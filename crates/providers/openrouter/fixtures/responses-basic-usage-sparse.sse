@@ -1,0 +1,15 @@
+data: {"type":"response.created","response":{"id":"resp_exact","object":"response","status":"in_progress"}}
+
+data: {"type":"response.output_item.added","response_id":"resp_exact","output_index":0,"item":{"id":"msg_exact","type":"message","status":"in_progress","role":"assistant","content":[]}}
+
+data: {"type":"response.content_part.added","response_id":"resp_exact","output_index":0,"item_id":"msg_exact","content_index":0,"part":{"type":"output_text","text":""}}
+
+data: {"type":"response.content_part.delta","response_id":"resp_exact","output_index":0,"item_id":"msg_exact","content_index":0,"delta":"Hello"}
+
+data: {"type":"response.content_part.done","response_id":"resp_exact","output_index":0,"item_id":"msg_exact","content_index":0,"part":{"type":"output_text","text":"Hello"}}
+
+data: {"type":"response.output_item.done","response_id":"resp_exact","output_index":0,"item":{"id":"msg_exact","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}}
+
+data: {"type":"response.done","response":{"id":"resp_exact","object":"response","status":"completed","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5},"incomplete_details":null,"error":null,"openrouter_metadata":{"requested":"openai/o4-mini","strategy":"direct","attempt":1,"is_byok":false,"endpoints":{"total":1,"available":[{"provider":"OpenAI","model":"openai/o4-mini","selected":true}]},"attempts":[{"provider":"OpenAI","model":"openai/o4-mini","status":200}],"pipeline":[],"params":{}}}}
+
+data: [DONE]

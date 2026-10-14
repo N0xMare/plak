@@ -1,0 +1,5 @@
+# Scenario: comp-direct.
+# Codex Luna with direct composition.
+
+[root]
+agent = "luna"

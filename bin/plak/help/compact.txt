@@ -1,0 +1,5 @@
+plak compact — canonical manual compaction
+
+USAGE:
+  plak compact <uuid> [--yes]
+  Requires an exact attached locator and safe idle boundary.

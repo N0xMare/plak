@@ -1,0 +1,11 @@
+jobs_dir: .plak/harbor/jobs
+n_attempts: 1
+n_concurrent_trials: 3
+environment:
+  type: docker
+datasets:
+  - path: eval/datasets/rung-a-plumbing
+    task_names:
+      - write-hello
+      - sum-file
+      - fix-typo

@@ -1,0 +1,6 @@
+event: error
+data: {"type":"error","error":{"type":"overloaded_error","message":"temporarily overloaded"},"request_id":"req_fixture_error"}
+
+: fixture-eof
+
+: fixture terminator

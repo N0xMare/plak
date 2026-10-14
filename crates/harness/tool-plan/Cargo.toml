@@ -1,0 +1,26 @@
+[package]
+name = "plakous-tool-plan"
+description = "The bounded task plan: a revisioned PlanState port, its replacement tool, and the id-merge lowering"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "harness"
+class = "published-internal"
+
+[dependencies]
+plakous-model = { version = "0.1.0", path = "../../core/model" }
+plakous-tools = { version = "0.1.0", path = "../../core/tools" }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+uuid.workspace = true
+
+[lints]
+workspace = true

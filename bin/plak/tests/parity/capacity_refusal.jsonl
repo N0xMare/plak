@@ -1,0 +1,22 @@
+{"kind":"activity","payload":"Activity { label: \"agent ready\", active: false }"}
+{"kind":"attached","payload":"AgentAttached(true)"}
+{"kind":"binding","payload":"Binding { session_id: Some(\"<uuid>\"), account: Some(\"codex\"), model: Some(\"offline-loopback-v1\"), effort: Some(\"medium\"), extra: None, composition: JsPtc, protocol: Auto, effective_presentation: \"js-ptc\" }"}
+{"kind":"busy","payload":"SetBusy(false)"}
+{"kind":"context_capacity_recovery","payload":"ContextCapacityRecovery(None)"}
+{"kind":"last_user_prompt_at","payload":"LastUserPromptAt(None)"}
+{"kind":"pending_continuation","payload":"PendingContinuation { results: 0, questions: 0, process_exits: 0, auto_continue_paused: false, tree_paused: false }"}
+{"kind":"presentation","payload":"PresentationSnapshot(PresentationSnapshot { schema: 2, revision: 0, rows: [SessionHeader { session_id: \"<uuid>\", carried_from: None }] })"}
+{"kind":"prompt_history","payload":"PromptHistorySnapshot([\"run the loopback\"])"}
+{"kind":"queue","payload":"QueueSnapshot { items: [], drain: LiveAutoDrain }"}
+{"kind":"session_info","payload":"SessionInfo(SessionInfoView { host_version: \"0.1.0\", session_id: \"<uuid>\", working_dir: \"<root>/workspace\", root_template: None, root_model: Some(\"offline-loopback-v1\"), root_effort: Some(\"medium\"), thinking: \"reasoning summaries (auto) requested at medium\", tool_policy: Some(\"js-ptc\"), admitted_options: [\"effort = medium\"], api_kernel: Some(\"Responses\"), turn_number: Some(0), tree_epoch: None, context: None })"}
+{"kind":"session_opened","payload":"SessionOpened { session_open_ms: Some(<n>) }"}
+{"kind":"session_opening","payload":"SessionOpening"}
+{"kind":"status","payload":"Status { phase: \"idle\", queue_len: 0 }"}
+{"kind":"template_readiness","payload":"TemplateReadiness([])"}
+{"kind":"usage","payload":"Usage(ContextUsage { breakdown: Some(ContextBreakdownView { used_tokens: <n>, total_tokens: <n>, categories: [ContextCategoryView { label: \"Messages (est.)\", tokens: <n> }, ContextCategoryView { label: \"Used (unattributed)\", tokens: <n> }], informational: [], auto_compact_trigger_tokens: Some(<n>), occupancy_anchored: false, turns: Some(0), tool_calls: Some(0), compactions: Some(0) }), prepared_input: Some(UpperBound(<n>)), total_window: Some(1), admitted_ceiling: Some(AdmittedContextCeiling { tokens: <n>, basis: \"envelope\" }), gauge_percent: Some(<n>), display_percent: Some(<n>), ceiling_excess: Some(UpperBoundExcess(<n>)), evidence: \"custom-envelope\", non_guarantee: Some(\"custom caller operating envelope; not provider capacity evidence\"), status: \"protected-overflow\" })"}
+{"kind":"draft_accepted","payload":"DraftAccepted(Prompt(..))"}
+{"kind":"prompt_admitted","payload":"PromptAdmitted(QueueItem { rejected: false, id: \"<uuid>\", revision: 1, text: \"run the loopback\" })"}
+{"kind":"prompt_started","payload":"PromptStarted(Some(QueueItem { rejected: false, id: \"<uuid>\", revision: 1, text: \"run the loopback\" }))"}
+{"kind":"user_message","payload":"UserMessage { text: \"run the loopback\", sent_at_ms: Some(<n>) }"}
+{"kind":"usage","payload":"Usage(ContextUsage { breakdown: Some(ContextBreakdownView { used_tokens: <n>, total_tokens: <n>, categories: [ContextCategoryView { label: \"Messages (est.)\", tokens: <n> }, ContextCategoryView { label: \"Used (unattributed)\", tokens: <n> }], informational: [], auto_compact_trigger_tokens: Some(<n>), occupancy_anchored: false, turns: Some(0), tool_calls: Some(0), compactions: Some(0) }), prepared_input: Some(UpperBound(<n>)), total_window: Some(1), admitted_ceiling: Some(AdmittedContextCeiling { tokens: <n>, basis: \"envelope\" }), gauge_percent: Some(<n>), display_percent: Some(<n>), ceiling_excess: Some(UpperBoundExcess(<n>)), evidence: \"custom-envelope\", non_guarantee: Some(\"custom caller operating envelope; not provider capacity evidence\"), status: \"protected-overflow\" })"}
+{"kind":"row","payload":"Row(Notice(NoticeRow { scope: Compaction, tone: Error, text: \"authoritative context would overflow; scheduled compaction is disabled\" }))"}

@@ -1,0 +1,114 @@
+[package]
+name = "plak"
+description = "Plak product library, command-line interface, and terminal application"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "bin"
+class = "supported"
+
+[[bin]]
+name = "plak"
+path = "src/main.rs"
+doc = false
+
+[dependencies]
+clap = { workspace = true, features = ["derive", "env"] }
+plakous-hosted = { version = "0.1.0", path = "../../crates/hosting/hosted", default-features = false }
+plakous-recursive-subagents = { version = "0.1.0", path = "../../crates/orchestration/recursive-subagents", default-features = false }
+plakous-recursive-subagents-store = { version = "0.1.0", path = "../../crates/orchestration/recursive-subagents-store", default-features = false }
+plakous-host-protocol = { version = "0.1.0", path = "../../crates/hosting/host-protocol" }
+# `test-hooks` only. The optional edge is what keeps the deterministic offline
+# model out of every build that does not explicitly ask for it.
+plakous-offline-crash-harness = { version = "0.1.0", path = "../../tests/harnesses/offline-crash", optional = true }
+tracing-subscriber.workspace = true
+plakous = { version = "0.1.0", path = "../../crates/plakous", default-features = false, features = ["native-subscriptions", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"] }
+nix.workspace = true
+rusqlite.workspace = true
+rustix = { workspace = true, features = ["event", "fs", "process", "termios", "time"] }
+# The TUI module's terminal stack: match Ratatui's current Crossterm backend so
+# the product carries one terminal stack.
+crossterm = { version = "0.29", default-features = false, features = ["events"] }
+ratatui = { version = "0.30", default-features = false, features = ["crossterm_0_29"] }
+pulldown-cmark = { version = "0.13", default-features = false }
+syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "regex-fancy"] }
+base64 = { workspace = true }
+tracing = { workspace = true }
+unicode-segmentation = "1.13.3"
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+zeroize.workspace = true
+tempfile = { workspace = true }
+# `local-offset`: the resume picker reads the UTC offset once on the main thread.
+time = { version = "0.3", features = ["formatting", "local-offset"] }
+# Prompt send times resolve each stamp in the process zone. `tz-system` loads
+# it once; `tzdb-zoneinfo` reads the host zoneinfo for that stamp's offset.
+jiff = { version = "0.2.35", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "time"] }
+# Configuration is real TOML: `toml` loads the typed schema with spans for
+# diagnostics, `toml_edit` makes a single-key save keep the file's comments.
+toml.workspace = true
+toml_edit.workspace = true
+unicode-width = "0.2.2"
+uuid = { workspace = true, features = ["v4"] }
+opentelemetry = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+
+[dev-dependencies]
+rustix = { workspace = true, features = ["pty", "termios"] }
+plakous-hosted = { version = "0.1.0", path = "../../crates/hosting/hosted", features = ["test-support"], default-features = false }
+plakous-offline-crash-harness = { version = "0.1.0", path = "../../tests/harnesses/offline-crash" }
+plakous-recursive-subagents = { version = "0.1.0", path = "../../crates/orchestration/recursive-subagents", features = ["test-support"], default-features = false }
+portable-pty.workspace = true
+proptest = { workspace = true, features = ["std"] }
+rusqlite.workspace = true
+tempfile = { workspace = true }
+vt100.workspace = true
+
+# No benchmark harness dependency in the workspace: the bench is a plain
+# `main` over `std::time::Instant` (named benchmark).
+[[bench]]
+name = "tui_render"
+harness = false
+required-features = ["test-support"]
+
+[[bench]]
+name = "product_store"
+harness = false
+required-features = ["test-support"]
+
+[features]
+default = ["git-cli", "jj-lib"]
+git-cli = ["plakous-hosted/git-cli", "plakous-recursive-subagents/git-cli", "plakous-recursive-subagents-store/git-cli"]
+jj-lib = ["plakous-hosted/jj-lib", "plakous-recursive-subagents/jj-lib", "plakous-recursive-subagents-store/jj-lib"]
+maintainer = []
+# The product fixtures the binary's own integration contracts drive: an
+# isolated product home and the state roots over Plak's real ports.
+test-support = []
+# Repository gate only: bind the deterministic offline model named by
+# `PLAK_TEST_SCRIPT` instead of a provider, so the spawned binary's own
+# lifecycles are testable. Never in `default`, never in a release build.
+test-hooks = [
+    "dep:plakous-offline-crash-harness",
+    "plakous-hosted/test-support",
+    "plakous-recursive-subagents-store/commit-trace",
+]
+otel = [
+    "dep:opentelemetry",
+    "dep:opentelemetry-otlp",
+    "dep:opentelemetry_sdk",
+    "dep:tracing-opentelemetry",
+    "tracing-subscriber/registry",
+]
+
+[lints]
+workspace = true

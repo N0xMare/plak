@@ -1,0 +1,31 @@
+[package]
+name = "plakous-prompts"
+description = "Model-visible instruction text, the first-turn assembler, recommended harness profiles, and AGENTS.md discovery"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "harness"
+class = "published-internal"
+
+[dependencies]
+plakous-agent = { version = "0.1.0", path = "../../core/agent" }
+plakous-model = { version = "0.1.0", path = "../../core/model" }
+plakous-tools = { version = "0.1.0", path = "../../core/tools" }
+rustix = { workspace = true, features = ["fs"] }
+
+[dev-dependencies]
+# Test-only. Instruction text may not depend on a pack (the workspace's
+# `harness-pack-independent` rule, which reads production edges); the tests
+# that assert which paragraph a compiled surface earns need a real compiled
+# surface, which is what `plakous-compose` builds.
+plakous-compose = { version = "0.1.0", path = "../compose" }
+serde_json.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

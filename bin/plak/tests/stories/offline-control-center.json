@@ -1,0 +1,231 @@
+{
+  "schema": "plak.tui-story.v1",
+  "name": "offline-control-center-and-turn",
+  "terminal": {
+    "rows": 30,
+    "cols": 100
+  },
+  "model_script": {
+    "version": 1,
+    "steps": [
+      {
+        "output": {
+          "text": "the declarative story answer"
+        }
+      }
+    ]
+  },
+  "workspace_files": {},
+  "steps": [
+    {
+      "kind": "wait",
+      "id": "launch-ready",
+      "contains": "offline-loopback-v1"
+    },
+    {
+      "kind": "assert",
+      "id": "launch-chrome",
+      "contains": [
+        "/ commands",
+        "offline-loopback-v1"
+      ],
+      "excludes": [
+        "panicked"
+      ],
+      "cursor_visible": true
+    },
+    {
+      "kind": "choose",
+      "id": "open-help",
+      "instructions": "Choose the action that opens Plak's command and key help without starting a model turn.",
+      "actions": {
+        "open_help": {
+          "description": "Open the help overlay.",
+          "input": "/help\r"
+        },
+        "open_settings": {
+          "description": "Open Settings instead of help.",
+          "input": "/settings\r"
+        },
+        "send_prompt": {
+          "description": "Start an agent turn instead of opening help.",
+          "input": "run work now\r"
+        }
+      },
+      "selected": "open_help"
+    },
+    {
+      "kind": "wait",
+      "id": "help-visible",
+      "contains": "commands:"
+    },
+    {
+      "kind": "choose",
+      "id": "dismiss-help",
+      "instructions": "Choose the action that closes the help overlay and returns to the composer.",
+      "actions": {
+        "dismiss_help": {
+          "description": "Dismiss the focused help overlay.",
+          "input": "\u001b"
+        },
+        "scroll_help": {
+          "description": "Scroll the help overlay instead of closing it.",
+          "input": "\u001b[B"
+        },
+        "quit": {
+          "description": "Quit the entire TUI.",
+          "input": "\u0011"
+        }
+      },
+      "selected": "dismiss_help"
+    },
+    {
+      "kind": "wait",
+      "id": "composer-after-help",
+      "contains": "/ commands"
+    },
+    {
+      "kind": "choose",
+      "id": "open-providers",
+      "instructions": "Choose the action that opens the read-only provider status tab.",
+      "actions": {
+        "open_models": {
+          "description": "Open the model picker.",
+          "input": "/model\r"
+        },
+        "open_providers": {
+          "description": "Open the connected-provider status tab.",
+          "input": "/providers\r"
+        },
+        "open_usage": {
+          "description": "Open provider usage instead.",
+          "input": "/usage\r"
+        }
+      },
+      "selected": "open_providers"
+    },
+    {
+      "kind": "wait",
+      "id": "providers-visible",
+      "contains": "Providers"
+    },
+    {
+      "kind": "choose",
+      "id": "dismiss-providers",
+      "instructions": "Choose the action that closes the provider tab and restores composer focus.",
+      "actions": {
+        "dismiss_providers": {
+          "description": "Close the Menu.",
+          "input": "\u001b"
+        },
+        "next_tab": {
+          "description": "Move to the next Menu tab.",
+          "input": "\u001b[C"
+        },
+        "copy_tab": {
+          "description": "Copy the provider status text.",
+          "input": "y"
+        }
+      },
+      "selected": "dismiss_providers"
+    },
+    {
+      "kind": "wait",
+      "id": "composer-after-providers",
+      "contains": "/ commands"
+    },
+    {
+      "kind": "choose",
+      "id": "open-settings",
+      "instructions": "Choose the action that opens interactive settings from the idle Plak composer.",
+      "actions": {
+        "open_help": {
+          "description": "Open the help overlay.",
+          "input": "/help\r"
+        },
+        "open_models": {
+          "description": "Open the model picker.",
+          "input": "/model\r"
+        },
+        "open_settings": {
+          "description": "Open the Menu on Settings.",
+          "input": "/settings\r"
+        }
+      },
+      "selected": "open_settings"
+    },
+    {
+      "kind": "wait",
+      "id": "settings-visible",
+      "contains": "Theme"
+    },
+    {
+      "kind": "assert",
+      "id": "settings-content",
+      "contains": [
+        "Settings",
+        "Theme"
+      ],
+      "excludes": [
+        "unknown command"
+      ],
+      "cursor_visible": true
+    },
+    {
+      "kind": "send",
+      "id": "dismiss-settings",
+      "text": "\u001b"
+    },
+    {
+      "kind": "wait",
+      "id": "composer-restored",
+      "contains": "/ commands"
+    },
+    {
+      "kind": "choose",
+      "id": "submit-prompt",
+      "instructions": "Choose the action that sends the requested user prompt to the agent.",
+      "actions": {
+        "open_help": {
+          "description": "Open help without running an agent turn.",
+          "input": "/help\r"
+        },
+        "quit": {
+          "description": "Exit without running an agent turn.",
+          "input": "/quit\r"
+        },
+        "send_prompt": {
+          "description": "Send the prompt 'answer this declarative story' to the agent.",
+          "input": "answer this declarative story\r"
+        }
+      },
+      "selected": "send_prompt"
+    },
+    {
+      "kind": "wait",
+      "id": "answer-visible",
+      "contains": "the declarative story answer"
+    },
+    {
+      "kind": "assert",
+      "id": "turn-complete",
+      "contains": [
+        "answer this declarative story",
+        "the declarative story answer"
+      ],
+      "excludes": [
+        "recovery required",
+        "panicked"
+      ],
+      "cursor_visible": true
+    },
+    {
+      "kind": "snapshot",
+      "id": "completed-turn-evidence"
+    },
+    {
+      "kind": "quit",
+      "id": "graceful-quit"
+    }
+  ]
+}

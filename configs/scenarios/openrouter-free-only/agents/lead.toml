@@ -1,0 +1,6 @@
+# Template lead for the openrouter-free-only scenario.
+account = "openrouter"
+model = "nvidia/nemotron-3-ultra-550b-a55b:free"
+composition = "direct"
+description = "OpenRouter free lead; delegates bounded work and adopts the result."
+tools = "full"

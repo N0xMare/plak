@@ -1,0 +1,13 @@
+# Scenario: tree-homogeneous.
+# One tuple everywhere — Codex Luna lead with a Codex Luna
+# implementer and reviewer. The working set names the two worker templates
+# on the same tuple; the lead is bound separately as root.
+
+[root]
+agent = "lead"
+
+[roster]
+working_set = ["implementer", "reviewer"]
+
+[orchestration]
+subagents = true

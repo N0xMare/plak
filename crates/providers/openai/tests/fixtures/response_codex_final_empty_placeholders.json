@@ -1,0 +1,37 @@
+{
+  "id": "resp_codex_multi_exec_final",
+  "object": "response",
+  "status": "completed",
+  "model": "gpt-test",
+  "output": [
+    {
+      "id": "rs_codex_multi_exec_final",
+      "type": "reasoning",
+      "status": "completed",
+      "summary": [
+        { "type": "summary_text", "text": "" }
+      ],
+      "content": [
+        { "type": "reasoning_text", "text": "" }
+      ],
+      "encrypted_content": "opaque-codex-reasoning"
+    },
+    {
+      "id": "msg_codex_multi_exec_final",
+      "type": "message",
+      "role": "assistant",
+      "phase": "final_answer",
+      "status": "completed",
+      "content": [
+        { "type": "output_text", "text": "", "annotations": [] },
+        { "type": "output_text", "text": "Done.", "annotations": [] }
+      ]
+    }
+  ],
+  "usage": {
+    "input_tokens": 41,
+    "output_tokens": 7,
+    "total_tokens": 48,
+    "output_tokens_details": { "reasoning_tokens": 5 }
+  }
+}

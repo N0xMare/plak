@@ -1,0 +1,6 @@
+plak refresh — force OAuth refresh
+
+USAGE:
+  plak refresh <codex|grok|claude>
+
+  Forces a token refresh now; ordinary commands refresh on their own.

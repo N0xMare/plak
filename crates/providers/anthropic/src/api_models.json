@@ -1,0 +1,24 @@
+{
+  "revision": "anthropic.api-models.2026-10-09.v1",
+  "reviewed_at": "2026-10-09",
+  "sources": [
+    "GET https://api.anthropic.com/v1/models (2026-10-09)",
+    "platform.claude.com/docs: models/overview, about-claude/pricing, feature pages featureMetadata.supportedModels"
+  ],
+  "models": [
+    {"id": "claude-haiku-5-5", "max_input_tokens": 1000000, "max_tokens": 128000, "efforts": ["low", "medium", "high", "xhigh", "max"], "adaptive_thinking": true, "price_threshold_input_tokens": 100000, "lifecycle": "active", "hosted_features": ["compaction", "hosted_ptc", "tool_search", "web_search", "code_execution"]},
+    {"id": "claude-sonnet-5-5", "max_input_tokens": 1000000, "max_tokens": 128000, "efforts": ["low", "medium", "high", "xhigh", "max"], "adaptive_thinking": true, "price_threshold_input_tokens": null, "lifecycle": "active", "hosted_features": ["compaction", "hosted_ptc", "tool_search", "web_search", "code_execution"]},
+    {"id": "claude-opus-5-5", "max_input_tokens": 1000000, "max_tokens": 128000, "efforts": ["low", "medium", "high", "xhigh", "max"], "adaptive_thinking": true, "price_threshold_input_tokens": null, "lifecycle": "active", "hosted_features": ["compaction", "hosted_ptc", "tool_search", "web_search", "code_execution"]},
+    {"id": "claude-fable-5-1", "max_input_tokens": 1000000, "max_tokens": 128000, "efforts": ["low", "medium", "high", "xhigh", "max"], "adaptive_thinking": true, "price_threshold_input_tokens": null, "lifecycle": "active", "hosted_features": ["compaction", "hosted_ptc", "tool_search", "web_search", "code_execution"]},
+    {"id": "claude-opus-5", "max_input_tokens": 1000000, "max_tokens": 128000, "efforts": ["low", "medium", "high", "xhigh", "max"], "adaptive_thinking": true, "price_threshold_input_tokens": null, "lifecycle": "active", "hosted_features": ["compaction", "hosted_ptc", "tool_search", "web_search", "code_execution"]},
+    {"id": "claude-sonnet-5", "max_input_tokens": 1000000, "max_tokens": 128000, "efforts": ["low", "medium", "high", "xhigh", "max"], "adaptive_thinking": true, "price_threshold_input_tokens": null, "lifecycle": "active", "hosted_features": ["compaction", "hosted_ptc", "web_search", "code_execution"]},
+    {"id": "claude-fable-5", "max_input_tokens": 1000000, "max_tokens": 128000, "efforts": ["low", "medium", "high", "xhigh", "max"], "adaptive_thinking": true, "price_threshold_input_tokens": null, "lifecycle": "active", "hosted_features": ["compaction", "hosted_ptc", "tool_search", "web_search", "code_execution"]},
+    {"id": "claude-opus-4-8", "max_input_tokens": 1000000, "max_tokens": 128000, "efforts": ["low", "medium", "high", "xhigh", "max"], "adaptive_thinking": true, "price_threshold_input_tokens": null, "lifecycle": "active", "hosted_features": ["compaction", "hosted_ptc", "tool_search", "web_search", "code_execution"]},
+    {"id": "claude-opus-4-7", "max_input_tokens": 1000000, "max_tokens": 128000, "efforts": ["low", "medium", "high", "xhigh", "max"], "adaptive_thinking": true, "price_threshold_input_tokens": null, "lifecycle": "active", "hosted_features": ["compaction", "hosted_ptc", "tool_search", "web_search", "code_execution"]},
+    {"id": "claude-sonnet-4-6", "max_input_tokens": 1000000, "max_tokens": 128000, "efforts": ["low", "medium", "high", "max"], "adaptive_thinking": true, "price_threshold_input_tokens": null, "lifecycle": "active", "hosted_features": ["compaction", "hosted_ptc", "tool_search", "web_search", "code_execution"]},
+    {"id": "claude-opus-4-6", "max_input_tokens": 1000000, "max_tokens": 128000, "efforts": ["low", "medium", "high", "max"], "adaptive_thinking": true, "price_threshold_input_tokens": null, "lifecycle": "active", "hosted_features": ["compaction", "hosted_ptc", "tool_search", "web_search", "code_execution"]},
+    {"id": "claude-opus-4-5-20251101", "max_input_tokens": 200000, "max_tokens": 64000, "efforts": ["low", "medium", "high"], "adaptive_thinking": false, "price_threshold_input_tokens": null, "lifecycle": "active", "hosted_features": ["hosted_ptc", "tool_search", "web_search", "code_execution"]},
+    {"id": "claude-haiku-4-5-20251001", "max_input_tokens": 200000, "max_tokens": 64000, "efforts": [], "adaptive_thinking": false, "price_threshold_input_tokens": null, "lifecycle": "active", "hosted_features": ["tool_search", "web_search", "code_execution"]},
+    {"id": "claude-sonnet-4-5-20250929", "max_input_tokens": 200000, "max_tokens": 64000, "efforts": [], "adaptive_thinking": false, "price_threshold_input_tokens": null, "lifecycle": "active", "hosted_features": ["hosted_ptc", "tool_search", "web_search", "code_execution"]}
+  ]
+}

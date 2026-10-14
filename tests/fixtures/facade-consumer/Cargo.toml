@@ -1,0 +1,31 @@
+[package]
+name = "plakous-facade-consumer"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.97.1"
+description = "Compile fixture: an out-of-workspace consumer of the `plakous` facade with its provider features."
+license = "MIT"
+repository = "https://github.com/N0xMare/plak"
+readme = "../../../README.md"
+publish = false
+
+[package.metadata.plakous]
+layer = "test"
+class = "repository-only"
+
+[dependencies]
+plakous = { version = "0.1.0", path = "../../../crates/plakous", features = ["anthropic", "native-subscriptions", "openai", "openrouter", "sessions-sqlite", "xai"] }
+
+futures-util = "0.3.31"
+serde_json = "1.0"
+tempfile = "3.23"
+tokio = { version = "1.48", features = ["rt-multi-thread", "macros", "sync", "time"] }
+uuid = "1"
+
+[workspace]
+
+[patch.crates-io]
+tungstenite = { git = "https://github.com/openai-oss-forks/tungstenite-rs", rev = "4fffad30fe373adbdcffab9545e9e9bf4f2fc19f" }
+
+[patch."ssh://git@github.com/openai-oss-forks/tungstenite-rs.git"]
+tungstenite = { git = "https://github.com/openai-oss-forks/tungstenite-rs", rev = "4fffad30fe373adbdcffab9545e9e9bf4f2fc19f" }

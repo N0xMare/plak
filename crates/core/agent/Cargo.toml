@@ -1,0 +1,47 @@
+[package]
+name = "plakous-agent"
+description = "Curated provider-neutral single-agent component for Plakous"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "core"
+class = "supported"
+neutral = true
+
+[features]
+default = []
+
+[dependencies]
+futures-util = { workspace = true, features = ["std"] }
+getrandom.workspace = true
+plakous-model = { version = "0.1.0", path = "../model" }
+plakous-tools = { version = "0.1.0", path = "../tools" }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json.workspace = true
+thiserror.workspace = true
+time = { version = "0.3", default-features = false, features = ["formatting"] }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+uuid.workspace = true
+
+[dev-dependencies]
+# Test-only: the composition presentations the agent hosts are compiled above
+# it, so only its tests name them.
+plakous-compose = { version = "0.1.0", path = "../../harness/compose" }
+plakous-tool-files = { version = "0.1.0", path = "../../harness/tool-files" }
+plakous-tool-plan = { version = "0.1.0", path = "../../harness/tool-plan" }
+plakous-tool-process = { version = "0.1.0", path = "../../harness/tool-process" }
+plakous-tool-search = { version = "0.1.0", path = "../../harness/tool-search" }
+futures = { workspace = true, features = ["async-await", "executor", "std"] }
+plakous-test-support = { version = "0.1.0", path = "../../../tests/support/plakous-test-support" }
+proptest = { workspace = true, features = ["std"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util", "time"] }
+
+[lints]
+workspace = true

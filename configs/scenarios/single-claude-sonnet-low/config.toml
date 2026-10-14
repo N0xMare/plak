@@ -1,0 +1,5 @@
+# Scenario: single-claude-sonnet-low.
+# Claude Sonnet 5 agent, plakous-default composition (default).
+
+[root]
+agent = "claude"

@@ -1,0 +1,18 @@
+"// @exec: {\"yield_time_ms\": 2500, \"max_output_tokens\": 4096}\nawait tools.exec_command({command:[\"ls\"]});\n"
+=> Ok(ParsedExecSource { code: "await tools.exec_command({command:[\"ls\"]});\n", yield_time_ms: Some(2500), max_output_tokens: Some(4096) })
+
+"const x = 1;\n"
+=> Ok(ParsedExecSource { code: "const x = 1;\n", yield_time_ms: None, max_output_tokens: None })
+
+"// @exec: {}\n1 + 1\n"
+=> Ok(ParsedExecSource { code: "1 + 1\n", yield_time_ms: None, max_output_tokens: None })
+
+"// @exec: {\"yield_time_ms\": 99999999999999999999}\n1\n"
+=> Err("exec pragma fields `yield_time_ms` and `max_output_tokens` must be non-negative safe integers: invalid type: floating point `1e+20`, expected u64")
+
+"// @exec: not json\n1\n"
+=> Err("exec pragma must be valid JSON with supported fields `yield_time_ms` and `max_output_tokens`: expected ident at line 1 column 2")
+
+""
+=> Err("exec expects raw JavaScript source text (non-empty). Provide JS only, optionally with first-line `// @exec: {\"yield_time_ms\": 10000, \"max_output_tokens\": 1000}`.")
+

@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "$0")/.." && pwd -P)"
+started_at="$SECONDS"
+
+step() {
+  printf '\n==> %s\n' "$1"
+}
+
+install_system_packages() {
+  local -a packages=(musl-tools)
+  local -a missing=()
+  local package
+  for package in "${packages[@]}"; do
+    dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null | grep -qx installed || missing+=("$package")
+  done
+  if ((${#missing[@]} == 0)); then
+    echo "System packages already installed."
+    return
+  fi
+  sudo apt-get update
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
+}
+
+install_release_binary() {
+  local name="$1" version_command="$2" expected_version="$3" url="$4" checksum="$5" member="$6" destination="$7"
+  if [[ -x "$destination" ]] && "$destination" $version_command 2>/dev/null | grep -Fq "$expected_version"; then
+    printf '%s %s already installed.\n' "$name" "$expected_version"
+    return
+  fi
+
+  local archive temporary
+  temporary="$(mktemp -d)"
+  archive="$temporary/archive.tar.gz"
+  trap 'rm -rf "$temporary"' RETURN
+  curl --proto '=https' --tlsv1.2 -fsSL "$url" -o "$archive"
+  printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check --status
+  tar -xzf "$archive" -C "$temporary" "$member"
+  mkdir -p "$(dirname "$destination")"
+  install -m 0755 "$temporary/$member" "$destination"
+  rm -rf "$temporary"
+  trap - RETURN
+}
+
+step "Install Linux prerequisites"
+install_system_packages
+
+step "Install the pinned Rust toolchain"
+if [[ ! -x "$HOME/.cargo/bin/rustup" ]]; then
+  curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
+    | sh -s -- -y --profile minimal --default-toolchain none
+fi
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+rustup toolchain install 1.97.1 \
+  --profile minimal \
+  --component clippy,rustfmt \
+  --target x86_64-unknown-linux-musl
+
+profile_marker="# plak orb tool paths"
+if grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
+  sed -i '/^# plak orb tool paths$/{n;s|^export PATH=.*$|export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"|;}' "$HOME/.bash_profile"
+else
+  cat >> "$HOME/.bash_profile" <<'EOF'
+
+# plak orb tool paths
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+EOF
+fi
+
+step "Install the command runner"
+install_release_binary \
+  just "--version" "1.58.0" \
+  "https://github.com/casey/just/releases/download/1.58.0/just-1.58.0-x86_64-unknown-linux-musl.tar.gz" \
+  "4a5cc2f53e6f0f8c59092a6cc38291eb729d46a7dd95d3ae582008881b84931d" \
+  just "$HOME/.local/bin/just"
+
+step "Install repository-pinned verification tools"
+dev_tools="$repo_root/.dev-tools/bin"
+install_release_binary \
+  cargo-nextest "--version" "0.9.100" \
+  "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.100/cargo-nextest-0.9.100-x86_64-unknown-linux-musl.tar.gz" \
+  "fbc4f0989a1b58bc23c335f8e1dc656f60efb854246aaa869a88543494e5b0ce" \
+  cargo-nextest "$dev_tools/cargo-nextest"
+install_release_binary \
+  cargo-deny "--version" "0.19.0" \
+  "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.19.0/cargo-deny-0.19.0-x86_64-unknown-linux-musl.tar.gz" \
+  "0e8c2aa59128612c90d9e09c02204e912f29a5b8d9a64671b94608cbe09e064f" \
+  cargo-deny-0.19.0-x86_64-unknown-linux-musl/cargo-deny "$dev_tools/cargo-deny"
+
+step "Prefetch locked Rust dependencies"
+cd "$repo_root"
+cargo fetch --locked
+for manifest in tests/fixtures/*/Cargo.toml; do
+  cargo fetch --locked --manifest-path "$manifest"
+done
+mkdir -p target/plak-test-tmp
+
+printf '\nOrb setup completed in %ss.\n' "$((SECONDS - started_at))"

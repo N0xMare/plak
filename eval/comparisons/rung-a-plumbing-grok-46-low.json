@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "id": "rung-a-plumbing-grok-46-low",
+  "dataset": "rung-a-plumbing",
+  "tasks": [
+    {
+      "name": "write-hello",
+      "digest": null
+    },
+    {
+      "name": "sum-file",
+      "digest": null
+    },
+    {
+      "name": "fix-typo",
+      "digest": null
+    }
+  ],
+  "policy": {
+    "model": "grok-4.6",
+    "effort": "low",
+    "account": "grok",
+    "timeout_policy": "rung-a-plumbing-task-default",
+    "attempts": 1
+  },
+  "arms": {
+    "plak": {
+      "job": {
+        "id": null,
+        "lockDigest": null
+      },
+      "candidateProvenanceDigest": null
+    },
+    "grok-build": {
+      "job": {
+        "id": null,
+        "lockDigest": null
+      },
+      "candidateProvenanceDigest": null
+    }
+  }
+}

@@ -1,0 +1,5 @@
+# Scenario: comp-js-ptc.
+# Codex Luna with js-ptc composition.
+
+[root]
+agent = "luna"

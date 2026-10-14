@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "id": "rung-a-ab-grok-46-low-prompt-ablation",
+  "dataset": "terminal-bench/terminal-bench-2-1@6",
+  "tasks": [
+    {
+      "name": "terminal-bench/openssl-selfsigned-cert",
+      "digest": null
+    },
+    {
+      "name": "terminal-bench/fix-git",
+      "digest": null
+    },
+    {
+      "name": "terminal-bench/nginx-request-logging",
+      "digest": null
+    },
+    {
+      "name": "terminal-bench/sqlite-db-truncate",
+      "digest": null
+    },
+    {
+      "name": "terminal-bench/cancel-async-tasks",
+      "digest": null
+    },
+    {
+      "name": "terminal-bench/log-summary-date-ranges",
+      "digest": null
+    },
+    {
+      "name": "terminal-bench/regex-log",
+      "digest": null
+    },
+    {
+      "name": "terminal-bench/configure-git-webserver",
+      "digest": null
+    }
+  ],
+  "policy": {
+    "model": "grok-4.6",
+    "effort": "low",
+    "account": "grok",
+    "timeout_policy": "terminal-bench-2-1-task-default",
+    "attempts": 1
+  },
+  "arms": {
+    "plak-grok-legacy": {
+      "job": {
+        "id": null,
+        "lockDigest": null
+      },
+      "candidateProvenanceDigest": null
+    },
+    "plak-grok-parity": {
+      "job": {
+        "id": null,
+        "lockDigest": null
+      },
+      "candidateProvenanceDigest": null
+    }
+  }
+}

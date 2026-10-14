@@ -1,0 +1,6 @@
+# Template reviewer for the openrouter-free-only scenario.
+account = "openrouter"
+model = "nvidia/nemotron-3-ultra-550b-a55b:free"
+composition = "direct"
+description = "OpenRouter free reviewer; runs the checks it cites and writes no files."
+tools = "read-execute"

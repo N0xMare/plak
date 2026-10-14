@@ -1,0 +1,60 @@
+plak run — non-interactive agent run
+
+USAGE:
+  plak run --account <codex|grok|claude|openrouter|openai|anthropic|xai-api> --model <exact-id> [options] -- <prompt>
+  plak run --session <session> [--resume-tree] -- <prompt>   Continue an exact idle session
+
+EXAMPLES:
+  plak run --account codex --model gpt-5.6-luna --effort medium -- 'summarise src/'
+  plak run --account grok --model grok-4.6 --effort low -- 'run the tests'
+  plak run --account claude --model claude-sonnet-5 --effort low --composition js-ptc -- 'fix the lint'
+  plak run --session 0f2c… -- 'and now update the changelog'
+
+OPTIONS:
+  --account <id>       codex | grok | claude | openrouter | openai | anthropic | xai-api
+                       (alias: --provider)
+  --model <exact-id>   Exact catalog model id; no prefixes, no inference
+  --effort <level>     none | low | medium | high | xhigh | max | ultra
+                       Required for a reasoning model, refused for the rest.
+                       There is no default: the catalog row decides.
+  --composition <c>    plakous-default | direct | native-ptc | js-ptc | py-ptc
+                       plakous-default (when omitted) follows the catalog: Codex
+                       CodeModeOnly and OpenAI API models→native-ptc; Grok, Claude,
+                       OpenRouter, anthropic and xai-api→direct.
+  --protocol <p>       auto | chat | responses | messages (OpenRouter only;
+                       default auto→chat)
+  --session <session>     Continue that session; its recorded binding wins, so
+                       --account/--model/--effort/--composition/--protocol are refused
+  --resume-tree        Resume a RestoredPaused topology (requires --session)
+  --max-turns <n>      Admitted turns including the first, 1..=100 (default 25)
+  --timeout <seconds>  Hosted run wall clock (default none)
+  --print-session-id   Print `session_id=<session>` on stdout before the turn
+
+NOTES:
+  Subscription accounts require ready OAuth login (login + revalidate).
+  First use asks to accept the compatibility notice on stdin: pipe `y`
+  (echo y | plak run ...) or accept it once with `plak login <account>`.
+  A closed stdin refuses with exit 3; an invalid config.toml exits 1.
+  API accounts require their exact API key; no OAuth fallback.
+  openai, anthropic and xai-api take each model's own effort ladder
+  (`plak models <account>` lists it). Bare xai is refused; use grok or xai-api.
+  Full coding tools; no approval gates.
+  --session reopens the recorded workspace locator; cwd must match.
+  OpenRouter model ids are literal dynamic selections: every model/wire tuple is
+  Custom/experimental, not a subscription catalog or a qualification claim.
+  js-ptc and py-ptc are one Plak-owned harness PTC class: custom, non-default, one
+  engine per agent. exec_js requires JSON field source (async module; emit with
+  text(...)); exec_py requires code. Neither is Codex-native Code Mode, and
+  unsupported tuples fail before inference.
+
+PROCESS-TOOL AUTHORITY:
+  Model-launched process tools run with your full host authority on Linux and
+  macOS; there is no OS sandbox. native-ptc and js-ptc use PLAK_JS_HOST or a
+  sibling plakous-js-host; py-ptc uses PLAK_MONTY_WORKER or a sibling monty
+  worker. That is worker isolation, not workspace isolation, and it does not
+  isolate the Plak product itself: use a container or VM for that boundary.
+  Unsupported process-tool targets, including Intel macOS, fail closed.
+
+Runs until idle; continuations and turn-free waiting are reported on stderr.
+Bounds stop jobs and interrupt children resumably (exit 6); Ctrl-C exits 4.
+Only the last turn answer is written to stdout, once after release.

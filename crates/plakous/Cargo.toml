@@ -1,0 +1,141 @@
+[package]
+name = "plakous"
+description = "Provider-neutral, library-first agent harness library"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "facade"
+class = "supported"
+
+[features]
+default = []
+# Provider protocol crates on the facade are provider internals (not TUI surface).
+# Enabling openai/xai/openrouter/anthropic re-exports those crates as plakous::*.
+# TUI/embedder-safe surface is always-on: agent (curated), model, tools, profiles.
+anthropic = ["dep:plakous-anthropic", "dep:plakous-http"]
+auth = [
+    "dep:plakous-auth",
+    "openai",
+    "xai",
+]
+# Code Mode presentation and JavaScript evaluation through the sidecar host.
+# This is the whole evaluator capability a Custom-model JS embedder needs; it
+# carries no credential, subscription, or HTTP machinery.
+composition = [
+    "dep:plakous-code-mode",
+    "dep:plakous-js-eval",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:sha2",
+]
+# The Monty-backed Python PTC projection, layered on the same composition API.
+composition-python = ["composition", "dep:plakous-py-eval"]
+full = [
+    "anthropic",
+    "auth",
+    "composition",
+    "composition-python",
+    "native-subscriptions",
+    "openai",
+    "openrouter",
+    "sessions-sqlite",
+    "xai",
+]
+# Plak's product closure: both evaluators plus subscription authentication.
+native-subscriptions = [
+    "composition",
+    "composition-python",
+    "dep:plakous-auth",
+    "plakous-auth/http-refresh",
+    "dep:plakous-http",
+    "dep:rustix",
+    "dep:plakous-openai",
+    "plakous-openai/native-auth",
+    "dep:plakous-xai",
+    "plakous-xai/native-auth",
+    "dep:plakous-anthropic",
+    "plakous-anthropic/native-auth",
+]
+openai = ["dep:plakous-openai", "dep:plakous-http"]
+openrouter = ["dep:plakous-http", "dep:plakous-openrouter"]
+sessions-sqlite = ["plakous-store/sqlite"]
+xai = ["dep:plakous-xai", "dep:plakous-http"]
+
+[dependencies]
+plakous-agent = { version = "0.1.0", path = "../core/agent" }
+plakous-anthropic = { version = "0.1.0", path = "../providers/anthropic", optional = true }
+plakous-auth = { version = "0.1.0", path = "../common/auth", default-features = false, optional = true }
+plakous-code-mode = { version = "0.1.0", path = "../runtimes/code-mode", optional = true }
+plakous-js-eval = { version = "0.1.0", path = "../runtimes/js-eval", optional = true }
+plakous-py-eval = { version = "0.1.0", path = "../runtimes/py-eval", optional = true }
+plakous-compose = { version = "0.1.0", path = "../harness/compose" }
+plakous-model = { version = "0.1.0", path = "../core/model" }
+plakous-tool-files = { version = "0.1.0", path = "../harness/tool-files" }
+plakous-tool-plan = { version = "0.1.0", path = "../harness/tool-plan" }
+plakous-tool-process = { version = "0.1.0", path = "../harness/tool-process" }
+plakous-tool-search = { version = "0.1.0", path = "../harness/tool-search" }
+plakous-prompts = { version = "0.1.0", path = "../harness/prompts" }
+plakous-openai = { version = "0.1.0", path = "../providers/openai", default-features = false, optional = true }
+plakous-openrouter = { version = "0.1.0", path = "../providers/openrouter", optional = true }
+plakous-store = { version = "0.1.0", path = "../store" }
+plakous-http = { version = "0.1.0", path = "../common/http", optional = true }
+rustix = { workspace = true, features = ["fs", "process"], optional = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+serde_json = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+plakous-tools = { version = "0.1.0", path = "../core/tools" }
+plakous-xai = { version = "0.1.0", path = "../providers/xai", default-features = false, optional = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[dev-dependencies]
+futures-core.workspace = true
+futures-util.workspace = true
+plakous-test-support = { version = "0.1.0", path = "../../tests/support/plakous-test-support" }
+rusqlite.workspace = true
+rustix = { workspace = true, features = ["pty", "termios"] }
+serde_json.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+uuid = { workspace = true, features = ["v4"] }
+
+[lints]
+workspace = true
+
+# Embedding examples. Each is a self-contained file an external consumer can
+# copy; none depends on a repository test-support crate. `required-features`
+# names exactly the facade capability the workflow needs.
+[[example]]
+name = "cancellation_shutdown"
+
+[[example]]
+name = "direct_custom_tool"
+required-features = ["sessions-sqlite"]
+
+[[example]]
+name = "durable_session"
+required-features = ["sessions-sqlite"]
+
+[[example]]
+name = "provider_direct"
+required-features = ["openrouter"]
+
+# The standard coding packs contain mutating tools, which require a
+# required-durability session store; the composition example therefore also
+# selects a session backend.
+[[example]]
+name = "worker_js_sidecar"
+required-features = ["composition", "sessions-sqlite"]
+
+[[bench]]
+name = "perf_core"
+harness = false
+
+[[bench]]
+name = "perf_project"
+harness = false

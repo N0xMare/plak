@@ -1,0 +1,26 @@
+[package]
+name = "plakous-tool-search"
+description = "Bounded deterministic repository search and directory listing, with its own walker and bound table"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "harness"
+class = "published-internal"
+
+[dependencies]
+plakous-model = { version = "0.1.0", path = "../../core/model" }
+plakous-tools = { version = "0.1.0", path = "../../core/tools" }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

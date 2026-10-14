@@ -1,0 +1,5 @@
+# Scenario: single-openrouter-free.
+# One OpenRouter free model, direct composition.
+
+[root]
+agent = "free"

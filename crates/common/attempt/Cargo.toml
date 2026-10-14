@@ -1,0 +1,23 @@
+[package]
+name = "plakous-attempt"
+description = "Family-agnostic attempt lifecycle, observation ledger, and await core for Plakous"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "common"
+class = "published-internal"
+
+[dependencies]
+getrandom.workspace = true
+httpdate.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tower.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,34 @@
+[package]
+name = "plakous-workspace"
+description = "VCS-backed agent workspaces: detect, mint, seal, adopt, and the git-redirect fence"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "host"
+class = "published-internal"
+neutral = true
+
+[dependencies]
+plakous-host-protocol = { version = "0.1.0", path = "../../hosting/host-protocol" }
+rustix = { workspace = true, features = ["process"] }
+sha2.workspace = true
+jj-lib = { version = "=0.45.1", default-features = false, features = ["git"], optional = true }
+futures = { workspace = true, optional = true }
+gix = { version = "=0.87.1", default-features = false, optional = true }
+pollster = { version = "=1.0.1", optional = true }
+tempfile.workspace = true
+
+[features]
+default = ["git-cli", "jj-lib"]
+git-cli = []
+jj-lib = ["dep:jj-lib", "dep:futures", "dep:pollster", "dep:gix"]
+# `FakeVcs` and the real-`git`/`jj` fixtures, for the crates above this one.
+test-support = []
+
+[lints]
+workspace = true

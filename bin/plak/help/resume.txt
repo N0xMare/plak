@@ -1,0 +1,8 @@
+plak resume — open a prior session
+
+USAGE:
+  plak resume              Cwd-scoped session picker
+  plak resume <id>         Open session in TUI (full uuid or the short id printed at quit)
+  plak --resume [uuid]     Same as resume
+
+  TUI: /resume lists cwd sessions; /resume <session> reopens an attached session only when its persisted locator, workspace, and binding match exactly.

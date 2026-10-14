@@ -1,0 +1,24 @@
+{
+  "id": "resp_ptc_second_pause",
+  "object": "response",
+  "status": "completed",
+  "model": "gpt-5.6-sol",
+  "output": [
+    {
+      "id": "fc_ptc_second",
+      "type": "function_call",
+      "call_id": "call_ptc_second",
+      "name": "lookup",
+      "arguments": "{\"q\":\"second\"}",
+      "caller": {
+        "type": "program",
+        "caller_id": "pcall_ptc_root"
+      }
+    }
+  ],
+  "usage": {
+    "input_tokens": 23,
+    "output_tokens": 7,
+    "total_tokens": 30
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "id": "rung-a-plumbing-claude-opus55-low",
+  "dataset": "rung-a-plumbing",
+  "tasks": [
+    {
+      "name": "write-hello",
+      "digest": null
+    },
+    {
+      "name": "sum-file",
+      "digest": null
+    },
+    {
+      "name": "fix-typo",
+      "digest": null
+    }
+  ],
+  "policy": {
+    "model": "claude-opus-5-5",
+    "effort": "low",
+    "account": "claude",
+    "timeout_policy": "rung-a-plumbing-task-default",
+    "attempts": 1
+  },
+  "arms": {
+    "plak": {
+      "job": {
+        "id": null,
+        "lockDigest": null
+      },
+      "candidateProvenanceDigest": null
+    },
+    "claude-code": {
+      "job": {
+        "id": null,
+        "lockDigest": null
+      },
+      "candidateProvenanceDigest": null
+    }
+  }
+}

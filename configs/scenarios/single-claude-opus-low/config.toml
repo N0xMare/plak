@@ -1,0 +1,5 @@
+# Scenario: single-claude-opus-low.
+# Claude Opus 5 agent, plakous-default composition (default).
+
+[root]
+agent = "claude"

@@ -1,0 +1,5 @@
+# Scenario: comp-py-ptc.
+# Codex Luna with py-ptc composition.
+
+[root]
+agent = "luna"

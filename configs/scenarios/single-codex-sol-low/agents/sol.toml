@@ -1,0 +1,4 @@
+# Template sol for the single-codex-sol-low scenario.
+account = "codex"
+model = "gpt-5.6-sol"
+effort = "low"

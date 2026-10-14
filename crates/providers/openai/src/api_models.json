@@ -1,0 +1,363 @@
+{
+  "revision": "openai.api-models.2026-10-09.v1",
+  "reviewed_at": "2026-10-09",
+  "sources": [
+    "GET https://api.openai.com/v1/models (2026-10-09; ids only)",
+    "platform.openai.com model pages: context window, maximum input, max output, reasoning.effort, 272K price threshold, Responses",
+    "Codex catalog per-model context_window (gpt-daybreak-red-latest 372000; reviewed profiles 272000)"
+  ],
+  "models": [
+    {
+      "id": "gpt-6-luna",
+      "max_input_tokens": 922000,
+      "max_tokens": 128000,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "price_threshold_input_tokens": 272000,
+      "codex_context_window": 272000,
+      "responses": true,
+      "hosted_features": [
+        "web_search",
+        "code_execution",
+        "tool_search"
+      ]
+    },
+    {
+      "id": "gpt-6-sol",
+      "max_input_tokens": 922000,
+      "max_tokens": 128000,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "price_threshold_input_tokens": 272000,
+      "codex_context_window": 272000,
+      "responses": true,
+      "hosted_features": [
+        "web_search",
+        "code_execution",
+        "tool_search"
+      ]
+    },
+    {
+      "id": "gpt-5.6-luna",
+      "max_input_tokens": 922000,
+      "max_tokens": 128000,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "price_threshold_input_tokens": 272000,
+      "codex_context_window": 272000,
+      "responses": true,
+      "hosted_features": [
+        "web_search",
+        "code_execution",
+        "tool_search"
+      ]
+    },
+    {
+      "id": "gpt-5.6-sol",
+      "max_input_tokens": 922000,
+      "max_tokens": 128000,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "price_threshold_input_tokens": 272000,
+      "codex_context_window": 272000,
+      "responses": true,
+      "hosted_features": [
+        "web_search",
+        "code_execution",
+        "tool_search"
+      ]
+    },
+    {
+      "id": "gpt-5.6-terra",
+      "max_input_tokens": 922000,
+      "max_tokens": 128000,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "price_threshold_input_tokens": 272000,
+      "codex_context_window": 272000,
+      "responses": true,
+      "hosted_features": [
+        "web_search",
+        "code_execution",
+        "tool_search"
+      ]
+    },
+    {
+      "id": "gpt-6-astra",
+      "max_input_tokens": 922000,
+      "max_tokens": 128000,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "price_threshold_input_tokens": 272000,
+      "codex_context_window": 272000,
+      "responses": true,
+      "hosted_features": [
+        "web_search",
+        "code_execution",
+        "tool_search"
+      ]
+    },
+    {
+      "id": "gpt-6.1-sol",
+      "max_input_tokens": 922000,
+      "max_tokens": 128000,
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "price_threshold_input_tokens": 272000,
+      "codex_context_window": 272000,
+      "responses": true,
+      "hosted_features": [
+        "web_search",
+        "code_execution",
+        "tool_search"
+      ]
+    },
+    {
+      "id": "gpt-5.5",
+      "max_input_tokens": 1050000,
+      "max_tokens": 128000,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "price_threshold_input_tokens": 272000,
+      "codex_context_window": 272000,
+      "responses": true,
+      "hosted_features": [
+        "web_search",
+        "code_execution",
+        "tool_search"
+      ]
+    },
+    {
+      "id": "gpt-5.4",
+      "max_input_tokens": 1050000,
+      "max_tokens": 128000,
+      "efforts": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "price_threshold_input_tokens": 272000,
+      "codex_context_window": null,
+      "responses": true,
+      "hosted_features": [
+        "web_search",
+        "code_execution",
+        "tool_search"
+      ]
+    },
+    {
+      "id": "gpt-5",
+      "max_input_tokens": 272000,
+      "max_tokens": 128000,
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "price_threshold_input_tokens": null,
+      "codex_context_window": null,
+      "responses": true,
+      "hosted_features": [
+        "web_search",
+        "code_execution"
+      ]
+    },
+    {
+      "id": "gpt-5-mini",
+      "max_input_tokens": 272000,
+      "max_tokens": 128000,
+      "efforts": [],
+      "price_threshold_input_tokens": null,
+      "codex_context_window": null,
+      "responses": true,
+      "hosted_features": [
+        "web_search",
+        "code_execution"
+      ]
+    },
+    {
+      "id": "gpt-4.1",
+      "max_input_tokens": 1047576,
+      "max_tokens": 32768,
+      "efforts": [],
+      "price_threshold_input_tokens": null,
+      "codex_context_window": null,
+      "responses": true,
+      "hosted_features": [
+        "web_search",
+        "code_execution"
+      ]
+    },
+    {
+      "id": "gpt-4o",
+      "max_input_tokens": 128000,
+      "max_tokens": 16384,
+      "efforts": [],
+      "price_threshold_input_tokens": null,
+      "codex_context_window": null,
+      "responses": true,
+      "hosted_features": [
+        "web_search",
+        "code_execution"
+      ]
+    },
+    {
+      "id": "o3",
+      "max_input_tokens": 200000,
+      "max_tokens": 100000,
+      "efforts": [],
+      "price_threshold_input_tokens": null,
+      "codex_context_window": null,
+      "responses": true,
+      "hosted_features": [
+        "web_search",
+        "code_execution"
+      ]
+    },
+    {
+      "id": "gpt-daybreak-blue-latest",
+      "max_input_tokens": 922000,
+      "max_tokens": 128000,
+      "efforts": [],
+      "price_threshold_input_tokens": null,
+      "codex_context_window": 272000,
+      "responses": true,
+      "hosted_features": [
+        "web_search",
+        "code_execution",
+        "tool_search"
+      ]
+    },
+    {
+      "id": "gpt-daybreak-red-latest",
+      "max_input_tokens": 272000,
+      "max_tokens": 128000,
+      "efforts": [],
+      "price_threshold_input_tokens": null,
+      "codex_context_window": 372000,
+      "responses": true,
+      "hosted_features": [
+        "web_search",
+        "code_execution",
+        "tool_search"
+      ]
+    },
+    {
+      "id": "tts-1",
+      "max_input_tokens": 0,
+      "max_tokens": 0,
+      "efforts": [],
+      "price_threshold_input_tokens": null,
+      "codex_context_window": null,
+      "responses": false,
+      "hosted_features": []
+    },
+    {
+      "id": "whisper-1",
+      "max_input_tokens": 0,
+      "max_tokens": 0,
+      "efforts": [],
+      "price_threshold_input_tokens": null,
+      "codex_context_window": null,
+      "responses": false,
+      "hosted_features": []
+    },
+    {
+      "id": "text-embedding-3-small",
+      "max_input_tokens": 0,
+      "max_tokens": 0,
+      "efforts": [],
+      "price_threshold_input_tokens": null,
+      "codex_context_window": null,
+      "responses": false,
+      "hosted_features": []
+    },
+    {
+      "id": "sora-2",
+      "max_input_tokens": 0,
+      "max_tokens": 0,
+      "efforts": [],
+      "price_threshold_input_tokens": null,
+      "codex_context_window": null,
+      "responses": false,
+      "hosted_features": []
+    },
+    {
+      "id": "gpt-image-1",
+      "max_input_tokens": 0,
+      "max_tokens": 0,
+      "efforts": [],
+      "price_threshold_input_tokens": null,
+      "codex_context_window": null,
+      "responses": false,
+      "hosted_features": []
+    },
+    {
+      "id": "omni-moderation-latest",
+      "max_input_tokens": 0,
+      "max_tokens": 0,
+      "efforts": [],
+      "price_threshold_input_tokens": null,
+      "codex_context_window": null,
+      "responses": false,
+      "hosted_features": []
+    },
+    {
+      "id": "gpt-realtime",
+      "max_input_tokens": 0,
+      "max_tokens": 0,
+      "efforts": [],
+      "price_threshold_input_tokens": null,
+      "codex_context_window": null,
+      "responses": false,
+      "hosted_features": []
+    }
+  ]
+}

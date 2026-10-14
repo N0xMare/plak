@@ -1,0 +1,75 @@
+[advisories]
+yanked = "deny"
+ignore = [
+    { id = "RUSTSEC-2023-0089", reason = "atomic-polyfill 1.0.3 is unmaintained and appears only through heapless 0.7.17 unsupported AVR/RISC-V/Thumbv6m/Xtensa target edges. The supported Linux x86_64 and Apple Silicon dependency graphs exclude it, enforced by check_workspace.py. Revisit on dependency or supported-target changes." },
+    { id = "RUSTSEC-2025-0141", reason = "Syntect 5.3.0 uses Bincode 1.3.3 only for embedded syntax assets; maintenance advisory, not a known vulnerability. Revisit on version or asset-loading changes." },
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+
+[licenses]
+confidence-threshold = 0.8
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    # MPL-2.0 stays allowed for reviewed transitive dependencies; no direct dependency uses it.
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+# Monty cap-std includes this Windows-only adapter in the all-target audit.
+# Pin the allowance to the reviewed package and version.
+[[licenses.exceptions]]
+name = "winx"
+version = "=0.36.4"
+allow = ["Apache-2.0 WITH LLVM-exception"]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# Exact reviewed upstreams required by the Monty worker graph. The pinned Codex
+# 0.153.3 Code Mode grammar is no longer fetched: it is the reviewed vendor
+# snapshot at `vendor/codex-code-mode-protocol`.
+allow-git = [
+    "https://github.com/openai-oss-forks/tokio-tungstenite",
+    "https://github.com/openai-oss-forks/tungstenite-rs",
+]
+
+# Upstream Monty typeshed build uses zip 0.6.6 and its checksum helper.
+[[licenses.exceptions]]
+name = "constant_time_eq"
+version = "=0.1.5"
+allow = ["CC0-1.0"]
+
+# Monty's parser consumes this release's Unicode name tables.
+[[licenses.exceptions]]
+name = "unicode_names2"
+version = "=1.3.0"
+allow = ["Unicode-DFS-2016"]
+
+# Monty 1.x serializes session dumps with CBOR through minicbor-serde. Pin the
+# Blue Oak permissive license to the reviewed packages and versions.
+[[licenses.exceptions]]
+name = "minicbor"
+version = "=2.3.0"
+allow = ["BlueOak-1.0.0"]
+
+[[licenses.exceptions]]
+name = "minicbor-serde"
+version = "=0.7.1"
+allow = ["BlueOak-1.0.0"]
+
+# Build-time archive writer of `psm`, reached through Ruff's parser `stacker`.
+[[licenses.exceptions]]
+name = "ar_archive_writer"
+version = "=0.5.3"
+allow = ["Apache-2.0 WITH LLVM-exception"]

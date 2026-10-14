@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "tb4-smoke-pi-opencode-grok-46-low",
+  "dataset": "terminal-bench/terminal-bench@4.0.0",
+  "tasks": [
+    {"name": "terminal-bench/photonic-waveguide-routing", "digest": null},
+    {"name": "terminal-bench/music-harmony", "digest": null},
+    {"name": "terminal-bench/bun-sourcemap-leak", "digest": null},
+    {"name": "terminal-bench/foodstuff-beta-activity", "digest": null},
+    {"name": "terminal-bench/interleaved-vigenere", "digest": null}
+  ],
+  "policy": {
+    "model": "grok-4.6",
+    "effort": "low",
+    "account": "grok",
+    "timeout_policy": "terminal-bench-4.0-task-default",
+    "attempts": 1
+  },
+  "arms": {
+    "plak": {
+      "job": {"id": null, "lockDigest": null},
+      "candidateProvenanceDigest": null
+    },
+    "pi": {
+      "job": {"id": null, "lockDigest": null},
+      "candidateProvenanceDigest": null
+    },
+    "opencode": {
+      "job": {"id": null, "lockDigest": null},
+      "candidateProvenanceDigest": null
+    }
+  }
+}

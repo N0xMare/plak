@@ -1,0 +1,12 @@
+plak models — list catalog models
+
+USAGE:
+  plak models <codex|grok|claude|openrouter|openai|anthropic|xai-api>
+
+  Subscription catalogs require a ready OAuth login. OpenRouter lists discovered
+  model IDs; listing alone does not establish tool or protocol support.
+  openai, anthropic and xai-api list the provider's own model list (cached six
+  hours; offline, the last cache, else the table built into Plak) with each
+  model's status, efforts, windows and output bound, without an inference
+  request. Bare xai is refused; use grok or xai-api.
+  Refreshes the stored credential first; catalog discovery itself does not.

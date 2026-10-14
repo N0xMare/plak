@@ -1,0 +1,32 @@
+{
+  "machines": {
+    "0da2b9873814": {
+      "cli_two_tool_turn_ms": {
+        "unit": "ms",
+        "value": 380.2
+      },
+      "cold_start_to_ready_ms": {
+        "unit": "ms",
+        "value": 1848.4
+      },
+      "growth_turn_peak_rss_mb": {
+        "unit": "mb",
+        "value": 54.8
+      },
+      "jsonl_bulk_throughput_mb_per_s": {
+        "unit": "mb_per_s",
+        "value": 0.101
+      },
+      "jsonl_tool_round_trip_ms": {
+        "unit": "ms",
+        "value": 14.341
+      },
+      "tui_transcript_20k_layout_ms": {
+        "unit": "ms",
+        "value": 62.5957
+      }
+    }
+  },
+  "tolerance": 0.5,
+  "version": 1
+}

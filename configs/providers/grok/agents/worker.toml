@@ -1,0 +1,10 @@
+account = "grok"
+model = "grok-4.7-build-fast"
+effort = "medium"
+fast_mode = false
+composition = "plakous-default"
+description = "Implement a bounded change and run its relevant checks; report changes, evidence, and unresolved issues."
+tools = "full"
+may_adopt = false
+delegation = "explicit"
+show_model = true

@@ -1,0 +1,35 @@
+target/
+.public-contracts/
+/.gate-times.jsonl
+/.dev-tools/
+tests/fixtures/authority-negative/target/
+__pycache__/
+*.py[cod]
+**/*.rs.bk
+*.swp
+*.swo
+.DS_Store
+.idea/
+.vscode/
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Local, regenerated artifacts (prompt renders, handoff research)
+docs/local/
+
+# Harbor bakeoff jobs and frozen Linux agent binaries
+.plak/
+
+# Private reference-client captures; eval/.gitignore owns its own caches.
+/tests/provider-authority/
+
+# proptest local failures
+**/proptest-regressions/
+
+# Claude Code agent worktrees
+.claude/worktrees/
+
+# Amp orb portal metadata
+.amp/portals/*

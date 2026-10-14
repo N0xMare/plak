@@ -1,0 +1,17 @@
+{
+  "schema": "plak.canonical-conversation-item",
+  "version": 1,
+  "value": {
+    "id": "00000000-0000-0000-0000-000000000001",
+    "actor": "Assistant",
+    "blocks": [
+      {
+        "Text": {
+          "text": "hello",
+          "phase": "Final"
+        }
+      }
+    ],
+    "provenance": "ModelOutput"
+  }
+}

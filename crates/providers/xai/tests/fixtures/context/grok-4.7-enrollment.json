@@ -1,0 +1,31 @@
+{
+  "schema": "plak.provider-authority.local-implementation-contract.v1",
+  "revision": "grok-4.7-model-enrollment.2026-09-21.r1",
+  "model": "grok-4.7",
+  "access_mode": "supergrok-subscription",
+  "release_document": "https://x.ai/news/grok-4-7",
+  "model_document": "https://docs.x.ai/developers/models/grok-4.7",
+  "reviewed_on": "2026-09-21",
+  "official_model_facts": {
+    "context_window_tokens": 500000,
+    "reasoning_efforts": ["low", "medium", "high", "xhigh"],
+    "default_reasoning_effort": "high",
+    "function_calling": true
+  },
+  "native_discovery": {
+    "command": "grok models",
+    "version": "grok 1.0.40 (eb1a2256660d) [stable]",
+    "executable_sha256": "3f2aef9618191a2c60d18a5044fa462c9c77bdc4187b02ed716b0394e8d4fef2",
+    "reported_authentication": "grok.com",
+    "model_present": true,
+    "inference_performed": false
+  },
+  "enrollment_constraints": {
+    "require_authenticated_exact_model_catalog_receipt": true,
+    "maximum_context_envelope_tokens": 500000,
+    "automatic_compaction_trigger": "Plakous policy; no upstream model-specific threshold asserted",
+    "provider_reported_aliases": [],
+    "fast_variant_enrolled": true,
+    "qualification": "discovery and reviewed facts only; live inference and harness behavior require separate evidence"
+  }
+}

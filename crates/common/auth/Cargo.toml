@@ -1,0 +1,49 @@
+[package]
+name = "plakous-auth"
+description = "Provider-neutral secure authentication foundations for Plakous"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "common"
+class = "published-internal"
+
+[dependencies]
+base64.workspace = true
+getrandom.workspace = true
+plakous-http = { path = "../http", version = "0.1.0", optional = true }
+rustix = { workspace = true, features = ["fs", "process"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+subtle.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, optional = true, features = [
+    "io-util",
+    "net",
+    "time",
+] }
+secrecy.workspace = true
+url.workspace = true
+zeroize.workspace = true
+
+[features]
+# external-compat removed from product path (owner lock 2026-08-04):
+# plak-owned OAuth is the only supported login surface.
+default = []
+# Claimed refresh/revoke + browser loopback + JWKS cache orchestrators.
+http-refresh = ["dep:plakous-http", "dep:tokio"]
+
+[dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
+
+[lints]
+workspace = true

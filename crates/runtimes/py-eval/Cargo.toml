@@ -1,0 +1,31 @@
+[package]
+name = "plakous-py-eval"
+description = "monty-pool py-ptc session for Plak Code Mode"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "engine"
+class = "published-internal"
+
+[dependencies]
+monty-pool = "=1.1.0"
+monty-proto = "=1.1.0"
+monty-types = "=1.1.0"
+plakous-agent = { version = "0.1.0", path = "../../core/agent" }
+# `sample_children_rusage` / `children_rusage_delta`: the shared child-process
+# resource sampler already owned by the JS evaluator crate.
+plakous-js-eval = { version = "0.1.0", path = "../js-eval" }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+
+[dev-dependencies]
+num-bigint = "0.4"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

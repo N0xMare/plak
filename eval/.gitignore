@@ -1,0 +1,13 @@
+# Harbor jobs, frozen agent binaries, and local Python env.
+.plak/
+.venv/
+.uv-cache/
+__pycache__/
+*.pyc
+.tb21-registry.json
+
+# Never commit traces, transcripts, or credentials.
+jobs/
+*.auth.json
+.env
+*.token

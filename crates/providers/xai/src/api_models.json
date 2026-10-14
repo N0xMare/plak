@@ -1,0 +1,59 @@
+{
+  "revision": "xai.api-models.2026-10-09.v1",
+  "reviewed_at": "2026-10-09",
+  "sources": [
+    "GET https://api.x.ai/v1/models (2026-10-09; context_length)",
+    "GET https://api.x.ai/v1/language-models (2026-10-09; reasoning_effort, long_context_threshold 200000)"
+  ],
+  "output_rule": "xAI publishes no output limit. The output bound is the working window (the long-context price threshold when the list states one, otherwise the full context).",
+  "models": [
+    {
+      "id": "grok-4.20-0309-non-reasoning",
+      "context_length": 1000000,
+      "long_context_threshold": 200000,
+      "efforts": []
+    },
+    {
+      "id": "grok-4.20-0309-reasoning",
+      "context_length": 1000000,
+      "long_context_threshold": 200000,
+      "efforts": []
+    },
+    {
+      "id": "grok-4.20-multi-agent-0309",
+      "context_length": 1000000,
+      "long_context_threshold": 200000,
+      "efforts": []
+    },
+    {
+      "id": "grok-4.3",
+      "context_length": 1000000,
+      "long_context_threshold": 200000,
+      "efforts": ["none", "low", "medium", "high", "xhigh"]
+    },
+    {
+      "id": "grok-4.5",
+      "context_length": 500000,
+      "long_context_threshold": 200000,
+      "efforts": ["low", "medium", "high", "xhigh"]
+    },
+    {
+      "id": "grok-4.6",
+      "context_length": 500000,
+      "long_context_threshold": 200000,
+      "efforts": ["low", "medium", "high", "xhigh"]
+    },
+    {
+      "id": "grok-4.7",
+      "context_length": 500000,
+      "long_context_threshold": 200000,
+      "efforts": ["low", "medium", "high", "xhigh"]
+    },
+    {
+      "id": "grok-build-0.1",
+      "context_length": 256000,
+      "long_context_threshold": 200000,
+      "efforts": []
+    }
+  ]
+}

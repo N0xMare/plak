@@ -1,0 +1,43 @@
+plak session — session utilities
+
+USAGE:
+  plak session list
+  plak session show <session>[.cN]
+  plak session log <session>[.cN] [--kind kind] [--tail N (default 100)] [--json]
+  plak session recover <session>
+  plak session export <session> [--out <path>]
+  plak session import <path>
+  plak session reference <path-or-session> [--search <text>] [--tail N (default 20)]
+  plak session delete <session> [--yes] [--abandon-children]
+  plak session gc <session> | --all
+
+  show/log accept .cN to read only that child. Child log reads its canonical
+  history, not the root event log; --kind filters its actor (e.g. user).
+
+  recover reopens a session whose turn was interrupted, records once what that
+  turn left unobserved, and releases it; the next prompt does the same on its own.
+
+  export writes a private session reference (0600; default ~/.plak/carry/)
+  containing a bounded restart checkpoint and readable inert archive. import
+  creates a linked session from only the checkpoint; queued work stays paused.
+  reference prints bounded archive excerpts without importing or running them.
+  Session IDs accept an unambiguous prefix of at least four characters.
+  --abandon-children explicitly retires recovery-required children before delete.
+
+  delete removes a session and all of its retained history, with its finished
+  sub-agents' history and its agent tree, and frees store space even when the
+  session store is full. It refuses a session that is open in a running plak,
+  whose agent tree has running, resumable or recovery-required sub-agents, or
+  that other sessions continue from (forks, rebinds); it asks
+  first unless --yes is given. A delete that failed part way finishes on rerun.
+
+  gc reclaims checkpoint history a session no longer needs: every turn's
+  intermediate checkpoints. History, resume and forks are unaffected, and it
+  works even when the session store is full. It skips sessions open in a
+  running plak, with an unfinished turn, or whose recorded head is stale (open
+  the session first). --all covers every plak session (product record) in this
+  home and finishes deletes an earlier crash interrupted; sub-agent runtime
+  sessions are pruned by their own turns. Turns also reclaim their own history
+  automatically once enough of it builds up.
+
+  Event logs: ~/.plak/state/<format key>/sessions/<session>.events.jsonl (agent-readable).

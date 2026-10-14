@@ -1,0 +1,56 @@
+frame 48x22
+p0 Rgb(248, 248, 246)/Rgb(59, 60, 65)
+p1 Rgb(252, 252, 250)/Rgb(59, 60, 65)
+p2 Reset/Rgb(59, 60, 65)
+p3 Reset/Rgb(30, 32, 37)
+p4 Rgb(240, 242, 248)/Rgb(20, 22, 27)
+p5 Reset/Rgb(20, 22, 27)
+p6 Reset/Rgb(128, 128, 128)
+p7 Rgb(150, 156, 168)/Rgb(20, 22, 27)
+p8 Rgb(255, 112, 112)/Rgb(20, 22, 27)
+p9 Rgb(190, 194, 204)/Rgb(20, 22, 27)
+p10 Rgb(248, 248, 246)/Rgb(20, 22, 27)
+00 symbols ❯·Make·the·release·evidence·concise·and·exact.··
+00 colors  0-1:p0, 2-45:p1, 46-46:p2, 47-47:p3
+01 symbols ··resize.·Evidence·line·04·remains·readable·····
+01 colors  0-42:p4, 43-46:p5, 47-47:p3
+02 symbols ··after·resize.·Evidence·line·05·remains········
+02 colors  0-39:p4, 40-46:p5, 47-47:p3
+03 symbols ··readable·after·resize.·Evidence·line·06·······
+03 colors  0-40:p4, 41-46:p5, 47-47:p3
+04 symbols ··remains·readable·after·resize.·Evidence·line··
+04 colors  0-45:p4, 46-46:p5, 47-47:p6
+05 symbols ··07·remains·readable·after·resize.·Evidence····
+05 colors  0-43:p4, 44-46:p5, 47-47:p6
+06 symbols ··line·08·remains·readable·after·resize.········
+06 colors  0-39:p4, 40-46:p5, 47-47:p6
+07 symbols ··Evidence·line·09·remains·readable·after·······
+07 colors  0-40:p4, 41-46:p5, 47-47:p6
+08 symbols ··resize.·Evidence·line·10·remains·readable·····
+08 colors  0-42:p4, 43-46:p5, 47-47:p6
+09 symbols ··after·resize.·Evidence·line·11·remains········
+09 colors  0-39:p4, 40-46:p5, 47-47:p6
+10 symbols ··readable·after·resize.·Evidence·line·12·······
+10 colors  0-40:p4, 41-46:p5, 47-47:p6
+11 symbols ··remains·readable·after·resize.·Evidence·line··
+11 colors  0-45:p4, 46-46:p5, 47-47:p6
+12 symbols ··13·remains·readable·after·resize.·Evidence····
+12 colors  0-43:p4, 44-46:p5, 47-47:p6
+13 symbols ··line·14·remains·readable·after·resize.········
+13 colors  0-39:p4, 40-46:p5, 47-47:p6
+14 symbols ················································
+14 colors  0-46:p5, 47-47:p3
+15 symbols ··✗·Read·1·file,·edited·1·file·(1·failed)·····▸·
+15 colors  0-1:p7, 2-2:p8, 3-40:p4, 41-44:p5, 45-46:p7, 47-47:p3
+16 symbols ························↓·······················
+16 colors  0-23:p5, 24-24:p7, 25-47:p5
+17 symbols ╭·awaiting·context·────────────────────·custom·╮
+17 colors  0-0:p4, 1-18:p9, 19-38:p4, 39-46:p9, 47-47:p4
+18 symbols │❯·············································│
+18 colors  0-0:p4, 1-2:p10, 3-3:p4, 4-46:p5, 47-47:p4
+19 symbols │··············································│
+19 colors  0-0:p4, 1-2:p10, 3-46:p5, 47-47:p4
+20 symbols ╰─────────────────────────────────·~/ws···main·╯
+20 colors  0-33:p4, 34-46:p9, 47-47:p4
+21 symbols ·/·commands···Ctrl+X·menu···?·keybinds··········
+21 colors  0-0:p5, 1-37:p7, 38-47:p5

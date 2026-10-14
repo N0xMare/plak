@@ -1,0 +1,19 @@
+[package]
+name = "plakous-model-consumer"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.97.1"
+description = "Compile fixture: an out-of-workspace consumer of the `plakous-model` core crate."
+license = "MIT"
+repository = "https://github.com/N0xMare/plak"
+readme = "../../../README.md"
+publish = false
+
+[package.metadata.plakous]
+layer = "test"
+class = "repository-only"
+
+[dependencies]
+plakous-model = { version = "0.1.0", path = "../../../crates/core/model" }
+
+[workspace]

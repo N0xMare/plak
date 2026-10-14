@@ -1,0 +1,11 @@
+plak fork — request a source-preserving canonical fork
+
+USAGE:
+  plak fork <uuid> [--yes]
+
+DESCRIPTION:
+  Forks the session onto its exact active binding. A different binding is a
+  profile's Fork now in the TUI's Agents tab.
+
+OPTIONS:
+  --yes              Skip the confirmation (required non-interactively)

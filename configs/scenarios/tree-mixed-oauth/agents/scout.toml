@@ -1,0 +1,7 @@
+# Template scout for the tree-mixed-oauth scenario.
+account = "grok"
+model = "grok-4.6"
+effort = "low"
+composition = "direct"
+description = "Grok scout; reads and reports, never writes and never runs commands."
+tools = "read-execute"

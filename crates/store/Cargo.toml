@@ -1,0 +1,54 @@
+[package]
+name = "plakous-store"
+description = "Durable session-store backends for Plakous"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+autotests = false
+
+[package.metadata.plakous]
+layer = "store"
+class = "published-internal"
+
+[features]
+default = []
+sqlite = ["dep:futures-channel", "dep:rusqlite", "dep:tracing"]
+commit-trace = ["sqlite", "rusqlite/hooks", "nix/signal", "dep:serde_json"]
+perf-instrumentation = ["sqlite"]
+
+[dependencies]
+serde_json = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+futures-channel = { workspace = true, optional = true }
+plakous-agent = { version = "0.1.0", path = "../core/agent" }
+rusqlite = { workspace = true, optional = true }
+rustix = { workspace = true, features = ["fs", "system"] }
+nix = { workspace = true, features = ["time", "process"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+sysctl = "=0.7.1"
+
+[dev-dependencies]
+proptest = { workspace = true, features = ["std"] }
+plakous-model = { version = "0.1.0", path = "../core/model" }
+rusqlite = { workspace = true, features = ["hooks", "trace"] }
+tempfile.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+serde_json = { workspace = true, features = ["raw_value"] }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[[test]]
+name = "integration"
+path = "tests/integration/main.rs"
+
+[[bench]]
+name = "perf_store"
+path = "benches/perf_store.rs"
+harness = false
+required-features = ["sqlite", "perf-instrumentation"]
+
+[lints]
+workspace = true

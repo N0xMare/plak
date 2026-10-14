@@ -1,0 +1,5 @@
+# Scenario: single-grok-46-low.
+# SuperGrok Grok 4.6 agent, direct composition.
+
+[root]
+agent = "grok"

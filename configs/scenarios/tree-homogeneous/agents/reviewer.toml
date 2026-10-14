@@ -1,0 +1,6 @@
+# Template reviewer for the tree-homogeneous scenario.
+account = "codex"
+model = "gpt-5.6-luna"
+effort = "low"
+description = "Codex Luna reviewer; runs the checks it cites and writes no files."
+tools = "read-execute"

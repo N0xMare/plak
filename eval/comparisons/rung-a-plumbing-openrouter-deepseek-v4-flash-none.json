@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "rung-a-plumbing-openrouter-deepseek-v4-flash-none",
+  "dataset": "rung-a-plumbing",
+  "tasks": [
+    {
+      "name": "write-hello",
+      "digest": null
+    },
+    {
+      "name": "sum-file",
+      "digest": null
+    },
+    {
+      "name": "fix-typo",
+      "digest": null
+    }
+  ],
+  "policy": {
+    "model": "deepseek/deepseek-v4-flash",
+    "effort": "none",
+    "account": "openrouter",
+    "timeout_policy": "rung-a-plumbing-task-default",
+    "attempts": 1
+  },
+  "arms": {
+    "plak": {
+      "job": {
+        "id": null,
+        "lockDigest": null
+      },
+      "candidateProvenanceDigest": null
+    },
+    "pi": {
+      "job": {
+        "id": null,
+        "lockDigest": null
+      },
+      "candidateProvenanceDigest": null
+    },
+    "opencode": {
+      "job": {
+        "id": null,
+        "lockDigest": null
+      },
+      "candidateProvenanceDigest": null
+    }
+  }
+}

@@ -1,0 +1,41 @@
+[package]
+name = "plakous-compose"
+description = "Composition presentations: the js/py cell outer tools and the Codex Code Mode exec/wait compilers over the coding packs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "harness"
+class = "published-internal"
+
+[dependencies]
+plakous-model = { version = "0.1.0", path = "../../core/model" }
+plakous-tool-files = { version = "0.1.0", path = "../tool-files" }
+plakous-tool-plan = { version = "0.1.0", path = "../tool-plan" }
+plakous-tool-process = { version = "0.1.0", path = "../tool-process" }
+plakous-tool-search = { version = "0.1.0", path = "../tool-search" }
+plakous-tools = { version = "0.1.0", path = "../../core/tools" }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+[features]
+# Repository harness only. Adds one extra enrolled Code Mode target whose
+# protocol, route, profile, family and model all carry a `scripted` marker, so
+# the offline harness can drive a real composition without impersonating a
+# Codex model. The gate's own conditions are unchanged; this only widens the
+# admitted set, and only when the feature is on. Never in `default`, and no
+# release build enables it.
+scripted-code-mode-enrolment = []
+
+[dev-dependencies]
+plakous-code-mode = { version = "0.1.0", path = "../../runtimes/code-mode" }
+futures = { workspace = true, features = ["async-await", "executor", "std"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

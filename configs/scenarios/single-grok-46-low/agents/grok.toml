@@ -1,0 +1,5 @@
+# Template grok for the single-grok-46-low scenario.
+account = "supergrok"
+model = "grok-4.6"
+effort = "low"
+composition = "direct"

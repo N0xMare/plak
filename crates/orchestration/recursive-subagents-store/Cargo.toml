@@ -1,0 +1,40 @@
+[package]
+name = "plakous-recursive-subagents-store"
+description = "The agent tree's durable store: TreeStore over its own subagents.sqlite3"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "host"
+class = "published-internal"
+neutral = true
+
+[dependencies]
+# Repository-only commit tracing; never selected by a default or maintainer build.
+plakous-store = { version = "0.1.0", path = "../../store", optional = true }
+plakous-recursive-subagents = { version = "0.1.0", path = "../recursive-subagents", default-features = false }
+rusqlite.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+
+[dev-dependencies]
+plakous = { version = "0.1.0", path = "../../plakous", default-features = false }
+plakous-workspace = { version = "0.1.0", path = "../workspace", default-features = false }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[features]
+default = ["git-cli", "jj-lib"]
+git-cli = ["plakous-recursive-subagents/git-cli"]
+jj-lib = ["plakous-recursive-subagents/jj-lib"]
+test-support = ["plakous-recursive-subagents/test-support"]
+commit-trace = ["dep:plakous-store", "plakous-store/commit-trace"]
+
+[lints]
+workspace = true

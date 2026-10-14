@@ -1,0 +1,11 @@
+plak key — API key management
+
+USAGE:
+  plak key set <openai|xai-api|anthropic|openrouter>
+  plak key clear <account>
+  plak key status [account]
+
+  Key entry is CLI-only: the TUI Providers tab shows status and names this command.
+  Use xai-api for the direct API key; grok for the subscription.
+  Env vars override files. Plak never loads .env.
+  `key clear` cannot unset process environment variables.

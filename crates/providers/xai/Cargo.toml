@@ -1,0 +1,61 @@
+[package]
+name = "plakous-xai"
+description = "xAI Responses and Grok subscription protocol integration for Plakous"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "provider"
+class = "published-internal"
+
+[features]
+default = []
+native-auth = [
+    "dep:base64",
+    "dep:futures-util",
+    "dep:getrandom",
+    "dep:jsonwebtoken",
+    "dep:plakous-auth",
+    "dep:sha2",
+    "dep:url",
+    "plakous-auth/http-refresh",
+    "tokio/io-util",
+    "tokio/net",
+]
+[dependencies]
+base64 = { workspace = true, optional = true }
+futures-util = { workspace = true, features = ["async-await", "std"], optional = true }
+getrandom = { workspace = true, optional = true }
+jsonwebtoken = { workspace = true, features = ["aws_lc_rs"], optional = true }
+plakous-auth = { version = "0.1.0", path = "../../common/auth", default-features = false, optional = true }
+plakous-http = { version = "0.1.0", path = "../../common/http" }
+plakous-attempt = { version = "0.1.0", path = "../../common/attempt" }
+plakous-model = { version = "0.1.0", path = "../../core/model" }
+plakous-responses = { version = "0.1.0", path = "../../protocols/responses" }
+plakous-responses-dialect = { version = "0.1.0", path = "../../protocols/responses-dialect" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["raw_value"] }
+sha2 = { workspace = true, optional = true }
+thiserror.workspace = true
+time = { version = "0.3", features = ["parsing"] }
+tokio = { workspace = true, features = ["time"] }
+tracing.workspace = true
+url = { workspace = true, optional = true }
+zeroize.workspace = true
+
+[dev-dependencies]
+plakous-test-support = { version = "0.1.0", path = "../../../tests/support/plakous-test-support" }
+base64.workspace = true
+futures-core.workspace = true
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
+rustls = { workspace = true, features = ["ring", "std"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio-rustls = { workspace = true, features = ["ring"] }
+
+[lints]
+workspace = true

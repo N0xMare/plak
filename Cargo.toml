@@ -1,0 +1,358 @@
+[workspace]
+default-members = ["bin/plak"]
+exclude = [
+    ".plak",
+    "vendor/codex-code-mode-protocol",
+    "vendor/monty",
+    "vendor/monty-typeshed",
+    "tests/fixtures/agent-consumer",
+    "tests/fixtures/facade-consumer",
+]
+members = [
+    "bin/plak",
+    "crates/hosting/host-protocol",
+    "crates/hosting/hosted",
+    "crates/plakous",
+    "crates/core/agent",
+    "crates/providers/anthropic",
+    "crates/common/attempt",
+    "crates/common/auth",
+    "crates/runtimes/js-eval",
+    "crates/runtimes/js-runtime",
+    "crates/runtimes/py-worker",
+    "crates/runtimes/py-eval",
+    "crates/runtimes/code-mode",
+    "crates/harness/compose",
+    "crates/common/http",
+    "crates/protocols/chat-completions",
+    "crates/protocols/messages",
+    "crates/core/model",
+    "crates/providers/openai",
+    "crates/harness/prompts",
+    "crates/providers/openrouter",
+    "crates/protocols/responses",
+    "crates/orchestration/recursive-subagents",
+    "crates/orchestration/recursive-subagents-store",
+    "crates/protocols/responses-dialect",
+    "crates/store",
+    "crates/harness/tool-files",
+    "crates/harness/tool-plan",
+    "crates/harness/tool-process",
+    "crates/harness/tool-search",
+    "tests/support/plakous-test-support",
+    "crates/core/tools",
+    "crates/orchestration/workspace",
+    "crates/providers/xai",
+    "tests/harnesses/offline-crash",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+license = "MIT"
+repository = "https://github.com/N0xMare/plak"
+readme = "README.md"
+
+[workspace.dependencies]
+base64 = "0.22"
+bytes = "1"
+clap = "4"
+diffy = { version = "0.5.1", default-features = false }
+filedescriptor = "=0.8.3"
+futures = { version = "0.3", default-features = false }
+futures-channel = "0.3"
+futures-core = "0.3"
+futures-util = { version = "0.3", default-features = false }
+getrandom = "0.4"
+globset = "0.4"
+h2 = "0.4"
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
+httpdate = "1"
+hyper = "1"
+hyper-util = "0.1"
+ignore = "0.4"
+jsonwebtoken = { version = "=11.0.0", default-features = false }
+proptest = { version = "1", default-features = false }
+regex = "1"
+portable-pty = { version = "=0.9.0", default-features = false }
+rustix = "1"
+nix = { version = "=0.28.0", default-features = false, features = ["resource"] }
+rustls = { version = "0.23.45", default-features = false }
+rquickjs = "0.12.1"
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
+secrecy = "0.10"
+serde = "1"
+serde_json = "1"
+serde_json_canonicalizer = "=0.3.2"
+sha2 = "0.11"
+subtle = "2"
+tempfile = "3"
+thiserror = "2"
+tokio = "1"
+tokio-util = "0.7"
+toml = "1.1.6"
+toml_edit = "0.25.15"
+tokio-rustls = { version = "0.26", default-features = false }
+tracing = "=0.1.44"
+tracing-opentelemetry = "=0.33.0"
+tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["env-filter", "fmt", "std"] }
+opentelemetry = { version = "=0.32.0", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "=0.32.0", default-features = false, features = ["http-proto", "trace", "reqwest-client"] }
+opentelemetry_sdk = { version = "=0.32.0", default-features = false, features = ["trace", "rt-tokio"] }
+tower = { version = "0.5", default-features = false }
+tower-service = "0.3"
+url = "2"
+uuid = "1"
+vt100 = { version = "=0.15.2", default-features = false }
+webpki-roots = "1"
+zeroize = "1"
+
+# Dependency boundaries enforced by the workspace checker (Spec 06).
+[workspace.metadata.plakous]
+layers = [
+    "core",
+    "common",
+    "engine",
+    "protocol",
+    "provider",
+    "store",
+    "harness",
+    "facade",
+    "host",
+    "bin",
+    "test",
+]
+
+harness-pack-independent = ["plakous-prompts"]
+
+[workspace.metadata.plakous.edges]
+core = ["core"]
+common = ["common"]
+engine = ["core", "common", "engine"]
+protocol = ["core:plakous-model", "common", "protocol"]
+provider = ["core:plakous-model", "common", "protocol"]
+store = ["core"]
+harness = ["core", "common", "engine", "harness"]
+facade = ["core", "common", "engine", "provider", "store", "harness"]
+host = ["facade", "host"]
+bin = ["facade", "host"]
+test = ["*"]
+
+[workspace.metadata.plakous.edge-exceptions]
+plak = [
+    "plakous-host-protocol",
+    "plakous-hosted",
+    # The `test-hooks` edge only; see the production-dependencies note above.
+    "plakous-offline-crash-harness",
+    "plakous-recursive-subagents",
+    "plakous-recursive-subagents-store",
+]
+plakous-workspace = ["plakous-host-protocol"]
+plakous-recursive-subagents = ["plakous-host-protocol", "plakous-workspace"]
+plakous-hosted = ["plakous-host-protocol", "plakous-recursive-subagents", "plakous-workspace"]
+# The store edge is optional and pinned to the repository-only commit-trace gate.
+plakous-recursive-subagents-store = ["plakous-recursive-subagents", "plakous-store"]
+
+[workspace.metadata.plakous.layout]
+core = ["crates/core/{short}"]
+common = ["crates/common/{short}"]
+engine = ["crates/runtimes/{short}"]
+protocol = ["crates/protocols/{short}"]
+provider = ["crates/providers/{short}"]
+store = ["crates/store"]
+harness = ["crates/harness/{short}"]
+facade = ["crates/plakous"]
+host = ["crates/hosting/{short}", "crates/orchestration/{short}"]
+bin = ["bin/{name}"]
+test = ["tests/**"]
+
+[workspace.metadata.plakous.classes]
+core = ["supported"]
+common = ["published-internal"]
+engine = ["published-internal"]
+protocol = ["published-internal"]
+provider = ["published-internal"]
+store = ["published-internal"]
+harness = ["published-internal"]
+facade = ["supported"]
+host = ["published-internal"]
+bin = ["supported", "published-internal"]
+test = ["repository-only"]
+
+[workspace.metadata.plakous.production-dependencies]
+plak = [
+    "base64",
+    "clap",
+    "crossterm",
+    "jiff",
+    "opentelemetry",
+    "opentelemetry-otlp",
+    "nix",
+    "opentelemetry_sdk",
+    "plakous",
+    "plakous-host-protocol",
+    "plakous-hosted",
+    # `test-hooks` only, like `tempfile` is `test-support` only: an optional
+    # edge no default or release build resolves. It carries the deterministic
+    # offline model the repository gate drives the real binary against.
+    "plakous-offline-crash-harness",
+    "plakous-recursive-subagents",
+    "plakous-recursive-subagents-store",
+    "pulldown-cmark",
+    "ratatui",
+    "rusqlite",
+    "rustix",
+    "serde",
+    "serde_json",
+    "sha2",
+    "syntect",
+    "tempfile",
+    "time",
+    "toml",
+    "toml_edit",
+    "tokio",
+    "tracing",
+    "tracing-opentelemetry",
+    "tracing-subscriber",
+    "unicode-segmentation",
+    "unicode-width",
+    "uuid",
+    "zeroize",
+]
+plakous-host-protocol = ["serde", "serde_json"]
+plakous-workspace = ["futures", "gix", "jj-lib", "plakous-host-protocol", "pollster", "rustix", "sha2", "tempfile"]
+plakous-recursive-subagents = [
+    "futures-util",
+    "plakous",
+    "plakous-host-protocol",
+    "plakous-workspace",
+    "serde",
+    "serde_json",
+    "tempfile",
+    "tokio",
+    "tracing",
+    "uuid",
+]
+plakous-recursive-subagents-store = [
+    "plakous-recursive-subagents",
+    "plakous-store",
+    "rusqlite",
+    "serde",
+    "serde_json",
+    "sha2",
+    "uuid",
+]
+plakous-hosted = [
+    "nix",
+    "tempfile",
+    "tokio",
+    "tracing",
+    "plakous-workspace",
+    "plakous",
+    "plakous-host-protocol",
+    "plakous-recursive-subagents",
+    "serde",
+    "serde_json",
+    "time",
+    "uuid",
+]
+
+[workspace.metadata.plakous.facade-features]
+plak = ["native-subscriptions", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"]
+plakous-recursive-subagents = []
+plakous-hosted = ["native-subscriptions", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"]
+
+[workspace.metadata.plakous.modules.plak.tui]
+forbid-crates = ["plakous", "plakous-*"]
+allow-crates = ["plakous-host-protocol"]
+may-use = [
+    "crate::tui",
+    "crate::config::AgentAcknowledgement",
+    "crate::config::HostEvent",
+    "crate::config::HostEventReceiver",
+    "crate::config::ProfileOutcome",
+    "crate::config::ProfileRole",
+    "crate::config::ProfileRow",
+    "crate::config::ProfilesView",
+    "crate::config::SettingsCompositionOption",
+    "crate::config::SettingsSnapshot",
+    "crate::config::SettingsTheme",
+    "crate::config::SurfaceIntent",
+    "crate::config::SurfaceObservation",
+    "crate::config::UserAction",
+    "crate::config::UserActionSendError",
+    "crate::config::UserActionSender",
+    "crate::config::effort",
+    "crate::config::host_event_channel",
+    "crate::config::product_recommended_effort",
+    "crate::config::user_action_channel",
+]
+
+[patch.crates-io]
+monty = { path = "vendor/monty" }
+monty-typeshed = { path = "vendor/monty-typeshed" }
+tungstenite = { git = "https://github.com/openai-oss-forks/tungstenite-rs", rev = "4fffad30fe373adbdcffab9545e9e9bf4f2fc19f" }
+
+[patch."ssh://git@github.com/openai-oss-forks/tungstenite-rs.git"]
+tungstenite = { git = "https://github.com/openai-oss-forks/tungstenite-rs", rev = "4fffad30fe373adbdcffab9545e9e9bf4f2fc19f" }
+
+[workspace.lints.rust]
+missing_docs = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+unsafe_code = "forbid"
+unused_lifetimes = "deny"
+unused_qualifications = "warn"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+allow_attributes_without_reason = "warn"
+dbg_macro = "deny"
+expect_used = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_used = "deny"
+duration_suboptimal_units = "allow"
+
+# Line tables keep panics and backtraces pointing at source lines in workspace
+# code; dependencies carry no debug info. Full debug info cost build and link
+# time and tens of gigabytes of `target/debug` for no use in the gate.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# Build identity hashes the executable, including large debug binaries. Keep
+# SHA-256's compression loop fast without optimizing workspace debug code.
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "debuginfo"
+
+# Dogfood build (`just build-maintainer`): release codegen without LTO so
+# rebuilds stay incremental, with line tables for panics and backtraces.
+[profile.maintainer]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
+debug = "line-tables-only"
+strip = "none"
+
+[profile.profiling]
+inherits = "release"
+debug = "full"
+strip = "none"
+lto = false

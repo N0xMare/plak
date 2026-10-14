@@ -1,0 +1,12 @@
+# Scenario: tree-openrouter-root.
+# An OpenRouter free root over subscription children — free lead,
+# Codex implementer, Claude reviewer.
+
+[root]
+agent = "lead"
+
+[roster]
+working_set = ["implementer", "reviewer"]
+
+[orchestration]
+subagents = true

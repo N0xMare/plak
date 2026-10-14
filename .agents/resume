@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "$0")/.." && pwd -P)"
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+
+mkdir -p "$repo_root/target/plak-test-tmp"
+rustc --version >/dev/null
+"$repo_root/.dev-tools/bin/cargo-nextest" --version >/dev/null
+
+echo "Plak orb development environment is ready."

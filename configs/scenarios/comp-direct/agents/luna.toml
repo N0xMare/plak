@@ -1,0 +1,5 @@
+# Template luna for the comp-direct scenario.
+account = "codex"
+model = "gpt-5.6-luna"
+effort = "low"
+composition = "direct"

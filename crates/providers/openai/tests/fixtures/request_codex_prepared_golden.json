@@ -1,0 +1,1 @@
+{"include":["reasoning.encrypted_content"],"input":[{"content":[{"text":"native route","type":"input_text"}],"role":"user","type":"message"}],"model":"gpt-5.6-luna","prompt_cache_key":"8e29892cc0bbd81d70e375ca7114046947a93046db1aa13359bdf3d7c209dfbd","store":false,"stream":true,"tool_choice":"auto"}

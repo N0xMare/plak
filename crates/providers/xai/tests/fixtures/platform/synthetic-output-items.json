@@ -1,0 +1,21 @@
+[
+  {
+    "type": "reasoning",
+    "id": "reasoning_local_fixture",
+    "summary": [],
+    "encrypted_content": "opaque-local-fixture"
+  },
+  {
+    "type": "message",
+    "id": "message_local_fixture",
+    "role": "assistant",
+    "status": "completed",
+    "content": [
+      {
+        "type": "output_text",
+        "text": "hello",
+        "annotations": []
+      }
+    ]
+  }
+]

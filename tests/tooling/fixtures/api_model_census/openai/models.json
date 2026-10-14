@@ -1,0 +1,404 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "tts-1"
+    },
+    {
+      "id": "gpt-5-mini"
+    },
+    {
+      "id": "gpt-5-mini-2025-08-07"
+    },
+    {
+      "id": "o4-mini-2025-04-16"
+    },
+    {
+      "id": "gpt-5.4-2026-03-05"
+    },
+    {
+      "id": "gpt-3.5-turbo-0125"
+    },
+    {
+      "id": "gpt-5-nano"
+    },
+    {
+      "id": "gpt-5.1-codex"
+    },
+    {
+      "id": "gpt-5.4-mini"
+    },
+    {
+      "id": "o1-pro"
+    },
+    {
+      "id": "gpt-4-turbo-2024-04-09"
+    },
+    {
+      "id": "gpt-realtime-2.1-mini"
+    },
+    {
+      "id": "gpt-realtime-2025-08-28"
+    },
+    {
+      "id": "omni-moderation-2024-09-26"
+    },
+    {
+      "id": "gpt-live-transcribe"
+    },
+    {
+      "id": "gpt-5.6-luna"
+    },
+    {
+      "id": "omni-moderation-latest"
+    },
+    {
+      "id": "gpt-realtime-2"
+    },
+    {
+      "id": "gpt-5-search-api"
+    },
+    {
+      "id": "gpt-5.5-2026-04-23"
+    },
+    {
+      "id": "gpt-4o-2024-11-20"
+    },
+    {
+      "id": "gpt-5.1"
+    },
+    {
+      "id": "whisper-1"
+    },
+    {
+      "id": "gpt-5-pro"
+    },
+    {
+      "id": "gpt-realtime-whisper"
+    },
+    {
+      "id": "gpt-realtime"
+    },
+    {
+      "id": "tts-1-hd"
+    },
+    {
+      "id": "gpt-realtime-1.5"
+    },
+    {
+      "id": "gpt-5.2-pro"
+    },
+    {
+      "id": "gpt-5-chat-latest"
+    },
+    {
+      "id": "gpt-5.5-pro"
+    },
+    {
+      "id": "gpt-4o-mini-transcribe-2025-03-20"
+    },
+    {
+      "id": "gpt-audio-2025-08-28"
+    },
+    {
+      "id": "chat-latest"
+    },
+    {
+      "id": "gpt-5.4-pro-2026-03-05"
+    },
+    {
+      "id": "gpt-realtime-translate"
+    },
+    {
+      "id": "gpt-5.4-mini-2026-03-17"
+    },
+    {
+      "id": "gpt-5-2025-08-07"
+    },
+    {
+      "id": "tts-1-1106"
+    },
+    {
+      "id": "gpt-5.2-pro-2025-12-11"
+    },
+    {
+      "id": "gpt-audio-mini-2025-10-06"
+    },
+    {
+      "id": "gpt-5.5-pro-2026-04-23"
+    },
+    {
+      "id": "gpt-4-turbo"
+    },
+    {
+      "id": "gpt-4o-2024-08-06"
+    },
+    {
+      "id": "o3"
+    },
+    {
+      "id": "gpt-4o-mini-search-preview-2025-03-11"
+    },
+    {
+      "id": "gpt-4o-mini-transcribe-2025-12-15"
+    },
+    {
+      "id": "gpt-5-pro-2025-10-06"
+    },
+    {
+      "id": "gpt-5.6-sol"
+    },
+    {
+      "id": "babbage-002"
+    },
+    {
+      "id": "text-embedding-3-large"
+    },
+    {
+      "id": "gpt-4o-2024-05-13"
+    },
+    {
+      "id": "gpt-4.1-nano"
+    },
+    {
+      "id": "gpt-image-2"
+    },
+    {
+      "id": "gpt-3.5-turbo-16k"
+    },
+    {
+      "id": "text-embedding-ada-002"
+    },
+    {
+      "id": "gpt-realtime-2.1"
+    },
+    {
+      "id": "gpt-4.1"
+    },
+    {
+      "id": "gpt-5.5"
+    },
+    {
+      "id": "gpt-4o-transcribe-diarize"
+    },
+    {
+      "id": "gpt-5-codex"
+    },
+    {
+      "id": "gpt-5.1-2025-11-13"
+    },
+    {
+      "id": "gpt-4-0613"
+    },
+    {
+      "id": "gpt-4o-search-preview"
+    },
+    {
+      "id": "gpt-5.4-pro"
+    },
+    {
+      "id": "gpt-realtime-mini-2025-12-15"
+    },
+    {
+      "id": "gpt-4o-mini-tts"
+    },
+    {
+      "id": "gpt-5.1-codex-max"
+    },
+    {
+      "id": "gpt-4o-mini-search-preview"
+    },
+    {
+      "id": "gpt-image-1.5"
+    },
+    {
+      "id": "o3-mini-2025-01-31"
+    },
+    {
+      "id": "gpt-audio-1.5"
+    },
+    {
+      "id": "gpt-realtime-mini"
+    },
+    {
+      "id": "gpt-image-1-mini"
+    },
+    {
+      "id": "gpt-5.6-terra"
+    },
+    {
+      "id": "gpt-3.5-turbo-instruct-0914"
+    },
+    {
+      "id": "sora-2"
+    },
+    {
+      "id": "tts-1-hd-1106"
+    },
+    {
+      "id": "gpt-5.4"
+    },
+    {
+      "id": "gpt-4o-search-preview-2025-03-11"
+    },
+    {
+      "id": "text-embedding-3-small"
+    },
+    {
+      "id": "gpt-4.1-mini"
+    },
+    {
+      "id": "gpt-4o-mini"
+    },
+    {
+      "id": "gpt-5.1-chat-latest"
+    },
+    {
+      "id": "gpt-5.2-chat-latest"
+    },
+    {
+      "id": "gpt-image-2-2026-04-21"
+    },
+    {
+      "id": "gpt-4o-mini-transcribe"
+    },
+    {
+      "id": "gpt-3.5-turbo-instruct"
+    },
+    {
+      "id": "sora-2-pro"
+    },
+    {
+      "id": "gpt-5"
+    },
+    {
+      "id": "gpt-transcribe"
+    },
+    {
+      "id": "gpt-4.1-nano-2025-04-14"
+    },
+    {
+      "id": "o1-2024-12-17"
+    },
+    {
+      "id": "gpt-4o-mini-tts-2025-12-15"
+    },
+    {
+      "id": "gpt-image-1"
+    },
+    {
+      "id": "gpt-audio"
+    },
+    {
+      "id": "gpt-5.3-codex"
+    },
+    {
+      "id": "gpt-5-search-api-2025-10-14"
+    },
+    {
+      "id": "gpt-5.2-codex"
+    },
+    {
+      "id": "gpt-4.1-2025-04-14"
+    },
+    {
+      "id": "gpt-4o-mini-2024-07-18"
+    },
+    {
+      "id": "gpt-5-nano-2025-08-07"
+    },
+    {
+      "id": "o4-mini"
+    },
+    {
+      "id": "gpt-5.1-codex-mini"
+    },
+    {
+      "id": "gpt-4o-transcribe"
+    },
+    {
+      "id": "gpt-4o"
+    },
+    {
+      "id": "gpt-3.5-turbo-1106"
+    },
+    {
+      "id": "gpt-4o-mini-tts-2025-03-20"
+    },
+    {
+      "id": "gpt-5.2"
+    },
+    {
+      "id": "o1"
+    },
+    {
+      "id": "gpt-5.4-nano-2026-03-17"
+    },
+    {
+      "id": "gpt-6-luna"
+    },
+    {
+      "id": "gpt-image-2.5-sunburst-2026-09-08"
+    },
+    {
+      "id": "gpt-image-2.5-flare"
+    },
+    {
+      "id": "gpt-6-astra"
+    },
+    {
+      "id": "gpt-4"
+    },
+    {
+      "id": "o3-2025-04-16"
+    },
+    {
+      "id": "gpt-5.3-chat-latest"
+    },
+    {
+      "id": "gpt-5.2-2025-12-11"
+    },
+    {
+      "id": "chatgpt-image-latest"
+    },
+    {
+      "id": "gpt-3.5-turbo"
+    },
+    {
+      "id": "gpt-image-2.5-sunburst"
+    },
+    {
+      "id": "gpt-image-2.5-flare-2026-09-08"
+    },
+    {
+      "id": "gpt-live-1"
+    },
+    {
+      "id": "davinci-002"
+    },
+    {
+      "id": "o3-mini"
+    },
+    {
+      "id": "gpt-5.4-nano"
+    },
+    {
+      "id": "gpt-audio-mini-2025-12-15"
+    },
+    {
+      "id": "o1-pro-2025-03-19"
+    },
+    {
+      "id": "gpt-audio-mini"
+    },
+    {
+      "id": "gpt-4.1-mini-2025-04-14"
+    },
+    {
+      "id": "gpt-6-sol"
+    },
+    {
+      "id": "gpt-6.1-sol"
+    }
+  ]
+}

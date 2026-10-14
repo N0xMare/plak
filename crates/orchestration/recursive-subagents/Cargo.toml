@@ -1,0 +1,49 @@
+[package]
+name = "plakous-recursive-subagents"
+description = "One durable agent tree per root session: nodes, grants, attempts, candidates, mail, epochs, and the nine topology tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "host"
+class = "published-internal"
+neutral = true
+
+[dependencies]
+futures-util = { workspace = true, features = ["std"] }
+plakous = { version = "0.1.0", path = "../../plakous", default-features = false }
+plakous-host-protocol = { version = "0.1.0", path = "../../hosting/host-protocol" }
+plakous-workspace = { version = "0.1.0", path = "../workspace", default-features = false }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tempfile = { workspace = true, optional = true }
+uuid = { workspace = true, features = ["v4"], optional = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+tracing.workspace = true
+
+[dev-dependencies]
+plakous-offline-crash-harness = { version = "0.1.0", path = "../../../tests/harnesses/offline-crash" }
+plakous-workspace = { version = "0.1.0", path = "../workspace", features = ["test-support"], default-features = false }
+proptest = { workspace = true, features = ["std"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
+uuid = { workspace = true, features = ["v4"] }
+
+[features]
+default = ["git-cli", "jj-lib"]
+git-cli = ["plakous-workspace/git-cli"]
+jj-lib = ["plakous-workspace/jj-lib"]
+# `MemoryTreeStore`, `FakeVcs`, and the fixtures the crates above this one drive.
+test-support = [
+    "dep:tempfile",
+    "dep:uuid",
+    "plakous-host-protocol/test-support",
+    "plakous-workspace/test-support",
+]
+
+[lints]
+workspace = true

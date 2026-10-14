@@ -1,0 +1,70 @@
+# Plak agent template (non-secret): ~/.plak/agents/root-agent.toml
+#
+# One flat object plus an optional [env] table. The file stem is the
+# template's name. A project's .plak/agents/<name>.toml wins over the
+# user's file of the same name. An unknown key is a named load error.
+
+# Credential lane the copy runs on.
+# type: string · default: (required) · codex|chatgpt|grok|supergrok|xai-oauth|claude|openrouter|openai|anthropic|xai-api
+account = "codex"
+
+# Exact model id.
+# type: string · default: (required) · non-empty; a direct API account must name an enrolled model, checked at load; every other account is checked at bind
+model = "gpt-6-astra"
+
+# Reasoning effort; on a subscription account a typo surfaces as a bind failure, not a load error.
+# type: string · default: (unset) · none|low|medium|high|xhigh|max|ultra; Codex offers low through max (never ultra); none is an explicit API effort, not an omitted one; a direct API account requires a level on the model's published ladder, checked at load; every other account is checked at bind
+effort = "medium"
+
+# Fast mode: request the provider's faster processing lane for this Codex subscription template. It is not a model choice and does not grant additional tools. A child runs on its own template's setting, never its parent's.
+# type: bool · default: false · true is only valid with account = "codex"
+fast_mode = false
+
+# How the model composes the product tools: direct calls one at a time, or a programmatic tool calling (PTC) cell. native-ptc is the provider's own PTC system (today only Codex Code Mode is enrolled); js-ptc and py-ptc are harness PTC on every account. plakous-default uses the versioned Plakous-recommended tool presentation for this provider/model; the resolved presentation is pinned for the session and does not select or substitute a model.
+# type: enum · default: "plakous-default" · direct|plakous-default|native-ptc|js-ptc|py-ptc; native-ptc is refused for openrouter, anthropic and xai-api, and on openai is valid only for a model enrolled as CodeModeOnly
+composition = "plakous-default"
+
+# Wire protocol pin for an OpenRouter model whose family the gateway reports wrongly.
+# type: enum · default: "auto" · auto|chat|responses|messages; anything but auto is OpenRouter-only
+# protocol = "auto"
+
+# The spawn card a parent routes on: what this agent is for, in the parent's words.
+# type: string · default: "" · required and non-blank for a template named in [roster] working_set or in a spawns list
+description = "Drive the session, delegate bounded work only when explicitly requested, and integrate verified results."
+
+# Tool presentation: full includes file-edit tools; read-execute omits dedicated file-edit tools but permits shell commands. Neither is an OS sandbox. A spawn request above the ceiling is clipped, not refused.
+# type: enum · default: "full" · full|read-execute
+tools = "full"
+
+# The templates a copy of this template may spawn; its own name is never on its menu. Empty is a leaf with no spawn_agent. The root spawns [roster] working_set instead; this list applies where the template runs as a child.
+# type: array of string · default: [] · 0..=5 names, no duplicates, each a template file with a description
+spawns = []
+
+# Whether a copy may adopt a sealed candidate out of its own subtree.
+# type: bool · default: false · requires spawns naming another template
+may_adopt = false
+
+# Whether the model is told to delegate unprompted or only when asked.
+# type: enum · default: "explicit" · explicit|proactive
+delegation = "explicit"
+
+# Static label a parent sees on the spawn card; never a measured cost.
+# type: integer · default: (unset) · 0..=255
+# cost_tier = 2
+
+# Turn budget for a copy of this template.
+# type: integer · default: (unset) · 1 or more
+# max_turns = 24
+
+# Command run once when a copy is minted, before its first turn.
+# type: string · default: (unset) · not validated at parse; runs in the copy's workspace
+# on_mint = "cargo fetch"
+
+# Put the model id on the spawn card next to the description.
+# type: bool · default: false
+show_model = true
+
+# Environment for on_mint only; not passed to the copy's tool calls.
+# type: table of string · default: {} · keys are not validated; values are strings
+# [env]
+# GIT_TERMINAL_PROMPT = "0"

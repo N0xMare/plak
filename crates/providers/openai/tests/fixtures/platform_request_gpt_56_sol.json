@@ -1,0 +1,45 @@
+{
+  "input": [
+    {
+      "content": [
+        {
+          "text": "Find the answer.",
+          "type": "input_text"
+        }
+      ],
+      "role": "user",
+      "type": "message"
+    }
+  ],
+  "instructions": "Be precise.",
+  "max_output_tokens": 512,
+  "model": "gpt-5.6-sol",
+  "parallel_tool_calls": false,
+  "reasoning": {
+    "effort": "high",
+    "summary": "auto"
+  },
+  "store": false,
+  "stream": true,
+  "tool_choice": "auto",
+  "tools": [
+    {
+      "description": "Look up a value",
+      "name": "lookup",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "q": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "q"
+        ],
+        "type": "object"
+      },
+      "strict": false,
+      "type": "function"
+    }
+  ]
+}

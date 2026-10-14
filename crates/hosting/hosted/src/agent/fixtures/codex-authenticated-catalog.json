@@ -1,0 +1,248 @@
+{
+  "schema": "plak.provider-authority.authenticated-catalog-observation.v1",
+  "provider": "openai",
+  "vertical": "codex-oauth",
+  "client_version": "0.155.1",
+  "etag": "W/\"56739dad38b64be2ed8d94d8733a641d\"",
+  "fetched_at": "2026-09-23T01:15:53.358576Z",
+  "account_material_removed": true,
+  "models": {
+    "gpt-6-astra": {
+      "tool_mode": "code_mode_only",
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "default_reasoning": "medium",
+      "context_window": 272000,
+      "max_context_window": 872000,
+      "effective_context_window_percent": 95,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "use_responses_lite": true,
+      "service_tiers": [
+        {
+          "id": "priority",
+          "name": "Fast",
+          "description": "2x speed, increased usage"
+        }
+      ]
+    },
+    "gpt-6-sol": {
+      "tool_mode": "code_mode_only",
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "default_reasoning": "medium",
+      "context_window": 272000,
+      "max_context_window": 872000,
+      "effective_context_window_percent": 95,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "use_responses_lite": true,
+      "service_tiers": [
+        {
+          "id": "priority",
+          "name": "Fast",
+          "description": "1.5x speed"
+        }
+      ]
+    },
+    "gpt-6-luna": {
+      "tool_mode": "code_mode_only",
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default_reasoning": "medium",
+      "context_window": 272000,
+      "max_context_window": 872000,
+      "effective_context_window_percent": 95,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "use_responses_lite": true,
+      "service_tiers": [
+        {
+          "id": "priority",
+          "name": "Fast",
+          "description": "1.5x speed"
+        }
+      ]
+    },
+    "gpt-reserve": {
+      "tool_mode": "code_mode_only",
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default_reasoning": "medium",
+      "context_window": 272000,
+      "max_context_window": 872000,
+      "effective_context_window_percent": 95,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "use_responses_lite": true,
+      "service_tiers": [
+        {
+          "id": "priority",
+          "name": "Fast",
+          "description": "1.5x speed, increased usage"
+        }
+      ]
+    },
+    "gpt-5.6-sol": {
+      "tool_mode": "code_mode_only",
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "default_reasoning": "low",
+      "context_window": 272000,
+      "max_context_window": 872000,
+      "effective_context_window_percent": 95,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "use_responses_lite": true,
+      "service_tiers": [
+        {
+          "id": "priority",
+          "name": "Fast",
+          "description": "1.5x speed, increased usage"
+        }
+      ]
+    },
+    "gpt-5.6-terra": {
+      "tool_mode": "code_mode_only",
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "default_reasoning": "medium",
+      "context_window": 272000,
+      "max_context_window": 872000,
+      "effective_context_window_percent": 95,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "use_responses_lite": true,
+      "service_tiers": [
+        {
+          "id": "priority",
+          "name": "Fast",
+          "description": "1.5x speed, increased usage"
+        }
+      ]
+    },
+    "gpt-5.6-luna": {
+      "tool_mode": "code_mode_only",
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default_reasoning": "medium",
+      "context_window": 272000,
+      "max_context_window": 872000,
+      "effective_context_window_percent": 95,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "use_responses_lite": true,
+      "service_tiers": [
+        {
+          "id": "priority",
+          "name": "Fast",
+          "description": "1.5x speed, increased usage"
+        }
+      ]
+    },
+    "gpt-5.5": {
+      "tool_mode": null,
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "default_reasoning": "medium",
+      "context_window": 272000,
+      "max_context_window": 272000,
+      "effective_context_window_percent": 95,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "use_responses_lite": false,
+      "service_tiers": [
+        {
+          "id": "priority",
+          "name": "Fast",
+          "description": "1.5x speed, increased usage"
+        }
+      ]
+    },
+    "codex-auto-review": {
+      "tool_mode": "code_mode_only",
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default_reasoning": "medium",
+      "context_window": 272000,
+      "max_context_window": 872000,
+      "effective_context_window_percent": 95,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "use_responses_lite": true,
+      "service_tiers": [
+        {
+          "id": "priority",
+          "name": "Fast",
+          "description": "1.5x speed, increased usage"
+        }
+      ]
+    }
+  }
+}

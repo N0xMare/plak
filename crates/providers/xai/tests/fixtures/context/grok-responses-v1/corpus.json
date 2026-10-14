@@ -1,0 +1,89 @@
+{
+  "schema": "plakous.xai.grok-responses-context-corpus",
+  "revision": 1,
+  "models": ["grok-build-0.1", "grok-4.5"],
+  "route": "xai.grok-subscription.responses.2026-07",
+  "accounting_revision": "responses-wire-accounting-v3",
+  "estimator_revision": "grok-responses-v2",
+  "fixed_margin": 4096,
+  "occurrence_margins": {
+    "message": 64,
+    "input_text": 32,
+    "output_text": 32,
+    "refusal": 32,
+    "function_call": 96,
+    "function_call_output": 96,
+    "function_tool": 256,
+    "schema_node": 16,
+    "reasoning_replay": 128,
+    "reasoning_summary": 32,
+    "opaque_replay": 256
+  },
+  "proof": {
+    "base": "wire bytes plus fixed margin",
+    "step": "each closed repeated shape adds its wire bytes plus its occurrence margin",
+    "cache_rule": "total input_tokens is compared; cached_input_tokens is never subtracted"
+  },
+  "cases": [
+    "minimal-text",
+    "unicode-and-json-escaping",
+    "function-schema-deep-wide",
+    "function-call-and-result",
+    "reasoning-and-encrypted-replay",
+    "repeated-composition"
+  ],
+  "live_observations": [
+    {
+      "observed_on": "2026-08-10",
+      "case": "minimal-text",
+      "model": "grok-4.5",
+      "wire_digest": "90d72d3f0b5917d18fcdda2b2e7d427b9208f07c3ae51f1e2742eb77e3bd5088",
+      "wire_size": 193,
+      "occurrences": {"message": 1, "input_text": 1, "output_text": 0, "refusal": 0, "function_call": 0, "function_call_output": 0, "function_tool": 0, "schema_node": 0, "reasoning_replay": 0, "reasoning_summary": 0, "opaque_replay": 0},
+      "input_upper_bound": 4385,
+      "output_maximum_field": 128,
+      "usage": {"input_tokens": 501, "cached_input_tokens": 384, "output_tokens": 14, "reasoning_tokens": 13},
+      "input_bound_holds": true,
+      "total_output_reservation_holds": true
+    },
+    {
+      "observed_on": "2026-08-10",
+      "case": "minimal-text",
+      "model": "grok-build-0.1",
+      "wire_digest": "a543a184b293f9b212f6c618acb114a7343c9622b1a6c37cbad696421f286a15",
+      "wire_size": 199,
+      "occurrences": {"message": 1, "input_text": 1, "output_text": 0, "refusal": 0, "function_call": 0, "function_call_output": 0, "function_tool": 0, "schema_node": 0, "reasoning_replay": 0, "reasoning_summary": 0, "opaque_replay": 0},
+      "input_upper_bound": 4391,
+      "output_maximum_field": 128,
+      "usage": {"input_tokens": 193, "cached_input_tokens": 128, "output_tokens": 187, "reasoning_tokens": 186},
+      "input_bound_holds": true,
+      "total_output_reservation_holds": false
+    },
+    {
+      "observed_on": "2026-08-10",
+      "case": "unicode-and-json-escaping",
+      "model": "grok-4.5",
+      "wire_digest": "e0fa29d502bba656ec52dd2485385e6cd2479384b7c0fef6369f96db342cb346",
+      "wire_size": 242,
+      "occurrences": {"message": 1, "input_text": 1, "output_text": 0, "refusal": 0, "function_call": 0, "function_call_output": 0, "function_tool": 0, "schema_node": 0, "reasoning_replay": 0, "reasoning_summary": 0, "opaque_replay": 0},
+      "input_upper_bound": 4434,
+      "output_maximum_field": 128,
+      "usage": {"input_tokens": 516, "cached_input_tokens": 384, "output_tokens": 148, "reasoning_tokens": 147},
+      "input_bound_holds": true,
+      "total_output_reservation_holds": false
+    },
+    {
+      "observed_on": "2026-08-10",
+      "case": "unicode-and-json-escaping",
+      "model": "grok-build-0.1",
+      "wire_digest": "4ab6954045f95d86e5b8080a60201bb950df66ef2f0bb0e78045b840ec30e477",
+      "wire_size": 248,
+      "occurrences": {"message": 1, "input_text": 1, "output_text": 0, "refusal": 0, "function_call": 0, "function_call_output": 0, "function_tool": 0, "schema_node": 0, "reasoning_replay": 0, "reasoning_summary": 0, "opaque_replay": 0},
+      "input_upper_bound": 4440,
+      "output_maximum_field": 128,
+      "usage": {"input_tokens": 209, "cached_input_tokens": 128, "output_tokens": 1452, "reasoning_tokens": 1451},
+      "input_bound_holds": true,
+      "total_output_reservation_holds": false
+    }
+  ]
+}

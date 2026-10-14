@@ -1,0 +1,28 @@
+[root]
+agent = "root-agent"
+
+[roster]
+working_set = ["worker", "reviewer", "scout"]
+
+[orchestration]
+subagents = true
+max_depth = 1
+max_children = 8
+max_nodes = 32
+max_attempts = 64
+require_review_evidence = false
+
+[tui]
+mouse = true
+theme = "default-dark"
+scroll_lines = 3
+show_thinking = true
+group_tool_calls = true
+reduced_motion = false
+
+[compaction]
+enabled = true
+
+[telemetry]
+max_bytes = 536870912
+max_age_days = 90

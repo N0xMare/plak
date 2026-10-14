@@ -1,0 +1,17 @@
+jobs_dir: .plak/harbor/jobs
+n_attempts: 1
+n_concurrent_trials: 4
+environment:
+  type: docker
+datasets:
+  - name: terminal-bench/terminal-bench-2-1
+    ref: "6"
+    task_names:
+      - terminal-bench/openssl-selfsigned-cert
+      - terminal-bench/fix-git
+      - terminal-bench/nginx-request-logging
+      - terminal-bench/sqlite-db-truncate
+      - terminal-bench/cancel-async-tasks
+      - terminal-bench/log-summary-date-ranges
+      - terminal-bench/regex-log
+      - terminal-bench/configure-git-webserver

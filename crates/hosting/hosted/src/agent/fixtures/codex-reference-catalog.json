@@ -1,0 +1,205 @@
+{
+  "schema": "plak.provider-authority.reference-client-catalog.v1",
+  "provider": "openai",
+  "vertical": "codex-oauth",
+  "client_version": "0.160.1",
+  "source_tag": "rust-v0.160.0",
+  "source_revision": "a956835d020762cb2b570053af06f643a11c0ecc",
+  "source_path": "codex-rs/models-manager/models.json",
+  "models": {
+    "gpt-6-astra": {
+      "tool_mode": "code_mode_only",
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "default_reasoning": "low",
+      "context_window": 272000,
+      "max_context_window": 872000,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "use_responses_lite": true,
+      "supports_parallel_tool_calls": true,
+      "service_tiers": [
+        {
+          "id": "priority",
+          "name": "Fast",
+          "description": "2x speed, increased usage"
+        }
+      ],
+      "default_service_tier": null
+    },
+    "gpt-6.1-sol": {
+      "tool_mode": "code_mode_only",
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "default_reasoning": "low",
+      "context_window": 272000,
+      "max_context_window": 872000,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "use_responses_lite": true,
+      "supports_parallel_tool_calls": true,
+      "service_tiers": [
+        {
+          "id": "priority",
+          "name": "Fast",
+          "description": "2x speed, increased usage"
+        }
+      ],
+      "default_service_tier": null
+    },
+    "gpt-6-sol": {
+      "tool_mode": "code_mode_only",
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "default_reasoning": "medium",
+      "context_window": 272000,
+      "max_context_window": 872000,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "use_responses_lite": true,
+      "supports_parallel_tool_calls": true,
+      "service_tiers": [
+        {
+          "id": "priority",
+          "name": "Fast",
+          "description": "1.5x speed"
+        }
+      ],
+      "default_service_tier": "priority"
+    },
+    "gpt-6-luna": {
+      "tool_mode": "code_mode_only",
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default_reasoning": "medium",
+      "context_window": 272000,
+      "max_context_window": 872000,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "use_responses_lite": true,
+      "supports_parallel_tool_calls": true,
+      "service_tiers": [
+        {
+          "id": "priority",
+          "name": "Fast",
+          "description": "1.5x speed"
+        }
+      ],
+      "default_service_tier": "priority"
+    },
+    "gpt-5.6-sol": {
+      "tool_mode": "code_mode_only",
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "default_reasoning": "low",
+      "context_window": 272000,
+      "max_context_window": 872000,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "use_responses_lite": true,
+      "supports_parallel_tool_calls": true,
+      "service_tiers": [
+        {
+          "id": "priority",
+          "name": "Fast",
+          "description": "1.5x speed, increased usage"
+        }
+      ],
+      "default_service_tier": null
+    },
+    "gpt-5.6-terra": {
+      "tool_mode": "code_mode_only",
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ],
+      "default_reasoning": "medium",
+      "context_window": 272000,
+      "max_context_window": 872000,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "use_responses_lite": true,
+      "supports_parallel_tool_calls": true,
+      "service_tiers": [
+        {
+          "id": "priority",
+          "name": "Fast",
+          "description": "1.5x speed, increased usage"
+        }
+      ],
+      "default_service_tier": null
+    },
+    "gpt-5.6-luna": {
+      "tool_mode": "code_mode_only",
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default_reasoning": "medium",
+      "context_window": 272000,
+      "max_context_window": 872000,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "use_responses_lite": true,
+      "supports_parallel_tool_calls": true,
+      "service_tiers": [
+        {
+          "id": "priority",
+          "name": "Fast",
+          "description": "1.5x speed, increased usage"
+        }
+      ],
+      "default_service_tier": null
+    }
+  }
+}

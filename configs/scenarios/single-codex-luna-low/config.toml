@@ -1,0 +1,6 @@
+# Scenario: single-codex-luna-low.
+# Single Codex Luna agent, plakous-default composition.
+# Copy config.toml and agents/*.toml into $PLAK_HOME.
+
+[root]
+agent = "luna"

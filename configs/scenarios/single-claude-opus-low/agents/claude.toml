@@ -1,0 +1,4 @@
+# Template claude for the single-claude-opus-low scenario.
+account = "claude"
+model = "claude-opus-5"
+effort = "low"

@@ -1,0 +1,20 @@
+[package]
+name = "plakous-tools-consumer"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.97.1"
+description = "Compile fixture: an out-of-workspace consumer of the `plakous-model` and `plakous-tools` core crates."
+license = "MIT"
+repository = "https://github.com/N0xMare/plak"
+readme = "../../../README.md"
+publish = false
+
+[package.metadata.plakous]
+layer = "test"
+class = "repository-only"
+
+[dependencies]
+plakous-model = { version = "0.1.0", path = "../../../crates/core/model" }
+plakous-tools = { version = "0.1.0", path = "../../../crates/core/tools" }
+
+[workspace]

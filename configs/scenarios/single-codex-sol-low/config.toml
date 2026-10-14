@@ -1,0 +1,5 @@
+# Scenario: single-codex-sol-low.
+# Single Codex Sol agent, plakous-default composition.
+
+[root]
+agent = "sol"

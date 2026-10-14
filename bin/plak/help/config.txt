@@ -1,0 +1,18 @@
+plak config — product configuration
+
+USAGE:
+  plak config show
+  plak config set <key> <value> [--scope user|project]
+  plak config edit
+  plak config init
+  plak config trust
+  plak config untrust
+
+  `config show` prints the file path on its first line (`config_path=`),
+  then the effective config and which file decided each value.
+  Agent templates are one file each: ~/.plak/agents/<name>.toml (or the
+  project's .plak/agents/). [roster] working_set and [orchestration] are
+  config-only: edit config.toml or use `plak config set`. The TUI has no roster editor.
+
+  A project .plak/ applies nothing until `plak config trust` admits it;
+  `--scope project` writes a key into the trusted project's config.toml.

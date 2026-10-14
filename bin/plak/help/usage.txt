@@ -1,0 +1,6 @@
+plak usage — subscription limits and context status
+
+USAGE:
+  plak usage [--account codex|grok|claude|openrouter] [--session <session>]
+
+  --session opens the exact attached runtime and reports descriptor-bound context status. Without it, provider plan limits use the provider dashboard. Plak never estimates tokens or model capacity.

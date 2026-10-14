@@ -1,0 +1,7 @@
+# Scenario: fresh-home-bootstrap.
+# The smallest home that binds a named agent. One template, no
+# roster, no [orchestration] table — every other key stays at its schema
+# default. This is what a newcomer copies first.
+
+[root]
+agent = "lead"

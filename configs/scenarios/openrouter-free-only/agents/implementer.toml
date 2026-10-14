@@ -1,0 +1,6 @@
+# Template implementer for the openrouter-free-only scenario.
+account = "openrouter"
+model = "nvidia/nemotron-3-ultra-550b-a55b:free"
+composition = "direct"
+description = "OpenRouter free implementer that edits in its own fork."
+tools = "full"

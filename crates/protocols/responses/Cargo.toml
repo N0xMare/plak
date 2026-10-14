@@ -1,0 +1,23 @@
+[package]
+name = "plakous-responses"
+description = "Responses-family protocol kernel primitives for Plakous"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "protocol"
+class = "published-internal"
+
+[dependencies]
+plakous-http = { version = "0.1.0", path = "../../common/http" }
+plakous-model = { version = "0.1.0", path = "../../core/model" }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

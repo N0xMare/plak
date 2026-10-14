@@ -1,0 +1,5 @@
+event: response.created
+data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_failed","object":"response","status":"in_progress","model":"gpt-5.4"}}
+
+event: response.failed
+data: {"type":"response.failed","sequence_number":1,"request_id":"req_safe","response":{"id":"resp_failed","status":"failed","model":"gpt-5.4","error":{"code":"rate_limit_exceeded","message":"fixture detail must not escape"}}}

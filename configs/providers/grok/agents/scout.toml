@@ -1,0 +1,10 @@
+account = "grok"
+model = "grok-4.7-build-fast"
+effort = "low"
+fast_mode = false
+composition = "plakous-default"
+description = "Investigate the codebase using read, search, and shell diagnostics; report grounded findings. Dedicated file-edit tools are unavailable; shell commands still have host authority."
+tools = "read-execute"
+may_adopt = false
+delegation = "explicit"
+show_model = true

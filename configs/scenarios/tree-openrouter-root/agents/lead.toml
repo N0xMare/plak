@@ -1,0 +1,8 @@
+# Template lead for the tree-openrouter-root scenario.
+# An OpenRouter root can bind and drive children; native-ptc is refused for
+# openrouter, so the lead composes directly.
+account = "openrouter"
+model = "nvidia/nemotron-3-ultra-550b-a55b:free"
+composition = "direct"
+description = "OpenRouter free lead; delegates bounded work and adopts the result."
+tools = "full"

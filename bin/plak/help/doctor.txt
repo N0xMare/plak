@@ -1,0 +1,6 @@
+plak doctor — local health checks
+
+USAGE:
+  plak doctor
+
+  When an OpenRouter key and default model are set, probes catalog keys via discovery GETs only (no inference).

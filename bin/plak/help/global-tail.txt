@@ -1,0 +1,5 @@
+
+See 'plak <command> --help' for details.
+
+WARNING: Agents use full coding tools by default with no approval gates.
+Process tools are worker-isolated, not workspace-isolated; use a container or VM for that. See `plak run --help`.

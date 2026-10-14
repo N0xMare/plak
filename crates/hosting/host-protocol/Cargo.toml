@@ -1,0 +1,25 @@
+[package]
+name = "plakous-host-protocol"
+description = "Wire types for the plak agent JSONL host protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "host"
+class = "published-internal"
+neutral = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+[features]
+default = []
+test-support = []
+
+[lints]
+workspace = true

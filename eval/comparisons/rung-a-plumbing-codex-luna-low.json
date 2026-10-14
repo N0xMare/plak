@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "id": "rung-a-plumbing-codex-luna-low",
+  "dataset": "rung-a-plumbing",
+  "tasks": [
+    {
+      "name": "write-hello",
+      "digest": null
+    },
+    {
+      "name": "sum-file",
+      "digest": null
+    },
+    {
+      "name": "fix-typo",
+      "digest": null
+    }
+  ],
+  "policy": {
+    "model": "gpt-6-luna",
+    "effort": "low",
+    "account": "codex",
+    "timeout_policy": "rung-a-plumbing-task-default",
+    "attempts": 1
+  },
+  "arms": {
+    "plak": {
+      "job": {
+        "id": null,
+        "lockDigest": null
+      },
+      "candidateProvenanceDigest": null
+    },
+    "codex": {
+      "job": {
+        "id": null,
+        "lockDigest": null
+      },
+      "candidateProvenanceDigest": null
+    }
+  }
+}

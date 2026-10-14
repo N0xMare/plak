@@ -1,0 +1,6 @@
+# Template free for the single-openrouter-free scenario.
+# OpenRouter Chat models attest no reasoning-effort enumeration, so no effort
+# is pinned here; native-ptc is refused for openrouter.
+account = "openrouter"
+model = "nvidia/nemotron-3-ultra-550b-a55b:free"
+composition = "direct"

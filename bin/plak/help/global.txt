@@ -1,0 +1,26 @@
+plak {version}
+Plak coding agent (CLI + TUI) on plakous
+
+USAGE:
+  plak                              Open TUI (new session in cwd; interactive terminal required)
+  plak <command> [options]
+  plak help                         Global help (this message)
+  plak <command> --help             Command-specific help
+
+COMMANDS:
+  login       OAuth/subscription login (codex, grok, claude)
+  logout      OAuth logout / local retirement
+  status      Credential readiness (no secrets)
+  refresh     Refresh OAuth credential
+  key         API key set/clear/status (openai, xai-api, anthropic, openrouter)
+  run         Non-interactive one-shot agent run
+  agent       Long-lived JSONL host client (stdio; same host as TUI)
+  resume      Resume session (cwd picker or UUID)
+  config      Show/set/edit product config (~/.plak)
+  doctor      Local health diagnosis
+  usage       Subscription limits and context-status availability
+  session     List/show/log sessions (agent-readable events)
+  state       Prune unused legacy state (inspect with doctor)
+  telemetry   Local analytics store (status, SQL, prune)
+  models      List account catalog or enrolled API models (read-only)
+  version     Print version

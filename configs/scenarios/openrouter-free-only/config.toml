@@ -1,0 +1,12 @@
+# Scenario: openrouter-free-only.
+# No subscription anywhere — an OpenRouter free lead, implementer and
+# reviewer. No template binds a subscription account.
+
+[root]
+agent = "lead"
+
+[roster]
+working_set = ["implementer", "reviewer"]
+
+[orchestration]
+subagents = true

@@ -1,0 +1,4 @@
+# Template claude for the single-claude-sonnet-low scenario.
+account = "claude"
+model = "claude-sonnet-5"
+effort = "low"

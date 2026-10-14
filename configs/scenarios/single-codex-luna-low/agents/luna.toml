@@ -1,0 +1,4 @@
+# Template luna for the single-codex-luna-low scenario.
+account = "codex"
+model = "gpt-5.6-luna"
+effort = "low"

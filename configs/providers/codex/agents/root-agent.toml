@@ -1,0 +1,9 @@
+account = "codex"
+model = "gpt-6-astra"
+effort = "medium"
+fast_mode = false
+composition = "plakous-default"
+description = "Drive the session, delegate bounded work only when explicitly requested, and integrate verified results."
+tools = "full"
+delegation = "explicit"
+show_model = true

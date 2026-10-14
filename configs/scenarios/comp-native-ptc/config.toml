@@ -1,0 +1,5 @@
+# Scenario: comp-native-ptc.
+# Codex Luna with native-ptc composition.
+
+[root]
+agent = "luna"

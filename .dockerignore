@@ -1,0 +1,12 @@
+.git
+target
+.plak
+docs/local
+**/.venv
+**/__pycache__
+*.pyc
+.eval-cache
+.env
+.env.*
+**/*.auth.json
+**/*.token

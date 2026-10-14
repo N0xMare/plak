@@ -1,0 +1,24 @@
+[package]
+name = "plakous-code-mode"
+description = "Parse/DTO helpers for Plakous Code Mode presentation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "engine"
+class = "published-internal"
+
+[dependencies]
+# Reviewed vendor snapshot of the pinned Codex 0.153.3 grammar. Consuming it by
+# path is what lets an external embedder build Code Mode with no `[patch]` table.
+codex-code-mode-protocol = { version = "=0.153.3", path = "../../../vendor/codex-code-mode-protocol" }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

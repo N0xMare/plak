@@ -1,0 +1,31 @@
+plak login — OAuth / subscription login
+
+USAGE:
+  plak login <codex|grok|claude> [--remote]
+
+DESCRIPTION:
+  Interactive browser OAuth for subscription accounts.
+  Codex default: open a browser on THIS machine; Plak waits
+  for the loopback callback automatically. Do not paste the localhost URL.
+  Grok default: open a browser on THIS machine, then paste the
+  code from the page ("Copy the code below into Grok Build").
+  Claude default: open a browser, then paste the authorization
+  code shown on the callback page (HTTPS redirect; no loopback).
+  API keys use `plak key set` instead.
+  The SuperGrok account answers to `grok` and `supergrok`.
+  Login is CLI-only: the TUI Providers tab shows status and names this command.
+
+EXAMPLES:
+  plak login claude
+  plak login claude --remote
+  plak login grok
+
+OPTIONS:
+  --remote   Browser is not on this host (SSH/headless): print the URL and paste the result
+
+NOTES:
+  Codex local: press c in the terminal to re-copy while waiting for loopback.
+  Grok/Claude (and any --remote): paste the code or callback URL; re-copy is `c` then Enter.
+  Codex local wait reminds at 30s and times out at 120s.
+  SSH sessions refuse local login and print `plak login <acct> --remote`
+  (no silent mode switch).

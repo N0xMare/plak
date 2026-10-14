@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "tb4-smoke-codex-luna-low",
+  "dataset": "terminal-bench/terminal-bench@4.0.0",
+  "tasks": [
+    {"name": "terminal-bench/photonic-waveguide-routing", "digest": null},
+    {"name": "terminal-bench/music-harmony", "digest": null},
+    {"name": "terminal-bench/bun-sourcemap-leak", "digest": null},
+    {"name": "terminal-bench/foodstuff-beta-activity", "digest": null},
+    {"name": "terminal-bench/interleaved-vigenere", "digest": null}
+  ],
+  "policy": {
+    "model": "gpt-5.6-luna",
+    "effort": "low",
+    "account": "codex",
+    "timeout_policy": "terminal-bench-4.0-task-default",
+    "attempts": 1
+  },
+  "arms": {
+    "plak": {
+      "job": {"id": null, "lockDigest": null},
+      "candidateProvenanceDigest": null
+    },
+    "codex": {
+      "job": {"id": null, "lockDigest": null},
+      "candidateProvenanceDigest": null
+    }
+  }
+}

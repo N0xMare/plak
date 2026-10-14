@@ -1,0 +1,32 @@
+[package]
+name = "plakous-tool-process"
+description = "Joined process sessions: the four canonical operations, the PTY backend, and the per-vocabulary shell tool"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "harness"
+class = "published-internal"
+
+[dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+plakous-model = { version = "0.1.0", path = "../../core/model" }
+plakous-tools = { version = "0.1.0", path = "../../core/tools" }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+filedescriptor.workspace = true
+portable-pty.workspace = true
+rustix = { workspace = true, features = ["fs", "process"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

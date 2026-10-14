@@ -1,0 +1,6 @@
+# Template lead for the tree-openrouter-children scenario.
+account = "codex"
+model = "gpt-5.6-luna"
+effort = "low"
+description = "Codex Luna lead; delegates to free children and adopts the result."
+tools = "full"

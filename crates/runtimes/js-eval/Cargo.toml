@@ -1,0 +1,37 @@
+[package]
+name = "plakous-js-eval"
+description = "Code Mode evaluator protocol and sidecar client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "engine"
+class = "published-internal"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time", "process", "io-util"] }
+nix = { workspace = true, features = ["process", "resource", "signal"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "allow"
+unused_lifetimes = "deny"
+unused_qualifications = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+doc_markdown = "allow"

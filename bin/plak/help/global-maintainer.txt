@@ -1,0 +1,5 @@
+
+MAINTAINER:
+  fork        Canonical same-binding fork
+  compact     Canonical manual compaction
+  compatibility   Local compatibility notice (no network)

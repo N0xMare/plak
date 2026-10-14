@@ -1,0 +1,47 @@
+[package]
+name = "plakous-http"
+description = "Provider-blind bounded HTTP transport for Plakous"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "common"
+class = "published-internal"
+
+[dependencies]
+bytes.workspace = true
+h2.workspace = true
+http.workspace = true
+http-body.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["client", "http1", "http2"] }
+hyper-util = { workspace = true, features = ["tokio"] }
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
+sha2.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
+tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
+webpki-roots.workspace = true
+zeroize.workspace = true
+
+[features]
+# Repository-only transport fault injection driven by `PLAK_TEST_FAULTS`
+# (spec 05). Reached from the product only through `plak/test-hooks`; never in
+# a default or release build.
+fault-injection = ["tokio/io-util"]
+
+[dev-dependencies]
+hyper = { workspace = true, features = ["http2", "server"] }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "test-util", "time"] }
+
+[[test]]
+name = "faults"
+required-features = ["fault-injection"]
+
+[lints]
+workspace = true

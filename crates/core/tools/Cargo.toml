@@ -1,0 +1,44 @@
+[package]
+name = "plakous-tools"
+description = "Portable tool contracts, registries, environments, and coding tools for Plakous"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "core"
+class = "supported"
+neutral = true
+
+[features]
+default = []
+
+[dependencies]
+diffy.workspace = true
+plakous-model = { version = "0.1.0", path = "../model" }
+regex.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+
+[target.'cfg(unix)'.dependencies]
+filedescriptor.workspace = true
+globset.workspace = true
+ignore.workspace = true
+portable-pty.workspace = true
+rustix = { workspace = true, features = ["fs", "process"] }
+
+[dev-dependencies]
+futures = { workspace = true, features = ["async-await", "executor", "std"] }
+nix.workspace = true
+plakous-code-mode = { version = "0.1.0", path = "../../runtimes/code-mode" }
+proptest = { workspace = true, features = ["std"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

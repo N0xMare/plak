@@ -1,0 +1,22 @@
+[package]
+name = "plakous-js-embedder-consumer"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.97.1"
+description = "Compile fixture: an out-of-workspace consumer embedding the JavaScript evaluator through the `composition` feature."
+license = "MIT"
+repository = "https://github.com/N0xMare/plak"
+readme = "../../../README.md"
+publish = false
+
+[package.metadata.plakous]
+layer = "test"
+class = "repository-only"
+
+[dependencies]
+plakous = { version = "0.1.0", path = "../../../crates/plakous", features = ["composition", "sessions-sqlite"] }
+
+tempfile = "3.23"
+tokio = { version = "1.48", features = ["rt-multi-thread", "macros", "sync", "time"] }
+
+[workspace]

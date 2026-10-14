@@ -1,0 +1,7 @@
+plak status — credential readiness
+
+USAGE:
+  plak status [codex|grok|claude|openai|xai-api|anthropic|openrouter]
+
+  The SuperGrok subscription account answers to `grok` and `supergrok`.
+  Bare `xai` is ambiguous and refused; use grok or xai-api.

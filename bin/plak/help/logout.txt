@@ -1,0 +1,9 @@
+plak logout — retire OAuth credentials
+
+USAGE:
+  plak logout <codex|grok|claude> [--local]
+
+OPTIONS:
+  --local   Clear local only (no remote revoke)
+
+  Claude OAuth has no pinned remote revoke; logout retires the local credential.

@@ -1,0 +1,7 @@
+# Template reviewer for the tree-openrouter-root scenario.
+account = "claude"
+model = "claude-sonnet-5"
+effort = "low"
+composition = "direct"
+description = "Claude reviewer; runs the checks it cites and writes no files."
+tools = "read-execute"

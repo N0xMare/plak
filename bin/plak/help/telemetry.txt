@@ -1,0 +1,12 @@
+plak telemetry — local analytics store
+
+USAGE:
+  plak telemetry status [--views]
+  plak telemetry sql "<query>" [--json]
+  plak telemetry prune <--max-age-days N | --max-bytes N | --yes>
+
+  `status --views` prints the recommended read-only SQL to paste into `sql`.
+  `prune` deletes whole sessions, oldest first, so it refuses a bare run:
+  pass a bound, or `--yes` to prune to the configured retention.
+  Read-only SQL attaches product.sqlite3 and runtime.sqlite3 as product and runtime.
+  Retention defaults: 512 MiB and 90 days (config [telemetry]).

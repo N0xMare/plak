@@ -1,0 +1,6 @@
+event: ping
+data: {"type":"message_start","message":{"id":"msg_wrong_name","type":"message","role":"assistant","model":"claude-test-20260729","content":[],"usage":{"input_tokens":1,"output_tokens":0}}}
+
+: fixture-eof
+
+: fixture terminator

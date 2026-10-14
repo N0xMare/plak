@@ -1,0 +1,6 @@
+# Template lead for the fresh-home-bootstrap scenario.
+# The two required keys plus an effort; delegation is off until a [roster]
+# working_set names templates to spawn.
+account = "codex"
+model = "gpt-5.6-luna"
+effort = "low"
