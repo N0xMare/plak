@@ -998,22 +998,12 @@ fn inspect_feed_source(
     branch: BranchId,
     checkpoint: CheckpointId,
 ) -> Result<FeedSource, AgentSessionsError> {
-    let selector = plakous_agent::internal::SessionRef::new(session, branch);
-    match SqliteSessionStore::inspect_branch_ancestry(path, selector, Some(checkpoint)) {
-        Ok((head, ancestry)) => {
-            if head.checkpoint().checkpoint().id() == checkpoint {
-                return FeedSource::from_stored(head.checkpoint(), session, branch, true);
-            }
-            match ancestry.last() {
-                Some(named) if named.checkpoint().id() == checkpoint => {
-                    FeedSource::from_stored(named, session, branch, true)
-                }
-                _ => Err(not_held(
-                    "the feed checkpoint is not an ancestor of this branch's head",
-                )),
-            }
-        }
+    // The named checkpoint is loaded directly, exactly as the live
+    // `feed_source` does: one read per call, however long the branch.
+    match SqliteSessionStore::inspect_checkpoint(path, checkpoint) {
+        Ok(stored) => FeedSource::from_stored(&stored, session, branch, true),
         Err(SessionStoreError::Pruned) => {
+            let selector = plakous_agent::internal::SessionRef::new(session, branch);
             let head = SqliteSessionStore::inspect_branch(path, selector)
                 .map_err(|error| store_error(error).for_session(session))?;
             FeedSource::from_stored(head.checkpoint(), session, branch, false)

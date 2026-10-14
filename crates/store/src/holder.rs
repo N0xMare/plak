@@ -33,6 +33,7 @@
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read as _, Write as _};
+use std::num::NonZeroU64;
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::{Path, PathBuf};
 
@@ -45,6 +46,7 @@ use plakous_agent::internal::{BranchId, SessionId, SessionRef};
 /// and there is no way for a live holder to look dead by forgetting to unlock.
 #[derive(Debug)]
 pub(crate) struct HolderClaim {
+    fence: NonZeroU64,
     _file: File,
 }
 
@@ -69,12 +71,14 @@ impl HolderClaims {
         }
     }
 
-    /// Takes the branch's lock, recording who holds it.
+    /// Takes the branch's lock, recording who holds it and under which fence.
     ///
     /// Failure is not an error. The lease is the authority; this only decides
     /// whether a later process can prove the holder died, and a store that
-    /// cannot take the lock simply leaves the old rule in place.
-    pub(crate) fn claim(&mut self, session: SessionRef) {
+    /// cannot take the lock simply leaves the old rule in place. The file is
+    /// rewritten only once the lock is held: a claim that loses to a live
+    /// holder leaves that holder's record exactly as it was.
+    pub(crate) fn claim(&mut self, session: SessionRef, fence: NonZeroU64) {
         let key = (session.session_id(), session.branch_id());
         self.held.remove(&key);
         let Some(path) = self.path(session) else {
@@ -91,7 +95,7 @@ impl HolderClaims {
             .read(true)
             .write(true)
             .create(true)
-            .truncate(true)
+            .truncate(false)
             .mode(0o600)
             .open(&path)
         else {
@@ -100,11 +104,11 @@ impl HolderClaims {
         if !lock_exclusive_nonblocking(&file) {
             return;
         }
-        if file.write_all(identity().as_bytes()).is_err() {
+        if file.set_len(0).is_err() || file.write_all(record(fence).as_bytes()).is_err() {
             return;
         }
         let _ = file.flush();
-        self.held.insert(key, HolderClaim { _file: file });
+        self.held.insert(key, HolderClaim { fence, _file: file });
     }
 
     /// Whether this store holds the branch's lock right now.
@@ -129,13 +133,31 @@ impl HolderClaims {
         }
     }
 
-    /// Whether the recorded holder of this branch is provably gone.
+    /// Drops the claim taken with `fence` once another grant has replaced it.
     ///
-    /// True only on proof: the lock exists, names this host, names a process
-    /// that is not this one, and is free, which the kernel only allows once the
-    /// holder's last descriptor is closed. Everything else is `false`, which
-    /// leaves the caller's existing time-bounded rule untouched.
-    pub(crate) fn holder_is_gone(&self, session: SessionRef) -> bool {
+    /// A superseded holder must not keep pinning a lock it no longer owns: its
+    /// record names a fence the branch has moved past, so it proves nothing,
+    /// and holding it only stops the new holder from ever taking the lock.
+    pub(crate) fn forfeit(&mut self, session: SessionRef, fence: NonZeroU64) {
+        let key = (session.session_id(), session.branch_id());
+        if self
+            .held
+            .get(&key)
+            .is_some_and(|claim| claim.fence == fence)
+        {
+            self.release(session);
+        }
+    }
+
+    /// Whether the holder of the branch's `active` grant is provably gone.
+    ///
+    /// True only on proof: the lock file names this host, a process that is not
+    /// this one and exactly the active grant's fence, and its lock is free,
+    /// which the kernel only allows once the holder's last descriptor is
+    /// closed. A record naming an earlier grant says nothing about the current
+    /// holder, which may never have taken the lock at all. Everything else is
+    /// `false`, which leaves the caller's existing time-bounded rule untouched.
+    pub(crate) fn holder_is_gone(&self, session: SessionRef, active: NonZeroU64) -> bool {
         if self
             .held
             .contains_key(&(session.session_id(), session.branch_id()))
@@ -152,13 +174,12 @@ impl HolderClaims {
         if file.read_to_string(&mut recorded).is_err() {
             return false;
         }
-        let recorded = recorded.trim();
-        // A holder elsewhere, or one this build cannot read, is not proven
-        // dead by a lock this host can take. An empty file is: a holder that
-        // died between creating its file and writing its name is still a holder
-        // that died, and the lock it no longer holds says so.
-        if recorded == identity() || (!recorded.is_empty() && !recorded.starts_with(&host_prefix()))
-        {
+        let Some((holder, fence)) = parse_record(&recorded) else {
+            return false;
+        };
+        // A holder elsewhere, or this very process, is not proven dead by a
+        // lock this host can take.
+        if holder == identity() || !holder.starts_with(&host_prefix()) || fence != active {
             return false;
         }
         lock_exclusive_nonblocking(&file)
@@ -173,6 +194,18 @@ impl HolderClaims {
             ))
         })
     }
+}
+
+/// The lock file's contents: the holder's identity, then the fence it holds.
+fn record(fence: NonZeroU64) -> String {
+    format!("{}\nfence {fence}\n", identity())
+}
+
+fn parse_record(recorded: &str) -> Option<(&str, NonZeroU64)> {
+    let mut lines = recorded.lines();
+    let holder = lines.next()?;
+    let fence = lines.next()?.strip_prefix("fence ")?.parse().ok()?;
+    lines.next().is_none().then_some((holder, fence))
 }
 
 fn lock_root(database: &Path) -> Option<PathBuf> {
@@ -215,12 +248,15 @@ fn host_prefix() -> String {
         .to_str()
         .unwrap_or("unknown-host")
         .to_owned();
-    format!("plak-holder-v1 {host} ")
+    format!("plak-holder-v2 {host} ")
 }
 
 #[cfg(test)]
 #[allow(clippy::expect_used, reason = "test fixtures fail at exact lines")]
 mod tests {
+    use std::num::NonZeroU64;
+    use std::path::{Path, PathBuf};
+
     use super::{HolderClaims, host_prefix};
     use plakous_agent::internal::SessionRef;
     use plakous_model::{BranchId, SessionId};
@@ -232,61 +268,123 @@ mod tests {
         )
     }
 
+    fn fence(value: u64) -> NonZeroU64 {
+        NonZeroU64::new(value).expect("fence")
+    }
+
+    fn lock_path(directory: &Path) -> PathBuf {
+        directory.join("runtime.sqlite3-holders").join(format!(
+            "{}.{}.lock",
+            session().session_id(),
+            session().branch_id()
+        ))
+    }
+
     /// Only proof counts. A store written before locks existed has no file, a
-    /// holder on another machine has one this host cannot speak for, and a
-    /// branch this very store holds is obviously not free. None of those is a
+    /// holder on another machine has one this host cannot speak for, a branch
+    /// this very store holds is obviously not free, and a record naming an
+    /// earlier grant says nothing about the current one. None of those is a
     /// dead holder, and each keeps the lease's own clock.
     #[test]
-    fn nothing_short_of_a_free_lock_on_this_host_proves_a_holder_died() {
+    fn nothing_short_of_a_free_lock_naming_the_active_grant_proves_a_holder_died() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let database = directory.path().join("runtime.sqlite3");
 
         // A store from before locks existed: no file at all.
         let claims = HolderClaims::beside(&database);
         assert!(
-            !claims.holder_is_gone(session()),
+            !claims.holder_is_gone(session(), fence(1)),
             "an absent lock is an unknown holder, not a dead one"
         );
 
         // A holder this store is itself holding.
         let mut holding = HolderClaims::beside(&database);
-        holding.claim(session());
+        holding.claim(session(), fence(1));
         assert!(
-            !holding.holder_is_gone(session()),
+            !holding.holder_is_gone(session(), fence(1)),
             "a branch this store holds is not free"
         );
 
         // A holder on another machine, whose lock this host can take and must
         // not read anything into.
         holding.release(session());
-        let path = directory
-            .path()
-            .join("runtime.sqlite3-holders")
-            .join(format!(
-                "{}.{}.lock",
-                session().session_id(),
-                session().branch_id()
-            ));
-        std::fs::write(&path, "plak-holder-v1 some-other-host 4321").expect("foreign lock");
+        let path = lock_path(directory.path());
+        std::fs::write(&path, "plak-holder-v2 some-other-host 4321 0\nfence 1\n")
+            .expect("foreign lock");
         assert!(
-            !claims.holder_is_gone(session()),
+            !claims.holder_is_gone(session(), fence(1)),
             "a holder on another host is not proven dead by a lock this host can take"
         );
 
         // The same file, now naming this host and a process that is not ours.
-        std::fs::write(&path, format!("{}999999", host_prefix())).expect("local lock");
+        std::fs::write(&path, format!("{}999999 0\nfence 1\n", host_prefix())).expect("local lock");
         assert!(
-            claims.holder_is_gone(session()),
-            "a free lock naming this host and another process is proof"
+            claims.holder_is_gone(session(), fence(1)),
+            "a free lock naming this host, another process and the active grant is proof"
+        );
+        assert!(
+            !claims.holder_is_gone(session(), fence(2)),
+            "a free lock naming an earlier grant says nothing about the active one"
         );
 
-        // A holder that died between creating its file and naming itself. The
-        // lock decides, not the file, so an unlocked leftover is still a holder
-        // that is gone.
-        std::fs::write(&path, "").expect("empty lock");
+        // A holder that died between taking its lock and naming itself, or a
+        // record this build cannot read, names no grant at all.
+        for unreadable in ["", "plak-holder-v1 host 1 0", "garbage\nfence x\n"] {
+            std::fs::write(&path, unreadable).expect("unreadable lock");
+            assert!(
+                !claims.holder_is_gone(session(), fence(1)),
+                "an unreadable record {unreadable:?} is not proof"
+            );
+        }
+    }
+
+    /// A claim that loses to a live holder leaves that holder's record alone.
+    ///
+    /// Otherwise a process that acquired a lease whose suspended holder still
+    /// had the lock would wipe the holder's name, and once that holder exited a
+    /// third process would read the empty, unlocked file as proof and take the
+    /// second process's live lease.
+    #[test]
+    fn a_claim_that_loses_the_lock_leaves_the_holders_record_untouched() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let database = directory.path().join("runtime.sqlite3");
+        let path = lock_path(directory.path());
+
+        let mut first = HolderClaims::beside(&database);
+        first.claim(session(), fence(1));
+        let recorded = std::fs::read_to_string(&path).expect("first record");
         assert!(
-            claims.holder_is_gone(session()),
-            "a stale file with no holder is not a reason to wait"
+            recorded.ends_with("\nfence 1\n"),
+            "the record names its grant"
+        );
+
+        let mut second = HolderClaims::beside(&database);
+        second.claim(session(), fence(2));
+        assert!(!second.holds(session()), "a held lock is not taken twice");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("record after a lost claim"),
+            recorded,
+            "a lost claim rewrites nothing"
+        );
+
+        // Only the superseded grant's claim is forfeited, and then the lock is
+        // free for the current holder.
+        first.forfeit(session(), fence(2));
+        assert!(
+            first.holds(session()),
+            "a different grant's forfeit is ignored"
+        );
+        first.forfeit(session(), fence(1));
+        assert!(!first.holds(session()), "the superseded claim is dropped");
+        second.claim(session(), fence(2));
+        assert!(
+            second.holds(session()),
+            "the current holder can now take the lock"
+        );
+        assert!(
+            std::fs::read_to_string(&path)
+                .expect("second record")
+                .ends_with("\nfence 2\n")
         );
     }
 
@@ -300,17 +398,10 @@ mod tests {
     fn releasing_a_branch_removes_its_lock_file() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let database = directory.path().join("runtime.sqlite3");
-        let path = directory
-            .path()
-            .join("runtime.sqlite3-holders")
-            .join(format!(
-                "{}.{}.lock",
-                session().session_id(),
-                session().branch_id()
-            ));
+        let path = lock_path(directory.path());
 
         let mut claims = HolderClaims::beside(&database);
-        claims.claim(session());
+        claims.claim(session(), fence(1));
         assert!(path.exists(), "a held branch has a lock file");
         claims.release(session());
         assert!(!path.exists(), "a released branch leaves nothing behind");

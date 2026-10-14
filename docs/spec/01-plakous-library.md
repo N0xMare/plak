@@ -894,6 +894,21 @@ error if the host lease clock cannot be established, just as SQLite backend
 construction reports its storage prerequisites. It never falls back to a wall
 clock or panics to hide a clock-construction failure.
 
+The SQLite store refuses a path with a symbolic link in any component and a
+database that is not a private regular file. Its errors carry no path, so the
+facade's SQLite constructors and shape/usage readers examine an unavailable
+refusal and report a cause the store refuses deterministically as
+`AgentSessionsErrorKind::UnsafeStorePath`, whose message names the store path,
+the offending component and the remedy. Any other unavailable refusal stays
+`StorageUnavailable`.
+
+Read-only inspection (`SqliteSessionStore::inspect_*` and the facade's
+`inspect_*_sqlite` twins) opens one read-only connection per call and admits
+application id, version, shape pragmas, exact schema and the bound clock domain
+once on the snapshot it reads. It does not recount retained rows: those counters
+guard only the writer's admission accounting, which writer open still validates.
+A feed content read loads its named checkpoint directly, as the live read does.
+
 `SessionStoreError::Corrupt` carries only a content-free reason:
 `missing_base`, `missing_root`, `missing_child`, or `inconsistent` for other
 integrity checks. Its display is `session store integrity check failed: <reason>`,
@@ -7110,12 +7125,17 @@ under the product home and with the store's own permission discipline, never in
 the workspace, and holds it for the life of the lease. The kernel releases that
 lock when the process ends, however it ends, so a later acquire that can take it
 has proof rather than an inference, and a recycled process identifier cannot
-make that proof ambiguous. The lock decides, not the file: a file left behind by
-a holder that died before naming itself is still an unlocked file, and still
-proof. A held lock, a file naming another host, or a branch this store itself
-holds is not proof, and each keeps the lease's clock exactly as it was, with the
-refusal saying that the holder could not be confirmed gone and roughly how long
-the wait is.
+make that proof ambiguous. Create, fork and acquire all take the claim with the
+lease they grant. A claimant writes its record only after it holds the lock, and
+the record names the fence of the grant it holds; a claim that loses to a live
+lock leaves the other holder's record untouched. Proof is a free lock whose
+record names this host, another process and exactly the active lease's fence. A
+held lock, a file naming another host, an empty or unreadable record, a record
+naming an earlier grant (a superseded holder whose successor never got the lock),
+or a branch this store itself holds is not proof, and each keeps the lease's
+clock exactly as it was, with the refusal saying that the holder could not be
+confirmed gone and roughly how long the wait is. A store that sees its grant
+superseded on renew, revive or release drops its claim for that grant.
 
 The lock files are not database state. A missing holder lock file establishes
 no proof of owner loss, so acquisition preserves the lease's clock-based rule.

@@ -3491,7 +3491,7 @@ interleaves real commit, fork, prune, delete and bounded GC operations against
 an independent mark/sweep oracle and the root-or-queued ancestry invariant.
 Full verification checks payload length as well as canonical object contents.
 
-`crates/store/tests/integration/sqlite_admission_budget.rs` is compiled beside
+`crates/store/src/sqlite/admission_budget_tests.rs` is a unit-test module of
 the private SQLite actor so its real connection can be traced without a public
 test API. The small/large fixture measures a fixed usage/renew/commit delta over
 200 sessions, 2,000 checkpoints, 64 KiB payloads, 10,000 feed rows and a

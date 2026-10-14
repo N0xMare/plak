@@ -1351,6 +1351,85 @@ async fn an_expired_lease_revives_under_its_fence_only_when_nobody_took_it()
     Ok(())
 }
 
+/// Create and fork grant leases exactly as acquire does, host claim included.
+///
+/// Without the claim a suspended holder of a create- or fork-granted lease could
+/// never revive it on SQLite, although the memory store would, and a holder
+/// that died before releasing it would leave its branch to the lease's clock.
+#[tokio::test]
+async fn create_and_fork_granted_leases_revive_under_their_fence() -> Result<(), Box<dyn Error>> {
+    let db = Database::new();
+    let clock = Arc::new(ObservedLeaseClock::new(100));
+    let initial = seed(15_800, RuntimeDurability::Required, 1)?;
+    let store = SqliteSessionStore::open_with_clock(&db.path, clock.clone())?;
+    let created = store.create(initial.request.clone()).await?;
+    let target_branch = conformance::id::<BranchId>(15_810)?;
+    let source_checkpoint = store.load_checkpoint(initial.checkpoint_id).await?;
+    let context = source_checkpoint
+        .checkpoint()
+        .manifest()
+        .canonical()
+        .context()
+        .ordinary_fork(
+            initial.checkpoint_id,
+            initial.selector.session_id(),
+            target_branch,
+            [0x93; 32],
+        )?;
+    let target_checkpoint = conformance::checkpoint_with_context(
+        conformance::topology(
+            initial.selector.session_id(),
+            target_branch,
+            conformance::id::<CheckpointId>(15_811)?,
+            Some(initial.checkpoint_id),
+            0,
+            Some(ForkLineage {
+                session_id: initial.selector.session_id(),
+                branch_id: initial.selector.branch_id(),
+                checkpoint_id: initial.checkpoint_id,
+                branch_revision: 0,
+            }),
+            1,
+        )?,
+        1,
+        RuntimeDurability::Required,
+        context,
+        false,
+    )?;
+    let forked = store
+        .fork(ForkBranch::new(
+            conformance::workflow(203)?,
+            conformance::semantic_request(b"fork-granted lease revival")?,
+            created.lease().clone(),
+            SessionRevision::INITIAL,
+            created.branch(),
+            target_branch,
+            conformance::id::<RunId>(15_813)?,
+            NonZeroU64::new(30).ok_or("duration")?,
+            conformance::bundle(&target_checkpoint, Some(&initial.bundle))?,
+        ))
+        .await?;
+
+    clock.set(
+        created
+            .lease()
+            .expires_at()
+            .seconds()
+            .max(forked.lease().expires_at().seconds())
+            + 600,
+    );
+    for granted in [created.lease().clone(), forked.lease().clone()] {
+        assert_eq!(
+            store.renew(granted.clone()).await,
+            Err(SessionStoreError::LeaseExpired)
+        );
+        let revived = store.revive(granted.clone()).await?;
+        assert_eq!(revived.fence(), granted.fence());
+        store.release(revived).await?;
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn sqlite_releases_expired_grants_without_releasing_replaced_grants()
 -> Result<(), Box<dyn Error>> {
@@ -1742,6 +1821,61 @@ async fn admission_under_concurrent_commits_never_reports_corruption() -> Result
     Ok(())
 }
 
+/// Inspection admits shape and schema once per snapshot and never recounts
+/// retained rows, so a read stays O(what it reads) however large the store.
+#[tokio::test]
+async fn inspection_reads_without_recounting_retained_rows() -> Result<(), Box<dyn Error>> {
+    let db = Database::new();
+    let initial = seed(16_500, RuntimeDurability::Required, 1)?;
+    let store = SqliteSessionStore::open(&db.path)?;
+    let created = store.create(initial.request.clone()).await?;
+    let middle = conformance::id::<CheckpointId>(16_510)?;
+    let first = successor(&initial, middle, initial.checkpoint_id, 1, &initial.bundle)?;
+    store
+        .commit(CommitCheckpoint::new(
+            created.lease().clone(),
+            created.branch(),
+            first.clone(),
+        ))
+        .await?;
+    let head = store.load_branch(initial.selector).await?.head();
+    let newest = conformance::id::<CheckpointId>(16_511)?;
+    store
+        .commit(CommitCheckpoint::new(
+            created.lease().clone(),
+            head,
+            successor(&initial, newest, middle, 2, &first)?,
+        ))
+        .await?;
+    store.release(created.lease().clone()).await?;
+    store.shutdown().await?;
+    drop(store);
+
+    // A counter the writer would refuse does not stop a read.
+    let connection = Connection::open(&db.path)?;
+    connection.execute("UPDATE store_meta SET sessions=7 WHERE id=1", [])?;
+    drop(connection);
+    assert_eq!(
+        SqliteSessionStore::open(&db.path).err(),
+        Some(SessionStoreError::corrupt()),
+        "the writer still validates its counters"
+    );
+    assert_eq!(
+        SqliteSessionStore::inspect_branch(&db.path, initial.selector)?
+            .checkpoint()
+            .checkpoint()
+            .id(),
+        newest
+    );
+    assert_eq!(
+        SqliteSessionStore::inspect_checkpoint(&db.path, middle)?
+            .checkpoint()
+            .id(),
+        middle
+    );
+    Ok(())
+}
+
 #[test]
 fn counter_corruption_and_unknown_tables_fail_closed_on_reopen() {
     let db = Database::new();
@@ -2059,6 +2193,105 @@ async fn a_dead_holder_releases_its_branch_at_once_and_a_live_one_does_not()
     assert_eq!(reclaimed.owner(), conformance::id::<RunId>(46_020)?);
     assert!(reclaimed.fence().get() > created.lease().fence().get());
     store.release(reclaimed).await?;
+    store.shutdown().await?;
+    Ok(())
+}
+
+/// A superseded holder's exit is no proof that the current holder is gone.
+///
+/// A holder suspended past its lease still has its lock when another process
+/// acquires the expired lease, so the new holder runs without one. When the old
+/// holder later exits its lock comes free, but the record still names its own
+/// grant, not the live one, so a third process must keep waiting rather than
+/// take a lease that is in use.
+#[tokio::test]
+async fn a_superseded_holders_exit_does_not_hand_the_live_lease_to_a_third_process()
+-> Result<(), Box<dyn Error>> {
+    const CHILD_PATH: &str = "PLAK_STORE_SUPERSEDED_HOLDER_PATH";
+    if let Some(path) = std::env::var_os(CHILD_PATH) {
+        let store = SqliteSessionStore::open(path)?;
+        let initial = seed(46_500, RuntimeDurability::Required, 1)?;
+        let _lease = store
+            .acquire(plakous_agent::internal::AcquireBranch::new(
+                initial.selector,
+                conformance::id::<RunId>(46_510)?,
+                NonZeroU64::MIN,
+            ))
+            .await?;
+        println!("held");
+        std::thread::sleep(Duration::from_secs(600));
+        return Ok(());
+    }
+
+    let db = Database::new();
+    let store = SqliteSessionStore::open(&db.path)?;
+    let initial = seed(46_500, RuntimeDurability::Required, 1)?;
+    let created = store.create(initial.request).await?;
+    store.release(created.lease().clone()).await?;
+    let acquire = |owner: u128| -> Result<_, Box<dyn Error>> {
+        Ok(plakous_agent::internal::AcquireBranch::new(
+            initial.selector,
+            conformance::id::<RunId>(owner)?,
+            NonZeroU64::new(3_600).ok_or("duration")?,
+        ))
+    };
+
+    let mut child = std::process::Command::new(std::env::current_exe()?)
+        .args([
+            "--exact",
+            "sqlite::a_superseded_holders_exit_does_not_hand_the_live_lease_to_a_third_process",
+            "--nocapture",
+        ])
+        .env(CHILD_PATH, &db.path)
+        .stdout(std::process::Stdio::piped())
+        .spawn()?;
+    let mut held = String::new();
+    {
+        use std::io::Read as _;
+        let mut out = child.stdout.take().ok_or("child stdout")?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        let mut byte = [0_u8; 1];
+        while !held.contains("held") {
+            if std::time::Instant::now() >= deadline {
+                child.kill()?;
+                child.wait()?;
+                return Err("holder subprocess never took the branch".into());
+            }
+            if out.read(&mut byte)? == 0 {
+                break;
+            }
+            held.push(char::from(byte[0]));
+        }
+    }
+    assert!(held.contains("held"), "holder subprocess did not report");
+
+    // The suspended holder keeps its lock; its one-second lease runs out.
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let live = loop {
+        match store.acquire(acquire(46_520)?).await {
+            Ok(lease) => break lease,
+            Err(SessionStoreError::LeaseHeld) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(error) => {
+                child.kill()?;
+                child.wait()?;
+                return Err(error.into());
+            }
+        }
+    };
+
+    child.kill()?;
+    child.wait()?;
+    let third = SqliteSessionStore::open(&db.path)?;
+    assert_eq!(
+        third.acquire(acquire(46_530)?).await,
+        Err(SessionStoreError::LeaseHeld),
+        "the old holder's exit proves nothing about the live lease"
+    );
+    let renewed = store.renew(live).await?;
+    store.release(renewed).await?;
+    third.shutdown().await?;
     store.shutdown().await?;
     Ok(())
 }

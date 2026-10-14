@@ -935,11 +935,21 @@ async fn inspect_feed_content_twins_read_sqlite_snapshots() -> TestResult {
         session: SessionId::try_from(Uuid::from_u128(0xfeed))?,
         ..items
     };
+    // The named checkpoint is read directly, as the live read does, so a
+    // checkpoint named under another session is refused the same way by both.
     assert_eq!(
         AgentSessions::inspect_feed_items_sqlite(&database, &unknown)
             .err()
             .map(|error| error.kind()),
-        Some(AgentSessionsErrorKind::NotFound)
+        Some(AgentSessionsErrorKind::InvalidInput)
+    );
+    assert_eq!(
+        sessions
+            .feed_items(unknown)
+            .await
+            .err()
+            .map(|error| error.kind()),
+        Some(AgentSessionsErrorKind::InvalidInput)
     );
 
     let (terminal_record, turn_id) = records

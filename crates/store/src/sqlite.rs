@@ -37,8 +37,7 @@ use super::lease_clock::SystemLeaseClock;
 #[cfg(test)]
 mod actor_tests;
 #[cfg(test)]
-#[path = "../tests/integration/sqlite_admission_budget.rs"]
-mod admission_budget;
+mod admission_budget_tests;
 mod checkpoint_cache;
 mod feed;
 mod gc;
@@ -555,49 +554,13 @@ impl SqliteSessionStore {
         path: impl AsRef<Path>,
         session: SessionRef,
     ) -> Result<LoadedBranch, SessionStoreError> {
-        Self::inspect_branch_ancestry(path, session, None).map(|(branch, _)| branch)
-    }
-
-    /// Reads the exact head and its ancestry in the same read-only snapshot.
-    ///
-    /// # Errors
-    /// Returns the same inspection and object-integrity failures as `inspect_branch`.
-    pub fn inspect_branch_ancestry(
-        path: impl AsRef<Path>,
-        session: SessionRef,
-        ancestor: Option<CheckpointId>,
-    ) -> Result<(LoadedBranch, Vec<StoredCheckpoint>), SessionStoreError> {
         let connection =
             Self::open_inspection(path.as_ref())?.ok_or(SessionStoreError::NotFound)?;
         // One snapshot binds the schema check, branch head and all referenced
         // objects. A concurrent writer cannot make these reads span commits.
         let snapshot = connection.unchecked_transaction().map_err(map_sqlite)?;
         admit_inspection_snapshot(&snapshot)?;
-        let branch = load_branch(&snapshot, session)?;
-        let mut ancestry = Vec::new();
-        if let Some(ancestor) = ancestor {
-            let mut parent = branch
-                .checkpoint()
-                .checkpoint()
-                .manifest()
-                .topology()
-                .parent_checkpoint_id;
-            while let Some(id) = parent {
-                let checkpoint = load_checkpoint(&snapshot, id)?;
-                let topology = checkpoint.checkpoint().manifest().topology();
-                if topology.session_id != session.session_id()
-                    || topology.branch_id != session.branch_id()
-                {
-                    break;
-                }
-                parent = topology.parent_checkpoint_id;
-                ancestry.push(checkpoint);
-                if id == ancestor {
-                    break;
-                }
-            }
-        }
-        Ok((branch, ancestry))
+        load_branch(&snapshot, session)
     }
 
     /// Reads one bounded page of a session's change feed after `after`, with
@@ -636,16 +599,24 @@ impl SqliteSessionStore {
         let Some(connection) = Self::open_inspection(path.as_ref())? else {
             return Ok(None);
         };
+        if classify_connection(&connection)? != SqlitePersistenceShape::Current {
+            return Ok(None);
+        }
         let (records, bytes) = feed::totals(&connection)?;
         Ok(Some(SqliteFeedUsage { records, bytes }))
     }
 
-    /// Opens a read-only connection to a current-shape store; `None` for a
-    /// missing or fresh file.
+    /// Opens one read-only connection to an existing private store file;
+    /// `None` for a missing file. Callers admit its shape once, on the snapshot
+    /// they read, with [`admit_inspection_snapshot`] or [`classify_connection`].
     fn open_inspection(path: &Path) -> Result<Option<Connection>, SessionStoreError> {
-        if Self::classify_persistence(path)? != SqlitePersistenceShape::Current {
-            return Ok(None);
-        }
+        admit_header_file(path)?;
+        let metadata = match path.symlink_metadata() {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(map_io(error)),
+        };
+        require_private_regular_file(&metadata)?;
         let connection = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
@@ -668,20 +639,12 @@ impl SqliteSessionStore {
     ///
     /// Returns a typed shape, integrity, or storage failure.
     pub fn inspect_usage(path: impl AsRef<Path>) -> Result<Option<StoreUsage>, SessionStoreError> {
-        let path = path.as_ref();
-        if Self::classify_persistence(path)? != SqlitePersistenceShape::Current {
+        let Some(connection) = Self::open_inspection(path.as_ref())? else {
+            return Ok(None);
+        };
+        if classify_connection(&connection)? != SqlitePersistenceShape::Current {
             return Ok(None);
         }
-        let connection = Connection::open_with_flags(
-            path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-        )
-        .map_err(map_sqlite)?;
-        verify_sqlite_runtime(&connection)?;
-        connection.busy_timeout(BUSY_TIMEOUT).map_err(map_sqlite)?;
-        connection
-            .execute_batch("PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF;")
-            .map_err(map_sqlite)?;
         // One store_meta row read: no count validation or object scan, so the
         // doctor stays O(1) in retained history.
         usage(&connection, SqliteStoreOptions::default().limits).map(Some)
@@ -696,17 +659,12 @@ impl SqliteSessionStore {
     pub fn inspect_file_usage(
         path: impl AsRef<Path>,
     ) -> Result<Option<SqliteFileUsage>, SessionStoreError> {
-        let path = path.as_ref();
-        if Self::classify_persistence(path)? != SqlitePersistenceShape::Current {
+        let Some(connection) = Self::open_inspection(path.as_ref())? else {
+            return Ok(None);
+        };
+        if classify_connection(&connection)? != SqlitePersistenceShape::Current {
             return Ok(None);
         }
-        let connection = Connection::open_with_flags(
-            path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-        )
-        .map_err(map_sqlite)?;
-        verify_sqlite_runtime(&connection)?;
-        connection.busy_timeout(BUSY_TIMEOUT).map_err(map_sqlite)?;
         file_usage(&connection).map(Some)
     }
 
@@ -720,51 +678,10 @@ impl SqliteSessionStore {
     pub fn classify_persistence(
         path: impl AsRef<Path>,
     ) -> Result<SqlitePersistenceShape, SessionStoreError> {
-        let path = path.as_ref();
-        admit_existing_header(path, None)?;
-        let metadata = match path.symlink_metadata() {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(SqlitePersistenceShape::MissingOrFresh);
-            }
-            Err(_) => return Err(SessionStoreError::BackendUnavailable),
-        };
-        require_private_regular_file(&metadata)?;
-        let connection = Connection::open_with_flags(
-            path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-        )
-        .map_err(map_sqlite)?;
-        verify_sqlite_runtime(&connection)?;
-        connection.busy_timeout(BUSY_TIMEOUT).map_err(map_sqlite)?;
-        connection
-            .execute_batch("PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF;")
-            .map_err(map_sqlite)?;
-        let app: i64 = connection
-            .pragma_query_value(None, "application_id", |row| row.get(0))
-            .map_err(map_sqlite)?;
-        let version: i64 = connection
-            .pragma_query_value(None, "user_version", |row| row.get(0))
-            .map_err(map_sqlite)?;
-        let objects: i64 = connection
-            .query_row(
-                "SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(map_sqlite)?;
-        if app == 0 && version == 0 && objects == 0 {
-            return Ok(SqlitePersistenceShape::MissingOrFresh);
+        match Self::open_inspection(path.as_ref())? {
+            Some(connection) => classify_connection(&connection),
+            None => Ok(SqlitePersistenceShape::MissingOrFresh),
         }
-        if app != APPLICATION_ID {
-            return Err(SessionStoreError::corrupt());
-        }
-        if version != SCHEMA_VERSION {
-            return Err(SessionStoreError::UnsupportedSchema);
-        }
-        verify_shape_pragmas(&connection)?;
-        verify_exact_schema(&connection)?;
-        Ok(SqlitePersistenceShape::Current)
     }
 
     /// Opens or creates a private fresh-schema database.
@@ -977,33 +894,53 @@ impl SqliteSessionStore {
 
 /// Admits identity, schema version, shape and counters inside one read-only
 /// inspection snapshot.
-fn admit_inspection_snapshot(snapshot: &Connection) -> Result<(), SessionStoreError> {
-    let app: i64 = snapshot
+/// Bounded shape of one read-only connection: fresh, or exactly this build's
+/// application, version, shape pragmas and schema.
+fn classify_connection(c: &Connection) -> Result<SqlitePersistenceShape, SessionStoreError> {
+    let app: i64 = c
         .pragma_query_value(None, "application_id", |row| row.get(0))
         .map_err(map_sqlite)?;
-    let version: i64 = snapshot
+    let version: i64 = c
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(map_sqlite)?;
+    let objects: i64 = c
+        .query_row(
+            "SELECT count(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(map_sqlite)?;
+    if app == 0 && version == 0 && objects == 0 {
+        return Ok(SqlitePersistenceShape::MissingOrFresh);
+    }
     if app != APPLICATION_ID {
         return Err(SessionStoreError::corrupt());
     }
     if version != SCHEMA_VERSION {
         return Err(SessionStoreError::UnsupportedSchema);
     }
-    verify_shape_pragmas(snapshot)?;
-    verify_exact_schema(snapshot)?;
-    admit_open(snapshot)
+    verify_shape_pragmas(c)?;
+    verify_exact_schema(c)?;
+    Ok(SqlitePersistenceShape::Current)
 }
 
-/// Refuse unsupported versions before opening a writer or adjusting permissions.
-/// Read-only WAL inspection may reconstruct or update temporary SHM coordination,
-/// but preserves the database and WAL bytes. A supplied clock domain also
-/// refuses a foreign same-boot scope before any writer can alter journal state.
-/// The authoritative transaction repeats the domain check after this preflight.
-fn admit_existing_header(
-    path: &Path,
-    domain: Option<LeaseDomain>,
-) -> Result<(), SessionStoreError> {
+/// Admits one inspection snapshot: a current shape and a bound clock domain.
+///
+/// Retained-row counts are not revalidated. They guard the writer's admission
+/// accounting, which inspection never touches, and counting them is O(store)
+/// on every read. A fresh file has nothing to inspect.
+fn admit_inspection_snapshot(snapshot: &Connection) -> Result<(), SessionStoreError> {
+    if classify_connection(snapshot)? != SqlitePersistenceShape::Current {
+        return Err(SessionStoreError::NotFound);
+    }
+    bound_domain(snapshot)?;
+    Ok(())
+}
+
+/// The file half of the header preflight: refuses a non-regular file without
+/// blocking on it and a foreign or unsupported main-file header. Returns whether
+/// the file has content whose committed identity still needs a connection.
+fn admit_header_file(path: &Path) -> Result<bool, SessionStoreError> {
     let mut options = OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -1019,7 +956,7 @@ fn admit_existing_header(
     }
     let mut file = match options.open(path) {
         Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(map_io(error)),
     };
     let metadata = file.metadata().map_err(map_io)?;
@@ -1027,7 +964,7 @@ fn admit_existing_header(
         return Err(SessionStoreError::BackendUnavailable);
     }
     if metadata.len() == 0 {
-        return Ok(());
+        return Ok(false);
     }
     let mut header = [0_u8; 72];
     file.read_exact(&mut header)
@@ -1052,6 +989,21 @@ fn admit_existing_header(
         if version != SCHEMA_VERSION {
             return Err(SessionStoreError::UnsupportedSchema);
         }
+    }
+    Ok(true)
+}
+
+/// Refuse unsupported versions before opening a writer or adjusting permissions.
+/// Read-only WAL inspection may reconstruct or update temporary SHM coordination,
+/// but preserves the database and WAL bytes. A supplied clock domain also
+/// refuses a foreign same-boot scope before any writer can alter journal state.
+/// The authoritative transaction repeats the domain check after this preflight.
+fn admit_existing_header(
+    path: &Path,
+    domain: Option<LeaseDomain>,
+) -> Result<(), SessionStoreError> {
+    if !admit_header_file(path)? {
+        return Ok(());
     }
     // A WAL can carry a newer header than the main file. Read its committed
     // identity without opening a writer or checkpointing it into the main file.
@@ -3354,10 +3306,11 @@ fn create(b: &mut Backend, r: &CreateSession) -> Result<CreateReceipt, SessionSt
     )?;
     insert_candidate(&tx, &x, b.limits, r.admission())?;
     let d = x.checkpoint.manifest().durability();
+    let lease_fence = NonZeroU64::MIN;
     let lease = BranchLease::from_store(
         r.session(),
         r.owner(),
-        NonZeroU64::MIN,
+        lease_fence,
         expires,
         r.lease_seconds(),
     );
@@ -3429,7 +3382,7 @@ fn create(b: &mut Backend, r: &CreateSession) -> Result<CreateReceipt, SessionSt
         .map_err(map_sqlite)?,
     )?;
     meta(&tx, 1, 1)?;
-    tx.commit().map_err(map_sqlite)?;
+    commit_claimed(tx, &mut b.holders, r.session(), lease_fence)?;
     Ok(receipt)
 }
 
@@ -3677,7 +3630,7 @@ fn acquire(b: &mut Backend, r: AcquireBranch) -> Result<BranchLease, SessionStor
         // nothing and reads to the next user as a session that will not open.
         // Anything short of proof keeps the clock. Probed inside the writer's
         // transaction, which serializes it against every other reclaim.
-        if !b.holders.holder_is_gone(r.session()) {
+        if !b.holders.holder_is_gone(r.session(), current.fence()) {
             tx.commit().map_err(map_sqlite)?;
             return Err(SessionStoreError::LeaseHeld);
         }
@@ -3695,13 +3648,28 @@ fn acquire(b: &mut Backend, r: AcquireBranch) -> Result<BranchLease, SessionStor
     );
     write_active(&tx, &value, None)?;
     bump(&tx)?;
-    // Claimed before the commit, so the lock and the lease become visible
-    // together. Claiming afterwards would leave a window in which this holder's
-    // lease is live but its lock is not yet held, which is exactly the state a
-    // concurrent reclaim reads as a dead holder.
-    b.holders.claim(r.session());
-    tx.commit().map_err(map_sqlite)?;
+    commit_claimed(tx, &mut b.holders, r.session(), fence)?;
     Ok(value)
+}
+
+/// Commits a transaction that grants `session` a lease under `fence`, holding
+/// the branch's host-local claim from before the commit.
+///
+/// Claimed first, so the lock and the lease become visible together. Claiming
+/// afterwards would leave a window in which the lease is live but its lock is
+/// not yet held, which is exactly the state a concurrent reclaim reads as a
+/// dead holder. A grant that fails to commit gives its claim back.
+fn commit_claimed(
+    tx: Transaction<'_>,
+    holders: &mut crate::holder::HolderClaims,
+    session: SessionRef,
+    fence: NonZeroU64,
+) -> Result<(), SessionStoreError> {
+    holders.claim(session, fence);
+    tx.commit().map_err(|error| {
+        holders.release(session);
+        map_sqlite(error)
+    })
 }
 fn renew(b: &mut Backend, l: &BranchLease) -> Result<BranchLease, SessionStoreError> {
     b.require_open()?;
@@ -3713,6 +3681,7 @@ fn renew(b: &mut Backend, l: &BranchLease) -> Result<BranchLease, SessionStoreEr
     let now = sample_clock(b.clock.as_ref(), b.domain)?;
     live_session(&tx, l.session().session_id())?;
     let row = branch_row(&tx, l.session())?.ok_or(SessionStoreError::NotFound)?;
+    forfeit_if_superseded(&mut b.holders, &row, l);
     require_lease_domain(l, now)?;
     if row.previous.as_ref() == Some(l) {
         let active = row.active.ok_or(SessionStoreError::corrupt())?;
@@ -3758,6 +3727,7 @@ fn revive(b: &mut Backend, l: &BranchLease) -> Result<BranchLease, SessionStoreE
     let now = sample_clock(b.clock.as_ref(), b.domain)?;
     live_session(&tx, l.session().session_id())?;
     let row = branch_row(&tx, l.session())?.ok_or(SessionStoreError::NotFound)?;
+    forfeit_if_superseded(&mut b.holders, &row, l);
     require_lease_domain(l, now)?;
     if row.active.as_ref() != Some(l) || row.last_fence != l.fence().get() {
         tx.commit().map_err(map_sqlite)?;
@@ -3795,6 +3765,7 @@ fn release_many(b: &mut Backend, leases: &[BranchLease]) -> Result<(), SessionSt
     for lease in leases {
         live_session(&tx, lease.session().session_id())?;
         let row = branch_row(&tx, lease.session())?.ok_or(SessionStoreError::NotFound)?;
+        forfeit_if_superseded(&mut b.holders, &row, lease);
         require_lease_domain(lease, now)?;
         if row.released.as_ref() == Some(lease) && row.active.is_none() {
             continue;
@@ -3829,6 +3800,18 @@ fn release_many(b: &mut Backend, leases: &[BranchLease]) -> Result<(), SessionSt
     Ok(())
 }
 
+/// Drops this store's claim for `lease` once another acquire has replaced it,
+/// so a superseded holder stops pinning a lock that no longer proves anything.
+fn forfeit_if_superseded(
+    holders: &mut crate::holder::HolderClaims,
+    row: &BranchRow,
+    lease: &BranchLease,
+) {
+    if row.last_fence != lease.fence().get() {
+        holders.forfeit(lease.session(), lease.fence());
+    }
+}
+
 fn mark_released(tx: &Transaction<'_>, l: &BranchLease) -> Result<(), SessionStoreError> {
     tx.execute(
         "UPDATE branches SET active_owner=NULL,active_fence=NULL,active_time=NULL,active_ns=NULL,
@@ -3849,6 +3832,7 @@ fn release(b: &mut Backend, l: &BranchLease) -> Result<(), SessionStoreError> {
     let now = sample_clock(b.clock.as_ref(), b.domain)?;
     live_session(&tx, l.session().session_id())?;
     let row = branch_row(&tx, l.session())?.ok_or(SessionStoreError::NotFound)?;
+    forfeit_if_superseded(&mut b.holders, &row, l);
     require_lease_domain(l, now)?;
     if row.released.as_ref() == Some(l) && row.active.is_none() {
         tx.commit().map_err(map_sqlite)?;
@@ -4309,13 +4293,8 @@ fn fork(b: &mut Backend, r: &ForkBranch) -> Result<ForkReceipt, SessionStoreErro
                 0,
             )
         })?;
-    let lease = BranchLease::from_store(
-        target,
-        r.owner(),
-        NonZeroU64::MIN,
-        expires,
-        r.lease_seconds(),
-    );
+    let lease_fence = NonZeroU64::MIN;
+    let lease = BranchLease::from_store(target, r.owner(), lease_fence, expires, r.lease_seconds());
     let head = BranchHead::from_store(target, BranchRevision::INITIAL, reference);
     insert_candidate(&tx, &x, b.limits, r.admission())?;
     tx.execute(
@@ -4404,7 +4383,7 @@ fn fork(b: &mut Backend, r: &ForkBranch) -> Result<ForkReceipt, SessionStoreErro
         .map_err(map_sqlite)?,
     )?;
     meta(&tx, 0, 1)?;
-    tx.commit().map_err(map_sqlite)?;
+    commit_claimed(tx, &mut b.holders, target, lease_fence)?;
     Ok(receipt)
 }
 fn recover_fork(b: &Backend, r: &RecoverFork) -> Result<ForkReceipt, SessionStoreError> {
