@@ -658,6 +658,21 @@ pub(in crate::runtime) fn code_cell_abandonment_fold(
         return Err(AgentError::from_store(SessionStoreError::corrupt()));
     }
     allowed_attempts.extend(continuations.iter().map(|(attempt_id, _)| *attempt_id));
+    // Root-boundary cleanup can finalize a later round's continuation before
+    // the children it dispatched; their attempt is still this cell's.
+    allowed_attempts.extend(ledger.operations().into_iter().filter_map(|record| {
+        match (record.kind(), record.state()) {
+            (
+                DurableOperationKind::CompositionContinuation {
+                    attempt_id,
+                    evaluation_operation_id,
+                    ..
+                },
+                DurableOperationState::Finalized(_),
+            ) if *evaluation_operation_id == evaluation_operation.0 => Some(*attempt_id),
+            _ => None,
+        }
+    }));
     let mut sequences = BTreeSet::new();
     if children.iter().any(|(attempt_id, parent, sequence)| {
         !allowed_attempts.contains(attempt_id)

@@ -406,11 +406,11 @@ impl MemorySessionStore {
             .get(&selector.branch_id())
             .ok_or(SessionStoreError::NotFound)?;
         let checkpoint = stored_checkpoint(&state, branch.head.checkpoint())?;
-        Ok(LoadedBranch::from_store(
-            session.head,
-            branch.head,
-            checkpoint,
-        ))
+        let loaded = LoadedBranch::from_store(session.head, branch.head, checkpoint);
+        Ok(match state.horizons.get(&selector) {
+            Some(horizon) => loaded.with_horizon(*horizon),
+            None => loaded,
+        })
     }
 
     fn load_checkpoint_sync(

@@ -766,9 +766,11 @@ After every successful terminal publication of a root or child turn, the
 runtime records retention due. It drains ready control ingress and starts
 queued roots first, and prunes its own branch best-effort only when idle,
 once at least 64 checkpoints are
-superseded. The owner remembers the horizon of its last prune receipt and asks
-the store only when the revisions between that horizon and the head's parent
-could number 64, so most turns cost no store transaction; the prune runs under
+superseded. The owner remembers the horizon of its last prune receipt, seeded
+at open from the horizon the store persisted for the branch (`LoadedBranch`
+carries it), and asks the store only when the revisions between that horizon
+and the head's parent could number 64, so most turns cost no store
+transaction, and a reopened owner does not repeat its predecessor's prune; the prune runs under
 the owner's lease gate (the heartbeat waits for it), bounded by the store
 operation deadline and checkpoint-pruning work. SQLite defers the object walk
 to its bounded background lane (§5.2). This never changes or delays the published result: it runs after
@@ -1213,7 +1215,10 @@ a large reclaim does not leave the WAL file that size. Stores are created with
 accepts a dangling parent only when the parent id is a recorded pruned id, and
 refuses a commit receipt at or below a horizon or a pruned id that still
 exists. The pruned-id rows (about 80 bytes each) are not counted against the
-aggregate bounds.
+aggregate bounds. They grow with the session's pruned history and are removed
+only with the session, so their growth is bounded by session lifetime;
+replacing them with branch-and-revision ranges waits for a runtime schema
+change that is already happening for another reason.
 
 **The feed in SQLite.** The `session_feed` table holds one row per record,
 keyed `(session_id, seq)`, `WITHOUT ROWID`: the branch id, the change kind, the

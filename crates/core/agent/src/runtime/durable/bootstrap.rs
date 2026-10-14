@@ -254,7 +254,8 @@ impl DurableRuntimeBootstrap {
         Ok(Self {
             checkpoint,
             bundle,
-            branch: DurableBranchFacts::new(store, head, lease, store_timeouts),
+            branch: DurableBranchFacts::new(store, head, lease, store_timeouts)
+                .with_pruned_horizon(loaded.horizon()),
             admission: admission.fact,
         })
     }

@@ -1269,7 +1269,11 @@ impl Backend {
         if checkpoint.reference() != row.head.checkpoint() {
             return Err(SessionStoreError::corrupt());
         }
-        Ok(LoadedBranch::from_store(session, row.head, checkpoint))
+        with_loaded_horizon(
+            &self.connection,
+            selector,
+            LoadedBranch::from_store(session, row.head, checkpoint),
+        )
     }
 
     fn load_checkpoint(&mut self, id: CheckpointId) -> Result<StoredCheckpoint, SessionStoreError> {
@@ -4581,7 +4585,22 @@ fn load_branch(c: &Connection, s: SessionRef) -> Result<LoadedBranch, SessionSto
     if checkpoint.reference() != row.head.checkpoint() {
         return Err(SessionStoreError::corrupt());
     }
-    Ok(LoadedBranch::from_store(session, row.head, checkpoint))
+    with_loaded_horizon(
+        c,
+        s,
+        LoadedBranch::from_store(session, row.head, checkpoint),
+    )
+}
+
+fn with_loaded_horizon(
+    c: &Connection,
+    selector: SessionRef,
+    loaded: LoadedBranch,
+) -> Result<LoadedBranch, SessionStoreError> {
+    Ok(match load_horizon(c, selector)? {
+        Some(horizon) => loaded.with_horizon(horizon.revision),
+        None => loaded,
+    })
 }
 fn load_checkpoint(
     c: &Connection,

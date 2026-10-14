@@ -117,3 +117,68 @@ async fn queued_roots_settle_before_blocked_idle_retention() -> TestResult {
     agent.shutdown().await?;
     Ok(())
 }
+
+/// A reopened owner starts from the horizon its predecessor's prune left in
+/// the store, so the first idle terminal after a reopen does not repeat the
+/// whole-history prune.
+#[tokio::test]
+async fn reopened_owner_does_not_repeat_its_predecessors_prune() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let store = Arc::new(TestCreateStore::default());
+    let sessions = DurableSessionRuntime::current(
+        store.clone(),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("lease")?,
+    )?;
+    let model = artifact_test_model(0, 99_030)?;
+    let agent = sessions
+        .create(
+            "create:reopened-horizon",
+            durable_artifact_test_builder(Arc::clone(&workspace), model.clone()),
+        )
+        .await?;
+    let mut round = 0;
+    while store.prune_calls.load(Ordering::Acquire) == 0 {
+        round += 1;
+        assert!(round <= 80, "no automatic prune was attempted in 80 rounds");
+        let result = agent
+            .prompt(format!("round {round}"))
+            .await?
+            .result()
+            .await?;
+        assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
+    }
+    let address = DurableSessionAddress::new(
+        agent.session_id(),
+        agent.branch_id(),
+        agent.checkpoint().id(),
+    );
+    agent.shutdown().await?;
+    let DurableRuntimeOpen::Opened(reopened) = sessions
+        .open(
+            "open:reopened-horizon",
+            address,
+            durable_artifact_test_builder(workspace, model),
+        )
+        .await?
+    else {
+        return Err("a quiescent head unexpectedly required recovery".into());
+    };
+    let result = reopened.prompt("after reopen").await?.result().await?;
+    assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
+    // Retention runs before the next command, so one more turn observes it.
+    let result = reopened
+        .prompt("second after reopen")
+        .await?
+        .result()
+        .await?;
+    assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
+    assert_eq!(
+        store.prune_calls.load(Ordering::Acquire),
+        1,
+        "the reopened owner re-ran a prune its predecessor already ran"
+    );
+    reopened.shutdown().await?;
+    Ok(())
+}

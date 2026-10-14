@@ -351,6 +351,7 @@ pub struct LoadedBranch {
     session: SessionHead,
     head: BranchHead,
     checkpoint: StoredCheckpoint,
+    horizon: Option<BranchRevision>,
 }
 
 impl LoadedBranch {
@@ -366,7 +367,16 @@ impl LoadedBranch {
             session,
             head,
             checkpoint,
+            horizon: None,
         }
+    }
+
+    /// Attaches the branch history horizon the backend has persisted.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn with_horizon(mut self, horizon: BranchRevision) -> Self {
+        self.horizon = Some(horizon);
+        self
     }
 
     /// Returns current session metadata.
@@ -385,6 +395,13 @@ impl LoadedBranch {
     #[must_use]
     pub const fn checkpoint(&self) -> &StoredCheckpoint {
         &self.checkpoint
+    }
+
+    /// Returns the branch history horizon of its last acknowledged prune, or
+    /// `None` when retention never ran on this branch.
+    #[must_use]
+    pub const fn horizon(&self) -> Option<BranchRevision> {
+        self.horizon
     }
 }
 

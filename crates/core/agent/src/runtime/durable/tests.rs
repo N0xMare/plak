@@ -2173,6 +2173,8 @@ struct TestCreateStore {
     block_prune: AtomicBool,
     prune_started: Notify,
     prune_release: Notify,
+    /// The horizon of the last acknowledged prune, reported by `load_branch`.
+    horizon: Mutex<Option<BranchRevision>>,
 }
 
 impl TestCreateStore {
@@ -2440,11 +2442,15 @@ impl SessionStore for TestCreateStore {
     fn load_branch(&self, session: SessionRef) -> crate::StoreFuture<'_, crate::LoadedBranch> {
         self.record_admission_job("load_branch");
         Box::pin(async move {
-            lock_mutex(&self.state)
+            let loaded = lock_mutex(&self.state)
                 .loaded
                 .clone()
                 .filter(|loaded| loaded.head().session() == session)
-                .ok_or(SessionStoreError::NotFound)
+                .ok_or(SessionStoreError::NotFound)?;
+            Ok(match *lock_mutex(&self.horizon) {
+                Some(horizon) => loaded.with_horizon(horizon),
+                None => loaded,
+            })
         })
     }
 
@@ -3361,9 +3367,12 @@ impl SessionStore for TestCreateStore {
             if self.fail_prune.load(Ordering::Acquire) {
                 return Err(SessionStoreError::BackendUnavailable);
             }
+            let horizon =
+                BranchRevision::from_store(request.expected().revision().get().saturating_sub(1));
+            *lock_mutex(&self.horizon) = Some(horizon);
             Ok(crate::PruneReceipt::from_store(
                 request.expected(),
-                BranchRevision::INITIAL,
+                horizon,
                 0,
             ))
         })
@@ -19827,12 +19836,28 @@ async fn a_reopen_abandons_a_fenced_code_cell_without_a_second_result() -> TestR
 #[tokio::test]
 async fn historical_code_cell_continuation_resolves_only_its_finalized_evaluation() -> TestResult {
     for root_finalized in [false, true] {
-        historical_code_cell_continuation_recovery(root_finalized).await?;
+        historical_code_cell_continuation_recovery(root_finalized, false).await?;
     }
     Ok(())
 }
 
-async fn historical_code_cell_continuation_recovery(root_finalized: bool) -> TestResult {
+/// A two-round cell whose round-two continuation was already finalized by
+/// root-boundary cleanup while a child of that continuation's attempt is
+/// still dispatched: the child's attempt belongs to the cell, so explicit
+/// abandonment closes the root instead of calling the ledger corrupt.
+#[tokio::test]
+async fn multi_round_code_cell_abandonment_admits_a_finalized_continuations_children() -> TestResult
+{
+    for root_finalized in [false, true] {
+        historical_code_cell_continuation_recovery(root_finalized, true).await?;
+    }
+    Ok(())
+}
+
+async fn historical_code_cell_continuation_recovery(
+    root_finalized: bool,
+    finalized_continuation: bool,
+) -> TestResult {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let store = Arc::new(TestCreateStore::default());
@@ -19883,6 +19908,7 @@ async fn historical_code_cell_continuation_recovery(root_finalized: bool) -> Tes
         return Err("evaluation kind missing".into());
     };
     let mut continuation_id = 0;
+    let mut open_child_id = 0;
     for record in source.manifest().ledger().operations() {
         match record.kind() {
             DurableOperationKind::Command { .. } => {
@@ -19929,10 +19955,22 @@ async fn historical_code_cell_continuation_recovery(root_finalized: bool) -> Tes
             }
             DurableOperationKind::CompositionContinuation { .. } => {
                 continuation_id = record.operation_id();
-                records.push(record.append_transition(DurableOperationTransition::new(
-                    cut,
-                    DurableOperationState::OutcomeUnknown(settled.clone()),
-                ))?);
+                records.push(if finalized_continuation {
+                    record
+                        .append_transition(DurableOperationTransition::new(
+                            cut,
+                            DurableOperationState::Completed(settled.clone()),
+                        ))?
+                        .append_transition(DurableOperationTransition::new(
+                            cut,
+                            DurableOperationState::Finalized(settled.clone()),
+                        ))?
+                } else {
+                    record.append_transition(DurableOperationTransition::new(
+                        cut,
+                        DurableOperationState::OutcomeUnknown(settled.clone()),
+                    ))?
+                });
             }
             DurableOperationKind::CompositionChild { .. } => {
                 // Only sequences 6–11 remain obligations; earlier finalized
@@ -19973,16 +20011,22 @@ async fn historical_code_cell_continuation_recovery(root_finalized: bool) -> Tes
                         return Err("child kind missing".into());
                     };
                     *call_id = local_composition_child_call_id(binding)?;
-                    let completed = DurableOperationRecord::new(
+                    let dispatched = DurableOperationRecord::new(
                         record.operation_id() + u64::from(sequence) - 1,
                         kind,
                         runtime_component(RuntimeComponentKind::Operation, edge)?,
                         record.transitions().to_vec(),
-                    )?
-                    .append_transition(DurableOperationTransition::new(
-                        cut,
-                        DurableOperationState::Completed(settled.clone()),
-                    ))?;
+                    )?;
+                    if finalized_continuation && sequence == 11 {
+                        open_child_id = dispatched.operation_id();
+                        records.push(dispatched);
+                        continue;
+                    }
+                    let completed =
+                        dispatched.append_transition(DurableOperationTransition::new(
+                            cut,
+                            DurableOperationState::Completed(settled.clone()),
+                        ))?;
                     records.push(if sequence < 6 {
                         completed.append_transition(DurableOperationTransition::new(
                             cut,
@@ -20061,7 +20105,11 @@ async fn historical_code_cell_continuation_recovery(root_finalized: bool) -> Tes
     assert_eq!(
         fold.operations,
         vec![(
-            OperationId(continuation_id),
+            OperationId(if finalized_continuation {
+                open_child_id
+            } else {
+                continuation_id
+            }),
             crate::runtime::durable::DurableCodeCellAbandonmentDisposition::PossiblyStarted
         )]
     );
@@ -20084,6 +20132,11 @@ async fn historical_code_cell_continuation_recovery(root_finalized: bool) -> Tes
     for fault in [
         "parent", "turn", "sequence", "attempt", "call", "request", "definite",
     ] {
+        // A finalized continuation's request is settled history; only its
+        // kind's parent and attempt bind its children.
+        if finalized_continuation && fault == "request" {
+            continue;
+        }
         let mut bad = records.clone();
         let target = bad
             .iter_mut()
@@ -20351,6 +20404,10 @@ async fn historical_code_cell_continuation_recovery(root_finalized: bool) -> Tes
             DurableOperationState::OutcomeUnknown(_) => {
                 assert_eq!(before.operation_id(), continuation_id);
                 assert_eq!(after.transitions().len(), before.transitions().len() + 1);
+                assert!(matches!(after.state(), DurableOperationState::Finalized(_)));
+            }
+            DurableOperationState::Dispatched => {
+                assert_eq!(before.operation_id(), open_child_id);
                 assert!(matches!(after.state(), DurableOperationState::Finalized(_)));
             }
             _ => return Err("unexpected recovery source state".into()),

@@ -30,10 +30,10 @@ use crate::runtime::terminal::{cancelled_error, lock_mutex};
 use crate::runtime::{AbandonedTurnClaim, AbandonmentCause};
 use crate::runtime::{DEFAULT_STORE_OPERATION_TIMEOUT, StoreTimeouts};
 use crate::{
-    AgentError, AgentErrorKind, BranchHead, BranchLease, CheckpointId, CheckpointObjectBundle,
-    CommitCheckpoint, DurabilityAttemptKind, PruneBranch, PruneReceipt, RuntimeCheckpoint,
-    RuntimeCheckpointKind, RuntimeDurability, SessionStore, SessionStoreCapacity, StoreAdmission,
-    StoreBoundUsage,
+    AgentError, AgentErrorKind, BranchHead, BranchLease, BranchRevision, CheckpointId,
+    CheckpointObjectBundle, CommitCheckpoint, DurabilityAttemptKind, PruneBranch, PruneReceipt,
+    RuntimeCheckpoint, RuntimeCheckpointKind, RuntimeDurability, SessionStore,
+    SessionStoreCapacity, StoreAdmission, StoreBoundUsage,
 };
 use plakous_model::{
     CallId, CancellationToken, ContentBlock, ConversationView, Digest, ToolName, TurnId,
@@ -50,6 +50,7 @@ pub(in crate::runtime) struct DurableBranchFacts {
     head: BranchHead,
     lease: BranchLease,
     store_timeouts: StoreTimeouts,
+    pruned_horizon: u64,
 }
 
 #[derive(Clone)]
@@ -833,7 +834,17 @@ impl DurableBranchFacts {
             head,
             lease,
             store_timeouts,
+            pruned_horizon: 0,
         }
+    }
+    /// Seeds the retention horizon the store persisted for this branch, so a
+    /// reopened owner does not re-run a prune its predecessor already ran.
+    pub(in crate::runtime) fn with_pruned_horizon(
+        mut self,
+        horizon: Option<BranchRevision>,
+    ) -> Self {
+        self.pruned_horizon = horizon.map_or(0, BranchRevision::get);
+        self
     }
     pub(in crate::runtime) fn store(&self) -> &Arc<dyn SessionStore> {
         &self.store
@@ -937,6 +948,7 @@ impl PreparedCheckpoint {
                 head: branch.head,
                 lease: branch.lease.clone(),
                 store_timeouts: branch.store_timeouts,
+                pruned_horizon: self.state.pruned_horizon,
             })
     }
 
@@ -945,6 +957,7 @@ impl PreparedCheckpoint {
         bundle: CheckpointObjectBundle,
         durable: Option<DurableBranchFacts>,
     ) -> Self {
+        let pruned_horizon = durable.as_ref().map_or(0, |facts| facts.pruned_horizon);
         Self {
             state: CheckpointAuthority {
                 checkpoint,
@@ -957,7 +970,7 @@ impl PreparedCheckpoint {
                     store_timeouts: facts.store_timeouts,
                 }),
                 published_feed_seq: None,
-                pruned_horizon: 0,
+                pruned_horizon,
                 abandoned: false,
                 released: false,
             },

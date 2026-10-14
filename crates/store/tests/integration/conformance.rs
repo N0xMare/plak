@@ -1612,7 +1612,13 @@ pub(crate) async fn run_prune_conformance(
         (0, receipt.horizon())
     );
     assert_eq!(store.usage().await?, after);
-    assert_eq!(store.load_branch(selector).await?.head(), chain.head);
+    let loaded = store.load_branch(selector).await?;
+    assert_eq!(loaded.head(), chain.head);
+    assert_eq!(
+        loaded.horizon(),
+        Some(receipt.horizon()),
+        "a reopened owner learns the persisted horizon from the branch load"
+    );
 
     // A fork from the pruned branch, then more history and a second prune:
     // the fork source survives it and the fork receipt replays exactly.
