@@ -36,13 +36,9 @@ allow = ["Apache-2.0 WITH LLVM-exception"]
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-# Exact reviewed upstreams required by the Monty worker graph. The pinned Codex
-# 0.153.3 Code Mode grammar is no longer fetched: it is the reviewed vendor
-# snapshot at `vendor/codex-code-mode-protocol`.
-allow-git = [
-    "https://github.com/openai-oss-forks/tokio-tungstenite",
-    "https://github.com/openai-oss-forks/tungstenite-rs",
-]
+# No git sources: the pinned Codex 0.153.3 Code Mode grammar is the reviewed
+# vendor snapshot at `vendor/codex-code-mode-protocol`.
+allow-git = []
 
 # Upstream Monty typeshed build uses zip 0.6.6 and its checksum helper.
 [[licenses.exceptions]]

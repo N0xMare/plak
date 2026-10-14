@@ -706,25 +706,10 @@ option.
 
 Cargo does not inherit `[patch]` tables from a path dependency, so a downstream
 source consumer repeats in its own root manifest whatever its selection needs.
-The answer depends only on whether the selection reaches the Python evaluator.
-
-| Workflow | Facade features | Patch tables needed |
-| --- | --- | --- |
-| JavaScript through the worker | `composition`, with `sessions-sqlite` | **none** |
-| Anything reaching the Python evaluator | `composition-python`, `native-subscriptions` | the two `tungstenite` fork redirects |
-| Building the Monty worker package itself | — | additionally `monty-typeshed` |
-
-The `tungstenite` redirect is reached only through `plakous-py-eval` ->
-`monty-pool` -> `tokio-tungstenite`, under both the `https` and `ssh` spellings
-of the fork URL:
-
-```toml
-[patch.crates-io]
-tungstenite = { git = "https://github.com/openai-oss-forks/tungstenite-rs", rev = "4fffad30fe373adbdcffab9545e9e9bf4f2fc19f" }
-
-[patch."ssh://git@github.com/openai-oss-forks/tungstenite-rs.git"]
-tungstenite = { git = "https://github.com/openai-oss-forks/tungstenite-rs", rev = "4fffad30fe373adbdcffab9545e9e9bf4f2fc19f" }
-```
+No facade selection needs one, including those that reach the Python
+evaluator. Only building the Monty worker package itself selects the reviewed
+`monty-typeshed` snapshot (§7.3), and a consumer that omits it builds the
+upstream crate, whose type-checker archive is not byte-reproducible.
 
 There is no Codex patch table. `plakous-code-mode` depends on the
 reviewed vendor snapshot `vendor/codex-code-mode-protocol` by path; its
@@ -745,9 +730,9 @@ cargo run --manifest-path tests/fixtures/facade-consumer/Cargo.toml --locked --o
 ```
 
 `facade-consumer` is the broad public inventory contract and selects every
-feature, so it still carries the `tungstenite` tables. `js-embedder-consumer` is
-the JavaScript-only workflow and carries no `[patch]` section at all;
-`check_public_compile.py` fails if one appears.
+feature. `js-embedder-consumer` is the JavaScript-only workflow. Neither carries
+a `[patch]` section; `check_public_compile.py` fails if one appears in the
+workflow fixture.
 
 Five copyable examples cover one workflow each. Each names its exact features,
 and none depends on a repository test-support crate:
@@ -897,9 +882,7 @@ future repository formats.
 `deny.toml` enforces the mechanical half: `advisories.yanked = "deny"`;
 `bans.wildcards = "deny"` with `multiple-versions = "warn"`;
 `sources.unknown-registry` and `unknown-git` both denied with crates.io as the
-only allowed registry and two exact reviewed Git upstreams
-(`openai-oss-forks/tokio-tungstenite`, `openai-oss-forks/tungstenite-rs`)
-required by the Monty worker graph.
+only allowed registry and no allowed Git source.
 Run it when dependencies change:
 
 ```sh
@@ -946,15 +929,9 @@ sources.
 
 ### 7.3 Dependency overrides and the Code Mode protocol
 
-Two `[patch]` tables holding three redirects steer dependencies that would
-otherwise resolve outside the reviewed set:
-
-| Stanza | Redirect |
-| --- | --- |
-| `[patch.crates-io]` | `tungstenite` → the `openai-oss-forks` fork at an exact revision; `monty-typeshed` → the reviewed local reproducibility fix |
-| `[patch."ssh://git@github.com/openai-oss-forks/tungstenite-rs.git"]` | the same fork at the same revision, so an SSH-spelled edge cannot resolve elsewhere |
-
-Every patched Git source carries an exact `rev`, never a branch.
+One `[patch.crates-io]` redirect steers a dependency to the reviewed set:
+`monty-typeshed` → the reviewed local reproducibility fix. No dependency
+resolves from a Git source.
 
 Code Mode uses the reviewed `vendor/codex-code-mode-protocol` snapshot and the
 local `plakous-js-runtime` rquickjs evaluator, which runs only in the

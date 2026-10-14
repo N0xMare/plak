@@ -241,8 +241,8 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
 # `composition` is the JavaScript evaluator capability on its own: no
 # credential, HTTP, subscription, or Python machinery. `tungstenite` is reached
 # only through `plakous-py-eval` -> `monty-pool` -> `tokio-tungstenite`, so its
-# absence is the load-bearing evidence that a JavaScript-only embedder needs
-# neither the Monty closure nor the fork's patch tables.
+# absence is the load-bearing evidence that a JavaScript-only embedder does not
+# pull in the Monty closure.
 EXCLUDED_CLOSURE_PACKAGES = {
     ("plakous", ("composition",)): (
         "monty-pool",

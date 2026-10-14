@@ -23,9 +23,3 @@ tokio = { version = "1.48", features = ["rt-multi-thread", "macros", "sync", "ti
 uuid = "1"
 
 [workspace]
-
-[patch.crates-io]
-tungstenite = { git = "https://github.com/openai-oss-forks/tungstenite-rs", rev = "4fffad30fe373adbdcffab9545e9e9bf4f2fc19f" }
-
-[patch."ssh://git@github.com/openai-oss-forks/tungstenite-rs.git"]
-tungstenite = { git = "https://github.com/openai-oss-forks/tungstenite-rs", rev = "4fffad30fe373adbdcffab9545e9e9bf4f2fc19f" }

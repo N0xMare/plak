@@ -927,16 +927,15 @@ the call's own no-handler exception: filesystem paths and `open`
 `random` from its own process entropy without suspending; neither reaches
 host state. Name reads of undefined names stay undefined (`NameError`).
 
-Two dependency overrides are pinned in the workspace manifest, through two
-`[patch]` tables holding three redirects — `tungstenite` is patched under both
-source spellings. The pinned Code Mode grammar is not an override:
+One dependency override is pinned in the workspace manifest's
+`[patch.crates-io]` table, and no dependency resolves from a Git source. The
+pinned Code Mode grammar is not an override:
 `plakous-code-mode` consumes the reviewed `vendor/codex-code-mode-protocol`
 snapshot by path, with its license and per-file provenance, so no consumer needs
 a Codex patch table.
 
 | Override | Replacement | Why |
 | --- | --- | --- |
-| `tungstenite` from crates.io | a pinned fork revision | one exact revision, applied to both source spellings so no path resolves to an unpinned copy |
 | `monty-typeshed` from crates.io | the reviewed local 1.1.0 snapshot | deterministic ZIP timestamps and entry ordering for bundled type-checker assets |
 
 The vendored `codex-code-mode-protocol` snapshot is upstream version 0.153.3

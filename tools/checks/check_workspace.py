@@ -92,25 +92,11 @@ SUPPORTED_COMPILE_FIXTURE_FILES = {
     "model-consumer": frozenset({".cargo/config.toml", "Cargo.lock", "Cargo.toml", "src/main.rs"}),
     "tools-consumer": frozenset({".cargo/config.toml", "Cargo.lock", "Cargo.toml", "src/main.rs"}),
 }
-TUNGSTENITE_FORK_PATCH = {
-    "git": "https://github.com/openai-oss-forks/tungstenite-rs",
-    "rev": "4fffad30fe373adbdcffab9545e9e9bf4f2fc19f",
-}
-# The fork redirect the Monty worker graph needs, under both URL spellings.
-# `plakous-py-eval` is the only route to it, so a fixture carries these tables
-# exactly when its facade features reach the Python evaluator.
-TUNGSTENITE_PATCH_TABLES = {
-    "crates-io": {"tungstenite": dict(TUNGSTENITE_FORK_PATCH)},
-    "ssh://git@github.com/openai-oss-forks/tungstenite-rs.git": {
-        "tungstenite": dict(TUNGSTENITE_FORK_PATCH)
-    },
-}
 # Each supported compile fixture, as one closed contract: the workspace packages
-# it depends on, the facade features it selects, the extra utility dependencies
-# it pins, and the `[patch]` tables its own root manifest must carry. These are
-# per fixture on purpose: `facade-consumer` is the broad public inventory and
-# still reaches the Python evaluator, while `js-embedder-consumer` is the
-# JavaScript-only embedding workflow and carries no patch table at all.
+# it depends on, the facade features it selects and the extra utility
+# dependencies it pins. These are per fixture on purpose: `facade-consumer` is
+# the broad public inventory and still reaches the Python evaluator, while
+# `js-embedder-consumer` is the JavaScript-only embedding workflow.
 SUPPORTED_COMPILE_FIXTURES = {
     "agent-consumer": {
         "description": (
@@ -119,7 +105,6 @@ SUPPORTED_COMPILE_FIXTURES = {
         "dependencies": ("plakous-agent",),
         "facade-features": (),
         "extra-dependencies": {},
-        "patches": {},
     },
     "facade-consumer": {
         "description": (
@@ -145,7 +130,6 @@ SUPPORTED_COMPILE_FIXTURES = {
             },
             "uuid": "1",
         },
-        "patches": TUNGSTENITE_PATCH_TABLES,
     },
     "js-embedder-consumer": {
         "description": (
@@ -161,7 +145,6 @@ SUPPORTED_COMPILE_FIXTURES = {
                 "features": ["rt-multi-thread", "macros", "sync", "time"],
             },
         },
-        "patches": {},
     },
     "model-consumer": {
         "description": (
@@ -170,7 +153,6 @@ SUPPORTED_COMPILE_FIXTURES = {
         "dependencies": ("plakous-model",),
         "facade-features": (),
         "extra-dependencies": {},
-        "patches": {},
     },
     "tools-consumer": {
         "description": (
@@ -180,7 +162,6 @@ SUPPORTED_COMPILE_FIXTURES = {
         "dependencies": ("plakous-model", "plakous-tools"),
         "facade-features": (),
         "extra-dependencies": {},
-        "patches": {},
     },
 }
 SUPPORTED_COMPILE_FIXTURE_DEPENDENCIES = {
@@ -227,11 +208,6 @@ def supported_compile_fixtures(workspace: Workspace) -> dict[str, dict[str, Any]
                 entry["features"] = list(contract["facade-features"])
             manifest["dependencies"][dependency] = entry
         manifest["dependencies"].update(contract["extra-dependencies"])
-        if contract["patches"]:
-            manifest["patch"] = {
-                url: {name: dict(entry) for name, entry in table.items()}
-                for url, table in contract["patches"].items()
-            }
         contracts[fixture_name] = {
             "manifest": manifest,
             "files": SUPPORTED_COMPILE_FIXTURE_FILES[fixture_name],

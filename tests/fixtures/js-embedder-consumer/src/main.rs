@@ -1,10 +1,9 @@
-//! The JavaScript-only embedding workflow, with no `[patch]` table at all.
+//! The JavaScript-only embedding workflow.
 //!
 //! This fixture exists to pin one acceptance property: a fresh external
 //! consumer that wants JavaScript composition and the JavaScript sidecar copies this
-//! manifest and nothing else. There is no `[patch]` section above, because the
-//! `composition` feature reaches neither the Monty worker's `tungstenite` fork
-//! nor any Codex git dependency.
+//! manifest and nothing else. The `composition` feature reaches neither the
+//! Monty worker graph nor any git dependency.
 //!
 //! It also shows that the composition surface is fully nameable without the
 //! subscription, credential, and HTTP machinery that used to come with it.

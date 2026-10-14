@@ -397,9 +397,9 @@ It uses public facade APIs for a custom model and tool, cancellation, durable
 session reopening and shutdown, without repository test-support APIs. The
 lifecycle has a 30-second bound. It proves the public workflow, not live
 provider/auth admission, an OS sandbox, or any evaluator. The
-`facade-consumer` fixture selects every feature and still requires the
-source-checkout `tungstenite` patches (§06); the JavaScript-only fixture
-requires none. Neither is a registry-distribution proof.
+`facade-consumer` fixture selects every feature and the JavaScript-only fixture
+the `composition` workflow; neither needs a `[patch]` table (§06). Neither is a
+registry-distribution proof.
 
 ### Claude continuity regressions
 

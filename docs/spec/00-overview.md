@@ -165,9 +165,9 @@ agent, application, construction, sessions, model, tools, profiles, `VERSION` â€
 
 Evaluator capability and subscription authentication are separate choices. A
 Custom-model embedder that wants JavaScript selects `composition` and links
-neither `plakous-auth` nor `plakous-http` nor the Python evaluator. Because the
-Monty closure is what reaches the `tungstenite` fork, that consumer also needs
-no `[patch]` table; chapter 06 states which tables remain for which workflow.
+neither `plakous-auth` nor `plakous-http` nor the Python evaluator. No facade
+consumer needs a `[patch]` table; chapter 06 states the one that building the
+Monty worker package needs.
 
 ## Persisted versions
 
