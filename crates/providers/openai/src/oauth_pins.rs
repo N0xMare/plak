@@ -28,8 +28,8 @@ pub(crate) const CODEX_PROFILE: CompatibilityProfilePins = CompatibilityProfileP
     source_locator: None,
     notice_revision: "openai.codex.compat.notice.2026-07-31.r1",
     kill_switch_revision: "openai.codex.compat.kill.2026-07-31.r1",
-    reviewed_at_unix: 1_791_072_000,
-    expires_at_unix: 1_793_750_399,
+    reviewed_at_unix: 1_791_936_000,
+    expires_at_unix: 1_794_614_399,
     killed: false,
 };
 
@@ -70,8 +70,8 @@ mod tests {
                 source_locator: None,
                 notice_revision: "openai.codex.compat.notice.2026-07-31.r1",
                 kill_switch_revision: "openai.codex.compat.kill.2026-07-31.r1",
-                reviewed_at_unix: 1_791_072_000,
-                expires_at_unix: 1_793_750_399,
+                reviewed_at_unix: 1_791_936_000,
+                expires_at_unix: 1_794_614_399,
                 killed: false,
             }
         );

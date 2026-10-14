@@ -2373,7 +2373,7 @@ Responses Lite, parallel calls, service tiers). The 0.160.1 client also sends
 `x-codex-beta-features: remote_compaction_v2` on ordinary turns; Plak sends that
 header only on a remote-compaction request, because it claims a capability
 only that request uses. Its compiled compatibility
-profile was reviewed on 2026-10-04 and expires at 2026-11-03T23:59:59Z; an
+profile was reviewed on 2026-10-14 and expires at 2026-11-13T23:59:59Z; an
 acceptance recorded before the review date is not current, so the operator
 accepts the notice again. Authenticated catalog
 `use_responses_lite` evidence selects the request mode and binds its identity.
@@ -2773,7 +2773,7 @@ final usage chunk that repeats `finish_reason`, `reasoning` and
 `reasoning_details`, tool calls, and the pre-commit JSON and mid-stream
 `error` shapes were last reviewed against the public
 [OpenRouter docs](https://openrouter.ai/docs/api_reference/streaming) on
-2026-10-01, and the pin expires at 2026-10-31T00:00:00Z. The expiry is enforced
+2026-10-14, and the pin expires at 2026-11-13T00:00:00Z. The expiry is enforced
 at runtime exactly like a compiled subscription profile's: target construction
 and every runtime-authority revalidation at or after it refuse the route with
 "OpenRouter Chat compatibility profile is not currently admissible"

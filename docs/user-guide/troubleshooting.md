@@ -527,7 +527,7 @@ date (shown in the message and by `plak status`) or was withdrawn. Logging in
 again cannot renew it; build a newer plak.
 
 The built-in OpenRouter Chat dialect is pinned the same way: from its expiry
-(2026-10-31 UTC for this build) OpenRouter sessions refuse with `OpenRouter Chat
+(2026-11-13 UTC for this build) OpenRouter sessions refuse with `OpenRouter Chat
 compatibility profile is not currently admissible`. Build a newer plak.
 
 ## `native subscription storage is unsafe: <path> …`

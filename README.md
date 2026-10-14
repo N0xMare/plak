@@ -37,7 +37,7 @@ route. Use at your own risk.
 
 A supported route is not a promise that every model, effort level, or usage scenario works reliably. Testing has observed model refusals, incorrect tool outputs, and provider streaming failures although in many cases its been reliable for me in exhaustive testing. The [live status page](tests/live/STATUS.md) records the current live qualification state.
 
-Built-in compatibility pins carry review expiry dates: the Codex subscription profile expires 2026-11-03 and the OpenRouter Chat dialect 2026-10-31 (UTC). After its date a build refuses that route until a newer build renews the review; see [troubleshooting](docs/user-guide/troubleshooting.md) ("native compatibility profile compiled into this build is inactive").
+Built-in compatibility pins carry review expiry dates: the Codex subscription profile and the OpenRouter Chat dialect both expire 2026-11-13 (UTC). After its date a build refuses that route until a newer build renews the review; see [troubleshooting](docs/user-guide/troubleshooting.md) ("native compatibility profile compiled into this build is inactive").
 
 ## Using Plak
 

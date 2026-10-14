@@ -67,8 +67,8 @@ const OPENROUTER_CHAT_AUTH_PROFILE: &str = "openrouter.platform-api-key";
 const OPENROUTER_CHAT_AUTH_REVISION: &str = "openrouter-platform-api-key-v1";
 const OPENROUTER_CHAT_AUTHORITY_CLASS: &str = "platform-api-key";
 const OPENROUTER_CHAT_CREDENTIAL_SELECTION: &str = "openrouter-product-key-generation";
-pub(crate) const OPENROUTER_CHAT_REVIEWED_AT: u64 = 1_790_812_800;
-pub(crate) const OPENROUTER_CHAT_REVIEW_EXPIRES_AT: u64 = 1_793_404_800;
+pub(crate) const OPENROUTER_CHAT_REVIEWED_AT: u64 = 1_791_936_000;
+pub(crate) const OPENROUTER_CHAT_REVIEW_EXPIRES_AT: u64 = 1_794_528_000;
 
 /// Provider-owned exact reasoning-detail replay selection.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -2717,7 +2717,7 @@ mod tests {
     #[test]
     fn reviewed_chat_pin_bounds_authority_and_refuses_after_expiry()
     -> Result<(), Box<dyn std::error::Error>> {
-        assert_eq!(OPENROUTER_CHAT_REVIEW_EXPIRES_AT, 1_793_404_800);
+        assert_eq!(OPENROUTER_CHAT_REVIEW_EXPIRES_AT, 1_794_528_000);
         let expiry = Timestamp::new(OPENROUTER_CHAT_REVIEW_EXPIRES_AT, 0)?;
         let before = Timestamp::new(OPENROUTER_CHAT_REVIEW_EXPIRES_AT - 60, 0)?;
         let short = Timestamp::new(OPENROUTER_CHAT_REVIEW_EXPIRES_AT - 30, 0)?;
