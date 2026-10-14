@@ -39,6 +39,7 @@ pub(super) mod jobs_carry_fixture;
 pub(super) mod landed_round_abandonment;
 mod long_turn_compaction;
 mod native_capacity_tests;
+mod observation_budget;
 mod process_notices;
 #[path = "../provider_outcome_tests.rs"]
 mod provider_outcome_tests;

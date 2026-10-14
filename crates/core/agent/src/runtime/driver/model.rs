@@ -8,7 +8,7 @@ use crate::runtime::driver::model_cleanup::{
     join_cancelled_control_start, join_cancelled_control_stream,
 };
 use crate::runtime::driver::{Driver, ModelOperationResult, ModelStartAdmission};
-use crate::runtime::observation::budget::observation_bytes_from_headroom;
+use crate::runtime::observation::budget::observation_bytes_for_sent_status;
 use crate::runtime::observation::model_event_stamps_ttft;
 use crate::runtime::terminal::{agent_terminal_status, cancelled_error};
 use crate::runtime::{OperationId, PromptCommand};
@@ -409,13 +409,11 @@ impl Driver {
         self.observation_budget = match sent_status {
             Ok(status) => match status.kind() {
                 ContextStatusKind::Fits { headroom } => {
-                    let derived = if status.uses_unanchored_estimate() {
-                        0
-                    } else {
-                        observation_bytes_from_headroom(*headroom)
-                    };
                     crate::runtime::observation::budget::ObservationBudget::new(
-                        derived,
+                        observation_bytes_for_sent_status(
+                            *headroom,
+                            status.uses_unanchored_estimate(),
+                        ),
                         self.config.observation_budget_cap_bytes,
                     )
                 }

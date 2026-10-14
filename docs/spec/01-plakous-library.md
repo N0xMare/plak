@@ -686,7 +686,7 @@ bytes: about 8% of the effective input window expressed as text bytes at four
 bytes per token, bounded to 32-256 KiB. This is a product cap, not admission
 authority or a token-to-byte conversion for headroom. The effective allowance
 is the smaller of this cap and L0's existing headroom-derived byte allowance;
-an unanchored delegated estimate still starts at zero. The cap resets each
+an unanchored delegated estimate starts at half its estimated allowance. The cap resets each
 model round, is derived from the effective capacity contract at construction
 and rebind, and is not a user configuration key. A cap-only cut does not signal
 capacity pressure or compel compaction.
@@ -711,9 +711,13 @@ The observation omits the subject when the tool set none. L0 does not inspect
 result text for topology receipts.
 The item-delta admission bound charges one token per UTF-8 wire byte, so this
 allowance is the remaining headroom in **bytes**, not headroom multiplied by four.
-A delegated unanchored estimate has no guaranteed observation allowance at
-preparation. A completed matching response with positive input usage refreshes
-that allowance before any tool results in the round are canonicalized.
+A delegated unanchored estimate grants half of the allowance derived from its
+estimated headroom at preparation: the estimate is not a guaranteed bound, so
+the halving leaves room for the error a provider may still refuse, while a
+route or round that reports no usage still keeps ordinary tool results instead
+of withholding all of them and forcing a pressure fold. A completed matching
+response with positive input usage refreshes that allowance before any tool
+results in the round are canonicalized.
 Committed compaction can create room for later calls. The exhaustion message
 says output was withheld for context capacity, the harness compacts automatically
 when enabled, and to retry narrower afterwards; it never hands recovery to the
@@ -5610,8 +5614,9 @@ A matching completed-response anchor re-derives the observation allowance before
 that round canonicalizes tool results; this allowance is sealed in its frames.
 Headroom is in tokens: after subtracting the 4096-token reserve, the byte
 allowance equals the usable tokens (saturating). Anchored item-delta and
-whole-wire admission charge one token per UTF-8 wire byte; the unanchored
-`ceil(UTF-8 bytes/4)` estimate is not an observation allowance.
+whole-wire admission charge one token per UTF-8 wire byte. A request admitted
+only on the unanchored `ceil(UTF-8 bytes/4)` estimate grants half of the
+allowance its estimated headroom derives (§4).
 Each result is additionally capped at the canonical semantic-JSON maximum
 string size minus 4096 bytes of envelope reserve, using the existing exact
 omitted-bytes clipping marker. Every cut fits its bound; only a bound below

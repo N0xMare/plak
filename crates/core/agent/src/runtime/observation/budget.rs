@@ -97,6 +97,21 @@ pub(in crate::runtime) fn observation_bytes_from_headroom(headroom: ContextHeadr
     usize::try_from(usable).unwrap_or(usize::MAX)
 }
 
+/// The allowance a prepared call grants. An unanchored estimate delegated the
+/// fit to the provider, so it grants only half of its estimated headroom until
+/// a completed response's usage refreshes the allowance.
+pub(in crate::runtime) fn observation_bytes_for_sent_status(
+    headroom: ContextHeadroom,
+    unanchored_estimate: bool,
+) -> usize {
+    let bytes = observation_bytes_from_headroom(headroom);
+    if unanchored_estimate {
+        bytes / 2
+    } else {
+        bytes
+    }
+}
+
 const OBSERVATION_OMITTED: &str = prompts::PLAKOUS_RUNTIME_OBSERVATION_OMITTED;
 
 /// Share of a clipped body kept from its head; the rest is kept from its tail.
@@ -442,12 +457,12 @@ mod tests {
         let mut tight = super::ObservationBudget::new(10_000, Some(82_688));
         assert!(tight.clip_text(&"c".repeat(50_000)).len() <= 10_000);
         assert!(tight.capacity_exhausted());
-        let mut unanchored = super::ObservationBudget::new(0, Some(82_688));
+        let mut exhausted = super::ObservationBudget::new(0, Some(82_688));
         assert_eq!(
-            unanchored.clip_text(&"c".repeat(50_000)),
+            exhausted.clip_text(&"c".repeat(50_000)),
             super::OBSERVATION_EXHAUSTED
         );
-        assert!(unanchored.capacity_exhausted());
+        assert!(exhausted.capacity_exhausted());
     }
 
     #[test]
@@ -509,6 +524,21 @@ mod tests {
             input: QualifiedTokens::Exact(remaining_tokens),
         });
         assert_eq!(bytes, 16_000);
+    }
+
+    #[test]
+    fn an_unanchored_estimate_grants_half_its_estimated_headroom() {
+        let headroom = ContextHeadroom::Shared(QualifiedTokens::Exact(
+            OBSERVATION_BUDGET_RESERVE_TOKENS + 64_000,
+        ));
+        assert_eq!(
+            super::observation_bytes_for_sent_status(headroom, false),
+            64_000
+        );
+        assert_eq!(
+            super::observation_bytes_for_sent_status(headroom, true),
+            32_000
+        );
     }
 
     #[test]
