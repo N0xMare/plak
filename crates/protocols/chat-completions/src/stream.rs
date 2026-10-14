@@ -258,9 +258,16 @@ pub struct ChatStreamLimits {
     arguments: NonZeroUsize,
     reasoning_details: NonZeroUsize,
     reasoning_detail_bytes: NonZeroUsize,
+    total_stream_bytes: NonZeroUsize,
 }
 impl ChatStreamLimits {
-    /// Creates one exact limit set.
+    /// Creates one exact limit set. `total_stream_bytes` bounds every wire byte,
+    /// SSE comments included, so it also bounds the aggregate retained output and
+    /// tool arguments across all calls.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "each bound is an independent exact limit"
+    )]
     pub const fn new(
         line: NonZeroUsize,
         event: NonZeroUsize,
@@ -268,6 +275,7 @@ impl ChatStreamLimits {
         output: NonZeroUsize,
         calls: NonZeroUsize,
         arguments: NonZeroUsize,
+        total_stream_bytes: NonZeroUsize,
     ) -> Self {
         Self {
             line,
@@ -276,6 +284,7 @@ impl ChatStreamLimits {
             output,
             calls,
             arguments,
+            total_stream_bytes,
             reasoning_details: match NonZeroUsize::new(128) {
                 Some(value) => value,
                 None => NonZeroUsize::MIN,
@@ -308,6 +317,7 @@ impl Default for ChatStreamLimits {
             NonZeroUsize::new(16 * 1024 * 1024).unwrap_or(NonZeroUsize::MIN),
             NonZeroUsize::new(128).unwrap_or(NonZeroUsize::MIN),
             NonZeroUsize::new(16 * 1024 * 1024).unwrap_or(NonZeroUsize::MIN),
+            NonZeroUsize::new(64 * 1024 * 1024).unwrap_or(NonZeroUsize::MIN),
         )
     }
 }
@@ -416,6 +426,7 @@ pub struct ChatStreamProjector {
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGenerator>,
     sse: SseDecoder,
+    wire_bytes: usize,
     event_count: usize,
     response_id: Option<String>,
     model: Option<ModelId>,
@@ -458,6 +469,7 @@ impl ChatStreamProjector {
                 max_line_bytes: limits.line.get(),
                 max_event_bytes: limits.event.get(),
             }),
+            wire_bytes: 0,
             event_count: 0,
             response_id: None,
             model: None,
@@ -504,6 +516,13 @@ impl ChatStreamProjector {
             return self.fail(
                 ChatStreamErrorKind::InvalidResponse,
                 "bytes arrived after [DONE]",
+            );
+        }
+        self.wire_bytes = self.wire_bytes.saturating_add(bytes.len());
+        if self.wire_bytes > self.binding.limits.total_stream_bytes.get() {
+            return self.fail(
+                ChatStreamErrorKind::ResourceLimit,
+                "Chat stream exceeded its total byte bound",
             );
         }
         let frames = self.sse.push(bytes).map_err(|error| {
@@ -570,10 +589,10 @@ impl ChatStreamProjector {
                 "Chat stream ended without [DONE]",
             );
         }
-        self.terminal.clone().ok_or_else(|| {
+        self.terminal.take().ok_or_else(|| {
             err(
-                ChatStreamErrorKind::Incomplete,
-                "Chat terminal aggregate is absent",
+                ChatStreamErrorKind::InvalidResponse,
+                "Chat terminal aggregate was already taken or never formed",
             )
         })
     }
@@ -2174,6 +2193,13 @@ mod tests {
         let terminal = projector.finish().expect("terminal");
         assert_eq!(terminal.finish().wire(), "stop");
         assert_eq!(terminal.finish().canonical(), FinishReason::Stop);
+        assert_eq!(
+            projector
+                .finish()
+                .expect_err("terminal moves out once")
+                .kind(),
+            ChatStreamErrorKind::InvalidResponse
+        );
         let response = terminal.response();
         assert_eq!(response.response_id(), Some("response-1"));
         assert_eq!(response.provider_request_id(), Some("request-head-1"));
@@ -2860,7 +2886,8 @@ mod tests {
     #[test]
     fn enforces_output_argument_event_and_sse_bounds() {
         let nz = |value| NonZeroUsize::new(value).expect("nonzero");
-        let output_limits = ChatStreamLimits::new(nz(1024), nz(4096), nz(20), nz(1), nz(2), nz(2));
+        let output_limits =
+            ChatStreamLimits::new(nz(1024), nz(4096), nz(20), nz(1), nz(2), nz(2), nz(1 << 20));
         let mut output = projector_with_limits(output_limits);
         push_json(&mut output, role());
         assert_eq!(
@@ -2873,17 +2900,66 @@ mod tests {
             ChatStreamErrorKind::ResourceLimit
         );
 
-        let argument_limits =
-            ChatStreamLimits::new(nz(1024), nz(4096), nz(20), nz(100), nz(1), nz(2));
+        let argument_limits = ChatStreamLimits::new(
+            nz(1024),
+            nz(4096),
+            nz(20),
+            nz(100),
+            nz(1),
+            nz(2),
+            nz(1 << 20),
+        );
         let mut arguments = projector_with_limits(argument_limits);
         push_json(&mut arguments, role());
         assert_eq!(arguments.push(&data(&chunk(json!([{"index":0,"delta":{"tool_calls":[{"index":0,"id":"a","type":"function","function":{"name":"lookup","arguments":"{}x"}}]},"finish_reason":null}])))).expect_err("argument bound").kind(), ChatStreamErrorKind::ResourceLimit);
 
-        let line_limits = ChatStreamLimits::new(nz(4), nz(32), nz(1), nz(10), nz(1), nz(10));
+        let line_limits =
+            ChatStreamLimits::new(nz(4), nz(32), nz(1), nz(10), nz(1), nz(10), nz(1 << 20));
         assert_eq!(
             projector_with_limits(line_limits)
                 .push(b"data: too long")
                 .expect_err("line bound")
+                .kind(),
+            ChatStreamErrorKind::ResourceLimit
+        );
+    }
+
+    #[test]
+    fn total_stream_byte_bound_counts_comments_and_spans_tool_calls() {
+        let nz = |value| NonZeroUsize::new(value).expect("nonzero");
+        let limits = ChatStreamLimits::new(
+            nz(1024),
+            nz(4096),
+            nz(20),
+            nz(1024),
+            nz(4),
+            nz(1024),
+            nz(600),
+        );
+        let mut comments = projector_with_limits(limits);
+        let keepalive = b": keepalive\n\n".repeat(50);
+        assert!(keepalive.len() > 600);
+        assert_eq!(
+            comments
+                .push(&keepalive)
+                .expect_err("comment trickle exceeds the total byte bound")
+                .kind(),
+            ChatStreamErrorKind::ResourceLimit
+        );
+
+        let mut calls = projector_with_limits(limits);
+        push_json(&mut calls, role());
+        let mut error = None;
+        for index in 0..4 {
+            let pushed = calls.push(&data(&chunk(json!([{"index":0,"delta":{"tool_calls":[{"index":index,"id":format!("c{index}"),"type":"function","function":{"name":"lookup","arguments":"{}"}}]},"finish_reason":null}]))));
+            if let Err(failure) = pushed {
+                error = Some(failure);
+                break;
+            }
+        }
+        assert_eq!(
+            error
+                .expect("aggregate tool calls exceed the total byte bound")
                 .kind(),
             ChatStreamErrorKind::ResourceLimit
         );

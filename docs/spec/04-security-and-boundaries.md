@@ -45,6 +45,12 @@ fails the operation without accepting partial canonical output. Count capacity
 does not relax JSON validation, sequence or lifecycle correlation, cancellation,
 or the operation deadline.
 
+Chat Completions SSE has the same shape of bounds: by default 100,000 data
+events, a 1 MiB line, a 4 MiB event, 16 MiB of retained output, 128 tool calls
+of at most 16 MiB of arguments each, and 64 MiB of total wire bytes. The total
+counts every pushed byte, SSE comments included, so it also bounds the
+aggregate output and arguments retained across all calls.
+
 An explicit Responses `end_turn: false` is validated as a boolean terminal
 signal before projection. It cannot grant a tool or another root turn. The
 same bounded root turn commits each complete intermediate response and its
