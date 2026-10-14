@@ -2,7 +2,7 @@
 
 use crate::manifest::RuntimeCheckpoint;
 use crate::runtime::cleanup::error_with_cleanup_disposition;
-use crate::runtime::continuation::{runtime_component, terminal_record_at_checkpoint};
+use crate::runtime::continuation::runtime_component;
 use crate::runtime::control::usage_error;
 use crate::runtime::{
     OperationId, PreparedTerminalLifecycle, TerminalProposal, TerminalTransitionPlan,
@@ -1157,14 +1157,9 @@ pub(in crate::runtime) struct PendingTerminalResultRecord {
 }
 
 /// Whether reopening this checkpoint would close an unfinished turn itself.
-///
-/// A caller that holds a locator behind the durable head uses this to tell the
-/// two reasons apart. A head a reopen closes by abandonment is one it is
-/// entitled to adopt, because the record only lagged. A head carrying a
-/// definite terminal result the product record never learned about is not, and
-/// keeps its refusal: advancing to it would skip that result silently.
+#[cfg(test)]
 #[must_use]
-pub fn checkpoint_recovers_an_abandoned_turn(checkpoint: &RuntimeCheckpoint) -> bool {
+pub(crate) fn checkpoint_recovers_an_abandoned_turn(checkpoint: &RuntimeCheckpoint) -> bool {
     crate::runtime::durable::turn_recovery::reopen_abandons_working_turn(checkpoint)
 }
 
@@ -1172,7 +1167,8 @@ pub fn checkpoint_recovers_an_abandoned_turn(checkpoint: &RuntimeCheckpoint) -> 
 ///
 /// # Errors
 /// Returns typed integrity errors from matching local terminal evidence.
-pub fn checkpoint_finalizes_root_turn(
+#[cfg(test)]
+pub(crate) fn checkpoint_finalizes_root_turn(
     checkpoint: &RuntimeCheckpoint,
     command_id: &CommandId,
 ) -> Result<bool, AgentError> {
@@ -1255,17 +1251,15 @@ pub(in crate::runtime) fn completed_turn_result(
 /// The root terminal result of `command_id` when this checkpoint is the
 /// quiescent checkpoint the runtime published it at, and `None` otherwise.
 ///
-/// A host whose record committed that command's delivery but holds a locator
-/// behind this head uses it to tell a lost terminal publication apart from any
-/// other advance: when it is `Some`, the head is exactly the locator that
-/// publication would have recorded, nothing was committed after it, and the
-/// result is the one the host never published.
+/// When it is `Some`, nothing was committed after the publication, which tells
+/// a lost terminal publication apart from any other advance.
 ///
 /// # Errors
 ///
 /// Returns a session error when the checkpoint names that terminal but its
 /// command or result record is inconsistent.
-pub fn checkpoint_root_terminal_result(
+#[cfg(test)]
+pub(crate) fn checkpoint_root_terminal_result(
     checkpoint: &Arc<RuntimeCheckpoint>,
     command_id: &CommandId,
 ) -> Result<Option<TurnResult>, AgentError> {
@@ -1275,7 +1269,8 @@ pub fn checkpoint_root_terminal_result(
     if !published_here {
         return Ok(None);
     }
-    let terminal = terminal_record_at_checkpoint(checkpoint, command_id)?;
+    let terminal =
+        crate::runtime::continuation::terminal_record_at_checkpoint(checkpoint, command_id)?;
     if terminal.checkpoint_id != checkpoint.id()
         || manifest.canonical().history().identity() != terminal.conversation_identity
     {
@@ -1287,6 +1282,7 @@ pub fn checkpoint_root_terminal_result(
     terminal_turn_result(&terminal, Arc::clone(checkpoint)).map(Some)
 }
 
+#[cfg(test)]
 fn terminal_published_here(
     ledger: &crate::RuntimeOperationLedger,
     checkpoint_id: CheckpointId,

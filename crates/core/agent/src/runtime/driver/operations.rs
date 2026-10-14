@@ -424,9 +424,7 @@ impl Driver {
             let manifest = authority.manifest();
             let effect = manifest
                 .ledger()
-                .operations()
-                .into_iter()
-                .find(|record| record.operation_id() == effect_operation.0)
+                .operation(effect_operation.0)
                 .ok_or_else(|| {
                     AgentError::new(
                         AgentErrorKind::Internal,
@@ -904,9 +902,7 @@ impl Driver {
             }
             let record = manifest
                 .ledger()
-                .operations()
-                .into_iter()
-                .find(|record| record.operation_id() == root_operation.0)
+                .operation(root_operation.0)
                 .ok_or_else(|| {
                     AgentError::new(
                         AgentErrorKind::Internal,
@@ -1504,9 +1500,7 @@ impl Driver {
         };
         for operation_id in required {
             let evidence = ledger
-                .operations()
-                .into_iter()
-                .find(|record| record.operation_id() == operation_id.0)
+                .operation(operation_id.0)
                 .and_then(|record| match record.state() {
                     DurableOperationState::Completed(evidence)
                     | DurableOperationState::ProvenNotDispatched(evidence)
@@ -1875,9 +1869,7 @@ impl Driver {
             .checkpoint()
             .manifest()
             .ledger()
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == operation_id.0)
+            .operation(operation_id.0)
             .map(|record| record.state().clone())
             .ok_or_else(|| {
                 AgentError::new(
@@ -1924,9 +1916,7 @@ impl Driver {
         let record = authority
             .manifest()
             .ledger()
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == operation_id.0)
+            .operation(operation_id.0)
             .ok_or_else(|| {
                 AgentError::new(
                     AgentErrorKind::Internal,
@@ -1963,9 +1953,7 @@ impl Driver {
             let manifest = authority.manifest();
             let evidence = manifest
                 .ledger()
-                .operations()
-                .into_iter()
-                .find(|record| record.operation_id() == continuation.0)
+                .operation(continuation.0)
                 .and_then(|record| match record.state() {
                     DurableOperationState::ContinuationRequired(evidence) => Some(evidence),
                     _ => None,

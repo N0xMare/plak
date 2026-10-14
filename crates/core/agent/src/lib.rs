@@ -203,10 +203,8 @@ pub mod internal {
         RUNTIME_EXECUTOR_STACK_BYTES, RecoveredTurnHandle, ReresolvedModel, Turn,
         TurnContextCapacity, TurnRecoveryOperationId, TurnResult, TurnResultHandle,
         TurnResultOutcome, TurnSubmission, WeakAgent, abandon_and_release_many,
-        checkpoint_closes_on_reopen, checkpoint_finalizes_root_turn,
-        checkpoint_recovers_an_abandoned_turn, checkpoint_recovery_verdict,
-        checkpoint_root_terminal_result, close_admission, compile_explicit_runtime_profile,
-        lease_released, shutdown_for_transfer,
+        checkpoint_closes_on_reopen, checkpoint_recovery_verdict, close_admission,
+        compile_explicit_runtime_profile, lease_released, shutdown_for_transfer,
     };
     pub use crate::session::{
         AcquireBranch, ArchiveReceipt, ArchiveSession, BranchHead, BranchLease, BranchRevision,

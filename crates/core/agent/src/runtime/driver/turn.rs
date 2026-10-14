@@ -605,9 +605,7 @@ impl Driver {
         let authority = self.authority.checkpoint();
         let ledger = authority.manifest().ledger();
         let provider = ledger
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == provider_operation.0)
+            .operation(provider_operation.0)
             .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
         if operation_turn_id(provider) != Some(turn_id)
             || !matches!(
@@ -623,9 +621,7 @@ impl Driver {
         ));
         if let Some(prior_continuation) = prior_continuation {
             let prior = ledger
-                .operations()
-                .into_iter()
-                .find(|record| record.operation_id() == prior_continuation.0)
+                .operation(prior_continuation.0)
                 .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
             if !matches!(
                 prior.state(),

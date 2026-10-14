@@ -80,11 +80,13 @@ mod context;
 mod terminal;
 #[cfg(test)]
 use durable::checkpoint_can_abandon_compaction;
+pub use terminal::checkpoint_closes_on_reopen;
 pub(crate) use terminal::checkpoint_retained_history;
 pub(crate) use terminal::valid_terminal_enrichment;
-pub use terminal::{
-    checkpoint_closes_on_reopen, checkpoint_finalizes_root_turn,
-    checkpoint_recovers_an_abandoned_turn, checkpoint_root_terminal_result,
+#[cfg(test)]
+pub(crate) use terminal::{
+    checkpoint_finalizes_root_turn, checkpoint_recovers_an_abandoned_turn,
+    checkpoint_root_terminal_result,
 };
 
 mod agent;

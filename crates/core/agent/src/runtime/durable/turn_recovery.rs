@@ -159,6 +159,7 @@ impl RootClosure {
         }
     }
 
+    #[cfg(test)]
     pub(in crate::runtime) fn terminal(&self) -> Option<&LocalTerminalRecoveryFold> {
         match self {
             Self::FinalizeRecorded { terminal, .. } | Self::Complete(terminal) => Some(terminal),
@@ -309,6 +310,7 @@ pub(crate) fn recovery_verdict_refuses(checkpoint: &RuntimeCheckpoint) -> bool {
 
 /// Whether a newly opened owner abandons this head's unfinished turn, which
 /// carries no definite result a record could have missed.
+#[cfg(test)]
 pub(in crate::runtime) fn reopen_abandons_working_turn(checkpoint: &RuntimeCheckpoint) -> bool {
     match recovery_verdict(RecoveryEvidence::head(checkpoint)) {
         RecoveryVerdict::Close(closure) => matches!(

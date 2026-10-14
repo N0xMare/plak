@@ -98,7 +98,11 @@ pub(in crate::runtime) async fn command_feed_sequences(
             branch.store_timeouts().operation,
             branch.store().read_feed(
                 authority.manifest().topology().session_id,
-                FeedSeq::new(seq.get() - 1),
+                FeedSeq::new(
+                    seq.get()
+                        .checked_sub(1)
+                        .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?,
+                ),
                 NonZeroUsize::MIN,
             ),
         )
@@ -119,7 +123,11 @@ pub(in crate::runtime) async fn command_feed_sequences(
         }
         collect_sequences(record.facts(), seq, &mut wanted, &mut sequences);
         checkpoint = parent;
-        upper = Some(seq.get() - 1);
+        upper = Some(
+            seq.get()
+                .checked_sub(1)
+                .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?,
+        );
     }
     Ok(sequences)
 }
@@ -154,7 +162,11 @@ async fn retained_feed_ancestry(
     };
     let mut retained_from = 1;
     while !wanted.is_empty() && upper >= retained_from {
-        let lower = upper.saturating_sub(256).max(retained_from - 1);
+        let lower = upper.saturating_sub(256).max(
+            retained_from
+                .checked_sub(1)
+                .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?,
+        );
         let mut after = lower;
         loop {
             let limit = NonZeroUsize::new(usize::try_from(upper - after).unwrap_or(256).min(256))
@@ -209,7 +221,14 @@ async fn retained_feed_ancestry(
                 };
                 collect_sequences(record.facts(), record.header().seq, wanted, sequences);
                 checkpoint = parent;
-                next_upper = Some(record.header().seq.get() - 1);
+                next_upper = Some(
+                    record
+                        .header()
+                        .seq
+                        .get()
+                        .checked_sub(1)
+                        .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?,
+                );
                 if wanted.is_empty() {
                     return Ok(());
                 }

@@ -69,9 +69,7 @@ pub(super) fn decode_await_effect_decision_continuation(
     }
     let decision_record = manifest
         .ledger()
-        .operations()
-        .into_iter()
-        .find(|record| record.operation_id() == decision_obligations[0].operation_id())
+        .operation(decision_obligations[0].operation_id())
         .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
     let DurableOperationState::DecisionRequired(pending) = decision_record.state() else {
         return Err(AgentError::from_store(SessionStoreError::corrupt()));
@@ -131,9 +129,7 @@ pub(super) fn decode_await_effect_decision_continuation(
         .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
     let root_operation = manifest
         .ledger()
-        .operations()
-        .into_iter()
-        .find(|record| record.operation_id() == frame.root.operation_id.0)
+        .operation(frame.root.operation_id.0)
         .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
     if root_command.turn_id() != Some(*turn_id)
         || root_command.binding() != frame.root.binding
@@ -161,9 +157,7 @@ pub(super) fn decode_await_effect_decision_continuation(
     }
     let provider_record = manifest
         .ledger()
-        .operations()
-        .into_iter()
-        .find(|record| record.operation_id() == frame.provider_operation.0)
+        .operation(frame.provider_operation.0)
         .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
     if !matches!(
         provider_record.kind(),
@@ -186,9 +180,7 @@ pub(super) fn decode_await_effect_decision_continuation(
             } if index < pending_index => {
                 let operation = manifest
                     .ledger()
-                    .operations()
-                    .into_iter()
-                    .find(|record| record.operation_id() == operation_id.0)
+                    .operation(operation_id.0)
                     .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
                 if !matches!(
                     operation.kind(),
@@ -221,9 +213,7 @@ pub(super) fn decode_await_effect_decision_continuation(
     if let Some(operation) = frame.hosted_continuation_operation {
         let hosted = manifest
             .ledger()
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == operation.0)
+            .operation(operation.0)
             .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
         if !matches!(
             (hosted.kind(), hosted.state()),
@@ -266,9 +256,7 @@ pub(in crate::runtime) fn restore_frame_plan(
     let corrupt = || AgentError::from_store(SessionStoreError::corrupt());
     let record = manifest
         .ledger()
-        .operations()
-        .into_iter()
-        .find(|record| record.operation_id() == provider_operation.0)
+        .operation(provider_operation.0)
         .ok_or_else(corrupt)?;
     if !matches!(record.kind(), DurableOperationKind::Provider { .. }) {
         return Err(corrupt());
@@ -351,9 +339,7 @@ pub(super) fn decode_hosted_continuation(
     }
     let record = manifest
         .ledger()
-        .operations()
-        .into_iter()
-        .find(|record| record.operation_id() == hosted[0].operation_id())
+        .operation(hosted[0].operation_id())
         .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
     let DurableOperationState::ContinuationRequired(component) = record.state() else {
         return Err(AgentError::from_store(SessionStoreError::corrupt()));
@@ -498,9 +484,7 @@ fn validate_hosted_frame(
         .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
     let root_operation = manifest
         .ledger()
-        .operations()
-        .into_iter()
-        .find(|record| record.operation_id() == root.operation_id.0)
+        .operation(root.operation_id.0)
         .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
     if command.turn_id() != Some(*turn_id)
         || command.binding() != root.binding
@@ -523,9 +507,7 @@ fn validate_hosted_frame(
     }
     let provider = manifest
         .ledger()
-        .operations()
-        .into_iter()
-        .find(|record| record.operation_id() == provider_operation.0)
+        .operation(provider_operation.0)
         .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
     if !matches!(provider.kind(), DurableOperationKind::Provider { root: ModelOperationRoot::Turn(id), attempt_id: candidate } if id == turn_id && *candidate == attempt_id)
     {
