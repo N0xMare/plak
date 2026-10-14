@@ -3336,7 +3336,8 @@ That release deadline (for the owner's evidence and the joiner's answer alike)
 is the cancel settle plus `HOST_SESSION_RELEASE_TIMEOUT` (60 s): a released
 runtime's shutdown joins any store call already in flight, such as idle history
 retention after the child's last turn, then commits its shutdown receipt, each
-under the runtime's 30 s store operation deadline. A slow but healthy release
+under the runtime's `DEFAULT_STORE_OPERATION_TIMEOUT` (30 s); `plakous-hosted`
+asserts at compile time that the release timeout covers both. A slow but healthy release
 is therefore waited for, not fenced, and close of a completed child keeps its
 terminal.
 After publication and slot removal the host requests the tree's background

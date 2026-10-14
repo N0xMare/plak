@@ -1344,6 +1344,12 @@ text, and they do not establish that a readiness timeout was SQLite lock
 contention. Diagnostics do not change database/WAL preservation or readiness
 and integrity authority.
 
+Each session-store call the durable runtime makes is bounded by
+`DEFAULT_STORE_OPERATION_TIMEOUT` (30 s), exported at the agent's supported root
+and in the facade's `agent` module. Hosts size release timeouts from it:
+`plakous-hosted` asserts at compile time that `HOST_SESSION_RELEASE_TIMEOUT`
+covers two such deadlines (chapter 03).
+
 ### 5.3 Write-ahead intent and effect recovery
 
 Required-mode provider calls and mutating local effects write an attempt record

@@ -221,6 +221,7 @@ pub mod agent {
         CredentialProviderLabel,
         CredentialRefreshFailureClass,
         CredentialRefreshPhase,
+        DEFAULT_STORE_OPERATION_TIMEOUT,
         Digest,
         DigestDomain,
         DurabilityAttemptKind,

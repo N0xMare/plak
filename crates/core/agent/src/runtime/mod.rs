@@ -40,7 +40,6 @@ use tokio::sync::{mpsc, watch};
 
 pub use durable::DurableSessionAddress;
 
-pub use durable::DurableBranchPublication;
 pub use durable::DurableCodeCellAbandonmentOutcome;
 pub use durable::DurableCodeCellAbandonmentRequest;
 pub use durable::DurableCompactionReceipt;
@@ -108,7 +107,9 @@ mod round_classification;
 pub use reresolution::{
     ModelReresolutionError, ModelReresolutionOperation, ModelReresolver, ReresolvedModel,
 };
-const DEFAULT_STORE_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
+/// Default deadline for one session-store call made by the durable runtime, including the
+/// shutdown receipt a session release commits. Hosts size their release timeouts from it.
+pub const DEFAULT_STORE_OPERATION_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_STORE_CLEANUP_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

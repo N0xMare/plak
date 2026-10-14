@@ -102,6 +102,13 @@ mod api_runtime;
 mod call_detail;
 mod process_environment;
 
+// A session release joins one in-flight store call and then commits the shutdown receipt, each
+// bounded by the agent's store deadline; the host's release timeout must cover both.
+const _: () = assert!(
+    plakous_host_protocol::limits::HOST_SESSION_RELEASE_TIMEOUT.as_nanos()
+        >= 2 * plakous::agent::DEFAULT_STORE_OPERATION_TIMEOUT.as_nanos()
+);
+
 pub mod platform;
 
 /// Child assignment instructions and their byte-pinned renderers.
