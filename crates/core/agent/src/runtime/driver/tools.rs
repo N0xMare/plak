@@ -176,9 +176,20 @@ impl Driver {
         let mut operations = vec![provider_operation];
         for (index, (call, result_entry_id)) in calls.iter().zip(result_entry_ids).enumerate() {
             if let Some(record) = markers.remove(&index) {
+                // A cell that yielded earlier in this batch is still live and
+                // owned here: its marker already holds the yielded result, and
+                // the root boundary terminates the cell and settles the marker.
+                let live_yield = matches!(record.state(), DurableOperationState::LocatorBound(_))
+                    && self.local_composition.as_ref().and_then(
+                        crate::runtime::composition::CompositionOwner::evaluation_operation,
+                    ) == Some(OperationId(record.operation_id()));
                 let (item, nested_operations) =
-                    self.cancelled_composition_result(call, *result_entry_id, &record)?;
-                if !matches!(record.state(), DurableOperationState::Finalized(_)) {
+                    self.cancelled_composition_result(call, *result_entry_id, &record, live_yield)?;
+                if matches!(
+                    record.state(),
+                    DurableOperationState::Completed(_)
+                        | DurableOperationState::ProvenNotDispatched(_)
+                ) {
                     operations.push(OperationId(record.operation_id()));
                 }
                 operations.extend(nested_operations);
@@ -318,10 +329,12 @@ impl Driver {
         call: &ToolCallBlock,
         result_entry_id: EntryId,
         record: &DurableOperationRecord,
+        live_yield: bool,
     ) -> Result<(ConversationItem, Vec<OperationId>), AgentError> {
         let evidence = match record.state() {
             DurableOperationState::Completed(evidence)
             | DurableOperationState::ProvenNotDispatched(evidence) => evidence,
+            DurableOperationState::LocatorBound(evidence) if live_yield => evidence,
             DurableOperationState::Finalized(_) => record
                 .transitions()
                 .iter()
@@ -362,9 +375,7 @@ impl Driver {
                     let child = ledger
                         .manifest()
                         .ledger()
-                        .operations()
-                        .into_iter()
-                        .find(|candidate| candidate.operation_id() == *child_id)
+                        .operation(*child_id)
                         .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
                     let (DurableOperationState::Completed(evidence)
                     | DurableOperationState::ProvenNotDispatched(evidence)
@@ -460,9 +471,7 @@ impl Driver {
             let child = ledger
                 .manifest()
                 .ledger()
-                .operations()
-                .into_iter()
-                .find(|candidate| candidate.operation_id() == child_id)
+                .operation(child_id)
                 .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
             match child.state() {
                 DurableOperationState::Completed(_)

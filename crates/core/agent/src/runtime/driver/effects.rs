@@ -566,8 +566,93 @@ impl Driver {
             ));
         };
         let decision_ref = decision.clone();
+        Box::pin(self.drive_effect_decision(
+            command,
+            call,
+            pending,
+            operation_id,
+            decision_ref,
+            &audit_identity,
+            self.config.effect_decision_timeout,
+        ))
+        .await
+    }
+
+    fn project_resolved_effect_decision(
+        call: &ToolCallBlock,
+        resolved: Result<EffectAuthorization, ToolRuntimeError>,
+    ) -> Result<AuthorizationOutcome, AgentError> {
+        match resolved {
+            Ok(EffectAuthorization::Allowed(authorized)) => {
+                Ok(AuthorizationOutcome::Authorized(Box::new(authorized)))
+            }
+            Ok(EffectAuthorization::Denied(denial)) => {
+                let error =
+                    ToolRuntimeError::new(ToolRuntimeErrorKind::Policy, denial.reason().as_str());
+                Ok(AuthorizationOutcome::Rejected(normalized_tool_failure(
+                    call, &error,
+                )?))
+            }
+            Ok(_) => {
+                let error = ToolRuntimeError::new(
+                    ToolRuntimeErrorKind::Policy,
+                    "resolved decision returned an unsupported authorization state",
+                );
+                Ok(AuthorizationOutcome::Rejected(normalized_tool_failure(
+                    call, &error,
+                )?))
+            }
+            Err(error) => Ok(AuthorizationOutcome::Rejected(normalized_tool_failure(
+                call, &error,
+            )?)),
+        }
+    }
+
+    pub(super) async fn drive_restored_effect_decision(
+        &mut self,
+        command: &PromptCommand,
+        call: &ToolCallBlock,
+        pending: PendingEffectDecision,
+        operation_id: OperationId,
+        decision_ref: EffectDecisionRef,
+        expires_at: Timestamp,
+    ) -> Result<AuthorizationOutcome, AgentError> {
+        let audit_identity = ToolAuditIdentity::from_invocation(pending.invocation());
+        let remaining = timestamp_remaining(self.clock.now(), expires_at);
+        Box::pin(self.drive_effect_decision(
+            command,
+            call,
+            pending,
+            operation_id,
+            decision_ref,
+            &audit_identity,
+            remaining,
+        ))
+        .await
+    }
+
+    /// Waits for the operator's answer to one pending effect decision, live or
+    /// restored. Every exit settles the decision operation, publishes the
+    /// resolution and leaves a tombstone, so later commands naming the
+    /// decision are answered the same way on both paths.
+    #[allow(
+        clippy::too_many_arguments,
+        clippy::too_many_lines,
+        reason = "the actor-owned effect-decision state machine remains auditable as one cancellation-safe select loop"
+    )]
+    async fn drive_effect_decision(
+        &mut self,
+        command: &PromptCommand,
+        call: &ToolCallBlock,
+        pending: PendingEffectDecision,
+        operation_id: OperationId,
+        decision_ref: EffectDecisionRef,
+        audit_identity: &ToolAuditIdentity,
+        remaining: std::time::Duration,
+    ) -> Result<AuthorizationOutcome, AgentError> {
+        let binding_digest = decision_ref.binding_digest();
         let mut pending = Some(pending);
-        let expiry = tokio::time::sleep(self.config.effect_decision_timeout);
+        let expiry = tokio::time::sleep(remaining);
         tokio::pin!(expiry);
 
         loop {
@@ -577,20 +662,20 @@ impl Driver {
                     command.cancellation.cancel();
                     drop(pending.take());
                     self.finish_effect_decision_operation(command.turn_id, operation_id, binding_digest, EffectDecisionResolution::Invalidated, false).await?;
-                    self.resolve_effect_decision_event(command, decision_ref, &audit_identity, EffectDecisionResolution::Invalidated);
+                    self.resolve_effect_decision_event(command, decision_ref, audit_identity, EffectDecisionResolution::Invalidated);
                     return Err(self.authority.heartbeat_failure());
                 }
                 () = self.shutdown.cancelled() => {
                     command.cancellation.cancel();
                     drop(pending.take());
                     self.finish_effect_decision_operation(command.turn_id, operation_id, binding_digest, EffectDecisionResolution::Shutdown, false).await?;
-                    self.resolve_effect_decision_event(command, decision_ref, &audit_identity, EffectDecisionResolution::Shutdown);
+                    self.resolve_effect_decision_event(command, decision_ref, audit_identity, EffectDecisionResolution::Shutdown);
                     return Err(cancelled_error());
                 }
                 () = command.cancellation.cancelled() => {
                     drop(pending.take());
                     self.finish_effect_decision_operation(command.turn_id, operation_id, binding_digest, EffectDecisionResolution::Cancelled, false).await?;
-                    self.resolve_effect_decision_event(command, decision_ref, &audit_identity, EffectDecisionResolution::Cancelled);
+                    self.resolve_effect_decision_event(command, decision_ref, audit_identity, EffectDecisionResolution::Cancelled);
                     return Err(cancelled_error());
                 }
                 () = &mut expiry => {
@@ -609,7 +694,7 @@ impl Driver {
                         EffectDecisionResolution::Invalidated
                     };
                     self.finish_effect_decision_operation(command.turn_id, operation_id, binding_digest, resolution, true).await?;
-                    self.resolve_effect_decision_event(command, decision_ref, &audit_identity, resolution);
+                    self.resolve_effect_decision_event(command, decision_ref, audit_identity, resolution);
                     return Self::project_resolved_effect_decision(call, resolved);
                 }
                 control = self.control_receiver.recv() => {
@@ -617,7 +702,7 @@ impl Driver {
                         command.cancellation.cancel();
                         drop(pending.take());
                         self.finish_effect_decision_operation(command.turn_id, operation_id, binding_digest, EffectDecisionResolution::Shutdown, false).await?;
-                        self.resolve_effect_decision_event(command, decision_ref, &audit_identity, EffectDecisionResolution::Shutdown);
+                        self.resolve_effect_decision_event(command, decision_ref, audit_identity, EffectDecisionResolution::Shutdown);
                         return Err(cancelled_error());
                     };
                     match control {
@@ -685,7 +770,7 @@ impl Driver {
                                 let _ = reply.send(response);
                                 continue;
                             }
-                            let Some(pending) = pending.take() else {
+                            let Some(pending_capability) = pending.take() else {
                                 let response = self.record_rejection(
                                     command_id,
                                     binding,
@@ -718,12 +803,13 @@ impl Driver {
                             ).await {
                                 Ok(receipt) => receipt,
                                 Err(error) => {
+                                    pending = Some(pending_capability);
                                     let response = self.command_persistence_failure(command_id, Some(decision_ref.turn_id()), &error);
                                     let _ = reply.send(response);
                                     continue;
                                 }
                             };
-                            let resolved = self.tools.resolve_effect_decision(pending, recorded_decision);
+                            let resolved = self.tools.resolve_effect_decision(pending_capability, recorded_decision);
                             let resolution = match (&resolved, status) {
                                 (Ok(EffectAuthorization::Allowed(_)), EffectDecisionStatus::Allowed) => {
                                     EffectDecisionResolution::Allowed
@@ -735,7 +821,7 @@ impl Driver {
                             };
                             self.finish_effect_decision_operation(command.turn_id, operation_id, binding_digest, resolution, true).await?;
                             self.complete_command_operation(command.turn_id, command_operation, ActorCommandEffect::EffectDecision(status)).await?;
-                            self.resolve_effect_decision_event(command, decision_ref, &audit_identity, resolution);
+                            self.resolve_effect_decision_event(command, decision_ref, audit_identity, resolution);
                             let _ = reply.send(ActorCommandReply {
                                 acknowledgement,
                                 turn: None,
@@ -751,153 +837,6 @@ impl Driver {
                             Box::pin(self.handle_control(Some(command), other)).await;
                         }
                     }
-                }
-            }
-        }
-    }
-
-    fn project_resolved_effect_decision(
-        call: &ToolCallBlock,
-        resolved: Result<EffectAuthorization, ToolRuntimeError>,
-    ) -> Result<AuthorizationOutcome, AgentError> {
-        match resolved {
-            Ok(EffectAuthorization::Allowed(authorized)) => {
-                Ok(AuthorizationOutcome::Authorized(Box::new(authorized)))
-            }
-            Ok(EffectAuthorization::Denied(denial)) => {
-                let error =
-                    ToolRuntimeError::new(ToolRuntimeErrorKind::Policy, denial.reason().as_str());
-                Ok(AuthorizationOutcome::Rejected(normalized_tool_failure(
-                    call, &error,
-                )?))
-            }
-            Ok(_) => {
-                let error = ToolRuntimeError::new(
-                    ToolRuntimeErrorKind::Policy,
-                    "resolved decision returned an unsupported authorization state",
-                );
-                Ok(AuthorizationOutcome::Rejected(normalized_tool_failure(
-                    call, &error,
-                )?))
-            }
-            Err(error) => Ok(AuthorizationOutcome::Rejected(normalized_tool_failure(
-                call, &error,
-            )?)),
-        }
-    }
-
-    pub(super) async fn drive_restored_effect_decision(
-        &mut self,
-        command: &PromptCommand,
-        call: &ToolCallBlock,
-        pending: PendingEffectDecision,
-        operation_id: OperationId,
-        decision_ref: EffectDecisionRef,
-        expires_at: Timestamp,
-    ) -> Result<AuthorizationOutcome, AgentError> {
-        let binding_digest = decision_ref.binding_digest();
-        let audit_identity = ToolAuditIdentity::from_invocation(pending.invocation());
-        let mut pending = Some(pending);
-        let expiry = tokio::time::sleep(timestamp_remaining(self.clock.now(), expires_at));
-        tokio::pin!(expiry);
-        loop {
-            tokio::select! {
-                biased;
-                () = self.authority.lease_lost() => {
-                    command.cancellation.cancel();
-                    drop(pending.take());
-                    self.finish_effect_decision_operation(command.turn_id, operation_id, binding_digest, EffectDecisionResolution::Invalidated, false).await?;
-                    return Err(self.authority.heartbeat_failure());
-                }
-                () = self.shutdown.cancelled() => {
-                    command.cancellation.cancel();
-                    drop(pending.take());
-                    self.finish_effect_decision_operation(command.turn_id, operation_id, binding_digest, EffectDecisionResolution::Shutdown, false).await?;
-                    return Err(cancelled_error());
-                }
-                () = command.cancellation.cancelled() => {
-                    drop(pending.take());
-                    self.finish_effect_decision_operation(command.turn_id, operation_id, binding_digest, EffectDecisionResolution::Cancelled, false).await?;
-                    return Err(cancelled_error());
-                }
-                () = &mut expiry => {
-                    let pending = pending.take().ok_or_else(|| AgentError::new(AgentErrorKind::Internal, "restored decision capability disappeared"))?;
-                    let resolved = self.tools.resolve_effect_decision(
-                        pending,
-                        EffectDecision::deny(binding_digest, ToolPolicyDenial::new("tool decision expired before an operator decision")),
-                    );
-                    let resolution = if matches!(&resolved, Ok(EffectAuthorization::Denied(_))) { EffectDecisionResolution::Expired } else { EffectDecisionResolution::Invalidated };
-                    self.finish_effect_decision_operation(command.turn_id, operation_id, binding_digest, resolution, true).await?;
-                    self.resolve_effect_decision_event(command, decision_ref, &audit_identity, resolution);
-                    return Self::project_resolved_effect_decision(call, resolved);
-                }
-                control = self.control_receiver.recv() => {
-                    let Some(control) = control else {
-                        command.cancellation.cancel();
-                        drop(pending.take());
-                        self.finish_effect_decision_operation(command.turn_id, operation_id, binding_digest, EffectDecisionResolution::Shutdown, false).await?;
-                        return Err(cancelled_error());
-                    };
-                    let ActorControl::Command { command: incoming @ TurnCommand::ResolveEffectDecision { .. }, reply } = control else {
-                        Box::pin(self.handle_control(Some(command), control)).await;
-                        continue;
-                    };
-                    let binding = match command_binding(&incoming) {
-                        Ok(binding) => binding,
-                        Err(error) => {
-                            let _ = reply.send(self.unrecorded_rejection(incoming.command_id().clone(), incoming.target_turn_id(), error));
-                            continue;
-                        }
-                    };
-                    let canonical_input = command_canonical_bytes(&incoming);
-                    if let Some(recorded) = self.command_ledger.get(incoming.command_id()) {
-                        let response = if recorded.binding == binding {
-                            ActorCommandReply {
-                                acknowledgement: CommandAck::duplicate(incoming.command_id().clone(), &recorded.acknowledgement),
-                                turn: None,
-                                result: recorded.result.clone(),
-                                effect: recorded.effect,
-                            }
-                        } else {
-                            self.unrecorded_rejection(incoming.command_id().clone(), incoming.target_turn_id(), ControlError::new(ControlErrorKind::IdentityConflict, "command identity was reused with different canonical content"))
-                        };
-                        let _ = reply.send(response);
-                        continue;
-                    }
-                    let TurnCommand::ResolveEffectDecision { command_id, reference: supplied, decision } = incoming else { unreachable!() };
-                    if let Err(error) = validate_pending_effect_decision(supplied.turn_id(), &decision_ref, &supplied) {
-                        let response = self.record_rejection(command_id, binding, canonical_input, Some(supplied.turn_id()), error).await;
-                        let _ = reply.send(response);
-                        continue;
-                    }
-                    let Some(pending_capability) = pending.take() else {
-                        let response = self.record_rejection(command_id, binding, canonical_input, Some(supplied.turn_id()), ControlError::new(ControlErrorKind::Stale, "tool decision is no longer pending")).await;
-                        let _ = reply.send(response);
-                        continue;
-                    };
-                    let (recorded_decision, status) = match decision {
-                        EffectDecisionChoice::Allow(audit_id) => (EffectDecision::allow(binding_digest, audit_id), EffectDecisionStatus::Allowed),
-                        EffectDecisionChoice::Deny(denial) => (EffectDecision::deny(binding_digest, denial), EffectDecisionStatus::Denied),
-                    };
-                    let (acknowledgement, command_operation) = match self.record_acceptance(command_id.clone(), binding, canonical_input, Some(command.turn_id), ActorCommandEffect::EffectDecision(status)).await {
-                        Ok(receipt) => receipt,
-                        Err(error) => {
-                            pending = Some(pending_capability);
-                            let _ = reply.send(self.command_persistence_failure(command_id, Some(command.turn_id), &error));
-                            continue;
-                        }
-                    };
-                    let resolved = self.tools.resolve_effect_decision(pending_capability, recorded_decision);
-                    let resolution = match (&resolved, status) {
-                        (Ok(EffectAuthorization::Allowed(_)), EffectDecisionStatus::Allowed) => EffectDecisionResolution::Allowed,
-                        (Ok(EffectAuthorization::Denied(_)), EffectDecisionStatus::Denied) => EffectDecisionResolution::Denied,
-                        _ => EffectDecisionResolution::Invalidated,
-                    };
-                    self.finish_effect_decision_operation(command.turn_id, operation_id, binding_digest, resolution, true).await?;
-                    self.complete_command_operation(command.turn_id, command_operation, ActorCommandEffect::EffectDecision(status)).await?;
-                    self.resolve_effect_decision_event(command, decision_ref, &audit_identity, resolution);
-                    let _ = reply.send(ActorCommandReply { acknowledgement, turn: None, result: None, effect: ActorCommandEffect::EffectDecision(status) });
-                    return Self::project_resolved_effect_decision(call, resolved);
                 }
             }
         }

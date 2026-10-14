@@ -8,6 +8,7 @@ mod fake_composition;
 use fake_composition::{CompositionCounters, FakeComposition};
 
 mod cleanup_precedence;
+mod driver_live_paths;
 #[path = "tests/driver_reliability.rs"]
 mod driver_reliability;
 mod jobs;
@@ -9671,10 +9672,12 @@ async fn recurring_oversized_tool_results_schedule_distinct_pressure_paid_folds(
         .await?;
     assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
     assert_eq!(result.tool_calls(), 4, "pressure must recur");
-    assert_eq!(model.paid_compaction_calls.load(Ordering::Acquire), 4);
+    // The fourth pressure fence is past the per-turn cap on committed
+    // pressure-forced paid folds and uses the placeholder rung.
+    assert_eq!(model.paid_compaction_calls.load(Ordering::Acquire), 3);
     assert_eq!(
         model.calls.load(Ordering::Acquire),
-        result.model_rounds() + 5
+        result.model_rounds() + 4
     );
     agent.shutdown().await?;
     Ok(())

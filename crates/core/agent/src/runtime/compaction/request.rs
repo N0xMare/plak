@@ -172,16 +172,11 @@ pub(in crate::runtime) fn apply_completed_model_round_occupancy(
     *nested_committed = 0;
 }
 
-/// Whether the round boundary should schedule a compact.
-///
-/// This used to take the native-facet flag, because the semantic cut cannot
-/// select a protected-only tail: before the placeholder rung existed, only Codex
-/// remote compact could still drop tool material and every other route
-/// refused the turn. Placeholders is universal, so the disposition alone decides
-/// that a compact runs and the ladder decides which rung acts.
+/// Whether the tool-group boundary should schedule a compact: on an overflow
+/// disposition, on exhausted observation headroom, or once the anchored
+/// occupancy reaches the compaction trigger. The ladder decides which rung acts.
 pub(in crate::runtime) fn should_schedule_mid_turn_compaction_with_trigger(
     kind: &ContextStatusKind,
-    _gauge_percent: Option<u8>,
     occupied: Option<u64>,
     trigger: Option<u64>,
 ) -> bool {

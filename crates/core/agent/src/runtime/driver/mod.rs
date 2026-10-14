@@ -117,6 +117,9 @@ struct Driver {
     /// free placeholder rung, so a slow or failing summarizer cannot bill
     /// once per tool group.
     turn_budgets: TurnBudgets,
+    /// Pressure-forced paid folds committed in the active root turn by this
+    /// driver; capped by `COMMITTED_PRESSURE_FOLD_CAP`, reset with the turn.
+    pressure_folds_committed: usize,
     /// The family-artifact binding a round of this driver produced, with that
     /// round's stable prefix. The manifest keeps only the binding digest, so
     /// this is how a later round names which prefix field drifted.

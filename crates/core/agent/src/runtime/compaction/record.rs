@@ -198,9 +198,7 @@ fn finalized_compaction_ledger_evidence(
 ) -> Result<&ReconstructiveComponent, AgentError> {
     manifest
         .ledger()
-        .operations()
-        .into_iter()
-        .find(|record| record.operation_id() == operation.0)
+        .operation(operation.0)
         .and_then(|record| match record.state() {
             DurableOperationState::Finalized(evidence) => Some(evidence),
             _ => None,
@@ -508,9 +506,7 @@ fn provider_final_evidence_is_exact(
     if let Ok(result) = serde_json::from_slice::<ModelCallRecoveryResult>(evidence.bytes()) {
         let record = manifest
             .ledger()
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == provider.0)
+            .operation(provider.0)
             .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
         let locator = record
             .latest_locator()

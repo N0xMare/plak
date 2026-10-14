@@ -5542,8 +5542,14 @@ and is re-evaluated at each tool fence and at provider-overflow recovery. The
 existing ordered operation ledger derives both the backoff and the per-turn failure count,
 including on continuation resume; neither a placeholder commit nor reopening
 the session resets it.
-Re-arming after success can pay for one committed fold per tool group under
-recurring oversized output, bounded by `turn.max_model_rounds`.
+Re-arming after success is capped: once three pressure-forced paid folds have
+committed in a root turn, the pressure guard stays spent and every later
+pressure-forced fence in that turn uses the free placeholder rung, so recurring
+oversized output cannot pay for one committed fold per tool group. The count is
+held by the driver for the turn it runs: a continuation resumed on a new driver
+starts it again, which bounds a turn's pressure-forced paid folds by three per
+driver run. Occupancy-triggered and provider-overflow folds are not counted
+against this cap.
 A matching completed-response anchor re-derives the observation allowance before
 that round canonicalizes tool results; this allowance is sealed in its frames.
 Headroom is in tokens: after subtracting the 4096-token reserve, the byte
@@ -5837,8 +5843,9 @@ refusals proven not dispatched, consume neither that failure count nor backoff.
 A failure is paid only if its provider operation has a Dispatched transition
 and no ProvenNotDispatched transition; Completed and OutcomeUnknown count.
 An ambiguous fold remains fenced and is never retried by this policy.
-A fold that commits does not spend this guard: after the model consumes more
-work, a later genuinely eligible sealed prefix may be folded successfully.
+A fold that commits does not spend this failure guard: after the model consumes
+more work, a later genuinely eligible sealed prefix may be folded successfully,
+within the per-turn pressure-forced fold cap above.
 
 ### 10.6 Turn position
 

@@ -556,9 +556,7 @@ fn completed_provider_evidence(
 ) -> Result<ReconstructiveComponent, AgentError> {
     let expected = compaction_operation_component(response)?;
     let actual = ledger
-        .operations()
-        .into_iter()
-        .find(|candidate| candidate.operation_id() == operation.0)
+        .operation(operation.0)
         .and_then(|candidate| match candidate.state() {
             DurableOperationState::Completed(evidence) => Some(evidence.clone()),
             _ => None,

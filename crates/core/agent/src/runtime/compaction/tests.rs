@@ -72,14 +72,10 @@ fn tool_group_fence_occupied_tokens_adds_nested_local_composition_observations()
         headroom: ContextHeadroom::Shared(QualifiedTokens::Exact(10_000)),
     };
     assert!(!should_schedule_mid_turn_compaction_with_trigger(
-        &fits,
-        occupancy_gauge_percent(201_582, 258_400),
-        None,
-        None,
+        &fits, None, None,
     ));
     assert!(should_schedule_mid_turn_compaction_with_trigger(
         &fits,
-        occupancy_gauge_percent(232_302, 258_400),
         occupied,
         Some(232_000),
     ));
@@ -99,13 +95,12 @@ fn an_unanchored_measure_never_schedules_the_tool_group_fence() {
     };
     assert!(!should_schedule_mid_turn_compaction_with_trigger(
         &fits,
-        unanchored.and_then(|occupied| occupancy_gauge_percent(occupied, 1_000_000)),
         unanchored,
         Some(800_000),
     ));
     let overflow = ContextStatusKind::WouldOverflow(fixture_overflow());
     assert!(should_schedule_mid_turn_compaction_with_trigger(
-        &overflow, None, unanchored, None,
+        &overflow, unanchored, None,
     ));
 }
 
@@ -133,24 +128,18 @@ fn tool_group_fence_is_anchored_on_the_last_provider_input() {
     };
     let anchored = tool_group_fence_occupied_tokens(Some(estimate), anchor, 0);
     assert!(!should_schedule_mid_turn_compaction_with_trigger(
-        &fits,
-        anchored.and_then(|occupied| occupancy_gauge_percent(occupied, 500_000)),
-        anchored,
-        trigger,
+        &fits, anchored, trigger,
     ));
     // The same estimate on the anchor's own scale would have fired it.
     let identity = ContextAnchor::new(850_715, 850_715);
     let whole = tool_group_fence_occupied_tokens(Some(estimate), identity, 0);
     assert!(should_schedule_mid_turn_compaction_with_trigger(
-        &fits,
-        whole.and_then(|occupied| occupancy_gauge_percent(occupied, 500_000)),
-        whole,
-        trigger,
+        &fits, whole, trigger,
     ));
     // Growth past the trigger on the anchored scale still fires it.
     let grown = tool_group_fence_occupied_tokens(Some(850_715 + 110_000), anchor, 0);
     assert!(should_schedule_mid_turn_compaction_with_trigger(
-        &fits, None, grown, trigger,
+        &fits, grown, trigger,
     ));
 }
 
@@ -228,11 +217,9 @@ fn should_schedule_mid_turn_compaction_matches_spec_thresholds() {
         &ContextStatusKind::WouldOverflow(overflow),
         None,
         None,
-        None,
     ));
     assert!(should_schedule_mid_turn_compaction_with_trigger(
         &ContextStatusKind::ProtectedOverflow(overflow),
-        None,
         None,
         None,
     ));
@@ -243,35 +230,26 @@ fn should_schedule_mid_turn_compaction_matches_spec_thresholds() {
         &ContextStatusKind::ProtectedOverflow(overflow),
         None,
         None,
-        None,
     ));
     let fits = ContextStatusKind::Fits {
         headroom: ContextHeadroom::Shared(QualifiedTokens::Exact(10_000)),
     };
     assert!(!should_schedule_mid_turn_compaction_with_trigger(
-        &fits,
-        Some(85),
-        None,
-        None,
+        &fits, None, None,
     ));
     assert!(!should_schedule_mid_turn_compaction_with_trigger(
-        &fits,
-        Some(84),
-        None,
-        None,
+        &fits, None, None,
     ));
     assert!(!should_schedule_mid_turn_compaction_with_trigger(
-        &fits, None, None, None
+        &fits, None, None
     ));
     assert!(should_schedule_mid_turn_compaction_with_trigger(
         &fits,
-        None,
         Some(400_000),
         Some(400_000),
     ));
     assert!(!should_schedule_mid_turn_compaction_with_trigger(
         &fits,
-        Some(85),
         Some(399_000),
         Some(400_000),
     ));
@@ -287,12 +265,7 @@ fn exhausted_admission_headroom_fences_even_below_anchored_occupancy() {
         };
         for occupied in [None, Some(346_950)] {
             assert_eq!(
-                should_schedule_mid_turn_compaction_with_trigger(
-                    &fits,
-                    Some(35),
-                    occupied,
-                    Some(850_000),
-                ),
+                should_schedule_mid_turn_compaction_with_trigger(&fits, occupied, Some(850_000),),
                 remaining <= 4_096,
             );
         }

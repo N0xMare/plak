@@ -11,13 +11,12 @@ use crate::runtime::compaction::record::{
     compaction_attempt_id, compaction_checkpoint_id, compaction_operation_component,
 };
 use crate::runtime::compaction::request::{
-    compact_runtime_endpoint_error, compact_runtime_endpoint_rejected,
-    compaction_fence_base_tokens, context_status_audit, exact_compaction_runtime,
-    harness_compaction_input, harness_compaction_input_at_depth, harness_compaction_prefix,
-    harness_compaction_reduction_count, native_compaction_dispatch_prefix,
-    native_compaction_facet_enrolled, occupancy_gauge_percent, portable_compaction_history,
-    should_schedule_mid_turn_compaction_with_trigger, tool_group_fence_occupied_tokens,
-    unmeasured_native_compact_audit,
+    compact_runtime_endpoint_error, compact_runtime_endpoint_rejected, context_status_audit,
+    exact_compaction_runtime, harness_compaction_input, harness_compaction_input_at_depth,
+    harness_compaction_prefix, harness_compaction_reduction_count,
+    native_compaction_dispatch_prefix, native_compaction_facet_enrolled,
+    portable_compaction_history, should_schedule_mid_turn_compaction_with_trigger,
+    tool_group_fence_occupied_tokens, unmeasured_native_compact_audit,
 };
 use crate::runtime::compaction::{
     CompactOrigin, CompactionCompletionError, DurableCompactionIdentity,
@@ -63,6 +62,10 @@ use std::time::Duration;
 
 const PAID_FOLD_BACKOFF_ROUNDS: usize = 2;
 const FAILED_PAID_FOLD_CAP: usize = 3;
+/// Committed pressure-forced paid folds one root turn may pay for. Recurring
+/// oversized output re-arms pressure after every commit; past this cap a
+/// pressure fence uses only the free placeholder rung for the rest of the turn.
+const COMMITTED_PRESSURE_FOLD_CAP: usize = 3;
 
 #[derive(Default)]
 struct CompactionDetail {
@@ -239,7 +242,8 @@ impl Driver {
         };
         if rounds >= backoff {
             self.turn_budgets.paid_fold_spent = false;
-            self.turn_budgets.pressure_fold_spent = false;
+            self.turn_budgets.pressure_fold_spent =
+                self.pressure_folds_committed >= COMMITTED_PRESSURE_FOLD_CAP;
         }
     }
 
@@ -321,9 +325,6 @@ impl Driver {
             }
             return Ok(TurnCompactionOutcome::Deferred);
         };
-        let fence_base = status
-            .capacity()
-            .and_then(|capacity| compaction_fence_base_tokens(capacity.rule()));
         let occupied = if status.wire_input().is_some() {
             self.request_anchor
                 .as_ref()
@@ -339,17 +340,8 @@ impl Driver {
                 self.nested_committed_observation_tokens,
             )
         };
-        let gauge = match (occupied, fence_base) {
-            (Some(occ), Some(total)) => occupancy_gauge_percent(occ, total),
-            _ => None,
-        };
         let trigger = status.compaction_trigger_tokens();
-        if !should_schedule_mid_turn_compaction_with_trigger(
-            status.kind(),
-            gauge,
-            occupied,
-            trigger,
-        ) {
+        if !should_schedule_mid_turn_compaction_with_trigger(status.kind(), occupied, trigger) {
             if pressure {
                 return self.run_turn_fence_compaction(command, true).await;
             }
@@ -1546,8 +1538,17 @@ impl Driver {
                 .await
             {
                 Ok((target, occupancy_after)) => {
+                    if matches!(
+                        origin,
+                        CompactOrigin::TurnFence {
+                            pressure_forced: true
+                        }
+                    ) {
+                        self.pressure_folds_committed += 1;
+                    }
                     if origin.is_turn_fence() {
-                        self.turn_budgets.pressure_fold_spent = false;
+                        self.turn_budgets.pressure_fold_spent =
+                            self.pressure_folds_committed >= COMMITTED_PRESSURE_FOLD_CAP;
                     }
                     Ok(AgentCompactSessionOutcome::Compacted {
                         workflow_id: identity.workflow_id,
@@ -1867,9 +1868,7 @@ impl Driver {
             let manifest = authority.manifest();
             let provider = manifest
                 .ledger()
-                .operations()
-                .into_iter()
-                .find(|record| record.operation_id() == provider_operation.0)
+                .operation(provider_operation.0)
                 .ok_or_else(|| {
                     AgentError::new(
                         AgentErrorKind::Internal,
@@ -2232,9 +2231,7 @@ impl Driver {
                 authority
                     .manifest()
                     .ledger()
-                    .operations()
-                    .into_iter()
-                    .find(|record| record.operation_id() == operation.0)
+                    .operation(operation.0)
                     .map(|record| record.state().clone())
             })
         };
@@ -2366,9 +2363,7 @@ impl Driver {
                     evidence.clone()
                 } else {
                     ledger
-                        .operations()
-                        .into_iter()
-                        .find(|record| record.operation_id() == operation.0)
+                        .operation(operation.0)
                         .and_then(|record| match record.state() {
                             DurableOperationState::Completed(value)
                             | DurableOperationState::ProvenNotDispatched(value) => {
