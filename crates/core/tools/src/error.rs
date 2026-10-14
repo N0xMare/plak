@@ -234,20 +234,20 @@ mod tests {
         let error = ToolRuntimeError::new(
             ToolRuntimeErrorKind::Execution,
             format!(
-                "token=abc sk-live-value Bearer bearer-value {}",
+                "token=abcdefgh123 sk-live-value-0123456789abcdef Bearer bearer-value-0123456789 {}",
                 "x".repeat(4_000)
             ),
         );
         let displayed = error.to_string();
-        assert!(!displayed.contains("abc"));
+        assert!(!displayed.contains("abcdefgh123"));
         assert!(!displayed.contains("sk-live-value"));
         assert!(!displayed.contains("bearer-value"));
         assert!(displayed.len() <= MAX_SAFE_ERROR_BYTES);
-        assert!(!format!("{error:?}").contains("abc"));
+        assert!(!format!("{error:?}").contains("abcdefgh123"));
 
         for diagnostic in [
-            "authorization: Bearer deeply-secret",
-            "Authorization:Bearer deeply-secret",
+            "authorization: Bearer deeply-secret-value",
+            "Authorization:Bearer deeply-secret-value",
             "https://example.invalid/?api_key=deeply-secret",
         ] {
             let error = ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, diagnostic);

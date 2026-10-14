@@ -1,6 +1,16 @@
 //! Best-effort display minimization, not a credential security boundary.
+//!
+//! The one text redactor shared by [`crate::SafeDiagnostic`], observation
+//! subjects, argument/result previews and hosted session-log previews. It is an
+//! unsupported seam re-exported to sibling crates, not a supported API.
 
-use std::{borrow::Cow, sync::LazyLock};
+#![allow(
+    clippy::must_use_candidate,
+    missing_docs,
+    reason = "unsupported sibling seam is documented as one implementation tier"
+)]
+
+use std::{borrow::Cow, collections::HashSet, sync::LazyLock};
 
 use regex::Regex;
 use serde_json::Value;
@@ -35,7 +45,7 @@ fn compile(pattern: &str) -> Regex {
 /// Name, an optional key-closing quote, the separator, then either an escaped
 /// quoted body, a plain quoted body, or a bare value. The body is what
 /// becomes `[redacted]`; quotes stay with their backslash.
-const ASSIGNMENT: &str = r#"(?i)(\b[A-Za-z0-9_.-]*(?:api[_-]?key|token|secret|password|passwd)\b)(["']?)(\s*[:=]\s*)(?:(\\["'])([^\s"'\[\]]{8,})(\\["'])|(["'])([^\s"'\[\]]{8,})(["'])|([^\s"'\[\]]{8,}))"#;
+const ASSIGNMENT: &str = r#"(?i)(\b[A-Za-z0-9_.-]*(?:api[_-]?key|token|secret|password|passwd|credential)\b)(["']?)(\s*[:=]\s*)(?:(\\["'])([^\s"'\[\]]{8,})(\\["'])|(["'])([^\s"'\[\]]{8,})(["'])|([^\s"'\[\]]{8,}))"#;
 
 static ASSIGNMENT_RULE: LazyLock<Regex> = LazyLock::new(|| compile(ASSIGNMENT));
 
@@ -84,7 +94,8 @@ pub fn json(value: &mut Value) {
 }
 
 /// A credential-named key redacts every string and number leaf under it, at
-/// any depth. Other string leaves use the text rules. Booleans and null stay.
+/// any depth. Other string leaves and every key use the text rules; a later
+/// key that redacts to an already-kept key is dropped. Booleans and null stay.
 fn redact(value: &mut Value, credential: bool) {
     if credential && matches!(value, Value::String(_) | Value::Number(_)) {
         *value = Value::String(MARKER.to_owned());
@@ -92,8 +103,14 @@ fn redact(value: &mut Value, credential: bool) {
     }
     match value {
         Value::Object(object) => {
-            for (key, child) in object {
-                redact(child, credential || credential_name(key));
+            let source = std::mem::take(object);
+            for (key, mut child) in source {
+                let shown = text(&key);
+                if object.contains_key(&shown) {
+                    continue;
+                }
+                redact(&mut child, credential || credential_name(&key));
+                object.insert(shown, child);
             }
         }
         Value::Array(values) => {
@@ -108,8 +125,10 @@ fn redact(value: &mut Value, credential: bool) {
 
 /// Pretty-prints `value` with the same rules as [`json`], stopping once `limit`
 /// bytes have been written. The unread tail is not visited. The bool is true
-/// when the value continued past that prefix. A string leaf is redacted whole
-/// before its encoding is written into the remaining room.
+/// when the value continued past that prefix. A string leaf or key is redacted
+/// whole before its encoding is written into the remaining room. Keys are
+/// written in source order, so an object whose redacted keys sort differently
+/// from their sources lists them in another order than [`json`] does.
 #[must_use]
 pub fn pretty_bounded(value: &Value, limit: usize) -> (String, bool) {
     let mut writer = Pretty {
@@ -198,11 +217,18 @@ impl Pretty {
         if self.push("{") {
             return true;
         }
-        for (index, (key, child)) in items.iter().enumerate() {
-            if self.push(if index == 0 { "\n" } else { ",\n" }) || self.push_indent(indent + 1) {
+        let mut shown_keys = HashSet::new();
+        for (key, child) in items {
+            let shown = text(key);
+            if shown_keys.contains(&shown) {
+                continue;
+            }
+            let separator = if shown_keys.is_empty() { "\n" } else { ",\n" };
+            if self.push(separator) || self.push_indent(indent + 1) {
                 return true;
             }
-            let encoded = serde_json::to_string(key).unwrap_or_else(|_| "\"\"".to_owned());
+            let encoded = serde_json::to_string(&shown).unwrap_or_else(|_| "\"\"".to_owned());
+            shown_keys.insert(shown);
             if self.push(&encoded) || self.push(": ") {
                 return true;
             }
@@ -303,6 +329,37 @@ mod tests {
     }
 
     #[test]
+    fn token_shaped_keys_use_the_text_rules_in_both_json_paths() {
+        let key = concat!("sk-live", "abcdefghijklmnopqrstuvwx");
+        let url = "https://user:hunter2hunter2@example.invalid/x";
+        let value = serde_json::json!({
+            "env": {key: true, url: 1, "PATH": "/bin"},
+            "dup": {"[redacted]": "first", key: "second"}
+        });
+        let mut redacted = value.clone();
+        json(&mut redacted);
+        let rendered = redacted.to_string();
+        assert!(!rendered.contains("abcdefghijklmnop"), "{rendered}");
+        assert!(!rendered.contains("hunter2"), "{rendered}");
+        assert_eq!(redacted["env"]["[redacted]"], true);
+        assert_eq!(
+            redacted["env"]["https://user:[redacted]@example.invalid/x"],
+            1
+        );
+        assert_eq!(redacted["env"]["PATH"], "/bin");
+        assert_eq!(redacted["dup"], serde_json::json!({"[redacted]": "first"}));
+
+        let (pretty, clipped) = pretty_bounded(&value, 1_000_000);
+        assert!(!clipped);
+        assert!(!pretty.contains("abcdefghijklmnop"), "{pretty}");
+        assert!(!pretty.contains("hunter2"), "{pretty}");
+        assert!(pretty.contains("\"[redacted]\": \"first\""), "{pretty}");
+        assert!(!pretty.contains("second"), "{pretty}");
+        let reparsed: Value = serde_json::from_str(&pretty).expect("pretty is JSON");
+        assert_eq!(reparsed, redacted);
+    }
+
+    #[test]
     fn pretty_bounded_matches_json_redaction_and_stops_without_the_tail() {
         let value = serde_json::json!({
             "cmd": "cargo test",
@@ -319,15 +376,19 @@ mod tests {
         assert_eq!(pretty, format!("{redacted:#}"));
         assert!(!pretty.contains("hunter2"));
 
-        let huge = serde_json::json!({"v": vec![1; 200_000]});
-        let started = std::time::Instant::now();
+        // The tail past the limit is never visited. Redacting each of these
+        // strings is a pass of every text rule, so walking the whole array
+        // would cost far more CPU than the bound; the clipped prefix is a few
+        // hundred strings.
+        let huge = serde_json::json!({"v": vec!["token=abcdefgh12345678"; 200_000]});
+        let started = process_cpu_time();
         let (prefix, clipped) = pretty_bounded(&huge, 8 * 1024);
+        let spent = process_cpu_time().saturating_sub(started);
         assert!(clipped);
         assert!(prefix.len() <= 8 * 1024);
         assert!(
-            started.elapsed() < std::time::Duration::from_millis(50),
-            "bounded pretty of a long array took {:?}",
-            started.elapsed()
+            spent < std::time::Duration::from_millis(250),
+            "bounded pretty of a long array used {spent:?} of CPU"
         );
     }
 }

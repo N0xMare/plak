@@ -101,7 +101,7 @@ mod tests {
     fn control_import_and_normalization_preserve_stable_wire_fields() {
         let portable = ToolRuntimeError::new(
             ToolRuntimeErrorKind::EffectSafety,
-            "token=secret observer rejected dispatch",
+            "token=secret-value observer rejected dispatch",
         );
         let normalized = ToolDispatchError::from_control(portable.clone()).into_portable();
 

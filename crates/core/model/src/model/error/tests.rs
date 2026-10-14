@@ -593,12 +593,13 @@ fn paid_recovery_attachment_is_one_shot_and_requires_permanent_unknown_context()
             risk: ModelRetryRisk::DuplicateInferenceOrBilling,
         },
     )?;
+    let mut unsafe_error = ModelError::contextual(
+        ModelErrorKind::OutcomeUnknown,
+        "paid outcome unknown",
+        unsafe_context,
+    )?;
     assert_eq!(
-        ModelError::contextual_paid_recovery(
-            "paid outcome unknown",
-            unsafe_context,
-            paid_recovery_fixture()?,
-        ),
+        unsafe_error.attach_paid_recovery(paid_recovery_fixture()?),
         Err(ModelErrorContextError::PaidRecoveryRequiresPermanentRetry)
     );
     Ok(())

@@ -18,6 +18,8 @@ mod identity;
 mod model;
 mod portable_schema_v2;
 mod prompts;
+#[doc(hidden)]
+pub mod redaction;
 mod request;
 mod semantic_json;
 mod subscription_usage;

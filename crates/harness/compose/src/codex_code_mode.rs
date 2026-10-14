@@ -33,15 +33,23 @@ use plakous_tools::{
     register_codex_code_mode_markers_into,
 };
 use plakous_tools::{
-    CODEX_PROJECTION_PROFILE, CODEX_PROJECTION_PROTOCOL, CODEX_PROJECTION_ROUTE,
-    OPENAI_PLATFORM_PROJECTION_PROTOCOL, OPENAI_PLATFORM_PROJECTION_ROUTE,
-};
-use plakous_tools::{
     CanonicalProcessOperationV2, FrozenToolRegistry, NestedToolEligibility, PortableToolSchemaV2,
     ProviderModelProjectionIdentityV2, ToolExecutorId, ToolProjectionExposureV2,
     ToolProjectionLoweringV2, ToolProjectionMapV2, ToolProjectionRaisingV2, ToolRegistryBuilder,
     ToolRuntimeError, ToolRuntimeErrorKind,
 };
+
+/// The one protocol the Codex Code Mode presentation is compiled for.
+pub const CODEX_PROJECTION_PROTOCOL: &str = "openai.codex.responses";
+/// The one route the Codex Code Mode presentation is compiled for.
+pub const CODEX_PROJECTION_ROUTE: &str = "openai.codex_subscription";
+/// The one integration profile the Codex Code Mode presentation is compiled for.
+pub const CODEX_PROJECTION_PROFILE: &str = "openai.codex.compat.2026-07-31.r1";
+/// The `openai` API protocol a Code Mode presentation is also compiled for.
+pub const OPENAI_PLATFORM_PROJECTION_PROTOCOL: &str = "openai.responses";
+/// The `openai` API route a Code Mode presentation is also compiled for. Which
+/// profiles and models it carries is the route's own enrollment.
+pub const OPENAI_PLATFORM_PROJECTION_ROUTE: &str = "openai.platform";
 
 const CODEX_NATIVE_CODE_MODE_FAMILY_V1: &str = "responses-family";
 

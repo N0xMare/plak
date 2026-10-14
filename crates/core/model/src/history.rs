@@ -2027,12 +2027,6 @@ impl ContextHistoryPlan {
         Ok(plan)
     }
 
-    /// Reports the fixed rule for the stable instruction/tool prefix.
-    #[must_use]
-    pub const fn stable_prefix_is_protected(&self) -> bool {
-        true
-    }
-
     /// Returns the closed policy revision.
     #[must_use]
     pub const fn policy_revision(&self) -> u32 {
@@ -2530,17 +2524,6 @@ fn is_canonical_compaction_summary(segment: &HistorySegment) -> bool {
         && matches!(segment.items()[0].blocks(), [ContentBlock::Compaction(_)])
 }
 
-/// Required successor fence for a semantic-summary retained tail.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-pub enum ContextSummarySuccessorRequirement {
-    /// Commit one position-zero semantic replacement, then freshly prepare and measure.
-    ///
-    /// When the source already begins with a compaction output, its semantics
-    /// must be folded into the sole replacement; a successor cannot contain
-    /// two model-visible compaction segments.
-    InsertCommittedSummaryThenFreshPreparedProjectionAndMeasurement,
-}
-
 /// Zero-copy retained groups awaiting a committed semantic-summary insertion.
 ///
 /// This value is neither a valid compaction successor nor an admission/fit
@@ -2560,13 +2543,6 @@ impl<'a> ContextSummaryRetainedTail<'a> {
     #[must_use]
     pub const fn identity(self) -> Digest {
         self.identity
-    }
-
-    /// Returns the mandatory replacement and fresh-admission fence.
-    #[must_use]
-    pub const fn successor_requirement(self) -> ContextSummarySuccessorRequirement {
-        ContextSummarySuccessorRequirement::
-            InsertCommittedSummaryThenFreshPreparedProjectionAndMeasurement
     }
 
     /// Returns the retained complete-group count.
@@ -3369,7 +3345,6 @@ mod tests {
     #[test]
     fn context_plan_empty_and_no_user_history_are_protected_only() {
         let empty = ContextHistoryPlan::new(&ConversationView::default()).expect("empty plan");
-        assert!(empty.stable_prefix_is_protected());
         assert_eq!(empty.policy_revision(), CONTEXT_PLANNER_POLICY_REVISION);
         assert_eq!(
             empty.strategy(),
@@ -3493,11 +3468,6 @@ mod tests {
         let candidate = plan
             .summary_replacement_tail()
             .expect("summary replacement tail");
-        assert_eq!(
-            candidate.successor_requirement(),
-            ContextSummarySuccessorRequirement::
-                InsertCommittedSummaryThenFreshPreparedProjectionAndMeasurement
-        );
         let retained = candidate.segments().collect::<Vec<_>>();
         assert_eq!(retained.len(), 2);
         assert!(retained[0].shares_storage_with(&latest));

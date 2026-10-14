@@ -399,31 +399,6 @@ fn native_meters(
             });
         }
     }
-    // A period the provider named without any usage figure is still a fact
-    // worth a row: it carries the cadence and the reset, and says in words
-    // that the consumption is unknown (never a bar, never `0%`).
-    if let Some(period) = snapshot.unmetered_period() {
-        let seconds = match period.period() {
-            SubscriptionUsagePeriod::Rolling { duration_seconds } => *duration_seconds,
-            SubscriptionUsagePeriod::ProviderPeriod { .. } => 0,
-        };
-        let (group, label) = meter_identity(
-            vertical,
-            "included-credits",
-            None,
-            None,
-            seconds,
-            Some(period.period()),
-        );
-        meters.push(UsageMeterView {
-            label,
-            group,
-            reading: UsageMeterReading::Unreported,
-            resets_at: period
-                .ends_at()
-                .map(|timestamp| format_reset_wall_clock(timestamp.seconds())),
-        });
-    }
     meters
 }
 

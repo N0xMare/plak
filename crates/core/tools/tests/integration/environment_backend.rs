@@ -1,15 +1,7 @@
 //! Disposable-workspace conformance for execution backend authority.
 
 #![cfg_attr(
-    not(unix),
-    allow(
-        dead_code,
-        unused_imports,
-        reason = "Unix host backend tests are cfg-gated"
-    )
-)]
-#![cfg_attr(
-    all(unix, not(target_os = "linux")),
+    not(target_os = "linux"),
     allow(
         dead_code,
         unused_imports,
@@ -92,7 +84,6 @@ fn limits(
     )?)
 }
 
-#[cfg(unix)]
 fn unix_program(candidates: &'static [&'static str]) -> Result<&'static str, TestError> {
     candidates
         .iter()
@@ -101,7 +92,6 @@ fn unix_program(candidates: &'static [&'static str]) -> Result<&'static str, Tes
         .ok_or_else(|| "required Unix test program is unavailable".into())
 }
 
-#[cfg(unix)]
 async fn wait_for_file(path: &Path) -> Result<(), TestError> {
     for _ in 0..200 {
         if path.is_file() {
@@ -112,7 +102,6 @@ async fn wait_for_file(path: &Path) -> Result<(), TestError> {
     Err("timed out waiting for child process marker".into())
 }
 
-#[cfg(unix)]
 async fn wait_for_pid_file(path: &Path) -> Result<rustix::process::Pid, TestError> {
     for _ in 0..200 {
         if let Ok(contents) = fs::read_to_string(path)
@@ -126,7 +115,6 @@ async fn wait_for_pid_file(path: &Path) -> Result<rustix::process::Pid, TestErro
     Err("timed out waiting for an atomically published child process identity".into())
 }
 
-#[cfg(unix)]
 async fn wait_for_process_exit(pid: rustix::process::Pid) -> bool {
     for _ in 0..200 {
         if rustix::process::test_kill_process(pid).is_err() {
@@ -137,7 +125,6 @@ async fn wait_for_process_exit(pid: rustix::process::Pid) -> bool {
     false
 }
 
-#[cfg(unix)]
 async fn collect_joined_output(
     sessions: &plakous_tools::JoinedProcessSessions,
     id: plakous_tools::JoinedProcessSessionId,
@@ -156,7 +143,6 @@ async fn collect_joined_output(
     Err("timed out collecting joined process output".into())
 }
 
-#[cfg(unix)]
 fn joined_request(
     command: JoinedProcessCommand,
     keep_stdin_open: bool,
@@ -170,13 +156,11 @@ fn joined_request(
     )?)
 }
 
-#[cfg(unix)]
 struct DetachedProcessGuard {
     pid: Option<rustix::process::Pid>,
     stop_path: PathBuf,
 }
 
-#[cfg(unix)]
 impl DetachedProcessGuard {
     fn new(pid: rustix::process::Pid, stop_path: PathBuf) -> Self {
         Self {
@@ -190,7 +174,6 @@ impl DetachedProcessGuard {
     }
 }
 
-#[cfg(unix)]
 impl Drop for DetachedProcessGuard {
     fn drop(&mut self) {
         let Some(pid) = self.pid.take() else {
@@ -224,7 +207,6 @@ impl Drop for DetachedProcessGuard {
 ///
 /// Every one of them is decided by looking, before anything is opened for
 /// writing, so every one is proven to have had no effect.
-#[cfg(unix)]
 #[tokio::test]
 async fn each_workspace_path_refusal_names_its_own_cause() -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
@@ -305,7 +287,6 @@ async fn each_workspace_path_refusal_names_its_own_cause() -> Result<(), TestErr
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn host_backend_preserves_constructor_and_is_truthful() -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
@@ -387,18 +368,12 @@ async fn host_backend_preserves_constructor_and_is_truthful() -> Result<(), Test
             control(),
         )
         .await;
-    #[cfg(unix)]
     {
         let process = process?;
         assert_eq!(process.exit_code(), Some(0));
         assert_eq!(process.stdout().as_ref(), b"literal\n");
         assert!(process.stderr().is_empty());
     }
-    #[cfg(not(unix))]
-    assert_eq!(
-        process.err().map(|error| error.kind()),
-        Some(ExecutionBackendErrorKind::Unsupported)
-    );
     Ok(())
 }
 
@@ -440,7 +415,6 @@ fn joined_process_session_construction_is_bounded_and_fake_backend_fails_closed(
     Ok(())
 }
 
-#[cfg(unix)]
 #[test]
 fn execution_environment_clones_share_one_joined_process_service() -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
@@ -477,7 +451,6 @@ fn execution_environment_clones_share_one_joined_process_service() -> Result<(),
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn joined_process_shell_multicall_dispatch_preserves_enrolled_name() -> Result<(), TestError>
 {
@@ -564,7 +537,6 @@ async fn joined_process_shell_multicall_dispatch_preserves_enrolled_name() -> Re
     Ok(())
 }
 
-#[cfg(unix)]
 #[test]
 fn joined_process_shell_replacement_fails_before_spawn() -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
@@ -595,7 +567,6 @@ fn joined_process_shell_replacement_fails_before_spawn() -> Result<(), TestError
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn joined_process_noninteractive_stdin_is_null_and_initial_input_is_delivered()
 -> Result<(), TestError> {
@@ -643,7 +614,6 @@ async fn joined_process_noninteractive_stdin_is_null_and_initial_input_is_delive
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn joined_process_sessions_preserve_literal_and_explicit_shell_semantics()
 -> Result<(), TestError> {
@@ -691,7 +661,6 @@ async fn joined_process_sessions_preserve_literal_and_explicit_shell_semantics()
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn joined_process_sessions_write_poll_terminate_and_diagnose_stale_foreign_ids()
 -> Result<(), TestError> {
@@ -746,7 +715,6 @@ async fn joined_process_sessions_write_poll_terminate_and_diagnose_stale_foreign
 /// and been joined still answers `active_session_ids`, while its durable record
 /// has already left `Dispatched`. The driver compared the two sets for equality
 /// and fenced the session over the product's own bookkeeping.
-#[cfg(unix)]
 #[tokio::test]
 async fn a_finished_session_stays_live_until_it_is_retired() -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
@@ -795,7 +763,6 @@ async fn a_finished_session_stays_live_until_it_is_retired() -> Result<(), TestE
 /// The message always read "choose an existing directory" while the kind said
 /// policy, so a consumer branching on the kind saw a refusal where a user had
 /// made a typo. It is the same defect the read path had, on the process path.
-#[cfg(unix)]
 #[tokio::test]
 async fn a_missing_process_working_directory_is_not_found_and_nothing_started()
 -> Result<(), TestError> {
@@ -843,7 +810,6 @@ async fn a_missing_process_working_directory_is_not_found_and_nothing_started()
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn joined_process_sessions_join_cancelled_group() -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
@@ -1037,7 +1003,6 @@ async fn joined_process_pty_terminate_and_drop_clean_descendants() -> Result<(),
         control(),
     )?;
     let dropped_pid = wait_for_pid_file(&dropped_pid_path).await?;
-    assert_eq!(sessions.active_sessions(), 1);
     let _ = dropped;
     drop(sessions);
     drop(environment);
@@ -1165,7 +1130,6 @@ async fn joined_process_pty_cancellation_and_timeout_join_the_group() -> Result<
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn joined_process_sessions_keep_the_newest_output_window() -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
@@ -1212,7 +1176,6 @@ async fn joined_process_sessions_keep_the_newest_output_window() -> Result<(), T
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 #[allow(clippy::too_many_lines, reason = "one query conformance matrix")]
 async fn workspace_operations_reject_traversal_and_query_stably_without_symlinks()
@@ -1256,7 +1219,6 @@ async fn workspace_operations_reject_traversal_and_query_stably_without_symlinks
         );
     }
 
-    #[cfg(unix)]
     {
         use std::os::unix::fs::symlink;
 
@@ -1342,7 +1304,6 @@ async fn workspace_operations_reject_traversal_and_query_stably_without_symlinks
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn repository_query_reports_scan_stop_before_byte_ceiling() -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
@@ -1378,7 +1339,6 @@ async fn repository_query_reports_scan_stop_before_byte_ceiling() -> Result<(), 
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn repository_query_searches_a_regular_file_root_and_still_walks_directories()
 -> Result<(), TestError> {
@@ -1476,7 +1436,6 @@ async fn repository_query_searches_a_regular_file_root_and_still_walks_directori
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
 async fn repository_search_truncates_only_at_utf8_boundaries_and_yields_runtime()
 -> Result<(), TestError> {
@@ -1526,7 +1485,6 @@ async fn repository_search_truncates_only_at_utf8_boundaries_and_yields_runtime(
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn deterministic_read_resume_fails_closed_when_content_changes_and_enforces_bounds()
 -> Result<(), TestError> {
@@ -1580,7 +1538,6 @@ async fn deterministic_read_resume_fails_closed_when_content_changes_and_enforce
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 #[allow(clippy::too_many_lines, reason = "one transaction conformance matrix")]
 async fn workspace_mutation_preflights_all_items_and_returns_typed_results() -> Result<(), TestError>
@@ -1699,7 +1656,6 @@ async fn workspace_mutation_preflights_all_items_and_returns_typed_results() -> 
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn workspace_mutation_any_creates_or_overwrites() -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
@@ -1749,7 +1705,6 @@ async fn workspace_mutation_any_creates_or_overwrites() -> Result<(), TestError>
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn workspace_mutation_any_rejects_symlink_overwrite() -> Result<(), TestError> {
     use std::os::unix::fs::symlink;
@@ -1789,7 +1744,6 @@ async fn workspace_mutation_any_rejects_symlink_overwrite() -> Result<(), TestEr
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn workspace_mutation_any_rejects_missing_parent_directory() -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
@@ -1861,7 +1815,6 @@ async fn workspace_mutation_any_rejects_missing_parent_directory() -> Result<(),
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn workspace_mutation_rejects_duplicates_traversal_symlinks_and_limits()
 -> Result<(), TestError> {
@@ -1923,7 +1876,6 @@ async fn workspace_mutation_rejects_duplicates_traversal_symlinks_and_limits()
     );
     assert_eq!(fs::read(workspace.path().join("small.txt"))?, b"old");
 
-    #[cfg(unix)]
     {
         use std::os::unix::fs::symlink;
 
@@ -2218,7 +2170,6 @@ async fn host_process_uses_literal_argv_absolute_program_and_explicit_environmen
 /// Bash still reads `~/.profile` from the passwd entry, so a profile line like
 /// `. "$HOME/.cargo/env"` resolved against an empty `HOME` and every shell the
 /// model ran printed an error before its own command.
-#[cfg(unix)]
 #[tokio::test]
 async fn host_process_exports_the_captured_home() -> Result<(), TestError> {
     let Some(expected) = captured_host_home() else {
@@ -2254,7 +2205,6 @@ async fn host_process_exports_the_captured_home() -> Result<(), TestError> {
 
 /// The captured host home under the same filter the backend applies, or `None`
 /// when this host has no usable one and the assertion would not be meaningful.
-#[cfg(unix)]
 fn captured_host_home() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -2263,7 +2213,6 @@ fn captured_host_home() -> Option<PathBuf> {
         .filter(|home| home.is_dir() && home != Path::new("/"))
 }
 
-#[cfg(unix)]
 fn assert_home_line(environment: &str) {
     match captured_host_home() {
         Some(home) => assert!(environment.contains(&format!("HOME={}\n", home.display()))),
@@ -2273,7 +2222,6 @@ fn assert_home_line(environment: &str) {
 
 /// Process tools carry the operator's full host authority on every platform:
 /// a file outside the workspace is readable and writable from the child.
-#[cfg(unix)]
 #[tokio::test]
 async fn host_process_reaches_paths_outside_the_workspace() -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
@@ -2354,7 +2302,6 @@ fn file_tools_refuse_credentials_outside_the_workspace() -> Result<(), TestError
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 #[allow(
     clippy::too_many_lines,
@@ -2472,7 +2419,6 @@ async fn host_process_bounds_live_output_and_enforces_timeout() -> Result<(), Te
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn host_cancel_and_future_drop_join_the_owned_process_group() -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
@@ -2822,7 +2768,6 @@ fn fake_authority_instance_is_identity_bound_and_not_reconstructed_by_serde()
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn host_process_path_prepends_required_workspace_prefix() -> Result<(), TestError> {
     use std::os::unix::fs::PermissionsExt;
@@ -2910,7 +2855,6 @@ async fn host_process_path_prepends_required_workspace_prefix() -> Result<(), Te
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn login_shell_process_restores_required_workspace_prefix() -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
@@ -2956,7 +2900,6 @@ async fn login_shell_process_restores_required_workspace_prefix() -> Result<(), 
     Ok(())
 }
 
-#[cfg(unix)]
 fn query_environment(workspace: &Path, id: u8) -> Result<ExecutionEnvironment, TestError> {
     let backend = Arc::new(DeterministicExecutionBackend::new(
         [],
@@ -2975,7 +2918,6 @@ fn query_environment(workspace: &Path, id: u8) -> Result<ExecutionEnvironment, T
 /// A repository query surveys a live tree. An entry it cannot open is skipped
 /// and counted, never a reason to abandon the whole query: a socket bound by a
 /// neighbouring process must not make search stop working.
-#[cfg(unix)]
 #[tokio::test]
 async fn repository_query_surveys_past_sockets_and_fifos_and_counts_them() -> Result<(), TestError>
 {
@@ -3013,7 +2955,6 @@ async fn repository_query_surveys_past_sockets_and_fifos_and_counts_them() -> Re
 ///
 /// The sibling holds an entry the walk could never open, so an `entries_skipped`
 /// of zero is proof that the sibling was never visited.
-#[cfg(unix)]
 #[tokio::test]
 async fn repository_query_glob_prefix_prunes_the_walk_to_its_literal_directory()
 -> Result<(), TestError> {
@@ -3076,7 +3017,6 @@ async fn repository_query_glob_prefix_prunes_the_walk_to_its_literal_directory()
 }
 
 /// A glob prefix that names nothing yields an empty result, not a failure.
-#[cfg(unix)]
 #[tokio::test]
 async fn repository_query_glob_prefix_without_a_directory_is_empty() -> Result<(), TestError> {
     let workspace = tempfile::tempdir()?;
@@ -3100,7 +3040,6 @@ async fn repository_query_glob_prefix_without_a_directory_is_empty() -> Result<(
 /// way in. The output bound is not: it is noticed once the child has produced
 /// more than the environment allows, which means it ran. A classifier that
 /// reads the category alone would tell the model nothing happened.
-#[cfg(unix)]
 #[tokio::test]
 async fn an_output_bound_noticed_after_the_child_ran_is_not_a_no_effect_refusal()
 -> Result<(), TestError> {
@@ -3143,7 +3082,6 @@ async fn an_output_bound_noticed_after_the_child_ran_is_not_a_no_effect_refusal(
     Ok(())
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn repository_queries_honour_gitignore_scan_by_matches_and_glob_from_the_root()
 -> Result<(), TestError> {

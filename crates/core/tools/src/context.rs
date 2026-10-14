@@ -127,32 +127,6 @@ impl WorkspacePolicy {
         self.ensure_contained(resolved)
     }
 
-    /// Resolves a possibly-new path by checking its nearest existing ancestor.
-    ///
-    /// This is lexical and symlink-aware at check time, but host mode does not
-    /// claim race-free containment. Strong containment requires a future
-    /// backend-owned isolation capability.
-    ///
-    /// # Errors
-    ///
-    /// Returns a workspace-policy error for traversal or symlink escape.
-    pub fn resolve_for_write(&self, path: impl AsRef<Path>) -> Result<PathBuf, ToolRuntimeError> {
-        let relative = self.relative_input(path)?;
-        let candidate = self.root.join(relative);
-        let mut ancestor = candidate.as_path();
-        while !ancestor.exists() {
-            ancestor = ancestor
-                .parent()
-                .ok_or_else(|| workspace_error("workspace path has no existing ancestor"))?;
-        }
-        let canonical_ancestor =
-            canonicalize_safe(ancestor, "workspace path ancestor could not be resolved")?;
-        if !canonical_ancestor.starts_with(self.root.as_path()) {
-            return Err(workspace_error("workspace path escapes through a symlink"));
-        }
-        Ok(candidate)
-    }
-
     fn ensure_contained(&self, resolved: PathBuf) -> Result<PathBuf, ToolRuntimeError> {
         if resolved.starts_with(self.root.as_path()) {
             Ok(resolved)
@@ -781,11 +755,9 @@ mod tests {
             assert!(policy.relative_input(false_prefix.join("foo")).is_err());
         }
 
-        #[cfg(unix)]
         {
             std::os::unix::fs::symlink(outside.path(), workspace.path().join("escape"))?;
             assert!(policy.resolve_existing("escape").is_err());
-            assert!(policy.resolve_for_write("escape/new.txt").is_err());
         }
         Ok(())
     }

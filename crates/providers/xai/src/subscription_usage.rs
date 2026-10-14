@@ -250,7 +250,6 @@ mod tests {
         let body = br#"{"config":{"prepaidBalance":{"val":1250}}}"#;
         let snapshot = decode_grok_subscription_usage(body, Timestamp::new(1, 0)?)?;
         assert_eq!(snapshot.meters(), []);
-        assert!(snapshot.unmetered_period().is_none());
         assert_eq!(snapshot.balances().len(), 1);
         assert_eq!(snapshot.balances()[0].remaining_cents(), Some(1250));
         Ok(())
@@ -264,7 +263,6 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let body = br#"{"config":{"billingPeriodEnd":"2026-09-10T13:22:28.845023+00:00","billingPeriodStart":"2026-09-03T13:22:28.845023+00:00","currentPeriod":{"end":"2026-09-10T13:22:28.845023+00:00","start":"2026-09-03T13:22:28.845023+00:00","type":"USAGE_PERIOD_TYPE_WEEKLY"},"isUnifiedBillingUser":true,"onDemandCap":{"val":0},"onDemandUsed":{"val":0},"prepaidBalance":{"val":0},"topUpMethod":"TOP_UP_METHOD_SAVED_PAYMENT_METHOD"}}"#;
         let snapshot = decode_grok_subscription_usage(body, Timestamp::new(1, 0)?)?;
-        assert!(snapshot.unmetered_period().is_none());
         let window = &snapshot.meters()[0].windows()[0];
         assert!(window.used_percent().get().abs() < f64::EPSILON);
         assert!(
@@ -290,7 +288,6 @@ mod tests {
         let observed = Timestamp::new(1, 0)?;
         let empty = decode_grok_subscription_usage(br#"{"config":null}"#, observed)?;
         assert!(empty.meters().is_empty() && empty.balances().is_empty());
-        assert!(empty.unmetered_period().is_none());
         // A percentage with no period and no end names no allowance window.
         assert_eq!(
             decode_grok_subscription_usage(br#"{"config":{"creditUsagePercent":5}}"#, observed)?

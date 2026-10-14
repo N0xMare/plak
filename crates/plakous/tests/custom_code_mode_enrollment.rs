@@ -16,9 +16,9 @@ mod scripted;
 fn custom_descriptor_cannot_borrow_codex_code_mode_enrollment() -> scripted::Fallible<()> {
     let model = scripted::ScriptedModel::new(
         &scripted::Vocabulary {
-            protocol: plakous_tools::CODEX_PROJECTION_PROTOCOL,
-            route: plakous_tools::CODEX_PROJECTION_ROUTE,
-            profile: plakous_tools::CODEX_PROJECTION_PROFILE,
+            protocol: plakous_compose::CODEX_PROJECTION_PROTOCOL,
+            route: plakous_compose::CODEX_PROJECTION_ROUTE,
+            profile: plakous_compose::CODEX_PROJECTION_PROFILE,
             family: "responses-family",
             model: "gpt-5.6-luna",
         },

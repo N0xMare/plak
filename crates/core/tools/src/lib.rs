@@ -7,6 +7,9 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(not(unix))]
+compile_error!("plakous-tools requires a unix target (spec 06 supported platforms)");
+
 mod jobs;
 pub use jobs::{JobConfig, JobHost, JobHostCapacity, JobOwner, JobStatus, JobStopReason, JobView};
 
@@ -26,11 +29,6 @@ mod outcome;
 mod pack;
 mod pack_support;
 mod policy;
-mod process_projection_catalog;
-pub use process_projection_catalog::{
-    CODEX_PROJECTION_PROFILE, CODEX_PROJECTION_PROTOCOL, CODEX_PROJECTION_ROUTE,
-    OPENAI_PLATFORM_PROJECTION_PROTOCOL, OPENAI_PLATFORM_PROJECTION_ROUTE,
-};
 mod prompt_digest;
 mod registry;
 mod schema;

@@ -761,6 +761,7 @@ pub struct RepositoryQueryResult {
     pub(super) bytes_scanned: u64,
     pub(super) skipped_binary: usize,
     pub(super) skipped_oversize: usize,
+    pub(super) skipped_changed: usize,
     pub(super) entries_skipped: usize,
     pub(super) stop_reason: Option<RepositoryQueryStopReason>,
 }
@@ -794,6 +795,12 @@ impl RepositoryQueryResult {
     #[must_use]
     pub const fn skipped_oversize(&self) -> usize {
         self.skipped_oversize
+    }
+    /// Returns the number of files skipped because they changed between the
+    /// walk and the read, or while being read (an appended log, for example).
+    #[must_use]
+    pub const fn skipped_changed(&self) -> usize {
+        self.skipped_changed
     }
     /// Returns the number of directory entries the walk could not traverse.
     ///

@@ -20,6 +20,7 @@ default = []
 [dependencies]
 futures-core.workspace = true
 futures-util = { workspace = true, features = ["std"] }
+regex.workspace = true
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true, features = ["raw_value"] }
 serde_json_canonicalizer.workspace = true
@@ -29,6 +30,7 @@ uuid = { workspace = true, features = ["serde", "v7"] }
 
 [dev-dependencies]
 futures = { workspace = true, features = ["executor", "std"] }
+nix.workspace = true
 proptest = { workspace = true, features = ["std"] }
 
 [lints]

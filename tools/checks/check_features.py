@@ -220,7 +220,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-js-eval": "97fac4b3c7bddcf38ecc29fde3c4c946cc8b060042e2778beb7ee4e2d053aecf",
     "plakous-py-eval": "9762b4ca38230836eaee81639f677cba2bf7f7af708d8a9c6aaf9cddd43beed2",
     "plakous-messages": "26f0d49c592ebe70e92aacd186d37d68facb9fd3f07eedc93446ea00ab829955",
-    "plakous-model": "fdbb9b934f1115dbd33ecb2ac178438f48ca83596075cd0f3bd68747ce2731b0",
+    "plakous-model": "ad51d57d372a8bceb2696f96a4e87f7ac31071c9690f074c41559cb2677ad78d",
     "plakous-openai": "71c9398736219afe95673b6cb3fbf4cb1f15dd9aec2ba4d6b9ed379fcc1c08a6",
     "plakous-tool-files": "032d5367ef52db60dd8a5f798aecb2517aa5464787cb962d743b18d48f2dc9b0",
     "plakous-tool-plan": "97d99c53c448bc26d4bfb53ef555578d2c2185a98579a6df934ea3ce7a245da4",
@@ -232,7 +232,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-responses": "b87aaaa7f0fd6f8b28a1df608553ebc9a4f359da3078f605f9152ef4f37b9d3d",
     "plakous-responses-dialect": "427931c2943d637059f278bc2a5c5b44b3357b6228490f9c232ded76adf35d4d",
     "plakous-store": "c23f61cbedc0d1f35c7eb983f164580f83b9147f8213b5fe403b142c1027e25e",
-    "plakous-tools": "28cc70534492b77b9084c700113d37f271a8ad5a504b35c9416bdea2371754a0",
+    "plakous-tools": "7ec15cba907899e96ad08adcf386241ada9cdf69b30f6f93b1dc1cfbd5409a75",
     "plakous-xai": "5b5e114b647a394b41e86d049abfdd812c8dfce92c4245b60d4b171dd9ee50f8",
 }
 

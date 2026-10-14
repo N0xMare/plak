@@ -11,7 +11,6 @@ use super::{
     ToolExecutorBindingIdentity, invalid_request, resource_error, validate_absolute_program,
     validate_literal, validate_process_value, validate_process_values, validate_relative_path,
 };
-#[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 
 /// Opaque, allocation-local process-session identity. It is never an OS PID.
@@ -45,9 +44,7 @@ pub enum JoinedProcessTerminalMode {
 pub struct JoinedProcessShellProfile {
     pub(super) executable: Arc<PathBuf>,
     pub(super) canonical_executable: Arc<PathBuf>,
-    #[cfg(unix)]
     pub(super) executable_device: u64,
-    #[cfg(unix)]
     pub(super) executable_inode: u64,
     pub(super) arguments: Arc<[String]>,
     pub(super) identity: JoinedProcessShellProfileIdentity,
@@ -59,11 +56,8 @@ pub struct JoinedProcessShellProfileIdentity {
     pub(super) semantic_revision: u32,
     pub(super) enrolled_executable: Arc<PathBuf>,
     pub(super) canonical_executable: Arc<PathBuf>,
-    #[cfg(unix)]
     pub(super) executable_device: u64,
-    #[cfg(unix)]
     pub(super) executable_inode: u64,
-    #[cfg(unix)]
     pub(super) executable_mode_mask: u32,
     pub(super) arguments: Arc<[String]>,
     pub(super) binding_identity: ToolExecutorBindingIdentity,
@@ -96,19 +90,16 @@ impl JoinedProcessShellProfileIdentity {
         self.binding_identity
     }
     /// Returns the enrolled Unix device identity.
-    #[cfg(unix)]
     #[must_use]
     pub const fn executable_device(&self) -> u64 {
         self.executable_device
     }
     /// Returns the enrolled Unix inode identity.
-    #[cfg(unix)]
     #[must_use]
     pub const fn executable_inode(&self) -> u64 {
         self.executable_inode
     }
     /// Returns the Unix mode-bit mask that must remain nonzero.
-    #[cfg(unix)]
     #[must_use]
     pub const fn executable_mode_mask(&self) -> u32 {
         self.executable_mode_mask
@@ -137,7 +128,6 @@ impl JoinedProcessShellProfile {
                 "joined process shell must resolve to a regular file",
             ));
         }
-        #[cfg(unix)]
         if metadata.mode() & 0o111 == 0 {
             return Err(invalid_request(
                 "joined process shell is not marked executable",
@@ -157,7 +147,6 @@ impl JoinedProcessShellProfile {
             canonical_text.as_bytes().to_vec(),
             b"regular-file-required".to_vec(),
         ];
-        #[cfg(unix)]
         {
             identity_parts.push(metadata.dev().to_be_bytes().to_vec());
             identity_parts.push(metadata.ino().to_be_bytes().to_vec());
@@ -185,11 +174,8 @@ impl JoinedProcessShellProfile {
             semantic_revision: JOINED_PROCESS_SHELL_PROFILE_SEMANTIC_REVISION,
             enrolled_executable: Arc::clone(&enrolled_executable),
             canonical_executable: Arc::clone(&canonical_executable),
-            #[cfg(unix)]
             executable_device: metadata.dev(),
-            #[cfg(unix)]
             executable_inode: metadata.ino(),
-            #[cfg(unix)]
             executable_mode_mask: 0o111,
             arguments: Arc::clone(&arguments),
             binding_identity,
@@ -197,9 +183,7 @@ impl JoinedProcessShellProfile {
         Ok(Self {
             executable: enrolled_executable,
             canonical_executable,
-            #[cfg(unix)]
             executable_device: metadata.dev(),
-            #[cfg(unix)]
             executable_inode: metadata.ino(),
             arguments,
             identity,
@@ -239,7 +223,6 @@ impl JoinedProcessShellProfile {
                 "joined process shell is no longer a regular file",
             ));
         }
-        #[cfg(unix)]
         if metadata.dev() != self.executable_device
             || metadata.ino() != self.executable_inode
             || metadata.mode() & 0o111 == 0

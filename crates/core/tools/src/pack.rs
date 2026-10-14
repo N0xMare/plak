@@ -155,6 +155,10 @@ pub struct MenuEntry {
     /// claimed read/await/stop tool states the same foreground budget and
     /// hard runtime cap the leaf's description does.
     description_suffix: Option<Arc<str>>,
+    /// Bound job-lifetime tail this entry's own description states, declared
+    /// by the pack that rendered it. A claimer of this entry inherits it as
+    /// its description suffix.
+    lifetime_tail: Option<Arc<str>>,
 }
 
 impl MenuEntry {
@@ -178,6 +182,7 @@ impl MenuEntry {
             alternate: None,
             claimable: false,
             description_suffix: None,
+            lifetime_tail: None,
         }
     }
 
@@ -208,6 +213,15 @@ impl MenuEntry {
     #[must_use]
     pub fn with_description_suffix(mut self, suffix: &str) -> Self {
         self.description_suffix = Some(Arc::from(suffix));
+        self
+    }
+
+    /// Declares the bound job-lifetime tail (foreground budget, hard runtime
+    /// cap and job-lifetime contract) this entry's description states, so a
+    /// claim that takes this entry over states the same bounds.
+    #[must_use]
+    pub fn with_lifetime_tail(mut self, tail: &str) -> Self {
+        self.lifetime_tail = Some(Arc::from(tail));
         self
     }
 
@@ -717,7 +731,10 @@ fn apply_claims(
         .iter()
         .filter(|(_, entry)| entry.ordinal().is_core() && claimed.contains(&entry.exposed))
         .filter_map(|(_, entry)| {
-            bound_lifetime_tail(entry).map(|tail| (Arc::clone(&entry.exposed), tail))
+            entry
+                .lifetime_tail
+                .as_ref()
+                .map(|tail| (Arc::clone(&entry.exposed), Arc::clone(tail)))
         })
         .collect::<std::collections::BTreeMap<_, _>>();
     let claimed_output =
@@ -745,18 +762,6 @@ fn apply_claims(
             }
         })
         .collect())
-}
-
-/// The bound foreground-budget and hard-runtime-cap tail a process tool's
-/// description states, including the job-lifetime contract that follows it.
-fn bound_lifetime_tail(entry: &MenuEntry) -> Option<Arc<str>> {
-    let MenuShape::Structured { description, .. } = &entry.shape else {
-        return None;
-    };
-    let marker = "Construction-bound foreground budget:";
-    description
-        .find(marker)
-        .map(|index| Arc::from(description[index..].trim_end()))
 }
 
 /// Resolves the namespace of declared `(pack id, entry)` pairs, with the

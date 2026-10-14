@@ -19,15 +19,10 @@ use std::path::Path;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 
-#[cfg(unix)]
 use rustix::fs::{AtFlags, Dir, Mode, OFlags, mkdirat, openat, unlinkat};
-#[cfg(unix)]
 use rustix::io::Errno;
-#[cfg(unix)]
 use std::fs::File;
-#[cfg(unix)]
 use std::io::Write;
-#[cfg(unix)]
 use std::os::unix::fs::{FileExt, MetadataExt, PermissionsExt};
 
 /// Content bytes one job output file keeps before it stops spooling.
@@ -43,7 +38,6 @@ pub const JOB_OUTPUT_STALE_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60)
 /// created, counting the new file at its full bound.
 pub const JOB_OUTPUT_ROOT_BUDGET_BYTES: u64 = 1024 * 1024 * 1024;
 
-#[cfg(unix)]
 const CONSUMED_MODE: u32 = 0o400;
 
 /// Line reported wherever an issued file is named or read after spooling to
@@ -55,7 +49,6 @@ pub fn job_output_incomplete_line(written: u64) -> String {
 
 /// Bytes a read takes from one issued file: the content bound plus the longest
 /// line spooling may append after it. Anything beyond was not spooled.
-#[cfg(unix)]
 fn job_output_read_bound() -> u64 {
     let truncated = JOB_OUTPUT_TRUNCATED_LINE.len();
     let incomplete = job_output_incomplete_line(MAX_JOB_OUTPUT_FILE_BYTES).len();
@@ -82,7 +75,6 @@ pub struct JobOutputRoot {
 
 struct JobOutputRootInner {
     path: String,
-    #[cfg(unix)]
     directory: File,
 }
 
@@ -102,63 +94,52 @@ impl JobOutputRoot {
     /// Refuses a relative or non-UTF-8 path, a symlinked or foreign directory,
     /// a directory whose mode is not 0700, or an I/O failure.
     pub fn open(path: &Path) -> Result<Self, ExecutionBackendError> {
-        #[cfg(not(unix))]
-        {
-            let _ = path;
-            Err(backend_error(
-                ExecutionBackendErrorKind::Unsupported,
-                "job output files are unsupported on this platform",
-            ))
+        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+            return Err(backend_error(
+                ExecutionBackendErrorKind::InvalidRequest,
+                "job output root must name a directory",
+            ));
+        };
+        if !path.is_absolute() {
+            return Err(backend_error(
+                ExecutionBackendErrorKind::InvalidRequest,
+                "job output root must be absolute",
+            ));
         }
-        #[cfg(unix)]
-        {
-            let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
-                return Err(backend_error(
-                    ExecutionBackendErrorKind::InvalidRequest,
-                    "job output root must name a directory",
-                ));
-            };
-            if !path.is_absolute() {
-                return Err(backend_error(
-                    ExecutionBackendErrorKind::InvalidRequest,
-                    "job output root must be absolute",
-                ));
-            }
-            let parent = std::fs::canonicalize(parent).map_err(|_| {
-                backend_error(
-                    ExecutionBackendErrorKind::Io,
-                    "job output root parent could not be resolved",
-                )
-            })?;
-            let display = parent
-                .join(name)
-                .into_os_string()
-                .into_string()
-                .map_err(|_| {
-                    backend_error(
-                        ExecutionBackendErrorKind::InvalidRequest,
-                        "job output root is not UTF-8",
-                    )
-                })?;
-            let parent = rustix::fs::open(
-                &parent,
-                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
-                Mode::empty(),
+        let parent = std::fs::canonicalize(parent).map_err(|_| {
+            backend_error(
+                ExecutionBackendErrorKind::Io,
+                "job output root parent could not be resolved",
             )
+        })?;
+        let display = parent
+            .join(name)
+            .into_os_string()
+            .into_string()
             .map_err(|_| {
                 backend_error(
-                    ExecutionBackendErrorKind::Io,
-                    "job output root parent could not be opened",
+                    ExecutionBackendErrorKind::InvalidRequest,
+                    "job output root is not UTF-8",
                 )
             })?;
-            let directory = private_directory(&parent, name, true)?;
-            Ok(Self {
-                inner: Arc::new(JobOutputRootInner {
-                    path: display,
-                    directory,
-                }),
-            })
-        }
+        let parent = rustix::fs::open(
+            &parent,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|_| {
+            backend_error(
+                ExecutionBackendErrorKind::Io,
+                "job output root parent could not be opened",
+            )
+        })?;
+        let directory = private_directory(&parent, name, true)?;
+        Ok(Self {
+            inner: Arc::new(JobOutputRootInner {
+                path: display,
+                directory,
+            }),
+        })
     }
 
     /// Absolute path the root was opened at.
@@ -172,9 +153,6 @@ impl JobOutputRoot {
     /// session directories left empty. Hosts run it once, when they first
     /// open the root.
     pub fn sweep_stale(&self, now: SystemTime) {
-        #[cfg(not(unix))]
-        let _ = now;
-        #[cfg(unix)]
         for (session, directory) in self.session_directories() {
             for entry in log_entries(&directory, |_| true) {
                 if expired(entry.modified, JOB_OUTPUT_STALE_AGE, now) {
@@ -193,7 +171,6 @@ impl JobOutputRoot {
     /// deletes nothing; otherwise it evicts consumed files oldest first, then
     /// stale unconsumed files oldest first, until the new file fits. Returns
     /// the evicted paths and whether the new file fits.
-    #[cfg(unix)]
     fn reserve(&self, now: SystemTime) -> (Vec<String>, bool) {
         let mut used = 0_u64;
         let mut kept = 0_u64;
@@ -246,7 +223,6 @@ impl JobOutputRoot {
 
     /// Every private session directory under the root whose name is a
     /// canonical session id, by name.
-    #[cfg(unix)]
     fn session_directories(&self) -> Vec<(String, File)> {
         let Ok(mut entries) = Dir::read_from(&self.inner.directory) else {
             return Vec::new();
@@ -415,55 +391,43 @@ impl JobOutputs {
     /// Creates one job's file exclusively (mode 0600) and records its identity.
     /// The caller has already reserved room under the root budget.
     pub(super) fn create(&mut self, number: u32) -> Result<JobOutputWriter, ExecutionBackendError> {
-        #[cfg(not(unix))]
-        {
-            let _ = number;
-            Err(backend_error(
-                ExecutionBackendErrorKind::Unsupported,
-                "job output files are unsupported on this platform",
-            ))
-        }
-        #[cfg(unix)]
-        {
-            let name = format!("{}-p{number}-{}.log", self.scope.branch, self.scope.owner);
-            // A concurrent stale sweep may remove an empty session directory
-            // between its creation and the file's; one retry covers that.
-            let file = self
-                .scope
-                .create_file(&name)
-                .or_else(|_| self.scope.create_file(&name))?;
-            let metadata = file.metadata().map_err(|_| {
-                backend_error(
-                    ExecutionBackendErrorKind::Io,
-                    "job output file could not be inspected",
-                )
-            })?;
-            let failure = Arc::new(OnceLock::new());
-            self.issued.insert(
-                number,
-                IssuedJobOutput {
-                    path: format!(
-                        "{}/{}/{name}",
-                        self.scope.root.inner.path, self.scope.session
-                    ),
-                    name,
-                    device: metadata.dev(),
-                    inode: metadata.ino(),
-                    failure: Arc::clone(&failure),
-                },
-            );
-            Ok(JobOutputWriter {
-                file,
-                written: 0,
-                open: true,
-                failure,
-            })
-        }
+        let name = format!("{}-p{number}-{}.log", self.scope.branch, self.scope.owner);
+        // A concurrent stale sweep may remove an empty session directory
+        // between its creation and the file's; one retry covers that.
+        let file = self
+            .scope
+            .create_file(&name)
+            .or_else(|_| self.scope.create_file(&name))?;
+        let metadata = file.metadata().map_err(|_| {
+            backend_error(
+                ExecutionBackendErrorKind::Io,
+                "job output file could not be inspected",
+            )
+        })?;
+        let failure = Arc::new(OnceLock::new());
+        self.issued.insert(
+            number,
+            IssuedJobOutput {
+                path: format!(
+                    "{}/{}/{name}",
+                    self.scope.root.inner.path, self.scope.session
+                ),
+                name,
+                device: metadata.dev(),
+                inode: metadata.ino(),
+                failure: Arc::clone(&failure),
+            },
+        );
+        Ok(JobOutputWriter {
+            file,
+            written: 0,
+            open: true,
+            failure,
+        })
     }
 }
 
 impl JobOutputScope {
-    #[cfg(unix)]
     fn create_file(&self, name: &str) -> Result<File, ExecutionBackendError> {
         let directory = private_directory(&self.root.inner.directory, self.session.as_str(), true)?;
         openat(
@@ -486,17 +450,9 @@ impl JobOutputScope {
     /// one more file fits. It walks the whole root: never call it on an async
     /// worker.
     pub(super) fn prepare_create(&self, now: SystemTime) -> (Vec<String>, Vec<String>, bool) {
-        #[cfg(not(unix))]
-        {
-            let _ = now;
-            (Vec::new(), Vec::new(), false)
-        }
-        #[cfg(unix)]
-        {
-            let swept = self.sweep(now);
-            let (evicted, fits) = self.root.reserve(now);
-            (swept, evicted, fits)
-        }
+        let swept = self.sweep(now);
+        let (evicted, fits) = self.root.reserve(now);
+        (swept, evicted, fits)
     }
 
     /// Marks the files of just-consumed job numbers, of any incarnation of
@@ -511,52 +467,43 @@ impl JobOutputScope {
         own: &[IssuedJobOutput],
         now: SystemTime,
     ) -> Vec<String> {
-        #[cfg(all(test, unix))]
+        #[cfg(test)]
         tests::release_gate(self.root.path());
-        #[cfg(not(unix))]
-        {
-            let _ = (numbers, own, now);
-            Vec::new()
-        }
-        #[cfg(unix)]
-        {
-            let Ok(directory) =
-                private_directory(&self.root.inner.directory, self.session.as_str(), false)
-            else {
-                return Vec::new();
-            };
-            let mut names = Vec::new();
-            read_layout_names(&directory, |name| {
-                if name.branch == self.branch && numbers.contains(&name.number) {
-                    names.push((name.owner == self.owner, name.text.to_owned()));
-                }
-            });
-            for (this_incarnation, name) in names {
-                let Some((file, metadata)) = open_job_file(&directory, &name) else {
-                    continue;
-                };
-                if this_incarnation
-                    && !own.iter().any(|issued| {
-                        issued.name == name
-                            && issued.device == metadata.dev()
-                            && issued.inode == metadata.ino()
-                    })
-                {
-                    continue;
-                }
-                if file.set_modified(now).is_ok() {
-                    let _ = file.set_permissions(std::fs::Permissions::from_mode(CONSUMED_MODE));
-                }
+        let Ok(directory) =
+            private_directory(&self.root.inner.directory, self.session.as_str(), false)
+        else {
+            return Vec::new();
+        };
+        let mut names = Vec::new();
+        read_layout_names(&directory, |name| {
+            if name.branch == self.branch && numbers.contains(&name.number) {
+                names.push((name.owner == self.owner, name.text.to_owned()));
             }
-            drop(directory);
-            self.sweep(now)
+        });
+        for (this_incarnation, name) in names {
+            let Some((file, metadata)) = open_job_file(&directory, &name) else {
+                continue;
+            };
+            if this_incarnation
+                && !own.iter().any(|issued| {
+                    issued.name == name
+                        && issued.device == metadata.dev()
+                        && issued.inode == metadata.ino()
+                })
+            {
+                continue;
+            }
+            if file.set_modified(now).is_ok() {
+                let _ = file.set_permissions(std::fs::Permissions::from_mode(CONSUMED_MODE));
+            }
         }
+        drop(directory);
+        self.sweep(now)
     }
 
     /// Deletes this branch's consumed files, of any incarnation, whose
     /// consumption is at least [`JOB_OUTPUT_RETENTION`] old. Returns the
     /// deleted file names.
-    #[cfg(unix)]
     fn sweep(&self, now: SystemTime) -> Vec<String> {
         let Ok(directory) =
             private_directory(&self.root.inner.directory, self.session.as_str(), false)
@@ -574,7 +521,6 @@ impl JobOutputScope {
 
 /// A file name of the job layout: `<branch id>-p<N>-<16 lowercase hex>.log`,
 /// with a canonical branch id and job number.
-#[cfg(unix)]
 struct LayoutName<'a> {
     text: &'a str,
     branch: &'a str,
@@ -582,7 +528,6 @@ struct LayoutName<'a> {
     owner: &'a str,
 }
 
-#[cfg(unix)]
 impl<'a> LayoutName<'a> {
     fn parse(text: &'a str) -> Option<Self> {
         let (rest, owner) = text.strip_suffix(".log")?.rsplit_once('-')?;
@@ -603,14 +548,12 @@ impl<'a> LayoutName<'a> {
 }
 
 /// Whether `text` is the canonical spelling of an id of type `T`.
-#[cfg(unix)]
 fn canonical<T: std::str::FromStr + std::fmt::Display>(text: &str) -> bool {
     text.parse::<T>().is_ok_and(|id| id.to_string() == text)
 }
 
 /// Calls `visit` for every entry of `directory` whose name parses as the job
 /// layout.
-#[cfg(unix)]
 fn read_layout_names(directory: &File, mut visit: impl FnMut(&LayoutName<'_>)) {
     let Ok(mut entries) = Dir::read_from(directory) else {
         return;
@@ -625,7 +568,6 @@ fn read_layout_names(directory: &File, mut visit: impl FnMut(&LayoutName<'_>)) {
 }
 
 /// One job layout file: regular, singly linked and owned by the effective user.
-#[cfg(unix)]
 struct LogEntry {
     name: String,
     size: u64,
@@ -635,7 +577,6 @@ struct LogEntry {
 
 /// Lists the job layout files whose names pass `select`, inspecting each
 /// through a no-follow, non-blocking open.
-#[cfg(unix)]
 fn log_entries(directory: &File, select: impl Fn(&LayoutName<'_>) -> bool) -> Vec<LogEntry> {
     let mut names = Vec::new();
     read_layout_names(directory, |name| {
@@ -660,7 +601,6 @@ fn log_entries(directory: &File, select: impl Fn(&LayoutName<'_>) -> bool) -> Ve
 /// Opens one name under a held directory without following a symlink or
 /// blocking, and keeps it only if it is a regular, singly linked file owned
 /// by the effective user.
-#[cfg(unix)]
 fn open_job_file(directory: &File, name: &str) -> Option<(File, std::fs::Metadata)> {
     let file = openat(
         directory,
@@ -677,7 +617,6 @@ fn open_job_file(directory: &File, name: &str) -> Option<(File, std::fs::Metadat
     .then_some((file, metadata))
 }
 
-#[cfg(unix)]
 fn expired(modified: SystemTime, age: Duration, now: SystemTime) -> bool {
     modified
         .checked_add(age)
@@ -704,62 +643,50 @@ impl IssuedJobOutputLocation {
         offset: u64,
         max_bytes: u64,
     ) -> Result<JobOutputSlice, ExecutionBackendError> {
-        #[cfg(not(unix))]
+        let path = &self.issued.path;
+        let directory = private_directory(&self.root.inner.directory, &self.session, false)
+            .map_err(|error| refusal(error.kind(), path))?;
+        let file = openat(
+            &directory,
+            self.issued.name.as_str(),
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map(File::from)
+        .map_err(|errno| refusal(open_error_kind(errno), path))?;
+        let metadata = file
+            .metadata()
+            .map_err(|_| refusal(ExecutionBackendErrorKind::Io, path))?;
+        if !metadata.file_type().is_file()
+            || metadata.nlink() != 1
+            || metadata.uid() != rustix::process::geteuid().as_raw()
+            || metadata.dev() != self.issued.device
+            || metadata.ino() != self.issued.inode
         {
-            let _ = (offset, max_bytes);
-            Err(backend_error(
-                ExecutionBackendErrorKind::Unsupported,
-                "job output files are unsupported on this platform",
-            ))
+            return Err(refusal(ExecutionBackendErrorKind::IdentityMismatch, path));
         }
-        #[cfg(unix)]
-        {
-            let path = &self.issued.path;
-            let directory = private_directory(&self.root.inner.directory, &self.session, false)
-                .map_err(|error| refusal(error.kind(), path))?;
-            let file = openat(
-                &directory,
-                self.issued.name.as_str(),
-                OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
-                Mode::empty(),
-            )
-            .map(File::from)
-            .map_err(|errno| refusal(open_error_kind(errno), path))?;
-            let metadata = file
-                .metadata()
-                .map_err(|_| refusal(ExecutionBackendErrorKind::Io, path))?;
-            if !metadata.file_type().is_file()
-                || metadata.nlink() != 1
-                || metadata.uid() != rustix::process::geteuid().as_raw()
-                || metadata.dev() != self.issued.device
-                || metadata.ino() != self.issued.inode
-            {
-                return Err(refusal(ExecutionBackendErrorKind::IdentityMismatch, path));
+        let bound = job_output_read_bound();
+        let room = bound.saturating_sub(offset);
+        let wanted = usize::try_from(max_bytes.min(room)).unwrap_or(usize::MAX);
+        let mut bytes = vec![0; wanted.min(4 * 1024 * 1024)];
+        let mut filled = 0;
+        while filled < bytes.len() {
+            let position = offset.saturating_add(u64::try_from(filled).unwrap_or(u64::MAX));
+            match file.read_at(&mut bytes[filled..], position) {
+                Ok(0) => break,
+                Ok(read) => filled += read,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(_) => return Err(refusal(ExecutionBackendErrorKind::Io, path)),
             }
-            let bound = job_output_read_bound();
-            let room = bound.saturating_sub(offset);
-            let wanted = usize::try_from(max_bytes.min(room)).unwrap_or(usize::MAX);
-            let mut bytes = vec![0; wanted.min(4 * 1024 * 1024)];
-            let mut filled = 0;
-            while filled < bytes.len() {
-                let position = offset.saturating_add(u64::try_from(filled).unwrap_or(u64::MAX));
-                match file.read_at(&mut bytes[filled..], position) {
-                    Ok(0) => break,
-                    Ok(read) => filled += read,
-                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-                    Err(_) => return Err(refusal(ExecutionBackendErrorKind::Io, path)),
-                }
-            }
-            let at_bound =
-                offset.saturating_add(u64::try_from(filled).unwrap_or(u64::MAX)) >= bound;
-            let complete = filled < bytes.len() || (at_bound && metadata.size() <= bound);
-            bytes.truncate(filled);
-            Ok(JobOutputSlice {
-                bytes,
-                complete,
-                write_failed_after: self.issued.failure.get().copied(),
-            })
         }
+        let at_bound = offset.saturating_add(u64::try_from(filled).unwrap_or(u64::MAX)) >= bound;
+        let complete = filled < bytes.len() || (at_bound && metadata.size() <= bound);
+        bytes.truncate(filled);
+        Ok(JobOutputSlice {
+            bytes,
+            complete,
+            write_failed_after: self.issued.failure.get().copied(),
+        })
     }
 }
 
@@ -779,7 +706,6 @@ fn refusal(kind: ExecutionBackendErrorKind, path: &str) -> ExecutionBackendError
     backend_error(kind, format!("job output file {path} {reason}"))
 }
 
-#[cfg(unix)]
 const fn open_error_kind(errno: Errno) -> ExecutionBackendErrorKind {
     match errno {
         Errno::NOENT => ExecutionBackendErrorKind::NotFound,
@@ -790,7 +716,6 @@ const fn open_error_kind(errno: Errno) -> ExecutionBackendErrorKind {
 
 /// Opens (optionally creating, mode 0700) one directory component without
 /// following a symlink, and requires mode 0700 and the effective user as owner.
-#[cfg(unix)]
 fn private_directory(
     parent: &impl std::os::fd::AsFd,
     name: impl rustix::path::Arg + Copy,
@@ -836,7 +761,6 @@ fn private_directory(
 
 /// Appends one promoted job's combined output up to the file bound.
 pub(super) struct JobOutputWriter {
-    #[cfg(unix)]
     file: File,
     written: u64,
     open: bool,
@@ -852,43 +776,36 @@ impl JobOutputWriter {
         if !self.open || bytes.is_empty() {
             return;
         }
-        #[cfg(not(unix))]
-        {
+        let room = MAX_JOB_OUTPUT_FILE_BYTES.saturating_sub(self.written);
+        let take = usize::try_from(room).unwrap_or(usize::MAX).min(bytes.len());
+        let mut accepted = 0;
+        let failed = loop {
+            if accepted == take {
+                break false;
+            }
+            match self.file.write(&bytes[accepted..take]) {
+                Ok(count) if count > 0 => accepted += count,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Ok(_) | Err(_) => break true,
+            }
+        };
+        self.written = self
+            .written
+            .saturating_add(u64::try_from(accepted).unwrap_or(u64::MAX));
+        if failed {
             self.open = false;
+            let _ = self.failure.set(self.written);
+            let line = format!("\n{}\n", job_output_incomplete_line(self.written));
+            let _ = self.file.write_all(line.as_bytes());
+            return;
         }
-        #[cfg(unix)]
-        {
-            let room = MAX_JOB_OUTPUT_FILE_BYTES.saturating_sub(self.written);
-            let take = usize::try_from(room).unwrap_or(usize::MAX).min(bytes.len());
-            let mut accepted = 0;
-            let failed = loop {
-                if accepted == take {
-                    break false;
-                }
-                match self.file.write(&bytes[accepted..take]) {
-                    Ok(count) if count > 0 => accepted += count,
-                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-                    Ok(_) | Err(_) => break true,
-                }
-            };
-            self.written = self
-                .written
-                .saturating_add(u64::try_from(accepted).unwrap_or(u64::MAX));
-            if failed {
-                self.open = false;
-                let _ = self.failure.set(self.written);
-                let line = format!("\n{}\n", job_output_incomplete_line(self.written));
-                let _ = self.file.write_all(line.as_bytes());
-                return;
-            }
-            if take < bytes.len() {
-                let line = format!("\n{JOB_OUTPUT_TRUNCATED_LINE}\n");
-                let _ = self.file.write_all(line.as_bytes());
-                self.open = false;
-            }
+        if take < bytes.len() {
+            let line = format!("\n{JOB_OUTPUT_TRUNCATED_LINE}\n");
+            let _ = self.file.write_all(line.as_bytes());
+            self.open = false;
         }
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests;

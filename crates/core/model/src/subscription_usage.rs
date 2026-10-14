@@ -261,52 +261,6 @@ impl SubscriptionUsageBalance {
     }
 }
 
-/// The provider-declared current allowance period when the response names
-/// the period but reports no usage figure for it.
-///
-/// This is not a meter: it carries no percentage and never becomes one. It
-/// exists so the product can state truthfully that the provider named a
-/// period (and its reset) while reporting no consumption against it, instead
-/// of either inventing `0%` or hiding the period the provider did report.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SubscriptionUsageUnmeteredPeriod {
-    period: SubscriptionUsagePeriod,
-    ends_at: Option<Timestamp>,
-}
-
-impl SubscriptionUsageUnmeteredPeriod {
-    /// Constructs one validated provider period without a usage reading.
-    ///
-    /// # Errors
-    ///
-    /// Returns a window failure for a zero rolling duration or a label
-    /// failure for an invalid provider period name.
-    pub fn new(
-        period: SubscriptionUsagePeriod,
-        ends_at: Option<Timestamp>,
-    ) -> Result<Self, SubscriptionUsageValueError> {
-        match &period {
-            SubscriptionUsagePeriod::Rolling { duration_seconds } if *duration_seconds == 0 => {
-                return Err(SubscriptionUsageValueError::Window);
-            }
-            SubscriptionUsagePeriod::ProviderPeriod { kind, .. } => validate_label(kind)?,
-            SubscriptionUsagePeriod::Rolling { .. } => {}
-        }
-        Ok(Self { period, ends_at })
-    }
-
-    #[must_use]
-    /// Returns the provider-declared period shape.
-    pub const fn period(&self) -> &SubscriptionUsagePeriod {
-        &self.period
-    }
-    #[must_use]
-    /// Returns the provider-reported period end, when supplied.
-    pub const fn ends_at(&self) -> Option<Timestamp> {
-        self.ends_at
-    }
-}
-
 /// One fresh read-only provider subscription observation.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SubscriptionUsageSnapshot {
@@ -315,7 +269,6 @@ pub struct SubscriptionUsageSnapshot {
     account: Option<String>,
     meters: Vec<SubscriptionUsageMeter>,
     balances: Vec<SubscriptionUsageBalance>,
-    unmetered_period: Option<SubscriptionUsageUnmeteredPeriod>,
 }
 
 impl SubscriptionUsageSnapshot {
@@ -345,7 +298,6 @@ impl SubscriptionUsageSnapshot {
             account: None,
             meters,
             balances: Vec::new(),
-            unmetered_period: None,
         })
     }
 
@@ -403,19 +355,6 @@ impl SubscriptionUsageSnapshot {
         Ok(self)
     }
 
-    /// Attaches the provider-declared current period for a response that
-    /// names the period but reports no usage against it. `None` preserves
-    /// absence. A period is never attached to a snapshot that already carries
-    /// meters, since those windows name their own periods.
-    #[must_use]
-    pub fn with_unmetered_period(
-        mut self,
-        period: Option<SubscriptionUsageUnmeteredPeriod>,
-    ) -> Self {
-        self.unmetered_period = if self.meters.is_empty() { period } else { None };
-        self
-    }
-
     #[must_use]
     /// Returns when the provider response was fully observed.
     pub const fn observed_at(&self) -> Timestamp {
@@ -441,14 +380,6 @@ impl SubscriptionUsageSnapshot {
     pub fn balances(&self) -> &[SubscriptionUsageBalance] {
         &self.balances
     }
-    #[must_use]
-    /// Returns the provider-declared current period when the response named
-    /// a period without any usage figure; `None` when meters exist or no
-    /// period was reported.
-    pub const fn unmetered_period(&self) -> Option<&SubscriptionUsageUnmeteredPeriod> {
-        self.unmetered_period.as_ref()
-    }
-
     /// Reports whether any projected window had already ended when observed.
     #[must_use]
     pub fn contains_ended_window(&self) -> bool {

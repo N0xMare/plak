@@ -48,6 +48,16 @@ pub fn output_omitted_marker(omitted: u64) -> String {
     PLAKOUS_TOOL_OUTPUT_OMITTED.replace("{omitted}", &omitted.to_string())
 }
 
+const LIFETIME_TAIL_LEAD: &str = "Construction-bound foreground budget:";
+
+/// The bound job-lifetime tail [`bound_description`] appended to
+/// `description`, through the end, when it has one.
+pub(crate) fn lifetime_tail(description: &str) -> Option<&str> {
+    description
+        .find(LIFETIME_TAIL_LEAD)
+        .map(|index| description[index..].trim_end())
+}
+
 pub(crate) fn bound_description(
     description: &str,
     config: plakous_tools::JobConfig,
@@ -89,9 +99,38 @@ pub(crate) fn bound_description(
         );
     let description = description.trim_end();
     format!(
-        "{description} Construction-bound foreground budget: {} seconds ({} ms); hard runtime cap: {} hours. {PLAKOUS_PROCESS_JOB_LIFETIME_CONTRACT}{actions}",
+        "{description} {LIFETIME_TAIL_LEAD} {} seconds ({} ms); hard runtime cap: {} hours. {PLAKOUS_PROCESS_JOB_LIFETIME_CONTRACT}{actions}",
         config.foreground_seconds(),
         config.foreground_seconds() * 1000,
         config.max_runtime_hours(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lifetime_tail_is_the_rendered_bound_suffix() {
+        for kind in [
+            crate::ProcessToolProjectionKind::PiBash,
+            crate::ProcessToolProjectionKind::CodexUnifiedExec,
+            crate::ProcessToolProjectionKind::GrokTerminal,
+            crate::ProcessToolProjectionKind::ClaudeOAuthBash,
+        ] {
+            for actions in [false, true] {
+                let rendered = bound_description(
+                    "Reads job output.",
+                    plakous_tools::JobConfig::default(),
+                    kind,
+                    actions,
+                );
+                let tail = lifetime_tail(&rendered).unwrap_or_default();
+                assert!(tail.starts_with(LIFETIME_TAIL_LEAD), "{rendered}");
+                assert!(tail.contains("hard runtime cap"), "{tail}");
+                assert!(rendered.trim_end().ends_with(tail), "{rendered}");
+            }
+        }
+        assert_eq!(lifetime_tail("Reads job output."), None);
+    }
 }

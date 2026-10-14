@@ -4895,12 +4895,12 @@ async fn historical_evaluator_round_trip(kind: u8) -> TestResult {
         let base = descriptor()?;
         let facts = ResolvedModelDescriptor::new(
             &plakous_model::StandardIntegrationAuthority::release_owned(),
-            ProtocolId::new(plakous_tools::CODEX_PROJECTION_PROTOCOL)?,
-            RouteId::new(plakous_tools::CODEX_PROJECTION_ROUTE)?,
+            ProtocolId::new(plakous_compose::CODEX_PROJECTION_PROTOCOL)?,
+            RouteId::new(plakous_compose::CODEX_PROJECTION_ROUTE)?,
             ModelId::new("offline-historical-code-mode")?,
             None,
             Some(ModelFamilyId::new("responses-family")?),
-            ModelAdapterProfileId::new(plakous_tools::CODEX_PROJECTION_PROFILE)?,
+            ModelAdapterProfileId::new(plakous_compose::CODEX_PROJECTION_PROFILE)?,
             base.capabilities().clone(),
         );
         let facts = crate::test_model::with_context_contract(facts, timestamp()?)?;

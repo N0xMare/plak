@@ -504,13 +504,6 @@ class LayerPolicyTests(unittest.TestCase):
         self.assertEqual(
             errors, ["plakous-model:src/lib.rs: provider name 'openai' in neutral package"]
         )
-        catalog_package, catalog_path = workspace_policy.PROCESS_PROJECTION_CATALOG
-        self.assertEqual(
-            workspace_policy.validate_neutral_sources(
-                catalog_package, {catalog_path: 'const X: &str = "openai.codex.responses";'}
-            ),
-            [],
-        )
 
     def test_production_dependency_pins_are_exact_and_layer_bound(self) -> None:
         policy = synthetic_policy(

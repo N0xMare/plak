@@ -13,7 +13,7 @@
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
-pub mod preview;
+pub use plakous_model::redaction as preview;
 
 use plakous_model::{AttemptId, CancellationToken, Clock, Digest, RunId, Timestamp, TurnId};
 
@@ -275,10 +275,6 @@ pub fn reported_process_session(
     number: u32,
 ) -> Option<(crate::JoinedProcessSessionId, crate::JoinedProcessStatus)> {
     sessions.reported_session_for_number(number)
-}
-
-pub const fn process_session_identity(id: crate::JoinedProcessSessionId) -> [u8; 16] {
-    id.runtime_bytes()
 }
 
 pub fn active_process_session_identities(

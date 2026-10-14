@@ -1596,23 +1596,6 @@ impl ModelError {
         Ok(error)
     }
 
-    /// Creates an outcome-unknown, permanently non-retryable error with exact
-    /// paid recovery evidence and caller-supplied immutable context.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error unless the supplied context is permanently
-    /// non-retryable.
-    pub fn contextual_paid_recovery(
-        message: impl Into<String>,
-        context: ModelErrorContext,
-        paid_recovery: ModelPaidRecovery,
-    ) -> Result<Self, ModelErrorContextError> {
-        let mut error = Self::contextual(ModelErrorKind::OutcomeUnknown, message, context)?;
-        error.attach_paid_recovery(paid_recovery)?;
-        Ok(error)
-    }
-
     /// Creates an outcome-unknown, permanently non-retryable error for an exact
     /// validated target and provider-neutral paid recovery attachment.
     #[must_use]

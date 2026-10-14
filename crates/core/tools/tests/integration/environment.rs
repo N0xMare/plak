@@ -141,7 +141,6 @@ fn host_authority_allocations_are_distinct_and_paths_are_canonical() -> Result<(
     assert_eq!(first.backend().semantic_revision().get(), 13);
     assert_eq!(first.backend().authority_revision().get(), 1);
     assert_eq!(first.backend().operating_system(), std::env::consts::OS);
-    #[cfg(unix)]
     assert_eq!(first.backend().path_format(), HostPathFormat::UnixUtf8);
     #[cfg(windows)]
     assert_eq!(first.backend().path_format(), HostPathFormat::WindowsUtf8);
@@ -193,7 +192,6 @@ fn host_authority_allocations_are_distinct_and_paths_are_canonical() -> Result<(
     Ok(())
 }
 
-#[cfg(unix)]
 #[test]
 fn symlinked_workspace_alias_has_one_canonical_path_under_distinct_authority()
 -> Result<(), TestError> {
@@ -246,7 +244,9 @@ fn delegation_order_is_canonical_and_lookup_is_exact() -> Result<(), TestError> 
     assert_eq!(
         first_environment
             .config()
-            .environment_delegation(&path)
+            .environment_delegations()
+            .iter()
+            .find(|binding| binding.name() == &path)
             .ok_or("PATH delegation missing")?
             .source_revision()
             .get(),
@@ -255,34 +255,24 @@ fn delegation_order_is_canonical_and_lookup_is_exact() -> Result<(), TestError> 
     assert!(
         first_environment
             .config()
-            .credential_delegation(&slot)
-            .is_some()
+            .credential_delegations()
+            .iter()
+            .any(|binding| binding.slot() == &slot)
     );
     Ok(())
 }
 
 #[test]
-fn defaults_delegate_nothing_and_limits_are_bounded() -> Result<(), TestError> {
+fn defaults_delegate_nothing_and_limits_are_bounded() {
     let config = ExecutionEnvironmentConfig::default();
     assert_eq!(config.environment_delegations(), []);
     assert_eq!(config.credential_delegations(), []);
-    assert!(
-        config
-            .environment_delegation(&EnvironmentVariableName::new("PATH")?)
-            .is_none()
-    );
-    assert!(
-        config
-            .credential_delegation(&CredentialSlotId::new("credential.primary/default")?)
-            .is_none()
-    );
     let limits = config.limits();
     assert!((1..=MAX_ENVIRONMENT_OUTPUT_BYTES).contains(&limits.max_stdout_bytes()));
     assert!((1..=MAX_ENVIRONMENT_OUTPUT_BYTES).contains(&limits.max_stderr_bytes()));
     assert!((1..=MAX_ENVIRONMENT_OUTPUT_BYTES).contains(&limits.max_artifact_bytes()));
     assert!(limits.execution_duration() <= MAX_ENVIRONMENT_EXECUTION_DURATION);
     assert!(limits.cleanup_duration() <= MAX_ENVIRONMENT_CLEANUP_DURATION);
-    Ok(())
 }
 
 #[test]
@@ -701,7 +691,6 @@ fn workspace_rejects_traversal_missing_cwd_and_symlink_escape() -> Result<(), Te
             Some(ExecutionEnvironmentErrorKind::Workspace)
         );
     }
-    #[cfg(unix)]
     {
         use std::os::unix::fs::symlink;
 

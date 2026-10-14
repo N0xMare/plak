@@ -1,32 +1,24 @@
 //! Workspace execution backend responsibilities.
 
 use plakous_model::{Digest, DigestDomain};
-#[cfg(unix)]
 use rustix::fs::{
     AtFlags, Dir, Mode, OFlags, RenameFlags, mkdirat, open, openat, renameat_with, unlinkat,
 };
 #[cfg(target_os = "linux")]
 use rustix::fs::{ResolveFlags, openat2};
-#[cfg(unix)]
 use rustix::io::Errno;
 use std::collections::{BTreeMap, VecDeque};
 use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
-#[cfg(unix)]
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-#[cfg(unix)]
 use tokio::sync::Semaphore;
 
 use std::io::Write;
-#[cfg(unix)]
 use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
 
-#[cfg(not(unix))]
-use super::ready_error;
-#[cfg(unix)]
 use super::workspace_types::compile_query_regex;
 use super::{
     ExecutionBackendError, ExecutionBackendErrorKind, ExecutionBackendFuture,
@@ -39,7 +31,6 @@ use super::{
     recovery_required_error, resource_error, validate_path_bytes, validate_relative_path,
     workspace_error,
 };
-#[cfg(unix)]
 pub(super) fn verified_workspace_root(
     workspace: &ExecutionWorkspace,
 ) -> Result<fs::File, ExecutionBackendError> {
@@ -59,7 +50,6 @@ pub(super) fn verified_workspace_root(
     Ok(root)
 }
 
-#[cfg(unix)]
 pub(super) fn workspace_descriptor_path(
     _workspace: &ExecutionWorkspace,
     relative: &Path,
@@ -82,7 +72,6 @@ pub(super) fn workspace_descriptor_path(
 ///
 /// Each of these is decided by looking, before anything is opened for writing,
 /// so each is proven to have had no effect.
-#[cfg(unix)]
 fn workspace_open_error(relative: &Path, errno: Errno) -> ExecutionBackendError {
     let path = relative.display();
     let error = match errno {
@@ -123,7 +112,6 @@ fn workspace_open_error(relative: &Path, errno: Errno) -> ExecutionBackendError 
     error.with_proven_no_effect(true)
 }
 
-#[cfg(unix)]
 fn workspace_path_components(
     relative: &Path,
 ) -> Result<Vec<&std::ffi::OsStr>, ExecutionBackendError> {
@@ -143,7 +131,7 @@ fn workspace_path_components(
     Ok(names)
 }
 
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(not(target_os = "linux"))]
 fn open_workspace_beneath_at(
     root: &fs::File,
     relative: &Path,
@@ -182,7 +170,7 @@ fn open_workspace_beneath_at(
     Err(workspace_open_error(relative, Errno::NOENT))
 }
 
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(not(target_os = "linux"))]
 fn observe_open_workspace_file_at(
     root: &fs::File,
     relative: &Path,
@@ -261,7 +249,6 @@ fn observe_open_workspace_file_at(
 /// A walk is a survey of a live tree, not a transaction over it: an entry that
 /// is not traversable never aborts the query. Only an opened descriptor carries
 /// the walk forward.
-#[cfg(unix)]
 enum RepositoryQueryEntry {
     /// The child opened and may be a directory or a regular file.
     Opened(fs::File),
@@ -277,7 +264,6 @@ enum RepositoryQueryEntry {
 ///
 /// `None` means the kind is unknown and only the opened descriptor's metadata
 /// can decide.
-#[cfg(unix)]
 const fn query_entry_kind_is_walkable(file_type: rustix::fs::FileType) -> Option<bool> {
     match file_type {
         rustix::fs::FileType::Directory
@@ -288,7 +274,6 @@ const fn query_entry_kind_is_walkable(file_type: rustix::fs::FileType) -> Option
     }
 }
 
-#[cfg(unix)]
 fn open_directory_entry_for_query(directory: &fs::File, name: &Path) -> RepositoryQueryEntry {
     // `O_NONBLOCK` keeps an unknown-kind fifo from parking the walk on a
     // writer that may never arrive; regular files and directories ignore it.
@@ -301,7 +286,7 @@ fn open_directory_entry_for_query(directory: &fs::File, name: &Path) -> Reposito
         Mode::empty(),
         ResolveFlags::BENEATH | ResolveFlags::NO_SYMLINKS | ResolveFlags::NO_MAGICLINKS,
     );
-    #[cfg(all(unix, not(target_os = "linux")))]
+    #[cfg(not(target_os = "linux"))]
     let opened = openat(directory, name, flags, Mode::empty());
     match opened {
         Ok(descriptor) => RepositoryQueryEntry::Opened(fs::File::from(descriptor)),
@@ -311,7 +296,6 @@ fn open_directory_entry_for_query(directory: &fs::File, name: &Path) -> Reposito
     }
 }
 
-#[cfg(unix)]
 fn open_workspace_beneath(
     workspace: &ExecutionWorkspace,
     relative: &Path,
@@ -331,13 +315,12 @@ fn open_workspace_beneath(
         .map_err(|errno| workspace_open_error(relative, errno))?;
         Ok(fs::File::from(descriptor))
     }
-    #[cfg(all(unix, not(target_os = "linux")))]
+    #[cfg(not(target_os = "linux"))]
     {
         open_workspace_beneath_at(&root, &path, flags)
     }
 }
 
-#[cfg(unix)]
 #[derive(Clone, Copy, Eq, PartialEq)]
 struct FileObservation {
     device: u64,
@@ -349,7 +332,6 @@ struct FileObservation {
     changed_nanoseconds: i64,
 }
 
-#[cfg(unix)]
 impl FileObservation {
     fn capture(metadata: &fs::Metadata) -> Self {
         Self {
@@ -364,7 +346,6 @@ impl FileObservation {
     }
 }
 
-#[cfg(unix)]
 struct WorkspaceSnapshot {
     path: PathBuf,
     content: WorkspaceContentIdentity,
@@ -374,11 +355,9 @@ struct WorkspaceSnapshot {
 
 #[derive(Default)]
 pub(super) struct WorkspaceSnapshotCache {
-    #[cfg(unix)]
     entries: VecDeque<WorkspaceSnapshot>,
 }
 
-#[cfg(unix)]
 impl WorkspaceSnapshotCache {
     fn get(
         &mut self,
@@ -414,118 +393,106 @@ pub(super) fn read_workspace_sync(
     control: &ExecutionOperationControl,
     snapshots: &Mutex<WorkspaceSnapshotCache>,
 ) -> Result<WorkspaceReadSlice, ExecutionBackendError> {
-    #[cfg(unix)]
-    {
-        control.check_cancelled()?;
-        let mut file = open_workspace_beneath(workspace, request.path(), OFlags::RDONLY)?;
-        let metadata = file
-            .metadata()
-            .map_err(|_| io_error("workspace file metadata failed"))?;
-        if !metadata.is_file() {
-            // "not a file" is two different answers, and a model can act on
-            // only one of them.
-            let path = request.path().display();
-            return Err(if metadata.is_dir() {
-                backend_error(
-                    ExecutionBackendErrorKind::IsADirectory,
-                    format!("path is a directory: {path}"),
-                )
-            } else {
-                backend_error(
-                    ExecutionBackendErrorKind::NotARegularFile,
-                    format!("path is not a regular file: {path}"),
-                )
-            }
-            .with_proven_no_effect(true));
-        }
-        if metadata.len() > MAX_WORKSPACE_FILE_BYTES {
-            return Err(resource_error(
-                "workspace file exceeds the hard content identity limit",
-            ));
-        }
-        if request.offset() > metadata.len() {
-            return Err(conflict_error(
-                "workspace read cursor offset exceeds its content length",
-            ));
-        }
-        let slice_end = request
-            .offset()
-            .saturating_add(request.max_bytes())
-            .min(metadata.len());
-        let opened = FileObservation::capture(&metadata);
-        let expected = request.expected_content();
-        let cached =
-            expected.and_then(|content| lock(snapshots).get(request.path(), content, opened));
-        let (content, complete_bytes) = if let Some(bytes) = cached {
-            (
-                expected.ok_or_else(|| conflict_error("workspace read cache was inconsistent"))?,
-                bytes,
+    control.check_cancelled()?;
+    let mut file = open_workspace_beneath(workspace, request.path(), OFlags::RDONLY)?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| io_error("workspace file metadata failed"))?;
+    if !metadata.is_file() {
+        // "not a file" is two different answers, and a model can act on
+        // only one of them.
+        let path = request.path().display();
+        return Err(if metadata.is_dir() {
+            backend_error(
+                ExecutionBackendErrorKind::IsADirectory,
+                format!("path is a directory: {path}"),
             )
         } else {
-            let mut reader = CancellationReader::new(&mut file, control);
-            let mut bytes = Vec::with_capacity(usize::try_from(metadata.len()).unwrap_or(0));
-            reader.read_to_end(&mut bytes).map_err(|_| {
-                if reader.cancelled {
-                    backend_error(
-                        ExecutionBackendErrorKind::Cancelled,
-                        "execution environment operation was cancelled",
-                    )
-                } else {
-                    io_error("workspace file read failed")
-                }
-            })?;
-            let after = reader
-                .inner
-                .metadata()
-                .map_err(|_| io_error("workspace file metadata failed"))?;
-            if opened != FileObservation::capture(&after)
-                || u64::try_from(bytes.len()).unwrap_or(u64::MAX) != metadata.len()
-            {
-                return Err(conflict_error("workspace file changed while reading"));
-            }
-            let content = WorkspaceContentIdentity::from_bytes(&bytes)?;
-            let bytes: Arc<[u8]> = bytes.into();
-            lock(snapshots).insert(WorkspaceSnapshot {
-                path: request.path.clone(),
-                content,
-                observation: opened,
-                bytes: Arc::clone(&bytes),
-            });
-            (content, bytes)
-        };
-        if request
-            .expected_content()
-            .is_some_and(|expected| expected != content)
-        {
-            return Err(conflict_error(
-                "workspace content changed before read slice resume",
-            ));
+            backend_error(
+                ExecutionBackendErrorKind::NotARegularFile,
+                format!("path is not a regular file: {path}"),
+            )
         }
-        let start = usize::try_from(request.offset())
-            .map_err(|_| resource_error("workspace read offset is not addressable"))?;
-        let end = usize::try_from(slice_end)
-            .map_err(|_| resource_error("workspace read end is not addressable"))?;
-        let retained: Arc<[u8]> = complete_bytes[start..end].to_vec().into();
-        let next = (slice_end < metadata.len()).then(|| WorkspaceReadCursor {
+        .with_proven_no_effect(true));
+    }
+    if metadata.len() > MAX_WORKSPACE_FILE_BYTES {
+        return Err(resource_error(
+            "workspace file exceeds the hard content identity limit",
+        ));
+    }
+    if request.offset() > metadata.len() {
+        return Err(conflict_error(
+            "workspace read cursor offset exceeds its content length",
+        ));
+    }
+    let slice_end = request
+        .offset()
+        .saturating_add(request.max_bytes())
+        .min(metadata.len());
+    let opened = FileObservation::capture(&metadata);
+    let expected = request.expected_content();
+    let cached = expected.and_then(|content| lock(snapshots).get(request.path(), content, opened));
+    let (content, complete_bytes) = if let Some(bytes) = cached {
+        (
+            expected.ok_or_else(|| conflict_error("workspace read cache was inconsistent"))?,
+            bytes,
+        )
+    } else {
+        let mut reader = CancellationReader::new(&mut file, control);
+        let mut bytes = Vec::with_capacity(usize::try_from(metadata.len()).unwrap_or(0));
+        reader.read_to_end(&mut bytes).map_err(|_| {
+            if reader.cancelled {
+                backend_error(
+                    ExecutionBackendErrorKind::Cancelled,
+                    "execution environment operation was cancelled",
+                )
+            } else {
+                io_error("workspace file read failed")
+            }
+        })?;
+        let after = reader
+            .inner
+            .metadata()
+            .map_err(|_| io_error("workspace file metadata failed"))?;
+        if opened != FileObservation::capture(&after)
+            || u64::try_from(bytes.len()).unwrap_or(u64::MAX) != metadata.len()
+        {
+            return Err(conflict_error("workspace file changed while reading"));
+        }
+        let content = WorkspaceContentIdentity::from_bytes(&bytes)?;
+        let bytes: Arc<[u8]> = bytes.into();
+        lock(snapshots).insert(WorkspaceSnapshot {
             path: request.path.clone(),
             content,
-            offset: slice_end,
+            observation: opened,
+            bytes: Arc::clone(&bytes),
         });
-        Ok(WorkspaceReadSlice {
-            content,
-            offset: request.offset(),
-            bytes: retained,
-            next,
-        })
-    }
-    #[cfg(not(unix))]
+        (content, bytes)
+    };
+    if request
+        .expected_content()
+        .is_some_and(|expected| expected != content)
     {
-        let _ = (workspace, request, control, snapshots);
-        Err(backend_error(
-            ExecutionBackendErrorKind::Unsupported,
-            "workspace reads are unsupported on this platform",
-        ))
+        return Err(conflict_error(
+            "workspace content changed before read slice resume",
+        ));
     }
+    let start = usize::try_from(request.offset())
+        .map_err(|_| resource_error("workspace read offset is not addressable"))?;
+    let end = usize::try_from(slice_end)
+        .map_err(|_| resource_error("workspace read end is not addressable"))?;
+    let retained: Arc<[u8]> = complete_bytes[start..end].to_vec().into();
+    let next = (slice_end < metadata.len()).then(|| WorkspaceReadCursor {
+        path: request.path.clone(),
+        content,
+        offset: slice_end,
+    });
+    Ok(WorkspaceReadSlice {
+        content,
+        offset: request.offset(),
+        bytes: retained,
+        next,
+    })
 }
 
 #[allow(
@@ -537,304 +504,237 @@ pub(super) fn query_repository_sync(
     query: &RepositoryQuery,
     control: &ExecutionOperationControl,
 ) -> Result<RepositoryQueryResult, ExecutionBackendError> {
-    #[cfg(unix)]
-    {
+    control.check_cancelled()?;
+    let limits = query.limits();
+    let mut entries_skipped = 0_usize;
+    // A glob with a literal leading directory prefix can only match
+    // beneath that prefix, so the walk starts there instead of at the
+    // query root. Pruning changes only what is visited: every path is
+    // still named relative to the workspace root, and every containment
+    // rule still applies to the pruned start.
+    // The glob is relative to the query root.
+    let walk_root = match query.path_glob.as_deref().and_then(glob_walk_prefix) {
+        Some(prefix) => query.root().join(prefix),
+        None => query.root().to_path_buf(),
+    };
+    let pruned = walk_root != query.root();
+    let start_descriptor = match open_workspace_beneath(workspace, &walk_root, OFlags::RDONLY) {
+        Ok(descriptor) => descriptor,
+        // A glob prefix that names nothing traversable matches nothing.
+        Err(_) if pruned => return Ok(empty_repository_query_result(1)),
+        Err(error) => return Err(error),
+    };
+    let start_metadata = start_descriptor
+        .metadata()
+        .map_err(|_| io_error("repository query root metadata failed"))?;
+    let mut pending = BTreeMap::new();
+    let root_ignores = ancestor_ignores(workspace, &walk_root);
+    let mut files = Vec::new();
+    let mut tree_entries = 0_usize;
+    let mut stop_reason = None;
+    if start_metadata.is_file() {
+        files.push((
+            walk_root.clone(),
+            start_metadata.len(),
+            FileObservation::capture(&start_metadata),
+            start_descriptor,
+        ));
+    } else if start_metadata.is_dir() {
+        pending.insert(walk_root.clone(), (start_descriptor, root_ignores));
+    } else if pruned {
+        return Ok(empty_repository_query_result(1));
+    } else {
+        return Err(workspace_error(
+            "repository query root is not a regular file or directory",
+        ));
+    }
+    while let Some((directory_path, (directory, parent_ignores))) = pending.pop_first() {
         control.check_cancelled()?;
-        let limits = query.limits();
-        let mut entries_skipped = 0_usize;
-        // A glob with a literal leading directory prefix can only match
-        // beneath that prefix, so the walk starts there instead of at the
-        // query root. Pruning changes only what is visited: every path is
-        // still named relative to the workspace root, and every containment
-        // rule still applies to the pruned start.
-        // The glob is relative to the query root.
-        let walk_root = match query.path_glob.as_deref().and_then(glob_walk_prefix) {
-            Some(prefix) => query.root().join(prefix),
-            None => query.root().to_path_buf(),
+        let ignores = directory_ignores(&directory, &directory_path, &parent_ignores);
+        let remaining = limits.max_tree_entries.saturating_sub(tree_entries);
+        let mut children = Vec::with_capacity(remaining.min(256));
+        let Ok(mut entries) = Dir::read_from(&directory) else {
+            entries_skipped = entries_skipped.saturating_add(1);
+            continue;
         };
-        let pruned = walk_root != query.root();
-        let start_descriptor = match open_workspace_beneath(workspace, &walk_root, OFlags::RDONLY) {
-            Ok(descriptor) => descriptor,
-            // A glob prefix that names nothing traversable matches nothing.
-            Err(_) if pruned => return Ok(empty_repository_query_result(1)),
-            Err(error) => return Err(error),
-        };
-        let start_metadata = start_descriptor
-            .metadata()
-            .map_err(|_| io_error("repository query root metadata failed"))?;
-        let mut pending = BTreeMap::new();
-        let root_ignores = ancestor_ignores(workspace, &walk_root);
-        let mut files = Vec::new();
-        let mut tree_entries = 0_usize;
-        let mut stop_reason = None;
-        if start_metadata.is_file() {
-            files.push((
-                walk_root.clone(),
-                start_metadata.len(),
-                FileObservation::capture(&start_metadata),
-                start_descriptor,
-            ));
-        } else if start_metadata.is_dir() {
-            pending.insert(walk_root.clone(), (start_descriptor, root_ignores));
-        } else if pruned {
-            return Ok(empty_repository_query_result(1));
-        } else {
-            return Err(workspace_error(
-                "repository query root is not a regular file or directory",
-            ));
-        }
-        while let Some((directory_path, (directory, parent_ignores))) = pending.pop_first() {
+        for entry in &mut entries {
             control.check_cancelled()?;
-            let ignores = directory_ignores(&directory, &directory_path, &parent_ignores);
-            let remaining = limits.max_tree_entries.saturating_sub(tree_entries);
-            let mut children = Vec::with_capacity(remaining.min(256));
-            let Ok(mut entries) = Dir::read_from(&directory) else {
+            if children.len() == remaining {
+                stop_reason = Some(RepositoryQueryStopReason::TreeEntries);
+                break;
+            }
+            let Ok(entry) = entry else {
                 entries_skipped = entries_skipped.saturating_add(1);
                 continue;
             };
-            for entry in &mut entries {
-                control.check_cancelled()?;
-                if children.len() == remaining {
-                    stop_reason = Some(RepositoryQueryStopReason::TreeEntries);
-                    break;
-                }
-                let Ok(entry) = entry else {
-                    entries_skipped = entries_skipped.saturating_add(1);
-                    continue;
-                };
-                let name = entry.file_name().to_bytes();
-                // Version-control metadata is never repository content. Other
-                // dot entries (`.github`, `.cargo`) are walked unless ignored.
-                if matches!(name, b"." | b".." | b".git" | b".jj") {
-                    continue;
-                }
-                if query_entry_kind_is_walkable(entry.file_type()) == Some(false) {
-                    entries_skipped = entries_skipped.saturating_add(1);
-                    continue;
-                }
-                let child_name = PathBuf::from(std::ffi::OsStr::from_bytes(name));
-                let is_directory = entry.file_type() == rustix::fs::FileType::Directory;
-                if is_ignored(&ignores, &directory_path.join(&child_name), is_directory) {
-                    continue;
-                }
-                children.push(child_name);
+            let name = entry.file_name().to_bytes();
+            // Version-control metadata is never repository content. Other
+            // dot entries (`.github`, `.cargo`) are walked unless ignored.
+            if matches!(name, b"." | b".." | b".git" | b".jj") {
+                continue;
             }
-            if stop_reason.is_some() {
-                break;
+            if query_entry_kind_is_walkable(entry.file_type()) == Some(false) {
+                entries_skipped = entries_skipped.saturating_add(1);
+                continue;
             }
-            tree_entries = tree_entries.saturating_add(children.len());
-            children.sort();
-            for child_name in children {
-                control.check_cancelled()?;
-                let relative = directory_path.join(&child_name);
-                validate_path_bytes(&relative)?;
-                let child = match open_directory_entry_for_query(&directory, &child_name) {
-                    RepositoryQueryEntry::Opened(child) => child,
-                    RepositoryQueryEntry::Vanished | RepositoryQueryEntry::Symlink => continue,
-                    RepositoryQueryEntry::Skipped => {
-                        entries_skipped = entries_skipped.saturating_add(1);
-                        continue;
-                    }
-                };
-                let Ok(metadata) = child.metadata() else {
-                    entries_skipped = entries_skipped.saturating_add(1);
-                    continue;
-                };
-                if metadata.is_dir() {
-                    pending.insert(relative, (child, Arc::clone(&ignores)));
-                } else if metadata.is_file() {
-                    files.push((
-                        relative,
-                        metadata.len(),
-                        FileObservation::capture(&metadata),
-                        child,
-                    ));
-                } else {
-                    // An unknown-kind entry that opened as a socket, fifo or
-                    // device has no contents this walk can survey.
-                    entries_skipped = entries_skipped.saturating_add(1);
-                }
+            let child_name = PathBuf::from(std::ffi::OsStr::from_bytes(name));
+            let is_directory = entry.file_type() == rustix::fs::FileType::Directory;
+            if is_ignored(&ignores, &directory_path.join(&child_name), is_directory) {
+                continue;
             }
+            children.push(child_name);
         }
-        files.sort_by(|left, right| left.0.cmp(&right.0));
-        if let Some(glob) = query.path_glob.as_deref() {
-            let matcher = PathGlob::new(glob)?;
-            files.retain(|(relative, _, _, _)| {
-                // A file root is matched by its own path; anything beneath a
-                // directory root by its path relative to that root.
-                let within = relative
-                    .strip_prefix(query.root())
-                    .ok()
-                    .filter(|within| !within.as_os_str().is_empty())
-                    .unwrap_or(relative);
-                matcher.matches(within)
-            });
+        if stop_reason.is_some() {
+            break;
         }
-
-        let files_considered = files.len().min(limits.max_files);
-        if files.len() > files_considered {
-            stop_reason = Some(RepositoryQueryStopReason::Files);
-        }
-        if query.list_only {
-            let mut matches = Vec::new();
-            let empty = WorkspaceContentIdentity::from_bytes(&[])?;
-            for (relative, _, _, _) in files.into_iter().take(files_considered) {
-                control.check_cancelled()?;
-                if matches.len() == limits.max_matches {
-                    stop_reason = Some(RepositoryQueryStopReason::Matches);
-                    break;
-                }
-                matches.push(RepositoryQueryMatch {
-                    path: relative,
-                    line: 1,
-                    column: 1,
-                    bytes: Arc::from([]),
-                    truncated: false,
-                    content: empty,
-                });
-            }
-            return Ok(RepositoryQueryResult {
-                matches: matches.into(),
-                files_considered,
-                files_scanned: 0,
-                bytes_scanned: 0,
-                skipped_binary: 0,
-                skipped_oversize: 0,
-                entries_skipped,
-                stop_reason,
-            });
-        }
-        let mut matches = Vec::new();
-        let mut files_scanned = 0_usize;
-        let mut bytes_scanned = 0_u64;
-        let mut skipped_binary = 0_usize;
-        let mut skipped_oversize = 0_usize;
-        let mut result_bytes = format!("matches={} incomplete=true\n", limits.max_matches).len();
-        let pattern = RepositoryLiteralMatcher::new(query.literal(), query.match_case());
-        let regex = query
-            .regex
-            .as_deref()
-            .map(|pattern| compile_query_regex(pattern, query.match_case()))
-            .transpose()?;
-        'files: for (relative, reported_bytes, discovered, mut file) in
-            files.into_iter().take(files_considered)
-        {
+        tree_entries = tree_entries.saturating_add(children.len());
+        children.sort();
+        for child_name in children {
             control.check_cancelled()?;
-            if reported_bytes > limits.max_file_bytes {
-                skipped_oversize = skipped_oversize.saturating_add(1);
-                continue;
-            }
-            if reported_bytes > limits.max_total_bytes.saturating_sub(bytes_scanned) {
-                stop_reason = Some(RepositoryQueryStopReason::ScannedBytes);
-                break;
-            }
-            let opened_metadata = file
-                .metadata()
-                .map_err(|_| io_error("repository query file metadata failed"))?;
-            let opened = FileObservation::capture(&opened_metadata);
-            if opened != discovered {
-                return Err(conflict_error("repository query file changed before open"));
-            }
-            if opened.length > limits.max_file_bytes {
-                skipped_oversize = skipped_oversize.saturating_add(1);
-                continue;
-            }
-            let retained_limit = limits.max_file_bytes.saturating_add(1);
-            let mut bytes = Vec::with_capacity(usize::try_from(reported_bytes).unwrap_or(0));
-            Read::by_ref(&mut file)
-                .take(retained_limit)
-                .read_to_end(&mut bytes)
-                .map_err(|_| io_error("repository query file read failed"))?;
-            let after = file
-                .metadata()
-                .map_err(|_| io_error("repository query file metadata failed"))?;
-            if opened != FileObservation::capture(&after) {
-                return Err(conflict_error(
-                    "repository query file changed while reading",
-                ));
-            }
-            let observed = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-            if observed > limits.max_file_bytes {
-                skipped_oversize = skipped_oversize.saturating_add(1);
-                continue;
-            }
-            if observed > limits.max_total_bytes.saturating_sub(bytes_scanned) {
-                stop_reason = Some(RepositoryQueryStopReason::ScannedBytes);
-                break;
-            }
-            bytes_scanned = bytes_scanned.saturating_add(observed);
-            files_scanned = files_scanned.saturating_add(1);
-            if bytes.contains(&0) || std::str::from_utf8(&bytes).is_err() {
-                skipped_binary = skipped_binary.saturating_add(1);
-                continue;
-            }
-            let content = WorkspaceContentIdentity::from_bytes(&bytes)?;
-            let mut line_number = 1_u64;
-            let mut line_start = 0_usize;
-            while line_start <= bytes.len() {
-                let line_end = bytes[line_start..]
-                    .iter()
-                    .position(|byte| *byte == b'\n')
-                    .map_or(bytes.len(), |offset| line_start.saturating_add(offset));
-                let line = &bytes[line_start..line_end];
-                if let Some(regex) = regex.as_ref() {
-                    // A regular expression reports a line once, as grep does.
-                    if let Some(found) = regex.find(line) {
-                        let column = found.start();
-                        let retained =
-                            utf8_prefix_len(line, line.len().min(limits.max_match_bytes));
-                        let truncated = retained < line.len();
-                        let row_bytes = repository_row_bytes(
-                            &relative,
-                            line_number,
-                            column,
-                            retained,
-                            truncated,
-                        );
-                        if matches.len() == limits.max_matches
-                            || row_bytes > limits.max_result_bytes.saturating_sub(result_bytes)
-                        {
-                            stop_reason = Some(if matches.len() == limits.max_matches {
-                                RepositoryQueryStopReason::Matches
-                            } else {
-                                RepositoryQueryStopReason::ResultBytes
-                            });
-                            break 'files;
-                        }
-                        matches.push(RepositoryQueryMatch {
-                            path: relative.clone(),
-                            line: line_number,
-                            column: u64::try_from(column.saturating_add(1)).unwrap_or(u64::MAX),
-                            bytes: line[..retained].to_vec().into(),
-                            truncated,
-                            content,
-                        });
-                        result_bytes = result_bytes.saturating_add(row_bytes);
-                    }
-                    if line_end == bytes.len() {
-                        break;
-                    }
-                    line_start = line_end.saturating_add(1);
-                    line_number = line_number.saturating_add(1);
+            let relative = directory_path.join(&child_name);
+            validate_path_bytes(&relative)?;
+            let child = match open_directory_entry_for_query(&directory, &child_name) {
+                RepositoryQueryEntry::Opened(child) => child,
+                RepositoryQueryEntry::Vanished | RepositoryQueryEntry::Symlink => continue,
+                RepositoryQueryEntry::Skipped => {
+                    entries_skipped = entries_skipped.saturating_add(1);
                     continue;
                 }
-                let mut prefix_len = 0_usize;
-                for (index, byte) in line.iter().copied().enumerate() {
-                    if index.is_multiple_of(65_536) {
-                        control.check_cancelled()?;
-                    }
-                    while prefix_len > 0 && !pattern.matches(byte, prefix_len) {
-                        prefix_len = pattern.failure[prefix_len - 1];
-                    }
-                    if pattern.matches(byte, prefix_len) {
-                        prefix_len = prefix_len.saturating_add(1);
-                    }
-                    if prefix_len != pattern.needle.len() {
-                        continue;
-                    }
-                    let column = index.saturating_add(1).saturating_sub(pattern.needle.len());
-                    let retained_bound = line.len().min(limits.max_match_bytes);
-                    let retained = utf8_prefix_len(line, retained_bound);
+            };
+            let Ok(metadata) = child.metadata() else {
+                entries_skipped = entries_skipped.saturating_add(1);
+                continue;
+            };
+            if metadata.is_dir() {
+                pending.insert(relative, (child, Arc::clone(&ignores)));
+            } else if metadata.is_file() {
+                files.push((
+                    relative,
+                    metadata.len(),
+                    FileObservation::capture(&metadata),
+                    child,
+                ));
+            } else {
+                // An unknown-kind entry that opened as a socket, fifo or
+                // device has no contents this walk can survey.
+                entries_skipped = entries_skipped.saturating_add(1);
+            }
+        }
+    }
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    if let Some(glob) = query.path_glob.as_deref() {
+        let matcher = PathGlob::new(glob)?;
+        files.retain(|(relative, _, _, _)| {
+            // A file root is matched by its own path; anything beneath a
+            // directory root by its path relative to that root.
+            let within = relative
+                .strip_prefix(query.root())
+                .ok()
+                .filter(|within| !within.as_os_str().is_empty())
+                .unwrap_or(relative);
+            matcher.matches(within)
+        });
+    }
+
+    let files_considered = files.len().min(limits.max_files);
+    if files.len() > files_considered {
+        stop_reason = Some(RepositoryQueryStopReason::Files);
+    }
+    if query.list_only {
+        let mut matches = Vec::new();
+        let empty = WorkspaceContentIdentity::from_bytes(&[])?;
+        for (relative, _, _, _) in files.into_iter().take(files_considered) {
+            control.check_cancelled()?;
+            if matches.len() == limits.max_matches {
+                stop_reason = Some(RepositoryQueryStopReason::Matches);
+                break;
+            }
+            matches.push(RepositoryQueryMatch {
+                path: relative,
+                line: 1,
+                column: 1,
+                bytes: Arc::from([]),
+                truncated: false,
+                content: empty,
+            });
+        }
+        return Ok(RepositoryQueryResult {
+            matches: matches.into(),
+            files_considered,
+            files_scanned: 0,
+            bytes_scanned: 0,
+            skipped_binary: 0,
+            skipped_oversize: 0,
+            skipped_changed: 0,
+            entries_skipped,
+            stop_reason,
+        });
+    }
+    let mut matches = Vec::new();
+    let mut files_scanned = 0_usize;
+    let mut bytes_scanned = 0_u64;
+    let mut skipped_binary = 0_usize;
+    let mut skipped_oversize = 0_usize;
+    let mut skipped_changed = 0_usize;
+    let mut result_bytes = format!("matches={} incomplete=true\n", limits.max_matches).len();
+    let pattern = RepositoryLiteralMatcher::new(query.literal(), query.match_case());
+    let regex = query
+        .regex
+        .as_deref()
+        .map(|pattern| compile_query_regex(pattern, query.match_case()))
+        .transpose()?;
+    'files: for (relative, reported_bytes, discovered, mut file) in
+        files.into_iter().take(files_considered)
+    {
+        control.check_cancelled()?;
+        if reported_bytes > limits.max_file_bytes {
+            skipped_oversize = skipped_oversize.saturating_add(1);
+            continue;
+        }
+        if reported_bytes > limits.max_total_bytes.saturating_sub(bytes_scanned) {
+            stop_reason = Some(RepositoryQueryStopReason::ScannedBytes);
+            break;
+        }
+        let bytes = match read_unchanged_query_file(&mut file, discovered, limits.max_file_bytes)? {
+            QueryFileRead::Changed => {
+                skipped_changed = skipped_changed.saturating_add(1);
+                continue;
+            }
+            QueryFileRead::Oversize => {
+                skipped_oversize = skipped_oversize.saturating_add(1);
+                continue;
+            }
+            QueryFileRead::Bytes(bytes) => bytes,
+        };
+        let observed = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+        if observed > limits.max_file_bytes {
+            skipped_oversize = skipped_oversize.saturating_add(1);
+            continue;
+        }
+        if observed > limits.max_total_bytes.saturating_sub(bytes_scanned) {
+            stop_reason = Some(RepositoryQueryStopReason::ScannedBytes);
+            break;
+        }
+        bytes_scanned = bytes_scanned.saturating_add(observed);
+        files_scanned = files_scanned.saturating_add(1);
+        if bytes.contains(&0) || std::str::from_utf8(&bytes).is_err() {
+            skipped_binary = skipped_binary.saturating_add(1);
+            continue;
+        }
+        let content = WorkspaceContentIdentity::from_bytes(&bytes)?;
+        let mut line_number = 1_u64;
+        let mut line_start = 0_usize;
+        while line_start <= bytes.len() {
+            let line_end = bytes[line_start..]
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .map_or(bytes.len(), |offset| line_start.saturating_add(offset));
+            let line = &bytes[line_start..line_end];
+            if let Some(regex) = regex.as_ref() {
+                // A regular expression reports a line once, as grep does.
+                if let Some(found) = regex.find(line) {
+                    let column = found.start();
+                    let retained = utf8_prefix_len(line, line.len().min(limits.max_match_bytes));
                     let truncated = retained < line.len();
                     let row_bytes =
                         repository_row_bytes(&relative, line_number, column, retained, truncated);
@@ -857,38 +757,118 @@ pub(super) fn query_repository_sync(
                         content,
                     });
                     result_bytes = result_bytes.saturating_add(row_bytes);
-                    prefix_len = 0;
                 }
                 if line_end == bytes.len() {
                     break;
                 }
                 line_start = line_end.saturating_add(1);
                 line_number = line_number.saturating_add(1);
+                continue;
             }
+            let mut prefix_len = 0_usize;
+            for (index, byte) in line.iter().copied().enumerate() {
+                if index.is_multiple_of(65_536) {
+                    control.check_cancelled()?;
+                }
+                while prefix_len > 0 && !pattern.matches(byte, prefix_len) {
+                    prefix_len = pattern.failure[prefix_len - 1];
+                }
+                if pattern.matches(byte, prefix_len) {
+                    prefix_len = prefix_len.saturating_add(1);
+                }
+                if prefix_len != pattern.needle.len() {
+                    continue;
+                }
+                let column = index.saturating_add(1).saturating_sub(pattern.needle.len());
+                let retained_bound = line.len().min(limits.max_match_bytes);
+                let retained = utf8_prefix_len(line, retained_bound);
+                let truncated = retained < line.len();
+                let row_bytes =
+                    repository_row_bytes(&relative, line_number, column, retained, truncated);
+                if matches.len() == limits.max_matches
+                    || row_bytes > limits.max_result_bytes.saturating_sub(result_bytes)
+                {
+                    stop_reason = Some(if matches.len() == limits.max_matches {
+                        RepositoryQueryStopReason::Matches
+                    } else {
+                        RepositoryQueryStopReason::ResultBytes
+                    });
+                    break 'files;
+                }
+                matches.push(RepositoryQueryMatch {
+                    path: relative.clone(),
+                    line: line_number,
+                    column: u64::try_from(column.saturating_add(1)).unwrap_or(u64::MAX),
+                    bytes: line[..retained].to_vec().into(),
+                    truncated,
+                    content,
+                });
+                result_bytes = result_bytes.saturating_add(row_bytes);
+                prefix_len = 0;
+            }
+            if line_end == bytes.len() {
+                break;
+            }
+            line_start = line_end.saturating_add(1);
+            line_number = line_number.saturating_add(1);
         }
-        Ok(RepositoryQueryResult {
-            matches: matches.into(),
-            files_considered,
-            files_scanned,
-            bytes_scanned,
-            skipped_binary,
-            skipped_oversize,
-            entries_skipped,
-            stop_reason,
-        })
     }
-    #[cfg(not(unix))]
-    {
-        let _ = (workspace, query, control);
-        Err(backend_error(
-            ExecutionBackendErrorKind::Unsupported,
-            "repository search is unsupported on this platform",
-        ))
+    Ok(RepositoryQueryResult {
+        matches: matches.into(),
+        files_considered,
+        files_scanned,
+        bytes_scanned,
+        skipped_binary,
+        skipped_oversize,
+        skipped_changed,
+        entries_skipped,
+        stop_reason,
+    })
+}
+
+/// One admitted repository-query file as read for scanning.
+#[derive(Debug, Eq, PartialEq)]
+enum QueryFileRead {
+    /// The file changed since the walk observed it, or while it was read.
+    Changed,
+    /// The file is over the per-file bound.
+    Oversize,
+    /// The whole file, up to one byte over the per-file bound.
+    Bytes(Vec<u8>),
+}
+
+/// Reads one admitted file unless it no longer matches its walk observation or
+/// changes while being read. A file that is being written to is skipped, not
+/// fatal to the query; mutation preflight keeps the hard conflict.
+fn read_unchanged_query_file(
+    file: &mut fs::File,
+    discovered: FileObservation,
+    max_file_bytes: u64,
+) -> Result<QueryFileRead, ExecutionBackendError> {
+    let observe = |file: &fs::File| {
+        file.metadata()
+            .map(|metadata| FileObservation::capture(&metadata))
+            .map_err(|_| io_error("repository query file metadata failed"))
+    };
+    let opened = observe(file)?;
+    if opened != discovered {
+        return Ok(QueryFileRead::Changed);
     }
+    if opened.length > max_file_bytes {
+        return Ok(QueryFileRead::Oversize);
+    }
+    let mut bytes = Vec::with_capacity(usize::try_from(opened.length).unwrap_or(0));
+    Read::by_ref(file)
+        .take(max_file_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|_| io_error("repository query file read failed"))?;
+    if observe(file)? != opened {
+        return Ok(QueryFileRead::Changed);
+    }
+    Ok(QueryFileRead::Bytes(bytes))
 }
 
 /// Builds the result of a walk that surveyed nothing.
-#[cfg(unix)]
 fn empty_repository_query_result(entries_skipped: usize) -> RepositoryQueryResult {
     RepositoryQueryResult {
         matches: Arc::from([]),
@@ -897,6 +877,7 @@ fn empty_repository_query_result(entries_skipped: usize) -> RepositoryQueryResul
         bytes_scanned: 0,
         skipped_binary: 0,
         skipped_oversize: 0,
+        skipped_changed: 0,
         entries_skipped,
         stop_reason: None,
     }
@@ -908,7 +889,6 @@ fn empty_repository_query_result(entries_skipped: usize) -> RepositoryQueryResul
 /// A pattern with no `/` also matches a bare file name at any depth, so it
 /// never yields a prefix. Brace alternatives contribute only the prefix they
 /// all share.
-#[cfg(unix)]
 fn glob_walk_prefix(pattern: &str) -> Option<PathBuf> {
     let mut expansions = expand_glob_braces(pattern).into_iter();
     let mut prefix = literal_directory_prefix(&expansions.next()?);
@@ -919,7 +899,6 @@ fn glob_walk_prefix(pattern: &str) -> Option<PathBuf> {
 }
 
 /// Returns the longest leading run of components two paths share.
-#[cfg(unix)]
 fn shared_path_prefix(left: &Path, right: &Path) -> PathBuf {
     left.components()
         .zip(right.components())
@@ -929,7 +908,6 @@ fn shared_path_prefix(left: &Path, right: &Path) -> PathBuf {
 }
 
 /// Returns the leading wildcard-free directory components of one glob.
-#[cfg(unix)]
 fn literal_directory_prefix(pattern: &str) -> PathBuf {
     let mut prefix = PathBuf::new();
     let mut components = pattern.split('/').peekable();
@@ -953,13 +931,11 @@ fn literal_directory_prefix(pattern: &str) -> PathBuf {
 /// depth, as ripgrep's `-g` does; a pattern with `/` matches the path relative
 /// to the query root. `*` and `?` stay within one component, `**` crosses
 /// components, and `[...]` classes and `{a,b}` alternatives are supported.
-#[cfg(unix)]
 struct PathGlob {
     matcher: globset::GlobMatcher,
     name_only: bool,
 }
 
-#[cfg(unix)]
 impl PathGlob {
     fn new(pattern: &str) -> Result<Self, ExecutionBackendError> {
         let name_only = !pattern.contains('/');
@@ -989,12 +965,10 @@ impl PathGlob {
 
 /// The `.gitignore`-style rules in force in one directory: every ancestor's
 /// rules, deepest last.
-#[cfg(unix)]
 type IgnoreChain = Arc<[Arc<ignore::gitignore::Gitignore>]>;
 
 /// Whether the deepest rule that speaks about `path` ignores it. A deeper
 /// `!pattern` re-includes what a shallower rule excluded.
-#[cfg(unix)]
 fn is_ignored(chain: &IgnoreChain, path: &Path, is_directory: bool) -> bool {
     for rules in chain.iter().rev() {
         match rules.matched(path, is_directory) {
@@ -1009,7 +983,6 @@ fn is_ignored(chain: &IgnoreChain, path: &Path, is_directory: bool) -> bool {
 /// Builds one directory's rules from its `.gitignore` and `.ignore`, read
 /// through the already-open directory descriptor without following links.
 /// The ignore crate is only a matcher here; the walk stays descriptor-based.
-#[cfg(unix)]
 fn directory_ignores(directory: &fs::File, relative: &Path, parent: &IgnoreChain) -> IgnoreChain {
     let mut builder = ignore::gitignore::GitignoreBuilder::new(relative);
     let mut any = false;
@@ -1022,7 +995,6 @@ fn directory_ignores(directory: &fs::File, relative: &Path, parent: &IgnoreChain
 /// The rules of every directory from the workspace root down to `walk_root`,
 /// plus the repository's `.git/info/exclude`, so a search that starts in a
 /// subdirectory still honours the root `.gitignore`.
-#[cfg(unix)]
 fn ancestor_ignores(workspace: &ExecutionWorkspace, walk_root: &Path) -> IgnoreChain {
     let mut chain: IgnoreChain = Arc::from([]);
     let open_directory = |relative: &Path| {
@@ -1053,7 +1025,6 @@ fn ancestor_ignores(workspace: &ExecutionWorkspace, walk_root: &Path) -> IgnoreC
     chain
 }
 
-#[cfg(unix)]
 fn extend_chain(parent: &IgnoreChain, rules: Option<ignore::gitignore::Gitignore>) -> IgnoreChain {
     match rules.filter(|rules| !rules.is_empty()) {
         Some(rules) => parent
@@ -1067,7 +1038,6 @@ fn extend_chain(parent: &IgnoreChain, rules: Option<ignore::gitignore::Gitignore
 
 /// Adds one ignore file's lines; a missing, linked, unreadable or oversized
 /// file contributes nothing.
-#[cfg(unix)]
 fn add_ignore_file(
     builder: &mut ignore::gitignore::GitignoreBuilder,
     directory: &fs::File,
@@ -1105,7 +1075,6 @@ fn add_ignore_file(
 }
 
 /// Bytes one reported match row costs in the model-visible result.
-#[cfg(unix)]
 fn repository_row_bytes(
     relative: &Path,
     line_number: u64,
@@ -1125,7 +1094,6 @@ fn repository_row_bytes(
         .saturating_add(if truncated { " …".len() } else { 0 })
 }
 
-#[cfg(unix)]
 fn expand_glob_braces(pattern: &str) -> Vec<String> {
     let Some(start) = pattern.find('{') else {
         return vec![pattern.to_owned()];
@@ -1146,14 +1114,12 @@ fn expand_glob_braces(pattern: &str) -> Vec<String> {
         .collect()
 }
 
-#[cfg(unix)]
 struct RepositoryLiteralMatcher<'a> {
     needle: &'a [u8],
     match_case: RepositoryMatchCase,
     failure: Vec<usize>,
 }
 
-#[cfg(unix)]
 impl<'a> RepositoryLiteralMatcher<'a> {
     fn new(needle: &'a [u8], match_case: RepositoryMatchCase) -> Self {
         let mut failure = vec![0; needle.len()];
@@ -1179,7 +1145,6 @@ impl<'a> RepositoryLiteralMatcher<'a> {
     }
 }
 
-#[cfg(unix)]
 fn literal_byte_eq(left: u8, right: u8, match_case: RepositoryMatchCase) -> bool {
     match match_case {
         RepositoryMatchCase::Sensitive => left == right,
@@ -1187,7 +1152,6 @@ fn literal_byte_eq(left: u8, right: u8, match_case: RepositoryMatchCase) -> bool
     }
 }
 
-#[cfg(unix)]
 fn utf8_prefix_len(bytes: &[u8], maximum: usize) -> usize {
     let mut retained = maximum.min(bytes.len());
     while retained > 0 && std::str::from_utf8(&bytes[..retained]).is_err() {
@@ -1196,12 +1160,10 @@ fn utf8_prefix_len(bytes: &[u8], maximum: usize) -> usize {
     retained
 }
 
-#[cfg(unix)]
 fn decimal_len(value: u64) -> usize {
     value.checked_ilog10().map_or(1, |log| log as usize + 1)
 }
 
-#[cfg(unix)]
 struct PreflightMutation {
     relative: PathBuf,
     disposition: WorkspaceMutationDisposition,
@@ -1211,19 +1173,6 @@ struct PreflightMutation {
     created_parents: Option<CreatedParents>,
 }
 
-#[cfg(not(unix))]
-pub(super) fn mutate_workspace_sync(
-    _workspace: &ExecutionWorkspace,
-    _transaction: &WorkspaceMutationTransaction,
-    _control: &ExecutionOperationControl,
-) -> Result<WorkspaceMutationTransactionResult, ExecutionBackendError> {
-    Err(backend_error(
-        ExecutionBackendErrorKind::Unsupported,
-        "workspace mutation is unsupported on this platform",
-    ))
-}
-
-#[cfg(unix)]
 pub(super) fn mutate_workspace_sync(
     workspace: &ExecutionWorkspace,
     transaction: &WorkspaceMutationTransaction,
@@ -1323,7 +1272,6 @@ pub(super) fn mutate_workspace_sync(
     })
 }
 
-#[cfg(unix)]
 fn mutation_disposition(
     expected: WorkspaceExpectedFileState,
     replacement: &WorkspaceReplacement,
@@ -1360,7 +1308,6 @@ fn mutation_disposition(
     }
 }
 
-#[cfg(unix)]
 fn verify_expected_file_state(
     file: Option<&mut fs::File>,
     expected: WorkspaceExpectedFileState,
@@ -1412,14 +1359,12 @@ fn verify_expected_file_state(
     }
 }
 
-#[cfg(unix)]
 struct CancellationReader<'a> {
     inner: &'a mut fs::File,
     control: &'a ExecutionOperationControl,
     cancelled: bool,
 }
 
-#[cfg(unix)]
 impl<'a> CancellationReader<'a> {
     fn new(inner: &'a mut fs::File, control: &'a ExecutionOperationControl) -> Self {
         Self {
@@ -1430,7 +1375,6 @@ impl<'a> CancellationReader<'a> {
     }
 }
 
-#[cfg(unix)]
 impl Read for CancellationReader<'_> {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
         if self.control.cancellation().is_cancelled() {
@@ -1445,7 +1389,6 @@ impl Read for CancellationReader<'_> {
     }
 }
 
-#[cfg(unix)]
 fn observe_workspace_file(
     workspace: &ExecutionWorkspace,
     relative: &Path,
@@ -1483,13 +1426,12 @@ fn observe_workspace_file(
             Err(_) => Err(io_error("workspace mutation target open failed")),
         }
     }
-    #[cfg(all(unix, not(target_os = "linux")))]
+    #[cfg(not(target_os = "linux"))]
     {
         observe_open_workspace_file_at(&root, &path)
     }
 }
 
-#[cfg(unix)]
 fn open_workspace_parent(
     workspace: &ExecutionWorkspace,
     relative: &Path,
@@ -1506,19 +1448,16 @@ fn open_workspace_parent(
 
 /// Directories a create made for its target, removed again unless the file
 /// they hold was published.
-#[cfg(unix)]
 struct CreatedParents {
     created: Vec<(fs::File, PathBuf)>,
 }
 
-#[cfg(unix)]
 impl CreatedParents {
     fn keep(&mut self) {
         self.created.clear();
     }
 }
 
-#[cfg(unix)]
 impl Drop for CreatedParents {
     fn drop(&mut self) {
         for (parent, name) in self.created.drain(..).rev() {
@@ -1532,7 +1471,6 @@ impl Drop for CreatedParents {
 /// beneath the verified root. Every component is opened `O_NOFOLLOW |
 /// O_DIRECTORY`, so an existing symbolic link or non-directory refuses the
 /// create instead of being followed.
-#[cfg(unix)]
 fn create_missing_parents(
     workspace: &ExecutionWorkspace,
     relative: &Path,
@@ -1576,10 +1514,8 @@ fn create_missing_parents(
     Ok(created)
 }
 
-#[cfg(unix)]
 static NEXT_MUTATION_TEMP: AtomicU64 = AtomicU64::new(1);
 
-#[cfg(unix)]
 struct MutationTemporaryFile {
     parent: fs::File,
     name: PathBuf,
@@ -1587,7 +1523,6 @@ struct MutationTemporaryFile {
     published: bool,
 }
 
-#[cfg(unix)]
 impl MutationTemporaryFile {
     fn create(
         workspace: &ExecutionWorkspace,
@@ -1624,7 +1559,6 @@ impl MutationTemporaryFile {
     }
 }
 
-#[cfg(unix)]
 impl Drop for MutationTemporaryFile {
     fn drop(&mut self) {
         if !self.published {
@@ -1634,7 +1568,6 @@ impl Drop for MutationTemporaryFile {
     }
 }
 
-#[cfg(unix)]
 fn write_temporary_file(
     workspace: &ExecutionWorkspace,
     target: &Path,
@@ -1654,7 +1587,6 @@ fn write_temporary_file(
     Ok(temporary)
 }
 
-#[cfg(unix)]
 fn publish_created_file(mut temporary: MutationTemporaryFile) -> Result<(), ExecutionBackendError> {
     renameat_with(
         &temporary.parent,
@@ -1671,7 +1603,6 @@ fn publish_created_file(mut temporary: MutationTemporaryFile) -> Result<(), Exec
     Ok(())
 }
 
-#[cfg(unix)]
 fn publish_replacement_file(
     mut temporary: MutationTemporaryFile,
 ) -> Result<(), ExecutionBackendError> {
@@ -1693,7 +1624,6 @@ fn publish_replacement_file(
 // Only process-cwd preflight calls this helper, before any child is spawned.
 // Metadata and canonicalization failures are therefore no-effect path refusals;
 // reusing this mapping after dispatch would incorrectly erase uncertainty.
-#[cfg(unix)]
 /// The refusal one component of a resolved path earns from its own errno.
 ///
 /// A path that is not there is not a policy decision, and a component that is
@@ -1763,10 +1693,8 @@ pub(super) fn resolve_existing_no_symlink(
     Ok(canonical)
 }
 
-#[cfg(unix)]
 const MAX_BLOCKING_FILESYSTEM_OPERATIONS: usize = 8;
 
-#[cfg(unix)]
 static FILESYSTEM_BLOCKING_LANES: LazyLock<Arc<Semaphore>> =
     LazyLock::new(|| Arc::new(Semaphore::new(MAX_BLOCKING_FILESYSTEM_OPERATIONS)));
 
@@ -1775,31 +1703,20 @@ where
     T: Send + 'static,
     F: FnOnce() -> Result<T, ExecutionBackendError> + Send + 'static,
 {
-    #[cfg(unix)]
-    {
-        Box::pin(async move {
-            let permit = Arc::clone(&FILESYSTEM_BLOCKING_LANES)
-                .acquire_owned()
-                .await
-                .map_err(|_| io_error("filesystem blocking lane closed"))?;
-            let result = tokio::task::spawn_blocking(operation)
-                .await
-                .map_err(|_| io_error("filesystem blocking operation failed to join"))?;
-            drop(permit);
-            result
-        })
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = operation;
-        ready_error(backend_error(
-            ExecutionBackendErrorKind::Unsupported,
-            "filesystem operations are unsupported on this platform",
-        ))
-    }
+    Box::pin(async move {
+        let permit = Arc::clone(&FILESYSTEM_BLOCKING_LANES)
+            .acquire_owned()
+            .await
+            .map_err(|_| io_error("filesystem blocking lane closed"))?;
+        let result = tokio::task::spawn_blocking(operation)
+            .await
+            .map_err(|_| io_error("filesystem blocking operation failed to join"))?;
+        drop(permit);
+        result
+    })
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 #[allow(clippy::expect_used, reason = "unit tests may assert with expect")]
 mod query_walk_tests {
     use super::{
@@ -1872,6 +1789,44 @@ mod query_walk_tests {
         assert_eq!(
             shared_path_prefix(Path::new("a/b/c"), Path::new("a/b/d")),
             PathBuf::from("a/b")
+        );
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "unit tests may assert with expect")]
+mod query_file_tests {
+    use super::{FileObservation, QueryFileRead, read_unchanged_query_file};
+    use std::fs;
+    use std::io::Write as _;
+
+    #[test]
+    fn a_file_appended_after_the_walk_is_skipped_not_fatal() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("server.log");
+        fs::write(&path, b"started\n").expect("write log");
+        let mut file = fs::File::open(&path).expect("open log");
+        let discovered = FileObservation::capture(&file.metadata().expect("metadata"));
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .and_then(|mut writer| writer.write_all(b"request served\n"))
+            .expect("append log");
+        assert_eq!(
+            read_unchanged_query_file(&mut file, discovered, 1024).expect("read"),
+            QueryFileRead::Changed
+        );
+
+        let mut file = fs::File::open(&path).expect("reopen log");
+        let discovered = FileObservation::capture(&file.metadata().expect("metadata"));
+        assert_eq!(
+            read_unchanged_query_file(&mut file, discovered, 1024).expect("read"),
+            QueryFileRead::Bytes(b"started\nrequest served\n".to_vec())
+        );
+        let mut file = fs::File::open(&path).expect("reopen log");
+        assert_eq!(
+            read_unchanged_query_file(&mut file, discovered, 4).expect("read"),
+            QueryFileRead::Oversize
         );
     }
 }

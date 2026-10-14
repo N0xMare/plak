@@ -39,10 +39,8 @@ use process::{
     execute_host_literal_process, validate_absolute_program, validate_process_value,
     validate_process_values,
 };
-#[cfg(unix)]
 use workspace::resolve_existing_no_symlink;
 
-#[cfg(unix)]
 use plakous_model::{CancellationToken, SafeDiagnostic};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -321,9 +319,7 @@ impl fmt::Debug for EnvironmentVariableValue {
 pub struct ExecutionWorkspace {
     root: Arc<PathBuf>,
     cwd: Arc<PathBuf>,
-    #[cfg(unix)]
     root_device: u64,
-    #[cfg(unix)]
     root_inode: u64,
 }
 
@@ -332,9 +328,7 @@ impl ExecutionWorkspace {
         Self {
             root: Arc::new(environment.root().to_path_buf()),
             cwd: Arc::new(environment.cwd().to_path_buf()),
-            #[cfg(unix)]
             root_device: environment.descriptor().root_object().device(),
-            #[cfg(unix)]
             root_inode: environment.descriptor().root_object().inode(),
         }
     }

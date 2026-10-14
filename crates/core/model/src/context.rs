@@ -5727,7 +5727,7 @@ mod tests {
     }
 
     #[test]
-    fn descriptor_revalidation_rejects_binding_drift() {
+    fn context_status_rejects_expired_evidence_and_foreign_descriptor() {
         let certificate = measurement_certificate(CountCertificateKind::ExactTokenizer);
         let descriptor = descriptor(
             CapacityRule::SharedWindow {
@@ -5743,16 +5743,17 @@ mod tests {
             Some(observation(60)),
         );
         let admission = descriptor
-            .admit_context(&plan, &projection, timestamp(2))
+            .context_status(&plan, &projection, timestamp(2))
+            .expect("status")
+            .admit(plan.request())
             .expect("admission");
         assert_eq!(admission.status().identity().version(), 3);
         assert_eq!(admission.identity().version(), 4);
-        descriptor
-            .revalidate_context_admission(&plan, &projection, &admission, timestamp(2))
-            .expect("revalidation");
         assert_eq!(
             descriptor
-                .revalidate_context_admission(&plan, &projection, &admission, timestamp(100),),
+                .context_status(&plan, &projection, timestamp(100))
+                .expect("expired status")
+                .admit(plan.request()),
             Err(ContextAdmissionError::Unavailable(
                 ContextUnavailable::EvidenceExpired {
                     evidence: "capacity"
@@ -5777,10 +5778,13 @@ mod tests {
             certificate,
         ));
         assert_eq!(
-            foreign.revalidate_context_admission(&plan, &projection, &admission, timestamp(2),),
+            foreign
+                .context_status(&plan, &projection, timestamp(2))
+                .expect("foreign status")
+                .admit(plan.request()),
             Err(ContextAdmissionError::Unavailable(
                 ContextUnavailable::ScopeDrift {
-                    field: "descriptor binding"
+                    field: "prepared projection"
                 }
             ))
         );

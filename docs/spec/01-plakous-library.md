@@ -2206,7 +2206,8 @@ proposal blocks. The entire provisional response is discarded at that terminal:
 canonical output is empty, finish reason is `Refusal`, and usage, response
 identity, request-plan identity, and provider metadata are retained. Optional
 provider refusal category and explanation enter the existing neutral finish
-detail only after control-character removal, credential redaction, and the
+detail only after control-character removal, credential redaction (the shared
+display redactor of chapter 04 §5), and the
 2,048-byte public diagnostic bound. Missing or null fields add no explanation. Stream
 observations remain provisional; they are not assistant history or replay
 material. No refused proposal executes and no tool result is fabricated.
@@ -3846,7 +3847,10 @@ reports a line once; like the literal query it stops on its match bound or its
 scanned-byte bound, never on a file count, and it counts files skipped as
 oversized or binary. The standard search pack bounds scanned text at **256 MiB**
 and traversal at **10,000 tree entries**, skipping and counting files over
-**1 MiB**, binary files and unreadable entries. The scanned-byte ceiling is
+**1 MiB**, binary files and unreadable entries. A file that changed between
+the walk and its read, or while being read (an appended log, for example), is
+skipped and counted as changed rather than failing the query; only mutation
+preflight treats such a change as a conflict. The scanned-byte ceiling is
 large enough for ordinary source repositories (over eight times this tree)
 while retaining bounded I/O and cancellation. The environment artifact bound
 limits each retained file and the result, not their cumulative scanned bytes;
@@ -3854,7 +3858,8 @@ the independently validated query ceiling bounds aggregate scan I/O. The backend
 files, scanned bytes, matches or retained-result bytes), even when the next
 file would exceed the scan ceiling before the byte counter reaches it. Results
 report bounds and skips on the first line. `incomplete` reflects only a backend
-resource stop: skipped binary, oversized or unreadable entries do not set it.
+resource stop: skipped binary, oversized, changed or unreadable entries do not
+set it.
 Skip-only reports do not recommend narrowing. Early-stop and clipped-output
 advice uses the presentation's own parameters: Grok grep `path`/`pattern`, and `search_repository`
 `path`/`filename_glob`/`query`. Regex output reserves 1 KiB of its 64 KiB result

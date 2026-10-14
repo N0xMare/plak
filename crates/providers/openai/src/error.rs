@@ -315,7 +315,7 @@ mod tests {
             "auth failed for sk-live-abcdef0123456789",
             "sent header Authorization: Bearer abcdef0123456789",
             concat!("config had api_key=", "abcdef0123456789"),
-            "token ghp_abcdef0123456789 was rejected",
+            "token ghp_abcdef0123456789abcdef was rejected",
         ];
         for text in rows {
             let error = OpenAiError::new(

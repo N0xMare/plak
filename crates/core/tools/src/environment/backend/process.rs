@@ -1,37 +1,25 @@
 //! Owned literal and joined process resources, supervision and cleanup.
 
-#[cfg(any(test, unix))]
 use plakous_model::CancellationToken;
-#[cfg(unix)]
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
-#[cfg(unix)]
 use rustix::fs::OFlags;
-#[cfg(unix)]
 use rustix::io::Errno;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::{Read, Write};
 use std::num::NonZeroU64;
-#[cfg(unix)]
 use std::os::fd::{AsFd, AsRawFd, RawFd};
 use std::path::{Path, PathBuf};
-#[cfg(unix)]
 use std::process::{Command, Stdio};
-#[cfg(unix)]
 use std::sync::Condvar;
-#[cfg(unix)]
 use std::sync::TryLockError;
-#[cfg(unix)]
 use std::sync::atomic::{AtomicBool, AtomicU8};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-#[cfg(unix)]
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
-#[cfg(unix)]
 use std::time::Instant;
 use std::{fmt, fs};
 
-#[cfg(unix)]
 use std::os::unix::{fs::MetadataExt, process::CommandExt};
 
 #[cfg(test)]
@@ -53,7 +41,6 @@ use super::{
     recovery_required_error, resolve_existing_no_symlink, resource_error, workspace_error,
 };
 
-#[cfg(unix)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HostProcessStop {
     Completed,
@@ -63,27 +50,37 @@ enum HostProcessStop {
     Io,
 }
 
-#[cfg(unix)]
 #[derive(Default)]
 struct HostProcessOutput {
     stdout: Vec<u8>,
     stderr: Vec<u8>,
 }
 
-#[cfg(unix)]
 #[derive(Clone, Copy)]
 enum HostProcessStream {
     Stdout,
     Stderr,
 }
 
-#[cfg(unix)]
+/// How long a supervisor sleeps between checks of a live child. A young child
+/// is checked every 2 ms so short commands keep their exit latency; a child
+/// past one second is checked every 32 ms, so a long-lived job wakes about 30
+/// times a second rather than 500 for its whole life.
+fn supervision_poll_interval(elapsed: Duration) -> Duration {
+    if elapsed < Duration::from_millis(100) {
+        Duration::from_millis(2)
+    } else if elapsed < Duration::from_secs(1) {
+        Duration::from_millis(8)
+    } else {
+        Duration::from_millis(32)
+    }
+}
+
 struct HostProcessOwner {
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
-#[cfg(unix)]
 impl HostProcessOwner {
     fn join_until(&mut self, deadline: Instant) -> Result<bool, ExecutionBackendError> {
         let Some(thread) = self.thread.as_ref() else {
@@ -108,7 +105,6 @@ impl HostProcessOwner {
     }
 }
 
-#[cfg(unix)]
 impl Drop for HostProcessOwner {
     fn drop(&mut self) {
         let Some(thread) = self.thread.take() else {
@@ -119,7 +115,6 @@ impl Drop for HostProcessOwner {
     }
 }
 
-#[cfg(unix)]
 #[derive(Default)]
 struct JoinedSessionOutput {
     records: VecDeque<JoinedProcessOutputRecord>,
@@ -130,7 +125,6 @@ struct JoinedSessionOutput {
     next_cursor: u64,
 }
 
-#[cfg(unix)]
 struct JoinedSessionShared {
     output: JoinedSessionOutput,
     status: JoinedProcessStatus,
@@ -143,7 +137,6 @@ struct JoinedSessionShared {
     pending_spool: Option<PendingJobOutput>,
 }
 
-#[cfg(unix)]
 struct PendingJobOutput {
     service: Weak<JoinedProcessServiceInner>,
     id: JoinedProcessSessionId,
@@ -152,7 +145,6 @@ struct PendingJobOutput {
     utf8: Vec<u8>,
 }
 
-#[cfg(unix)]
 impl PendingJobOutput {
     fn new(
         service: &Arc<JoinedProcessServiceInner>,
@@ -202,7 +194,6 @@ impl PendingJobOutput {
     }
 }
 
-#[cfg(unix)]
 impl JoinedSessionShared {
     fn terminal_changed(&mut self) {
         self.maybe_spool(&[], true);
@@ -232,21 +223,16 @@ impl JoinedSessionShared {
     }
 }
 
-#[cfg(unix)]
 enum JoinedSessionInput {
     Pipes(std::process::ChildStdin),
     Pty(PtyInputSender),
 }
 
 // Promotion and dispatch cancellation compete for the same foreground owner.
-#[cfg(unix)]
 const FOREGROUND: u8 = 0;
-#[cfg(unix)]
 const PROMOTED: u8 = 1;
-#[cfg(unix)]
 const CANCELLING: u8 = 2;
 
-#[cfg(unix)]
 fn cancel_foreground(ownership: &AtomicU8, control: &ExecutionOperationControl) -> bool {
     if control.cancellation().is_cancelled() {
         let _ =
@@ -255,7 +241,6 @@ fn cancel_foreground(ownership: &AtomicU8, control: &ExecutionOperationControl) 
     ownership.load(Ordering::Acquire) == CANCELLING
 }
 
-#[cfg(unix)]
 struct JoinedSession {
     operation: Mutex<()>,
     queued: AtomicUsize,
@@ -279,7 +264,6 @@ struct JoinedSession {
     owner: Mutex<Option<HostProcessOwner>>,
 }
 
-#[cfg(unix)]
 impl Drop for JoinedSession {
     fn drop(&mut self) {
         let mut shared = lock(&self.shared);
@@ -288,7 +272,6 @@ impl Drop for JoinedSession {
     }
 }
 
-#[cfg(unix)]
 impl JoinedSession {
     fn terminal_snapshot(view: &crate::JobView, service: &JoinedProcessServiceInner) -> Self {
         let (status, stopper) = match view.status {
@@ -432,13 +415,11 @@ impl JoinedSession {
     }
 }
 
-#[cfg(unix)]
 struct JoinedSessionOperation<'a> {
     session: &'a JoinedSession,
     _guard: std::sync::MutexGuard<'a, ()>,
 }
 
-#[cfg(unix)]
 impl Drop for JoinedSessionOperation<'_> {
     fn drop(&mut self) {
         self.session.queued.fetch_sub(1, Ordering::AcqRel);
@@ -451,9 +432,7 @@ struct JoinedProcessServiceState {
     terminal_membership: BTreeSet<JoinedProcessSessionId>,
     accepting_jobs: bool,
     starting: usize,
-    #[cfg(unix)]
     active: BTreeMap<JoinedProcessSessionId, Arc<JoinedSession>>,
-    #[cfg(unix)]
     finished: BTreeMap<JoinedProcessSessionId, Arc<JoinedSession>>,
     tombstones: VecDeque<(JoinedProcessSessionId, JoinedProcessStatus)>,
 }
@@ -529,15 +508,12 @@ impl JoinedProcessHostCapacity {
     fn reserve(&self) -> Result<HostStartReservation, ExecutionBackendError> {
         let mut state = lock(&self.state);
         state.services.retain(|service| service.strong_count() != 0);
-        #[cfg(unix)]
         let running = state
             .services
             .iter()
             .filter_map(Weak::upgrade)
             .map(|service| JoinedProcessSessions::running_sessions(&lock(&service.state)))
             .sum::<usize>();
-        #[cfg(not(unix))]
-        let running = 0;
         if running.saturating_add(state.starting) >= 128 {
             return Err(resource_error(
                 "host running process limit (128) was reached",
@@ -553,16 +529,7 @@ impl fmt::Debug for JoinedProcessSessions {
         let state = lock(&self.inner.state);
         formatter
             .debug_struct("JoinedProcessSessions")
-            .field("active", &{
-                #[cfg(unix)]
-                {
-                    state.active.len()
-                }
-                #[cfg(not(unix))]
-                {
-                    0_usize
-                }
-            })
+            .field("active", &state.active.len())
             .field("active_limit", &self.inner.active_limit)
             .field("queue_limit", &self.inner.queue_limit)
             .finish()
@@ -586,7 +553,6 @@ impl JoinedProcessSessions {
         });
     }
 
-    #[cfg(unix)]
     fn observe_job(
         &self,
         id: JoinedProcessSessionId,
@@ -623,22 +589,13 @@ impl JoinedProcessSessions {
         &self,
         id: JoinedProcessSessionId,
     ) -> Result<tokio::sync::watch::Receiver<u64>, ExecutionBackendError> {
-        #[cfg(unix)]
-        {
-            Ok(lock(&self.session(id)?.shared).changes.subscribe())
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = id;
-            self.unsupported()
-        }
+        Ok(lock(&self.session(id)?.shared).changes.subscribe())
     }
 
     /// Names promoted jobs that became terminal after an admission generation.
     #[must_use]
     pub fn terminal_jobs_since(&self, generation: u64) -> Vec<String> {
         let mut state = lock(&self.inner.state);
-        #[cfg(unix)]
         {
             let newly_terminal: Vec<_> = state
                 .active
@@ -687,29 +644,24 @@ impl JoinedProcessSessions {
     }
 
     pub(crate) fn restore_job_terminals(&self, views: &[crate::JobView]) {
-        #[cfg(not(unix))]
-        let _ = views;
-        #[cfg(unix)]
-        {
-            let mut state = lock(&self.inner.state);
-            for view in views {
-                if state
-                    .active
-                    .keys()
-                    .chain(state.finished.keys())
-                    .any(|id| Self::job_number(*id) == view.number)
-                {
-                    continue;
-                }
-                // Fresh allocation-local identity authorizes snapshot reads, never a PID.
-                let mut bytes = [0; 16];
-                bytes[..8].copy_from_slice(&self.inner.owner);
-                bytes[8..].copy_from_slice(&u64::from(view.number).to_be_bytes());
-                let snapshot = JoinedSession::terminal_snapshot(view, &self.inner);
-                state
-                    .finished
-                    .insert(JoinedProcessSessionId(bytes), Arc::new(snapshot));
+        let mut state = lock(&self.inner.state);
+        for view in views {
+            if state
+                .active
+                .keys()
+                .chain(state.finished.keys())
+                .any(|id| Self::job_number(*id) == view.number)
+            {
+                continue;
             }
+            // Fresh allocation-local identity authorizes snapshot reads, never a PID.
+            let mut bytes = [0; 16];
+            bytes[..8].copy_from_slice(&self.inner.owner);
+            bytes[8..].copy_from_slice(&u64::from(view.number).to_be_bytes());
+            let snapshot = JoinedSession::terminal_snapshot(view, &self.inner);
+            state
+                .finished
+                .insert(JoinedProcessSessionId(bytes), Arc::new(snapshot));
         }
     }
 
@@ -753,30 +705,14 @@ impl JoinedProcessSessions {
     /// Whether this process is session-owned rather than turn-owned.
     #[must_use]
     pub fn is_promoted(&self, id: JoinedProcessSessionId) -> bool {
-        #[cfg(unix)]
-        {
-            self.session(id)
-                .is_ok_and(|session| session.promoted.load(Ordering::Acquire) == PROMOTED)
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = id;
-            false
-        }
+        self.session(id)
+            .is_ok_and(|session| session.promoted.load(Ordering::Acquire) == PROMOTED)
     }
 
     /// Whether an exact active session or terminal snapshot is still retained.
     #[must_use]
     pub fn retains_session(&self, id: JoinedProcessSessionId) -> bool {
-        #[cfg(unix)]
-        {
-            self.session(id).is_ok()
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = id;
-            false
-        }
+        self.session(id).is_ok()
     }
 
     /// Promotes a process and detaches dispatch cancellation before producing its handle.
@@ -799,7 +735,6 @@ impl JoinedProcessSessions {
         if self.job_output_file(Self::job_number(id)).is_some() {
             return false;
         }
-        #[cfg(unix)]
         {
             let Ok(session) = self.session(id) else {
                 return false;
@@ -811,8 +746,6 @@ impl JoinedProcessSessions {
                 return false;
             }
         }
-        #[cfg(not(unix))]
-        let _ = id;
         self.prepare_job_output()
     }
 
@@ -834,7 +767,6 @@ impl JoinedProcessSessions {
     /// promoted, else a refusal while the owner releases, after foreground
     /// cancellation won, at the unconsumed-row limit, or while the host's
     /// notice ledger has no room.
-    #[cfg(unix)]
     fn promotion_refusal(
         &self,
         state: &JoinedProcessServiceState,
@@ -889,49 +821,40 @@ impl JoinedProcessSessions {
         id: JoinedProcessSessionId,
         fits: bool,
     ) -> Result<(), ExecutionBackendError> {
-        #[cfg(not(unix))]
+        let session = self.session(id)?;
+        // The monitor waits for `published`; dropping it unsent ends the
+        // monitor without touching the foreground session.
+        let (published, gate) = sync_channel::<()>(1);
         {
-            let _ = (id, fits);
-            self.unsupported()
-        }
-        #[cfg(unix)]
-        {
-            let session = self.session(id)?;
-            // The monitor waits for `published`; dropping it unsent ends the
-            // monitor without touching the foreground session.
-            let (published, gate) = sync_channel::<()>(1);
+            let state = lock(&self.inner.state);
+            if let Some(refusal) = self.promotion_refusal(&state, &session) {
+                return refusal;
+            }
+            self.spawn_job_monitor(id, &session, gate)?;
+            if session
+                .promoted
+                .compare_exchange(FOREGROUND, PROMOTED, Ordering::AcqRel, Ordering::Acquire)
+                .is_err()
             {
-                let state = lock(&self.inner.state);
-                if let Some(refusal) = self.promotion_refusal(&state, &session) {
-                    return refusal;
-                }
-                self.spawn_job_monitor(id, &session, gate)?;
-                if session
-                    .promoted
-                    .compare_exchange(FOREGROUND, PROMOTED, Ordering::AcqRel, Ordering::Acquire)
-                    .is_err()
-                {
-                    return Err(backend_error(
-                        ExecutionBackendErrorKind::Cancelled,
-                        "foreground cancellation won before job promotion",
-                    ));
-                }
-                if let Err(error) = self.observe_job(id, &session, true) {
-                    session.promoted.store(FOREGROUND, Ordering::Release);
-                    return Err(error.with_proven_no_effect(false));
-                }
+                return Err(backend_error(
+                    ExecutionBackendErrorKind::Cancelled,
+                    "foreground cancellation won before job promotion",
+                ));
             }
-            if fits {
-                self.spool_promoted(id, &session);
+            if let Err(error) = self.observe_job(id, &session, true) {
+                session.promoted.store(FOREGROUND, Ordering::Release);
+                return Err(error.with_proven_no_effect(false));
             }
-            let _ = published.send(());
-            Ok(())
         }
+        if fits {
+            self.spool_promoted(id, &session);
+        }
+        let _ = published.send(());
+        Ok(())
     }
 
     /// Starts a promoted job's monitor, which acts only once `gate` reports
     /// publication: it joins the job once terminal and then closes its spool.
-    #[cfg(unix)]
     fn spawn_job_monitor(
         &self,
         id: JoinedProcessSessionId,
@@ -976,23 +899,15 @@ impl JoinedProcessSessions {
         &self,
         id: JoinedProcessSessionId,
     ) -> Result<JoinedProcessStatus, ExecutionBackendError> {
-        #[cfg(not(unix))]
-        {
-            let _ = id;
-            self.unsupported()
+        let session = self.session(id)?;
+        let _operation = session.enter()?;
+        let status = lock(&session.shared).status;
+        if !status.is_terminal() {
+            return Err(conflict_error("process is still running"));
         }
-        #[cfg(unix)]
-        {
-            let session = self.session(id)?;
-            let _operation = session.enter()?;
-            let status = lock(&session.shared).status;
-            if !status.is_terminal() {
-                return Err(conflict_error("process is still running"));
-            }
-            session.join_finished_owner(status)?;
-            self.retire(id, status);
-            Ok(status)
-        }
+        session.join_finished_owner(status)?;
+        self.retire(id, status);
+        Ok(status)
     }
 
     /// Stops one process with recorded attribution.
@@ -1020,7 +935,6 @@ impl JoinedProcessSessions {
         if grace > Duration::from_secs(2) {
             return Err(invalid_request("process stop grace exceeds two seconds"));
         }
-        #[cfg(unix)]
         {
             let session = self.session(id)?;
             if !lock(&session.shared).status.is_terminal() {
@@ -1062,7 +976,6 @@ impl JoinedProcessSessions {
             if *lock(&self.inner.agent) != owner {
                 return Ok(());
             }
-            #[cfg(unix)]
             {
                 state
                     .active
@@ -1070,11 +983,6 @@ impl JoinedProcessSessions {
                     .filter(|(_, session)| session.promoted.load(Ordering::Acquire) == PROMOTED)
                     .map(|(id, _)| *id)
                     .collect()
-            }
-            #[cfg(not(unix))]
-            {
-                let _ = state;
-                Vec::new()
             }
         };
         self.stop_job_ids(ids, by, grace)
@@ -1129,7 +1037,6 @@ impl JoinedProcessSessions {
     /// Drops snapshots only after their terminal observation has committed.
     pub(crate) fn consume_jobs(&self, numbers: &[u32]) {
         let _ = self.terminal_jobs_since(0);
-        #[cfg(unix)]
         {
             let mut released = Vec::new();
             let mut state = lock(&self.inner.state);
@@ -1161,10 +1068,6 @@ impl JoinedProcessSessions {
             }
             drop(state);
             self.release_job_outputs(released);
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = numbers;
         }
     }
 
@@ -1205,7 +1108,6 @@ impl JoinedProcessSessions {
     /// Marks consumed jobs' files and runs the retention sweep on the blocking
     /// pool when a runtime is present (inline otherwise), never under the
     /// outputs lock; the lock is retaken only to forget deleted files.
-    #[cfg(unix)]
     fn release_job_outputs(&self, numbers: Vec<u32>) {
         if numbers.is_empty() {
             return;
@@ -1235,13 +1137,11 @@ impl JoinedProcessSessions {
     /// Creates the promoted job's file and moves spooling under the output
     /// lock, so no record is lost or written twice. The caller reserved room
     /// first. Failure never blocks promotion; the job then has no issued path.
-    #[cfg(unix)]
     fn spool_promoted(&self, id: JoinedProcessSessionId, session: &JoinedSession) {
         let mut shared = lock(&session.shared);
         self.spool_output(id, &mut shared);
     }
 
-    #[cfg(unix)]
     fn spool_output(&self, id: JoinedProcessSessionId, shared: &mut JoinedSessionShared) {
         let mut outputs = lock(&self.inner.outputs);
         let Some(outputs) = outputs.as_mut() else {
@@ -1275,39 +1175,25 @@ impl JoinedProcessSessions {
     /// Whether the service retains any promoted running or unconsumed job.
     #[must_use]
     pub fn has_jobs(&self) -> bool {
-        #[cfg(unix)]
-        {
-            let state = lock(&self.inner.state);
-            state
-                .active
-                .values()
-                .chain(state.finished.values())
-                .any(|session| session.promoted.load(Ordering::Acquire) == PROMOTED)
-        }
-        #[cfg(not(unix))]
-        {
-            false
-        }
+        let state = lock(&self.inner.state);
+        state
+            .active
+            .values()
+            .chain(state.finished.values())
+            .any(|session| session.promoted.load(Ordering::Acquire) == PROMOTED)
     }
 
     /// Counts promoted running jobs without copying retained output.
     #[must_use]
     pub fn running_job_count(&self) -> usize {
-        #[cfg(unix)]
-        {
-            lock(&self.inner.state)
-                .active
-                .values()
-                .filter(|session| {
-                    session.promoted.load(Ordering::Acquire) == PROMOTED
-                        && !lock(&session.shared).status.is_terminal()
-                })
-                .count()
-        }
-        #[cfg(not(unix))]
-        {
-            0
-        }
+        lock(&self.inner.state)
+            .active
+            .values()
+            .filter(|session| {
+                session.promoted.load(Ordering::Acquire) == PROMOTED
+                    && !lock(&session.shared).status.is_terminal()
+            })
+            .count()
     }
 
     /// Whether a promoted job ended and its terminal notice is still
@@ -1316,46 +1202,31 @@ impl JoinedProcessSessions {
     /// terminal status alone does not mean unreported.
     #[must_use]
     pub fn has_unreported_terminal_job(&self) -> bool {
-        #[cfg(unix)]
-        {
-            let state = lock(&self.inner.state);
-            state
-                .active
-                .values()
-                .chain(state.finished.values())
-                .any(|session| {
-                    session.promoted.load(Ordering::Acquire) == PROMOTED
-                        && !session.consumed.load(Ordering::Acquire)
-                        && lock(&session.shared).status.is_terminal()
-                })
-        }
-        #[cfg(not(unix))]
-        {
-            false
-        }
+        let state = lock(&self.inner.state);
+        state
+            .active
+            .values()
+            .chain(state.finished.values())
+            .any(|session| {
+                session.promoted.load(Ordering::Acquire) == PROMOTED
+                    && !session.consumed.load(Ordering::Acquire)
+                    && lock(&session.shared).status.is_terminal()
+            })
     }
 
     /// Returns bounded live and pending-notice snapshots.
     #[must_use]
     pub fn jobs(&self) -> Vec<crate::JobView> {
-        #[cfg(not(unix))]
-        {
-            Vec::new()
-        }
-        #[cfg(unix)]
-        {
-            let state = lock(&self.inner.state);
-            state
-                .active
-                .iter()
-                .chain(&state.finished)
-                .filter(|(_, session)| session.promoted.load(Ordering::Acquire) == PROMOTED)
-                .map(|(id, session)| self.job_view(*id, session))
-                .collect()
-        }
+        let state = lock(&self.inner.state);
+        state
+            .active
+            .iter()
+            .chain(&state.finished)
+            .filter(|(_, session)| session.promoted.load(Ordering::Acquire) == PROMOTED)
+            .map(|(id, session)| self.job_view(*id, session))
+            .collect()
     }
 
-    #[cfg(unix)]
     fn job_view(&self, id: JoinedProcessSessionId, session: &JoinedSession) -> crate::JobView {
         let shared = lock(&session.shared);
         let status = match shared.status {
@@ -1394,21 +1265,13 @@ impl JoinedProcessSessions {
     /// Resolves a vendor handle only within this service's live/snapshot namespace.
     #[must_use]
     pub fn session_for_number(&self, number: u32) -> Option<JoinedProcessSessionId> {
-        #[cfg(unix)]
-        {
-            let state = lock(&self.inner.state);
-            state
-                .active
-                .keys()
-                .chain(state.finished.keys())
-                .find(|id| Self::job_number(**id) == number)
-                .copied()
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = number;
-            None
-        }
+        let state = lock(&self.inner.state);
+        state
+            .active
+            .keys()
+            .chain(state.finished.keys())
+            .find(|id| Self::job_number(**id) == number)
+            .copied()
     }
 
     /// Resolves an already-reported job while its bounded terminal tombstone remains.
@@ -1417,38 +1280,22 @@ impl JoinedProcessSessions {
         &self,
         number: u32,
     ) -> Option<(JoinedProcessSessionId, JoinedProcessStatus)> {
-        #[cfg(unix)]
-        {
-            lock(&self.inner.state)
-                .tombstones
-                .iter()
-                .find(|(id, _)| Self::job_number(*id) == number)
-                .copied()
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = number;
-            None
-        }
+        lock(&self.inner.state)
+            .tombstones
+            .iter()
+            .find(|(id, _)| Self::job_number(*id) == number)
+            .copied()
     }
 
     pub(crate) fn projection_state(
         &self,
         id: JoinedProcessSessionId,
     ) -> Result<crate::internal::ProcessSessionProjectionState, ExecutionBackendError> {
-        #[cfg(unix)]
-        {
-            let session = self.session(id)?;
-            Ok((
-                Arc::clone(&session.consumer_cursor),
-                Arc::clone(&session.consumer_pending_utf8),
-            ))
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = id;
-            self.unsupported()
-        }
+        let session = self.session(id)?;
+        Ok((
+            Arc::clone(&session.consumer_cursor),
+            Arc::clone(&session.consumer_pending_utf8),
+        ))
     }
 
     pub(crate) fn runtime_owner_generation(&self) -> NonZeroU64 {
@@ -1508,9 +1355,7 @@ impl JoinedProcessSessions {
                     terminal_membership: BTreeSet::new(),
                     accepting_jobs: true,
                     starting: 0,
-                    #[cfg(unix)]
                     active: BTreeMap::new(),
-                    #[cfg(unix)]
                     finished: BTreeMap::new(),
                     tombstones: VecDeque::new(),
                 }),
@@ -1518,31 +1363,10 @@ impl JoinedProcessSessions {
         })
     }
 
-    /// Returns sessions that have started and have not yet been explicitly
-    /// joined and retired. Terminal-but-unretired sessions remain active.
-    #[must_use]
-    pub fn active_sessions(&self) -> usize {
-        #[cfg(unix)]
-        {
-            lock(&self.inner.state).active.len()
-        }
-        #[cfg(not(unix))]
-        {
-            0
-        }
-    }
-
     /// The joined process sessions this environment still holds.
     #[must_use]
     pub fn active_session_ids(&self) -> Vec<JoinedProcessSessionId> {
-        #[cfg(unix)]
-        {
-            lock(&self.inner.state).active.keys().copied().collect()
-        }
-        #[cfg(not(unix))]
-        {
-            Vec::new()
-        }
+        lock(&self.inner.state).active.keys().copied().collect()
     }
 
     /// Returns one session's joined terminal status, when it has one.
@@ -1560,85 +1384,63 @@ impl JoinedProcessSessions {
         &self,
         id: JoinedProcessSessionId,
     ) -> Option<JoinedProcessStatus> {
-        #[cfg(unix)]
-        {
-            if id.0[..8] != self.inner.owner {
-                return None;
-            }
-            let state = lock(&self.inner.state);
-            if let Some(session) = state.active.get(&id).or_else(|| state.finished.get(&id)) {
-                let status = lock(&session.shared).status;
-                return status.is_terminal().then_some(status);
-            }
-            state
-                .tombstones
-                .iter()
-                .find(|(retired, _)| *retired == id)
-                .map(|(_, status)| *status)
+        if id.0[..8] != self.inner.owner {
+            return None;
         }
-        #[cfg(not(unix))]
-        {
-            let _ = id;
-            None
+        let state = lock(&self.inner.state);
+        if let Some(session) = state.active.get(&id).or_else(|| state.finished.get(&id)) {
+            let status = lock(&session.shared).status;
+            return status.is_terminal().then_some(status);
         }
+        state
+            .tombstones
+            .iter()
+            .find(|(retired, _)| *retired == id)
+            .map(|(_, status)| *status)
     }
 
     /// Identities with backend proof that the child group has exited and
     /// joined. Includes bounded tombstones for finished sessions reclaimed to
     /// admit later sequential commands.
     pub(crate) fn joined_terminal_identities(&self) -> Vec<[u8; 16]> {
-        #[cfg(unix)]
-        {
-            let state = lock(&self.inner.state);
-            let active = state
-                .active
-                .iter()
-                .map(|(id, session)| (*id, Arc::clone(session)))
-                .collect::<Vec<_>>();
-            let mut joined = state
-                .tombstones
-                .iter()
-                .map(|(id, _)| id.0)
-                .collect::<Vec<_>>();
-            drop(state);
+        let state = lock(&self.inner.state);
+        let active = state
+            .active
+            .iter()
+            .map(|(id, session)| (*id, Arc::clone(session)))
+            .collect::<Vec<_>>();
+        let mut joined = state
+            .tombstones
+            .iter()
+            .map(|(id, _)| id.0)
+            .collect::<Vec<_>>();
+        drop(state);
 
-            // A supervisor publishes terminal status before its thread exits.
-            // Only its joined owner (or a retired tombstone) proves cleanup.
-            // Release the service lock before taking an operation lock: retire
-            // takes those locks in the opposite order.
-            for (id, session) in active {
-                let Ok(_operation) = session.enter_until(Instant::now()) else {
-                    continue;
-                };
-                let status = lock(&session.shared).status;
-                if status.is_terminal()
-                    && session
-                        .join_finished_owner_until(status, Instant::now())
-                        .is_ok()
-                {
-                    joined.push(id.0);
-                }
+        // A supervisor publishes terminal status before its thread exits.
+        // Only its joined owner (or a retired tombstone) proves cleanup.
+        // Release the service lock before taking an operation lock: retire
+        // takes those locks in the opposite order.
+        for (id, session) in active {
+            let Ok(_operation) = session.enter_until(Instant::now()) else {
+                continue;
+            };
+            let status = lock(&session.shared).status;
+            if status.is_terminal()
+                && session
+                    .join_finished_owner_until(status, Instant::now())
+                    .is_ok()
+            {
+                joined.push(id.0);
             }
-            joined
         }
-        #[cfg(not(unix))]
-        {
-            Vec::new()
-        }
+        joined
     }
 
     /// Reports whether no started or starting session remains.
     #[must_use]
     pub fn is_drained(&self) -> bool {
         let state = lock(&self.inner.state);
-        #[cfg(unix)]
-        {
-            state.active.is_empty() && state.starting == 0
-        }
-        #[cfg(not(unix))]
-        {
-            state.starting == 0
-        }
+        state.active.is_empty() && state.starting == 0
     }
 
     /// Starts one pipes- or Unix-PTY-mode process and returns a non-PID opaque identity.
@@ -1662,94 +1464,81 @@ impl JoinedProcessSessions {
             .as_ref()
             .map(JoinedProcessHostCapacity::reserve)
             .transpose()?;
-        #[cfg(not(unix))]
-        {
-            let _ = request;
-            return Err(backend_error(
-                ExecutionBackendErrorKind::Unsupported,
-                "joined process sessions require Unix process-group cleanup",
-            ));
-        }
-        #[cfg(unix)]
-        {
-            // A child that has exited holds no concurrency. Reclaim finished
-            // sessions before admitting a new one, so a sequential program that
-            // starts one command at a time never exhausts the limit.
-            self.reclaim_finished_sessions();
-            let id = {
-                let mut state = lock(&self.inner.state);
-                if !state.accepting_jobs {
-                    return Err(backend_error(
-                        ExecutionBackendErrorKind::Cancelled,
-                        "process owner is releasing; process admission is closed",
-                    ));
-                }
-                if Self::running_sessions(&state).saturating_add(state.starting)
-                    >= self.inner.active_limit
-                {
-                    let running = state
-                        .active
-                        .iter()
-                        .filter(|(_, session)| {
-                            lock(&session.shared).status == JoinedProcessStatus::Running
-                        })
-                        .map(|(id, _)| format!("p{}", Self::job_number(*id)))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    return Err(ExecutionBackendError::new(
-                        ExecutionBackendErrorKind::ResourceLimit,
-                        format!(
-                            "running process limit ({}) was reached: {running}",
-                            self.inner.active_limit
-                        ),
-                    ));
-                }
-                let sequence = state.next;
-                state.next = state
-                    .next
-                    .checked_add(1)
-                    .filter(|next| u32::try_from(*next).is_ok())
-                    .ok_or_else(|| {
-                        resource_error("joined process session identity space exhausted")
-                    })?;
-                state.starting = state.starting.saturating_add(1);
-                let mut bytes = [0_u8; 16];
-                bytes[..8].copy_from_slice(&self.inner.owner);
-                bytes[8..].copy_from_slice(&sequence.to_be_bytes());
-                JoinedProcessSessionId(bytes)
-            };
-            let started = start_joined_host_process(
-                &self.inner.workspace,
-                &self.inner.process,
-                &self.inner.environment,
-                self.inner.limits,
-                self.inner.queue_limit,
-                &request,
-                control,
-                Some(PendingJobOutput::new(
-                    &self.inner,
-                    id,
-                    request.output_spool_threshold,
-                )),
-            );
+        // A child that has exited holds no concurrency. Reclaim finished
+        // sessions before admitting a new one, so a sequential program that
+        // starts one command at a time never exhausts the limit.
+        self.reclaim_finished_sessions();
+        let id = {
             let mut state = lock(&self.inner.state);
-            state.starting = state.starting.saturating_sub(1);
-            match started {
-                Ok(session) => {
-                    let mut shared = lock(&session.shared);
-                    shared.terminal_changes = Some(self.inner.terminal_changes.clone());
-                    let terminal = shared.status.is_terminal();
-                    drop(shared);
-                    state.active.insert(id, Arc::new(session));
-                    if terminal {
-                        self.inner
-                            .terminal_changes
-                            .send_modify(|revision| *revision = revision.wrapping_add(1));
-                    }
-                    Ok(id)
-                }
-                Err(error) => Err(error),
+            if !state.accepting_jobs {
+                return Err(backend_error(
+                    ExecutionBackendErrorKind::Cancelled,
+                    "process owner is releasing; process admission is closed",
+                ));
             }
+            if Self::running_sessions(&state).saturating_add(state.starting)
+                >= self.inner.active_limit
+            {
+                let running = state
+                    .active
+                    .iter()
+                    .filter(|(_, session)| {
+                        lock(&session.shared).status == JoinedProcessStatus::Running
+                    })
+                    .map(|(id, _)| format!("p{}", Self::job_number(*id)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(ExecutionBackendError::new(
+                    ExecutionBackendErrorKind::ResourceLimit,
+                    format!(
+                        "running process limit ({}) was reached: {running}",
+                        self.inner.active_limit
+                    ),
+                ));
+            }
+            let sequence = state.next;
+            state.next = state
+                .next
+                .checked_add(1)
+                .filter(|next| u32::try_from(*next).is_ok())
+                .ok_or_else(|| resource_error("joined process session identity space exhausted"))?;
+            state.starting = state.starting.saturating_add(1);
+            let mut bytes = [0_u8; 16];
+            bytes[..8].copy_from_slice(&self.inner.owner);
+            bytes[8..].copy_from_slice(&sequence.to_be_bytes());
+            JoinedProcessSessionId(bytes)
+        };
+        let started = start_joined_host_process(
+            &self.inner.workspace,
+            &self.inner.process,
+            &self.inner.environment,
+            self.inner.limits,
+            self.inner.queue_limit,
+            &request,
+            control,
+            Some(PendingJobOutput::new(
+                &self.inner,
+                id,
+                request.output_spool_threshold,
+            )),
+        );
+        let mut state = lock(&self.inner.state);
+        state.starting = state.starting.saturating_sub(1);
+        match started {
+            Ok(session) => {
+                let mut shared = lock(&session.shared);
+                shared.terminal_changes = Some(self.inner.terminal_changes.clone());
+                let terminal = shared.status.is_terminal();
+                drop(shared);
+                state.active.insert(id, Arc::new(session));
+                if terminal {
+                    self.inner
+                        .terminal_changes
+                        .send_modify(|revision| *revision = revision.wrapping_add(1));
+                }
+                Ok(id)
+            }
+            Err(error) => Err(error),
         }
     }
 
@@ -1768,7 +1557,6 @@ impl JoinedProcessSessions {
     /// The active limit bounds concurrent children, not remembered ones: a
     /// session that has exited and been joined occupies no process slot and is
     /// kept only so its final output can still be read.
-    #[cfg(unix)]
     fn running_sessions(state: &JoinedProcessServiceState) -> usize {
         state
             .active
@@ -1785,7 +1573,6 @@ impl JoinedProcessSessions {
     /// `active_limit` finished sessions are retained, and older ones are
     /// released oldest-first. Session identities are allocated in sequence, so
     /// the active map is already in creation order.
-    #[cfg(unix)]
     fn reclaim_finished_sessions(&self) {
         let finished = {
             let state = lock(&self.inner.state);
@@ -1823,36 +1610,28 @@ impl JoinedProcessSessions {
                 "joined process stdin write exceeds its bound",
             ));
         }
-        #[cfg(not(unix))]
-        {
-            let _ = (id, bytes, disposition);
-            self.unsupported()
+        let session = self.session(id)?;
+        let _operation = session.enter()?;
+        if lock(&session.shared).status.is_terminal() {
+            return Err(conflict_error("joined process session is already terminal"));
         }
-        #[cfg(unix)]
-        {
-            let session = self.session(id)?;
-            let _operation = session.enter()?;
-            if lock(&session.shared).status.is_terminal() {
-                return Err(conflict_error("joined process session is already terminal"));
-            }
-            let prior = session.input_bytes.fetch_add(bytes.len(), Ordering::AcqRel);
-            if prior.saturating_add(bytes.len()) > MAX_LITERAL_PROCESS_STDIN_BYTES {
-                session.input_bytes.fetch_sub(bytes.len(), Ordering::AcqRel);
-                return Err(resource_error(
-                    "joined process aggregate input exceeds its bound",
-                ));
-            }
-            let mut input = lock(&session.input);
-            let writer = input
-                .as_mut()
-                .ok_or_else(|| conflict_error(super::JOINED_STDIN_CLOSED))?;
-            write_joined_session_input(writer, bytes, session.input_timeout)?;
-            if disposition == JoinedProcessInputDisposition::Close {
-                close_joined_session_input(writer, session.input_timeout)?;
-                input.take();
-            }
-            Ok(())
+        let prior = session.input_bytes.fetch_add(bytes.len(), Ordering::AcqRel);
+        if prior.saturating_add(bytes.len()) > MAX_LITERAL_PROCESS_STDIN_BYTES {
+            session.input_bytes.fetch_sub(bytes.len(), Ordering::AcqRel);
+            return Err(resource_error(
+                "joined process aggregate input exceeds its bound",
+            ));
         }
+        let mut input = lock(&session.input);
+        let writer = input
+            .as_mut()
+            .ok_or_else(|| conflict_error(super::JOINED_STDIN_CLOSED))?;
+        write_joined_session_input(writer, bytes, session.input_timeout)?;
+        if disposition == JoinedProcessInputDisposition::Close {
+            close_joined_session_input(writer, session.input_timeout)?;
+            input.take();
+        }
+        Ok(())
     }
 
     /// Returns bounded newly available records and the current status.
@@ -1875,66 +1654,58 @@ impl JoinedProcessSessions {
         {
             return Err(invalid_request("joined process poll bounds are invalid"));
         }
-        #[cfg(not(unix))]
-        {
-            let _ = id;
-            self.unsupported()
-        }
-        #[cfg(unix)]
-        {
-            let session = self.session(id)?;
-            let _operation = session.enter()?;
-            let mut shared = lock(&session.shared);
-            let status = shared.status;
-            let mut remaining = max_bytes;
-            let mut records = Vec::new();
-            while records.len() < max_records {
-                let Some(front) = shared.output.records.front() else {
-                    break;
+        let session = self.session(id)?;
+        let _operation = session.enter()?;
+        let mut shared = lock(&session.shared);
+        let status = shared.status;
+        let mut remaining = max_bytes;
+        let mut records = Vec::new();
+        while records.len() < max_records {
+            let Some(front) = shared.output.records.front() else {
+                break;
+            };
+            if front.bytes.len() > remaining {
+                let returned = JoinedProcessOutputRecord {
+                    sequence: front.sequence,
+                    cursor: front.cursor,
+                    stream: front.stream,
+                    bytes: Arc::from(&front.bytes[..remaining]),
                 };
-                if front.bytes.len() > remaining {
-                    let returned = JoinedProcessOutputRecord {
-                        sequence: front.sequence,
-                        cursor: front.cursor,
-                        stream: front.stream,
-                        bytes: Arc::from(&front.bytes[..remaining]),
-                    };
-                    let retained = JoinedProcessOutputRecord {
-                        sequence: front.sequence,
-                        cursor: front
-                            .cursor
-                            .saturating_add(u64::try_from(remaining).unwrap_or(u64::MAX)),
-                        stream: front.stream,
-                        bytes: Arc::from(&front.bytes[remaining..]),
-                    };
-                    shared.output.records.pop_front();
-                    shared.output.records.push_front(retained);
-                    shared.output.retained_bytes = shared
-                        .output
-                        .retained_bytes
-                        .saturating_sub(u64::try_from(remaining).unwrap_or(u64::MAX));
-                    records.push(returned);
-                    break;
-                }
-                let Some(record) = shared.output.records.pop_front() else {
-                    break;
+                let retained = JoinedProcessOutputRecord {
+                    sequence: front.sequence,
+                    cursor: front
+                        .cursor
+                        .saturating_add(u64::try_from(remaining).unwrap_or(u64::MAX)),
+                    stream: front.stream,
+                    bytes: Arc::from(&front.bytes[remaining..]),
                 };
-                remaining -= record.bytes.len();
+                shared.output.records.pop_front();
+                shared.output.records.push_front(retained);
                 shared.output.retained_bytes = shared
                     .output
                     .retained_bytes
-                    .saturating_sub(u64::try_from(record.bytes.len()).unwrap_or(u64::MAX));
-                records.push(record);
+                    .saturating_sub(u64::try_from(remaining).unwrap_or(u64::MAX));
+                records.push(returned);
+                break;
             }
-            let more_output = !shared.output.records.is_empty();
-            drop(shared);
-            session.join_finished_owner(status)?;
-            Ok(JoinedProcessPollResult {
-                records: records.into(),
-                status,
-                more_output,
-            })
+            let Some(record) = shared.output.records.pop_front() else {
+                break;
+            };
+            remaining -= record.bytes.len();
+            shared.output.retained_bytes = shared
+                .output
+                .retained_bytes
+                .saturating_sub(u64::try_from(record.bytes.len()).unwrap_or(u64::MAX));
+            records.push(record);
         }
+        let more_output = !shared.output.records.is_empty();
+        drop(shared);
+        session.join_finished_owner(status)?;
+        Ok(JoinedProcessPollResult {
+            records: records.into(),
+            status,
+            more_output,
+        })
     }
 
     /// Reads bounded output from an exact cursor without consuming retained bytes.
@@ -1962,68 +1733,60 @@ impl JoinedProcessSessions {
         {
             return Err(invalid_request("joined process poll bounds are invalid"));
         }
-        #[cfg(not(unix))]
-        {
-            let _ = (id, cursor);
-            self.unsupported()
+        let session = self.session(id)?;
+        let _operation = session.enter()?;
+        let shared = lock(&session.shared);
+        let oldest = shared
+            .output
+            .records
+            .front()
+            .map_or(shared.output.next_cursor, |record| record.cursor);
+        if cursor.0 > shared.output.next_cursor {
+            return Err(conflict_error(
+                "joined process output cursor is stale or unknown",
+            ));
         }
-        #[cfg(unix)]
-        {
-            let session = self.session(id)?;
-            let _operation = session.enter()?;
-            let shared = lock(&session.shared);
-            let oldest = shared
-                .output
-                .records
-                .front()
-                .map_or(shared.output.next_cursor, |record| record.cursor);
-            if cursor.0 > shared.output.next_cursor {
-                return Err(conflict_error(
-                    "joined process output cursor is stale or unknown",
-                ));
+        let skipped_bytes = oldest.saturating_sub(cursor.0);
+        let cursor = JoinedProcessOutputCursor(cursor.0.max(oldest));
+        let mut remaining = max_bytes;
+        let mut records = Vec::new();
+        let mut next = cursor.0;
+        for record in &shared.output.records {
+            if records.len() >= max_records || remaining == 0 {
+                break;
             }
-            let skipped_bytes = oldest.saturating_sub(cursor.0);
-            let cursor = JoinedProcessOutputCursor(cursor.0.max(oldest));
-            let mut remaining = max_bytes;
-            let mut records = Vec::new();
-            let mut next = cursor.0;
-            for record in &shared.output.records {
-                if records.len() >= max_records || remaining == 0 {
-                    break;
-                }
-                let end = record
+            let end = record
+                .cursor
+                .saturating_add(u64::try_from(record.bytes.len()).unwrap_or(u64::MAX));
+            if end <= cursor.0 {
+                continue;
+            }
+            let offset = usize::try_from(cursor.0.saturating_sub(record.cursor))
+                .unwrap_or(usize::MAX)
+                .min(record.bytes.len());
+            let count = remaining.min(record.bytes.len().saturating_sub(offset));
+            records.push(JoinedProcessOutputRecord {
+                sequence: record.sequence,
+                cursor: record
                     .cursor
-                    .saturating_add(u64::try_from(record.bytes.len()).unwrap_or(u64::MAX));
-                if end <= cursor.0 {
-                    continue;
-                }
-                let offset = usize::try_from(cursor.0.saturating_sub(record.cursor))
-                    .unwrap_or(usize::MAX)
-                    .min(record.bytes.len());
-                let count = remaining.min(record.bytes.len().saturating_sub(offset));
-                records.push(JoinedProcessOutputRecord {
-                    sequence: record.sequence,
-                    cursor: record
-                        .cursor
-                        .saturating_add(u64::try_from(offset).unwrap_or(u64::MAX)),
-                    stream: record.stream,
-                    bytes: Arc::from(&record.bytes[offset..offset.saturating_add(count)]),
-                });
-                remaining -= count;
-                next = next.saturating_add(u64::try_from(count).unwrap_or(u64::MAX));
-            }
-            let more_output = next < shared.output.next_cursor;
-            let status = shared.status;
-            drop(shared);
-            session.join_finished_owner(status)?;
-            Ok(JoinedProcessCursorPollResult {
-                records: records.into(),
-                status,
-                next_cursor: JoinedProcessOutputCursor(next),
-                more_output,
-                skipped_bytes,
-            })
+                    .saturating_add(u64::try_from(offset).unwrap_or(u64::MAX)),
+                stream: record.stream,
+                bytes: Arc::from(&record.bytes[offset..offset.saturating_add(count)]),
+            });
+            remaining -= count;
+            next = next.saturating_add(u64::try_from(count).unwrap_or(u64::MAX));
         }
+        let more_output = next < shared.output.next_cursor;
+        let status = shared.status;
+        drop(shared);
+        session.join_finished_owner(status)?;
+        Ok(JoinedProcessCursorPollResult {
+            records: records.into(),
+            status,
+            next_cursor: JoinedProcessOutputCursor(next),
+            more_output,
+            skipped_bytes,
+        })
     }
 
     /// Reads the newest bounded tail without walking or copying the whole window.
@@ -2044,46 +1807,38 @@ impl JoinedProcessSessions {
         {
             return Err(invalid_request("joined process poll bounds are invalid"));
         }
-        #[cfg(not(unix))]
-        {
-            let _ = id;
-            self.unsupported()
-        }
-        #[cfg(unix)]
-        {
-            let session = self.session(id)?;
-            let _operation = session.enter()?;
-            let shared = lock(&session.shared);
-            let mut remaining = max_bytes;
-            let mut records = Vec::new();
-            for record in shared.output.records.iter().rev().take(max_records) {
-                if remaining == 0 {
-                    break;
-                }
-                let count = remaining.min(record.bytes.len());
-                let offset = record.bytes.len() - count;
-                records.push(JoinedProcessOutputRecord {
-                    sequence: record.sequence,
-                    cursor: record
-                        .cursor
-                        .saturating_add(u64::try_from(offset).unwrap_or(u64::MAX)),
-                    stream: record.stream,
-                    bytes: Arc::from(&record.bytes[offset..]),
-                });
-                remaining -= count;
+        let session = self.session(id)?;
+        let _operation = session.enter()?;
+        let shared = lock(&session.shared);
+        let mut remaining = max_bytes;
+        let mut records = Vec::new();
+        for record in shared.output.records.iter().rev().take(max_records) {
+            if remaining == 0 {
+                break;
             }
-            records.reverse();
-            let skipped_bytes = records
-                .first()
-                .map_or(shared.output.next_cursor, |record| record.cursor);
-            Ok(JoinedProcessCursorPollResult {
-                records: records.into(),
-                status: shared.status,
-                next_cursor: JoinedProcessOutputCursor(shared.output.next_cursor),
-                more_output: false,
-                skipped_bytes,
-            })
+            let count = remaining.min(record.bytes.len());
+            let offset = record.bytes.len() - count;
+            records.push(JoinedProcessOutputRecord {
+                sequence: record.sequence,
+                cursor: record
+                    .cursor
+                    .saturating_add(u64::try_from(offset).unwrap_or(u64::MAX)),
+                stream: record.stream,
+                bytes: Arc::from(&record.bytes[offset..]),
+            });
+            remaining -= count;
         }
+        records.reverse();
+        let skipped_bytes = records
+            .first()
+            .map_or(shared.output.next_cursor, |record| record.cursor);
+        Ok(JoinedProcessCursorPollResult {
+            records: records.into(),
+            status: shared.status,
+            next_cursor: JoinedProcessOutputCursor(shared.output.next_cursor),
+            more_output: false,
+            skipped_bytes,
+        })
     }
 
     /// Terminates and joins one exact session, then retains a bounded tombstone.
@@ -2095,41 +1850,33 @@ impl JoinedProcessSessions {
         &self,
         id: JoinedProcessSessionId,
     ) -> Result<JoinedProcessStatus, ExecutionBackendError> {
-        #[cfg(not(unix))]
-        {
-            let _ = id;
-            self.unsupported()
+        let deadline = Instant::now() + self.inner.limits.cleanup_duration();
+        let session = self.session(id)?;
+        let _operation = session.enter_until(deadline)?;
+        if !lock(&session.shared).status.is_terminal() {
+            lock(&session.stopped_by).get_or_insert(crate::JobStopReason::Model);
         }
-        #[cfg(unix)]
-        {
-            let deadline = Instant::now() + self.inner.limits.cleanup_duration();
-            let session = self.session(id)?;
-            let _operation = session.enter_until(deadline)?;
-            if !lock(&session.shared).status.is_terminal() {
-                lock(&session.stopped_by).get_or_insert(crate::JobStopReason::Model);
-            }
-            lock(&session.input).take();
-            let mut owner = lock(&session.owner);
-            let joined = if let Some(owner) = owner.as_mut() {
-                owner.stop.store(true, Ordering::Release);
-                owner.join_until(deadline)?
-            } else {
-                true
-            };
-            if !joined {
-                return Err(cleanup_unresolved_error());
-            }
-            owner.take();
-            drop(owner);
-            let status = lock(&session.shared).status;
-            if status == JoinedProcessStatus::CleanupUnresolved {
-                return Err(recovery_required_error(
-                    "joined process cleanup remains unresolved",
-                ));
-            }
-            self.retire(id, status);
-            Ok(status)
+        lock(&session.input).take();
+        let mut owner = lock(&session.owner);
+        let joined = if let Some(owner) = owner.as_mut() {
+            owner.stop.store(true, Ordering::Release);
+            owner.join_until(deadline)?
+        } else {
+            true
+        };
+        if !joined {
+            return Err(cleanup_unresolved_error());
         }
+        owner.take();
+        drop(owner);
+        let status = lock(&session.shared).status;
+        if status == JoinedProcessStatus::CleanupUnresolved {
+            return Err(recovery_required_error(
+                "joined process cleanup remains unresolved",
+            ));
+        }
+        self.retire(id, status);
+        Ok(status)
     }
 
     /// Terminates and joins every active session owned by this service.
@@ -2138,33 +1885,25 @@ impl JoinedProcessSessions {
     ///
     /// Returns the first join failure after attempting every active session.
     pub fn join_all(&self) -> Result<(), ExecutionBackendError> {
-        #[cfg(not(unix))]
-        {
-            return Ok(());
-        }
-        #[cfg(unix)]
-        {
-            let ids = lock(&self.inner.state)
-                .active
-                .keys()
-                .copied()
-                .collect::<Vec<_>>();
-            let deadline = Instant::now() + self.inner.limits.cleanup_duration();
-            let mut failure = None;
-            for id in ids {
-                if Instant::now() >= deadline {
-                    failure.get_or_insert_with(cleanup_unresolved_error);
-                    break;
-                }
-                if let Err(error) = self.terminate_until(id, deadline) {
-                    failure.get_or_insert(error);
-                }
+        let ids = lock(&self.inner.state)
+            .active
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
+        let deadline = Instant::now() + self.inner.limits.cleanup_duration();
+        let mut failure = None;
+        for id in ids {
+            if Instant::now() >= deadline {
+                failure.get_or_insert_with(cleanup_unresolved_error);
+                break;
             }
-            failure.map_or(Ok(()), Err)
+            if let Err(error) = self.terminate_until(id, deadline) {
+                failure.get_or_insert(error);
+            }
         }
+        failure.map_or(Ok(()), Err)
     }
 
-    #[cfg(unix)]
     fn terminate_until(
         &self,
         id: JoinedProcessSessionId,
@@ -2195,7 +1934,6 @@ impl JoinedProcessSessions {
         Ok(status)
     }
 
-    #[cfg(unix)]
     fn session(
         &self,
         id: JoinedProcessSessionId,
@@ -2220,7 +1958,6 @@ impl JoinedProcessSessions {
         ))
     }
 
-    #[cfg(unix)]
     fn retire(&self, id: JoinedProcessSessionId, status: JoinedProcessStatus) {
         let mut state = lock(&self.inner.state);
         if state.finished.contains_key(&id)
@@ -2254,14 +1991,6 @@ impl JoinedProcessSessions {
         if self.job_output_file(Self::job_number(id)).is_some() {
             self.release_job_outputs(vec![Self::job_number(id)]);
         }
-    }
-
-    #[cfg(not(unix))]
-    fn unsupported<T>(&self) -> Result<T, ExecutionBackendError> {
-        Err(backend_error(
-            ExecutionBackendErrorKind::Unsupported,
-            "joined process sessions require Unix process-group cleanup",
-        ))
     }
 }
 
@@ -2307,7 +2036,6 @@ pub(super) fn validate_process_value(value: &str) -> Result<(), ExecutionBackend
     Ok(())
 }
 
-#[cfg(unix)]
 #[allow(
     clippy::too_many_lines,
     clippy::too_many_arguments,
@@ -2347,7 +2075,6 @@ fn start_joined_host_process(
     }
 }
 
-#[cfg(unix)]
 #[allow(
     clippy::too_many_lines,
     clippy::too_many_arguments,
@@ -2626,20 +2353,17 @@ fn start_joined_pipes_process(
     })
 }
 
-#[cfg(unix)]
 struct PtyMasterDescriptor<'a> {
     raw: RawFd,
     _master: std::marker::PhantomData<&'a dyn MasterPty>,
 }
 
-#[cfg(unix)]
 impl AsRawFd for PtyMasterDescriptor<'_> {
     fn as_raw_fd(&self) -> RawFd {
         self.raw
     }
 }
 
-#[cfg(unix)]
 fn clone_linux_pty_master(master: &dyn MasterPty) -> Result<fs::File, ExecutionBackendError> {
     let raw = master
         .as_raw_fd()
@@ -2652,7 +2376,6 @@ fn clone_linux_pty_master(master: &dyn MasterPty) -> Result<fs::File, ExecutionB
     .map_err(|_| io_error("joined process PTY master could not be safely duplicated"))
 }
 
-#[cfg(unix)]
 fn joined_pty_command(
     program: &Path,
     argv0: Option<&Path>,
@@ -2665,7 +2388,6 @@ fn joined_pty_command(
     command
 }
 
-#[cfg(unix)]
 #[allow(
     clippy::too_many_lines,
     clippy::too_many_arguments,
@@ -2933,7 +2655,6 @@ fn start_joined_pty_process(
     })
 }
 
-#[cfg(unix)]
 fn write_joined_initial_input(
     stdin: &mut std::process::ChildStdin,
     bytes: &[u8],
@@ -2942,7 +2663,6 @@ fn write_joined_initial_input(
     write_joined_input(stdin, bytes, duration)
 }
 
-#[cfg(unix)]
 fn write_joined_input(
     stdin: &mut std::process::ChildStdin,
     bytes: &[u8],
@@ -2970,7 +2690,6 @@ fn write_joined_input(
     Ok(())
 }
 
-#[cfg(unix)]
 fn write_joined_session_input(
     input: &mut JoinedSessionInput,
     bytes: &[u8],
@@ -2987,7 +2706,6 @@ fn write_joined_session_input(
     }
 }
 
-#[cfg(unix)]
 fn close_joined_session_input(
     input: &mut JoinedSessionInput,
     duration: Duration,
@@ -2998,19 +2716,16 @@ fn close_joined_session_input(
     }
 }
 
-#[cfg(unix)]
 enum PtyInputCommand {
     Write(Vec<u8>, SyncSender<Result<(), ()>>),
     Close(SyncSender<Result<(), ()>>),
     Stop,
 }
 
-#[cfg(unix)]
 struct PtyInputSender {
     commands: SyncSender<PtyInputCommand>,
 }
 
-#[cfg(unix)]
 impl PtyInputSender {
     fn write(&self, bytes: &[u8], duration: Duration) -> Result<(), ExecutionBackendError> {
         if bytes.is_empty() {
@@ -3048,7 +2763,6 @@ impl PtyInputSender {
     }
 }
 
-#[cfg(unix)]
 fn spawn_pty_input_writer(
     mut writer: Box<dyn Write + Send>,
 ) -> Result<
@@ -3094,7 +2808,6 @@ fn spawn_pty_input_writer(
     Ok((PtyInputSender { commands }, owner_commands, thread))
 }
 
-#[cfg(unix)]
 struct JoinedProcessResources {
     child: std::process::Child,
     process_group: rustix::process::Pid,
@@ -3105,7 +2818,6 @@ struct JoinedProcessResources {
     armed: bool,
 }
 
-#[cfg(unix)]
 impl Drop for JoinedProcessResources {
     fn drop(&mut self) {
         if !self.armed {
@@ -3128,7 +2840,6 @@ impl Drop for JoinedProcessResources {
     }
 }
 
-#[cfg(unix)]
 struct JoinedPtyResources {
     child: Box<dyn portable_pty::Child + Send + Sync>,
     process_group: rustix::process::Pid,
@@ -3140,7 +2851,6 @@ struct JoinedPtyResources {
     armed: bool,
 }
 
-#[cfg(unix)]
 impl Drop for JoinedPtyResources {
     fn drop(&mut self) {
         if !self.armed {
@@ -3164,7 +2874,6 @@ impl Drop for JoinedPtyResources {
     }
 }
 
-#[cfg(unix)]
 #[allow(
     clippy::too_many_arguments,
     reason = "the PTY supervisor explicitly owns every process, I/O, limit, and cancellation input"
@@ -3205,7 +2914,7 @@ fn supervise_joined_pty(
                 status = Some(exit);
                 break JoinedProcessStatus::Exited(code);
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(2)),
+            Ok(None) => std::thread::sleep(supervision_poll_interval(started.elapsed())),
             Err(_) => break JoinedProcessStatus::Failed,
         }
     };
@@ -3243,7 +2952,6 @@ fn supervise_joined_pty(
     shared.terminal_changed();
 }
 
-#[cfg(unix)]
 #[allow(
     clippy::too_many_arguments,
     reason = "the supervisor explicitly owns every process, I/O, limit, and cancellation input"
@@ -3282,7 +2990,7 @@ fn supervise_joined_process(
                 status = Some(exit);
                 break JoinedProcessStatus::Exited(exit.code());
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(2)),
+            Ok(None) => std::thread::sleep(supervision_poll_interval(started.elapsed())),
             Err(_) => break JoinedProcessStatus::Failed,
         }
     };
@@ -3313,7 +3021,6 @@ fn supervise_joined_process(
     shared.terminal_changed();
 }
 
-#[cfg(unix)]
 const fn joined_process_final_status(
     reason: JoinedProcessStatus,
     cleanup_resolved: bool,
@@ -3329,7 +3036,6 @@ const fn joined_process_final_status(
     }
 }
 
-#[cfg(unix)]
 fn spawn_joined_output_reader<R>(
     reader: R,
     stream: JoinedProcessOutputStream,
@@ -3487,7 +3193,6 @@ impl HostProcessContext {
         })
     }
 
-    #[cfg(unix)]
     fn required_prefix(&self) -> Result<Option<&Path>, ExecutionBackendError> {
         let Some((path, directory)) = &self.prefix else {
             return Ok(None);
@@ -3516,7 +3221,6 @@ fn captured_process_home(home: Option<PathBuf>) -> Option<PathBuf> {
         .filter(|home| home.is_dir() && home != Path::new("/"))
 }
 
-#[cfg(unix)]
 fn host_process_path(
     process: &HostProcessContext,
     environment: &[(EnvironmentVariableName, EnvironmentVariableValue)],
@@ -3540,7 +3244,6 @@ fn host_process_path(
 /// empty `HOME`. Bash reads `~/.profile` from the passwd entry whether or not
 /// `HOME` is set, so an unset `HOME` breaks every `$HOME`-relative profile line
 /// and every tool that resolves `$HOME` inside the model's shell.
-#[cfg(unix)]
 fn host_process_home<'context>(
     process: &'context HostProcessContext,
     environment: &[(EnvironmentVariableName, EnvironmentVariableValue)],
@@ -3555,7 +3258,6 @@ fn host_process_home<'context>(
 }
 
 /// Restore the required prefix after a login shell initializes its own base PATH.
-#[cfg(unix)]
 fn restore_path_after_login(
     process: &HostProcessContext,
     command: &str,
@@ -3573,7 +3275,6 @@ fn restore_path_after_login(
 /// programs are looked up on the prepared PATH or the default host PATH so
 /// models can call `true` / `printf` without absolute paths. Relative paths
 /// containing `/` remain rejected (no workspace-relative program resolution).
-#[cfg(unix)]
 fn resolve_host_process_program(
     program: &str,
     process: &HostProcessContext,
@@ -3608,7 +3309,6 @@ fn resolve_host_process_program(
     ))
 }
 
-#[cfg(unix)]
 pub(super) fn execute_host_literal_process(
     workspace: ExecutionWorkspace,
     request: PreparedLiteralProcess,
@@ -3662,24 +3362,6 @@ pub(super) fn execute_host_literal_process(
     })
 }
 
-#[cfg(not(unix))]
-pub(super) fn execute_host_literal_process(
-    _workspace: ExecutionWorkspace,
-    _request: PreparedLiteralProcess,
-    _limits: ExecutionEnvironmentLimits,
-    control: ExecutionOperationControl,
-    _process: Arc<HostProcessContext>,
-) -> ExecutionBackendFuture<LiteralProcessResult> {
-    Box::pin(async move {
-        control.check_cancelled()?;
-        Err(backend_error(
-            ExecutionBackendErrorKind::Unsupported,
-            "host process execution requires joined Unix process-group cleanup",
-        ))
-    })
-}
-
-#[cfg(unix)]
 #[allow(
     clippy::too_many_lines,
     clippy::too_many_arguments,
@@ -3875,7 +3557,7 @@ fn supervise_host_process(
                 terminal_status = Some(status);
                 break HostProcessStop::Completed;
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(2)),
+            Ok(None) => std::thread::sleep(supervision_poll_interval(started.elapsed())),
             Err(_) => break HostProcessStop::Io,
         }
     };
@@ -3938,7 +3620,6 @@ fn supervise_host_process(
     )
 }
 
-#[cfg(unix)]
 fn spawn_output_reader<R>(
     reader: R,
     stream: HostProcessStream,
@@ -3965,7 +3646,6 @@ where
         .map_err(|_| io_error("host process output worker could not start"))
 }
 
-#[cfg(unix)]
 fn read_bounded_process_output<R: Read>(
     mut reader: R,
     stream: HostProcessStream,
@@ -4029,7 +3709,6 @@ fn read_bounded_process_output<R: Read>(
     }
 }
 
-#[cfg(unix)]
 fn set_nonblocking<Fd: AsFd>(fd: &Fd) -> Result<(), ExecutionBackendError> {
     let flags = rustix::fs::fcntl_getfl(fd)
         .map_err(|_| io_error("host process pipe flags could not be read"))?;
@@ -4037,7 +3716,6 @@ fn set_nonblocking<Fd: AsFd>(fd: &Fd) -> Result<(), ExecutionBackendError> {
         .map_err(|_| io_error("host process pipe could not be made nonblocking"))
 }
 
-#[cfg(unix)]
 fn write_process_input(mut stdin: std::process::ChildStdin, bytes: &[u8], stop: &AtomicBool) {
     let mut written = 0_usize;
     while written < bytes.len() && !stop.load(Ordering::Acquire) {
@@ -4053,7 +3731,6 @@ fn write_process_input(mut stdin: std::process::ChildStdin, bytes: &[u8], stop: 
     }
 }
 
-#[cfg(unix)]
 fn terminate_owned_process_group(
     child: &mut std::process::Child,
     process_group: rustix::process::Pid,
@@ -4064,7 +3741,6 @@ fn terminate_owned_process_group(
     terminate_owned_process_group_until(child, process_group, status.take(), cleanup_deadline)
 }
 
-#[cfg(unix)]
 fn terminate_owned_process_group_until(
     child: &mut std::process::Child,
     process_group: rustix::process::Pid,
@@ -4080,7 +3756,6 @@ fn terminate_owned_process_group_until(
     )
 }
 
-#[cfg(unix)]
 fn terminate_owned_process_group_with_grace(
     child: &mut std::process::Child,
     process_group: rustix::process::Pid,
@@ -4122,7 +3797,6 @@ fn terminate_owned_process_group_with_grace(
     ))
 }
 
-#[cfg(unix)]
 fn terminate_owned_pty_group(
     child: &mut dyn portable_pty::Child,
     process_group: rustix::process::Pid,
@@ -4132,7 +3806,6 @@ fn terminate_owned_pty_group(
     terminate_owned_pty_group_until(child, process_group, status, Instant::now() + grace)
 }
 
-#[cfg(unix)]
 fn terminate_owned_pty_group_until(
     child: &mut dyn portable_pty::Child,
     process_group: rustix::process::Pid,
@@ -4148,7 +3821,6 @@ fn terminate_owned_pty_group_until(
     )
 }
 
-#[cfg(unix)]
 fn terminate_owned_pty_group_with_grace(
     child: &mut dyn portable_pty::Child,
     process_group: rustix::process::Pid,
@@ -4189,7 +3861,6 @@ fn terminate_owned_pty_group_with_grace(
     ))
 }
 
-#[cfg(unix)]
 fn cleanup_pty_setup_error(
     child: &mut dyn portable_pty::Child,
     process_group: rustix::process::Pid,
@@ -4201,7 +3872,6 @@ fn cleanup_pty_setup_error(
         .unwrap_or(setup_error)
 }
 
-#[cfg(unix)]
 fn wait_for_output_readers_until(
     stdout: &std::thread::JoinHandle<()>,
     stderr: &std::thread::JoinHandle<()>,
@@ -4212,7 +3882,6 @@ fn wait_for_output_readers_until(
     }
 }
 
-#[cfg(unix)]
 fn join_thread_until(thread: std::thread::JoinHandle<()>, deadline: Instant) -> bool {
     while Instant::now() < deadline && !thread.is_finished() {
         std::thread::sleep(Duration::from_millis(2));
@@ -4220,7 +3889,6 @@ fn join_thread_until(thread: std::thread::JoinHandle<()>, deadline: Instant) -> 
     thread.is_finished() && thread.join().is_ok()
 }
 
-#[cfg(unix)]
 fn cleanup_setup_error(
     child: &mut std::process::Child,
     process_group: rustix::process::Pid,
@@ -4232,7 +3900,6 @@ fn cleanup_setup_error(
         .unwrap_or(setup_error)
 }
 
-#[cfg(unix)]
 fn terminate_direct_child(
     child: &mut std::process::Child,
     grace: Duration,
@@ -4254,7 +3921,6 @@ fn terminate_direct_child(
     ))
 }
 
-#[cfg(unix)]
 fn terminate_direct_pty_child(
     child: &mut dyn portable_pty::Child,
     grace: Duration,
@@ -4276,12 +3942,11 @@ fn terminate_direct_pty_child(
     ))
 }
 
-#[cfg(unix)]
 fn process_group_exists(process_group: rustix::process::Pid) -> bool {
     rustix::process::test_kill_process_group(process_group).is_ok()
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod cleanup_contention_tests {
     use std::str::FromStr;
 
@@ -4806,7 +4471,7 @@ mod cleanup_contention_tests {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 #[allow(
     clippy::expect_used,
     clippy::unwrap_used,
@@ -4950,7 +4615,7 @@ impl ExecutionEnvironment {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod job_tests {
     use super::*;
     use crate::{ExecutionEnvironmentConfig, ExecutionEnvironmentScope, JobStatus, JobStopReason};
@@ -5424,5 +5089,27 @@ mod job_tests {
             JobStatus::Stopped(JobStopReason::HardCap)
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod supervision_poll_tests {
+    use super::supervision_poll_interval;
+    use std::time::Duration;
+
+    #[test]
+    fn long_lived_children_are_polled_slowly_and_young_ones_promptly() {
+        assert_eq!(
+            supervision_poll_interval(Duration::ZERO),
+            Duration::from_millis(2)
+        );
+        assert_eq!(
+            supervision_poll_interval(Duration::from_millis(500)),
+            Duration::from_millis(8)
+        );
+        assert_eq!(
+            supervision_poll_interval(Duration::from_secs(36_000)),
+            Duration::from_millis(32)
+        );
     }
 }

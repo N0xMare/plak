@@ -734,15 +734,6 @@ impl ToolCallerLineage {
             Self::ProviderProgrammatic { execution_id, .. } => Some(execution_id),
         }
     }
-
-    /// Returns the independent local-composition recursion depth, when local.
-    #[must_use]
-    pub const fn local_programmatic_depth(&self) -> Option<u16> {
-        match self {
-            Self::LocalProgrammatic { depth, .. } => Some(*depth),
-            Self::Direct | Self::ProviderProgrammatic { .. } => None,
-        }
-    }
 }
 
 /// Remote correlation, container, and caller lineage retained for replay.
@@ -2503,7 +2494,10 @@ mod tests {
 
         assert_eq!(local.correlation().caller_lineage(), &programmatic);
         assert_eq!(mcp.correlation().caller_lineage(), &local_programmatic);
-        assert_eq!(local_programmatic.local_programmatic_depth(), Some(1));
+        assert!(matches!(
+            local_programmatic,
+            ToolCallerLineage::LocalProgrammatic { depth: 1, .. }
+        ));
         assert_eq!(
             hosted.correlation().caller_lineage(),
             &ToolCallerLineage::Direct

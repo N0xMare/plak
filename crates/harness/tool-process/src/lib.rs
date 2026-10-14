@@ -5749,7 +5749,7 @@ impl ToolPack for ProcessToolPack {
                         ));
                     }
                 };
-                let entry = MenuEntry::new(
+                let mut entry = MenuEntry::new(
                     tool.name().as_str(),
                     bindings,
                     MenuShape::Structured {
@@ -5757,20 +5757,24 @@ impl ToolPack for ProcessToolPack {
                         schema: tool.schema().document().value().as_ref().clone(),
                     },
                     lowering,
-                )
-                .with_defaults(defaults)
-                .with_output(MenuOutput::Explicit(tool.output_schema().clone()))
-                .with_raising(
-                    if matches!(
-                        lowering,
-                        ToolProjectionLoweringV2::GrokGetCommandOutput
-                            | ToolProjectionLoweringV2::PiWait
-                    ) {
-                        ToolProjectionRaisingV2::Identity
-                    } else {
-                        ToolProjectionRaisingV2::ProcessResult
-                    },
                 );
+                if let Some(tail) = text::lifetime_tail(tool.description()) {
+                    entry = entry.with_lifetime_tail(tail);
+                }
+                let entry = entry
+                    .with_defaults(defaults)
+                    .with_output(MenuOutput::Explicit(tool.output_schema().clone()))
+                    .with_raising(
+                        if matches!(
+                            lowering,
+                            ToolProjectionLoweringV2::GrokGetCommandOutput
+                                | ToolProjectionLoweringV2::PiWait
+                        ) {
+                            ToolProjectionRaisingV2::Identity
+                        } else {
+                            ToolProjectionRaisingV2::ProcessResult
+                        },
+                    );
                 Ok(match lowering {
                     // Pi's jobs await yields `wait` to a runtime marker of
                     // that spelling (spec 01 §8.2); on a node granted agent

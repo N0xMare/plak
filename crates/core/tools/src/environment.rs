@@ -302,18 +302,7 @@ pub enum HostPathFormat {
 
 impl HostPathFormat {
     const fn current() -> Self {
-        #[cfg(unix)]
-        {
-            Self::UnixUtf8
-        }
-        #[cfg(windows)]
-        {
-            Self::WindowsUtf8
-        }
-        #[cfg(not(any(unix, windows)))]
-        {
-            Self::OtherUtf8
-        }
+        Self::UnixUtf8
     }
 
     fn is_compatible_with(self, operating_system: &str) -> bool {
@@ -1214,27 +1203,6 @@ impl ExecutionEnvironmentConfig {
     pub fn credential_delegations(&self) -> &[CredentialDelegation] {
         &self.credential_delegations
     }
-
-    /// Returns the exact delegation binding for `name`, if configured.
-    #[must_use]
-    pub fn environment_delegation(
-        &self,
-        name: &EnvironmentVariableName,
-    ) -> Option<&EnvironmentDelegation> {
-        self.environment_delegations
-            .binary_search_by(|binding| binding.name.cmp(name))
-            .ok()
-            .map(|index| &self.environment_delegations[index])
-    }
-
-    /// Returns the exact delegation binding for `slot`, if configured.
-    #[must_use]
-    pub fn credential_delegation(&self, slot: &CredentialSlotId) -> Option<&CredentialDelegation> {
-        self.credential_delegations
-            .binary_search_by(|binding| binding.slot.cmp(slot))
-            .ok()
-            .map(|index| &self.credential_delegations[index])
-    }
 }
 
 impl Default for ExecutionEnvironmentConfig {
@@ -1881,7 +1849,6 @@ fn path_identity_bytes(path: &Path) -> Result<Vec<u8>, ExecutionEnvironmentError
         })
 }
 
-#[cfg(unix)]
 fn filesystem_object_identity(
     path: &Path,
 ) -> Result<HostFilesystemObjectIdentity, ExecutionEnvironmentError> {
@@ -1897,16 +1864,6 @@ fn filesystem_object_identity(
         device: metadata.dev(),
         inode: metadata.ino(),
     })
-}
-
-#[cfg(not(unix))]
-fn filesystem_object_identity(
-    _path: &Path,
-) -> Result<HostFilesystemObjectIdentity, ExecutionEnvironmentError> {
-    Err(ExecutionEnvironmentError::new(
-        ExecutionEnvironmentErrorKind::Workspace,
-        "stable execution workspace root identity is unsupported on this host",
-    ))
 }
 
 fn config_from_wire(

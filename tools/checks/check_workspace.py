@@ -863,7 +863,6 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "SubscriptionUsageSnapshot",
         "SubscriptionUsageCredentialState",
         "SubscriptionUsageUnavailable",
-        "SubscriptionUsageUnmeteredPeriod",
         "ToolChoice",
         "ToolCallerDisposition",
         "ToolCallerLineage",
@@ -1165,16 +1164,6 @@ PROVIDER_NAMES = {"anthropic", "gemini", "openai", "openrouter", "xai"}
 PRODUCT_ACCOUNT_NAMES = {"claude", "codex", "grok", "supergrok"}
 # Core account names are allowed only at the explicitly listed source sites.
 PRODUCT_ACCOUNT_NAME_WAIVERS: set[str] = set()
-# The one provider route tuple the neutral tools layer names. No model id may
-# live here: enrolled models are the provider crates' tables.
-PROCESS_PROJECTION_CATALOG: SourceKey = ("plakous-tools", "src/process_projection_catalog.rs")
-PROCESS_PROJECTION_CATALOG_STRINGS = {
-    "openai.codex.responses",
-    "openai.codex_subscription",
-    "openai.codex.compat.2026-07-31.r1",
-    "openai.responses",
-    "openai.platform",
-}
 # Where a neutral package still names one of Plak's accounts. Each of these is
 # *identity*, not behaviour: a vocabulary a model is shown, a durable lowering
 # recorded in a persisted projection, or an enrolled-candidate table. None of
@@ -1193,15 +1182,9 @@ PRODUCT_ACCOUNT_NAME_EXEMPTIONS: dict[SourceKey, set[str]] = {
     ("plakous-tools", "src/capabilities.rs"): {"codex", "grok", "claude"},
     # The Code Mode driver-marker identity strings.
     ("plakous-tools", "src/composition_markers.rs"): {"codex"},
-    # The Codex route tuple; see PROCESS_PROJECTION_CATALOG above.
-    ("plakous-tools", "src/process_projection_catalog.rs"): {"codex"},
 }
 
-NEUTRAL_PROVIDER_NAME_EXEMPTIONS: dict[SourceKey, set[str]] = {
-    # `codex_code_mode.rs` compares the descriptor target against the Codex
-    # tuple. Other route-to-vocabulary rules belong to the composition root.
-    PROCESS_PROJECTION_CATALOG: {"openai"},
-}
+NEUTRAL_PROVIDER_NAME_EXEMPTIONS: dict[SourceKey, set[str]] = {}
 # Neutral core packages that must not link the tracing/otel stacks.
 TRACING_FREE_PACKAGES = ("plakous-agent", "plakous-model")
 PRODUCTION_TARGET_KINDS = {
@@ -3483,23 +3466,6 @@ def main() -> int:
     complete: set[str] = set()
     for package_name in adjacency:
         visit(package_name, set(), complete)
-
-    catalog_package, catalog_relative = PROCESS_PROJECTION_CATALOG
-    catalog_path = ROOT / packages[catalog_package].relative(catalog_relative)
-    catalog_tokens = rust_tokens(catalog_path.read_text(encoding="utf-8"))
-    if _significant_strings(catalog_tokens) != PROCESS_PROJECTION_CATALOG_STRINGS:
-        errors.append("process presentation candidate catalog must contain only exact tuple strings")
-    catalog_forbidden = {
-        token.value
-        for token in catalog_tokens
-        if token.kind == "identifier"
-        and token.value in {"enum", "fn", "if", "impl", "match", "mod", "struct", "trait", "use"}
-    }
-    if catalog_forbidden:
-        errors.append(
-            "process projection catalog must remain data-only; found "
-            f"{sorted(catalog_forbidden)!r}"
-        )
 
     for package_name, retired_sources in RETIRED_SOURCES.items():
         package = packages.get(package_name)

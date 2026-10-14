@@ -765,9 +765,11 @@ User, model, and tool content may itself be sensitive. It is governed by
 minimization, redaction, private permissions, retention, and truthful
 at-rest-protection metadata rather than by a claim that it is encrypted.
 Observation subjects (including the command a process transcript row
-names), argument/result previews and hosted session-log previews
-share one small regex redactor. It runs before clipping and is **best effort,
-not a security boundary**. Canonical history retains user/model/tool content
+names), argument/result previews, hosted session-log previews and every
+public diagnostic (`SafeDiagnostic`: model errors, provider refusal details and
+other bounded diagnostics) share one small regex redactor, owned by
+`plakous-model`. It runs before clipping and is **best effort, not a security
+boundary**. Canonical history retains user/model/tool content
 in full; display minimization does not rewrite it. The one display text in a
 Plakous change-feed fact (chapter 01 §5.11) is an effect's presentation subject:
 the bounded, redacted `ToolStarted` subject that Plakous core computes from the
@@ -813,7 +815,7 @@ unless a replacement is shown):
 - `\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`.
 - `(\b[A-Za-z][A-Za-z0-9+.-]*://[^\s/:@]+:)[^\s@/\[]+(@)` -> `${1}[redacted]${2}`.
 - `(?i)([?&](?:token|key|api_key|access_token|password|secret|sig)=)[^\s&#"'\[\]]+` -> `${1}[redacted]`.
-- `(?i)(\b[A-Za-z0-9_.-]*(?:api[_-]?key|token|secret|password|passwd)\b)(["']?)(\s*[:=]\s*)(?:(\\["'])([^\s"'\[\]]{8,})(\\["'])|(["'])([^\s"'\[\]]{8,})(["'])|([^\s"'\[\]]{8,}))`
+- `(?i)(\b[A-Za-z0-9_.-]*(?:api[_-]?key|token|secret|password|passwd|credential)\b)(["']?)(\s*[:=]\s*)(?:(\\["'])([^\s"'\[\]]{8,})(\\["'])|(["'])([^\s"'\[\]]{8,})(["'])|([^\s"'\[\]]{8,}))`
 
 The body of the match becomes `[redacted]`; the name, the separator and any
 quotes stay. A quote after the separator is its own alternative, either a
@@ -826,8 +828,10 @@ linear time.
 JSON keeps object and array layout. Every string and number leaf at any depth
 under a key matching
 `(?i)^[A-Za-z0-9_.-]*(?:api[_-]?key|token|secret|password|passwd)$`
-becomes `[redacted]`. Other string leaves use the text rules. Booleans and
-null stay.
+becomes `[redacted]`. Other string leaves and every object key use the text
+rules; the credential-name rule is decided on the original key. When a key
+redacts to the same text as an earlier key of the same object, the later entry
+is dropped. Booleans and null stay.
 Header values stop at a newline or quote; URL rules retain the username, host,
 path and non-credential query fields. Assignment values require eight
 characters, bearer/basic bodies sixteen, and recognized key-prefix bodies

@@ -3995,7 +3995,9 @@ dependencies = [
  "futures",
  "futures-core",
  "futures-util",
+ "nix",
  "proptest",
+ "regex",
  "serde",
  "serde_json",
  "serde_json_canonicalizer",
@@ -4274,13 +4276,10 @@ dependencies = [
 name = "plakous-tools"
 version = "0.1.0"
 dependencies = [
- "diffy",
  "filedescriptor",
- "futures",
  "globset",
  "ignore",
  "nix",
- "plakous-code-mode",
  "plakous-model",
  "portable-pty",
  "proptest",

@@ -418,15 +418,6 @@ impl ToolConcurrency {
         }
         Ok(())
     }
-
-    /// Returns resource keys in deterministic acquisition order.
-    #[must_use]
-    pub fn resource_keys(&self) -> &[ToolResourceKey] {
-        match self {
-            Self::ResourceExclusive(keys) => keys,
-            Self::Serial | Self::Parallel => &[],
-        }
-    }
 }
 
 /// The side-effect class declared by a tool definition.
@@ -2767,11 +2758,11 @@ mod tests {
 
         assert_eq!(first, second);
         assert_eq!(
-            first.concurrency().resource_keys(),
-            [
+            first.concurrency(),
+            ToolConcurrency::ResourceExclusive(vec![
                 ToolResourceKey::new("workspace:a")?,
                 ToolResourceKey::new("workspace:b")?,
-            ]
+            ])
         );
         for keys in [
             Vec::new(),

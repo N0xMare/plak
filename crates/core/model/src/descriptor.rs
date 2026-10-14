@@ -7,13 +7,13 @@ use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
 use crate::{
-    CachePolicy, CapabilityRequirement, CapacityRule, ContextAdmission, ContextAdmissionError,
+    CachePolicy, CapabilityRequirement, CapacityRule, ContextAdmissionError,
     ContextAdmissionRequirement, ContextCapacity, ContextContract, ContextContractError,
-    ContextEvidenceClass, ContextMeasurement, ContextScope, ContextStatus, ContextStatusKind,
-    ContextUnavailable, Digest, DigestDomain, DigestError, IntegrationClass, ModelAdapterProfileId,
-    ModelFamilyId, ModelId, ModelRequest, NamespaceId, OutputFormat, OutputReservation,
-    PreparedModelProjection, PreparedOutputLimitSource, ProtocolId, ReasoningPolicy, RouteId,
-    StandardIntegrationAuthority, Timestamp,
+    ContextEvidenceClass, ContextMeasurement, ContextScope, ContextStatus, ContextUnavailable,
+    Digest, DigestDomain, DigestError, IntegrationClass, ModelAdapterProfileId, ModelFamilyId,
+    ModelId, ModelRequest, NamespaceId, OutputFormat, OutputReservation, PreparedModelProjection,
+    PreparedOutputLimitSource, ProtocolId, ReasoningPolicy, RouteId, StandardIntegrationAuthority,
+    Timestamp,
 };
 
 /// A neutral feature that may affect request preparation.
@@ -791,98 +791,6 @@ impl ResolvedModelDescriptor {
             status
         };
         Ok(status.with_input_parts(tokens.input_parts()))
-    }
-
-    /// Checks context and returns a closed whole-request admission witness.
-    ///
-    /// # Errors
-    ///
-    /// Returns typed unavailable or overflow denial, including checked
-    /// arithmetic failure and protected-only overflow.
-    pub fn admit_context(
-        &self,
-        plan: &ValidatedRequestPlan,
-        prepared: &PreparedModelProjection,
-        now: Timestamp,
-    ) -> Result<ContextAdmission, ContextAdmissionError> {
-        self.context_status(plan, prepared, now)?
-            .admit(plan.request())
-    }
-
-    /// Checks context against a caller-selected minimum evidence class and returns
-    /// a closed whole-request admission witness.
-    ///
-    /// # Errors
-    ///
-    /// Returns before dispatch when release-verified capacity was required but the
-    /// exact descriptor carries only a reference-client-envelope operating envelope.
-    pub fn admit_context_with_requirement(
-        &self,
-        plan: &ValidatedRequestPlan,
-        prepared: &PreparedModelProjection,
-        now: Timestamp,
-        requirement: ContextAdmissionRequirement,
-    ) -> Result<ContextAdmission, ContextAdmissionError> {
-        self.context_status(plan, prepared, now)?
-            .admit_with_requirement(plan.request(), requirement)
-    }
-
-    /// Revalidates a prior admission against the current exact descriptor,
-    /// authority binding, request projection, certificate set, and time.
-    ///
-    /// # Errors
-    ///
-    /// Fails closed on descriptor/request drift, unknown or revised evidence,
-    /// expiry, or any status that no longer fits.
-    pub fn revalidate_context_admission(
-        &self,
-        plan: &ValidatedRequestPlan,
-        prepared: &PreparedModelProjection,
-        admission: &ContextAdmission,
-        now: Timestamp,
-    ) -> Result<(), ContextAdmissionError> {
-        let descriptor_binding = self.context_descriptor_binding()?;
-        if descriptor_binding != admission.status().descriptor_binding() {
-            return Err(ContextAdmissionError::Unavailable(
-                ContextUnavailable::ScopeDrift {
-                    field: "descriptor binding",
-                },
-            ));
-        }
-        if admission.request() != plan.request()
-            || admission.status().model_input_identity() != plan.request().model_input_identity()
-        {
-            return Err(ContextAdmissionError::Unavailable(
-                ContextUnavailable::ScopeDrift {
-                    field: "model input",
-                },
-            ));
-        }
-        let current = self.context_status(plan, prepared, now)?;
-        match current.kind() {
-            ContextStatusKind::Unavailable(unavailable) => {
-                Err(ContextAdmissionError::Unavailable(unavailable.clone()))
-            }
-            ContextStatusKind::WouldOverflow(overflow) => {
-                Err(ContextAdmissionError::WouldOverflow(*overflow))
-            }
-            ContextStatusKind::ProtectedOverflow(overflow) => {
-                Err(ContextAdmissionError::ProtectedOverflow(*overflow))
-            }
-            ContextStatusKind::Fits { .. } => {
-                let current_admission =
-                    current.admit_with_requirement(plan.request(), admission.requirement())?;
-                if current_admission.identity() == admission.identity() {
-                    Ok(())
-                } else {
-                    Err(ContextAdmissionError::Unavailable(
-                        ContextUnavailable::ScopeDrift {
-                            field: "context admission",
-                        },
-                    ))
-                }
-            }
-        }
     }
 
     fn context_descriptor_binding(&self) -> Result<Digest, ContextContractError> {

@@ -39,7 +39,9 @@ use plakous_tools::{
     ToolRuntimeError, ToolRuntimeErrorKind,
 };
 
-use plakous_tools::{MAX_STANDARD_SEARCH_MATCHES, SEARCH_REPOSITORY_CAPABILITY_NAME};
+use plakous_tools::{
+    MAX_STANDARD_SEARCH_FILES, MAX_STANDARD_SEARCH_MATCHES, SEARCH_REPOSITORY_CAPABILITY_NAME,
+};
 use plakous_tools::{
     backend_runtime_error, decode_arguments, deserialize_optional_semantic_u64,
     generation_stamp_prefix, operation_control,
@@ -47,7 +49,6 @@ use plakous_tools::{
 use plakous_tools::{standard_definition, standard_registration};
 
 const STANDARD_SEARCH_MATCHES: usize = 256;
-const STANDARD_SEARCH_FILES: usize = 10_000;
 const STANDARD_SEARCH_FILE_BYTES: u64 = 1024 * 1024;
 const STANDARD_SEARCH_TREE_ENTRIES: usize = 10_000;
 // Covers ordinary source trees well beyond this repository while bounding I/O.
@@ -191,7 +192,7 @@ async fn execute_regex_search(
     };
     let match_cap = match_cap.clamp(1, MAX_STANDARD_SEARCH_MATCHES);
     let limits = RepositoryQueryLimits::new(
-        STANDARD_SEARCH_FILES,
+        MAX_STANDARD_SEARCH_FILES,
         STANDARD_SEARCH_TREE_ENTRIES,
         STANDARD_SEARCH_FILE_BYTES,
         STANDARD_SEARCH_TOTAL_BYTES,
@@ -323,6 +324,12 @@ fn search_limit_notes(
             result.skipped_binary()
         ));
     }
+    if result.skipped_changed() != 0 {
+        notes.push(format!(
+            "{} files changed during the search and were not searched",
+            result.skipped_changed()
+        ));
+    }
     if result.entries_skipped() != 0 {
         notes.push(format!(
             "{} unreadable entries were skipped",
@@ -342,7 +349,7 @@ fn search_limit_notes(
                 format!("tree-entry bound: {STANDARD_SEARCH_TREE_ENTRIES} entries")
             }
             RepositoryQueryStopReason::Files => {
-                format!("file bound: {STANDARD_SEARCH_FILES} files")
+                format!("file bound: {MAX_STANDARD_SEARCH_FILES} files")
             }
             RepositoryQueryStopReason::ResultBytes => {
                 format!("retained-result bound: {} KiB", result_bytes / 1024)
@@ -611,7 +618,7 @@ fn repository_query_limits(
 ) -> Result<RepositoryQueryLimits, ToolRuntimeError> {
     let max_matches = repository_match_cap(args, default_match_cap);
     RepositoryQueryLimits::new(
-        STANDARD_SEARCH_FILES,
+        MAX_STANDARD_SEARCH_FILES,
         STANDARD_SEARCH_TREE_ENTRIES,
         STANDARD_SEARCH_FILE_BYTES,
         STANDARD_SEARCH_TOTAL_BYTES,
