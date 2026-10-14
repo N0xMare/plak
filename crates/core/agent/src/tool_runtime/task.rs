@@ -294,10 +294,12 @@ impl TokioTask {
         }
     }
 
+    /// The abort request is read under the state lock that `request_abort` also takes, so a
+    /// request racing installation either sees the handle or is seen by this check.
     fn install_abort(&self, abort: &tokio::task::AbortHandle) {
-        let requested = self.abort_requested.load(Ordering::Acquire);
-        lock(&self.state).abort = Some(abort.clone());
-        if requested {
+        let mut state = lock(&self.state);
+        state.abort = Some(abort.clone());
+        if self.abort_requested.load(Ordering::Acquire) {
             abort.abort();
         }
     }
@@ -319,8 +321,9 @@ impl TokioTask {
         if self.completed.load(Ordering::Acquire) {
             return;
         }
+        let state = lock(&self.state);
         self.abort_requested.store(true, Ordering::Release);
-        if let Some(abort) = lock(&self.state).abort.clone() {
+        if let Some(abort) = &state.abort {
             abort.abort();
         }
     }
@@ -497,6 +500,29 @@ mod tests {
         assert_eq!(error.kind(), ToolRuntimeErrorKind::Execution);
         assert!(owner.drain().await.is_drained());
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn abort_requested_while_installation_waits_is_not_lost() {
+        let task = Arc::new(TokioTask::new());
+        let worker = tokio::spawn(std::future::pending::<()>());
+        let abort = worker.abort_handle();
+        let state = lock(&task.state);
+        let installer = std::thread::spawn({
+            let task = Arc::clone(&task);
+            move || task.install_abort(&abort)
+        });
+        // Give the installer time to reach the state lock, then publish the request the way
+        // `request_abort` does while it owns the lock and still sees no handle.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        task.abort_requested.store(true, Ordering::Release);
+        drop(state);
+        assert!(installer.join().is_ok());
+        let joined = tokio::time::timeout(std::time::Duration::from_secs(10), worker).await;
+        let Ok(Err(error)) = joined else {
+            panic!("the requested abort must reach the installed worker");
+        };
+        assert!(error.is_cancelled());
     }
 
     #[tokio::test]
