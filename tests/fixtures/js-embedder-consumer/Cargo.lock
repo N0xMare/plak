@@ -529,6 +529,7 @@ version = "0.1.0"
 dependencies = [
  "futures-core",
  "futures-util",
+ "regex",
  "serde",
  "serde_json",
  "serde_json_canonicalizer",
@@ -609,7 +610,6 @@ dependencies = [
 name = "plakous-tools"
 version = "0.1.0"
 dependencies = [
- "diffy",
  "filedescriptor",
  "globset",
  "ignore",
