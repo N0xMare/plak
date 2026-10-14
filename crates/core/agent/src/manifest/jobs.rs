@@ -6,7 +6,7 @@ use plakous_tools::{JobStatus, JobStopReason, JobView};
 use std::time::Duration;
 
 /// Maximum unconsumed process notices in one checkpoint.
-pub const MAX_JOB_ROWS: usize = 128;
+pub(crate) const MAX_JOB_ROWS: usize = 128;
 
 /// Durable terminal classification; live authority never comes from a checkpoint.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

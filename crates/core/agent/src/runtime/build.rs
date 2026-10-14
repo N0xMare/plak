@@ -4,6 +4,7 @@ use crate::local_composition::{LocalCompositionConstruction, LocalCompositionLif
 use crate::manifest::{
     InterpreterAvailability, InterpreterObservation, InterpreterResetReason, RuntimeContextState,
 };
+use crate::profile::compile_construction_bound_plan;
 use crate::runtime::admission::{
     refreshed_reopen_admission, validate_configuration_runtime_authority,
 };
@@ -38,7 +39,7 @@ use crate::{
     RuntimeComponentKind, RuntimeDurability, RuntimeLifecycle, RuntimeManifest,
     RuntimeOperationLedger, RuntimeRehydration, RuntimeTopology, SessionStoreError,
     TelemetryContext, TelemetryEmitter, ToolRuntimeManifest, ViewError,
-    compile_construction_bound_plan, compiler_model_facts_from_model,
+    compiler_model_facts_from_model,
 };
 use plakous_model::{
     AgentId, BranchId, CachePolicy, CanonicalHistory, CapabilityRequirement, Clock,

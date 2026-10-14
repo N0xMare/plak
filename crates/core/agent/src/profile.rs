@@ -25,11 +25,11 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Schema version of the portable harness profile specification.
-pub const HARNESS_PROFILE_SCHEMA_VERSION: u32 = 2;
+pub(crate) const HARNESS_PROFILE_SCHEMA_VERSION: u32 = 2;
 /// Compiler revision bound into every resolved plan.
-pub const HARNESS_PROFILE_COMPILER_REVISION: u32 = 5;
+pub(crate) const HARNESS_PROFILE_COMPILER_REVISION: u32 = 5;
 /// Closed strategy catalog revision bound into every resolved plan.
-pub const HARNESS_STRATEGY_CATALOG_REVISION: u32 = 3;
+pub(crate) const HARNESS_STRATEGY_CATALOG_REVISION: u32 = 3;
 /// Canonical persisted encoding revision for [`HarnessProfileSpec`].
 pub(crate) const HARNESS_PROFILE_ENCODING_VERSION: u32 = 2;
 /// Canonical persisted encoding revision for [`HarnessCompilerInputs`].
@@ -2051,7 +2051,7 @@ impl ResolvedHarnessPlan {
 
 /// Maps descriptor support into compiler support facts without inventing support.
 #[must_use]
-pub fn feature_support_from_descriptor(
+pub(crate) fn feature_support_from_descriptor(
     descriptor: &ResolvedModelDescriptor,
     capability: Capability,
 ) -> FeatureSupportFact {
@@ -2111,18 +2111,6 @@ pub fn compiler_model_facts_from_model(
     ))
 }
 
-/// Builds tool facts from a frozen registry digest and canonical names.
-///
-/// # Errors
-///
-/// Returns a profile error for invalid names.
-pub fn compiler_tool_facts(
-    registry_digest: Digest,
-    canonical_tool_names: Vec<String>,
-) -> Result<CompilerToolFacts, ProfileError> {
-    CompilerToolFacts::new(registry_digest, canonical_tool_names)
-}
-
 /// Compiles a construction-bound plan from explicit builder policy.
 ///
 /// Used when a caller has not supplied a precompiled plan: the agent still
@@ -2136,7 +2124,7 @@ pub fn compiler_tool_facts(
     clippy::too_many_arguments,
     reason = "construction-bound plan compilation takes one explicit frozen authority tuple"
 )]
-pub fn compile_construction_bound_plan(
+pub(crate) fn compile_construction_bound_plan(
     model: &dyn LanguageModel,
     provider_configuration: &CompiledProviderConfiguration,
     registry_digest: Digest,

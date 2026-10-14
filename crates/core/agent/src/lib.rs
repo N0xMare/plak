@@ -9,25 +9,6 @@
 //! unsupported [`internal`] namespace for official sibling composition. Direct
 //! use of that namespace carries no compatibility or support promise.
 //!
-//! Exact reopen owns interrupted-turn closure; the old explicit reconciliation
-//! workflow is absent even from the sibling bridge:
-//!
-//! ```compile_fail
-//! let _ = plakous_agent::internal::DurableSessionRuntime::reconcile_turn;
-//! ```
-//!
-//! ```compile_fail
-//! use plakous_agent::internal::DurableTurnRecoveryEvidence;
-//! ```
-//!
-//! ```compile_fail
-//! use plakous_agent::internal::DurableTurnRecoveryRequest;
-//! ```
-//!
-//! ```compile_fail
-//! use plakous_agent::internal::DurableTurnRecoveryOutcome;
-//! ```
-//!
 //! Raw checkpoint authority is not part of the supported root:
 //!
 //! ```compile_fail
@@ -150,15 +131,12 @@ pub mod internal {
     pub use crate::lease::{LeaseClock, LeaseDomain, LeaseInstant};
     pub use crate::local_composition::*;
     pub use crate::manifest::{
-        BindingReference, CURRENT_FAMILY_ARTIFACT_ID, CompactionInvalidation, CompactionProvenance,
-        ContextEvaluationAudit, DurableCommandDisposition, DurableCommandRecord,
-        DurableOperationKind, DurableOperationRecord, DurableOperationState,
-        DurableOperationTransition, FamilyArtifact, ForkLineage, JobLedger, JobRow, JobTerminal,
-        JobTerminalStatus, MAX_JOB_ROWS, MAX_RUNTIME_CHECKPOINT_BYTES, MAX_RUNTIME_COMPONENT_BYTES,
-        MAX_RUNTIME_CONTEXT_STATE_BYTES, MAX_RUNTIME_MANIFEST_BYTES, MAX_RUNTIME_RECORDS,
-        ModelRouteBinding, PendingEffectDecisionState, ProducerProvenance,
-        RESPONSES_FAMILY_ARTIFACT_CODEC_REVISION, RESPONSES_FAMILY_ARTIFACT_SCHEMA_REVISION,
-        RUNTIME_CONTEXT_STATE_CODEC_REVISION, ReconstructiveComponent, RecoveryAction,
+        BindingReference, CompactionInvalidation, CompactionProvenance, ContextEvaluationAudit,
+        DurableCommandDisposition, DurableCommandRecord, DurableOperationKind,
+        DurableOperationRecord, DurableOperationState, DurableOperationTransition, FamilyArtifact,
+        ForkLineage, JobLedger, JobRow, JobTerminal, JobTerminalStatus, ModelRouteBinding,
+        PendingEffectDecisionState, ProducerProvenance, RESPONSES_FAMILY_ARTIFACT_CODEC_REVISION,
+        RESPONSES_FAMILY_ARTIFACT_SCHEMA_REVISION, ReconstructiveComponent, RecoveryAction,
         RecoveryHandlerSignature, RecoveryObligation, RecoveryObligationKind, RevalidationFact,
         RuntimeCanonicalState, RuntimeCheckpoint, RuntimeCheckpointKind, RuntimeCompactionStrategy,
         RuntimeComponentKind, RuntimeContextState, RuntimeContextTransition,
@@ -170,16 +148,14 @@ pub mod internal {
     pub use crate::profile::{
         CachePreferenceStrategy, CompilerModelFacts, CompilerRuntimeFacts, CompilerToolFacts,
         ContextSourceSelector, ContinuationPreferenceStrategy, FeatureSupportFact,
-        HARNESS_PROFILE_COMPILER_REVISION, HARNESS_PROFILE_SCHEMA_VERSION,
-        HARNESS_STRATEGY_CATALOG_REVISION, HarnessCompilerInputs, HarnessProfileCompiler,
-        HarnessProfileId, HarnessProfileProvenance, HarnessProfileSpec, HarnessProfileSpecBuilder,
-        InstructionCompositionStrategy, MAX_INSTRUCTION_BYTES, ProfileError,
-        ProfileSemanticVersion, ReasoningPreferenceStrategy, ResolvedCachePlan,
-        ResolvedContextSourceFact, ResolvedContinuationPlan, ResolvedHarnessPlan,
-        ResolvedInstructionPlan, ResolvedReasoningPlan, ResolvedToolExposurePlan,
-        ToolExposureOverride, ToolExposureStrategy, VerifiedContextSourceRef,
-        compile_construction_bound_plan, compile_explicit_profile, compiler_model_facts_from_model,
-        compiler_tool_facts, feature_support_from_descriptor, recommended_neutral_coding_profile,
+        HarnessCompilerInputs, HarnessProfileCompiler, HarnessProfileId, HarnessProfileProvenance,
+        HarnessProfileSpec, HarnessProfileSpecBuilder, InstructionCompositionStrategy,
+        MAX_INSTRUCTION_BYTES, ProfileError, ProfileSemanticVersion, ReasoningPreferenceStrategy,
+        ResolvedCachePlan, ResolvedContextSourceFact, ResolvedContinuationPlan,
+        ResolvedHarnessPlan, ResolvedInstructionPlan, ResolvedReasoningPlan,
+        ResolvedToolExposurePlan, ToolExposureOverride, ToolExposureStrategy,
+        VerifiedContextSourceRef, compile_explicit_profile, compiler_model_facts_from_model,
+        recommended_neutral_coding_profile,
     };
     pub use crate::recovery_scope::{
         RevalidationError, RuntimeRehydration, RuntimeRehydrationError, RuntimeRevalidationWitness,
@@ -187,14 +163,12 @@ pub mod internal {
     };
     pub use crate::rehydration::{
         HARNESS_PLAN_COMPONENT_FORMAT_VERSION, HarnessManifestCodecError,
-        HarnessPlanComponentEnvelope, HarnessPlanComponentManifest, HarnessPlanMismatch,
-        HarnessPlanReadiness, MAX_HARNESS_PLAN_COMPONENT_BYTES, RUNTIME_POLICY_REVISION,
-        rehydrate_harness_plan,
+        HarnessPlanComponentEnvelope, HarnessPlanComponentManifest, RUNTIME_POLICY_REVISION,
     };
     pub use crate::runtime::{
         AbandonedTurnClaim, AbandonedTurnReport, AbandonmentCause, Agent, AgentBuilder,
         AgentConfig, AgentRequestPolicy, CheckpointRecoveryVerdict, ContextOverflowRemedy,
-        DurableBranchPublication, DurableCodeCellAbandonmentOutcome,
+        DEFAULT_STORE_OPERATION_TIMEOUT, DurableCodeCellAbandonmentOutcome,
         DurableCodeCellAbandonmentRequest, DurableCompactionReceipt,
         DurableCompactionRecoveryOutcome, DurableEffectEvidenceRecoveryOutcome,
         DurableEffectEvidenceRecoveryRequest, DurableRuntimeBranchOutcome, DurableRuntimeOpen,
@@ -211,11 +185,11 @@ pub mod internal {
         BranchTransitionMode, CheckpointObjectRef, CommitCheckpoint, CommitOperation,
         CommitReceipt, CommittedCheckpoint, CreateOperation, CreateReceipt, CreateSession,
         DeleteReceipt, DeleteSession, DurabilityReport, ForkBranch, ForkOperation, ForkReceipt,
-        LoadedBranch, Page, PruneBranch, PruneReceipt, RecoverFork, SESSION_WORKFLOW_ID_BYTES,
-        SessionHead, SessionQuery, SessionRef, SessionRevision, SessionStore, SessionStoreCapacity,
-        SessionStoreError, SessionSummary, SessionWorkflowId, StoreAdmission, StoreBoundUsage,
-        StoreCapacityBound, StoreFuture, StoreIntegrityReason, StoreInvalidReason,
-        StoreReclaimMode, StoreReclaimReport, StoreUsage, StoredCheckpoint,
+        LoadedBranch, Page, PruneBranch, PruneReceipt, RecoverFork, SessionHead, SessionQuery,
+        SessionRef, SessionRevision, SessionStore, SessionStoreCapacity, SessionStoreError,
+        SessionSummary, SessionWorkflowId, StoreAdmission, StoreBoundUsage, StoreCapacityBound,
+        StoreFuture, StoreIntegrityReason, StoreInvalidReason, StoreReclaimMode,
+        StoreReclaimReport, StoreUsage, StoredCheckpoint,
     };
     pub use crate::telemetry::{
         ChildProcessKind, CompactionRefusalReason, CredentialProviderLabel,
@@ -250,6 +224,9 @@ pub mod internal {
     }
 }
 
+pub(crate) use crate::manifest::{MAX_RUNTIME_CHECKPOINT_BYTES, MAX_RUNTIME_RECORDS};
+
+pub(crate) use crate::rehydration::{HarnessPlanReadiness, rehydrate_harness_plan};
 #[cfg_attr(
     not(test),
     allow(
@@ -269,19 +246,18 @@ pub(crate) use internal::{
     DurableOperationState, DurableOperationTransition, EventContext, EventHub, EventHubLimits,
     EventPipeline, FamilyArtifact, ForkBranch, ForkLineage, ForkReceipt,
     HARNESS_PLAN_COMPONENT_FORMAT_VERSION, HarnessManifestCodecError, HarnessPlanComponentEnvelope,
-    HarnessPlanReadiness, LoadedBranch, MAX_RUNTIME_CHECKPOINT_BYTES, MAX_RUNTIME_RECORDS,
-    ModelRouteBinding, Page, PendingEffectDecisionState, ProducerProvenance, PruneBranch,
-    PruneReceipt, RUNTIME_FORMAT_EPOCH, RUNTIME_POLICY_REVISION, ReconstructiveComponent,
-    RecoverFork, RecoveryAction, RecoveryHandlerSignature, RecoveryObligation,
-    RecoveryObligationKind, RevalidationFact, RuntimeCanonicalState, RuntimeCheckpoint,
-    RuntimeCheckpointCodec, RuntimeCheckpointKind, RuntimeComponentKind, RuntimeDurability,
-    RuntimeLifecycle, RuntimeManifest, RuntimeManifestError, RuntimeObjectAddress,
-    RuntimeObjectKind, RuntimeOperationLedger, RuntimeRehydration, RuntimeRehydrationError,
-    RuntimeRevalidationWitness, RuntimeTopology, RuntimeWorkingRoot, SemanticCompactionPublication,
-    SessionHead, SessionQuery, SessionRef, SessionRevision, SessionStore, SessionStoreCapacity,
-    SessionStoreError, SessionSummary, SessionWorkflowId, StoreAdmission, StoreBoundUsage,
-    StoreFuture, StoreUsage, StoredCheckpoint, ToolRuntimeManifest, WorkingRecoveryPhase,
-    rehydrate_harness_plan, submit_actor_command,
+    LoadedBranch, ModelRouteBinding, Page, PendingEffectDecisionState, ProducerProvenance,
+    PruneBranch, PruneReceipt, RUNTIME_FORMAT_EPOCH, RUNTIME_POLICY_REVISION,
+    ReconstructiveComponent, RecoverFork, RecoveryAction, RecoveryHandlerSignature,
+    RecoveryObligation, RecoveryObligationKind, RevalidationFact, RuntimeCanonicalState,
+    RuntimeCheckpoint, RuntimeCheckpointCodec, RuntimeCheckpointKind, RuntimeComponentKind,
+    RuntimeDurability, RuntimeLifecycle, RuntimeManifest, RuntimeManifestError,
+    RuntimeObjectAddress, RuntimeObjectKind, RuntimeOperationLedger, RuntimeRehydration,
+    RuntimeRehydrationError, RuntimeRevalidationWitness, RuntimeTopology, RuntimeWorkingRoot,
+    SemanticCompactionPublication, SessionHead, SessionQuery, SessionRef, SessionRevision,
+    SessionStore, SessionStoreCapacity, SessionStoreError, SessionSummary, SessionWorkflowId,
+    StoreAdmission, StoreBoundUsage, StoreFuture, StoreUsage, StoredCheckpoint,
+    ToolRuntimeManifest, WorkingRecoveryPhase, submit_actor_command,
 };
 
 pub use internal::{
@@ -296,35 +272,35 @@ pub use internal::{
     ContextOverflowRemedy, ContextSourceCatalog, ContextSourceResolver, ContextSourceSelector,
     ContinuationPreferenceStrategy, ControlError, ControlErrorKind, ConversationItem,
     ConversationItemView, CredentialProviderLabel, CredentialRefreshFailureClass,
-    CredentialRefreshPhase, DataClassification, Digest, DigestDomain, DurabilityAttemptKind,
-    DurabilityAttemptOutcome, EffectDecisionChoice, EffectDecisionRef, EffectDecisionResolution,
-    EffectDecisionStatus, EventCursor, EventDelivery, EventDeliveryClass, EventId, EventLossKind,
-    EventLostRange, EventOrigin, EventScope, EventSequence, EventSubscription, EventToolProgress,
-    EventVisibility, FeatureSupportFact, GenerationLimits, HarnessCompilerInputs,
-    HarnessProfileCompiler, HarnessProfileId, HarnessProfileProvenance, HarnessProfileSpec,
-    HarnessProfileSpecBuilder, HttpStatusClass, IdGenerator, InstructionCompositionStrategy,
-    JobHintSource, JobNoticeDelivery, JobPreemption, JobTool, MAX_INSTRUCTION_BYTES,
-    MIN_EVENT_DEBT_BYTES, ModelAdapterProfileId, ModelFamilyId, ModelId, ModelReresolutionError,
-    ModelReresolutionOperation, ModelReresolver, NamespaceId, NormalizedModelEventKind,
-    PendingEffectDecisionView, ProfileError, ProfileSemanticVersion, ProtocolId, Provenance,
-    RUNTIME_EXECUTOR_STACK_BYTES, ReasoningEffort, ReasoningPolicy, ReasoningPreferenceStrategy,
-    RecoveredTurnHandle, ReducerError, RegisteredContextSource, ReplayEnvelope, ReplayKindId,
-    ReplayScope, ReresolvedModel, ResolvedCachePlan, ResolvedContextSourceFact,
-    ResolvedContinuationPlan, ResolvedHarnessPlan, ResolvedInstructionPlan, ResolvedReasoningPlan,
-    ResolvedToolExposurePlan, ResumeOutcome, RunId, SessionId, SteeringStatus, SubscriptionEnd,
-    SubscriptionLimitError, SubscriptionLimits, SystemClock, TelemetryContext, TelemetryEmitter,
-    TelemetryObservation, TelemetryObservationKind, TelemetrySink, TelemetrySinkError,
-    TelemetryStatus, TelemetryTerminalStatus, TextBlock, Timestamp, ToolActivityView,
-    ToolAuditIdentity, ToolCallAttemptIdentity, ToolCallBlock, ToolCallObservation, ToolCallState,
-    ToolCallerClass, ToolCallerLineageView, ToolCorrelation, ToolEffect, ToolExecutionOwner,
-    ToolExposureOverride, ToolExposureStrategy, ToolName, ToolProgressSummary, ToolResultBlock,
-    ToolResultKind, ToolResultObservation, ToolResultPart, Turn, TurnCommand, TurnContextCapacity,
-    TurnControl, TurnEventError, TurnEvents, TurnRecoveryOperationId, TurnResult, TurnResultHandle,
+    CredentialRefreshPhase, DEFAULT_STORE_OPERATION_TIMEOUT, DataClassification, Digest,
+    DigestDomain, DurabilityAttemptKind, DurabilityAttemptOutcome, EffectDecisionChoice,
+    EffectDecisionRef, EffectDecisionResolution, EffectDecisionStatus, EventCursor, EventDelivery,
+    EventDeliveryClass, EventId, EventLossKind, EventLostRange, EventOrigin, EventScope,
+    EventSequence, EventSubscription, EventToolProgress, EventVisibility, FeatureSupportFact,
+    GenerationLimits, HarnessCompilerInputs, HarnessProfileCompiler, HarnessProfileId,
+    HarnessProfileProvenance, HarnessProfileSpec, HarnessProfileSpecBuilder, HttpStatusClass,
+    IdGenerator, InstructionCompositionStrategy, JobHintSource, JobNoticeDelivery, JobPreemption,
+    JobTool, MAX_INSTRUCTION_BYTES, MIN_EVENT_DEBT_BYTES, ModelAdapterProfileId, ModelFamilyId,
+    ModelId, ModelReresolutionError, ModelReresolutionOperation, ModelReresolver, NamespaceId,
+    NormalizedModelEventKind, PendingEffectDecisionView, ProfileError, ProfileSemanticVersion,
+    ProtocolId, Provenance, RUNTIME_EXECUTOR_STACK_BYTES, ReasoningEffort, ReasoningPolicy,
+    ReasoningPreferenceStrategy, RecoveredTurnHandle, ReducerError, RegisteredContextSource,
+    ReplayEnvelope, ReplayKindId, ReplayScope, ReresolvedModel, ResolvedCachePlan,
+    ResolvedContextSourceFact, ResolvedContinuationPlan, ResolvedHarnessPlan,
+    ResolvedInstructionPlan, ResolvedReasoningPlan, ResolvedToolExposurePlan, ResumeOutcome, RunId,
+    SessionId, SteeringStatus, SubscriptionEnd, SubscriptionLimitError, SubscriptionLimits,
+    SystemClock, TelemetryContext, TelemetryEmitter, TelemetryObservation,
+    TelemetryObservationKind, TelemetrySink, TelemetrySinkError, TelemetryStatus,
+    TelemetryTerminalStatus, TextBlock, Timestamp, ToolActivityView, ToolAuditIdentity,
+    ToolCallAttemptIdentity, ToolCallBlock, ToolCallObservation, ToolCallState, ToolCallerClass,
+    ToolCallerLineageView, ToolCorrelation, ToolEffect, ToolExecutionOwner, ToolExposureOverride,
+    ToolExposureStrategy, ToolName, ToolProgressSummary, ToolResultBlock, ToolResultKind,
+    ToolResultObservation, ToolResultPart, Turn, TurnCommand, TurnContextCapacity, TurnControl,
+    TurnEventError, TurnEvents, TurnRecoveryOperationId, TurnResult, TurnResultHandle,
     TurnResultOutcome, TurnSubmission, TurnUsage, TurnView, TurnViewState, Usage,
     UsageAggregationError, UsageTotals, VerifiedContextSourceRef, ViewAttachment, ViewError,
-    ViewRequest, WeakAgent, compile_construction_bound_plan, compile_explicit_profile,
-    compile_explicit_runtime_profile, compiler_model_facts_from_model, compiler_tool_facts,
-    feature_support_from_descriptor, recommended_neutral_coding_profile,
+    ViewRequest, WeakAgent, compile_explicit_profile, compile_explicit_runtime_profile,
+    compiler_model_facts_from_model, recommended_neutral_coding_profile,
 };
 
 /// Session-owned process observations and optional host registry.

@@ -3005,14 +3005,14 @@ fn family_artifact_is_exact_redacted_responses_v3_state() -> TestResult {
     const SECRET: &[u8] = b"FAMILY_ARTIFACT_SECRET_SENTINEL";
     let binding = digest(DigestDomain::ModelBinding, b"family-binding")?;
     let artifact = FamilyArtifact::new(
-        CURRENT_FAMILY_ARTIFACT_ID,
+        "responses",
         RESPONSES_FAMILY_ARTIFACT_SCHEMA_REVISION,
         RESPONSES_FAMILY_ARTIFACT_CODEC_REVISION,
         binding,
         SECRET,
     )?;
     let active = artifact.to_active()?;
-    assert_eq!(active.family(), CURRENT_FAMILY_ARTIFACT_ID);
+    assert_eq!(active.family(), "responses");
     assert_eq!(
         active.schema_revision(),
         RESPONSES_FAMILY_ARTIFACT_SCHEMA_REVISION
@@ -3040,7 +3040,7 @@ fn family_artifact_is_exact_redacted_responses_v3_state() -> TestResult {
     );
     assert_eq!(
         FamilyArtifact::new(
-            CURRENT_FAMILY_ARTIFACT_ID,
+            "responses",
             RESPONSES_FAMILY_ARTIFACT_SCHEMA_REVISION.saturating_add(1),
             RESPONSES_FAMILY_ARTIFACT_CODEC_REVISION,
             binding,
@@ -3050,7 +3050,7 @@ fn family_artifact_is_exact_redacted_responses_v3_state() -> TestResult {
     );
     assert_eq!(
         FamilyArtifact::new(
-            CURRENT_FAMILY_ARTIFACT_ID,
+            "responses",
             RESPONSES_FAMILY_ARTIFACT_SCHEMA_REVISION,
             RESPONSES_FAMILY_ARTIFACT_CODEC_REVISION,
             digest(DigestDomain::Blob, b"wrong-binding-domain")?,

@@ -1,4 +1,4 @@
-//! K0 test-only presentation consumers over the public agent surface.
+//! Test-only presentation consumers over the public agent surface.
 
 use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroU32;

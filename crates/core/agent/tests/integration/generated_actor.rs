@@ -1,4 +1,4 @@
-//! Bounded generated K0 actor command and safe model-fault schedules.
+//! Bounded generated actor command and safe model-fault schedules.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroU32;

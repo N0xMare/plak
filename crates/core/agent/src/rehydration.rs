@@ -25,7 +25,7 @@ pub const RUNTIME_POLICY_REVISION: u32 = 5;
 /// Canonical binary envelope format emitted by this codec.
 pub const HARNESS_PLAN_COMPONENT_FORMAT_VERSION: u32 = 1;
 /// Hard limit for one encoded envelope.
-pub const MAX_HARNESS_PLAN_COMPONENT_BYTES: usize = 2 * 1024 * 1024;
+pub(crate) const MAX_HARNESS_PLAN_COMPONENT_BYTES: usize = 2 * 1024 * 1024;
 
 const MAGIC: &[u8; 8] = b"PLAKHPC\0";
 const ENVELOPE_KIND: u8 = 1;
@@ -198,7 +198,7 @@ impl HarnessPlanComponentEnvelope {
 /// Exact harness-plan reconstruction result suitable for a session controller.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
-pub enum HarnessPlanReadiness {
+pub(crate) enum HarnessPlanReadiness {
     /// A freshly compiled trusted plan exactly matches the recorded plan.
     Exact(ResolvedHarnessPlan),
     /// Valid persisted data requires an unavailable historical component.
@@ -208,7 +208,7 @@ pub enum HarnessPlanReadiness {
 /// Typed reason why exact harness-plan reconstruction is not ready.
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
 #[non_exhaustive]
-pub enum HarnessPlanMismatch {
+pub(crate) enum HarnessPlanMismatch {
     /// The recorded profile schema is unavailable.
     #[error("unsupported harness profile schema version {found}")]
     ProfileSchema {
@@ -264,7 +264,7 @@ pub enum HarnessPlanMismatch {
 /// # Errors
 ///
 /// Returns [`HarnessManifestCodecError`] for invalid durable bytes.
-pub fn rehydrate_harness_plan(
+pub(crate) fn rehydrate_harness_plan(
     bytes: &[u8],
     available_runtime_policy_version: u32,
 ) -> Result<HarnessPlanReadiness, HarnessManifestCodecError> {
