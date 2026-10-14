@@ -1799,3 +1799,118 @@ async fn status_on_absent_storage_is_signed_out_and_creates_nothing() -> Result<
     fs::remove_dir_all(root)?;
     Ok(())
 }
+
+/// A profile re-review moves `reviewed_at`, so a receipt recorded under the
+/// previous review is no longer current. That is acceptance-required, not a
+/// fenced credential: the stored login is not quarantined, the operator
+/// accepts the notice again without logging in, and the login stays admitted
+/// under the new acceptance, for every native vertical.
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn a_profile_re_review_requires_acceptance_and_keeps_the_ready_login()
+-> Result<(), Box<dyn Error>> {
+    for provider in [
+        NativeProvider::Codex,
+        NativeProvider::Xai,
+        NativeProvider::Claude,
+    ] {
+        let root = unique_test_root(&format!("re-review-{}", provider.as_str()))?;
+        let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
+        let consent_generation = install_ready_login_fixture(&paths, provider, 3)?;
+        let operation = arm_login_recovery(&paths, provider, &consent_generation)?;
+        clear_login_recovery(&paths, provider, &operation, 3)?;
+
+        let notice = NativeSubscriptions::notice(provider);
+        let receipt_path = paths.receipt_path(provider);
+        let mut receipt: serde_json::Value = serde_json::from_slice(&fs::read(&receipt_path)?)?;
+        receipt["reviewed_at"] = serde_json::Value::from(notice.reviewed_at() - 864_000);
+        receipt["expires_at"] = serde_json::Value::from(notice.expires_at() - 864_000);
+        write_private_atomic(&receipt_path, &serde_json::to_vec(&receipt)?)?;
+        assert_eq!(
+            load_acceptance_exact(&paths, notice, unix_now()?).err(),
+            Some(NativeSubscriptionError::AcceptanceRequired)
+        );
+
+        let state = SubscriptionState::new(paths.clone());
+        let stale_consent = state.stored_acceptance_generation(provider)?;
+        assert!(
+            !login_recovery_required_for_status(
+                &paths,
+                provider,
+                stale_consent.as_deref(),
+                NativeAuthStatus::Ready,
+            )?,
+            "{provider:?}: a stale acceptance must not fence the stored login"
+        );
+
+        let subscriptions = NativeSubscriptions::new(paths.clone());
+        if provider == NativeProvider::Codex {
+            // The fixture's opaque secret is not a Codex token, so Codex reads
+            // it as login-required; what matters is that it is not fenced.
+            let before = subscriptions.status(provider).await?;
+            assert_eq!(
+                (before.compatibility(), before.credential()),
+                (
+                    CompatibilityStatus::Required,
+                    NativeAuthStatus::LoginRequired
+                )
+            );
+        }
+
+        subscriptions
+            .acknowledge_exact(provider, notice.notice_revision())
+            .await?;
+        let accepted = load_acceptance_exact(&paths, notice, unix_now()?)?;
+        assert_ne!(accepted.generation, consent_generation);
+        assert!(
+            !login_recovery_required_for_status(
+                &paths,
+                provider,
+                Some(&accepted.generation),
+                NativeAuthStatus::Ready,
+            )?,
+            "{provider:?}: accepting the re-reviewed notice must keep the login"
+        );
+        if provider == NativeProvider::Codex {
+            let current = NativeSubscriptions::new(paths.clone())
+                .status(provider)
+                .await?;
+            assert_eq!(
+                (current.compatibility(), current.credential()),
+                (
+                    CompatibilityStatus::Current,
+                    NativeAuthStatus::LoginRequired
+                )
+            );
+        }
+        fs::remove_dir_all(root)?;
+    }
+    Ok(())
+}
+
+/// Accepting a notice moves only a login bound to the acceptance it replaces:
+/// a cleared marker bound to some other consent stays fenced.
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn accepting_a_notice_does_not_rebind_a_login_from_another_consent()
+-> Result<(), Box<dyn Error>> {
+    let provider = NativeProvider::Codex;
+    let root = unique_test_root("re-review-foreign-consent")?;
+    let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
+    let consent_generation = install_ready_login_fixture(&paths, provider, 5)?;
+    let operation = arm_login_recovery(&paths, provider, &consent_generation)?;
+    clear_login_recovery(&paths, provider, &operation, 5)?;
+    let notice = NativeSubscriptions::notice(provider);
+    store_acceptance(&paths, notice, unix_now()?)?;
+
+    let subscriptions = NativeSubscriptions::new(paths.clone());
+    subscriptions
+        .acknowledge_exact(provider, notice.notice_revision())
+        .await?;
+    let marker = read_login_recovery_marker(&paths, provider)?.ok_or("cleared marker")?;
+    assert_eq!(marker.0.consent_generation, consent_generation);
+    let status = subscriptions.status(provider).await?;
+    fs::remove_dir_all(root)?;
+    assert_eq!(status.credential(), NativeAuthStatus::Quarantined);
+    Ok(())
+}

@@ -524,6 +524,65 @@ pub(super) fn retire_login_recovery(
     Ok(())
 }
 
+/// Moves a **cleared** login-recovery marker from the acceptance it was bound
+/// to onto the acceptance that explicitly replaced it, so accepting a
+/// re-reviewed notice keeps the login it already admitted.
+///
+/// Only a marker bound to exactly `previous`, with a matching epoch and no
+/// process-local quarantine, moves; an armed, foreign or ambiguous marker is
+/// left as it is and the status gate keeps judging it fail-closed.
+pub(super) fn rebind_login_recovery_consent(
+    paths: &SubscriptionPaths,
+    provider: NativeProvider,
+    previous: &str,
+    next: &str,
+) -> Result<(), NativeSubscriptionError> {
+    let path = paths.login_recovery_path(provider);
+    let key = process_quarantine_key(paths, provider, path.clone());
+    if quarantined(&LOGIN_RECOVERY_QUARANTINE, &key)? || !valid_generation(next) {
+        return Ok(());
+    }
+    let Ok(Some((marker, _))) = read_login_recovery_marker(paths, provider) else {
+        return Ok(());
+    };
+    if marker.state != LoginRecoveryState::Cleared
+        || marker.consent_generation != previous
+        || !login_epoch_matches(paths, provider, &marker).unwrap_or(false)
+    {
+        return Ok(());
+    }
+    let rebound = LoginRecoveryMarker {
+        consent_generation: next.to_owned(),
+        ..marker
+    };
+    let rebound_bytes = rebound.to_bytes()?;
+    let rebound_epoch = LoginRecoveryEpoch::from_marker(&rebound);
+    let rebound_epoch_bytes = rebound_epoch.to_bytes()?;
+    let written = write_private_atomic(
+        &paths.login_recovery_epoch_path(provider),
+        &rebound_epoch_bytes,
+    )
+    .and_then(|()| write_private_atomic(&path, &rebound_bytes))
+    .and_then(|()| {
+        let current = read_login_recovery_marker(paths, provider)?;
+        let current_epoch = read_login_recovery_epoch(paths, provider)?;
+        if current.is_some_and(|(marker, bytes)| marker == rebound && bytes == rebound_bytes)
+            && current_epoch.is_some_and(|(epoch, bytes)| {
+                epoch == rebound_epoch && bytes == rebound_epoch_bytes
+            })
+        {
+            Ok(())
+        } else {
+            Err(NativeSubscriptionError::UnsafeStorage)
+        }
+    });
+    if let Err(error) = written {
+        quarantine(&LOGIN_RECOVERY_QUARANTINE, key)?;
+        return Err(error);
+    }
+    Ok(())
+}
+
 /// Re-pins a **cleared** login-recovery marker after a legitimate credential
 /// generation advance (for example owner-managed refresh).
 ///

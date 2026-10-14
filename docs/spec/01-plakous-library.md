@@ -2375,7 +2375,7 @@ header only on a remote-compaction request, because it claims a capability
 only that request uses. Its compiled compatibility
 profile was reviewed on 2026-10-14 and expires at 2026-11-13T23:59:59Z; an
 acceptance recorded before the review date is not current, so the operator
-accepts the notice again. Authenticated catalog
+accepts the notice again without a new login (§7.2). Authenticated catalog
 `use_responses_lite` evidence selects the request mode and binds its identity.
 Lite requests prepend a developer `additional_tools` item (client tools under
 `functions`) and a developer instruction message to the input. They omit
@@ -3008,6 +3008,15 @@ review, expiry and notice revisions (§7.2).
 The facade's private `SubscriptionState` owns compatibility consent, login
 recovery markers, their locks and quarantine, and offline catalog persistence. Login and model
 workflows call named state operations; the catalog codec performs no I/O.
+A cleared login-recovery marker binds the login to the consent generation of
+the acceptance receipt it was made under. A receipt that is no longer current
+(a re-reviewed, expired or killed profile) is reported as compatibility state
+only: the login is still judged against the stored receipt's generation and
+is not quarantined. Explicitly accepting the current notice mints a new
+generation and, under the same compatibility lock, moves a cleared marker
+bound to exactly the replaced receipt (with a matching epoch and no
+process-local quarantine) onto it, so the login stays usable. An armed,
+mismatched or ambiguous marker is never moved and stays fail-closed.
 `SubscriptionPaths` remains the explicit public layout input, and facade
 construction performs no filesystem or network I/O. Credential generations
 and secrets remain owned by the separate auth credential store.

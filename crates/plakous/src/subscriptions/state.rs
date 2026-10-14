@@ -39,8 +39,8 @@ use filesystem::{
 };
 use recovery::{
     arm_login_recovery, clear_login_recovery, current_credential_generation,
-    login_recovery_required_for_status, read_login_recovery_marker, repin_cleared_login_recovery,
-    restore_login_recovery, retire_login_recovery,
+    login_recovery_required_for_status, read_login_recovery_marker, rebind_login_recovery_consent,
+    repin_cleared_login_recovery, restore_login_recovery, retire_login_recovery,
 };
 
 const RECEIPT_SCHEMA: u32 = 2;
@@ -280,20 +280,49 @@ fn validate_profile_time(
     Ok(())
 }
 
+/// Writes a fresh acceptance receipt and returns its new consent generation.
 fn store_acceptance(
     paths: &SubscriptionPaths,
     notice: CompatibilityNotice,
     accepted_at: u64,
-) -> Result<(), NativeSubscriptionError> {
+) -> Result<String, NativeSubscriptionError> {
     paths.prepare()?;
     validate_notice_time(notice, accepted_at, accepted_at)?;
     let generation = new_random_identity()?;
-    let bytes = serde_json::to_vec(&AcceptanceReceipt::new(notice, accepted_at, generation))
-        .map_err(|_| NativeSubscriptionError::InvalidReceipt)?;
+    let bytes = serde_json::to_vec(&AcceptanceReceipt::new(
+        notice,
+        accepted_at,
+        generation.clone(),
+    ))
+    .map_err(|_| NativeSubscriptionError::InvalidReceipt)?;
     if bytes.len() as u64 > MAX_RECEIPT_BYTES {
         return Err(NativeSubscriptionError::InvalidReceipt);
     }
-    write_private_atomic(&paths.receipt_path(notice.provider), &bytes)
+    write_private_atomic(&paths.receipt_path(notice.provider), &bytes)?;
+    Ok(generation)
+}
+
+/// The consent generation of the stored receipt whether or not it is current
+/// for this build's notice. A login stays bound to the acceptance it was made
+/// under even after a profile re-review makes that acceptance stale; only an
+/// absent or unreadable receipt has no generation.
+fn stored_acceptance_generation(
+    paths: &SubscriptionPaths,
+    provider: NativeProvider,
+) -> Result<Option<String>, NativeSubscriptionError> {
+    let bytes = match read_private_bounded(&paths.receipt_path(provider)) {
+        Ok(bytes) => bytes,
+        Err(NativeSubscriptionError::AcceptanceRequired) => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    Ok(serde_json::from_slice::<AcceptanceReceipt>(&bytes)
+        .ok()
+        .filter(|receipt| {
+            receipt.schema == RECEIPT_SCHEMA
+                && receipt.provider == provider.as_str()
+                && valid_generation(&receipt.generation)
+        })
+        .map(|receipt| receipt.generation))
 }
 
 fn load_acceptance(
@@ -425,8 +454,22 @@ impl SubscriptionState {
         &self,
         notice: CompatibilityNotice,
         accepted_at: u64,
-    ) -> Result<(), NativeSubscriptionError> {
+    ) -> Result<String, NativeSubscriptionError> {
         store_acceptance(&self.paths, notice, accepted_at)
+    }
+    pub(super) fn stored_acceptance_generation(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<Option<String>, NativeSubscriptionError> {
+        stored_acceptance_generation(&self.paths, provider)
+    }
+    pub(super) fn rebind_login_recovery_consent(
+        &self,
+        provider: NativeProvider,
+        previous: &str,
+        next: &str,
+    ) -> Result<(), NativeSubscriptionError> {
+        rebind_login_recovery_consent(&self.paths, provider, previous, next)
     }
     pub(super) fn arm_login_recovery(
         &self,

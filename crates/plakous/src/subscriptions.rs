@@ -1281,7 +1281,11 @@ impl NativeSubscriptions {
         run_blocking(move || {
             lock.verify()?;
             let now = unix_now()?;
-            paths.store_acceptance(notice, now)?;
+            let previous = paths.stored_acceptance_generation(provider)?;
+            let next = paths.store_acceptance(notice, now)?;
+            if let Some(previous) = previous {
+                paths.rebind_login_recovery_consent(provider, &previous, &next)?;
+            }
             lock.verify()
         })
         .await?
@@ -1448,10 +1452,12 @@ impl NativeSubscriptions {
             let now = unix_now()?;
             match paths.load_acceptance_exact(notice, now) {
                 Ok(acceptance) => Ok(Some(acceptance.generation)),
+                // A stale or inactive acceptance is reported as compatibility;
+                // the login stays judged against the acceptance it was made under.
                 Err(
                     NativeSubscriptionError::AcceptanceRequired
                     | NativeSubscriptionError::ProfileInactive,
-                ) => Ok(None),
+                ) => paths.stored_acceptance_generation(provider),
                 Err(error) => Err(error),
             }
         })

@@ -186,6 +186,11 @@ refuses with exit 3 and names both ways (`plak login` itself asks for the
 answer on a terminal or a pipe); any other answer declines, exits 3 and sends
 nothing.
 
+When a newer build renews a profile's review, `plak status` shows the
+acceptance as required while the credential stays ready. Accepting the renewed
+notice (for example through `plak models <account>`) keeps the existing login;
+no new `plak login` is needed.
+
 `plak status` lists the UTC expiry of each compiled subscription compatibility
 profile. These dates govern this build's integration review, independently of
 credential expiry. Once a profile expires, obtain a build whose profile was
