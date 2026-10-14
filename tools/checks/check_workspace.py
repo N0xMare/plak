@@ -1152,6 +1152,8 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plakous-hosted", "src/agent/build.rs"): {"sessions": {"internal"}},
+    # The compile-time check that the host release timeout covers the store deadline.
+    ("plakous-hosted", "src/lib.rs"): {"agent": {"DEFAULT_STORE_OPERATION_TIMEOUT"}},
     ("plak", "src/commands/reload_rehearsal.rs"): {
         "sessions": {"rehearsal", "inspect_sqlite", "OfflineReopenOutcome"},
     },
