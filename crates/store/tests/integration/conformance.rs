@@ -2298,17 +2298,16 @@ pub(crate) async fn run_expired_release_conformance(
             Err(SessionStoreError::LeaseDomainMismatch)
         );
         clock.set(Ok(expired));
-        if durability == RuntimeDurability::Required {
-            // The valid expired grant must survive rollback of a stale peer.
-            assert_eq!(
-                store.release_many(vec![renewed.clone(), prior]).await,
-                Err(SessionStoreError::FenceSuperseded)
-            );
-            assert_eq!(
-                store.renew(renewed.clone()).await,
-                Err(SessionStoreError::LeaseExpired)
-            );
-        }
+        // `release_many` is all-or-none on every backend: the valid expired grant must
+        // survive rollback of a stale peer.
+        assert_eq!(
+            store.release_many(vec![renewed.clone(), prior]).await,
+            Err(SessionStoreError::FenceSuperseded)
+        );
+        assert_eq!(
+            store.renew(renewed.clone()).await,
+            Err(SessionStoreError::LeaseExpired)
+        );
         store.release_many(vec![renewed, taken]).await?;
     }
     Ok(())

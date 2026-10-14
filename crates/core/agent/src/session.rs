@@ -22,7 +22,6 @@ use crate::{
 };
 
 /// Fixed byte width of the one canonical session-workflow root identity.
-pub use plakous_model::SESSION_WORKFLOW_ROOT_ID_BYTES as SESSION_WORKFLOW_ID_BYTES;
 /// The one canonical caller-stable workflow/root identity used by model calls,
 /// manifests, and session-store receipts.
 pub use plakous_model::SessionWorkflowRootId as SessionWorkflowId;
@@ -2328,7 +2327,12 @@ pub trait SessionStore: Send + Sync + 'static {
     /// can be released only while its domain and exact active value still match.
     fn release(&self, lease: BranchLease) -> StoreFuture<'_, ()>;
 
-    /// Releases a set of exact leases. Durable backends coalesce this into one transaction.
+    /// Releases a set of exact leases, all or none: on error no lease in the batch was
+    /// released, so a caller may treat every lease as still held.
+    ///
+    /// The default releases one lease at a time and keeps that contract only for a batch of
+    /// one; a backend that can be handed several leases must override it (the bundled memory
+    /// and SQLite stores do).
     fn release_many(&self, leases: Vec<BranchLease>) -> StoreFuture<'_, ()> {
         Box::pin(async move {
             for lease in leases {

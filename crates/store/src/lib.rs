@@ -563,6 +563,47 @@ impl MemorySessionStore {
         Ok(())
     }
 
+    /// Validates every lease before releasing any, under one hold of the state lock.
+    fn release_many_sync(&self, leases: &[BranchLease]) -> Result<(), SessionStoreError> {
+        let mut guard = self.lock()?;
+        let state = &mut *guard;
+        require_open(state)?;
+        let now = self.lease_now()?;
+        let mut releasing: Vec<&BranchLease> = Vec::new();
+        let mut changes = Vec::new();
+        for lease in leases {
+            require_lease_domain(lease, now)?;
+            let branch = mutable_branch(state, lease.session())?;
+            if (branch.released_lease.as_ref() == Some(lease) && branch.active_lease.is_none())
+                || releasing.contains(&lease)
+            {
+                continue;
+            }
+            if branch.active_lease.as_ref() != Some(lease) {
+                return Err(SessionStoreError::FenceSuperseded);
+            }
+            changes.push((
+                lease.session(),
+                FeedChange::LeaseReleased {
+                    head: branch.head.checkpoint().checkpoint_id(),
+                    fence: lease.fence().get(),
+                },
+            ));
+            releasing.push(lease);
+        }
+        let records = memory_feed::prepare_changes(&state.feeds, changes)?;
+        for lease in releasing {
+            let branch = mutable_branch(state, lease.session())?;
+            branch.active_lease = None;
+            branch.previous_renewal = None;
+            branch.released_lease = Some(lease.clone());
+        }
+        for record in records {
+            memory_feed::append(&mut state.feeds, record);
+        }
+        Ok(())
+    }
+
     fn commit_sync(&self, request: &CommitCheckpoint) -> Result<CommitReceipt, SessionStoreError> {
         let reference = bundle_reference(request.checkpoint());
         let checkpoint_id = reference.checkpoint_id();
@@ -1236,6 +1277,20 @@ impl SessionStore for MemorySessionStore {
             let session_id = lease.session().session_id();
             self.release_sync(lease)?;
             self.trim_feed(session_id);
+            Ok(())
+        })
+    }
+
+    fn release_many(&self, leases: Vec<BranchLease>) -> StoreFuture<'_, ()> {
+        Box::pin(async move {
+            self.release_many_sync(&leases)?;
+            let sessions = leases
+                .iter()
+                .map(|lease| lease.session().session_id())
+                .collect::<BTreeSet<_>>();
+            for session_id in sessions {
+                self.trim_feed(session_id);
+            }
             Ok(())
         })
     }

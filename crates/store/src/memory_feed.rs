@@ -110,9 +110,48 @@ pub(crate) fn prepare(
     change: FeedChange,
     facts: &[FeedFact],
 ) -> Result<PendingRecord, SessionStoreError> {
-    let tail = feeds
+    prepare_after(
+        feed_tail(feeds, session_id),
+        session_id,
+        branch_id,
+        change,
+        facts,
+    )
+}
+
+fn feed_tail(feeds: &BTreeMap<SessionId, SessionFeed>, session_id: SessionId) -> FeedSeq {
+    feeds
         .get(&session_id)
-        .map_or(FeedSeq::ZERO, |feed| feed.tail);
+        .map_or(FeedSeq::ZERO, |feed| feed.tail)
+}
+
+/// Prepares several changes as one batch without appending any: a later change for the same
+/// session takes the sequence after the earlier one, so the caller can append all or none.
+pub(crate) fn prepare_changes(
+    feeds: &BTreeMap<SessionId, SessionFeed>,
+    changes: Vec<(SessionRef, FeedChange)>,
+) -> Result<Vec<PendingRecord>, SessionStoreError> {
+    let mut tails = BTreeMap::new();
+    let mut pending = Vec::with_capacity(changes.len());
+    for (session, change) in changes {
+        let session_id = session.session_id();
+        let tail = *tails
+            .entry(session_id)
+            .or_insert_with(|| feed_tail(feeds, session_id));
+        let record = prepare_after(tail, session_id, session.branch_id(), change, &[])?;
+        tails.insert(session_id, record.seq());
+        pending.push(record);
+    }
+    Ok(pending)
+}
+
+fn prepare_after(
+    tail: FeedSeq,
+    session_id: SessionId,
+    branch_id: BranchId,
+    change: FeedChange,
+    facts: &[FeedFact],
+) -> Result<PendingRecord, SessionStoreError> {
     let seq = tail.checked_next().ok_or_else(|| {
         SessionStoreError::capacity(StoreCapacityBound::FeedRecordBytes, u64::MAX, 0)
     })?;
