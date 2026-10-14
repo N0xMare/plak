@@ -62,9 +62,7 @@ pub(super) fn settle_uncertain(
         .find(|item| item.operation_id() == operation.0)
         .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
     let record = ledger
-        .operations()
-        .into_iter()
-        .find(|record| record.operation_id() == operation.0)
+        .operation(operation.0)
         .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
     uncertain_evidence(record, obligation)?
         .map(|evidence| close_as_unobserved(ledger, operation, &evidence, checkpoint_id))

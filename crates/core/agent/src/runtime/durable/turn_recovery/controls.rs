@@ -276,9 +276,7 @@ pub(super) mod tests {
                         };
                         let control = closed
                             .ledger
-                            .operations()
-                            .into_iter()
-                            .find(|record| record.operation_id() == prior.operation_id())
+                            .operation(prior.operation_id())
                             .ok_or("closed control")?;
                         assert!(
                             matches!(control.state(), DurableOperationState::Finalized(evidence)

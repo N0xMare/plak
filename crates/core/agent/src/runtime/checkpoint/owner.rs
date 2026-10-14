@@ -12,6 +12,7 @@ use crate::runtime::checkpoint::io::{
     store_call,
 };
 #[cfg(test)]
+#[cfg(test)]
 use crate::runtime::checkpoint::owner::heartbeat::renew_shared_durable_lease;
 use crate::runtime::checkpoint::owner::heartbeat::{
     LeaseHeartbeat, renew_shared_durable_lease_under_gate,
@@ -1523,6 +1524,175 @@ mod tests {
             .heartbeat
             .stop_and_join(Duration::from_secs(1))
             .await?;
+        Ok(())
+    }
+
+    /// Renewal answers scripted per call: `busy` leading renewals report
+    /// `BackendBusy`, and every renewal reports `LeaseExpired` once `expired`
+    /// is set, with revival answering `revive_error`.
+    struct FlakyRenewStore {
+        now: std::sync::atomic::AtomicU64,
+        busy: std::sync::atomic::AtomicUsize,
+        expired: std::sync::atomic::AtomicBool,
+        revive_error: SessionStoreError,
+        renewals: std::sync::atomic::AtomicUsize,
+    }
+
+    impl FlakyRenewStore {
+        fn new(busy: usize, revive_error: SessionStoreError) -> Self {
+            Self {
+                now: std::sync::atomic::AtomicU64::new(0),
+                busy: std::sync::atomic::AtomicUsize::new(busy),
+                expired: std::sync::atomic::AtomicBool::new(false),
+                revive_error,
+                renewals: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl SessionStore for FlakyRenewStore {
+        fn lease_now(&self) -> Result<LeaseInstant, SessionStoreError> {
+            LeaseInstant::new(
+                LeaseDomain::new([1; 16], [2; 32]),
+                self.now.load(std::sync::atomic::Ordering::Acquire),
+                0,
+            )
+        }
+
+        unused_store_methods! {
+            create(request: CreateSession) -> CreateReceipt;
+            recover_create(request: CreateSession) -> CreateReceipt;
+            load_branch(session: SessionRef) -> LoadedBranch;
+            load_checkpoint(checkpoint: CheckpointId) -> StoredCheckpoint;
+            acquire(request: AcquireBranch) -> BranchLease;
+            release(lease: BranchLease) -> ();
+            commit(request: CommitCheckpoint) -> CommitReceipt;
+            recover_commit(checkpoint: CheckpointId) -> CommittedCheckpoint;
+            fork(request: ForkBranch) -> ForkReceipt;
+            recover_fork(request: RecoverFork) -> ForkReceipt;
+            list(query: SessionQuery) -> Page<SessionSummary>;
+            archive(request: ArchiveSession) -> ArchiveReceipt;
+            delete(request: DeleteSession) -> DeleteReceipt;
+            recover_delete(request: DeleteSession) -> DeleteReceipt;
+            feed_tail(session: SessionId) -> feed::FeedTail;
+        }
+
+        fn renew(&self, lease: BranchLease) -> StoreFuture<'_, BranchLease> {
+            use std::sync::atomic::Ordering;
+            Box::pin(async move {
+                self.renewals.fetch_add(1, Ordering::AcqRel);
+                if self.expired.load(Ordering::Acquire) {
+                    return Err(SessionStoreError::LeaseExpired);
+                }
+                if self
+                    .busy
+                    .try_update(Ordering::AcqRel, Ordering::Acquire, |left| {
+                        left.checked_sub(1)
+                    })
+                    .is_ok()
+                {
+                    return Err(SessionStoreError::BackendBusy);
+                }
+                Ok(lease)
+            })
+        }
+
+        fn revive(&self, _: BranchLease) -> StoreFuture<'_, BranchLease> {
+            let error = self.revive_error;
+            Box::pin(async move { Err(error) })
+        }
+
+        fn read_feed(
+            &self,
+            _: SessionId,
+            _: FeedSeq,
+            _: std::num::NonZeroUsize,
+        ) -> StoreFuture<'_, feed::FeedPage> {
+            Box::pin(async { Err(SessionStoreError::BackendUnavailable) })
+        }
+
+        fn usage(&self) -> StoreFuture<'_, StoreUsage> {
+            Box::pin(async { Err(SessionStoreError::BackendUnavailable) })
+        }
+        fn flush(&self) -> StoreFuture<'_, DurabilityReport> {
+            Box::pin(async { Err(SessionStoreError::BackendUnavailable) })
+        }
+        fn shutdown(&self) -> StoreFuture<'_, DurabilityReport> {
+            self.flush()
+        }
+    }
+
+    /// Starts an owner holding a 3 s lease (renewed every second) that
+    /// expires at store second 100.
+    fn flaky_owner(store: Arc<FlakyRenewStore>) -> TestResult<CheckpointOwner> {
+        let first = checkpoint(1, 1_000)?;
+        let bundle = RuntimeCheckpointCodec::bundle(&first, None)?;
+        let topology = first.manifest().topology();
+        let session = SessionRef::new(topology.session_id, topology.branch_id);
+        let head = BranchHead::from_store(
+            session,
+            BranchRevision::from_store(1),
+            CheckpointObjectRef::from_store(
+                topology.checkpoint_id,
+                bundle.root(),
+                first.integrity(),
+            ),
+        );
+        let lease = BranchLease::from_store(
+            session,
+            RunId::try_from(uuid::Uuid::from_u128(99))?,
+            NonZeroU64::new(1).ok_or("nonzero fence")?,
+            LeaseInstant::new(LeaseDomain::new([1; 16], [2; 32]), 100, 0)?,
+            NonZeroU64::new(3).ok_or("nonzero interval")?,
+        );
+        Ok(PreparedCheckpoint::new(
+            first,
+            bundle,
+            Some(DurableBranchFacts::new(
+                store,
+                head,
+                lease,
+                StoreTimeouts::default(),
+            )),
+        )
+        .start())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_busy_renewal_is_retried_while_the_lease_is_live() -> TestResult {
+        let store = Arc::new(FlakyRenewStore::new(2, SessionStoreError::LeaseHeld));
+        let mut owner = flaky_owner(Arc::clone(&store))?;
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        assert!(
+            store.renewals.load(std::sync::atomic::Ordering::Acquire) >= 3,
+            "two busy answers and a successful retry"
+        );
+        owner.heartbeat.check()?;
+        owner
+            .heartbeat
+            .stop_and_join(Duration::from_secs(1))
+            .await?;
+        Ok(())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_revival_the_store_cannot_answer_is_not_reported_as_takeover() -> TestResult {
+        for (revive_error, takeover) in [
+            (SessionStoreError::BackendBusy, false),
+            (SessionStoreError::LeaseHeld, true),
+        ] {
+            let store = Arc::new(FlakyRenewStore::new(0, revive_error));
+            store
+                .expired
+                .store(true, std::sync::atomic::Ordering::Release);
+            store.now.store(200, std::sync::atomic::Ordering::Release);
+            let mut owner = flaky_owner(Arc::clone(&store))?;
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let failure = owner.heartbeat.failure();
+            assert!(owner.heartbeat.lost().is_cancelled());
+            assert_eq!(failure == lease_taken_over(), takeover, "{revive_error:?}");
+            let _ = owner.heartbeat.stop_and_join(Duration::from_secs(1)).await;
+        }
         Ok(())
     }
 }

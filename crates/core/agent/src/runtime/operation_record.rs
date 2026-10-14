@@ -656,9 +656,7 @@ pub(super) fn effect_operation_intent_digest(
     let record = checkpoint
         .manifest()
         .ledger()
-        .operations()
-        .into_iter()
-        .find(|record| record.operation_id() == operation_id.0)
+        .operation(operation_id.0)
         .ok_or_else(|| {
             AgentError::new(
                 AgentErrorKind::Internal,

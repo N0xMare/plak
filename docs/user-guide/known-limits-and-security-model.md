@@ -42,6 +42,15 @@ and billing attestation. Plak is not Claude Code or an official Anthropic
 client. The separate `anthropic` API-key route does not use this OAuth
 identity.
 
+## Very long turns can need recovery
+
+A session records every tool call, model round and command of a turn and
+reclaims that record only between turns. A single turn with a very large
+number of rounds and parallel tool calls can exhaust the per-session record
+limit before it finishes; the turn then ends as recovery-required, and
+reopening the session settles it. Splitting very long work across turns avoids
+this.
+
 ## Plak's own git steps
 
 When Plak mints, seals or adopts a copy, it runs `git` with inherited `GIT_*`

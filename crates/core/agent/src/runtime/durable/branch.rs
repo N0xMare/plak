@@ -178,11 +178,14 @@ impl DurableSessionRuntime {
             self.store_timeouts.cleanup,
         )
         .await;
+        // A failed branch keeps its own cause; a release failure is reported
+        // only for an otherwise published branch.
+        let publication = publication?;
         target_cleanup?;
         source_cleanup?;
-        publication
-            .map(Box::new)
-            .map(DurableRuntimeBranchOutcome::Published)
+        Ok(DurableRuntimeBranchOutcome::Published(Box::new(
+            publication,
+        )))
     }
 
     /// Recovers the receipt published under one exact request identity.
@@ -296,18 +299,10 @@ impl DurableSessionRuntime {
             identity.target_branch,
         )
         .with_transition(transition);
-        match store_call(
-            StorePhase::RecoverFork,
-            self.store_timeouts.operation,
-            self.store.recover_fork(recovery.clone()),
-        )
-        .await
-        {
-            Ok(receipt) => return Ok(receipt),
-            Err(error) if error.is(SessionStoreError::NotFound) => {}
-            Err(error) => return Err(error.into_agent()),
-        }
-
+        // The chosen transition and selectors are one of the candidates
+        // probed above, and the held source lease keeps anyone else from
+        // publishing this workflow since: `recovery` serves only an
+        // ambiguous fork acknowledgement below.
         let loaded = store_call(
             StorePhase::LoadBranch,
             self.store_timeouts.operation,

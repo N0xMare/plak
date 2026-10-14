@@ -160,6 +160,8 @@ pub(crate) fn command_operation_id(
         .ledger()
         .operations()
         .into_iter()
+        // The command's operation was just appended: search newest first.
+        .rev()
         .find(|record| {
             matches!(record.kind(), crate::DurableOperationKind::Command { .. })
                 && record.request().bytes() == command.command_component().bytes()
@@ -444,11 +446,7 @@ pub fn checkpoint_operation_call(
     operation_id: u64,
 ) -> Result<Option<FeedOperationCall>, AgentError> {
     let ledger = checkpoint.manifest().ledger();
-    let Some(record) = ledger
-        .operations()
-        .into_iter()
-        .find(|record| record.operation_id() == operation_id)
-    else {
+    let Some(record) = ledger.operation(operation_id) else {
         return Ok(None);
     };
     Ok(match record.kind() {

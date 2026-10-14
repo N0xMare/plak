@@ -359,9 +359,7 @@ fn prepare_effect_evidence_publication(
     };
     let Some(record) = manifest
         .ledger()
-        .operations()
-        .into_iter()
-        .find(|record| record.operation_id() == identity.recovery_operation)
+        .operation(identity.recovery_operation)
         .cloned()
     else {
         return Ok(EffectEvidencePreparation::Conflict);
@@ -613,9 +611,7 @@ fn validate_effect_evidence_checkpoint(
     }
     let record = manifest
         .ledger()
-        .operations()
-        .into_iter()
-        .find(|record| record.operation_id() == identity.recovery_operation)
+        .operation(identity.recovery_operation)
         .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
     if !matches!(record.kind(), DurableOperationKind::Effect { .. }) {
         return Err(AgentError::from_store(SessionStoreError::corrupt()));

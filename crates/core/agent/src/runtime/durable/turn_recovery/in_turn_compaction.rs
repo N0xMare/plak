@@ -68,9 +68,7 @@ pub(super) fn finalize_completed_fold(
     checkpoint_id: CheckpointId,
 ) -> Result<Option<RuntimeOperationLedger>, AgentError> {
     let record = ledger
-        .operations()
-        .into_iter()
-        .find(|record| record.operation_id() == operation.0)
+        .operation(operation.0)
         .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
     let DurableOperationState::Completed(evidence) = record.state() else {
         return Ok(None);

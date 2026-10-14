@@ -579,7 +579,7 @@ async fn traced_branch_load(
 }
 
 #[tokio::test]
-async fn validated_checkpoint_cache_bounds_second_branch_load_to_three_statements() -> TestResult {
+async fn validated_checkpoint_cache_bounds_second_branch_load_to_four_statements() -> TestResult {
     use crate::integrity_fixture as fixture;
     for history_items in [1, 1000] {
         let directory = tempfile::tempdir()?;
@@ -607,8 +607,9 @@ async fn validated_checkpoint_cache_bounds_second_branch_load_to_three_statement
         let (cached, cached_count, cached_objects) = traced_branch_load(&store, selector).await?;
         assert_eq!(cached.checkpoint(), cold.checkpoint());
         assert!(cold_count > 3 && cold_objects);
+        // Session, branch, horizon and checkpoint rows; never the objects.
         assert!(
-            cached_count <= 3,
+            cached_count <= 4,
             "{history_items} history items: {cached_count} cached statements"
         );
         assert!(

@@ -418,9 +418,7 @@ fn abandonment_evidence_fold(
         .filter(|fold| fold.turn_abandonment && !fold.operations.is_empty());
     for obligation in obligations {
         let record = ledger
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == obligation.operation_id())
+            .operation(obligation.operation_id())
             .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
         if controls::same_turn_control(ledger, record, turn_id)
             && obligation.kind() == RecoveryObligationKind::Command
@@ -865,9 +863,7 @@ fn local_terminal_from_ledger(
     let mut operations = Vec::with_capacity(obligations.len());
     for obligation in obligations {
         let record = ledger
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == obligation.operation_id())
+            .operation(obligation.operation_id())
             .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
         if controls::same_turn_control(ledger, record, *turn_id)
             && obligation.kind() == RecoveryObligationKind::Command
@@ -1550,9 +1546,7 @@ fn abandonment_closure_state(
     let mut ledger = source_manifest.ledger().clone();
     for operation in &fold.settled_operations {
         let record = ledger
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == operation.0)
+            .operation(operation.0)
             .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
         if controls::same_turn_control(&ledger, record, fold.turn_id) {
             ledger = controls::settle_control(&ledger, record, checkpoint_id)?;
@@ -1684,9 +1678,7 @@ fn abandonment_closure_state(
         .chain(&fold.unrun_effect_operations)
     {
         let record = ledger
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == operation.0)
+            .operation(operation.0)
             .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
         if controls::same_turn_control(&ledger, record, fold.turn_id) {
             ledger = controls::settle_control(&ledger, record, checkpoint_id)?;
@@ -1713,9 +1705,7 @@ fn abandonment_closure_state(
                 .map_err(runtime_manifest_error)?;
         }
         let evidence = ledger
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == operation.0)
+            .operation(operation.0)
             .and_then(|record| match record.state() {
                 DurableOperationState::Completed(evidence)
                 | DurableOperationState::ProvenNotDispatched(evidence) => Some(evidence.clone()),
@@ -1734,9 +1724,7 @@ fn abandonment_closure_state(
     }
     if fold.root == AbandonedRoot::Prepared {
         let record = ledger
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == fold.root_operation.0)
+            .operation(fold.root_operation.0)
             .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
         ledger = finalize_not_started(&ledger, record, checkpoint_id, history.identity())?;
     }
@@ -1820,9 +1808,7 @@ fn abandonment_closure_state(
     }
     if fold.root == AbandonedRoot::PendingTerminal {
         let evidence = ledger
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == fold.root_operation.0)
+            .operation(fold.root_operation.0)
             .and_then(|record| match record.state() {
                 DurableOperationState::Completed(evidence) => Some(evidence),
                 _ => None,
@@ -1888,19 +1874,13 @@ fn terminal_closure_state(
             .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
     }
     for operation in &fold.operations {
-        if let Some(record) = ledger
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == operation.0)
+        if let Some(record) = ledger.operation(operation.0)
             && controls::same_turn_control(&ledger, record, fold.turn_id)
         {
             ledger = controls::settle_control(&ledger, record, checkpoint_id)?;
             continue;
         }
-        if let Some(record) = ledger
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == operation.0)
+        if let Some(record) = ledger.operation(operation.0)
             && matches!(record.kind(), DurableOperationKind::ProcessSession { .. })
             && uncertain_process_state(record.state())
         {
@@ -1931,9 +1911,7 @@ fn terminal_closure_state(
                 .map_err(runtime_manifest_error)?;
         }
         let evidence = ledger
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == operation.0)
+            .operation(operation.0)
             .and_then(|record| match record.state() {
                 DurableOperationState::Completed(evidence)
                 | DurableOperationState::ProvenNotDispatched(evidence) => Some(evidence),
@@ -2218,9 +2196,7 @@ fn close_as_unobserved(
     }
     let already_unknown = matches!(
         ledger
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == operation.0)
+            .operation(operation.0)
             .map(DurableOperationRecord::state),
         Some(DurableOperationState::OutcomeUnknown(_))
     );

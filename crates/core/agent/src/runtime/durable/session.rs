@@ -6,7 +6,7 @@ use crate::runtime::continuation::{
     RestoredContinuationFrame, checkpoint_bundle_error, decode_restored_continuation,
 };
 use crate::runtime::durable::bootstrap::{
-    prepare_durable_genesis, recover_or_create, release_store_lease,
+    self, prepare_durable_genesis, recover_or_create, release_store_lease,
 };
 use crate::runtime::durable::branch::{
     operation_run_id, validate_durable_builder, validate_session_operation_id,
@@ -51,43 +51,19 @@ impl DurableSessionRuntime {
         validate_session_operation_id(operation_id)?;
         let identities = DurableGenesisIdentities::new(operation_id)?;
         let session = SessionRef::new(identities.session_id, identities.branch_id);
-        let loaded = match store_call(
-            StorePhase::LoadBranch,
-            self.store_timeouts.operation,
-            self.store.load_branch(session),
-        )
-        .await
-        {
-            Ok(loaded) => loaded,
-            Err(error) if error.is(crate::SessionStoreError::NotFound) => return Ok(None),
-            Err(error) => return Err(error.into_agent()),
-        };
-        if loaded.session().initial_branch() != identities.branch_id {
-            return Err(AgentError::from_store(
-                crate::SessionStoreError::IdentityConflict,
-            ));
-        }
-        let stored = store_call(
-            StorePhase::LoadCheckpoint,
-            self.store_timeouts.operation,
-            self.store.load_checkpoint(identities.checkpoint_id),
-        )
-        .await
-        .map_err(StoreCallError::into_agent)?;
-        let request = CreateSession::new(
+        if bootstrap::recover_persisted_create(
+            Arc::clone(&self.store),
             session,
-            loaded.session().created_at(),
             identities.run_id,
             self.lease_seconds,
-            stored.bundle().clone(),
-        );
-        store_call(
-            StorePhase::RecoverCreate,
+            identities.checkpoint_id,
             self.store_timeouts.operation,
-            self.store.recover_create(request),
         )
-        .await
-        .map_err(StoreCallError::into_agent)?;
+        .await?
+        .is_none()
+        {
+            return Ok(None);
+        }
         Ok(Some(DurableSessionAddress::new(
             identities.session_id,
             identities.branch_id,
@@ -221,16 +197,17 @@ impl DurableSessionRuntime {
         // opening it is how it recovers (spec 01 §13.1). Everything else
         // outstanding still is.
         let abandonable = reopen_closes_working_turn(loaded.checkpoint().checkpoint());
+        let restored = decode_restored_continuation(loaded.checkpoint().checkpoint());
         if checkpoint_requires_closed_recovery(loaded.checkpoint().checkpoint())
             && !abandonable
-            && decode_restored_continuation(loaded.checkpoint().checkpoint()).is_err()
+            && restored.is_err()
         {
             return Ok(DurableRuntimeOpen::RecoveryRequired {
                 address,
                 retry_after_seconds: None,
             });
         }
-        if let Ok(frame) = decode_restored_continuation(loaded.checkpoint().checkpoint())
+        if let Ok(frame) = restored
             && matches!(
                 &frame,
                 RestoredContinuationFrame::EffectDecision(effect)

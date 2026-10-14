@@ -558,9 +558,7 @@ pub(super) mod tests {
             }
             let after = closed
                 .ledger
-                .operations()
-                .into_iter()
-                .find(|closed| closed.operation_id() == record.operation_id())
+                .operation(record.operation_id())
                 .ok_or("fold record")?;
             if matches!(record.state(), DurableOperationState::Finalized(_)) {
                 assert_eq!(after, record, "{row:?} rewrote a committed fold");

@@ -7,6 +7,7 @@
 mod fake_composition;
 use fake_composition::{CompositionCounters, FakeComposition};
 
+mod cleanup_precedence;
 #[path = "tests/driver_reliability.rs"]
 mod driver_reliability;
 mod jobs;

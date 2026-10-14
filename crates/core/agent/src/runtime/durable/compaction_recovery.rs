@@ -35,8 +35,8 @@ use crate::{
     AcquireBranch, AgentError, AgentErrorKind, CheckpointId, CommitCheckpoint,
     DurableOperationKind, DurableOperationRecord, DurableOperationState,
     DurableOperationTransition, FamilyArtifact, ReconstructiveComponent, RuntimeCheckpoint,
-    RuntimeComponentKind, RuntimeLifecycle, RuntimeOperationLedger, RuntimeWorkingRoot,
-    SessionStoreError, StoreAdmission,
+    RuntimeComponentKind, RuntimeLifecycle, RuntimeOperationLedger, RuntimeTopology,
+    RuntimeWorkingRoot, SessionStoreError, StoreAdmission,
 };
 use plakous_model::{
     CanonicalHistory, Clock, CompiledProviderConfiguration, LanguageModel,
@@ -141,13 +141,9 @@ impl DurableSessionRuntime {
                 ..
             } if *workflow_id == identity.workflow_id
         ) {
-            return Ok(DurableCompactionReceipt::RecoveryRequired(
-                DurableSessionAddress::new(
-                    topology.session_id,
-                    topology.branch_id,
-                    topology.checkpoint_id,
-                ),
-            ));
+            return Ok(DurableCompactionReceipt::RecoveryRequired(head_address(
+                topology,
+            )));
         }
         Ok(DurableCompactionReceipt::NotFound)
     }
@@ -187,11 +183,7 @@ impl DurableSessionRuntime {
                 }
                 if matches!(manifest.lifecycle(), RuntimeLifecycle::Working { .. }) {
                     return Ok(DurableCompactionRecoveryOutcome::RecoveryRequired(
-                        DurableSessionAddress::new(
-                            topology.session_id,
-                            topology.branch_id,
-                            topology.checkpoint_id,
-                        ),
+                        head_address(topology),
                     ));
                 }
                 return Err(AgentError::from_store(SessionStoreError::IdentityConflict));
@@ -292,9 +284,7 @@ impl DurableSessionRuntime {
                     .checkpoint
                     .manifest()
                     .ledger()
-                    .operations()
-                    .into_iter()
-                    .find(|record| record.operation_id() == compaction.0)
+                    .operation(compaction.0)
                     .map(DurableOperationRecord::state)
                     .ok_or_else(|| {
                         ambiguous_compaction_error(
@@ -323,9 +313,7 @@ impl DurableSessionRuntime {
                 .checkpoint
                 .manifest()
                 .ledger()
-                .operations()
-                .into_iter()
-                .find(|record| record.operation_id() == provider.0)
+                .operation(provider.0)
                 .cloned()
                 .ok_or_else(|| {
                     AgentError::new(
@@ -360,9 +348,7 @@ impl DurableSessionRuntime {
                         for operation in [compaction, provider] {
                             if !matches!(
                                 ledger
-                                    .operations()
-                                    .into_iter()
-                                    .find(|record| record.operation_id() == operation.0)
+                                    .operation(operation.0)
                                     .map(DurableOperationRecord::state),
                                 Some(DurableOperationState::Dispatched)
                             ) {
@@ -397,11 +383,7 @@ impl DurableSessionRuntime {
                     }
                     let topology = owner.checkpoint.manifest().topology();
                     return Ok(DurableCompactionRecoveryOutcome::RecoveryRequired(
-                        DurableSessionAddress::new(
-                            topology.session_id,
-                            topology.branch_id,
-                            topology.checkpoint_id,
-                        ),
+                        head_address(topology),
                     ));
                 };
                 let recovery_request =
@@ -421,11 +403,7 @@ impl DurableSessionRuntime {
                 else {
                     let topology = owner.checkpoint.manifest().topology();
                     return Ok(DurableCompactionRecoveryOutcome::RecoveryRequired(
-                        DurableSessionAddress::new(
-                            topology.session_id,
-                            topology.branch_id,
-                            topology.checkpoint_id,
-                        ),
+                        head_address(topology),
                     ));
                 };
                 result
@@ -442,11 +420,7 @@ impl DurableSessionRuntime {
                         let Ok(recovery_evidence) = compaction_operation_component(&result) else {
                             let topology = owner.checkpoint.manifest().topology();
                             return Ok(DurableCompactionRecoveryOutcome::RecoveryRequired(
-                                DurableSessionAddress::new(
-                                    topology.session_id,
-                                    topology.branch_id,
-                                    topology.checkpoint_id,
-                                ),
+                                head_address(topology),
                             ));
                         };
                         let error = AgentError::new(
@@ -471,11 +445,7 @@ impl DurableSessionRuntime {
                         let Ok(recovery_evidence) = compaction_operation_component(&result) else {
                             let topology = owner.checkpoint.manifest().topology();
                             return Ok(DurableCompactionRecoveryOutcome::RecoveryRequired(
-                                DurableSessionAddress::new(
-                                    topology.session_id,
-                                    topology.branch_id,
-                                    topology.checkpoint_id,
-                                ),
+                                head_address(topology),
                             ));
                         };
                         let error = AgentError::from_model((**error).clone());
@@ -494,11 +464,7 @@ impl DurableSessionRuntime {
                     _ => {
                         let topology = owner.checkpoint.manifest().topology();
                         return Ok(DurableCompactionRecoveryOutcome::RecoveryRequired(
-                            DurableSessionAddress::new(
-                                topology.session_id,
-                                topology.branch_id,
-                                topology.checkpoint_id,
-                            ),
+                            head_address(topology),
                         ));
                     }
                 }
@@ -512,11 +478,7 @@ impl DurableSessionRuntime {
             let Ok(evidence) = compaction_operation_component(&response) else {
                 let topology = owner.checkpoint.manifest().topology();
                 return Ok(DurableCompactionRecoveryOutcome::RecoveryRequired(
-                    DurableSessionAddress::new(
-                        topology.session_id,
-                        topology.branch_id,
-                        topology.checkpoint_id,
-                    ),
+                    head_address(topology),
                 ));
             };
             recovery_complete_compaction_call(&mut owner, identity, compaction, provider, evidence)
@@ -539,13 +501,11 @@ impl DurableSessionRuntime {
                 Ok(target) => Ok(DurableCompactionRecoveryOutcome::Compacted { source, target }),
                 Err(CompactionCompletionError::RecoveryRequired(error)) => {
                     let topology = owner.checkpoint.manifest().topology();
+                    // Open-time recovery has no telemetry context to carry
+                    // the cause; the head stays recovery-only either way.
                     let _ = error;
                     Ok(DurableCompactionRecoveryOutcome::RecoveryRequired(
-                        DurableSessionAddress::new(
-                            topology.session_id,
-                            topology.branch_id,
-                            topology.checkpoint_id,
-                        ),
+                        head_address(topology),
                     ))
                 }
                 Err(CompactionCompletionError::Semantic(error)) => {
@@ -661,11 +621,7 @@ impl DurableSessionRuntime {
             if !super::checkpoint_can_abandon_compaction(checkpoint, operation_id, source) {
                 let topology = checkpoint.manifest().topology();
                 return Ok(DurableCompactionRecoveryOutcome::RecoveryRequired(
-                    DurableSessionAddress::new(
-                        topology.session_id,
-                        topology.branch_id,
-                        topology.checkpoint_id,
-                    ),
+                    head_address(topology),
                 ));
             }
             let bundle = loaded.checkpoint().bundle().clone();
@@ -682,9 +638,7 @@ impl DurableSessionRuntime {
                     .checkpoint
                     .manifest()
                     .ledger()
-                    .operations()
-                    .into_iter()
-                    .find(|record| record.operation_id() == operation.0)
+                    .operation(operation.0)
                     .is_some_and(|record| {
                         matches!(record.state(), DurableOperationState::Completed(_))
                     })
@@ -715,11 +669,7 @@ impl DurableSessionRuntime {
                 _ => {
                     let topology = owner.checkpoint.manifest().topology();
                     Ok(DurableCompactionRecoveryOutcome::RecoveryRequired(
-                        DurableSessionAddress::new(
-                            topology.session_id,
-                            topology.branch_id,
-                            topology.checkpoint_id,
-                        ),
+                        head_address(topology),
                     ))
                 }
             }
@@ -833,9 +783,7 @@ pub(in crate::runtime) async fn close_abandoned_compaction(
     let mut ledger = manifest.ledger().clone();
     for operation in [compaction, provider] {
         let closed = match ledger
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == operation.0)
+            .operation(operation.0)
             .map(DurableOperationRecord::state)
         {
             Some(DurableOperationState::Prepared) => {
@@ -1088,9 +1036,7 @@ async fn recovery_complete_compaction_call(
     let current_states = [compaction, provider].map(|operation| {
         manifest
             .ledger()
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == operation.0)
+            .operation(operation.0)
             .map(|record| record.state().clone())
     });
     if current_checkpoint == identity.completed_checkpoint {
@@ -1166,14 +1112,10 @@ pub(in crate::runtime) async fn recovery_fail_compaction(
     let mut ledger = manifest.ledger().clone();
     if current_checkpoint == identity.failure_evidence_checkpoint {
         let compaction_state = ledger
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == compaction.0)
+            .operation(compaction.0)
             .map(DurableOperationRecord::state);
         let provider_state = ledger
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == provider.0)
+            .operation(provider.0)
             .map(DurableOperationRecord::state);
         if !matches!(
             compaction_state,
@@ -1199,9 +1141,7 @@ pub(in crate::runtime) async fn recovery_fail_compaction(
         for operation in [compaction, provider] {
             if !matches!(
                 ledger
-                    .operations()
-                    .into_iter()
-                    .find(|record| record.operation_id() == operation.0)
+                    .operation(operation.0)
                     .map(DurableOperationRecord::state),
                 Some(
                     DurableOperationState::Completed(_)
@@ -1260,9 +1200,7 @@ pub(in crate::runtime) async fn recovery_fail_compaction(
             evidence.clone()
         } else {
             ledger
-                .operations()
-                .into_iter()
-                .find(|record| record.operation_id() == operation.0)
+                .operation(operation.0)
                 .and_then(|record| match record.state() {
                     DurableOperationState::Completed(evidence)
                     | DurableOperationState::ProvenNotDispatched(evidence) => {
@@ -1377,4 +1315,13 @@ pub(in crate::runtime) async fn recovery_publish_compaction_success(
         request.source_branch,
         identity.success_checkpoint,
     ))
+}
+
+/// The exact address of the head this recovery inspected.
+fn head_address(topology: RuntimeTopology) -> DurableSessionAddress {
+    DurableSessionAddress::new(
+        topology.session_id,
+        topology.branch_id,
+        topology.checkpoint_id,
+    )
 }

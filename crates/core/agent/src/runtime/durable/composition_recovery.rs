@@ -338,9 +338,7 @@ pub(in crate::runtime) fn code_cell_abandonment_fold(
     let mut root_recovery_required = root_finalized;
     for obligation in obligations {
         let record = ledger
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == obligation.operation_id())
+            .operation(obligation.operation_id())
             .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
         if operation_turn_id(record) != Some(*turn_id) {
             if queued_root(checkpoint, record, *turn_id)
@@ -590,9 +588,7 @@ pub(in crate::runtime) fn code_cell_abandonment_fold(
             .or_else(|| children.first().map(|(_, parent, _)| parent))
             .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
         let record = ledger
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == *parent)
+            .operation(*parent)
             .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
         let DurableOperationKind::CompositionEvaluation {
             turn_id: evaluation_turn,
@@ -823,9 +819,7 @@ pub(in crate::runtime) fn code_cell_abandonment_state(
     let mut ledger = manifest.ledger().clone();
     for (operation_id, disposition) in fold.operations {
         let record = ledger
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == operation_id.0)
+            .operation(operation_id.0)
             .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
         let evidence = DurableCodeCellAbandonmentEvidence {
             version: 1,
@@ -935,9 +929,7 @@ fn validate_code_cell_evidence_checkpoint(
         }
         let record = manifest
             .ledger()
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == obligation.operation_id())
+            .operation(obligation.operation_id())
             .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
         let decoded = match record.state() {
             DurableOperationState::Completed(component)

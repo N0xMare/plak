@@ -103,9 +103,7 @@ pub(in crate::runtime) fn workflow_compaction_closure(
     }
     let state = |operation: u64| {
         ledger
-            .operations()
-            .into_iter()
-            .find(|record| record.operation_id() == operation)
+            .operation(operation)
             .map(|record| record.state().clone())
             .ok_or_else(|| integrity("a compaction record disappeared"))
     };

@@ -25,6 +25,7 @@ use crate::{
 };
 use plakous_model::{BranchId, CanonicalHistory, RunId, SessionId};
 use std::fmt;
+use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::time::Duration;
 impl Default for StoreTimeouts {
@@ -123,9 +124,7 @@ pub(super) fn checkpoint_has_code_cell_obligation(checkpoint: &RuntimeCheckpoint
             checkpoint
                 .manifest()
                 .ledger()
-                .operations()
-                .into_iter()
-                .find(|record| record.operation_id() == obligation.operation_id())
+                .operation(obligation.operation_id())
                 .is_some_and(|record| {
                     matches!(
                         record.kind(),
@@ -185,13 +184,10 @@ impl DurableRuntimeBootstrap {
         {
             Ok(bootstrap) => Ok(bootstrap),
             Err(error) => {
-                store_call(
-                    StorePhase::Release,
-                    store_timeouts.cleanup,
-                    release_store.release(release_lease),
-                )
-                .await
-                .map_err(StoreCallError::into_agent)?;
+                // The refusal is the outcome. A lease this open could not
+                // release expires on its own and must not replace the cause.
+                let _unreleased =
+                    release_store_lease(release_store, release_lease, store_timeouts.cleanup).await;
                 Err(error)
             }
         }
@@ -353,7 +349,7 @@ pub(super) async fn recover_or_create(
         Ok(receipt) => return Ok(receipt),
         Err(error) if error.is(SessionStoreError::NotFound) => {}
         Err(error) if error.is(SessionStoreError::IdentityConflict) => {
-            return recover_persisted_create(store, &request, timeout).await;
+            return recover_request(store, &request, timeout).await;
         }
         Err(error) => return Err(error.into_agent()),
     }
@@ -369,7 +365,7 @@ pub(super) async fn recover_or_create(
             {
                 Ok(receipt) => Ok(receipt),
                 Err(recovery) if recovery.is(SessionStoreError::IdentityConflict) => {
-                    recover_persisted_create(store, &request, timeout).await
+                    recover_request(store, &request, timeout).await
                 }
                 Err(recovery) if recovery.is(SessionStoreError::NotFound) => {
                     Err(error.into_ambiguous_agent())
@@ -378,41 +374,61 @@ pub(super) async fn recover_or_create(
             }
         }
         Err(error) if error.is(SessionStoreError::IdentityConflict) => {
-            recover_persisted_create(store, &request, timeout).await
+            recover_request(store, &request, timeout).await
         }
         Err(error) => Err(error.into_agent()),
     }
 }
 
-async fn recover_persisted_create(
+async fn recover_request(
     store: Arc<dyn SessionStore>,
     request: &CreateSession,
     timeout: Duration,
 ) -> Result<crate::CreateReceipt, AgentError> {
-    let loaded = store_call(
-        StorePhase::LoadBranch,
+    recover_persisted_create(
+        store,
+        request.session(),
+        request.owner(),
+        request.lease_seconds(),
+        request.initial().checkpoint_id(),
         timeout,
-        store.load_branch(request.session()),
     )
-    .await
-    .map_err(StoreCallError::into_agent)?;
-    if loaded.session().initial_branch() != request.session().branch_id() {
+    .await?
+    .ok_or_else(|| AgentError::from_store(SessionStoreError::NotFound))
+}
+
+/// Authenticates the accepted create of `session` from its persisted creation
+/// time and genesis checkpoint. `None` means the session does not exist.
+pub(super) async fn recover_persisted_create(
+    store: Arc<dyn SessionStore>,
+    session: SessionRef,
+    owner: RunId,
+    lease_seconds: NonZeroU64,
+    genesis: CheckpointId,
+    timeout: Duration,
+) -> Result<Option<crate::CreateReceipt>, AgentError> {
+    let loaded = match store_call(StorePhase::LoadBranch, timeout, store.load_branch(session)).await
+    {
+        Ok(loaded) => loaded,
+        Err(error) if error.is(SessionStoreError::NotFound) => return Ok(None),
+        Err(error) => return Err(error.into_agent()),
+    };
+    if loaded.session().initial_branch() != session.branch_id() {
         return Err(AgentError::from_store(SessionStoreError::IdentityConflict));
     }
     let stored = store_call(
         StorePhase::LoadCheckpoint,
         timeout,
-        store.load_checkpoint(request.initial().checkpoint_id()),
+        store.load_checkpoint(genesis),
     )
     .await
     .map_err(StoreCallError::into_agent)?;
-    let bundle = stored.bundle().clone();
     let original = CreateSession::new(
-        request.session(),
+        session,
         loaded.session().created_at(),
-        request.owner(),
-        request.lease_seconds(),
-        bundle,
+        owner,
+        lease_seconds,
+        stored.bundle().clone(),
     );
     store_call(
         StorePhase::RecoverCreate,
@@ -420,6 +436,7 @@ async fn recover_persisted_create(
         store.recover_create(original),
     )
     .await
+    .map(Some)
     .map_err(StoreCallError::into_agent)
 }
 

@@ -183,7 +183,9 @@ It closes admission, fires cancellation, stops heartbeat renewal, stops promoted
 process groups concurrently with a 200 ms TERM grace, and records newly available
 job terminals on a Quiescent head before releasing the exact lease. That
 manifest-only exit publication holds the lease gate after fencing the actor;
-a Working head is left for recovery. It does not join the driver, save a shutdown receipt, or
+a Working head is left for recovery. Job terminals are published per agent,
+one settlement checkpoint on each agent's own branch; closing a tree publishes
+one per child, not a batched multi-agent commit. It does not join the driver, save a shutdown receipt, or
 flush the store. The exiting host MUST enforce a one-second process bound.
 Already dispatched work can overlap a new owner for the remainder of that
 bound; its late commits are fenced out. This capability is not ordinary
@@ -253,7 +255,11 @@ needed for dedupe and recovery.
 This applies to idle rejected commands as well as turn terminals; a long idle
 rejection sequence cannot permanently fill the 4096-command actor ledger.
 A ledger full during owned work remains recovery-requiring; reopen settles that
-work before quiescent retention can free capacity.
+work before quiescent retention can free capacity. Nothing reserves headroom
+for one turn's rounds and fan-out: retention runs only at quiescence, so a very
+long turn (many rounds of parallel tools or Code Cell children) that starts
+near the high-water mark can reach the 4096-record limit and end
+recovery-requiring. This is an accepted limit, not a configuration error.
 A duplicate preserves the original rejection; consumers classify its rejection
 before its disposition. Only `CommandAck::is_accepted()` denotes admission.
 
@@ -925,14 +931,20 @@ rule. The owner revives once when a renewal reports expiry, from the heartbeat
 or from start admission, which does so under the lease gate it already holds
 because a suspended runtime's timers can fire after the first start. A refused
 revival ends the owner's authority: the session was taken over, and the other
-owner's open closes whatever this one left. Start admission that refuses
+owner's open closes whatever this one left. A revival the store could not
+answer (busy, unavailable or past its deadline) keeps that error and is not
+reported as a takeover. Start admission that refuses
 because authority was lost or expired is a definite `Session` failure, because
 nothing was started; only a loss after dispatch remains `OutcomeUnknown`.
 
 Lease heartbeats schedule renewal starts one-third of the lease duration apart.
 A delayed acknowledgement does not add another full interval before renewal:
 when the interval has elapsed, the next renewal starts immediately, without
-replaying missed ticks. This does not extend an expired lease or bypass fencing;
+replaying missed ticks. A heartbeat renewal that fails transiently (the store
+busy or unavailable, or the store call or lease gate past its deadline) is
+retried a quarter interval later while the store clock still reads before the
+held lease's expiry; only a refusal, an expired lease or a failed revival ends
+authority. This does not extend an expired lease or bypass fencing;
 renewal and checkpoint publication still require live authority. Each durable
 checkpoint publication also renews under the same lease gate immediately before
 constructing its commit request, after candidate encoding. The commit and any
@@ -1132,6 +1144,11 @@ stops while settlement, terminal publication and recovery still have headroom:
   can start once that headroom is gone.
 - `Recovery`: open-time abandonment, local terminal, effect, composition and
   compaction recovery, and their evidence.
+
+The reserve is store-wide. No session or child holds a private share of it, so
+recovering sessions draw on the same reserve and recovery can still be refused
+when it is exhausted; the remedies are a raised limit, pruning or deleting
+other sessions, or deleting a parent with `--abandon-children` (spec 02).
 
 A refusal is `SessionStoreError::Capacity` carrying the bound, the attempted
 usage, the class threshold, the configured limit and the class. An ordinary
