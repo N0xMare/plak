@@ -593,7 +593,7 @@ mod tests {
             )
             .unwrap();
         assert!(listed.agents.iter().any(|agent| agent["agent_id"] == id));
-        assert!(tree.pending_result_mail("root").is_empty());
+        assert_eq!(tree.pending_result_mail("root"), [] as [MailRecord; 0]);
         let attempt = tree.attempt(&id).unwrap().attempt_id.clone();
         tree.recover_host_decision(
             &id,
@@ -611,7 +611,7 @@ mod tests {
             tree.attempt(&id).unwrap().output_json.as_deref(),
             Some(r#"{"ok":true}"#)
         );
-        assert!(tree.pending_result_mail("root").is_empty());
+        assert_eq!(tree.pending_result_mail("root"), [] as [MailRecord; 0]);
     }
 
     #[test]
@@ -645,7 +645,7 @@ mod tests {
             reopened.recovery_need(&child).unwrap(),
             RecoveryNeed::NotRequired
         );
-        assert!(reopened.session_recovery_targets().is_empty());
+        assert_eq!(reopened.session_recovery_targets(), [] as [String; 0]);
         let recovered = reopened
             .recover_host_decision(
                 &child,
@@ -791,7 +791,7 @@ mod tests {
                 .unwrap();
             assert_eq!(tree.node(&id).unwrap().status, NodeStatus::RecoveryRequired);
             assert_eq!(tree.attempt(&id).unwrap().status, AttemptStatus::Closed);
-            assert!(tree.pending_result_mail("root").is_empty());
+            assert_eq!(tree.pending_result_mail("root"), [] as [MailRecord; 0]);
         }
         tree.recover_host_decision(
             &id,
@@ -804,7 +804,7 @@ mod tests {
         tree.settle_for_test();
         assert_eq!(tree.node(&id).unwrap().status, NodeStatus::Closed);
         assert_eq!(tree.attempt(&id).unwrap().ended_at, ended_at);
-        assert!(tree.pending_result_mail("root").is_empty());
+        assert_eq!(tree.pending_result_mail("root"), [] as [MailRecord; 0]);
     }
 
     #[test]
@@ -919,7 +919,7 @@ mod tests {
             )
             .unwrap();
         reopened.settle_for_test();
-        assert!(reopened.pending_result_mail("root").is_empty());
+        assert_eq!(reopened.pending_result_mail("root"), [] as [MailRecord; 0]);
     }
 
     fn scoped(agent_id: &str) -> AttemptScopedRequest {
@@ -978,7 +978,7 @@ mod tests {
         assert_eq!(receipt.failure_kind.as_deref(), Some(TURN_ABANDONED));
         assert!(tree.attempt(&id).unwrap().turn_was_abandoned());
         assert_eq!(tree.recovery_need(&id).unwrap(), RecoveryNeed::NotRequired);
-        assert!(tree.session_recovery_targets().is_empty());
+        assert_eq!(tree.session_recovery_targets(), [] as [String; 0]);
 
         let again = tree
             .recover_host_decision(
@@ -1116,7 +1116,7 @@ mod tests {
             tree.recovery_need(&id).unwrap(),
             RecoveryNeed::Workspace { .. }
         ));
-        assert!(tree.session_recovery_targets().is_empty());
+        assert_eq!(tree.session_recovery_targets(), [] as [String; 0]);
         let again = tree
             .recover_host_decision(
                 &id,
@@ -1234,7 +1234,7 @@ mod tests {
             tree.recovery_need(&id).unwrap(),
             RecoveryNeed::Workspace { .. }
         ));
-        assert!(tree.session_recovery_targets().is_empty());
+        assert_eq!(tree.session_recovery_targets(), [] as [String; 0]);
     }
 
     /// A terminal recovery refusal recorded for the current attempt lets
@@ -1254,7 +1254,7 @@ mod tests {
             "recovery_session_unavailable",
             "the child session was created by an incompatible build",
         );
-        assert!(tree.session_recovery_targets().is_empty());
+        assert_eq!(tree.session_recovery_targets(), [] as [String; 0]);
         let closed = tree.close_agent("root", &scoped(&id), None).unwrap();
         assert_eq!(closed, vec![(id.clone(), NodeStatus::Closed)]);
         let attempt = tree.attempt(&id).unwrap();

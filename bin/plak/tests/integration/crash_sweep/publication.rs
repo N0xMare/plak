@@ -85,13 +85,13 @@ mod tests {
             ["original"]
         );
         for wrong in ["firstsecond", "first\n\n\n\nsecond\n\n"] {
-            assert!(
+            assert_eq!(
                 completed_publications(
                     &answers,
                     &submissions,
                     &[json!({"kind":"assistant","text":wrong})],
-                )
-                .is_empty()
+                ),
+                [] as [String; 0]
             );
         }
         Ok(())
@@ -129,11 +129,18 @@ mod tests {
         let answers = vec![("original".into(), "final text".into())];
         let submission = json!({"command":"original","kind":"root_start","state":"accepted"});
         let row = json!({"kind":"assistant","text":"final text"});
-        assert!(
-            completed_publications(&answers, std::slice::from_ref(&submission), &[]).is_empty()
+        assert_eq!(
+            completed_publications(&answers, std::slice::from_ref(&submission), &[]),
+            [] as [String; 0]
         );
-        assert!(completed_publications(&answers, &[], std::slice::from_ref(&row)).is_empty());
-        assert!(completed_publications(&answers, &[submission], &[row.clone(), row]).is_empty());
+        assert_eq!(
+            completed_publications(&answers, &[], std::slice::from_ref(&row)),
+            [] as [String; 0]
+        );
+        assert_eq!(
+            completed_publications(&answers, &[submission], &[row.clone(), row]),
+            [] as [String; 0]
+        );
     }
 
     #[test]

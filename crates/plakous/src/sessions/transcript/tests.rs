@@ -384,7 +384,10 @@ fn continuation_owner_comes_from_the_same_snapshot_not_cell_names() {
     assert_eq!(tail.composition_owner(id(1)), Some(id(1)));
     assert_eq!(tail.composition_owner(call_id), Some(id(1)));
     assert_eq!(tail.composition_owner(id(99)), None);
-    assert!(history_composition_calls(&source.ledger, 0).is_empty());
+    assert_eq!(
+        history_composition_calls(&source.ledger, 0),
+        [] as [(CallId, CallId); 0]
+    );
     assert_eq!(
         history_composition_calls(&source.ledger, 1),
         vec![(call_id, id(1))]
@@ -411,7 +414,7 @@ fn transcript_lineage_and_marker_identity_are_inside_the_item_byte_bound() {
     assert!(bounded.truncated());
     assert_eq!(bounded.items().len(), 1);
     assert_eq!(bounded.items()[0].retained_bytes(), newest_bytes);
-    assert!(source.tail(0, 0).items().is_empty());
+    assert_eq!(source.tail(0, 0).items(), []);
 }
 
 #[test]

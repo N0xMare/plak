@@ -1441,7 +1441,6 @@ where
     /// shares the policy's physical budget; a hosted effect or a second 401
     /// ends the attempt as-is. Session workflows retry only exact transport
     /// evidence that the request was not fully sent, never an HTTP response.
-    #[must_use]
     pub fn execute(&self, attempt: ResponsesAttempt) -> ResponsesAttemptFuture {
         if attempt.binding.operation().execution() != self.data.execution
             || attempt.binding.operation().ledger_policy() != self.data.ledger_policy
@@ -2303,6 +2302,10 @@ fn admit_attempt(attempt: &ResponsesAttempt) -> Result<(), FamilyCoreError> {
     Ok(())
 }
 
+#[allow(
+    clippy::result_large_err,
+    reason = "the attempt error is returned once per attempt from a future that already holds it"
+)]
 async fn execute_admitted<D, G>(
     client: Client,
     dialect: Arc<D>,
@@ -2618,6 +2621,10 @@ where
     result
 }
 
+#[allow(
+    clippy::result_large_err,
+    reason = "the attempt error is returned once per attempt from a future that already holds it"
+)]
 async fn decode_body(
     body_slot: &mut Option<ResponseBody>,
     http_cancellation: &HttpCancellationToken,

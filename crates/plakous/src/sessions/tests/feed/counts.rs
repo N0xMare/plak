@@ -308,11 +308,9 @@ async fn committed_call_batch_authenticates_one_exact_head_for_many_ids() -> Tes
     assert_eq!(store.branches.load(Ordering::SeqCst), 1);
     assert_eq!(store.checkpoints.load(Ordering::SeqCst), 0);
     store.reset();
-    assert!(
-        sessions
-            .committed_calls(locator, Vec::new())
-            .await?
-            .is_empty()
+    assert_eq!(
+        sessions.committed_calls(locator, Vec::new()).await?,
+        [] as [(CallId, bool); 0]
     );
     assert_eq!(store.branches.load(Ordering::SeqCst), 1);
     session

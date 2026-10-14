@@ -737,7 +737,7 @@ mod tests {
         );
         assert_eq!(menu(Some("orchestrate")), ["nested"]);
         assert!(menu(Some("review")).is_empty(), "a leaf spawns nothing");
-        assert!(menu(Some("unknown")).is_empty());
+        assert_eq!(menu(Some("unknown")), [] as [String; 0]);
         assert!(snapshot.menu_contains(Some("orchestrate"), &name("nested")));
         assert!(!snapshot.menu_contains(None, &name("nested")));
         let cards = snapshot.template_cards(Some("orchestrate"));

@@ -134,10 +134,10 @@ fn activity_agents_unavailable_stays_in_the_body_and_can_switch_or_close() {
         render_to_string(&mut app, 80, 24)
             .contains("Sub-agents are unavailable: no topology hub is attached")
     );
-    assert!(app.pane.blocks.is_empty());
+    assert_eq!(app.pane.blocks, [] as [crate::tui::blocks::ScrollBlock; 0]);
     assert_eq!(app.semantic_snapshot().owner, "canvas-loading");
     app.handle_paste("must not reach the composer");
-    assert!(app.input.is_empty());
+    assert_eq!(app.input, "");
     app.handle_key(key(KeyCode::Tab));
     assert_eq!(app.activity_tab, Some(ActivityTab::Processes));
     app.handle_key(key(KeyCode::BackTab));
@@ -514,7 +514,10 @@ fn a_too_small_activity_frame_drops_process_hits() {
     let stale = app.process_hits[0].1;
     let mut terminal = Terminal::new(TestBackend::new(40, 5)).unwrap();
     terminal.draw(|frame| app.draw(frame)).unwrap();
-    assert!(app.process_hits.is_empty());
+    assert_eq!(
+        app.process_hits,
+        [] as [(String, ratatui::prelude::Rect); 0]
+    );
     assert!(app.activity_close_hit.is_none());
     assert!(app.activity_agents_hit.is_none());
     assert!(app.tree_popup.is_none());

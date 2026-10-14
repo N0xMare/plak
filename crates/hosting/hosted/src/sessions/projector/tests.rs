@@ -776,7 +776,7 @@ fn terminal_usage_is_fact_derived_and_identical_on_rebuild_not_replay() {
     assert_eq!(live.terminal_usages[0].committed_at_ms, 2_000);
     assert_eq!(project_all(&feed).terminal_usages, live.terminal_usages);
     let replay = project(&live.views, &feed.intents, &feed.records, &feed.reads).unwrap();
-    assert!(replay.terminal_usages.is_empty());
+    assert_eq!(replay.terminal_usages, [] as [ProjectedTurnUsage; 0]);
 }
 
 /// Applies `records` page by page, each page replaying up to `replay`

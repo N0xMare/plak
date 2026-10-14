@@ -190,7 +190,7 @@ fn bundled_listing_admits_luna_low_and_medium() -> TestResult {
     assert_eq!(luna.status(), &OpenAiApiModelStatus::Usable);
     assert!(luna.efforts().contains(&ReasoningEffort::Low));
     assert!(luna.efforts().contains(&ReasoningEffort::Medium));
-    assert!(!bundled_table()?.revision.is_empty());
+    assert_ne!(bundled_table()?.revision, "");
     Ok(())
 }
 

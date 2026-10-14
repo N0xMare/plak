@@ -419,7 +419,10 @@ mod tests {
                 .unwrap(),
             HostStep::Continue
         ));
-        assert!(submissions(&host).is_empty());
+        assert_eq!(
+            submissions(&host),
+            [] as [crate::sessions::projector::Submission; 0]
+        );
         host.config.auto_continue = true;
         host.config.session.child_wake_suppressed = true;
         assert!(matches!(
@@ -427,7 +430,10 @@ mod tests {
                 .unwrap(),
             HostStep::Continue
         ));
-        assert!(submissions(&host).is_empty());
+        assert_eq!(
+            submissions(&host),
+            [] as [crate::sessions::projector::Submission; 0]
+        );
         host.config.session.child_wake_suppressed = false;
         let mut second = job.clone();
         second.number = 4;
@@ -1119,11 +1125,11 @@ mod tests {
                 let (text, item, echoed) = take_prompt(host.next_prompt(None).unwrap());
                 host.run_prompt(text, item, echoed, None).unwrap();
                 // The committed root turn retired its await receipt.
-                assert!(
+                assert_eq!(
                     runtime
                         .read(|tree| tree.retained_wait_receipts(&tree.root_agent_id))
-                        .unwrap()
-                        .is_empty()
+                        .unwrap(),
+                    [] as [String; 0]
                 );
                 let live = observed
                     .try_iter()
@@ -1352,7 +1358,10 @@ mod tests {
                     .execute_batch("DROP TRIGGER cut_wait_publication")
                     .unwrap();
                 let before = runtime.read(Clone::clone).unwrap();
-                assert!(before.pending_mail("root").is_empty());
+                assert_eq!(
+                    before.pending_mail("root"),
+                    [] as [plakous_recursive_subagents::tree::MailRecord; 0]
+                );
                 assert_eq!(before.retained_wait_receipts("root").len(), 1);
                 host.config
                     .session
@@ -1925,7 +1934,7 @@ mod tests {
             assert_eq!(intents.len(), 1);
             assert_eq!(root_batch(host, &intents[0]).unwrap().message_ids.len(), 2);
             assert!(accepted(host, &intents[0]));
-            assert!(host.config.session.prompt_history.is_empty());
+            assert_eq!(host.config.session.prompt_history, [] as [String; 0]);
             assert!(
                 !host
                     .config
@@ -2114,7 +2123,10 @@ mod tests {
             reopen_at_cut(host, |reopened| {
                 assert_eq!(submissions(reopened).len(), 1);
                 assert!(accepted(reopened, &submissions(reopened)[0]));
-                assert!(reopened.config.session.pending_queue.is_empty());
+                assert_eq!(
+                    reopened.config.session.pending_queue,
+                    [] as [crate::sessions::queue::QueueItem; 0]
+                );
                 assert!(
                     runtime
                         .read(|tree| tree.pending_mail("root").is_empty())
@@ -2149,8 +2161,14 @@ mod tests {
                         .submission(&command_id)
                         .is_none()
                 );
-                assert!(submissions(reopened).is_empty());
-                assert!(reopened.config.session.pending_queue.is_empty());
+                assert_eq!(
+                    submissions(reopened),
+                    [] as [crate::sessions::projector::Submission; 0]
+                );
+                assert_eq!(
+                    reopened.config.session.pending_queue,
+                    [] as [crate::sessions::queue::QueueItem; 0]
+                );
                 assert_eq!(
                     runtime
                         .read(|tree| tree.pending_mail("root").len())
@@ -2190,8 +2208,14 @@ mod tests {
                 take_prompt(host.child_wake_prompt(now + QUIET_WINDOW).unwrap());
             host.child_wake.prepared_context = None;
             host.run_prompt(text, item, echoed, None).unwrap();
-            assert!(submissions(host).is_empty());
-            assert!(host.config.session.pending_queue.is_empty());
+            assert_eq!(
+                submissions(host),
+                [] as [crate::sessions::projector::Submission; 0]
+            );
+            assert_eq!(
+                host.config.session.pending_queue,
+                [] as [crate::sessions::queue::QueueItem; 0]
+            );
             assert!(!host.recovery_blocked);
             assert_eq!(
                 host.config.session.queue_drain_state,
@@ -2240,14 +2264,17 @@ mod tests {
                 HostStep::Continue
             ));
             assert!(host.config.session.child_wake_suppressed);
-            assert!(host.child_wake.message_ids.is_empty());
-            assert!(host.config.session.pending_queue.is_empty());
-            assert!(
+            assert_eq!(host.child_wake.message_ids, [] as [String; 0]);
+            assert_eq!(
+                host.config.session.pending_queue,
+                [] as [crate::sessions::queue::QueueItem; 0]
+            );
+            assert_eq!(
                 store
                     .load_intents(&host.config.session.id)
                     .unwrap()
-                    .submissions
-                    .is_empty()
+                    .submissions,
+                [] as [crate::sessions::projector::Submission; 0]
             );
             assert_eq!(
                 runtime
@@ -2297,7 +2324,10 @@ mod tests {
                 host.run_prompt(text, item, echoed, None).unwrap();
 
                 assert!(host.config.session.pending_queue.is_empty(), "{kind:?}");
-                assert!(submissions(host).is_empty());
+                assert_eq!(
+                    submissions(host),
+                    [] as [crate::sessions::projector::Submission; 0]
+                );
                 assert!(host.config.session.child_wake_suppressed);
                 assert!(!host.recovery_blocked);
                 assert_eq!(
@@ -2305,14 +2335,17 @@ mod tests {
                     QueueDrainState::LiveAutoDrain
                 );
                 let saved = host.config.store.load(&host.config.session.id).unwrap();
-                assert!(saved.pending_queue.is_empty());
-                assert!(
+                assert_eq!(
+                    saved.pending_queue,
+                    [] as [crate::sessions::queue::QueueItem; 0]
+                );
+                assert_eq!(
                     host.config
                         .store
                         .load_intents(&saved.id)
                         .unwrap()
-                        .submissions
-                        .is_empty()
+                        .submissions,
+                    [] as [crate::sessions::projector::Submission; 0]
                 );
                 assert_eq!(
                     runtime
@@ -2357,8 +2390,14 @@ mod tests {
                 host.child_wake_prompt(now + QUIET_WINDOW).unwrap(),
                 HostStep::Continue
             ));
-            assert!(submissions(host).is_empty());
-            assert!(host.config.session.pending_queue.is_empty());
+            assert_eq!(
+                submissions(host),
+                [] as [crate::sessions::projector::Submission; 0]
+            );
+            assert_eq!(
+                host.config.session.pending_queue,
+                [] as [crate::sessions::queue::QueueItem; 0]
+            );
             assert!(host.config.session.child_wake_suppressed);
             let events: Vec<_> = observed.try_iter().collect();
             assert!(
@@ -2442,7 +2481,10 @@ mod tests {
         store.save(&mut host.config.session).unwrap();
         actions.send(UserAction::Quit).unwrap();
         assert!(matches!(host.next_prompt(None).unwrap(), HostStep::Quit));
-        assert!(host.config.session.pending_queue.is_empty());
+        assert_eq!(
+            host.config.session.pending_queue,
+            [] as [crate::sessions::queue::QueueItem; 0]
+        );
         assert_eq!(
             host.config.session.queue_drain_state,
             QueueDrainState::RestoredPaused
@@ -2615,7 +2657,10 @@ mod tests {
                 ));
             }
             assert!(!host.config.auto_continue);
-            assert!(submissions(host).is_empty());
+            assert_eq!(
+                submissions(host),
+                [] as [crate::sessions::projector::Submission; 0]
+            );
             host.config.interactive = true;
             host.child_wake_prompt(now).unwrap();
             assert!(host.config.auto_continue);
@@ -3053,7 +3098,10 @@ mod tests {
                         if coalesce { "p2" } else { "" }
                     );
                     host.run_prompt(text, item, echoed, None).unwrap();
-                    assert!(host.opened.agent().unwrap().jobs().is_empty());
+                    assert_eq!(
+                        host.opened.agent().unwrap().jobs(),
+                        [] as [plakous_tools::JobView; 0]
+                    );
                     assert!(
                         runtime
                             .read(|tree| tree.pending_mail("root").is_empty())
@@ -3072,7 +3120,10 @@ mod tests {
                     host.run_prompt(item.text.clone(), Some(item), false, None)
                         .unwrap();
                     assert!(root_batch(host, submissions(host).last().unwrap()).is_none());
-                    assert!(host.opened.agent().unwrap().jobs().is_empty());
+                    assert_eq!(
+                        host.opened.agent().unwrap().jobs(),
+                        [] as [plakous_tools::JobView; 0]
+                    );
                 },
             );
         }

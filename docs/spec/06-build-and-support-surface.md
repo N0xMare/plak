@@ -30,8 +30,8 @@ API execution surface.
 
 ## 2. Platforms
 
-The workspace is Rust edition 2024. MSRV is 1.97.1 and `rust-toolchain.toml`
-pins channel `1.97.1` with the `minimal` profile plus `clippy` and `rustfmt`, so
+The workspace is Rust edition 2024. MSRV is 1.99.0 and `rust-toolchain.toml`
+pins channel `1.99.0` with the `minimal` profile plus `clippy` and `rustfmt`, so
 the ordinary development build is the MSRV build and there is no separate MSRV
 job. `clippy.toml` repeats the MSRV so lint suggestions stay inside it.
 `.cargo/config.toml` sets `resolver.incompatible-rust-versions = "fallback"`.
@@ -712,7 +712,7 @@ The answer depends only on whether the selection reaches the Python evaluator.
 | --- | --- | --- |
 | JavaScript through the worker | `composition`, with `sessions-sqlite` | **none** |
 | Anything reaching the Python evaluator | `composition-python`, `native-subscriptions` | the two `tungstenite` fork redirects |
-| Building the Monty worker package itself | — | additionally `monty` and `monty-typeshed` |
+| Building the Monty worker package itself | — | additionally `monty-typeshed` |
 
 The `tungstenite` redirect is reached only through `plakous-py-eval` ->
 `monty-pool` -> `tokio-tungstenite`, under both the `https` and `ssh` spellings
@@ -780,25 +780,14 @@ Retain a downstream lockfile and fetch its dependency closure before using
 complete example, including utility dependencies. No registry publication or
 independent binary distribution is established by these examples.
 
-The root `[patch.crates-io]` selects the reviewed `vendor/monty` 1.1.0
-interpreter snapshot. Its only code change reverts one line of upstream commit
-`505f1044`: `drop_all` in `src/modules/json/string_cache.rs` iterates with
-`inner.entries.iter_mut()`, because `&mut Box<[T; N]>` is not `IntoIterator`
-before Rust 1.99 and upstream's declared `rust-version = "1.96"` does not hold
-on the pinned 1.97.1. Only `src/`, the README the crate documentation
-includes, the license and a manifest without test targets or
-dev-dependencies are vendored. `vendor/monty/PLAK-PATCH.md` records the
-archive digest and the drop condition: a workspace toolchain of 1.99 or later,
-or a reviewed upstream release that restores `iter_mut()`.
-
-The root `[patch.crates-io]` also selects the reviewed `vendor/monty-typeshed`
+The root `[patch.crates-io]` selects the reviewed `vendor/monty-typeshed`
 1.1.0 dependency snapshot. Only its build script changes: ZIP timestamps
 are fixed to 1980-01-01 and entries are sorted by name. The Python stubs and
 interpreter remain unchanged. The snapshot's provenance is recorded in
 `vendor/monty-typeshed/PLAK-PATCH.md`; it is excluded from workspace membership
 and compiled by Cargo as a dependency. This eliminates per-build archive
 extraction and patch application while preserving deterministic type-checker
-assets. Both snapshots are excluded from workspace membership. The shared lock
+assets. The shared lock
 pins `salsa`, `salsa-macros` and `salsa-macro-rules` at 0.28.2 and the Ruff/ty
 crates at 0.0.14, the versions upstream Monty 1.1.0 locks: `salsa` 0.28.5 does
 not compile with `ruff_python_ast` 0.0.14. `just deny` audits the unified
@@ -957,12 +946,12 @@ sources.
 
 ### 7.3 Dependency overrides and the Code Mode protocol
 
-Two `[patch]` tables holding four redirects steer dependencies that would
+Two `[patch]` tables holding three redirects steer dependencies that would
 otherwise resolve outside the reviewed set:
 
 | Stanza | Redirect |
 | --- | --- |
-| `[patch.crates-io]` | `tungstenite` → the `openai-oss-forks` fork at an exact revision; `monty` → the reviewed local toolchain fix; `monty-typeshed` → the reviewed local reproducibility fix |
+| `[patch.crates-io]` | `tungstenite` → the `openai-oss-forks` fork at an exact revision; `monty-typeshed` → the reviewed local reproducibility fix |
 | `[patch."ssh://git@github.com/openai-oss-forks/tungstenite-rs.git"]` | the same fork at the same revision, so an SSH-spelled edge cannot resolve elsewhere |
 
 Every patched Git source carries an exact `rev`, never a branch.

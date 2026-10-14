@@ -753,7 +753,7 @@ mod placeholders {
         assert!(harness_compaction_input_at_depth(&cut, workflow(), 3).is_err());
         let first = harness_compaction_input_at_depth(&cut, workflow(), 1).expect("R1");
         assert!(placeholder_bodies(first.history())[0].contains("tool: read_file"));
-        assert!(harness_notes(first.history()).is_empty());
+        assert_eq!(harness_notes(first.history()), [] as [String; 0]);
     }
 
     #[test]
@@ -982,7 +982,10 @@ mod placeholders {
         )
         .expect("successor")
         .history;
-        assert!(collect_placeholder_candidates(&noted).is_empty());
+        assert_eq!(
+            collect_placeholder_candidates(&noted),
+            [] as [PlaceholderCandidate; 0]
+        );
     }
 
     #[test]

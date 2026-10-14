@@ -1309,6 +1309,10 @@ impl Driver {
         queue_local_composition_nested_results(state, pending.responder, waiters, result)
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "the refusal hands the pending nested call back so the caller can settle it verbatim"
+    )]
     async fn start_local_composition_nested_read_only(
         &mut self,
         command: &PromptCommand,

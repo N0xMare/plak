@@ -944,7 +944,10 @@ mod tests {
 
             assert!(matches!(outcome, TurnDriveOutcome::Interrupted));
             assert_eq!(presented, 0);
-            assert!(model.captured_plans().is_empty());
+            assert_eq!(
+                model.captured_plans(),
+                [] as [plakous_model::ValidatedRequestPlan; 0]
+            );
             assert_eq!(model.remaining_scenarios(), 1);
             assert!(weak.upgrade().is_none(), "shutdown left the agent owned");
             Ok::<(), Box<dyn Error>>(())
@@ -1009,7 +1012,10 @@ mod tests {
             .await;
 
             assert!(matches!(result, Err(TurnDriveError::Signal(_))));
-            assert!(model.captured_plans().is_empty());
+            assert_eq!(
+                model.captured_plans(),
+                [] as [plakous_model::ValidatedRequestPlan; 0]
+            );
             assert_eq!(model.remaining_scenarios(), 1);
             assert!(weak.upgrade().is_none(), "shutdown left the agent owned");
             Ok::<(), Box<dyn Error>>(())

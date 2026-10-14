@@ -51,7 +51,10 @@ pub(super) fn assert_idempotent(fixture: &Fixture, id: &str, shape: &str) {
                 );
                 assert_eq!(replayed.views.cursor, views.cursor);
                 assert!(replayed.writes.is_empty(), "{shape}: replay planned writes");
-                assert!(replayed.writes.successors.is_empty());
+                assert_eq!(
+                    replayed.writes.successors,
+                    [] as [plakous_hosted::sessions::projector::Successor; 0]
+                );
                 let applied = records
                     .last()
                     .map_or(cursor.applied(), |record| record.header().seq);

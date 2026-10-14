@@ -466,7 +466,7 @@ fn absent_optional_instructions_preserve_base_only_profile() {
             .base_instructions()
             .contains("Commit or push only when the user asks.")
     );
-    assert!(facts.is_empty());
+    assert_eq!(facts, [] as [ResolvedContextSourceFact; 0]);
 }
 
 #[test]

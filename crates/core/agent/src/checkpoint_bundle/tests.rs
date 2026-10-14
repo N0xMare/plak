@@ -1134,7 +1134,7 @@ fn claude_shaped_tool_exchange_with_visible_reasoning_advances() -> TestResult {
     let next_history = base_history.append(claude_shaped_tool_exchange()?)?;
     let next = fixture_with_history(next_history, 1, false)?;
     let advanced = RuntimeCheckpointCodec::advance(&next, &base)?;
-    assert!(!advanced.supplied_objects().is_empty());
+    assert_ne!(advanced.supplied_objects(), []);
     assert_eq!(RuntimeCheckpointCodec::materialize(&advanced)?, next);
     Ok(())
 }

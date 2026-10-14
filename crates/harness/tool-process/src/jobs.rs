@@ -583,7 +583,10 @@ async fn first_terminal_await_over_every_own_job_returns_when_one_ends() -> Test
 async fn bare_first_terminal_await_with_no_jobs_returns_empty_tasks_at_once() -> TestResult {
     let directory = tempfile::tempdir()?;
     let environment = environment(directory.path())?;
-    assert!(environment.joined_process_sessions()?.jobs().is_empty());
+    assert_eq!(
+        environment.joined_process_sessions()?.jobs(),
+        [] as [plakous_tools::JobView; 0]
+    );
     let mut request = await_request(&[], 60_000);
     request.wake = Some(AwaitWake::Any);
     request.validate()?;

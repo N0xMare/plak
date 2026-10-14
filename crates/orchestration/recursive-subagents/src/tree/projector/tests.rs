@@ -1567,7 +1567,7 @@ fn a_committed_wait_call_retires_its_receipt_and_keeps_the_mail_read() {
     let mut feed = Feed::new(ROOT_SESSION);
     feed.history(turn(1), vec![call(9), call(1)]);
     project(&mut tree, "root", &feed);
-    assert!(tree.retained_wait_receipts("root").is_empty());
+    assert_eq!(tree.retained_wait_receipts("root"), [] as [String; 0]);
     assert_eq!(durable(&tree, &ids[0]), MailDurableState::Acknowledged);
     assert_eq!(tree.feed_cursor(ROOT_SESSION), 1);
 }
@@ -1586,13 +1586,13 @@ fn an_unclosed_terminal_restores_the_turns_waits_and_a_closed_one_retires_them()
     );
     feed.terminal("cmd-1", turn(1), End::Abandoned);
     project(&mut tree, "root", &feed);
-    assert!(tree.retained_wait_receipts("root").is_empty());
+    assert_eq!(tree.retained_wait_receipts("root"), [] as [String; 0]);
     assert_eq!(durable(&tree, &ids[0]), MailDurableState::Accepted);
 
     wait_receipt(&mut tree, "root", call(2), &ids[1..]);
     feed.terminal("cmd-2", turn(2), End::Completed);
     project(&mut tree, "root", &feed);
-    assert!(tree.retained_wait_receipts("root").is_empty());
+    assert_eq!(tree.retained_wait_receipts("root"), [] as [String; 0]);
     assert_eq!(durable(&tree, &ids[1]), MailDurableState::Acknowledged);
 }
 
@@ -1668,9 +1668,9 @@ fn a_discarded_host_wake_withdraws_its_batch_at_the_open_join() {
         "the withdrawn batch's mail is unread for the next admission"
     );
     // The join is idempotent.
-    assert!(
-        tree.join_pending_root_commands(&["user:2".to_owned()])
-            .is_empty()
+    assert_eq!(
+        tree.join_pending_root_commands(&["user:2".to_owned()]),
+        [] as [String; 0]
     );
 }
 
@@ -2133,7 +2133,7 @@ fn assert_intent_outcome_below_retention(intent: RetainedIntent) {
         .filter(|operation| operation.tool_name == "consumed_below_retention")
         .map(|operation| operation.canonical_request.clone())
         .collect::<Vec<_>>();
-    assert!(consumed.is_empty());
+    assert_eq!(consumed, [] as [String; 0]);
     if finalize {
         rebuilt
             .record_child_finalization(
@@ -2761,7 +2761,7 @@ fn a_queued_followup_binding_does_not_replace_the_live_waiter_owner() {
     feed.accepted("start-owned", turn(1));
     feed.accepted("followup-owned", turn(2));
     let pass = project(&mut tree, &child, &feed);
-    assert!(pass.conflicts.is_empty());
+    assert_eq!(pass.conflicts, [] as [BindConflict; 0]);
     assert_eq!(
         tree.attempt(&child).unwrap().turn_id,
         Some(turn(2).to_string())
@@ -4559,7 +4559,7 @@ fn child_finalization_requires_an_exact_committed_terminal() {
     assert_eq!(refused.code, TopologyErrorCode::OperationRecoveryRequired);
     tree.fold_due(&child).unwrap();
     assert_eq!(tree.attempt(&child).unwrap().status, AttemptStatus::Running);
-    assert!(tree.pending_result_mail("root").is_empty());
+    assert_eq!(tree.pending_result_mail("root"), [] as [MailRecord; 0]);
     feed.terminal("start-1", turn(1), End::Completed);
     project(&mut tree, &child, &feed);
     assert!(!tree.node(&child).unwrap().active_turn);
@@ -4568,7 +4568,7 @@ fn child_finalization_requires_an_exact_committed_terminal() {
         AttemptStatus::Running,
         "ended, decision pending"
     );
-    assert!(tree.pending_result_mail("root").is_empty());
+    assert_eq!(tree.pending_result_mail("root"), [] as [MailRecord; 0]);
     tree.record_child_finalization(
         &child,
         &turn(1).to_string(),

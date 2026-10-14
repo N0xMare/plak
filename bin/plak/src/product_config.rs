@@ -5006,7 +5006,7 @@ mod tests {
             TemplateNotReady::EffortNotAdmitted,
             TemplateNotReady::TierNotAdvertised,
         ] {
-            assert!(!reason.reason().is_empty());
+            assert_ne!(reason.reason(), "");
             assert!(!reason.reason().contains("sk-"));
         }
     }

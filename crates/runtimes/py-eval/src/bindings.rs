@@ -127,7 +127,7 @@ mod tests {
     #[test]
     fn empty_catalog_needs_no_bootstrap() -> Result<(), String> {
         let bindings = PythonBindings::compile(BTreeMap::new())?;
-        assert!(bindings.source.is_empty());
+        assert_eq!(bindings.source, "");
         assert!(bindings.host.is_empty());
         Ok(())
     }

@@ -311,8 +311,8 @@ async fn recovery_dispatched_root_without_provider_is_nothing_started() -> TestR
         crate::AbandonedTurnClaim::NothingStarted
     );
     assert_eq!(fold.root, super::super::AbandonedRoot::Dispatched);
-    assert!(fold.provider_operations.is_empty());
-    assert!(fold.effect_operations.is_empty());
+    assert_eq!(fold.provider_operations, [] as [OperationId; 0]);
+    assert_eq!(fold.effect_operations, [] as [OperationId; 0]);
     Ok(())
 }
 
@@ -577,7 +577,7 @@ async fn completed_tool_round_with_live_process_preserves_unknown_outcome() -> T
     let cut = completed_tool_round_cut(SessionUpdateFixtureMode::Active, true, false).await?;
     let fold = abandoned_turn_recovery_fold(&cut)?;
     assert!(fold.tool_round_completed);
-    assert!(!fold.process_operations.is_empty());
+    assert_ne!(fold.process_operations, [] as [OperationId; 0]);
     assert_eq!(
         abandoned_turn_claim(&fold),
         crate::AbandonedTurnClaim::RunningTool

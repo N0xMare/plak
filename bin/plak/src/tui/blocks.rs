@@ -6431,15 +6431,15 @@ mod tests {
         );
 
         // §5.5 `show thinking blocks` off removes the block entirely.
-        assert!(
+        assert_eq!(
             plain(
                 &[sealed],
                 RenderPrefs {
                     show_thinking: false,
                     ..RenderPrefs::default()
                 }
-            )
-            .is_empty()
+            ),
+            [] as [String; 0]
         );
     }
 

@@ -14,7 +14,7 @@ fn missing_fixture_session_does_not_create_logs_or_state() -> Result<(), Box<dyn
         .env("PLAK_HOME", home.path())
         .output()?;
     assert!(!result.status.success());
-    assert!(result.stdout.is_empty());
+    assert_eq!(result.stdout, [] as [u8; 0]);
     assert_eq!(std::fs::read_dir(home.path())?.count(), 0);
     Ok(())
 }

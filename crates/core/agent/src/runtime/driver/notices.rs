@@ -350,7 +350,7 @@ mod tests {
         assert!(!tail.starts_with("lt;"));
         assert!(!tail.starts_with("t;"));
         assert!(!tail.starts_with(';'));
-        assert!(tail.replace("&amp;", "").is_empty());
+        assert_eq!(tail.replace("&amp;", ""), "");
         let mut output = String::new();
         for number in 0..100 {
             writeln!(output, "line {number}")?;

@@ -174,11 +174,9 @@ fn a_workflow_request_without_a_fact_holds_gc_and_export() {
     let mut record = store.load(&session).unwrap();
     let notices = store.withdraw_unadmitted_workflows(&mut record).unwrap();
     assert_eq!(notices.len(), 1);
-    assert!(
-        store
-            .withdraw_unadmitted_workflows(&mut record)
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        store.withdraw_unadmitted_workflows(&mut record).unwrap(),
+        [] as [plakous_hosted::sessions::TranscriptRow; 0]
     );
     let out = gc_all(&fixture, &session);
     assert!(!out.contains(&format!("skipped {session}")), "{out}");

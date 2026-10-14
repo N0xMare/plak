@@ -79,7 +79,7 @@ pub(super) fn assert_sealed(fixture: &Fixture, outcome: &AgentOutcome, state: &s
     );
     assert!(artifact["schema"].as_u64().unwrap() > 0);
     assert!(artifact["codec"].as_u64().unwrap() > 0);
-    assert!(!artifact["digest"].as_str().unwrap().is_empty());
+    assert_ne!(artifact["digest"].as_str().unwrap(), "");
 }
 
 #[test]

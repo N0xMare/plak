@@ -30,7 +30,7 @@ fn worker(input: &[u8]) -> Output {
 fn clean_eof_exits_without_a_frame() {
     let output = worker(&[]);
     assert!(output.status.success());
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, [] as [u8; 0]);
 }
 
 #[test]
@@ -87,7 +87,7 @@ fn standalone_python_is_not_an_execution_entrypoint() {
         .output()
         .expect("worker refusal");
     assert!(!output.status.success());
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, [] as [u8; 0]);
 }
 
 #[test]

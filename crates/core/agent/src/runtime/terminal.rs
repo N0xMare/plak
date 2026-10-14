@@ -354,7 +354,7 @@ impl TurnShared {
         #[cfg(test)]
         let terminal_fault = self
             .terminal_fault
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |fault| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |fault| {
                 Some(if fault == 4 { 4 } else { 0 })
             })
             .unwrap_or_default();

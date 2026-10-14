@@ -510,7 +510,10 @@ mod contract {
                 .unwrap();
             let intents = store.load_intents(&session.id).unwrap();
             assert_eq!(intents.workflow_requests.len(), 2);
-            assert!(intents.notices.is_empty());
+            assert_eq!(
+                intents.notices,
+                [] as [plakous_hosted::sessions::projector::OperatorNotice; 0]
+            );
             let revision = session.store_revision;
             store
                 .discard_unadmitted_workflow(&mut session, "plak:compact:unadmitted")
@@ -624,11 +627,9 @@ mod contract {
                     ),
                 ]
             );
-            assert!(
-                store
-                    .withdraw_unadmitted_workflows(&mut session)
-                    .unwrap()
-                    .is_empty()
+            assert_eq!(
+                store.withdraw_unadmitted_workflows(&mut session).unwrap(),
+                [] as [TranscriptRow; 0]
             );
             let intents = store.load_intents(&session.id).unwrap();
             assert_eq!(intents.workflow_requests.len(), 1);
@@ -664,11 +665,9 @@ mod contract {
             carried.bind_plakous_locator(locator()).unwrap();
             carried.link_carried_forward(&uuid::Uuid::new_v4().to_string(), "previous-build");
             store.save(&mut carried).unwrap();
-            assert!(
-                store
-                    .load_inherited_submissions(&carried.id)
-                    .unwrap()
-                    .is_empty()
+            assert_eq!(
+                store.load_inherited_submissions(&carried.id).unwrap(),
+                [] as [Submission; 0]
             );
 
             let mut cleared = record(workspace);
@@ -682,11 +681,9 @@ mod contract {
             cleared.source_product_session_id = Some(source.id.clone());
             cleared.source_workflow_operation_id = Some("plak:clear:ancestry".into());
             store.save(&mut cleared).unwrap();
-            assert!(
-                store
-                    .load_inherited_submissions(&cleared.id)
-                    .unwrap()
-                    .is_empty()
+            assert_eq!(
+                store.load_inherited_submissions(&cleared.id).unwrap(),
+                [] as [Submission; 0]
             );
         });
     }
@@ -766,7 +763,7 @@ mod contract {
                 };
                 run_actual_host(paths.home().to_owned(), &source.id, injection, actions).unwrap();
                 let intents = store.load_intents(&source.id).unwrap();
-                assert!(intents.workflow_requests.is_empty());
+                assert_eq!(intents.workflow_requests, [] as [WorkflowRequest; 0]);
                 assert_eq!(
                     intents
                         .notices
@@ -812,7 +809,10 @@ mod contract {
                 store.load_intents(&session.id).unwrap().workflow_requests,
                 vec![request.clone()]
             );
-            assert!(store.load_intents(&session.id).unwrap().notices.is_empty());
+            assert_eq!(
+                store.load_intents(&session.id).unwrap().notices,
+                [] as [plakous_hosted::sessions::projector::OperatorNotice; 0]
+            );
             assert!(store.load(&request.successor_product_id()).is_ok());
         });
     }
@@ -929,7 +929,10 @@ mod contract {
                 .unwrap();
             let loaded = store.load(&session.id).unwrap();
             assert_eq!(loaded.store_revision, revision);
-            assert!(loaded.pending_queue.is_empty());
+            assert_eq!(
+                loaded.pending_queue,
+                [] as [plakous_hosted::sessions::QueueItem; 0]
+            );
             assert_eq!(
                 store.load_intents(&session.id).unwrap().submissions,
                 vec![submission]
@@ -1011,12 +1014,11 @@ mod contract {
                     )
                     .is_err()
             );
-            assert!(
-                store
-                    .load_intents(&session.id)
-                    .unwrap()
-                    .pause_causes
-                    .is_empty()
+            assert_eq!(
+                store.load_intents(&session.id).unwrap().pause_causes,
+                [] as [plakous_hosted::sessions::projector::AnchoredIntent<
+                    plakous_hosted::sessions::projector::HostPauseCause,
+                >; 0]
             );
             assert_eq!(
                 store.load_intents(&session.id).unwrap().submissions,
@@ -1040,14 +1042,14 @@ mod contract {
                     .collect::<Vec<_>>(),
                 vec![&pause_cause]
             );
-            assert!(
-                store
-                    .load_intents(&session.id)
-                    .unwrap()
-                    .submissions
-                    .is_empty()
+            assert_eq!(
+                store.load_intents(&session.id).unwrap().submissions,
+                [] as [Submission; 0]
             );
-            assert!(store.load(&session.id).unwrap().pending_queue.is_empty());
+            assert_eq!(
+                store.load(&session.id).unwrap().pending_queue,
+                [] as [plakous_hosted::sessions::QueueItem; 0]
+            );
             let revision = session.store_revision;
             for conflicting in [
                 Submission {
@@ -1066,12 +1068,9 @@ mod contract {
             ] {
                 assert!(store.save_submission(&mut session, &conflicting).is_err());
                 assert_eq!(session.store_revision, revision);
-                assert!(
-                    store
-                        .load_intents(&session.id)
-                        .unwrap()
-                        .submissions
-                        .is_empty()
+                assert_eq!(
+                    store.load_intents(&session.id).unwrap().submissions,
+                    [] as [Submission; 0]
                 );
             }
         });
@@ -1088,7 +1087,7 @@ mod contract {
             session.upsert_tool_activity(activity("a", "running"));
             session.record_notice(TranscriptRow::warning(NoticeScope::Tree, "first"));
             store.save(&mut session).unwrap();
-            assert!(session.transcript.pending_notices().is_empty());
+            assert_eq!(session.transcript.pending_notices(), []);
             let loaded = store.load(&session.id).unwrap();
             assert_eq!(loaded.store_revision, session.store_revision);
             assert_eq!(
@@ -1251,12 +1250,9 @@ mod contract {
                 store
                     .discard_submission(&mut session, &request.command_id, None)
                     .unwrap();
-                assert!(
-                    store
-                        .load_intents(&session.id)
-                        .unwrap()
-                        .submissions
-                        .is_empty()
+                assert_eq!(
+                    store.load_intents(&session.id).unwrap().submissions,
+                    [] as [Submission; 0]
                 );
                 // Rebuilding the views cannot erase the immutable content binding.
                 let before = store.load_views(&session.id).unwrap().unwrap();
@@ -1296,12 +1292,9 @@ mod contract {
                 assert_eq!(session, invalid, "failure cannot mutate the caller");
                 assert_eq!(store.load(&session.id).unwrap(), before);
                 assert_eq!(store.list_for_workspace(workspace).unwrap(), listed_before);
-                assert!(
-                    store
-                        .load_intents(&session.id)
-                        .unwrap()
-                        .submissions
-                        .is_empty()
+                assert_eq!(
+                    store.load_intents(&session.id).unwrap().submissions,
+                    [] as [Submission; 0]
                 );
                 let mut retry = if transfer_claim {
                     let mut other = record(workspace);
@@ -1412,7 +1405,10 @@ mod contract {
                 store.save(&mut owner).unwrap_err(),
                 "stable product identity contradicts durable state"
             );
-            assert!(store.load(&owner.id).unwrap().pending_queue.is_empty());
+            assert_eq!(
+                store.load(&owner.id).unwrap().pending_queue,
+                [] as [plakous_hosted::sessions::QueueItem; 0]
+            );
         });
     }
 
@@ -1424,7 +1420,10 @@ mod contract {
             let request = submission(&item, "consume-command");
             store.save_submission(&mut session, &request).unwrap();
             project_delivery(store, &session.id, &request.command_id, Delivery::Accepted);
-            assert!(store.load(&session.id).unwrap().pending_queue.is_empty());
+            assert_eq!(
+                store.load(&session.id).unwrap().pending_queue,
+                [] as [plakous_hosted::sessions::QueueItem; 0]
+            );
             session.pending_queue.clear();
             store
                 .discard_submission(&mut session, &request.command_id, None)
@@ -1434,7 +1433,10 @@ mod contract {
                 store.save(&mut session).unwrap_err(),
                 "stable product identity contradicts durable state"
             );
-            assert!(store.load(&session.id).unwrap().pending_queue.is_empty());
+            assert_eq!(
+                store.load(&session.id).unwrap().pending_queue,
+                [] as [plakous_hosted::sessions::QueueItem; 0]
+            );
         });
     }
 

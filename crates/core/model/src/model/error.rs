@@ -729,7 +729,7 @@ impl ModelPaidRecoveryBytes {
             return Err(ModelErrorContextError::MalformedPaidRecoveryEncoding);
         }
         let mut bytes = Vec::with_capacity(encoded.len() / 2);
-        for pair in encoded.as_bytes().chunks_exact(2) {
+        for pair in encoded.as_bytes().as_chunks::<2>().0 {
             let high = decode_lower_hex(pair[0])
                 .ok_or(ModelErrorContextError::MalformedPaidRecoveryEncoding)?;
             let low = decode_lower_hex(pair[1])

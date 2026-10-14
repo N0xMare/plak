@@ -496,7 +496,7 @@ async fn joined_process_shell_multicall_dispatch_preserves_enrolled_name() -> Re
         .args(["-c", command])
         .output()?;
     assert_eq!(wrong_applet.status.code(), Some(127));
-    assert!(wrong_applet.stdout.is_empty());
+    assert_eq!(wrong_applet.stdout, [] as [u8; 0]);
     let profile = JoinedProcessShellProfile::new(&enrolled, [String::from("-c")])?;
     assert_eq!(
         profile.identity().canonical_executable(),
@@ -615,7 +615,7 @@ async fn joined_process_noninteractive_stdin_is_null_and_initial_input_is_delive
         )?;
         let (output, status) = collect_joined_output(&sessions, id).await?;
         assert_eq!(status, JoinedProcessStatus::Exited(Some(0)), "{command}");
-        assert!(output.is_empty());
+        assert_eq!(output, [] as [u8; 0]);
     }
     let id = sessions.start(
         joined_request(
@@ -782,7 +782,10 @@ async fn a_finished_session_stays_live_until_it_is_retired() -> Result<(), TestE
 
     // Cleanup retires it, and only then is the backend drained.
     sessions.join_all()?;
-    assert!(sessions.active_session_ids().is_empty());
+    assert_eq!(
+        sessions.active_session_ids(),
+        [] as [plakous_tools::JoinedProcessSessionId; 0]
+    );
     assert!(sessions.is_drained());
     Ok(())
 }
@@ -2691,7 +2694,10 @@ async fn fake_policy_and_output_caps_fail_before_unsafe_success() -> Result<(), 
             Some(ExecutionBackendErrorKind::Denied)
         );
     }
-    assert!(backend.process_calls().is_empty());
+    assert_eq!(
+        backend.process_calls(),
+        [] as [plakous_tools::RecordedLiteralProcess; 0]
+    );
 
     let oversized = environment
         .execute_literal_process(
@@ -3083,7 +3089,7 @@ async fn repository_query_glob_prefix_without_a_directory_is_empty() -> Result<(
             control(),
         )
         .await?;
-    assert!(listed.matches().is_empty());
+    assert_eq!(listed.matches(), []);
     assert!(!listed.incomplete());
     Ok(())
 }

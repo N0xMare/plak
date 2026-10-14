@@ -873,7 +873,7 @@ fn empty_product_extensions_preserve_four_tool_minimal_identity() -> Result<(), 
     )?;
     assert_eq!(compiled.identity(), with_empty.identity());
     assert_eq!(compiled.nested_tools().len(), 4);
-    assert!(compiled.extra_nested_names().is_empty());
+    assert_eq!(compiled.extra_nested_names(), [] as [ToolName; 0]);
     Ok(())
 }
 

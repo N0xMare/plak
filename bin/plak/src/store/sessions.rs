@@ -144,11 +144,9 @@ mod tests {
             save_session(&paths, &mut persisted).unwrap_err(),
             "session has invalid pending queue state"
         );
-        assert!(
-            load_session(&paths, &persisted.id)
-                .unwrap()
-                .pending_queue
-                .is_empty()
+        assert_eq!(
+            load_session(&paths, &persisted.id).unwrap().pending_queue,
+            [] as [QueueItem; 0]
         );
     }
 

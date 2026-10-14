@@ -352,12 +352,14 @@ mod tests {
         type Prepared = ();
         type Output = ();
 
-        async fn check_profile(&mut self) -> Result<(), Self::Error> {
-            Ok(())
+        fn check_profile(&mut self) -> impl Future<Output = Result<(), Self::Error>> {
+            std::future::ready(Ok(()))
         }
 
-        async fn fence_needing_refresh(&mut self) -> Result<Option<CredentialFence>, Self::Error> {
-            Ok(self.fence.clone())
+        fn fence_needing_refresh(
+            &mut self,
+        ) -> impl Future<Output = Result<Option<CredentialFence>, Self::Error>> {
+            std::future::ready(Ok(self.fence.clone()))
         }
 
         fn fresh_output(&mut self) -> Result<Self::Output, Self::Error> {
@@ -382,8 +384,8 @@ mod tests {
             }
         }
 
-        async fn authorize_dispatch(&mut self) -> Result<(), Self::Error> {
-            self.authorize
+        fn authorize_dispatch(&mut self) -> impl Future<Output = Result<(), Self::Error>> {
+            std::future::ready(self.authorize)
         }
 
         fn exchange_control(&mut self) -> ExchangeControl {
@@ -410,12 +412,12 @@ mod tests {
             }
         }
 
-        async fn map_claimed_http_error(
+        fn map_claimed_http_error(
             &mut self,
             _store: &PrivateCredentialStore,
             _error: ClaimedHttpError,
-        ) -> Self::Error {
-            "transport"
+        ) -> impl Future<Output = Self::Error> {
+            std::future::ready("transport")
         }
 
         fn map_store_error(&mut self, _error: PrivateStoreError) -> Self::Error {
@@ -484,7 +486,10 @@ mod tests {
             control: Duration::from_millis(50),
         };
         run_claimed_refresh(&store, &client()?, &mut hooks).await?;
-        assert!(observer.phases().is_empty());
+        assert_eq!(
+            observer.phases(),
+            [] as [crate::oauth_orchestrator::hooks::CredentialRefreshPhase; 0]
+        );
         Ok(())
     }
 

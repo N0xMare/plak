@@ -1065,6 +1065,10 @@ struct ClaudeRefreshPrepared {
     refresh_token: Zeroizing<String>,
 }
 
+#[allow(
+    clippy::unused_async_trait_impl,
+    reason = "hook methods implement the orchestrator's async trait; some bodies finish without awaiting, and async keeps them lazy until the orchestrator polls"
+)]
 impl ClaimedRefreshHooks for ClaudeRefreshHooks<'_> {
     type Error = ClaudeNativeAuthError;
     type Prepared = ClaudeRefreshPrepared;

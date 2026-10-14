@@ -154,7 +154,7 @@ fn first_frame_layout_of_an_empty_transcript_is_immediate() {
     let started = Instant::now();
     let layout = layout_blocks(&blocks, COLS);
     let elapsed = started.elapsed();
-    assert!(layout.plain.is_empty());
+    assert_eq!(layout.plain, [] as [String; 0]);
 
     if wallclock_enabled() {
         assert!(

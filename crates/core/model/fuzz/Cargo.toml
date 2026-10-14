@@ -2,7 +2,7 @@
 name = "plakous-model-fuzz"
 version = "0.0.0"
 edition = "2024"
-rust-version = "1.97.1"
+rust-version = "1.99.0"
 description = "cargo-fuzz targets for the `plakous-model` response assembler, semantic JSON and portable schema."
 license = "MIT"
 repository = "https://github.com/N0xMare/plak"

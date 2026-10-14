@@ -733,7 +733,7 @@ mod tests {
         assert_eq!(rows[1].1.as_deref(), Some("call-a"));
         let restored = ProductTranscript::from_rows(rows);
         assert_eq!(restored, live);
-        assert!(restored.pending_notices().is_empty());
+        assert_eq!(restored.pending_notices(), []);
         assert_eq!(
             restored.tool_activity("call-a").map(|row| row.call_id),
             Some("call-a".to_owned())
@@ -934,7 +934,10 @@ mod tests {
         );
         assert!(session.queue_commands.is_locked(&item.id));
         project_delivery(&store, &session, &request.command_id, Delivery::Accepted);
-        assert!(store.load(&session.id).unwrap().pending_queue.is_empty());
+        assert_eq!(
+            store.load(&session.id).unwrap().pending_queue,
+            [] as [QueueItem; 0]
+        );
         session.pending_queue[0].revision += 1;
         session.pending_queue[0].text = "new revision".into();
         store.save(&mut session).unwrap();
@@ -1110,7 +1113,7 @@ mod tests {
         assert_eq!(target.effort.as_deref(), Some("high"));
         assert_eq!(target.target_selection, ProductTargetSelection::Native);
         assert_eq!(target.plakous_locator, Some(branch_locator(9, 10)));
-        assert!(target.pending_queue.is_empty());
+        assert_eq!(target.pending_queue, [] as [QueueItem; 0]);
         assert!(!target.queue_commands.has_pending());
 
         assert!(target.bind_plakous_locator(locator(11)).is_err());
@@ -1260,8 +1263,8 @@ mod tests {
         );
         assert_eq!(target.target_selection, source.target_selection);
         assert!(target.transcript.is_empty());
-        assert!(target.prompt_history.is_empty());
-        assert!(target.pending_queue.is_empty());
+        assert_eq!(target.prompt_history, [] as [String; 0]);
+        assert_eq!(target.pending_queue, [] as [QueueItem; 0]);
 
         assert_eq!(
             target.source_product_session_id.as_deref(),

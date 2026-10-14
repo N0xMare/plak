@@ -759,7 +759,10 @@ fn irreversible_palette_commands_run_only_from_their_full_name() {
     let mut steps = typed_at("/co", 90);
     steps.push((90, KeyCode::Enter));
     steps.push((120, KeyCode::Enter));
-    assert!(run(&mut app, &steps).is_empty());
+    assert_eq!(
+        run(&mut app, &steps),
+        [] as [plakous_host_protocol::SessionIntent<crate::surface_protocol::PlakExtension>; 0]
+    );
     assert_eq!(app.input, "/compact");
     assert_eq!(
         run(&mut app, &[(700, KeyCode::Enter)]),
@@ -877,7 +880,10 @@ fn unmapped_letters_show_no_typing_hint() {
 fn settings_reset_enter_confirms_and_esc_cancels() {
     let mut app = settings_fixture();
     let before = app.settings_menu.as_ref().unwrap().draft.clone();
-    assert!(run(&mut app, &[(0, KeyCode::Char('d'))]).is_empty());
+    assert_eq!(
+        run(&mut app, &[(0, KeyCode::Char('d'))]),
+        [] as [plakous_host_protocol::SessionIntent<crate::surface_protocol::PlakExtension>; 0]
+    );
     let screen = render_to_string(&mut app, 100, 30);
     assert!(
         screen.contains("Reset Scroll lines?") && screen.contains("Scroll lines returns to 3."),
@@ -890,7 +896,10 @@ fn settings_reset_enter_confirms_and_esc_cancels() {
         Some(1),
         "focus starts on Reset"
     );
-    assert!(run(&mut app, &[(700, KeyCode::Esc)]).is_empty());
+    assert_eq!(
+        run(&mut app, &[(700, KeyCode::Esc)]),
+        [] as [plakous_host_protocol::SessionIntent<crate::surface_protocol::PlakExtension>; 0]
+    );
     assert!(app.destructive_confirm.is_none());
     assert_eq!(app.settings_menu.as_ref().unwrap().draft, before);
 

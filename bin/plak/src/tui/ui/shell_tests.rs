@@ -371,7 +371,7 @@ fn submit_busy_is_follow_up() {
     let action = app.handle_key(key(KeyCode::Enter));
     assert_eq!(action, Some(UserAction::FollowUp("later".into())));
     // The host owns queue truth; the UI waits for its authoritative snapshot.
-    assert!(app.local_queue.is_empty());
+    assert_eq!(app.local_queue, [] as [plakous_host_protocol::QueueItem; 0]);
 }
 
 #[test]
@@ -494,7 +494,7 @@ fn refused_queue_edit_adopts_snapshot_revision_and_applied_edit_clears_exact_tex
     };
     assert!(send_user_action(&mut app, Some(&sender), retry));
     app.apply_host_event(HostEvent::QueueEditApplied { id: "q-1".into() });
-    assert!(app.input.is_empty());
+    assert_eq!(app.input, "");
     assert!(app.queue_editing.is_none());
 }
 
@@ -630,7 +630,7 @@ fn ctrl_d_and_drop_command() {
             revision: 7,
         })
     );
-    assert!(app.input.is_empty());
+    assert_eq!(app.input, "");
 }
 
 #[test]
@@ -887,7 +887,7 @@ fn ctrl_c_ladder_clears_then_cancels_then_escalates() {
 
     // 1. A non-empty draft: clear it. That is the only effect.
     assert_eq!(app.handle_key(key_ctrl(KeyCode::Char('c'))), None);
-    assert!(app.input.is_empty());
+    assert_eq!(app.input, "");
     assert!(!app.cancel_pending);
     assert!(!app.should_quit);
 

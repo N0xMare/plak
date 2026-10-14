@@ -971,7 +971,7 @@ mod tests {
         tree.close_agent("root", &close_req(&idle.agent_id), None)
             .unwrap();
         let settled = tree.settle_for_test();
-        assert!(settled.cleanup_failures.is_empty());
+        assert_eq!(settled.cleanup_failures, [] as [TopologyError; 0]);
         assert_eq!(vcs.calls_of(FakeOp::Unmint).len(), 1);
         assert_eq!(
             tree.workspace(&idle.workspace.id).unwrap().status,
@@ -2275,7 +2275,7 @@ mod tests {
             .base_commit
             .clone()
             .unwrap_or_else(|| unreachable!("the jj mint records a base"));
-        assert!(!base.is_empty());
+        assert_ne!(base, "");
         tree.record_turn_completed(&child.agent_id).unwrap();
         tree.settle_for_test();
         assert!(
@@ -2407,7 +2407,10 @@ mod tests {
             AttemptStatus::Closed
         );
         assert_eq!(tree.candidates().len(), 1);
-        assert!(result_mails_from(&tree, &child.agent_id).is_empty());
+        assert_eq!(
+            result_mails_from(&tree, &child.agent_id),
+            [] as [MailRecord; 0]
+        );
         tree.close_agent("root", &close_req(&child.agent_id), None)
             .unwrap();
         assert!(tree.effects.seals.is_empty());
@@ -2455,7 +2458,7 @@ mod tests {
             tree.attempt(id).unwrap().output_json.as_deref(),
             Some(r#"{"ok":true}"#)
         );
-        assert!(result_mails_from(&tree, id).is_empty());
+        assert_eq!(result_mails_from(&tree, id), [] as [MailRecord; 0]);
         assert!(matches!(
             tree.recovery_need(id).unwrap(),
             RecoveryNeed::Session { .. }
@@ -2474,7 +2477,7 @@ mod tests {
         tree.settle_for_test();
         assert_eq!(tree.node(id).unwrap().status, NodeStatus::Closed);
         assert_eq!(tree.attempt(id).unwrap().status, AttemptStatus::Closed);
-        assert!(result_mails_from(&tree, id).is_empty());
+        assert_eq!(result_mails_from(&tree, id), [] as [MailRecord; 0]);
     }
 
     #[test]
@@ -2687,7 +2690,10 @@ mod tests {
             tree.candidates().is_empty(),
             "a running child is not sealed at close; its turn is still unwinding"
         );
-        assert!(result_mails_from(&tree, &child.agent_id).is_empty());
+        assert_eq!(
+            result_mails_from(&tree, &child.agent_id),
+            [] as [MailRecord; 0]
+        );
         // The turn keeps writing until it exits.
         std::fs::write(child_path.join("AFTER_CLOSE.txt"), "2\n").unwrap();
         seal_after_turn_exit(&mut tree, &child.agent_id);
@@ -2726,7 +2732,10 @@ mod tests {
         // (`finalize_of_an_interrupted_turn_seals_nothing`), so nothing has
         // sealed and `enqueue_result_mail` refuses the running attempt.
         assert!(tree.candidates().is_empty(), "an interrupt does not seal");
-        assert!(result_mails_from(&tree, &child.agent_id).is_empty());
+        assert_eq!(
+            result_mails_from(&tree, &child.agent_id),
+            [] as [MailRecord; 0]
+        );
         // Resume: the parent's mail starts a new turn on the same attempt.
         tree.send_agent_message("root", &mail(&child.agent_id, "continue"), None)
             .unwrap();

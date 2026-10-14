@@ -3028,11 +3028,9 @@ mod tests {
             args["max_output_bytes"] = json!(64);
             args["max_output_records"] = json!(256);
             let single = serde_json::from_value::<CanonicalProcessPollRequest>(args.clone())
-                .ok()
-                .is_some_and(|request| request.validate().is_ok());
+                .is_ok_and(|request| request.validate().is_ok());
             let multiple = serde_json::from_value::<CanonicalProcessAwaitRequest>(args.clone())
-                .ok()
-                .is_some_and(|request| request.validate().is_ok());
+                .is_ok_and(|request| request.validate().is_ok());
             assert!(!single && !multiple, "{args}");
         }
         let grok =
@@ -3795,11 +3793,11 @@ mod tests {
         assert_eq!(pending, [0xe2, 0x82]);
         pending.extend_from_slice(&[0xac, 0xff, b'b']);
         assert_eq!(drain_process_utf8_bounded(&mut pending, false, 8), "€�b");
-        assert!(pending.is_empty());
+        assert_eq!(pending, [] as [u8; 0]);
 
         pending.extend_from_slice(&[0xf0, 0x9f]);
         assert_eq!(drain_process_utf8_bounded(&mut pending, true, 8), "�");
-        assert!(pending.is_empty());
+        assert_eq!(pending, [] as [u8; 0]);
     }
 
     #[test]
@@ -3815,7 +3813,7 @@ mod tests {
                 drain_process_utf8_bounded(&mut pending, true, width),
                 scalar
             );
-            assert!(pending.is_empty());
+            assert_eq!(pending, [] as [u8; 0]);
         }
     }
 
@@ -3836,7 +3834,7 @@ mod tests {
                 ),
                 "�"
             );
-            assert!(pending.is_empty());
+            assert_eq!(pending, [] as [u8; 0]);
         }
     }
 
@@ -4315,7 +4313,7 @@ mod tests {
             &sessions,
             &retained.iter().map(|job| job.number).collect::<Vec<_>>(),
         );
-        assert!(sessions.jobs().is_empty());
+        assert_eq!(sessions.jobs(), [] as [plakous_tools::JobView; 0]);
         Ok(())
     }
 
@@ -4358,7 +4356,7 @@ mod tests {
         let sessions = environment.joined_process_sessions()?;
         sessions.join_all()?;
         plakous_tools::internal::consume_jobs(&sessions, &[1]);
-        assert!(sessions.jobs().is_empty());
+        assert_eq!(sessions.jobs(), [] as [plakous_tools::JobView; 0]);
         Ok(())
     }
 
@@ -4634,12 +4632,12 @@ mod tests {
                 &control,
             )
             .await?;
-            assert!(joined.projection.output.is_empty());
+            assert_eq!(joined.projection.output, "");
             assert_eq!(joined.cursor, TOTAL_BYTES as u64);
         }
         assert!(joined.joined);
         assert_eq!(joined.cursor, TOTAL_BYTES as u64);
-        assert!(joined.projection.output.is_empty());
+        assert_eq!(joined.projection.output, "");
         assert_eq!(joined.projection.session_id, None);
         Ok(())
     }

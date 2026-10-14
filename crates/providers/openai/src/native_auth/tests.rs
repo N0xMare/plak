@@ -141,10 +141,10 @@ fn compact_client_metadata_is_copied_to_codex_compat_headers() -> TestResult {
     assert_eq!(headers[0].1.as_bytes(), b"abc");
     assert_eq!(headers[1].0.as_str(), "x-codex-turn-metadata");
     assert_eq!(headers[1].1.as_bytes(), metadata.to_string().as_bytes());
-    assert!(
+    assert_eq!(
         codex_compact_compat_headers(&serde_json::json!({}))
-            .map_err(|_| "empty body should not be compact")?
-            .is_empty()
+            .map_err(|_| "empty body should not be compact")?,
+        [] as [(HeaderName, HeaderValue); 0]
     );
     Ok(())
 }
@@ -3934,7 +3934,7 @@ async fn codex_not_started_refunds_inference_permit_and_input() -> TestResult {
         ),
     )
     .await?;
-    assert!(!terminal.output().is_empty());
+    assert_ne!(terminal.output(), []);
     assert_eq!(server.await??.len(), 2);
     let inference = gate.snapshot()?.class(SubscriptionRequestClass::Inference);
     assert_eq!(inference.reserved(), 1);
@@ -4414,7 +4414,7 @@ async fn assert_inference_observation(inherited: bool) -> TestResult {
         ),
     )
     .await?;
-    assert!(!result.output().is_empty());
+    assert_ne!(result.output(), []);
     let requests = server.await??;
     assert_eq!(
         requests.len(),
@@ -4704,7 +4704,7 @@ async fn device_jwks_userinfo_catalog_and_lite_inference_are_exact() -> TestResu
         reopened_artifact,
     )
     .await?;
-    assert!(!second.output().is_empty());
+    assert_ne!(second.output(), []);
     assert_eq!(
         second.metadata().provider_request_id(),
         Some("req_native_text")
@@ -6615,7 +6615,7 @@ async fn another_manager_refreshing_the_shared_store_renews_the_running_receipt(
         "00000000-0000-7000-8000-000000000501",
     )
     .await?;
-    assert!(!response.output().is_empty());
+    assert_ne!(response.output(), []);
     let after = Arc::clone(&fixture.model)
         .revalidate_runtime_authority(system_timestamp())
         .await?;
@@ -7086,7 +7086,7 @@ async fn a_login_stored_without_a_selection_epoch_requires_a_new_login() -> Test
         Err(NativeCodexAuthError::LoginRequired)
     ));
     let (requests, unexpected) = server.await??;
-    assert!(requests.is_empty());
+    assert_eq!(requests, [] as [Vec<u8>; 0]);
     assert!(!unexpected, "a legacy login reached the wire");
     Ok(())
 }

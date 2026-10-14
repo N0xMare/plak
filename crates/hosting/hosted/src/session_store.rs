@@ -1140,14 +1140,12 @@ mod memory {
                     .len(),
                 1
             );
-            assert!(
-                store
-                    .withdraw_unadmitted_workflows(&mut source)
-                    .unwrap()
-                    .is_empty()
+            assert_eq!(
+                store.withdraw_unadmitted_workflows(&mut source).unwrap(),
+                [] as [plakous_host_protocol::views::transcript::TranscriptRow; 0]
             );
             let intents = store.load_intents(&source.id).unwrap();
-            assert!(intents.workflow_requests.is_empty());
+            assert_eq!(intents.workflow_requests, [] as [WorkflowRequest; 0]);
             assert_eq!(intents.notices.len(), 1);
             assert!(store.load(&request.successor_product_id()).is_err());
         }

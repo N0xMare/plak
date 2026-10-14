@@ -595,8 +595,11 @@ mod tests {
                 },
             )
             .unwrap();
-        assert!(listed.agents.is_empty());
-        assert!(tree.stop_all("root", None).unwrap().is_empty());
+        assert_eq!(listed.agents, [] as [serde_json::Value; 0]);
+        assert_eq!(
+            tree.stop_all("root", None).unwrap(),
+            [] as [(String, NodeStatus); 0]
+        );
     }
 
     /// A singleton (or a tree whose descendants are all finished) has nothing

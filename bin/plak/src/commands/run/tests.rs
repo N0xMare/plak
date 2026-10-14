@@ -29,7 +29,7 @@ fn expired_run_timeout_precedes_authentication_preparation() {
         )
         .unwrap();
     assert_eq!(outcome, ProcessOutcome::Bounded);
-    assert!(stdout.is_empty());
+    assert_eq!(stdout, [] as [u8; 0]);
     assert_eq!(
         String::from_utf8(stderr).unwrap(),
         "plak: run stopped at timeout\n"
@@ -402,7 +402,7 @@ fn failed_terminal_publication_never_reports_success_and_reopen_publishes_it() {
                 || error.message().contains("injected publication failure"),
             "{error:?}"
         );
-        assert!(stdout.is_empty());
+        assert_eq!(stdout, [] as [u8; 0]);
         // The record lost only the terminal publication: the runtime head is
         // that turn's terminal. With storage restored, the next open adopts
         // exactly that head and publishes the skipped result, once.
@@ -640,7 +640,10 @@ fn refusal_pauses_queued_work_until_explicit_resume() {
     actions.send(UserAction::Quit).unwrap();
     worker.join().unwrap().unwrap();
     assert_eq!(dispatches(), 2);
-    assert!(store.load(&id).unwrap().pending_queue.is_empty());
+    assert_eq!(
+        store.load(&id).unwrap().pending_queue,
+        [] as [plakous_hosted::sessions::QueueItem; 0]
+    );
 }
 
 #[test]
@@ -681,7 +684,7 @@ fn refusal_one_shot_release_failure_keeps_stdout_empty_and_reports_release() {
     .unwrap_err();
     assert_eq!(error.exit_code(), 5);
     assert!(error.message().contains("release failed"), "{error:?}");
-    assert!(stdout.is_empty());
+    assert_eq!(stdout, [] as [u8; 0]);
 }
 
 #[test]
@@ -703,7 +706,7 @@ fn one_shot_capacity_admission_failure_is_returned_without_duplicate_note() {
     )
     .unwrap_err();
     assert_eq!(failure.exit_code(), 5);
-    assert!(stdout.is_empty());
+    assert_eq!(stdout, [] as [u8; 0]);
     let before_final = String::from_utf8(stderr.clone()).unwrap();
     assert!(!before_final.contains(failure.message()));
     assert!(failure.message().contains("compaction"), "{failure:?}");
@@ -757,7 +760,7 @@ fn one_shot_terminal_error_is_returned_once_and_keeps_failure_guidance() {
     )
     .unwrap_err();
     assert_eq!(failure.exit_code(), 5);
-    assert!(stdout.is_empty());
+    assert_eq!(stdout, [] as [u8; 0]);
     let notes = String::from_utf8(stderr).unwrap();
     assert!(!notes.contains(failure.message()));
     assert!(
@@ -859,8 +862,8 @@ fn run_refuses_an_invalid_config_before_any_account_or_session_work() {
             failure.message()
         );
         assert_eq!(stdin.position(), 0, "the compatibility prompt must not run");
-        assert!(stdout.is_empty());
-        assert!(stderr.is_empty());
+        assert_eq!(stdout, [] as [u8; 0]);
+        assert_eq!(stderr, [] as [u8; 0]);
         assert!(!paths.product_database().exists());
     }
     assert!(!home.path().join("state").exists());

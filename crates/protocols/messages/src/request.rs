@@ -3350,7 +3350,7 @@ mod tests {
                 assert!(
                     matches!(&messages[1].content[native_count], MessageBlock::Text { text, .. } if text == "answer")
                 );
-                assert!(diagnostics.is_empty());
+                assert_eq!(diagnostics, [] as [String; 0]);
                 assert_eq!(projections.len(), usize::from(native_count == 0));
                 if native_count == 0 {
                     let identity = projections[0]
@@ -3541,7 +3541,7 @@ mod tests {
                 return Err("malformed or unfinished history was accepted".into());
             };
             assert_eq!(error.kind(), MessagesRequestErrorKind::InvalidRequest);
-            assert!(diagnostics.is_empty());
+            assert_eq!(diagnostics, [] as [String; 0]);
         }
         Ok(())
     }
@@ -4149,7 +4149,7 @@ mod tests {
             &policy,
         )?;
         assert!(pending.is_empty());
-        assert!(opaque_only.is_empty());
+        assert_eq!(opaque_only, [] as [MessageBlock; 0]);
 
         let (compacted, pending) = translate_assistant(
             &[ContentBlock::Compaction(
@@ -4291,7 +4291,7 @@ mod tests {
             ),
             Some(MessageBlock::Text { text, .. }) if text == "private chain of thought"
         ));
-        assert!(lenient_diagnostics.is_empty());
+        assert_eq!(lenient_diagnostics, [] as [String; 0]);
 
         // A signature from another protocol is refused the same way.
         let foreign_replay = bind_replay_payload(

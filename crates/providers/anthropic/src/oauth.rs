@@ -717,8 +717,8 @@ mod tests {
             CLAUDE_OAUTH_IDENTITY,
             "You are Claude Code, Anthropic's official CLI for Claude."
         );
-        assert!(!claude_oauth_stainless_arch().is_empty());
-        assert!(!claude_oauth_stainless_os().is_empty());
+        assert_ne!(claude_oauth_stainless_arch(), "");
+        assert_ne!(claude_oauth_stainless_os(), "");
     }
 
     #[test]
@@ -854,7 +854,7 @@ mod tests {
         for model in ["claude-haiku-4-5", "claude-future-neighbor"] {
             assert!(claude_enrollment(model).is_none());
             assert_eq!(claude_max_output_tokens(model), 64_000);
-            assert!(claude_oauth_reasoning_effort_options(model).is_empty());
+            assert_eq!(claude_oauth_reasoning_effort_options(model), []);
         }
     }
 

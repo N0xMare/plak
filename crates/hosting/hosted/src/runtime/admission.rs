@@ -7,9 +7,6 @@ use crate::sessions::{
     QueueDrainState as SessionQueueDrainState, QueueItem as SessionQueueItem, SessionRecord,
 };
 
-#[cfg(test)]
-use crate::sessions::queue::{drop_last_mutable, edit_mutable, move_mutable, remove_mutable};
-
 use super::rebind::durable_tree_id;
 use super::{
     HostEvent, MAX_PENDING_PROMPTS, MAX_PROMPT_BYTES, Sender, TopologyRows, UserAction, queue,
@@ -499,7 +496,7 @@ mod tests {
             queue::enqueue(&mut queue, "x".repeat(MAX_PROMPT_BYTES + 1)),
             Err(queue::Refusal::TooLarge)
         );
-        assert!(queue.is_empty());
+        assert_eq!(queue, [] as [queue::QueueItem; 0]);
     }
 
     #[test]

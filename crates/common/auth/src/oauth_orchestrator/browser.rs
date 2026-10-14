@@ -77,15 +77,20 @@ pub trait BrowserLoopbackHooks {
 ///
 /// # Errors
 ///
-/// `Err(())` when every candidate fails to bind.
-pub async fn bind_loopback_listener(ports: &[u16]) -> Result<(TcpListener, u16), ()> {
+/// The last bind failure when every candidate fails to bind, or
+/// [`std::io::ErrorKind::AddrNotAvailable`] when `ports` is empty.
+pub async fn bind_loopback_listener(ports: &[u16]) -> std::io::Result<(TcpListener, u16)> {
+    let mut last = std::io::Error::from(std::io::ErrorKind::AddrNotAvailable);
     for port in ports {
-        if let Ok(listener) = TcpListener::bind(("127.0.0.1", *port)).await {
-            let bound = listener.local_addr().map_err(|_| ())?.port();
-            return Ok((listener, bound));
+        match TcpListener::bind(("127.0.0.1", *port)).await {
+            Ok(listener) => {
+                let bound = listener.local_addr()?.port();
+                return Ok((listener, bound));
+            }
+            Err(error) => last = error,
         }
     }
-    Err(())
+    Err(last)
 }
 
 /// Failure while reading a loopback request head.
@@ -143,20 +148,23 @@ pub async fn read_http11_request_head(
 ///
 /// # Errors
 ///
-/// `Err(())` on deadline or transport failure.
+/// [`std::io::ErrorKind::TimedOut`] on deadline, otherwise the transport
+/// failure.
 pub async fn write_all_before_deadline(
     stream: &mut (impl AsyncWrite + Unpin),
     bytes: &[u8],
     deadline: Instant,
-) -> Result<(), ()> {
-    let remaining = deadline.checked_duration_since(Instant::now()).ok_or(())?;
+) -> std::io::Result<()> {
+    let timed_out = || std::io::Error::from(std::io::ErrorKind::TimedOut);
+    let remaining = deadline
+        .checked_duration_since(Instant::now())
+        .ok_or_else(timed_out)?;
     tokio::time::timeout(remaining, async {
-        stream.write_all(bytes).await.map_err(|_| ())?;
-        stream.shutdown().await.map_err(|_| ())?;
-        Ok(())
+        stream.write_all(bytes).await?;
+        stream.shutdown().await
     })
     .await
-    .map_err(|_| ())?
+    .map_err(|_| timed_out())?
 }
 
 /// Run the shared loopback accept session until one callback completes.
@@ -211,7 +219,7 @@ where
                 let page = hooks.preflight_response_bytes(&preflight);
                 write_all_before_deadline(&mut stream, &page, hooks.deadline())
                     .await
-                    .map_err(|()| hooks.callback_error())?;
+                    .map_err(|_| hooks.callback_error())?;
             }
             Ok(LoopbackConnectionEvent::Callback(callback)) => {
                 let outcome = hooks.complete_callback(callback).await;

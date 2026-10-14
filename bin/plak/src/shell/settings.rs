@@ -1044,7 +1044,10 @@ mod tests {
         session.roster = None;
         let without_tree = session_profile(&prepared.config, dir.path(), &session);
         assert_eq!(without_tree.id, "custom");
-        assert!(without_tree.cards.is_empty());
+        assert_eq!(
+            without_tree.cards,
+            [] as [crate::surface_protocol::ProfileRole; 0]
+        );
     }
 
     /// Settings lists the frozen working set in config order, the same shape
@@ -1325,7 +1328,10 @@ mod tests {
                     SurfaceIntent::OpenUsage
                         if phase == SurfacePhase::Idle && attached_one_shot =>
                     {
-                        assert!(observed.is_empty());
+                        assert_eq!(
+                            observed,
+                            [] as [plakous_host_protocol::SessionObservation<PlakExtension>; 0]
+                        );
                     }
                     SurfaceIntent::OpenUsage => assert!(matches!(
                         observed.as_slice(),

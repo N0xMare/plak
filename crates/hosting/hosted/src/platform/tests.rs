@@ -325,7 +325,7 @@ fn openai_api_code_mode_table_matches_the_codex_reference_catalog() {
         );
     }
     let rows = platform_models(PlatformProvider::OpenAi);
-    assert!(!rows.is_empty());
+    assert_ne!(rows, [] as [PlatformModel; 0]);
     for row in rows {
         assert!(
             reference["models"].get(&row.model).is_some()

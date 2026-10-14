@@ -124,14 +124,14 @@ fn a_pruned_feed_reopen_consumes_historical_intents_without_withdrawing_clear() 
             .find(|record| record.source_product_session_id.as_deref() == Some(&id))
             .expect("clear successor");
         assert!(store.load_views(&successor.id).unwrap().is_some());
-        assert!(
-            !store
-                .load_intents(&id)
-                .unwrap()
-                .workflow_requests
-                .is_empty()
+        assert_ne!(
+            store.load_intents(&id).unwrap().workflow_requests,
+            [] as [crate::sessions::projector::WorkflowRequest; 0]
         );
-        assert!(!store.load_intents(&id).unwrap().submissions.is_empty());
+        assert_ne!(
+            store.load_intents(&id).unwrap().submissions,
+            [] as [crate::sessions::projector::Submission; 0]
+        );
         let mut connection = rusqlite::Connection::open(database).unwrap();
         let tx = connection.transaction().unwrap();
         // Retain the runtime heads and receipts, but none of their feed facts.
@@ -184,8 +184,14 @@ fn a_pruned_feed_reopen_consumes_historical_intents_without_withdrawing_clear() 
         );
         let views = store.load_views(&id).unwrap().unwrap();
         let intents = store.load_intents(&id).unwrap();
-        assert!(crate::sessions::projector::pending_command_ids(&views, &intents).is_empty());
-        assert!(crate::sessions::projector::workflow_withdrawals(&views, &intents).is_empty());
+        assert_eq!(
+            crate::sessions::projector::pending_command_ids(&views, &intents),
+            [] as [String; 0]
+        );
+        assert_eq!(
+            crate::sessions::projector::workflow_withdrawals(&views, &intents),
+            [] as [(String, crate::sessions::projector::OperatorNotice); 0]
+        );
         assert!(
             intents
                 .notices
@@ -602,5 +608,8 @@ fn background_projection_releases_the_next_admission_without_resending_the_previ
             1
         );
     }
-    assert!(store.load(&id).unwrap().pending_queue.is_empty());
+    assert_eq!(
+        store.load(&id).unwrap().pending_queue,
+        [] as [crate::sessions::queue::QueueItem; 0]
+    );
 }

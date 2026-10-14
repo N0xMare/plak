@@ -725,7 +725,7 @@ async fn assert_mixed_debt(not_dispatched: bool, root_state: MixedRoot) -> TestR
         .filter(|record| matches!(record.kind(), DurableOperationKind::Effect { .. }))
         .map(|record| OperationId(record.operation_id()))
         .collect::<Vec<_>>();
-    assert!(!uncertain_effects.is_empty());
+    assert_ne!(uncertain_effects, [] as [OperationId; 0]);
     let refused = checkpoint_with_code_cell_records(seeded.checkpoint(), turn_id, refused_records)?;
     // An uncertain nested effect is not Code Cell finalization debt and never
     // takes Code Cell evidence; it makes the closure a turn abandonment, which

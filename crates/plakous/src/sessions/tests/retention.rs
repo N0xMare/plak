@@ -214,7 +214,10 @@ async fn prune_history_refuses_an_attached_session_and_names_a_moved_head() -> T
         sessions.prune_history(head).await?,
         PruneHistoryOutcome::Pruned(_)
     ));
-    assert!(sessions.archived_sessions().await?.is_empty());
+    assert_eq!(
+        sessions.archived_sessions().await?,
+        [] as [ArchivedSessionReport; 0]
+    );
     let archived = sessions.archive(head).await?;
     assert_eq!(
         sessions.archived_sessions().await?,
@@ -226,7 +229,10 @@ async fn prune_history_refuses_an_attached_session_and_names_a_moved_head() -> T
     sessions
         .delete(archived.session_id(), archived.archived_revision())
         .await?;
-    assert!(sessions.archived_sessions().await?.is_empty());
+    assert_eq!(
+        sessions.archived_sessions().await?,
+        [] as [ArchivedSessionReport; 0]
+    );
     drop(sessions);
     store.shutdown().await?;
     Ok(())

@@ -2043,6 +2043,10 @@ impl AttachedCodingSession {
             .await
     }
 
+    #[allow(
+        clippy::result_large_err,
+        reason = "the error carries the released locator and both lease failures; it is returned once at session teardown"
+    )]
     pub async fn release(mut self) -> Result<SessionLocator, AttachedReleaseError> {
         let topology = match self.topology_owner.take() {
             Some(tree_id) => crate::topology_runtime::release_root_lease(&tree_id)
@@ -2067,6 +2071,10 @@ impl AttachedCodingSession {
     }
 
     /// Process-exit release: no hub retirement, product saves or driver join.
+    #[allow(
+        clippy::result_large_err,
+        reason = "the error carries the released locator and both lease failures; it is returned once at process exit"
+    )]
     pub async fn abandon_and_release(
         mut self,
         job_budget: Duration,

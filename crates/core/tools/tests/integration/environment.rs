@@ -264,8 +264,8 @@ fn delegation_order_is_canonical_and_lookup_is_exact() -> Result<(), TestError> 
 #[test]
 fn defaults_delegate_nothing_and_limits_are_bounded() -> Result<(), TestError> {
     let config = ExecutionEnvironmentConfig::default();
-    assert!(config.environment_delegations().is_empty());
-    assert!(config.credential_delegations().is_empty());
+    assert_eq!(config.environment_delegations(), []);
+    assert_eq!(config.credential_delegations(), []);
     assert!(
         config
             .environment_delegation(&EnvironmentVariableName::new("PATH")?)

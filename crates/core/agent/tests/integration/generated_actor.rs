@@ -485,7 +485,7 @@ async fn a_schedule_without_dispatch_hits_the_virtual_poll_deadline() -> TestRes
             .is_some()
     );
     assert_eq!(started.elapsed(), POLL_TIMEOUT);
-    assert!(model.captured_plans().is_empty());
+    assert_eq!(model.captured_plans(), [] as [ValidatedRequestPlan; 0]);
     Ok(())
 }
 

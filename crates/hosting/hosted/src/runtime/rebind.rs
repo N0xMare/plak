@@ -1337,7 +1337,10 @@ mod tests {
                 .workflow_request(&requests[1].operation_id)
                 .is_some()
         );
-        assert!(intents.notices.is_empty());
+        assert_eq!(
+            intents.notices,
+            [] as [sessions::projector::OperatorNotice; 0]
+        );
         assert!(
             config
                 .store
@@ -1645,7 +1648,7 @@ mod tests {
             .unwrap()
             .unwrap()
             .unwrap();
-        assert!(projected.pending_workflows.is_empty());
+        assert_eq!(projected.pending_workflows, [] as [String; 0]);
         assert_eq!(
             projected.head.branch_id(),
             source.plakous_locator.unwrap().branch_id()
@@ -1720,7 +1723,10 @@ mod tests {
             source_locator.branch_id()
         );
         let intents = store.load_intents(&source_id).unwrap();
-        assert!(intents.workflow_requests.is_empty());
+        assert_eq!(
+            intents.workflow_requests,
+            [] as [sessions::projector::WorkflowRequest; 0]
+        );
         let notice = TranscriptRow::info(NoticeScope::Recovery, request.withdrawal_note());
         assert_eq!(
             intents
@@ -1732,11 +1738,9 @@ mod tests {
         );
         assert!(store.load(&request.successor_product_id()).is_err());
         let mut stored = store.load(&source_id).unwrap();
-        assert!(
-            store
-                .withdraw_unadmitted_workflows(&mut stored)
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            store.withdraw_unadmitted_workflows(&mut stored).unwrap(),
+            [] as [TranscriptRow; 0]
         );
 
         actions.send(UserAction::Quit).unwrap();
@@ -1878,7 +1882,7 @@ mod tests {
             .withdraw_unadmitted_workflows(&mut config.session)
             .unwrap();
         if let Some(target) = published {
-            assert!(notices.is_empty());
+            assert_eq!(notices, [] as [TranscriptRow; 0]);
             let successor = config.store.load(&request.successor_product_id()).unwrap();
             assert_eq!(successor.plakous_locator, Some(target));
             let views = config.store.load_views(&source_id).unwrap().unwrap();
@@ -1890,20 +1894,20 @@ mod tests {
         } else {
             assert_eq!(notices.len(), 1);
             assert_eq!(notices[0].text(), Some(request.withdrawal_note()));
-            assert!(
+            assert_eq!(
                 config
                     .store
                     .withdraw_unadmitted_workflows(&mut config.session)
-                    .unwrap()
-                    .is_empty()
+                    .unwrap(),
+                [] as [TranscriptRow; 0]
             );
-            assert!(
+            assert_eq!(
                 config
                     .store
                     .load_intents(&source_id)
                     .unwrap()
-                    .workflow_requests
-                    .is_empty()
+                    .workflow_requests,
+                [] as [sessions::projector::WorkflowRequest; 0]
             );
         }
 

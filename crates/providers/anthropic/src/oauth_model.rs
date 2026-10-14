@@ -1435,7 +1435,7 @@ mod tests {
                     .with_session_id(Some(test_affinity(99, 0).session()))
                     .translate(&plan, ToolOwnership::default())
                     .unwrap();
-                assert!(prepared.replay_diagnostics().is_empty());
+                assert_eq!(prepared.replay_diagnostics(), [] as [String; 0]);
                 requests
                     .push(serde_json::from_slice::<serde_json::Value>(prepared.body()).unwrap());
             }

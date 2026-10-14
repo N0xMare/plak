@@ -947,7 +947,7 @@ mod tests {
                 [],
             )
             .unwrap();
-        assert!(!candidate.commit.is_empty());
+        assert_ne!(candidate.commit, "");
         // Model a landed candidate: both the branch and its pin are reachable
         // from launch HEAD, rather than the synthetic snapshot seal commit.
         let pin = maintenance::candidate_ref(&maintenance::digest_text("old"), "cand-old-a1");

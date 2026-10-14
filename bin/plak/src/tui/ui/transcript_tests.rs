@@ -1472,7 +1472,7 @@ fn submit_idle_is_prompt() {
         sent_at_ms: None,
     });
     assert!(blocks_contain(&app, "hello world"));
-    assert!(app.input.is_empty());
+    assert_eq!(app.input, "");
     assert!(!app.should_quit);
 }
 
@@ -1504,7 +1504,7 @@ fn hosted_idle_prompt_user_message_does_not_create_queue_chip() {
         text: "hello world".into(),
         sent_at_ms: None,
     });
-    assert!(app.local_queue.is_empty());
+    assert_eq!(app.local_queue, [] as [plakous_host_protocol::QueueItem; 0]);
     assert_eq!(app.queue_len, 0);
     assert!(
         app.pane
@@ -1807,7 +1807,7 @@ fn host_status_and_transcript_events() {
     assert_eq!(app.effort.as_deref(), Some("low"));
     assert_eq!(app.protocol, crate::tui::ProtocolSelection::Messages);
     app.apply_host_event(HostEvent::ClearView);
-    assert!(app.pane.blocks.is_empty());
+    assert_eq!(app.pane.blocks, [] as [ScrollBlock; 0]);
 }
 
 #[test]
@@ -2149,7 +2149,7 @@ fn an_unresolved_approval_retires_when_the_turn_ends() {
 #[test]
 fn transcript_starts_without_static_application_banner() {
     let app = App::new(launch_basic(), false);
-    assert!(app.pane.blocks.is_empty());
+    assert_eq!(app.pane.blocks, [] as [ScrollBlock; 0]);
 }
 
 #[test]
@@ -2849,15 +2849,14 @@ fn the_close_glyph_brightens_on_hover_and_closes_on_click() {
     terminal.draw(|frame| app.draw(frame)).unwrap();
     let hot = serialize_frame(terminal.backend().buffer());
     assert_ne!(cold, hot, "the glyph must brighten under the pointer");
-    for (path, expected) in [(
-        "tests/goldens/menu-close-hover-120x40.frame",
-        include_str!("../../../tests/goldens/menu-close-hover-120x40.frame"),
-    )] {
-        if std::env::var_os("PLAK_UPDATE_GOLDENS").is_some() {
-            std::fs::write(path, &hot).expect("write reviewed frame golden");
-        } else {
-            assert_eq!(hot, expected);
-        }
+    let path = "tests/goldens/menu-close-hover-120x40.frame";
+    if std::env::var_os("PLAK_UPDATE_GOLDENS").is_some() {
+        std::fs::write(path, &hot).expect("write reviewed frame golden");
+    } else {
+        assert_eq!(
+            hot,
+            include_str!("../../../tests/goldens/menu-close-hover-120x40.frame")
+        );
     }
 
     app.handle_control_mouse(left_click(close.x + 1, close.y));

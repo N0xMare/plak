@@ -3376,8 +3376,8 @@ mod tests {
             ContextHistoryStrategy::SemanticSummaryPrefixV1
         );
         assert_eq!(empty.latest_user_intent_position(), None);
-        assert!(empty.selected_intent_groups().is_empty());
-        assert!(empty.selected_segments().is_empty());
+        assert_eq!(empty.selected_intent_groups(), []);
+        assert_eq!(empty.selected_segments(), []);
         assert!(empty.retained_tail().is_none());
         assert!(empty.summary_replacement_tail().is_none());
         assert_eq!(
@@ -3398,8 +3398,8 @@ mod tests {
             WorkingProjection::default(),
         );
         let plan = ContextHistoryPlan::new(&no_user).expect("no-user plan");
-        assert!(plan.selected_intent_groups().is_empty());
-        assert!(plan.selected_segments().is_empty());
+        assert_eq!(plan.selected_intent_groups(), []);
+        assert_eq!(plan.selected_segments(), []);
         assert_eq!(plan.latest_user_intent_position(), None);
         assert_eq!(
             plan.disposition().kind(),
@@ -3668,7 +3668,7 @@ mod tests {
             WorkingProjection::default(),
         );
         let plan = ContextHistoryPlan::new(&source).expect("plan");
-        assert!(plan.selected_segments().is_empty());
+        assert_eq!(plan.selected_segments(), []);
         assert_eq!(
             plan.disposition().kind(),
             ContextPlannerDispositionKind::ProtectedOnly
@@ -3693,7 +3693,7 @@ mod tests {
             WorkingProjection::default(),
         );
         let plan = ContextHistoryPlan::new(&text_only).expect("plan");
-        assert!(plan.selected_segments().is_empty());
+        assert_eq!(plan.selected_segments(), []);
         assert_eq!(
             plan.disposition().kind(),
             ContextPlannerDispositionKind::ProtectedOnly
@@ -3886,7 +3886,7 @@ mod tests {
         assert_eq!(left.strategy_revision(), CONTEXT_PLANNER_STRATEGY_REVISION);
         assert_eq!(left.selected_segments().len(), 5);
         assert_eq!(left.summary_input().history().segments().len(), 5);
-        assert!(left.summary_input().working().segments().is_empty());
+        assert_eq!(left.summary_input().working().segments(), []);
         assert_eq!(left.retained_segment_count(), 2);
         assert_eq!(
             left.retained_tail_identity(),
@@ -4343,7 +4343,7 @@ mod tests {
         );
         let plan = ContextHistoryPlan::new(&source).expect("plan");
         assert_eq!(plan.latest_user_intent_position(), None);
-        assert!(plan.selected_segments().is_empty());
+        assert_eq!(plan.selected_segments(), []);
         // Nothing is selected, so the retained set is the whole committed
         // history — the steering anchor does not discard the orphan before it.
         assert_eq!(
@@ -4374,8 +4374,8 @@ mod tests {
             WorkingProjection::default(),
         );
         let plan = ContextHistoryPlan::new(&source).expect("plan");
-        assert!(plan.selected_intent_groups().is_empty());
-        assert!(plan.selected_segments().is_empty());
+        assert_eq!(plan.selected_intent_groups(), []);
+        assert_eq!(plan.selected_segments(), []);
         assert!(plan.summary_replacement_tail().is_none());
         assert_eq!(
             plan.retained_tail()

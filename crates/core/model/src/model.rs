@@ -4410,13 +4410,11 @@ impl PreparedModelCall {
     }
 
     /// Consumes the sole start capability under attempt-only controls.
-    #[must_use]
     pub fn start(self, context: ModelCallContext) -> StartModelCall {
         events_start_from_semantic(self.start_with_control(context))
     }
 
     /// Consumes the sole start capability while preserving locator controls.
-    #[must_use]
     pub fn start_with_control(mut self, context: ModelCallContext) -> StartModelCallWithControl {
         if context.attempt_id() != self.record.projection.attempt_id {
             return Box::pin(async {
@@ -4749,7 +4747,6 @@ impl ReachabilityProbe {
     }
 
     /// Starts one probe bounded by caller cancellation and an absolute deadline.
-    #[must_use]
     pub fn run(
         &self,
         cancellation: CancellationToken,

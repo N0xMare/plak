@@ -828,7 +828,10 @@ fn every_control_tab_and_terminal_owner_has_a_closed_action_table() {
     let mut shutdown = App::new(launch_basic(), true);
     shutdown.quitting = true;
     assert_eq!(shutdown.semantic_snapshot().owner, "shutdown");
-    assert!(shutdown.legal_pilot_actions().is_empty());
+    assert_eq!(
+        shutdown.legal_pilot_actions(),
+        [] as [crate::tui::ui::pilot::LegalAction; 0]
+    );
 }
 
 #[test]
@@ -1130,7 +1133,7 @@ mod sidecar {
             "a pending host intent is not a terminal outcome"
         );
         assert_eq!(sent.revision, app.semantic_revision);
-        assert!(!sent.observation_digest.is_empty());
+        assert_ne!(sent.observation_digest, "");
     }
 
     #[test]
@@ -1175,7 +1178,7 @@ mod sidecar {
         );
         assert_eq!(outcome.status, "stale_observation");
         assert!(outcome.action.is_none());
-        assert!(app.input.is_empty());
+        assert_eq!(app.input, "");
     }
 
     #[test]

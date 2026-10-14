@@ -687,14 +687,12 @@ impl ToolRuntime {
     }
 
     /// Returns a future completing when the runtime's task owner is drained.
-    #[must_use]
     pub fn drain_tasks(&self) -> ToolTaskDrain {
         self.tasks.drain()
     }
 
     /// Atomically closes task admission, requests abort, and joins to a stable
     /// drained boundary shared by every clone of this runtime.
-    #[must_use]
     pub fn shutdown_tasks(&self) -> ToolTaskDrain {
         self.tasks.shutdown()
     }

@@ -158,7 +158,7 @@ pub(super) fn assert_capacity(fixture: &Fixture, outcome: &AgentOutcome, state: 
     assert_eq!(state.original_answers, 0);
     assert_eq!(state.tool_call_count, 0);
     assert_eq!(state.drain, "live_auto_drain");
-    assert!(state.queue.is_empty());
+    assert_eq!(state.queue, [] as [String; 0]);
     assert_eq!(invariants::dispatches(fixture).len(), 2);
     invariants::no_duplicate_dispatch(fixture);
 }

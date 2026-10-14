@@ -1840,7 +1840,7 @@ impl crate::agent_tree_tools::MailDeliverer for ProductMailDeliverer {
                 .runtime
                 .reserve_startup_admitted(&agent_id, |_| Ok(()))
                 .await
-                .map_err(&refused)?;
+                .map_err(refused)?;
             let opened = reopen_spawned_child(
                 &self.parent,
                 &agent_id,
@@ -3537,8 +3537,7 @@ fn finalize_child_turn(
         if cancelled {
             let skip_emit = tree
                 .node(agent_id)
-                .ok()
-                .is_some_and(|node| !node.status.is_terminal());
+                .is_ok_and(|node| !node.status.is_terminal());
             if skip_emit {
                 return;
             }
@@ -4406,8 +4405,7 @@ pub(super) async fn reattach_inflight_children(
                 }
                 let terminal = tree
                     .node(agent_id)
-                    .ok()
-                    .is_some_and(|node| node.status.is_terminal())
+                    .is_ok_and(|node| node.status.is_terminal())
                     || tree
                         .attempt(agent_id)
                         .is_some_and(|assignment| assignment.status.is_stopped());
@@ -7623,7 +7621,7 @@ mod retirement_tests {
         finish.notify_one();
         let failure = close.await.unwrap_err();
         assert_eq!(failure.failed_ids, vec![child_id.clone()]);
-        assert!(failure.not_live_ids.is_empty());
+        assert_eq!(failure.not_live_ids, [] as [String; 0]);
         assert_eq!(failure.message, "release refused");
         assert_eq!(
             runtime.cancel_live(&child_id).await.unwrap(),

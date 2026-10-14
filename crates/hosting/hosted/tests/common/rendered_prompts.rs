@@ -2020,7 +2020,10 @@ pub(crate) mod suite {
         let render = plakous::prompts::content_filter::render(None);
         let pin = &plakous::prompts::content_filter::CONTENT_FILTER_PROMPT_PINS[0];
         assert_eq!(render, pin.text());
-        assert!(plakous::tools::drifted_pins(std::slice::from_ref(pin)).is_empty());
+        assert_eq!(
+            plakous::tools::drifted_pins(std::slice::from_ref(pin)),
+            [] as [(&str, String); 0]
+        );
         if print_pins_requested() {
             println!(
                 "CONTENT_FILTER_PROMPT_PINS: {:?}",

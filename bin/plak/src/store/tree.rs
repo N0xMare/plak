@@ -350,7 +350,7 @@ mod tests {
         };
 
         assert!(!store.exists("tree-conf").unwrap());
-        assert!(store.ids().unwrap().is_empty());
+        assert_eq!(store.ids().unwrap(), [] as [String; 0]);
         assert!(store.load("tree-conf").unwrap().is_none());
 
         let mut tree = ProductAgentTree::bootstrap_root_for_test(

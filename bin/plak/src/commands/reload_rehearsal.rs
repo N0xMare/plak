@@ -524,7 +524,7 @@ mod tests {
         let paths = PlakPaths::explicit(home.path().to_path_buf());
         let mut output = Vec::new();
         assert!(rehearse(&paths, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", &mut output).is_err());
-        assert!(output.is_empty());
+        assert_eq!(output, [] as [u8; 0]);
         assert!(!paths.state_root().exists());
     }
 

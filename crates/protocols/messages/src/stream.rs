@@ -3201,7 +3201,7 @@ mod usage_wire_tests {
         let delta: ThinkingDeltaWire =
             serde_json::from_str(r#"{"type":"thinking_delta","thinking":""}"#)
                 .expect("empty thinking delta is observed on Claude Code");
-        assert!(delta.thinking.is_empty());
+        assert_eq!(delta.thinking, "");
     }
 
     #[test]
@@ -3434,7 +3434,7 @@ mod projector_tests {
                         .into_parts();
                     assert_eq!(response.as_ref(), Some(&terminal));
                     assert_eq!(terminal.finish().reason(), FinishReason::Refusal);
-                    assert!(terminal.output().is_empty());
+                    assert_eq!(terminal.output(), []);
                     assert!(terminal.usage().is_some());
                     assert!(terminal.response_id().is_some());
                     assert_eq!(
@@ -3505,7 +3505,7 @@ mod projector_tests {
                 }
                 assert!(!rejected, "revoked input needs no JSON interpretation");
                 projector.finish_eof().expect("closed refusal EOF");
-                assert!(terminal.expect("refusal terminal").output().is_empty());
+                assert_eq!(terminal.expect("refusal terminal").output(), []);
             }
         }
         let stream = refusal_stream(Some(block), "refusal", None).replace(

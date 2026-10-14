@@ -1493,7 +1493,10 @@ async fn length_stopped_tool_proposal_retries_once_without_dispatch_or_commit() 
 
     let result = agent.prompt(PROMPT).await?.result().await?;
     assert_terminal_error(&result, AgentErrorKind::Model)?;
-    assert!(tool.captured().is_empty());
+    assert_eq!(
+        tool.captured(),
+        [] as [plakous_test_support::CapturedToolInvocation; 0]
+    );
     let items = result.conversation().items();
     assert_eq!(items.len(), 3);
     assert_eq!(items[0], user_item()?);
@@ -1944,7 +1947,10 @@ async fn length_stopped_tool_call_persists_the_prepared_wire_limit() -> TestResu
         .build()?;
     let result = agent.prompt(PROMPT).await?.result().await?;
     assert_terminal_error(&result, AgentErrorKind::Model)?;
-    assert!(tool.captured().is_empty());
+    assert_eq!(
+        tool.captured(),
+        [] as [plakous_test_support::CapturedToolInvocation; 0]
+    );
     assert_eq!(
         model.captured_plans()[0]
             .request()
@@ -2011,7 +2017,10 @@ async fn malformed_call_round_projects_terminal_model_error_phase() -> TestResul
         error.model_context().ok_or("model error context")?.phase(),
         plakous_model::ModelErrorPhase::Terminal
     );
-    assert!(tool.captured().is_empty());
+    assert_eq!(
+        tool.captured(),
+        [] as [plakous_test_support::CapturedToolInvocation; 0]
+    );
     agent.shutdown().await?;
     Ok(())
 }
@@ -2659,7 +2668,10 @@ async fn denial_is_model_visible_without_backend_dispatch() -> TestResult {
         next_resolution(&mut events).await?,
         EffectDecisionResolution::Denied
     );
-    assert!(tool.captured().is_empty());
+    assert_eq!(
+        tool.captured(),
+        [] as [plakous_test_support::CapturedToolInvocation; 0]
+    );
 
     let result = turn.result().await?;
     assert!(matches!(result.outcome(), TurnResultOutcome::Failed(_)));
@@ -2844,7 +2856,10 @@ async fn cancellation_phase_matrix() -> TestResult {
             next_resolution(&mut events).await?,
             EffectDecisionResolution::Cancelled
         );
-        assert!(tool.captured().is_empty());
+        assert_eq!(
+            tool.captured(),
+            [] as [plakous_test_support::CapturedToolInvocation; 0]
+        );
         let result = turn.result().await?;
         assert!(matches!(result.outcome(), TurnResultOutcome::Cancelled(_)));
         assert_terminal_error(&result, AgentErrorKind::Cancelled)?;

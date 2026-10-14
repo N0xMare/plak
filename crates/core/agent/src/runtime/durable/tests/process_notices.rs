@@ -159,7 +159,7 @@ async fn process_notice_terminal_tool_result_consumes_before_boundary_delivery()
         "{:?}",
         result.outcome()
     );
-    assert!(fixture.agent.jobs().is_empty());
+    assert_eq!(fixture.agent.jobs(), [] as [plakous_tools::JobView; 0]);
     assert_eq!(notice_count(&fixture.agent), 0);
     fixture
         .agent
@@ -187,7 +187,7 @@ async fn process_notice_capacity_refusal_defers_to_next_boundary() -> TestResult
     assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
     assert_eq!(fixture.store.ordinary_refusals.load(Ordering::Acquire), 1);
     assert_eq!(notice_count(&fixture.agent), 1);
-    assert!(fixture.agent.jobs().is_empty());
+    assert_eq!(fixture.agent.jobs(), [] as [plakous_tools::JobView; 0]);
     fixture.agent.shutdown().await?;
     Ok(())
 }
@@ -217,7 +217,7 @@ async fn process_notice_crash_before_commit_redelivers_after_reopen() -> TestRes
         .result()
         .await?;
     assert_eq!(notice_count(&reopened), 1);
-    assert!(reopened.jobs().is_empty());
+    assert_eq!(reopened.jobs(), [] as [plakous_tools::JobView; 0]);
     drop(turn);
     reopened.shutdown().await?;
     Ok(())
@@ -233,7 +233,7 @@ async fn process_notice_crash_after_commit_never_redelivers() -> TestResult {
     turn.result().await?;
     assert_eq!(notice_count(&fixture.agent), 1);
     let reopened = fixture.reopen().await?;
-    assert!(reopened.jobs().is_empty());
+    assert_eq!(reopened.jobs(), [] as [plakous_tools::JobView; 0]);
     reopened
         .prompt("continue after committed notice")
         .await?
@@ -254,7 +254,7 @@ async fn process_notice_boundary_without_steering_commits_once() -> TestResult {
     let result = turn.result().await?;
     assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
     assert_eq!(notice_count(&fixture.agent), 1);
-    assert!(fixture.agent.jobs().is_empty());
+    assert_eq!(fixture.agent.jobs(), [] as [plakous_tools::JobView; 0]);
     assert!(
         lock_mutex(&fixture.model.observed_request_texts)
             .iter()
@@ -275,7 +275,7 @@ async fn process_notice_rides_pending_steering_commit() -> TestResult {
     let result = turn.result().await?;
     assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
     assert_eq!(notice_count(&fixture.agent), 1);
-    assert!(fixture.agent.jobs().is_empty());
+    assert_eq!(fixture.agent.jobs(), [] as [plakous_tools::JobView; 0]);
     {
         let state = lock_mutex(&fixture.store.state);
         let first_notice = state.stored_commits.values()
@@ -284,14 +284,7 @@ async fn process_notice_rides_pending_steering_commit() -> TestResult {
                     .any(|block| matches!(block, ContentBlock::Text(text) if text.text().contains("<process_notice")))))
             .min_by_key(|stored| stored.checkpoint().manifest().topology().branch_revision)
             .ok_or("notice commit")?;
-        assert!(
-            first_notice
-                .checkpoint()
-                .manifest()
-                .jobs()
-                .rows()
-                .is_empty()
-        );
+        assert_eq!(first_notice.checkpoint().manifest().jobs().rows(), []);
         assert!(first_notice.checkpoint().manifest().canonical().history().segments().iter()
             .flat_map(HistorySegment::items).flat_map(ConversationItem::blocks)
             .any(|block| matches!(block, ContentBlock::Text(text) if text.text() == "change course")));
@@ -322,7 +315,7 @@ async fn process_notice_does_not_extend_final_answer_and_child_instruction_admit
         .result()
         .await?;
     assert_eq!(notice_count(&fixture.agent), 1);
-    assert!(fixture.agent.jobs().is_empty());
+    assert_eq!(fixture.agent.jobs(), [] as [plakous_tools::JobView; 0]);
     fixture.agent.shutdown().await?;
     Ok(())
 }

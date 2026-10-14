@@ -1851,7 +1851,7 @@ mod tests {
             .expect("idempotent repeated finish");
 
         assert_eq!(core.accumulated_bytes(), accumulated);
-        assert!(out.is_empty());
+        assert_eq!(out, [] as [ModelEvent; 0]);
         let location = core.location(0, 0).expect("location");
         let ProjectedBlock::Tool {
             bytes, complete, ..
@@ -1946,7 +1946,7 @@ mod tests {
         else {
             panic!("expected tool")
         };
-        assert!(bytes.is_empty());
+        assert_eq!(bytes.as_slice(), [] as [u8; 0]);
         assert!(!*complete);
     }
 
@@ -1981,7 +1981,7 @@ mod tests {
         );
         core.complete_provider_block_with_emit(0, 0, false, &mut out)
             .expect("part done silent");
-        assert!(out.is_empty());
+        assert_eq!(out, [] as [ModelEvent; 0]);
 
         let payload = RawValue::from_string("{}".into()).expect("raw");
         let replay = core

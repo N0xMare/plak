@@ -830,10 +830,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
         ledger: &SessionLedger,
         subscriptions: Option<NativeSubscriptions>,
     ) {
-        let due =
-            self.last_request.lock().ok().is_some_and(|last| {
-                last.is_some_and(|at| at.elapsed() >= Duration::from_secs(300))
-            });
+        let due = self
+            .last_request
+            .lock()
+            .is_ok_and(|last| last.is_some_and(|at| at.elapsed() >= Duration::from_secs(300)));
         if due {
             request_subscription_usage_cached(held, ledger, &self.events, self, subscriptions);
         }

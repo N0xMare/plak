@@ -689,11 +689,11 @@ mod tests {
         let mut hooks = TestHooks { fail_decode: false };
         // No trailing blank line: residual must be auto-dispatched at finish.
         let residual = b"data: {\"type\":\"done\",\"sequence_number\":0}\n";
-        assert!(
+        assert_eq!(
             kernel
                 .push(residual, &mut hooks)
-                .unwrap_or_else(|error| panic!("{error:?}"))
-                .is_empty()
+                .unwrap_or_else(|error| panic!("{error:?}")),
+            [] as [TestEvent; 0]
         );
         let events = kernel
             .finish(&mut hooks)
@@ -710,11 +710,11 @@ mod tests {
         );
         let mut hooks = TestHooks { fail_decode: false };
         let residual = b"data: {\"type\":\"done\",\"sequence_number\":0}\n";
-        assert!(
+        assert_eq!(
             kernel
                 .push(residual, &mut hooks)
-                .unwrap_or_else(|error| panic!("{error:?}"))
-                .is_empty()
+                .unwrap_or_else(|error| panic!("{error:?}")),
+            [] as [TestEvent; 0]
         );
         assert!(matches!(
             kernel.finish(&mut hooks),

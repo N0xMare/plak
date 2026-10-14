@@ -155,7 +155,7 @@ mod tests {
             abandoned_turn_claim(&fold),
             AbandonedTurnClaim::NothingStarted
         );
-        assert!(fold.provider_operations.is_empty());
+        assert_eq!(fold.provider_operations, [] as [OperationId; 0]);
         assert!(
             fold.compaction_operations.is_empty(),
             "a committed fold is not abandoned debt"

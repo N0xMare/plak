@@ -580,7 +580,7 @@ mod tests {
         assert!(!admitted.is_empty() && admitted.len() < 40);
         let omitted = fitted.omitted.as_ref().unwrap();
         assert_eq!(omitted.mail, 41 - admitted.len());
-        assert!(omitted.rereads.is_empty());
+        assert_eq!(omitted.rereads, [] as [String; 0]);
         assert!(len(&fitted) <= WAIT_OUTPUT_BUDGET_BYTES);
         let rendered = serde_json::to_value(&fitted).unwrap();
         assert_eq!(rendered["omitted"]["note"], OMITTED_NOTE);

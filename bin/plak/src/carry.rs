@@ -2646,8 +2646,8 @@ mod tests {
             .unwrap()
             .unwrap()
             .unwrap();
-        assert!(projection.pending_commands.is_empty());
-        assert!(projection.pending_workflows.is_empty());
+        assert_eq!(projection.pending_commands, [] as [String; 0]);
+        assert_eq!(projection.pending_workflows, [] as [String; 0]);
         assert_eq!(
             store.load(&record.id).unwrap().transcript.to_vec(),
             expected
@@ -2682,8 +2682,14 @@ mod tests {
             expected
         );
         assert_eq!(record.queue_drain_state, QueueDrainState::RestoredPaused);
-        assert!(intents.submissions.is_empty());
-        assert!(intents.workflow_requests.is_empty());
+        assert_eq!(
+            intents.submissions,
+            [] as [plakous_hosted::sessions::projector::Submission; 0]
+        );
+        assert_eq!(
+            intents.workflow_requests,
+            [] as [plakous_hosted::sessions::projector::WorkflowRequest; 0]
+        );
         database.delete_views(&record.id).unwrap();
         drop(database);
         executor

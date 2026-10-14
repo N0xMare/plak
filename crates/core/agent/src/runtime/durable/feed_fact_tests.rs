@@ -527,7 +527,10 @@ async fn an_abandoned_compaction_closure_states_its_summary_unsent() -> TestResu
     let _ = agent.shutdown().await;
     store.resume_commits();
     store.expire_active_lease();
-    assert!(compaction_settlements(&store, operation_id).is_empty());
+    assert_eq!(
+        compaction_settlements(&store, operation_id),
+        [] as [crate::feed::FeedWorkflowOutcome; 0]
+    );
     assert!(matches!(
         sessions.abandon_compaction(operation_id, source).await?,
         DurableCompactionRecoveryOutcome::Abandoned { .. }

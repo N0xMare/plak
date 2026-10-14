@@ -1604,7 +1604,10 @@ mod tests {
             let next = host.pending_start.take().unwrap();
             host.run_prompt(next.text.clone(), Some(next), false, None)
                 .unwrap();
-            assert!(host.config.session.pending_queue.is_empty());
+            assert_eq!(
+                host.config.session.pending_queue,
+                [] as [queue::QueueItem; 0]
+            );
             assert_eq!(host.config.session.root_turn_count, 1);
             assert!(!host.recovery_blocked);
             host.release().unwrap();
@@ -1679,7 +1682,10 @@ mod tests {
         let submitted_at_ms = queued_delivery.as_ref().unwrap().submitted_at_ms;
         host.run_prompt(text, queued_delivery, true, None).unwrap();
         assert!(!host.recovery_blocked);
-        assert!(host.config.session.pending_queue.is_empty());
+        assert_eq!(
+            host.config.session.pending_queue,
+            [] as [queue::QueueItem; 0]
+        );
         assert_eq!(host.config.session.root_turn_count, 1);
         // The admitted row shows the operator's submit time, not the retry's.
         assert_eq!(
@@ -2109,13 +2115,13 @@ mod tests {
         assert_eq!(host.config.session.pending_queue.len(), 1);
         assert_eq!(host.config.session.pending_queue[0].text, "keep my text");
         assert!(!host.config.session.queue_commands.has_pending());
-        assert!(
+        assert_eq!(
             host.config
                 .store
                 .load_intents(&host.config.session.id)
                 .unwrap()
-                .submissions
-                .is_empty()
+                .submissions,
+            [] as [sessions::projector::Submission; 0]
         );
         let saved = host.config.store.load(&host.config.session.id).unwrap();
         assert_eq!(saved.pending_queue, host.config.session.pending_queue);
@@ -2258,7 +2264,7 @@ mod tests {
                     assert_eq!(stored.pending_queue, admitted.pending_queue);
                     assert!(!stored.queue_commands.has_pending());
                 } else {
-                    assert!(stored.pending_queue.is_empty());
+                    assert_eq!(stored.pending_queue, [] as [queue::QueueItem; 0]);
                     assert!(
                         stored
                             .queue_commands

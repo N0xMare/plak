@@ -486,7 +486,7 @@ async fn without_a_reresolver_a_model_past_its_window_fails_as_before() -> TestR
     };
     assert_ne!(error.kind(), AgentErrorKind::ExternalBindingUnavailable);
     assert_eq!(current.calls.load(Ordering::Acquire), 0);
-    assert!(reresolutions(&durable.sink).is_empty());
+    assert_eq!(reresolutions(&durable.sink), [] as [bool; 0]);
     agent.shutdown().await?;
     Ok(())
 }

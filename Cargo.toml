@@ -3,7 +3,6 @@ default-members = ["bin/plak"]
 exclude = [
     ".plak",
     "vendor/codex-code-mode-protocol",
-    "vendor/monty",
     "vendor/monty-typeshed",
     "tests/fixtures/agent-consumer",
     "tests/fixtures/facade-consumer",
@@ -50,7 +49,7 @@ resolver = "3"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97.1"
+rust-version = "1.99.0"
 license = "MIT"
 repository = "https://github.com/N0xMare/plak"
 readme = "README.md"
@@ -75,7 +74,7 @@ httpdate = "1"
 hyper = "1"
 hyper-util = "0.1"
 ignore = "0.4"
-jsonwebtoken = { version = "=11.0.0", default-features = false }
+jsonwebtoken = { version = "=11.1.0", default-features = false }
 proptest = { version = "1", default-features = false }
 regex = "1"
 portable-pty = { version = "=0.9.0", default-features = false }
@@ -293,7 +292,6 @@ may-use = [
 ]
 
 [patch.crates-io]
-monty = { path = "vendor/monty" }
 monty-typeshed = { path = "vendor/monty-typeshed" }
 tungstenite = { git = "https://github.com/openai-oss-forks/tungstenite-rs", rev = "4fffad30fe373adbdcffab9545e9e9bf4f2fc19f" }
 

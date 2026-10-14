@@ -74,7 +74,7 @@ fn open_served(app: &mut App, agent: &str, live: Option<&str>) {
         }]
     );
     app.apply_host_event(transcript(agent, live));
-    assert!(!app.pane.blocks.is_empty());
+    assert_ne!(app.pane.blocks, [] as [ScrollBlock; 0]);
 }
 
 fn child_op(agent: &str, turn: &str, op: ChildOp) -> HostEvent {

@@ -95,7 +95,7 @@ impl TuiAttacher for OfflineAttacher {
     ) -> Result<HostedAgentChannels, String> {
         if self
             .remaining_attach_refusals
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |left| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |left| {
                 left.checked_sub(1)
             })
             .is_ok()
@@ -878,7 +878,7 @@ fn injected_real_pty_model_response_and_slash_clear() -> Result<(), Box<dyn Erro
     );
     assert!(!cleared.contains("recovery required"), "{cleared}");
     let cleared_session = wait_product_event(&paths, &cwd, "session.cleared")?;
-    assert!(!cleared_session.is_empty());
+    assert_ne!(cleared_session, "");
 
     child.send(b"turn after clear\r")?;
     child.wait_screen("loopback turn committed")?;
@@ -1946,7 +1946,10 @@ fn restarted_recovery_required_clear_preserves_source_and_attaches_fresh_root()
     let product_store = crate::store::session_records::SqliteSessionStore::new(paths.clone());
     let source_submissions = product_store.load_intents(&source_id)?.submissions;
     assert_eq!(source_submissions.len(), 1);
-    assert!(source.pending_queue.is_empty());
+    assert_eq!(
+        source.pending_queue,
+        [] as [plakous_hosted::sessions::QueueItem; 0]
+    );
 
     let controller = BoundaryController::quiet_from_evidence_path(CrashBoundary::None, &evidence)?;
     let executor = ApplicationExecutor::new()?;
@@ -2211,7 +2214,10 @@ fn injected_dual_profile_fork_continues_history_queue_and_reverse_switch()
         .find(|row| row.model.as_deref() == Some("binding-b-model"))
         .ok_or("binding B branch missing")?;
     assert_ne!(branch_b.id, source_id);
-    assert!(branch_b.pending_queue.is_empty());
+    assert_eq!(
+        branch_b.pending_queue,
+        [] as [plakous_hosted::sessions::QueueItem; 0]
+    );
     assert_eq!(
         branch_b.prompt_history,
         [
@@ -2284,7 +2290,10 @@ fn injected_dual_profile_fork_continues_history_queue_and_reverse_switch()
         final_a.prompt_history.last().map(String::as_str),
         Some("binding A resumed after reverse switch")
     );
-    assert!(final_a.pending_queue.is_empty());
+    assert_eq!(
+        final_a.pending_queue,
+        [] as [plakous_hosted::sessions::QueueItem; 0]
+    );
     let physical = read_evidence(&evidence)?;
     assert_eq!(
         physical
@@ -3909,7 +3918,10 @@ fn a_live_follow_up_drains_after_a_resume_with_a_stale_pause()
         .map_err(|_| "stale-pause host panicked")?
         .map_err(|error| error.message().to_owned())?;
     let after = product_sessions::load_session(&paths, &id)?;
-    assert!(after.pending_queue.is_empty());
+    assert_eq!(
+        after.pending_queue,
+        [] as [plakous_hosted::sessions::QueueItem; 0]
+    );
     assert_eq!(
         after.prompt_history.last().map(String::as_str),
         Some("typed while busy")

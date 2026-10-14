@@ -256,7 +256,7 @@ fn ctrl_c_twice_while_busy_asks_before_stopping() {
     let mut app = busy_root_app();
     app.set_input("half a draft".into());
     assert_eq!(app.handle_key(key_ctrl(KeyCode::Char('c'))), None);
-    assert!(app.input.is_empty());
+    assert_eq!(app.input, "");
     assert_eq!(app.handle_key(key_ctrl(KeyCode::Char('c'))), None);
     assert_eq!(
         app.destructive_confirm
@@ -353,7 +353,10 @@ fn the_approval_row_chips_allow_and_deny() {
         resolution: "allowed".into(),
     });
     render_to_string(&mut app, 120, 30);
-    assert!(app.approval_chip_hits.is_empty());
+    assert_eq!(
+        app.approval_chip_hits,
+        [] as [crate::tui::ui::ApprovalChipHit; 0]
+    );
 }
 
 /// `Tab` in the palette completes only the prefix match `Enter` would run.

@@ -1796,6 +1796,10 @@ struct CodexBrowserLoopbackHooks<'a> {
     attempt: Option<BrowserLoginAttempt>,
 }
 
+#[allow(
+    clippy::unused_async_trait_impl,
+    reason = "hook methods implement the orchestrator's async trait; some bodies finish without awaiting, and async keeps them lazy until the orchestrator polls"
+)]
 impl BrowserLoopbackHooks for CodexBrowserLoopbackHooks<'_> {
     type Error = NativeCodexAuthError;
     type Callback = OAuthCallbackOutcome;
@@ -2381,6 +2385,10 @@ impl CodexRefreshHooks<'_> {
     }
 }
 
+#[allow(
+    clippy::unused_async_trait_impl,
+    reason = "hook methods implement the orchestrator's async trait; some bodies finish without awaiting, and async keeps them lazy until the orchestrator polls"
+)]
 impl ClaimedRefreshHooks for CodexRefreshHooks<'_> {
     type Error = NativeCodexAuthError;
     type Prepared = StoredCredential;
@@ -2630,6 +2638,10 @@ struct CodexRevokeHooks<'a> {
     flight: Option<AuthSingleFlightGuard>,
 }
 
+#[allow(
+    clippy::unused_async_trait_impl,
+    reason = "hook methods implement the orchestrator's async trait; some bodies finish without awaiting, and async keeps them lazy until the orchestrator polls"
+)]
 impl ClaimedRevokeHooks for CodexRevokeHooks<'_> {
     type Error = NativeCodexAuthError;
     type Output = CodexCredentialStatus;

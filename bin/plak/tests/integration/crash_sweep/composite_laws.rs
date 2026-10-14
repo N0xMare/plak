@@ -171,12 +171,9 @@ fn composite_discarded_compaction_obeys_all_three_sqlite_laws() {
         "the corpus never submitted a workflow request"
     );
     let store = SqliteSessionStore::new(summary::paths(&fixture));
-    assert!(
-        store
-            .load_intents(&id)
-            .unwrap()
-            .workflow_requests
-            .is_empty()
+    assert_eq!(
+        store.load_intents(&id).unwrap().workflow_requests,
+        [] as [plakous_hosted::sessions::projector::WorkflowRequest; 0]
     );
     assert_eq!(store.load(&id).unwrap().compaction_count, 0);
     all_laws(&fixture, &[id], "discarded compact", &script);
@@ -322,7 +319,10 @@ fn exported_and_imported() -> (Fixture, Value, String, String) {
         .to_owned();
     assert_ne!(source, imported);
     let store = SqliteSessionStore::new(summary::paths(&fixture));
-    assert!(!store.load_intents(&imported).unwrap().notices.is_empty());
+    assert_ne!(
+        store.load_intents(&imported).unwrap().notices,
+        [] as [plakous_hosted::sessions::projector::OperatorNotice; 0]
+    );
     (fixture, script, source, imported)
 }
 

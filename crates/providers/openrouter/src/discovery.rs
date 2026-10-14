@@ -1171,8 +1171,14 @@ mod tests {
             models.iter().map(String::as_str).collect::<Vec<_>>(),
             ["vendor/z:free", "vendor/a", "~vendor/latest"]
         );
-        assert!(catalog_model_ids(&serde_json::json!({"data":[]}))?.is_empty());
-        assert!(catalog_model_ids(&serde_json::json!({"data":[],"future":true}))?.is_empty());
+        assert_eq!(
+            catalog_model_ids(&serde_json::json!({"data":[]}))?,
+            [] as [String; 0]
+        );
+        assert_eq!(
+            catalog_model_ids(&serde_json::json!({"data":[],"future":true}))?,
+            [] as [String; 0]
+        );
         for invalid in [
             serde_json::json!({"data":[{"id":"vendor/a"},{"id":"vendor/a"}]}),
             serde_json::json!({"data":[{"id":12}]}),

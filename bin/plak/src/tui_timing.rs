@@ -240,7 +240,7 @@ impl Timing {
 }
 
 pub(crate) fn first_frame() {
-    let first = TIMING.lock().ok().is_some_and(|mut timing| {
+    let first = TIMING.lock().is_ok_and(|mut timing| {
         timing.as_mut().is_some_and(|timing| {
             if timing.first_frame {
                 return false;
@@ -263,7 +263,7 @@ pub(crate) fn first_frame() {
 }
 
 pub(crate) fn host_ready() {
-    let first = TIMING.lock().ok().is_some_and(|mut timing| {
+    let first = TIMING.lock().is_ok_and(|mut timing| {
         timing.as_mut().is_some_and(|timing| {
             if timing.host_ready {
                 return false;
@@ -395,7 +395,7 @@ mod tests {
                 (TuiTimingPhase::HostReadyBackground, Duration::from_secs(2)),
             ]
         );
-        assert!(timing.pending.is_empty());
+        assert_eq!(timing.pending, [] as [ProductObservation; 0]);
     }
 
     #[test]

@@ -403,7 +403,7 @@ mod tests {
                     assert_eq!(menu.int_value(meta.key), Some(default), "{}", meta.key);
                 }
                 SettingKind::Action => {
-                    assert!(menu.value_label(index).is_empty());
+                    assert_eq!(menu.value_label(index), "");
                 }
             }
         }

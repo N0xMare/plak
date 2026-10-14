@@ -857,7 +857,7 @@ fn copy_reads_measured_rows_even_where_the_viewport_never_looked() {
         crate::tui::blocks::RenderPrefs::default(),
     );
 
-    assert!(windowed.estimated_blocks().is_empty());
+    assert_eq!(windowed.estimated_blocks(), [] as [usize; 0]);
     assert_eq!(
         windowed.plain(),
         whole.plain(),

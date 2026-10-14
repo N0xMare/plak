@@ -790,7 +790,7 @@ mod tests {
         host.observe_terminal(first, &service.jobs());
         assert_eq!(registry.snapshot().len(), 1);
         host.attach(second, sessions(root.path())?)?;
-        assert!(registry.snapshot().is_empty());
+        assert_eq!(registry.snapshot(), [] as [ProcessView; 0]);
         host.attach(first, sessions(root.path())?)?;
         assert_eq!(registry.snapshot().len(), 1);
         Ok(())
@@ -966,7 +966,7 @@ mod tests {
         registry.stop_user(None)?;
         registry.settle_user_stops();
         assert_eq!(registry.running_count(), 0);
-        assert!(registry.take_user_stop_failures().is_empty());
+        assert_eq!(registry.take_user_stop_failures(), [] as [String; 0]);
         assert!(
             first
                 .jobs()
@@ -1031,7 +1031,7 @@ mod tests {
         std::fs::write(&release, b"")?;
         registry.settle_user_stops();
         assert!(graced.exists(), "SIGKILL arrived inside the TERM grace");
-        assert!(registry.take_user_stop_failures().is_empty());
+        assert_eq!(registry.take_user_stop_failures(), [] as [String; 0]);
         assert_eq!(registry.snapshot()[0].status, ProcessStatus::Stopped);
         assert!(
             service
@@ -1060,10 +1060,9 @@ mod tests {
             registry.snapshot_at(now + Duration::from_secs(299)).len(),
             1
         );
-        assert!(
-            registry
-                .snapshot_at(now + Duration::from_secs(300))
-                .is_empty()
+        assert_eq!(
+            registry.snapshot_at(now + Duration::from_secs(300)),
+            [] as [ProcessView; 0]
         );
         Ok(())
     }
@@ -1125,7 +1124,7 @@ mod tests {
         registry
             .for_agent("root", S2)
             .attach(keyed(S2, X)?, sessions(root.path())?)?;
-        assert!(registry.snapshot().is_empty());
+        assert_eq!(registry.snapshot(), [] as [ProcessView; 0]);
         registry
             .for_agent("root", S1)
             .attach(keyed(S1, A)?, sessions(root.path())?)?;
@@ -1179,7 +1178,7 @@ mod tests {
         registry
             .for_agent("root", S2)
             .attach(keyed(S2, X)?, sessions(root.path())?)?;
-        assert!(registry.snapshot().is_empty());
+        assert_eq!(registry.snapshot(), [] as [ProcessView; 0]);
         assert!(registry.stop_user(Some(&id)).is_err());
         assert_eq!(registry.running_count(), 1);
         registry.stop_user(None)?;
@@ -1245,10 +1244,9 @@ mod tests {
             registry.snapshot_at(now + Duration::from_secs(299)).len(),
             1
         );
-        assert!(
-            registry
-                .snapshot_at(now + Duration::from_secs(300))
-                .is_empty()
+        assert_eq!(
+            registry.snapshot_at(now + Duration::from_secs(300)),
+            [] as [ProcessView; 0]
         );
         assert!(
             !registry
@@ -1476,7 +1474,7 @@ mod tests {
         plakous_tools::internal::promote(&service, job)?;
         service.stop(job, JobStopReason::Model)?;
         plakous_tools::internal::consume_jobs(&service, &[JoinedProcessSessions::job_number(job)]);
-        assert!(registry.views().is_empty());
+        assert_eq!(registry.views(), [] as [plakous_tools::JobView; 0]);
         let mut observed = Vec::new();
         registry.publish_pending(|phase, _key, job| {
             observed.push(crate::runtime::job_events::transition::<
@@ -1741,7 +1739,7 @@ mod tests {
                 ..
             }) if job_id == &predecessor_id
         ));
-        assert!(again.is_empty());
+        assert_eq!(again, [] as [TranscriptRow; 0]);
 
         assert_eq!(terminals(&current_observed), vec![current_id.clone()]);
         assert_eq!(current_rows.len(), 1);

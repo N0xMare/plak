@@ -415,7 +415,7 @@ mod tests {
             (clamped.meters()[0].windows()[0].used_percent().get() - 100.0).abs() < f64::EPSILON
         );
         let empty = decode_claude_subscription_usage(br"{}", observed)?;
-        assert!(empty.meters()[0].windows().is_empty());
+        assert_eq!(empty.meters()[0].windows(), []);
         assert!(decode_claude_subscription_usage(b"", observed).is_err());
         assert!(
             decode_claude_subscription_usage(
@@ -439,7 +439,7 @@ mod tests {
         }"#;
         let snapshot = decode_claude_subscription_usage(body, Timestamp::new(1, 0)?)?;
         assert_eq!(snapshot.meters().len(), 1);
-        assert!(snapshot.meters()[0].windows().is_empty());
+        assert_eq!(snapshot.meters()[0].windows(), []);
         Ok(())
     }
 

@@ -2094,10 +2094,9 @@ mod tests {
         if let ScrollBlock::Thinking { text, .. } = &mut alone {
             text.clear();
         }
-        assert!(
-            crate::tui::blocks::layout_blocks(&[alone], 80)
-                .plain
-                .is_empty()
+        assert_eq!(
+            crate::tui::blocks::layout_blocks(&[alone], 80).plain,
+            [] as [String; 0]
         );
     }
 

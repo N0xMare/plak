@@ -57,7 +57,10 @@ async fn nonfitting_successor_after_fold(unpreparable: bool) -> TestResult {
     );
     assert_eq!(result.model_rounds(), 1);
     assert_eq!(result.tool_calls(), 1);
-    assert!(placeholder_bodies(agent.checkpoint().manifest().canonical().history()).is_empty());
+    assert_eq!(
+        placeholder_bodies(agent.checkpoint().manifest().canonical().history()),
+        [] as [String; 0]
+    );
     agent.shutdown().await?;
     Ok(())
 }

@@ -1476,7 +1476,7 @@ impl JoinedProcessSessions {
             .collect::<Vec<_>>();
         let authority = environment.backend().authority_id().bytes();
         let generation = JOINED_PROCESS_SERVICE_GENERATION
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                 current.checked_add(1)
             })
             .map_err(|_| resource_error("joined process service generation space exhausted"))?;
@@ -4847,7 +4847,7 @@ mod process_policy_tests {
             output.stdout,
             alias.to_str().expect("alias text").as_bytes()
         );
-        assert!(output.stderr.is_empty());
+        assert_eq!(output.stderr, [] as [u8; 0]);
     }
 
     #[test]
@@ -5236,7 +5236,7 @@ mod job_tests {
         assert_eq!(sessions.jobs()[0].output, "tail");
         assert_eq!(sessions.next_job_number(), 8);
         sessions.consume_jobs(&[7]);
-        assert!(sessions.jobs().is_empty());
+        assert_eq!(sessions.jobs(), [] as [crate::jobs::JobView; 0]);
         assert!(
             sessions
                 .poll_from(id, JoinedProcessOutputCursor::new(0), 4096, 256)

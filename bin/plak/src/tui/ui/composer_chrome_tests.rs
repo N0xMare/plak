@@ -281,7 +281,7 @@ fn empty_question_mark_opens_keybinds_but_a_draft_keeps_it_literal() {
     let mut app = App::new(launch_basic(), true);
     app.handle_key(key(KeyCode::Char('?')));
     assert_eq!(app.control_tab, Some(super::ControlTab::Keybinds));
-    assert!(app.input.is_empty());
+    assert_eq!(app.input, "");
     app.close_control_center();
     app.set_input("draft".into());
     app.handle_key(key(KeyCode::Char('?')));
@@ -391,7 +391,7 @@ fn admitted_steer_stays_visible_until_applied_without_a_duplicate_transcript_row
         position: Some(1),
     });
     assert!(render_to_string(&mut app, 100, 24).contains("sent · waiting for the current reply"));
-    assert!(app.pane.blocks.is_empty());
+    assert_eq!(app.pane.blocks, [] as [crate::tui::blocks::ScrollBlock; 0]);
     app.apply_host_event(HostEvent::QueueSnapshot {
         items: vec![queue_item("q1", 1, "next")],
         drain: QueueDrainState::LiveAutoDrain,

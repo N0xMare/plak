@@ -1361,11 +1361,9 @@ mod tests {
         // fail a full record load. An ancestry read does not need either.
         store.connection.execute("INSERT INTO transcript_rows(session_id,anchor,lane,ordinal,row) VALUES(?1,1,0,0,'{\"kind\":\"invalid\"}')", [&id]).unwrap();
         assert!(store.load(&id).is_err());
-        assert!(
-            store
-                .load_inherited_submissions(&child.id)
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            store.load_inherited_submissions(&child.id).unwrap(),
+            [] as [Submission; 0]
         );
         store
             .connection
@@ -1373,11 +1371,9 @@ mod tests {
             .unwrap();
         store.connection.execute("INSERT INTO workflow_requests(session_id,operation_id,source_locator,kind,anchor) VALUES(?1,'unrelated','invalid','fork',0)", [&id]).unwrap();
         assert!(store.load(&id).is_err());
-        assert!(
-            store
-                .load_inherited_submissions(&child.id)
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            store.load_inherited_submissions(&child.id).unwrap(),
+            [] as [Submission; 0]
         );
     }
 
@@ -1472,23 +1468,24 @@ mod tests {
             let intents = store.load_intents(&id).unwrap();
             assert_eq!(intents.submission_anchors[&submission.command_id], 0);
             assert_eq!(intents.workflow_anchors[&request.operation_id], 0);
-            assert!(
-                plakous_hosted::sessions::projector::pending_command_ids(&views, &intents)
-                    .is_empty()
+            assert_eq!(
+                plakous_hosted::sessions::projector::pending_command_ids(&views, &intents),
+                [] as [String; 0]
             );
-            assert!(
+            assert_eq!(
                 plakous_hosted::sessions::projector::pending_workflow_operation_ids(
                     &views, &intents
-                )
-                .is_empty()
+                ),
+                [] as [String; 0]
             );
-            assert!(
-                store
-                    .withdraw_unadmitted_workflows(&mut source)
-                    .unwrap()
-                    .is_empty()
+            assert_eq!(
+                store.withdraw_unadmitted_workflows(&mut source).unwrap(),
+                [] as [TranscriptRow; 0]
             );
-            assert!(store.load_intents(&id).unwrap().notices.is_empty());
+            assert_eq!(
+                store.load_intents(&id).unwrap().notices,
+                [] as [OperatorNotice; 0]
+            );
             assert!(store.load(&request.successor_product_id()).is_ok());
             assert!(store.load(&id).unwrap().queue_commands.is_consumed(
                 &plakous_hosted::sessions::QueueItem {
@@ -1561,12 +1558,9 @@ mod tests {
         );
         assert_eq!(source.store_revision, revision);
         assert_eq!(store.load(&id).unwrap().store_revision, revision);
-        assert!(
-            store
-                .load_intents(&id)
-                .unwrap()
-                .workflow_requests
-                .is_empty()
+        assert_eq!(
+            store.load_intents(&id).unwrap().workflow_requests,
+            [] as [WorkflowRequest; 0]
         );
         assert!(store.load(&target_id).is_err());
         store
@@ -1588,7 +1582,7 @@ mod tests {
             )
         );
         assert!(target.transcript.is_empty());
-        assert!(target.prompt_history.is_empty());
+        assert_eq!(target.prompt_history, [] as [String; 0]);
     }
 
     fn id_from<T: std::str::FromStr>(n: u64) -> T
@@ -1629,7 +1623,10 @@ mod tests {
             store.load_intents(&id).unwrap().workflow_requests,
             vec![request]
         );
-        assert!(store.load_intents(&id).unwrap().notices.is_empty());
+        assert_eq!(
+            store.load_intents(&id).unwrap().notices,
+            [] as [OperatorNotice; 0]
+        );
         store
             .connection
             .execute_batch("DROP TRIGGER refuse_clear_notice")
@@ -1707,11 +1704,9 @@ mod tests {
             .commit_projection_views(&target.id, &ViewWrites::between(&views, &views), &views)
             .unwrap();
         assert_eq!(store.load_views(&id).unwrap().unwrap(), source_views);
-        assert!(
-            store
-                .withdraw_unadmitted_workflows(&mut source)
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            store.withdraw_unadmitted_workflows(&mut source).unwrap(),
+            [] as [TranscriptRow; 0]
         );
     }
 
@@ -2126,11 +2121,9 @@ mod tests {
         let intents = store.load_intents(&session).unwrap();
         assert!(intents.submissions.is_empty() && intents.workflow_requests.is_empty());
         assert_eq!(intents.notices.len(), 3);
-        assert!(
-            store
-                .withdraw_unadmitted_workflows(&mut record)
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            store.withdraw_unadmitted_workflows(&mut record).unwrap(),
+            [] as [TranscriptRow; 0]
         );
     }
 

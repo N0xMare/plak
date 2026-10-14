@@ -352,7 +352,7 @@ mod tests {
     #[test]
     fn invalid_filter_directive_is_rejected() {
         let error = EnvFilter::try_new("info=not_a_real_level").unwrap_err();
-        assert!(!error.to_string().is_empty());
+        assert_ne!(error.to_string(), "");
     }
 
     #[test]

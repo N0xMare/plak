@@ -22,7 +22,7 @@ history, never prerequisite reading, and never cited as authority.
 
 ## Dev
 
-MSRV and pinned toolchain are Rust 1.97.1; supported platforms are Linux x86_64
+MSRV and pinned toolchain are Rust 1.99.0; supported platforms are Linux x86_64
 musl and Apple Silicon macOS. Run `just dev-tools install` once for the pinned
 cargo-nextest and cargo-deny. Run `just fast` or `just changed` while
 iterating and `just check` before each commit. Before installing a maintainer

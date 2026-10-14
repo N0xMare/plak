@@ -2,7 +2,7 @@
 name = "plakous-js-embedder-consumer"
 version = "0.0.0"
 edition = "2024"
-rust-version = "1.97.1"
+rust-version = "1.99.0"
 description = "Compile fixture: an out-of-workspace consumer embedding the JavaScript evaluator through the `composition` feature."
 license = "MIT"
 repository = "https://github.com/N0xMare/plak"

@@ -250,7 +250,10 @@ fn denial_and_pending_decision_never_dispatch() -> TestResult {
         "denied",
     )?))?;
     assert!(matches!(denied, EffectAuthorization::Denied(_)));
-    assert!(read.captured().is_empty());
+    assert_eq!(
+        read.captured(),
+        [] as [plakous_test_support::CapturedToolInvocation; 0]
+    );
 
     let decision_runtime = runtime(
         registry,
@@ -274,7 +277,10 @@ fn denial_and_pending_decision_never_dispatch() -> TestResult {
         EffectDecision::deny(binding, ToolPolicyDenial::new("operator denied")),
     )?;
     assert!(matches!(denied, EffectAuthorization::Denied(_)));
-    assert!(read.captured().is_empty());
+    assert_eq!(
+        read.captured(),
+        [] as [plakous_test_support::CapturedToolInvocation; 0]
+    );
     Ok(())
 }
 
@@ -299,7 +305,10 @@ fn mutating_dispatch_fails_closed_without_an_effect_journal() -> TestResult {
         result.err().map(|error| error.kind()),
         Some(ToolRuntimeErrorKind::Policy)
     );
-    assert!(write.captured().is_empty());
+    assert_eq!(
+        write.captured(),
+        [] as [plakous_test_support::CapturedToolInvocation; 0]
+    );
     Ok(())
 }
 
@@ -367,7 +376,10 @@ fn decision_response_for_another_binding_fails_closed() -> TestResult {
         result.err().map(|error| error.kind()),
         Some(ToolRuntimeErrorKind::Policy)
     );
-    assert!(read.captured().is_empty());
+    assert_eq!(
+        read.captured(),
+        [] as [plakous_test_support::CapturedToolInvocation; 0]
+    );
     Ok(())
 }
 
@@ -425,7 +437,10 @@ fn environment_scope_must_cover_invocation_run_and_attempt() -> TestResult {
         foreign_attempt.err().map(|error| error.kind()),
         Some(ToolRuntimeErrorKind::Policy)
     );
-    assert!(read.captured().is_empty());
+    assert_eq!(
+        read.captured(),
+        [] as [plakous_test_support::CapturedToolInvocation; 0]
+    );
     Ok(())
 }
 
@@ -453,7 +468,10 @@ fn authorization_cannot_cross_runtime_authority_even_with_identical_inputs() -> 
         result.err().map(|error| error.kind()),
         Some(ToolRuntimeErrorKind::Policy)
     );
-    assert!(read.captured().is_empty());
+    assert_eq!(
+        read.captured(),
+        [] as [plakous_test_support::CapturedToolInvocation; 0]
+    );
     Ok(())
 }
 
@@ -654,7 +672,10 @@ fn policy_revision_change_invalidates_an_existing_grant() -> TestResult {
         result.err().map(|error| error.kind()),
         Some(ToolRuntimeErrorKind::Policy)
     );
-    assert!(read.captured().is_empty());
+    assert_eq!(
+        read.captured(),
+        [] as [plakous_test_support::CapturedToolInvocation; 0]
+    );
     Ok(())
 }
 
@@ -762,6 +783,9 @@ fn control_call_mismatch_fails_before_executor_dispatch() -> TestResult {
         result.err().map(|error| error.kind()),
         Some(ToolRuntimeErrorKind::Execution)
     );
-    assert!(read.captured().is_empty());
+    assert_eq!(
+        read.captured(),
+        [] as [plakous_test_support::CapturedToolInvocation; 0]
+    );
     Ok(())
 }

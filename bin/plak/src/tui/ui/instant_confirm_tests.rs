@@ -280,14 +280,14 @@ fn unmapped_keys_in_promptless_views_do_nothing_and_show_no_hint() {
             .unwrap(),
         before
     );
-    assert!(agents.input.is_empty());
+    assert_eq!(agents.input, "");
     assert!(agents.destructive_confirm.is_none());
     no_typing_hint(&render_to_string(&mut agents, 100, 30));
 
     let mut view = agent_view_app();
     assert!(view.handle_key(key(KeyCode::Char('q'))).is_none());
     view.handle_paste("pasted");
-    assert!(view.input.is_empty());
+    assert_eq!(view.input, "");
     assert_eq!(view.viewed_agent_id(), Some("child-a"));
     no_typing_hint(&render_to_string(&mut view, 100, 30));
 
@@ -297,7 +297,7 @@ fn unmapped_keys_in_promptless_views_do_nothing_and_show_no_hint() {
     assert!(processes.handle_key(key(KeyCode::Char('s'))).is_none());
     assert!(processes.destructive_confirm.is_none());
     processes.handle_paste("pasted");
-    assert!(processes.input.is_empty());
+    assert_eq!(processes.input, "");
     no_typing_hint(&render_to_string(&mut processes, 100, 30));
 }
 

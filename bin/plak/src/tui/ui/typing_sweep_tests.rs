@@ -270,7 +270,7 @@ fn ctrl_c_in_the_agent_view_goes_back() {
 fn a_paste_in_activity_does_nothing() {
     let mut app = agents_app();
     assert_eq!(app.handle_paste("stop all of it"), None);
-    assert!(app.input.is_empty());
+    assert_eq!(app.input, "");
     assert!(app.destructive_confirm.is_none());
     let screen = render_to_string(&mut app, 100, 30);
     assert!(
@@ -286,7 +286,7 @@ fn a_paste_under_the_turn_stop_pop_up_does_nothing() {
     app.apply_host_event(HostEvent::SetBusy(true));
     app.handle_key(key(KeyCode::Esc));
     assert_eq!(app.handle_paste("y\n"), None);
-    assert!(app.input.is_empty());
+    assert_eq!(app.input, "");
     assert!(app.destructive_confirm.is_some());
     // Focus already sits on Stop turn, so Enter confirms at once.
     assert_eq!(
@@ -541,7 +541,10 @@ fn s_in_the_process_output_view_stops_nothing() {
     app.handle_key(key(KeyCode::Enter));
     assert!(app.process_output);
     let sent = press(&mut app, &typed("sS"));
-    assert!(sent.is_empty());
+    assert_eq!(
+        sent,
+        [] as [plakous_host_protocol::SessionIntent<crate::surface_protocol::PlakExtension>; 0]
+    );
     assert!(app.destructive_confirm.is_none());
     let screen = render_to_string(&mut app, 100, 30);
     assert!(

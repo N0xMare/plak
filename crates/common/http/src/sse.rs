@@ -294,7 +294,10 @@ mod tests {
             Err(SseError::AlreadyFailed)
         ));
         let mut invalid_at_finish = SseDecoder::new(SseLimits::default());
-        assert!(invalid_at_finish.push(b"data: ok\n").unwrap().is_empty());
+        assert_eq!(
+            invalid_at_finish.push(b"data: ok\n").unwrap(),
+            [] as [SseMessage; 0]
+        );
         assert!(matches!(
             invalid_at_finish.finish(),
             Ok(messages) if messages.len() == 1 && messages[0].data() == "ok"

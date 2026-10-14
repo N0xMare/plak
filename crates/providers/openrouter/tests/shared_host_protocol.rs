@@ -140,7 +140,13 @@ fn openrouter_sse_requires_ordered_typed_terminal_then_done() -> TestResult {
             ResponsesStreamEventKind::ResponseCompleted(_)
         ]
     ));
-    assert!(valid.finish()?.is_empty());
+    assert_eq!(
+        valid.finish()?,
+        [] as [ResponsesStreamEventKind<
+            plakous_responses_dialect::ResponsesResponse,
+            plakous_responses_dialect::ResponsesProviderError,
+        >; 0]
+    );
 
     let mut missing_done = decoder();
     missing_done.push(format!("{}{}", created(10), terminal(11)).as_bytes())?;
@@ -189,7 +195,13 @@ fn pinned_official_sparse_lifecycle_uses_only_prepared_model_and_completed_items
     assert_eq!(response.native(), &terminal_native["response"]);
     assert!(response.native().get("model").is_none());
     assert!(response.native().get("output").is_none());
-    assert!(sparse.finish()?.is_empty());
+    assert_eq!(
+        sparse.finish()?,
+        [] as [ResponsesStreamEventKind<
+            plakous_responses_dialect::ResponsesResponse,
+            plakous_responses_dialect::ResponsesProviderError,
+        >; 0]
+    );
 
     let mut wrong_created_model = decoder();
     assert!(matches!(

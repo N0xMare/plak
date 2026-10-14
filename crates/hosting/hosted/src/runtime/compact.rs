@@ -2124,13 +2124,13 @@ mod tests {
             "{}",
             error.message()
         );
-        assert!(
+        assert_eq!(
             config
                 .store
                 .load_intents(&config.session.id)
                 .unwrap()
-                .workflow_requests
-                .is_empty()
+                .workflow_requests,
+            [] as [sessions::projector::WorkflowRequest; 0]
         );
     }
 
@@ -2197,13 +2197,13 @@ mod tests {
             compact_answer_is_unadmitted(&answer, source),
             Ok(views),
         );
-        assert!(
+        assert_eq!(
             config
                 .store
                 .load_intents(&config.session.id)
                 .unwrap()
-                .workflow_requests
-                .is_empty()
+                .workflow_requests,
+            [] as [WorkflowRequest; 0]
         );
     }
 
@@ -2325,13 +2325,13 @@ mod tests {
         );
         // no dispatch happened, so no workflow and no redispatch.
 
-        assert!(
+        assert_eq!(
             config
                 .store
                 .load_intents(&config.session.id)
                 .unwrap()
-                .workflow_requests
-                .is_empty()
+                .workflow_requests,
+            [] as [sessions::projector::WorkflowRequest; 0]
         );
         assert_eq!(config.session.plakous_locator, Some(source));
     }
@@ -2352,7 +2352,7 @@ mod tests {
         let mut seen = std::collections::BTreeSet::new();
         for outcome in outcomes {
             let detail = compaction_event_outcome_detail(outcome);
-            assert!(!detail.is_empty());
+            assert_ne!(detail, "");
             assert!(seen.insert(detail), "duplicate operator text: {detail}");
         }
         assert_eq!(seen.len(), outcomes.len());

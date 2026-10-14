@@ -3959,7 +3959,7 @@ mod tests {
             failure.message(),
             "the codex compatibility notice needs an answer on stdin and none came; accept it once with `plak login codex`, or pipe `y` to this command"
         );
-        assert!(stdout.is_empty());
+        assert_eq!(stdout, [] as [u8; 0]);
         assert_eq!(
             String::from_utf8(stderr).unwrap(),
             "codex uses an experimental revision-pinned compatibility integration.\n\
@@ -4626,7 +4626,10 @@ mod tests {
                     } else {
                         assert_eq!(entry.effort_options, ["low", "medium"]);
                     }
-                    assert!(entry.extras.is_empty());
+                    assert_eq!(
+                        entry.extras,
+                        [] as [plakous_host_protocol::views::ExtraState; 0]
+                    );
                 }
             } else {
                 assert!(matches!(
@@ -4681,7 +4684,10 @@ mod tests {
             backend.credential = credential;
             let (providers, sections) = tui_presentation_values_with_backend(&paths, &mut backend);
             let sections = native_sections_with_checked_api_rows(&providers, &sections);
-            assert!(sections.is_empty());
+            assert_eq!(
+                sections,
+                [] as [&plakous_host_protocol::views::ProviderSection; 0]
+            );
             assert_eq!(
                 providers
                     .iter()
@@ -4770,10 +4776,10 @@ mod tests {
         ));
         assert_eq!(candidate.store_revision, 0);
         assert!(product_sessions::load_session(&paths, &id).is_err());
-        assert!(
+        assert_eq!(
             product_session_log::read_tail(&paths.session_home(), &id, 8)
-                .expect("missing observation log is empty")
-                .is_empty()
+                .expect("missing observation log is empty"),
+            [] as [String; 0]
         );
     }
 
@@ -5373,7 +5379,10 @@ mod tests {
         backend.models_failure = Some(CliFailure::new("catalog unavailable"));
         let (providers, sections) = tui_presentation_values_with_backend(&paths, &mut backend);
         let sections = native_sections_with_checked_api_rows(&providers, &sections);
-        assert!(sections.is_empty());
+        assert_eq!(
+            sections,
+            [] as [&plakous_host_protocol::views::ProviderSection; 0]
+        );
         for provider in providers.iter().take(3) {
             assert_eq!(
                 provider.state,
@@ -5447,7 +5456,7 @@ mod tests {
             providers[0].state,
             plakous_host_protocol::views::ProviderState::Ready
         );
-        assert!(providers[0].detail.is_empty());
+        assert_eq!(providers[0].detail, "");
         assert_eq!(
             providers[1].state,
             plakous_host_protocol::views::ProviderState::Ready
@@ -5462,7 +5471,7 @@ mod tests {
         assert!(sections[0].entries[0].reasoning);
         assert_eq!(sections[1].entries.len(), 1);
         assert_eq!(sections[1].entries[0].id, "grok-4.6");
-        assert!(sections[1].entries[0].effort_options.is_empty());
+        assert_eq!(sections[1].entries[0].effort_options, [] as [String; 0]);
         assert!(!sections[1].entries[0].reasoning);
         assert!(sections[2].ready);
         assert_eq!(sections[2].entries.len(), 1);
@@ -5953,8 +5962,8 @@ mod tests {
         let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
         let mut stdout = Vec::new();
         write_selected_subscription_usage(Some("nope"), &mut backend, None, &mut stdout).unwrap();
-        assert!(backend.calls.is_empty());
-        assert!(stdout.is_empty());
+        assert_eq!(backend.calls, [] as [Call; 0]);
+        assert_eq!(stdout, [] as [u8; 0]);
     }
 
     /// "Edit raw config" returned from `$EDITOR`
@@ -6678,7 +6687,7 @@ mod tests {
                 b"yes\n",
             );
             assert!(result.is_err());
-            assert!(stdout.is_empty());
+            assert_eq!(stdout, [] as [u8; 0]);
             assert!(!String::from_utf8_lossy(&stderr).contains("Continue?"));
             assert_eq!(backend.calls, vec![Call::Status(NativeProvider::Codex)]);
         }
@@ -6752,7 +6761,7 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
             b"exact-review\n",
         );
         assert!(result.is_err());
-        assert!(stdout.is_empty());
+        assert_eq!(stdout, [] as [u8; 0]);
         assert_eq!(inactive.calls, vec![Call::Status(NativeProvider::Codex)]);
 
         let mut rejected = FakeBackend::new(CompatibilityState::Required, CredentialState::Ready);
@@ -6763,7 +6772,7 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
             b"not-exact\n",
         );
         assert!(result.is_err());
-        assert!(stdout.is_empty());
+        assert_eq!(stdout, [] as [u8; 0]);
         assert_eq!(rejected.calls, vec![Call::Status(NativeProvider::Xai)]);
         let stderr = String::from_utf8(stderr).unwrap_or_default();
         assert!(stderr.contains("Continue? [y/N]"));
@@ -6777,14 +6786,14 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
         let (result, stdout, stderr) = invoke(Command::ModelsOpenRouter, &mut backend, b"");
         assert_eq!(result, Ok(ProcessOutcome::Success));
         assert_eq!(stdout, b"author/model\n");
-        assert!(stderr.is_empty());
+        assert_eq!(stderr, [] as [u8; 0]);
         assert_eq!(backend.calls, vec![Call::OpenRouterModels]);
         backend.calls.clear();
         backend.models_failure = Some(CliFailure::new("catalog failed"));
         let (result, stdout, stderr) = invoke(Command::ModelsOpenRouter, &mut backend, b"");
         assert!(result.is_err());
-        assert!(stdout.is_empty());
-        assert!(stderr.is_empty());
+        assert_eq!(stdout, [] as [u8; 0]);
+        assert_eq!(stderr, [] as [u8; 0]);
         assert_eq!(backend.calls, vec![Call::OpenRouterModels]);
     }
 
@@ -6811,8 +6820,8 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
             result.err().map(|error| error.message().to_owned()),
             Some("authenticated catalog failed".to_owned())
         );
-        assert!(stdout.is_empty());
-        assert!(stderr.is_empty());
+        assert_eq!(stdout, [] as [u8; 0]);
+        assert_eq!(stderr, [] as [u8; 0]);
         assert_eq!(
             backend.calls,
             vec![
@@ -6842,7 +6851,7 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
             stdout,
             b"grok: compatibility=acceptance-required, credential=refresh-required; run plak login grok\n"
         );
-        assert!(stderr.is_empty());
+        assert_eq!(stderr, [] as [u8; 0]);
 
         let mut logout_backend =
             FakeBackend::new(CompatibilityState::Required, CredentialState::Revoked);
@@ -6859,7 +6868,7 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
             logout_backend.calls,
             vec![Call::LogoutLocal(NativeProvider::Codex)]
         );
-        assert!(stdout.is_empty());
+        assert_eq!(stdout, [] as [u8; 0]);
         assert_eq!(
             stderr,
             b"codex: local credential revoked; recovery state cleared; remote credential may remain active\n"
@@ -6879,7 +6888,7 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
                 b"exact-review\n",
             );
             assert!(result.is_err());
-            assert!(stdout.is_empty());
+            assert_eq!(stdout, [] as [u8; 0]);
             assert_eq!(backend.calls, vec![Call::Status(NativeProvider::Codex)]);
         }
 
@@ -6926,7 +6935,7 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
             &mut Vec::new(),
         );
         assert_eq!(result.unwrap_err().exit_code(), 3);
-        assert!(output.is_empty());
+        assert_eq!(output, [] as [u8; 0]);
         assert!(!paths.product_database().exists());
         assert!(!paths.runtime_database().exists());
     }
@@ -7072,8 +7081,8 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
             )
             .is_err()
         );
-        assert!(ui.presented_urls.is_empty());
-        assert!(backend.completed_login_modes.is_empty());
+        assert_eq!(ui.presented_urls, [] as [String; 0]);
+        assert_eq!(backend.completed_login_modes, [] as [NativeLoginMode; 0]);
 
         let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
         let mut ui = commands::login_flow::TestLoginUi {
@@ -7092,7 +7101,7 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
             .is_err()
         );
         assert_eq!(backend.calls, [Call::Status(NativeProvider::Codex)]);
-        assert!(backend.completed_login_modes.is_empty());
+        assert_eq!(backend.completed_login_modes, [] as [NativeLoginMode; 0]);
 
         let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
         let mut ui = commands::login_flow::TestLoginUi::default();
@@ -7114,8 +7123,8 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
                 Call::Login(NativeProvider::Codex, NativeLoginMode::RemoteBrowser)
             ]
         );
-        assert!(backend.completed_login_modes.is_empty());
-        assert!(ui.browser_urls.is_empty());
+        assert_eq!(backend.completed_login_modes, [] as [NativeLoginMode; 0]);
+        assert_eq!(ui.browser_urls, [] as [String; 0]);
     }
 
     #[test]
@@ -7144,7 +7153,7 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
                     "{}",
                     failure.message()
                 );
-                assert!(stdout.is_empty());
+                assert_eq!(stdout, [] as [u8; 0]);
             }
         }
     }

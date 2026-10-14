@@ -1690,7 +1690,10 @@ async fn turn_scoped_prepare_without_root_does_not_start_inference() -> Result<(
             .message()
             .contains("inference root is unavailable")
     );
-    assert!(inner.captured_records().is_empty());
+    assert_eq!(
+        inner.captured_records(),
+        [] as [plakous_model::PreparedCallRecord; 0]
+    );
 
     let _root = Arc::clone(&model).begin_operation_root(ModelOperationRoot::Turn(turn))?;
     let bound =

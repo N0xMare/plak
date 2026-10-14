@@ -245,12 +245,14 @@ mod tests {
         type Error = &'static str;
         type Output = ();
 
-        async fn check_profile(&mut self) -> Result<(), Self::Error> {
-            Ok(())
+        fn check_profile(&mut self) -> impl Future<Output = Result<(), Self::Error>> {
+            std::future::ready(Ok(()))
         }
 
-        async fn fence_to_revoke(&mut self) -> Result<CredentialFence, Self::Error> {
-            Ok(self.fence.clone())
+        fn fence_to_revoke(
+            &mut self,
+        ) -> impl Future<Output = Result<CredentialFence, Self::Error>> {
+            std::future::ready(Ok(self.fence.clone()))
         }
 
         fn build_revoke_request(
@@ -269,27 +271,27 @@ mod tests {
             .expect("request"))
         }
 
-        async fn authorize_dispatch(&mut self) -> Result<(), Self::Error> {
-            self.authorize
+        fn authorize_dispatch(&mut self) -> impl Future<Output = Result<(), Self::Error>> {
+            std::future::ready(self.authorize)
         }
 
         fn exchange_control(&mut self) -> ExchangeControl {
             ExchangeControl::new(Instant::now() + Duration::from_millis(50))
         }
 
-        async fn accept_revoke_response(
+        fn accept_revoke_response(
             &mut self,
             _response: &mut ClaimedHttpResponse,
-        ) -> Result<(), Self::Error> {
-            Ok(())
+        ) -> impl Future<Output = Result<(), Self::Error>> {
+            std::future::ready(Ok(()))
         }
 
-        async fn map_claimed_http_error(
+        fn map_claimed_http_error(
             &mut self,
             _store: &PrivateCredentialStore,
             _error: ClaimedHttpError,
-        ) -> Self::Error {
-            "transport"
+        ) -> impl Future<Output = Self::Error> {
+            std::future::ready("transport")
         }
 
         fn map_store_error(&mut self, _error: PrivateStoreError) -> Self::Error {

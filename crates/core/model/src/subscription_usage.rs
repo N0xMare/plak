@@ -560,7 +560,7 @@ mod tests {
     fn balances_preserve_absence_and_stay_bounded() -> Result<(), Box<dyn std::error::Error>> {
         let observed = Timestamp::new(10, 0)?;
         let snapshot = SubscriptionUsageSnapshot::new(observed, None, Vec::new())?;
-        assert!(snapshot.balances().is_empty());
+        assert_eq!(snapshot.balances(), []);
         let credits =
             SubscriptionUsageBalance::new("prepaid-credits".to_owned(), Some(1250), None, None)?;
         assert_eq!(credits.remaining_cents(), Some(1250));

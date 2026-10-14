@@ -581,12 +581,15 @@ mod tests {
             .agent_id;
         tree.fold_scratch_clones = 0;
         let before = format!("{tree:?}");
-        assert!(tree.fold_due(&child).unwrap().is_empty());
+        assert_eq!(tree.fold_due(&child).unwrap(), [] as [IntentJoinRefusal; 0]);
         assert_eq!(format!("{tree:?}"), before);
         tree.nodes.get_mut(&child).unwrap().fold_order = None;
         tree.pending_close_folds.insert(child.clone());
         let before = format!("{tree:?}");
-        assert!(tree.fold_reserved_closes().unwrap().is_empty());
+        assert_eq!(
+            tree.fold_reserved_closes().unwrap(),
+            [] as [IntentJoinRefusal; 0]
+        );
         assert_eq!(format!("{tree:?}"), before);
         assert_eq!(tree.fold_scratch_clones, 0);
     }

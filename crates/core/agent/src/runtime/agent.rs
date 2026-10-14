@@ -522,6 +522,7 @@ impl Agent {
     /// Returns bounded subscriber-admission or view-scope errors.
     #[allow(
         clippy::unused_async,
+        clippy::unused_async_trait_impl,
         reason = "attachment is an async public capability so actor-command serialization can replace the current in-process hub without an API break"
     )]
     pub async fn attach(&self, request: ViewRequest) -> Result<ViewAttachment, ViewError> {
@@ -560,6 +561,7 @@ impl Agent {
     /// Returns a typed scope, future-cursor, or subscriber-admission error.
     #[allow(
         clippy::unused_async,
+        clippy::unused_async_trait_impl,
         reason = "resume is an async public capability so durable replay can replace the current retained-memory path without an API break"
     )]
     pub async fn resume(

@@ -826,7 +826,7 @@ async fn agent_view_streams_its_live_turn_and_follows_the_next_one() {
             .rows
             .contains(&TranscriptRow::assistant("committed prefix"))
     );
-    assert!(!ops.is_empty());
+    assert_ne!(ops, [] as [plakous_host_protocol::SessionObservation; 0]);
     for op in &ops {
         let HostEvent::ChildLive {
             agent_id,

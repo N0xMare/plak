@@ -469,7 +469,10 @@ mod tests {
         let mut unchanged = crate::agent::read_tree_feed(&sessions, locator.session_id(), cursor)
             .await
             .unwrap();
-        assert!(unchanged.records.is_empty());
+        assert_eq!(
+            unchanged.records,
+            [] as [plakous::sessions::feed::FeedRecord; 0]
+        );
         seed_wait_head(&mut unchanged, locator).unwrap();
         session
             .agent()
@@ -489,7 +492,7 @@ mod tests {
                 .unwrap_err()
                 .contains("retry required")
         );
-        assert!(moved.heads.is_empty());
+        assert_eq!(moved.heads, [] as [plakous::sessions::SessionLocator; 0]);
         session.release().await.unwrap();
     }
 

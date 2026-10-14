@@ -2695,7 +2695,7 @@ async fn resolver_rejects_requested_alias_or_bogus_id_before_credentials_and_wir
         expected_descriptor.route().as_str(),
         crate::XaiRouteKind::GrokSubscription.route_id()
     );
-    assert!(!evidence.route_fingerprint().is_empty());
+    assert_ne!(evidence.route_fingerprint(), "");
     assert_eq!(
         evidence.dialect(),
         XaiDialect::GrokSubscriptionResponses2026_07
@@ -3252,7 +3252,10 @@ fn only_release_enrolled_models_receive_supergrok_capabilities() {
             ReasoningEffort::XHigh
         ]
     );
-    assert!(subscription_model_reasoning_effort_options(XAI_GROK_BUILD_MODEL).is_empty());
+    assert_eq!(
+        subscription_model_reasoning_effort_options(XAI_GROK_BUILD_MODEL),
+        []
+    );
 }
 
 #[test]
@@ -3610,11 +3613,11 @@ async fn grok_47_descriptor_declares_its_served_build_id_for_anchoring() -> Test
             "{foreign}"
         );
     }
-    assert!(
+    assert_eq!(
         resolve(XAI_GROK_46_CODING_MODEL)?
             .descriptor()
-            .same_served_models()
-            .is_empty()
+            .same_served_models(),
+        []
     );
     assert!(resolve("grok-4.7-build").is_err());
     assert!(inference.requests.lock().await.is_empty());

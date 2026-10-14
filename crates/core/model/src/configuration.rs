@@ -3085,8 +3085,14 @@ mod tests {
         let mut hosted = behavior()?;
         hosted.hosted_tools = vec![HostedTool::CodeInterpreter];
         let compacted = compiled(hosted, b"hosted-policy")?.semantic_compaction()?;
-        assert!(compacted.selected().behavior().tools.is_empty());
-        assert!(compacted.selected().behavior().hosted_tools.is_empty());
+        assert_eq!(
+            compacted.selected().behavior().tools,
+            [] as [ConfiguredTool; 0]
+        );
+        assert_eq!(
+            compacted.selected().behavior().hosted_tools,
+            [] as [HostedTool; 0]
+        );
         Ok(())
     }
 

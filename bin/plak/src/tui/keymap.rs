@@ -1006,7 +1006,7 @@ mod tests {
             );
         }
         for binding in BINDINGS {
-            assert!(!binding.effect.is_empty());
+            assert_ne!(binding.effect, "");
             assert!(
                 binding.chord.chars().count() < CHORD_WIDTH,
                 "{} overflows the chord column",

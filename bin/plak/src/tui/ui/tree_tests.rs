@@ -412,12 +412,12 @@ fn tree_unavailable_keeps_activity_open_and_reports_the_reason_in_its_body() {
         Some(super::processes::ActivityTab::Agents)
     );
     assert_eq!(app.agents_unavailable.as_deref(), Some("no topology"));
-    assert!(app.pane.blocks.is_empty());
+    assert_eq!(app.pane.blocks, [] as [crate::tui::blocks::ScrollBlock; 0]);
     app.apply_host_event(HostEvent::TopologyNavigatorSnapshot(tree_snapshot(vec![
         tree_node("root", None, 0),
     ])));
     assert!(app.agents_unavailable.is_none());
-    assert!(app.pane.blocks.is_empty());
+    assert_eq!(app.pane.blocks, [] as [crate::tui::blocks::ScrollBlock; 0]);
 }
 
 #[test]

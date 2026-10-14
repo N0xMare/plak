@@ -162,7 +162,10 @@ fn an_opened_item_asks_once_and_shows_input_then_a_windowed_output() {
     // Closing and reopening reads the cached answer.
     app.toggle_tool_expand_at(0);
     app.toggle_tool_expand_at(0);
-    assert!(requests(&mut app).is_empty());
+    assert_eq!(
+        requests(&mut app),
+        [] as [plakous_host_protocol::SessionIntent<crate::surface_protocol::PlakExtension>; 0]
+    );
     assert_eq!(app.call_details.waiting(), 0);
 }
 
@@ -1079,7 +1082,10 @@ fn a_preview_for_a_call_that_just_ended_is_asked_once_more() {
     app.apply_host_event(preview("run"));
     paint(&mut app, 120);
     assert!(plain(&app).contains("│ preview"), "{}", plain(&app));
-    assert!(requests(&mut app).is_empty());
+    assert_eq!(
+        requests(&mut app),
+        [] as [plakous_host_protocol::SessionIntent<crate::surface_protocol::PlakExtension>; 0]
+    );
     app.call_details.age_asks(std::time::Duration::from_secs(6));
     assert_eq!(requests(&mut app).len(), 1, "asked once more");
     app.apply_host_event(preview("run"));
@@ -1109,7 +1115,10 @@ fn a_preview_for_a_restored_call_is_not_asked_again_while_open() {
     assert_eq!(requests(&mut app).len(), 1);
     app.apply_host_event(preview("run"));
     app.call_details.age_asks(std::time::Duration::from_secs(6));
-    assert!(requests(&mut app).is_empty());
+    assert_eq!(
+        requests(&mut app),
+        [] as [plakous_host_protocol::SessionIntent<crate::surface_protocol::PlakExtension>; 0]
+    );
     assert_eq!(app.call_details.waiting(), 0);
 }
 
@@ -1350,7 +1359,7 @@ fn a_one_line_thought_copies_its_full_clean_summary_without_toggling() {
         manual: false,
     });
     paint(&mut app, 40);
-    assert!(app.tool_hit_rows.is_empty());
+    assert_eq!(app.tool_hit_rows, [] as [(usize, u16); 0]);
     app.toggle_tool_expand_at(0);
     assert_eq!(
         app.pane.blocks[0].display_mode(),
@@ -1482,7 +1491,7 @@ fn hidden_thoughts_are_not_keyboard_fold_targets() {
         manual: false,
     });
     paint(&mut app, 80);
-    assert!(plain(&app).is_empty());
+    assert_eq!(plain(&app), "");
     assert_eq!(app.focused_foldable_block(), None);
 }
 

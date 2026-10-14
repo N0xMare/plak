@@ -328,7 +328,7 @@ mod tests {
             .get("live_observations")
             .and_then(Value::as_array)
             .ok_or("Grok corpus omitted live observations")?;
-        assert!(!observations.is_empty());
+        assert_ne!(observations.as_slice(), [] as [Value; 0]);
         assert_eq!(
             corpus.get("route").and_then(Value::as_str),
             Some("xai.grok-subscription.responses.2026-07")

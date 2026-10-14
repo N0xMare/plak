@@ -525,7 +525,10 @@ mod tests {
                 .unwrap(),
             NodeStatus::Running
         );
-        assert!(tree.interrupt_running_descendants().unwrap().is_empty());
+        assert_eq!(
+            tree.interrupt_running_descendants().unwrap(),
+            [] as [String; 0]
+        );
         assert!(tree.is_park_ending(&child));
         tree.unpark_child(&child);
         assert!(!tree.mark_park_ending(&child), "only a parked child ends");
@@ -543,9 +546,9 @@ mod tests {
             tree.claimed_mail(&child),
             std::slice::from_ref(&sent.message_id)
         );
-        assert!(tree.wake_mail(&child).is_empty());
+        assert_eq!(tree.wake_mail(&child), [] as [MailRecord; 0]);
         tree.set_delivery_claim_for_test(&sent.message_id, false);
-        assert!(tree.claimed_mail(&child).is_empty());
+        assert_eq!(tree.claimed_mail(&child), [] as [String; 0]);
         assert_eq!(tree.wake_mail(&child).len(), 1);
     }
 
@@ -576,7 +579,7 @@ mod tests {
         )
         .unwrap();
         tree.record_turn_completed(&running).unwrap();
-        assert!(tree.live_child_work(&hub).is_empty());
+        assert_eq!(tree.live_child_work(&hub), [] as [String; 0]);
     }
 
     #[test]
@@ -615,7 +618,10 @@ mod tests {
             "the parked map is process-local"
         );
         // A restored tree wakes nothing until the operator resumes it.
-        assert!(reopened.parked_reopen_targets().is_empty());
+        assert_eq!(
+            reopened.parked_reopen_targets(),
+            [] as [(String, String, String); 0]
+        );
         reopened.resume_tree().unwrap();
         let targets = reopened
             .parked_reopen_targets()
@@ -750,7 +756,7 @@ mod tests {
             assert_eq!(tree.retained_wait_receipts(&child), [operation]);
             tree.release_attempt_turn(&child).unwrap();
             tree.park_child(&child, Vec::new()).unwrap();
-            assert!(tree.retained_wait_receipts(&child).is_empty());
+            assert_eq!(tree.retained_wait_receipts(&child), [] as [String; 0]);
             tree.begin_wake(&child);
             tree.bind_attempt_turn(&child, format!("00000000-0000-0000-0000-{:012}", wake + 2))
                 .unwrap();

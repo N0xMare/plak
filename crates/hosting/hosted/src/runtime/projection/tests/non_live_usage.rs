@@ -127,10 +127,9 @@ fn resumed_fork_and_rebind_do_not_present_inherited_terminal_usage() {
             !rx.try_iter()
                 .any(|event| matches!(event, HostEvent::TurnUsage { .. }))
         );
-        assert!(
-            crate::session_log::read_tail(&home, &config.session.id, 10)
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            crate::session_log::read_tail(&home, &config.session.id, 10).unwrap(),
+            [] as [String; 0]
         );
 
         // Opening a successor with no projected views must obey the same law.
@@ -144,7 +143,10 @@ fn resumed_fork_and_rebind_do_not_present_inherited_terminal_usage() {
             .unwrap()
             .unwrap();
         assert_eq!(store.projected_usage_emissions(), before);
-        assert!(process.lock().unwrap().pending.is_empty());
+        assert_eq!(
+            process.lock().unwrap().pending,
+            [] as [crate::sessions::projector::ProjectedTurnUsage; 0]
+        );
     }
 }
 

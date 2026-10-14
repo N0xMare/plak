@@ -947,7 +947,10 @@ mod tests {
             host.next_prompt(None).unwrap(),
             HostStep::Continue
         ));
-        assert!(host.config.session.pending_queue.is_empty());
+        assert_eq!(
+            host.config.session.pending_queue,
+            [] as [queue::QueueItem; 0]
+        );
         let after_success = session_log::read_tail_for_kind(
             &host.config.home,
             &before.id,

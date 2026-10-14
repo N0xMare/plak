@@ -196,7 +196,7 @@ mod tests {
         assert_eq!(summaries.len(), 2);
         assert_eq!(summaries[0].operation_id.as_deref(), Some("summary-one"));
         assert_eq!(summaries[1].operation_id.as_deref(), Some("summary-two"));
-        assert!(read_evidence(&path)?.is_empty());
+        assert_eq!(read_evidence(&path)?, [] as [EvidenceRecord; 0]);
         Ok(())
     }
 }

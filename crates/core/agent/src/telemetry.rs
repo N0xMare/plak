@@ -871,7 +871,7 @@ impl fmt::Debug for TelemetryEmitter {
 }
 
 fn increment(counter: &AtomicU64) {
-    let _ = counter.fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+    let _ = counter.try_update(Ordering::AcqRel, Ordering::Acquire, |value| {
         value.checked_add(1)
     });
 }

@@ -3376,7 +3376,10 @@ fn codex_completed_sse_preserves_explicit_end_turn_for_projection() {
     let Ok((residual, terminal)) = collector.finish() else {
         panic!("valid completed SSE expected");
     };
-    assert!(residual.is_empty());
+    assert_eq!(
+        residual,
+        [] as [ResponsesStreamEventKind<ResponsesResponse, ResponsesProviderError>; 0]
+    );
     let RawTerminal::Completed(response) = terminal else {
         panic!("completed terminal expected");
     };
@@ -3402,7 +3405,10 @@ fn codex_auto_dispatches_terminal_from_residual_eof() {
     assert!(matches!(collector.push(bytes.as_bytes()), Ok(events) if events.len() == 1));
     match collector.finish() {
         Ok((residual, terminal)) => {
-            assert!(residual.is_empty());
+            assert_eq!(
+                residual,
+                [] as [ResponsesStreamEventKind<ResponsesResponse, ResponsesProviderError>; 0]
+            );
             assert!(matches!(&terminal, RawTerminal::Completed(_)));
         }
         Err(error) => panic!("terminal residual fixture failed: {error:?}"),
@@ -3425,7 +3431,10 @@ fn codex_terminal_owns_the_boundary_before_buffered_provider_trailers() {
     assert!(matches!(collector.push(bytes.as_bytes()), Ok(events) if events.len() == 1));
     match collector.finish() {
         Ok((residual, terminal)) => {
-            assert!(residual.is_empty());
+            assert_eq!(
+                residual,
+                [] as [ResponsesStreamEventKind<ResponsesResponse, ResponsesProviderError>; 0]
+            );
             assert!(matches!(terminal, RawTerminal::Completed(_)));
         }
         Err(error) => panic!("terminal boundary fixture failed: {error:?}"),
@@ -3497,7 +3506,10 @@ fn delayed_body_delivers_available_observation_and_saturation_preserves_terminal
 
     match collector.finish() {
         Ok((residual, terminal)) => {
-            assert!(residual.is_empty());
+            assert_eq!(
+                residual,
+                [] as [ResponsesStreamEventKind<ResponsesResponse, ResponsesProviderError>; 0]
+            );
             assert_eq!(delivery.observations_delivered, 2);
             assert_eq!(delivery.observations_dropped, 1);
             assert!(matches!(terminal, RawTerminal::Completed(_)));
@@ -4679,7 +4691,7 @@ async fn a_reset_after_send_is_replayed_only_for_a_cost_only_turn() -> TestResul
             };
             assert!(matches!(error, ResponsesAttemptError::Transport { .. }));
             assert_eq!(error.facts().physical_attempts(), 1);
-            assert!(retries.is_empty());
+            assert_eq!(retries, [] as [ModelRetry; 0]);
         }
         assert_eq!(peer.await??.len(), sends);
     }
@@ -5347,7 +5359,7 @@ async fn a_session_workflow_retries_unsent_tls_but_never_an_http_refusal() -> Te
             retries[0].loss().transport_phase,
             Some(plakous_model::ModelRetryPhase::Tls)
         );
-        assert!(!peer.await??.is_empty());
+        assert_ne!(peer.await??, [] as [u8; 0]);
     }
     Ok(())
 }

@@ -144,19 +144,15 @@ mod tests {
             ],
             "a repeat is one row; a new label or a new end stamp is another occurrence"
         );
-        assert!(
-            reopened
-                .agent_acknowledgements("tree-3")
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            reopened.agent_acknowledgements("tree-3").unwrap(),
+            [] as [AgentAcknowledgement; 0]
         );
         reopened.delete_agent_acknowledgements("tree-1").unwrap();
         reopened.delete_agent_acknowledgements("tree-1").unwrap();
-        assert!(
-            reopened
-                .agent_acknowledgements("tree-1")
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            reopened.agent_acknowledgements("tree-1").unwrap(),
+            [] as [AgentAcknowledgement; 0]
         );
         assert_eq!(
             reopened.agent_acknowledgements("tree-2").unwrap(),

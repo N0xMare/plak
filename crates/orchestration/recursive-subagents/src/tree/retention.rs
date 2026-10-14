@@ -389,7 +389,10 @@ mod tests {
         let child = tree.spawn_agent("root", &spawn_req(), None).unwrap();
         tree.record_turn_completed(&child.agent_id).unwrap();
         tree.settle_for_test();
-        assert!(tree.prepare_child_retention(u64::MAX).unwrap().is_empty());
+        assert_eq!(
+            tree.prepare_child_retention(u64::MAX).unwrap(),
+            [] as [crate::tree::retention::RetirementTicket; 0]
+        );
         let result = tree
             .poll_wait("root", &AwaitAgents::Pending)
             .unwrap()
@@ -460,7 +463,7 @@ mod tests {
             tree.node(&child.agent_id).unwrap().status,
             NodeStatus::Closed
         );
-        assert!(tree.node(&child.agent_id).unwrap().prompt.is_empty());
+        assert_eq!(tree.node(&child.agent_id).unwrap().prompt, "");
         assert!(
             tree.resolve_input_base(&[candidate.to_string()])
                 .unwrap()
@@ -509,6 +512,9 @@ mod tests {
         );
         tree.finish_child_retention(&ticket).unwrap();
         tree.finish_child_retention(&ticket).unwrap();
-        assert!(tree.prepare_child_retention(u64::MAX).unwrap().is_empty());
+        assert_eq!(
+            tree.prepare_child_retention(u64::MAX).unwrap(),
+            [] as [crate::tree::retention::RetirementTicket; 0]
+        );
     }
 }

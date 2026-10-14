@@ -425,7 +425,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["codex-default", "claude-default", "grok-default"]
         );
-        assert!(view.diagnostics.is_empty());
+        assert_eq!(view.diagnostics, [] as [String; 0]);
         assert!(
             view.rows[2]
                 .cards

@@ -531,7 +531,7 @@ fn ctrl_c_clears_nonempty_input() {
     app.busy = true;
     let action = app.handle_key(key_ctrl(KeyCode::Char('c')));
     assert_eq!(action, None);
-    assert!(app.input.is_empty());
+    assert_eq!(app.input, "");
     assert!(!app.should_quit);
     // Second Ctrl+C while busy asks in the turn stop pop-up.
     let action = app.handle_key(key_ctrl(KeyCode::Char('c')));
@@ -559,7 +559,7 @@ fn esc_esc_clears_an_idle_draft_and_one_undo_restores_it() {
     );
     assert!(!app.input.is_empty(), "first Esc only arms the clear");
     assert_eq!(app.handle_key(key(KeyCode::Esc)), None);
-    assert!(app.input.is_empty());
+    assert_eq!(app.input, "");
     assert!(!app.should_quit, "Esc never quits");
     app.handle_key(key_ctrl(KeyCode::Char('z')));
     assert_eq!(app.input, "keep me!");
@@ -643,12 +643,12 @@ fn prompt_history_up_when_empty() {
     let second = app.handle_key(key(KeyCode::Enter));
     assert_eq!(second, Some(UserAction::Prompt("two".into())));
     commit_sent_action(&mut app, second.as_ref().unwrap());
-    assert!(app.prompt_history.is_empty());
+    assert_eq!(app.prompt_history, [] as [String; 0]);
     app.apply_host_event(HostEvent::PromptHistorySnapshot(vec![
         "one".into(),
         "two".into(),
     ]));
-    assert!(app.input.is_empty());
+    assert_eq!(app.input, "");
     assert!(app.handle_key(key(KeyCode::Up)).is_none());
     assert!(
         app.input.is_empty(),
@@ -672,7 +672,7 @@ fn prompt_history_ctrl_c_clears_and_typing_detaches() {
     assert_eq!(app.history_browse, Some(0));
     assert!(app.handle_key(key_ctrl(KeyCode::Char('c'))).is_none());
     assert_eq!(app.history_browse, None);
-    assert!(app.input.is_empty());
+    assert_eq!(app.input, "");
 
     app.handle_key(key(KeyCode::Up));
     app.handle_key(key(KeyCode::Char('n')));
@@ -1183,7 +1183,7 @@ fn the_first_ctrl_c_draft_clear_is_recoverable_by_one_undo() {
     let mut app = App::new(launch_basic(), true);
     typed(&mut app, "a long prompt");
     assert_eq!(app.handle_key(key_ctrl(KeyCode::Char('c'))), None);
-    assert!(app.input.is_empty());
+    assert_eq!(app.input, "");
     app.handle_key(key_ctrl(KeyCode::Char('z')));
     assert_eq!(app.input, "a long prompt");
 }
@@ -1343,7 +1343,10 @@ fn selection_anchor_survives_estimated_to_exact_rebuild_over_512_blocks() {
     app.mark_transcript_replaced();
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
     terminal.draw(|frame| app.draw(frame)).unwrap();
-    assert!(!app.pane.transcript_cache.estimated_blocks().is_empty());
+    assert_ne!(
+        app.pane.transcript_cache.estimated_blocks(),
+        [] as [usize; 0]
+    );
     let body = app.transcript_body_area.unwrap();
     let position = app.transcript_position_at(body.x + 2, body.y + 2).unwrap();
     let anchor = layout_anchor(app.pane.transcript_cache.layout(), position.row).unwrap();
@@ -1400,7 +1403,7 @@ fn super_editing_bindings_select_cut_undo_and_redo() {
     app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::SUPER));
     assert_eq!(app.composer_selection.range(&app.input), Some(0..11));
     app.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::SUPER));
-    assert!(app.input.is_empty());
+    assert_eq!(app.input, "");
     assert!(app.control_tab.is_none());
     app.handle_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::SUPER));
     assert_eq!(app.input, "whole draft");
@@ -1408,5 +1411,5 @@ fn super_editing_bindings_select_cut_undo_and_redo() {
         KeyCode::Char('z'),
         KeyModifiers::SUPER | KeyModifiers::SHIFT,
     ));
-    assert!(app.input.is_empty());
+    assert_eq!(app.input, "");
 }

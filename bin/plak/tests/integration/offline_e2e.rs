@@ -951,7 +951,7 @@ fn a_jsonl_turn_interrupted_by_sigint_stops_promptly_with_exit_4() {
         "stream:\n{}",
         outcome.lines.join("\n")
     );
-    assert!(outcome.assistant_text().is_empty());
+    assert_eq!(outcome.assistant_text(), [] as [String; 0]);
 }
 
 /// An interrupted JSONL turn grows no auto-continue note line: JSONL never

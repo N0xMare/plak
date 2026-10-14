@@ -59,7 +59,10 @@ fn close_drain_never_restarts_a_deleted_fold() {
     tree.clear_agent_feed_views(&child, CHILD_SESSION);
     tree.pending_close_folds.insert(child.clone());
     let before = format!("{:?}", tree.to_persisted());
-    assert!(tree.fold_reserved_closes().unwrap().is_empty());
+    assert_eq!(
+        tree.fold_reserved_closes().unwrap(),
+        [] as [IntentJoinRefusal; 0]
+    );
     assert_eq!(format!("{:?}", tree.to_persisted()), before);
     assert!(tree.pending_close_folds.contains(&child));
     let mut feed = Feed::new(CHILD_SESSION);
@@ -235,5 +238,5 @@ fn refold_usage_filter_is_sequence_exact_for_repeated_turn_ids() {
         )
         .unwrap();
     assert_eq!(again.applied, 0);
-    assert!(again.terminal_usages.is_empty());
+    assert_eq!(again.terminal_usages, [] as [ProjectedChildTurnUsage; 0]);
 }

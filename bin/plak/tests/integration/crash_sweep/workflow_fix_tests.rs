@@ -50,7 +50,10 @@ fn unadmitted_compact_request_is_withdrawn_once_without_dispatch() {
         assert_eq!(invariants::summary_dispatches(&fixture), before);
         let mut store = plak::store::ProductStore::open(&summary::paths(&fixture)).unwrap();
         let intents = store.load_intents(&session).unwrap();
-        assert!(intents.workflow_requests.is_empty());
+        assert_eq!(
+            intents.workflow_requests,
+            [] as [plakous_hosted::sessions::projector::WorkflowRequest; 0]
+        );
         assert_eq!(
             intents
                 .notices
@@ -519,7 +522,8 @@ fn normalize_probe_head(summary: &mut summary::Summary, before_head: &str) {
         return;
     }
     let head = std::mem::replace(&mut summary.head, "recovered_head".to_owned());
-    for locator in [&mut summary.locator] {
+    {
+        let locator = &mut summary.locator;
         if locator.as_deref() == Some(&head) {
             *locator = Some("recovered_head".to_owned());
         }

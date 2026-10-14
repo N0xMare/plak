@@ -414,7 +414,7 @@ mod tests {
         assert!(tree.attempt(&child).unwrap().turn_id.is_none());
         assert_eq!(waiting_children(&tree), [(child.clone(), child.clone())]);
         tree.release_turn_owner(&child);
-        assert!(waiting_children(&tree).is_empty());
+        assert_eq!(waiting_children(&tree), [] as [(String, String); 0]);
     }
 
     /// `plak run` keeps waiting for a parked child and names what it waits on.

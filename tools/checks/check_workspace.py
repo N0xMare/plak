@@ -206,7 +206,7 @@ def supported_compile_fixtures(workspace: Workspace) -> dict[str, dict[str, Any]
                 "name": f"plakous-{fixture_name}",
                 "version": "0.0.0",
                 "edition": "2024",
-                "rust-version": "1.97.1",
+                "rust-version": "1.99.0",
                 "description": contract["description"],
                 "license": WORKSPACE_LICENSE,
                 "repository": WORKSPACE_REPOSITORY,
@@ -3249,7 +3249,6 @@ def validate_workspace_excludes(
         errors.append("workspace must exclude .plak operator state and fork worktrees")
     reviewed_vendor_packages = {
         "vendor/codex-code-mode-protocol",
-        "vendor/monty",
         "vendor/monty-typeshed",
     }
     unknown_excludes = excludes - supported_fixture_paths - reviewed_vendor_packages - {".plak"}
@@ -3309,8 +3308,8 @@ def main() -> int:
             errors.append(f"{name}: pre-release packages must have publish = false")
         if metadata.get("edition") != "2024":
             errors.append(f"{name}: edition must be 2024")
-        if metadata.get("rust_version") != "1.97.1":
-            errors.append(f"{name}: rust-version must be 1.97.1")
+        if metadata.get("rust_version") != "1.99.0":
+            errors.append(f"{name}: rust-version must be 1.99.0")
         if metadata.get("license") != WORKSPACE_LICENSE:
             errors.append(f"{name}: license expression is inconsistent")
 

@@ -1060,13 +1060,7 @@ async fn clear_runtime_copies_counter_without_job_rows() -> TestResult {
     .builder
     .build()?;
     assert_eq!(agent_checkpoint(&cleared).manifest().jobs().next_id(), 17);
-    assert!(
-        agent_checkpoint(&cleared)
-            .manifest()
-            .jobs()
-            .rows()
-            .is_empty()
-    );
+    assert_eq!(agent_checkpoint(&cleared).manifest().jobs().rows(), []);
     source.shutdown().await?;
     cleared.shutdown().await?;
     Ok(())
@@ -2641,7 +2635,7 @@ fn assert_complete_compaction_success(
     );
     assert_eq!(target_manifest.binding(), source_manifest.binding());
     assert_eq!(target_manifest.tools(), source_manifest.tools());
-    assert!(target_manifest.canonical().working().segments().is_empty());
+    assert_eq!(target_manifest.canonical().working().segments(), []);
 
     let source_history = source_manifest.canonical().history();
     let target_history = target_manifest.canonical().history();
@@ -3643,7 +3637,7 @@ async fn history_page_on_created_session_returns_page_or_honest_resnapshot() -> 
         } => {
             assert_eq!(page_locator, locator);
             assert_eq!(visibility, SessionHistoryVisibility::Metadata);
-            assert!(!items.is_empty());
+            assert_ne!(items, [] as [SessionHistoryItem; 0]);
             assert!(items.iter().all(|item| item.display_text().is_none()));
             assert_eq!(next, None);
         }
@@ -4071,7 +4065,7 @@ async fn context_status_current_and_pending_are_exact_and_read_only() -> TestRes
         current.model_input_identity(),
         pending.model_input_identity()
     );
-    assert!(model.captured_records().is_empty());
+    assert_eq!(model.captured_records(), [] as [PreparedCallRecord; 0]);
     let after_checkpoint = agent_checkpoint(session.agent());
     assert_eq!(after_checkpoint.id(), checkpoint.id());
     assert_eq!(
@@ -4140,7 +4134,7 @@ async fn context_status_turn_scoped_inspect_is_available_without_operation_root(
         current.model_input_identity(),
         pending.model_input_identity()
     );
-    assert!(model.captured_records().is_empty());
+    assert_eq!(model.captured_records(), [] as [PreparedCallRecord; 0]);
     let after = store.load_branch(locator.session_ref()).await?;
     assert_eq!(after.head(), before.head());
     assert_eq!(
@@ -4195,7 +4189,7 @@ async fn context_status_turn_scoped_inspect_reports_overflow_without_operation_r
         "turn-scoped overflow inspect returned {:?}",
         status.kind()
     );
-    assert!(model.captured_records().is_empty());
+    assert_eq!(model.captured_records(), [] as [PreparedCallRecord; 0]);
     session.release().await?;
     Ok(())
 }
@@ -4238,7 +4232,7 @@ async fn context_status_missing_contract_is_available_unavailable_without_start(
         SessionContextStatusKind::Available(status)
             if matches!(status.kind(), ContextStatusKind::Unavailable(_))
     ));
-    assert!(model.captured_records().is_empty());
+    assert_eq!(model.captured_records(), [] as [PreparedCallRecord; 0]);
     let after = store.load_branch(locator.session_ref()).await?;
     assert_eq!(after.head(), before.head());
     assert_eq!(
@@ -5144,8 +5138,11 @@ async fn historical_evaluator_round_trip(kind: u8) -> TestResult {
         return Err("historical head did not reopen".into());
     };
     assert_eq!(session.release().await?, head);
-    assert!(model.captured_plans().is_empty());
-    assert!(reopened_model.captured_plans().is_empty());
+    assert_eq!(model.captured_plans(), [] as [ValidatedRequestPlan; 0]);
+    assert_eq!(
+        reopened_model.captured_plans(),
+        [] as [ValidatedRequestPlan; 0]
+    );
     std::fs::write(&historical, b"changed evaluator")?;
     #[cfg(feature = "sessions-sqlite")]
     assert!(!rehearsal::inspect_exact(&sessions.load_exact(head).await?).evaluator_verified);
@@ -6410,7 +6407,7 @@ async fn sqlite_terminal_capacity_failure_recovers_exactly_within_the_reserve() 
     let report = AgentSessions::inspect_recovery_sqlite(&database, source)?
         .ok_or("capacity failure did not retain a recovery checkpoint")?;
     assert_eq!(report.phase(), SessionRecoveryPhase::Finalization);
-    assert!(!report.obligations().is_empty());
+    assert_ne!(report.obligations(), []);
     assert!(
         report.obligations().iter().all(|obligation| {
             obligation.action() == SessionRecoveryAction::FinalizationRequired

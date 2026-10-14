@@ -249,7 +249,7 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let body = br#"{"config":{"prepaidBalance":{"val":1250}}}"#;
         let snapshot = decode_grok_subscription_usage(body, Timestamp::new(1, 0)?)?;
-        assert!(snapshot.meters().is_empty());
+        assert_eq!(snapshot.meters(), []);
         assert!(snapshot.unmetered_period().is_none());
         assert_eq!(snapshot.balances().len(), 1);
         assert_eq!(snapshot.balances()[0].remaining_cents(), Some(1250));
@@ -292,19 +292,18 @@ mod tests {
         assert!(empty.meters().is_empty() && empty.balances().is_empty());
         assert!(empty.unmetered_period().is_none());
         // A percentage with no period and no end names no allowance window.
-        assert!(
+        assert_eq!(
             decode_grok_subscription_usage(br#"{"config":{"creditUsagePercent":5}}"#, observed)?
-                .meters()
-                .is_empty()
+                .meters(),
+            []
         );
         // A zero legacy limit is not a zero-percent allowance.
-        assert!(
+        assert_eq!(
             decode_grok_subscription_usage(
                 br#"{"config":{"monthlyLimit":{},"used":{"val":5},"billingPeriodEnd":"2026-09-01T00:00:00Z"}}"#,
                 observed
             )?
-            .meters()
-            .is_empty()
+            .meters(), []
         );
         assert!(
             decode_grok_subscription_usage(br#"{"config":{"creditUsagePercent":-1}}"#, observed)

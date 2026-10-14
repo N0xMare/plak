@@ -1800,6 +1800,10 @@ struct XaiRefreshHooks<'a> {
     force: bool,
 }
 
+#[allow(
+    clippy::unused_async_trait_impl,
+    reason = "hook methods implement the orchestrator's async trait; some bodies finish without awaiting, and async keeps them lazy until the orchestrator polls"
+)]
 impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
     type Error = XaiNativeAuthError;
     type Prepared = XaiRefreshPrepared;
@@ -2021,6 +2025,10 @@ struct XaiRevokeHooks<'a> {
     _flight: futures_util::lock::MutexGuard<'a, ()>,
 }
 
+#[allow(
+    clippy::unused_async_trait_impl,
+    reason = "hook methods implement the orchestrator's async trait; some bodies finish without awaiting, and async keeps them lazy until the orchestrator polls"
+)]
 impl ClaimedRevokeHooks for XaiRevokeHooks<'_> {
     type Error = XaiNativeAuthError;
     type Output = CredentialGeneration;
@@ -3841,6 +3849,10 @@ struct XaiBrowserLoopbackHooks {
     flow: Option<BrowserLoginFlow>,
 }
 
+#[allow(
+    clippy::unused_async_trait_impl,
+    reason = "hook methods implement the orchestrator's async trait; some bodies finish without awaiting, and async keeps them lazy until the orchestrator polls"
+)]
 impl BrowserLoopbackHooks for XaiBrowserLoopbackHooks {
     type Error = XaiNativeAuthError;
     type Callback = BrowserCallback;

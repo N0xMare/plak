@@ -5926,11 +5926,12 @@ mod tests {
             );
         }
         let unpinned_schema = schema(TopologyKind::Spawn, &[]);
-        assert!(
+        assert_eq!(
             unpinned_schema["properties"]["template"]["enum"]
                 .as_array()
                 .unwrap()
-                .is_empty()
+                .as_slice(),
+            [] as [Value; 0]
         );
     }
 
@@ -7303,7 +7304,7 @@ mod tests {
         let mut tree = tree.lock().unwrap();
         tree.record_turn_completed("c1").unwrap();
         assert!(tree.attempt("c1").unwrap().status.is_stopped());
-        assert!(tree.wake_mail("c1").is_empty());
+        assert_eq!(tree.wake_mail("c1"), [] as [crate::tree::MailRecord; 0]);
     }
 
     /// Spec 03 section 9: mail that reaches an interrupted child while its
@@ -8991,7 +8992,10 @@ mod tests {
             .await
             .unwrap();
         let mut tree = driver.tree.lock().unwrap();
-        assert!(tree.pending_mail("root").is_empty());
+        assert_eq!(
+            tree.pending_mail("root"),
+            [] as [crate::tree::MailRecord; 0]
+        );
         let mut retained = tree.retained_wait_receipts("root");
         retained.sort();
         assert_eq!(retained, ["committed-wait", "uncommitted-wait"]);
@@ -9008,7 +9012,7 @@ mod tests {
                 restored_mail: 1,
             }
         );
-        assert!(tree.retained_wait_receipts("root").is_empty());
+        assert_eq!(tree.retained_wait_receipts("root"), [] as [String; 0]);
         assert!(tree.delivered_to("root", "c1"));
         let pending = tree.pending_mail("root");
         assert_eq!(pending.len(), 1);
@@ -9058,7 +9062,10 @@ mod tests {
             0
         );
         assert!(tree.delivered_to("root", "c1"));
-        assert!(tree.pending_mail("root").is_empty());
+        assert_eq!(
+            tree.pending_mail("root"),
+            [] as [crate::tree::MailRecord; 0]
+        );
     }
 
     #[tokio::test]
@@ -9204,10 +9211,10 @@ mod tests {
                 .await
                 .unwrap();
             let mut tree = driver.tree.lock().unwrap();
-            assert!(tree.pending_mail("c1").is_empty());
+            assert_eq!(tree.pending_mail("c1"), [] as [crate::tree::MailRecord; 0]);
             if wait == "interrupted-wait" {
                 tree.release_attempt_turn("c1").unwrap();
-                assert!(tree.retained_wait_receipts("c1").is_empty());
+                assert_eq!(tree.retained_wait_receipts("c1"), [] as [String; 0]);
                 tree.bind_attempt_turn("c1", "child-turn-2").unwrap();
             }
         }
@@ -9973,7 +9980,10 @@ mod tests {
                     tree.recovery_need(&child).unwrap(),
                     crate::tree::RecoveryNeed::NotRequired
                 );
-                assert!(tree.pending_result_mail("root").is_empty());
+                assert_eq!(
+                    tree.pending_result_mail("root"),
+                    [] as [crate::tree::MailRecord; 0]
+                );
             })
             .unwrap();
         driver.bind_job_host(None);
@@ -10163,7 +10173,10 @@ mod tests {
         assert_eq!(output["woke_by"], "mail");
         assert_eq!(output["mail"][0]["body"], "which file?");
         assert!(deliverer.calls.lock().unwrap().is_empty());
-        assert!(driver.tree.lock().unwrap().pending_mail("c1").is_empty());
+        assert_eq!(
+            driver.tree.lock().unwrap().pending_mail("c1"),
+            [] as [crate::tree::MailRecord; 0]
+        );
     }
 
     #[tokio::test]
@@ -10210,7 +10223,10 @@ mod tests {
         assert_eq!(output["woke_by"], "mail");
         assert_eq!(output["mail"][0]["body"], "which file?");
         assert!(deliverer.calls.lock().unwrap().is_empty());
-        assert!(driver.tree.lock().unwrap().pending_mail("c1").is_empty());
+        assert_eq!(
+            driver.tree.lock().unwrap().pending_mail("c1"),
+            [] as [crate::tree::MailRecord; 0]
+        );
     }
 
     #[tokio::test]
@@ -10260,7 +10276,10 @@ mod tests {
             .unwrap();
         assert_eq!(receipt.kind(), ToolOutcomeKind::Success);
         assert_eq!(deliverer.calls.lock().unwrap().len(), 1);
-        assert!(driver.tree.lock().unwrap().pending_mail("c1").is_empty());
+        assert_eq!(
+            driver.tree.lock().unwrap().pending_mail("c1"),
+            [] as [crate::tree::MailRecord; 0]
+        );
     }
 
     #[tokio::test]
@@ -13470,7 +13489,10 @@ mod tests {
         assert_eq!(inner["mail"][0]["body"], "halfway there");
         {
             let tree = driver.tree.lock().unwrap();
-            assert!(tree.pending_mail("root").is_empty());
+            assert_eq!(
+                tree.pending_mail("root"),
+                [] as [crate::tree::MailRecord; 0]
+            );
             assert_eq!(tree.retained_wait_receipts("root"), ["grok-await"]);
         }
         let replay = tool
@@ -13489,14 +13511,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(replay.joined_text(), settled.joined_text());
-        assert!(
-            reopened
-                .driver
-                .tree
-                .lock()
-                .unwrap()
-                .pending_mail("root")
-                .is_empty()
+        assert_eq!(
+            reopened.driver.tree.lock().unwrap().pending_mail("root"),
+            [] as [crate::tree::MailRecord; 0]
         );
         let unknown = tool
             .task_output_with(
@@ -13846,7 +13863,10 @@ mod tests {
         assert_eq!(inner["mail"][0]["body"], "halfway there");
         {
             let tree = driver.tree.lock().unwrap();
-            assert!(tree.pending_mail("root").is_empty());
+            assert_eq!(
+                tree.pending_mail("root"),
+                [] as [crate::tree::MailRecord; 0]
+            );
             assert_eq!(tree.retained_wait_receipts("root"), ["pi-await"]);
         }
         // A rejoined turn: the tree reopens from the store with the receipt

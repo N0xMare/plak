@@ -2,7 +2,7 @@
 name = "plakous-authority-negative"
 version = "0.0.0"
 edition = "2024"
-rust-version = "1.97.1"
+rust-version = "1.99.0"
 description = "Compile fixture: negative pins proving private Plakous authority is unreachable from outside the workspace."
 license = "MIT"
 repository = "https://github.com/N0xMare/plak"

@@ -1820,8 +1820,14 @@ mod tests {
             actions_on_successful_attach(false, true, true),
             vec![UserAction::OpenTopologyNavigator]
         );
-        assert!(actions_on_successful_attach(false, false, true).is_empty());
-        assert!(actions_on_successful_attach(false, true, false).is_empty());
+        assert_eq!(
+            actions_on_successful_attach(false, false, true),
+            [] as [plakous_host_protocol::SessionIntent<crate::surface_protocol::PlakExtension>; 0]
+        );
+        assert_eq!(
+            actions_on_successful_attach(false, true, false),
+            [] as [plakous_host_protocol::SessionIntent<crate::surface_protocol::PlakExtension>; 0]
+        );
     }
 
     #[test]

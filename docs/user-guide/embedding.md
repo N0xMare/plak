@@ -2,7 +2,7 @@
 
 Plakous is an embeddable single-agent library. Plak is the CLI/TUI product built
 on it. Nothing is published to crates.io: depend on a source checkout by path.
-Use Rust **1.97.1** or later and edition **2024**. Supported platforms are Linux
+Use Rust **1.99.0** or later and edition **2024**. Supported platforms are Linux
 x86_64 musl and Apple Silicon macOS.
 
 ## Four explicit choices
@@ -50,7 +50,7 @@ This complete manifest supports copying a scripted example and
 name = "my-agent"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97.1"
+rust-version = "1.99.0"
 
 [dependencies]
 plakous = { path = "../plak/crates/plakous", features = ["composition", "sessions-sqlite"] }

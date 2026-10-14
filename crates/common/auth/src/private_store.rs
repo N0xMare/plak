@@ -1238,6 +1238,10 @@ impl PrivateCredentialStore {
     /// Returns a redacted error if the claim is foreign, the concrete exchange
     /// fails, or the exact restoration/quarantine verification fails closed.
     #[cfg(feature = "http-refresh")]
+    #[allow(
+        clippy::result_large_err,
+        reason = "the error carries the claim disposition and transport cause back to the refresh owner; it is returned once from an async exchange whose future already holds it"
+    )]
     pub async fn execute_claimed_http(
         &self,
         claim: RefreshClaim,
@@ -4493,7 +4497,6 @@ mod tests {
     mod http_refresh_tests {
         use std::fs;
         use std::io;
-        use std::os::unix::fs::PermissionsExt as _;
         use std::sync::Arc;
         use std::time::Instant;
 

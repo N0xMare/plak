@@ -401,9 +401,12 @@ fn control_overlay_geometry_is_the_whole_terminal_and_floored() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|frame| app.draw(frame)).unwrap();
     assert!(app.control_popup.is_none(), "refuses to draw the frame");
-    assert!(app.control_tab_hits.is_empty());
+    assert_eq!(
+        app.control_tab_hits,
+        [] as [(crate::tui::ui::ControlTab, ratatui::prelude::Rect); 0]
+    );
     assert!(app.control_close_hit.is_none());
-    assert!(app.settings_hits.is_empty());
+    assert_eq!(app.settings_hits, [] as [crate::tui::picker::RowHit; 0]);
     let screen = serialize_frame(terminal.backend().buffer());
     assert!(screen.contains("terminal·too·small"), "{screen}");
 }
@@ -458,7 +461,7 @@ fn durable_draft_disposition_controls_restoration() {
     app.set_input("preserve until durable".into());
     let action = app.submit_line(false).expect("prompt action");
     dispatch_action(&mut app, &action, Some(&sender));
-    assert!(app.input.is_empty());
+    assert_eq!(app.input, "");
     assert_eq!(app.pending_drafts.len(), 1);
     assert!(
         app.pane.blocks.is_empty(),
@@ -476,7 +479,7 @@ fn durable_draft_disposition_controls_restoration() {
     app.clear_input();
     assert!(send_user_action(&mut app, Some(&sender), action.clone()));
     app.apply_host_event(HostEvent::DraftAccepted(action));
-    assert!(app.input.is_empty());
+    assert_eq!(app.input, "");
     assert!(app.pending_drafts.is_empty());
 }
 
@@ -633,7 +636,7 @@ fn clear_slash_produces_clear_session_action() {
     );
 
     app.apply_host_event(HostEvent::ClearView);
-    assert!(app.pane.blocks.is_empty());
+    assert_eq!(app.pane.blocks, [] as [ScrollBlock; 0]);
     assert!(!app.clear_pending);
 }
 
@@ -718,7 +721,7 @@ fn capacity_recovery_keeps_draft_and_recalls_saved_prompt_without_dispatch() {
                 app.clear_input();
                 assert!(app.handle_key(key(KeyCode::Up)).is_none());
                 assert_eq!(app.history_browse, Some(1));
-                assert!(app.input.is_empty());
+                assert_eq!(app.input, "");
                 terminal.draw(|frame| app.draw(frame)).unwrap();
                 assert!(screen_text(&terminal).contains("safe saved prompt"));
                 if accept == KeyCode::Enter

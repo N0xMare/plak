@@ -5,7 +5,7 @@
 # Two cargo invocations keep rquickjs out of plak (see tools/build/build-plak.sh).
 # clang + mold are this image's own build tooling; `.cargo/config.toml`
 # ships no linker or rustflags section for the linux GNU host targets.
-FROM rust:1.97.1-bookworm AS build
+FROM rust:1.99.0-bookworm AS build
 WORKDIR /src
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     pkg-config libssl-dev ca-certificates build-essential clang mold \

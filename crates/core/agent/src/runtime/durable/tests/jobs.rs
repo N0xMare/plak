@@ -387,8 +387,8 @@ async fn process_notice_admission_is_atomic_and_exactly_once() -> TestResult {
     let id = process.session_for_number(1).ok_or("handle")?;
     process.stop(id, plakous_tools::JobStopReason::User)?;
     let result = agent.prompt("next intent").await?.result().await?;
-    assert!(result.checkpoint().manifest().jobs().rows().is_empty());
-    assert!(agent.jobs().is_empty());
+    assert_eq!(result.checkpoint().manifest().jobs().rows(), []);
+    assert_eq!(agent.jobs(), [] as [plakous_tools::JobView; 0]);
     let history = result.checkpoint().manifest().canonical().history();
     let segments = history.segments();
     let notice_index = segments
@@ -424,7 +424,7 @@ async fn process_notice_admission_is_atomic_and_exactly_once() -> TestResult {
                 segments.len() == notice_index + 2
             })
             .ok_or("notice and prompt did not commit together")?;
-        assert!(admission.checkpoint().manifest().jobs().rows().is_empty());
+        assert_eq!(admission.checkpoint().manifest().jobs().rows(), []);
     }
     let later = agent.prompt("third intent").await?.result().await?;
     assert_eq!(
@@ -646,9 +646,9 @@ async fn promoted_job_survives_turn_and_records_quiescent_terminal_once() -> Tes
         reported.outcome(),
         TurnResultOutcome::Completed(_)
     ));
-    assert!(reported.checkpoint().manifest().jobs().rows().is_empty());
+    assert_eq!(reported.checkpoint().manifest().jobs().rows(), []);
     assert_eq!(reported.checkpoint().manifest().jobs().next_id(), 8);
-    assert!(snapshots.jobs().is_empty());
+    assert_eq!(snapshots.jobs(), [] as [plakous_tools::JobView; 0]);
     assert!(snapshots.session_for_number(7).is_none());
     assert!(!reopened.record_job_terminals().await?);
     reopened.shutdown().await?;
@@ -740,8 +740,8 @@ async fn review_crash_reopen_running_job_is_pollable_and_consumed() -> TestResul
     assert_eq!(tool.dispatches.load(Ordering::Acquire), 1);
     assert!(result.conversation().items().iter().flat_map(ConversationItem::blocks)
         .any(|block| matches!(block, ContentBlock::Text(text) if text.text().contains("Plak stopped unexpectedly while this command was running."))));
-    assert!(result.checkpoint().manifest().jobs().rows().is_empty());
-    assert!(snapshots.jobs().is_empty());
+    assert_eq!(result.checkpoint().manifest().jobs().rows(), []);
+    assert_eq!(snapshots.jobs(), [] as [plakous_tools::JobView; 0]);
     reopened.shutdown().await?;
     let _ = agent.shutdown().await;
     Ok(())
@@ -812,7 +812,7 @@ async fn review_nul_tail_does_not_block_later_turn_commits() -> TestResult {
         .result()
         .await?;
     assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
-    assert!(result.checkpoint().manifest().jobs().rows().is_empty());
+    assert_eq!(result.checkpoint().manifest().jobs().rows(), []);
     assert!(result.conversation().items().iter().flat_map(ConversationItem::blocks)
         .any(|block| matches!(block, ContentBlock::Text(text) if text.text().contains("terminal\u{fffd}tail"))));
     assert!(!agent.record_job_terminals().await?);

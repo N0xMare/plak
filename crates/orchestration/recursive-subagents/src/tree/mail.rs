@@ -1405,7 +1405,7 @@ mod tests {
         .unwrap();
         tree.record_turn_completed(&child.agent_id).unwrap();
         tree.settle_for_test();
-        assert!(tree.pending_result_mail("root").is_empty());
+        assert_eq!(tree.pending_result_mail("root"), [] as [MailRecord; 0]);
         assert_eq!(
             tree.attempt(&child.agent_id)
                 .unwrap()
@@ -1610,7 +1610,7 @@ mod tests {
         let timeout = tree
             .timeout_wait("root", &wait_for(&child.agent_id))
             .unwrap();
-        assert!(timeout.mail.is_empty());
+        assert_eq!(timeout.mail, [] as [InboxMail; 0]);
         assert_eq!(timeout.woke_by, WaitWakeReason::Timeout);
     }
 
@@ -1686,12 +1686,12 @@ mod tests {
         assert_eq!(output.mail[0].message_id, result);
         tree.acknowledge_wait_mail("root", &output);
         tree.mark_wait_delivered("root", &output);
-        assert!(tree.pending_mail("root").is_empty());
+        assert_eq!(tree.pending_mail("root"), [] as [MailRecord; 0]);
         assert_eq!(
             tree.return_admitted_mail(admission, "root", &ids).unwrap(),
             0
         );
-        assert!(tree.pending_mail("root").is_empty());
+        assert_eq!(tree.pending_mail("root"), [] as [MailRecord; 0]);
         assert!(tree.delivered_to("root", &child.agent_id));
     }
 
@@ -1899,7 +1899,7 @@ mod tests {
             .unwrap();
         assert!(!tree.admitted_mail_returned("plak:deliver:b:1"));
         assert_eq!(tree.operations.len(), operations);
-        assert!(tree.pending_mail("root").is_empty());
+        assert_eq!(tree.pending_mail("root"), [] as [MailRecord; 0]);
         // Mail addressed elsewhere is refused.
         assert!(
             tree.acknowledge_admitted_mail("plak:deliver:d:1", "c9", &ids)
@@ -1950,7 +1950,7 @@ mod tests {
         }
         assert_eq!(tree.messages.len(), 64);
         assert_eq!(tree.inbound["root"].len(), 64);
-        assert!(tree.inbox_for("root", false).is_empty());
+        assert_eq!(tree.inbox_for("root", false), [] as [InboxMail; 0]);
         assert_eq!(tree.inbox_for("root", true).len(), 64);
         let mut reopened = ProductAgentTree::reopen(tree.to_persisted());
         reopened.state = TreeAdmissionState::Live;
@@ -1981,11 +1981,11 @@ mod tests {
         );
         tree.record_turn_completed(&finished.agent_id).unwrap();
         tree.settle_for_test();
-        assert!(tree.pending_result_mail("root").is_empty());
+        assert_eq!(tree.pending_result_mail("root"), [] as [MailRecord; 0]);
         let mut reopened = ProductAgentTree::reopen(tree.to_persisted());
         reopened.record_turn_completed(&finished.agent_id).unwrap();
         reopened.settle_for_test();
-        assert!(reopened.pending_result_mail("root").is_empty());
+        assert_eq!(reopened.pending_result_mail("root"), [] as [MailRecord; 0]);
     }
 
     #[test]
@@ -2209,7 +2209,7 @@ mod tests {
         reply.purpose = Some(MessagePurpose::Reply);
         reply.in_reply_to = Some(asked.message_id);
         let replied = tree.send_agent_message("root", &reply, None).unwrap();
-        assert!(!replied.message_id.is_empty());
+        assert_ne!(replied.message_id, "");
     }
 
     #[test]

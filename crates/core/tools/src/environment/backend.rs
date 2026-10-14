@@ -590,7 +590,6 @@ impl ExecutionEnvironment {
     }
 
     /// Reads one bounded regular file through the exact live backend.
-    #[must_use]
     pub fn read_workspace(
         &self,
         request: WorkspaceReadSliceRequest,
@@ -613,7 +612,6 @@ impl ExecutionEnvironment {
     }
 
     /// Runs one bounded deterministic repository query without following symlinks.
-    #[must_use]
     pub fn query_repository(
         &self,
         query: RepositoryQuery,
@@ -647,7 +645,6 @@ impl ExecutionEnvironment {
     /// Cancellation is observed before publication starts. Once normal mutation
     /// begins, the operation finishes its bounded request so callers never
     /// receive a safe `Cancelled` result for changes that may already exist.
-    #[must_use]
     pub fn mutate_workspace(
         &self,
         transaction: WorkspaceMutationTransaction,
@@ -673,7 +670,6 @@ impl ExecutionEnvironment {
     ///
     /// Only complete configured environment delegations are resolved. Credential
     /// delegations never enter the prepared child environment.
-    #[must_use]
     pub fn execute_literal_process(
         &self,
         request: LiteralProcessRequest,

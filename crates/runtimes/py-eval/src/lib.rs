@@ -155,7 +155,6 @@ fn repl_config() -> ReplConfig {
 }
 
 /// Build a py-ptc local-composition session bundle backed by a monty worker.
-#[must_use]
 pub fn session_bundle(
     worker: &std::path::Path,
     bindings: BTreeMap<String, PythonToolBinding>,

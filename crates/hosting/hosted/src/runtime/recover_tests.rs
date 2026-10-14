@@ -554,12 +554,9 @@ fn an_unadmitted_fork_is_withdrawn_at_open_and_the_source_answers() {
         .count();
     assert_eq!(notes, 1, "{seen:#?}");
     let stored = store.load(&id).unwrap();
-    assert!(
-        store
-            .load_intents(&id)
-            .unwrap()
-            .workflow_requests
-            .is_empty()
+    assert_eq!(
+        store.load_intents(&id).unwrap().workflow_requests,
+        [] as [crate::sessions::projector::WorkflowRequest; 0]
     );
     assert_eq!(
         stored

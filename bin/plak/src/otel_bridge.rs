@@ -1716,7 +1716,7 @@ mod tests {
         assert_eq!(span.parent_span_id, turn_span_id());
         assert_eq!(span.span_kind, SpanKind::Client);
         assert_eq!(span.status, Status::error("failed"));
-        assert!(span.events.events.is_empty());
+        assert_eq!(span.events.events, [] as [Event; 0]);
         let attrs = attributes_map(&span);
         assert_eq!(attrs.get("plak.status"), Some(&"failed".to_owned()));
         assert!(!attrs.contains_key("plak.ttft_ns"));

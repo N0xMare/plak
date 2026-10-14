@@ -690,7 +690,7 @@ fn converged_summary_projects_debt_without_changing_cut_trace() {
     let converged = summary::read_converged(&fixture);
     assert_eq!(converged.locator.as_ref(), Some(&converged.head));
     assert!(converged.phase.is_none());
-    assert!(converged.obligations.is_empty());
+    assert_eq!(converged.obligations, [] as [(u64, String); 0]);
     assert_eq!(converged.original_answers, 1);
     assert_eq!(
         converged.head, cut.head,
@@ -792,7 +792,7 @@ fn summary_queue_joins_consumed_submissions_without_changing_the_cut_trace() {
     let trace_path = fixture.root.join("commit-trace.jsonl");
     let traced = std::fs::read(&trace_path).unwrap();
     let state = summary::read_converged(&fixture);
-    assert!(state.queue.is_empty());
+    assert_eq!(state.queue, [] as [String; 0]);
     assert!(!state.original_queued);
     assert_eq!(std::fs::read(&trace_path).unwrap(), traced);
 }

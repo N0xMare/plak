@@ -1878,7 +1878,7 @@ mod tests {
             .read(|tree| tree.waiting_on(&fixture.child).cloned().unwrap())
             .unwrap();
         assert_eq!(waiting.agents, [grandchild.clone()]);
-        assert!(waiting.processes.is_empty());
+        assert_eq!(waiting.processes, [] as [String; 0]);
         fixture.mutate(|tree| {
             tree.submit_result(
                 &grandchild,
@@ -2725,7 +2725,10 @@ mod tests {
             )
             .unwrap();
             tree.acknowledge_mail(&mail.message_id).unwrap();
-            assert!(tree.wake_mail(&fixture.child).is_empty());
+            assert_eq!(
+                tree.wake_mail(&fixture.child),
+                [] as [plakous_recursive_subagents::tree::MailRecord; 0]
+            );
         });
         wake_held(&fixture, attached).await;
         fixture.until("the wake turn", turns(2)).await;
@@ -2776,7 +2779,7 @@ mod tests {
                 assert_eq!(attempt.usage.turns, 2);
             })
             .unwrap();
-        assert!(fixture.wake_prompts().is_empty());
+        assert_eq!(fixture.wake_prompts(), [] as [String; 0]);
     }
 
     /// Mail that is unread when a turn ends wakes the child although nothing
@@ -3173,7 +3176,10 @@ mod tests {
                 assert!(!tree.is_parked(&fixture.child));
                 // The mail that waited for the wake is settled and named,
                 // not left unread on an attempt nothing will wake.
-                assert!(tree.wake_mail(&fixture.child).is_empty());
+                assert_eq!(
+                    tree.wake_mail(&fixture.child),
+                    [] as [plakous_recursive_subagents::tree::MailRecord; 0]
+                );
                 let fault = tree.fault_reason(&fixture.child).unwrap_or_default();
                 assert!(fault.contains("was not delivered"), "{fault}");
             })

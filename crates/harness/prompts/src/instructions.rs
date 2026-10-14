@@ -571,7 +571,7 @@ mod tests {
         let discovered =
             discover_instruction_sources(Some(&missing_home), temporary.path(), temporary.path())
                 .unwrap();
-        assert!(discovered.sources().is_empty());
+        assert_eq!(discovered.sources(), []);
     }
 
     #[test]

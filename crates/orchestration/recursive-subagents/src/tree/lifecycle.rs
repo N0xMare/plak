@@ -1918,8 +1918,7 @@ impl ProductAgentTree {
             }
             if self
                 .node(&agent_id)
-                .ok()
-                .is_some_and(|node| node.status.is_finished() && !node.active_turn)
+                .is_ok_and(|node| node.status.is_finished() && !node.active_turn)
             {
                 continue;
             }
@@ -2836,7 +2835,10 @@ mod tests {
                 .code,
             TopologyErrorCode::RecipientClosed
         );
-        assert!(tree.inflight_join_targets().is_empty());
+        assert_eq!(
+            tree.inflight_join_targets(),
+            [] as [(String, String, String, String); 0]
+        );
         tree.set_active_turn(&spawned.agent_id, false).unwrap();
         // A completed node is idle, not terminal: the refusal
         // there names the finished attempt, which a followup would replace.
@@ -3004,7 +3006,7 @@ mod tests {
             tree.node(&child.agent_id).unwrap().status,
             NodeStatus::Closed
         );
-        assert!(tree.pending_mail(&hub.agent_id).is_empty());
+        assert_eq!(tree.pending_mail(&hub.agent_id), [] as [MailRecord; 0]);
     }
 
     /// the template's `max_turns` ends the attempt `blocked` with
@@ -3327,7 +3329,7 @@ mod tests {
                 frozen.contains(r#""additionalProperties":false"#),
                 "{frozen}"
             );
-            assert!(!digest.is_empty());
+            assert_ne!(digest, "");
             // The frozen schema is the contract the child submits against.
             validate_output_json(&frozen, r#"{"files":["a"],"raw_output":"x"}"#)
                 .or_else(|_| validate_output_json(&frozen, r#"{"files":["a"]}"#))

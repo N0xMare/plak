@@ -11942,7 +11942,7 @@ async fn required_durable_refusal_discards_proposed_tool_and_reopens_for_next_tu
         return Err("refusal did not complete".into());
     };
     assert_eq!(response.finish().reason(), FinishReason::Refusal);
-    assert!(response.output().is_empty());
+    assert_eq!(response.output(), []);
     assert_eq!(result.tool_calls(), 0);
     assert_exact_terminal_result(&result, &command)?;
     assert_eq!(model.calls.load(Ordering::Acquire), 1);
@@ -19533,7 +19533,7 @@ fn local_cleanup_panic_still_joins_owned_process_lifetimes() -> TestResult {
         assert!(error.message().contains("panicked"), "{}", error.message());
         assert!(error.message().contains("Cancelled"), "{}", error.message());
         let _ = agent.shutdown().await;
-        assert!(!agent.checkpoint().manifest().jobs().rows().is_empty());
+        assert_ne!(agent.checkpoint().manifest().jobs().rows(), []);
         assert!(
             agent
                 .checkpoint()
@@ -30124,10 +30124,16 @@ async fn an_unpreparable_fold_continues_when_history_fits_without_a_placeholder(
             .is_none(),
         "the unavailable fold cannot fall through by discarding the fresh batch"
     );
-    assert!(placeholder_bodies(manifest.canonical().history()).is_empty());
-    assert!(placeholder_harness_notes(manifest.canonical().history()).is_empty());
+    assert_eq!(
+        placeholder_bodies(manifest.canonical().history()),
+        [] as [String; 0]
+    );
+    assert_eq!(
+        placeholder_harness_notes(manifest.canonical().history()),
+        [] as [String; 0]
+    );
     let affinities = model.observed_affinities();
-    assert!(!affinities.is_empty());
+    assert_ne!(affinities, [] as [Option<ModelCacheAffinity>; 0]);
     assert!(
         affinities.iter().all(|affinity| affinity
             .as_ref()
@@ -30325,7 +30331,10 @@ async fn opaque_native_prepare_failure_commits_portable_placeholders_at_capacity
         RuntimeCompactionStrategy::ToolResultPlaceholdersV1
     );
     assert!(provenance.after_audit().input_tokens() < provenance.before_audit().input_tokens());
-    assert!(!placeholder_bodies(checkpoint.manifest().canonical().history()).is_empty());
+    assert_ne!(
+        placeholder_bodies(checkpoint.manifest().canonical().history()),
+        [] as [String; 0]
+    );
     assert!(
         checkpoint
             .manifest()
@@ -31329,7 +31338,7 @@ async fn codex_offline_successor_case(protected: bool, overflow: bool) -> TestRe
     );
     assert!(provenance.after_audit().input_tokens() < provenance.before_audit().input_tokens());
     assert!(history_note_has_replay_omission(history));
-    assert!(placeholder_bodies(history).is_empty());
+    assert_eq!(placeholder_bodies(history), [] as [String; 0]);
     let fresh = history
         .segments()
         .iter()

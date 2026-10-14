@@ -325,7 +325,7 @@ async fn durable_open_reads_bounded_ancestry_pages_without_unrelated_tail() -> T
             return Err("budget head did not reopen".into());
         };
         let budgets = lock_mutex(&store.feed_read_budgets).clone();
-        assert!(!budgets.is_empty());
+        assert_ne!(budgets, [] as [usize; 0]);
         assert!(budgets.iter().all(|budget| *budget <= 256), "{budgets:?}");
         if !pruned {
             assert!(budgets.iter().all(|budget| *budget == 1));

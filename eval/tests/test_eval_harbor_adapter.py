@@ -1700,7 +1700,7 @@ class ConfigurationContractTests(unittest.TestCase):
         self.assertIn("fetch-pmux", script)
         self.assertIn("pmux.Dockerfile", script)
         self.assertIn("vendor.Dockerfile", script)
-        self.assertIn("rust:1.97.1-bookworm", (ROOT / "eval" / "harbor_adapter" / "Dockerfile").read_text())
+        self.assertIn("rust:1.99.0-bookworm", (ROOT / "eval" / "harbor_adapter" / "Dockerfile").read_text())
         self.assertNotIn(
             "FROM --platform=",
             (ROOT / "eval" / "harbor_adapter" / "Dockerfile").read_text(),
@@ -1847,7 +1847,7 @@ class ConfigurationContractTests(unittest.TestCase):
         self.assertIn("harbor==0.23.0", pyproject)
         self.assertTrue((ROOT / "eval" / "uv.lock").is_file())
         dockerfile = (ROOT / "eval" / "harbor_adapter" / "Dockerfile").read_text()
-        self.assertIn("FROM rust:1.97.1-bookworm", dockerfile)
+        self.assertIn("FROM rust:1.99.0-bookworm", dockerfile)
         self.assertNotIn("FROM --platform=", dockerfile)
         self.assertIn("clang mold", dockerfile)
         self.assertIn("-p plakous-js-runtime --bin plakous-js-host", dockerfile)

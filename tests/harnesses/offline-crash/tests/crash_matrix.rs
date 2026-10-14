@@ -77,7 +77,7 @@ fn complete_run_is_one_exact_new_state_and_probe_is_inert() -> TestResult {
     let mut child = spawn_child(&fixture.run_command(CrashBoundary::None))?;
     await_started(&mut child)?;
     let finished = await_finished(&mut child)?;
-    assert!(!finished.is_empty());
+    assert_ne!(finished, "");
     assert!(
         child
             .wait_before(Instant::now() + REPLY_DEADLINE)?

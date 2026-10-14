@@ -230,8 +230,6 @@ pub fn probe_openrouter_catalog_allowlist(
 mod tests {
     use std::ffi::OsStr;
 
-    use plakous::openrouter::OpenRouterApiKeySource as _;
-
     use super::*;
 
     #[test]

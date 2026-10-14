@@ -541,8 +541,8 @@ mod tests {
         );
         assert!(!snapshot.bind_hints.refuses_native_protocol("codex"));
         let inherited = snapshot.binding(&name("inherited")).unwrap();
-        assert!(inherited.account.is_empty());
-        assert!(inherited.tuple_id.is_empty());
+        assert_eq!(inherited.account, "");
+        assert_eq!(inherited.tuple_id, "");
         let restored: OrchestrationSnapshot =
             serde_json::from_str(&serde_json::to_string(&snapshot).unwrap()).unwrap();
         assert_eq!(restored, snapshot);
@@ -762,7 +762,7 @@ mod tests {
         assert_eq!(menu(None), ["lead"]);
         assert_eq!(menu(Some("lead")), ["worker", "critic"]);
         assert_eq!(menu(Some("worker")), ["lead"], "a cycle is fine");
-        assert!(menu(Some("critic")).is_empty());
+        assert_eq!(menu(Some("critic")), [] as [String; 0]);
         assert!(
             snapshot.template_cards(Some("lead")).contains(
                 "- worker: gpt-5.6-luna worker (tier ≤ mutate · spawns lead · adopts no)"

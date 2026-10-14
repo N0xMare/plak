@@ -41,7 +41,10 @@ fn converged_memory_views_are_byte_identical_after_replaying_every_feed_page() {
                 assert_eq!(replayed.views.cursor, views.cursor);
                 assert_eq!(format!("{:?}", replayed.views).into_bytes(), before);
                 assert!(replayed.writes.is_empty());
-                assert!(replayed.writes.successors.is_empty());
+                assert_eq!(
+                    replayed.writes.successors,
+                    [] as [crate::sessions::projector::Successor; 0]
+                );
                 let applied = records
                     .last()
                     .map_or(cursor.applied(), |record| record.header().seq);

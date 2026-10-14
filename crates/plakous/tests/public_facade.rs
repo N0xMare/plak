@@ -1064,13 +1064,13 @@ fn transcript_cursor_types_remain_on_curated_agent_surface() {
         AgentEvent, AgentEventKind, EventCursor, EventSequence, EventSubscription, TurnControl,
         TurnEvents,
     };
-    assert!(!std::any::type_name::<AgentEvent>().is_empty());
-    assert!(!std::any::type_name::<AgentEventKind>().is_empty());
-    assert!(!std::any::type_name::<EventCursor>().is_empty());
-    assert!(!std::any::type_name::<EventSequence>().is_empty());
-    assert!(!std::any::type_name::<TurnEvents>().is_empty());
-    assert!(!std::any::type_name::<TurnControl>().is_empty());
-    assert!(!std::any::type_name::<EventSubscription>().is_empty());
+    assert_ne!(std::any::type_name::<AgentEvent>(), "");
+    assert_ne!(std::any::type_name::<AgentEventKind>(), "");
+    assert_ne!(std::any::type_name::<EventCursor>(), "");
+    assert_ne!(std::any::type_name::<EventSequence>(), "");
+    assert_ne!(std::any::type_name::<TurnEvents>(), "");
+    assert_ne!(std::any::type_name::<TurnControl>(), "");
+    assert_ne!(std::any::type_name::<EventSubscription>(), "");
 }
 
 /// Serde round-trip for transcript affordances (claimed by facade freeze docs).
@@ -1105,8 +1105,8 @@ fn agent_event_and_cursor_serde_round_trip() {
 #[test]
 fn auth_module_exists_without_existing_login() {
     use plakous::auth::{CredentialGeneration, SecretString};
-    assert!(!std::any::type_name::<CredentialGeneration>().is_empty());
-    assert!(!std::any::type_name::<SecretString>().is_empty());
+    assert_ne!(std::any::type_name::<CredentialGeneration>(), "");
+    assert_ne!(std::any::type_name::<SecretString>(), "");
 }
 
 /// Telemetry is on the curated facade for content-free embedder observation.
@@ -1120,14 +1120,14 @@ fn curated_agent_telemetry_surface_is_importable() {
         TelemetrySink, TelemetrySinkError, TelemetryStatus, TelemetryTerminalStatus,
     };
 
-    assert!(!std::any::type_name::<TelemetryContext>().is_empty());
-    assert!(!std::any::type_name::<TelemetryEmitter>().is_empty());
-    assert!(!std::any::type_name::<TelemetryObservation>().is_empty());
-    assert!(!std::any::type_name::<TelemetryObservationKind>().is_empty());
-    assert!(!std::any::type_name::<dyn TelemetrySink>().is_empty());
-    assert!(!std::any::type_name::<TelemetrySinkError>().is_empty());
-    assert!(!std::any::type_name::<TelemetryStatus>().is_empty());
-    assert!(!std::any::type_name::<TelemetryTerminalStatus>().is_empty());
+    assert_ne!(std::any::type_name::<TelemetryContext>(), "");
+    assert_ne!(std::any::type_name::<TelemetryEmitter>(), "");
+    assert_ne!(std::any::type_name::<TelemetryObservation>(), "");
+    assert_ne!(std::any::type_name::<TelemetryObservationKind>(), "");
+    assert_ne!(std::any::type_name::<dyn TelemetrySink>(), "");
+    assert_ne!(std::any::type_name::<TelemetrySinkError>(), "");
+    assert_ne!(std::any::type_name::<TelemetryStatus>(), "");
+    assert_ne!(std::any::type_name::<TelemetryTerminalStatus>(), "");
     // Default emitter is disabled; product paths opt in explicitly.
     let _ = TelemetryEmitter::disabled();
 }
@@ -1312,8 +1312,11 @@ fn curated_subscription_models_are_nameable() {
         ResolvedProvider,
     };
 
-    assert!(!std::any::type_name::<plakous::openai::OpenAiLanguageModel>().is_empty());
-    assert!(!std::any::type_name::<plakous::xai::XaiLanguageModel>().is_empty());
+    assert_ne!(
+        std::any::type_name::<plakous::openai::OpenAiLanguageModel>(),
+        ""
+    );
+    assert_ne!(std::any::type_name::<plakous::xai::XaiLanguageModel>(), "");
     let reasoning_efforts: fn(&NativeModelSummary) -> &[ReasoningEffort] =
         NativeModelSummary::reasoning_efforts;
     let visibility: fn(&NativeModelSummary) -> NativeModelVisibility =

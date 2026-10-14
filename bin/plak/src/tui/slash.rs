@@ -630,6 +630,6 @@ mod tests {
         assert!(help.iter().any(|(n, _)| *n == "help"));
         let clr = fuzzy_list("clr"); // subsequence c-l-r in clear
         assert!(clr.iter().any(|(n, _)| *n == "clear"));
-        assert!(fuzzy_list("zzznotfound").is_empty());
+        assert_eq!(fuzzy_list("zzznotfound"), [] as [(&str, &str); 0]);
     }
 }

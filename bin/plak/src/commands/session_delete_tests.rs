@@ -263,7 +263,7 @@ fn delete_abandoned_obligation_survives_sqlite_restart_before_cleanup() -> TestR
         reopened.node(&f.child_id).checked()?.status,
         NodeStatus::Closed
     );
-    assert!(reopened.session_recovery_targets().is_empty());
+    assert_eq!(reopened.session_recovery_targets(), [] as [String; 0]);
     let after = SessionBackend::inspect_sqlite_usage(f.paths.runtime_database())
         .checked()?
         .ok_or("usage")

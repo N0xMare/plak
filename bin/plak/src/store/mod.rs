@@ -2201,12 +2201,9 @@ mod tests {
                 .discard_submission(&mut session, &request.command_id, None)
                 .unwrap();
             session = store.load(&session.id).unwrap();
-            assert!(
-                store
-                    .load_intents(&session.id)
-                    .unwrap()
-                    .submissions
-                    .is_empty()
+            assert_eq!(
+                store.load_intents(&session.id).unwrap().submissions,
+                [] as [Submission; 0]
             );
             assert_eq!(session.pending_queue, vec![item.clone()]);
             let bindings: i64 = store
@@ -2278,7 +2275,10 @@ mod tests {
             Delivery::Accepted,
         );
         store.connection.execute_batch("CREATE TEMP TABLE submission_writes(command_id TEXT NOT NULL); CREATE TEMP TRIGGER observe_submission_update AFTER UPDATE ON submissions BEGIN INSERT INTO submission_writes VALUES(NEW.command_id); END;").unwrap();
-        assert!(store.load(&session.id).unwrap().pending_queue.is_empty());
+        assert_eq!(
+            store.load(&session.id).unwrap().pending_queue,
+            [] as [QueueItem; 0]
+        );
         assert_eq!(
             store.load_intents(&session.id).unwrap().submissions,
             vec![request]
@@ -2483,7 +2483,10 @@ mod tests {
         store.commit(&mut session).unwrap();
         session.pending_queue.clear();
         store.commit(&mut session).unwrap();
-        assert!(store.load(&session.id).unwrap().pending_queue.is_empty());
+        assert_eq!(
+            store.load(&session.id).unwrap().pending_queue,
+            [] as [QueueItem; 0]
+        );
         assert_eq!(
             store
                 .connection
@@ -2515,7 +2518,10 @@ mod tests {
             &request.command_id,
             Delivery::Accepted,
         );
-        assert!(store.load(&session.id).unwrap().pending_queue.is_empty());
+        assert_eq!(
+            store.load(&session.id).unwrap().pending_queue,
+            [] as [QueueItem; 0]
+        );
         let retained: i64 = store
             .connection
             .query_row(
@@ -2547,7 +2553,10 @@ mod tests {
             &request.command_id,
             Delivery::Accepted,
         );
-        assert!(store.load(&session.id).unwrap().pending_queue.is_empty());
+        assert_eq!(
+            store.load(&session.id).unwrap().pending_queue,
+            [] as [QueueItem; 0]
+        );
         session.pending_queue.clear();
         store.commit(&mut session).unwrap();
         let remaining: i64 = store
@@ -2763,11 +2772,9 @@ mod tests {
         source.bind_plakous_locator(locator(2, 3)).unwrap();
         store.commit(&mut source).unwrap();
         let runtime = locator(2, 3).session_id();
-        assert!(
-            store
-                .session_dependents(&source.id, runtime)
-                .unwrap()
-                .is_empty()
+        assert_eq!(
+            store.session_dependents(&source.id, runtime).unwrap(),
+            [] as [String; 0]
         );
 
         // A fork's head is another branch of the same runtime session.

@@ -65,7 +65,13 @@ fn platform_codec_projects_exact_terminal_without_dispatch() -> TestResult {
     );
     let mut codec = decoder();
     let events = codec.push(stream.as_bytes())?;
-    assert!(codec.finish()?.is_empty());
+    assert_eq!(
+        codec.finish()?,
+        [] as [ResponsesStreamEventKind<
+            plakous_responses_dialect::ResponsesResponse,
+            plakous_responses_dialect::ResponsesProviderError,
+        >; 0]
+    );
     let response = events
         .iter()
         .find_map(|event| match event {
@@ -220,7 +226,13 @@ fn platform_stream_keeps_terminal_reasoning_ciphertext_when_only_that_field_chan
         platform_reasoning_stream(&reasoning_item(TERMINAL_CIPHERTEXT, &serde_json::json!([])));
     let mut codec = decoder();
     let events = codec.push(stream.as_bytes())?;
-    assert!(codec.finish()?.is_empty());
+    assert_eq!(
+        codec.finish()?,
+        [] as [ResponsesStreamEventKind<
+            plakous_responses_dialect::ResponsesResponse,
+            plakous_responses_dialect::ResponsesProviderError,
+        >; 0]
+    );
     let done = events.iter().find_map(|event| match event {
         ResponsesStreamEventKind::OutputItemDone { item, .. } => Some(item),
         _ => None,

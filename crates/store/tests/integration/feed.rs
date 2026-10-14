@@ -304,7 +304,10 @@ pub(crate) async fn run_feed_conformance(
         FeedPage::Records { records, .. } => assert_eq!(records.len(), 3),
         FeedPage::BehindRetention { .. } => return Err("unexpected retention".into()),
     }
-    assert!(records(store, session_id, 11).await?.0.is_empty());
+    assert_eq!(
+        records(store, session_id, 11).await?.0,
+        [] as [FeedRecord; 0]
+    );
 
     // Deletion removes the feed with the rest of the session's authority.
     let archived_revision = revision.checked_next().ok_or("revision")?;

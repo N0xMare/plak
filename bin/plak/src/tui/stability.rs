@@ -369,7 +369,10 @@ mod tests {
         assert_eq!(report.repositions, 0);
         assert_eq!(report.mass_reflows, 0);
         assert_eq!(report.transitions, 1);
-        assert!(report.violations(&StabilityBudget::perfect()).is_empty());
+        assert_eq!(
+            report.violations(&StabilityBudget::perfect()),
+            [] as [String; 0]
+        );
     }
 
     #[test]
@@ -439,7 +442,10 @@ mod tests {
             metric.observe(&frame(&["alpha", "beta", "gamma"]), ViewportMotion::Pinned);
         }
         let report = metric.report();
-        assert!(report.violations(&StabilityBudget::perfect()).is_empty());
+        assert_eq!(
+            report.violations(&StabilityBudget::perfect()),
+            [] as [String; 0]
+        );
         assert_eq!(report.frames, 3);
         assert_eq!(report.pinned_transitions, 2);
     }

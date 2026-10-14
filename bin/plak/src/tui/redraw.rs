@@ -468,7 +468,7 @@ mod tests {
     #[test]
     fn every_state_names_itself() {
         for (state, _, _) in SCHEDULE_TABLE {
-            assert!(!state.name().is_empty());
+            assert_ne!(state.name(), "");
         }
         assert_eq!(RedrawState::Streaming.name(), "streaming");
     }

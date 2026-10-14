@@ -47,7 +47,7 @@ Built-in compatibility pins carry review expiry dates: the Codex subscription pr
 
 ### Build the release binary
 
-From the repository root, with Rust **1.97.1**, a platform C/C++ toolchain,
+From the repository root, with Rust **1.99.0**, a platform C/C++ toolchain,
 [`just`](https://github.com/casey/just), Python 3.11+ and `nm` (or `llvm-nm`)
 available, build and install the full Plak product and both evaluator workers:
 
@@ -96,7 +96,7 @@ in-process jj-lib backend and the Git CLI backend; only the latter requires
 the `git` executable. To update, run `git pull` and repeat the build command.
 
 To **embed Plakous as a library**, depend on the source checkout by path,
-using Rust 1.97.1 or later and edition 2024. Defaults are empty: a Custom
+using Rust 1.99.0 or later and edition 2024. Defaults are empty: a Custom
 model with Direct tools needs no interpreter or provider credentials.
 `composition` adds consumer-owned JavaScript through the `plakous-js-host`
 worker, with no credential, HTTP or Python machinery and no `[patch]` table.
@@ -225,7 +225,7 @@ Third-party material keeps its upstream license:
 
 - `vendor/` holds patched or vendored upstream sources, each with its own
   `LICENSE` (and `NOTICE` or `PROVENANCE.md` where upstream has one): Pydantic's
-  Monty crates (MIT; the bundled typeshed stubs are Apache-2.0) and OpenAI Codex
+  `monty-typeshed` crate (MIT; the bundled typeshed stubs are Apache-2.0) and OpenAI Codex
   prompt and code-mode protocol material (Apache-2.0).
 - Excerpts reproduced from the OpenAI Codex CLI (Apache-2.0, Copyright 2025
   OpenAI; license and notice in `vendor/codex-prompt/`): the `apply_patch`

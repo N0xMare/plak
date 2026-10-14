@@ -245,11 +245,11 @@ async fn sql_deleted_cascade_views_rebuild_through_real_reopen_in_postorder() {
     let report = run_tree_recovery_pass(&fixture.tree_id).await.unwrap();
     assert!(report.refused.is_empty(), "{:?}", report.refused);
     assert_eq!(report.recovered.len(), 3);
-    assert!(
+    assert_eq!(
         runtime
             .read(ProductAgentTree::session_recovery_targets)
-            .unwrap()
-            .is_empty()
+            .unwrap(),
+        [] as [String; 0]
     );
     // Exact opens add release/head records. Advance the no-deletion oracle to
     // the same authoritative tails before comparing its derived rows.
@@ -1932,7 +1932,7 @@ async fn recovery_seal_failure_is_reported_not_as_vcs_ambiguity() {
             )));
         if pass {
             let report = run_tree_recovery_pass(&fixture.tree_id).await.unwrap();
-            assert!(report.recovered.is_empty());
+            assert_eq!(report.recovered, [] as [String; 0]);
             assert_eq!(report.refused.len(), 1);
             assert_eq!(report.refused[0].1.code, TopologyErrorCode::MintUnavailable);
             assert!(
@@ -1972,7 +1972,7 @@ async fn recovery_seal_publication_failure_is_reported_as_storage_unavailable() 
         fixture.store.refuse_sealed.store(true, Ordering::SeqCst);
         if pass {
             let report = run_tree_recovery_pass(&fixture.tree_id).await.unwrap();
-            assert!(report.recovered.is_empty());
+            assert_eq!(report.recovered, [] as [String; 0]);
             assert_eq!(report.refused.len(), 1);
             assert_eq!(
                 report.refused[0].1.code,
@@ -2082,7 +2082,7 @@ async fn a_held_lease_is_refused_as_recovery_lease_held() {
     let pass_started = std::time::Instant::now();
     let report = run_tree_recovery_pass(&fixture.tree_id).await.unwrap();
     let one_try = pass_started.elapsed();
-    assert!(report.recovered.is_empty());
+    assert_eq!(report.recovered, [] as [String; 0]);
     assert_eq!(report.refused.len(), 1);
     assert_eq!(report.refused[0].0, id);
     assert_eq!(
@@ -2305,7 +2305,7 @@ async fn recovery_pass_keeps_a_genuinely_interrupted_adopt_ambiguous() {
     let fixture = Fixture::new("recover-adopt-pass");
     let id = interrupted_adopt(&fixture).await;
     let report = run_tree_recovery_pass(&fixture.tree_id).await.unwrap();
-    assert!(report.recovered.is_empty());
+    assert_eq!(report.recovered, [] as [String; 0]);
     assert_eq!(report.refused.len(), 1);
     assert_eq!(report.refused[0].0, id);
     assert_eq!(
@@ -3362,8 +3362,8 @@ async fn automatic_recovery_settles_a_followup_hold_without_an_admitted_start() 
     )
     .await;
     assert_eq!(report.recovered, vec![id.clone()]);
-    assert!(report.refused.is_empty());
-    assert!(report.not_attempted.is_empty());
+    assert_eq!(report.refused, [] as [(String, TopologyError); 0]);
+    assert_eq!(report.not_attempted, [] as [String; 0]);
     assert_eq!(fixture.dispatches(), 0);
     fixture
         .runtime

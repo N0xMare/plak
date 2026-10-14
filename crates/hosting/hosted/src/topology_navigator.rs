@@ -995,7 +995,7 @@ mod tests {
         assert!(root.usage.is_none());
         assert!(root.blocked.is_none());
         assert_eq!(root.attempt_seq, None);
-        assert!(root.attempts.is_empty());
+        assert_eq!(root.attempts, [] as [u32; 0]);
     }
 
     /// The row carries the template and the tier, and the
@@ -1078,7 +1078,7 @@ mod tests {
             child.description,
             tree.node(&spawned.agent_id).unwrap().description
         );
-        assert!(!child.model_tuple.is_empty());
+        assert_ne!(child.model_tuple, "");
         assert_eq!(child.turns, Some(1));
         assert!(!child.finished());
         let started = tree.attempt(&spawned.agent_id).unwrap().started_at / 1_000;
@@ -1700,7 +1700,10 @@ mod tests {
                     tree.recovery_need(&child).unwrap(),
                     crate::agent_tree::RecoveryNeed::NotRequired
                 );
-                assert!(tree.pending_result_mail("root").is_empty());
+                assert_eq!(
+                    tree.pending_result_mail("root"),
+                    [] as [plakous_recursive_subagents::tree::MailRecord; 0]
+                );
             })
             .unwrap();
         assert!(events.lock().unwrap().iter().any(|event| matches!(event, HostEvent::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text: message, .. })) if message.contains("owner retained"))));

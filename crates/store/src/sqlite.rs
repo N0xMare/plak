@@ -913,7 +913,6 @@ impl SqliteSessionStore {
     }
 
     /// Reads local counters without changing authority.
-    #[must_use]
     pub fn stats(&self) -> StoreFuture<'_, SqliteStoreStats> {
         self.dispatch_read(|backend| {
             backend.require_open()?;

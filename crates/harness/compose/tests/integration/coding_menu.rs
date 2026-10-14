@@ -1385,7 +1385,7 @@ fn every_vendor_menu_entry_lowers_its_documented_example_into_a_valid_canonical_
                 })?;
             // Lowered arguments reached the canonical tool and satisfied its
             // structured contract: `prepare` validates them there.
-            assert!(!prepared.invocation().identity().name().as_str().is_empty());
+            assert_ne!(prepared.invocation().identity().name().as_str(), "");
             covered = covered.saturating_add(1);
         }
     }

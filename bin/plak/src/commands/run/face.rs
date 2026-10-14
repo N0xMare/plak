@@ -491,7 +491,10 @@ mod tests {
     #[test]
     fn a_running_tool_is_silent_and_its_completion_is_one_line() {
         let mut face = face();
-        assert!(face.lines(&tool_line("running", None, None)).is_empty());
+        assert_eq!(
+            face.lines(&tool_line("running", None, None)),
+            [] as [String; 0]
+        );
         assert_eq!(
             face.lines(&tool_line("done", Some("ok"), Some(1_234))),
             vec!["plak: tool done: read_file odd/missing.txt in 1.2s"]
@@ -559,7 +562,7 @@ mod tests {
             vec!["plak: composition Direct: the model calls plak's tools directly"]
         );
         // Said once, however often the host republishes the projection.
-        assert!(face.lines(&HostEvent::SessionInfo(info)).is_empty());
+        assert_eq!(face.lines(&HostEvent::SessionInfo(info)), [] as [String; 0]);
     }
 
     #[test]
@@ -737,7 +740,10 @@ mod tests {
     #[test]
     fn an_interrupted_tool_still_speaks_and_is_not_counted_as_a_failure() {
         let mut face = face();
-        assert!(face.lines(&tool_line("running", None, None)).is_empty());
+        assert_eq!(
+            face.lines(&tool_line("running", None, None)),
+            [] as [String; 0]
+        );
         assert_eq!(
             face.lines(&tool_line("cancelled", None, Some(400))),
             vec!["plak: tool cancelled: read_file odd/missing.txt in 400ms"]

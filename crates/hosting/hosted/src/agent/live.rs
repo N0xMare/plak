@@ -817,7 +817,10 @@ mod tests {
         let observed =
             released_with_feed(&child.attached.sessions, locator, None, cursor, false).await;
         assert!(observed.failure.is_none());
-        assert!(observed.feed.unwrap().records.is_empty());
+        assert_eq!(
+            observed.feed.unwrap().records,
+            [] as [plakous::sessions::feed::FeedRecord; 0]
+        );
         assert!(
             Box::new(child)
                 .release(runtime.driver().clone())

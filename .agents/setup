@@ -52,7 +52,7 @@ if [[ ! -x "$HOME/.cargo/bin/rustup" ]]; then
     | sh -s -- -y --profile minimal --default-toolchain none
 fi
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
-rustup toolchain install 1.97.1 \
+rustup toolchain install 1.99.0 \
   --profile minimal \
   --component clippy,rustfmt \
   --target x86_64-unknown-linux-musl

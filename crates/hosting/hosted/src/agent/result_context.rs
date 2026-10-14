@@ -962,7 +962,7 @@ mod tests {
             .unwrap();
         let replay = prepare(runtime.driver(), "root", "command-one", "continue").unwrap();
         assert_eq!(prepared.prompt, replay.prompt);
-        assert!(replay.message_ids.is_empty());
+        assert_eq!(replay.message_ids, [] as [String; 0]);
         assert_eq!(
             runtime
                 .read(|tree| tree.pending_result_mail("root").len())

@@ -1980,7 +1980,7 @@ mod tests {
     fn short_overlays_drop_the_inspector() {
         let mut nav = TreeNavigator::from_snapshot(family());
         let frame = paint(&mut nav, 60, 8, 0);
-        assert!(frame.inspector.is_empty());
+        assert_eq!(frame.inspector, [] as [String; 0]);
         // The header takes a row and the long footer would need more than
         // its two rows at 60 columns, so the short one takes one (§5.5); the
         // list scrolls inside what is left.

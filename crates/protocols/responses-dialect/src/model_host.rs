@@ -182,7 +182,6 @@ impl std::fmt::Debug for PreparedResponsesModelExecution {
 /// Nonterminal events in the returned stream are explicitly observational;
 /// callers must validate the self-contained `ResponseCompleted` aggregate
 /// directly instead of gating it on incremental-event assembly.
-#[must_use]
 pub fn start_prepared_responses_model_call<D, G>(
     prepared: PreparedResponsesModelExecution,
     service: Arc<ResponsesAttemptService<D, G>>,

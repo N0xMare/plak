@@ -500,7 +500,7 @@ mod tests {
             "grok-4.6",
         );
         assert_eq!(grok.api_kernel, Some("Responses"));
-        assert!(grok.admitted_options.is_empty());
+        assert_eq!(grok.admitted_options, [] as [String; 0]);
         // No effort means no reasoning configuration on the wire, and the row
         // says so instead of implying a thought block is coming.
         assert_eq!(

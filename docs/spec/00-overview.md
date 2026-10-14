@@ -71,7 +71,7 @@ or `plakous-tools` (Custom tool integration).
 
 ## Platforms
 
-The workspace is Rust edition 2024 with MSRV 1.97.1 and forbids unsafe Rust in
+The workspace is Rust edition 2024 with MSRV 1.99.0 and forbids unsafe Rust in
 production code.
 
 | Target | Status |
@@ -136,8 +136,8 @@ workspace policy checks per module. `plakous-js-host` is not a package either:
 it is a `[[bin]]` of `plakous-js-runtime`, and it is the rquickjs worker for Code Mode and js-ptc.
 
 The Monty interpreter and protocol remain external dependencies pinned at
-`=1.1.0`; the interpreter crate `monty` itself resolves to the reviewed
-`vendor/monty` snapshot (chapter 06 §7.3).
+`=1.1.0`; only their `monty-typeshed` dependency resolves to a reviewed
+vendor snapshot (chapter 06 §7.3).
 `plakous-py-worker` supplies the process entry point;
 `plakous-py-eval` owns only the session that drives that worker.
 

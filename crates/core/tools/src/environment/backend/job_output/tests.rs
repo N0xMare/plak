@@ -437,23 +437,21 @@ fn retention_runs_a_day_after_consumption_and_spares_unconsumed_and_foreign_file
         set_modified(path, old)?;
     }
     let scope = outputs.scope();
-    assert!(
-        scope
-            .release(&[1, 3], &outputs.issued(&[1, 3]), now)
-            .is_empty()
+    assert_eq!(
+        scope.release(&[1, 3], &outputs.issued(&[1, 3]), now),
+        [] as [String; 0]
     );
     assert!(paths.iter().all(|path| Path::new(path).exists()));
     assert_eq!(mode(&paths[0])?, 0o400);
     assert_eq!(mode(&paths[1])?, 0o600);
     assert_eq!(mode(&paths[2])?, 0o400);
-    assert!(
-        scope
-            .release(
-                &[],
-                &[],
-                now + JOB_OUTPUT_RETENTION - Duration::from_secs(1)
-            )
-            .is_empty()
+    assert_eq!(
+        scope.release(
+            &[],
+            &[],
+            now + JOB_OUTPUT_RETENTION - Duration::from_secs(1)
+        ),
+        [] as [String; 0]
     );
 
     let swept = scope.release(&[], &[], now + JOB_OUTPUT_RETENTION);

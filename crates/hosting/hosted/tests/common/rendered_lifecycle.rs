@@ -165,8 +165,7 @@ mod suite {
     /// what `raise` actually produced.
     fn raising_note(body: &str, extra: &str) -> String {
         let wrapped = serde_json::from_str::<Value>(body)
-            .ok()
-            .is_some_and(|value| value.get("result").is_some_and(Value::is_string));
+            .is_ok_and(|value| value.get("result").is_some_and(Value::is_string));
         let mut note = if wrapped {
             "Raising: `TextResultObjectV1` → `{\"result\": …}`.".to_owned()
         } else {

@@ -1487,7 +1487,7 @@ mod tests {
         assert!(!paths.state_root().join("flat").exists());
         let mut notice = Vec::new();
         report_other_state_once(&paths, &mut notice, &Once::new());
-        assert!(notice.is_empty());
+        assert_eq!(notice, [] as [u8; 0]);
     }
 
     #[test]
@@ -1654,7 +1654,7 @@ mod tests {
         assert!(
             confirm_prune_legacy(&paths, false, false, &mut &b"yes\n"[..], &mut output).is_err()
         );
-        assert!(output.is_empty());
+        assert_eq!(output, [] as [u8; 0]);
         assert!(confirm_prune_legacy(&paths, false, true, &mut &b"\n"[..], &mut output).is_err());
         assert!(confirm_prune_legacy(&paths, false, true, &mut &b"yes\n"[..], &mut output).is_ok());
         let text = String::from_utf8(output.clone()).unwrap();

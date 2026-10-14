@@ -878,7 +878,7 @@ async fn emit_observation_schema_proof() -> BenchResult<()> {
     let matches = statement
         .query_map([], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
-    assert!(matches.is_empty());
+    assert_eq!(matches, [] as [String; 0]);
     println!(
         "{}",
         json!({

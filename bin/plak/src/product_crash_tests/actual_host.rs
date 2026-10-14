@@ -332,7 +332,10 @@ fn actual_host_sigkill_relaunch_matrix_uses_real_handlers_and_reconcilers() -> T
             let mut store = crate::store::ProductStore::open(&paths)?;
             let intents = store.load_intents(&source.id)?;
             if cut == ProductCrashBoundary::Prepared {
-                assert!(intents.workflow_requests.is_empty());
+                assert_eq!(
+                    intents.workflow_requests,
+                    [] as [plakous_hosted::sessions::projector::WorkflowRequest; 0]
+                );
                 assert_eq!(
                     intents
                         .notices

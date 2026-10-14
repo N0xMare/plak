@@ -277,7 +277,10 @@ pub static CHILD_PROMPT_PINS: &[PromptPin] = &[
 mod tests {
     #[test]
     fn child_prompt_pins_match_unchanged_text() {
-        assert!(plakous::tools::drifted_pins(CHILD_PROMPT_PINS).is_empty());
+        assert_eq!(
+            plakous::tools::drifted_pins(CHILD_PROMPT_PINS),
+            [] as [(&str, String); 0]
+        );
     }
     #[test]
     fn transient_resume_render_preserves_failure_and_does_not_replay_work() {

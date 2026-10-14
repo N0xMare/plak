@@ -192,10 +192,9 @@ mod tests {
                 .len(),
             2
         );
-        assert!(
-            events
-                .observe::<plakous_host_protocol::Core>(&[job.clone()])
-                .is_empty()
+        assert_eq!(
+            events.observe::<plakous_host_protocol::Core>(&[job.clone()]),
+            [] as [SessionObservation; 0]
         );
         job.status = JobStatus::Exited(Some(0));
         assert_eq!(
@@ -204,10 +203,9 @@ mod tests {
                 .len(),
             1
         );
-        assert!(
-            events
-                .observe::<plakous_host_protocol::Core>(&[job])
-                .is_empty()
+        assert_eq!(
+            events.observe::<plakous_host_protocol::Core>(&[job]),
+            [] as [SessionObservation; 0]
         );
     }
 

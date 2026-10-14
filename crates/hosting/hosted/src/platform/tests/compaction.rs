@@ -388,7 +388,7 @@ async fn openai_product_tools_preserve_optional_schemas_on_production_wire() {
         .unwrap();
     assert_eq!(requests.len(), 1);
     let wire_tools = requests[0]["tools"].as_array().unwrap();
-    assert!(!wire_tools.is_empty());
+    assert_ne!(wire_tools.as_slice(), [] as [serde_json::Value; 0]);
     // The OpenAI API wears the Codex pack: `apply_patch` is its one free-form
     // custom tool, and every function keeps its non-strict schema.
     for wire in wire_tools {
@@ -655,7 +655,10 @@ fn assert_compaction_wire(provider: PlatformProvider, requests: &[serde_json::Va
     // 8,192-token summary plus its default 8,192-token thinking reserve.
     let compaction_bound = plakous::model::SEMANTIC_COMPACTION_MAX_OUTPUT_TOKENS.get();
     assert_eq!(requests.len(), 3);
-    assert!(!requests[0]["tools"].as_array().unwrap().is_empty());
+    assert_ne!(
+        requests[0]["tools"].as_array().unwrap().as_slice(),
+        [] as [serde_json::Value; 0]
+    );
     assert_eq!(requests[0]["tools"], requests[1]["tools"]);
     assert_eq!(requests[0]["tools"], requests[2]["tools"]);
     if provider == PlatformProvider::Anthropic {

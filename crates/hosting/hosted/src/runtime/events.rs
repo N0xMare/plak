@@ -3877,7 +3877,7 @@ mod tests {
         projection.observe_block_start(&pending_reasoning_block(location));
         let _ =
             projection.observe_reasoning_delta(&ReasoningDelta::new(location, b"held".to_vec()));
-        assert!(projection.seal_all_reasoning().is_empty());
+        assert_eq!(projection.seal_all_reasoning(), [] as [SealedReasoning; 0]);
         assert!(projection.reasoning.is_empty());
 
         // A delta for a location that never started is non-admitting.
@@ -3946,7 +3946,10 @@ mod tests {
         assert_eq!(session.store_revision, revision);
         assert_eq!(store.load(&session.id).unwrap().store_revision, revision);
         assert!(store.load_views(&session.id).unwrap().is_none());
-        assert!(store.load_intents(&session.id).unwrap().notices.is_empty());
+        assert_eq!(
+            store.load_intents(&session.id).unwrap().notices,
+            [] as [sessions::projector::OperatorNotice; 0]
+        );
     }
 
     #[test]

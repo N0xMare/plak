@@ -227,7 +227,7 @@ fn a_fifth_pack_that_presents_nothing_earns_nothing() -> Result<(), TestError> {
         target()?,
         None,
     )?;
-    assert!(surface.contributions().is_empty());
+    assert_eq!(surface.contributions(), []);
     assert!(
         surface
             .registry()

@@ -210,9 +210,12 @@ fn cumulative_print_cap_reports_truncation_once_on_a_char_boundary() {
         "the truncation notice must survive status-inclusive projection"
     );
     let first = super::drain_print(&printed.output);
-    assert!(!first.is_empty());
+    assert_ne!(first, [] as [LocalCompositionContentItem; 0]);
     super::append_print(&mut printed, "more dropped output");
-    assert!(super::drain_print(&printed.output).is_empty());
+    assert_eq!(
+        super::drain_print(&printed.output),
+        [] as [LocalCompositionContentItem; 0]
+    );
 }
 
 fn dictionary_tool(name: &str) -> super::PythonToolBinding {

@@ -234,7 +234,10 @@ fn dispatch_observer_rejection_prevents_executor_poll_and_closes_progress()
         Err(error) if error.kind() == ToolRuntimeErrorKind::Execution
     ));
     assert_eq!(observer.calls.load(Ordering::Acquire), 1);
-    assert!(tool.captured().is_empty());
+    assert_eq!(
+        tool.captured(),
+        [] as [plakous_test_support::CapturedToolInvocation; 0]
+    );
     assert!(test_block_on(receiver.recv()).is_none());
     progress.report("late", None, None)?;
     assert!(receiver.try_recv().is_none());
@@ -314,7 +317,10 @@ fn conformance_rejects_invalid_arguments_without_dispatch() -> Result<(), Box<dy
         schema_invalid.err().map(|error| error.kind()),
         Some(ToolRuntimeErrorKind::InvalidArguments)
     );
-    assert!(tool.captured().is_empty());
+    assert_eq!(
+        tool.captured(),
+        [] as [plakous_test_support::CapturedToolInvocation; 0]
+    );
     assert_eq!(tool.remaining_steps(), 1);
     Ok(())
 }
@@ -370,7 +376,10 @@ fn prepared_invocation_cannot_cross_frozen_registry_boundaries()
         result.err().map(|error| error.kind()),
         Some(ToolRuntimeErrorKind::Execution)
     );
-    assert!(second.captured().is_empty());
+    assert_eq!(
+        second.captured(),
+        [] as [plakous_test_support::CapturedToolInvocation; 0]
+    );
     assert_eq!(second.remaining_steps(), 1);
     Ok(())
 }
@@ -432,7 +441,10 @@ fn context_call_binding_and_prepare_failures_close_progress()
         mismatch.err().map(|error| error.kind()),
         Some(ToolRuntimeErrorKind::Execution)
     );
-    assert!(tool.captured().is_empty());
+    assert_eq!(
+        tool.captured(),
+        [] as [plakous_test_support::CapturedToolInvocation; 0]
+    );
 
     let (_control, progress, sink) = context(&ids, &workspace, CancellationToken::new(), 1)?;
     let invalid = runtime.prepare(request(&ids, r#"{"query":1}"#)?);
@@ -443,7 +455,10 @@ fn context_call_binding_and_prepare_failures_close_progress()
     );
     sink.report("must stay closed", None, None)?;
     assert!(progress.try_recv().is_none());
-    assert!(tool.captured().is_empty());
+    assert_eq!(
+        tool.captured(),
+        [] as [plakous_test_support::CapturedToolInvocation; 0]
+    );
     Ok(())
 }
 

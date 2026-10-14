@@ -1535,7 +1535,7 @@ mod tests {
         )?;
         let (_, _, prepared) = prepare(&model, request(10)?)?;
         drop(prepared);
-        assert!(model.captured_records().is_empty());
+        assert_eq!(model.captured_records(), [] as [PreparedCallRecord; 0]);
         assert_eq!(model.remaining_scenarios(), 1);
         Ok(())
     }
@@ -1629,7 +1629,7 @@ mod tests {
         let cloned = decoded.clone();
         assert_eq!(decoded, cloned);
         decoded.revalidate(model.descriptor(), &plan, Timestamp::new(1, 0)?)?;
-        assert!(model.captured_records().is_empty());
+        assert_eq!(model.captured_records(), [] as [PreparedCallRecord; 0]);
         assert_eq!(model.remaining_scenarios(), 1);
         let _stream = futures::executor::block_on(
             prepared.start(context(attempt, CancellationToken::new())),

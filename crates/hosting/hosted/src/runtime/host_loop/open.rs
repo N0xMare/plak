@@ -855,7 +855,10 @@ mod tests {
         let reopened = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
         let published = store.load(&id).unwrap();
         assert_eq!(published.plakous_locator, Some(head));
-        assert!(published.pending_queue.is_empty());
+        assert_eq!(
+            published.pending_queue,
+            [] as [sessions::queue::QueueItem; 0]
+        );
         let rows = published.transcript.len();
         reopened.release().unwrap();
         let mut config = control_cut_host(root.path(), cut);
@@ -967,8 +970,14 @@ mod tests {
         config.session = store.load(&id).unwrap();
         let (events, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
         let reopened = HostLoop::open(config, &actions, Sender::over(events), None).unwrap();
-        assert!(reopened.config.session.pending_queue.is_empty());
-        assert!(store.load_intents(&id).unwrap().submissions.is_empty());
+        assert_eq!(
+            reopened.config.session.pending_queue,
+            [] as [sessions::queue::QueueItem; 0]
+        );
+        assert_eq!(
+            store.load_intents(&id).unwrap().submissions,
+            [] as [sessions::projector::Submission; 0]
+        );
         assert_eq!(reopened.config.session.root_turn_count, 0);
         reopened.release().unwrap();
     }
@@ -1073,7 +1082,10 @@ mod tests {
                     views.state.deliveries.get(&intent.command_id),
                     Some(&Delivery::Accepted)
                 );
-                assert!(reopened.config.session.pending_queue.is_empty());
+                assert_eq!(
+                    reopened.config.session.pending_queue,
+                    [] as [sessions::queue::QueueItem; 0]
+                );
                 let duplicate = reopened
                     .executor
                     .block_on(reopened.opened.agent().unwrap().command(
@@ -1168,7 +1180,10 @@ mod tests {
             super::super::HostStep::Continue
         ));
         assert_eq!(reopened.config.session.root_turn_count, 0);
-        assert!(reopened.config.session.pending_queue.is_empty());
+        assert_eq!(
+            reopened.config.session.pending_queue,
+            [] as [sessions::queue::QueueItem; 0]
+        );
         let intents = store.load_intents(&id).unwrap();
         assert_eq!(intents.submissions, vec![intent.clone()]);
         let views = store.load_views(&id).unwrap().unwrap();

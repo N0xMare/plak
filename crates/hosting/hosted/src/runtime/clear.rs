@@ -668,7 +668,7 @@ mod tests {
             .withdraw_unadmitted_workflows(&mut config.session)
             .unwrap();
         if admit {
-            assert!(notices.is_empty());
+            assert_eq!(notices, [] as [TranscriptRow; 0]);
             assert!(
                 views.state.workflows[&request.operation_id]
                     .settled
@@ -788,12 +788,12 @@ mod tests {
             assert!(
                 matches!(&notices[0], TranscriptRow::Notice(row) if row.text == "clear did not start; run /clear again")
             );
-            assert!(
+            assert_eq!(
                 config
                     .store
                     .withdraw_unadmitted_workflows(&mut config.session)
-                    .unwrap()
-                    .is_empty()
+                    .unwrap(),
+                [] as [TranscriptRow; 0]
             );
             assert_eq!(
                 durable_authority_count(&config.product_home.join("runtime.sqlite3"), "sessions"),

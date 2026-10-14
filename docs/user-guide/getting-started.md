@@ -5,7 +5,7 @@ Plak is built from source. There are no releases, no published binaries, and no
 
 ## Before you start
 
-- **Rust 1.97.1**, pinned by `rust-toolchain.toml`, so rustup installs it on the
+- **Rust 1.99.0**, pinned by `rust-toolchain.toml`, so rustup installs it on the
   first build. That is also the MSRV.
 - **[`just`](https://github.com/casey/just)**, to run `just install` and the
   other recipes in the `Justfile`. Without it, use the Cargo commands below.

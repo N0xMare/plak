@@ -41,7 +41,7 @@ class WorkspaceExclusionTests(unittest.TestCase):
                          ['workspace must exclude .plak operator state and fork worktrees'])
 
     def test_operator_state_and_reviewed_packages_are_allowed(self):
-        manifest = {'exclude': ['.plak', 'vendor/monty', 'tests/fixtures/example']}
+        manifest = {'exclude': ['.plak', 'vendor/monty-typeshed', 'tests/fixtures/example']}
         self.assertEqual(workspace_policy.validate_workspace_excludes(
             manifest, {'tests/fixtures/example'}), [])
 
