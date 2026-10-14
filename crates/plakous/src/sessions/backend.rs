@@ -1,3 +1,5 @@
+#[cfg(feature = "sessions-sqlite")]
+use super::error::store_path_error;
 use super::registry::DriverRegistry;
 use super::{AgentSessionsError, error::store_error};
 use plakous_agent::internal::{RuntimeDurability, SessionStore};
@@ -65,7 +67,9 @@ impl SessionBackend {
     /// cannot be opened exactly.
     #[cfg(feature = "sessions-sqlite")]
     pub fn sqlite(path: impl AsRef<Path>) -> Result<Self, AgentSessionsError> {
-        let store = SqliteSessionStore::open(path).map_err(store_error)?;
+        let path = path.as_ref();
+        let store =
+            SqliteSessionStore::open(path).map_err(|error| store_path_error(path, error))?;
         Ok(Self::from_store(
             Arc::new(store),
             RuntimeDurability::Required,
@@ -80,7 +84,9 @@ impl SessionBackend {
     /// cannot be opened exactly.
     #[cfg(feature = "sessions-sqlite")]
     pub fn sqlite_verified(path: impl AsRef<Path>) -> Result<Self, AgentSessionsError> {
-        let store = SqliteSessionStore::open_verified(path).map_err(store_error)?;
+        let path = path.as_ref();
+        let store = SqliteSessionStore::open_verified(path)
+            .map_err(|error| store_path_error(path, error))?;
         Ok(Self::from_store(
             Arc::new(store),
             RuntimeDurability::Required,
@@ -102,12 +108,13 @@ impl SessionBackend {
     ) -> Result<SessionPersistenceShape, AgentSessionsError> {
         use plakous_store::SqlitePersistenceShape;
 
+        let path = path.as_ref();
         SqliteSessionStore::classify_persistence(path)
             .map(|shape| match shape {
                 SqlitePersistenceShape::MissingOrFresh => SessionPersistenceShape::MissingOrFresh,
                 SqlitePersistenceShape::Current => SessionPersistenceShape::Current,
             })
-            .map_err(store_error)
+            .map_err(|error| store_path_error(path, error))
     }
 
     /// Reads aggregate retention usage of one SQLite store without opening it
@@ -123,7 +130,9 @@ impl SessionBackend {
         path: impl AsRef<Path>,
     ) -> Result<Option<SessionStoreUsage>, AgentSessionsError> {
         let path = path.as_ref();
-        let Some(usage) = SqliteSessionStore::inspect_usage(path).map_err(store_error)? else {
+        let Some(usage) = SqliteSessionStore::inspect_usage(path)
+            .map_err(|error| store_path_error(path, error))?
+        else {
             return Ok(None);
         };
         let file = SqliteSessionStore::inspect_file_usage(path).map_err(store_error)?;

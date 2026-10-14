@@ -263,6 +263,58 @@ pub(super) fn store_error(error: SessionStoreError) -> AgentSessionsError {
     store_origin_error(session_store_origin(error))
 }
 
+/// A refusal of the SQLite store at `path`, naming the path and the remedy when
+/// the cause is a permanent property of the path rather than a transient one.
+///
+/// The store refuses a symbolic link in any component and a database that is
+/// not a private regular file, but reports both as unavailable because its
+/// errors carry no paths. Only that refusal is examined, and only for causes the
+/// store refuses deterministically, so a busy store still reads as busy.
+#[cfg(feature = "sessions-sqlite")]
+pub(super) fn store_path_error(
+    path: &std::path::Path,
+    error: SessionStoreError,
+) -> AgentSessionsError {
+    if error == SessionStoreError::BackendUnavailable
+        && let Some(cause) = unsafe_store_path(path)
+    {
+        return AgentSessionsError::new(AgentSessionsErrorKind::UnsafeStorePath, cause);
+    }
+    store_error(error)
+}
+
+#[cfg(feature = "sessions-sqlite")]
+fn unsafe_store_path(path: &std::path::Path) -> Option<String> {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let shown = path.display();
+    let ancestors = path.ancestors().collect::<Vec<_>>();
+    for ancestor in ancestors.into_iter().rev() {
+        let Ok(metadata) = ancestor.symlink_metadata() else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() {
+            return Some(format!(
+                "session store {shown} is refused: {} is a symbolic link; \
+                 use a path with no symbolic link in it (for example its resolved path)",
+                ancestor.display()
+            ));
+        }
+    }
+    let metadata = path.symlink_metadata().ok()?;
+    if !metadata.file_type().is_file() {
+        return Some(format!(
+            "session store {shown} is refused: it is not a regular file; move it aside"
+        ));
+    }
+    (metadata.permissions().mode() & 0o077 != 0).then(|| {
+        format!(
+            "session store {shown} is refused: other users can access it; \
+             make it private to its owner (chmod 600)"
+        )
+    })
+}
+
 pub(super) fn store_origin_error(origin: SessionStoreOrigin) -> AgentSessionsError {
     // The origin is content-free and is the only way an operator can tell a
     // busy/locked store apart from a corrupt or foreign one at the CLI.
@@ -338,6 +390,53 @@ fn incompatible() -> AgentSessionsError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A store refused for a permanent property of its path names the path and
+    /// a remedy instead of reading as a store that is busy.
+    #[cfg(feature = "sessions-sqlite")]
+    #[test]
+    #[allow(
+        clippy::expect_used,
+        clippy::panic,
+        reason = "test fixtures fail at exact lines"
+    )]
+    fn unsafe_store_paths_name_the_path_and_the_remedy() {
+        use crate::sessions::SessionBackend;
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let real = directory.path().join("real");
+        std::fs::create_dir(&real).expect("real directory");
+        let alias = directory.path().join("alias");
+        std::os::unix::fs::symlink(&real, &alias).expect("symlinked ancestor");
+
+        let Err(error) = SessionBackend::sqlite(alias.join("runtime.sqlite3")) else {
+            panic!("a symlinked ancestor must be refused");
+        };
+        assert_eq!(error.kind(), AgentSessionsErrorKind::UnsafeStorePath);
+        let message = error.to_string();
+        assert!(
+            message.contains(&format!("{} is a symbolic link", alias.display())),
+            "{message}"
+        );
+        assert!(message.contains("no symbolic link"), "{message}");
+
+        let database = real.join("runtime.sqlite3");
+        drop(SessionBackend::sqlite(&database).expect("private store"));
+        std::fs::set_permissions(&database, std::fs::Permissions::from_mode(0o644))
+            .expect("world-readable store");
+        let Err(error) = SessionBackend::classify_sqlite(&database) else {
+            panic!("a world-readable store must be refused");
+        };
+        assert_eq!(error.kind(), AgentSessionsErrorKind::UnsafeStorePath);
+        assert!(error.to_string().contains("chmod 600"), "{error}");
+
+        // An ordinary unavailable refusal still reads as one.
+        assert_eq!(
+            store_path_error(&real, SessionStoreError::BackendBusy).kind(),
+            AgentSessionsErrorKind::StorageUnavailable
+        );
+    }
 
     #[test]
     fn workflow_unknown_is_not_an_ownership_refusal() {

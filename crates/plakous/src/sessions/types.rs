@@ -1858,6 +1858,10 @@ pub enum AgentSessionsErrorKind {
     StorageFull,
     /// The store is busy, unavailable or shutting down.
     StorageUnavailable,
+    /// The store path itself is refused: a component of it is a symbolic link,
+    /// or the database is not a private regular file. Retrying never helps; the
+    /// message names the path and the remedy.
+    UnsafeStorePath,
     /// Stored session state is corrupt or does not match the requested workflow.
     Integrity,
     /// The session or store was written by an incompatible build: it does not
