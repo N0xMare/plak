@@ -69,19 +69,11 @@ impl EventPipeline {
 
     fn publish_prepared_locked(
         &self,
-        mut prepared: PreparedAgentEvent,
+        prepared: PreparedAgentEvent,
         closes: bool,
     ) -> Result<Arc<AgentEvent>, AgentError> {
         self.hub
-            .preflight_prepared(&mut prepared)
-            .map_err(pipeline_view_error)?;
-        let sequence = self.hub.next_sequence().map_err(pipeline_view_error)?;
-        let materialized = self
-            .hub
-            .materialize_prepared(prepared, sequence)
-            .map_err(pipeline_view_error)?;
-        self.hub
-            .publish_materialized(materialized, closes)
+            .publish_prepared(prepared, closes)
             .map_err(pipeline_view_error)
     }
 }

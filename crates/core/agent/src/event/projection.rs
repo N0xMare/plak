@@ -707,6 +707,20 @@ fn update_tool_activity(
     Ok(ToolProgressDisposition::Applied)
 }
 
+/// Live usage is reported cumulatively per model dispatch; the provider cost is not carried.
+fn saturating_token_sum(base: Usage, usage: Usage) -> Usage {
+    Usage::new(
+        base.input_tokens().saturating_add(usage.input_tokens()),
+        base.output_tokens().saturating_add(usage.output_tokens()),
+        base.reasoning_tokens()
+            .saturating_add(usage.reasoning_tokens()),
+        base.cached_input_tokens()
+            .saturating_add(usage.cached_input_tokens()),
+        base.cache_write_tokens()
+            .saturating_add(usage.cache_write_tokens()),
+    )
+}
+
 fn event_context_shape_is_valid(event: &AgentEvent) -> bool {
     let shape_is_valid = match event.kind() {
         AgentEventKind::AgentClosed => {
@@ -715,8 +729,9 @@ fn event_context_shape_is_valid(event: &AgentEvent) -> bool {
         AgentEventKind::JobPromoted { .. } | AgentEventKind::JobFinished { .. } => {
             event.attempt_id.is_none() && event.call_id.is_none()
         }
+        // `OutputBoundRederived` is turn-scoped because the product's only subscription is per
+        // turn.
         AgentEventKind::TurnStarted
-        // Turn-scoped, because the product's only subscription is per turn.
         | AgentEventKind::OutputBoundRederived { .. }
         | AgentEventKind::SteeringQueued { .. }
         | AgentEventKind::SteeringApplied
@@ -730,9 +745,14 @@ fn event_context_shape_is_valid(event: &AgentEvent) -> bool {
         | AgentEventKind::TurnFailed { .. } => {
             event.turn_id.is_some() && event.attempt_id.is_none() && event.call_id.is_none()
         }
-        AgentEventKind::ModelStarted | AgentEventKind::ModelDispatchStarted | AgentEventKind::RequestPrepared { .. } | AgentEventKind::Model { .. } => {
+        AgentEventKind::ModelStarted
+        | AgentEventKind::ModelDispatchStarted
+        | AgentEventKind::RequestPrepared { .. }
+        | AgentEventKind::Model { .. } => {
             event.turn_id.is_some() && event.attempt_id.is_some() && event.call_id.is_none()
         }
+        // Observation notes are named for the call whose observation was cut, so a surface can
+        // attach the note to that tool row rather than to the turn.
         AgentEventKind::EffectDecisionRequired { .. }
         | AgentEventKind::EffectDecisionResolved { .. }
         | AgentEventKind::ToolAuthorized { .. }
@@ -740,8 +760,6 @@ fn event_context_shape_is_valid(event: &AgentEvent) -> bool {
         | AgentEventKind::ToolProgress { .. }
         | AgentEventKind::ToolPreparationRejected { .. }
         | AgentEventKind::ToolCompleted { .. }
-        // Named for the call whose observation was cut, so a surface can
-        // attach the note to that tool row rather than to the turn.
         | AgentEventKind::ObservationClipped { .. }
         | AgentEventKind::ObservationReplaced { .. } => {
             event.turn_id.is_some() && event.attempt_id.is_some() && event.call_id.is_some()
@@ -949,22 +967,31 @@ fn plan_transition(
                 attempt: Some((turn_id, attempt_id)),
             })
         }
-        AgentEventKind::ModelDispatchStarted | AgentEventKind::Model { .. } | AgentEventKind::RequestPrepared { .. } => {
+        AgentEventKind::ModelDispatchStarted
+        | AgentEventKind::Model { .. }
+        | AgentEventKind::RequestPrepared { .. } => {
             let turn_id = event.turn_id.ok_or(TransitionError::Invalid)?;
             let attempt_id = event.attempt_id.ok_or(TransitionError::Invalid)?;
             let mut turn = state.turn.cloned().ok_or(TransitionError::Invalid)?;
             if matches!(event.kind(), AgentEventKind::ModelDispatchStarted) {
                 turn.live_usage_base = turn.live_usage;
             }
-            if let AgentEventKind::Model { event: Some(model), .. } = event.kind()
-                && let ModelEvent::Usage(update) = model.as_ref() {
+            if let AgentEventKind::Model {
+                event: Some(model), ..
+            } = event.kind()
+                && let ModelEvent::Usage(update) = model.as_ref()
+            {
                 let base = turn.live_usage_base;
-                let usage = update.usage();
-                turn.live_usage = Usage::new(base.input_tokens().saturating_add(usage.input_tokens()), base.output_tokens().saturating_add(usage.output_tokens()), base.reasoning_tokens().saturating_add(usage.reasoning_tokens()), base.cached_input_tokens().saturating_add(usage.cached_input_tokens()), base.cache_write_tokens().saturating_add(usage.cache_write_tokens()));
+                turn.live_usage = saturating_token_sum(base, update.usage());
             }
-            Ok(TransitionPlan::TurnChanged {turn_id, turn, attempt: Some((turn_id, attempt_id))})
+            Ok(TransitionPlan::TurnChanged {
+                turn_id,
+                turn,
+                attempt: Some((turn_id, attempt_id)),
+            })
         }
-        // A note about the session's output contract; it moves no state.
+        // Notes about the turn or about tool results that were already recorded; they move no
+        // projected state.
         AgentEventKind::JobPromoted { .. }
         | AgentEventKind::JobFinished { .. }
         | AgentEventKind::OutputBoundRederived { .. }
@@ -973,7 +1000,6 @@ fn plan_transition(
         | AgentEventKind::OperationBudgetExhausted
         | AgentEventKind::OutputLimitRetry { .. }
         | AgentEventKind::ToolResultsReplaced { .. }
-        // A note about one tool result that was already recorded; it moves no state.
         | AgentEventKind::ObservationClipped { .. }
         | AgentEventKind::ObservationReplaced { .. }
         | AgentEventKind::CompactionStarted { .. }

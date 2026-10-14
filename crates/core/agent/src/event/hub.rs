@@ -7,7 +7,7 @@ pub(super) mod subscription;
 use self::subscription::{EventSubscription, ResumeOutcome, TurnEvents, ViewAttachment, ViewError};
 use super::projection::{
     AgentViewSnapshot, AgentViewState, ConversationItemView, ConversationProjection, LifetimeFence,
-    LifetimeFenceDomain, ProjectionState, TransitionPlan, TurnViewState, apply_projection_delta,
+    LifetimeFenceDomain, ProjectionState, TurnViewState, apply_projection_delta,
     preflight_projection,
 };
 use super::types::{
@@ -139,30 +139,15 @@ struct EventHubState {
     last_event: Option<EventId>,
 }
 
-#[derive(Clone)]
+/// An event whose identity, timestamp and size accounting were fixed outside the hub lock.
 struct PreparedAgentEvent {
     event_id: EventId,
     timestamp: Timestamp,
     context: EventContext,
     kind: AgentEventKind,
     retained_bytes: usize,
-    preflight: Option<PreflightedTransition>,
-}
-
-#[derive(Clone)]
-struct PreflightedTransition {
-    base_sequence: u64,
-    branch_sequence: u64,
-    causal_parent: Option<EventId>,
-    delta: TransitionPlan,
-    evicted_active_call: Option<(TurnId, AttemptId, CallId)>,
-}
-
-#[derive(Clone)]
-struct MaterializedAgentEvent {
-    event: Arc<AgentEvent>,
-    context: EventContext,
-    preflight: Option<PreflightedTransition>,
+    metadata_retained_bytes: usize,
+    content_retained_bytes: usize,
 }
 
 impl EventHub {
@@ -290,7 +275,7 @@ impl EventHub {
     ) -> Result<Arc<AgentEvent>, ViewError> {
         let event_id = self.reserve_event_id()?;
         let prepared = self.prepare_reserved_with(context, event_id, create(event_id))?;
-        self.publish_prepared_state(prepared, closes)
+        self.publish_prepared(prepared, closes)
     }
 
     fn prepare_reserved_with(
@@ -320,135 +305,51 @@ impl EventHub {
         let timestamp = std::panic::catch_unwind(AssertUnwindSafe(|| self.inner.clock.now()))
             .unwrap_or(fallback_timestamp);
         let retained_bytes = kind.retained_bytes();
+        let metadata_retained_bytes = kind.projected(EventVisibility::Metadata).retained_bytes();
+        let content_retained_bytes = kind.projected(EventVisibility::Content).retained_bytes();
         Ok(PreparedAgentEvent {
             event_id,
             timestamp,
             context,
             kind,
             retained_bytes,
-            preflight: None,
+            metadata_retained_bytes,
+            content_retained_bytes,
         })
     }
 
-    #[cfg(test)]
-    fn publish_prepared_state(
+    /// Validates, sequences, applies and retains one prepared event under a single hold of
+    /// the hub state lock, so no other publication can interleave between its checks and its
+    /// effects.
+    fn publish_prepared(
         &self,
-        mut prepared: PreparedAgentEvent,
+        prepared: PreparedAgentEvent,
         closes: bool,
     ) -> Result<Arc<AgentEvent>, ViewError> {
-        self.preflight_prepared(&mut prepared)?;
-        let sequence = self.next_sequence()?;
-        let materialized = self.materialize_prepared(prepared, sequence)?;
-        self.publish_materialized(materialized, closes)
-    }
-
-    fn preflight_prepared(&self, prepared: &mut PreparedAgentEvent) -> Result<(), ViewError> {
-        if prepared.preflight.is_some() {
-            return Ok(());
-        }
-        let sequence = self.next_sequence()?;
-        let materialized = self.materialize_prepared_unchecked(prepared.clone(), sequence)?;
-        prepared.preflight = Some(self.preflight_materialized(&materialized)?);
-        Ok(())
-    }
-
-    fn preflight_materialized(
-        &self,
-        materialized: &MaterializedAgentEvent,
-    ) -> Result<PreflightedTransition, ViewError> {
-        let state = lock(&self.inner.state);
+        let mut state = lock(&self.inner.state);
         if state.closed {
             return Err(ViewError::Closed);
         }
-        let event = &materialized.event;
         let branch_sequence = state
             .branch_sequence
             .checked_add(1)
             .ok_or(ViewError::Identity)?;
-        if event.branch_sequence.get() != branch_sequence
-            || event.session_id != self.inner.session_id
-            || event.branch_id != self.inner.branch_id
-            || event.agent_id != self.inner.agent_id
-            || event.run_id != self.inner.run_id
-            || event.causal_parent != causal_parent(&state, materialized.context, &event.kind)
-        {
-            return Err(ViewError::InvalidEvent);
-        }
-        validate_causal_context(&state, event, self.inner.limits.retained_items)
-            .map_err(|()| ViewError::InvalidEvent)?;
-        let delta = preflight_projection(&state.view, event, self.inner.limits.retained_items)?;
-        Ok(PreflightedTransition {
-            base_sequence: state.branch_sequence,
-            branch_sequence,
-            causal_parent: event.causal_parent,
-            delta,
-            evicted_active_call: None,
-        })
-    }
-
-    fn next_sequence(&self) -> Result<EventSequence, ViewError> {
-        let state = lock(&self.inner.state);
-        if state.closed {
-            return Err(ViewError::Closed);
-        }
-        Ok(EventSequence(
-            state
-                .branch_sequence
-                .checked_add(1)
-                .ok_or(ViewError::Identity)?,
-        ))
-    }
-
-    fn materialize_prepared(
-        &self,
-        mut prepared: PreparedAgentEvent,
-        sequence: EventSequence,
-    ) -> Result<MaterializedAgentEvent, ViewError> {
-        self.preflight_prepared(&mut prepared)?;
-        self.materialize_prepared_unchecked(prepared, sequence)
-    }
-
-    fn materialize_prepared_unchecked(
-        &self,
-        prepared: PreparedAgentEvent,
-        sequence: EventSequence,
-    ) -> Result<MaterializedAgentEvent, ViewError> {
-        let state = lock(&self.inner.state);
-        if state.closed {
-            return Err(ViewError::Closed);
-        }
-        let expected_branch = state
-            .branch_sequence
-            .checked_add(1)
-            .ok_or(ViewError::Identity)?;
-        if sequence.get() != expected_branch {
-            return Err(ViewError::InvalidEvent);
-        }
-        let parent = causal_parent(&state, prepared.context, &prepared.kind);
-        drop(state);
-        let preflight = prepared.preflight;
+        let context = prepared.context;
+        let causal_parent = causal_parent(&state, context, &prepared.kind);
         let (origin, classification) = event_metadata(&prepared.kind);
-        let metadata_retained_bytes = prepared
-            .kind
-            .projected(EventVisibility::Metadata)
-            .retained_bytes();
-        let content_retained_bytes = prepared
-            .kind
-            .projected(EventVisibility::Content)
-            .retained_bytes();
         let event = Arc::new(AgentEvent {
-            branch_sequence: sequence,
+            branch_sequence: EventSequence(branch_sequence),
             event_id: prepared.event_id,
             session_id: self.inner.session_id,
             branch_id: self.inner.branch_id,
             agent_id: self.inner.agent_id,
             run_id: self.inner.run_id,
-            turn_id: prepared.context.turn_id,
-            attempt_id: prepared.context.attempt_id,
-            call_id: prepared.context.call_id,
-            feed_seq: prepared.context.feed_seq,
+            turn_id: context.turn_id,
+            attempt_id: context.attempt_id,
+            call_id: context.call_id,
+            feed_seq: context.feed_seq,
             timestamp: prepared.timestamp,
-            causal_parent: parent,
+            causal_parent,
             origin,
             classification,
             event_schema: EVENT_SCHEMA_VERSION,
@@ -458,58 +359,20 @@ impl EventHub {
             event_kind_version: EVENT_KIND_VERSION,
             kind: prepared.kind,
             retained_bytes: prepared.retained_bytes,
-            metadata_retained_bytes,
-            content_retained_bytes,
+            metadata_retained_bytes: prepared.metadata_retained_bytes,
+            content_retained_bytes: prepared.content_retained_bytes,
         });
-        Ok(MaterializedAgentEvent {
-            event,
-            context: prepared.context,
-            preflight,
-        })
-    }
-
-    fn publish_materialized(
-        &self,
-        materialized: MaterializedAgentEvent,
-        closes: bool,
-    ) -> Result<Arc<AgentEvent>, ViewError> {
-        let mut state = lock(&self.inner.state);
-        let preflight = materialized.preflight.ok_or(ViewError::InvalidEvent)?;
-        let event = materialized.event;
-        let branch_sequence = state
-            .branch_sequence
-            .checked_add(1)
-            .ok_or(ViewError::Identity)?;
-        if state.closed
-            || preflight.base_sequence != state.branch_sequence
-            || preflight.branch_sequence != branch_sequence
-            || preflight.causal_parent != event.causal_parent
-            || event.branch_sequence.get() != branch_sequence
-            || event.session_id != self.inner.session_id
-            || event.branch_id != self.inner.branch_id
-            || event.agent_id != self.inner.agent_id
-            || event.run_id != self.inner.run_id
-            || event.causal_parent != causal_parent(&state, materialized.context, &event.kind)
-        {
-            return Err(ViewError::InvalidEvent);
-        }
-        apply_projection_delta(&mut state.view, preflight.delta);
-        if let Some(binding) = preflight.evicted_active_call {
-            state.call_parents.remove(&binding);
-        }
+        validate_causal_context(&state, &event).map_err(|()| ViewError::InvalidEvent)?;
+        let delta = preflight_projection(&state.view, &event, self.inner.limits.retained_items)?;
+        apply_projection_delta(&mut state.view, delta);
         state.branch_sequence = branch_sequence;
         state.last_timestamp = event.timestamp;
-        update_causal_parents(
-            &mut state,
-            materialized.context,
-            &event.kind,
-            event.event_id,
-        );
+        update_causal_parents(&mut state, context, &event.kind, event.event_id);
         state.last_event = Some(event.event_id);
         if matches!(
             event.kind,
             AgentEventKind::TurnCompleted { .. } | AgentEventKind::TurnFailed { .. }
-        ) && let Some(turn_id) = materialized.context.turn_id
+        ) && let Some(turn_id) = context.turn_id
         {
             complete_turn_indexes(&mut state, turn_id, self.inner.limits.retained_items);
         }
@@ -693,6 +556,21 @@ impl EventHub {
     }
 }
 
+impl EventHubState {
+    /// Retained events at or after `sequence`. Retention holds a contiguous sequence range
+    /// (events are appended in sequence order and evicted from the front), so the start is an
+    /// index, not a scan.
+    fn retained_from(
+        &self,
+        sequence: u64,
+    ) -> std::collections::vec_deque::Iter<'_, Arc<AgentEvent>> {
+        let skip = self.retained.front().map_or(0, |first| {
+            usize::try_from(sequence.saturating_sub(first.branch_sequence.0)).unwrap_or(usize::MAX)
+        });
+        self.retained.range(skip.min(self.retained.len())..)
+    }
+}
+
 fn replay_debt_exceeds(
     state: &EventHubState,
     requested: u64,
@@ -701,11 +579,7 @@ fn replay_debt_exceeds(
 ) -> bool {
     let mut items = 0_usize;
     let mut bytes = 0_usize;
-    for event in state
-        .retained
-        .iter()
-        .filter(|event| event.branch_sequence.0 >= requested)
-    {
+    for event in state.retained_from(requested) {
         items = items.saturating_add(1);
         bytes = bytes.saturating_add(event.projected_retained_bytes(visibility));
         if items > limits.max_items() || bytes > limits.max_bytes() {
@@ -794,11 +668,7 @@ fn snapshot_from(
     }
 }
 
-fn validate_causal_context(
-    state: &EventHubState,
-    event: &AgentEvent,
-    retained_items: usize,
-) -> Result<(), ()> {
+fn validate_causal_context(state: &EventHubState, event: &AgentEvent) -> Result<(), ()> {
     if matches!(event.kind(), AgentEventKind::ConversationCommitted { .. }) {
         let turn_id = event.turn_id.ok_or(())?;
         let turn = state.view.turns.get(&turn_id);
@@ -808,26 +678,6 @@ fn validate_causal_context(
         if !active && !completed && state.view.recovery_promotable_turn != Some(turn_id) {
             return Err(());
         }
-    }
-    let _ = retained_items;
-    if let (Some(turn_id), Some(attempt_id), Some(call_id)) =
-        (event.turn_id, event.attempt_id, event.call_id)
-    {
-        let binding = (turn_id, attempt_id, call_id);
-        let does_not_retain_call_parent = matches!(
-            event.kind(),
-            AgentEventKind::ToolCompleted { .. }
-                | AgentEventKind::ToolPreparationRejected { .. }
-                | AgentEventKind::EffectDecisionResolved {
-                    resolution: EffectDecisionResolution::Denied
-                        | EffectDecisionResolution::Expired
-                        | EffectDecisionResolution::Cancelled
-                        | EffectDecisionResolution::Shutdown
-                        | EffectDecisionResolution::Invalidated,
-                    ..
-                }
-        );
-        let _ = (does_not_retain_call_parent, binding);
     }
     Ok(())
 }
@@ -904,25 +754,28 @@ fn update_causal_parents(
         (context.call_id, context.attempt_id, context.turn_id)
     {
         let binding = (turn_id, attempt_id, call_id);
-        let call_is_terminal = matches!(
-            kind,
-            AgentEventKind::ToolCompleted { .. }
-                | AgentEventKind::ToolPreparationRejected { .. }
-                | AgentEventKind::EffectDecisionResolved {
-                    resolution: EffectDecisionResolution::Denied
-                        | EffectDecisionResolution::Expired
-                        | EffectDecisionResolution::Cancelled
-                        | EffectDecisionResolution::Shutdown
-                        | EffectDecisionResolution::Invalidated,
-                    ..
-                }
-        );
-        if call_is_terminal {
+        if call_is_terminal(kind) {
             state.call_parents.remove(&binding);
         } else {
             state.call_parents.insert(binding, event_id);
         }
     }
+}
+
+fn call_is_terminal(kind: &AgentEventKind) -> bool {
+    matches!(
+        kind,
+        AgentEventKind::ToolCompleted { .. }
+            | AgentEventKind::ToolPreparationRejected { .. }
+            | AgentEventKind::EffectDecisionResolved {
+                resolution: EffectDecisionResolution::Denied
+                    | EffectDecisionResolution::Expired
+                    | EffectDecisionResolution::Cancelled
+                    | EffectDecisionResolution::Shutdown
+                    | EffectDecisionResolution::Invalidated,
+                ..
+            }
+    )
 }
 
 fn complete_turn_indexes(state: &mut EventHubState, turn_id: TurnId, retained_turns: usize) {

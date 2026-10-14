@@ -289,51 +289,24 @@ async fn dropped_subscriber_does_not_change_terminal_projection() -> TestResult 
 }
 
 #[test]
-fn stale_prepared_event_preserves_current_projection_and_retention() -> TestResult {
-    let fixture = fixture(16, 256 * 1024)?;
+fn retained_suffix_starts_at_the_requested_sequence_after_eviction() -> TestResult {
+    let fixture = fixture(4, 256 * 1024)?;
     publish_started(&fixture)?;
     let context = EventContext::attempt(fixture.turn_id, fixture.attempt_id);
-    let mut prepared =
-        fixture
-            .hub
-            .prepare_reserved(context, fixture.hub.reserve_event_id()?, delta(b'x'))?;
-    fixture.hub.preflight_prepared(&mut prepared)?;
-    let materialized = fixture
-        .hub
-        .materialize_prepared(prepared, fixture.hub.next_sequence()?)?;
-    fixture.hub.publish(context, delta(b'y'))?;
-    let before = fixture.hub.attach(ViewRequest::content())?.into_parts().0;
-    let retained = {
-        let state = lock(&fixture.hub.inner.state);
-        (
-            state.retained.clone(),
-            state.retained_bytes,
-            state.last_event,
-            state.turn_parents.clone(),
-            state.attempt_parents.clone(),
-            state.call_parents.clone(),
-        )
-    };
-    assert_eq!(
-        fixture.hub.publish_materialized(materialized, false),
-        Err(ViewError::InvalidEvent)
-    );
-    assert_eq!(
-        fixture.hub.attach(ViewRequest::content())?.into_parts().0,
-        before
-    );
+    for byte in 0..6 {
+        fixture.hub.publish(context, delta(byte))?;
+    }
     let state = lock(&fixture.hub.inner.state);
-    assert_eq!(
-        (
-            state.retained.clone(),
-            state.retained_bytes,
-            state.last_event,
-            state.turn_parents.clone(),
-            state.attempt_parents.clone(),
-            state.call_parents.clone()
-        ),
-        retained
-    );
+    let sequences = |from| {
+        state
+            .retained_from(from)
+            .map(|event| event.branch_sequence.0)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(sequences(0), [5, 6, 7, 8]);
+    assert_eq!(sequences(6), [6, 7, 8]);
+    assert_eq!(sequences(8), [8]);
+    assert_eq!(sequences(9), [] as [u64; 0]);
     Ok(())
 }
 

@@ -1583,9 +1583,9 @@ impl AgentEventKind {
                 // Retry logging facts are skipped on the wire but still own
                 // strings while the event is retained in a live window.
                 let logging_bytes = match event.as_ref() {
-                    ModelEvent::Retry(retry) => retry.request().map_or(0, |(host, route, _)| {
-                        host.len().saturating_add(route.len())
-                    }),
+                    ModelEvent::Retry(retry) => retry
+                        .request()
+                        .map_or(0, |(host, route, _)| host.len().saturating_add(route.len())),
                     _ => 0,
                 };
                 serialized_size(event.as_ref()).saturating_add(logging_bytes)
@@ -1660,9 +1660,14 @@ impl AgentEventKind {
                         .as_ref()
                         .map_or(0, ToolCallObservation::retained_bytes),
                 ),
-            Self::RequestPrepared { tool_names, .. } => 128 + tool_names.iter().map(|name| name.as_str().len()).sum::<usize>(),
+            Self::RequestPrepared { tool_names, .. } => {
+                128 + tool_names
+                    .iter()
+                    .map(|name| name.as_str().len())
+                    .sum::<usize>()
+            }
+            // Job notes carry two optional integers, retained inline.
             Self::AgentClosed
-            // Two optional integers, retained inline.
             | Self::JobPromoted { .. }
             | Self::JobFinished { .. }
             | Self::OutputBoundRederived { .. }
@@ -1774,10 +1779,22 @@ mod presentation_safety_tests {
             prepared_input_upper_bound: Some(42),
             tool_names: vec![plakous_model::ToolName::new("read_file")?],
         };
-        assert!(matches!(event.projected(EventVisibility::Content),
-            AgentEventKind::RequestPrepared { tool_names, .. } if tool_names.len() == 1));
-        assert!(matches!(event.projected(EventVisibility::Metadata),
-            AgentEventKind::RequestPrepared { tool_names, occupied_tokens: Some(23), .. } if tool_names.is_empty()));
+        let AgentEventKind::RequestPrepared { tool_names, .. } =
+            event.projected(EventVisibility::Content)
+        else {
+            panic!("content projection must keep the request shape");
+        };
+        assert_eq!(tool_names.len(), 1);
+        let AgentEventKind::RequestPrepared {
+            tool_names,
+            occupied_tokens,
+            ..
+        } = event.projected(EventVisibility::Metadata)
+        else {
+            panic!("metadata projection must keep the request shape");
+        };
+        assert_eq!(tool_names, [] as [plakous_model::ToolName; 0]);
+        assert_eq!(occupied_tokens, Some(23));
         Ok(())
     }
 
@@ -2235,12 +2252,31 @@ impl AgentEvent {
     pub(super) fn projected(&self, visibility: EventVisibility, scope: EventScope) -> Arc<Self> {
         let kind = self.kind.projected(visibility);
         let retained_bytes = kind.retained_bytes();
+        // Spelled out so the source kind is not cloned only to be replaced.
         Arc::new(Self {
+            branch_sequence: self.branch_sequence,
+            event_id: self.event_id,
+            session_id: self.session_id,
+            branch_id: self.branch_id,
+            agent_id: self.agent_id,
+            run_id: self.run_id,
+            turn_id: self.turn_id,
+            attempt_id: self.attempt_id,
+            call_id: self.call_id,
+            feed_seq: self.feed_seq,
+            timestamp: self.timestamp,
+            causal_parent: self.causal_parent,
+            origin: self.origin,
+            classification: self.classification,
+            event_schema: self.event_schema,
+            projection_revision: self.projection_revision,
             visibility,
             scope,
+            event_kind_version: self.event_kind_version,
             kind,
             retained_bytes,
-            ..self.clone()
+            metadata_retained_bytes: self.metadata_retained_bytes,
+            content_retained_bytes: self.content_retained_bytes,
         })
     }
 
@@ -2350,8 +2386,12 @@ pub enum EventDelivery {
 
 pub(super) fn event_metadata(kind: &AgentEventKind) -> (EventOrigin, DataClassification) {
     match kind {
-        AgentEventKind::ModelStarted | AgentEventKind::ModelDispatchStarted => (EventOrigin::Model, DataClassification::Public),
-        AgentEventKind::RequestPrepared { .. } | AgentEventKind::Model { .. } => (EventOrigin::Model, DataClassification::Sensitive),
+        AgentEventKind::ModelStarted | AgentEventKind::ModelDispatchStarted => {
+            (EventOrigin::Model, DataClassification::Public)
+        }
+        AgentEventKind::RequestPrepared { .. } | AgentEventKind::Model { .. } => {
+            (EventOrigin::Model, DataClassification::Sensitive)
+        }
         AgentEventKind::EffectDecisionRequired { .. }
         | AgentEventKind::ToolProgress { .. }
         | AgentEventKind::ToolStarted { .. }
@@ -2369,14 +2409,13 @@ pub(super) fn event_metadata(kind: &AgentEventKind) -> (EventOrigin, DataClassif
         AgentEventKind::ConversationCommitted { .. } => {
             (EventOrigin::Agent, DataClassification::Sensitive)
         }
+        // Counts, budgets and tool names only: agent-owned and public.
         AgentEventKind::OperationBudgetExhausted
         | AgentEventKind::OutputLimitRetry { .. }
         | AgentEventKind::ToolResultsReplaced { .. }
-        // A tool name and three byte counts: agent-owned and public.
         | AgentEventKind::ObservationClipped { .. }
         | AgentEventKind::ObservationReplaced { .. }
         | AgentEventKind::CompactionStarted { .. }
-        // Two integers naming a budget: agent-owned and public.
         | AgentEventKind::JobPromoted { .. }
         | AgentEventKind::JobFinished { .. }
         | AgentEventKind::OutputBoundRederived { .. }

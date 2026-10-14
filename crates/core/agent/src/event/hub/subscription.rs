@@ -278,11 +278,7 @@ impl EventSubscription {
         let mut matching_items = 0_usize;
         let mut matching_bytes = 0_usize;
         let mut first_matching = None;
-        for event in state
-            .retained
-            .iter()
-            .filter(|event| event.branch_sequence.0 >= self.next_sequence)
-        {
+        for event in state.retained_from(self.next_sequence) {
             if self
                 .turn_filter
                 .is_none_or(|turn| event.turn_id == Some(turn))
@@ -291,6 +287,12 @@ impl EventSubscription {
                 matching_bytes = matching_bytes
                     .saturating_add(event.projected_retained_bytes(self.request.visibility));
                 first_matching.get_or_insert_with(|| Arc::clone(event));
+                // Only "over the limit" matters past this point, not the full debt.
+                if matching_items > self.request.limits.max_items()
+                    || matching_bytes > self.request.limits.max_bytes()
+                {
+                    break;
+                }
             }
         }
         if matching_items > self.request.limits.max_items()
@@ -300,14 +302,17 @@ impl EventSubscription {
                 let mut structural_items = 0_usize;
                 let mut structural_bytes = 0_usize;
                 for event in state
-                    .retained
-                    .iter()
-                    .filter(|event| event.branch_sequence.0 >= self.next_sequence)
+                    .retained_from(self.next_sequence)
                     .filter(|event| event.delivery_class() == EventDeliveryClass::Structural)
                 {
                     structural_items = structural_items.saturating_add(1);
                     structural_bytes = structural_bytes
                         .saturating_add(event.projected_retained_bytes(self.request.visibility));
+                    if structural_items > self.request.limits.max_items()
+                        || structural_bytes > self.request.limits.max_bytes()
+                    {
+                        break;
+                    }
                 }
                 if structural_items <= self.request.limits.max_items()
                     && structural_bytes <= self.request.limits.max_bytes()
@@ -316,10 +321,8 @@ impl EventSubscription {
                 {
                     let mut through = first.branch_sequence;
                     let mut kind = loss_kind(first.delivery_class());
-                    for event in state.retained.iter().filter(|event| {
-                        event.branch_sequence.0 > first.branch_sequence.0
-                            && event.branch_sequence.0 >= self.next_sequence
-                    }) {
+                    let after_first = first.branch_sequence.0.saturating_add(1);
+                    for event in state.retained_from(after_first.max(self.next_sequence)) {
                         let class = event.delivery_class();
                         if class == EventDeliveryClass::Structural {
                             break;
