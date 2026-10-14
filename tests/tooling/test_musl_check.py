@@ -79,7 +79,7 @@ raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
         for option, value in (('--platform', 'linux/amd64'), ('--pull', 'never'),
                               ('--network', 'none')):
             self.assertEqual(args[args.index(option) + 1], value)
-        self.assertIn('plak-qual-base:32710bfe', args)
+        self.assertIn('plak-qual-base:185eaa28', args)
         command = args[args.index('-c') + 1]
         self.assertIn('CARGO_BUILD_TARGET=x86_64-unknown-linux-musl', command)
         self.assertIn('CARGO_NET_OFFLINE=true', command)
@@ -167,9 +167,8 @@ raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
             self.assertIn('touch "$CARGO_HOME/.seeded"', command)
 
         image_cargo = self.root / 'image-cargo'
-        for cache in ('registry', 'git'):
-            (image_cargo / cache).mkdir(parents=True)
-            (image_cargo / cache / 'payload').write_text('image seed')
+        (image_cargo / 'registry').mkdir(parents=True)
+        (image_cargo / 'registry' / 'payload').write_text('image seed')
         cargo_home = self.root / f'target/musl-gate/cargo-home-{tag}'
         seed = command.split('    cd /qual/src')[0]
         seed = seed.replace('/qual/cargo-home', str(cargo_home))
@@ -179,9 +178,8 @@ raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
             result = subprocess.run(['/bin/sh', '-c', seed], env=self.env, text=True,
                                     capture_output=True, timeout=15)
             self.assertEqual(result.returncode, 0, result.stderr)
-            for cache in ('registry', 'git'):
-                self.assertEqual((cargo_home / cache / 'payload').read_text(), 'image seed')
-                (image_cargo / cache / 'payload').write_text('must not recopy')
+            self.assertEqual((cargo_home / 'registry' / 'payload').read_text(), 'image seed')
+            (image_cargo / 'registry' / 'payload').write_text('must not recopy')
         self.assertTrue((cargo_home / '.seeded').is_file())
 
     def test_public_contract_cache_is_on_the_persistent_mount_and_image_keyed(self):

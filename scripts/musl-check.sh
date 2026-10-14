@@ -16,7 +16,7 @@ tools="$(cd "$tools" && pwd -P)"
 target="${PLAK_MUSL_TARGET_DIR:-$root/target/musl-gate}"
 mkdir -p "$target" "$root/target"
 target="$(cd "$target" && pwd -P)"
-image=plak-qual-base:32710bfe
+image=plak-qual-base:185eaa28
 # One Cargo cache per pinned image: a bumped image never inherits old crates.
 cargo_home="$target/cargo-home-${image##*:}"
 mkdir -p "$cargo_home"
@@ -43,7 +43,7 @@ docker run --rm --platform linux/amd64 --pull never --network none \
     export CARGO_HOME=/qual/cargo-home RUSTUP_HOME=/usr/local/rustup
     # Seed the writable offline cache once, not once per qualification run.
     if [ ! -f "$CARGO_HOME/.seeded" ]; then
-      cp -R /usr/local/cargo/registry /usr/local/cargo/git "$CARGO_HOME/"
+      cp -R /usr/local/cargo/registry "$CARGO_HOME/"
       touch "$CARGO_HOME/.seeded"
     fi
     cd /qual/src

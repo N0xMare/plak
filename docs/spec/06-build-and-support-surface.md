@@ -477,16 +477,22 @@ just musl-check --fast plak  # optional targeted iteration
 ```
 
 `just musl-check` is a maintainer-only gate. `scripts/musl-check.sh` uses the
-preloaded image `plak-qual-base:32710bfe` (image ID `32710bfe8d64`), which is
+preloaded image `plak-qual-base:185eaa28` (image ID `185eaa28ddb7`), which is
 not published; without that image on a Linux x86_64 Docker host the gate cannot
-run, and the platform tiers above remain the public evidence. The image holds Alpine 3.24.1,
-Rust 1.97.1 with a musl host toolchain and C/C++ tools, Python 3.14,
+run, and the platform tiers above remain the public evidence. The image holds Alpine 3.24.2,
+Rust 1.99.0 with a musl host toolchain, clippy, rustfmt and C/C++ tools, Python 3.14,
 git, jj, just, and the registry sources for cargo-deny (not its executable),
 the workspace and compile-contract fixture lockfiles. It never pulls an image or installs tools.
 Provide the executable musl cargo-nextest 0.9.100 in `~/plak-musl/bin`
 (override with `PLAK_MUSL_TOOLS`); GNU-host tools cannot substitute for it.
 The container has no network and sets `CARGO_NET_OFFLINE=true`. A dependency
 change requires refreshing the image's registry before qualification.
+`scripts/musl-image.Dockerfile` is the recipe: built from a `git archive` of a
+commit, its default target is the image, tagged `plak-qual-base:` plus the first
+eight hex digits of its image ID, and its `nextest` target exports the musl
+cargo-nextest at the version `scripts/dev-tools.sh` pins. A toolchain or
+dependency change rebuilds the image under a new tag and updates the tag in
+`scripts/musl-check.sh`.
 
 The script exports tracked and nonignored untracked source, including the
 working-tree diff and excluding deleted files, into a fresh retained
