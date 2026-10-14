@@ -20,6 +20,7 @@ use plakous_attempt::{
     PhysicalRequestBinding, PhysicalRequestOutcome, ReplaySafety, RetryClass, RetryPolicy,
     TerminalFacts, retry_after_seconds,
 };
+use plakous_exchange::{RetryDeclineInput, retry_decline, retry_phase};
 use plakous_http::{
     Bytes, CancellationToken as HttpCancellationToken, Client, ErrorKind as HttpErrorKind,
     ExchangeControl, Failure as HttpFailure, HeaderName, Request, ResponseBody, StatusCode,
@@ -1441,6 +1442,10 @@ where
     /// shares the policy's physical budget; a hosted effect or a second 401
     /// ends the attempt as-is. Session workflows retry only exact transport
     /// evidence that the request was not fully sent, never an HTTP response.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one linear host step whose ordering is the invariant"
+    )]
     pub fn execute(&self, attempt: ResponsesAttempt) -> ResponsesAttemptFuture {
         if attempt.binding.operation().execution() != self.data.execution
             || attempt.binding.operation().ledger_policy() != self.data.ledger_policy
@@ -1790,6 +1795,10 @@ async fn refresh_credential<D: Send + Sync + 'static>(
 /// Applies [`RetryPolicy::TURN`]: announces the retry on the observation
 /// channel, ordered after the failed request's events, then waits its delay
 /// when the wait fits before the operation deadline.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one linear host step whose ordering is the invariant"
+)]
 async fn wait_to_retry(
     attempt: &mut ResponsesAttempt,
     failure: Retryable,
@@ -1809,46 +1818,25 @@ async fn wait_to_retry(
         *waited,
         Jitter::random(),
     );
-    let reason = if attempt
-        .hard_deadline
-        .is_some_and(|hard| monotonic_now() >= hard)
-    {
-        Some(Decline::Deadline)
-    } else if attempt.stream.retry_disabled {
-        Some(Decline::RetryDisabled)
-    } else if !attempt.retry_permitted
-        && !matches!(
-            failure.cause,
-            ModelRetryCause::Connect | ModelRetryCause::RecordRejectedInTransit
-        )
-    {
-        Some(Decline::Workflow)
-    } else if facts.hosted_effects_possible()
-        || (facts.replay_safety() == ReplaySafety::ServerEffect
-            && !matches!(
-                failure.point,
-                FailurePoint::Unreachable
-                    | FailurePoint::Refused
-                    | FailurePoint::RecordRejectedInTransit
-            ))
-    {
-        Some(Decline::ServerEffect)
-    } else if !attempt.long_stream_replays.permits(
-        facts.physical_attempts(),
-        failure.point,
-        elapsed,
-    ) || delay.is_none()
-    {
-        Some(Decline::Budget)
-    } else if attempt.hard_deadline.is_some_and(|hard| {
-        monotonic_now()
-            .checked_add(delay.unwrap_or_default())
-            .is_none_or(|resume| resume >= hard)
-    }) {
-        Some(Decline::Deadline)
-    } else {
-        None
-    };
+    let reason = retry_decline(
+        &RetryDeclineInput {
+            deadline_remaining: attempt
+                .hard_deadline
+                .map(|hard| hard.saturating_duration_since(monotonic_now())),
+            established: attempt
+                .stream
+                .retry_disabled
+                .then_some(Decline::RetryDisabled),
+            redispatch_available: true,
+            turn_retry: attempt.retry_permitted,
+            cause: failure.cause,
+            point: failure.point,
+            facts,
+            elapsed,
+            delay,
+        },
+        &mut attempt.long_stream_replays,
+    );
     let unsent = failure.point == FailurePoint::Unreachable;
     attempt.core.observations_ref().record_failure(
         failure.point,
@@ -2306,6 +2294,10 @@ fn admit_attempt(attempt: &ResponsesAttempt) -> Result<(), FamilyCoreError> {
     clippy::result_large_err,
     reason = "the attempt error is returned once per attempt from a future that already holds it"
 )]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one linear host step whose ordering is the invariant"
+)]
 async fn execute_admitted<D, G>(
     client: Client,
     dialect: Arc<D>,
@@ -2624,6 +2616,10 @@ where
 #[allow(
     clippy::result_large_err,
     reason = "the attempt error is returned once per attempt from a future that already holds it"
+)]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one linear host step whose ordering is the invariant"
 )]
 async fn decode_body(
     body_slot: &mut Option<ResponseBody>,
@@ -3112,6 +3108,10 @@ fn fail_decoded_stream(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "owned value matches the dialect hook and caller ownership"
+)]
 fn fail_stream(attempt: &mut ResponsesAttempt, failure: CollectorFailure) -> ResponsesAttemptError {
     let _ = attempt.core.claim_and_close_protocol_failure();
     match failure {
@@ -3705,6 +3705,10 @@ fn validate_auth_slots(
     Ok(())
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "one linear host step whose ordering is the invariant"
+)]
 fn physical_request_digest(
     physical: &ResponsesPhysicalRequestBinding,
     credential_authority: &ResponsesCredentialAuthority,
@@ -3907,22 +3911,6 @@ fn header_name_requires_secret(name: &HeaderName) -> bool {
         || name.contains("token")
         || name.contains("cookie")
         || name.contains("account")
-}
-
-fn retry_phase(phase: plakous_http::Phase) -> Option<plakous_model::ModelRetryPhase> {
-    use plakous_http::Phase;
-    use plakous_model::ModelRetryPhase as RetryPhase;
-    Some(match phase {
-        Phase::Resolution => RetryPhase::Resolution,
-        Phase::Connect => RetryPhase::Connect,
-        Phase::Tls => RetryPhase::Tls,
-        Phase::RequestWrite => RetryPhase::RequestWrite,
-        Phase::RequestWriteOrResponseHead => RetryPhase::RequestWriteOrResponseHead,
-        Phase::ResponseHead => RetryPhase::ResponseHead,
-        Phase::ResponseBody => RetryPhase::ResponseBody,
-        Phase::Cleanup => RetryPhase::Cleanup,
-        _ => return None,
-    })
 }
 
 #[cfg(test)]

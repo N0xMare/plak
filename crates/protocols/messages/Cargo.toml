@@ -16,6 +16,7 @@ class = "published-internal"
 futures-channel = { workspace = true, features = ["sink"] }
 futures-util = { workspace = true, features = ["sink", "std"] }
 plakous-attempt = { version = "0.1.0", path = "../../common/attempt" }
+plakous-exchange = { version = "0.1.0", path = "../exchange" }
 plakous-http = { version = "0.1.0", path = "../../common/http" }
 plakous-model = { version = "0.1.0", path = "../../core/model" }
 serde = { workspace = true, features = ["derive"] }

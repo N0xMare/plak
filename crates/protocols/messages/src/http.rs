@@ -8,8 +8,10 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::time::Instant;
 
-use futures_util::future::{Either, select};
 use plakous_attempt::{ExchangeBreak, FailurePoint, Jitter, PhysicalRequestOutcome, RetryPolicy};
+use plakous_exchange::{
+    RetryDeclineInput, cancellable, read_bounded_body, retry_decline, retry_phase, time_until,
+};
 use plakous_http::{
     CancellationToken as HttpCancellationToken, Client, ExchangeControl, Failure as HttpFailure,
     Origin, Request as HttpRequest, Response, ResponseBody, StatusCode,
@@ -325,8 +327,10 @@ async fn execute<H: MessagesHttpHooks>(
         .map_or(timeout, |budget| timeout.min(budget));
     let mut next_dispatch_started = None;
     let mut fresh_connection = false;
-    let hard_deadline =
-        context_remaining(attempt, &clock).map(|remaining| Instant::now() + remaining);
+    let hard_deadline = attempt
+        .context()
+        .deadline()
+        .map(|deadline| Instant::now() + time_until(deadline, clock.now()));
     loop {
         let physical_started = next_dispatch_started.take().unwrap_or_else(Instant::now);
         if attempt.context().cancellation().is_cancelled() {
@@ -744,38 +748,21 @@ async fn retry_step<H: MessagesHttpHooks>(
         *waited,
         Jitter::random(),
     );
-    let reason = if hard_deadline.is_some_and(|hard| Instant::now() >= hard) {
-        Some(Decline::Deadline)
-    } else if failure.loss.declined_reason.is_some() {
-        failure.loss.declined_reason
-    } else if redispatch.is_none() {
-        Some(Decline::RetryDisabled)
-    } else if !turn_rooted
-        && !matches!(
-            failure.cause,
-            ModelRetryCause::Connect | ModelRetryCause::RecordRejectedInTransit
-        )
-    {
-        Some(Decline::Workflow)
-    } else if facts.hosted_effects_possible()
-        || (facts.replay_safety() == plakous_attempt::ReplaySafety::ServerEffect
-            && !matches!(
-                failure.point,
-                FailurePoint::Unreachable
-                    | FailurePoint::Refused
-                    | FailurePoint::RecordRejectedInTransit
-            ))
-    {
-        Some(Decline::ServerEffect)
-    } else if !long_stream_replays.permits(facts.physical_attempts(), failure.point, elapsed)
-        || delay.is_none()
-    {
-        Some(Decline::Budget)
-    } else if hard_deadline.is_some_and(|hard| Instant::now() + delay.unwrap_or_default() >= hard) {
-        Some(Decline::Deadline)
-    } else {
-        None
-    };
+    let reason = retry_decline(
+        &RetryDeclineInput {
+            deadline_remaining: hard_deadline
+                .map(|hard| hard.saturating_duration_since(Instant::now())),
+            established: failure.loss.declined_reason,
+            redispatch_available: redispatch.is_some(),
+            turn_retry: turn_rooted,
+            cause: failure.cause,
+            point: failure.point,
+            facts,
+            elapsed,
+            delay,
+        },
+        long_stream_replays,
+    );
     let phase = failure.loss.transport_phase;
     let unsent = failure.point == FailurePoint::Unreachable;
     attempt.record_failure(
@@ -857,7 +844,9 @@ async fn run_hook<H: MessagesHttpHooks>(
 ) -> RetryStep<H> {
     let started = Instant::now();
     let cancellation = attempt.context().cancellation().clone();
-    let bound = context_remaining(attempt, clock).map_or(budget, |remaining| remaining.min(budget));
+    let bound = attempt.context().deadline().map_or(budget, |deadline| {
+        time_until(deadline, clock.now()).min(budget)
+    });
     if bound.is_zero() {
         return RetryStep::End;
     }
@@ -871,20 +860,6 @@ async fn run_hook<H: MessagesHttpHooks>(
             Err(_) => RetryStep::End,
         },
     }
-}
-
-/// Time left before the caller's operation deadline, if it set one.
-fn context_remaining(attempt: &MessagesAttempt, clock: &Arc<dyn Clock>) -> Option<Duration> {
-    let deadline = attempt.context().deadline()?;
-    let now = clock.now();
-    let nanos = |seconds: u64, nanoseconds: u32| {
-        u128::from(seconds) * 1_000_000_000 + u128::from(nanoseconds)
-    };
-    let remaining = nanos(deadline.seconds(), deadline.nanoseconds())
-        .saturating_sub(nanos(now.seconds(), now.nanoseconds()));
-    Some(Duration::from_nanos(
-        u64::try_from(remaining).unwrap_or(u64::MAX),
-    ))
 }
 
 #[allow(
@@ -1211,89 +1186,6 @@ fn safety(attempt: &MessagesAttempt) -> MessagesHttpSafety {
         visible_output: facts.visible_output(),
         hosted_effects_possible: facts.hosted_effects_possible(),
     }
-}
-
-async fn read_bounded_body(
-    mut body: ResponseBody,
-    cancellation: &plakous_model::CancellationToken,
-    http_cancellation: &HttpCancellationToken,
-    limit: usize,
-) -> Result<Vec<u8>, HttpFailure> {
-    let mut retained = Vec::new();
-    loop {
-        let next = cancellable(body.next_chunk(), cancellation, http_cancellation).await;
-        // Error bodies are optional, but required capture failures must end the
-        // attempt before a status retry or credential refresh can dispatch.
-        if let Some(Err(failure)) = &next.value
-            && failure.kind() == plakous_http::ErrorKind::Internal
-        {
-            return Err(*failure);
-        }
-        if next.cancelled {
-            if let Err(failure) = body.close().await
-                && failure.kind() == plakous_http::ErrorKind::Internal
-            {
-                return Err(failure);
-            }
-            return Ok(retained);
-        }
-        match next.value {
-            Some(Ok(chunk)) => {
-                let remaining = limit.saturating_add(1).saturating_sub(retained.len());
-                retained.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
-                if retained.len() > limit {
-                    if let Err(failure) = body.close().await
-                        && failure.kind() == plakous_http::ErrorKind::Internal
-                    {
-                        return Err(failure);
-                    }
-                    return Ok(retained);
-                }
-            }
-            Some(Err(_)) | None => return Ok(retained),
-        }
-    }
-}
-
-struct Cancellable<T> {
-    value: T,
-    cancelled: bool,
-}
-
-async fn cancellable<F: Future>(
-    future: F,
-    cancellation: &plakous_model::CancellationToken,
-    http_cancellation: &HttpCancellationToken,
-) -> Cancellable<F::Output> {
-    match select(Box::pin(future), Box::pin(cancellation.clone().cancelled())).await {
-        Either::Left((value, _)) => Cancellable {
-            value,
-            cancelled: false,
-        },
-        Either::Right(((), future)) => {
-            http_cancellation.cancel();
-            Cancellable {
-                value: future.await,
-                cancelled: true,
-            }
-        }
-    }
-}
-
-fn retry_phase(phase: plakous_http::Phase) -> Option<plakous_model::ModelRetryPhase> {
-    use plakous_http::Phase;
-    use plakous_model::ModelRetryPhase as RetryPhase;
-    Some(match phase {
-        Phase::Resolution => RetryPhase::Resolution,
-        Phase::Connect => RetryPhase::Connect,
-        Phase::Tls => RetryPhase::Tls,
-        Phase::RequestWrite => RetryPhase::RequestWrite,
-        Phase::RequestWriteOrResponseHead => RetryPhase::RequestWriteOrResponseHead,
-        Phase::ResponseHead => RetryPhase::ResponseHead,
-        Phase::ResponseBody => RetryPhase::ResponseBody,
-        Phase::Cleanup => RetryPhase::Cleanup,
-        _ => return None,
-    })
 }
 
 #[cfg(test)]

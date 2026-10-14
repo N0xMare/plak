@@ -23,6 +23,7 @@ native-auth = [
 ]
 [dependencies]
 plakous-auth = { version = "0.1.0", path = "../../common/auth", default-features = false, optional = true }
+plakous-exchange = { version = "0.1.0", path = "../../protocols/exchange" }
 plakous-http = { version = "0.1.0", path = "../../common/http" }
 plakous-model = { version = "0.1.0", path = "../../core/model" }
 plakous-messages = { version = "0.1.0", path = "../../protocols/messages" }

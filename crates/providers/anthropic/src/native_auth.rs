@@ -37,7 +37,6 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use zeroize::{Zeroize as _, Zeroizing};
 
-use crate::http::network_failure;
 use crate::oauth::{
     CLAUDE_OAUTH_CLIENT_ID, CLAUDE_OAUTH_COMPATIBILITY_PROFILE_ID, CLAUDE_OAUTH_EXPIRES_AT_UNIX,
     CLAUDE_OAUTH_INFERENCE_SCOPE, CLAUDE_OAUTH_KILL_SWITCH_REVISION, CLAUDE_OAUTH_MESSAGES_ORIGIN,
@@ -51,6 +50,7 @@ use crate::{
     CLAUDE_SUBSCRIPTION_PROFILE_PATH, CLAUDE_SUBSCRIPTION_USAGE_PATH,
     MAX_CLAUDE_SUBSCRIPTION_USAGE_BODY_BYTES,
 };
+use plakous_exchange::network_failure;
 
 const USER_AGENT: &str = CLAUDE_OAUTH_USER_AGENT;
 const STORED_VERSION: u32 = 3;

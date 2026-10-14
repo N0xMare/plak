@@ -23,7 +23,6 @@ mod tools;
 pub use body::{insert_stream_store, join_instruction_texts};
 pub use items::{
     function_call_item, function_call_output_item, input_text_part, message_item, output_text_part,
-    refusal_part,
 };
 pub use reasoning::{
     REASONING_SUMMARY_AUTO, ReasoningConfigWire, ReasoningEffortWire, reasoning_object,

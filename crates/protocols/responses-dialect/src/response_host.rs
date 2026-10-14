@@ -796,18 +796,6 @@ pub enum ResponsesOutputItem {
 }
 
 impl ResponsesOutputItem {
-    /// Parses one output item value.
-    ///
-    /// # Errors
-    ///
-    /// Returns `E` for structural field failures.
-    pub fn parse_value<E>(value: &Value) -> Result<Self, E>
-    where
-        E: From<ResponsesFieldError> + ResponsesUsageError,
-    {
-        parse_output_item(value)
-    }
-
     /// Returns the complete provider-native item.
     #[must_use]
     pub const fn native(&self) -> &Value {
@@ -1405,18 +1393,6 @@ where
     })
 }
 
-/// Parses usage (alias for [`ResponsesUsage::parse`]).
-///
-/// # Errors
-///
-/// Returns `E` when accounting is inconsistent.
-pub fn parse_usage<E>(value: &Value) -> Result<ResponsesUsage, E>
-where
-    E: From<ResponsesFieldError> + ResponsesUsageError,
-{
-    ResponsesUsage::parse(value)
-}
-
 /// Returns the provider item status when present.
 #[must_use]
 pub fn output_item_status(item: &ResponsesOutputItem) -> Option<&str> {
@@ -1430,12 +1406,6 @@ pub fn output_item_status(item: &ResponsesOutputItem) -> Option<&str> {
             native.get("status").and_then(Value::as_str)
         }
     }
-}
-
-/// Reports whether the item carries the expected status string.
-#[must_use]
-pub fn output_item_has_status(item: &ResponsesOutputItem, expected: &str) -> bool {
-    output_item_status(item) == Some(expected)
 }
 
 /// Validates assistant roles and unique item/call identities.
@@ -1514,22 +1484,6 @@ where
         .filter(|caller_id| !caller_id.is_empty())
         .ok_or_else(|| E::missing_field("tool caller_id"))?;
     Ok(())
-}
-
-/// Parses a bounded provider error object.
-///
-/// # Errors
-///
-/// Fails closed for malformed labels or an over-limit payload.
-pub fn parse_provider_error(
-    value: &Value,
-    limits: ResponsesResponseLimits,
-) -> Result<ResponsesProviderError, ResponsesHostDecodeError> {
-    parse_provider_error_with_policy(
-        value,
-        limits,
-        ResponsesProviderErrorPolicy::OpenAiCompatible,
-    )
 }
 
 /// Parses a bounded provider error using one exact classification allowlist.

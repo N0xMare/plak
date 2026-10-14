@@ -27,7 +27,7 @@ pub use attempt::{
 };
 pub use http::{
     ChatHttpAttemptService, ChatHttpErrorHead, ChatHttpHooks, ChatHttpResponseHead, ChatHttpSafety,
-    PreparedChatHttpOperation, network_failure,
+    PreparedChatHttpOperation,
 };
 pub use plakous_attempt::ReplaySafety;
 pub use request::{

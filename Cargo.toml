@@ -24,6 +24,7 @@ members = [
     "crates/harness/compose",
     "crates/common/http",
     "crates/protocols/chat-completions",
+    "crates/protocols/exchange",
     "crates/protocols/messages",
     "crates/core/model",
     "crates/providers/openai",

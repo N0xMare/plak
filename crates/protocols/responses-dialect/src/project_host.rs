@@ -15,8 +15,8 @@ use plakous_model::{
     ToolInputContract, Usage, ValidatedRequestPlan,
 };
 use plakous_responses::{
-    ProjectedItemKind, RESPONSES_ARTIFACT_CODEC_REVISION, RESPONSES_ARTIFACT_SCHEMA_REVISION,
-    ResponsesArtifact, ResponsesArtifactBinding, ResponsesArtifactCodec, ResponsesArtifactError,
+    RESPONSES_ARTIFACT_CODEC_REVISION, RESPONSES_ARTIFACT_SCHEMA_REVISION, ResponsesArtifact,
+    ResponsesArtifactBinding, ResponsesArtifactCodec, ResponsesArtifactError,
     ResponsesArtifactProduction, ResponsesArtifactReplayKind, ResponsesContinuation,
     ResponsesReplayContract, ResponsesReplayItem, ResponsesReplayPurpose, ResponsesStorageMode,
 };
@@ -26,21 +26,6 @@ use crate::response_host::{
     ResponsesAnnotation, ResponsesContentPart, ResponsesOutputItem, ResponsesReasoningSummaryPart,
     ResponsesResponse, ResponsesResponseStatus,
 };
-
-/// Maps a shared output item to the projector item kind.
-#[must_use]
-pub const fn item_kind_from_output(item: &ResponsesOutputItem) -> ProjectedItemKind {
-    match item {
-        ResponsesOutputItem::Message { .. } => ProjectedItemKind::Message,
-        ResponsesOutputItem::Reasoning { .. } => ProjectedItemKind::Reasoning,
-        ResponsesOutputItem::FunctionCall { .. } | ResponsesOutputItem::CustomToolCall { .. } => {
-            ProjectedItemKind::Function
-        }
-        ResponsesOutputItem::Opaque { .. } | ResponsesOutputItem::Compaction { .. } => {
-            ProjectedItemKind::Opaque
-        }
-    }
-}
 
 /// Exact replay-envelope construction data supplied by the admitted dialect.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -442,14 +427,6 @@ impl ResponsesTerminalProjection {
             paired_artifact,
         })
     }
-
-    /// Consumes the unpaired terminal observation fields.
-    #[must_use]
-    pub fn into_observation_parts(
-        self,
-    ) -> (ResponsesResponse, Option<FinishDetails>, Option<Usage>) {
-        (self.response, self.finish, self.usage)
-    }
 }
 
 /// Closed canonical output plus its exact native artifact candidate.
@@ -719,7 +696,8 @@ pub enum ResponsesProjectError {
 ///
 /// Fails closed for active/unknown status, model-binding mismatch, index
 /// overflow, or invalid exact replay material.
-pub fn project_terminal_response(
+#[cfg(test)]
+pub(crate) fn project_terminal_response(
     response: ResponsesResponse,
     replay: &ResponsesReplayProjection,
     storage: ResponsesStorageMode,

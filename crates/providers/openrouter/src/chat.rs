@@ -1261,7 +1261,7 @@ impl ChatHttpHooks for OpenRouterChatHooks {
         failure: HttpFailure,
         _request_id: Option<&str>,
     ) -> ChatAttemptProtocolError {
-        let cause = plakous_chat_completions::network_failure(failure).map_or_else(
+        let cause = plakous_exchange::network_failure(failure).map_or_else(
             || "network exchange failed".to_owned(),
             |cause| cause.to_string(),
         );

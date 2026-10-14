@@ -89,6 +89,7 @@ RESPONSIBILITY_RULES: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
     ("family kernels", (
         ("plakous-anthropic", "src/"),
         ("plakous-chat-completions", "src/"),
+        ("plakous-exchange", "src/"),
         ("plakous-messages", "src/"),
         ("plakous-responses", "src/"),
         ("plakous-responses-dialect", "src/"),

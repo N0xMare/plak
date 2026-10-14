@@ -382,29 +382,6 @@ impl ChatReplayTargetV1 {
     pub const fn requested_model(&self) -> &ModelId {
         &self.requested_model
     }
-
-    /// Returns a stable identity for this durable replay target.
-    pub fn identity_digest(&self) -> Result<Digest, ChatRequestError> {
-        Digest::sha256(
-            DigestDomain::ModelBinding,
-            1,
-            &[
-                b"plakous-chat-completions/replay-target-v1",
-                self.protocol.as_str().as_bytes(),
-                self.requested_model.as_str().as_bytes(),
-                &self.account_binding.identity_bytes(),
-                &self
-                    .selected_provider_configuration
-                    .digest()
-                    .identity_bytes(),
-                &self
-                    .effective_provider_configuration
-                    .digest()
-                    .identity_bytes(),
-            ],
-        )
-        .map_err(|_| invalid("Chat replay target identity failed"))
-    }
 }
 
 /// Byte-preserving, source-ordered native reasoning detail replay.

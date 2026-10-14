@@ -1,8 +1,8 @@
 //! Generic Responses-family **dialect host** shapes.
 //!
 //! Free-function request/stream/response/project hosts plus shared value types.
-//! Dialects (OpenRouter, xAI) consume via type aliases and hooks — not via a
-//! mandatory plugin trait (removed 2026-08-05; zero impls).
+//! Dialects (OpenRouter, xAI) consume via type aliases and hooks, not via a
+//! mandatory plugin trait.
 //!
 //! ## Ownership
 //!
@@ -15,14 +15,19 @@
 //! | Anthropic Messages | **never** | never | own family |
 
 #![forbid(unsafe_code)]
-// Host docs name OpenRouter/xAI; stream front/project skeletons exceed 100 lines
-// by design; map helpers take SseError by value at the dialect boundary.
+// Host docs name OpenRouter/xAI.
 #![allow(
     clippy::doc_markdown,
-    clippy::too_many_lines,
     clippy::must_use_candidate,
-    clippy::needless_pass_by_value,
-    reason = "product names; host skeletons; dialect map_error signatures"
+    reason = "product names in host docs"
+)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::too_many_lines,
+        clippy::needless_pass_by_value,
+        reason = "scenario tests spell out whole wire exchanges and own their fixtures"
+    )
 )]
 
 mod attempt_host;
@@ -208,7 +213,7 @@ pub use project_host::{
     ResponsesArtifactCandidateInput, ResponsesPairedArtifactCandidate,
     ResponsesPairedTerminalProjection, ResponsesProjectError, ResponsesProviderRequestBinding,
     ResponsesReplayProjection, ResponsesSealedArtifactCandidate, ResponsesTerminalProjection,
-    item_kind_from_output, project_terminal_response, seal_responses_family_artifact,
+    seal_responses_family_artifact,
 };
 pub use request_host::{
     CustomToolPolicy, FunctionStrictPolicy, InstructionPlacementPolicy, LoweredResponsesRequest,
@@ -234,10 +239,10 @@ pub use response_host::{
     ResponsesProviderError, ResponsesProviderErrorClass, ResponsesProviderErrorPolicy,
     ResponsesReasoningContentPart, ResponsesReasoningSummaryPart, ResponsesResponse,
     ResponsesResponseLimits, ResponsesResponseStatus, ResponsesUsage, ResponsesUsageError,
-    ResponsesUsagePolicy, output_item_has_status, output_item_status, parse_annotation,
-    parse_content_part, parse_custom_tool_call, parse_function_call, parse_message,
-    parse_output_item, parse_provider_error, parse_provider_error_with_policy, parse_reasoning,
-    parse_unique_json_value, parse_usage, validate_output_identity_roles,
+    ResponsesUsagePolicy, output_item_status, parse_annotation, parse_content_part,
+    parse_custom_tool_call, parse_function_call, parse_message, parse_output_item,
+    parse_provider_error_with_policy, parse_reasoning, parse_unique_json_value,
+    validate_output_identity_roles,
 };
 pub use stream_host::{
     ResponsesEventPolicy, ResponsesFamilySseDecoder, ResponsesFamilyStreamError,
@@ -250,8 +255,7 @@ pub use wire_accounting::{ResponsesWireOccurrence, ResponsesWireOccurrenceCounts
 
 #[cfg(test)]
 mod host_pins {
-    use super::{ResponsesResponseStatus, item_kind_from_output};
-    use crate::response_host::ResponsesOutputItem;
+    use super::ResponsesResponseStatus;
 
     #[test]
     fn completed_status_is_terminal() {
@@ -259,22 +263,6 @@ mod host_pins {
         assert_eq!(
             ResponsesResponseStatus::parse("completed"),
             ResponsesResponseStatus::Completed
-        );
-    }
-
-    #[test]
-    fn item_kind_maps_function_call() {
-        let item = ResponsesOutputItem::FunctionCall {
-            id: Some("id1".into()),
-            call_id: "call1".into(),
-            name: "tool".into(),
-            arguments: "{}".into(),
-            status: Some("completed".into()),
-            native: serde_json::json!({}),
-        };
-        assert_eq!(
-            item_kind_from_output(&item),
-            plakous_responses::ProjectedItemKind::Function
         );
     }
 }

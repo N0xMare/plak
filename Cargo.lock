@@ -3784,6 +3784,7 @@ dependencies = [
  "futures-util",
  "plakous-agent",
  "plakous-auth",
+ "plakous-exchange",
  "plakous-http",
  "plakous-messages",
  "plakous-model",
@@ -3845,6 +3846,7 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "plakous-attempt",
+ "plakous-exchange",
  "plakous-http",
  "plakous-model",
  "rcgen",
@@ -3883,6 +3885,16 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "plakous-exchange"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "plakous-attempt",
+ "plakous-http",
+ "plakous-model",
 ]
 
 [[package]]
@@ -3979,6 +3991,7 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "plakous-attempt",
+ "plakous-exchange",
  "plakous-http",
  "plakous-model",
  "serde",
@@ -4036,6 +4049,7 @@ dependencies = [
  "jsonwebtoken",
  "plakous-attempt",
  "plakous-auth",
+ "plakous-exchange",
  "plakous-http",
  "plakous-model",
  "plakous-responses",
@@ -4063,6 +4077,7 @@ dependencies = [
  "plakous-agent",
  "plakous-attempt",
  "plakous-chat-completions",
+ "plakous-exchange",
  "plakous-http",
  "plakous-messages",
  "plakous-model",
@@ -4169,6 +4184,7 @@ version = "0.1.0"
 dependencies = [
  "futures-core",
  "plakous-attempt",
+ "plakous-exchange",
  "plakous-http",
  "plakous-model",
  "plakous-responses",
@@ -4316,6 +4332,7 @@ dependencies = [
  "jsonwebtoken",
  "plakous-attempt",
  "plakous-auth",
+ "plakous-exchange",
  "plakous-http",
  "plakous-model",
  "plakous-responses",

@@ -268,6 +268,10 @@ impl<Response, ProviderError> ResponsesStreamEventKind<Response, ProviderError> 
     /// # Errors
     ///
     /// Propagates [`ResponsesLifecycleError`] from the pure lifecycle machine.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one linear host step whose ordering is the invariant"
+    )]
     pub fn apply_intermediate_lifecycle(
         &self,
         lifecycle: &mut ResponsesLifecycle,
@@ -441,6 +445,10 @@ impl<Response, ProviderError> ResponsesStreamEventKind<Response, ProviderError> 
 impl<Response: fmt::Debug, ProviderError: fmt::Debug> fmt::Debug
     for ResponsesStreamEventKind<Response, ProviderError>
 {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one linear host step whose ordering is the invariant"
+    )]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Redacted structural Debug: never dumps provider payloads.
         match self {
@@ -1141,6 +1149,10 @@ impl ResponsesFamilyHooks {
         Ok(item_id.map(str::to_owned))
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one linear host step whose ordering is the invariant"
+    )]
     fn parse_event(
         &mut self,
         value: &Value,
@@ -1567,6 +1579,10 @@ impl ResponsesFamilyHooks {
         Ok(event)
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one linear host step whose ordering is the invariant"
+    )]
     fn parse_terminal(
         &self,
         event_kind: &str,
@@ -1900,6 +1916,10 @@ pub trait ResponsesStreamHostError: Sized {
 }
 
 /// Standard SSE framing error map used by OpenRouter / xAI-style dialects.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "owned value matches the dialect hook and caller ownership"
+)]
 pub fn map_sse_error_standard<E: ResponsesStreamHostError>(
     error: SseError,
     limits: &ResponsesStreamLimits,
@@ -1982,11 +2002,6 @@ impl<H> ResponsesSseDecoderFront<H> {
     #[must_use]
     pub const fn hooks(&self) -> &H {
         &self.hooks
-    }
-
-    /// Returns a mutable handle to dialect hooks.
-    pub const fn hooks_mut(&mut self) -> &mut H {
-        &mut self.hooks
     }
 
     /// Returns the stream kernel.

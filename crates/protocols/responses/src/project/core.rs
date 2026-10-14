@@ -6,13 +6,11 @@ use std::sync::Arc;
 
 use plakous_model::{
     Actor, BlockCompleted, BlockStart, BlockStarted, CallId, Clock, ContentBlock, ConversationItem,
-    DataClassification, Digest, EntryId, FinishDetails, FinishReason, IdGenerator, ModelEvent,
-    ModelFamilyId, ModelId, ModelProviderRequestId, ModelResponse, ModelResponseMetadata,
-    OutputLocation, ProtocolId, Provenance, ReasoningBlock, ReasoningDelta, ReasoningVisibility,
-    RefusalBlock, ReplayEnvelope, ReplayKindId, ReplayScope, ResponseStarted, SystemClock,
-    SystemIdGenerator, TextBlock, TextDelta, TextPhase, ToolCallBlock, ToolCallState,
-    ToolCallerLineage, ToolCorrelation, ToolExecutionOwner, ToolInputDelta, ToolName, Usage,
-    UsageUpdate,
+    DataClassification, Digest, EntryId, IdGenerator, ModelEvent, ModelFamilyId, ModelId,
+    ModelResponseMetadata, OutputLocation, ProtocolId, Provenance, ReasoningBlock, ReasoningDelta,
+    ReasoningVisibility, RefusalBlock, ReplayEnvelope, ReplayKindId, ReplayScope, ResponseStarted,
+    SystemClock, SystemIdGenerator, TextBlock, TextDelta, TextPhase, ToolCallBlock, ToolCallState,
+    ToolCallerLineage, ToolCorrelation, ToolExecutionOwner, ToolInputDelta, ToolName,
 };
 use serde_json::Value;
 use serde_json::value::RawValue;
@@ -104,8 +102,6 @@ pub enum ToolArgsFinishPolicy {
     /// Empty known seeds from done; non-empty disagree → error (xAI/OR default).
     #[default]
     Strict,
-    /// Empty done becomes `{}`; non-empty known is **replaced** by done.
-    PreferDone,
     /// Seed from done **only when projected bytes are empty**; empty done → `{}`.
     /// Non-empty deltas that disagree with done are **kept** (never silent-replace).
     /// OpenAI Platform / Codex product policy.
@@ -327,13 +323,6 @@ impl ResponseProjectorCore {
         self.failed = true;
     }
 
-    /// Mark the projector terminal without emitting ResponseCompleted.
-    ///
-    /// Used by dialects that assemble a custom terminal aggregate (OpenAI
-    /// incomplete finish reasons, continuation envelopes) after residual work.
-    pub fn mark_terminal_silent(&mut self) {
-        self.terminal = true;
-    }
     /// Retained response id.
     #[must_use]
     pub fn response_id(&self) -> Option<&str> {
@@ -366,16 +355,6 @@ impl ResponseProjectorCore {
         if self.events_seen > self.limits.max_events {
             self.failed = true;
             return Err(FamilyProjectionError::ResourceLimit("projected events"));
-        }
-        Ok(())
-    }
-
-    /// Complete (non-stream) projection must start fresh.
-    pub fn require_fresh_for_complete(&self) -> ProjResult<()> {
-        if self.started || self.terminal || !self.items.is_empty() {
-            return Err(FamilyProjectionError::InvalidState(
-                "complete projection requires a fresh projector",
-            ));
         }
         Ok(())
     }
@@ -538,51 +517,6 @@ impl ResponseProjectorCore {
             self.append_tool_with_emit(provider_index, initial_arguments, emit_started, output)?;
         }
         Ok(())
-    }
-
-    /// Start text/refusal from a content-part JSON object. Returns false if type unknown.
-    pub fn start_text_or_refusal_content(
-        &mut self,
-        provider_index: u32,
-        content_index: u32,
-        part: &Value,
-        skip_empty_initial: bool,
-        output: &mut Vec<ModelEvent>,
-    ) -> ProjResult<bool> {
-        let kind = part.get("type").and_then(Value::as_str);
-        let (block, start, initial) = match kind {
-            Some("output_text") => (
-                ProjectedBlock::Text {
-                    phase: Some(TextPhase::Final),
-                    bytes: Vec::new(),
-                    complete: false,
-                },
-                BlockStart::Text {
-                    phase: Some(TextPhase::Final),
-                },
-                part.get("text").and_then(Value::as_str).unwrap_or_default(),
-            ),
-            Some("refusal") => (
-                ProjectedBlock::Refusal {
-                    bytes: Vec::new(),
-                    complete: false,
-                },
-                BlockStart::Refusal,
-                part.get("refusal")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default(),
-            ),
-            _ => return Ok(false),
-        };
-        let entry_id = self.item(provider_index)?.entry_id;
-        let location = self.insert_block(provider_index, content_index, block)?;
-        output.push(ModelEvent::BlockStarted(BlockStarted::new(
-            entry_id, location, start,
-        )));
-        if !skip_empty_initial || !initial.is_empty() {
-            self.append_text(provider_index, content_index, initial, output)?;
-        }
-        Ok(true)
     }
 
     /// Insert a pre-completed block and emit BlockStarted.
@@ -983,26 +917,6 @@ impl ResponseProjectorCore {
         )
     }
 
-    /// Soft finish: full prefer-done replace; empty → `{}`.
-    ///
-    /// Retained for family completeness / experimental callers. Product OpenAI
-    /// uses [`ToolArgsFinishPolicy::SoftSeedEmptyOnly`] via
-    /// [`ProjectorPolicy::openai_platform`].
-    pub fn finish_function_arguments_soft(
-        &mut self,
-        provider_index: u32,
-        arguments: &str,
-        output: &mut Vec<ModelEvent>,
-    ) -> ProjResult<()> {
-        self.finish_function_arguments_with(
-            provider_index,
-            arguments,
-            ToolArgsFinishPolicy::PreferDone,
-            true,
-            output,
-        )
-    }
-
     /// SoftSeedEmptyOnly finish with optional stream-event emission (custom tools).
     pub fn finish_function_arguments_with(
         &mut self,
@@ -1013,11 +927,7 @@ impl ResponseProjectorCore {
         output: &mut Vec<ModelEvent>,
     ) -> ProjResult<()> {
         let seed = match policy {
-            ToolArgsFinishPolicy::PreferDone | ToolArgsFinishPolicy::SoftSeedEmptyOnly
-                if arguments.is_empty() =>
-            {
-                "{}"
-            }
+            ToolArgsFinishPolicy::SoftSeedEmptyOnly if arguments.is_empty() => "{}",
             _ => arguments,
         };
         let location = self.location(provider_index, 0)?;
@@ -1056,7 +966,6 @@ impl ResponseProjectorCore {
                 self.append_tool_with_emit(provider_index, seed, emit_events, output)?;
             } else {
                 let replace = match policy {
-                    ToolArgsFinishPolicy::PreferDone => true,
                     ToolArgsFinishPolicy::SoftSeedEmptyOnly => !semantically_equivalent,
                     ToolArgsFinishPolicy::Strict => {
                         return Err(FamilyProjectionError::InvalidState(
@@ -1083,21 +992,6 @@ impl ResponseProjectorCore {
             }
         }
         self.complete_provider_block_with_emit(provider_index, 0, emit_events, output)
-    }
-
-    /// Opaque-replay-only reasoning when summary is empty.
-    pub fn finish_reasoning_opaque_only(
-        &mut self,
-        provider_index: u32,
-        replay: ReplayEnvelope,
-        output: &mut Vec<ModelEvent>,
-    ) -> ProjResult<()> {
-        let block = ContentBlock::Reasoning(ReasoningBlock::new(
-            ReasoningVisibility::OpaqueReplay,
-            None,
-            Some(replay),
-        )?);
-        self.start_complete_block(provider_index, 0, block, output)
     }
 
     /// Emit deferred OpenAI-style reasoning for one item (started + deltas + completed).
@@ -1155,36 +1049,6 @@ impl ResponseProjectorCore {
             }
             output.push(ModelEvent::BlockCompleted(BlockCompleted::new(location)));
         }
-        Ok(())
-    }
-
-    /// Empty deferred reasoning: single opaque-replay block at provider index 0.
-    pub fn finish_deferred_empty_reasoning(
-        &mut self,
-        provider_index: u32,
-        replay: ReplayEnvelope,
-        output: &mut Vec<ModelEvent>,
-    ) -> ProjResult<()> {
-        let entry_id = self.item(provider_index)?.entry_id;
-        let location = self.insert_block(
-            provider_index,
-            0,
-            ProjectedBlock::Reasoning {
-                bytes: Vec::new(),
-                chunks: Vec::new(),
-                replay: Some(replay.clone()),
-                complete: true,
-            },
-        )?;
-        output.push(ModelEvent::BlockStarted(BlockStarted::new(
-            entry_id,
-            location,
-            BlockStart::Reasoning {
-                visibility: ReasoningVisibility::OpaqueReplay,
-                replay: Some(replay),
-            },
-        )));
-        output.push(ModelEvent::BlockCompleted(BlockCompleted::new(location)));
         Ok(())
     }
 
@@ -1247,66 +1111,6 @@ impl ResponseProjectorCore {
             self.bind_reasoning_replay(location, replay.clone(), output)?;
         }
         self.complete_provider_block(provider_index, provider_block, output)
-    }
-
-    /// Materialize a complete text/refusal/opaque message part, or validate+complete if streamed.
-    pub fn finish_message_part(
-        &mut self,
-        provider_index: u32,
-        provider_block: u32,
-        streamed_match: Option<bool>,
-        complete: Option<ContentBlock>,
-        output: &mut Vec<ModelEvent>,
-    ) -> ProjResult<()> {
-        let existing = self
-            .item(provider_index)?
-            .provider_blocks
-            .contains_key(&provider_block);
-        if existing {
-            if streamed_match == Some(false) {
-                return Err(FamilyProjectionError::InvalidState(
-                    "completed message content disagrees with its fragments",
-                ));
-            }
-            return self.complete_provider_block(provider_index, provider_block, output);
-        }
-        let complete = complete.ok_or(FamilyProjectionError::InvalidState(
-            "message part could not be materialised",
-        ))?;
-        self.start_complete_block(provider_index, provider_block, complete, output)
-    }
-
-    /// Emit usage + ResponseCompleted and seal terminal.
-    pub fn seal_completed_response(
-        &mut self,
-        response_id_check: &str,
-        usage: Option<Usage>,
-        plan_digest: Digest,
-        metadata: ModelResponseMetadata,
-        output: &mut Vec<ModelEvent>,
-    ) -> ProjResult<()> {
-        self.require_started()?;
-        if response_id_check != self.response_id.as_deref().unwrap_or_default() {
-            return Err(FamilyProjectionError::InvalidState(
-                "terminal response identity changed",
-            ));
-        }
-        if let Some(ref usage) = usage {
-            output.push(ModelEvent::Usage(UsageUpdate::new(*usage)));
-        }
-        let items = self.canonical_items()?;
-        let reason = finish_reason_for_items(&items);
-        let response = ModelResponse::new(
-            items,
-            FinishDetails::new(reason, None),
-            usage,
-            self.response_id.clone(),
-            plan_digest,
-        )
-        .with_metadata(metadata);
-        output.push(ModelEvent::ResponseCompleted(response));
-        self.terminal = true;
-        Ok(())
     }
 
     /// Build contiguous completed conversation items.
@@ -1486,17 +1290,6 @@ impl ResponseProjectorCore {
         Ok(())
     }
 
-    /// Whether a provider tool block exists and is incomplete with empty args.
-    pub fn tool_args_need_seed(&self, provider_index: u32) -> ProjResult<bool> {
-        let location = self.location(provider_index, 0)?;
-        Ok(match self.block(location)? {
-            ProjectedBlock::Tool {
-                bytes, complete, ..
-            } if !*complete => bytes.is_empty(),
-            _ => false,
-        })
-    }
-
     /// Tool block correlation for dialect residual checks.
     pub fn tool_correlation(
         &self,
@@ -1534,28 +1327,12 @@ impl ResponseProjectorCore {
         }
     }
 
-    /// Metadata from optional model + provider request id.
-    pub fn metadata_from_parts(
-        actual_model: Option<&str>,
-        provider_request_id: Option<ModelProviderRequestId>,
-    ) -> ProjResult<ModelResponseMetadata> {
-        Ok(ModelResponseMetadata::new(
-            actual_model.map(ModelId::new).transpose()?,
-            provider_request_id,
-        ))
-    }
-
     /// Text/refusal complete blocks from strings.
     pub fn text_block(text: String) -> ProjResult<ContentBlock> {
         Ok(ContentBlock::Text(TextBlock::new(
             text,
             Some(TextPhase::Final),
         )?))
-    }
-
-    /// Refusal complete block.
-    pub fn refusal_block(refusal: String) -> ProjResult<ContentBlock> {
-        Ok(ContentBlock::Refusal(RefusalBlock::new(refusal)?))
     }
 
     /// Match streamed text/refusal bytes to expected.
@@ -1598,28 +1375,6 @@ fn json_values_equivalent(a: &str, b: &str) -> bool {
     ) {
         (Ok(va), Ok(vb)) => va == vb,
         _ => false,
-    }
-}
-
-/// Derive finish reason from completed items (tool > refusal > stop).
-#[must_use]
-pub fn finish_reason_for_items(items: &[ConversationItem]) -> FinishReason {
-    let has_tool = items.iter().any(|item| {
-        item.blocks()
-            .iter()
-            .any(|block| matches!(block, ContentBlock::ToolCall(_)))
-    });
-    let has_refusal = items.iter().any(|item| {
-        item.blocks()
-            .iter()
-            .any(|block| matches!(block, ContentBlock::Refusal(_)))
-    });
-    if has_tool {
-        FinishReason::ToolCalls
-    } else if has_refusal {
-        FinishReason::Refusal
-    } else {
-        FinishReason::Stop
     }
 }
 
@@ -1878,7 +1633,7 @@ mod tests {
     }
 
     #[test]
-    fn prefer_done_replacement_accounting_is_exact_and_fail_closed_at_boundaries() {
+    fn done_replacement_accounting_is_exact_and_fail_closed_at_boundaries() {
         for limit in 1_usize..=16 {
             for initial_len in 1..=limit {
                 for replacement_len in 1..=limit.saturating_add(1) {
@@ -1893,7 +1648,7 @@ mod tests {
                     let result = core.finish_function_arguments_with(
                         0,
                         &replacement,
-                        ToolArgsFinishPolicy::PreferDone,
+                        ToolArgsFinishPolicy::SoftSeedEmptyOnly,
                         true,
                         &mut out,
                     );
@@ -1932,7 +1687,7 @@ mod tests {
             core.finish_function_arguments_with(
                 0,
                 "",
-                ToolArgsFinishPolicy::PreferDone,
+                ToolArgsFinishPolicy::SoftSeedEmptyOnly,
                 true,
                 &mut out,
             ),

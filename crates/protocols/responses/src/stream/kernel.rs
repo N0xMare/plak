@@ -100,12 +100,6 @@ impl ResponsesStreamKernel {
         self.limits
     }
 
-    /// Returns whether the kernel is terminally failed.
-    #[must_use]
-    pub const fn is_failed(&self) -> bool {
-        self.failed
-    }
-
     /// Returns whether a typed terminal event was accepted.
     #[must_use]
     pub const fn typed_terminal_seen(&self) -> bool {
@@ -118,28 +112,10 @@ impl ResponsesStreamKernel {
         self.done_marker_seen
     }
 
-    /// Returns total accepted stream bytes so far.
-    #[must_use]
-    pub const fn total_bytes(&self) -> usize {
-        self.total_bytes
-    }
-
-    /// Returns the count of decoded JSON events so far.
-    #[must_use]
-    pub const fn event_count(&self) -> usize {
-        self.event_count
-    }
-
     /// Returns the sequence tracker.
     #[must_use]
     pub const fn sequence(&self) -> &SequenceState {
         &self.sequence
-    }
-
-    /// Returns whether the underlying SSE framer holds no unfinished work.
-    #[must_use]
-    pub fn sse_is_idle(&self) -> bool {
-        self.sse.is_idle()
     }
 
     /// Marks the kernel terminally failed (dialect outer transactional push).
@@ -662,7 +638,7 @@ mod tests {
                 .unwrap_or_else(|error| panic!("push: {error:?}"));
             assert_eq!(events.len(), 1);
             assert!(events[0].terminal);
-            assert_eq!(kernel.total_bytes(), terminal.len());
+            assert_eq!(kernel.total_bytes, terminal.len());
             assert!(kernel.finish(&mut hooks).is_ok());
         }
     }

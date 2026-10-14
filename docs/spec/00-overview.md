@@ -53,7 +53,7 @@ Publication and Rust nameability confer accessibility, not support. A published
 package carries no direct-use compatibility, qualification, or support promise
 unless it is in the supported class.
 
-The workspace contains 35 packages: five supported, 28 published internal, and
+The workspace contains 36 packages: five supported, 29 published internal, and
 two repository-only. Nothing is published to a registry today; every package
 sets `publish = false`.
 
@@ -109,6 +109,7 @@ classes and directory policy.
 | `plakous-responses-dialect` | `crates/protocols/responses-dialect` | `protocol` | Generic Responses dialect host shapes shared by the Responses commercial routes |
 | `plakous-messages` | `crates/protocols/messages` | `protocol` | Messages-family kernel: request grammar, block ordering, thinking/signature replay, stream grammar, wire accounting |
 | `plakous-chat-completions` | `crates/protocols/chat-completions` | `protocol` | Chat Completions kernel: message lowering, one-choice streaming lifecycle, indexed function calls, exact usage, SSE `[DONE]` |
+| `plakous-exchange` | `crates/protocols/exchange` | `protocol` | Physical-exchange plumbing shared by the kernels and providers: transport failure to network-failure facts, bounded error-body reads, the cancellation race, and the turn-retry decline ladder |
 | `plakous-openai` | `crates/providers/openai` | `provider` | OpenAI route/catalog/authz dialect plus Codex OAuth subscription execution |
 | `plakous-anthropic` | `crates/providers/anthropic` | `provider` | Anthropic Messages dialect: route, authz, catalog, error hooks, Claude OAuth costume |
 | `plakous-xai` | `crates/providers/xai` | `provider` | xAI Responses provider facts and SuperGrok subscription auth |

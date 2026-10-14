@@ -340,16 +340,6 @@ impl MessagesRequestPolicy {
         self
     }
 
-    /// Prepends a gateway identity system block (Claude OAuth first-block law).
-    #[must_use]
-    pub fn with_identity_prefix(mut self, text: impl Into<String>) -> Self {
-        let text = text.into();
-        if !text.is_empty() {
-            self.system_prefixes.push(text);
-        }
-        self
-    }
-
     /// Appends one exact gateway-required system prefix block.
     #[must_use]
     pub fn with_system_prefix(mut self, text: impl Into<String>) -> Self {
@@ -477,12 +467,6 @@ impl ToolOwnership {
     /// Reports whether the exact tool was included.
     pub fn contains(&self, tool: &ToolName) -> bool {
         self.owners.contains_key(tool)
-    }
-    /// Reports whether any exposed tool is provider hosted.
-    pub fn has_provider_hosted(&self) -> bool {
-        self.owners
-            .values()
-            .any(|owner| matches!(owner, ToolExecutionOwner::ProviderHosted { .. }))
     }
     /// Returns the caller disposition frozen for an advertised customer tool.
     pub fn caller(&self, tool: &ToolName) -> Option<ToolCallerDisposition> {

@@ -23,15 +23,6 @@ pub fn output_text_part(text: impl Into<String>) -> Value {
     Value::Object(map)
 }
 
-/// Builds a `refusal` content part (assistant messages).
-#[must_use]
-pub fn refusal_part(refusal: impl Into<String>) -> Value {
-    let mut map = Map::new();
-    map.insert("type".to_owned(), Value::String("refusal".to_owned()));
-    map.insert("refusal".to_owned(), Value::String(refusal.into()));
-    Value::Object(map)
-}
-
 /// Builds a `message` input item with role and content parts.
 #[must_use]
 pub fn message_item(role: impl Into<String>, content: Vec<Value>) -> Value {

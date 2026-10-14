@@ -317,12 +317,6 @@ impl ResponsesLifecycle {
         self.policy
     }
 
-    /// Reports whether `response.created` has been accepted.
-    #[must_use]
-    pub const fn is_created(&self) -> bool {
-        self.created.is_some()
-    }
-
     /// Returns the created response id when present.
     #[must_use]
     pub fn created_id(&self) -> Option<&str> {

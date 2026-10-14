@@ -55,6 +55,7 @@ use plakous_auth::{
     SecretString as AuthSecretString, SubscriptionIntegrationProfileId as AuthProfileId,
     generate_oauth_correlation_token,
 };
+use plakous_exchange::network_failure;
 use plakous_http::{
     CancellationToken, Client, ExchangeControl, HeaderMap, HeaderName, HeaderValue, Limits, Method,
     Origin, Request, SensitiveBytes, StatusCode, sensitive_header_value,
@@ -2755,33 +2756,6 @@ impl ClaimedRevokeHooks for CodexRevokeHooks<'_> {
     fn observer(&self) -> Option<&dyn CredentialRefreshObserver> {
         self.manager.refresh_observer.as_deref()
     }
-}
-
-pub(crate) fn network_failure(
-    failure: plakous_http::Failure,
-) -> Option<plakous_model::ModelNetworkFailure> {
-    use plakous_http::{ErrorKind, Phase, TransmissionFact};
-    use plakous_model::{ModelNetworkFailure, ModelNetworkTransmission, ModelRetryPhase};
-    let phase = match failure.phase() {
-        Phase::Resolution => ModelRetryPhase::Resolution,
-        Phase::Connect => ModelRetryPhase::Connect,
-        Phase::Tls => ModelRetryPhase::Tls,
-        Phase::RequestWrite => ModelRetryPhase::RequestWrite,
-        Phase::RequestWriteOrResponseHead => ModelRetryPhase::RequestWriteOrResponseHead,
-        Phase::ResponseHead => ModelRetryPhase::ResponseHead,
-        Phase::ResponseBody => ModelRetryPhase::ResponseBody,
-        Phase::Cleanup => ModelRetryPhase::Cleanup,
-        _ => return None,
-    };
-    Some(ModelNetworkFailure {
-        phase,
-        sent: match failure.transmission() {
-            TransmissionFact::NotStarted => ModelNetworkTransmission::NotSent,
-            TransmissionFact::RequestIncomplete => ModelNetworkTransmission::Incomplete,
-            TransmissionFact::MayHaveTransmitted => ModelNetworkTransmission::MayHaveSent,
-        },
-        timed_out: failure.kind() == ErrorKind::DeadlineExceeded,
-    })
 }
 
 fn map_codex_claimed_http_error(error: ClaimedHttpError) -> NativeCodexAuthError {

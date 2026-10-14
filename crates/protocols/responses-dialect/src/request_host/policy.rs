@@ -119,6 +119,10 @@ pub fn compile_provider_configuration_with_implementation(
     clippy::too_many_arguments,
     reason = "the compiler receives independent selected, resolved, implementation, authority, family, and router facts"
 )]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "owned value matches the dialect hook and caller ownership"
+)]
 pub fn compile_provider_configuration_with_implementation_and_router_policy(
     selected: &SelectedProviderConfiguration,
     descriptor: ResolvedModelDescriptor,
@@ -158,6 +162,10 @@ fn mismatch(field: &'static str) -> ResponsesProviderConfigurationError {
     ResponsesProviderConfigurationError::PolicyMismatch(field)
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "one linear host step whose ordering is the invariant"
+)]
 fn validate_selected_behavior(
     selected: &SelectedProviderConfiguration,
     policy: ResponsesRequestPolicy,

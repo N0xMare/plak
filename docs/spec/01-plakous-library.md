@@ -2444,7 +2444,9 @@ retained or seeded history lowers on every protocol family. The failure's
 retryability still records possible duplicate inference or billing; a possible
 provider-hosted effect suppresses the guided retry and requires reconciliation.
 When the model error carries retry-delay advice, the host waits before retrying,
-with cancellation and shutdown still active. The bundled reference-client
+with cancellation and shutdown still active. The Responses hosts attach none to
+this error: it arrives on an accepted HTTP 200 stream, whose head `Retry-After`
+is not read, so the guided retry dispatches without a delay. The bundled reference-client
 guidance is verbatim in the neutral prompts crate. A catalog
 `model_messages.content_filter_guidance` overrides it only when nonblank and
 at most 512 UTF-8 bytes; the accepted value binds catalog row identity.
@@ -6723,7 +6725,12 @@ request is replayed automatically in every case where a replay can only cost a
 duplicate inference, and in no other. The pure policy is `RetryPolicy::TURN` in
 `plakous-attempt`; the Messages, Chat Completions and Responses kernels each own
 the loop, the wait, cancellation and their deadline, and nothing above a kernel
-adds a second loop.
+adds a second loop. They share one decline ladder, `retry_decline` in
+`plakous-exchange`: a passed deadline, then a decline the exchange already
+established (a provider retry-disabled header), then no re-authorizable resend
+(`retry_disabled`), then a non-turn workflow whose request may have been sent
+(`workflow`), then a possible server effect, then the physical, wait or
+long-generation budget, and last a deadline the wait would cross.
 
 *Request classification.* Each kernel classifies the exact serialized body it
 sends as `ReplaySafety::CostOnly` or `ReplaySafety::ServerEffect`, by allowlist:
@@ -7256,7 +7263,11 @@ operation by default, including the typed terminal event. Its independent
 2 MiB frame and 16 MiB total stream byte limits still apply. This event
 budget accommodates valid long streams of small deltas; it does not promise
 that every model output fitting its token allowance fits the client's byte,
-event, or operation deadline bounds.
+event, or operation deadline bounds. Chat Completions and Messages streams
+carry the same kind of total wire-byte bound, 64 MiB by default, counting SSE
+comments, so it also caps the output and tool arguments retained across all
+calls. No kernel reports per-attempt wire byte or event counts: a stream that
+crosses a bound reports only the typed limit error naming that bound.
 JavaScript generated-data,
 queue, retained-storage and frame limits are fixed in §9.4 and apply before
 final token presentation limits; crossing one destroys the evaluation without

@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 
 use futures_core::Stream;
 use plakous_attempt::{FailureRisk, RetryClass, TerminalFacts};
+use plakous_exchange::network_failure;
 use plakous_model::{
     CanonicalItemPrefixIdentity, Clock, ModelCallContext, ModelDispatchRejection,
     ModelDispatchRejectionClass, ModelDispatchRejectionPhase, ModelError, ModelErrorContext,
@@ -413,6 +414,10 @@ enum JoinedState {
 }
 
 impl ResponsesJoinedModelStream {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one linear host step whose ordering is the invariant"
+    )]
     fn terminalize(&mut self) -> Result<(), ModelError> {
         let outcome = self.outcome.take().ok_or_else(|| {
             model_error(
@@ -704,147 +709,6 @@ fn grok_length_text_terminal(projection: &ResponsesTerminalProjection) -> bool {
         })
 }
 
-#[cfg(test)]
-mod grok_length_tests {
-    use super::*;
-    use crate::{
-        ResponsesProviderRequestBinding, ResponsesReplayProjection, ResponsesResponse,
-        ResponsesResponseLimits, ResponsesUsagePolicy, project_terminal_response,
-    };
-    use plakous_model::{
-        Digest, DigestDomain, FinishReason, FixedClock, ModelId, ProtocolId, ReplayKindId,
-        Timestamp,
-    };
-    use plakous_responses::ResponsesStorageMode;
-    use serde_json::json;
-
-    #[test]
-    fn only_native_grok_length_text_projects_a_single_terminal_without_tools()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let response = ResponsesResponse::parse(
-            &json!({
-                "id":"resp-length","object":"response","status":"incomplete",
-                "model":"grok-test","output":[
-                    {"id":"reason","type":"reasoning","status":"completed","summary":[]},
-                    {"id":"message","type":"message","role":"assistant","status":"incomplete",
-                     "content":[{"type":"output_text","text":"summary","annotations":[]}]}
-                ],"usage":{"input_tokens":2,"output_tokens":7,"total_tokens":9},
-                "incomplete_details":{"reason":"max_output_tokens"}
-            }),
-            ResponsesUsagePolicy::RequireTotal,
-            ResponsesResponseLimits::default(),
-        )?;
-        let replay = ResponsesReplayProjection::new(
-            ProtocolId::new("xai.responses")?,
-            None,
-            ModelId::new("grok-test")?,
-            ReplayKindId::new("responses.output_item")?,
-            1,
-        )?;
-        let provider_request = ResponsesProviderRequestBinding::new(
-            Digest::sha256(DigestDomain::ProviderOperation, 1, &[b"request"])?,
-            Digest::sha256(DigestDomain::ProviderOperation, 1, &[b"response"])?,
-            None,
-        )?;
-        let projection = project_terminal_response(
-            response,
-            &replay,
-            ResponsesStorageMode::Stateless,
-            provider_request,
-        )?;
-        assert!(grok_length_text_terminal(&projection));
-        let grok = ResponsesCanonicalDialectData::grok(ModelId::new("grok-test")?, [])?;
-        let platform = ResponsesCanonicalDialectData::xai_platform(ModelId::new("grok-test")?)?;
-        assert!(grok.policy().allows_grok_length_text());
-        assert!(!platform.policy().allows_grok_length_text());
-        let clock = Arc::new(FixedClock::new(Timestamp::new(42, 0)?));
-        let ids = CanonicalIdSources::with_clock(clock);
-        let canonical = project_canonical_terminal_with_hosted_programs(
-            &projection,
-            &grok,
-            Digest::sha256(DigestDomain::RequestPlan, 1, &[b"plan"])?,
-            &ids,
-            ResponsesHostedProgramContext::default(),
-        )?;
-        assert_eq!(canonical.response().finish().reason(), FinishReason::Length);
-        let events = canonical.into_events();
-        assert!(
-            events
-                .iter()
-                .all(|event| !matches!(event, plakous_model::ModelEvent::ToolInputDelta(_)))
-        );
-        assert_eq!(
-            events
-                .iter()
-                .filter(|event| matches!(event, plakous_model::ModelEvent::ResponseCompleted(_)))
-                .count(),
-            1
-        );
-        Ok(())
-    }
-
-    fn incomplete_projection(
-        output: serde_json::Value,
-        reason: &str,
-    ) -> Result<ResponsesTerminalProjection, Box<dyn std::error::Error>> {
-        let response = ResponsesResponse::parse(
-            &json!({
-                "id":"resp-cut","object":"response","status":"incomplete",
-                "model":"grok-test","output":output,
-                "usage":{"input_tokens":2,"output_tokens":7,"total_tokens":9},
-                "incomplete_details":{"reason":reason}
-            }),
-            ResponsesUsagePolicy::RequireTotal,
-            ResponsesResponseLimits::default(),
-        )?;
-        let replay = ResponsesReplayProjection::new(
-            ProtocolId::new("xai.responses")?,
-            None,
-            ModelId::new("grok-test")?,
-            ReplayKindId::new("responses.output_item")?,
-            1,
-        )?;
-        let provider_request = ResponsesProviderRequestBinding::new(
-            Digest::sha256(DigestDomain::ProviderOperation, 1, &[b"request"])?,
-            Digest::sha256(DigestDomain::ProviderOperation, 1, &[b"response"])?,
-            None,
-        )?;
-        Ok(project_terminal_response(
-            response,
-            &replay,
-            ResponsesStorageMode::Stateless,
-            provider_request,
-        )?)
-    }
-
-    /// A tool call cut off by the output bound is an output-limit failure the
-    /// runtime can retry, never a generic incomplete response, and never a
-    /// Grok length-text terminal that could dispatch it.
-    #[test]
-    fn a_tool_call_cut_off_by_the_output_bound_is_an_output_limit_failure()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let cut = incomplete_projection(
-            json!([
-                {"id":"reason","type":"reasoning","status":"completed","summary":[]},
-                {"id":"call","type":"function_call","status":"incomplete","call_id":"call-1",
-                 "name":"write","arguments":"{\"path\":\"big.txt\",\"content\":\"aaa"}
-            ]),
-            "max_output_tokens",
-        )?;
-        assert!(!grok_length_text_terminal(&cut));
-        assert_eq!(
-            incomplete_terminal_failure(&cut).0,
-            ModelErrorKind::OutputLimit
-        );
-        let filtered = incomplete_projection(json!([]), "content_filter")?;
-        assert_eq!(
-            incomplete_terminal_failure(&filtered).0,
-            ModelErrorKind::IncompleteResponse
-        );
-        Ok(())
-    }
-}
-
 impl Stream for ResponsesJoinedModelStream {
     type Item = Result<plakous_model::ModelEvent, ModelError>;
 
@@ -903,6 +767,10 @@ impl Drop for ResponsesJoinedModelStream {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "one linear host step whose ordering is the invariant"
+)]
 fn seal_terminal_events(
     projection: ResponsesTerminalProjection,
     canonical: ResponsesCanonicalTerminal,
@@ -1082,31 +950,6 @@ fn covered_projection_after_output(
         .staged_canonical_item_prefix_identity(output)
 }
 
-fn network_failure(failure: plakous_http::Failure) -> Option<plakous_model::ModelNetworkFailure> {
-    use plakous_http::{ErrorKind, Phase, TransmissionFact};
-    use plakous_model::{ModelNetworkFailure, ModelNetworkTransmission, ModelRetryPhase};
-    let phase = match failure.phase() {
-        Phase::Resolution => ModelRetryPhase::Resolution,
-        Phase::Connect => ModelRetryPhase::Connect,
-        Phase::Tls => ModelRetryPhase::Tls,
-        Phase::RequestWrite => ModelRetryPhase::RequestWrite,
-        Phase::RequestWriteOrResponseHead => ModelRetryPhase::RequestWriteOrResponseHead,
-        Phase::ResponseHead => ModelRetryPhase::ResponseHead,
-        Phase::ResponseBody => ModelRetryPhase::ResponseBody,
-        Phase::Cleanup => ModelRetryPhase::Cleanup,
-        _ => return None,
-    };
-    Some(ModelNetworkFailure {
-        phase,
-        sent: match failure.transmission() {
-            TransmissionFact::NotStarted => ModelNetworkTransmission::NotSent,
-            TransmissionFact::RequestIncomplete => ModelNetworkTransmission::Incomplete,
-            TransmissionFact::MayHaveTransmitted => ModelNetworkTransmission::MayHaveSent,
-        },
-        timed_out: failure.kind() == ErrorKind::DeadlineExceeded,
-    })
-}
-
 /// Binds a credential-free probe to the executor's exact origin and route.
 #[must_use]
 pub fn bind_reachability_probe(
@@ -1154,6 +997,10 @@ fn model_error_from_attempt(
         .with_attempt_summary(summary)
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "one linear host step whose ordering is the invariant"
+)]
 fn model_error_from_attempt_without_summary(
     error: ResponsesAttemptError,
     descriptor: &ResolvedModelDescriptor,
@@ -1298,6 +1145,10 @@ fn model_error_from_attempt_without_summary(
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "owned value matches the dialect hook and caller ownership"
+)]
 fn dispatch_rejection_error(
     descriptor: &ResolvedModelDescriptor,
     rejection: crate::ResponsesDispatchRejection,
@@ -1373,6 +1224,10 @@ fn stream_failure_message(error: ResponsesFamilyStreamError) -> String {
     }
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "owned value matches the dialect hook and caller ownership"
+)]
 fn contextual_http_error(
     descriptor: &ResolvedModelDescriptor,
     kind: ModelErrorKind,
@@ -1526,51 +1381,6 @@ fn model_error(
     .ok()
     .and_then(|context| ModelError::contextual(kind, message.clone(), context).ok())
     .unwrap_or_else(|| ModelError::new(kind, message))
-}
-
-#[cfg(test)]
-mod progress_tests {
-    use super::*;
-    use std::time::Duration;
-
-    #[test]
-    fn sustained_arguments_and_inactivity_have_bounded_content_free_diagnostics() {
-        let start = Instant::now();
-        let mut progress = StreamProgress::new(start);
-        assert!(
-            progress
-                .deadline_message(start)
-                .contains("observed_phase=Waiting")
-        );
-        for index in 0..3979 {
-            progress.observe(
-                &crate::ResponsesStreamEventKind::FunctionCallArgumentsDelta {
-                    output_index: 0,
-                    item_id: Some("private-id".into()),
-                    delta: "private-content".into(),
-                },
-                start + Duration::from_millis(index * 30),
-            );
-        }
-        let active = progress.deadline_message(start + Duration::from_millis(119_352));
-        assert!(active.contains("observed_argument_deltas=3979 observed_argument_completions=0"));
-        assert!(active.contains("last_observation_age_ms=12"));
-        assert!(!active.contains("private"));
-        assert!(active.len() < 512);
-        assert!(active.contains("authoritative_completion=false"));
-        let idle = progress.deadline_message(start + Duration::from_millis(129_340));
-        assert!(idle.contains("last_observation_age_ms=10000"));
-        progress.observe(
-            &crate::ResponsesStreamEventKind::Unknown {
-                kind: "private-label".into(),
-                native: serde_json::json!({"secret": "private"}),
-            },
-            start,
-        );
-        let unknown = progress.deadline_message(start);
-        assert!(unknown.contains("observed_phase=Unknown"));
-        assert!(!unknown.contains("private"));
-    }
 }
 
 #[cfg(test)]
@@ -2101,5 +1911,191 @@ mod rejection_tests {
                 risk: ModelRetryRisk::ProviderHostedEffect,
             }
         );
+    }
+}
+
+#[cfg(test)]
+mod grok_length_tests {
+    use super::*;
+    use crate::{
+        ResponsesProviderRequestBinding, ResponsesReplayProjection, ResponsesResponse,
+        ResponsesResponseLimits, ResponsesUsagePolicy, project_host::project_terminal_response,
+    };
+    use plakous_model::{
+        Digest, DigestDomain, FinishReason, FixedClock, ModelId, ProtocolId, ReplayKindId,
+        Timestamp,
+    };
+    use plakous_responses::ResponsesStorageMode;
+    use serde_json::json;
+
+    #[test]
+    fn only_native_grok_length_text_projects_a_single_terminal_without_tools()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let response = ResponsesResponse::parse(
+            &json!({
+                "id":"resp-length","object":"response","status":"incomplete",
+                "model":"grok-test","output":[
+                    {"id":"reason","type":"reasoning","status":"completed","summary":[]},
+                    {"id":"message","type":"message","role":"assistant","status":"incomplete",
+                     "content":[{"type":"output_text","text":"summary","annotations":[]}]}
+                ],"usage":{"input_tokens":2,"output_tokens":7,"total_tokens":9},
+                "incomplete_details":{"reason":"max_output_tokens"}
+            }),
+            ResponsesUsagePolicy::RequireTotal,
+            ResponsesResponseLimits::default(),
+        )?;
+        let replay = ResponsesReplayProjection::new(
+            ProtocolId::new("xai.responses")?,
+            None,
+            ModelId::new("grok-test")?,
+            ReplayKindId::new("responses.output_item")?,
+            1,
+        )?;
+        let provider_request = ResponsesProviderRequestBinding::new(
+            Digest::sha256(DigestDomain::ProviderOperation, 1, &[b"request"])?,
+            Digest::sha256(DigestDomain::ProviderOperation, 1, &[b"response"])?,
+            None,
+        )?;
+        let projection = project_terminal_response(
+            response,
+            &replay,
+            ResponsesStorageMode::Stateless,
+            provider_request,
+        )?;
+        assert!(grok_length_text_terminal(&projection));
+        let grok = ResponsesCanonicalDialectData::grok(ModelId::new("grok-test")?, [])?;
+        let platform = ResponsesCanonicalDialectData::xai_platform(ModelId::new("grok-test")?)?;
+        assert!(grok.policy().allows_grok_length_text());
+        assert!(!platform.policy().allows_grok_length_text());
+        let clock = Arc::new(FixedClock::new(Timestamp::new(42, 0)?));
+        let ids = CanonicalIdSources::with_clock(clock);
+        let canonical = project_canonical_terminal_with_hosted_programs(
+            &projection,
+            &grok,
+            Digest::sha256(DigestDomain::RequestPlan, 1, &[b"plan"])?,
+            &ids,
+            ResponsesHostedProgramContext::default(),
+        )?;
+        assert_eq!(canonical.response().finish().reason(), FinishReason::Length);
+        let events = canonical.into_events();
+        assert!(
+            events
+                .iter()
+                .all(|event| !matches!(event, plakous_model::ModelEvent::ToolInputDelta(_)))
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, plakous_model::ModelEvent::ResponseCompleted(_)))
+                .count(),
+            1
+        );
+        Ok(())
+    }
+
+    fn incomplete_projection(
+        output: serde_json::Value,
+        reason: &str,
+    ) -> Result<ResponsesTerminalProjection, Box<dyn std::error::Error>> {
+        let response = ResponsesResponse::parse(
+            &json!({
+                "id":"resp-cut","object":"response","status":"incomplete",
+                "model":"grok-test","output":output,
+                "usage":{"input_tokens":2,"output_tokens":7,"total_tokens":9},
+                "incomplete_details":{"reason":reason}
+            }),
+            ResponsesUsagePolicy::RequireTotal,
+            ResponsesResponseLimits::default(),
+        )?;
+        let replay = ResponsesReplayProjection::new(
+            ProtocolId::new("xai.responses")?,
+            None,
+            ModelId::new("grok-test")?,
+            ReplayKindId::new("responses.output_item")?,
+            1,
+        )?;
+        let provider_request = ResponsesProviderRequestBinding::new(
+            Digest::sha256(DigestDomain::ProviderOperation, 1, &[b"request"])?,
+            Digest::sha256(DigestDomain::ProviderOperation, 1, &[b"response"])?,
+            None,
+        )?;
+        Ok(project_terminal_response(
+            response,
+            &replay,
+            ResponsesStorageMode::Stateless,
+            provider_request,
+        )?)
+    }
+
+    /// A tool call cut off by the output bound is an output-limit failure the
+    /// runtime can retry, never a generic incomplete response, and never a
+    /// Grok length-text terminal that could dispatch it.
+    #[test]
+    fn a_tool_call_cut_off_by_the_output_bound_is_an_output_limit_failure()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let cut = incomplete_projection(
+            json!([
+                {"id":"reason","type":"reasoning","status":"completed","summary":[]},
+                {"id":"call","type":"function_call","status":"incomplete","call_id":"call-1",
+                 "name":"write","arguments":"{\"path\":\"big.txt\",\"content\":\"aaa"}
+            ]),
+            "max_output_tokens",
+        )?;
+        assert!(!grok_length_text_terminal(&cut));
+        assert_eq!(
+            incomplete_terminal_failure(&cut).0,
+            ModelErrorKind::OutputLimit
+        );
+        let filtered = incomplete_projection(json!([]), "content_filter")?;
+        assert_eq!(
+            incomplete_terminal_failure(&filtered).0,
+            ModelErrorKind::IncompleteResponse
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn sustained_arguments_and_inactivity_have_bounded_content_free_diagnostics() {
+        let start = Instant::now();
+        let mut progress = StreamProgress::new(start);
+        assert!(
+            progress
+                .deadline_message(start)
+                .contains("observed_phase=Waiting")
+        );
+        for index in 0..3979 {
+            progress.observe(
+                &crate::ResponsesStreamEventKind::FunctionCallArgumentsDelta {
+                    output_index: 0,
+                    item_id: Some("private-id".into()),
+                    delta: "private-content".into(),
+                },
+                start + Duration::from_millis(index * 30),
+            );
+        }
+        let active = progress.deadline_message(start + Duration::from_millis(119_352));
+        assert!(active.contains("observed_argument_deltas=3979 observed_argument_completions=0"));
+        assert!(active.contains("last_observation_age_ms=12"));
+        assert!(!active.contains("private"));
+        assert!(active.len() < 512);
+        assert!(active.contains("authoritative_completion=false"));
+        let idle = progress.deadline_message(start + Duration::from_millis(129_340));
+        assert!(idle.contains("last_observation_age_ms=10000"));
+        progress.observe(
+            &crate::ResponsesStreamEventKind::Unknown {
+                kind: "private-label".into(),
+                native: serde_json::json!({"secret": "private"}),
+            },
+            start,
+        );
+        let unknown = progress.deadline_message(start);
+        assert!(unknown.contains("observed_phase=Unknown"));
+        assert!(!unknown.contains("private"));
     }
 }

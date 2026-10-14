@@ -744,6 +744,10 @@ impl ResponsesCanonicalObservationProjector {
         self.gapped
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one linear host step whose ordering is the invariant"
+    )]
     fn try_project(
         &mut self,
         event: ResponsesFamilyStreamEvent,
@@ -958,6 +962,10 @@ impl ResponsesCanonicalObservationProjector {
         Ok(())
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one linear host step whose ordering is the invariant"
+    )]
     fn add_item(
         &mut self,
         output_index: u32,
@@ -1632,6 +1640,10 @@ pub fn project_canonical_terminal(
 ///
 /// In addition to ordinary terminal errors, rejects caller/output references
 /// to absent or already completed programs and duplicate program terminals.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one linear host step whose ordering is the invariant"
+)]
 pub fn project_canonical_terminal_with_hosted_programs(
     terminal: &ResponsesTerminalProjection,
     data: &ResponsesCanonicalDialectData,
@@ -1820,6 +1832,10 @@ fn validate_router_metadata(
 #[allow(
     clippy::too_many_arguments,
     reason = "terminal item projection binds exact item/replay/identity/config facts"
+)]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one linear host step whose ordering is the invariant"
 )]
 fn terminal_item_blocks(
     item: &ResponsesOutputItem,
@@ -2331,7 +2347,7 @@ mod tests {
     use crate::{
         ResponsesFamilySseDecoder, ResponsesReplayProjection, ResponsesResponse,
         ResponsesResponseLimits, ResponsesStreamDialectData, ResponsesUsagePolicy,
-        project_terminal_response,
+        project_host::project_terminal_response,
     };
 
     const MODEL: &str = "gpt-test";

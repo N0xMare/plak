@@ -30,19 +30,20 @@
 //! Dialects own event-shape parsing in [`DialectStreamHooks::decode_json_event`]
 //! and residual hooks (citations, custom tools, incomplete terminals).
 //!
-//! ### Request core status (slice)
+//! ### Request helpers
 //!
 //! Pure wire helpers for common body fields (reasoning effort labels,
 //! function `tool_choice`, function tool defs, instruction join, stream/store,
-//! input-item Value builders). Dialects still own full encode/prepare and
-//! fail-closed deltas. Full request merge is later sequenced work.
+//! input-item Value builders). Dialects own full encode/prepare and
+//! fail-closed deltas.
 //!
 //! ## Not in this crate
 //!
 //! - Provider HTTP clients, credentials, or route identities
 //! - Agent loop / session / history stacks
 //! - Anthropic Messages event machines
-//! - `plakous-model` (canonical model types stay in dialect/runtime crates)
+//! - Canonical model type definitions: the projector emits `plakous-model`
+//!   events but defines none
 
 #![forbid(unsafe_code)]
 // Protocol docs name OpenAI/OpenRouter/SuperGrok; Result-heavy pure wire helpers;
@@ -76,7 +77,7 @@ pub use dialect::{
     BomPolicy, DoneMarkerDecision, FinishPolicy, OPENAI_PLATFORM_SEQUENCE_FIELDS,
     OPENROUTER_SEQUENCE_FIELDS, ResponsesDialectProfile, SequencePolicy, SequenceState,
     SequenceValidationError, TerminalPolicy, UTF8_BOM, XAI_SEQUENCE_FIELDS, decide_done_marker,
-    requires_done_marker, strips_leading_bom, terminal_finish_ok, validate_next_sequence,
+    terminal_finish_ok, validate_next_sequence,
 };
 pub use json_fields::{
     MAX_PROVIDER_LABEL_BYTES, ResponsesFieldError, optional_object, optional_provider_label,
@@ -86,13 +87,12 @@ pub use json_fields::{
 pub use project::{
     CanonicalIdSources, FamilyProjectionError, ProjectedBlock, ProjectedItem, ProjectedItemKind,
     ProjectorLimits, ProjectorPolicy, ReasoningEmitMode, ResponseProjectorCore,
-    ToolArgsFinishPolicy, finish_reason_for_items,
+    ToolArgsFinishPolicy,
 };
 pub use request::{
     FunctionToolChoiceWire, FunctionToolWire, REASONING_SUMMARY_AUTO, ReasoningConfigWire,
     ReasoningEffortWire, function_call_item, function_call_output_item, input_text_part,
     insert_stream_store, join_instruction_texts, message_item, output_text_part, reasoning_object,
-    refusal_part,
 };
 pub use stream::{
     DialectStreamHooks, LifecycleDialectPolicy, ReasoningLifecycleMode, ResponseModelBinding,

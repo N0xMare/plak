@@ -1,5 +1,7 @@
 //! Leading UTF-8 BOM stripping for dialects with [`BomPolicy::Strip`].
 
+use std::borrow::Cow;
+
 use crate::dialect::{BomPolicy, UTF8_BOM};
 
 /// Mutable lead buffer used only while a dialect may still strip a BOM.
@@ -33,9 +35,10 @@ impl BomLead {
     ///
     /// Returns `None` while the lead is still an incomplete BOM prefix and the
     /// decoder must wait for more input before framing begins.
-    pub(crate) fn take_bytes_after_bom(&mut self, chunk: &[u8]) -> Option<Vec<u8>> {
+    /// Once the lead is resolved the chunk is borrowed, not copied.
+    pub(crate) fn take_bytes_after_bom<'a>(&mut self, chunk: &'a [u8]) -> Option<Cow<'a, [u8]>> {
         let Some(lead) = self.inner.as_mut() else {
-            return Some(chunk.to_vec());
+            return Some(Cow::Borrowed(chunk));
         };
         lead.extend_from_slice(chunk);
         if lead.is_empty() {
@@ -50,6 +53,6 @@ impl BomLead {
         }
         let rest = std::mem::take(lead);
         self.inner = None;
-        Some(rest)
+        Some(Cow::Owned(rest))
     }
 }

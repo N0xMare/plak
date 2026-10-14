@@ -48,6 +48,7 @@ use plakous_auth::{
     OfflineCredentialLifecycle, PkceS256, PrivateCredentialStore, PrivateStoreError,
     ReadyCredentialLease, RefreshClaim, SecretBytes, SecretString,
 };
+use plakous_exchange::network_failure;
 use plakous_http::{
     Bytes, Client, ExchangeControl, Failure, HeaderMap, HeaderName, HeaderValue, Headers, Method,
     Origin, Request, SensitiveBytes, StatusCode, sensitive_header_value,
@@ -2127,31 +2128,6 @@ impl ClaimedRevokeHooks for XaiRevokeHooks<'_> {
     fn observer(&self) -> Option<&dyn CredentialRefreshObserver> {
         self.core.refresh_observer.as_deref()
     }
-}
-
-pub(crate) fn network_failure(failure: Failure) -> Option<plakous_model::ModelNetworkFailure> {
-    use plakous_http::{ErrorKind, Phase, TransmissionFact};
-    use plakous_model::{ModelNetworkFailure, ModelNetworkTransmission, ModelRetryPhase};
-    let phase = match failure.phase() {
-        Phase::Resolution => ModelRetryPhase::Resolution,
-        Phase::Connect => ModelRetryPhase::Connect,
-        Phase::Tls => ModelRetryPhase::Tls,
-        Phase::RequestWrite => ModelRetryPhase::RequestWrite,
-        Phase::RequestWriteOrResponseHead => ModelRetryPhase::RequestWriteOrResponseHead,
-        Phase::ResponseHead => ModelRetryPhase::ResponseHead,
-        Phase::ResponseBody => ModelRetryPhase::ResponseBody,
-        Phase::Cleanup => ModelRetryPhase::Cleanup,
-        _ => return None,
-    };
-    Some(ModelNetworkFailure {
-        phase,
-        sent: match failure.transmission() {
-            TransmissionFact::NotStarted => ModelNetworkTransmission::NotSent,
-            TransmissionFact::RequestIncomplete => ModelNetworkTransmission::Incomplete,
-            TransmissionFact::MayHaveTransmitted => ModelNetworkTransmission::MayHaveSent,
-        },
-        timed_out: failure.kind() == ErrorKind::DeadlineExceeded,
-    })
 }
 
 fn map_xai_claimed_http_error(

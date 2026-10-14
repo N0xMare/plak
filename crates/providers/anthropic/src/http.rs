@@ -10,6 +10,7 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use futures_util::Stream;
+use plakous_exchange::network_failure;
 use plakous_http::{
     Client, ErrorKind as HttpErrorKind, Failure as HttpFailure, HeaderMap, HeaderName, HeaderValue,
     Method, Origin, Phase as HttpPhase, Request as HttpRequest, SensitiveBytes, StatusCode,
@@ -1048,33 +1049,6 @@ fn http_phase_name(phase: HttpPhase) -> &'static str {
         HttpPhase::Cleanup => "cleanup",
         _ => "unknown",
     }
-}
-
-pub(crate) fn network_failure(
-    failure: plakous_http::Failure,
-) -> Option<plakous_model::ModelNetworkFailure> {
-    use plakous_http::{ErrorKind, Phase, TransmissionFact};
-    use plakous_model::{ModelNetworkFailure, ModelNetworkTransmission, ModelRetryPhase};
-    let phase = match failure.phase() {
-        Phase::Resolution => ModelRetryPhase::Resolution,
-        Phase::Connect => ModelRetryPhase::Connect,
-        Phase::Tls => ModelRetryPhase::Tls,
-        Phase::RequestWrite => ModelRetryPhase::RequestWrite,
-        Phase::RequestWriteOrResponseHead => ModelRetryPhase::RequestWriteOrResponseHead,
-        Phase::ResponseHead => ModelRetryPhase::ResponseHead,
-        Phase::ResponseBody => ModelRetryPhase::ResponseBody,
-        Phase::Cleanup => ModelRetryPhase::Cleanup,
-        _ => return None,
-    };
-    Some(ModelNetworkFailure {
-        phase,
-        sent: match failure.transmission() {
-            TransmissionFact::NotStarted => ModelNetworkTransmission::NotSent,
-            TransmissionFact::RequestIncomplete => ModelNetworkTransmission::Incomplete,
-            TransmissionFact::MayHaveTransmitted => ModelNetworkTransmission::MayHaveSent,
-        },
-        timed_out: failure.kind() == ErrorKind::DeadlineExceeded,
-    })
 }
 
 /// Binds a credential-free probe to the executor's exact origin and route.

@@ -336,18 +336,6 @@ pub const fn terminal_finish_ok(
     }
 }
 
-/// Reports whether the dialect requires a trailing `[DONE]` after a typed terminal.
-#[must_use]
-pub const fn requires_done_marker(policy: TerminalPolicy) -> bool {
-    matches!(policy, TerminalPolicy::TypedThenDone)
-}
-
-/// Reports whether the dialect strips a leading UTF-8 BOM.
-#[must_use]
-pub const fn strips_leading_bom(policy: BomPolicy) -> bool {
-    matches!(policy, BomPolicy::Strip)
-}
-
 /// UTF-8 byte-order mark recognized when [`BomPolicy::Strip`] is active.
 pub const UTF8_BOM: &[u8; 3] = b"\xef\xbb\xbf";
 
@@ -367,8 +355,6 @@ mod tests {
         assert_eq!(profile.terminal(), TerminalPolicy::TypedOptionalDone);
         assert_eq!(profile.finish(), FinishPolicy::AutoDispatchResidual);
         assert_eq!(profile.bom(), BomPolicy::Ignore);
-        assert!(!strips_leading_bom(profile.bom()));
-        assert!(!requires_done_marker(profile.terminal()));
     }
 
     #[test]
@@ -403,8 +389,6 @@ mod tests {
         assert_eq!(profile.terminal(), TerminalPolicy::TypedThenDone);
         assert_eq!(profile.finish(), FinishPolicy::BlankLineClosed);
         assert_eq!(profile.bom(), BomPolicy::Strip);
-        assert!(requires_done_marker(profile.terminal()));
-        assert!(strips_leading_bom(profile.bom()));
         assert_eq!(
             decide_done_marker(profile.terminal(), true, false),
             DoneMarkerDecision::Accept
