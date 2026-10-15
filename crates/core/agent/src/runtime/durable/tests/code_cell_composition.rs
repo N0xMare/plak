@@ -266,21 +266,40 @@ pub(super) fn neutral_composition_descriptor(
     })
 }
 
-pub(super) fn composition_test_builder(
-    workspace: Arc<WorkspacePolicy>,
-    registry: FrozenToolRegistry,
+/// The provider-model projection target `configured` binds for `descriptor`.
+pub(super) fn composition_projection_target(
+    configured: &ConfiguredLanguageModel,
+    descriptor: &ResolvedModelDescriptor,
+) -> TestResult<ProviderModelProjectionIdentityV2> {
+    let configuration = configured.configuration();
+    Ok(ProviderModelProjectionIdentityV2::new(
+        descriptor.integration_class(),
+        descriptor.protocol().as_str(),
+        descriptor.route().as_str(),
+        descriptor.profile().as_str(),
+        descriptor
+            .model_family()
+            .ok_or("composition descriptor omitted its family")?
+            .as_str(),
+        descriptor.requested_model().as_str(),
+        configuration.effective().effective_model().as_str(),
+        configuration.effective_identity(),
+        plakous_tools::PROCESS_TOOL_PROJECTION_REVISION,
+    )?)
+}
+
+/// `model` configured for the neutral exec/wait Code Cell surface only.
+fn neutral_composition_model(
     model: &Arc<ArtifactModel>,
     descriptor: ResolvedModelDescriptor,
     authority: RuntimeModelAuthority,
-    composition_descriptor: LocalCompositionDescriptor,
-    integration_profile: (Arc<FakeCompositionEvidence>, LocalCompositionLifecycle),
-) -> TestResult<AgentBuilder> {
-    let (evidence, lifecycle) = integration_profile;
-    let configured = configured_test_model_for_operation_with_tools(
+    registry: &FrozenToolRegistry,
+) -> TestResult<ConfiguredLanguageModel> {
+    configured_test_model_for_operation_with_tools(
         model.clone(),
         descriptor,
         authority,
-        &registry,
+        registry,
         LocalDurabilityDisposition::DurableRequired,
         ContextAdmissionRequirement::AnyBounded,
         1,
@@ -288,15 +307,36 @@ pub(super) fn composition_test_builder(
         Some(&["exec", "wait"]),
         ToolPresentationMode::LocalCompositionOnly,
         false,
-    )?;
-    let integration: Arc<dyn LocalCompositionIntegration> =
-        Arc::new(FakeComposition::Neutral(FakeCompositionIntegration {
-            descriptor: composition_descriptor.clone(),
-            evidence,
-            lifecycle,
-        }));
+    )
+}
+
+/// The neutral Code Cell descriptor bound to `model`'s configured target.
+pub(super) fn neutral_composition_for(
+    model: &Arc<ArtifactModel>,
+    descriptor: &ResolvedModelDescriptor,
+    authority: &RuntimeModelAuthority,
+    registry: &FrozenToolRegistry,
+) -> TestResult<LocalCompositionDescriptor> {
+    let configured =
+        neutral_composition_model(model, descriptor.clone(), authority.clone(), registry)?;
+    let target = composition_projection_target(&configured, descriptor)?;
+    neutral_composition_descriptor(registry.clone(), target)
+}
+
+/// The agent builder every Code Cell fixture shares: a synthetic base-only
+/// profile named `profile_id`, the composition attachment, a 128-token output
+/// limit, an allow-all tool policy and a fixed clock.
+pub(super) fn code_cell_agent_builder(
+    model: &dyn LanguageModel,
+    configured: ConfiguredLanguageModel,
+    registry: FrozenToolRegistry,
+    workspace: Arc<WorkspacePolicy>,
+    profile_id: &str,
+    composition_descriptor: LocalCompositionDescriptor,
+    integration: Arc<dyn LocalCompositionIntegration>,
+) -> TestResult<AgentBuilder> {
     let profile = HarnessProfileSpecBuilder::new()
-        .id(HarnessProfileId::new("test.persistent-local-composition")?)
+        .id(HarnessProfileId::new(profile_id)?)
         .semantic_version(ProfileSemanticVersion::new(1, 0, 0))
         .provenance(HarnessProfileProvenance::Synthetic)
         .base_instructions("")
@@ -308,7 +348,7 @@ pub(super) fn composition_test_builder(
         .build()?;
     let plan = compile_explicit_runtime_profile(
         &profile,
-        model.as_ref(),
+        model,
         configured.configuration(),
         &registry,
         workspace.as_ref(),
@@ -339,6 +379,36 @@ pub(super) fn composition_test_builder(
             Arc::new(FixedClock::new(Timestamp::new(10, 0)?)),
             Arc::new(SystemIdGenerator),
         ))
+}
+
+/// A neutral exec/wait Code Cell agent over the fake integration, sharing
+/// `evidence` and running under `lifecycle`.
+pub(super) fn composition_test_builder(
+    workspace: Arc<WorkspacePolicy>,
+    registry: FrozenToolRegistry,
+    model: &Arc<ArtifactModel>,
+    descriptor: ResolvedModelDescriptor,
+    authority: RuntimeModelAuthority,
+    composition_descriptor: LocalCompositionDescriptor,
+    integration_profile: (Arc<FakeCompositionEvidence>, LocalCompositionLifecycle),
+) -> TestResult<AgentBuilder> {
+    let (evidence, lifecycle) = integration_profile;
+    let configured = neutral_composition_model(model, descriptor, authority, &registry)?;
+    let integration: Arc<dyn LocalCompositionIntegration> =
+        Arc::new(FakeComposition::Neutral(FakeCompositionIntegration {
+            descriptor: composition_descriptor.clone(),
+            evidence,
+            lifecycle,
+        }));
+    code_cell_agent_builder(
+        model.as_ref(),
+        configured,
+        registry,
+        workspace,
+        "test.neutral-local-composition",
+        composition_descriptor,
+        integration,
+    )
 }
 
 #[tokio::test]
@@ -382,90 +452,25 @@ async fn local_composition_invalid_wait_then_valid_wait_completes_without_replay
                 ),
             ]),
     );
-    let configured = configured_test_model_for_operation_with_tools(
-        model.clone(),
-        descriptor.clone(),
-        authority.clone(),
-        &registry,
-        LocalDurabilityDisposition::DurableRequired,
-        ContextAdmissionRequirement::AnyBounded,
-        1,
-        ReasoningEffortDisposition::Disabled,
-        Some(&["exec", "wait"]),
-        ToolPresentationMode::LocalCompositionOnly,
-        false,
-    )?;
-    let effective = configured.configuration().effective();
-    let target = ProviderModelProjectionIdentityV2::new(
-        descriptor.integration_class(),
-        descriptor.protocol().as_str(),
-        descriptor.route().as_str(),
-        descriptor.profile().as_str(),
-        descriptor
-            .model_family()
-            .ok_or("neutral composition descriptor omitted its family")?
-            .as_str(),
-        descriptor.requested_model().as_str(),
-        effective.effective_model().as_str(),
-        configured.configuration().effective_identity(),
-        plakous_tools::PROCESS_TOOL_PROJECTION_REVISION,
-    )?;
-    let composition_descriptor = neutral_composition_descriptor(registry.clone(), target)?;
+    let composition_descriptor =
+        neutral_composition_for(&model, &descriptor, &authority, &registry)?;
     let evidence = Arc::new(FakeCompositionEvidence::default());
-    let integration: Arc<dyn LocalCompositionIntegration> =
-        Arc::new(FakeComposition::Neutral(FakeCompositionIntegration {
-            descriptor: composition_descriptor.clone(),
-            evidence: Arc::clone(&evidence),
-            lifecycle: LocalCompositionLifecycle::RootTurnJoined,
-        }));
-    let profile = HarnessProfileSpecBuilder::new()
-        .id(HarnessProfileId::new("test.neutral-local-composition")?)
-        .semantic_version(ProfileSemanticVersion::new(1, 0, 0))
-        .provenance(HarnessProfileProvenance::Synthetic)
-        .base_instructions("")
-        .instruction_strategy(InstructionCompositionStrategy::BaseOnly)
-        .tool_exposure_strategy(ToolExposureStrategy::None)
-        .reasoning_strategy(ReasoningPreferenceStrategy::Disabled)
-        .continuation_strategy(ContinuationPreferenceStrategy::CanonicalReplayOnly)
-        .cache_strategy(CachePreferenceStrategy::Disabled)
-        .build()?;
-    let plan = compile_explicit_runtime_profile(
-        &profile,
-        model.as_ref(),
-        configured.configuration(),
-        &registry,
-        workspace.as_ref(),
-        Vec::new(),
-    )?;
-    let attachment_identity = composition_descriptor.identity;
-    let mut attachment = LocalCompositionAttachmentIdentity {
-        profile: attachment_identity,
-        artifact: attachment_identity,
-        binding: attachment_identity,
-        engine_contract: attachment_identity,
-        evidence_receipt: None,
-    };
-    attachment.binding = local_composition_binding_identity(&attachment)?;
     let sink = Arc::new(RecordingTelemetrySink {
         observations: Mutex::new(Vec::new()),
     });
-    let builder = AgentBuilder::new(configured, registry, workspace)
-        .local_programmatic_composition(LocalCompositionConstruction {
-            descriptor: composition_descriptor,
-            integration,
-            attachment,
-        })?
-        .harness_plan(plan)
-        .request_policy(AgentRequestPolicy::new(
-            GenerationLimits::new(NonZeroU32::new(128), Vec::new())?,
-            ReasoningPolicy::Disabled,
-        ))
-        .tool_policy(Arc::new(AlwaysAllowPolicy))
-        .identity_sources(
-            Arc::new(FixedClock::new(Timestamp::new(10, 0)?)),
-            Arc::new(SystemIdGenerator),
-        )
-        .telemetry(Arc::new(TelemetryEmitter::enabled(sink.clone())));
+    let builder = composition_test_builder(
+        workspace,
+        registry,
+        &model,
+        descriptor,
+        authority,
+        composition_descriptor,
+        (
+            Arc::clone(&evidence),
+            LocalCompositionLifecycle::RootTurnJoined,
+        ),
+    )?
+    .telemetry(Arc::new(TelemetryEmitter::enabled(sink.clone())));
     let store = Arc::new(TestCreateStore::default());
     let semantic_store: Arc<dyn SessionStore> = store;
     let sessions = DurableSessionRuntime::current(
@@ -724,35 +729,8 @@ async fn yielded_wait_failure_joins_once_and_preserves_cleanup_pair_failures() -
                 ),
             ]),
     );
-    let configured = configured_test_model_for_operation_with_tools(
-        model.clone(),
-        descriptor.clone(),
-        authority.clone(),
-        &registry,
-        LocalDurabilityDisposition::DurableRequired,
-        ContextAdmissionRequirement::AnyBounded,
-        1,
-        ReasoningEffortDisposition::Disabled,
-        Some(&["exec", "wait"]),
-        ToolPresentationMode::LocalCompositionOnly,
-        false,
-    )?;
-    let effective = configured.configuration().effective();
-    let target = ProviderModelProjectionIdentityV2::new(
-        descriptor.integration_class(),
-        descriptor.protocol().as_str(),
-        descriptor.route().as_str(),
-        descriptor.profile().as_str(),
-        descriptor
-            .model_family()
-            .ok_or("neutral composition descriptor omitted its family")?
-            .as_str(),
-        descriptor.requested_model().as_str(),
-        effective.effective_model().as_str(),
-        configured.configuration().effective_identity(),
-        plakous_tools::PROCESS_TOOL_PROJECTION_REVISION,
-    )?;
-    let composition_descriptor = neutral_composition_descriptor(registry.clone(), target)?;
+    let composition_descriptor =
+        neutral_composition_for(&model, &descriptor, &authority, &registry)?;
     let evidence = Arc::new(FakeCompositionEvidence::default());
     evidence.fail_wait.store(true, Ordering::Release);
     evidence.lose_terminate.store(true, Ordering::Release);
@@ -853,35 +831,8 @@ async fn cleanup_panics_still_attempt_integration_release_and_flush() -> TestRes
                     (2, "exec", serde_json::to_string("load bounded state")?),
                 ]),
         );
-        let configured = configured_test_model_for_operation_with_tools(
-            model.clone(),
-            descriptor.clone(),
-            authority.clone(),
-            &registry,
-            LocalDurabilityDisposition::DurableRequired,
-            ContextAdmissionRequirement::AnyBounded,
-            1,
-            ReasoningEffortDisposition::Disabled,
-            Some(&["exec", "wait"]),
-            ToolPresentationMode::LocalCompositionOnly,
-            false,
-        )?;
-        let effective = configured.configuration().effective();
-        let target = ProviderModelProjectionIdentityV2::new(
-            descriptor.integration_class(),
-            descriptor.protocol().as_str(),
-            descriptor.route().as_str(),
-            descriptor.profile().as_str(),
-            descriptor
-                .model_family()
-                .ok_or("neutral composition descriptor omitted its family")?
-                .as_str(),
-            descriptor.requested_model().as_str(),
-            effective.effective_model().as_str(),
-            configured.configuration().effective_identity(),
-            plakous_tools::PROCESS_TOOL_PROJECTION_REVISION,
-        )?;
-        let composition_descriptor = neutral_composition_descriptor(registry.clone(), target)?;
+        let composition_descriptor =
+            neutral_composition_for(&model, &descriptor, &authority, &registry)?;
         let evidence = Arc::new(FakeCompositionEvidence::default());
         let builder = composition_test_builder(
             Arc::clone(&workspace),
@@ -977,37 +928,8 @@ async fn a_definite_cell_outcome_that_loses_its_generation_still_completes_the_t
                 (2, "exec", serde_json::to_string("load bounded state")?),
             ]),
     );
-    let composition_descriptor = {
-        let configured = configured_test_model_for_operation_with_tools(
-            model.clone(),
-            descriptor.clone(),
-            authority.clone(),
-            &registry,
-            LocalDurabilityDisposition::DurableRequired,
-            ContextAdmissionRequirement::AnyBounded,
-            1,
-            ReasoningEffortDisposition::Disabled,
-            Some(&["exec", "wait"]),
-            ToolPresentationMode::LocalCompositionOnly,
-            false,
-        )?;
-        let effective = configured.configuration().effective();
-        let target = ProviderModelProjectionIdentityV2::new(
-            descriptor.integration_class(),
-            descriptor.protocol().as_str(),
-            descriptor.route().as_str(),
-            descriptor.profile().as_str(),
-            descriptor
-                .model_family()
-                .ok_or("neutral composition descriptor omitted its family")?
-                .as_str(),
-            descriptor.requested_model().as_str(),
-            effective.effective_model().as_str(),
-            configured.configuration().effective_identity(),
-            plakous_tools::PROCESS_TOOL_PROJECTION_REVISION,
-        )?;
-        neutral_composition_descriptor(registry.clone(), target)?
-    };
+    let composition_descriptor =
+        neutral_composition_for(&model, &descriptor, &authority, &registry)?;
     let evidence = Arc::new(FakeCompositionEvidence::default());
     let builder = composition_test_builder(
         Arc::clone(&workspace),
@@ -1113,37 +1035,8 @@ async fn empty_text_item_is_dropped_and_never_fails_the_cell() -> TestResult {
         ArtifactModel::new(descriptor.clone(), authority.clone(), 0, 0xc0de_5300, false)
             .with_scripted_tool_calls([(0, "exec", serde_json::to_string("emit empty text")?)]),
     );
-    let composition_descriptor = {
-        let configured = configured_test_model_for_operation_with_tools(
-            model.clone(),
-            descriptor.clone(),
-            authority.clone(),
-            &registry,
-            LocalDurabilityDisposition::DurableRequired,
-            ContextAdmissionRequirement::AnyBounded,
-            1,
-            ReasoningEffortDisposition::Disabled,
-            Some(&["exec", "wait"]),
-            ToolPresentationMode::LocalCompositionOnly,
-            false,
-        )?;
-        let effective = configured.configuration().effective();
-        let target = ProviderModelProjectionIdentityV2::new(
-            descriptor.integration_class(),
-            descriptor.protocol().as_str(),
-            descriptor.route().as_str(),
-            descriptor.profile().as_str(),
-            descriptor
-                .model_family()
-                .ok_or("neutral composition descriptor omitted its family")?
-                .as_str(),
-            descriptor.requested_model().as_str(),
-            effective.effective_model().as_str(),
-            configured.configuration().effective_identity(),
-            plakous_tools::PROCESS_TOOL_PROJECTION_REVISION,
-        )?;
-        neutral_composition_descriptor(registry.clone(), target)?
-    };
+    let composition_descriptor =
+        neutral_composition_for(&model, &descriptor, &authority, &registry)?;
     let evidence = Arc::new(FakeCompositionEvidence::default());
     let builder = composition_test_builder(
         Arc::clone(&workspace),
@@ -1236,35 +1129,8 @@ async fn successive_composition_resumes_are_bounded_by_the_round_cap() -> TestRe
         ArtifactModel::new(descriptor.clone(), authority.clone(), 0, 0xc0de_5200, false)
             .with_scripted_tool_calls(scripted),
     );
-    let configured = configured_test_model_for_operation_with_tools(
-        model.clone(),
-        descriptor.clone(),
-        authority.clone(),
-        &registry,
-        LocalDurabilityDisposition::DurableRequired,
-        ContextAdmissionRequirement::AnyBounded,
-        1,
-        ReasoningEffortDisposition::Disabled,
-        Some(&["exec", "wait"]),
-        ToolPresentationMode::LocalCompositionOnly,
-        false,
-    )?;
-    let effective = configured.configuration().effective();
-    let target = ProviderModelProjectionIdentityV2::new(
-        descriptor.integration_class(),
-        descriptor.protocol().as_str(),
-        descriptor.route().as_str(),
-        descriptor.profile().as_str(),
-        descriptor
-            .model_family()
-            .ok_or("neutral composition descriptor omitted its family")?
-            .as_str(),
-        descriptor.requested_model().as_str(),
-        effective.effective_model().as_str(),
-        configured.configuration().effective_identity(),
-        plakous_tools::PROCESS_TOOL_PROJECTION_REVISION,
-    )?;
-    let composition_descriptor = neutral_composition_descriptor(registry.clone(), target)?;
+    let composition_descriptor =
+        neutral_composition_for(&model, &descriptor, &authority, &registry)?;
     let evidence = Arc::new(FakeCompositionEvidence::default());
     let builder = composition_test_builder(
         Arc::clone(&workspace),
@@ -1321,35 +1187,8 @@ async fn persistent_local_composition_state_survives_compaction_between_cells() 
                 (3, "exec", serde_json::to_string("load bounded state")?),
             ]),
     );
-    let configured = configured_test_model_for_operation_with_tools(
-        model.clone(),
-        descriptor.clone(),
-        authority.clone(),
-        &registry,
-        LocalDurabilityDisposition::DurableRequired,
-        ContextAdmissionRequirement::AnyBounded,
-        1,
-        ReasoningEffortDisposition::Disabled,
-        Some(&["exec", "wait"]),
-        ToolPresentationMode::LocalCompositionOnly,
-        false,
-    )?;
-    let effective = configured.configuration().effective();
-    let target = ProviderModelProjectionIdentityV2::new(
-        descriptor.integration_class(),
-        descriptor.protocol().as_str(),
-        descriptor.route().as_str(),
-        descriptor.profile().as_str(),
-        descriptor
-            .model_family()
-            .ok_or("neutral composition descriptor omitted its family")?
-            .as_str(),
-        descriptor.requested_model().as_str(),
-        effective.effective_model().as_str(),
-        configured.configuration().effective_identity(),
-        plakous_tools::PROCESS_TOOL_PROJECTION_REVISION,
-    )?;
-    let composition_descriptor = neutral_composition_descriptor(registry.clone(), target)?;
+    let composition_descriptor =
+        neutral_composition_for(&model, &descriptor, &authority, &registry)?;
     let evidence = Arc::new(FakeCompositionEvidence::default());
     let builder = composition_test_builder(
         Arc::clone(&workspace),

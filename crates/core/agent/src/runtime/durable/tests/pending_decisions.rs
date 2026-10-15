@@ -253,21 +253,7 @@ fn v2_direct_builder(
         workspace.as_ref(),
         Vec::new(),
     )?;
-    let effective = configured.configuration().effective();
-    let target = ProviderModelProjectionIdentityV2::new(
-        descriptor.integration_class(),
-        descriptor.protocol().as_str(),
-        descriptor.route().as_str(),
-        descriptor.profile().as_str(),
-        descriptor
-            .model_family()
-            .ok_or("direct descriptor omitted family")?
-            .as_str(),
-        descriptor.requested_model().as_str(),
-        effective.effective_model().as_str(),
-        configured.configuration().effective_identity(),
-        plakous_tools::PROCESS_TOOL_PROJECTION_REVISION,
-    )?;
+    let target = composition_projection_target(&configured, &descriptor)?;
     let projection = presentation.projection_map(
         plakous_tools::JobConfig::default(),
         registry.clone(),

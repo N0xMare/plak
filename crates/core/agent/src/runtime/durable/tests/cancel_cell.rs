@@ -445,21 +445,7 @@ pub(super) fn cancel_cell_builder(
         },
         false,
     )?;
-    let effective = configured.configuration().effective();
-    let target = ProviderModelProjectionIdentityV2::new(
-        descriptor.integration_class(),
-        descriptor.protocol().as_str(),
-        descriptor.route().as_str(),
-        descriptor.profile().as_str(),
-        descriptor
-            .model_family()
-            .ok_or("cancel-cell descriptor omitted its family")?
-            .as_str(),
-        descriptor.requested_model().as_str(),
-        effective.effective_model().as_str(),
-        configured.configuration().effective_identity(),
-        plakous_tools::PROCESS_TOOL_PROJECTION_REVISION,
-    )?;
+    let target = composition_projection_target(&configured, &descriptor)?;
     let mut composition_descriptor = if evidence.python_fixture.load(Ordering::Acquire) {
         cancel_cell_python_descriptor(registry.clone(), target)?
     } else if mode.codex_process_catalog() {
@@ -484,50 +470,15 @@ pub(super) fn cancel_cell_builder(
             mode,
             evidence,
         }));
-    let profile = HarnessProfileSpecBuilder::new()
-        .id(HarnessProfileId::new("test.cancel-cell")?)
-        .semantic_version(ProfileSemanticVersion::new(1, 0, 0))
-        .provenance(HarnessProfileProvenance::Synthetic)
-        .base_instructions("")
-        .instruction_strategy(InstructionCompositionStrategy::BaseOnly)
-        .tool_exposure_strategy(ToolExposureStrategy::None)
-        .reasoning_strategy(ReasoningPreferenceStrategy::Disabled)
-        .continuation_strategy(ContinuationPreferenceStrategy::CanonicalReplayOnly)
-        .cache_strategy(CachePreferenceStrategy::Disabled)
-        .build()?;
-    let plan = compile_explicit_runtime_profile(
-        &profile,
+    let builder = code_cell_agent_builder(
         model.as_ref(),
-        configured.configuration(),
-        &registry,
-        workspace.as_ref(),
-        Vec::new(),
+        configured,
+        registry,
+        workspace,
+        "test.cancel-cell",
+        composition_descriptor,
+        integration,
     )?;
-    let attachment_identity = composition_descriptor.identity;
-    let mut attachment = LocalCompositionAttachmentIdentity {
-        profile: attachment_identity,
-        artifact: attachment_identity,
-        binding: attachment_identity,
-        engine_contract: attachment_identity,
-        evidence_receipt: None,
-    };
-    attachment.binding = local_composition_binding_identity(&attachment)?;
-    let builder = AgentBuilder::new(configured, registry, workspace)
-        .local_programmatic_composition(LocalCompositionConstruction {
-            descriptor: composition_descriptor,
-            integration,
-            attachment,
-        })?
-        .harness_plan(plan)
-        .request_policy(AgentRequestPolicy::new(
-            GenerationLimits::new(NonZeroU32::new(128), Vec::new())?,
-            ReasoningPolicy::Disabled,
-        ))
-        .tool_policy(Arc::new(AlwaysAllowPolicy))
-        .identity_sources(
-            Arc::new(FixedClock::new(Timestamp::new(10, 0)?)),
-            Arc::new(SystemIdGenerator),
-        );
     Ok((builder, model))
 }
 

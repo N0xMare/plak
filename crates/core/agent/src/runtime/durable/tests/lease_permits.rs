@@ -132,35 +132,8 @@ async fn evaluator_source_wait_rechecks_lease_before_heap_execution_and_joins() 
                 (2, "exec", serde_json::to_string("load bounded state")?),
             ]),
     );
-    let configured = configured_test_model_for_operation_with_tools(
-        model.clone(),
-        descriptor.clone(),
-        authority.clone(),
-        &registry,
-        LocalDurabilityDisposition::DurableRequired,
-        ContextAdmissionRequirement::AnyBounded,
-        1,
-        ReasoningEffortDisposition::Disabled,
-        Some(&["exec", "wait"]),
-        ToolPresentationMode::LocalCompositionOnly,
-        false,
-    )?;
-    let effective = configured.configuration().effective();
-    let target = ProviderModelProjectionIdentityV2::new(
-        descriptor.integration_class(),
-        descriptor.protocol().as_str(),
-        descriptor.route().as_str(),
-        descriptor.profile().as_str(),
-        descriptor
-            .model_family()
-            .ok_or("neutral composition descriptor omitted its family")?
-            .as_str(),
-        descriptor.requested_model().as_str(),
-        effective.effective_model().as_str(),
-        configured.configuration().effective_identity(),
-        plakous_tools::PROCESS_TOOL_PROJECTION_REVISION,
-    )?;
-    let composition_descriptor = neutral_composition_descriptor(registry.clone(), target)?;
+    let composition_descriptor =
+        neutral_composition_for(&model, &descriptor, &authority, &registry)?;
     let evidence = Arc::new(FakeCompositionEvidence::default());
     let builder = composition_test_builder(
         Arc::clone(&workspace),
