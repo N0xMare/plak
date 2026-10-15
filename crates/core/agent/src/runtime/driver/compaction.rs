@@ -45,17 +45,18 @@ use crate::{
     AgentErrorKind, AgentEventKind, AgentSessionEndpointError, CheckpointId,
     CompactionEventOutcome, CompactionEventReason, ContextEvaluationAudit, DurableOperationKind,
     DurableOperationRecord, DurableOperationState, DurableOperationTransition, EventContext,
-    RuntimeComponentKind, RuntimeLifecycle, StoreAdmission, TelemetryObservationKind,
+    RuntimeCheckpoint, RuntimeComponentKind, RuntimeLifecycle, StoreAdmission,
+    TelemetryObservationKind,
 };
 use futures_util::StreamExt;
 use plakous_model::{
     Actor, Clock, CompiledProviderConfiguration, ContentBlock, ContextHistoryPlan, ContextStatus,
-    ContextStatusKind, ConversationItem, Digest, DigestDomain, HistorySegmentKind, LanguageModel,
-    ModelCacheAffinity, ModelError, ModelErrorKind, ModelErrorPhase, ModelEvent,
-    ModelOperationRoot, ModelPreparationContext, ModelPreparationError, ModelRequest,
-    ModelResponse, ModelStreamItem, PreparedCallRecord, Provenance, ProviderCallRecoveryLocator,
-    ProviderCallRecoveryLocatorStage, RequestMetadata, SemanticCompactionCut, TextBlock, Timestamp,
-    TurnId, Usage, ValidationMode,
+    ContextStatusKind, ConversationItem, ConversationView, Digest, DigestDomain,
+    HistorySegmentKind, LanguageModel, ModelCacheAffinity, ModelError, ModelErrorKind,
+    ModelErrorPhase, ModelEvent, ModelOperationRoot, ModelPreparationContext,
+    ModelPreparationError, ModelRequest, ModelResponse, ModelStreamItem, PreparedCallRecord,
+    Provenance, ProviderCallRecoveryLocator, ProviderCallRecoveryLocatorStage, RequestMetadata,
+    SemanticCompactionCut, TextBlock, Timestamp, TurnId, Usage, ValidationMode,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -853,55 +854,14 @@ impl Driver {
                 .affinity()
                 .clone();
             let source_projection = checkpoint.manifest().canonical().projection();
-            let source_request = ModelRequest::from_parts(
-                checkpoint.manifest().canonical().stable_prefix().clone(),
-                source_projection.clone(),
-                RequestMetadata::for_session_workflow(
-                    self.run_id,
-                    identity.workflow_id,
-                    compaction_attempt_id(
-                        identity.workflow_id,
-                        if native_allowed {
-                            b"source-measurement"
-                        } else {
-                            b"summary-source-measurement"
-                        },
-                    )
-                    .map_err(|error| compact_runtime_endpoint_error(&error))?,
-                    runtime.clock.now(),
-                ),
-            )
-            .map_err(compact_runtime_endpoint_rejected)?;
-            let qualification_request = request
-                .pending_user_input
-                .as_deref()
-                .map(|pending| {
-                    let notice = self
-                        .process_notices()
-                        .map_err(|_| AgentSessionEndpointError::Unavailable)?
-                        .map(|(segment, _)| segment);
-                    let projection = context_status_projection(&checkpoint, Some(pending), notice)?;
-                    ModelRequest::from_parts(
-                        checkpoint.manifest().canonical().stable_prefix().clone(),
-                        projection,
-                        RequestMetadata::for_session_workflow(
-                            self.run_id,
-                            identity.workflow_id,
-                            compaction_attempt_id(
-                                identity.workflow_id,
-                                if native_allowed {
-                                    b"qualification-measurement"
-                                } else {
-                                    b"summary-qualification-measurement"
-                                },
-                            )
-                            .map_err(|error| compact_runtime_endpoint_error(&error))?,
-                            runtime.clock.now(),
-                        ),
-                    )
-                    .map_err(compact_runtime_endpoint_rejected)
-                })
-                .transpose()?;
+            let (source_request, qualification_request) = self.compaction_measurement_requests(
+                &checkpoint,
+                &source_projection,
+                &request,
+                &identity,
+                &runtime,
+                native_allowed,
+            )?;
             let native =
                 native_allowed && native_compaction_facet_enrolled(&runtime.provider_configuration);
             committed_detail.rung = Some(if native {
@@ -1275,7 +1235,7 @@ impl Driver {
                     .map_err(|error| compact_runtime_endpoint_error(&error))?;
                 compaction_request = ModelRequest::from_parts(
                     compaction_request.stable_prefix().clone(),
-                    plakous_model::ConversationView::from_shared(
+                    ConversationView::from_shared(
                         history,
                         plakous_model::WorkingProjection::default(),
                     ),
@@ -1675,6 +1635,69 @@ impl Driver {
         }
     }
 
+    /// The source measurement request and, for a pending user, the request that
+    /// qualifies a scheduled compaction.
+    fn compaction_measurement_requests(
+        &mut self,
+        checkpoint: &RuntimeCheckpoint,
+        source_projection: &ConversationView,
+        request: &AgentCompactSessionRequest,
+        identity: &DurableCompactionIdentity,
+        runtime: &ExactCompactionRuntime,
+        native_allowed: bool,
+    ) -> Result<(ModelRequest, Option<ModelRequest>), AgentSessionEndpointError> {
+        let source_request = ModelRequest::from_parts(
+            checkpoint.manifest().canonical().stable_prefix().clone(),
+            source_projection.clone(),
+            RequestMetadata::for_session_workflow(
+                self.run_id,
+                identity.workflow_id,
+                compaction_attempt_id(
+                    identity.workflow_id,
+                    if native_allowed {
+                        b"source-measurement"
+                    } else {
+                        b"summary-source-measurement"
+                    },
+                )
+                .map_err(|error| compact_runtime_endpoint_error(&error))?,
+                runtime.clock.now(),
+            ),
+        )
+        .map_err(compact_runtime_endpoint_rejected)?;
+        let qualification_request = request
+            .pending_user_input
+            .as_deref()
+            .map(|pending| {
+                let notice = self
+                    .process_notices()
+                    .map_err(|_| AgentSessionEndpointError::Unavailable)?
+                    .map(|(segment, _)| segment);
+                let projection = context_status_projection(checkpoint, Some(pending), notice)?;
+                ModelRequest::from_parts(
+                    checkpoint.manifest().canonical().stable_prefix().clone(),
+                    projection,
+                    RequestMetadata::for_session_workflow(
+                        self.run_id,
+                        identity.workflow_id,
+                        compaction_attempt_id(
+                            identity.workflow_id,
+                            if native_allowed {
+                                b"qualification-measurement"
+                            } else {
+                                b"summary-qualification-measurement"
+                            },
+                        )
+                        .map_err(|error| compact_runtime_endpoint_error(&error))?,
+                        runtime.clock.now(),
+                    ),
+                )
+                .map_err(compact_runtime_endpoint_rejected)
+            })
+            .transpose()?;
+        Ok((source_request, qualification_request))
+    }
+
     /// Whether the cut's retained tail alone is definitely over the window.
     ///
     /// Measured like a successor (fresh, without the live request anchor). A
@@ -1699,10 +1722,7 @@ impl Driver {
         };
         let Ok(request) = ModelRequest::from_parts(
             stable_prefix.clone(),
-            plakous_model::ConversationView::from_shared(
-                tail,
-                plakous_model::WorkingProjection::default(),
-            ),
+            ConversationView::from_shared(tail, plakous_model::WorkingProjection::default()),
             RequestMetadata::for_session_workflow(
                 self.run_id,
                 identity.workflow_id,
