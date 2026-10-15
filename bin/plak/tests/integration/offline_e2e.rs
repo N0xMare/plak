@@ -3431,21 +3431,20 @@ fn run_waits_for_a_real_promoted_process_then_continues_and_prints_only_last_ans
 
 #[test]
 fn run_max_turns_stops_a_real_promoted_process_and_exits_six() {
-    // The stop lands as soon as the one turn ends, so that turn first polls
-    // the promoted job until it prints: output exists only once the TERM trap
-    // is installed, and a stop that beat the trap would leave no marker.
-    let mut script = promoted_run_script(
-        "trap 'printf stopped > stopped.txt; exit 0' TERM; mkfifo stop-wait; \
-         exec 3<>stop-wait; printf '%s' \"$$\" > owned.pid; echo trapped; read line <&3",
-    );
+    // The stop lands as soon as the one turn ends, so that turn first joins a
+    // second process that exits once `owned.pid` exists: the promoted job
+    // writes it only after its TERM trap is installed, and a stop that beat
+    // the trap would leave no marker.
+    let mut script = promoted_run_script(RUN_OWNED_COMMAND);
     script["steps"].as_array_mut().unwrap().insert(
         1,
-        json!({"output": {"tool": {"name": "process_session_poll", "arguments": {
-            "session_id": "$session_id",
-            "cursor": "$cursor",
+        json!({"output": {"tool": {"name": "process_session_start", "arguments": {
+            "command": "while [ ! -f owned.pid ]; do sleep 0.05; done",
+            "workdir": ".",
+            "login": false,
+            "tty": false,
             "yield_time_ms": 30000,
-            "max_output_bytes": 8192,
-            "max_output_records": 64
+            "max_output_bytes": 8192
         }}}, "finish": "tool_calls"}),
     );
     let fixture = Fixture::new(&script);
@@ -3467,9 +3466,14 @@ fn run_max_turns_stops_a_real_promoted_process_and_exits_six() {
 fn run_timeout_stops_a_real_promoted_process_while_waiting_and_exits_six() {
     let command = RUN_OWNED_COMMAND;
     let fixture = Fixture::new(&promoted_run_script(command));
-    let mut run = RunJobCli::start(&fixture, &["--timeout", "15"]);
+    // The run timeout counts from process start, so it can fire before the
+    // job installs its TERM trap and leave no marker. Fifteen seconds did on
+    // a loaded lane; the bound is startup liveness, as in
+    // `prepare_bound_child_job`, and `owned.pid` proves the trap came first.
+    let mut run = RunJobCli::start(&fixture, &["--timeout", "60"]);
     run.wait_for_line(&format!("plak: waiting for p1 ({command}); Ctrl-C to stop"));
-    let result = run.finish();
+    wait_for_fixture_file(&fixture.workspace().join("owned.pid"));
+    let result = run.finish_within(Duration::from_secs(90));
     assert_eq!(result.status.code(), Some(6), "{}", result.stderr);
     assert!(
         result
