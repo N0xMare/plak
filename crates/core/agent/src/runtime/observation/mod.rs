@@ -960,7 +960,7 @@ pub(crate) fn normalized_tool_failure(
         .map_err(|_| AgentError::from_tool(error))?;
     ToolResultBlock::new(
         call.call_id(),
-        ToolExecutionOwner::Local,
+        call.owner().clone(),
         ToolResultKind::Failure,
         vec![ToolResultPart::Text(text)],
         call.correlation().clone(),

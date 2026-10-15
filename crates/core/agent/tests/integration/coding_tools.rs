@@ -183,11 +183,11 @@ async fn both_synthetic_maps_dispatch_exact_standard_executors() -> TestResult {
     let runtime = runtime(registry, &workspace, ids.run)?;
 
     let read_invocation = claude.prepare(request(ids, "Read", r#"{"path":"source.txt"}"#)?)?;
-    let read = execute_prepared_read_only(
+    let read = Box::pin(execute_prepared_read_only(
         &runtime,
         read_invocation,
         control(ids, CancellationToken::new())?,
-    )
+    ))
     .await?;
     assert!(text(&read)?.contains("alpha"));
 
@@ -197,11 +197,11 @@ async fn both_synthetic_maps_dispatch_exact_standard_executors() -> TestResult {
         "grep_files",
         r#"{"query":"alpha","path":"."}"#,
     )?)?;
-    let search = execute_prepared_read_only(
+    let search = Box::pin(execute_prepared_read_only(
         &runtime,
         search_invocation,
         control(search_ids, CancellationToken::new())?,
-    )
+    ))
     .await?;
     assert!(text(&search)?.contains("source.txt:1:1:alpha"));
     Ok(())

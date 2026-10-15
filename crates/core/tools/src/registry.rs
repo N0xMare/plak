@@ -4,7 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 
-use plakous_model::{Digest, DigestDomain, ToolDefinition, ToolEffect, ToolName};
+use plakous_model::{
+    Digest, DigestDomain, McpServerId, ToolDefinition, ToolEffect, ToolExecutionOwner, ToolName,
+};
 
 use crate::{
     ArgumentLimits, SchemaLimits, ToolExecutor, ToolInvocation, ToolInvocationRequest,
@@ -97,6 +99,113 @@ stable_id!(
     ToolExecutorId,
     "A stable identity for the executable implementation."
 );
+
+/// Maximum byte length of an [`McpServerName`].
+///
+/// The exposed MCP tool name `mcp__<server>__<tool>` must still fit the
+/// common 64-byte provider function-name bound with room for the tool part.
+pub const MAX_MCP_SERVER_NAME_BYTES: usize = 32;
+
+/// A configured MCP server id: `[a-z][a-z0-9]{0,15}(_[a-z0-9]+)*`, at most
+/// [`MAX_MCP_SERVER_NAME_BYTES`] bytes.
+///
+/// The grammar admits no `__`, so `mcp__<server>__<tool>` splits back into
+/// its server and tool unambiguously, and the name is a valid identifier in
+/// every composition language.
+#[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct McpServerName(McpServerId);
+
+impl McpServerName {
+    /// Validates one configured server id.
+    ///
+    /// # Errors
+    ///
+    /// Returns a registration error when `value` is outside the grammar.
+    pub fn new(value: impl Into<String>) -> Result<Self, ToolRuntimeError> {
+        let value = value.into();
+        let invalid = || {
+            ToolRuntimeError::new(
+                ToolRuntimeErrorKind::Registration,
+                "MCP server id must match [a-z][a-z0-9]{0,15}(_[a-z0-9]+)* within 32 bytes",
+            )
+        };
+        if !mcp_server_name_is_valid(&value) {
+            return Err(invalid());
+        }
+        McpServerId::new(value).map(Self).map_err(|_| invalid())
+    }
+
+    /// Returns the id text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    /// Returns the canonical server id committed history records.
+    #[must_use]
+    pub const fn canonical(&self) -> &McpServerId {
+        &self.0
+    }
+}
+
+fn mcp_server_name_is_valid(value: &str) -> bool {
+    if value.len() > MAX_MCP_SERVER_NAME_BYTES {
+        return false;
+    }
+    let mut segments = value.split('_');
+    let Some(head) = segments.next() else {
+        return false;
+    };
+    let lower_alphanumeric = |byte: u8| byte.is_ascii_lowercase() || byte.is_ascii_digit();
+    let head_valid = head.len() <= 16
+        && head.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
+        && head.bytes().all(lower_alphanumeric);
+    head_valid
+        && segments.all(|segment| !segment.is_empty() && segment.bytes().all(lower_alphanumeric))
+}
+
+impl fmt::Debug for McpServerName {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("McpServerName")
+            .field(&self.as_str())
+            .finish()
+    }
+}
+
+impl fmt::Display for McpServerName {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_str().fmt(formatter)
+    }
+}
+
+/// Who executes a registered tool, as committed history records it.
+///
+/// The driver stamps this owner onto every call it lands for the tool and
+/// onto the tool's results. It is registration data, not executable identity:
+/// it is in no registry, exposure or projection digest, and durable
+/// reconstruction re-takes it from the live host bindings.
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+pub enum ToolOwnerClass {
+    /// Plak executes the tool in process or through its execution backend.
+    #[default]
+    PlakLocal,
+    /// A configured MCP server executes the tool.
+    Mcp(McpServerName),
+}
+
+impl ToolOwnerClass {
+    /// Returns the canonical execution owner committed history records.
+    #[must_use]
+    pub fn execution_owner(&self) -> ToolExecutionOwner {
+        match self {
+            Self::PlakLocal => ToolExecutionOwner::Local,
+            Self::Mcp(server) => ToolExecutionOwner::Mcp {
+                server: server.canonical().clone(),
+            },
+        }
+    }
+}
 /// Immutable content identity for one exact executable binding configuration.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct ToolExecutorBindingIdentity(Digest);
@@ -153,6 +262,9 @@ pub struct RegisteredToolIdentity {
     /// authorizes construction, it is not a persisted semantic, and
     /// reconstruction re-takes it from the live host bindings.
     pub(crate) claims_presented_name: bool,
+    /// Registration data like the claimer flag: in no digest and not part of
+    /// identity equality; reconstruction re-takes it from the host bindings.
+    pub(crate) owner: ToolOwnerClass,
     pub(crate) provenance: Arc<RegistryProvenance>,
 }
 
@@ -189,6 +301,7 @@ impl fmt::Debug for RegisteredToolIdentity {
             .field("effect_metadata_digest", &self.effect_metadata_digest)
             .field("nested_eligibility", &self.nested_eligibility)
             .field("claims_presented_name", &self.claims_presented_name)
+            .field("owner", &self.owner)
             .finish_non_exhaustive()
     }
 }
@@ -266,6 +379,12 @@ impl RegisteredToolIdentity {
         self.claims_presented_name
     }
 
+    /// Returns who executes this tool, as committed history records it.
+    #[must_use]
+    pub const fn owner(&self) -> &ToolOwnerClass {
+        &self.owner
+    }
+
     pub(crate) const fn provenance(&self) -> &Arc<RegistryProvenance> {
         &self.provenance
     }
@@ -308,6 +427,7 @@ pub struct ToolRegistration {
     executor: Arc<dyn ToolExecutor>,
     nested_eligibility: NestedToolEligibility,
     claims_presented_name: bool,
+    owner: ToolOwnerClass,
 }
 
 impl fmt::Debug for ToolRegistration {
@@ -320,6 +440,7 @@ impl fmt::Debug for ToolRegistration {
             .field("definition", &self.definition)
             .field("nested_eligibility", &self.nested_eligibility)
             .field("claims_presented_name", &self.claims_presented_name)
+            .field("owner", &self.owner)
             .field("executor", &"dyn ToolExecutor")
             .finish()
     }
@@ -343,7 +464,22 @@ impl ToolRegistration {
             executor,
             nested_eligibility: NestedToolEligibility::DirectOnly,
             claims_presented_name: false,
+            owner: ToolOwnerClass::PlakLocal,
         }
+    }
+
+    /// Sets who executes this tool; the default is
+    /// [`ToolOwnerClass::PlakLocal`].
+    #[must_use]
+    pub fn with_owner(mut self, owner: ToolOwnerClass) -> Self {
+        self.owner = owner;
+        self
+    }
+
+    /// Returns who executes this tool.
+    #[must_use]
+    pub const fn owner(&self) -> &ToolOwnerClass {
+        &self.owner
     }
 
     /// Opts this registration into claiming the core menu entry of its own
@@ -568,6 +704,7 @@ impl ToolRegistryBuilder {
             effect_metadata_digest,
             nested_eligibility: registration.nested_eligibility,
             claims_presented_name: registration.claims_presented_name,
+            owner: registration.owner,
             provenance: Arc::clone(&self.provenance),
         };
         self.names.insert(definition.name().clone());
@@ -923,6 +1060,99 @@ mod tests {
 
     fn binding(value: &str) -> Result<ToolExecutorBindingIdentity, ToolRuntimeError> {
         ToolExecutorBindingIdentity::new(1, &[value.as_bytes()])
+    }
+
+    #[test]
+    fn mcp_server_name_grammar_table() {
+        for valid in [
+            "a",
+            "github",
+            "gh2",
+            "abcdefghijklmnop",
+            "my_server",
+            "a_b_c",
+            "linear_2",
+            "abcdefghijklmnop_qrstuvwxyz01234",
+        ] {
+            assert!(McpServerName::new(valid).is_ok(), "{valid}");
+        }
+        for invalid in [
+            "",
+            "Github",
+            "2fa",
+            "_github",
+            "github_",
+            "git__hub",
+            "git-hub",
+            "git.hub",
+            "abcdefghijklmnopq",
+            "abcdefghijklmnop_qrstuvwxyz012345",
+            "gith\u{fc}b",
+        ] {
+            assert_eq!(
+                McpServerName::new(invalid).err().map(|error| error.kind()),
+                Some(ToolRuntimeErrorKind::Registration),
+                "{invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn owner_class_defaults_local_stamps_results_and_moves_no_identity()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use std::str::FromStr;
+
+        let github = ToolOwnerClass::Mcp(McpServerName::new("github")?);
+        assert_eq!(
+            github.execution_owner(),
+            ToolExecutionOwner::Mcp {
+                server: McpServerId::new("github")?
+            }
+        );
+        assert_eq!(
+            ToolOwnerClass::default().execution_owner(),
+            ToolExecutionOwner::Local
+        );
+        let freeze = |owner: Option<ToolOwnerClass>| -> Result<FrozenToolRegistry, Box<dyn std::error::Error>> {
+            let registration = registration("lookup-id", "lookup-exec", tool("lookup")?)?;
+            assert_eq!(registration.owner(), &ToolOwnerClass::PlakLocal);
+            let mut builder = ToolRegistryBuilder::default();
+            builder.register(match owner {
+                Some(owner) => registration.with_owner(owner),
+                None => registration,
+            })?;
+            Ok(builder.freeze())
+        };
+        let local = freeze(None)?;
+        let mcp = freeze(Some(github.clone()))?;
+        assert_eq!(
+            local.registry_identity_digest()?,
+            mcp.registry_identity_digest()?
+        );
+        let name = ToolName::new("lookup")?;
+        assert_eq!(
+            mcp.identity(&name).map(RegisteredToolIdentity::owner),
+            Some(&github)
+        );
+
+        let result = |registry: &FrozenToolRegistry| -> Result<ToolExecutionOwner, Box<dyn std::error::Error>> {
+            let invocation = registry.prepare(ToolInvocationRequest::new(
+                plakous_model::RunId::from_str("00000000-0000-0000-0000-000000000001")?,
+                plakous_model::TurnId::from_str("00000000-0000-0000-0000-000000000002")?,
+                plakous_model::AttemptId::from_str("00000000-0000-0000-0000-000000000003")?,
+                plakous_model::CallId::from_str("00000000-0000-0000-0000-000000000004")?,
+                name.clone(),
+                plakous_model::ToolCorrelation::default(),
+                "{}",
+            ))?;
+            Ok(ToolOutcome::success_text("ok")?
+                .to_model_result(&invocation)?
+                .owner()
+                .clone())
+        };
+        assert_eq!(result(&local)?, ToolExecutionOwner::Local);
+        assert_eq!(result(&mcp)?, github.execution_owner());
+        Ok(())
     }
 
     #[test]

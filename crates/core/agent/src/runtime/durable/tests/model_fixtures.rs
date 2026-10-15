@@ -323,7 +323,7 @@ impl ArtifactModel {
 
     pub(super) fn with_programmatic_mcp_tool(mut self) -> TestResult<Self> {
         self.tool_owner = ToolExecutionOwner::Mcp {
-            server: plakous_model::McpServerId::new("test-mcp")?,
+            server: plakous_model::McpServerId::new("test_mcp")?,
         };
         self.tool_correlation = ToolCorrelation::new(
             Some("remote-call-1".to_owned()),

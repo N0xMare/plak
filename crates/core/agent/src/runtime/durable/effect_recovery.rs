@@ -24,8 +24,7 @@ use crate::{
     RuntimeCheckpoint, RuntimeLifecycle, RuntimeManifest, RuntimeWorkingRoot, SessionStoreError,
 };
 use plakous_model::{
-    Digest, DigestDomain, EntryId, HistorySegment, ToolCallBlock, ToolExecutionOwner,
-    ToolResultBlock, ToolResultKind,
+    Digest, DigestDomain, EntryId, HistorySegment, ToolCallBlock, ToolResultBlock, ToolResultKind,
 };
 use plakous_tools::{
     FrozenToolRegistryDescriptor, TOOL_REGISTRY_DESCRIPTOR_CODEC_REVISION,
@@ -585,7 +584,7 @@ fn terminal_tool_execution(
     };
     let result = ToolResultBlock::new(
         call.call_id(),
-        ToolExecutionOwner::Local,
+        call.owner().clone(),
         kind,
         request.outcome.parts().to_vec(),
         call.correlation().clone(),
@@ -678,13 +677,15 @@ fn retained_evidence_matches(
 
 #[cfg(test)]
 mod tests {
-    use plakous_model::{AttemptId, BranchId, CallId, Digest, DigestDomain, SessionId, TurnId};
+    use plakous_model::{
+        AttemptId, BranchId, CallId, Digest, DigestDomain, SessionId, ToolExecutionOwner, TurnId,
+    };
 
     use super::{
         COMPLETED_TOOL_OUTCOME_TAG, DurableEffectEvidenceIdentity,
         DurableEffectEvidenceRecoveryRequest, DurableSessionAddress, ToolCallBlock,
-        ToolExecutionOwner, ToolExecutionResult, ToolExecutorId, ToolOutcome, ToolResultBlock,
-        ToolResultKind, effect_evidence_matches_ledger, effect_evidence_topology_matches,
+        ToolExecutionResult, ToolExecutorId, ToolOutcome, ToolResultBlock, ToolResultKind,
+        effect_evidence_matches_ledger, effect_evidence_topology_matches,
         retained_evidence_matches, terminal_tool_execution,
     };
     use crate::runtime::operation_record::operation_binding_component;

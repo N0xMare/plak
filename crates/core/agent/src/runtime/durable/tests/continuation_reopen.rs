@@ -1004,6 +1004,170 @@ async fn completed_tool_turn_keeps_artifact_and_prefix_after_reopen() -> TestRes
     Ok(())
 }
 
+/// Owners of every tool call and result in committed history, in order.
+fn committed_tool_owners<'a>(
+    items: impl IntoIterator<Item = &'a ConversationItem>,
+) -> Vec<(&'static str, ToolExecutionOwner)> {
+    items
+        .into_iter()
+        .flat_map(ConversationItem::blocks)
+        .filter_map(|block| match block {
+            ContentBlock::ToolCall(call) => Some(("call", call.owner().clone())),
+            ContentBlock::ToolResult(result) => Some(("result", result.owner().clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The frozen registry's owner class is stamped onto the landed call and its
+/// result before the round commits, whatever owner the provider emitted, and
+/// committed history keeps both across reopen. The producing round carries no
+/// family artifact: an artifact binds the owner the provider emitted (see
+/// `protocol_owner_matching_the_registry_keeps_the_family_artifact`).
+#[tokio::test]
+async fn mcp_owned_registration_commits_mcp_calls_and_results_that_survive_reopen() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let sessions = DurableSessionRuntime::current(
+        Arc::new(TestCreateStore::default()),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("lease")?,
+    )?;
+    let descriptor = durable_test_descriptor("test.route")?;
+    let producer = Arc::new(
+        ArtifactModel::new(
+            descriptor.clone(),
+            artifact_authority(&descriptor, 1)?,
+            0,
+            19_500,
+            false,
+        )
+        .with_tool_first(),
+    );
+    let owner = plakous_tools::ToolOwnerClass::Mcp(plakous_tools::McpServerName::new("github")?);
+    let mcp = owner.execution_owner();
+    let builder = |model: Arc<ArtifactModel>| -> TestResult<AgentBuilder> {
+        let registry = one_tool_registry_owned_by(owner.clone())?;
+        let configured = configured_test_model(
+            model.clone(),
+            model.descriptor.clone(),
+            model.authority.clone(),
+            &registry,
+            LocalDurabilityDisposition::DurableRequired,
+            ContextAdmissionRequirement::AnyBounded,
+        )?;
+        Ok(AgentBuilder::new(configured, registry, workspace.clone())
+            .tool_policy(Arc::new(AlwaysAllowPolicy))
+            .request_policy(AgentRequestPolicy::new(
+                GenerationLimits::new(NonZeroU32::new(128), Vec::new())?,
+                ReasoningPolicy::Disabled,
+            ))
+            .identity_sources(
+                Arc::new(FixedClock::new(Timestamp::new(10, 0)?)),
+                Arc::new(SystemIdGenerator),
+            ))
+    };
+    let first = sessions
+        .create("create:mcp-owner", builder(producer.clone())?)
+        .await?;
+    let result = first
+        .prompt("use probe then finish")
+        .await?
+        .result()
+        .await?;
+    assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
+    assert_eq!(result.tool_calls(), 1);
+    let committed = result.checkpoint().manifest().canonical().projection();
+    let expected = vec![("call", mcp.clone()), ("result", mcp.clone())];
+    assert_eq!(committed_tool_owners(committed.items().iter()), expected);
+    let covered_count = committed.items().len();
+    first.shutdown().await?;
+
+    let address = DurableSessionAddress::new(
+        first.session_id(),
+        first.branch_id(),
+        first.checkpoint().id(),
+    );
+    let consumer = artifact_test_model_at(1, 20_500, Timestamp::new(2, 0)?)?;
+    let DurableRuntimeOpen::Opened(opened) = sessions
+        .open("open:mcp-owner", address, builder(consumer.clone())?)
+        .await?
+    else {
+        return Err("expected quiescent reopen".into());
+    };
+    let next = opened.prompt("follow up").await?.result().await?;
+    assert!(matches!(next.outcome(), TurnResultOutcome::Completed(_)));
+    let reopened = next.checkpoint().manifest().canonical().projection();
+    assert_eq!(
+        committed_tool_owners(reopened.items().iter().take(covered_count)),
+        expected
+    );
+    opened.shutdown().await?;
+    Ok(())
+}
+
+/// A protocol configured with the registry's owner emits it at parse time, so
+/// landing changes nothing the family artifact's covered projection binds and
+/// the artifact round commits with MCP-owned history.
+#[tokio::test]
+async fn protocol_owner_matching_the_registry_keeps_the_family_artifact() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let owner = plakous_tools::ToolOwnerClass::Mcp(plakous_tools::McpServerName::new("github")?);
+    let descriptor = durable_test_descriptor("test.route")?;
+    let mut model = ArtifactModel::new(
+        descriptor.clone(),
+        artifact_authority(&descriptor, 1)?,
+        2,
+        19_700,
+        false,
+    )
+    .with_tool_first();
+    model.tool_owner = owner.execution_owner();
+    let model = Arc::new(model);
+    let registry = one_tool_registry_owned_by(owner.clone())?;
+    let configured = configured_test_model(
+        model.clone(),
+        model.descriptor.clone(),
+        model.authority.clone(),
+        &registry,
+        LocalDurabilityDisposition::Ephemeral,
+        ContextAdmissionRequirement::AnyBounded,
+    )?;
+    let agent = AgentBuilder::new(configured, registry, workspace)
+        .tool_policy(Arc::new(AlwaysAllowPolicy))
+        .request_policy(AgentRequestPolicy::new(
+            GenerationLimits::new(NonZeroU32::new(128), Vec::new())?,
+            ReasoningPolicy::Disabled,
+        ))
+        .identity_sources(
+            Arc::new(FixedClock::new(Timestamp::new(10, 0)?)),
+            Arc::new(SystemIdGenerator),
+        )
+        .build()?;
+    let result = agent
+        .prompt("use probe then finish")
+        .await?
+        .result()
+        .await?;
+    assert!(
+        matches!(result.outcome(), TurnResultOutcome::Completed(_)),
+        "unexpected outcome: {:?}",
+        result.outcome()
+    );
+    let manifest = result.checkpoint().manifest();
+    assert!(manifest.family_artifact().is_some());
+    assert_eq!(
+        committed_tool_owners(manifest.canonical().projection().items().iter()),
+        vec![
+            ("call", owner.execution_owner()),
+            ("result", owner.execution_owner())
+        ]
+    );
+    agent.shutdown().await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn family_artifact_reopens_feeds_next_turn_replaces_and_clears_atomically() -> TestResult {
     let directory = tempfile::tempdir()?;

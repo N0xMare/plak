@@ -4,8 +4,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use plakous_model::{
-    TextBlock, ToolExecutionOwner, ToolOutputContract, ToolResultBlock, ToolResultKind,
-    ToolResultPart,
+    TextBlock, ToolOutputContract, ToolResultBlock, ToolResultKind, ToolResultPart,
 };
 
 use crate::{ToolInvocation, ToolRuntimeError, ToolRuntimeErrorKind};
@@ -400,7 +399,8 @@ impl ToolOutcome {
         })
     }
 
-    /// Converts the outcome to the canonical model result for its invocation.
+    /// Converts the outcome to the canonical model result for its invocation,
+    /// owned by the invoked registration's [`crate::ToolOwnerClass`].
     ///
     /// `OutcomeUnknown` is model-visible failure content while its stronger
     /// replay prohibition remains available through [`Self::kind`].
@@ -418,7 +418,7 @@ impl ToolOutcome {
         };
         ToolResultBlock::new(
             invocation.call_id(),
-            ToolExecutionOwner::Local,
+            invocation.identity().owner().execution_owner(),
             kind,
             self.parts.clone(),
             invocation.correlation().clone(),

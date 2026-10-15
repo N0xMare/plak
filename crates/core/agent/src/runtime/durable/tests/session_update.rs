@@ -1,6 +1,12 @@
 use super::*;
 
 pub(super) fn one_tool_registry() -> TestResult<FrozenToolRegistry> {
+    one_tool_registry_owned_by(plakous_tools::ToolOwnerClass::PlakLocal)
+}
+
+pub(super) fn one_tool_registry_owned_by(
+    owner: plakous_tools::ToolOwnerClass,
+) -> TestResult<FrozenToolRegistry> {
     let definition = ToolDefinition::new(
         ToolName::new("probe")?,
         "1.0.0",
@@ -17,15 +23,18 @@ pub(super) fn one_tool_registry() -> TestResult<FrozenToolRegistry> {
         ToolEffect::ReadOnly,
     )?;
     let mut registry = ToolRegistryBuilder::default();
-    registry.register(ToolRegistration::new(
-        RegisteredToolId::new("probe.registration")?,
-        ToolExecutorId::new("probe.executor")?,
-        plakous_tools::ToolExecutorBindingIdentity::new(1, &[b"probe.executor"])?,
-        definition.clone(),
-        Arc::new(plakous_test_support::ScriptedTool::new([
-            ToolOutcome::success_text("ok"),
-        ])),
-    ))?;
+    registry.register(
+        ToolRegistration::new(
+            RegisteredToolId::new("probe.registration")?,
+            ToolExecutorId::new("probe.executor")?,
+            plakous_tools::ToolExecutorBindingIdentity::new(1, &[b"probe.executor"])?,
+            definition.clone(),
+            Arc::new(plakous_test_support::ScriptedTool::new([
+                ToolOutcome::success_text("ok"),
+            ])),
+        )
+        .with_owner(owner),
+    )?;
     Ok(registry.freeze())
 }
 

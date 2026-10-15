@@ -14,9 +14,9 @@ use crate::{
     ArgumentLimits, FrozenToolRegistry, NestedToolEligibility, PortableToolSchemaV2,
     ProviderModelProjectionIdentityV2, RegisteredToolId, RegisteredToolIdentity, SchemaLimits,
     ToolExecutor, ToolExecutorBindingIdentity, ToolExecutorId, ToolExposure, ToolExposureMap,
-    ToolProjectionExposureV2, ToolProjectionLoweringV2, ToolProjectionMap, ToolProjectionRaisingV2,
-    ToolRegistration, ToolRegistryBuilder, ToolRegistryLimits, ToolRuntimeError,
-    ValidatedToolSchema,
+    ToolOwnerClass, ToolProjectionExposureV2, ToolProjectionLoweringV2, ToolProjectionMap,
+    ToolProjectionRaisingV2, ToolRegistration, ToolRegistryBuilder, ToolRegistryLimits,
+    ToolRuntimeError, ValidatedToolSchema,
 };
 
 /// Pre-integration V1 registry revision used only by the retained custom-profile path.
@@ -129,12 +129,14 @@ impl From<ToolDescriptorError> for ToolBindingError {
 /// Immutable process-local executor capabilities keyed by durable IDs.
 ///
 /// The table also carries which registered tools its host flagged
-/// [`ToolRegistration::presented_name_claimer`]: the flag is host authority,
-/// never persisted, so reconstruction re-takes it here.
+/// [`ToolRegistration::presented_name_claimer`] and every non-local
+/// [`ToolRegistration::with_owner`]: both are host authority, never
+/// persisted, so reconstruction re-takes them here.
 #[derive(Clone)]
 pub struct ToolExecutorBindings {
     by_id: BTreeMap<ToolExecutorId, BoundToolExecutor>,
     claimers: BTreeSet<RegisteredToolId>,
+    owners: BTreeMap<RegisteredToolId, ToolOwnerClass>,
 }
 
 #[derive(Clone)]
@@ -149,6 +151,7 @@ impl fmt::Debug for ToolExecutorBindings {
             .debug_struct("ToolExecutorBindings")
             .field("binding_count", &self.by_id.len())
             .field("claimers", &self.claimers)
+            .field("owners", &self.owners)
             .finish()
     }
 }
@@ -174,7 +177,16 @@ impl ToolExecutorBindings {
             .filter(|identity| identity.claims_presented_name())
             .map(|identity| identity.tool_id().clone())
             .collect();
-        Self { by_id, claimers }
+        let owners = registry
+            .identities()
+            .filter(|identity| *identity.owner() != ToolOwnerClass::PlakLocal)
+            .map(|identity| (identity.tool_id().clone(), identity.owner().clone()))
+            .collect();
+        Self {
+            by_id,
+            claimers,
+            owners,
+        }
     }
 
     /// Returns the number of process-local bindings.
@@ -195,6 +207,7 @@ impl ToolExecutorBindings {
 pub struct ToolExecutorBindingsBuilder {
     by_id: BTreeMap<ToolExecutorId, BoundToolExecutor>,
     claimers: BTreeSet<RegisteredToolId>,
+    owners: BTreeMap<RegisteredToolId, ToolOwnerClass>,
 }
 
 impl ToolExecutorBindingsBuilder {
@@ -204,6 +217,7 @@ impl ToolExecutorBindingsBuilder {
         Self {
             by_id: BTreeMap::new(),
             claimers: BTreeSet::new(),
+            owners: BTreeMap::new(),
         }
     }
 
@@ -212,6 +226,13 @@ impl ToolExecutorBindingsBuilder {
     /// registration.
     pub fn presented_name_claimer(&mut self, tool_id: RegisteredToolId) -> &mut Self {
         self.claimers.insert(tool_id);
+        self
+    }
+
+    /// Sets the owner of the registered tool `tool_id` on reconstruction, as
+    /// [`ToolRegistration::with_owner`] does at registration.
+    pub fn owner(&mut self, tool_id: RegisteredToolId, owner: ToolOwnerClass) -> &mut Self {
+        self.owners.insert(tool_id, owner);
         self
     }
 
@@ -240,6 +261,7 @@ impl ToolExecutorBindingsBuilder {
         ToolExecutorBindings {
             by_id: self.by_id,
             claimers: self.claimers,
+            owners: self.owners,
         }
     }
 }
@@ -612,6 +634,7 @@ impl FrozenToolRegistryDescriptor {
                 });
             }
             let claims = bindings.claimers.contains(&tool_id);
+            let owner = bindings.owners.get(&tool_id).cloned().unwrap_or_default();
             let restored = ToolRegistration::new(
                 tool_id,
                 executor_id,
@@ -619,7 +642,8 @@ impl FrozenToolRegistryDescriptor {
                 registration.definition.clone(),
                 Arc::clone(&binding.executor),
             )
-            .with_nested_eligibility(registration.nested_eligibility);
+            .with_nested_eligibility(registration.nested_eligibility)
+            .with_owner(owner);
             builder
                 .register(if claims {
                     restored.presented_name_claimer()
@@ -705,6 +729,7 @@ impl FrozenToolRegistryDescriptor {
                 .map_err(invalid_runtime)?,
                 nested_eligibility: entry.nested_eligibility,
                 claims_presented_name: false,
+                owner: ToolOwnerClass::PlakLocal,
                 provenance: Arc::clone(&provenance),
             };
             if identity_wire(&identity) != entry.identity {
@@ -761,6 +786,7 @@ impl FrozenToolRegistryDescriptor {
             .map_err(invalid_runtime)?,
             nested_eligibility: entry.nested_eligibility,
             claims_presented_name: false,
+            owner: ToolOwnerClass::PlakLocal,
             provenance: Arc::new(crate::registry::RegistryProvenance),
         };
         Ok((identity, &entry.definition))
@@ -1614,6 +1640,79 @@ mod tests {
             restored.identity(&ToolName::new("beta")?),
             live.identity(&ToolName::new("beta")?)
         );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        Ok(())
+    }
+
+    /// The owner class is host authority like the claimer flag: in no
+    /// persisted byte or digest, re-taken from the live binding table.
+    #[test]
+    fn reconstruction_retakes_the_owner_class_from_the_host_table() -> TestResult {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let github = ToolOwnerClass::Mcp(crate::McpServerName::new("github")?);
+        let register = |owner: &ToolOwnerClass| -> TestResult<FrozenToolRegistry> {
+            let mut builder = ToolRegistryBuilder::default();
+            for (index, definition) in [structured_definition("alpha")?, utf8_definition("beta")?]
+                .into_iter()
+                .enumerate()
+            {
+                let registration = ToolRegistration::new(
+                    RegisteredToolId::new(format!("tool-{index}"))?,
+                    ToolExecutorId::new(format!("executor-{index}"))?,
+                    test_binding(index)?,
+                    definition,
+                    Arc::new(CountingExecutor {
+                        calls: Arc::clone(&calls),
+                    }),
+                );
+                builder.register(if index == 1 {
+                    registration.with_owner(owner.clone())
+                } else {
+                    registration
+                })?;
+            }
+            Ok(builder.freeze())
+        };
+        let live = register(&github)?;
+        let local = register(&ToolOwnerClass::PlakLocal)?;
+        let descriptor = FrozenToolRegistryDescriptor::capture(&live)?;
+        assert_eq!(
+            descriptor,
+            FrozenToolRegistryDescriptor::capture(&local)?,
+            "the owner is in no persisted byte"
+        );
+        assert_eq!(
+            live.registry_identity_digest()?,
+            local.registry_identity_digest()?
+        );
+        let decoded = FrozenToolRegistryDescriptor::decode_v2(&descriptor.encode_v2()?)?;
+        let owner_of = |registry: &FrozenToolRegistry, name: &str| -> TestResult<ToolOwnerClass> {
+            Ok(registry
+                .identity(&ToolName::new(name)?)
+                .ok_or("registered")?
+                .owner()
+                .clone())
+        };
+
+        let restored = decoded.resolve(&ToolExecutorBindings::capture(&live))?;
+        assert_eq!(owner_of(&restored, "beta")?, github);
+        assert_eq!(owner_of(&restored, "alpha")?, ToolOwnerClass::PlakLocal);
+        let restored = decoded.resolve(&ToolExecutorBindings::capture(&local))?;
+        assert_eq!(owner_of(&restored, "beta")?, ToolOwnerClass::PlakLocal);
+
+        let mut builder = ToolExecutorBindingsBuilder::new();
+        for index in 0..2 {
+            builder.bind(
+                ToolExecutorId::new(format!("executor-{index}"))?,
+                test_binding(index)?,
+                Arc::new(CountingExecutor {
+                    calls: Arc::clone(&calls),
+                }),
+            )?;
+        }
+        builder.owner(RegisteredToolId::new("tool-1")?, github.clone());
+        let restored = decoded.resolve(&builder.freeze())?;
+        assert_eq!(owner_of(&restored, "beta")?, github);
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         Ok(())
     }

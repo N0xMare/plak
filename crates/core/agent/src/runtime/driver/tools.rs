@@ -38,13 +38,12 @@ use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
 use plakous_model::{
     Actor, AttemptId, CallId, ContentBlock, ConversationItem, EntryId, HistorySegmentKind,
-    ModelResponse, Provenance, TextBlock, ToolCallBlock, ToolEffect, ToolExecutionOwner, ToolName,
-    ToolResultBlock, ToolResultKind, ToolResultPart, ToolResultUpdateBlock, TurnId,
-    ValidatedRequestPlan,
+    ModelResponse, Provenance, TextBlock, ToolCallBlock, ToolEffect, ToolName, ToolResultBlock,
+    ToolResultKind, ToolResultPart, ToolResultUpdateBlock, TurnId, ValidatedRequestPlan,
 };
 use plakous_tools::{
-    ToolInvocation, ToolInvocationRequest, ToolProjectionReceiptV2, ToolRuntimeError,
-    ToolRuntimeErrorKind,
+    ToolInvocation, ToolInvocationRequest, ToolOwnerClass, ToolProjectionReceiptV2,
+    ToolRuntimeError, ToolRuntimeErrorKind,
 };
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -443,7 +442,7 @@ impl Driver {
         };
         let result = ToolResultBlock::new(
             call.call_id(),
-            ToolExecutionOwner::Local,
+            call.owner().clone(),
             kind,
             parts,
             call.correlation().clone(),
@@ -1183,15 +1182,23 @@ impl Driver {
     }
 
     /// Records the canonical name of every runtime-owned call in a provider
-    /// response as it lands, before anything records or classifies it.
-    pub(super) fn land_tool_names(
+    /// response as it lands, before anything records or classifies it, and
+    /// stamps the frozen registry's owner of that name onto the call. This is
+    /// the one point a provider-emitted call becomes canonical; its results
+    /// take the same owner from the invoked registration or from the call.
+    pub(super) fn land_tool_calls(
         &self,
         command: &PromptCommand,
         attempt_id: AttemptId,
         response: ModelResponse,
     ) -> ModelResponse {
-        response.with_canonical_tool_names(|call| {
-            self.canonical_tool_name(command, attempt_id, &self.tool_presentation, call)
+        response.with_canonical_tool_calls(|call| {
+            let name = self.canonical_tool_name(command, attempt_id, &self.tool_presentation, call);
+            let server = match self.tools.owner(&name) {
+                Some(ToolOwnerClass::Mcp(server)) => Some(server.canonical().clone()),
+                Some(ToolOwnerClass::PlakLocal) | None => None,
+            };
+            (name, server)
         })
     }
 
@@ -1847,7 +1854,7 @@ pub(super) fn superseded_tool_execution(
         .map_err(|_| internal())?;
     let result = ToolResultBlock::new(
         call.call_id(),
-        ToolExecutionOwner::Local,
+        call.owner().clone(),
         ToolResultKind::Failure,
         vec![ToolResultPart::Text(text)],
         call.correlation().clone(),

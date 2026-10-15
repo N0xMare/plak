@@ -241,7 +241,7 @@ impl Driver {
             &mut prepared_wire_output_limit,
         ))
         .await
-        .map(|response| self.land_tool_names(command, attempt_id, response));
+        .map(|response| self.land_tool_calls(command, attempt_id, response));
         if let Err(error) = &mut result {
             error.fill_missing_wire_output_limit(prepared_wire_output_limit);
         }

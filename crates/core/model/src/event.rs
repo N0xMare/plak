@@ -10,12 +10,12 @@ use serde_json::value::RawValue;
 
 use crate::{
     Actor, CanonicalItemPrefixIdentity, CitationBlock, ContentBlock, ConversationItem, Digest,
-    DigestDomain, EntryId, FamilyArtifactError, FamilyArtifactProducerFacts, ModelError,
-    ModelErrorKind, ModelId, ModelProviderRequestId, OutputFormat, Provenance, ReasoningBlock,
-    ReasoningVisibility, RefusalBlock, ReplayEnvelope, SafeDiagnostic, ServedBy, TextBlock,
-    TextPhase, ToolCallBlock, ToolCallState, ToolCorrelation, ToolExecutionOwner, ToolName,
-    ValidatedRequestPlan, family_artifact_integrity, validate_family_bytes, validate_family_digest,
-    validate_family_id, validate_family_revisions,
+    DigestDomain, EntryId, FamilyArtifactError, FamilyArtifactProducerFacts, McpServerId,
+    ModelError, ModelErrorKind, ModelId, ModelProviderRequestId, OutputFormat, Provenance,
+    ReasoningBlock, ReasoningVisibility, RefusalBlock, ReplayEnvelope, SafeDiagnostic, ServedBy,
+    TextBlock, TextPhase, ToolCallBlock, ToolCallState, ToolCorrelation, ToolExecutionOwner,
+    ToolName, ValidatedRequestPlan, family_artifact_integrity, validate_family_bytes,
+    validate_family_digest, validate_family_id, validate_family_revisions,
 };
 
 /// A stable location for one output block.
@@ -909,15 +909,17 @@ impl ModelResponse {
         self
     }
 
-    /// Records the canonical name `resolve` gives each runtime-owned tool call
-    /// in the output; exposed names are never rewritten.
+    /// Records the canonical name and runtime owner `resolve` gives each
+    /// runtime-owned tool call in the output: `None` is Plak-local,
+    /// `Some(server)` that server's MCP owner. Exposed names are never
+    /// rewritten, and provider-hosted calls are left as they are.
     #[must_use]
-    pub fn with_canonical_tool_names(
+    pub fn with_canonical_tool_calls(
         mut self,
-        mut resolve: impl FnMut(&ToolCallBlock) -> ToolName,
+        mut resolve: impl FnMut(&ToolCallBlock) -> (ToolName, Option<McpServerId>),
     ) -> Self {
         for item in &mut self.output {
-            item.resolve_canonical_tool_names(&mut resolve);
+            item.resolve_canonical_tool_calls(&mut resolve);
         }
         self
     }
@@ -2715,9 +2717,10 @@ mod tests {
     }
 
     /// Landing records each runtime-owned call's canonical name beside the
-    /// exact name the model called; a provider-hosted call keeps its own name.
+    /// exact name the model called, and its runtime owner; a provider-hosted
+    /// call keeps its own name and owner.
     #[test]
-    fn landing_records_canonical_names_and_keeps_exposed_names()
+    fn landing_records_canonical_names_and_owners_and_keeps_exposed_names()
     -> Result<(), Box<dyn std::error::Error>> {
         let call = |id: u128, name: &str, owner: ToolExecutionOwner| {
             ToolCallBlock::new(
@@ -2734,32 +2737,57 @@ mod tests {
         let hosted = ToolExecutionOwner::ProviderHosted {
             provider_kind: crate::NamespaceId::new("hosted.search")?,
         };
+        let github = McpServerId::new("github")?;
+        let mcp = ToolExecutionOwner::Mcp {
+            server: github.clone(),
+        };
         let response = output_response(vec![vec![
             call(1, "edit", ToolExecutionOwner::Local)?,
-            call(2, "write", ToolExecutionOwner::Local)?,
-            call(3, "web_search", hosted)?,
+            call(2, "write", mcp.clone())?,
+            call(3, "web_search", hosted.clone())?,
+            call(4, "mcp__github__create_issue", ToolExecutionOwner::Local)?,
         ]])?
-        .with_canonical_tool_names(|call| {
-            ToolName::new(format!("canonical_{}", call.exposed_name().as_str()))
-                .unwrap_or_else(|_| call.exposed_name().clone())
+        .with_canonical_tool_calls(|call| {
+            let name = ToolName::new(format!("canonical_{}", call.exposed_name().as_str()))
+                .unwrap_or_else(|_| call.exposed_name().clone());
+            let server = call
+                .exposed_name()
+                .as_str()
+                .starts_with("mcp__")
+                .then(|| github.clone());
+            (name, server)
         });
-        let names = response.output()[0]
+        let calls = response.output()[0]
             .blocks()
             .iter()
             .filter_map(|block| match block {
                 ContentBlock::ToolCall(call) => Some((
                     call.canonical_name().as_str().to_owned(),
                     call.exposed_name().as_str().to_owned(),
+                    call.owner().clone(),
                 )),
                 _ => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(
-            names,
+            calls,
             [
-                ("canonical_edit".to_owned(), "edit".to_owned()),
-                ("canonical_write".to_owned(), "write".to_owned()),
-                ("web_search".to_owned(), "web_search".to_owned()),
+                (
+                    "canonical_edit".to_owned(),
+                    "edit".to_owned(),
+                    ToolExecutionOwner::Local
+                ),
+                (
+                    "canonical_write".to_owned(),
+                    "write".to_owned(),
+                    ToolExecutionOwner::Local
+                ),
+                ("web_search".to_owned(), "web_search".to_owned(), hosted),
+                (
+                    "canonical_mcp__github__create_issue".to_owned(),
+                    "mcp__github__create_issue".to_owned(),
+                    mcp
+                ),
             ]
         );
         Ok(())
@@ -3362,7 +3390,7 @@ mod tests {
         for owner in [
             ToolExecutionOwner::Local,
             ToolExecutionOwner::Mcp {
-                server: crate::McpServerId::new("test-server")?,
+                server: McpServerId::new("test-server")?,
             },
             ToolExecutionOwner::ProviderHosted {
                 provider_kind: crate::NamespaceId::new("remote")?,

@@ -2137,17 +2137,22 @@ impl ConversationItem {
         })
     }
 
-    /// Records the canonical name of each runtime-owned tool call. A
-    /// provider-hosted call keeps the provider's own name as both names.
-    pub(crate) fn resolve_canonical_tool_names(
+    /// Records the canonical name and runtime owner of each runtime-owned
+    /// tool call: `None` is Plak-local, `Some(server)` that server's MCP owner.
+    /// A provider-hosted call keeps the provider's own name and owner.
+    pub(crate) fn resolve_canonical_tool_calls(
         &mut self,
-        resolve: &mut impl FnMut(&ToolCallBlock) -> ToolName,
+        resolve: &mut impl FnMut(&ToolCallBlock) -> (ToolName, Option<McpServerId>),
     ) {
         for block in &mut self.blocks {
             if let ContentBlock::ToolCall(call) = block
                 && !matches!(call.owner, ToolExecutionOwner::ProviderHosted { .. })
             {
-                call.canonical_name = resolve(call);
+                let (canonical_name, server) = resolve(call);
+                call.canonical_name = canonical_name;
+                call.owner = server.map_or(ToolExecutionOwner::Local, |server| {
+                    ToolExecutionOwner::Mcp { server }
+                });
             }
         }
     }

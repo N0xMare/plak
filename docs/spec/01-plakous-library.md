@@ -3807,6 +3807,36 @@ pipeline. Plak
 compiles every session surface, native and API, under its composition's
 runtime and reports a clash with both providers before any inference.
 
+Every registration carries an **owner class**, `ToolOwnerClass`: `PlakLocal`
+(the default) or `Mcp(McpServerName)`, set with `ToolRegistration::with_owner`.
+`McpServerName` is a configured server id matching
+`[a-z][a-z0-9]{0,15}(_[a-z0-9]+)*` within 32 bytes; the grammar admits no
+`__`, so an exposed `mcp__<server>__<tool>` name splits back unambiguously.
+The driver stamps the frozen registry's owner onto canonical history at one
+point: when a provider response lands, every runtime-owned call (any call not
+`ProviderHosted`) records the owner of its resolved canonical name (`Mcp` for
+an MCP-owned registration, `Local` otherwise, including a name that resolves to
+no registration), together with that canonical name, before the round's first
+record or classification. The registry is the authority, but the owner is
+serialized into the covered projection a family-artifact candidate binds, and
+the provider computes that over the calls as it parsed them; a round whose
+artifact covers a different owner fails closed as an artifact mismatch. A
+protocol that can produce an artifact on a tool round therefore emits the
+registry's owner at parse time through its owner configuration (Messages
+`ToolOwnership`, Responses `ResponsesCanonicalToolOwner`), and landing is then
+a no-op. A result takes its owner from the invoked
+registration (`ToolOutcome::to_model_result`), and a result the runtime
+synthesizes (rejection, interruption, supersession, recovery) copies its
+call's owner, so a call and its result always agree. The owner class is
+registration data like the claimer flag: it is in no registry, exposure or
+projection digest and not part of `RegisteredToolIdentity` equality, and
+reconstruction re-takes it from the live host (`ToolExecutorBindings::capture`
+records every non-local owner; `ToolExecutorBindingsBuilder::owner` sets one by
+hand). It adds no encoding: an MCP owner is the existing
+`ToolExecutionOwner::Mcp` canonical variant (§8.6). Every protocol replays an
+MCP-owned exchange exactly like a local one. Calls a local composition cell
+issues keep the `Local` owner.
+
 Presentation evidence transfers across routes for the same model family and
 pack. A pack qualified on an OAuth vertical is the qualified presentation for
 an API route serving the same model family: the OpenAI API wears the Codex
@@ -6259,6 +6289,12 @@ through it.
 `plakous-agent::internal::ToolExecutionControl` is a nameable unsupported
 executor seam, not a supported component contract. Only the core driver can
 attach its turn-scoped preempt watch through the crate-private `with_preempt`.
+
+`plakous::tools` names the registration owner class (§8.2): `ToolOwnerClass`,
+`McpServerName` and `MAX_MCP_SERVER_NAME_BYTES`, with
+`ToolRegistration::with_owner`, `RegisteredToolIdentity::owner` and
+`ToolExecutorBindingsBuilder::owner`. They are supported inventory, pinned by
+`crates/plakous/tests/public_facade.rs`.
 
 `plakous::sessions::feed` is the change feed's public surface (§5.11):
 `FeedSeq`, `FeedCursor`, `FeedRecord`, `FeedChange`, `FeedFact` and its typed

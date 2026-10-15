@@ -482,6 +482,9 @@ fn exact_supported_root_inventory_is_importable() {
     hold(&process_presentation_candidate_v2);
     hold(&process_presentation_candidate_with_extensions_v2);
     hold(&std::any::type_name::<plakous::tools::CodingPresentation>());
+    hold(&std::any::type_name::<plakous::tools::ToolOwnerClass>());
+    hold(&std::any::type_name::<plakous::tools::McpServerName>());
+    assert_eq!(plakous::tools::MAX_MCP_SERVER_NAME_BYTES, 32);
     assert_eq!(
         plakous::tools::PROCESS_SESSION_CAPABILITY_NAME,
         "process_session_start"

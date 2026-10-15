@@ -968,6 +968,15 @@ fn is_chat_function_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
+/// Chat has no owner on the wire: a Plak-local and a Plak MCP tool are both
+/// ordinary client functions.
+const fn runtime_owned(owner: &ToolExecutionOwner) -> bool {
+    matches!(
+        owner,
+        ToolExecutionOwner::Local | ToolExecutionOwner::Mcp { .. }
+    )
+}
+
 fn text_message(role: &'static str, content: String) -> Message {
     Message {
         role,
@@ -1094,13 +1103,13 @@ fn lower_history(
                             }
                         }
                         ContentBlock::ToolCall(call) => {
-                            if call.owner() != &ToolExecutionOwner::Local
+                            if !runtime_owned(call.owner())
                                 || call.state() == ToolCallState::Pending
                                 || call.correlation().container_id().is_some()
                                 || call.correlation().caller_lineage() != &ToolCallerLineage::Direct
                             {
                                 return Err(unsupported(
-                                    "only direct local tools are inside Chat V1",
+                                    "only direct runtime-owned tools are inside Chat V1",
                                 ));
                             }
                             let projected_exposure =
@@ -1232,7 +1241,7 @@ fn lower_history(
                             .ok_or_else(|| {
                                 invalid("tool-result update has no preceding assistant call")
                             })?;
-                        if update.owner() != &ToolExecutionOwner::Local
+                        if !runtime_owned(update.owner())
                             || update.correlation() != &expected.correlation
                         {
                             return Err(invalid(
@@ -1254,7 +1263,7 @@ fn lower_history(
                         .pop_front()
                         .ok_or_else(|| invalid("tool result has no preceding assistant call"))?;
                     if result.call_id() != expected.call_id
-                        || result.owner() != &ToolExecutionOwner::Local
+                        || !runtime_owned(result.owner())
                         || result.correlation() != &expected.correlation
                     {
                         return Err(invalid(
@@ -2220,6 +2229,54 @@ mod tests {
         assert_eq!(body["messages"][1]["role"], "tool");
         assert_eq!(body["messages"][1]["tool_call_id"], "remote-alpha");
         assert_eq!(body["messages"][1]["content"], "working\ndone");
+        Ok(())
+    }
+
+    #[test]
+    fn mcp_owned_tool_exchange_lowers_exactly_like_a_local_one() -> TestResult {
+        let fixture = Fixture::new()?;
+        let lower = |owner: ToolExecutionOwner| -> TestResult<Value> {
+            let (call_id, correlation, call) = call(13, "alpha", "remote-alpha")?;
+            let ContentBlock::ToolCall(call) = call else {
+                return Err("fixture call is a tool call".into());
+            };
+            let call = plakous_model::ToolCallBlock::new(
+                call_id,
+                call.exposed_name().clone(),
+                owner.clone(),
+                call.state(),
+                correlation.clone(),
+                call.raw_arguments(),
+            )?;
+            let plan = fixture.plan(vec![
+                item(13, Actor::Assistant, vec![ContentBlock::ToolCall(call)])?,
+                item(
+                    14,
+                    Actor::Tool,
+                    vec![
+                        ContentBlock::ToolResultUpdate(ToolResultUpdateBlock::new(
+                            call_id,
+                            owner.clone(),
+                            TextBlock::new("working\n", None)?,
+                            correlation.clone(),
+                        )?),
+                        ContentBlock::ToolResult(ToolResultBlock::new(
+                            call_id,
+                            owner,
+                            ToolResultKind::Success,
+                            vec![ToolResultPart::Text(TextBlock::new("done", None)?)],
+                            correlation,
+                        )?),
+                    ],
+                )?,
+            ])?;
+            let lowered = lower_request(&plan, &fixture.policy(&plan)?)?;
+            Ok(serde_json::from_slice(lowered.body())?)
+        };
+        let mcp = ToolExecutionOwner::Mcp {
+            server: plakous_model::McpServerId::new("github")?,
+        };
+        assert_eq!(lower(mcp)?, lower(ToolExecutionOwner::Local)?);
         Ok(())
     }
 

@@ -1362,7 +1362,9 @@ async fn provider_programmatic_mcp_call_uses_registered_tool_pipeline() -> TestR
     );
     let authority = model.authority.clone();
     let runtime_model: Arc<dyn LanguageModel> = model.clone();
-    let registry = one_tool_registry()?;
+    let registry = one_tool_registry_owned_by(plakous_tools::ToolOwnerClass::Mcp(
+        plakous_tools::McpServerName::new("test_mcp")?,
+    ))?;
     let configured = configured_test_model(
         runtime_model,
         descriptor,

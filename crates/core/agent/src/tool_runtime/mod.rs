@@ -608,6 +608,16 @@ impl ToolRuntime {
         self.registry.definitions()
     }
 
+    /// Returns who executes the registered tool `name`, when it is registered.
+    pub(crate) fn owner(
+        &self,
+        name: &plakous_model::ToolName,
+    ) -> Option<&plakous_tools::ToolOwnerClass> {
+        self.registry
+            .identity(name)
+            .map(RegisteredToolIdentity::owner)
+    }
+
     /// Reports whether one exact registered identity belongs to this executable snapshot.
     #[must_use]
     pub(crate) fn owns_registration(&self, identity: &RegisteredToolIdentity) -> bool {
