@@ -1159,6 +1159,10 @@ struct LoseForkAckStore {
     lose_next_fork_ack: AtomicBool,
     stop_after_hosted_working: AtomicBool,
     working_cut_committed: AtomicBool,
+    /// Report every forked target checkpoint as pruned and refuse every
+    /// lease release, so a fork fails both its publication and its cleanup.
+    fail_fork_publication_and_release: AtomicBool,
+    forked_targets: Mutex<Vec<CheckpointId>>,
 }
 
 impl LoseForkAckStore {
@@ -1168,7 +1172,25 @@ impl LoseForkAckStore {
             lose_next_fork_ack: AtomicBool::new(true),
             stop_after_hosted_working: AtomicBool::new(false),
             working_cut_committed: AtomicBool::new(false),
+            fail_fork_publication_and_release: AtomicBool::new(false),
+            forked_targets: Mutex::new(Vec::new()),
         }
+    }
+
+    fn passing_through(inner: MemorySessionStore) -> Self {
+        Self {
+            inner,
+            lose_next_fork_ack: AtomicBool::new(false),
+            stop_after_hosted_working: AtomicBool::new(false),
+            working_cut_committed: AtomicBool::new(false),
+            fail_fork_publication_and_release: AtomicBool::new(false),
+            forked_targets: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn fail_fork_publication_and_release(&self) {
+        self.fail_fork_publication_and_release
+            .store(true, Ordering::Release);
     }
 
     fn stopping_after_hosted_working(inner: MemorySessionStore) -> Self {
@@ -1177,6 +1199,8 @@ impl LoseForkAckStore {
             lose_next_fork_ack: AtomicBool::new(false),
             stop_after_hosted_working: AtomicBool::new(true),
             working_cut_committed: AtomicBool::new(false),
+            fail_fork_publication_and_release: AtomicBool::new(false),
+            forked_targets: Mutex::new(Vec::new()),
         }
     }
 
@@ -1216,6 +1240,13 @@ impl SessionStore for LoseForkAckStore {
         &self,
         checkpoint: CheckpointId,
     ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::StoredCheckpoint> {
+        if self
+            .fail_fork_publication_and_release
+            .load(Ordering::Acquire)
+            && test_lock(&self.forked_targets).contains(&checkpoint)
+        {
+            return Box::pin(async { Err(SessionStoreError::Pruned) });
+        }
         self.inner.load_checkpoint(checkpoint)
     }
 
@@ -1237,6 +1268,12 @@ impl SessionStore for LoseForkAckStore {
         &self,
         lease: plakous_agent::internal::BranchLease,
     ) -> plakous_agent::internal::StoreFuture<'_, ()> {
+        if self
+            .fail_fork_publication_and_release
+            .load(Ordering::Acquire)
+        {
+            return Box::pin(async { Err(SessionStoreError::BackendUnavailable) });
+        }
         self.inner.release(lease)
     }
 
@@ -1286,6 +1323,7 @@ impl SessionStore for LoseForkAckStore {
     ) -> plakous_agent::internal::StoreFuture<'_, plakous_agent::internal::ForkReceipt> {
         Box::pin(async move {
             let receipt = self.inner.fork(request).await?;
+            test_lock(&self.forked_targets).push(receipt.target().checkpoint().checkpoint_id());
             if self.lose_next_fork_ack.swap(false, Ordering::AcqRel) {
                 Err(SessionStoreError::BackendUnavailable)
             } else {
@@ -4755,6 +4793,46 @@ async fn ordinary_fork_recovers_an_accepted_lost_ack_without_republication() -> 
     assert_ne!(target.branch_id(), source.branch_id());
     assert_eq!(after.branches(), before.branches() + 1);
     assert_eq!(after.checkpoints(), before.checkpoints() + 1);
+    Ok(())
+}
+
+/// A fork whose publication and lease releases both fail reports the
+/// publication's cause, not the release failure.
+#[tokio::test]
+async fn ordinary_fork_keeps_its_publication_cause_when_releases_fail_too() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let inner = MemorySessionStore::with_clock(
+        MemoryStoreLimits::default(),
+        Arc::new(FixedLeaseClock::new(timestamp()?)),
+    )?;
+    let store = Arc::new(LoseForkAckStore::passing_through(inner));
+    let sessions = AgentSessions::new(SessionBackend::from_store(
+        Arc::clone(&store) as Arc<dyn SessionStore>,
+        RuntimeDurability::Disabled,
+    ))?;
+    let CreateSessionOutcome::Created { session, .. } = sessions
+        .create(CreateSessionRequest::new(
+            SessionOperationId::new("create:fork-cleanup")?,
+            runtime_binding_for(workspace, descriptor()?, b"cleanup-account")?,
+        ))
+        .await?;
+    let source = session.release().await?;
+    store.fail_fork_publication_and_release();
+    let Err(error) = sessions
+        .fork(ForkSessionRequest::new(
+            SessionOperationId::new("fork:cleanup")?,
+            source,
+        ))
+        .await
+    else {
+        return Err("a fork whose target cannot be loaded published".into());
+    };
+    assert_eq!(
+        error.kind(),
+        AgentSessionsErrorKind::Pruned,
+        "the release failure replaced the publication cause: {error}"
+    );
     Ok(())
 }
 
