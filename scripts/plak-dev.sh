@@ -14,8 +14,11 @@ set -euo pipefail
 
 script_path="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "${BASH_SOURCE[0]}")"
 repo_root="$(cd "$(dirname "$script_path")/.." && pwd)"
+# The login user's passwd home, not an inherited HOME; a uid without a passwd
+# entry (e.g. a container user) falls back to HOME.
 operator_home="$(
-  python3 -c 'import os, pwd; print(pwd.getpwuid(os.getuid()).pw_dir)'
+  python3 -c 'import os, pwd; print(pwd.getpwuid(os.getuid()).pw_dir)' 2>/dev/null ||
+    printf '%s\n' "${HOME:?plak-dev: no passwd entry and no HOME}"
 )"
 product_home="${PLAK_DEV_PLAK_HOME:-$operator_home/plak-dev-home}"
 profile="${PLAK_DEV_PROFILE:-release}"
