@@ -213,7 +213,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-agent": "bd86d54cede49bb93150a0461f2c803b79525872d1fe243715261f9f0d6ef8e8",
     "plakous-anthropic": "961f43653d38f0f9b3251cfd6933f814a289210cc87e98081af2aef3ab00189a",
     "plakous-attempt": "6fa8c59b329b4de7ae6eb497bf4b3e2d93f916551c682c2f1a803a506ee65992",
-    "plakous-auth": "068d58398a6573169df8ff18656f4f2eb19dc4908afd6fcf0d696d12f7655ece",
+    "plakous-auth": "5f45056d97e40ee2e4281e6b625a1d9a95e464d30d4c24126fb7fb2e95835c2a",
     "plakous-code-mode": "6126837839f8d7f0647eaff50f357f144940d5eca849a54805f70102d4de3cf9",
     "plakous-chat-completions": "e54c02e36671b7fff55d4705060d5f57748c12da95100c6224c29bd2701889c9",
     "plakous-exchange": "e0f496fedf43d21bf110457d61e96f7f99dbec9d337ff0770fab2afe9530b129",
