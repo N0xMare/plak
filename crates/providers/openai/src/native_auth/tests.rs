@@ -4945,8 +4945,12 @@ async fn expired_commit_and_stalled_callback_writer_are_fail_closed_and_bounded(
 #[tokio::test]
 async fn remote_browser_login_is_listener_free_pinned_and_state_bound() -> TestResult {
     let _browser_test = BROWSER_TEST_LOCK.lock().await;
-    let _primary_callback_port = TcpListener::bind(("127.0.0.1", 1455)).await?;
-    let _fallback_callback_port = TcpListener::bind(("127.0.0.1", 1457)).await?;
+    // The pinned callback ports are held for the whole flow; a bind refused
+    // because another process already holds one leaves it just as occupied.
+    let _callback_ports = (
+        TcpListener::bind(("127.0.0.1", 1455)).await.ok(),
+        TcpListener::bind(("127.0.0.1", 1457)).await.ok(),
+    );
     let endpoint = test_endpoint().await?;
     let (_directory, slot) = private_slot()?;
     let manager = manager_for_endpoint(&slot, &endpoint)?;
