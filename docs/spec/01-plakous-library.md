@@ -1317,7 +1317,7 @@ across boots. Historical receipts remain exact evidence, never fresh authority;
 old-boot renewal/release refuses as superseded. Binding rotation and subsequent
 branch acquisition are separate transactions.
 
-The runtime schema is **25** and the checkpoint format epoch is **25**; the
+The runtime schema is **25** and the checkpoint format epoch is **26**; the
 feed record encoding (§5.11) is part of that epoch, which it shares with the
 decision-fact encodings of the same release. Only
 the current exact schema and format epoch are supported. Every other runtime
@@ -1560,7 +1560,7 @@ Readers, including read-only SQLite inspection, read the report directly from
 the record and do not require the parent checkpoint to survive pruning.
 
 These encodings, and the exposed name on each canonical tool call (§6.5), are
-runtime checkpoint format epoch 25 (chapter 00). An earlier-epoch checkpoint
+runtime checkpoint format epoch 26 (chapter 00). An earlier-epoch checkpoint
 does not decode and is refused as an incompatible build (§5.4); sessions cross
 the bump only through the export document.
 
@@ -3654,7 +3654,7 @@ tool's restore bind the canonical name; provider replay sends the exposed name
 exactly, every kernel alike; views label a call by its exposed name, display
 telemetry records it, and classification follows the canonical name. Tool
 results correlate by call identity and record no name. This is part of
-runtime checkpoint format epoch 25.
+runtime checkpoint format epoch 26.
 V2 lowering preserves the canonical input contract's wire shape: structured
 targets receive semantic JSON, while bounded UTF-8 targets receive the exact
 validated text. In particular, Codex `apply_patch` sends its `*** Begin Patch`
@@ -4463,6 +4463,11 @@ distinct from local composition and MUST never enter the local composition
 coordinator or `ToolRuntime`. It carries its own exact dispatch, billing, data,
 effect and retry, replay, context, and reconciliation evidence, and never
 inherits local executor or recovery claims from a familiar name or schema.
+
+`ToolExecutionOwner` is product-neutral: `Local` (the local runtime), `Mcp`
+(a configured tool server) or `ProviderHosted` (the inference service). Its
+serialized variant names are part of the canonical history encoding and so of
+runtime checkpoint format epoch 26.
 
 Caller lineage and `ToolExecutionOwner` are independent axes. A customer tool
 called by a provider program MAY retain a local or MCP owner and MUST traverse
