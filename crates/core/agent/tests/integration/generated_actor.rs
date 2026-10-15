@@ -552,7 +552,7 @@ fn request_for(
     Ok(ModelRequest::builder(
         configuration.selected_identity(),
         configuration.effective_identity(),
-        ConversationView::new(history),
+        ConversationView::from_items(history)?,
         RequestMetadata::for_turn(
             id::<RunId>(4)?,
             id::<TurnId>(turn)?,

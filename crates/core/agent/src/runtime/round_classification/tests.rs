@@ -315,7 +315,7 @@ fn round_classifier_duplicate_call_identity_response_and_history() -> TestResult
         return Err("duplicate response call accepted".into());
     };
     assert_eq!(error.kind(), ModelErrorKind::InvalidEvent);
-    let history = ConversationView::new(vec![item(vec![local.clone()])?]);
+    let history = ConversationView::from_items(vec![item(vec![local.clone()])?])?;
     let reused = response(FinishReason::ToolCalls, vec![local], false)?;
     assert!(matches!(
         classify_round(RoundClassificationInput {

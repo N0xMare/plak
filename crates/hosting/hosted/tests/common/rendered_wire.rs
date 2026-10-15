@@ -116,7 +116,7 @@ pub(crate) mod suite {
 
     fn first_turn_conversation(spec: &prompts::RouteSpec) -> ConversationView {
         let user_text = prompts::first_turn_user_text(spec);
-        ConversationView::new(vec![
+        ConversationView::from_items(vec![
             ConversationItem::new(
                 EntryId::try_from(Uuid::from_u128(0x10)).expect("user entry"),
                 Actor::User,
@@ -127,6 +127,7 @@ pub(crate) mod suite {
             )
             .expect("user item"),
         ])
+        .expect("test conversation items form one valid segment")
     }
 
     fn turn_metadata() -> RequestMetadata {

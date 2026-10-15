@@ -492,12 +492,12 @@ fn prepared_with_metadata(
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![ConversationItem::new(
+        ConversationView::from_items(vec![ConversationItem::new(
             EntryId::try_from(Uuid::from_u128(1))?,
             Actor::User,
             vec![ContentBlock::Text(TextBlock::new(text, None)?)],
             Provenance::UserInput,
-        )?]),
+        )?])?,
         metadata,
     )
     .build()?;
@@ -1118,12 +1118,12 @@ fn hosted_ptc_prepared() -> TestResult<(
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![ConversationItem::new(
+        ConversationView::from_items(vec![ConversationItem::new(
             EntryId::try_from(Uuid::from_u128(1))?,
             Actor::User,
             vec![ContentBlock::Text(TextBlock::new("weather", None)?)],
             Provenance::UserInput,
-        )?]),
+        )?])?,
         RequestMetadata::for_turn(
             RunId::try_from(Uuid::from_u128(2))?,
             TurnId::try_from(Uuid::from_u128(3))?,

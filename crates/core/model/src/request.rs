@@ -2974,7 +2974,7 @@ mod tests {
     fn stable_prefix_and_history_are_shared_across_normal_round_construction()
     -> Result<(), Box<dyn std::error::Error>> {
         let request = request_builder(
-            ConversationView::new(vec![user_item(10, "large stable history")?]),
+            ConversationView::from_items(vec![user_item(10, "large stable history")?])?,
             metadata()?,
         )
         .instructions(vec![InstructionBlock::new(
@@ -3214,7 +3214,7 @@ mod tests {
     fn from_parts_shares_prefix_and_accepts_new_canonical_history()
     -> Result<(), Box<dyn std::error::Error>> {
         let request = request_builder(
-            ConversationView::new(vec![user_item(10, "first intent")?]),
+            ConversationView::from_items(vec![user_item(10, "first intent")?])?,
             metadata()?,
         )
         .instructions(vec![InstructionBlock::new(
@@ -3243,7 +3243,7 @@ mod tests {
         let build = || {
             Ok::<_, Box<dyn std::error::Error>>(
                 request_builder(
-                    ConversationView::new(vec![user_item(10, "same history")?]),
+                    ConversationView::from_items(vec![user_item(10, "same history")?])?,
                     metadata()?,
                 )
                 .instructions(vec![InstructionBlock::new(

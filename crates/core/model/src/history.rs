@@ -1207,26 +1207,23 @@ struct ConversationViewWire {
 }
 
 impl ConversationView {
-    /// Creates a source-compatible one-segment projection from ordered items.
+    /// Creates a one-segment projection from ordered items.
     ///
-    /// New canonical owners should prefer [`Self::from_shared`]. The inferred
-    /// segment is atomic and protected according to its content; request
-    /// construction rejects an incomplete inferred tool exchange.
-    #[must_use]
-    #[allow(
-        clippy::expect_used,
-        clippy::missing_panics_doc,
-        reason = "the compatibility constructor receives already validated canonical items; fallible segmented construction uses HistorySegment and CanonicalHistory directly"
-    )]
-    pub fn new(items: Vec<ConversationItem>) -> Self {
+    /// Canonical owners use [`Self::from_shared`]. The inferred segment is
+    /// atomic and protected according to its content; request construction
+    /// rejects an incomplete inferred tool exchange.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HistoryError`] when the items exceed the segment bounds,
+    /// repeat an entry identity, or cannot be serialized canonically.
+    pub fn from_items(items: Vec<ConversationItem>) -> Result<Self, HistoryError> {
         if items.is_empty() {
-            return Self::default();
+            return Ok(Self::default());
         }
-        let segment = HistorySegment::inferred(items)
-            .expect("validated conversation items fit the portable segment bounds");
-        let history = CanonicalHistory::new(vec![segment])
-            .expect("one inferred segment has unique entry identities");
-        Self::from_shared(history, WorkingProjection::default())
+        let segment = HistorySegment::inferred(items)?;
+        let history = CanonicalHistory::new(vec![segment])?;
+        Ok(Self::from_shared(history, WorkingProjection::default()))
     }
 
     /// Projects shared canonical and bounded working state without cloning item payloads.
@@ -4427,7 +4424,8 @@ mod tests {
             HistorySegment::new(HistorySegmentKind::ToolExchange, vec![call.clone()]),
             Err(HistoryError::IncompleteToolExchange)
         );
-        let inferred = ConversationView::new(vec![call]);
+        let inferred = ConversationView::from_items(vec![call])
+            .expect("test conversation items form one valid segment");
         assert_eq!(
             inferred.validate_model_visible(),
             Err(HistoryError::IncompleteToolExchange)

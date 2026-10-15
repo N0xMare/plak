@@ -58,7 +58,7 @@ fn with_imported_reference(request: &ModelRequest) -> TestResult<ModelRequest> {
     items.extend(request.input().items().iter().cloned());
     Ok(ModelRequest::from_parts(
         request.stable_prefix().clone(),
-        ConversationView::new(items),
+        ConversationView::from_items(items)?,
         request.metadata(),
     )?)
 }
@@ -172,7 +172,7 @@ fn request_with_options(
     Ok(ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![input]),
+        ConversationView::from_items(vec![input])?,
         RequestMetadata::for_turn(
             RunId::from_str("00000000-0000-4000-8000-000000000101")?,
             TurnId::from_str("00000000-0000-4000-8000-000000000102")?,
@@ -670,7 +670,7 @@ fn tool_request(
     Ok(ModelRequest::builder(
         configured.configuration().selected_identity(),
         configured.configuration().effective_identity(),
-        ConversationView::new(input),
+        ConversationView::from_items(input)?,
         RequestMetadata::for_turn(
             RunId::from_str("00000000-0000-4000-8000-000000000101")?,
             TurnId::from_str("00000000-0000-4000-8000-000000000102")?,
@@ -1234,7 +1234,7 @@ async fn semantic_compaction_workflow_retains_source_configuration_and_tools() -
     let request = ModelRequest::builder(
         configuration_before.selected_identity(),
         configuration_before.effective_identity(),
-        ConversationView::new(vec![ConversationItem::new(
+        ConversationView::from_items(vec![ConversationItem::new(
             EntryId::from_str("00000000-0000-4000-8000-000000000711")?,
             Actor::User,
             vec![ContentBlock::Text(TextBlock::new(
@@ -1242,7 +1242,7 @@ async fn semantic_compaction_workflow_retains_source_configuration_and_tools() -
                 None,
             )?)],
             Provenance::UserInput,
-        )?]),
+        )?])?,
         RequestMetadata::for_session_workflow(
             RunId::from_str("00000000-0000-4000-8000-000000000712")?,
             plakous_model::SessionWorkflowRootId::new([7; 32])?,

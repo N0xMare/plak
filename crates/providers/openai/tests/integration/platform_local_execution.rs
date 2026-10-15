@@ -181,7 +181,7 @@ fn request_with_options(
     Ok(ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![input]),
+        ConversationView::from_items(vec![input])?,
         RequestMetadata::for_turn(
             RunId::from_str("00000000-0000-4000-8000-000000000101")?,
             TurnId::from_str("00000000-0000-4000-8000-000000000102")?,

@@ -309,12 +309,12 @@ fn api_complete_wire_boundary_preserves_typed_context_denial() -> TestResult {
         let request = ModelRequest::builder(
             binding.configuration().selected().identity(),
             binding.configuration().effective().identity(),
-            ConversationView::new(vec![ConversationItem::new(
+            ConversationView::from_items(vec![ConversationItem::new(
                 EntryId::try_from(uuid::Uuid::from_u128(1))?,
                 Actor::User,
                 vec![ContentBlock::Text(TextBlock::new(text, None)?)],
                 Provenance::UserInput,
-            )?]),
+            )?])?,
             RequestMetadata::for_turn(
                 RunId::try_from(uuid::Uuid::from_u128(2))?,
                 TurnId::try_from(uuid::Uuid::from_u128(3))?,
@@ -790,12 +790,12 @@ async fn production_api_rotation_after_preparation_refuses_deferred_dispatch() -
     let request = ModelRequest::builder(
         binding.configuration().selected().identity(),
         binding.configuration().effective().identity(),
-        ConversationView::new(vec![ConversationItem::new(
+        ConversationView::from_items(vec![ConversationItem::new(
             EntryId::try_from(uuid::Uuid::from_u128(1))?,
             Actor::User,
             vec![ContentBlock::Text(TextBlock::new("hello", None)?)],
             Provenance::UserInput,
-        )?]),
+        )?])?,
         RequestMetadata::for_turn(
             RunId::try_from(uuid::Uuid::from_u128(2))?,
             TurnId::try_from(uuid::Uuid::from_u128(3))?,
@@ -891,7 +891,7 @@ async fn production_api_old_signed_thinking_projects_changed_key_before_dispatch
         let request = ModelRequest::builder(
             target.configuration().selected().identity(),
             target.configuration().effective().identity(),
-            ConversationView::new(history),
+            ConversationView::from_items(history)?,
             RequestMetadata::for_turn(
                 RunId::try_from(uuid::Uuid::from_u128(82))?,
                 TurnId::try_from(uuid::Uuid::from_u128(83))?,
@@ -1209,12 +1209,12 @@ async fn production_api_refuses_configuration_tampering_before_key_read_or_socke
         let mut request = ModelRequest::builder(
             selected,
             effective,
-            ConversationView::new(vec![ConversationItem::new(
+            ConversationView::from_items(vec![ConversationItem::new(
                 EntryId::try_from(uuid::Uuid::from_u128(91))?,
                 Actor::User,
                 vec![ContentBlock::Text(TextBlock::new("fixture", None)?)],
                 Provenance::UserInput,
-            )?]),
+            )?])?,
             RequestMetadata::for_turn(
                 RunId::try_from(uuid::Uuid::from_u128(92))?,
                 TurnId::try_from(uuid::Uuid::from_u128(93))?,
@@ -1409,12 +1409,12 @@ async fn production_api_workflow_connect_retry_revalidates_the_sealed_key() -> T
         let request = ModelRequest::builder(
             binding.configuration().selected().identity(),
             binding.configuration().effective().identity(),
-            ConversationView::new(vec![ConversationItem::new(
+            ConversationView::from_items(vec![ConversationItem::new(
                 EntryId::try_from(uuid::Uuid::from_u128(91))?,
                 Actor::User,
                 vec![ContentBlock::Text(TextBlock::new("fixture", None)?)],
                 Provenance::UserInput,
-            )?]),
+            )?])?,
             RequestMetadata::for_session_workflow(
                 RunId::try_from(uuid::Uuid::from_u128(92))?,
                 SessionWorkflowRootId::new([7; 32])?,

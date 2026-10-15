@@ -1246,7 +1246,7 @@ mod tests {
         ModelRequest::builder(
             selected,
             effective,
-            ConversationView::new(vec![
+            ConversationView::from_items(vec![
                 ConversationItem::new(
                     EntryId::try_from(Uuid::from_u128(1)).expect("entry ID"),
                     Actor::User,
@@ -1262,7 +1262,8 @@ mod tests {
                     Provenance::UserInput,
                 )
                 .expect("conversation item"),
-            ]),
+            ])
+            .expect("test conversation items form one valid segment"),
             metadata,
         )
         .build()
@@ -1312,7 +1313,8 @@ mod tests {
             ModelRequest::builder(
                 selected,
                 effective,
-                ConversationView::new(items),
+                ConversationView::from_items(items)
+                    .expect("test conversation items form one valid segment"),
                 request(now).metadata(),
             )
             .reasoning(ReasoningPolicy::Enabled {
@@ -1484,7 +1486,8 @@ mod tests {
             ModelRequest::builder(
                 selected,
                 effective,
-                ConversationView::new(items),
+                ConversationView::from_items(items)
+                    .expect("test conversation items form one valid segment"),
                 request(now).metadata(),
             )
             .reasoning(ReasoningPolicy::Enabled {

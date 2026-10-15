@@ -57,7 +57,7 @@ fn request() -> Result<ModelRequest, Box<dyn Error>> {
     Ok(ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![input]),
+        ConversationView::from_items(vec![input])?,
         RequestMetadata::for_turn(
             RunId::from_str("00000000-0000-4000-8000-000000000001")?,
             TurnId::from_str("00000000-0000-4000-8000-000000000002")?,

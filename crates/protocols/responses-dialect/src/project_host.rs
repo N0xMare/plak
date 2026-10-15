@@ -1698,7 +1698,8 @@ mod tests {
         let (_, _, _, Some(candidate)) = paired.into_parts() else {
             panic!("paired artifact candidate");
         };
-        let covered = plakous_model::ConversationView::new(vec![canonical.clone()])
+        let covered = plakous_model::ConversationView::from_items(vec![canonical.clone()])
+            .expect("test conversation items form one valid segment")
             .canonical_item_prefix_identity(1)
             .expect("covered output");
         (
@@ -2282,7 +2283,8 @@ mod tests {
             Err(ResponsesProjectError::InvalidArtifactCoverage)
         ));
 
-        let covered = plakous_model::ConversationView::new(vec![canonical])
+        let covered = plakous_model::ConversationView::from_items(vec![canonical])
+            .expect("test conversation items form one valid segment")
             .canonical_item_prefix_identity(1)
             .expect("covered output");
         let sealed = candidate.seal(&plan, covered).expect("sealed candidate");
@@ -2409,12 +2411,13 @@ mod tests {
             ))
         ));
 
-        let foreign_covered = plakous_model::ConversationView::new(vec![item(
+        let foreign_covered = plakous_model::ConversationView::from_items(vec![item(
             76,
             vec![ContentBlock::Text(
                 TextBlock::new("foreign", Some(TextPhase::Final)).expect("text"),
             )],
         )])
+        .expect("test conversation items form one valid segment")
         .canonical_item_prefix_identity(1)
         .expect("foreign covered output");
         assert!(matches!(

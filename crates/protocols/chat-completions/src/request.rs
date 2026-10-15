@@ -1478,7 +1478,7 @@ mod tests {
             let request = ModelRequest::builder(
                 self.selected,
                 self.effective,
-                ConversationView::new(items),
+                ConversationView::from_items(items)?,
                 RequestMetadata::for_turn(
                     RunId::try_from(Uuid::from_u128(1))?,
                     TurnId::try_from(Uuid::from_u128(2))?,
@@ -1501,7 +1501,7 @@ mod tests {
             let request = ModelRequest::builder(
                 self.selected,
                 self.effective,
-                ConversationView::new(items),
+                ConversationView::from_items(items)?,
                 RequestMetadata::for_turn(
                     RunId::try_from(Uuid::from_u128(1))?,
                     TurnId::try_from(Uuid::from_u128(2))?,
@@ -2860,11 +2860,11 @@ mod tests {
         let request = ModelRequest::builder(
             fixture.selected,
             fixture.effective,
-            ConversationView::new(vec![item(
+            ConversationView::from_items(vec![item(
                 41,
                 Actor::User,
                 vec![ContentBlock::Text(TextBlock::new("compact", None)?)],
-            )?]),
+            )?])?,
             RequestMetadata::for_turn(
                 RunId::try_from(Uuid::from_u128(1))?,
                 TurnId::try_from(Uuid::from_u128(2))?,
@@ -2891,11 +2891,11 @@ mod tests {
         let request = ModelRequest::builder(
             fixture.selected,
             fixture.effective,
-            ConversationView::new(vec![item(
+            ConversationView::from_items(vec![item(
                 41,
                 Actor::User,
                 vec![ContentBlock::Text(TextBlock::new("compact", None)?)],
-            )?]),
+            )?])?,
             RequestMetadata::for_turn(
                 RunId::try_from(Uuid::from_u128(1))?,
                 TurnId::try_from(Uuid::from_u128(2))?,
@@ -2953,11 +2953,11 @@ mod tests {
             let request = ModelRequest::builder(
                 fixture.selected,
                 fixture.effective,
-                ConversationView::new(vec![item(
+                ConversationView::from_items(vec![item(
                     41,
                     Actor::User,
                     vec![ContentBlock::Text(TextBlock::new("code", None)?)],
-                )?]),
+                )?])?,
                 RequestMetadata::for_turn(
                     RunId::try_from(Uuid::from_u128(1))?,
                     TurnId::try_from(Uuid::from_u128(2))?,
@@ -3016,11 +3016,11 @@ mod tests {
         let request = ModelRequest::builder(
             fixture.selected,
             fixture.effective,
-            ConversationView::new(vec![item(
+            ConversationView::from_items(vec![item(
                 41,
                 Actor::User,
                 vec![ContentBlock::Text(TextBlock::new("code", None)?)],
-            )?]),
+            )?])?,
             RequestMetadata::for_turn(
                 RunId::try_from(Uuid::from_u128(1))?,
                 TurnId::try_from(Uuid::from_u128(2))?,
@@ -3050,11 +3050,11 @@ mod tests {
         let enabled_request = ModelRequest::builder(
             fixture.selected,
             fixture.effective,
-            ConversationView::new(vec![item(
+            ConversationView::from_items(vec![item(
                 42,
                 Actor::User,
                 vec![ContentBlock::Text(TextBlock::new("think", None)?)],
-            )?]),
+            )?])?,
             RequestMetadata::for_turn(
                 RunId::try_from(Uuid::from_u128(1))?,
                 TurnId::try_from(Uuid::from_u128(2))?,
@@ -3105,11 +3105,11 @@ mod tests {
         let request = ModelRequest::builder(
             fixture.selected,
             fixture.effective,
-            ConversationView::new(vec![item(
+            ConversationView::from_items(vec![item(
                 41,
                 Actor::User,
                 vec![ContentBlock::Text(TextBlock::new("cached", None)?)],
-            )?]),
+            )?])?,
             RequestMetadata::for_turn(
                 RunId::try_from(Uuid::from_u128(1))?,
                 TurnId::try_from(Uuid::from_u128(2))?,

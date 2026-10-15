@@ -486,7 +486,7 @@ mod tests {
         Ok(ModelRequest::builder(
             configuration.selected_identity(),
             configuration.effective_identity(),
-            ConversationView::new(vec![user]),
+            ConversationView::from_items(vec![user])?,
             RequestMetadata::for_turn(
                 id::<RunId>(4)?,
                 id::<TurnId>(5)?,

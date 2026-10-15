@@ -437,7 +437,8 @@ mod tests {
             Provenance::ModelOutput,
         )
         .expect("item");
-        let covered = ConversationView::new(vec![item])
+        let covered = ConversationView::from_items(vec![item])
+            .expect("test conversation items form one valid segment")
             .canonical_item_prefix_identity(1)
             .expect("prefix");
         MessagesFamilyArtifact::new(

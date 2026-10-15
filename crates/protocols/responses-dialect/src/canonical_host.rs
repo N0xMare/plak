@@ -2835,7 +2835,8 @@ mod tests {
                 if *opaque.fallback() == OpaqueFallback::CompatibleReplay
         ));
         let request = crate::test_support::model_request_builder(
-            plakous_model::ConversationView::new(projected.canonical_output().to_vec()),
+            plakous_model::ConversationView::from_items(projected.canonical_output().to_vec())
+                .expect("test conversation items form one valid segment"),
             producing_request().metadata(),
         )
         .build()
@@ -2896,7 +2897,8 @@ mod tests {
             let projected = project_canonical_terminal(&raw, &grok, digest(), &ids())
                 .expect("Grok projects the terminal");
             let request = crate::test_support::model_request_builder(
-                plakous_model::ConversationView::new(projected.canonical_output().to_vec()),
+                plakous_model::ConversationView::from_items(projected.canonical_output().to_vec())
+                    .expect("test conversation items form one valid segment"),
                 producing_request().metadata(),
             )
             .tool_choice(plakous_model::ToolChoice::None)
@@ -2959,7 +2961,8 @@ mod tests {
                 if *opaque.fallback() == OpaqueFallback::Omit
         ));
         let request = crate::test_support::model_request_builder(
-            plakous_model::ConversationView::new(projected.canonical_output().to_vec()),
+            plakous_model::ConversationView::from_items(projected.canonical_output().to_vec())
+                .expect("test conversation items form one valid segment"),
             producing_request().metadata(),
         )
         .build()

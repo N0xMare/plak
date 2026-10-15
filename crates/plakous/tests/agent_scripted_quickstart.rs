@@ -306,7 +306,8 @@ fn expected_first_request(configuration: &CompiledProviderConfiguration) -> Mode
     ModelRequest::builder(
         configuration.selected_identity(),
         configuration.effective_identity(),
-        ConversationView::new(vec![user]),
+        ConversationView::from_items(vec![user])
+            .expect("test conversation items form one valid segment"),
         RequestMetadata::for_turn(
             RunId::try_from(Uuid::from_u128(4)).expect("run"),
             TurnId::try_from(Uuid::from_u128(5)).expect("turn"),

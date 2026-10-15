@@ -207,7 +207,7 @@ async fn response_provenance_survives_tool_round_followup_and_exact_reopen() -> 
         Ok(model.descriptor.validate_request(
             ModelRequest::from_parts(
                 plan.request().stable_prefix().clone(),
-                ConversationView::new(items),
+                ConversationView::from_items(items)?,
                 plan.request().metadata(),
             )?,
             ValidationMode::Strict,

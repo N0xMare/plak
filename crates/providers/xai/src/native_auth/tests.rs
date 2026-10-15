@@ -5696,7 +5696,7 @@ async fn native_second_turn_replays_exact_encrypted_reasoning() -> TestResult {
     let first_request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user.clone()]),
+        ConversationView::from_items(vec![user.clone()])?,
         RequestMetadata::for_turn(
             RunId::from_str("00000000-0000-4000-8000-000000000472")?,
             TurnId::from_str("00000000-0000-4000-8000-000000000473")?,
@@ -6609,7 +6609,7 @@ fn model_request_with_cache(attempt: &str, cache: CachePolicy) -> TestResult<Mod
     Ok(ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![item]),
+        ConversationView::from_items(vec![item])?,
         RequestMetadata::for_turn(
             RunId::from_str("00000000-0000-4000-8000-000000000403")?,
             TurnId::from_str("00000000-0000-4000-8000-000000000404")?,
@@ -6652,7 +6652,7 @@ fn model_request_with_options(
     Ok(ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![item]),
+        ConversationView::from_items(vec![item])?,
         RequestMetadata::for_turn(
             RunId::from_str("00000000-0000-4000-8000-000000000403")?,
             TurnId::from_str("00000000-0000-4000-8000-000000000404")?,
@@ -6735,7 +6735,7 @@ fn fixture_string_custom_tool() -> TestResult<ToolDefinition> {
 }
 
 fn tool_loop_request(items: Vec<ConversationItem>, attempt: &str) -> TestResult<ModelRequest> {
-    tool_loop_request_from_view(ConversationView::new(items), attempt)
+    tool_loop_request_from_view(ConversationView::from_items(items)?, attempt)
 }
 
 fn tool_loop_request_from_view(input: ConversationView, attempt: &str) -> TestResult<ModelRequest> {

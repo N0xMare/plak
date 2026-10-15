@@ -17,7 +17,7 @@ use plakous_model::{Actor, ContentBlock, ConversationItem, EntryId, Provenance};
 
 #[test]
 fn canonical_conversation_seeds_fresh_snapshot_without_events() -> TestResult {
-    let conversation = ConversationView::new(vec![ConversationItem::new(
+    let conversation = ConversationView::from_items(vec![ConversationItem::new(
         EntryId::try_from(Uuid::from_u128(9))?,
         Actor::User,
         vec![ContentBlock::Text(TextBlock::new(
@@ -25,7 +25,7 @@ fn canonical_conversation_seeds_fresh_snapshot_without_events() -> TestResult {
             None,
         )?)],
         Provenance::UserInput,
-    )?]);
+    )?])?;
     let fixture = fixture_with_run_and_conversation(4, &conversation, 8, 64 * 1024)?;
 
     let content = fixture.hub.attach(ViewRequest::content())?;

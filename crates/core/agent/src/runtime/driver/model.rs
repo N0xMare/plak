@@ -1075,11 +1075,11 @@ mod completed_history_tests {
         );
         // Elision changes content while retaining its entry identity. Bind the
         // proof to the exact selected projection, not the old canonical bytes.
-        let selected = ConversationView::new(vec![
+        let selected = ConversationView::from_items(vec![
             item(2, Actor::Assistant, "elided older body")?,
             item(4, Actor::Assistant, "continuing")?,
             item(5, Actor::User, "steer")?,
-        ]);
+        ])?;
         assert_eq!(
             completed_history_prefix(&history, &working, &selected),
             Some(selected.semantic_prefix_identity(1)?),

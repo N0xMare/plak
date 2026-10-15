@@ -140,7 +140,7 @@ fn with_imported_reference(request: &ModelRequest) -> TestResult<ModelRequest> {
     items.extend(request.input().items().iter().cloned());
     Ok(ModelRequest::from_parts(
         request.stable_prefix().clone(),
-        ConversationView::new(items),
+        ConversationView::from_items(items)?,
         request.metadata(),
     )?)
 }
@@ -271,7 +271,7 @@ fn request_rooted(
     Ok(ModelRequest::builder(
         configured.configuration().selected_identity(),
         configured.configuration().effective_identity(),
-        ConversationView::new(vec![input]),
+        ConversationView::from_items(vec![input])?,
         metadata,
     )
     .tool_choice(ToolChoice::None)
@@ -311,7 +311,7 @@ fn request_with_retired_responses_exec(
         call.arguments().and_then(serde_json::Value::as_str),
         Some(source)
     );
-    let input = ConversationView::new(vec![
+    let input = ConversationView::from_items(vec![
         ConversationItem::new(
             plakous_model::EntryId::from_str("00000000-0000-4000-8000-000000000902")?,
             Actor::Assistant,
@@ -342,7 +342,7 @@ fn request_with_retired_responses_exec(
             )?)],
             Provenance::UserInput,
         )?,
-    ]);
+    ])?;
     Ok(ModelRequest::builder(
         configured.configuration().selected_identity(),
         configured.configuration().effective_identity(),

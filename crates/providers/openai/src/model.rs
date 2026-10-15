@@ -1976,7 +1976,7 @@ mod tests {
         let mut builder = ModelRequest::builder(
             selected,
             effective,
-            ConversationView::new(vec![item]),
+            ConversationView::from_items(vec![item])?,
             metadata(attempt)?,
         )
         .resolved_harness_plan_identity(harness_plan_identity()?);

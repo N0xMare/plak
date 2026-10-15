@@ -1563,7 +1563,7 @@ fn lower_on(wire: Wire, items: &[ConversationItem]) -> TestResult<Vec<u8>> {
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(items.to_vec()),
+        ConversationView::from_items(items.to_vec())?,
         RequestMetadata::for_turn(
             uuid::Uuid::from_u128(1).try_into()?,
             uuid::Uuid::from_u128(2).try_into()?,

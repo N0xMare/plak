@@ -2817,7 +2817,8 @@ mod tests {
         let (producer_plan, binding) = admitted(&descriptor, &producer_request, b"account-a");
         let envelope = replay(r#"{"type":"message","id":"msg_1"}"#.to_owned());
         let output = output_item(10, envelope.clone());
-        let next_view = ConversationView::new(vec![output, user_item(11, "turn two")]);
+        let next_view = ConversationView::from_items(vec![output, user_item(11, "turn two")])
+            .expect("test conversation items form one valid segment");
         let covered = next_view
             .canonical_item_prefix_identity(1)
             .expect("covered prefix")
@@ -2928,11 +2929,18 @@ mod tests {
                 r#"{"type":"reasoning","id":"old"}"#.to_owned(),
             ),
         );
-        let producer_request = request(ConversationView::new(vec![historical.clone()]), 20, 21);
+        let producer_request = request(
+            ConversationView::from_items(vec![historical.clone()])
+                .expect("test conversation items form one valid segment"),
+            20,
+            21,
+        );
         let (producer_plan, binding) = admitted(&descriptor, &producer_request, b"account-a");
         let target_envelope = replay(r#"{"type":"function_call","id":"new"}"#.to_owned());
         let target_output = output_item(41, target_envelope.clone());
-        let covered_view = ConversationView::new(vec![historical.clone(), target_output.clone()]);
+        let covered_view =
+            ConversationView::from_items(vec![historical.clone(), target_output.clone()])
+                .expect("test conversation items form one valid segment");
         let covered = covered_view
             .canonical_item_prefix_identity(2)
             .expect("covered prefix")
@@ -2964,11 +2972,12 @@ mod tests {
         .expect("artifact");
         let next_request = ModelRequest::from_parts(
             producer_request.stable_prefix().clone(),
-            ConversationView::new(vec![
+            ConversationView::from_items(vec![
                 historical.clone(),
                 target_output.clone(),
                 user_item(42, "tool result"),
-            ]),
+            ])
+            .expect("test conversation items form one valid segment"),
             metadata(22, 23),
         )
         .expect("next request");
@@ -2983,14 +2992,15 @@ mod tests {
 
         let tail_request = ModelRequest::from_parts(
             producer_request.stable_prefix().clone(),
-            ConversationView::new(vec![
+            ConversationView::from_items(vec![
                 historical,
                 target_output,
                 output_item(
                     43,
                     replay(r#"{"type":"message","id":"unauthorized"}"#.to_owned()),
                 ),
-            ]),
+            ])
+            .expect("test conversation items form one valid segment"),
             metadata(24, 25),
         )
         .expect("tail request");
@@ -3212,10 +3222,11 @@ mod tests {
     #[test]
     fn coordinate_transplant_and_request_projection_drift_fail_closed() {
         let fixture = fixture(ResponsesStorageMode::Stateless, None);
-        let drifted_view = ConversationView::new(vec![
+        let drifted_view = ConversationView::from_items(vec![
             user_item(20, "foreign prefix"),
             output_item(21, fixture.envelope.clone()),
-        ]);
+        ])
+        .expect("test conversation items form one valid segment");
         let drifted_request = ModelRequest::from_parts(
             fixture.producer_request.stable_prefix().clone(),
             drifted_view,
@@ -3431,10 +3442,11 @@ mod tests {
     #[test]
     fn identical_envelopes_remain_valid_at_distinct_exact_coordinates() {
         let fixture = fixture(ResponsesStorageMode::Stateless, None);
-        let view = ConversationView::new(vec![
+        let view = ConversationView::from_items(vec![
             output_item(30, fixture.envelope.clone()),
             output_item(31, fixture.envelope.clone()),
-        ]);
+        ])
+        .expect("test conversation items form one valid segment");
         let covered = view
             .canonical_item_prefix_identity(2)
             .expect("covered")

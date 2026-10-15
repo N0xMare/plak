@@ -2585,7 +2585,7 @@ mod tests {
         let request = ModelRequest::builder(
             selected,
             effective,
-            ConversationView::new(history),
+            ConversationView::from_items(history)?,
             RequestMetadata::for_turn(
                 RunId::try_from(TestUuid::from_u128(1))?,
                 TurnId::try_from(TestUuid::from_u128(2))?,
@@ -2665,12 +2665,12 @@ mod tests {
         let request = ModelRequest::builder(
             selected,
             effective,
-            ConversationView::new(vec![ConversationItem::new(
+            ConversationView::from_items(vec![ConversationItem::new(
                 TestEntryId::try_from(TestUuid::from_u128(4))?,
                 Actor::User,
                 vec![ContentBlock::Text(TestTextBlock::new("hello", None)?)],
                 Provenance::UserInput,
-            )?]),
+            )?])?,
             RequestMetadata::for_turn(
                 RunId::try_from(TestUuid::from_u128(1))?,
                 TurnId::try_from(TestUuid::from_u128(2))?,
@@ -2752,12 +2752,12 @@ mod tests {
         let request = ModelRequest::builder(
             selected,
             effective,
-            ConversationView::new(vec![ConversationItem::new(
+            ConversationView::from_items(vec![ConversationItem::new(
                 TestEntryId::try_from(TestUuid::from_u128(4))?,
                 Actor::User,
                 vec![ContentBlock::Text(TestTextBlock::new("hello", None)?)],
                 Provenance::UserInput,
-            )?]),
+            )?])?,
             RequestMetadata::for_turn(
                 RunId::try_from(TestUuid::from_u128(1))?,
                 TurnId::try_from(TestUuid::from_u128(2))?,
@@ -3303,11 +3303,11 @@ mod tests {
                 (&account_target, 0),
                 (&beta_target, 0),
             ] {
-                let history = ConversationView::new(vec![
+                let history = ConversationView::from_items(vec![
                     initial_user.clone(),
                     assistant.clone(),
                     user.clone(),
-                ]);
+                ])?;
                 let mut diagnostics = Vec::new();
                 let (messages, _, projections) = translate_history(
                     &history,
@@ -3347,8 +3347,10 @@ mod tests {
                     let wire = serde_json::to_string(&messages)?;
                     assert!(!wire.contains("private thought"));
                     assert!(!wire.contains("signature"));
-                    let quiescent =
-                        ConversationView::new(vec![initial_user.clone(), assistant.clone()]);
+                    let quiescent = ConversationView::from_items(vec![
+                        initial_user.clone(),
+                        assistant.clone(),
+                    ])?;
                     assert!(
                         translate_history(
                             &quiescent,
@@ -3413,7 +3415,7 @@ mod tests {
                         Provenance::ModelOutput,
                     )?;
                     let active =
-                        ConversationView::new(vec![user.clone(), active_assistant.clone()]);
+                        ConversationView::from_items(vec![user.clone(), active_assistant.clone()])?;
                     assert!(
                         translate_history(
                             &active,
@@ -3442,11 +3444,11 @@ mod tests {
                         )],
                         Provenance::ToolExecution,
                     )?;
-                    let cancelled = ConversationView::new(vec![
+                    let cancelled = ConversationView::from_items(vec![
                         user.clone(),
                         active_assistant,
                         cancelled_result,
-                    ]);
+                    ])?;
                     let closed = target.clone().with_completed_history_prefix(Some(
                         cancelled.semantic_prefix_identity(3)?,
                     ));
@@ -3509,7 +3511,8 @@ mod tests {
             if unfinished {
                 blocks.push(batch_call(1)?);
             }
-            let history = ConversationView::new(vec![batch_item(100, Actor::Assistant, blocks)?]);
+            let history =
+                ConversationView::from_items(vec![batch_item(100, Actor::Assistant, blocks)?])?;
             let closed = target
                 .clone()
                 .with_completed_history_prefix(Some(history.semantic_prefix_identity(1)?));
@@ -4335,7 +4338,7 @@ mod tests {
             TestTextBlock::new("late", None)?,
             correlation.clone(),
         )?;
-        let history = ConversationView::new(vec![ConversationItem::new(
+        let history = ConversationView::from_items(vec![ConversationItem::new(
             TestEntryId::try_from(TestUuid::from_u128(43))?,
             Actor::Tool,
             vec![
@@ -4343,7 +4346,7 @@ mod tests {
                 ContentBlock::ToolResultUpdate(update),
             ],
             Provenance::ToolExecution,
-        )?]);
+        )?])?;
         let mut pending = vec![PendingTool {
             call_id,
             remote_id: "remote-exec".into(),
@@ -4460,7 +4463,7 @@ mod tests {
     fn lower(items: Vec<ConversationItem>) -> Result<Vec<MessageParam>, MessagesRequestError> {
         let policy = policy().map_err(|_| invalid("test policy"))?;
         translate_history(
-            &ConversationView::new(items),
+            &ConversationView::from_items(items).map_err(|_| invalid("test conversation"))?,
             &policy,
             &ToolOwnership::default(),
             false,

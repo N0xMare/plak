@@ -950,9 +950,11 @@ fn exact_request_authority_with_metadata(
         1,
         &[b"attempt-host-test-plan"],
     )?;
-    let mut builder =
-        crate::test_support::model_request_builder(ConversationView::new(vec![item]), metadata)
-            .resolved_harness_plan_identity(harness_plan);
+    let mut builder = crate::test_support::model_request_builder(
+        ConversationView::from_items(vec![item])?,
+        metadata,
+    )
+    .resolved_harness_plan_identity(harness_plan);
     if include_tools {
         builder = builder.tools(vec![plakous_model::ConfiguredTool::new(ToolDefinition::new(
             ToolName::new("lookup")?,

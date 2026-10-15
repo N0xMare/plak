@@ -2207,7 +2207,7 @@ async fn cross_account_request_authority_is_rejected_before_codex_preflight() ->
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata("00000000-0000-7000-8000-000000000220")?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -2419,7 +2419,7 @@ async fn resolution_evidence_is_exact_and_deterministic() -> TestResult {
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata(attempt)?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -2849,7 +2849,7 @@ async fn resolved_model_rejects_external_generation_rotation_before_dispatch() -
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata(attempt)?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -2925,7 +2925,7 @@ async fn resolved_model_rejects_external_rotation_before_later_round() -> TestRe
     let first_request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata(first_attempt)?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -3042,7 +3042,7 @@ async fn assert_subscription_gate_blocks_before_credentials(
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata(attempt)?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -3120,7 +3120,7 @@ async fn assert_inference_outcome(
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata(attempt)?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -3197,7 +3197,7 @@ async fn codex_prepare_rejects_authority_and_route_drift_without_fallback() -> T
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata("00000000-0000-7000-8000-000000000228")?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -3357,7 +3357,7 @@ async fn codex_prepare_seals_exact_wire_and_is_inert_until_first_poll() -> TestR
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata(attempt)?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -3545,7 +3545,7 @@ async fn codex_invalid_input_drop_and_foreign_attempt_have_zero_provider_effect(
     let cache_request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata(cache_attempt)?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -3567,7 +3567,7 @@ async fn codex_invalid_input_drop_and_foreign_attempt_have_zero_provider_effect(
     let missing_affinity_request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata(missing_affinity_attempt)?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -3595,7 +3595,7 @@ async fn codex_invalid_input_drop_and_foreign_attempt_have_zero_provider_effect(
     let invalid_request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata(invalid_attempt)?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -3628,7 +3628,7 @@ async fn codex_invalid_input_drop_and_foreign_attempt_have_zero_provider_effect(
     let dropped_request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata(dropped_attempt)?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -3651,7 +3651,7 @@ async fn codex_invalid_input_drop_and_foreign_attempt_have_zero_provider_effect(
     let foreign_request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata(prepared_attempt)?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -3735,7 +3735,7 @@ async fn codex_terminal_only_and_gapped_observations_share_terminal_authority() 
     let terminal_request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata(terminal_attempt)?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -3763,7 +3763,7 @@ async fn codex_terminal_only_and_gapped_observations_share_terminal_authority() 
     let gapped_request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata(gapped_attempt)?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -3835,7 +3835,7 @@ async fn codex_observation_and_terminal_canonical_ids_are_distinct() -> TestResu
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata(attempt)?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -3918,7 +3918,7 @@ async fn codex_not_started_refunds_inference_permit_and_input() -> TestResult {
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata(attempt)?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -4058,7 +4058,7 @@ async fn content_filtered_compaction_is_single_dispatch_terminal_policy() -> Tes
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata(attempt)?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -4202,7 +4202,7 @@ async fn codex_inference_cancellation_after_one_write_never_falls_back() -> Test
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata(attempt)?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -4384,7 +4384,7 @@ async fn assert_inference_observation(inherited: bool) -> TestResult {
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata(attempt)?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -4592,7 +4592,7 @@ async fn device_jwks_userinfo_catalog_and_lite_inference_are_exact() -> TestResu
     let first_request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata(first_attempt)?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)
@@ -6489,7 +6489,7 @@ fn text_request(attempt: &str) -> TestResult<ModelRequest> {
     Ok(ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![user_item()?]),
+        ConversationView::from_items(vec![user_item()?])?,
         metadata(attempt)?,
     )
     .resolved_harness_plan_identity(resolved_harness_plan()?)

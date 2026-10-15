@@ -85,5 +85,5 @@ pub(super) fn long_conversation(item_count: u128) -> TestResult<ConversationView
     let items = (0..item_count)
         .map(|index| conversation_item(10_000 + index, &format!("history item {index}")))
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(ConversationView::new(items))
+    Ok(ConversationView::from_items(items)?)
 }

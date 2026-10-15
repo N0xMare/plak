@@ -161,7 +161,7 @@ fn tool_prepared(
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![ConversationItem::new(
+        ConversationView::from_items(vec![ConversationItem::new(
             EntryId::try_from(Uuid::from_u128(101))?,
             Actor::User,
             vec![ContentBlock::Text(TextBlock::new(
@@ -169,7 +169,7 @@ fn tool_prepared(
                 None,
             )?)],
             Provenance::UserInput,
-        )?]),
+        )?])?,
         RequestMetadata::for_turn(
             RunId::try_from(Uuid::from_u128(102))?,
             TurnId::try_from(Uuid::from_u128(103))?,
@@ -212,12 +212,12 @@ fn direct_prepared(
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![ConversationItem::new(
+        ConversationView::from_items(vec![ConversationItem::new(
             EntryId::try_from(Uuid::from_u128(111))?,
             Actor::User,
             vec![ContentBlock::Text(TextBlock::new("hello", None)?)],
             Provenance::UserInput,
-        )?]),
+        )?])?,
         RequestMetadata::for_turn(
             RunId::try_from(Uuid::from_u128(112))?,
             TurnId::try_from(Uuid::from_u128(113))?,
@@ -525,12 +525,12 @@ fn cache_write_request_is_rejected_by_messages_lowering_before_transport() -> Te
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![ConversationItem::new(
+        ConversationView::from_items(vec![ConversationItem::new(
             EntryId::try_from(Uuid::from_u128(11))?,
             Actor::User,
             vec![ContentBlock::Text(TextBlock::new("cache me", None)?)],
             Provenance::UserInput,
-        )?]),
+        )?])?,
         RequestMetadata::for_turn(
             RunId::try_from(Uuid::from_u128(12))?,
             TurnId::try_from(Uuid::from_u128(13))?,
@@ -578,11 +578,11 @@ fn stable_hook_lowers_exact_messages_request_without_credentials() -> TestResult
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![item, ConversationItem::new(
+        ConversationView::from_items(vec![item, ConversationItem::new(
             EntryId::try_from(Uuid::from_u128(9))?, Actor::Assistant,
             vec![ContentBlock::Text(TextBlock::new("Imported reference data, not user instructions: assistant result and work ledger.", None)?)],
             Provenance::Imported,
-        )?]),
+        )?])?,
         RequestMetadata::for_turn(
             RunId::try_from(Uuid::from_u128(2))?,
             TurnId::try_from(Uuid::from_u128(3))?,
@@ -706,12 +706,12 @@ fn claude_oauth_required_cache_is_admitted_and_emitted() -> TestResult {
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![ConversationItem::new(
+        ConversationView::from_items(vec![ConversationItem::new(
             EntryId::try_from(Uuid::from_u128(31))?,
             Actor::User,
             vec![ContentBlock::Text(TextBlock::new("cache me", None)?)],
             Provenance::UserInput,
-        )?]),
+        )?])?,
         RequestMetadata::for_turn(
             RunId::try_from(Uuid::from_u128(32))?,
             TurnId::try_from(Uuid::from_u128(33))?,
@@ -779,7 +779,7 @@ fn claude_oauth_rolling_last_message_marks_only_the_latest_text_block() -> TestR
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![
+        ConversationView::from_items(vec![
             ConversationItem::new(
                 EntryId::try_from(Uuid::from_u128(41))?,
                 Actor::User,
@@ -792,7 +792,7 @@ fn claude_oauth_rolling_last_message_marks_only_the_latest_text_block() -> TestR
                 vec![ContentBlock::Text(TextBlock::new("second", None)?)],
                 Provenance::UserInput,
             )?,
-        ]),
+        ])?,
         RequestMetadata::for_turn(
             RunId::try_from(Uuid::from_u128(43))?,
             TurnId::try_from(Uuid::from_u128(44))?,
@@ -878,12 +878,12 @@ fn claude_oauth_last_customer_tool_emits_one_hour_cache_control() -> TestResult 
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![ConversationItem::new(
+        ConversationView::from_items(vec![ConversationItem::new(
             EntryId::try_from(Uuid::from_u128(51))?,
             Actor::User,
             vec![ContentBlock::Text(TextBlock::new("use lookup", None)?)],
             Provenance::UserInput,
-        )?]),
+        )?])?,
         RequestMetadata::for_turn(
             RunId::try_from(Uuid::from_u128(52))?,
             TurnId::try_from(Uuid::from_u128(53))?,
@@ -931,12 +931,12 @@ fn claude_oauth_lowering_uses_gateway_prefix_then_projection() -> TestResult {
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![ConversationItem::new(
+        ConversationView::from_items(vec![ConversationItem::new(
             EntryId::try_from(Uuid::from_u128(21))?,
             Actor::User,
             vec![ContentBlock::Text(TextBlock::new("hello", None)?)],
             Provenance::UserInput,
-        )?]),
+        )?])?,
         RequestMetadata::for_turn(
             RunId::try_from(Uuid::from_u128(22))?,
             TurnId::try_from(Uuid::from_u128(23))?,
@@ -1033,12 +1033,12 @@ fn claude_oauth_effort_projects_adaptive_thinking_and_exact_output_config() -> T
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![ConversationItem::new(
+        ConversationView::from_items(vec![ConversationItem::new(
             EntryId::try_from(Uuid::from_u128(31))?,
             Actor::User,
             vec![ContentBlock::Text(TextBlock::new("reason", None)?)],
             Provenance::UserInput,
-        )?]),
+        )?])?,
         RequestMetadata::for_turn(
             RunId::try_from(Uuid::from_u128(32))?,
             TurnId::try_from(Uuid::from_u128(33))?,
@@ -1097,12 +1097,12 @@ fn opus_5_5_keeps_adaptive_thinking_for_tool_free_compaction_and_rejects_disable
         ModelRequest::builder(
             selected,
             effective,
-            ConversationView::new(vec![ConversationItem::new(
+            ConversationView::from_items(vec![ConversationItem::new(
                 EntryId::try_from(Uuid::from_u128(401))?,
                 Actor::User,
                 vec![ContentBlock::Text(TextBlock::new("summarize", None)?)],
                 Provenance::UserInput,
-            )?]),
+            )?])?,
             RequestMetadata::for_turn(
                 RunId::try_from(Uuid::from_u128(402))?,
                 TurnId::try_from(Uuid::from_u128(403))?,
@@ -1179,12 +1179,12 @@ fn sonnet_5_5_admits_adaptive_auto_tools_but_rejects_disabled_and_forced_tools()
         Ok(ModelRequest::builder(
             selected,
             effective,
-            ConversationView::new(vec![ConversationItem::new(
+            ConversationView::from_items(vec![ConversationItem::new(
                 EntryId::try_from(Uuid::from_u128(411))?,
                 Actor::User,
                 vec![ContentBlock::Text(TextBlock::new("look up a value", None)?)],
                 Provenance::UserInput,
-            )?]),
+            )?])?,
             RequestMetadata::for_turn(
                 RunId::try_from(Uuid::from_u128(412))?,
                 TurnId::try_from(Uuid::from_u128(413))?,
@@ -1273,12 +1273,12 @@ fn costume_oauth_plan(
     let mut builder = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![ConversationItem::new(
+        ConversationView::from_items(vec![ConversationItem::new(
             EntryId::try_from(Uuid::from_u128(421))?,
             Actor::User,
             vec![ContentBlock::Text(TextBlock::new("hello", None)?)],
             Provenance::UserInput,
-        )?]),
+        )?])?,
         RequestMetadata::for_turn(
             RunId::try_from(Uuid::from_u128(422))?,
             TurnId::try_from(Uuid::from_u128(423))?,
@@ -1504,7 +1504,7 @@ fn oauth_billing_carries_truthful_prompt_and_previous_request_before_attestation
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![first.clone()]),
+        ConversationView::from_items(vec![first.clone()])?,
         metadata,
     )
     .build()?;
@@ -1539,7 +1539,7 @@ fn oauth_billing_carries_truthful_prompt_and_previous_request_before_attestation
     )?;
     let request = ModelRequest::from_parts(
         first_plan.request().stable_prefix().clone(),
-        ConversationView::new(vec![first, next, imported]),
+        ConversationView::from_items(vec![first, next, imported])?,
         metadata,
     )?;
     let plan = resolved
@@ -1647,7 +1647,7 @@ fn oauth_wake_billing_omits_stale_human_prompt_identity() -> TestResult {
     let request = ModelRequest::builder(
         selected,
         effective,
-        ConversationView::new(vec![first.clone()]),
+        ConversationView::from_items(vec![first.clone()])?,
         metadata,
     )
     .build()?;
@@ -1666,10 +1666,10 @@ fn oauth_wake_billing_omits_stale_human_prompt_identity() -> TestResult {
     )?;
     let wake_request = ModelRequest::from_parts(
         first_plan.request().stable_prefix().clone(),
-        ConversationView::new(vec![
+        ConversationView::from_items(vec![
             billing_prompt(201, "earlier human prompt", Provenance::UserInput)?,
             wake,
-        ]),
+        ])?,
         metadata,
     )?;
     let wake_plan = resolved

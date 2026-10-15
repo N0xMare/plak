@@ -127,7 +127,7 @@ fn workflow_metadata() -> Result<RequestMetadata, plakous_model::IdentityError> 
 fn openai_codex_session_workflow_emits_no_native_compaction_contract() -> TestResult {
     let (protocol, family, model) = target_values()?;
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(21, "compact this")?]),
+        ConversationView::from_items(vec![user(21, "compact this")?])?,
         workflow_metadata()?,
     )
     .build()?;
@@ -164,7 +164,7 @@ fn openai_codex_native_compaction_trigger_emits_compaction_trigger_item() -> Tes
         .collect(),
     );
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(22, "compact this")?]),
+        ConversationView::from_items(vec![user(22, "compact this")?])?,
         workflow_metadata()?,
     )
     .native(native)
@@ -185,7 +185,7 @@ fn openai_codex_native_compaction_trigger_emits_compaction_trigger_item() -> Tes
         Some("compaction_trigger")
     );
     let without = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(22, "compact this")?]),
+        ConversationView::from_items(vec![user(22, "compact this")?])?,
         workflow_metadata()?,
     )
     .build()?;
@@ -203,7 +203,7 @@ fn openai_codex_unknown_native_options_are_rejected() -> TestResult {
             .collect(),
     );
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(23, "no")?]),
+        ConversationView::from_items(vec![user(23, "no")?])?,
         workflow_metadata()?,
     )
     .native(native)
@@ -231,7 +231,7 @@ fn codex_service_tier_is_exact_and_orthogonal_to_reasoning() -> TestResult {
     let (protocol, family, model) = target_values()?;
     let policy = ResponsesRequestPolicy::openai_codex(false, false, "reasoning.encrypted_content");
     let standard = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(31, "standard")?]),
+        ConversationView::from_items(vec![user(31, "standard")?])?,
         metadata()?,
     )
     .reasoning(ReasoningPolicy::Enabled {
@@ -240,7 +240,7 @@ fn codex_service_tier_is_exact_and_orthogonal_to_reasoning() -> TestResult {
     })
     .build()?;
     let priority = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(32, "priority")?]),
+        ConversationView::from_items(vec![user(32, "priority")?])?,
         metadata()?,
     )
     .processing_tier(ProcessingTierDisposition::ProviderNamed(
@@ -270,7 +270,7 @@ fn codex_service_tier_is_exact_and_orthogonal_to_reasoning() -> TestResult {
 fn non_codex_responses_policy_rejects_named_service_tier() -> TestResult {
     let (protocol, family, model) = target_values()?;
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(33, "unsupported")?]),
+        ConversationView::from_items(vec![user(33, "unsupported")?])?,
         metadata()?,
     )
     .processing_tier(ProcessingTierDisposition::ProviderNamed(
@@ -358,7 +358,7 @@ fn requested_calls_with_results_prepare_fresh_on_shared_responses_routes() -> Te
                 )?,
             ];
             let request = crate::test_support::model_request_builder(
-                ConversationView::new(items),
+                ConversationView::from_items(items)?,
                 workflow_metadata()?,
             )
             .build()?;
@@ -384,10 +384,10 @@ fn requested_calls_with_results_prepare_fresh_on_shared_responses_routes() -> Te
 fn unbound_compaction_requires_exact_replay() -> TestResult {
     let (protocol, family, model) = target_values()?;
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![native_compaction_prior(
+        ConversationView::from_items(vec![native_compaction_prior(
             "opaque-ciphertext",
             r#"{"type":"compaction","encrypted_content":"opaque-ciphertext"}"#,
-        )?]),
+        )?])?,
         workflow_metadata()?,
     )
     .build()?;
@@ -489,7 +489,7 @@ fn projector_shaped_history_reopens_with_exact_artifact_and_prepares_fresh() -> 
         "{}",
     )?;
     let producing = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(20, "first")?]),
+        ConversationView::from_items(vec![user(20, "first")?])?,
         metadata()?,
     )
     .tools(vec![tool("lookup", false)?])
@@ -533,11 +533,13 @@ fn projector_shaped_history_reopens_with_exact_artifact_and_prepares_fresh() -> 
         )?,
         user(25, "follow up")?,
     ];
-    let request =
-        crate::test_support::model_request_builder(ConversationView::new(items), metadata()?)
-            .tools(vec![tool("lookup", false)?])
-            .resolved_harness_plan_identity(harness_plan_identity()?)
-            .build()?;
+    let request = crate::test_support::model_request_builder(
+        ConversationView::from_items(items)?,
+        metadata()?,
+    )
+    .tools(vec![tool("lookup", false)?])
+    .resolved_harness_plan_identity(harness_plan_identity()?)
+    .build()?;
     let now = Timestamp::new(1_700_000_000, 0)?;
     let artifact = output_artifact(
         &producing,
@@ -680,7 +682,7 @@ fn openai_codex_replays_bound_native_compaction_item() -> TestResult {
         r#"{"id":"compact_1","type":"compaction","encrypted_content":"opaque-ciphertext"}"#,
     )?;
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(21, "continue")?, prior]),
+        ConversationView::from_items(vec![user(21, "continue")?, prior])?,
         workflow_metadata()?,
     )
     .build()?;
@@ -717,7 +719,7 @@ fn openai_codex_rejects_compaction_ciphertext_mismatch() -> TestResult {
         r#"{"type":"compaction","encrypted_content":"opaque"}"#,
     )?;
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(21, "continue")?, prior]),
+        ConversationView::from_items(vec![user(21, "continue")?, prior])?,
         workflow_metadata()?,
     )
     .build()?;
@@ -753,7 +755,7 @@ fn non_codex_responses_policy_rejects_native_compaction_replay() -> TestResult {
         r#"{"type":"compaction","encrypted_content":"opaque-ciphertext"}"#,
     )?;
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(21, "continue")?, prior]),
+        ConversationView::from_items(vec![user(21, "continue")?, prior])?,
         workflow_metadata()?,
     )
     .build()?;
@@ -935,7 +937,7 @@ fn tool_with_concurrency(
 fn provider_parallel_permission_is_independent_of_local_tool_scheduling() -> TestResult {
     let (protocol, family, model) = target_values()?;
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(10, "Use the appropriate tool.")?]),
+        ConversationView::from_items(vec![user(10, "Use the appropriate tool.")?])?,
         metadata()?,
     )
     .tools(vec![
@@ -971,7 +973,7 @@ fn provider_parallel_permission_is_independent_of_local_tool_scheduling() -> Tes
 fn openrouter_tools_emit_documented_null_strict_and_serial_authority() -> TestResult {
     let (protocol, family, model) = target_values()?;
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(11, "Use one tool.")?]),
+        ConversationView::from_items(vec![user(11, "Use one tool.")?])?,
         metadata()?,
     )
     .tools(vec![tool_with_concurrency(
@@ -1013,7 +1015,7 @@ fn target_values() -> Result<(ProtocolId, ModelFamilyId, ModelId), Box<dyn std::
 #[test]
 fn mixed_v2_projection_lowers_explicit_function_and_custom_presentations() -> TestResult {
     let base = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(90, "run it")?]),
+        ConversationView::from_items(vec![user(90, "run it")?])?,
         metadata()?,
     )
     .tools(vec![
@@ -1143,7 +1145,7 @@ fn mixed_v2_projection_lowers_explicit_function_and_custom_presentations() -> Te
 #[test]
 fn ordinary_tool_is_not_projected_by_provider_or_model_name() -> TestResult {
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(91, "run it")?]),
+        ConversationView::from_items(vec![user(91, "run it")?])?,
         metadata()?,
     )
     .tools(vec![tool("run_process", false)?])
@@ -1418,7 +1420,7 @@ fn canonical_custom_tool_is_compilable_but_requires_request_projection() -> Test
     )?;
 
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(92, "run it")?]),
+        ConversationView::from_items(vec![user(92, "run it")?])?,
         metadata()?,
     )
     .tools(vec![tool("canonical_process_start", true)?])
@@ -1961,10 +1963,12 @@ fn active_context_replays_bound_output_and_portably_lowers_compatible_unbound_ou
             Provenance::ModelOutput,
         )?,
     );
-    let request =
-        crate::test_support::model_request_builder(ConversationView::new(items), metadata()?)
-            .resolved_harness_plan_identity(harness_plan_identity()?)
-            .build()?;
+    let request = crate::test_support::model_request_builder(
+        ConversationView::from_items(items)?,
+        metadata()?,
+    )
+    .resolved_harness_plan_identity(harness_plan_identity()?)
+    .build()?;
     let authority = operation_authority(
         &request,
         "responses-test-route",
@@ -1999,7 +2003,7 @@ fn active_context_replays_bound_output_and_portably_lowers_compatible_unbound_ou
 #[test]
 fn nested_digest_versions_are_part_of_authority_and_prefix_identity() -> TestResult {
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(9, "exact identity")?]),
+        ConversationView::from_items(vec![user(9, "exact identity")?])?,
         metadata()?,
     )
     .resolved_harness_plan_identity(harness_plan_identity()?)
@@ -2037,7 +2041,7 @@ fn nested_digest_versions_are_part_of_authority_and_prefix_identity() -> TestRes
 fn platform_golden_preserves_ordered_request_shape() -> TestResult {
     let (protocol, family, model) = target_values()?;
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(10, "Find the answer.")?]),
+        ConversationView::from_items(vec![user(10, "Find the answer.")?])?,
         metadata()?,
     )
     .instructions(vec![
@@ -2116,7 +2120,7 @@ fn assistant_history_uses_output_text_and_projects_commentary_without_replay() -
         .expect("assistant item")
     };
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![assistant(Some(TextPhase::Final))]),
+        ConversationView::from_items(vec![assistant(Some(TextPhase::Final))])?,
         metadata()?,
     )
     .build()?;
@@ -2141,7 +2145,7 @@ fn assistant_history_uses_output_text_and_projects_commentary_without_replay() -
     );
 
     let commentary = crate::test_support::model_request_builder(
-        ConversationView::new(vec![assistant(Some(TextPhase::Commentary))]),
+        ConversationView::from_items(vec![assistant(Some(TextPhase::Commentary))])?,
         metadata()?,
     )
     .build()?;
@@ -2169,7 +2173,7 @@ fn assistant_history_uses_output_text_and_projects_commentary_without_replay() -
     let source_family = ModelFamilyId::new("gpt")?;
     let source_model = ModelId::new("gpt-5.6-sol")?;
     let commentary_with_native = crate::test_support::model_request_builder(
-        ConversationView::new(vec![ConversationItem::new(
+        ConversationView::from_items(vec![ConversationItem::new(
             id::<EntryId>(16)?,
             Actor::Assistant,
             vec![
@@ -2182,7 +2186,7 @@ fn assistant_history_uses_output_text_and_projects_commentary_without_replay() -
                 )?,
             ],
             Provenance::ModelOutput,
-        )?]),
+        )?])?,
         metadata()?,
     )
     .build()?;
@@ -2212,10 +2216,12 @@ fn codex_history_projects_portably_to_supergrok_without_native_bytes() -> TestRe
     let target_model = ModelId::new("grok-4.5")?;
     let history =
         cross_provider_history(&source_protocol, &source_family, &source_model, 600, true)?;
-    let request =
-        crate::test_support::model_request_builder(ConversationView::new(history), metadata()?)
-            .tools(vec![tool("lookup", false)?])
-            .build()?;
+    let request = crate::test_support::model_request_builder(
+        ConversationView::from_items(history)?,
+        metadata()?,
+    )
+    .tools(vec![tool("lookup", false)?])
+    .build()?;
     let canonical_before = serde_json::to_vec(request.input().history())?;
     let lowered = lower_responses_request(
         &request,
@@ -2250,13 +2256,13 @@ fn grok_history_projects_portably_to_codex_without_foreign_reasoning() -> TestRe
     let target_model = ModelId::new("gpt-5.6")?;
     let build = |include_reasoning| -> Result<ModelRequest, Box<dyn std::error::Error>> {
         Ok(crate::test_support::model_request_builder(
-            ConversationView::new(cross_provider_history(
+            ConversationView::from_items(cross_provider_history(
                 &source_protocol,
                 &source_family,
                 &source_model,
                 700,
                 include_reasoning,
-            )?),
+            )?)?,
             metadata()?,
         )
         .tools(vec![tool("lookup", false)?])
@@ -2294,9 +2300,9 @@ fn target_compatible_native_output_without_artifact_uses_portable_semantics() ->
     let family = ModelFamilyId::new("gpt")?;
     let model = ModelId::new("gpt-5.6")?;
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(cross_provider_history(
+        ConversationView::from_items(cross_provider_history(
             &protocol, &family, &model, 750, false,
-        )?),
+        )?)?,
         metadata()?,
     )
     .tools(vec![tool("lookup", false)?])
@@ -2318,7 +2324,7 @@ fn target_compatible_native_output_without_artifact_uses_portable_semantics() ->
     assert!(!wire.contains("private-"));
 
     let opaque_only = crate::test_support::model_request_builder(
-        ConversationView::new(vec![ConversationItem::new(
+        ConversationView::from_items(vec![ConversationItem::new(
             id::<EntryId>(759)?,
             Actor::Assistant,
             vec![native_output(
@@ -2328,7 +2334,7 @@ fn target_compatible_native_output_without_artifact_uses_portable_semantics() ->
                 "target-compatible-opaque-only",
             )?],
             Provenance::ModelOutput,
-        )?]),
+        )?])?,
         metadata()?,
     )
     .build()?;
@@ -2386,7 +2392,7 @@ fn incompatible_opaque_fallback_matrix_is_exact_in_both_directions() -> TestResu
         {
             let base = 900 + u128::try_from(direction * 10 + fallback_index)?;
             let opaque_only = crate::test_support::model_request_builder(
-                ConversationView::new(vec![ConversationItem::new(
+                ConversationView::from_items(vec![ConversationItem::new(
                     id::<EntryId>(base)?,
                     Actor::Assistant,
                     vec![native_output_with_fallback(
@@ -2397,7 +2403,7 @@ fn incompatible_opaque_fallback_matrix_is_exact_in_both_directions() -> TestResu
                         fallback.clone(),
                     )?],
                     Provenance::ModelOutput,
-                )?]),
+                )?])?,
                 metadata()?,
             )
             .build()?;
@@ -2433,7 +2439,7 @@ fn incompatible_opaque_fallback_matrix_is_exact_in_both_directions() -> TestResu
             }
 
             let mixed = crate::test_support::model_request_builder(
-                ConversationView::new(vec![ConversationItem::new(
+                ConversationView::from_items(vec![ConversationItem::new(
                     id::<EntryId>(base + 100)?,
                     Actor::Assistant,
                     vec![
@@ -2450,7 +2456,7 @@ fn incompatible_opaque_fallback_matrix_is_exact_in_both_directions() -> TestResu
                         )?,
                     ],
                     Provenance::ModelOutput,
-                )?]),
+                )?])?,
                 metadata()?,
             )
             .build()?;
@@ -2473,7 +2479,7 @@ fn incompatible_opaque_fallback_matrix_is_exact_in_both_directions() -> TestResu
         }
 
         let user_summary = crate::test_support::model_request_builder(
-            ConversationView::new(vec![ConversationItem::new(
+            ConversationView::from_items(vec![ConversationItem::new(
                 id::<EntryId>(990 + u128::try_from(direction)?)?,
                 Actor::User,
                 vec![native_output_with_fallback(
@@ -2484,7 +2490,7 @@ fn incompatible_opaque_fallback_matrix_is_exact_in_both_directions() -> TestResu
                     OpaqueFallback::SemanticSummary("portable user summary".to_owned()),
                 )?],
                 Provenance::UserInput,
-            )?]),
+            )?])?,
             metadata()?,
         )
         .build()?;
@@ -2543,7 +2549,7 @@ fn opaque_only_cross_target_semantics_fail_closed_without_payload_disclosure() -
     ) in cases
     {
         let request = crate::test_support::model_request_builder(
-            ConversationView::new(vec![ConversationItem::new(
+            ConversationView::from_items(vec![ConversationItem::new(
                 id::<EntryId>(entry)?,
                 Actor::Assistant,
                 vec![native_output(
@@ -2553,7 +2559,7 @@ fn opaque_only_cross_target_semantics_fail_closed_without_payload_disclosure() -
                     "secret-opaque-only-marker",
                 )?],
                 Provenance::ModelOutput,
-            )?]),
+            )?])?,
             metadata()?,
         )
         .build()?;
@@ -2650,7 +2656,7 @@ fn codex_deltas_are_closed_policy_data() -> TestResult {
 fn grok_deltas_emit_exact_stateless_reasoning_wire() -> TestResult {
     let (protocol, family, model) = target_values()?;
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(41, "Inspect the repository.")?]),
+        ConversationView::from_items(vec![user(41, "Inspect the repository.")?])?,
         metadata()?,
     )
     .limits(GenerationLimits::new(
@@ -2692,7 +2698,7 @@ fn grok_deltas_emit_exact_stateless_reasoning_wire() -> TestResult {
 fn supergrok_lowers_instructions_as_first_input_system_message() -> TestResult {
     let (protocol, family, model) = target_values()?;
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(10, "hello")?]),
+        ConversationView::from_items(vec![user(10, "hello")?])?,
         metadata()?,
     )
     .instructions(vec![InstructionBlock::new(
@@ -3148,7 +3154,7 @@ fn ordered_function_and_custom_tool_groups_lower_exactly() -> TestResult {
         Provenance::ToolExecution,
     )?;
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![call_item, result_item]),
+        ConversationView::from_items(vec![call_item, result_item])?,
         workflow_metadata()?,
     )
     .tools(vec![tool("lookup", false)?, tool("write_code", true)?])
@@ -3187,7 +3193,7 @@ fn ordered_function_and_custom_tool_groups_lower_exactly() -> TestResult {
         r#"{"code":"print(1)"}"#,
     )?;
     let invalid_request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![
+        ConversationView::from_items(vec![
             ConversationItem::new(
                 id::<EntryId>(28)?,
                 Actor::Assistant,
@@ -3206,7 +3212,7 @@ fn ordered_function_and_custom_tool_groups_lower_exactly() -> TestResult {
                 )?)],
                 Provenance::ToolExecution,
             )?,
-        ]),
+        ])?,
         metadata()?,
     )
     .tools(vec![tool("write_code", true)?])
@@ -3301,7 +3307,7 @@ fn code_mode_exec_cell_replays_as_a_function_call_on_a_direct_target() -> TestRe
     )?;
     // The Direct target exposes only structured functions.
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![call_item, result_item]),
+        ConversationView::from_items(vec![call_item, result_item])?,
         workflow_metadata()?,
     )
     .tools(vec![tool("exec_command", false)?])
@@ -3466,9 +3472,11 @@ fn fresh_codex_body_matches_portable_reasoning_projection() -> TestResult {
         }
     }
     let lower = |items| -> Result<LoweredResponsesRequest, Box<dyn std::error::Error>> {
-        let request =
-            crate::test_support::model_request_builder(ConversationView::new(items), metadata()?)
-                .build()?;
+        let request = crate::test_support::model_request_builder(
+            ConversationView::from_items(items)?,
+            metadata()?,
+        )
+        .build()?;
         Ok(lower_responses_request(
             &request,
             ResponsesRequestConfig::new(
@@ -3511,7 +3519,7 @@ fn result_before_call_fails_with_exact_protected_group_error() -> TestResult {
         ToolCorrelation::default(),
     )?;
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![
+        ConversationView::from_items(vec![
             ConversationItem::new(
                 id::<EntryId>(31)?,
                 Actor::Tool,
@@ -3524,7 +3532,7 @@ fn result_before_call_fails_with_exact_protected_group_error() -> TestResult {
                 vec![ContentBlock::ToolCall(call)],
                 Provenance::ModelOutput,
             )?,
-        ]),
+        ])?,
         metadata()?,
     )
     .tools(vec![tool("lookup", false)?])
@@ -3559,7 +3567,7 @@ fn result_before_call_fails_with_exact_protected_group_error() -> TestResult {
 fn provider_stored_without_active_artifact_replays_full_canonical_request() -> TestResult {
     let (protocol, family, model) = target_values()?;
     let request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(45, "first")?, user(46, "second")?]),
+        ConversationView::from_items(vec![user(45, "first")?, user(46, "second")?])?,
         metadata()?,
     )
     .build()?;
@@ -3594,7 +3602,7 @@ fn openai_platform_programmatic_request_and_replay_are_exact_in_both_storage_mod
         ToolCallerDisposition::ProviderProgrammaticOnly,
     );
     let producing_request = crate::test_support::model_request_builder(
-        ConversationView::new(vec![user(145, "look up one value")?]),
+        ConversationView::from_items(vec![user(145, "look up one value")?])?,
         metadata()?,
     )
     .tools(vec![programmatic_tool.clone()])
@@ -4017,7 +4025,7 @@ fn openai_platform_programmatic_request_and_replay_are_exact_in_both_storage_mod
             "caller":{"type":"program","caller_id":"wrong-program"}
         }))?;
         let mutated_views = [
-            ConversationView::new(vec![
+            ConversationView::from_items(vec![
                 user(145, "look up one value")?,
                 ConversationItem::new(
                     id::<EntryId>(147)?,
@@ -4030,8 +4038,8 @@ fn openai_platform_programmatic_request_and_replay_are_exact_in_both_storage_mod
                 )?,
                 call_item.clone(),
                 result_item.clone(),
-            ]),
-            ConversationView::new(vec![
+            ])?,
+            ConversationView::from_items(vec![
                 user(145, "look up one value")?,
                 program_item.clone(),
                 ConversationItem::new(
@@ -4047,13 +4055,13 @@ fn openai_platform_programmatic_request_and_replay_are_exact_in_both_storage_mod
                     Provenance::ModelOutput,
                 )?,
                 result_item.clone(),
-            ]),
-            ConversationView::new(vec![
+            ])?,
+            ConversationView::from_items(vec![
                 user(145, "look up one value")?,
                 call_item.clone(),
                 program_item.clone(),
                 result_item.clone(),
-            ]),
+            ])?,
         ];
         let mutated_replays = [
             vec![wrong_program, call_replay.clone()],

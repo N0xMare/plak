@@ -292,7 +292,7 @@ async fn native_wrap_up_replays_the_live_artifact_and_other_drift_lowers_fresh()
     let first = complete_model_round(
         Arc::clone(&model),
         round_request(
-            ConversationView::new(vec![user.clone()]),
+            ConversationView::from_items(vec![user.clone()])?,
             "00000000-0000-4000-8000-000000000472",
             ToolChoice::Auto,
             Vec::new(),
@@ -410,7 +410,7 @@ async fn native_wrap_up_over_protected_history_keeps_bound_replay_into_the_next_
     let first = complete_model_round(
         Arc::clone(&model),
         round_request(
-            ConversationView::new(vec![user.clone()]),
+            ConversationView::from_items(vec![user.clone()])?,
             "00000000-0000-4000-8000-000000000482",
             ToolChoice::Auto,
             Vec::new(),
