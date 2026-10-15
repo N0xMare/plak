@@ -136,6 +136,20 @@ fn response_segment(response: &ModelResponse) -> Result<Option<HistorySegment>, 
     })
 }
 
+/// The retry a settled failed attempt leads to.
+enum AttemptRetry {
+    ContentFilter,
+    OutputLimit,
+    OverflowFold,
+}
+
+/// How a round without customer tools continues the turn.
+enum SettledRound {
+    /// The loop resumes, holding the hosted continuation operation, if any.
+    Continue(Option<OperationId>),
+    Finished(Box<TurnResult>),
+}
+
 /// How a failed provider attempt continues the turn.
 enum AttemptFailure {
     Retry(RoundDecision),
@@ -798,31 +812,7 @@ impl Driver {
         }
         self.appended_prompt = None;
         if append_user {
-            self.maybe_compact_before_turn_prompt(command).await?;
-            let prompt_entry = self.entry_id()?;
-            let user_item = ConversationItem::new(
-                prompt_entry,
-                Actor::User,
-                vec![ContentBlock::Text(
-                    TextBlock::new(command.text.clone(), None).map_err(|_| {
-                        AgentError::new(AgentErrorKind::InvalidInput, "prompt text is invalid")
-                    })?,
-                )],
-                if command.instruction {
-                    Provenance::Instruction
-                } else {
-                    Provenance::UserInput
-                },
-            )
-            .map_err(|_| AgentError::new(AgentErrorKind::InvalidInput, "prompt item is invalid"))?;
-            self.append_history_with_notices(
-                command.turn_id,
-                Some(HistorySegmentKind::RecentIntent),
-                [user_item],
-                true,
-            )
-            .await?;
-            self.appended_prompt = Some(prompt_entry);
+            self.append_turn_prompt(command).await?;
         }
         // A resumed continuation's prompt was appended by an earlier frame.
         self.prompt_in_history = Some(command.turn_id);
@@ -877,104 +867,27 @@ impl Driver {
                 // The attempt ended with this definite error and ran nothing.
                 // Its decision commits first; then the turn acts on it.
                 Err(error) => {
-                    let decision =
-                        self.failed_attempt_decision(&error, over_budget, continuation_baton);
-                    let (decision, failure) = match decision {
-                        AttemptFailure::Retry(decision) => {
-                            match decision {
-                                RoundDecision::RetryContentFilter => {
-                                    self.turn_budgets.content_filter_retry_spent = true;
-                                    // The filtered attempt does not count as a round.
-                                    self.turn_budgets.model_rounds =
-                                        self.turn_budgets.model_rounds.saturating_sub(1);
-                                }
-                                RoundDecision::RetryOutputLimit => {
-                                    self.turn_budgets.output_limit_retry_taken = true;
-                                }
-                                RoundDecision::OverflowFold => {
-                                    self.turn_budgets.overflow_recovery_taken = true;
-                                }
-                                _ => {}
-                            }
-                            (decision, None)
-                        }
-                        AttemptFailure::EndsTurn(failure) => (
-                            self.fail_turn_decision(command.turn_id, &failure).await?,
-                            Some(failure),
-                        ),
-                    };
-                    match decision {
-                        RoundDecision::RetryContentFilter => {
-                            let guidance = self.content_filter_guidance(command)?;
-                            let kind = history_segment_kind(std::slice::from_ref(&guidance));
-                            Box::pin(self.commit_retry(
-                                command.turn_id,
-                                provider_operation,
-                                attempt_error.as_ref(),
-                                last_round_usage,
-                                decision,
-                                continuation_baton,
-                                guidance,
-                                kind,
-                            ))
-                            .await?;
-                            self.await_content_filter_retry(command, &error).await?;
+                    match Box::pin(self.settle_failed_attempt(
+                        command,
+                        error,
+                        over_budget,
+                        continuation_baton,
+                        provider_operation,
+                        attempt_error,
+                        last_round_usage,
+                    ))
+                    .await?
+                    {
+                        AttemptRetry::ContentFilter => {
                             continuation_baton = None;
                             if over_budget {
                                 wrap_up_round_taken = false;
                             }
-                            continue;
                         }
-                        RoundDecision::RetryOutputLimit => {
-                            Box::pin(self.commit_output_limit_retry(
-                                command,
-                                provider_operation,
-                                attempt_error.as_ref(),
-                                last_round_usage,
-                                continuation_baton,
-                                &error,
-                            ))
-                            .await?;
-                            continuation_baton = None;
-                            continue;
-                        }
-                        _ => {}
+                        AttemptRetry::OutputLimit => continuation_baton = None,
+                        AttemptRetry::OverflowFold => {}
                     }
-                    if let (Some(provider_operation), Some(attempt_error)) =
-                        (provider_operation, attempt_error.as_ref())
-                    {
-                        self.record_provider_decision(
-                            command.turn_id,
-                            provider_operation,
-                            Err(attempt_error),
-                            last_round_usage,
-                            decision,
-                            continuation_baton,
-                        )
-                        .await?;
-                    }
-                    if let Some(failure) = failure {
-                        return Err(failure);
-                    }
-                    if Box::pin(self.compact_after_provider_overflow(command)).await? {
-                        // The refused operation entered ModelStreaming before
-                        // the provider classified it. A successful fold closes
-                        // that round and the resend starts from Preparing.
-                        if error
-                            .model_error()
-                            .is_some_and(ModelError::is_provider_context_overflow)
-                        {
-                            command.shared.continue_after_model()?;
-                        }
-                        // The refused round produced nothing and its operation
-                        // is finalized. The round is sent again as a new
-                        // operation on the smaller successor; the prompt is
-                        // already history and is not appended twice.
-                        self.turn_budgets.model_rounds =
-                            self.turn_budgets.model_rounds.saturating_sub(1);
-                        continue;
-                    }
-                    return Err(error);
+                    continue;
                 }
             };
             let provider_operation = provider_operation.ok_or_else(|| {
@@ -1114,131 +1027,25 @@ impl Driver {
                 &disposition,
                 HostedRoundDisposition::CustomerToolsRequested(_)
             ) {
-                if matches!(&disposition, HostedRoundDisposition::ServerPaused) {
-                    let (model_admission_reference, policy_reference) =
-                        self.continuation_bindings();
-                    let continuation =
-                        RuntimeContinuation::AwaitServerPauseV1(Box::new(AwaitServerPauseV1 {
-                            root: Self::continuation_root(command),
-                            config: DurableAgentConfig::from_config(self.config)?,
-                            budgets: self.turn_budgets,
-                            tool_calls: u64::try_from(tool_calls).map_err(|_| {
-                                AgentError::new(
-                                    AgentErrorKind::Internal,
-                                    "tool call counter overflowed",
-                                )
-                            })?,
-                            usage: command.shared.usage(),
-                            context_anchor: self.context_anchor,
-                            request_anchor: self
-                                .request_anchor
-                                .as_ref()
-                                .map(plakous_model::ContextRequestAnchor::identity)
-                                .transpose()
-                                .map_err(
-                                    |_| AgentError::from_store(SessionStoreError::corrupt()),
-                                )?,
-                            observation_budget: self.observation_budget,
-                            attempt_id,
-                            provider_operation,
-                            provider_request: provider_plan.request().clone(),
-                            provider_plan_digest: provider_plan.digest(),
-                            provider_response: response.clone(),
-                            working: WorkingProjection::default(),
-                            steering: self
-                                .steering
-                                .iter()
-                                .map(|queued| ContinuationSteering {
-                                    text: queued.text.clone(),
-                                    operation_id: queued.operation_id,
-                                })
-                                .collect(),
-                            model_admission_reference,
-                            policy_reference,
-                        }));
-                    let outcome = self.provider_outcome(
-                        Ok(&response),
-                        last_round_usage,
-                        RoundDecision::Continue,
-                    )?;
-                    // The decision, the restorable frame and the response's
-                    // history are one commit (spec 01 §3.5 item 5).
-                    let continuation_operation = Box::pin(self.commit_hosted_round(
-                        command.turn_id,
-                        provider_operation,
-                        outcome,
-                        continuation_baton,
-                        DurableOperationKind::ServerPauseContinuation {
-                            turn_id: command.turn_id,
-                            attempt_id,
-                        },
-                        continuation,
-                        Some((
-                            &response,
-                            provider_artifact_transition(&provider_plan, &response),
-                        )),
-                    ))
-                    .await?;
-                    continuation_baton = Some(continuation_operation);
-                    let _ = self.apply_steering(command).await?;
-                    command.shared.continue_after_model()?;
-                    continue;
-                }
-                let continuing = disposition.continuing(!self.steering.is_empty());
-                if continuing {
-                    // The decision and the response's history are one commit
-                    // (spec 01 §3.5 item 5).
-                    Box::pin(self.commit_continue_round(
-                        command.turn_id,
-                        provider_operation,
-                        &response,
-                        last_round_usage,
-                        continuation_baton,
-                        provider_artifact_transition(&provider_plan, &response),
-                    ))
-                    .await?;
-                    continuation_baton = None;
-                    let steering_pending = !self.steering.is_empty();
-                    if !self.apply_steering(command).await? && steering_pending {
-                        return Err(turn_lifecycle_error());
-                    }
-                    command.shared.continue_after_model()?;
-                    continue;
-                }
-                // The decision commit; the consequence commit follows once the
-                // turn's process sessions are joined (spec 01 §3.5 item 1).
-                self.record_provider_decision(
-                    command.turn_id,
+                match Box::pin(self.settle_model_round(
+                    command,
+                    &disposition,
+                    tool_calls,
+                    attempt_id,
                     provider_operation,
-                    Ok(&response),
-                    last_round_usage,
-                    RoundDecision::Terminal,
-                    continuation_baton,
-                )
-                .await?;
-                Box::pin(self.cleanup_process_sessions(command.turn_id)).await?;
-                command.shared.begin_commit()?;
-                let checkpoint = match Box::pin(self.commit_turn_terminal(
-                    &command.command_id,
-                    command.turn_id,
-                    command.operation_id,
-                    TurnConsequence::Completed {
-                        response: &response,
-                        artifact: provider_artifact_transition(&provider_plan, &response),
-                    },
-                    command.shared.usage(),
-                ))
-                .await
-                {
-                    Ok(checkpoint) => checkpoint,
-                    Err(error) => return Err(self.required_terminal_publication_failure(&error)),
-                };
-                return Ok(crate::runtime::terminal::completed_turn_result(
-                    command.turn_id,
+                    &provider_plan,
                     response,
-                    command.shared.usage(),
-                    checkpoint,
-                ));
+                    last_round_usage,
+                    continuation_baton,
+                ))
+                .await?
+                {
+                    SettledRound::Continue(baton) => {
+                        continuation_baton = baton;
+                        continue;
+                    }
+                    SettledRound::Finished(result) => return Ok(*result),
+                }
             }
             let HostedRoundDisposition::CustomerToolsRequested(calls) = disposition else {
                 return Err(AgentError::new(
@@ -1290,51 +1097,16 @@ impl Driver {
                 .await?;
                 continuation_baton = None;
             }
-            let (model_admission_reference, policy_reference) = self.continuation_bindings();
-            let continuation = RuntimeContinuation::AwaitToolBatchV2(Box::new(AwaitToolBatchV2 {
-                root: Self::continuation_root(command),
-                config: DurableAgentConfig::from_config(self.config)?,
-                budgets: self.turn_budgets,
-                tool_calls: u64::try_from(tool_calls).map_err(|_| {
-                    AgentError::new(AgentErrorKind::Internal, "tool call counter overflowed")
-                })?,
-                usage: command.shared.usage(),
-                context_anchor: self.context_anchor,
-                request_anchor: self
-                    .request_anchor
-                    .as_ref()
-                    .map(plakous_model::ContextRequestAnchor::identity)
-                    .transpose()
-                    .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?,
+            let continuation = self.tool_batch_continuation(
+                command,
+                tool_calls,
                 attempt_id,
                 provider_operation,
-                provider_request: provider_plan.request().clone(),
-                provider_plan_digest: provider_plan.digest(),
-                provider_response: response.clone(),
-                working: WorkingProjection::default(),
-                steering: self
-                    .steering
-                    .iter()
-                    .map(|queued| ContinuationSteering {
-                        text: queued.text.clone(),
-                        operation_id: queued.operation_id,
-                    })
-                    .collect(),
-                slots: calls
-                    .iter()
-                    .cloned()
-                    .zip(result_entry_ids.iter().copied())
-                    .map(
-                        |(call, result_entry_id)| ContinuationToolSlot::NotAdmitted {
-                            call,
-                            result_entry_id,
-                        },
-                    )
-                    .collect(),
-                observation_budget: self.observation_budget,
-                model_admission_reference,
-                policy_reference,
-            }));
+                &provider_plan,
+                &response,
+                &calls,
+                &result_entry_ids,
+            )?;
             let continuation_operation = if provider_programmatic {
                 let outcome = self.provider_outcome(
                     Ok(&response),
@@ -1410,6 +1182,348 @@ impl Driver {
             let _ = self.apply_steering(command).await?;
             command.shared.begin_preparing()?;
         }
+    }
+
+    /// Appends the turn's prompt to history after any pre-prompt compaction.
+    async fn append_turn_prompt(&mut self, command: &PromptCommand) -> Result<(), AgentError> {
+        self.maybe_compact_before_turn_prompt(command).await?;
+        let prompt_entry = self.entry_id()?;
+        let user_item = ConversationItem::new(
+            prompt_entry,
+            Actor::User,
+            vec![ContentBlock::Text(
+                TextBlock::new(command.text.clone(), None).map_err(|_| {
+                    AgentError::new(AgentErrorKind::InvalidInput, "prompt text is invalid")
+                })?,
+            )],
+            if command.instruction {
+                Provenance::Instruction
+            } else {
+                Provenance::UserInput
+            },
+        )
+        .map_err(|_| AgentError::new(AgentErrorKind::InvalidInput, "prompt item is invalid"))?;
+        self.append_history_with_notices(
+            command.turn_id,
+            Some(HistorySegmentKind::RecentIntent),
+            [user_item],
+            true,
+        )
+        .await?;
+        self.appended_prompt = Some(prompt_entry);
+        Ok(())
+    }
+
+    /// Settles an attempt that ended with a definite error: its decision commits
+    /// first, then the round is retried or the turn fails.
+    #[allow(
+        clippy::too_many_arguments,
+        clippy::too_many_lines,
+        reason = "the failed attempt's decision, retry commit and overflow fold stay in one ordered body"
+    )]
+    async fn settle_failed_attempt(
+        &mut self,
+        command: &PromptCommand,
+        error: AgentError,
+        over_budget: bool,
+        continuation_baton: Option<OperationId>,
+        provider_operation: Option<OperationId>,
+        attempt_error: Option<AgentError>,
+        last_round_usage: Option<Usage>,
+    ) -> Result<AttemptRetry, AgentError> {
+        let decision = self.failed_attempt_decision(&error, over_budget, continuation_baton);
+        let (decision, failure) = match decision {
+            AttemptFailure::Retry(decision) => {
+                match decision {
+                    RoundDecision::RetryContentFilter => {
+                        self.turn_budgets.content_filter_retry_spent = true;
+                        // The filtered attempt does not count as a round.
+                        self.turn_budgets.model_rounds =
+                            self.turn_budgets.model_rounds.saturating_sub(1);
+                    }
+                    RoundDecision::RetryOutputLimit => {
+                        self.turn_budgets.output_limit_retry_taken = true;
+                    }
+                    RoundDecision::OverflowFold => {
+                        self.turn_budgets.overflow_recovery_taken = true;
+                    }
+                    _ => {}
+                }
+                (decision, None)
+            }
+            AttemptFailure::EndsTurn(failure) => (
+                self.fail_turn_decision(command.turn_id, &failure).await?,
+                Some(failure),
+            ),
+        };
+        match decision {
+            RoundDecision::RetryContentFilter => {
+                let guidance = self.content_filter_guidance(command)?;
+                let kind = history_segment_kind(std::slice::from_ref(&guidance));
+                Box::pin(self.commit_retry(
+                    command.turn_id,
+                    provider_operation,
+                    attempt_error.as_ref(),
+                    last_round_usage,
+                    decision,
+                    continuation_baton,
+                    guidance,
+                    kind,
+                ))
+                .await?;
+                self.await_content_filter_retry(command, &error).await?;
+                return Ok(AttemptRetry::ContentFilter);
+            }
+            RoundDecision::RetryOutputLimit => {
+                Box::pin(self.commit_output_limit_retry(
+                    command,
+                    provider_operation,
+                    attempt_error.as_ref(),
+                    last_round_usage,
+                    continuation_baton,
+                    &error,
+                ))
+                .await?;
+                return Ok(AttemptRetry::OutputLimit);
+            }
+            _ => {}
+        }
+        if let (Some(provider_operation), Some(attempt_error)) =
+            (provider_operation, attempt_error.as_ref())
+        {
+            self.record_provider_decision(
+                command.turn_id,
+                provider_operation,
+                Err(attempt_error),
+                last_round_usage,
+                decision,
+                continuation_baton,
+            )
+            .await?;
+        }
+        if let Some(failure) = failure {
+            return Err(failure);
+        }
+        if Box::pin(self.compact_after_provider_overflow(command)).await? {
+            // The refused operation entered ModelStreaming before
+            // the provider classified it. A successful fold closes
+            // that round and the resend starts from Preparing.
+            if error
+                .model_error()
+                .is_some_and(ModelError::is_provider_context_overflow)
+            {
+                command.shared.continue_after_model()?;
+            }
+            // The refused round produced nothing and its operation
+            // is finalized. The round is sent again as a new
+            // operation on the smaller successor; the prompt is
+            // already history and is not appended twice.
+            self.turn_budgets.model_rounds = self.turn_budgets.model_rounds.saturating_sub(1);
+            return Ok(AttemptRetry::OverflowFold);
+        }
+        Err(error)
+    }
+
+    /// Commits a round that requested no customer tools: a server pause or a
+    /// continuing round resumes the loop; any other round ends the turn.
+    #[allow(
+        clippy::too_many_arguments,
+        clippy::too_many_lines,
+        reason = "each disposition's decision and history commit stays in one ordered body"
+    )]
+    async fn settle_model_round(
+        &mut self,
+        command: &PromptCommand,
+        disposition: &HostedRoundDisposition,
+        tool_calls: usize,
+        attempt_id: AttemptId,
+        provider_operation: OperationId,
+        provider_plan: &ValidatedRequestPlan,
+        response: ModelResponse,
+        last_round_usage: Option<Usage>,
+        continuation_baton: Option<OperationId>,
+    ) -> Result<SettledRound, AgentError> {
+        if matches!(disposition, HostedRoundDisposition::ServerPaused) {
+            let (model_admission_reference, policy_reference) = self.continuation_bindings();
+            let continuation =
+                RuntimeContinuation::AwaitServerPauseV1(Box::new(AwaitServerPauseV1 {
+                    root: Self::continuation_root(command),
+                    config: DurableAgentConfig::from_config(self.config)?,
+                    budgets: self.turn_budgets,
+                    tool_calls: u64::try_from(tool_calls).map_err(|_| {
+                        AgentError::new(AgentErrorKind::Internal, "tool call counter overflowed")
+                    })?,
+                    usage: command.shared.usage(),
+                    context_anchor: self.context_anchor,
+                    request_anchor: self
+                        .request_anchor
+                        .as_ref()
+                        .map(plakous_model::ContextRequestAnchor::identity)
+                        .transpose()
+                        .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?,
+                    observation_budget: self.observation_budget,
+                    attempt_id,
+                    provider_operation,
+                    provider_request: provider_plan.request().clone(),
+                    provider_plan_digest: provider_plan.digest(),
+                    provider_response: response.clone(),
+                    working: WorkingProjection::default(),
+                    steering: self
+                        .steering
+                        .iter()
+                        .map(|queued| ContinuationSteering {
+                            text: queued.text.clone(),
+                            operation_id: queued.operation_id,
+                        })
+                        .collect(),
+                    model_admission_reference,
+                    policy_reference,
+                }));
+            let outcome =
+                self.provider_outcome(Ok(&response), last_round_usage, RoundDecision::Continue)?;
+            // The decision, the restorable frame and the response's
+            // history are one commit (spec 01 §3.5 item 5).
+            let continuation_operation = Box::pin(self.commit_hosted_round(
+                command.turn_id,
+                provider_operation,
+                outcome,
+                continuation_baton,
+                DurableOperationKind::ServerPauseContinuation {
+                    turn_id: command.turn_id,
+                    attempt_id,
+                },
+                continuation,
+                Some((
+                    &response,
+                    provider_artifact_transition(provider_plan, &response),
+                )),
+            ))
+            .await?;
+            let _ = self.apply_steering(command).await?;
+            command.shared.continue_after_model()?;
+            return Ok(SettledRound::Continue(Some(continuation_operation)));
+        }
+        let continuing = disposition.continuing(!self.steering.is_empty());
+        if continuing {
+            // The decision and the response's history are one commit
+            // (spec 01 §3.5 item 5).
+            Box::pin(self.commit_continue_round(
+                command.turn_id,
+                provider_operation,
+                &response,
+                last_round_usage,
+                continuation_baton,
+                provider_artifact_transition(provider_plan, &response),
+            ))
+            .await?;
+            let steering_pending = !self.steering.is_empty();
+            if !self.apply_steering(command).await? && steering_pending {
+                return Err(turn_lifecycle_error());
+            }
+            command.shared.continue_after_model()?;
+            return Ok(SettledRound::Continue(None));
+        }
+        // The decision commit; the consequence commit follows once the
+        // turn's process sessions are joined (spec 01 §3.5 item 1).
+        self.record_provider_decision(
+            command.turn_id,
+            provider_operation,
+            Ok(&response),
+            last_round_usage,
+            RoundDecision::Terminal,
+            continuation_baton,
+        )
+        .await?;
+        Box::pin(self.cleanup_process_sessions(command.turn_id)).await?;
+        command.shared.begin_commit()?;
+        let checkpoint = match Box::pin(self.commit_turn_terminal(
+            &command.command_id,
+            command.turn_id,
+            command.operation_id,
+            TurnConsequence::Completed {
+                response: &response,
+                artifact: provider_artifact_transition(provider_plan, &response),
+            },
+            command.shared.usage(),
+        ))
+        .await
+        {
+            Ok(checkpoint) => checkpoint,
+            Err(error) => return Err(self.required_terminal_publication_failure(&error)),
+        };
+        Ok(SettledRound::Finished(Box::new(
+            crate::runtime::terminal::completed_turn_result(
+                command.turn_id,
+                response,
+                command.shared.usage(),
+                checkpoint,
+            ),
+        )))
+    }
+
+    /// The restorable frame of a round paused at its customer tool batch.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the frame records every round input the restored batch needs"
+    )]
+    fn tool_batch_continuation(
+        &self,
+        command: &PromptCommand,
+        tool_calls: usize,
+        attempt_id: AttemptId,
+        provider_operation: OperationId,
+        provider_plan: &ValidatedRequestPlan,
+        response: &ModelResponse,
+        calls: &[ToolCallBlock],
+        result_entry_ids: &[EntryId],
+    ) -> Result<RuntimeContinuation, AgentError> {
+        let (model_admission_reference, policy_reference) = self.continuation_bindings();
+        Ok(RuntimeContinuation::AwaitToolBatchV2(Box::new(
+            AwaitToolBatchV2 {
+                root: Self::continuation_root(command),
+                config: DurableAgentConfig::from_config(self.config)?,
+                budgets: self.turn_budgets,
+                tool_calls: u64::try_from(tool_calls).map_err(|_| {
+                    AgentError::new(AgentErrorKind::Internal, "tool call counter overflowed")
+                })?,
+                usage: command.shared.usage(),
+                context_anchor: self.context_anchor,
+                request_anchor: self
+                    .request_anchor
+                    .as_ref()
+                    .map(plakous_model::ContextRequestAnchor::identity)
+                    .transpose()
+                    .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?,
+                attempt_id,
+                provider_operation,
+                provider_request: provider_plan.request().clone(),
+                provider_plan_digest: provider_plan.digest(),
+                provider_response: response.clone(),
+                working: WorkingProjection::default(),
+                steering: self
+                    .steering
+                    .iter()
+                    .map(|queued| ContinuationSteering {
+                        text: queued.text.clone(),
+                        operation_id: queued.operation_id,
+                    })
+                    .collect(),
+                slots: calls
+                    .iter()
+                    .cloned()
+                    .zip(result_entry_ids.iter().copied())
+                    .map(
+                        |(call, result_entry_id)| ContinuationToolSlot::NotAdmitted {
+                            call,
+                            result_entry_id,
+                        },
+                    )
+                    .collect(),
+                observation_budget: self.observation_budget,
+                model_admission_reference,
+                policy_reference,
+            },
+        )))
     }
 
     /// The plan a restored frame's provider response was validated under,
