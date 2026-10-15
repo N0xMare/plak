@@ -54,10 +54,6 @@ test-group = 'cli-contract-serial'
 filter = 'binary(local_transport)'
 test-group = 'native-auth-serial'
 
-[[profile.default.overrides]]
-filter = 'test(clear_publishes_fresh_product_and_runtime_authority_before_dispatch) | test(accepted_sse_error_uses_anthropic_classification_and_terminal_delivery)'
-retries = 2
-
 # Opt-in (ignored) pruning sweep-cost measurement over a large store.
 [[profile.default.overrides]]
 filter = 'test(sqlite_prune_sweep_cost_on_a_large_store)'
@@ -172,10 +168,6 @@ test-group = 'cli-contract-serial'
 [[profile.offline.overrides]]
 filter = 'binary(local_transport)'
 test-group = 'native-auth-serial'
-
-[[profile.offline.overrides]]
-filter = 'test(clear_publishes_fresh_product_and_runtime_authority_before_dispatch) | test(accepted_sse_error_uses_anthropic_classification_and_terminal_delivery)'
-retries = 2
 
 # Opt-in (ignored) pruning sweep-cost measurement over a large store.
 [[profile.offline.overrides]]
