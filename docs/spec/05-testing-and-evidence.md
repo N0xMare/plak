@@ -3481,7 +3481,7 @@ candidate for that harness, not for a mocked unit test.
 
 ### SQLite Reclaim and Admission Budgets
 
-The runtime schema-24 fixture checks rowid metadata, separate payloads and
+The runtime schema-25 fixture checks rowid metadata, separate payloads and
 persistent GC candidates. Count-based actor tests pin independent priority
 lanes, 32-job aging, zero actor dispatches for `usage()`, publication of usage
 before the next background step, and one shutdown checkpoint despite a vacuum

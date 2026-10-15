@@ -5,13 +5,13 @@ use std::task::{Context, Poll, Waker};
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 #[tokio::test]
-async fn schema_24_separates_metadata_payloads_and_persistent_gc_queue() -> TestResult {
+async fn schema_25_separates_metadata_payloads_and_persistent_gc_queue() -> TestResult {
     let directory = tempfile::tempdir()?;
     let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
     store.create(seed()?).await?;
     store.dispatch_read(|b| {
         let version: i64 = b.connection.pragma_query_value(None, "user_version", |r| r.get(0)).map_err(map_sqlite)?;
-        assert_eq!(version, 24);
+        assert_eq!(version, 25);
         let sql: String = b.connection.query_row("SELECT sql FROM sqlite_schema WHERE name='runtime_objects'", [], |r| r.get(0)).map_err(map_sqlite)?;
         assert!(!sql.contains("WITHOUT ROWID"));
         let invalid: i64 = b.connection.query_row("SELECT count(*) FROM runtime_objects o LEFT JOIN runtime_object_bytes p USING(id) WHERE p.id IS NULL OR o.byte_len<>length(p.bytes)", [], |r| r.get(0)).map_err(map_sqlite)?;

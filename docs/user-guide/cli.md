@@ -318,12 +318,12 @@ CHECK              RESULT   DETAIL                                        FIX
 Version            OK       available · 0.1.0                             —
 Home               OK       available · /home/you/.plak                   —
 Config             OK       valid · /home/you/.plak/config.toml           —
-Product db         OK       available · /home/you/.plak/state/r24.e25.p31.t6/product.sqlite3   —
-Runtime db         OK       available · /home/you/.plak/state/r24.e25.p31.t6/runtime.sqlite3   —
+Product db         OK       available · /home/you/.plak/state/r25.e25.p31.t6/product.sqlite3   —
+Runtime db         OK       available · /home/you/.plak/state/r25.e25.p31.t6/runtime.sqlite3   —
 Runtime store      OK       available · checkpoints 412/524288 (new work stops at 458752), …   —
 Telemetry db       OK       ok · 1189 rows                                —
 Secrets dir        OK       available · /home/you/.plak/secrets           —
-Sessions dir       OK       available · /home/you/.plak/state/r24.e25.p31.t6/sessions          —
+Sessions dir       OK       available · /home/you/.plak/state/r25.e25.p31.t6/sessions          —
 Cwd                OK       available · /home/you/project                 —
 Composition host   OK       included · not required by the selected …     —
 Root template      OK       unset · no [root] agent; new sessions …       —

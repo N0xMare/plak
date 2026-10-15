@@ -43,6 +43,8 @@ mod feed;
 mod gc;
 #[cfg(test)]
 mod gc_tests;
+#[cfg(test)]
+mod index_tests;
 use super::{MemoryStoreLimits, expired, expiry, require_lease_domain, sample_clock};
 use checkpoint_cache::CheckpointCache;
 use plakous_agent::internal::{StoreReclaimMode, StoreReclaimReport};
@@ -50,7 +52,7 @@ use plakous_agent::internal::{StoreReclaimMode, StoreReclaimReport};
 const APPLICATION_ID: i64 = 0x504c_4b35;
 const INCREMENTAL_AUTO_VACUUM: i64 = 2;
 /// The runtime store's schema version. Only this exact version opens.
-pub const SQLITE_SCHEMA_VERSION: i64 = 24;
+pub const SQLITE_SCHEMA_VERSION: i64 = 25;
 const SCHEMA_VERSION: i64 = SQLITE_SCHEMA_VERSION;
 /// Reviewed `SQLite` release statically embedded by the workspace dependency.
 pub const BUNDLED_SQLITE_VERSION: &str = "3.53.2";
@@ -1796,6 +1798,13 @@ CREATE INDEX checkpoints_parent ON checkpoints(parent_id);
 CREATE INDEX checkpoints_fork ON checkpoints(fork_checkpoint);
 CREATE INDEX runtime_object_edges_child ON runtime_object_edges(child_kind,child_codec,child_digest);
 CREATE INDEX commit_receipts_expected ON commit_receipts(expected_checkpoint);
+CREATE INDEX branches_checkpoint ON branches(checkpoint_id);
+CREATE INDEX branches_fork ON branches(fork_checkpoint);
+CREATE INDEX create_receipts_checkpoint ON create_receipts(checkpoint_id);
+CREATE INDEX fork_receipts_source ON fork_receipts(source_checkpoint);
+CREATE INDEX fork_receipts_target ON fork_receipts(target_checkpoint);
+CREATE INDEX branch_horizons_checkpoint ON branch_horizons(horizon_checkpoint);
+CREATE INDEX pruned_checkpoints_branch ON pruned_checkpoints(session_id,branch_id);
 ";
 
 /// Admits shape, schema, domain and counter integrity. Retained state over
@@ -4958,6 +4967,20 @@ fn delete(b: &mut Backend, r: DeleteSession) -> Result<DeleteReceipt, SessionSto
     Ok(receipt)
 }
 
+/// Checkpoints of branch `?1`/`?2` strictly below revision `?3` that no
+/// receipt, fork, other branch or foreign child still names.
+const PRUNE_CANDIDATES: &str = "SELECT checkpoint_id FROM checkpoints c
+     WHERE c.session_id=?1 AND c.branch_id=?2 AND c.revision<?3
+     AND NOT EXISTS (SELECT 1 FROM create_receipts r
+         WHERE r.session_id=?1 AND r.checkpoint_id=c.checkpoint_id)
+     AND NOT EXISTS (SELECT 1 FROM fork_receipts f WHERE f.source_checkpoint=c.checkpoint_id)
+     AND NOT EXISTS (SELECT 1 FROM fork_receipts f WHERE f.target_checkpoint=c.checkpoint_id)
+     AND NOT EXISTS (SELECT 1 FROM checkpoints o WHERE o.fork_checkpoint=c.checkpoint_id)
+     AND NOT EXISTS (SELECT 1 FROM branches b WHERE b.fork_checkpoint=c.checkpoint_id)
+     AND NOT EXISTS (SELECT 1 FROM checkpoints o WHERE o.parent_id=c.checkpoint_id
+         AND (o.session_id<>?1 OR o.branch_id<>?2))
+     ORDER BY checkpoint_id";
+
 #[allow(
     clippy::too_many_lines,
     reason = "the one prune transaction stays linear so its retained set is auditable"
@@ -5000,21 +5023,7 @@ fn prune(b: &mut Backend, r: &PruneBranch) -> Result<PruneReceipt, SessionStoreE
         tx.commit().map_err(map_sqlite)?;
         return Ok(unchanged);
     };
-    let mut statement = tx
-        .prepare(
-            "SELECT checkpoint_id FROM checkpoints c
-             WHERE c.session_id=?1 AND c.branch_id=?2 AND c.revision<?3
-             AND NOT EXISTS (SELECT 1 FROM create_receipts r
-                 WHERE r.session_id=?1 AND r.checkpoint_id=c.checkpoint_id)
-             AND NOT EXISTS (SELECT 1 FROM fork_receipts f
-                 WHERE f.source_checkpoint=c.checkpoint_id OR f.target_checkpoint=c.checkpoint_id)
-             AND NOT EXISTS (SELECT 1 FROM checkpoints o WHERE o.fork_checkpoint=c.checkpoint_id)
-             AND NOT EXISTS (SELECT 1 FROM branches b WHERE b.fork_checkpoint=c.checkpoint_id)
-             AND NOT EXISTS (SELECT 1 FROM checkpoints o WHERE o.parent_id=c.checkpoint_id
-                 AND (o.session_id<>?1 OR o.branch_id<>?2))
-             ORDER BY checkpoint_id",
-        )
-        .map_err(map_sqlite)?;
+    let mut statement = tx.prepare(PRUNE_CANDIDATES).map_err(map_sqlite)?;
     let superseded = statement
         .query_map(
             params![

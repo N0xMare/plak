@@ -148,11 +148,11 @@ fn deletion_defers_objects_and_gc_steps_keep_exact_counters() -> TestResult {
     Ok(())
 }
 
-struct Branch {
-    head: BranchHead,
-    lease: BranchLease,
-    bundle: CheckpointObjectBundle,
-    value: u32,
+pub(super) struct Branch {
+    pub(super) head: BranchHead,
+    pub(super) lease: BranchLease,
+    pub(super) bundle: CheckpointObjectBundle,
+    pub(super) value: u32,
 }
 
 fn workflow(identity: u128) -> TestResult<SessionWorkflowId> {
@@ -162,7 +162,7 @@ fn workflow(identity: u128) -> TestResult<SessionWorkflowId> {
     Ok(SessionWorkflowId::new(bytes)?)
 }
 
-fn advance_branch(
+pub(super) fn advance_branch(
     branch: &mut Branch,
     b: &mut Backend,
     graph: &mut BTreeMap<RuntimeObjectAddress, RuntimeObject>,
@@ -211,7 +211,7 @@ fn advance_branch(
     Ok(())
 }
 
-fn fork_branch(
+pub(super) fn fork_branch(
     source: &Branch,
     b: &mut Backend,
     graph: &mut BTreeMap<RuntimeObjectAddress, RuntimeObject>,

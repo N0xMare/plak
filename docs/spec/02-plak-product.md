@@ -159,9 +159,9 @@ launch directory — the cwd of the process, resolved once.
   secrets/<account>.key       API keys, files-first
   cache/api-models/<account>-<fingerprint>.json  API model lists, 6 h TTL (§2.3), disposable
   state/
-    r24.e25.p31.t6/             this build's state (§2.5)
+    r25.e25.p31.t6/             this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
-      runtime.sqlite3             Plakous semantic runtime and change feed, schema 24, epoch 25
+      runtime.sqlite3             Plakous semantic runtime and change feed, schema 25, epoch 25
       product.sqlite3             Plak intents and feed-derived views, schema 31
       subagents.sqlite3           the agent tree, schema 6
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
@@ -598,7 +598,7 @@ recovery authority.
 Plak does not migrate state. Each build keeps its state in
 `~/.plak/state/<key>/`, where the key names every persisted format the build
 reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree
-schema>`, for example `r24.e25.p31.t6`. The key is derived from the stores'
+schema>`, for example `r25.e25.p31.t6`. The key is derived from the stores'
 own version constants, never hand-bumped, so a format change cannot forget to
 move it. A build therefore never finds another build's files in its own
 directory, and a whole-store incompatibility never blocks startup.

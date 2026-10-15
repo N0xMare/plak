@@ -1198,7 +1198,9 @@ limits.
 
 **Pruning in SQLite.** One `IMMEDIATE` transaction checks the lease, exact
 head and Quiescent kind, selects the superseded checkpoints through indexes on
-(session, branch, revision), parent and fork checkpoint, deletes commit
+(session, branch, revision), parent and fork checkpoint, with one indexed probe
+per referencing column (fork receipt source and target, branch fork, create
+receipt), deletes commit
 receipts at or below the horizon, records each pruned id in
 `pruned_checkpoints` (so a later lookup is typed `Pruned` exactly) and the
 branch's integrity-sealed `branch_horizons` row (horizon and cumulative pruned
@@ -1210,8 +1212,15 @@ grows with every checkpoint a session has ever pruned: the bound is the
 session's lifetime, not its retained window. A reopened branch seeds its known
 prune horizon from `branch_horizons`, so reopening never re-prunes or re-records
 ids at or below that horizon.
+Every foreign-key child column is indexed (the leading columns of a primary
+key, unique constraint or index cover it), so the per-row foreign-key checks of
+a checkpoint, branch or session delete probe each child table by index rather
+than scanning it; prune and session-deletion cost therefore does not grow with
+the fork receipts and branches elsewhere in the store. A unit test asserts an
+index search in the query plan of every foreign-key child probe and of the
+prune candidate query.
 
-Schema 24 stores object metadata in a rowid `runtime_objects` table with an
+Schema 25 stores object metadata in a rowid `runtime_objects` table with an
 integer primary key, unique `(kind,codec,digest)` address and `byte_len`.
 `runtime_object_bytes` stores the payload by integer id; edges and checkpoint
 roots still reference the unique address. Accounting sums metadata lengths plus
@@ -1302,7 +1311,7 @@ across boots. Historical receipts remain exact evidence, never fresh authority;
 old-boot renewal/release refuses as superseded. Binding rotation and subsequent
 branch acquisition are separate transactions.
 
-The runtime schema is **24** and the checkpoint format epoch is **25**; the
+The runtime schema is **25** and the checkpoint format epoch is **25**; the
 feed record encoding (§5.11) is part of that epoch, which it shares with the
 decision-fact encodings of the same release. Only
 the current exact schema and format epoch are supported. Every other runtime
