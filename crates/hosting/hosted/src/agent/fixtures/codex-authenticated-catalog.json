@@ -1,68 +1,14 @@
 {
-  "schema": "plak.provider-authority.authenticated-catalog-observation.v1",
-  "provider": "openai",
-  "vertical": "codex-oauth",
-  "client_version": "0.155.1",
-  "etag": "W/\"56739dad38b64be2ed8d94d8733a641d\"",
-  "fetched_at": "2026-09-23T01:15:53.358576Z",
   "account_material_removed": true,
+  "capture_procedure": "PLAK_CAPTURE_STATE_HOME=<Plak XDG state home> PLAK_CAPTURE_OUTPUT=<fixture path> cargo test --locked -p plakous --features native-subscriptions capture_codex_authenticated_catalog -- --ignored",
+  "client_version": "0.162.1",
   "models": {
-    "gpt-6-astra": {
-      "tool_mode": "code_mode_only",
-      "reasoning": [
-        "low",
-        "medium",
-        "high",
-        "xhigh",
-        "max",
-        "ultra"
-      ],
-      "default_reasoning": "medium",
+    "gpt-5.6-luna": {
+      "auto_compact_token_limit": null,
       "context_window": 272000,
-      "max_context_window": 872000,
-      "effective_context_window_percent": 95,
-      "truncation_policy": {
-        "mode": "tokens",
-        "limit": 10000
-      },
-      "use_responses_lite": true,
-      "service_tiers": [
-        {
-          "id": "priority",
-          "name": "Fast",
-          "description": "2x speed, increased usage"
-        }
-      ]
-    },
-    "gpt-6-sol": {
-      "tool_mode": "code_mode_only",
-      "reasoning": [
-        "low",
-        "medium",
-        "high",
-        "xhigh",
-        "max",
-        "ultra"
-      ],
       "default_reasoning": "medium",
-      "context_window": 272000,
-      "max_context_window": 872000,
       "effective_context_window_percent": 95,
-      "truncation_policy": {
-        "mode": "tokens",
-        "limit": 10000
-      },
-      "use_responses_lite": true,
-      "service_tiers": [
-        {
-          "id": "priority",
-          "name": "Fast",
-          "description": "1.5x speed"
-        }
-      ]
-    },
-    "gpt-6-luna": {
-      "tool_mode": "code_mode_only",
+      "max_context_window": 872000,
       "reasoning": [
         "low",
         "medium",
@@ -70,105 +16,45 @@
         "xhigh",
         "max"
       ],
-      "default_reasoning": "medium",
-      "context_window": 272000,
-      "max_context_window": 872000,
-      "effective_context_window_percent": 95,
-      "truncation_policy": {
-        "mode": "tokens",
-        "limit": 10000
-      },
-      "use_responses_lite": true,
       "service_tiers": [
         {
+          "description": "1.5x speed, increased usage",
           "id": "priority",
-          "name": "Fast",
-          "description": "1.5x speed"
+          "name": "Fast"
         }
-      ]
-    },
-    "gpt-reserve": {
-      "tool_mode": "code_mode_only",
-      "reasoning": [
-        "low",
-        "medium",
-        "high",
-        "xhigh",
-        "max"
       ],
-      "default_reasoning": "medium",
-      "context_window": 272000,
-      "max_context_window": 872000,
-      "effective_context_window_percent": 95,
-      "truncation_policy": {
-        "mode": "tokens",
-        "limit": 10000
-      },
-      "use_responses_lite": true,
-      "service_tiers": [
-        {
-          "id": "priority",
-          "name": "Fast",
-          "description": "1.5x speed, increased usage"
-        }
-      ]
+      "tool_mode": "code_mode_only",
+      "use_responses_lite": true
     },
     "gpt-5.6-sol": {
-      "tool_mode": "code_mode_only",
+      "auto_compact_token_limit": null,
+      "context_window": 272000,
+      "default_reasoning": "low",
+      "effective_context_window_percent": 95,
+      "max_context_window": 872000,
       "reasoning": [
         "low",
         "medium",
         "high",
         "xhigh",
-        "max",
-        "ultra"
+        "max"
       ],
-      "default_reasoning": "low",
-      "context_window": 272000,
-      "max_context_window": 872000,
-      "effective_context_window_percent": 95,
-      "truncation_policy": {
-        "mode": "tokens",
-        "limit": 10000
-      },
-      "use_responses_lite": true,
       "service_tiers": [
         {
+          "description": "1.5x speed, increased usage",
           "id": "priority",
-          "name": "Fast",
-          "description": "1.5x speed, increased usage"
+          "name": "Fast"
         }
-      ]
+      ],
+      "tool_mode": "code_mode_only",
+      "use_responses_lite": true
     },
     "gpt-5.6-terra": {
-      "tool_mode": "code_mode_only",
-      "reasoning": [
-        "low",
-        "medium",
-        "high",
-        "xhigh",
-        "max",
-        "ultra"
-      ],
-      "default_reasoning": "medium",
+      "auto_compact_token_limit": null,
       "context_window": 272000,
-      "max_context_window": 872000,
+      "default_reasoning": "medium",
       "effective_context_window_percent": 95,
-      "truncation_policy": {
-        "mode": "tokens",
-        "limit": 10000
-      },
-      "use_responses_lite": true,
-      "service_tiers": [
-        {
-          "id": "priority",
-          "name": "Fast",
-          "description": "1.5x speed, increased usage"
-        }
-      ]
-    },
-    "gpt-5.6-luna": {
-      "tool_mode": "code_mode_only",
+      "max_context_window": 872000,
       "reasoning": [
         "low",
         "medium",
@@ -176,50 +62,22 @@
         "xhigh",
         "max"
       ],
-      "default_reasoning": "medium",
-      "context_window": 272000,
-      "max_context_window": 872000,
-      "effective_context_window_percent": 95,
-      "truncation_policy": {
-        "mode": "tokens",
-        "limit": 10000
-      },
-      "use_responses_lite": true,
       "service_tiers": [
         {
+          "description": "1.5x speed, increased usage",
           "id": "priority",
-          "name": "Fast",
-          "description": "1.5x speed, increased usage"
+          "name": "Fast"
         }
-      ]
-    },
-    "gpt-5.5": {
-      "tool_mode": null,
-      "reasoning": [
-        "low",
-        "medium",
-        "high",
-        "xhigh"
       ],
-      "default_reasoning": "medium",
-      "context_window": 272000,
-      "max_context_window": 272000,
-      "effective_context_window_percent": 95,
-      "truncation_policy": {
-        "mode": "tokens",
-        "limit": 10000
-      },
-      "use_responses_lite": false,
-      "service_tiers": [
-        {
-          "id": "priority",
-          "name": "Fast",
-          "description": "1.5x speed, increased usage"
-        }
-      ]
-    },
-    "codex-auto-review": {
       "tool_mode": "code_mode_only",
+      "use_responses_lite": true
+    },
+    "gpt-6-astra": {
+      "auto_compact_token_limit": null,
+      "context_window": 272000,
+      "default_reasoning": "medium",
+      "effective_context_window_percent": 95,
+      "max_context_window": 872000,
       "reasoning": [
         "low",
         "medium",
@@ -227,22 +85,87 @@
         "xhigh",
         "max"
       ],
-      "default_reasoning": "medium",
-      "context_window": 272000,
-      "max_context_window": 872000,
-      "effective_context_window_percent": 95,
-      "truncation_policy": {
-        "mode": "tokens",
-        "limit": 10000
-      },
-      "use_responses_lite": true,
       "service_tiers": [
         {
+          "description": "2x speed, increased usage",
           "id": "priority",
-          "name": "Fast",
-          "description": "1.5x speed, increased usage"
+          "name": "Fast"
         }
-      ]
+      ],
+      "tool_mode": "code_mode_only",
+      "use_responses_lite": true
+    },
+    "gpt-6-luna": {
+      "auto_compact_token_limit": null,
+      "context_window": 272000,
+      "default_reasoning": "medium",
+      "effective_context_window_percent": 95,
+      "max_context_window": 872000,
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "service_tiers": [
+        {
+          "description": "1.5x speed",
+          "id": "priority",
+          "name": "Fast"
+        }
+      ],
+      "tool_mode": "code_mode_only",
+      "use_responses_lite": true
+    },
+    "gpt-6-sol": {
+      "auto_compact_token_limit": null,
+      "context_window": 272000,
+      "default_reasoning": "medium",
+      "effective_context_window_percent": 95,
+      "max_context_window": 872000,
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "service_tiers": [
+        {
+          "description": "1.5x speed",
+          "id": "priority",
+          "name": "Fast"
+        }
+      ],
+      "tool_mode": "code_mode_only",
+      "use_responses_lite": true
+    },
+    "gpt-6.1-sol": {
+      "auto_compact_token_limit": null,
+      "context_window": 500000,
+      "default_reasoning": "low",
+      "effective_context_window_percent": 95,
+      "max_context_window": 872000,
+      "reasoning": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "service_tiers": [
+        {
+          "description": "2x speed, increased usage",
+          "id": "priority",
+          "name": "Fast"
+        }
+      ],
+      "tool_mode": "code_mode_only",
+      "use_responses_lite": true
     }
-  }
+  },
+  "provider": "openai",
+  "schema": "plak.provider-authority.authenticated-catalog-observation.v1",
+  "vertical": "codex-oauth"
 }
