@@ -12,30 +12,27 @@ use plakous_agent::internal::{
 };
 use plakous_model::{
     CachePolicy, Capability, CapabilityConstraints, CapabilitySet, CompiledProviderConfiguration,
-    ConfiguredLanguageModel, ConfiguredTool, ContextAdmissionRequirement, CredentialSelectionId,
-    EffectiveProviderConfiguration, FactProvenance, FactSource, FamilyPolicyEnvelope,
-    FeatureSupport, LanguageModel, LocalDurabilityDisposition, ModelAdapterProfileId,
-    ModelFamilyId, ModelId, ModelImplementationIdentity, ModelPreparationContext,
-    ModelPreparationError, ModelPreparationErrorKind, ModelStream, OutputBoundDisposition,
-    OutputPolicy, ParallelToolDisposition, PreparedCacheUse, PreparedCallRecord, PreparedModelCall,
-    PreparedModelProjection, PreparedTokenProjection, ProtocolId, ProviderAuthorityClassId,
-    ProviderBehaviorConfiguration, ProviderProfileRevisionId, ProviderRouteSelection,
-    ProviderSemanticEvidence, ProviderStorageDisposition, ReasoningEffortDisposition,
-    ReasoningIncludeDisposition, ReasoningSummaryDisposition, ReplayDisposition,
-    ResolvedModelDescriptor, ResolvedProviderAuthorityBinding, ResponseStateDisposition,
-    RetentionDisposition, RouteId, RuntimeModelAuthority, RuntimeModelAuthorityError,
-    RuntimeModelAuthorityOperation, SelectedProviderConfiguration, Support, Timestamp, ToolChoice,
-    ToolConcurrency, ToolDefinition, ToolEffect, ToolExecutionDisposition, ToolInputContract,
-    ToolName, ToolOutputContract, ValidatedRequestPlan,
+    ConfiguredLanguageModel, FactProvenance, FactSource, FeatureSupport, LanguageModel,
+    ModelAdapterProfileId, ModelFamilyId, ModelId, ModelPreparationContext, ModelPreparationError,
+    ModelPreparationErrorKind, ModelStream, OutputBoundDisposition, PreparedCacheUse,
+    PreparedCallRecord, PreparedModelCall, PreparedModelProjection, PreparedTokenProjection,
+    ProtocolId, ResolvedModelDescriptor, RouteId, RuntimeModelAuthority,
+    RuntimeModelAuthorityError, RuntimeModelAuthorityOperation, Support, Timestamp,
+    ToolConcurrency, ToolDefinition, ToolEffect, ToolInputContract, ToolName, ToolOutputContract,
+    ValidatedRequestPlan,
 };
 use plakous_tools::{
     FrozenToolRegistry, RegisteredToolId, ToolExecutorId, ToolOutcome, ToolRegistration,
     ToolRegistryBuilder, WorkspacePolicy,
 };
 use serde_json::json;
-use tempfile::TempDir;
 
-type TestResult<T> = Result<T, Box<dyn std::error::Error>>;
+use crate::support::{self, Fixture, TestResult, workspace};
+
+const FIXTURE: Fixture = Fixture {
+    label: "harness-profile",
+    provider_semantics: b"harness-profile-semantics-v1",
+};
 
 fn descriptor_with_route(route: &str) -> TestResult<ResolvedModelDescriptor> {
     let provenance = FactProvenance::new(FactSource::BuiltIn, Timestamp::new(1, 0)?, None);
@@ -192,79 +189,14 @@ fn provider_configuration(
     model: &SilentModel,
     tools: &[ToolDefinition],
 ) -> TestResult<CompiledProviderConfiguration> {
-    let descriptor = model.descriptor();
-    let behavior = ProviderBehaviorConfiguration {
-        processing_tier: plakous_model::ProcessingTierDisposition::Standard,
-        tool_mode: plakous_model::ToolPresentationMode::Direct,
-        reasoning_effort: ReasoningEffortDisposition::Disabled,
-        reasoning_summary: ReasoningSummaryDisposition::Omit,
-        reasoning_include: ReasoningIncludeDisposition::Omit,
-        replay: ReplayDisposition::Disabled,
-        cache: CachePolicy::Disabled,
-        tools: tools
-            .iter()
-            .cloned()
-            .map(|definition| {
-                ConfiguredTool::new(
-                    definition,
-                    ToolExecutionDisposition::Local,
-                    plakous_model::ToolCallerDisposition::DirectOnly,
-                )
-            })
-            .collect(),
-        hosted_tools: Vec::new(),
-        tool_choice: ToolChoice::Auto,
-        parallel_tools: ParallelToolDisposition::Disabled,
-        output: OutputPolicy::default(),
-        output_bound: OutputBoundDisposition::NoRequestBound,
-        storage: ProviderStorageDisposition::OmittedRouteContract,
-        retention: RetentionDisposition::RouteContract {
-            profile: descriptor.profile().clone(),
-            revision: ProviderProfileRevisionId::new("harness-profile-retention-v1")?,
-        },
-        response_state: ResponseStateDisposition::Stateless,
-        context_evidence_requirement: ContextAdmissionRequirement::AnyBounded,
-        local_durability: LocalDurabilityDisposition::Ephemeral,
-    };
-    let selected = SelectedProviderConfiguration::new(
-        ProviderRouteSelection::new(
-            descriptor.protocol().clone(),
-            descriptor.route().clone(),
-            descriptor.profile().clone(),
-            ProviderProfileRevisionId::new("harness-profile-route-v1")?,
-            ModelAdapterProfileId::new("harness-profile.auth")?,
-            ProviderProfileRevisionId::new("harness-profile-auth-v1")?,
-            ProviderAuthorityClassId::new("harness-profile-scripted")?,
-            CredentialSelectionId::new("harness-profile-credential")?,
-            descriptor.requested_model().clone(),
-        ),
-        behavior.clone(),
-    )?;
-    let stable = ResolvedProviderAuthorityBinding::new(
-        descriptor,
+    support::provider_configuration(
+        &FIXTURE,
+        model.descriptor(),
         &model.authority,
-        ProviderSemanticEvidence::new(1, b"harness-profile-semantics-v1".to_vec())?,
-    )?;
-    let family = FamilyPolicyEnvelope::new(
-        descriptor.model_family().cloned().ok_or("missing family")?,
-        1,
-        1,
-        1,
-        b"harness-profile-family-policy-v1".to_vec(),
-    )?;
-    let effective = EffectiveProviderConfiguration::compile(
-        &selected,
-        descriptor.clone(),
-        ModelImplementationIdentity::release_owned(
-            &plakous_model::StandardIntegrationAuthority::release_owned(),
-            descriptor,
-            1,
-        )?,
-        stable,
-        behavior,
-        family,
-    )?;
-    Ok(CompiledProviderConfiguration::new(selected, effective)?)
+        tools,
+        CachePolicy::Disabled,
+        OutputBoundDisposition::NoRequestBound,
+    )
 }
 
 fn configured_model(
@@ -279,12 +211,6 @@ fn configured_model(
         configuration,
         authority,
     )?)
-}
-
-fn workspace() -> TestResult<(TempDir, Arc<WorkspacePolicy>)> {
-    let directory = tempfile::tempdir()?;
-    let policy = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
-    Ok((directory, policy))
 }
 
 fn workspace_digest(workspace: &WorkspacePolicy) -> TestResult<plakous_model::Digest> {

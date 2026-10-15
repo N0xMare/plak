@@ -1,6 +1,6 @@
 //! Test-only presentation consumers over the public agent surface.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,39 +11,72 @@ use plakous_agent::internal::{
     TurnResult, TurnViewState, ViewRequest,
 };
 use plakous_model::{
-    Actor, AttemptId, BlockCompleted, BlockStart, BlockStarted, CachePolicy, Capability,
-    CapabilityConstraints, CapabilitySet, CapacityCertificate, CapacityRule,
-    CompiledProviderConfiguration, ConfiguredLanguageModel, ContentBlock,
-    ContextAdmissionRequirement, ContextContract, ContextEvidenceSource, ConversationItem,
-    ConversationView, CountCertificateKind, CountObservation, CredentialSelectionId,
-    EffectiveProviderConfiguration, EntryId, EvidenceFreshness, FactProvenance, FactSource,
-    FamilyPolicyEnvelope, FeatureSupport, FinishDetails, FinishReason, FixedClock,
-    GenerationLimits, LocalDurabilityDisposition, MeasurementCertificate, ModelAdapterProfileId,
-    ModelEvent, ModelFamilyId, ModelId, ModelImplementationIdentity, ModelProviderRequestId,
+    AttemptId, BlockCompleted, BlockStart, BlockStarted, CachePolicy, Capability,
+    CompiledProviderConfiguration, ConfiguredLanguageModel, ConversationItem, ConversationView,
+    FinishDetails, FinishReason, FixedClock, ModelEvent, ModelId, ModelProviderRequestId,
     ModelRequest, ModelResponse, ModelResponseMetadata, OutputBoundDisposition, OutputLocation,
-    OutputPolicy, ParallelToolDisposition, ProtocolId, Provenance, ProviderAuthorityClassId,
-    ProviderBehaviorConfiguration, ProviderProfileRevisionId, ProviderRouteSelection,
-    ProviderSemanticEvidence, ProviderStorageDisposition, ReasoningEffortDisposition,
-    ReasoningIncludeDisposition, ReasoningPolicy, ReasoningSummaryDisposition, ReplayDisposition,
-    RequestMetadata, ResolvedModelDescriptor, ResolvedProviderAuthorityBinding, ResponseStarted,
-    ResponseStateDisposition, RetentionDisposition, RouteId, RunId, RuntimeModelAuthority,
-    SafeLimit, SelectedProviderConfiguration, SequenceIdGenerator, Support, TextBlock, TextDelta,
-    TextPhase, Timestamp, ToolChoice, TurnId, ValidationMode,
+    ReasoningPolicy, RequestMetadata, ResolvedModelDescriptor, ResponseStarted, RunId,
+    SequenceIdGenerator, TextDelta, TextPhase, TurnId, ValidationMode,
 };
-use plakous_tools::{ToolRegistryBuilder, WorkspacePolicy};
+use plakous_tools::ToolRegistryBuilder;
 use serde_json::json;
-use tempfile::TempDir;
-use uuid::Uuid;
 
-type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+use crate::support::{
+    self, DescriptorIds, Fixture, MAX_OUTPUT_TOKENS, TestResult, assistant_text_item,
+    generation_limits, id, timestamp, workspace,
+};
 
 const PROMPT: &str = "golden prompt";
 const RESPONSE: &str = "golden response";
 const ACTUAL_MODEL: &str = "provider.actual";
 const REQUEST_ID: &str = "presentation-request-id-sentinel";
-const MAX_OUTPUT_TOKENS: u32 = 128;
-const CONTEXT_COUNTER_ID: &str = "presentation-scripted-counter";
-const CONTEXT_COUNTER_REVISION: &str = "presentation-scripted-exact-v1";
+const FIXTURE: Fixture = Fixture {
+    label: "presentation",
+    provider_semantics: b"presentation-semantics-v1",
+};
+const DESCRIPTOR: DescriptorIds = DescriptorIds {
+    protocol: "test.protocol",
+    route: "test.route",
+    model: "test.model",
+    family: "test.presentation",
+    profile: "test.profile",
+};
+
+fn runtime_authority(
+    descriptor: &ResolvedModelDescriptor,
+) -> TestResult<plakous_model::RuntimeModelAuthority> {
+    support::runtime_authority(&FIXTURE, descriptor)
+}
+
+fn provider_configuration(
+    descriptor: &ResolvedModelDescriptor,
+) -> TestResult<CompiledProviderConfiguration> {
+    support::provider_configuration(
+        &FIXTURE,
+        descriptor,
+        &runtime_authority(descriptor)?,
+        &[],
+        CachePolicy::Disabled,
+        OutputBoundDisposition::Enforced(
+            NonZeroU32::new(MAX_OUTPUT_TOKENS).ok_or("nonzero presentation output bound")?,
+        ),
+    )
+}
+
+fn descriptor() -> TestResult<ResolvedModelDescriptor> {
+    support::descriptor(&FIXTURE, &DESCRIPTOR, &[Capability::Streaming])
+}
+
+fn identity_sources() -> TestResult<(Arc<FixedClock>, Arc<SequenceIdGenerator>)> {
+    support::identity_sources(32)
+}
+
+fn scripted_model(
+    descriptor: ResolvedModelDescriptor,
+    scenarios: impl IntoIterator<Item = plakous_test_support::ModelScenario>,
+) -> TestResult<plakous_test_support::ScriptedModel> {
+    support::scripted_model(&FIXTURE, descriptor, scenarios)
+}
 
 #[derive(Default)]
 struct LineEventPrinter {
@@ -423,206 +456,8 @@ fn terminated_lines(lines: &[String]) -> String {
     output
 }
 
-fn id<T>(value: u128) -> TestResult<T>
-where
-    T: TryFrom<Uuid>,
-    T::Error: std::error::Error + 'static,
-{
-    Ok(T::try_from(Uuid::from_u128(value))?)
-}
-
-fn timestamp() -> TestResult<Timestamp> {
-    Ok(Timestamp::new(1, 0)?)
-}
-
-fn context_contract(protocol: ProtocolId) -> TestResult<ContextContract> {
-    let freshness = EvidenceFreshness::new(timestamp()?, None)?;
-    Ok(ContextContract::new(
-        protocol,
-        "scripted-accounting-v1",
-        "scripted-projection-v1",
-        "scripted-reservation-v1",
-        CapacityCertificate::new(
-            &plakous_model::StandardIntegrationAuthority::release_owned(),
-            "presentation-scripted-capacity",
-            "presentation-scripted-capacity-v1",
-            ContextEvidenceSource::BuiltInCatalog,
-            CapacityRule::SharedWindow {
-                total: SafeLimit::Exact(1_000_000_000),
-            },
-            None,
-            freshness,
-        )?,
-        vec![MeasurementCertificate::standard(
-            &plakous_model::StandardIntegrationAuthority::release_owned(),
-            CONTEXT_COUNTER_ID,
-            CONTEXT_COUNTER_REVISION,
-            "presentation-scripted-complete-projection",
-            "scripted-lowering-v1",
-            ContextEvidenceSource::BuiltInCatalog,
-            CountCertificateKind::ExactTokenizer,
-            None,
-            freshness,
-        )?],
-    )?)
-}
-
-fn context_observation() -> TestResult<CountObservation> {
-    Ok(CountObservation::new(
-        CONTEXT_COUNTER_ID,
-        CONTEXT_COUNTER_REVISION,
-        64,
-    )?)
-}
-
-fn generation_limits() -> TestResult<GenerationLimits> {
-    Ok(GenerationLimits::new(
-        NonZeroU32::new(MAX_OUTPUT_TOKENS),
-        Vec::new(),
-    )?)
-}
-
-fn descriptor() -> TestResult<ResolvedModelDescriptor> {
-    let provenance = FactProvenance::new(FactSource::TestFixture, timestamp()?, None);
-    let features = BTreeMap::from([(
-        Capability::Streaming,
-        FeatureSupport::new(
-            Support::Native,
-            CapabilityConstraints::default(),
-            provenance,
-        ),
-    )]);
-    let protocol = ProtocolId::new("test.protocol")?;
-    Ok(ResolvedModelDescriptor::new(
-        &plakous_model::StandardIntegrationAuthority::release_owned(),
-        protocol.clone(),
-        RouteId::new("test.route")?,
-        ModelId::new("test.model")?,
-        None,
-        Some(ModelFamilyId::new("test.presentation")?),
-        ModelAdapterProfileId::new("test.profile")?,
-        CapabilitySet::new(features, BTreeMap::new()),
-    )
-    .with_context_contract(context_contract(protocol)?))
-}
-
-fn scripted_model(
-    descriptor: ResolvedModelDescriptor,
-    scenarios: impl IntoIterator<Item = plakous_test_support::ModelScenario>,
-) -> TestResult<plakous_test_support::ScriptedModel> {
-    let authority = runtime_authority(&descriptor)?;
-    Ok(
-        plakous_test_support::ScriptedModel::new(descriptor, scenarios)
-            .with_runtime_authority(authority)
-            .with_context_observation(context_observation()?),
-    )
-}
-
-fn runtime_authority(descriptor: &ResolvedModelDescriptor) -> TestResult<RuntimeModelAuthority> {
-    let account = plakous_model::Digest::sha256(
-        plakous_model::DigestDomain::ModelBinding,
-        1,
-        &[b"presentation-scripted-account"],
-    )?;
-    let credential = plakous_model::Digest::sha256(
-        plakous_model::DigestDomain::ModelBinding,
-        1,
-        &[b"presentation-scripted-credential"],
-    )?;
-    let authority =
-        RuntimeModelAuthority::new(descriptor, account, credential, 1, timestamp()?, None)?;
-    Ok(authority)
-}
-
-fn provider_configuration(
-    descriptor: &ResolvedModelDescriptor,
-) -> TestResult<CompiledProviderConfiguration> {
-    let authority = runtime_authority(descriptor)?;
-    let behavior = ProviderBehaviorConfiguration {
-        processing_tier: plakous_model::ProcessingTierDisposition::Standard,
-        tool_mode: plakous_model::ToolPresentationMode::Direct,
-        reasoning_effort: ReasoningEffortDisposition::Disabled,
-        reasoning_summary: ReasoningSummaryDisposition::Omit,
-        reasoning_include: ReasoningIncludeDisposition::Omit,
-        replay: ReplayDisposition::Disabled,
-        cache: CachePolicy::Disabled,
-        tools: Vec::new(),
-        hosted_tools: Vec::new(),
-        tool_choice: ToolChoice::Auto,
-        parallel_tools: ParallelToolDisposition::Disabled,
-        output: OutputPolicy::default(),
-        output_bound: OutputBoundDisposition::Enforced(
-            NonZeroU32::new(MAX_OUTPUT_TOKENS).ok_or("nonzero presentation output bound")?,
-        ),
-        storage: ProviderStorageDisposition::OmittedRouteContract,
-        retention: RetentionDisposition::RouteContract {
-            profile: descriptor.profile().clone(),
-            revision: ProviderProfileRevisionId::new("presentation-retention-v1")?,
-        },
-        response_state: ResponseStateDisposition::Stateless,
-        context_evidence_requirement: ContextAdmissionRequirement::AnyBounded,
-        local_durability: LocalDurabilityDisposition::Ephemeral,
-    };
-    let selected = SelectedProviderConfiguration::new(
-        ProviderRouteSelection::new(
-            descriptor.protocol().clone(),
-            descriptor.route().clone(),
-            descriptor.profile().clone(),
-            ProviderProfileRevisionId::new("presentation-route-v1")?,
-            ModelAdapterProfileId::new("presentation.auth")?,
-            ProviderProfileRevisionId::new("presentation-auth-v1")?,
-            ProviderAuthorityClassId::new("presentation-scripted")?,
-            CredentialSelectionId::new("presentation-credential")?,
-            descriptor.requested_model().clone(),
-        ),
-        behavior.clone(),
-    )?;
-    let stable = ResolvedProviderAuthorityBinding::new(
-        descriptor,
-        &authority,
-        ProviderSemanticEvidence::new(1, b"presentation-semantics-v1".to_vec())?,
-    )?;
-    let family = FamilyPolicyEnvelope::new(
-        descriptor.model_family().cloned().ok_or("missing family")?,
-        1,
-        1,
-        1,
-        b"presentation-family-policy-v1".to_vec(),
-    )?;
-    let effective = EffectiveProviderConfiguration::compile(
-        &selected,
-        descriptor.clone(),
-        ModelImplementationIdentity::release_owned(
-            &plakous_model::StandardIntegrationAuthority::release_owned(),
-            descriptor,
-            1,
-        )?,
-        stable,
-        behavior,
-        family,
-    )?;
-    Ok(CompiledProviderConfiguration::new(selected, effective)?)
-}
-
 fn user_item() -> TestResult<ConversationItem> {
-    Ok(ConversationItem::new(
-        id::<EntryId>(6)?,
-        Actor::User,
-        vec![ContentBlock::Text(TextBlock::new(PROMPT, None)?)],
-        Provenance::UserInput,
-    )?)
-}
-
-fn assistant_item(entry: u128, text: &str) -> TestResult<ConversationItem> {
-    Ok(ConversationItem::new(
-        id::<EntryId>(entry)?,
-        Actor::Assistant,
-        vec![ContentBlock::Text(TextBlock::new(
-            text,
-            Some(TextPhase::Final),
-        )?)],
-        Provenance::ModelOutput,
-    )?)
+    support::user_text_item(6, PROMPT)
 }
 
 fn request(
@@ -653,7 +488,7 @@ fn text_scenario(
 ) -> TestResult<plakous_test_support::ModelScenario> {
     let plan = descriptor.validate_request(request.clone(), ValidationMode::Strict)?;
     let digest = plan.digest();
-    let item = assistant_item(entry, text)?;
+    let item = assistant_text_item(entry, text)?;
     let location = OutputLocation::new(0, 0);
     let response = ModelResponse::new(
         vec![item.clone()],
@@ -692,21 +527,6 @@ fn text_scenario(
             )),
             plakous_test_support::ScenarioStep::Emit(ModelEvent::ResponseCompleted(response)),
         ],
-    ))
-}
-
-fn workspace() -> TestResult<(TempDir, Arc<WorkspacePolicy>)> {
-    let directory = tempfile::tempdir()?;
-    let policy = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
-    Ok((directory, policy))
-}
-
-fn identity_sources() -> TestResult<(Arc<FixedClock>, Arc<SequenceIdGenerator>)> {
-    Ok((
-        Arc::new(FixedClock::new(timestamp()?)),
-        Arc::new(SequenceIdGenerator::new(
-            (1_u128..=32).map(Uuid::from_u128),
-        )?),
     ))
 }
 
