@@ -52,6 +52,8 @@ pub enum SessionStoreOrigin {
     Capacity(SessionStoreCapacity),
     /// Physical storage is exhausted, not a logical retention bound.
     StorageFull,
+    /// Another connection held the backend, or its request queue was full.
+    Busy,
     /// Backend availability or shutdown prevented the operation.
     Unavailable,
     /// The store rejected the caller's semantic input.
@@ -147,9 +149,10 @@ pub const fn session_store_origin(error: SessionStoreError) -> SessionStoreOrigi
         | SessionStoreError::FenceSuperseded => SessionStoreOrigin::Ownership,
         SessionStoreError::Capacity(capacity) => SessionStoreOrigin::Capacity(capacity),
         SessionStoreError::StorageFull => SessionStoreOrigin::StorageFull,
-        SessionStoreError::BackendUnavailable
-        | SessionStoreError::BackendBusy
-        | SessionStoreError::Shutdown => SessionStoreOrigin::Unavailable,
+        SessionStoreError::BackendBusy => SessionStoreOrigin::Busy,
+        SessionStoreError::BackendUnavailable | SessionStoreError::Shutdown => {
+            SessionStoreOrigin::Unavailable
+        }
         SessionStoreError::Invalid(_) => SessionStoreOrigin::InvalidInput,
         SessionStoreError::UnsupportedSchema | SessionStoreError::UnsupportedCodec => {
             SessionStoreOrigin::UnsupportedPersistence

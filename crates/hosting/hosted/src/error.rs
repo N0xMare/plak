@@ -46,6 +46,90 @@ pub struct CliFailure {
     message: String,
     shutdown: Option<Box<ShutdownFailures>>,
     source: Option<Box<LookupFailure>>,
+    refusal: Option<StoreRefusal>,
+}
+
+/// A semantic-store refusal of a read that the same read may clear when
+/// retried: nothing was written and no authority was lost.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum StoreRefusal {
+    /// Another connection held the store, or its request queue was full.
+    Busy,
+    /// The store could not be reached or was shutting down.
+    Unavailable,
+}
+
+impl StoreRefusal {
+    fn of(error: &plakous::sessions::AgentSessionsError) -> Option<Self> {
+        match error.kind() {
+            plakous::sessions::AgentSessionsErrorKind::StorageBusy => Some(Self::Busy),
+            plakous::sessions::AgentSessionsErrorKind::StorageUnavailable => {
+                Some(Self::Unavailable)
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Busy => "busy",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
+/// A failed read whose transient store refusal survives the string context
+/// the projectors add on their way up.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ReadFailure {
+    message: String,
+    refusal: Option<StoreRefusal>,
+}
+
+impl ReadFailure {
+    /// `context: error`, keeping the refusal class of `error` when it is
+    /// transient.
+    pub(crate) fn store(context: &str, error: &plakous::sessions::AgentSessionsError) -> Self {
+        Self {
+            message: format!("{context}: {error}"),
+            refusal: StoreRefusal::of(error),
+        }
+    }
+}
+
+impl std::fmt::Display for ReadFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl From<String> for ReadFailure {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            refusal: None,
+        }
+    }
+}
+
+impl From<&'static str> for ReadFailure {
+    fn from(message: &'static str) -> Self {
+        message.to_owned().into()
+    }
+}
+
+impl From<ReadFailure> for String {
+    fn from(failure: ReadFailure) -> Self {
+        failure.message
+    }
+}
+
+impl From<ReadFailure> for CliFailure {
+    fn from(failure: ReadFailure) -> Self {
+        let mut cli = Self::new(failure.message);
+        cli.refusal = failure.refusal;
+        cli
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -100,7 +184,14 @@ impl CliFailure {
             message: message.into(),
             shutdown: None,
             source: None,
+            refusal: None,
         }
+    }
+
+    /// The transient store refusal of a failed read, when it was one.
+    #[must_use]
+    pub(crate) const fn store_refusal(&self) -> Option<StoreRefusal> {
+        self.refusal
     }
 
     /// Failure that requires explicit operator recovery (no silent bootstrap).
@@ -195,6 +286,39 @@ impl From<String> for CliFailure {
 
 /// Result alias for product CLI operations.
 pub type CliResult<T> = Result<T, CliFailure>;
+
+/// Refusals injected at named read sites, standing in for a store that is
+/// busy, unavailable or corrupt at that moment. A process-wide queue: each
+/// nextest test is its own process.
+#[cfg(test)]
+pub(crate) mod read_faults {
+    use super::{ReadFailure, StoreRefusal};
+    use std::sync::{Mutex, PoisonError};
+
+    static FAULTS: Mutex<Vec<(&'static str, Option<StoreRefusal>)>> = Mutex::new(Vec::new());
+
+    /// Refuses the next `times` reads at the site whose context is `site`;
+    /// `None` is a permanent (integrity) refusal.
+    pub(crate) fn inject(site: &'static str, refusal: Option<StoreRefusal>, times: usize) {
+        let mut faults = FAULTS.lock().unwrap_or_else(PoisonError::into_inner);
+        faults.extend(std::iter::repeat_n((site, refusal), times));
+    }
+
+    pub(crate) fn take(site: &str) -> Option<ReadFailure> {
+        let mut faults = FAULTS.lock().unwrap_or_else(PoisonError::into_inner);
+        let index = faults.iter().position(|(queued, _)| *queued == site)?;
+        let (_, refusal) = faults.remove(index);
+        let label = match refusal {
+            Some(StoreRefusal::Busy) => "storage busy",
+            Some(StoreRefusal::Unavailable) => "storage unavailable",
+            None => "integrity",
+        };
+        Some(ReadFailure {
+            message: format!("{site}: semantic session store refused the workflow: {label}"),
+            refusal,
+        })
+    }
+}
 
 #[cfg(test)]
 mod tests {

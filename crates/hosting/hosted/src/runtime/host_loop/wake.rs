@@ -5,6 +5,13 @@ use crate::sessions::{NoticeScope, TranscriptRow};
 use std::time::Duration;
 
 const QUIET_WINDOW: Duration = Duration::from_secs(2);
+/// Consecutive transient store refusals a wake retries on a doubling delay,
+/// starting at [`TRANSIENT_FIRST_DELAY`], before it reports itself paused.
+const TRANSIENT_RETRIES: u32 = 5;
+const TRANSIENT_FIRST_DELAY: Duration = Duration::from_secs(1);
+/// A wake paused by transient refusals is retried at this interval, so the
+/// pause ends on its own once the store answers again.
+const TRANSIENT_REARM: Duration = Duration::from_secs(60);
 pub(in crate::runtime) const WAKE_COMMAND_PREFIX: &str = "plak:child-wake:";
 pub(in crate::runtime) const WAKE_PROMPT: &str = "Background processes finished or sub-agent results arrived while you were idle; continue the current task, or reply briefly if nothing remains.";
 
@@ -15,7 +22,17 @@ pub(super) struct ChildWake {
     quiet_since: Option<Instant>,
     suppression_pending: bool,
     pause_pending: Option<String>,
+    retry: Option<TransientRetry>,
     pub(super) prepared_context: Option<crate::context::ContextProjection>,
+}
+
+/// A wake whose reads the session store refused transiently. It is neither
+/// suppressed nor parked: the observed batch stays, and the next attempt
+/// waits for `next_at`.
+struct TransientRetry {
+    session_id: String,
+    failures: u32,
+    next_at: Instant,
 }
 
 impl ChildWake {
@@ -39,6 +56,34 @@ impl ChildWake {
     fn park(&mut self) {
         self.message_ids.clear();
         self.quiet_since = None;
+    }
+
+    fn retry_waiting(&self, session_id: &str, now: Instant) -> bool {
+        self.retry
+            .as_ref()
+            .is_some_and(|retry| retry.session_id == session_id && now < retry.next_at)
+    }
+
+    /// Records one more transient refusal and returns the consecutive count
+    /// and the delay before the next attempt.
+    fn defer(&mut self, session_id: &str, now: Instant) -> (u32, Duration) {
+        let failures = self
+            .retry
+            .as_ref()
+            .filter(|retry| retry.session_id == session_id)
+            .map_or(0, |retry| retry.failures)
+            .saturating_add(1);
+        let delay = if failures <= TRANSIENT_RETRIES {
+            TRANSIENT_FIRST_DELAY * 2u32.pow(failures - 1)
+        } else {
+            TRANSIENT_REARM
+        };
+        self.retry = Some(TransientRetry {
+            session_id: session_id.to_owned(),
+            failures,
+            next_at: now + delay,
+        });
+        (failures, delay)
     }
 }
 
@@ -114,10 +159,26 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         {
             return Ok(HostStep::Continue);
         }
+        if self.child_wake.retry_waiting(&self.config.session.id, now) {
+            return self.wake_deferred();
+        }
         let suppressed = self.config.session.child_wake_suppressed;
         let step = match self.try_child_wake_prompt(now) {
-            Ok(step) => Ok(step),
+            Ok(step) => {
+                self.child_wake.retry = None;
+                Ok(step)
+            }
             Err(error) => {
+                if let Some(refusal) = error.store_refusal() {
+                    self.defer_child_wake(refusal, now);
+                    return self.wake_deferred();
+                }
+                tracing::warn!(
+                    target: "plak.wake",
+                    cause = "refused",
+                    "sub-agent auto-continue paused until the next prompt"
+                );
+                self.child_wake.retry = None;
                 let _ = self.events.notice(TranscriptRow::error(
                     NoticeScope::Tree,
                     format!(
@@ -135,6 +196,35 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         }
         self.publish_pending_continuation();
         step
+    }
+
+    fn wake_deferred(&mut self) -> CliResult<HostStep> {
+        self.publish_pending_continuation();
+        Ok(HostStep::Continue)
+    }
+
+    /// A transient store refusal neither suppresses nor parks the wake: it is
+    /// retried on a doubling delay, then every [`TRANSIENT_REARM`] once the
+    /// retries are spent, which is when the pause is reported.
+    fn defer_child_wake(&mut self, refusal: crate::error::StoreRefusal, now: Instant) {
+        let (failures, delay) = self.child_wake.defer(&self.config.session.id, now);
+        tracing::warn!(
+            target: "plak.wake",
+            cause = refusal.as_str(),
+            failures,
+            retry_in_secs = delay.as_secs(),
+            "the session store refused a sub-agent wake read; retrying"
+        );
+        if failures == TRANSIENT_RETRIES + 1 {
+            let _ = self.events.notice(TranscriptRow::warning(
+                NoticeScope::Tree,
+                format!(
+                    "Sub-agent auto-continue paused: the session store is {}; it retries every {} s",
+                    refusal.as_str(),
+                    TRANSIENT_REARM.as_secs()
+                ),
+            ));
+        }
     }
 
     fn try_child_wake_prompt(&mut self, now: Instant) -> CliResult<HostStep> {
@@ -190,8 +280,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 &super::durable_tree_id(&rows, session),
                 self.opened.locator().session_id(),
             ))
-            .map_err(|_| CliFailure::new("application execution failed"))?
-            .map_err(CliFailure::new)?;
+            .map_err(|_| CliFailure::new("application execution failed"))??;
         let mails = if let Some(runtime) = runtime {
             runtime
                 .read(|tree| {
@@ -2367,6 +2456,233 @@ mod tests {
                 );
             });
         }
+    }
+
+    /// Captures `plak.wake` WARN events, the lines `plak.log` would carry.
+    #[derive(Clone, Default)]
+    struct WakeWarnings(Arc<std::sync::Mutex<Vec<String>>>);
+
+    impl WakeWarnings {
+        fn take(&self) -> Vec<String> {
+            std::mem::take(&mut *self.0.lock().unwrap())
+        }
+    }
+
+    impl tracing::Subscriber for WakeWarnings {
+        fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+            true
+        }
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+        fn event(&self, event: &tracing::Event<'_>) {
+            struct Fields(String);
+            impl tracing::field::Visit for Fields {
+                fn record_debug(
+                    &mut self,
+                    field: &tracing::field::Field,
+                    value: &dyn std::fmt::Debug,
+                ) {
+                    use std::fmt::Write as _;
+                    let _ = write!(self.0, "{}={value:?} ", field.name());
+                }
+            }
+            let metadata = event.metadata();
+            if *metadata.level() == tracing::Level::WARN && metadata.target() == "plak.wake" {
+                let mut fields = Fields(String::new());
+                event.record(&mut fields);
+                self.0.lock().unwrap().push(fields.0);
+            }
+        }
+        fn enter(&self, _: &tracing::span::Id) {}
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    fn with_wake_warnings(
+        results: usize,
+        test: impl FnOnce(
+            &mut HostLoop<'_, TestExtension>,
+            &Arc<crate::topology_runtime::ProductTopologyRuntime>,
+            &HostEventReceiver<TestExtension>,
+            &WakeWarnings,
+        ),
+    ) {
+        let warnings = WakeWarnings::default();
+        let captured = warnings.clone();
+        tracing::subscriber::with_default(warnings.clone(), || {
+            with_host(results, |host, runtime, _, observed| {
+                test(host, runtime, observed, &captured);
+            });
+        });
+    }
+
+    #[test]
+    fn a_transient_tree_feed_refusal_retries_and_wakes_exactly_once() {
+        use crate::error::{StoreRefusal, read_faults};
+
+        for refusal in [StoreRefusal::Busy, StoreRefusal::Unavailable] {
+            with_wake_warnings(1, |host, runtime, observed, warnings| {
+                let now = Instant::now();
+                host.child_wake_prompt(now).unwrap();
+                read_faults::inject(crate::agent::TREE_FEED_READ_FAILED, Some(refusal), 1);
+                let ready = now + QUIET_WINDOW;
+                assert!(matches!(
+                    host.child_wake_prompt(ready).unwrap(),
+                    HostStep::Continue
+                ));
+                assert!(!host.config.session.child_wake_suppressed);
+                assert_eq!(notice_texts(observed), [] as [String; 0], "{refusal:?}");
+                let logged = warnings.take();
+                assert_eq!(logged.len(), 1, "{logged:?}");
+                assert!(
+                    logged[0].contains(&format!("cause=\"{}\"", refusal.as_str())),
+                    "{logged:?}"
+                );
+                assert_eq!(
+                    runtime
+                        .read(|tree| tree.pending_mail("root").len())
+                        .unwrap(),
+                    1
+                );
+
+                // The backoff holds the next attempt; a retry then wakes once.
+                assert!(matches!(
+                    host.child_wake_prompt(ready + TRANSIENT_FIRST_DELAY / 2)
+                        .unwrap(),
+                    HostStep::Continue
+                ));
+                let (text, item, echoed) = take_prompt(
+                    host.child_wake_prompt(ready + TRANSIENT_FIRST_DELAY)
+                        .unwrap(),
+                );
+                assert_eq!(submissions(host).len(), 1);
+                host.run_prompt(text, item, echoed, None).unwrap();
+                assert!(accepted(host, &submissions(host)[0]));
+                assert!(
+                    runtime
+                        .read(|tree| tree.pending_mail("root").is_empty())
+                        .unwrap()
+                );
+                let later = ready + TRANSIENT_REARM;
+                for at in [later, later + QUIET_WINDOW] {
+                    assert!(matches!(
+                        host.child_wake_prompt(at).unwrap(),
+                        HostStep::Continue
+                    ));
+                }
+                assert_eq!(submissions(host).len(), 1);
+                assert_eq!(warnings.take(), [] as [String; 0]);
+            });
+        }
+    }
+
+    #[test]
+    fn spent_transient_retries_pause_with_a_rearm_that_later_wakes() {
+        use crate::error::{StoreRefusal, read_faults};
+
+        with_wake_warnings(1, |host, runtime, observed, warnings| {
+            let now = Instant::now();
+            host.child_wake_prompt(now).unwrap();
+            let site = super::super::super::usage::CONTEXT_QUERY_FAILED;
+            let attempts = TRANSIENT_RETRIES + 2;
+            read_faults::inject(
+                site,
+                Some(StoreRefusal::Unavailable),
+                usize::try_from(attempts).unwrap(),
+            );
+            let mut at = now + QUIET_WINDOW;
+            for attempt in 1..=attempts {
+                assert!(matches!(
+                    host.child_wake_prompt(at).unwrap(),
+                    HostStep::Continue
+                ));
+                let notices = notice_texts(observed);
+                if attempt == TRANSIENT_RETRIES + 1 {
+                    assert_eq!(notices.len(), 1, "{notices:?}");
+                    assert!(
+                        notices[0].contains("paused")
+                            && notices[0].contains("unavailable")
+                            && !notices[0].contains("until the next prompt"),
+                        "{notices:?}"
+                    );
+                } else {
+                    assert_eq!(notices, [] as [String; 0], "attempt {attempt}");
+                }
+                assert_eq!(warnings.take().len(), 1, "attempt {attempt}");
+                let delay = if attempt <= TRANSIENT_RETRIES {
+                    TRANSIENT_FIRST_DELAY * 2u32.pow(attempt - 1)
+                } else {
+                    TRANSIENT_REARM
+                };
+                // Nothing retries before the delay is over.
+                assert!(matches!(
+                    host.child_wake_prompt(at + delay.saturating_sub(Duration::from_millis(1)))
+                        .unwrap(),
+                    HostStep::Continue
+                ));
+                at += delay;
+            }
+            assert!(!host.config.session.child_wake_suppressed);
+            assert_eq!(
+                submissions(host),
+                [] as [crate::sessions::projector::Submission; 0]
+            );
+
+            // The re-arm finds the store answering again and wakes once.
+            let (text, item, echoed) = take_prompt(host.child_wake_prompt(at).unwrap());
+            host.run_prompt(text, item, echoed, None).unwrap();
+            assert_eq!(submissions(host).len(), 1);
+            assert!(
+                runtime
+                    .read(|tree| tree.pending_mail("root").is_empty())
+                    .unwrap()
+            );
+        });
+    }
+
+    #[test]
+    fn a_permanent_read_refusal_still_pauses_until_the_next_prompt() {
+        use crate::error::read_faults;
+
+        with_wake_warnings(1, |host, runtime, observed, warnings| {
+            let now = Instant::now();
+            host.child_wake_prompt(now).unwrap();
+            read_faults::inject(crate::agent::TREE_FEED_READ_FAILED, None, 1);
+            assert!(matches!(
+                host.child_wake_prompt(now + QUIET_WINDOW).unwrap(),
+                HostStep::Continue
+            ));
+            assert!(host.config.session.child_wake_suppressed);
+            let notices = notice_texts(observed);
+            assert!(
+                notices
+                    .iter()
+                    .any(|note| note.contains("paused until the next prompt")
+                        && note.contains("integrity")),
+                "{notices:?}"
+            );
+            let logged = warnings.take();
+            assert_eq!(logged.len(), 1, "{logged:?}");
+            assert!(logged[0].contains("cause=\"refused\""), "{logged:?}");
+            for at in [now + TRANSIENT_REARM, now + TRANSIENT_REARM * 2] {
+                assert!(matches!(
+                    host.child_wake_prompt(at).unwrap(),
+                    HostStep::Continue
+                ));
+            }
+            assert_eq!(
+                submissions(host),
+                [] as [crate::sessions::projector::Submission; 0]
+            );
+            assert_eq!(
+                runtime
+                    .read(|tree| tree.pending_mail("root").len())
+                    .unwrap(),
+                1
+            );
+        });
     }
 
     #[test]

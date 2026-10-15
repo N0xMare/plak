@@ -84,7 +84,7 @@ pub fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
             new_session.locator(),
         ))
         .map_err(|_| "application execution failed".to_owned())
-        .and_then(|result| result)
+        .and_then(|result| result.map_err(String::from))
         .and_then(|_| config.store.load(&target_product_id));
     let next = match publication {
         Ok(next) => next,

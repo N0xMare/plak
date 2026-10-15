@@ -23,8 +23,8 @@ pub(crate) async fn retry_tree_feed<R>(
     })?;
     let mut reread = super::read_tree_feed(sessions, session, 0)
         .await
-        .map_err(|message| {
-            TopologyError::new(TopologyErrorCode::OperationRecoveryRequired, message)
+        .map_err(|failure| {
+            TopologyError::new(TopologyErrorCode::OperationRecoveryRequired, failure)
         })?;
     reread.reads.extend_waits_from(&feed.reads);
     feed = reread;

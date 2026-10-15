@@ -1680,6 +1680,17 @@ batch and driver-inserted notice segment and uses ordinary scheduled compaction 
 and pauses auto-continue until the next user prompt. An error writes an error
 notice intent and a `wake_suppression` intent; a failed write keeps the
 suppression in memory for the process.
+A transient semantic-store refusal of a wake read (`StorageBusy`, or
+`StorageUnavailable`, from the canonical context query or a feed read of the
+tree or product projector) does neither: the observed batch stays, nothing is
+suppressed or written, and the wake is retried after 1, 2, 4, 8 and 16 s. The
+sixth consecutive refusal writes one warning notice naming the class (busy or
+unavailable) and the wake is then retried every 60 s until the store answers;
+a retried wake still prepares exactly one delivery. Every wake refusal is
+logged at WARN under target `plak.wake` with its cause class (`busy`,
+`unavailable`, or `refused` for a permanent refusal) and no session content.
+Integrity, ownership, compatibility and product-store refusals keep the pause
+until the next user prompt.
 The host parks the wake and stays attached. Non-live trees are not reloaded
 on idle ticks. It never repeatedly dispatches paid compaction for the same idle
 wake. Prompt and wake preflight share one scheduled-compaction trigger and

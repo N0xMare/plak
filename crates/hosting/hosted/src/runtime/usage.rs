@@ -114,6 +114,8 @@ pub(super) fn report_unavailable_context<P: plakous_host_protocol::ProtocolExten
     emit_unavailable_context(events);
 }
 
+pub(super) const CONTEXT_QUERY_FAILED: &str = "canonical context query failed";
+
 pub(super) fn query_context(
     executor: &ApplicationExecutor,
     opened: &AttachedCodingSession,
@@ -121,10 +123,19 @@ pub(super) fn query_context(
 ) -> CliResult<ContextProjection> {
     let operation = SessionOperationId::new(format!("plak:context:{}", uuid::Uuid::new_v4()))
         .map_err(|_| CliFailure::new("context query identity is invalid"))?;
+    #[cfg(test)]
+    if let Some(failure) = crate::error::read_faults::take(CONTEXT_QUERY_FAILED) {
+        return Err(failure.into());
+    }
     let report = executor
         .block_on(opened.context_status(operation, query))
         .map_err(|_| CliFailure::new("application execution failed"))?
-        .map_err(|error| CliFailure::new(format!("canonical context query failed: {error}")))?;
+        .map_err(|error| {
+            CliFailure::from(crate::error::ReadFailure::store(
+                CONTEXT_QUERY_FAILED,
+                &error,
+            ))
+        })?;
     if report.locator() != opened.locator() {
         return Err(CliFailure::new(
             "canonical context report locator does not match the attached session",

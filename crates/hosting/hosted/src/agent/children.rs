@@ -3329,7 +3329,7 @@ async fn project_turn_end(
         .await
         .map(|(projection, _)| projection)
         .map_err(|error| error.message),
-        Err(error) => Err(error),
+        Err(error) => Err(String::from(error)),
     };
     let terminal = mutate_child(driver, agent_id, |tree| match applied {
         Ok(projection) => Ok(projection
@@ -4512,6 +4512,7 @@ impl ChildReopenErrorKind {
                 retry_after_seconds: None,
             },
             AgentSessionsErrorKind::StorageFull
+            | AgentSessionsErrorKind::StorageBusy
             | AgentSessionsErrorKind::StorageUnavailable
             | AgentSessionsErrorKind::StoragePressure => Self::StorageUnavailable,
             AgentSessionsErrorKind::IncompatibleBuild => Self::Incompatible,

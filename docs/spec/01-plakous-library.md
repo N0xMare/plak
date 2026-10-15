@@ -904,7 +904,10 @@ facade's SQLite constructors and shape/usage readers examine an unavailable
 refusal and report a cause the store refuses deterministically as
 `AgentSessionsErrorKind::UnsafeStorePath`, whose message names the store path,
 the offending component and the remedy. Any other unavailable refusal stays
-`StorageUnavailable`.
+`StorageUnavailable`. A busy store (`SessionStoreError::BackendBusy`: SQLite
+`BUSY`/`LOCKED` past the busy timeout, or a full actor lane) is
+`AgentSessionsErrorKind::StorageBusy` with the message label `storage busy`;
+nothing was written and the same request may succeed when retried.
 
 Read-only inspection (`SqliteSessionStore::inspect_*` and the facade's
 `inspect_*_sqlite` twins) opens one read-only connection per call and admits

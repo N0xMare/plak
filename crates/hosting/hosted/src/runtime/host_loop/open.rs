@@ -179,7 +179,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
                     Err(error) => log_ev(
                         log.as_ref(),
                         &config,
-                        SessionEvent::new("projector.deferred").str("error", &error),
+                        SessionEvent::new("projector.deferred").str("error", error.to_string()),
                     ),
                 }
             }

@@ -10,6 +10,7 @@ use plakous::model::SessionId;
 use plakous::sessions::AgentSessions;
 use plakous::sessions::feed::{FeedCursor, FeedLocator, FeedPage, FeedPageRequest, FeedSeq};
 
+use crate::error::ReadFailure;
 use crate::session_store::SessionRecordStore;
 use crate::sessions::SessionRecord;
 use crate::sessions::projector::{
@@ -177,7 +178,7 @@ pub(crate) async fn project_to_tail(
     store: &Arc<dyn SessionRecordStore>,
     product_id: &str,
     followed: plakous::sessions::SessionLocator,
-) -> Result<SessionViews, String> {
+) -> Result<SessionViews, ReadFailure> {
     project_to_tail_cached(sessions, store, product_id, followed, None).await
 }
 
@@ -187,7 +188,7 @@ async fn project_to_tail_cached(
     product_id: &str,
     followed: plakous::sessions::SessionLocator,
     cached: Option<SessionViews>,
-) -> Result<SessionViews, String> {
+) -> Result<SessionViews, ReadFailure> {
     #[cfg(test)]
     let _entry = probe::enter(product_id);
     let runtime_session = followed.session_id();
@@ -211,7 +212,9 @@ async fn project_to_tail_cached(
             .runtime_session_id
             .is_some_and(|followed| followed != runtime_session)
         {
-            return Err("the product session's views follow another runtime session".to_owned());
+            return Err("the product session's views follow another runtime session"
+                .to_owned()
+                .into());
         }
         let (page, intents) = page_with_intents(store, product_id, &inherited, async {
             sessions
@@ -220,7 +223,9 @@ async fn project_to_tail_cached(
                     views.cursor,
                 )))
                 .await
-                .map_err(|error| format!("the projector could not read the feed: {error}"))
+                .map_err(|error| {
+                    ReadFailure::store("the projector could not read the feed", &error)
+                })
         })
         .await?;
         let (mut next, writes, terminal_usages) = match page {
@@ -270,7 +275,7 @@ async fn project_to_tail_cached(
                     {
                         Ok(target) => target,
                         Err(error) if error == "session not found" => continue,
-                        Err(error) => return Err(error),
+                        Err(error) => return Err(error.into()),
                     };
                     let operation =
                         plakous::sessions::SessionOperationId::new(&target.create_operation_id)
@@ -291,7 +296,7 @@ async fn project_to_tail_cached(
                         {
                             continue;
                         }
-                        Err(error) => return Err(error.to_string()),
+                        Err(error) => return Err(error.to_string().into()),
                     };
                     // An absent genesis has no admission fact and is withdrawn
                     // by open; never retry create from an unresolved intent.
@@ -354,7 +359,7 @@ async fn project_to_tail_cached(
                 let writes = full_writes(&views, &rebuilt);
                 (rebuilt, writes, Vec::new())
             }
-            _ => return Err("the projector read an unknown feed page".to_owned()),
+            _ => return Err("the projector read an unknown feed page".to_owned().into()),
         };
         next.consume_before_retention(&intents);
         let committed = next.clone();
@@ -390,8 +395,8 @@ async fn page_with_intents(
     store: &Arc<dyn SessionRecordStore>,
     product_id: &str,
     inherited: &[crate::sessions::projector::Submission],
-    page: impl Future<Output = Result<FeedPage, String>>,
-) -> Result<(FeedPage, crate::sessions::projector::ProductIntents), String> {
+    page: impl Future<Output = Result<FeedPage, ReadFailure>>,
+) -> Result<(FeedPage, crate::sessions::projector::ProductIntents), ReadFailure> {
     let page = page.await?;
     // Every intent precedes its submission, so a page read before this
     // snapshot cannot name an intent the snapshot missed.
@@ -474,7 +479,7 @@ async fn seed_lineage(
     sessions: &AgentSessions,
     runtime_session: SessionId,
     branch: plakous::model::BranchId,
-) -> Result<Vec<LineageStep>, String> {
+) -> Result<Vec<LineageStep>, ReadFailure> {
     let mut created = None;
     let mut published = std::collections::BTreeMap::new();
     let mut behind = false;
@@ -483,7 +488,7 @@ async fn seed_lineage(
         let page = sessions
             .feed_page(FeedPageRequest::after(cursor))
             .await
-            .map_err(|error| format!("the projector could not read the feed: {error}"))?;
+            .map_err(|error| ReadFailure::store("the projector could not read the feed", &error))?;
         let records = match page {
             FeedPage::Records { records, .. } => records,
             FeedPage::BehindRetention { retained_from, .. } => {
@@ -494,7 +499,7 @@ async fn seed_lineage(
                 );
                 continue;
             }
-            _ => return Err("the projector read an unknown feed page".to_owned()),
+            _ => return Err("the projector read an unknown feed page".to_owned().into()),
         };
         let Some(last) = records.last() else {
             break;
@@ -520,14 +525,16 @@ async fn seed_lineage(
             if behind {
                 break;
             }
-            return Err("the product session's branch has no publishing record".to_owned());
+            return Err("the product session's branch has no publishing record"
+                .to_owned()
+                .into());
         };
         lineage.push(LineageStep {
             branch_id: current,
             from_seq: seq,
         });
         if lineage.len() > published.len() {
-            return Err("the feed's branch lineage is cyclic".to_owned());
+            return Err("the feed's branch lineage is cyclic".to_owned().into());
         }
         current = source;
     }
@@ -612,7 +619,7 @@ pub(crate) async fn project_tree(
     rows: &(dyn TopologyRows + Sync),
     tree_id: &str,
     runtime_session: SessionId,
-) -> Result<(), String> {
+) -> Result<(), ReadFailure> {
     let session_key = runtime_session.to_string();
     let runtime = crate::topology_runtime::lookup(tree_id);
     let read = |tree: &crate::agent_tree::ProductAgentTree| {
@@ -646,7 +653,7 @@ pub(crate) async fn project_tree(
     if tree.feed_cursor(&session_key) == before {
         return Ok(());
     }
-    rows.save_tree(&mut tree)
+    Ok(rows.save_tree(&mut tree)?)
 }
 
 pub(super) mod live;

@@ -1856,7 +1856,12 @@ pub enum AgentSessionsErrorKind {
     StoragePressure,
     /// Physical storage is exhausted, independently of retention limits.
     StorageFull,
-    /// The store is busy, unavailable or shutting down.
+    /// Another connection held the store past its busy timeout, or its
+    /// request queue was full. Nothing was written; the same request may
+    /// succeed when retried.
+    StorageBusy,
+    /// The store is unavailable or shutting down, or the runtime refused the
+    /// request under backpressure.
     StorageUnavailable,
     /// The store path itself is refused: a component of it is a symbolic link,
     /// or the database is not a private regular file. Retrying never helps; the

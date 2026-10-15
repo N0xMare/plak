@@ -56,7 +56,7 @@ fn an_intent_written_during_the_feed_read_is_joined_to_that_page() {
                     plakous::sessions::feed::FeedCursor::start(request.source_locator.session_id()),
                 ))
                 .await
-                .map_err(|error| error.to_string())
+                .map_err(|error| crate::error::ReadFailure::from(error.to_string()))
         }))
         .unwrap()
         .unwrap();

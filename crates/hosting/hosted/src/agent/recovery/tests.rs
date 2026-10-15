@@ -3799,7 +3799,7 @@ async fn refold_reread_spans_more_than_sixty_four_synthetic_pages() {
             retained_from: FeedSeq::new(1),
             tail: FeedSeq::new(count as u64),
         };
-        std::future::ready(Ok(page))
+        std::future::ready(Ok::<_, String>(page))
     })
     .await
     .unwrap();
@@ -3840,7 +3840,7 @@ async fn refold_reread_refuses_a_short_run_at_the_record_cap() {
                 FeedRecord::from_store(header, Vec::new())
             })
             .collect();
-        std::future::ready(Ok(FeedPage::Records {
+        std::future::ready(Ok::<_, String>(FeedPage::Records {
             records,
             retained_from: FeedSeq::new(1),
             tail: FeedSeq::new(target),
@@ -3887,7 +3887,7 @@ async fn cursor_read_only_pages_new_records_of_a_ten_thousand_record_feed() {
                 })).unwrap();
                 FeedRecord::from_store(header, Vec::new())
             }).collect();
-        std::future::ready(Ok(FeedPage::Records {
+        std::future::ready(Ok::<_, String>(FeedPage::Records {
             records, retained_from: FeedSeq::new(1), tail: FeedSeq::new(target),
         }))
     }).await.unwrap();

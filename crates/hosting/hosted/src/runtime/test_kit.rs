@@ -643,5 +643,7 @@ pub async fn child_feed(
     sessions: &plakous::sessions::AgentSessions,
     session_id: plakous::model::SessionId,
 ) -> Result<crate::agent_tree::TreeFeed, String> {
-    crate::agent::read_tree_feed(sessions, session_id, 0).await
+    crate::agent::read_tree_feed(sessions, session_id, 0)
+        .await
+        .map_err(String::from)
 }

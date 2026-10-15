@@ -52,7 +52,7 @@ impl LiveTarget {
         );
         #[cfg(test)]
         let pass = super::probe::CALLER.scope(super::probe::Caller::Live, pass);
-        pass.await
+        pass.await.map_err(String::from)
     }
 
     /// The tree projector over the same feed. The host runs it from its

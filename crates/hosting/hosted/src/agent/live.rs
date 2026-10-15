@@ -190,7 +190,10 @@ pub(crate) async fn released_with_feed(
     cursor: u64,
     recorded: bool,
 ) -> LiveRelease {
-    match super::read_tree_feed(sessions, locator.session_id(), cursor).await {
+    match super::read_tree_feed(sessions, locator.session_id(), cursor)
+        .await
+        .map_err(String::from)
+    {
         Ok(feed) => {
             let reached = recorded || (feed.records.is_empty() && !feed.went_behind_retention()) || feed.heads.contains(&locator) || feed.records.iter().any(|record| {
                 let header = record.header();
@@ -248,6 +251,7 @@ impl LiveChildHandle for ProductLiveChild {
             super::read_tree_feed(&sessions, session, cursor)
                 .await
                 .map(Some)
+                .map_err(String::from)
         })
     }
 

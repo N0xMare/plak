@@ -493,14 +493,15 @@ impl TerminalExchange {
 /// 14.3). Read without a lease; applied under the tree's lock.
 use crate::agent_tree::TreeFeed;
 
-async fn read_tree_feed_pages<F, Fut>(
+async fn read_tree_feed_pages<F, Fut, E>(
     session_id: plakous::model::SessionId,
     cursor: u64,
     mut read_page: F,
-) -> Result<TreeFeed, String>
+) -> Result<TreeFeed, E>
 where
     F: FnMut(u64) -> Fut,
-    Fut: Future<Output = Result<plakous::sessions::feed::FeedPage, String>>,
+    Fut: Future<Output = Result<plakous::sessions::feed::FeedPage, E>>,
+    E: From<&'static str>,
 {
     use plakous::sessions::feed::FeedPage;
     let mut feed = TreeFeed {
@@ -529,7 +530,7 @@ where
                 };
                 let last_seq = last.header().seq.get();
                 if last_seq <= applied {
-                    return Err("the tree projector feed read made no progress".into());
+                    return Err(E::from("the tree projector feed read made no progress"));
                 }
                 applied = last_seq;
                 feed.records.extend(records);
@@ -556,10 +557,14 @@ where
         }
     }
     if tail.is_some_and(|target| applied < target) {
-        return Err("the tree projector feed read did not reach its initial tail".into());
+        return Err(E::from(
+            "the tree projector feed read did not reach its initial tail",
+        ));
     }
     Ok(feed)
 }
+
+pub(crate) const TREE_FEED_READ_FAILED: &str = "the tree projector could not read the feed";
 
 /// Reads `session_id`'s feed after `cursor` through its initial tail and the abandonment
 /// and failure terminals the tree projector reads (spec 03 section 14.3): the entry the
@@ -574,23 +579,31 @@ pub(crate) async fn read_tree_feed(
     sessions: &AgentSessions,
     session_id: plakous::model::SessionId,
     cursor: u64,
-) -> Result<TreeFeed, String> {
+) -> Result<TreeFeed, crate::error::ReadFailure> {
+    use crate::error::ReadFailure;
     use plakous::sessions::feed::{
         FeedCursor, FeedPageRequest, FeedSeq, FeedTerminalOutcome, FeedTerminalRequest,
     };
     let mut feed = read_tree_feed_pages(session_id, cursor, |after| async move {
+        #[cfg(test)]
+        if let Some(failure) = crate::error::read_faults::take(TREE_FEED_READ_FAILED) {
+            return Err(failure);
+        }
         sessions
             .feed_page(FeedPageRequest::after(FeedCursor::new(
                 session_id,
                 FeedSeq::new(after),
             )))
             .await
-            .map_err(|error| format!("the tree projector could not read the feed: {error}"))
+            .map_err(|error| ReadFailure::store(TREE_FEED_READ_FAILED, &error))
     })
     .await?;
     for head in &feed.heads {
         let turn = sessions.head_running_turn(*head).await.map_err(|error| {
-            format!("the tree projector could not read a head's running turn: {error}")
+            ReadFailure::store(
+                "the tree projector could not read a head's running turn",
+                &error,
+            )
         })?;
         feed.head_turns.insert(*head, turn);
     }
@@ -620,8 +633,9 @@ pub(crate) async fn read_tree_feed(
                 continue;
             }
             Err(error) => {
-                return Err(format!(
-                    "the tree projector could not read a terminal: {error}"
+                return Err(ReadFailure::store(
+                    "the tree projector could not read a terminal",
+                    &error,
                 ));
             }
         };
@@ -844,7 +858,7 @@ async fn release_reopened(
                 .map_err(|message| session_refusal(&message))?;
         let mut feed = read_tree_feed(session.sessions(), session.locator().session_id(), cursor)
             .await
-            .map_err(|message| session_refusal(&message))?;
+            .map_err(|failure| session_refusal(&failure.to_string()))?;
         feed.reads.insert_waits(session.locator(), evidence);
         session
             .release_opened_for_transfer()
@@ -868,7 +882,7 @@ async fn release_reopened(
         .map_err(|message| session_refusal(&message))?;
     let mut feed = read_tree_feed(session.sessions(), session.locator().session_id(), cursor)
         .await
-        .map_err(|message| session_refusal(&message))?;
+        .map_err(|failure| session_refusal(&failure.to_string()))?;
     feed.reads.insert_waits(session.locator(), evidence);
     session
         .release_opened_for_transfer()

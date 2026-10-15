@@ -480,7 +480,8 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
             &super::super::rebind::durable_tree_id(rows, session),
             runtime_session,
         )
-        .await?;
+        .await
+        .map_err(String::from)?;
         return Ok(DrivenTurn::continuing(outcome));
     }
     let turn = turn.ok_or_else(|| "new command omitted its turn authority".to_owned())?;

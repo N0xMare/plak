@@ -118,6 +118,8 @@ use children::{
     format_session_reopen_error, incompatible_session_message, reattach_inflight_children,
 };
 #[cfg(test)]
+pub(crate) use recovery::TREE_FEED_READ_FAILED;
+#[cfg(test)]
 pub(crate) use recovery::tests::Fixture as RecoveryFixture;
 pub(crate) use recovery::{
     RecoveryPassStart, TerminalExchange, committed_wait_evidence, read_tree_feed,

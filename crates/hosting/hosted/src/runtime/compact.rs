@@ -435,8 +435,7 @@ pub(super) fn handle_compact<P: plakous_host_protocol::ProtocolExtension>(
             &config.session.id,
             opened.locator(),
         ))
-        .map_err(|_| CliFailure::new("application execution failed"))?
-        .map_err(CliFailure::new)?;
+        .map_err(|_| CliFailure::new("application execution failed"))??;
     let intents = config
         .store
         .load_intents(&config.session.id)
@@ -912,7 +911,8 @@ fn refresh_compact_views<P: plakous_host_protocol::ProtocolExtension>(
             &config.session.id,
             opened.locator(),
         ))
-        .unwrap_or_else(|_| Err("application execution failed".to_owned()));
+        .unwrap_or_else(|_| Err("application execution failed".to_owned().into()))
+        .map_err(String::from);
     let settled_row = views.as_ref().ok().and_then(|views| {
         views.rows.values().find(|row| matches!(row,
             TranscriptRow::Tool(tool) if tool.call_id == call_id && tool.finished_at_ms.is_some()

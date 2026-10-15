@@ -346,9 +346,10 @@ pub(super) fn store_origin_error(origin: SessionStoreOrigin) -> AgentSessionsErr
             AgentSessionsErrorKind::Ownership,
             "ownership: the session is busy; its lease is held by another owner",
         ),
+        SessionStoreOrigin::Busy => (AgentSessionsErrorKind::StorageBusy, "storage busy"),
         SessionStoreOrigin::Unavailable => (
             AgentSessionsErrorKind::StorageUnavailable,
-            "storage unavailable or busy",
+            "storage unavailable",
         ),
         SessionStoreOrigin::InvalidInput => (AgentSessionsErrorKind::InvalidInput, "invalid input"),
         SessionStoreOrigin::UnsupportedPersistence => return incompatible(),
@@ -431,10 +432,10 @@ mod tests {
         assert_eq!(error.kind(), AgentSessionsErrorKind::UnsafeStorePath);
         assert!(error.to_string().contains("chmod 600"), "{error}");
 
-        // An ordinary unavailable refusal still reads as one.
+        // A busy refusal still reads as busy, never as the path.
         assert_eq!(
             store_path_error(&real, SessionStoreError::BackendBusy).kind(),
-            AgentSessionsErrorKind::StorageUnavailable
+            AgentSessionsErrorKind::StorageBusy
         );
     }
 
