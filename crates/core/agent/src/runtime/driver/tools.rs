@@ -28,7 +28,7 @@ use crate::runtime::terminal::{DurableAgentError, cancelled_error};
 use crate::runtime::{
     OperationId, PreparedToolInvocation, PromptCommand, ToolExecutionResult, ToolPresentation,
 };
-use crate::tool_runtime::AuthorizedToolInvocation;
+use crate::tool_runtime::{AuthorizedToolInvocation, PendingEffectDecision};
 use crate::{
     AgentError, AgentErrorKind, AgentEventKind, DurableOperationKind, DurableOperationRecord,
     DurableOperationState, EventContext, SessionStoreError, StoreAdmission,
@@ -503,10 +503,22 @@ impl Driver {
         provider_plan: &ValidatedRequestPlan,
         provider_response: &ModelResponse,
     ) -> Result<ToolBatchResult, AgentError> {
-        let mut items = vec![None; calls.len()];
-        let mut read_only = Vec::new();
-        let mut dispatched = 0_usize;
-        let mut operations = Vec::new();
+        let batch = ToolBatchInput {
+            command,
+            attempt_id,
+            calls: &calls,
+            result_entry_ids: &result_entry_ids,
+            tool_calls,
+            provider_operation,
+            provider_plan,
+            provider_response,
+        };
+        let mut progress = ToolBatchProgress {
+            items: vec![None; calls.len()],
+            read_only: Vec::new(),
+            dispatched: 0,
+            operations: Vec::new(),
+        };
         for (index, call) in calls.iter().cloned().enumerate() {
             if command.cancellation.is_cancelled() || self.shutdown.is_cancelled() {
                 command.cancellation.cancel();
@@ -562,8 +574,8 @@ impl Driver {
                             observation: Some(rejected_tool_call_observation(&call)),
                         },
                     );
-                    items[index] = Some(item);
-                    operations.push(operation_id);
+                    progress.items[index] = Some(item);
+                    progress.operations.push(operation_id);
                 }
                 ToolAdmission::RejectedAfterValidation { execution } => {
                     let result_entry_id = result_entry_ids[index];
@@ -591,189 +603,23 @@ impl Driver {
                         call.exposed_name(),
                         clip,
                     );
-                    items[index] = Some(item);
-                    operations.push(operation_id);
+                    progress.items[index] = Some(item);
+                    progress.operations.push(operation_id);
                 }
                 ToolAdmission::Admitted {
                     execution,
                     audit_identity,
                 } => {
-                    if self.is_local_composition_marker(&execution) {
-                        let result_entry_id = result_entry_ids[index];
-                        // Outer exec_*/wait_* skip ToolRuntime, so drive the
-                        // same observer Direct tools use: one ToolStarted and
-                        // one ToolFinished per model-visible call. Nested calls
-                        // inside the cell are separate calls and observe
-                        // themselves on the ordinary dispatch paths.
-                        let observer = self.tool_dispatch_observer(
-                            command,
-                            attempt_id,
-                            call.call_id(),
-                            audit_identity.clone(),
-                            self.local_composition_marker_lineage(),
-                            tool_call_observation(&call),
-                        );
-                        observer.observe_started()?;
-                        let local_composition =
-                            match Box::pin(self.execute_local_composition_outer(
-                                command,
-                                attempt_id,
-                                source_index,
-                                &call,
-                                result_entry_id,
-                                *execution,
-                            ))
-                            .await
-                            {
-                                Ok(local_composition) => local_composition,
-                                Err(error) => {
-                                    observer.emit_finished(
-                                        composition_tool_error_telemetry_status(
-                                            &error,
-                                            command.cancellation.is_cancelled()
-                                                || self.shutdown.is_cancelled(),
-                                        ),
-                                        0,
-                                    );
-                                    if let Some(error) = observer.take_error() {
-                                        return Err(error);
-                                    }
-                                    return Err(error);
-                                }
-                            };
-                        let output_bytes = conversation_item_tool_result(&local_composition.item)
-                            .map_or(0, tool_result_content_bytes);
-                        let status = conversation_item_tool_result(&local_composition.item).map_or(
-                            TelemetryTerminalStatus::Failed,
-                            |result| {
-                                tool_result_telemetry_status(result, self.shutdown.is_cancelled())
-                            },
-                        );
-                        observer.emit_finished(status, output_bytes);
-                        if let Some(error) = observer.take_error() {
-                            return Err(error);
-                        }
-                        let _ = command.shared.events.publish(
-                            EventContext::call(command.turn_id, attempt_id, call.call_id()),
-                            AgentEventKind::ToolCompleted {
-                                identity: audit_identity.clone(),
-                                lineage: self.local_composition_marker_terminal_lineage(),
-                                observation: local_composition_result_observation(
-                                    &local_composition.item,
-                                ),
-                            },
-                        );
-                        dispatched = dispatched.saturating_add(local_composition.dispatched);
-                        items[index] = Some(local_composition.item);
-                        operations.extend(local_composition.operations);
-                        continue;
-                    }
-                    let kind = DurableOperationKind::Effect {
-                        turn_id: command.turn_id,
-                        attempt_id,
-                        call_id: call.call_id(),
+                    Box::pin(self.dispatch_admitted_tool(
+                        batch,
+                        &mut progress,
+                        index,
                         source_index,
-                    };
-                    match *execution {
-                        AdmittedToolExecution::ReadOnly {
-                            invocation,
-                            projection_receipt,
-                            authorized,
-                            effect,
-                        } => {
-                            let effect_binding =
-                                canonical_tool_operation_binding(index, &invocation)?;
-                            let recoverable_input = serde_json::to_vec(&(effect_binding, &call))
-                                .map_err(|_| {
-                                    AgentError::new(
-                                        AgentErrorKind::Internal,
-                                        "tool operation input could not be captured",
-                                    )
-                                })?;
-                            let operation_id = self
-                                .prepare_operation(
-                                    StoreAdmission::Ordinary,
-                                    command.turn_id,
-                                    kind,
-                                    effect_binding,
-                                    Some(recoverable_input),
-                                    None,
-                                )
-                                .await?;
-                            read_only.push(AdmittedToolCall {
-                                operation_id,
-                                index,
-                                call,
-                                result_entry_id: result_entry_ids[index],
-                                audit_identity,
-                                execution: AdmittedToolExecution::ReadOnly {
-                                    invocation,
-                                    projection_receipt,
-                                    authorized,
-                                    effect,
-                                },
-                            });
-                            operations.push(operation_id);
-                        }
-                        AdmittedToolExecution::Mutating {
-                            invocation,
-                            projection_receipt,
-                            authorized,
-                            intent,
-                        } => {
-                            self.certify_mutating_effect_recovery()?;
-                            let recoverable_input =
-                                serde_json::to_vec(&DurableEffectIntentEnvelope {
-                                    intent_digest: intent.digest(),
-                                    call: call.clone(),
-                                    intent: effect_intent_bytes(&intent)?,
-                                })
-                                .map_err(|_| {
-                                    AgentError::new(
-                                        AgentErrorKind::Internal,
-                                        "mutating effect intent could not be captured",
-                                    )
-                                })?;
-                            let operation_id = self
-                                .prepare_operation(
-                                    StoreAdmission::Ordinary,
-                                    command.turn_id,
-                                    kind,
-                                    intent.digest(),
-                                    Some(recoverable_input),
-                                    None,
-                                )
-                                .await?;
-                            let claimed = self
-                                .claim_mutating_effect(
-                                    command.turn_id,
-                                    operation_id,
-                                    *intent,
-                                    *authorized,
-                                )
-                                .await?;
-                            let result_entry_id = result_entry_ids[index];
-                            let parent_call_id = self.active_composition_marker_call();
-                            let execution = Box::pin(self.execute_mutating_effect(
-                                command,
-                                attempt_id,
-                                operation_id,
-                                *invocation,
-                                projection_receipt,
-                                claimed,
-                                &call,
-                                &audit_identity,
-                                result_entry_id,
-                                ToolDispatchOrigin::TopLevel,
-                                parent_call_id,
-                            ))
-                            .await?;
-                            dispatched =
-                                dispatched.saturating_add(usize::from(execution.dispatched));
-                            items[index] = Some(execution.item);
-                            operations.push(operation_id);
-                        }
-                    }
+                        call,
+                        execution,
+                        audit_identity,
+                    ))
+                    .await?;
                 }
                 ToolAdmission::DecisionRequired {
                     invocation,
@@ -781,262 +627,37 @@ impl Driver {
                     pending,
                     audit_identity,
                 } => {
-                    if self.is_local_composition_invocation(&invocation) {
-                        drop(pending);
-                        let error = ToolRuntimeError::new(
-                            ToolRuntimeErrorKind::Policy,
-                            "local composition nested continuation cannot pause safely for a decision",
-                        );
-                        let execution = ToolExecutionResult::new(
-                            normalized_tool_failure(&call, &error)?,
-                            false,
-                        );
-                        let operation_id = self
-                            .prepare_rejected_tool_operation(
-                                command.turn_id,
-                                attempt_id,
-                                source_index,
-                                &call,
-                                result_entry_ids[index],
-                                &execution,
-                            )
-                            .await?;
-                        let (item, clip) = canonicalize_observed_tool_execution(
-                            result_entry_ids[index],
-                            execution,
-                            &mut self.observation_budget,
-                        )?;
-
-                        publish_observation_clip(
-                            &command.shared.events,
-                            command.turn_id,
-                            attempt_id,
-                            call.call_id(),
-                            call.exposed_name(),
-                            clip,
-                        );
-
-                        items[index] = Some(item);
-                        operations.push(operation_id);
-                        continue;
-                    }
-                    if !read_only.is_empty() {
-                        let parent_call_id = self.active_composition_marker_call();
-                        dispatched = dispatched.saturating_add(
-                            Box::pin(self.execute_read_only_group(
-                                command,
-                                attempt_id,
-                                std::mem::take(&mut read_only),
-                                &mut items,
-                                ToolDispatchOrigin::TopLevel,
-                                parent_call_id,
-                            ))
-                            .await?,
-                        );
-                    }
-                    let continuation = ToolBatchContinuation {
-                        tool_calls,
-                        provider_operation,
-                        provider_plan,
-                        provider_response,
-                        calls: &calls,
-                        result_entry_ids: &result_entry_ids,
-                        items: &items,
-                        operations: &operations,
-                        source_index: index,
-                    };
-                    let authorization = Box::pin(self.await_effect_decision(
-                        command,
-                        attempt_id,
-                        &call,
-                        *pending,
-                        &continuation,
+                    Box::pin(self.dispatch_decision_required_tool(
+                        batch,
+                        &mut progress,
+                        index,
+                        source_index,
+                        call,
+                        invocation,
+                        projection_receipt,
+                        pending,
+                        audit_identity,
                     ))
                     .await?;
-                    let authorization = if *self.tool_preempt.borrow()
-                        == plakous_tools::ToolPreempt::Steer
-                        && matches!(authorization, AuthorizationOutcome::Authorized(_))
-                    {
-                        AuthorizationOutcome::Rejected(
-                            self.superseded_tool_execution(&call)?.result,
-                        )
-                    } else {
-                        authorization
-                    };
-                    match authorization {
-                        AuthorizationOutcome::Rejected(result) => {
-                            let execution = ToolExecutionResult::new(result, false);
-                            let operation_id = self
-                                .prepare_rejected_tool_operation(
-                                    command.turn_id,
-                                    attempt_id,
-                                    source_index,
-                                    &call,
-                                    result_entry_ids[index],
-                                    &execution,
-                                )
-                                .await?;
-                            let (item, clip) = canonicalize_observed_tool_execution(
-                                result_entry_ids[index],
-                                execution,
-                                &mut self.observation_budget,
-                            )?;
-
-                            publish_observation_clip(
-                                &command.shared.events,
-                                command.turn_id,
-                                attempt_id,
-                                call.call_id(),
-                                call.exposed_name(),
-                                clip,
-                            );
-
-                            items[index] = Some(item);
-                            operations.push(operation_id);
-                        }
-                        AuthorizationOutcome::Authorized(authorized) => {
-                            let _ = command.shared.events.publish(
-                                EventContext::call(command.turn_id, attempt_id, call.call_id()),
-                                AgentEventKind::ToolAuthorized {
-                                    identity: audit_identity.clone(),
-                                    lineage: self.tool_caller_lineage(&call),
-                                },
-                            );
-                            let execution = self.admitted_tool_execution(
-                                *invocation,
-                                projection_receipt,
-                                *authorized,
-                            )?;
-                            let kind = DurableOperationKind::Effect {
-                                turn_id: command.turn_id,
-                                attempt_id,
-                                call_id: call.call_id(),
-                                source_index,
-                            };
-                            match execution {
-                                AdmittedToolExecution::ReadOnly {
-                                    invocation,
-                                    projection_receipt,
-                                    authorized,
-                                    effect,
-                                } => {
-                                    let effect_binding =
-                                        canonical_tool_operation_binding(index, &invocation)?;
-                                    let input = serde_json::to_vec(&(effect_binding, &call))
-                                        .map_err(|_| {
-                                            AgentError::new(
-                                                AgentErrorKind::Internal,
-                                                "tool operation input could not be captured",
-                                            )
-                                        })?;
-                                    let operation_id = self
-                                        .prepare_operation(
-                                            StoreAdmission::Ordinary,
-                                            command.turn_id,
-                                            kind,
-                                            effect_binding,
-                                            Some(input),
-                                            None,
-                                        )
-                                        .await?;
-                                    read_only.push(AdmittedToolCall {
-                                        operation_id,
-                                        index,
-                                        call,
-                                        result_entry_id: result_entry_ids[index],
-                                        audit_identity,
-                                        execution: AdmittedToolExecution::ReadOnly {
-                                            invocation,
-                                            projection_receipt,
-                                            authorized,
-                                            effect,
-                                        },
-                                    });
-                                    operations.push(operation_id);
-                                }
-                                AdmittedToolExecution::Mutating {
-                                    invocation,
-                                    projection_receipt,
-                                    authorized,
-                                    intent,
-                                } => {
-                                    self.certify_mutating_effect_recovery()?;
-                                    let input = serde_json::to_vec(&DurableEffectIntentEnvelope {
-                                        intent_digest: intent.digest(),
-                                        call: call.clone(),
-                                        intent: effect_intent_bytes(&intent)?,
-                                    })
-                                    .map_err(|_| {
-                                        AgentError::new(
-                                            AgentErrorKind::Internal,
-                                            "mutating effect intent could not be captured",
-                                        )
-                                    })?;
-                                    let operation_id = self
-                                        .prepare_operation(
-                                            StoreAdmission::Ordinary,
-                                            command.turn_id,
-                                            kind,
-                                            intent.digest(),
-                                            Some(input),
-                                            None,
-                                        )
-                                        .await?;
-                                    let claimed = self
-                                        .claim_mutating_effect(
-                                            command.turn_id,
-                                            operation_id,
-                                            *intent,
-                                            *authorized,
-                                        )
-                                        .await?;
-                                    let parent_call_id = self.active_composition_marker_call();
-                                    let execution = Box::pin(self.execute_mutating_effect(
-                                        command,
-                                        attempt_id,
-                                        operation_id,
-                                        *invocation,
-                                        projection_receipt,
-                                        claimed,
-                                        &call,
-                                        &audit_identity,
-                                        result_entry_ids[index],
-                                        ToolDispatchOrigin::TopLevel,
-                                        parent_call_id,
-                                    ))
-                                    .await?;
-                                    dispatched = dispatched
-                                        .saturating_add(usize::from(execution.dispatched));
-                                    items[index] = Some(execution.item);
-                                    operations.push(operation_id);
-                                }
-                            }
-                        }
-                        AuthorizationOutcome::Pending(_) => {
-                            return Err(AgentError::new(
-                                AgentErrorKind::Internal,
-                                "resolved decision remained pending",
-                            ));
-                        }
-                    }
                 }
             }
         }
-        if !read_only.is_empty() {
+        if !progress.read_only.is_empty() {
             let parent_call_id = self.active_composition_marker_call();
-            dispatched = dispatched.saturating_add(
+            progress.dispatched = progress.dispatched.saturating_add(
                 Box::pin(self.execute_read_only_group(
                     command,
                     attempt_id,
-                    read_only,
-                    &mut items,
+                    progress.read_only,
+                    &mut progress.items,
                     ToolDispatchOrigin::TopLevel,
                     parent_call_id,
                 ))
                 .await?,
             );
         }
-        let items = items
+        let items = progress
+            .items
             .into_iter()
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| {
@@ -1047,9 +668,461 @@ impl Driver {
             })?;
         Ok(ToolBatchResult {
             items,
-            dispatched,
-            operations,
+            dispatched: progress.dispatched,
+            operations: progress.operations,
         })
+    }
+
+    /// Executes or joins one admitted call in source order.
+    #[allow(
+        clippy::too_many_arguments,
+        clippy::too_many_lines,
+        reason = "one source-ordered call keeps its barriers and joins in a single auditable body"
+    )]
+    async fn dispatch_admitted_tool(
+        &mut self,
+        batch: ToolBatchInput<'_>,
+        progress: &mut ToolBatchProgress,
+        index: usize,
+        source_index: u32,
+        call: ToolCallBlock,
+        execution: Box<AdmittedToolExecution>,
+        audit_identity: ToolAuditIdentity,
+    ) -> Result<(), AgentError> {
+        let ToolBatchInput {
+            command,
+            attempt_id,
+            result_entry_ids,
+            ..
+        } = batch;
+        if self.is_local_composition_marker(&execution) {
+            let result_entry_id = result_entry_ids[index];
+            // Outer exec_*/wait_* skip ToolRuntime, so drive the
+            // same observer Direct tools use: one ToolStarted and
+            // one ToolFinished per model-visible call. Nested calls
+            // inside the cell are separate calls and observe
+            // themselves on the ordinary dispatch paths.
+            let observer = self.tool_dispatch_observer(
+                command,
+                attempt_id,
+                call.call_id(),
+                audit_identity.clone(),
+                self.local_composition_marker_lineage(),
+                tool_call_observation(&call),
+            );
+            observer.observe_started()?;
+            let local_composition = match Box::pin(self.execute_local_composition_outer(
+                command,
+                attempt_id,
+                source_index,
+                &call,
+                result_entry_id,
+                *execution,
+            ))
+            .await
+            {
+                Ok(local_composition) => local_composition,
+                Err(error) => {
+                    observer.emit_finished(
+                        composition_tool_error_telemetry_status(
+                            &error,
+                            command.cancellation.is_cancelled() || self.shutdown.is_cancelled(),
+                        ),
+                        0,
+                    );
+                    if let Some(error) = observer.take_error() {
+                        return Err(error);
+                    }
+                    return Err(error);
+                }
+            };
+            let output_bytes = conversation_item_tool_result(&local_composition.item)
+                .map_or(0, tool_result_content_bytes);
+            let status = conversation_item_tool_result(&local_composition.item)
+                .map_or(TelemetryTerminalStatus::Failed, |result| {
+                    tool_result_telemetry_status(result, self.shutdown.is_cancelled())
+                });
+            observer.emit_finished(status, output_bytes);
+            if let Some(error) = observer.take_error() {
+                return Err(error);
+            }
+            let _ = command.shared.events.publish(
+                EventContext::call(command.turn_id, attempt_id, call.call_id()),
+                AgentEventKind::ToolCompleted {
+                    identity: audit_identity.clone(),
+                    lineage: self.local_composition_marker_terminal_lineage(),
+                    observation: local_composition_result_observation(&local_composition.item),
+                },
+            );
+            progress.dispatched = progress
+                .dispatched
+                .saturating_add(local_composition.dispatched);
+            progress.items[index] = Some(local_composition.item);
+            progress.operations.extend(local_composition.operations);
+            return Ok(());
+        }
+        let kind = DurableOperationKind::Effect {
+            turn_id: command.turn_id,
+            attempt_id,
+            call_id: call.call_id(),
+            source_index,
+        };
+        match *execution {
+            AdmittedToolExecution::ReadOnly {
+                invocation,
+                projection_receipt,
+                authorized,
+                effect,
+            } => {
+                let effect_binding = canonical_tool_operation_binding(index, &invocation)?;
+                let recoverable_input =
+                    serde_json::to_vec(&(effect_binding, &call)).map_err(|_| {
+                        AgentError::new(
+                            AgentErrorKind::Internal,
+                            "tool operation input could not be captured",
+                        )
+                    })?;
+                let operation_id = self
+                    .prepare_operation(
+                        StoreAdmission::Ordinary,
+                        command.turn_id,
+                        kind,
+                        effect_binding,
+                        Some(recoverable_input),
+                        None,
+                    )
+                    .await?;
+                progress.read_only.push(AdmittedToolCall {
+                    operation_id,
+                    index,
+                    call,
+                    result_entry_id: result_entry_ids[index],
+                    audit_identity,
+                    execution: AdmittedToolExecution::ReadOnly {
+                        invocation,
+                        projection_receipt,
+                        authorized,
+                        effect,
+                    },
+                });
+                progress.operations.push(operation_id);
+            }
+            AdmittedToolExecution::Mutating {
+                invocation,
+                projection_receipt,
+                authorized,
+                intent,
+            } => {
+                self.certify_mutating_effect_recovery()?;
+                let recoverable_input = serde_json::to_vec(&DurableEffectIntentEnvelope {
+                    intent_digest: intent.digest(),
+                    call: call.clone(),
+                    intent: effect_intent_bytes(&intent)?,
+                })
+                .map_err(|_| {
+                    AgentError::new(
+                        AgentErrorKind::Internal,
+                        "mutating effect intent could not be captured",
+                    )
+                })?;
+                let operation_id = self
+                    .prepare_operation(
+                        StoreAdmission::Ordinary,
+                        command.turn_id,
+                        kind,
+                        intent.digest(),
+                        Some(recoverable_input),
+                        None,
+                    )
+                    .await?;
+                let claimed = self
+                    .claim_mutating_effect(command.turn_id, operation_id, *intent, *authorized)
+                    .await?;
+                let result_entry_id = result_entry_ids[index];
+                let parent_call_id = self.active_composition_marker_call();
+                let execution = Box::pin(self.execute_mutating_effect(
+                    command,
+                    attempt_id,
+                    operation_id,
+                    *invocation,
+                    projection_receipt,
+                    claimed,
+                    &call,
+                    &audit_identity,
+                    result_entry_id,
+                    ToolDispatchOrigin::TopLevel,
+                    parent_call_id,
+                ))
+                .await?;
+                progress.dispatched = progress
+                    .dispatched
+                    .saturating_add(usize::from(execution.dispatched));
+                progress.items[index] = Some(execution.item);
+                progress.operations.push(operation_id);
+            }
+        }
+        Ok(())
+    }
+
+    /// Pauses one call at its effect decision, then executes or rejects it.
+    #[allow(
+        clippy::too_many_arguments,
+        clippy::too_many_lines,
+        reason = "one source-ordered call keeps its barriers and joins in a single auditable body"
+    )]
+    async fn dispatch_decision_required_tool(
+        &mut self,
+        batch: ToolBatchInput<'_>,
+        progress: &mut ToolBatchProgress,
+        index: usize,
+        source_index: u32,
+        call: ToolCallBlock,
+        invocation: Box<ToolInvocation>,
+        projection_receipt: Option<ToolProjectionReceiptV2>,
+        pending: Box<PendingEffectDecision>,
+        audit_identity: ToolAuditIdentity,
+    ) -> Result<(), AgentError> {
+        let ToolBatchInput {
+            command,
+            attempt_id,
+            calls,
+            result_entry_ids,
+            tool_calls,
+            provider_operation,
+            provider_plan,
+            provider_response,
+            ..
+        } = batch;
+        if self.is_local_composition_invocation(&invocation) {
+            drop(pending);
+            let error = ToolRuntimeError::new(
+                ToolRuntimeErrorKind::Policy,
+                "local composition nested continuation cannot pause safely for a decision",
+            );
+            let execution =
+                ToolExecutionResult::new(normalized_tool_failure(&call, &error)?, false);
+            let operation_id = self
+                .prepare_rejected_tool_operation(
+                    command.turn_id,
+                    attempt_id,
+                    source_index,
+                    &call,
+                    result_entry_ids[index],
+                    &execution,
+                )
+                .await?;
+            let (item, clip) = canonicalize_observed_tool_execution(
+                result_entry_ids[index],
+                execution,
+                &mut self.observation_budget,
+            )?;
+
+            publish_observation_clip(
+                &command.shared.events,
+                command.turn_id,
+                attempt_id,
+                call.call_id(),
+                call.exposed_name(),
+                clip,
+            );
+
+            progress.items[index] = Some(item);
+            progress.operations.push(operation_id);
+            return Ok(());
+        }
+        if !progress.read_only.is_empty() {
+            let parent_call_id = self.active_composition_marker_call();
+            progress.dispatched = progress.dispatched.saturating_add(
+                Box::pin(self.execute_read_only_group(
+                    command,
+                    attempt_id,
+                    std::mem::take(&mut progress.read_only),
+                    &mut progress.items,
+                    ToolDispatchOrigin::TopLevel,
+                    parent_call_id,
+                ))
+                .await?,
+            );
+        }
+        let continuation = ToolBatchContinuation {
+            tool_calls,
+            provider_operation,
+            provider_plan,
+            provider_response,
+            calls,
+            result_entry_ids,
+            items: &progress.items,
+            operations: &progress.operations,
+            source_index: index,
+        };
+        let authorization = Box::pin(self.await_effect_decision(
+            command,
+            attempt_id,
+            &call,
+            *pending,
+            &continuation,
+        ))
+        .await?;
+        let authorization = if *self.tool_preempt.borrow() == plakous_tools::ToolPreempt::Steer
+            && matches!(authorization, AuthorizationOutcome::Authorized(_))
+        {
+            AuthorizationOutcome::Rejected(self.superseded_tool_execution(&call)?.result)
+        } else {
+            authorization
+        };
+        match authorization {
+            AuthorizationOutcome::Rejected(result) => {
+                let execution = ToolExecutionResult::new(result, false);
+                let operation_id = self
+                    .prepare_rejected_tool_operation(
+                        command.turn_id,
+                        attempt_id,
+                        source_index,
+                        &call,
+                        result_entry_ids[index],
+                        &execution,
+                    )
+                    .await?;
+                let (item, clip) = canonicalize_observed_tool_execution(
+                    result_entry_ids[index],
+                    execution,
+                    &mut self.observation_budget,
+                )?;
+
+                publish_observation_clip(
+                    &command.shared.events,
+                    command.turn_id,
+                    attempt_id,
+                    call.call_id(),
+                    call.exposed_name(),
+                    clip,
+                );
+
+                progress.items[index] = Some(item);
+                progress.operations.push(operation_id);
+            }
+            AuthorizationOutcome::Authorized(authorized) => {
+                let _ = command.shared.events.publish(
+                    EventContext::call(command.turn_id, attempt_id, call.call_id()),
+                    AgentEventKind::ToolAuthorized {
+                        identity: audit_identity.clone(),
+                        lineage: self.tool_caller_lineage(&call),
+                    },
+                );
+                let execution =
+                    self.admitted_tool_execution(*invocation, projection_receipt, *authorized)?;
+                let kind = DurableOperationKind::Effect {
+                    turn_id: command.turn_id,
+                    attempt_id,
+                    call_id: call.call_id(),
+                    source_index,
+                };
+                match execution {
+                    AdmittedToolExecution::ReadOnly {
+                        invocation,
+                        projection_receipt,
+                        authorized,
+                        effect,
+                    } => {
+                        let effect_binding = canonical_tool_operation_binding(index, &invocation)?;
+                        let input = serde_json::to_vec(&(effect_binding, &call)).map_err(|_| {
+                            AgentError::new(
+                                AgentErrorKind::Internal,
+                                "tool operation input could not be captured",
+                            )
+                        })?;
+                        let operation_id = self
+                            .prepare_operation(
+                                StoreAdmission::Ordinary,
+                                command.turn_id,
+                                kind,
+                                effect_binding,
+                                Some(input),
+                                None,
+                            )
+                            .await?;
+                        progress.read_only.push(AdmittedToolCall {
+                            operation_id,
+                            index,
+                            call,
+                            result_entry_id: result_entry_ids[index],
+                            audit_identity,
+                            execution: AdmittedToolExecution::ReadOnly {
+                                invocation,
+                                projection_receipt,
+                                authorized,
+                                effect,
+                            },
+                        });
+                        progress.operations.push(operation_id);
+                    }
+                    AdmittedToolExecution::Mutating {
+                        invocation,
+                        projection_receipt,
+                        authorized,
+                        intent,
+                    } => {
+                        self.certify_mutating_effect_recovery()?;
+                        let input = serde_json::to_vec(&DurableEffectIntentEnvelope {
+                            intent_digest: intent.digest(),
+                            call: call.clone(),
+                            intent: effect_intent_bytes(&intent)?,
+                        })
+                        .map_err(|_| {
+                            AgentError::new(
+                                AgentErrorKind::Internal,
+                                "mutating effect intent could not be captured",
+                            )
+                        })?;
+                        let operation_id = self
+                            .prepare_operation(
+                                StoreAdmission::Ordinary,
+                                command.turn_id,
+                                kind,
+                                intent.digest(),
+                                Some(input),
+                                None,
+                            )
+                            .await?;
+                        let claimed = self
+                            .claim_mutating_effect(
+                                command.turn_id,
+                                operation_id,
+                                *intent,
+                                *authorized,
+                            )
+                            .await?;
+                        let parent_call_id = self.active_composition_marker_call();
+                        let execution = Box::pin(self.execute_mutating_effect(
+                            command,
+                            attempt_id,
+                            operation_id,
+                            *invocation,
+                            projection_receipt,
+                            claimed,
+                            &call,
+                            &audit_identity,
+                            result_entry_ids[index],
+                            ToolDispatchOrigin::TopLevel,
+                            parent_call_id,
+                        ))
+                        .await?;
+                        progress.dispatched = progress
+                            .dispatched
+                            .saturating_add(usize::from(execution.dispatched));
+                        progress.items[index] = Some(execution.item);
+                        progress.operations.push(operation_id);
+                    }
+                }
+            }
+            AuthorizationOutcome::Pending(_) => {
+                return Err(AgentError::new(
+                    AgentErrorKind::Internal,
+                    "resolved decision remained pending",
+                ));
+            }
+        }
+        Ok(())
     }
 
     pub(super) async fn prepare_rejected_tool_operation(
@@ -1781,4 +1854,25 @@ pub(super) fn superseded_tool_execution(
     )
     .map_err(|_| internal())?;
     Ok(ToolExecutionResult::new(result, false))
+}
+
+/// Batch-level inputs shared by every source-ordered call in one tool batch.
+#[derive(Clone, Copy)]
+struct ToolBatchInput<'a> {
+    command: &'a PromptCommand,
+    attempt_id: AttemptId,
+    calls: &'a [ToolCallBlock],
+    result_entry_ids: &'a [EntryId],
+    tool_calls: usize,
+    provider_operation: OperationId,
+    provider_plan: &'a ValidatedRequestPlan,
+    provider_response: &'a ModelResponse,
+}
+
+/// Source-ordered results, the pending read-only group and dispatch counts.
+struct ToolBatchProgress {
+    items: Vec<Option<ConversationItem>>,
+    read_only: Vec<AdmittedToolCall>,
+    dispatched: usize,
+    operations: Vec<OperationId>,
 }
