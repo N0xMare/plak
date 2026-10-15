@@ -863,7 +863,7 @@ struct LoweredTools {
 
 fn lower_tools(plan: &ValidatedRequestPlan) -> Result<LoweredTools, ChatRequestError> {
     let request = plan.request();
-    if let Some(projection) = request.tool_projection_v2() {
+    if let Some(projection) = request.tool_projection() {
         let mut exposed_names = BTreeMap::new();
         let mut ambiguous = BTreeSet::new();
         let mut exposures = BTreeSet::new();

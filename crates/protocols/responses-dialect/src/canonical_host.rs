@@ -282,7 +282,7 @@ impl ResponsesCanonicalDialectData {
         request: &plakous_model::ModelRequest,
     ) -> Result<(), ResponsesCanonicalProjectError> {
         for configured in request.tools() {
-            let projected = if let Some(projection) = request.tool_projection_v2() {
+            let projected = if let Some(projection) = request.tool_projection() {
                 projection
                     .definitions()
                     .iter()

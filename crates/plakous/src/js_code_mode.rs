@@ -29,7 +29,7 @@ use plakous_compose::{
 };
 use plakous_js_eval::{RuntimeEvent, SidecarHost};
 use plakous_model::{CompiledProviderConfiguration, ToolName};
-use plakous_tools::{FrozenToolRegistry, ProviderModelProjectionIdentityV2, ToolProjectionMapV2};
+use plakous_tools::{FrozenToolRegistry, ProviderModelProjectionIdentityV2, ToolProjectionMap};
 use serde_json::Value;
 use tokio::sync::{Mutex, mpsc, oneshot};
 
@@ -182,7 +182,7 @@ impl LocalCompositionIntegration for RquickjsCodeModeIntegration {
         &self,
         job_config: plakous_tools::JobConfig,
         descriptor: &LocalCompositionDescriptor,
-        projection: &ToolProjectionMapV2,
+        projection: &ToolProjectionMap,
         registry: FrozenToolRegistry,
         configuration: &CompiledProviderConfiguration,
     ) -> Result<(), String> {

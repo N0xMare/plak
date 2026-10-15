@@ -29,9 +29,8 @@ use plakous_tools::{
 };
 use plakous_tools::{
     CanonicalProcessOperationV2, FrozenToolRegistry, NestedToolEligibility, PortableToolSchemaV2,
-    ProviderModelProjectionIdentityV2, ToolExecutorId, ToolProjectionLoweringV2,
-    ToolProjectionMapV2, ToolProjectionRaisingV2, ToolRegistryBuilder, ToolRuntimeError,
-    ToolRuntimeErrorKind,
+    ProviderModelProjectionIdentityV2, ToolExecutorId, ToolProjectionLoweringV2, ToolProjectionMap,
+    ToolProjectionRaisingV2, ToolRegistryBuilder, ToolRuntimeError, ToolRuntimeErrorKind,
 };
 
 /// Exact backend-independent profile name.
@@ -307,8 +306,8 @@ impl PythonPtcV1 {
 #[derive(Clone)]
 pub struct PythonPtcDescriptorV1 {
     job_config: plakous_tools::JobConfig,
-    outer_projection: ToolProjectionMapV2,
-    nested_projection: ToolProjectionMapV2,
+    outer_projection: ToolProjectionMap,
+    nested_projection: ToolProjectionMap,
     nested_tools: Arc<[PythonPtcNestedToolV1]>,
     authoring_contract: Arc<str>,
     presentation: PythonPtcPresentationV1,
@@ -329,12 +328,12 @@ impl PythonPtcDescriptorV1 {
 
     /// Exact provider-visible outer projection.
     #[must_use]
-    pub const fn outer_projection(&self) -> &ToolProjectionMapV2 {
+    pub const fn outer_projection(&self) -> &ToolProjectionMap {
         &self.outer_projection
     }
     /// Exact executor-bound local nested projection.
     #[must_use]
-    pub const fn nested_projection(&self) -> &ToolProjectionMapV2 {
+    pub const fn nested_projection(&self) -> &ToolProjectionMap {
         &self.nested_projection
     }
     /// Exact ordered injected-function catalog.
@@ -454,7 +453,7 @@ fn nested_projection(
     registry: &FrozenToolRegistry,
     target: &ProviderModelProjectionIdentityV2,
     names: &[ToolName],
-) -> Result<ToolProjectionMapV2, ToolRuntimeError> {
+) -> Result<ToolProjectionMap, ToolRuntimeError> {
     let mut entries = Vec::with_capacity(names.len());
     let mut names_seen = BTreeSet::new();
     let mut identities_seen = BTreeSet::new();
@@ -512,7 +511,7 @@ fn nested_projection(
 }
 
 fn ordered_nested_catalog(
-    projection: &ToolProjectionMapV2,
+    projection: &ToolProjectionMap,
     names: &[ToolName],
 ) -> Result<Vec<PythonPtcNestedToolV1>, ToolRuntimeError> {
     names
@@ -572,7 +571,7 @@ fn outer_projection(
     target: ProviderModelProjectionIdentityV2,
     presentation: PythonPtcPresentationV1,
     authoring_contract: String,
-) -> Result<ToolProjectionMapV2, ToolRuntimeError> {
+) -> Result<ToolProjectionMap, ToolRuntimeError> {
     let run = match presentation {
         PythonPtcPresentationV1::StructuredFunctions => {
             plakous_tools::internal::projection_exposure(

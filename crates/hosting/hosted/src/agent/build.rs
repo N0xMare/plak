@@ -43,7 +43,7 @@ use plakous::tools::{
     PROCESS_TOOL_PROJECTION_REVISION, PlanStateIdentity, ProcessSessionTools,
     ProductJavaScriptCompositionV1, ProviderModelProjectionIdentityV2, PythonPtcPresentationV1,
     PythonPtcV1, ToolPolicy, ToolPolicyDecision, ToolPolicyDenial, ToolPolicyFuture,
-    ToolPolicyRevision, ToolProjectionMapV2, ToolRegistryBuilder, WorkspacePolicy,
+    ToolPolicyRevision, ToolProjectionMap, ToolRegistryBuilder, WorkspacePolicy,
     plan_restoration_note, process_presentation_candidate_with_extensions_v2,
 };
 
@@ -1408,7 +1408,7 @@ pub(super) fn exact_process_presentation_candidate(
     configuration: &CompiledProviderConfiguration,
     registry: FrozenToolRegistry,
     extra_nested: &[plakous::model::ToolName],
-) -> CliResult<ToolProjectionMapV2> {
+) -> CliResult<ToolProjectionMap> {
     let route = configuration.selected().route();
     let requested = route.requested_model();
     let exact_route = native_provider_route_selection(provider, requested.clone())
@@ -3052,7 +3052,7 @@ pub(super) fn require_reconstructed_coding_projection(
     if session
         .agent()
         .stable_request_prefix()
-        .tool_projection_v2()
+        .tool_projection()
         .is_none()
     {
         return Err(CliFailure::new(format!(
@@ -3587,7 +3587,7 @@ pub(super) fn coding_session_runtime_binding_for(
                 &[]
             },
         )?;
-        builder = builder.tool_projection_v2(if fence == SessionToolFence::Full {
+        builder = builder.tool_projection(if fence == SessionToolFence::Full {
             projection
         } else {
             surface.projection().clone()

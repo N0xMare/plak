@@ -1076,7 +1076,7 @@ fn mixed_v2_projection_lowers_explicit_function_and_custom_presentations() -> Te
             )?,
         ],
     )?;
-    let prefix = base.stable_prefix().with_tool_projection_v2(projection)?;
+    let prefix = base.stable_prefix().with_tool_projection(projection)?;
     let request = ModelRequest::from_parts(prefix, base.input().clone(), base.metadata())?;
     let codex = lower_responses_request(
         &request,

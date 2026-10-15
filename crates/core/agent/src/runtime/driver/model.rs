@@ -888,9 +888,9 @@ fn tool_free_prefix(source: &StableRequestPrefix) -> Result<StableRequestPrefix,
             "operation-budget wrap-up request prefix is invalid",
         )
     })?;
-    if let Some(projection) = source.tool_projection_v2() {
+    if let Some(projection) = source.tool_projection() {
         prefix = prefix
-            .with_tool_projection_v2(projection.clone())
+            .with_tool_projection(projection.clone())
             .map_err(|_| {
                 AgentError::new(
                     AgentErrorKind::Internal,

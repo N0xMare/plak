@@ -30,7 +30,7 @@ use plakous_model::{
 };
 use plakous_tools::{
     FrozenToolRegistry, ProjectionCandidateAdmission, ToolExecutorBindings, ToolExposureMap,
-    ToolInvocation, ToolPolicy, ToolProjectionMapV2, ToolProjectionReceiptV2, WorkspacePolicy,
+    ToolInvocation, ToolPolicy, ToolProjectionMap, ToolProjectionReceiptV2, WorkspacePolicy,
 };
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64};
@@ -138,7 +138,7 @@ pub struct AgentBuilder {
     provider_configuration: Arc<CompiledProviderConfiguration>,
     initial_model_authority: RuntimeModelAuthority,
     tools: FrozenToolRegistry,
-    tool_projection_v2: Option<ToolProjectionMapV2>,
+    tool_projection: Option<ToolProjectionMap>,
     projection_admission: Option<Arc<dyn ProjectionCandidateAdmission>>,
     tool_bindings: ToolExecutorBindings,
     workspace: Arc<WorkspacePolicy>,
@@ -171,7 +171,7 @@ pub(crate) type PostCompactionNote =
 #[derive(Clone)]
 enum ToolPresentation {
     V1(ToolExposureMap),
-    V2(Arc<ToolProjectionMapV2>),
+    V2(Arc<ToolProjectionMap>),
 }
 
 struct PreparedToolInvocation {

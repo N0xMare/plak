@@ -2211,7 +2211,7 @@ async fn search_reports_entries_it_could_not_traverse_instead_of_failing() -> Te
 /// Builds the Claude direct projection over the standard coding packs.
 fn claude_standard_projection(
     registry: plakous_tools::FrozenToolRegistry,
-) -> TestResult<plakous_tools::ToolProjectionMapV2> {
+) -> TestResult<plakous_tools::ToolProjectionMap> {
     use plakous_compose::CodingPresentationExt as _;
     let effective = serde_json::from_value(serde_json::to_value(Digest::sha256(
         DigestDomain::EffectiveProviderConfiguration,

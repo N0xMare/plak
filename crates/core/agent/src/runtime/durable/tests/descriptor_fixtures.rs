@@ -663,7 +663,7 @@ impl ProjectionCandidateAdmission for FakeProjectionAdmission {
     fn admit(
         &self,
         _job_config: plakous_tools::JobConfig,
-        _projection: &ToolProjectionMapV2,
+        _projection: &ToolProjectionMap,
         _registry: &FrozenToolRegistry,
         _configuration: &CompiledProviderConfiguration,
     ) -> Result<(), ToolRuntimeError> {

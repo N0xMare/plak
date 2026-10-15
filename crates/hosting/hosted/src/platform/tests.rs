@@ -584,7 +584,7 @@ async fn pre_pack_openai_api_direct_session_reopen_fails_closed() {
         fn admit(
             &self,
             _job_config: plakous::tools::JobConfig,
-            _projection: &plakous::tools::ToolProjectionMapV2,
+            _projection: &plakous::tools::ToolProjectionMap,
             _registry: &plakous::tools::FrozenToolRegistry,
             _configuration: &plakous::model::CompiledProviderConfiguration,
         ) -> Result<(), plakous::tools::ToolRuntimeError> {
@@ -775,7 +775,7 @@ async fn pre_pack_openai_api_direct_session_reopen_fails_closed() {
         ))
         .host_process_options(crate::process_environment::options(&physical).unwrap())
         .job_config(spec.job_config)
-        .tool_projection_v2(projection)
+        .tool_projection(projection)
         .harness_plan(plan);
     let pre_pack = plakous::sessions::SessionRuntimeBinding::new(
         builder.config(config).request_policy(request),
@@ -851,7 +851,7 @@ async fn pre_w3_b_grok_session_reopen_fails_closed() {
         fn admit(
             &self,
             _job_config: plakous::tools::JobConfig,
-            _projection: &plakous::tools::ToolProjectionMapV2,
+            _projection: &plakous::tools::ToolProjectionMap,
             _registry: &plakous::tools::FrozenToolRegistry,
             _configuration: &plakous::model::CompiledProviderConfiguration,
         ) -> Result<(), plakous::tools::ToolRuntimeError> {
@@ -1070,7 +1070,7 @@ async fn pre_w3_b_grok_session_reopen_fails_closed() {
         ))
         .host_process_options(crate::process_environment::options(&physical).unwrap())
         .job_config(spec.job_config)
-        .tool_projection_v2(projection)
+        .tool_projection(projection)
         .harness_plan(plan);
     let pre_w3_b = plakous::sessions::SessionRuntimeBinding::new(
         builder.config(config).request_policy(request),

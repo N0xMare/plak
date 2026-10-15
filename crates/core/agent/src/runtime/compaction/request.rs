@@ -239,9 +239,9 @@ pub(in crate::runtime) fn harness_compaction_prefix(
             "harness compaction request prefix is invalid",
         )
     })?;
-    if let Some(projection) = source.tool_projection_v2() {
+    if let Some(projection) = source.tool_projection() {
         prefix = prefix
-            .with_tool_projection_v2(projection.clone())
+            .with_tool_projection(projection.clone())
             .map_err(|_| {
                 AgentError::new(
                     AgentErrorKind::Internal,
@@ -290,9 +290,9 @@ pub(in crate::runtime) fn native_compaction_dispatch_prefix(
             "native compaction request prefix is invalid",
         )
     })?;
-    if let Some(projection) = source.tool_projection_v2() {
+    if let Some(projection) = source.tool_projection() {
         prefix = prefix
-            .with_tool_projection_v2(projection.clone())
+            .with_tool_projection(projection.clone())
             .map_err(|_| {
                 AgentError::new(
                     AgentErrorKind::Internal,

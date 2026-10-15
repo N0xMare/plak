@@ -3185,7 +3185,7 @@ fn projected_coding_builder(
         registry,
         Arc::new(WorkspacePolicy::host(workspace, ".")?),
     )
-    .tool_projection_v2(projection)
+    .tool_projection(projection)
     .tool_policy(Arc::new(AlwaysAllowPolicy))
     .identity_sources(
         Arc::new(FixedClock::new(fixture_time()?)),

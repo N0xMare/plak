@@ -18,7 +18,7 @@ use plakous::subscriptions::{NativeProvider, native_provider_route_selection};
 use plakous::tools::CodingPresentationExt as _;
 use plakous::tools::{
     CodingPresentation, FrozenToolRegistry, PROCESS_PROJECTION_FAMILY, PresentationRoute,
-    PresentationRouteTuple, PresentationRoutes, ProjectionCandidateAdmission, ToolProjectionMapV2,
+    PresentationRouteTuple, PresentationRoutes, ProjectionCandidateAdmission, ToolProjectionMap,
     ToolRuntimeError, validate_process_presentation_candidate_v2,
 };
 
@@ -65,7 +65,7 @@ impl ProjectionCandidateAdmission for ProductProjectionAdmission {
     fn admit(
         &self,
         job_config: plakous::tools::JobConfig,
-        projection: &ToolProjectionMapV2,
+        projection: &ToolProjectionMap,
         registry: &FrozenToolRegistry,
         configuration: &CompiledProviderConfiguration,
     ) -> Result<(), ToolRuntimeError> {
@@ -148,7 +148,7 @@ impl ProjectionCandidateAdmission for ProductProjectionAdmission {
 /// `IntegrationClass::Custom` and never reaches [`ProductProjectionAdmission`].
 fn refuse_retired_topology_names(
     presentation: Option<CodingPresentation>,
-    projection: &ToolProjectionMapV2,
+    projection: &ToolProjectionMap,
 ) -> Result<(), ToolRuntimeError> {
     if matches!(presentation, Some(CodingPresentation::Grok))
         && projection.entries().iter().any(|entry| {
@@ -525,7 +525,7 @@ mod tests {
         extensions: &crate::tools::ProductToolExtensions,
     ) -> (
         plakous::tools::FrozenToolRegistry,
-        plakous::tools::ToolProjectionMapV2,
+        plakous::tools::ToolProjectionMap,
     ) {
         use plakous::tools::CodingPresentationExt as _;
         let registry = crate::agent::coding_tool_registry_with_extensions(

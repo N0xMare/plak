@@ -23,8 +23,7 @@ pub(crate) mod suite {
     use plakous::tools::{
         CodexMinimalLocalCodeModeV1, CodingPresentation, CompiledSurface, FrozenToolRegistry,
         PROCESS_TOOL_PROJECTION_REVISION, ProductJavaScriptCompositionV1,
-        ProviderModelProjectionIdentityV2, PythonPtcPresentationV1, PythonPtcV1,
-        ToolProjectionMapV2,
+        ProviderModelProjectionIdentityV2, PythonPtcPresentationV1, PythonPtcV1, ToolProjectionMap,
     };
 
     use super::super::rendered_wire::suite as wire;
@@ -1193,7 +1192,7 @@ pub(crate) mod suite {
         spec: &RouteSpec,
         extras: &ProductToolExtensions,
         target: ProviderModelProjectionIdentityV2,
-    ) -> Result<ToolProjectionMapV2, String> {
+    ) -> Result<ToolProjectionMap, String> {
         let extra = extra_names(extras);
         let kind = spec.provider.presentation();
         let registry = registry_for(spec, extras);

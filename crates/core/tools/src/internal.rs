@@ -407,14 +407,14 @@ pub fn tool_context(
 //
 // A composition presents one or two outer tools and runs the pack tools inside
 // a cell, so it builds its own projections instead of taking a compiled menu.
-// `ToolProjectionMapV2` retains executable authority, so its constructors are
+// `ToolProjectionMap` retains executable authority, so its constructors are
 // not part of the supported inventory; they are here, on the same unsupported
 // tier as the agent's dispatch seam, for `plakous-compose`.
 
 use crate::{
     CanonicalProcessOperationV2, PortableToolSchemaV2, ProviderModelProjectionIdentityV2,
-    RegisteredToolIdentity, ToolProjectionExposureV2, ToolProjectionLoweringV2,
-    ToolProjectionMapV2, ToolProjectionRaisingV2,
+    RegisteredToolIdentity, ToolProjectionExposureV2, ToolProjectionLoweringV2, ToolProjectionMap,
+    ToolProjectionRaisingV2,
 };
 use plakous_model::{ProjectedCustomToolFormatV2, SemanticJsonV1, Utf8TextContractV1};
 
@@ -422,8 +422,8 @@ pub fn projection_map(
     registry: FrozenToolRegistry,
     target: ProviderModelProjectionIdentityV2,
     entries: impl IntoIterator<Item = ToolProjectionExposureV2>,
-) -> Result<ToolProjectionMapV2, ToolRuntimeError> {
-    ToolProjectionMapV2::new(registry, target, entries)
+) -> Result<ToolProjectionMap, ToolRuntimeError> {
+    ToolProjectionMap::new(registry, target, entries)
 }
 
 #[allow(

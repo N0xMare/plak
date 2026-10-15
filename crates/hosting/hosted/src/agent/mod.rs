@@ -44,7 +44,7 @@ use plakous::subscriptions::{NativeProvider, NativeToolMode};
 use plakous::tools::{
     CodexMinimalLocalCodeModeV1, CodingPresentation, PROCESS_TOOL_PROJECTION_REVISION,
     ProductJavaScriptCompositionV1, ProviderModelProjectionIdentityV2, PythonPtcPresentationV1,
-    PythonPtcV1, ToolProjectionMapV2, WorkspacePolicy,
+    PythonPtcV1, ToolProjectionMap, WorkspacePolicy,
 };
 #[cfg(test)]
 use std::num::NonZeroU32;

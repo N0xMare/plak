@@ -27,7 +27,7 @@ mod suite {
         CodexMinimalLocalCodeModeV1, CodexNativeLocalCodeModeV1, CodingPresentation,
         CompiledSurface, ExecutionEnvironment, ExecutionEnvironmentConfig,
         ExecutionEnvironmentScope, ProductJavaScriptCompositionV1, PythonPtcPresentationV1,
-        PythonPtcV1, ToolInvocation, ToolInvocationRequest, ToolOutcome, ToolProjectionMapV2,
+        PythonPtcV1, ToolInvocation, ToolInvocationRequest, ToolOutcome, ToolProjectionMap,
     };
     use serde_json::{Value, json};
     use uuid::Uuid;
@@ -179,7 +179,7 @@ mod suite {
     }
 
     fn raise_text(
-        map: &ToolProjectionMapV2,
+        map: &ToolProjectionMap,
         tool: &str,
         arguments: &str,
         outcome: ToolOutcome,
@@ -213,7 +213,7 @@ mod suite {
         ProductToolExtensions::empty()
     }
 
-    fn catalog_names(map: &ToolProjectionMapV2) -> String {
+    fn catalog_names(map: &ToolProjectionMap) -> String {
         map.entries()
             .iter()
             .map(|entry| entry.exposed_name().as_str())
@@ -239,7 +239,7 @@ mod suite {
         }
     }
 
-    fn direct_map(provider: ProviderKind, seed: &[u8]) -> ToolProjectionMapV2 {
+    fn direct_map(provider: ProviderKind, seed: &[u8]) -> ToolProjectionMap {
         compile_projection(
             &lifecycle_route(
                 provider,
@@ -253,7 +253,7 @@ mod suite {
         .unwrap_or_else(|error| panic!("direct projection: {error}"))
     }
 
-    fn code_mode_nested() -> ToolProjectionMapV2 {
+    fn code_mode_nested() -> ToolProjectionMap {
         let extras = empty_extras();
         let extra = extra_names(&extras);
         let registry = registry(
@@ -276,7 +276,7 @@ mod suite {
     /// Seven-tool nested catalog (`read_file` / `search_repository` / `inspect_image`
     /// plus the Codex OAuth four). Product NativePtc goldens use the four-tool
     /// minimal set; this is the full `CodexNativeLocalCodeModeV1` nested map.
-    fn full_code_nested() -> ToolProjectionMapV2 {
+    fn full_code_nested() -> ToolProjectionMap {
         let extras = empty_extras();
         let registry = registry(
             ProductCompositionSelection::FollowCatalog,
@@ -294,7 +294,7 @@ mod suite {
         .clone()
     }
 
-    fn js_ptc_nested(kind: CodingPresentation, seed: &[u8]) -> ToolProjectionMapV2 {
+    fn js_ptc_nested(kind: CodingPresentation, seed: &[u8]) -> ToolProjectionMap {
         let extras = empty_extras();
         let registry = registry(
             ProductCompositionSelection::JsPtc,
@@ -328,7 +328,7 @@ mod suite {
         kind: CodingPresentation,
         extras: &ProductToolExtensions,
         seed: &[u8],
-    ) -> ToolProjectionMapV2 {
+    ) -> ToolProjectionMap {
         let registry = registry(
             ProductCompositionSelection::JsPtc,
             false,
@@ -357,7 +357,7 @@ mod suite {
         .clone()
     }
 
-    fn py_ptc_nested() -> ToolProjectionMapV2 {
+    fn py_ptc_nested() -> ToolProjectionMap {
         let extras = empty_extras();
         let registry = registry(
             ProductCompositionSelection::PyPtc,
@@ -388,7 +388,7 @@ mod suite {
         .clone()
     }
 
-    fn workdir_failure(map: &ToolProjectionMapV2, tool: &str, arguments: &str) -> String {
+    fn workdir_failure(map: &ToolProjectionMap, tool: &str, arguments: &str) -> String {
         let tmp = tempfile::tempdir().expect("workdir fixture");
         let root = tmp.path();
         std::fs::create_dir_all(root.join("src")).expect("cwd");
@@ -413,9 +413,9 @@ mod suite {
         md.push_str("# Lifecycle: tool results\n\n");
         md.push_str("## Header\n\n");
         md.push_str("| Field | Value |\n| --- | --- |\n");
-        md.push_str("| what | Exact model-visible tool result text after `ToolProjectionMapV2::raise` then `ToolOutcome::to_model_result` |\n");
+        md.push_str("| what | Exact model-visible tool result text after `ToolProjectionMap::raise` then `ToolOutcome::to_model_result` |\n");
         md.push_str("| why | First-turn goldens show schemas; this file shows what comes back |\n");
-        md.push_str("| production fns | `plakous_tools::exposure::ToolProjectionMapV2::raise`, `plakous_tools::outcome::ToolOutcome::to_model_result`, `coding.rs` result shapes, `prepare_in_environment` for absolute `workdir` |\n");
+        md.push_str("| production fns | `plakous_tools::exposure::ToolProjectionMap::raise`, `plakous_tools::outcome::ToolOutcome::to_model_result`, `coding.rs` result shapes, `prepare_in_environment` for absolute `workdir` |\n");
         md.push_str("| faithful vs synthetic | Raised envelopes are faithful. Canonical `ToolOutcome` bodies are synthetic copies of `coding.rs` formats (`read_file` stamp, process `into_outcome` JSON, search hit list, `changed_files=N`). Error bodies cite `crates/harness/tool-files/src/text.rs` and `crates/harness/tool-process/src/text.rs`. Observation-budget *runtime* replacement texts cite `crates/core/agent/src/runtime/prompts.rs` (private `clip_tool_result` is not called). |\n\n");
 
         md.push_str("Known/deferred: Code Mode `exec` bytes are upstream-pinned; nested `inspect_image` in PTC cells.\n\n");
@@ -980,7 +980,7 @@ mod suite {
         ));
 
         md.push_str("## Argument-validation failure (absolute `workdir`)\n\n");
-        md.push_str("Driven through `ToolProjectionMapV2::prepare_in_environment`. The prepare error is **not** from `crates/harness/tool-files/src/text.rs`; it is `projection_workdir_error` in `exposure.rs`. The runtime then prefixes it via private `normalized_tool_failure` (`tool invocation failed: …`). Grok `run_terminal_command`, Claude `Bash` and pi `bash` do not accept `workdir` (hardcoded `.`).\n\n");
+        md.push_str("Driven through `ToolProjectionMap::prepare_in_environment`. The prepare error is **not** from `crates/harness/tool-files/src/text.rs`; it is `projection_workdir_error` in `exposure.rs`. The runtime then prefixes it via private `normalized_tool_failure` (`tool invocation failed: …`). Grok `run_terminal_command`, Claude `Bash` and pi `bash` do not accept `workdir` (hardcoded `.`).\n\n");
         md.push_str(&surface(
             "Codex Direct `exec_command` absolute workdir",
             "Faithful prepare failure.",
@@ -1916,7 +1916,7 @@ mod suite {
     const LIFECYCLE_RENDER_PINS: &[(&str, &str)] = &[
         (
             "tool-results",
-            "cc9217112652a21ce247927dd59a90b608d5e960ee2149ca523ed3fed61f4bfc",
+            "ab71dc81f35663c8f9f590b5a353c81650919c343568a1c87a752a297b1b75e0",
         ),
         (
             "compaction",

@@ -1106,7 +1106,7 @@ pub mod tools {
         ToolExposureMap, ToolFuture, ToolInvocation, ToolInvocationRequest, ToolOutcome,
         ToolOutcomeKind, ToolOutcomeLimits, ToolPack, ToolPolicy, ToolPolicyDecision,
         ToolPolicyDenial, ToolPolicyFuture, ToolPolicyRequest, ToolPolicyRevision, ToolPreempt,
-        ToolProgress, ToolProjectionLoweringV2, ToolProjectionMapV2, ToolRegistration,
+        ToolProgress, ToolProjectionLoweringV2, ToolProjectionMap, ToolRegistration,
         ToolRegistryBuilder, ToolRegistryLimits, ToolRuntimeError, ToolRuntimeErrorKind,
         ValidatedArguments, ValidatedToolSchema, WorkspaceContentIdentity,
         WorkspaceExpectedFileState, WorkspaceMutation, WorkspaceMutationDisposition,

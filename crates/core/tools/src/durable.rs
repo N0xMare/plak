@@ -14,9 +14,9 @@ use crate::{
     ArgumentLimits, FrozenToolRegistry, NestedToolEligibility, PortableToolSchemaV2,
     ProviderModelProjectionIdentityV2, RegisteredToolId, RegisteredToolIdentity, SchemaLimits,
     ToolExecutor, ToolExecutorBindingIdentity, ToolExecutorId, ToolExposure, ToolExposureMap,
-    ToolProjectionExposureV2, ToolProjectionLoweringV2, ToolProjectionMapV2,
-    ToolProjectionRaisingV2, ToolRegistration, ToolRegistryBuilder, ToolRegistryLimits,
-    ToolRuntimeError, ValidatedToolSchema,
+    ToolProjectionExposureV2, ToolProjectionLoweringV2, ToolProjectionMap, ToolProjectionRaisingV2,
+    ToolRegistration, ToolRegistryBuilder, ToolRegistryLimits, ToolRuntimeError,
+    ValidatedToolSchema,
 };
 
 /// Pre-integration V1 registry revision used only by the retained custom-profile path.
@@ -989,7 +989,7 @@ impl FrozenToolProjectionDescriptorV2 {
     /// # Errors
     ///
     /// Rejects a map that cannot be represented and revalidated exactly.
-    pub fn capture(map: &ToolProjectionMapV2) -> Result<Self, ToolDescriptorError> {
+    pub fn capture(map: &ToolProjectionMap) -> Result<Self, ToolDescriptorError> {
         let entries = map
             .entries()
             .iter()
@@ -1082,7 +1082,7 @@ impl FrozenToolProjectionDescriptorV2 {
     pub fn resolve(
         &self,
         registry: FrozenToolRegistry,
-    ) -> Result<ToolProjectionMapV2, ToolDescriptorError> {
+    ) -> Result<ToolProjectionMap, ToolDescriptorError> {
         if registry
             .registry_identity_digest()
             .map_err(invalid_runtime)?
@@ -1112,7 +1112,7 @@ impl FrozenToolProjectionDescriptorV2 {
                 self.wire.target.clone(),
             )?);
         }
-        let map = ToolProjectionMapV2::new(registry, self.wire.target.clone(), entries)
+        let map = ToolProjectionMap::new(registry, self.wire.target.clone(), entries)
             .map_err(invalid_runtime)?;
         if map.digest() != self.wire.exposure_identity {
             return Err(ToolDescriptorError::IntegrityMismatch);
@@ -1937,14 +1937,14 @@ mod tests {
         }))?)
     }
 
-    fn projection_map(registry: FrozenToolRegistry) -> TestResult<ToolProjectionMapV2> {
+    fn projection_map(registry: FrozenToolRegistry) -> TestResult<ToolProjectionMap> {
         projection_map_for_target(registry, projection_target()?)
     }
 
     fn projection_map_for_target(
         registry: FrozenToolRegistry,
         target: ProviderModelProjectionIdentityV2,
-    ) -> TestResult<ToolProjectionMapV2> {
+    ) -> TestResult<ToolProjectionMap> {
         let identity = registry
             .identity(&ToolName::new("beta")?)
             .ok_or("beta missing")?
@@ -1981,7 +1981,7 @@ mod tests {
                 target.clone(),
             )?,
         ];
-        Ok(ToolProjectionMapV2::new(registry, target, entries)?)
+        Ok(ToolProjectionMap::new(registry, target, entries)?)
     }
 
     #[test]
@@ -2051,7 +2051,7 @@ mod tests {
             "type":"object", "properties":{"output":{"type":"string"}},
             "required":["output"], "additionalProperties":false
         }))?;
-        let map = ToolProjectionMapV2::new(
+        let map = ToolProjectionMap::new(
             registry.clone(),
             target.clone(),
             [
@@ -2302,7 +2302,7 @@ mod tests {
         let map = projection_map(registry.clone())?;
         let duplicate = map.entries()[0].clone();
         assert!(
-            ToolProjectionMapV2::new(
+            ToolProjectionMap::new(
                 registry.clone(),
                 map.target().clone(),
                 [duplicate.clone(), duplicate],

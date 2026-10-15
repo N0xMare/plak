@@ -868,7 +868,7 @@ impl LanguageModel for OpenAiLanguageModel {
     ) -> Result<PreparedModelCall, ModelPreparationError> {
         let current = self.current_target()?;
         let target = &current.target;
-        if let Some(projection) = plan.request().tool_projection_v2() {
+        if let Some(projection) = plan.request().tool_projection() {
             let target = projection.target();
             if target.protocol() != self.descriptor.protocol().as_str()
                 || target.integration_profile() != self.descriptor.profile().as_str()

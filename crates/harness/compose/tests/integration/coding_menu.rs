@@ -29,16 +29,16 @@ use plakous_tools::{
     CodingPresentation, PROCESS_TOOL_PROJECTION_REVISION, ProviderModelProjectionIdentityV2,
     RegisteredToolId, ToolContext, ToolExecutor, ToolExecutorBindingIdentity, ToolExecutorId,
     ToolFuture, ToolInvocation, ToolInvocationRequest, ToolOutcome, ToolOutcomeKind,
-    ToolProjectionExposureV2, ToolProjectionMapV2, ToolProjectionRaisingV2, ToolRegistration,
+    ToolProjectionExposureV2, ToolProjectionMap, ToolProjectionRaisingV2, ToolRegistration,
     ToolRegistryBuilder, menu_names, object_schema, register_packs,
 };
 use serde_json::json;
 
-fn claude_projection() -> Result<ToolProjectionMapV2, Box<dyn std::error::Error>> {
+fn claude_projection() -> Result<ToolProjectionMap, Box<dyn std::error::Error>> {
     claude_read_projection(false)
 }
 
-fn claude_read_projection(nested: bool) -> Result<ToolProjectionMapV2, Box<dyn std::error::Error>> {
+fn claude_read_projection(nested: bool) -> Result<ToolProjectionMap, Box<dyn std::error::Error>> {
     let mut builder = ToolRegistryBuilder::default();
     register_packs(&standard_coding_packs_in_memory()?, &mut builder)?;
     let effective: EffectiveProviderConfigurationId =
@@ -322,7 +322,7 @@ fn claude_write_prepare_lowers_to_apply_patch_create_or_overwrite()
     Ok(())
 }
 
-fn grok_projection() -> Result<ToolProjectionMapV2, Box<dyn std::error::Error>> {
+fn grok_projection() -> Result<ToolProjectionMap, Box<dyn std::error::Error>> {
     let mut builder = ToolRegistryBuilder::default();
     register_packs(&standard_coding_packs_in_memory()?, &mut builder)?;
     let effective: EffectiveProviderConfigurationId =
@@ -410,7 +410,7 @@ impl ToolExecutor for ExtraTool {
     }
 }
 
-fn structured_chat_with_spawn_extra() -> Result<ToolProjectionMapV2, Box<dyn std::error::Error>> {
+fn structured_chat_with_spawn_extra() -> Result<ToolProjectionMap, Box<dyn std::error::Error>> {
     let definition = ToolDefinition::new(
         ToolName::new("spawn_agent")?,
         "plak.topology.v1",
@@ -1326,7 +1326,7 @@ fn documented_vendor_example(
 
 fn presentation_projection(
     presentation: CodingPresentation,
-) -> Result<ToolProjectionMapV2, Box<dyn std::error::Error>> {
+) -> Result<ToolProjectionMap, Box<dyn std::error::Error>> {
     let mut builder = ToolRegistryBuilder::default();
     register_packs(&standard_coding_packs_in_memory()?, &mut builder)?;
     let effective: EffectiveProviderConfigurationId =

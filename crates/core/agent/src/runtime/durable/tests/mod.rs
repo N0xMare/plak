@@ -245,7 +245,7 @@ use plakous_tools::{
     ProviderModelProjectionIdentityV2, RegisteredToolId, ToolExecutorBindings,
     ToolExecutorBindingsBuilder, ToolExecutorId, ToolInvocation, ToolInvocationRequest,
     ToolOutcome, ToolOutcomeKind, ToolPolicy, ToolPolicyDecision, ToolPolicyDenial,
-    ToolPolicyFuture, ToolPolicyRequest, ToolPolicyRevision, ToolProjectionMapV2, ToolRegistration,
+    ToolPolicyFuture, ToolPolicyRequest, ToolPolicyRevision, ToolProjectionMap, ToolRegistration,
     ToolRegistryBuilder, ToolRuntimeError, ToolRuntimeErrorKind, WorkspacePolicy,
 };
 use serde_json::json;

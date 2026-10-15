@@ -996,7 +996,7 @@ impl fmt::Debug for ToolExposureMap {
 
 /// Immutable V2 catalog allowing several exact projected names for one canonical capability.
 #[derive(Clone)]
-pub struct ToolProjectionMapV2 {
+pub struct ToolProjectionMap {
     registry: FrozenToolRegistry,
     target: ProviderModelProjectionIdentityV2,
     entries: Arc<[ToolProjectionExposureV2]>,
@@ -1006,7 +1006,7 @@ pub struct ToolProjectionMapV2 {
     digest: Digest,
 }
 
-impl ToolProjectionMapV2 {
+impl ToolProjectionMap {
     /// Freezes one exact-target projection set.
     ///
     /// Multiple entries may bind the same canonical capability. Exposed-name
@@ -1912,10 +1912,10 @@ fn compiled_projection_error(error: &plakous_model::RequestError) -> ToolRuntime
     )
 }
 
-impl fmt::Debug for ToolProjectionMapV2 {
+impl fmt::Debug for ToolProjectionMap {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("ToolProjectionMapV2")
+            .debug_struct("ToolProjectionMap")
             .field("target", &self.target)
             .field("entry_count", &self.entries.len())
             .field("registry_digest", &self.registry_digest)
@@ -3200,7 +3200,7 @@ mod tests {
             target.clone(),
         )?;
         assert_eq!(
-            ToolProjectionMapV2::new(registry, target, [entry])
+            ToolProjectionMap::new(registry, target, [entry])
                 .err()
                 .map(|error| error.kind()),
             Some(ToolRuntimeErrorKind::Registration)
@@ -3210,14 +3210,14 @@ mod tests {
 
     fn text_projection(
         raising: ToolProjectionRaisingV2,
-    ) -> Result<(ToolProjectionMapV2, ToolProjectionReceiptV2), Box<dyn std::error::Error>> {
+    ) -> Result<(ToolProjectionMap, ToolProjectionReceiptV2), Box<dyn std::error::Error>> {
         text_projection_with_output(raising, ToolOutputContract::portable_model_content())
     }
 
     fn text_projection_with_output(
         raising: ToolProjectionRaisingV2,
         output: ToolOutputContract,
-    ) -> Result<(ToolProjectionMapV2, ToolProjectionReceiptV2), Box<dyn std::error::Error>> {
+    ) -> Result<(ToolProjectionMap, ToolProjectionReceiptV2), Box<dyn std::error::Error>> {
         let registry = registry_with_output(output)?;
         let identity = registry
             .identity(&ToolName::new("read")?)
@@ -3257,7 +3257,7 @@ mod tests {
             raising_identity: entry.raising_identity,
             target: target.clone(),
         };
-        let map = ToolProjectionMapV2::new(registry, target, [entry])?;
+        let map = ToolProjectionMap::new(registry, target, [entry])?;
         let receipt = ToolProjectionReceiptV2 {
             exposure_map_identity: map.digest(),
             ..receipt

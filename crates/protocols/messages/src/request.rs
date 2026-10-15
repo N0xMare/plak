@@ -640,12 +640,12 @@ pub fn lower_request_with_active_artifact(
             ));
         }
     };
-    if programmatic && request.tool_projection_v2().is_some() {
+    if programmatic && request.tool_projection().is_some() {
         return Err(unsupported(
             "Messages hosted programmatic tools require exact configured tool names",
         ));
     }
-    let mut tools = if let Some(projection) = request.tool_projection_v2() {
+    let mut tools = if let Some(projection) = request.tool_projection() {
         projection
             .definitions()
             .iter()
@@ -704,7 +704,7 @@ pub fn lower_request_with_active_artifact(
             name: "code_execution",
         }));
     }
-    let advertised: BTreeSet<ToolName> = if let Some(projection) = request.tool_projection_v2() {
+    let advertised: BTreeSet<ToolName> = if let Some(projection) = request.tool_projection() {
         projection
             .definitions()
             .iter()

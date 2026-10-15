@@ -12,7 +12,7 @@ use plakous_model::{
     MediaSource, ProjectedToolPresentationV2, TextBlock, ToolCallBlock, ToolExecutionOwner,
     ToolResultKind, ToolResultPart,
 };
-use plakous_tools::{ToolProjectionMapV2, ToolRuntimeError, ToolRuntimeErrorKind};
+use plakous_tools::{ToolProjectionMap, ToolRuntimeError, ToolRuntimeErrorKind};
 use std::time::Duration;
 pub(in crate::runtime) fn local_composition_exec_registry_arguments<'a>(
     call: &'a ToolCallBlock,
@@ -43,7 +43,7 @@ pub(in crate::runtime) fn local_composition_exec_registry_arguments<'a>(
 /// Encode a nested interpreter value as a canonical tool-call JSON argument.
 /// Custom tools carry a JSON string here and are decoded once at admission.
 pub(in crate::runtime) fn local_composition_nested_call_arguments(
-    projection: &ToolProjectionMapV2,
+    projection: &ToolProjectionMap,
     name: &plakous_model::ToolName,
     input: Option<&serde_json::Value>,
 ) -> Result<String, AgentError> {
@@ -445,7 +445,7 @@ pub(in crate::runtime) fn local_composition_child_call_id(
 
 pub(in crate::runtime) fn local_composition_nested_execution_owner(
     registry: &ToolRuntime,
-    projection: &ToolProjectionMapV2,
+    projection: &ToolProjectionMap,
     name: &plakous_model::ToolName,
 ) -> Result<ToolExecutionOwner, AgentError> {
     let exposure = projection.by_exposed(name).ok_or_else(|| {

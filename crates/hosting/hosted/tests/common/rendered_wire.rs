@@ -278,7 +278,7 @@ pub(crate) mod suite {
         .unwrap_or_else(|error| panic!("{}: model request: {error}", spec.file_stem));
         let prefix = request
             .stable_prefix()
-            .with_tool_projection_v2(view)
+            .with_tool_projection(view)
             .unwrap_or_else(|error| panic!("{}: bind projection: {error}", spec.file_stem));
         ModelRequest::from_parts(prefix, request.input().clone(), request.metadata())
             .unwrap_or_else(|error| panic!("{}: freeze request: {error}", spec.file_stem))

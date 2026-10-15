@@ -1094,7 +1094,7 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "ToolPolicyFuture",
         "ToolPolicyRequest",
         "ToolPolicyRevision",
-        "ToolProjectionMapV2",
+        "ToolProjectionMap",
         "ToolRegistration",
         "ToolRegistryBuilder",
         "ToolRegistryLimits",

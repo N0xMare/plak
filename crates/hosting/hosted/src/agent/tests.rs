@@ -165,7 +165,7 @@ fn openrouter_direct_registry_without_extensions_omits_spawn_agent() {
 }
 
 fn raise_direct_extra(
-    projection: &ToolProjectionMapV2,
+    projection: &ToolProjectionMap,
     name: &str,
     arguments: &str,
     canonical: &str,
@@ -1590,7 +1590,7 @@ async fn fenced_direct_child_session_admits_its_projection_at_construction()
         .projection_admission(Arc::new(crate::coding_routes::ProductProjectionAdmission))
         .job_config(job_config)
         .tool_policy(session_tool_policy(fence))
-        .tool_projection_v2(node.surface.projection().clone())
+        .tool_projection(node.surface.projection().clone())
         .harness_plan(plan)
         .request_policy(plakous::agent::AgentRequestPolicy::new(
             plakous::agent::GenerationLimits::new(
@@ -4031,7 +4031,7 @@ async fn supergrok_hub_creates_and_reopens_on_every_fence() -> Result<(), Box<dy
                         ))
                         .job_config(job_config)
                         .tool_policy(session_tool_policy(fence))
-                        .tool_projection_v2(node.surface.projection().clone())
+                        .tool_projection(node.surface.projection().clone())
                         .request_policy(
                             plakous::agent::AgentRequestPolicy::new(
                                 plakous::agent::GenerationLimits::new(

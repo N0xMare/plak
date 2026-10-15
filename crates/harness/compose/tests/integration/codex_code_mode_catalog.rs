@@ -585,7 +585,7 @@ fn nested_text_capabilities_raise_the_raw_string_without_a_result_envelope() -> 
     // G1-2: every nested lineage hands the cell the raw text. Direct keeps the
     // `{"result": ...}` envelope; a nested cell must never have to unwrap it.
     fn assert_raw(
-        projection: &plakous_tools::ToolProjectionMapV2,
+        projection: &plakous_tools::ToolProjectionMap,
         label: &str,
     ) -> Result<(), TestError> {
         let prepared = projection.prepare(request(

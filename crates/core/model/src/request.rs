@@ -1694,7 +1694,7 @@ impl StableRequestPrefix {
 
     /// Returns an exact precompiled V2 view when the upstream registry supplied one.
     #[must_use]
-    pub fn tool_projection_v2(&self) -> Option<&CompiledToolProjectionV2> {
+    pub fn tool_projection(&self) -> Option<&CompiledToolProjectionV2> {
         self.inner.tool_projection.as_ref()
     }
 
@@ -1704,7 +1704,7 @@ impl StableRequestPrefix {
     ///
     /// Returns an error when the projection does not bind this prefix's exact
     /// effective provider configuration and canonical tools.
-    pub fn with_tool_projection_v2(
+    pub fn with_tool_projection(
         &self,
         projection: CompiledToolProjectionV2,
     ) -> Result<Self, RequestError> {
@@ -1779,7 +1779,7 @@ impl StableRequestPrefix {
             self.instructions().to_vec(),
             self.tools().to_vec(),
             self.hosted_tools().to_vec(),
-            self.tool_projection_v2().cloned(),
+            self.tool_projection().cloned(),
             self.output().clone(),
             self.reasoning(),
             self.tool_choice().clone(),
@@ -2037,7 +2037,7 @@ impl Serialize for StableRequestPrefix {
             instructions: self.instructions().to_vec(),
             tools: self.tools().to_vec(),
             hosted_tools: self.hosted_tools().to_vec(),
-            tool_projection: self.tool_projection_v2().cloned(),
+            tool_projection: self.tool_projection().cloned(),
             output: self.output().clone(),
             reasoning: self.reasoning(),
             tool_choice: self.tool_choice().clone(),
@@ -2369,8 +2369,8 @@ impl ModelRequest {
 
     /// Returns the exact upstream-compiled V2 provider-visible tool view.
     #[must_use]
-    pub fn tool_projection_v2(&self) -> Option<&CompiledToolProjectionV2> {
-        self.prefix.tool_projection_v2()
+    pub fn tool_projection(&self) -> Option<&CompiledToolProjectionV2> {
+        self.prefix.tool_projection()
     }
 
     /// Returns output intent.
@@ -3407,15 +3407,13 @@ mod tests {
                 )?,
             ],
         )?;
-        let prefix = request
-            .stable_prefix()
-            .with_tool_projection_v2(projection)?;
+        let prefix = request.stable_prefix().with_tool_projection(projection)?;
         let rebuilt =
             ModelRequest::from_parts(prefix, request.input().clone(), request.metadata())?;
         let decoded: ModelRequest = serde_json::from_slice(&serde_json::to_vec(&rebuilt)?)?;
-        assert_eq!(decoded.tool_projection_v2(), rebuilt.tool_projection_v2());
+        assert_eq!(decoded.tool_projection(), rebuilt.tool_projection());
         let definitions = decoded
-            .tool_projection_v2()
+            .tool_projection()
             .ok_or("projection missing")?
             .definitions();
         assert!(matches!(
@@ -3509,7 +3507,7 @@ mod tests {
                 source,
                 vec![definition(description)?],
             )?;
-            request.stable_prefix().with_tool_projection_v2(projection)
+            request.stable_prefix().with_tool_projection(projection)
         };
         assert_ne!(
             prefix_for(exact)?.identity(),

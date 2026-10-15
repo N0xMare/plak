@@ -18,7 +18,7 @@ use std::{future::Future, pin::Pin, sync::Arc};
 
 use plakous_model::{CompiledProviderConfiguration, Digest};
 use plakous_tools::{
-    FrozenToolRegistry, ProviderModelProjectionIdentityV2, ToolExecutorId, ToolProjectionMapV2,
+    FrozenToolRegistry, ProviderModelProjectionIdentityV2, ToolExecutorId, ToolProjectionMap,
 };
 use serde_json::Value;
 
@@ -66,8 +66,8 @@ impl LocalCompositionRuntimeContract {
 
 #[derive(Clone)]
 pub struct LocalCompositionDescriptor {
-    pub outer_projection: ToolProjectionMapV2,
-    pub nested_projection: ToolProjectionMapV2,
+    pub outer_projection: ToolProjectionMap,
+    pub nested_projection: ToolProjectionMap,
     pub nested_tools: Arc<[LocalCompositionToolDefinition]>,
     pub identity: Digest,
     pub execute_name: Arc<str>,
@@ -414,7 +414,7 @@ pub trait LocalCompositionIntegration: Send + Sync {
         &self,
         job_config: plakous_tools::JobConfig,
         descriptor: &LocalCompositionDescriptor,
-        projection: &ToolProjectionMapV2,
+        projection: &ToolProjectionMap,
         registry: FrozenToolRegistry,
         configuration: &CompiledProviderConfiguration,
     ) -> Result<(), String>;

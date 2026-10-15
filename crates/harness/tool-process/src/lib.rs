@@ -49,7 +49,7 @@ use plakous_tools::{
     JoinedProcessStatus, JoinedProcessTerminalMode, PortableToolSchemaV2,
     ProviderModelProjectionIdentityV2, RegisteredToolId, RegisteredToolIdentity, ToolContext,
     ToolExecutor, ToolExecutorBindingIdentity, ToolExecutorId, ToolFuture, ToolInvocation,
-    ToolOutcome, ToolProjectionExposureV2, ToolProjectionLoweringV2, ToolProjectionMapV2,
+    ToolOutcome, ToolProjectionExposureV2, ToolProjectionLoweringV2, ToolProjectionMap,
     ToolProjectionRaisingV2, ToolRegistration, ToolRuntimeError, ToolRuntimeErrorKind,
 };
 use plakous_tools::{MenuBinding, MenuEntry, MenuOutput, MenuShape, ToolPack, tool_name};
@@ -274,7 +274,7 @@ impl ProcessToolProjectionKind {
         job_config: plakous_tools::JobConfig,
         registry: FrozenToolRegistry,
         target: ProviderModelProjectionIdentityV2,
-    ) -> Result<ToolProjectionMapV2, ToolRuntimeError> {
+    ) -> Result<ToolProjectionMap, ToolRuntimeError> {
         let canonical = canonical_process_identities(&registry)?;
         let entries = self
             .tools(job_config)?
@@ -4715,7 +4715,7 @@ mod tests {
     fn unified_exec_projection(
         registry: FrozenToolRegistry,
         kind: ProcessToolProjectionKind,
-    ) -> Result<ToolProjectionMapV2, Box<dyn Error>> {
+    ) -> Result<ToolProjectionMap, Box<dyn Error>> {
         let configuration = serde_json::from_value(serde_json::to_value(Digest::sha256(
             DigestDomain::EffectiveProviderConfiguration,
             5,
@@ -4740,7 +4740,7 @@ mod tests {
 
     async fn execute_projected_process_tool(
         registry: &FrozenToolRegistry,
-        map: &ToolProjectionMapV2,
+        map: &ToolProjectionMap,
         environment: Arc<ExecutionEnvironment>,
         tool: &str,
         arguments: Value,

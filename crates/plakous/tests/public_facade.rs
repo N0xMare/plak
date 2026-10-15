@@ -375,7 +375,7 @@ fn exact_supported_root_inventory_is_importable() {
     use plakous::tools::{
         AlwaysAllowPolicy, FilesToolPack, FrozenToolRegistry, PlanToolPack, ProcessSessionTools,
         ProcessToolPack, ProcessToolProjectionKind, ProviderModelProjectionIdentityV2,
-        SearchToolPack, ToolProjectionMapV2, ToolRegistryBuilder, WorkspacePolicy,
+        SearchToolPack, ToolProjectionMap, ToolRegistryBuilder, WorkspacePolicy,
         process_presentation_candidate_v2, process_presentation_candidate_with_extensions_v2,
     };
 
@@ -474,7 +474,7 @@ fn exact_supported_root_inventory_is_importable() {
     hold(&std::any::type_name::<SearchToolPack>());
     hold(&std::any::type_name::<ProcessToolPack>());
     hold(&std::any::type_name::<PlanToolPack>());
-    hold(&std::any::type_name::<ToolProjectionMapV2>());
+    hold(&std::any::type_name::<ToolProjectionMap>());
     hold(&std::any::type_name::<CompiledToolProjectionV2>());
     hold(&std::any::type_name::<PortableToolSchemaV2>());
     hold(&std::any::type_name::<ToolRegistryBuilder>());

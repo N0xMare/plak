@@ -31,9 +31,8 @@ use plakous_tools::{
 };
 use plakous_tools::{
     CanonicalProcessOperationV2, FrozenToolRegistry, NestedToolEligibility, PortableToolSchemaV2,
-    ProviderModelProjectionIdentityV2, ToolExecutorId, ToolProjectionLoweringV2,
-    ToolProjectionMapV2, ToolProjectionRaisingV2, ToolRegistryBuilder, ToolRuntimeError,
-    ToolRuntimeErrorKind,
+    ProviderModelProjectionIdentityV2, ToolExecutorId, ToolProjectionLoweringV2, ToolProjectionMap,
+    ToolProjectionRaisingV2, ToolRegistryBuilder, ToolRuntimeError, ToolRuntimeErrorKind,
 };
 
 const BOUNDED_CATALOG_BRIDGE_REVISION: &str =
@@ -179,8 +178,8 @@ impl ProductJavaScriptCompositionV1 {
 #[derive(Clone)]
 pub struct ProductJavaScriptCompositionDescriptorV1 {
     job_config: plakous_tools::JobConfig,
-    outer_projection: ToolProjectionMapV2,
-    nested_projection: ToolProjectionMapV2,
+    outer_projection: ToolProjectionMap,
+    nested_projection: ToolProjectionMap,
     nested_tools: Arc<[ProductJavaScriptNestedToolV1]>,
     run_description: Arc<str>,
     identity: Digest,
@@ -195,13 +194,13 @@ impl ProductJavaScriptCompositionDescriptorV1 {
 
     /// Provider-visible ordinary `exec_js` and `wait_js` functions.
     #[must_use]
-    pub const fn outer_projection(&self) -> &ToolProjectionMapV2 {
+    pub const fn outer_projection(&self) -> &ToolProjectionMap {
         &self.outer_projection
     }
 
     /// Exact executor-bound local nested projection.
     #[must_use]
-    pub const fn nested_projection(&self) -> &ToolProjectionMapV2 {
+    pub const fn nested_projection(&self) -> &ToolProjectionMap {
         &self.nested_projection
     }
 
@@ -301,7 +300,7 @@ fn nested_projection(
     registry: &FrozenToolRegistry,
     target: &ProviderModelProjectionIdentityV2,
     names: &[ToolName],
-) -> Result<ToolProjectionMapV2, ToolRuntimeError> {
+) -> Result<ToolProjectionMap, ToolRuntimeError> {
     let mut entries = Vec::with_capacity(names.len());
     let mut canonical = BTreeSet::new();
     for name in names {
@@ -357,7 +356,7 @@ fn nested_projection(
 }
 
 fn ordered_nested_catalog(
-    projection: &ToolProjectionMapV2,
+    projection: &ToolProjectionMap,
     names: &[ToolName],
 ) -> Result<Vec<ProductJavaScriptNestedToolV1>, ToolRuntimeError> {
     names
@@ -415,7 +414,7 @@ fn outer_projection(
     registry: FrozenToolRegistry,
     target: ProviderModelProjectionIdentityV2,
     run_description: String,
-) -> Result<ToolProjectionMapV2, ToolRuntimeError> {
+) -> Result<ToolProjectionMap, ToolRuntimeError> {
     let run = registered_identity(&registry, PRODUCT_JAVASCRIPT_RUN_NAME_V1)?;
     let wait = registered_identity(&registry, PRODUCT_JAVASCRIPT_WAIT_NAME_V1)?;
     let entries = [
@@ -461,8 +460,8 @@ fn registered_identity(
 }
 
 fn descriptor_identity(
-    outer: &ToolProjectionMapV2,
-    nested: &ToolProjectionMapV2,
+    outer: &ToolProjectionMap,
+    nested: &ToolProjectionMap,
     tools: &[ProductJavaScriptNestedToolV1],
     run_description: &str,
 ) -> Result<Digest, ToolRuntimeError> {

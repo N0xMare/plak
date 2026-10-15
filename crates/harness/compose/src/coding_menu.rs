@@ -19,9 +19,9 @@ use plakous_tool_search::SearchToolPack;
 use plakous_tools::{
     CodingPresentation, CompiledSurface, FrozenToolRegistry, NestedToolEligibility,
     PassthroughPack, PortableToolSchemaV2, ProviderModelProjectionIdentityV2, ToolPack,
-    ToolProjectionExposureV2, ToolProjectionLoweringV2, ToolProjectionMapV2,
-    ToolProjectionRaisingV2, ToolRuntimeError, ToolRuntimeErrorKind, compile_over,
-    is_composition_marker_executor, object_schema,
+    ToolProjectionExposureV2, ToolProjectionLoweringV2, ToolProjectionMap, ToolProjectionRaisingV2,
+    ToolRuntimeError, ToolRuntimeErrorKind, compile_over, is_composition_marker_executor,
+    object_schema,
 };
 use serde_json::json;
 
@@ -91,7 +91,7 @@ pub trait CodingPresentationExt {
         job_config: plakous_tools::JobConfig,
         registry: FrozenToolRegistry,
         target: ProviderModelProjectionIdentityV2,
-    ) -> Result<ToolProjectionMapV2, ToolRuntimeError>;
+    ) -> Result<ToolProjectionMap, ToolRuntimeError>;
 
     /// Compiles the enrolled OAuth menu plus an explicit product extension list.
     ///
@@ -108,7 +108,7 @@ pub trait CodingPresentationExt {
         registry: FrozenToolRegistry,
         target: ProviderModelProjectionIdentityV2,
         extra_nested: &[ToolName],
-    ) -> Result<ToolProjectionMapV2, ToolRuntimeError>;
+    ) -> Result<ToolProjectionMap, ToolRuntimeError>;
 
     /// The compiled surface for this vocabulary: the four coding packs plus the
     /// named extensions as one appended passthrough pack.
@@ -145,7 +145,7 @@ pub trait CodingPresentationExt {
         target: ProviderModelProjectionIdentityV2,
         extra_nested: &[ToolName],
         omit_exposed: &[&str],
-    ) -> Result<ToolProjectionMapV2, ToolRuntimeError>;
+    ) -> Result<ToolProjectionMap, ToolRuntimeError>;
 
     /// The extension list a Direct `projection` of this vocabulary was
     /// compiled with: every entry that is not the core entry of its name.
@@ -160,7 +160,7 @@ pub trait CodingPresentationExt {
         self,
         job_config: plakous_tools::JobConfig,
         registry: FrozenToolRegistry,
-        projection: &ToolProjectionMapV2,
+        projection: &ToolProjectionMap,
     ) -> Result<Vec<ToolName>, ToolRuntimeError>;
 
     /// Nested projection whose exposed names, schemas, and lowerings match Direct.
@@ -179,7 +179,7 @@ pub trait CodingPresentationExt {
         registry: FrozenToolRegistry,
         target: ProviderModelProjectionIdentityV2,
         ordered_exposed_names: &[ToolName],
-    ) -> Result<ToolProjectionMapV2, ToolRuntimeError>;
+    ) -> Result<ToolProjectionMap, ToolRuntimeError>;
 }
 
 impl CodingPresentationExt for CodingPresentation {
@@ -188,7 +188,7 @@ impl CodingPresentationExt for CodingPresentation {
         job_config: plakous_tools::JobConfig,
         registry: FrozenToolRegistry,
         target: ProviderModelProjectionIdentityV2,
-    ) -> Result<ToolProjectionMapV2, ToolRuntimeError> {
+    ) -> Result<ToolProjectionMap, ToolRuntimeError> {
         self.projection_map_with_extensions(job_config, registry, target, &[])
     }
 
@@ -198,7 +198,7 @@ impl CodingPresentationExt for CodingPresentation {
         registry: FrozenToolRegistry,
         target: ProviderModelProjectionIdentityV2,
         extra_nested: &[ToolName],
-    ) -> Result<ToolProjectionMapV2, ToolRuntimeError> {
+    ) -> Result<ToolProjectionMap, ToolRuntimeError> {
         Ok(self
             .compile_surface(job_config, registry, target, extra_nested)?
             .into_projection())
@@ -225,7 +225,7 @@ impl CodingPresentationExt for CodingPresentation {
         target: ProviderModelProjectionIdentityV2,
         extra_nested: &[ToolName],
         omit_exposed: &[&str],
-    ) -> Result<ToolProjectionMapV2, ToolRuntimeError> {
+    ) -> Result<ToolProjectionMap, ToolRuntimeError> {
         let map = self.projection_map_with_extensions(
             job_config,
             registry.clone(),
@@ -248,7 +248,7 @@ impl CodingPresentationExt for CodingPresentation {
         self,
         job_config: plakous_tools::JobConfig,
         registry: FrozenToolRegistry,
-        projection: &ToolProjectionMapV2,
+        projection: &ToolProjectionMap,
     ) -> Result<Vec<ToolName>, ToolRuntimeError> {
         let core = self.projection_map(job_config, registry, projection.target().clone())?;
         Ok(extension_names(projection, &core))
@@ -260,7 +260,7 @@ impl CodingPresentationExt for CodingPresentation {
         registry: FrozenToolRegistry,
         target: ProviderModelProjectionIdentityV2,
         ordered_exposed_names: &[ToolName],
-    ) -> Result<ToolProjectionMapV2, ToolRuntimeError> {
+    ) -> Result<ToolProjectionMap, ToolRuntimeError> {
         let core = self
             .compile_surface(job_config, registry.clone(), target.clone(), &[])?
             .exposed_names()
@@ -345,8 +345,8 @@ impl CodingPresentationExt for CodingPresentation {
 /// The names of `projection`'s entries that are not `core`'s entry of the
 /// same name, `core` being the same vocabulary compiled without extensions.
 pub(crate) fn extension_names(
-    projection: &ToolProjectionMapV2,
-    core: &ToolProjectionMapV2,
+    projection: &ToolProjectionMap,
+    core: &ToolProjectionMap,
 ) -> Vec<ToolName> {
     projection
         .entries()

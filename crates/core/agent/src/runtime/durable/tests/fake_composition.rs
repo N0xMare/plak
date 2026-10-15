@@ -417,7 +417,7 @@ impl LocalCompositionIntegration for FakeComposition {
         &self,
         _job_config: plakous_tools::JobConfig,
         descriptor: &LocalCompositionDescriptor,
-        projection: &ToolProjectionMapV2,
+        projection: &ToolProjectionMap,
         _registry: FrozenToolRegistry,
         _configuration: &CompiledProviderConfiguration,
     ) -> Result<(), String> {

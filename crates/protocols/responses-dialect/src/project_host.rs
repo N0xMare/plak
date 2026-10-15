@@ -1249,7 +1249,7 @@ fn canonical_tool_kind(
 }
 
 fn request_tool_kind(request: &ModelRequest, name: &str) -> Option<RawToolCallKind> {
-    if let Some(definition) = request.tool_projection_v2().and_then(|projection| {
+    if let Some(definition) = request.tool_projection().and_then(|projection| {
         projection
             .definitions()
             .iter()
@@ -1531,7 +1531,7 @@ mod tests {
         .expect("projection");
         let prefix = base
             .stable_prefix()
-            .with_tool_projection_v2(projection)
+            .with_tool_projection(projection)
             .expect("prefix");
         let request = ModelRequest::from_parts(prefix, base.input().clone(), base.metadata())
             .expect("request");
@@ -1587,7 +1587,7 @@ mod tests {
         .expect("projection");
         let prefix = base
             .stable_prefix()
-            .with_tool_projection_v2(projection)
+            .with_tool_projection(projection)
             .expect("prefix");
         let request = ModelRequest::from_parts(prefix, base.input().clone(), base.metadata())
             .expect("request");

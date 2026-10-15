@@ -58,7 +58,7 @@ use plakous_tools::{
     TOOL_EXPOSURE_DESCRIPTOR_V2_CODEC_REVISION, TOOL_REGISTRY_DESCRIPTOR_CODEC_REVISION,
     TOOL_REGISTRY_DESCRIPTOR_V2_CODEC_REVISION, ToolExecutorBindings, ToolExposure,
     ToolExposureMap, ToolInvocationRequest, ToolOutcome, ToolPolicy, ToolPolicyRevision,
-    ToolProjectionMapV2, ToolProjectionReceiptV2, ToolRuntimeError, ToolRuntimeErrorKind,
+    ToolProjectionMap, ToolProjectionReceiptV2, ToolRuntimeError, ToolRuntimeErrorKind,
     WorkspacePolicy, validate_custom_process_presentation_v2,
 };
 use std::collections::BTreeMap;
@@ -124,11 +124,8 @@ impl fmt::Debug for AgentBuilder {
             )
             .field("tool_count", &self.tools.len())
             .field(
-                "tool_projection_v2",
-                &self
-                    .tool_projection_v2
-                    .as_ref()
-                    .map(ToolProjectionMapV2::digest),
+                "tool_projection",
+                &self.tool_projection.as_ref().map(ToolProjectionMap::digest),
             )
             .field("workspace", &"<redacted>")
             .field("config", &self.config)
@@ -192,7 +189,7 @@ impl AgentBuilder {
             initial_model_authority,
             tool_bindings: ToolExecutorBindings::capture(&tools),
             tools,
-            tool_projection_v2: None,
+            tool_projection: None,
             projection_admission: None,
             workspace,
             host_process_options: plakous_tools::HostProcessOptions::default(),
@@ -284,7 +281,7 @@ impl AgentBuilder {
             ));
         }
         validate_local_composition_attachment_identity(&construction.attachment)?;
-        self.tool_projection_v2 = Some(descriptor.outer_projection.clone());
+        self.tool_projection = Some(descriptor.outer_projection.clone());
         self.local_composition = Some(construction);
         Ok(self)
     }
@@ -305,8 +302,8 @@ impl AgentBuilder {
     /// snapshot supplied to [`Self::new`]. Provider/model qualification is
     /// retained exactly by the map; the agent performs no projection inference.
     #[must_use]
-    pub fn tool_projection_v2(mut self, projection: ToolProjectionMapV2) -> Self {
-        self.tool_projection_v2 = Some(projection);
+    pub fn tool_projection(mut self, projection: ToolProjectionMap) -> Self {
+        self.tool_projection = Some(projection);
         self
     }
 
@@ -714,7 +711,7 @@ impl ToolPresentation {
             Self::V2(projection) => projection
                 .compile_request_view_v2()
                 .and_then(|view| {
-                    prefix.with_tool_projection_v2(view).map_err(|error| {
+                    prefix.with_tool_projection(view).map_err(|error| {
                         ToolRuntimeError::new(
                             ToolRuntimeErrorKind::Registration,
                             format!(
@@ -743,7 +740,7 @@ impl ToolPresentation {
 }
 
 pub(super) fn validate_reopened_projection(
-    provided: Option<&ToolProjectionMapV2>,
+    provided: Option<&ToolProjectionMap>,
     presentation: &ToolPresentation,
 ) -> Result<(), AgentError> {
     let message = match (provided, presentation) {
@@ -1026,15 +1023,15 @@ fn adopt_persisted_tool_semantics(
         )?;
         let (registry, presentation) =
             reconstruct_persisted_tools(bootstrap.checkpoint.manifest(), &builder.tool_bindings)?;
-        validate_reopened_projection(builder.tool_projection_v2.as_ref(), &presentation)?;
+        validate_reopened_projection(builder.tool_projection.as_ref(), &presentation)?;
         builder.tools = registry;
-        builder.tool_projection_v2 = match &presentation {
+        builder.tool_projection = match &presentation {
             ToolPresentation::V1(_) => None,
             ToolPresentation::V2(projection) => Some(projection.as_ref().clone()),
         };
         if let Some(local_composition) = builder.local_composition.as_mut() {
             let target = builder
-                .tool_projection_v2
+                .tool_projection
                 .as_ref()
                 .ok_or_else(|| {
                     AgentError::new(
@@ -1697,7 +1694,7 @@ pub(super) fn construction_tool_presentation(
     builder: &AgentBuilder,
     exposure: ToolExposureMap,
 ) -> Result<ToolPresentation, AgentError> {
-    match builder.tool_projection_v2.as_ref() {
+    match builder.tool_projection.as_ref() {
         Some(projection) => {
             let admission = if let Some(local_composition) = builder.local_composition.as_ref() {
                 local_composition.integration.validate_configuration(

@@ -37,7 +37,7 @@ use plakous_tools::{
     PROCESS_SESSION_WRITE_REGISTERED_TOOL_ID, PROCESS_TOOL_PROJECTION_REVISION, PlanStateIdentity,
     ProviderModelProjectionIdentityV2, RegisteredToolId, ToolContext, ToolExecutor,
     ToolExecutorBindingIdentity, ToolExecutorId, ToolFuture, ToolInvocation, ToolOutcome,
-    ToolProjectionMapV2, ToolRegistration, ToolRegistryBuilder, register_packs,
+    ToolProjectionMap, ToolRegistration, ToolRegistryBuilder, register_packs,
 };
 use serde_json::json;
 
@@ -318,7 +318,7 @@ fn projection(
     kind: CodingPresentation,
     registry: FrozenToolRegistry,
     with_topology: bool,
-) -> Result<ToolProjectionMapV2, TestError> {
+) -> Result<ToolProjectionMap, TestError> {
     if with_topology {
         let extras = [
             ToolName::new("spawn_agent")?,

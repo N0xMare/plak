@@ -13,7 +13,7 @@ use plakous_tool_process::{ProcessSessionTools, ProcessToolProjectionKind};
 use plakous_tools::{
     CanonicalProcessOperationV2, FrozenToolRegistry, PROCESS_SESSION_CAPABILITY_NAME,
     PROCESS_SESSION_POLL_NAME, PROCESS_SESSION_TERMINATE_NAME, PROCESS_SESSION_WRITE_NAME,
-    ProviderModelProjectionIdentityV2, ToolInvocationRequest, ToolOutcome, ToolProjectionMapV2,
+    ProviderModelProjectionIdentityV2, ToolInvocationRequest, ToolOutcome, ToolProjectionMap,
     ToolRegistryBuilder, ToolRuntimeErrorKind, register_packs,
 };
 use serde_json::{Value, json};
@@ -64,7 +64,7 @@ fn request(name: &str, arguments: &str) -> Result<ToolInvocationRequest, TestErr
     ))
 }
 
-fn maps() -> Result<(FrozenToolRegistry, ToolProjectionMapV2, ToolProjectionMapV2), TestError> {
+fn maps() -> Result<(FrozenToolRegistry, ToolProjectionMap, ToolProjectionMap), TestError> {
     let registry = registry()?;
     let configuration = configuration(b"process-projection-evidence")?;
     let codex = ProcessToolProjectionKind::CodexUnifiedExec.projection_map(
@@ -234,7 +234,7 @@ fn claude_promotion_reuses_native_timeout_and_message_arrival_text() -> Result<(
     Ok(())
 }
 
-fn projected_schema_bytes(map: &ToolProjectionMapV2) -> usize {
+fn projected_schema_bytes(map: &ToolProjectionMap) -> usize {
     map.entries()
         .iter()
         .map(|entry| {
@@ -1475,7 +1475,7 @@ async fn exec_command_with_absolute_workdir_is_a_no_effect_failure() -> Result<(
 async fn drive_process(
     environment: &Arc<plakous_tools::ExecutionEnvironment>,
     registry: &FrozenToolRegistry,
-    grok: &ToolProjectionMapV2,
+    grok: &ToolProjectionMap,
     name: &str,
     arguments: &Value,
     hub: bool,

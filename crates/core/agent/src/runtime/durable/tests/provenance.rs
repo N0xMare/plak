@@ -645,7 +645,7 @@ async fn durable_failed_turn_reopens_the_exact_closed_store_fact() -> TestResult
 #[test]
 fn reopened_projection_reports_provider_target_drift() -> TestResult {
     let registry = fake_process_projection_registry()?;
-    let projection = |evidence: &[u8]| -> TestResult<ToolProjectionMapV2> {
+    let projection = |evidence: &[u8]| -> TestResult<ToolProjectionMap> {
         let configuration = serde_json::from_value(serde_json::to_value(Digest::sha256(
             DigestDomain::EffectiveProviderConfiguration,
             5,

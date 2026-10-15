@@ -53,7 +53,7 @@ use plakous_tools::{
     FrozenToolRegistry, PROCESS_TOOL_PROJECTION_REVISION,
     PRODUCT_JAVASCRIPT_DRIVER_MARKER_EXECUTOR_ID_V1, PRODUCT_JAVASCRIPT_RUN_NAME_V1,
     PRODUCT_JAVASCRIPT_WAIT_NAME_V1, ProviderModelProjectionIdentityV2, ToolExecutorId,
-    ToolProjectionMapV2,
+    ToolProjectionMap,
 };
 #[cfg(feature = "composition-python")]
 use plakous_tools::{
@@ -1613,7 +1613,7 @@ impl LocalCompositionIntegration for PythonIntegration {
         &self,
         job_config: plakous_tools::JobConfig,
         descriptor: &LocalCompositionDescriptor,
-        projection: &ToolProjectionMapV2,
+        projection: &ToolProjectionMap,
         registry: FrozenToolRegistry,
         configuration: &CompiledProviderConfiguration,
     ) -> Result<(), String> {
@@ -1805,7 +1805,7 @@ impl LocalCompositionIntegration for ProductJavaScriptIntegration {
         &self,
         job_config: plakous_tools::JobConfig,
         descriptor: &LocalCompositionDescriptor,
-        projection: &ToolProjectionMapV2,
+        projection: &ToolProjectionMap,
         registry: FrozenToolRegistry,
         configuration: &CompiledProviderConfiguration,
     ) -> Result<(), String> {
@@ -1851,7 +1851,7 @@ impl LocalCompositionIntegration for ProductJavaScriptIntegration {
 fn validate_product_configuration(
     job_config: plakous_tools::JobConfig,
     descriptor: &LocalCompositionDescriptor,
-    projection: &ToolProjectionMapV2,
+    projection: &ToolProjectionMap,
     registry: FrozenToolRegistry,
     configuration: &CompiledProviderConfiguration,
     nested_names: &[ToolName],
@@ -1952,7 +1952,7 @@ fn validate_product_configuration(
 fn validate_python_configuration(
     job_config: plakous_tools::JobConfig,
     descriptor: &LocalCompositionDescriptor,
-    projection: &ToolProjectionMapV2,
+    projection: &ToolProjectionMap,
     registry: FrozenToolRegistry,
     configuration: &CompiledProviderConfiguration,
     nested_names: &[ToolName],

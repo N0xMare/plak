@@ -1925,7 +1925,7 @@ pub fn is_unprojected_string_custom_tool_definition(
     tool: &ToolDefinition,
 ) -> bool {
     is_string_custom_tool_definition(tool)
-        && !request.tool_projection_v2().is_some_and(|projection| {
+        && !request.tool_projection().is_some_and(|projection| {
             projection
                 .definitions()
                 .iter()
@@ -1937,7 +1937,7 @@ pub fn is_unprojected_string_custom_tool_definition(
 /// Responses decoding after an optional V2 projection.
 #[must_use]
 pub fn canonical_local_tools(request: &ModelRequest) -> Vec<ResponsesCanonicalTool> {
-    if let Some(projection) = request.tool_projection_v2() {
+    if let Some(projection) = request.tool_projection() {
         return projection
             .definitions()
             .iter()
@@ -1994,7 +1994,7 @@ pub fn lower_responses_request(
     request: &ModelRequest,
     config: ResponsesRequestConfig<'_>,
 ) -> Result<LoweredResponsesRequest, ResponsesRequestError> {
-    if let Some(projection) = request.tool_projection_v2() {
+    if let Some(projection) = request.tool_projection() {
         let target = projection.target();
         if target.protocol() != config.protocol.as_str()
             || target.family() != config.model_family.map_or("", ModelFamilyId::as_str)
@@ -2038,7 +2038,7 @@ pub fn lower_responses_request(
         .filter(|tool| is_unprojected_string_custom_tool_definition(request, tool.definition()))
         .map(|tool| tool.definition().name().clone())
         .collect::<BTreeSet<_>>();
-    if let Some(projection) = request.tool_projection_v2() {
+    if let Some(projection) = request.tool_projection() {
         custom_tools.extend(
             projection
                 .definitions()
@@ -2094,7 +2094,7 @@ pub fn lower_responses_request(
 
     let mut tools = lower_tool_definitions(
         request.tools(),
-        request.tool_projection_v2(),
+        request.tool_projection(),
         config,
         &custom_tools,
     )?;
@@ -2225,7 +2225,7 @@ pub fn lower_responses_request(
     }
     Ok(LoweredResponsesRequest {
         body: Value::Object(body),
-        local_tools: lowered_local_tool_names(request.tools(), request.tool_projection_v2()),
+        local_tools: lowered_local_tool_names(request.tools(), request.tool_projection()),
         custom_tools,
         replay_mode,
     })
@@ -2823,7 +2823,7 @@ fn lower_projected_tool_choice(
     custom_tools: &BTreeSet<ToolName>,
 ) -> Result<Value, ResponsesRequestError> {
     if let ToolChoice::Specific(name) = request.tool_choice()
-        && let Some(projection) = request.tool_projection_v2()
+        && let Some(projection) = request.tool_projection()
     {
         let mut matches = projection
             .definitions()

@@ -25,7 +25,7 @@ use crate::{
     CanonicalProcessOperationV2, CompositionRuntime, FrozenToolRegistry, NamespaceClash,
     NamespacePresentation, NestedToolEligibility, PortableToolSchemaV2, PresentationProvider,
     ProviderModelProjectionIdentityV2, ToolProjectionExposureV2, ToolProjectionLoweringV2,
-    ToolProjectionMapV2, ToolProjectionRaisingV2, ToolRegistration, ToolRegistryBuilder,
+    ToolProjectionMap, ToolProjectionRaisingV2, ToolRegistration, ToolRegistryBuilder,
     ToolRuntimeError, ToolRuntimeErrorKind, resolve_namespace,
 };
 
@@ -505,7 +505,7 @@ impl ToolPack for PassthroughPack {
 #[derive(Clone, Debug)]
 pub struct CompiledSurface {
     registry: FrozenToolRegistry,
-    projection: ToolProjectionMapV2,
+    projection: ToolProjectionMap,
     exposed_names: Vec<ToolName>,
     contributions: Vec<PromptContribution>,
 }
@@ -519,13 +519,13 @@ impl CompiledSurface {
 
     /// Returns the compiled projection.
     #[must_use]
-    pub const fn projection(&self) -> &ToolProjectionMapV2 {
+    pub const fn projection(&self) -> &ToolProjectionMap {
         &self.projection
     }
 
     /// Consumes the surface and returns its projection.
     #[must_use]
-    pub fn into_projection(self) -> ToolProjectionMapV2 {
+    pub fn into_projection(self) -> ToolProjectionMap {
         self.projection
     }
 
@@ -645,7 +645,7 @@ pub fn compile_over(
     }
     Ok(CompiledSurface {
         registry: registry.clone(),
-        projection: ToolProjectionMapV2::new(registry, target, ordered)?,
+        projection: ToolProjectionMap::new(registry, target, ordered)?,
         exposed_names,
         contributions,
     })

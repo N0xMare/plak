@@ -824,7 +824,7 @@ async fn direct_custom_patch_decodes_canonical_model_string_before_executor(
         )?;
         let admission: Arc<dyn ProjectionCandidateAdmission> = FakeProjectionAdmission::new(true);
         builder = builder
-            .tool_projection_v2(projection)
+            .tool_projection(projection)
             .projection_admission(admission);
     }
     let builder = builder

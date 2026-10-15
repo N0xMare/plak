@@ -145,7 +145,7 @@ pub(crate) fn runtime_binding(
                 .map_err(|error| {
                     CliFailure::new(format!("structured Chat tools are invalid: {error}"))
                 })?;
-                builder = builder.tool_projection_v2(projection);
+                builder = builder.tool_projection(projection);
             }
         }
         CompositionSelection::JsPtc => {

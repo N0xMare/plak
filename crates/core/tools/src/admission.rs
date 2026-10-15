@@ -15,7 +15,7 @@ use std::fmt;
 use plakous_model::{CompiledProviderConfiguration, IntegrationClass};
 
 use crate::capabilities::PROCESS_TOOL_PROJECTION_REVISION;
-use crate::{FrozenToolRegistry, ToolProjectionMapV2, ToolRuntimeError, ToolRuntimeErrorKind};
+use crate::{FrozenToolRegistry, ToolProjectionMap, ToolRuntimeError, ToolRuntimeErrorKind};
 
 /// Admits one compiled V2 projection as the exact candidate for one provider
 /// configuration.
@@ -35,7 +35,7 @@ pub trait ProjectionCandidateAdmission: Send + Sync + fmt::Debug {
     fn admit(
         &self,
         job_config: crate::JobConfig,
-        projection: &ToolProjectionMapV2,
+        projection: &ToolProjectionMap,
         registry: &FrozenToolRegistry,
         configuration: &CompiledProviderConfiguration,
     ) -> Result<(), ToolRuntimeError>;
@@ -53,7 +53,7 @@ pub trait ProjectionCandidateAdmission: Send + Sync + fmt::Debug {
 /// Rejects a foreign registry snapshot, a missing model family, and every
 /// target-axis disagreement.
 pub fn validate_custom_process_presentation_v2(
-    projection: &ToolProjectionMapV2,
+    projection: &ToolProjectionMap,
     registry: &FrozenToolRegistry,
     configuration: &CompiledProviderConfiguration,
 ) -> Result<(), ToolRuntimeError> {

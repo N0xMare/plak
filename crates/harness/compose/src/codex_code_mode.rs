@@ -35,7 +35,7 @@ use plakous_tools::{
 use plakous_tools::{
     CanonicalProcessOperationV2, FrozenToolRegistry, NestedToolEligibility, PortableToolSchemaV2,
     ProviderModelProjectionIdentityV2, ToolExecutorId, ToolProjectionExposureV2,
-    ToolProjectionLoweringV2, ToolProjectionMapV2, ToolProjectionRaisingV2, ToolRegistryBuilder,
+    ToolProjectionLoweringV2, ToolProjectionMap, ToolProjectionRaisingV2, ToolRegistryBuilder,
     ToolRuntimeError, ToolRuntimeErrorKind,
 };
 
@@ -398,7 +398,7 @@ fn compile_code_mode_descriptor(
 }
 
 fn validate_nested_eligibility(
-    projection: &ToolProjectionMapV2,
+    projection: &ToolProjectionMap,
     nested_names: &[&str],
 ) -> Result<(), ToolRuntimeError> {
     for name in nested_names {
@@ -449,13 +449,13 @@ impl CodexMinimalLocalCodeModeDescriptorV1 {
 
     /// Provider-visible native `exec`/`wait` projection.
     #[must_use]
-    pub const fn outer_projection(&self) -> &ToolProjectionMapV2 {
+    pub const fn outer_projection(&self) -> &ToolProjectionMap {
         self.0.outer_projection()
     }
 
     /// Core catalog plus any explicit product extensions, routed through canonical executors.
     #[must_use]
-    pub const fn nested_projection(&self) -> &ToolProjectionMapV2 {
+    pub const fn nested_projection(&self) -> &ToolProjectionMap {
         self.0.nested_projection()
     }
 
@@ -494,8 +494,8 @@ impl CodexMinimalLocalCodeModeDescriptorV1 {
 #[derive(Clone)]
 pub struct CodexNativeLocalCodeModeDescriptorV1 {
     job_config: plakous_tools::JobConfig,
-    outer_projection: ToolProjectionMapV2,
-    nested_projection: ToolProjectionMapV2,
+    outer_projection: ToolProjectionMap,
+    nested_projection: ToolProjectionMap,
     nested_tools: Arc<[CodexCodeModeNestedToolV1]>,
     exec_description: Arc<str>,
     wait_description: Arc<str>,
@@ -511,13 +511,13 @@ impl CodexNativeLocalCodeModeDescriptorV1 {
 
     /// The exact provider-visible `exec`/`wait` projection.
     #[must_use]
-    pub const fn outer_projection(&self) -> &ToolProjectionMapV2 {
+    pub const fn outer_projection(&self) -> &ToolProjectionMap {
         &self.outer_projection
     }
 
     /// The seven-tool local nested projection routed through canonical executors.
     #[must_use]
-    pub const fn nested_projection(&self) -> &ToolProjectionMapV2 {
+    pub const fn nested_projection(&self) -> &ToolProjectionMap {
         &self.nested_projection
     }
 
@@ -565,7 +565,7 @@ impl CodexNativeLocalCodeModeDescriptorV1 {
 /// descriptor, or selected outer-projection mismatch without fallback.
 pub fn validate_codex_native_local_code_mode_candidate_v1(
     descriptor: &CodexNativeLocalCodeModeDescriptorV1,
-    projection: &ToolProjectionMapV2,
+    projection: &ToolProjectionMap,
     registry: FrozenToolRegistry,
     configuration: &CompiledProviderConfiguration,
 ) -> Result<(), ToolRuntimeError> {
@@ -580,7 +580,7 @@ pub fn validate_codex_native_local_code_mode_candidate_v1(
 /// projection drift before provider or evaluator dispatch.
 pub fn validate_codex_minimal_local_code_mode_candidate_v1(
     descriptor: &CodexMinimalLocalCodeModeDescriptorV1,
-    projection: &ToolProjectionMapV2,
+    projection: &ToolProjectionMap,
     registry: FrozenToolRegistry,
     configuration: &CompiledProviderConfiguration,
 ) -> Result<(), ToolRuntimeError> {
@@ -593,7 +593,7 @@ pub fn validate_codex_minimal_local_code_mode_candidate_v1(
 )]
 fn validate_codex_code_mode_candidate_v1(
     descriptor: &CodexNativeLocalCodeModeDescriptorV1,
-    projection: &ToolProjectionMapV2,
+    projection: &ToolProjectionMap,
     registry: FrozenToolRegistry,
     configuration: &CompiledProviderConfiguration,
     minimal: bool,
@@ -790,7 +790,7 @@ fn nested_projection(
     target: ProviderModelProjectionIdentityV2,
     include_extensions: bool,
     extra_nested: &[&str],
-) -> Result<ToolProjectionMapV2, ToolRuntimeError> {
+) -> Result<ToolProjectionMap, ToolRuntimeError> {
     let process = ProcessToolProjectionKind::CodexUnifiedExec.projection_map(
         job_config,
         registry.clone(),
@@ -906,7 +906,7 @@ fn outer_projection(
     target: ProviderModelProjectionIdentityV2,
     exec_description: String,
     wait_description: String,
-) -> Result<ToolProjectionMapV2, ToolRuntimeError> {
+) -> Result<ToolProjectionMap, ToolRuntimeError> {
     let exec = registered_identity(&registry, CODEX_NATIVE_CODE_MODE_EXEC_NAME_V1)?;
     let wait = registered_identity(&registry, CODEX_NATIVE_CODE_MODE_WAIT_NAME_V1)?;
     let exec_entry = plakous_tools::internal::projection_exposure_custom(
@@ -939,7 +939,7 @@ fn outer_projection(
 }
 
 fn ordered_nested_catalog(
-    projection: &ToolProjectionMapV2,
+    projection: &ToolProjectionMap,
     nested_names: &[&str],
 ) -> Result<Vec<CodexCodeModeNestedToolV1>, ToolRuntimeError> {
     let view = projection.compile_request_view_v2()?;
@@ -1211,8 +1211,8 @@ pub(crate) fn normalize_javascript_identifier(name: &str) -> String {
 }
 
 fn descriptor_identity(
-    outer: &ToolProjectionMapV2,
-    nested: &ToolProjectionMapV2,
+    outer: &ToolProjectionMap,
+    nested: &ToolProjectionMap,
     nested_tools: &[CodexCodeModeNestedToolV1],
     exec_description: &str,
     wait_description: &str,

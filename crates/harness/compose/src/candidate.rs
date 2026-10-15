@@ -9,7 +9,7 @@
 use plakous_model::{CompiledProviderConfiguration, IntegrationClass, ToolName};
 use plakous_tools::{
     CodingPresentation, FrozenToolRegistry, PROCESS_TOOL_PROJECTION_REVISION, PresentationRoutes,
-    ProviderModelProjectionIdentityV2, ToolProjectionMapV2, ToolRuntimeError, ToolRuntimeErrorKind,
+    ProviderModelProjectionIdentityV2, ToolProjectionMap, ToolRuntimeError, ToolRuntimeErrorKind,
 };
 
 use crate::coding_menu::CodingPresentationExt as _;
@@ -26,7 +26,7 @@ pub fn process_presentation_candidate_v2(
     registry: FrozenToolRegistry,
     configuration: &CompiledProviderConfiguration,
     routes: &PresentationRoutes,
-) -> Result<ToolProjectionMapV2, ToolRuntimeError> {
+) -> Result<ToolProjectionMap, ToolRuntimeError> {
     process_presentation_candidate_with_extensions_v2(
         job_config,
         registry,
@@ -52,7 +52,7 @@ pub fn process_presentation_candidate_with_extensions_v2(
     configuration: &CompiledProviderConfiguration,
     routes: &PresentationRoutes,
     extra_nested: &[ToolName],
-) -> Result<ToolProjectionMapV2, ToolRuntimeError> {
+) -> Result<ToolProjectionMap, ToolRuntimeError> {
     let effective = configuration.effective();
     let descriptor = effective.descriptor();
     if descriptor.integration_class() != IntegrationClass::Standard {
@@ -93,7 +93,7 @@ pub fn process_presentation_candidate_with_extensions_v2(
 /// raising, or projection-kind drift without fallback.
 pub fn validate_process_presentation_candidate_v2(
     job_config: plakous_tools::JobConfig,
-    projection: &ToolProjectionMapV2,
+    projection: &ToolProjectionMap,
     registry: FrozenToolRegistry,
     configuration: &CompiledProviderConfiguration,
     routes: &PresentationRoutes,

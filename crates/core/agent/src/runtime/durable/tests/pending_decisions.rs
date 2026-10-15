@@ -261,7 +261,7 @@ fn v2_direct_builder(
     )?;
     let admission: Arc<dyn ProjectionCandidateAdmission> = FakeProjectionAdmission::new(true);
     Ok(AgentBuilder::new(configured, registry, workspace)
-        .tool_projection_v2(projection)
+        .tool_projection(projection)
         .projection_admission(admission)
         .harness_plan(plan)
         .tool_policy(Arc::new(RestoreDecisionPolicy::new()?))
