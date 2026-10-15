@@ -3144,8 +3144,10 @@ become Plakous authority.
 
 OpenAI and xAI keep signed-token/JWKS validation and request dispatch in
 private provider-local modules. Verification owns its decoded identity and key
-shapes; dispatch owns the execution facts and response-head guard. Credential
-managers retain selected-account state and claimed refresh/revoke orchestration.
+shapes; dispatch owns the execution facts and response-head guard; login,
+refresh and catalog modules own the login flows, the claimed refresh/revoke
+hooks and the catalog shapes. Credential managers retain selected-account state
+and claimed refresh/revoke orchestration.
 The established provider exports remain the entry points. Both share one
 implementation, in the auth crate, of the JWKS single flight (one async mutex
 held across the key-set fetch; a login bounds both the wait behind another
