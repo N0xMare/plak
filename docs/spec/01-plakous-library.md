@@ -7130,9 +7130,10 @@ dropping an idle connection aborts its driver. The model clients of every route
 (Claude, Codex and Grok subscription inference, the Anthropic, OpenAI Platform
 and xAI API clients, and OpenRouter's configured model clients) are pooled;
 OAuth, token refresh, catalog, discovery and key-usage clients stay one-shot.
-A pool key is the origin's host and port, the shared Rustls configuration, the
-transport policy, and the limits fixed into a connection at negotiation
-(response header bounds and the HTTP/2 receive window). A connection carries one
+A pool key is the origin's host, port and scheme (HTTPS or loopback HTTP), the
+shared Rustls configuration, the transport policy, the address policy, and the
+limits fixed into a connection at negotiation (response header bounds and the
+HTTP/2 receive window). A connection carries one
 exchange at a time on HTTP/1.1 and HTTP/2 alike, and request progress is reset
 for each exchange, so transmission facts describe that exchange alone.
 Deadlines, cancellation, streaming bounds and fault injection stay per
@@ -7157,6 +7158,34 @@ checkout drops the expired or closed entries of its own key; entries of a key
 no later exchange asks for stay until the pool ends. The client sets
 `TCP_NODELAY` on every connection, since HTTP/2 sends a request as separate
 HEADERS and DATA frames.
+
+**Origins and destination address policy.** An `Origin` is an absolute HTTPS
+origin (`Origin::parse`) or one of exactly two plain-HTTP loopback origins,
+`Origin::loopback_http(127.0.0.1 | ::1, port)`, for local services that listen
+on plain loopback HTTP. No other plain-HTTP origin exists: `Origin::parse`
+refuses every `http://` URL and `loopback_http` refuses every other address,
+host name and port 0. A loopback HTTP connection skips TLS and carries
+HTTP/1.1. A client may carry an `AddressPolicy` (`Client::with_address_policy`;
+none by default, and provider clients install none). With a policy, each fresh
+connection refuses the host names `localhost`, `*.localhost` and
+`metadata.google.internal` before resolution, then connects to the first
+resolved address the policy admits. The admitted address is the one connected,
+so a name that rebinds between a caller's check and the connection cannot reach
+a refused address. A refused name, or a resolution with no admitted address,
+fails `ErrorKind::AddressRefused` in the resolution phase before any connect;
+an empty resolution stays `ErrorKind::Resolution`. Redirects are the caller's:
+each hop sent through the same client is checked again.
+`AddressPolicy::public_only()` refuses one table of ranges, each with its RFC:
+IPv4 `0/8`, `10/8`, `100.64/10`, `127/8`, `169.254/16`, `172.16/12`, `192.0.0/24`,
+`192.0.2/24`, `192.88.99/24`, `192.168/16`, `198.18/15`, `198.51.100/24`,
+`203.0.113/24`, `224/4`, `240/4` and `255.255.255.255`; IPv6 `::`, `::1`, the
+deprecated IPv4-compatible `::/96`, `100::/64`, `2001::/23`, `2001:db8::/32`,
+`3fff::/20`, `fc00::/7`, `fe80::/10`, the deprecated site-local `fec0::/10` and
+`ff00::/8`. IPv4 addresses embedded in `::ffff:0:0/96`, `64:ff9b::/96` and
+`2002::/16` are decoded and re-checked as IPv4; within the local-use NAT64
+prefix `64:ff9b:1::/48` only the `/96` layout is decoded and every other layout
+is refused. A policy, when installed, is part of the transport behavior
+identity; a client without one keeps its identity unchanged.
 
 A reused connection that fails with a protocol error while its TLS stream has
 accepted no byte of the request was offered stale: the peer can hold at most an

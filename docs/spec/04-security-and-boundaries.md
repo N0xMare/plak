@@ -340,6 +340,23 @@ id removes its registration, directory and `plak/<copy_id>` branch first
 These steps are not a boundary against the model: a process tool in a copy
 runs its own `git` with the operator's authority (§2.4).
 
+### 2.7 Network destination policy
+
+`plakous-http` connects only to HTTPS origins and to plain HTTP on exactly
+`127.0.0.1` and `[::1]`; it has no proxy, redirect following or plain-HTTP
+origin beyond those two. A client that fetches a destination it did not choose
+itself installs an `AddressPolicy`. The policy is checked after DNS resolution
+on the exact address then connected, and again on every fresh connection, so
+DNS rebinding cannot move a vetted name onto a refused address. The public-only
+policy refuses loopback, private, shared, link-local (including the cloud
+metadata addresses `169.254.169.254` and `fd00:ec2::254`), documentation,
+benchmarking, multicast and reserved ranges, re-checks IPv4 addresses embedded
+in IPv6, and refuses `localhost`, `*.localhost` and `metadata.google.internal`
+before resolution (chapter 01 §13.1 lists the table). Provider, OAuth, catalog
+and discovery clients install no policy: their origins are fixed configuration,
+not model input. The policy is a mechanism; it does not by itself make a
+model-directed fetch safe against exfiltration through the URL it requests.
+
 ## 3. Credentials
 
 Claude OAuth wire account UUIDs come only from authenticated token grants or the

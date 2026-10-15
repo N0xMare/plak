@@ -1,6 +1,7 @@
 use std::convert::Infallible;
 use std::fmt;
 use std::future::Future;
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -29,12 +30,14 @@ use tokio_rustls::client::TlsStream;
 use crate::observation::Observation;
 use crate::request::header_bytes;
 use crate::{
-    Bytes as PublicBytes, CancellationToken, ConfigError, ConnectionUse, ErrorKind,
+    AddressPolicy, Bytes as PublicBytes, CancellationToken, ConfigError, ConnectionUse, ErrorKind,
     ExchangeControl, Failure, Headers, LimitKind, Origin, Phase, Request, RequestError, StatusCode,
     TransmissionFact, WireProtocol,
 };
 use crate::{ExchangeObserver, ExchangeTerminal};
 
+#[cfg(test)]
+mod address_tests;
 #[cfg(feature = "fault-injection")]
 pub(crate) mod fault;
 mod pool;
@@ -233,6 +236,64 @@ struct ClientInner {
     tls_config: Arc<ClientConfig>,
     /// Idle connections, shared with every client derived from this one.
     pool: Option<Arc<Pool>>,
+    address_policy: Option<AddressPolicy>,
+    resolver: Resolver,
+}
+
+/// How a fresh connection resolves its origin host.
+#[derive(Clone, Default)]
+enum Resolver {
+    #[default]
+    System,
+    /// Answers each lookup from a test script instead of DNS.
+    #[cfg(test)]
+    Scripted(ScriptedLookup),
+}
+
+#[cfg(test)]
+type ScriptedLookup = Arc<dyn Fn(&str, u16) -> Vec<SocketAddr> + Send + Sync>;
+
+impl Resolver {
+    async fn lookup(&self, host: &str, port: u16) -> Result<Vec<SocketAddr>, Failure> {
+        match self {
+            Self::System => tokio::net::lookup_host((host, port))
+                .await
+                .map(Iterator::collect)
+                .map_err(|_| resolution_failure(ErrorKind::Resolution)),
+            #[cfg(test)]
+            Self::Scripted(script) => Ok(script(host, port)),
+        }
+    }
+}
+
+const fn resolution_failure(kind: ErrorKind) -> Failure {
+    Failure::new(Phase::Resolution, TransmissionFact::NotStarted, kind)
+}
+
+/// Resolves `origin` and picks the address to connect: the first one, or with
+/// a policy the first one the policy admits.
+async fn resolve(
+    resolver: Resolver,
+    origin: &Origin,
+    policy: Option<AddressPolicy>,
+) -> Result<SocketAddr, Failure> {
+    if policy.is_some_and(|policy| policy.refuses_host_name(origin.host())) {
+        return Err(resolution_failure(ErrorKind::AddressRefused));
+    }
+    let addresses = resolver
+        .lookup(origin.resolution_host(), origin.port())
+        .await?;
+    let first = addresses
+        .first()
+        .copied()
+        .ok_or_else(|| resolution_failure(ErrorKind::Resolution))?;
+    let Some(policy) = policy else {
+        return Ok(first);
+    };
+    addresses
+        .into_iter()
+        .find(|address| policy.admits(address.ip()))
+        .ok_or_else(|| resolution_failure(ErrorKind::AddressRefused))
 }
 
 impl Client {
@@ -326,8 +387,8 @@ impl Client {
         trust_identity: Option<TlsConfigIdentity>,
     ) -> Result<Self, ConfigError> {
         limits.validate()?;
-        let behavior_identity =
-            trust_identity.map(|trust| transport_behavior_identity(&limits, policy, trust, false));
+        let behavior_identity = trust_identity
+            .map(|trust| transport_behavior_identity(&limits, policy, trust, false, None));
         Ok(Self {
             observer: None,
             #[cfg(feature = "fault-injection")]
@@ -339,6 +400,8 @@ impl Client {
                 behavior_identity,
                 tls_config: Arc::new(tls_config),
                 pool: None,
+                address_policy: None,
+                resolver: Resolver::System,
             }),
         })
     }
@@ -355,7 +418,13 @@ impl Client {
         limits.validate()?;
         let inner = &self.inner;
         let behavior_identity = inner.trust_identity.map(|trust| {
-            transport_behavior_identity(&limits, inner.policy, trust, inner.pool.is_some())
+            transport_behavior_identity(
+                &limits,
+                inner.policy,
+                trust,
+                inner.pool.is_some(),
+                inner.address_policy,
+            )
         });
         Ok(Self {
             observer: self.observer.clone(),
@@ -368,8 +437,74 @@ impl Client {
                 behavior_identity,
                 tls_config: Arc::clone(&inner.tls_config),
                 pool: inner.pool.clone(),
+                address_policy: inner.address_policy,
+                resolver: inner.resolver.clone(),
             }),
         })
+    }
+
+    /// Returns this client with `policy` deciding which resolved addresses a
+    /// fresh connection may use, keeping TLS, limits, observer and any pool.
+    ///
+    /// The policy is applied on every connection, to the exact address then
+    /// connected: the first resolved address it admits is used, and a refused
+    /// host name or a resolution with no admitted address fails
+    /// [`ErrorKind::AddressRefused`] in [`Phase::Resolution`] before any
+    /// connection is attempted. Pooled connections are kept per policy. A
+    /// caller following redirects sends each hop through this client, so every
+    /// hop is checked. `None` restores connecting to the first resolved address.
+    #[must_use]
+    pub fn with_address_policy(&self, policy: Option<AddressPolicy>) -> Self {
+        let inner = &self.inner;
+        Self {
+            observer: self.observer.clone(),
+            #[cfg(feature = "fault-injection")]
+            faults: self.faults.clone(),
+            inner: Arc::new(ClientInner {
+                limits: inner.limits.clone(),
+                policy: inner.policy,
+                trust_identity: inner.trust_identity,
+                behavior_identity: inner.trust_identity.map(|trust| {
+                    transport_behavior_identity(
+                        &inner.limits,
+                        inner.policy,
+                        trust,
+                        inner.pool.is_some(),
+                        policy,
+                    )
+                }),
+                tls_config: Arc::clone(&inner.tls_config),
+                pool: inner.pool.clone(),
+                address_policy: policy,
+                resolver: inner.resolver.clone(),
+            }),
+        }
+    }
+
+    /// Returns the destination address policy, if one is installed.
+    #[must_use]
+    pub fn address_policy(&self) -> Option<AddressPolicy> {
+        self.inner.address_policy
+    }
+
+    #[cfg(test)]
+    fn with_resolver(&self, resolver: Resolver) -> Self {
+        let inner = &self.inner;
+        Self {
+            observer: self.observer.clone(),
+            #[cfg(feature = "fault-injection")]
+            faults: self.faults.clone(),
+            inner: Arc::new(ClientInner {
+                limits: inner.limits.clone(),
+                policy: inner.policy,
+                trust_identity: inner.trust_identity,
+                behavior_identity: inner.behavior_identity,
+                tls_config: Arc::clone(&inner.tls_config),
+                pool: inner.pool.clone(),
+                address_policy: inner.address_policy,
+                resolver,
+            }),
+        }
     }
 
     /// Returns a client with the same TLS, policy, limits, observer and fault
@@ -395,10 +530,18 @@ impl Client {
                 policy: inner.policy,
                 trust_identity: inner.trust_identity,
                 behavior_identity: inner.trust_identity.map(|trust| {
-                    transport_behavior_identity(&inner.limits, inner.policy, trust, true)
+                    transport_behavior_identity(
+                        &inner.limits,
+                        inner.policy,
+                        trust,
+                        true,
+                        inner.address_policy,
+                    )
                 }),
                 tls_config: Arc::clone(&inner.tls_config),
                 pool: Some(Arc::new(Pool::default())),
+                address_policy: inner.address_policy,
+                resolver: inner.resolver.clone(),
             }),
         }
     }
@@ -443,7 +586,8 @@ impl Client {
         self.inner.behavior_identity
     }
 
-    /// Resolves, connects and verifies TLS/ALPN for this exact origin.
+    /// Resolves, connects and verifies TLS/ALPN for this exact origin (a
+    /// loopback HTTP origin stops after the TCP connect).
     ///
     /// Sends no HTTP bytes, uses no idle pooled connection, and drops the fresh
     /// connection after the handshake. No headers, credentials or request are built.
@@ -453,7 +597,7 @@ impl Client {
     /// Returns a closed transport failure on cancellation, deadline, DNS,
     /// connection, TLS verification or unsupported ALPN.
     pub async fn probe(&self, origin: &Origin, control: ExchangeControl) -> Result<(), Failure> {
-        let _ = self.connect_tls(origin, &control).await?;
+        let _ = self.connect_stream(origin, &control).await?;
         Ok(())
     }
 
@@ -663,38 +807,27 @@ impl Client {
         PoolKey {
             host: origin.host().to_owned(),
             port: origin.port(),
+            plain_loopback: origin.is_loopback_http(),
+            address_policy: self.inner.address_policy,
             tls_config: Arc::as_ptr(&self.inner.tls_config) as usize,
             policy: self.inner.policy,
             settings: ConnectionSettings::new(&self.inner.limits),
         }
     }
 
-    /// Resolves, connects and verifies TLS/ALPN for a fresh connection.
-    async fn connect_tls(
+    /// Resolves, connects and, for HTTPS, verifies TLS/ALPN for a fresh
+    /// connection.
+    async fn connect_stream(
         &self,
         origin: &Origin,
         control: &ExchangeControl,
-    ) -> Result<(TlsStream<TcpStream>, WireProtocol), Failure> {
-        let host = origin.host().to_owned();
-        let port = origin.port();
+    ) -> Result<(WireStream, WireProtocol), Failure> {
+        let resolver = self.inner.resolver.clone();
+        let policy = self.inner.address_policy;
+        let target = origin.clone();
         let address = wait_task(
             TaskGuard::new(tokio::spawn(async move {
-                let mut addresses = tokio::net::lookup_host((host.as_str(), port))
-                    .await
-                    .map_err(|_| {
-                        Failure::new(
-                            Phase::Resolution,
-                            TransmissionFact::NotStarted,
-                            ErrorKind::Resolution,
-                        )
-                    })?;
-                addresses.next().ok_or_else(|| {
-                    Failure::new(
-                        Phase::Resolution,
-                        TransmissionFact::NotStarted,
-                        ErrorKind::Resolution,
-                    )
-                })
+                resolve(resolver, &target, policy).await
             })),
             control,
             self.inner.limits.resolution_timeout,
@@ -721,6 +854,9 @@ impl Client {
             TransmissionFact::NotStarted,
         )
         .await?;
+        if origin.is_loopback_http() {
+            return Ok((WireStream::Plain(stream), WireProtocol::Http1));
+        }
 
         let server_name = ServerName::try_from(origin.host().to_owned())
             .map_err(|_| Failure::new(Phase::Tls, TransmissionFact::NotStarted, ErrorKind::Tls))?;
@@ -753,7 +889,7 @@ impl Client {
                 ));
             }
         };
-        Ok((tls_stream, protocol))
+        Ok((WireStream::Tls(Box::new(tls_stream)), protocol))
     }
 
     async fn connect(
@@ -761,7 +897,7 @@ impl Client {
         parts: &RequestParts,
         control: &ExchangeControl,
     ) -> Result<Live, Failure> {
-        let (tls_stream, protocol) = self.connect_tls(&parts.origin, control).await?;
+        let (stream, protocol) = self.connect_stream(&parts.origin, control).await?;
         // A fresh exchange's progress also counts the HTTP/2 preface and
         // settings the handshake writes.
         let progress = parts.progress(protocol);
@@ -770,7 +906,7 @@ impl Client {
         let limits = self.inner.limits.clone();
         let connection = wait_task(
             TaskGuard::new(tokio::spawn(async move {
-                establish(tls_stream, protocol, &limits, wire_slot).await
+                establish(stream, protocol, &limits, wire_slot).await
             })),
             control,
             self.inner.limits.tls_timeout,
@@ -981,6 +1117,7 @@ fn transport_behavior_identity(
     policy: TransportPolicy,
     trust: TlsConfigIdentity,
     pooled: bool,
+    address_policy: Option<AddressPolicy>,
 ) -> TransportBehaviorIdentity {
     let mut hasher = framed_identity_hasher(b"plakous-http/transport-behavior-v1");
     update_identity_frame(&mut hasher, &TRANSPORT_BEHAVIOR_REVISION.to_be_bytes());
@@ -1023,6 +1160,11 @@ fn transport_behavior_identity(
         update_identity_frame(&mut hasher, &duration.subsec_nanos().to_be_bytes());
     }
     update_identity_frame(&mut hasher, &trust.as_bytes());
+    // Appended only when installed, so clients without a policy keep the
+    // identity they had before address policies existed.
+    if let Some(address_policy) = address_policy {
+        update_identity_frame(&mut hasher, address_policy.identity_label());
+    }
     TransportBehaviorIdentity(hasher.finalize().into())
 }
 
@@ -1527,7 +1669,7 @@ impl Sender {
 }
 
 async fn establish(
-    stream: TlsStream<TcpStream>,
+    stream: WireStream,
     protocol: WireProtocol,
     limits: &Limits,
     slot: Arc<ProgressSlot>,
@@ -1951,17 +2093,27 @@ impl ProgressSlot {
 // H1 flush follows Hyper draining its full buffered request. Body polling alone
 // cannot establish this: Hyper may still be blocked writing the returned frame.
 struct RequestIo {
-    stream: TlsStream<TcpStream>,
+    stream: WireStream,
     slot: Arc<ProgressSlot>,
+}
+
+/// A connected byte stream: TLS for HTTPS origins, plain TCP for loopback
+/// HTTP origins.
+enum WireStream {
+    Tls(Box<TlsStream<TcpStream>>),
+    Plain(TcpStream),
 }
 
 impl RequestIo {
     fn record_io_error(&mut self, error: &std::io::Error) {
         let progress = self.slot.current();
+        let WireStream::Tls(stream) = &mut self.stream else {
+            progress.record_io_error(error, false);
+            return;
+        };
         // A head and alert may share a socket read: Rustls can retain plaintext
         // even when processing the later alert failed before Hyper saw it.
-        if self
-            .stream
+        if stream
             .get_mut()
             .1
             .reader()
@@ -1972,8 +2124,66 @@ impl RequestIo {
         }
         progress.record_io_error(
             error,
-            self.stream.get_ref().1.protocol_version() == Some(rustls::ProtocolVersion::TLSv1_3),
+            stream.get_ref().1.protocol_version() == Some(rustls::ProtocolVersion::TLSv1_3),
         );
+    }
+}
+
+impl AsyncRead for WireStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Self::Tls(stream) => Pin::new(stream.as_mut()).poll_read(cx, buf),
+            Self::Plain(stream) => Pin::new(stream).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for WireStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        match self.get_mut() {
+            Self::Tls(stream) => Pin::new(stream.as_mut()).poll_write(cx, buf),
+            Self::Plain(stream) => Pin::new(stream).poll_write(cx, buf),
+        }
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        match self {
+            Self::Tls(stream) => stream.is_write_vectored(),
+            Self::Plain(stream) => stream.is_write_vectored(),
+        }
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[std::io::IoSlice<'_>],
+    ) -> Poll<std::io::Result<usize>> {
+        match self.get_mut() {
+            Self::Tls(stream) => Pin::new(stream.as_mut()).poll_write_vectored(cx, bufs),
+            Self::Plain(stream) => Pin::new(stream).poll_write_vectored(cx, bufs),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Self::Tls(stream) => Pin::new(stream.as_mut()).poll_flush(cx),
+            Self::Plain(stream) => Pin::new(stream).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Self::Tls(stream) => Pin::new(stream.as_mut()).poll_shutdown(cx),
+            Self::Plain(stream) => Pin::new(stream).poll_shutdown(cx),
+        }
     }
 }
 

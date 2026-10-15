@@ -787,7 +787,7 @@ fn record_alert(tls: &mut rustls::ServerConnection, bad_mac: bool) -> TestResult
 #[tokio::test]
 async fn response_byte_guard_covers_delivered_and_buffered_plaintext_deterministically()
 -> TestResult {
-    use super::super::{ProgressSlot, RequestIo, RequestProgress};
+    use super::super::{ProgressSlot, RequestIo, RequestProgress, WireStream};
     for buffered in [false, true] {
         let Endpoint {
             listener,
@@ -826,14 +826,17 @@ async fn response_byte_guard_covers_delivered_and_buffered_plaintext_determinist
             .await?;
         let progress = Arc::new(RequestProgress::new(true, false, 0));
         let mut io = RequestIo {
-            stream,
+            stream: WireStream::Tls(Box::new(stream)),
             slot: ProgressSlot::new(Arc::clone(&progress)),
         };
         if buffered {
             // Process the whole ciphertext batch at once, independent of TCP
             // segmentation, before Hyper can consume the buffered plaintext.
             let mut wire = vec![0; size_rx.await?];
-            let (tcp, tls) = io.stream.get_mut();
+            let WireStream::Tls(stream) = &mut io.stream else {
+                return Err("the test connection is TLS".into());
+            };
+            let (tcp, tls) = stream.get_mut();
             tcp.read_exact(&mut wire).await?;
             let mut wire = io::Cursor::new(wire);
             while wire.position() < u64::try_from(wire.get_ref().len())? {

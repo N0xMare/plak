@@ -1,17 +1,20 @@
 //! Provider-blind, bounded HTTP transport and SSE framing.
 //!
-//! Each [`Client::execute`] call submits exactly one HTTP request, on a fresh
+//! Each [`Client::execute`] call submits exactly one HTTP request to an HTTPS
+//! origin or a plain-HTTP loopback origin ([`Origin::loopback_http`]), on a fresh
 //! DNS/TCP/TLS connection or, for a [`Client::pooled`] client, on an idle one
 //! a clean earlier exchange left. The crate deliberately has no redirect,
 //! proxy, decompression, retry, authentication, provider, model, or JSON
 //! semantics; the one exception is that a reused connection that fails before
-//! accepting any request byte is replaced once by a fresh one. [`sse`]
+//! accepting any request byte is replaced once by a fresh one. An optional
+//! [`AddressPolicy`] limits which resolved addresses a client connects to. [`sse`]
 //! provides HTML5 Server-Sent Events **framing** only
 //! (byte stream → complete messages); it does not interpret provider event
 //! types, sequences, or `[DONE]` markers.
 
 #![forbid(unsafe_code)]
 
+mod address;
 mod control;
 mod error;
 mod observation;
@@ -31,6 +34,7 @@ pub fn retry_disabled(headers: &Headers) -> bool {
     })
 }
 
+pub use address::AddressPolicy;
 pub use bytes::Bytes;
 pub use control::{CancellationToken, ExchangeControl};
 pub use error::{

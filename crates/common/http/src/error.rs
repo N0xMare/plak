@@ -80,6 +80,9 @@ pub enum ErrorKind {
     LimitExceeded(LimitKind),
     /// DNS resolution failed or returned no address.
     Resolution,
+    /// The client's [`AddressPolicy`](crate::AddressPolicy) refused the origin
+    /// host name or every address it resolved to; nothing was connected.
+    AddressRefused,
     /// TCP I/O failed.
     Io,
     /// TLS negotiation or peer verification failed.
@@ -583,8 +586,8 @@ pub enum ConfigError {
 #[non_exhaustive]
 pub enum RequestError {
     /// The origin is not an absolute HTTPS origin without user information,
-    /// path, query, or fragment.
-    #[error("origin must be an absolute HTTPS origin")]
+    /// path, query, or fragment, nor a loopback HTTP origin.
+    #[error("origin must be an absolute HTTPS origin or a loopback HTTP origin")]
     InvalidOrigin,
     /// The request target is not a non-network origin-form path and query.
     #[error("request target must be an origin-form path and optional query")]

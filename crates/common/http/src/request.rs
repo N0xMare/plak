@@ -1,4 +1,5 @@
 use std::fmt;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
 use http::header::{
@@ -10,12 +11,14 @@ use http::{HeaderMap, HeaderName, HeaderValue, Method, Uri};
 
 use crate::{LimitKind, Limits, RequestError};
 
-/// An absolute HTTPS origin used for both connection and request routing.
+/// An absolute origin used for both connection and request routing: HTTPS,
+/// or plain HTTP to exactly `127.0.0.1` or `[::1]` ([`Origin::loopback_http`]).
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub struct Origin {
     authority: Authority,
     host: String,
     port: u16,
+    plain_loopback: bool,
 }
 
 impl Origin {
@@ -49,7 +52,41 @@ impl Origin {
             authority: authority.clone(),
             host,
             port,
+            plain_loopback: false,
         })
+    }
+
+    /// A plain-HTTP origin on the loopback interface: `http://127.0.0.1:port`
+    /// or `http://[::1]:port`. No other address and no host name is accepted,
+    /// so plain HTTP never leaves the machine. Connections carry HTTP/1.1.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RequestError::InvalidOrigin`] for any other address or port 0.
+    pub fn loopback_http(address: IpAddr, port: u16) -> Result<Self, RequestError> {
+        let host = match address {
+            IpAddr::V4(Ipv4Addr::LOCALHOST) => "127.0.0.1",
+            IpAddr::V6(Ipv6Addr::LOCALHOST) => "[::1]",
+            IpAddr::V4(_) | IpAddr::V6(_) => return Err(RequestError::InvalidOrigin),
+        };
+        if port == 0 {
+            return Err(RequestError::InvalidOrigin);
+        }
+        let authority = format!("{host}:{port}")
+            .parse::<Authority>()
+            .map_err(|_| RequestError::InvalidOrigin)?;
+        Ok(Self {
+            authority,
+            host: host.to_owned(),
+            port,
+            plain_loopback: true,
+        })
+    }
+
+    /// Whether this is a plain-HTTP [`Origin::loopback_http`] origin.
+    #[must_use]
+    pub const fn is_loopback_http(&self) -> bool {
+        self.plain_loopback
     }
 
     /// Returns the normalized non-secret connection authority for exact
@@ -70,6 +107,14 @@ impl Origin {
     #[must_use]
     pub fn host(&self) -> &str {
         &self.host
+    }
+
+    /// The host as name resolution takes it: an IPv6 literal without brackets.
+    pub(crate) fn resolution_host(&self) -> &str {
+        self.host
+            .strip_prefix('[')
+            .and_then(|host| host.strip_suffix(']'))
+            .unwrap_or(&self.host)
     }
 
     pub(crate) const fn port(&self) -> u16 {
@@ -182,7 +227,7 @@ impl Request {
         })
     }
 
-    /// Returns the bound HTTPS origin.
+    /// Returns the bound origin.
     #[must_use]
     pub const fn origin(&self) -> &Origin {
         &self.origin

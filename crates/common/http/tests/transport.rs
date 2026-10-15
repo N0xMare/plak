@@ -13,9 +13,9 @@ use http_body_util::Full;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use plakous_http::{
-    Bytes, CancellationToken, Client, ErrorKind, ExchangeControl, HeaderMap, HeaderValue,
-    LimitKind, Limits, Method, Origin, Phase, Request, SensitiveBytes, StatusCode, TlsCause,
-    TransmissionFact, Version, WireProtocol, sensitive_header_value,
+    AddressPolicy, Bytes, CancellationToken, Client, ErrorKind, ExchangeControl, HeaderMap,
+    HeaderValue, LimitKind, Limits, Method, Origin, Phase, Request, SensitiveBytes, StatusCode,
+    TlsCause, TransmissionFact, Version, WireProtocol, sensitive_header_value,
 };
 use rcgen::{CertifiedKey, generate_simple_self_signed};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
@@ -2275,5 +2275,118 @@ async fn observation_body_failure_remains_failure_after_subsequent_poll() -> Tes
     assert!(terminals[0].contains("Failed"));
     assert!(terminals[0].contains("ResponseBody"));
     assert_eq!(server.await??.1, 1);
+    Ok(())
+}
+
+#[test]
+fn loopback_http_origins_are_exactly_the_two_loopback_literals() -> TestResult {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    let v4 = Origin::loopback_http(IpAddr::V4(Ipv4Addr::LOCALHOST), 8080)?;
+    assert!(v4.is_loopback_http());
+    assert_eq!(v4.host(), "127.0.0.1");
+    assert_eq!(v4.binding_authority(), "127.0.0.1:8080");
+    let v6 = Origin::loopback_http(IpAddr::V6(Ipv6Addr::LOCALHOST), 3000)?;
+    assert!(v6.is_loopback_http());
+    assert_eq!(v6.binding_authority(), "[::1]:3000");
+    for refused in [
+        "127.0.0.2",
+        "0.0.0.0",
+        "10.0.0.1",
+        "8.8.8.8",
+        "::",
+        "::ffff:127.0.0.1",
+        "fe80::1",
+    ] {
+        let address = refused.parse::<IpAddr>()?;
+        assert!(Origin::loopback_http(address, 8080).is_err(), "{refused}");
+    }
+    assert!(Origin::loopback_http(IpAddr::V4(Ipv4Addr::LOCALHOST), 0).is_err());
+    for refused in [
+        "http://127.0.0.1:8080",
+        "http://[::1]:8080",
+        "http://localhost:8080",
+    ] {
+        assert!(Origin::parse(refused).is_err(), "{refused}");
+    }
+    let https = Origin::parse("https://127.0.0.1:8080")?;
+    assert!(!https.is_loopback_http());
+    assert_ne!(https, v4);
+    Ok(())
+}
+
+#[tokio::test]
+async fn loopback_http_origin_exchanges_plain_http1() -> TestResult {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let port = listener.local_addr()?.port();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await?;
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 1024];
+        while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+            let read = stream.read(&mut buffer).await?;
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..read]);
+        }
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .await?;
+        stream.shutdown().await?;
+        Ok::<_, TestError>(request)
+    });
+    let origin = Origin::loopback_http(std::net::IpAddr::from([127, 0, 0, 1]), port)?;
+    let limits = Limits::default();
+    let client = Client::new(limits.clone())?;
+    let request = make_request(
+        origin,
+        Method::GET,
+        "/mcp",
+        HeaderMap::new(),
+        Bytes::new(),
+        &limits,
+    )?;
+    let response = client.execute(request, control()).await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.version(), Version::HTTP_11);
+    let mut body = response.into_body();
+    assert_eq!(required_chunk(&mut body).await?, Bytes::from_static(b"ok"));
+    let request = String::from_utf8(server.await??)?;
+    assert!(request.starts_with("GET /mcp HTTP/1.1\r\n"), "{request}");
+    assert!(
+        request
+            .to_ascii_lowercase()
+            .contains(&format!("host: 127.0.0.1:{port}\r\n")),
+        "{request}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_address_policy_refuses_a_loopback_origin_before_connecting() -> TestResult {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let port = listener.local_addr()?.port();
+    let client =
+        Client::new(Limits::default())?.with_address_policy(Some(AddressPolicy::public_only()));
+    assert_eq!(client.address_policy(), Some(AddressPolicy::public_only()));
+    for origin in [
+        Origin::loopback_http(std::net::IpAddr::from([127, 0, 0, 1]), port)?,
+        Origin::parse(&format!("https://127.0.0.1:{port}"))?,
+        Origin::parse(&format!("https://localhost:{port}"))?,
+    ] {
+        let failure = client
+            .probe(&origin, control())
+            .await
+            .err()
+            .ok_or("loopback must be refused")?;
+        assert_eq!(failure.phase(), Phase::Resolution);
+        assert_eq!(failure.kind(), ErrorKind::AddressRefused);
+    }
+    assert!(
+        timeout(Duration::from_millis(50), listener.accept())
+            .await
+            .is_err(),
+        "nothing may connect"
+    );
     Ok(())
 }

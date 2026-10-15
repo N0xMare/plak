@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use super::{ConnectionTask, Limits, ProgressSlot, TransportPolicy};
-use crate::WireProtocol;
+use crate::{AddressPolicy, WireProtocol};
 
 /// An idle connection this old is closed instead of reused. It assumes the
 /// inference front ends keep an idle connection open for longer, about 60 s
@@ -29,6 +29,9 @@ pub(super) const MAX_IDLE_PER_KEY: usize = 2;
 pub(super) struct PoolKey {
     pub(super) host: String,
     pub(super) port: u16,
+    /// A plain loopback connection never carries an HTTPS origin's request.
+    pub(super) plain_loopback: bool,
+    pub(super) address_policy: Option<AddressPolicy>,
     /// Address of the clients' shared Rustls configuration. Every client that
     /// shares a pool holds that same `Arc`, so the address cannot be reused
     /// by another configuration while the pool exists.
