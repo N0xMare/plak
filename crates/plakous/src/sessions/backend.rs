@@ -53,10 +53,8 @@ impl SessionBackend {
 
     /// Opens or creates one required-durability SQLite backend.
     ///
-    /// Ordinary attach admits bounded shape, exact schema, and counters. It
-    /// does not reconstruct every retained object. Call
-    /// [`Self::sqlite_verified`] before any
-    /// integrity-clean claim.
+    /// Attach admits bounded shape, exact schema, and counters. It does not
+    /// reconstruct every retained object.
     ///
     /// The database path and backend remain private implementation inputs;
     /// callers receive only the semantic workflow handle.
@@ -76,28 +74,10 @@ impl SessionBackend {
         ))
     }
 
-    /// Opens one SQLite backend after complete object and receipt verification.
-    ///
-    /// # Errors
-    ///
-    /// Returns a redaction-safe storage or integrity failure when the database
-    /// cannot be opened exactly.
-    #[cfg(feature = "sessions-sqlite")]
-    pub fn sqlite_verified(path: impl AsRef<Path>) -> Result<Self, AgentSessionsError> {
-        let path = path.as_ref();
-        let store = SqliteSessionStore::open_verified(path)
-            .map_err(|error| store_path_error(path, error))?;
-        Ok(Self::from_store(
-            Arc::new(store),
-            RuntimeDurability::Required,
-        ))
-    }
-
     /// Classifies bounded SQLite persistence shape without authorizing use.
     ///
     /// `Current` is only startup-routing evidence. Call [`Self::sqlite`] before
-    /// resume, mutation, or recovery. Call [`Self::sqlite_verified`] before any
-    /// integrity-clean claim.
+    /// resume, mutation, or recovery.
     ///
     /// # Errors
     ///

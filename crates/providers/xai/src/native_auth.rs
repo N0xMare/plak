@@ -4070,9 +4070,7 @@ fn route_credential_authority_id(store: &PrivateCredentialStore) -> String {
     let mut hasher = Sha256::new();
     hasher.update(store.path().as_os_str().as_encoded_bytes());
     hasher.update(b"\0xai-route-credential-authority-v2\0");
-    if let Some(slot) = store.slot_id() {
-        hasher.update(slot.as_str().as_bytes());
-    }
+    hasher.update(store.slot_id().as_str().as_bytes());
     let mut encoded = String::from("plak-native-xai-route:");
     for byte in hasher.finalize() {
         use std::fmt::Write as _;

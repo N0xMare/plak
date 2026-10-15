@@ -24,44 +24,15 @@ use crate::{
     CredentialStatus, CredentialValueError, SecretBytes, SubscriptionIntegrationProfileId,
 };
 
-const FORMAT_VERSION_V1: u32 = 1;
-const FORMAT_VERSION_V2: u32 = 2;
+const FORMAT_VERSION: u32 = 2;
 const MAX_RECORD_FILE_BYTES: u64 = 384 * 1024;
 const MAX_RECORD_NAME_BYTES: usize = 128;
 const MAX_LOCK_IDENTITY_RETRIES: usize = 4;
-
-#[cfg(any(
-    target_os = "android",
-    target_os = "dragonfly",
-    target_os = "freebsd",
-    target_os = "ios",
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "netbsd",
-    target_os = "openbsd"
-))]
-type DirectoryHandle = std::fs::File;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 struct StoreAuthority {
     device: u64,
     inode: u64,
-}
-
-#[derive(Clone, Eq, PartialEq)]
-enum StoreScope {
-    Account(AccountBinding),
-    Slot(CredentialSlotId),
-}
-
-/// Result of an explicit per-account bootstrap race.
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[non_exhaustive]
-pub enum CredentialBootstrap {
-    /// This caller durably created the initial record.
-    Created(CredentialFence),
-    /// Another caller already created a valid record for this exact scope.
-    Existing(CredentialFence),
 }
 
 /// A non-cloneable lease over one exact Ready credential record.
@@ -71,16 +42,6 @@ pub enum CredentialBootstrap {
 /// dropped. This type intentionally implements neither `Clone` nor Serde.
 pub struct ReadyCredentialLease {
     record: CredentialRecord,
-    #[cfg(any(
-        target_os = "android",
-        target_os = "dragonfly",
-        target_os = "freebsd",
-        target_os = "ios",
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "netbsd",
-        target_os = "openbsd"
-    ))]
     _lock: platform::StoreLock,
 }
 
@@ -107,7 +68,7 @@ impl fmt::Debug for ReadyCredentialLease {
 struct RefreshClaimCore {
     authority: StoreAuthority,
     record_name: OsString,
-    scope: StoreScope,
+    slot_id: CredentialSlotId,
     record: CredentialRecord,
     previous_generation: CredentialGeneration,
     previous_status: CredentialStatus,
@@ -423,7 +384,7 @@ impl fmt::Display for ClaimedHttpError {
 #[cfg(feature = "http-refresh")]
 impl std::error::Error for ClaimedHttpError {}
 
-/// An explicit-path store for exactly one profile/account credential record.
+/// An explicit-path store for exactly one profile/slot credential record.
 ///
 /// Mutations obtain the same per-record cross-process exclusive lock and a
 /// private-directory writer lock. The directory lock intentionally serializes
@@ -440,23 +401,17 @@ pub struct PrivateCredentialStore {
     lock_name: OsString,
     execution_lock_name: OsString,
     profile_id: SubscriptionIntegrationProfileId,
-    scope: StoreScope,
+    slot_id: CredentialSlotId,
     authority: StoreAuthority,
-    #[cfg(any(
-        target_os = "android",
-        target_os = "dragonfly",
-        target_os = "freebsd",
-        target_os = "ios",
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "netbsd",
-        target_os = "openbsd"
-    ))]
-    directory: DirectoryHandle,
+    directory: platform::DirectoryHandle,
 }
 
 impl PrivateCredentialStore {
-    /// Opens an explicitly selected record path and binds it to one scope.
+    /// Opens a restartable selected-account slot at an explicit record path.
+    ///
+    /// The slot is a local selector; each record separately stores the
+    /// actual provider-derived [`AccountBinding`]. No account value is inferred
+    /// from the slot and no ambient path discovery occurs.
     ///
     /// The record may be absent, but its parent directory must already exist,
     /// be owned by the effective user, have mode `0700`, and contain no symlink
@@ -467,85 +422,6 @@ impl PrivateCredentialStore {
     ///
     /// Fails closed when the platform cannot provide the required semantics or
     /// when the explicit path or private directory is unsafe.
-    pub fn open(
-        path: impl Into<PathBuf>,
-        profile_id: SubscriptionIntegrationProfileId,
-        account_binding: AccountBinding,
-    ) -> Result<Self, PrivateStoreError> {
-        let explicit_path = path.into();
-        let (path, record_name, lock_name, execution_lock_name) =
-            validate_explicit_path(&explicit_path)?;
-
-        #[cfg(any(
-            target_os = "android",
-            target_os = "dragonfly",
-            target_os = "freebsd",
-            target_os = "ios",
-            target_os = "linux",
-            target_os = "macos",
-            target_os = "netbsd",
-            target_os = "openbsd"
-        ))]
-        {
-            let (directory, authority) = platform::open_private_directory(&path)?;
-            Ok(Self {
-                path,
-                record_name,
-                lock_name,
-                execution_lock_name,
-                profile_id,
-                scope: StoreScope::Account(account_binding),
-                authority,
-                directory,
-            })
-        }
-
-        #[cfg(not(any(
-            target_os = "android",
-            target_os = "dragonfly",
-            target_os = "freebsd",
-            target_os = "ios",
-            target_os = "linux",
-            target_os = "macos",
-            target_os = "netbsd",
-            target_os = "openbsd"
-        )))]
-        {
-            let _ = (
-                path,
-                record_name,
-                lock_name,
-                execution_lock_name,
-                profile_id,
-                account_binding,
-            );
-            Err(PrivateStoreError::UnsupportedPlatform)
-        }
-    }
-
-    /// Alias for [`Self::open`] emphasizing that all configuration is explicit.
-    ///
-    /// # Errors
-    ///
-    /// Returns the same errors as [`Self::open`].
-    pub fn new(
-        path: impl Into<PathBuf>,
-        profile_id: SubscriptionIntegrationProfileId,
-        account_binding: AccountBinding,
-    ) -> Result<Self, PrivateStoreError> {
-        Self::open(path, profile_id, account_binding)
-    }
-
-    /// Opens a restartable selected-account slot using strict v2 storage.
-    ///
-    /// The slot is a local selector; each v2 record separately stores the
-    /// actual provider-derived [`AccountBinding`]. No account value is inferred
-    /// from the slot and no ambient path discovery occurs.
-    ///
-    /// # Errors
-    ///
-    /// Returns the same explicit-path and private-directory errors as
-    /// [`Self::open`]. A v1 document is never reinterpreted as a slot document.
     pub fn open_slot(
         path: impl Into<PathBuf>,
         profile_id: SubscriptionIntegrationProfileId,
@@ -554,52 +430,17 @@ impl PrivateCredentialStore {
         let explicit_path = path.into();
         let (path, record_name, lock_name, execution_lock_name) =
             validate_explicit_path(&explicit_path)?;
-
-        #[cfg(any(
-            target_os = "android",
-            target_os = "dragonfly",
-            target_os = "freebsd",
-            target_os = "ios",
-            target_os = "linux",
-            target_os = "macos",
-            target_os = "netbsd",
-            target_os = "openbsd"
-        ))]
-        {
-            let (directory, authority) = platform::open_private_directory(&path)?;
-            Ok(Self {
-                path,
-                record_name,
-                lock_name,
-                execution_lock_name,
-                profile_id,
-                scope: StoreScope::Slot(slot_id),
-                authority,
-                directory,
-            })
-        }
-
-        #[cfg(not(any(
-            target_os = "android",
-            target_os = "dragonfly",
-            target_os = "freebsd",
-            target_os = "ios",
-            target_os = "linux",
-            target_os = "macos",
-            target_os = "netbsd",
-            target_os = "openbsd"
-        )))]
-        {
-            let _ = (
-                path,
-                record_name,
-                lock_name,
-                execution_lock_name,
-                profile_id,
-                slot_id,
-            );
-            Err(PrivateStoreError::UnsupportedPlatform)
-        }
+        let (directory, authority) = platform::open_private_directory(&path)?;
+        Ok(Self {
+            path,
+            record_name,
+            lock_name,
+            execution_lock_name,
+            profile_id,
+            slot_id,
+            authority,
+            directory,
+        })
     }
 
     /// Returns the normalized explicit record path.
@@ -614,25 +455,13 @@ impl PrivateCredentialStore {
         &self.profile_id
     }
 
-    /// Returns the fixed account scope for a legacy v1 handle.
+    /// Returns the selected-account slot this handle is bound to.
     ///
-    /// A v2 selected slot returns `None` because its actual account is stored
-    /// in each credential record and may change only through explicit switch.
+    /// The actual account is stored in each credential record and may change
+    /// only through [`Self::replace_selected_login`].
     #[must_use]
-    pub const fn account_binding(&self) -> Option<&AccountBinding> {
-        match &self.scope {
-            StoreScope::Account(account) => Some(account),
-            StoreScope::Slot(_) => None,
-        }
-    }
-
-    /// Returns the selected-account slot for a v2 store.
-    #[must_use]
-    pub const fn slot_id(&self) -> Option<&CredentialSlotId> {
-        match &self.scope {
-            StoreScope::Account(_) => None,
-            StoreScope::Slot(slot) => Some(slot),
-        }
+    pub const fn slot_id(&self) -> &CredentialSlotId {
+        &self.slot_id
     }
 
     /// Returns the lock path for security inspection and operational cleanup.
@@ -653,7 +482,7 @@ impl PrivateCredentialStore {
     /// # Errors
     ///
     /// Rejects unsafe filesystem objects, malformed or unknown formats,
-    /// oversized data, and foreign profile/account records.
+    /// oversized data, and foreign profile/slot records.
     pub fn load(&self) -> Result<Option<CredentialFence>, PrivateStoreError> {
         self.with_shared_lock(
             |store| Ok(platform::load_record(store)?.map(|record| record.fence())),
@@ -710,38 +539,11 @@ impl PrivateCredentialStore {
     /// Returns [`PrivateStoreError::StoreBusy`] when the store lock is
     /// contended and otherwise preserves [`Self::load`]'s validation errors.
     pub fn try_load(&self) -> Result<Option<CredentialFence>, PrivateStoreError> {
-        #[cfg(any(
-            target_os = "android",
-            target_os = "dragonfly",
-            target_os = "freebsd",
-            target_os = "ios",
-            target_os = "linux",
-            target_os = "macos",
-            target_os = "netbsd",
-            target_os = "openbsd"
-        ))]
-        {
-            let lock = platform::lock_shared(self, true)?.ok_or(PrivateStoreError::StoreBusy)?;
-            platform::verify_lock_authority(self, &lock)?;
-            let result =
-                platform::load_record(self).map(|record| record.map(|value| value.fence()));
-            platform::verify_lock_authority(self, &lock)?;
-            result
-        }
-
-        #[cfg(not(any(
-            target_os = "android",
-            target_os = "dragonfly",
-            target_os = "freebsd",
-            target_os = "ios",
-            target_os = "linux",
-            target_os = "macos",
-            target_os = "netbsd",
-            target_os = "openbsd"
-        )))]
-        {
-            Err(PrivateStoreError::UnsupportedPlatform)
-        }
+        let lock = platform::lock_shared(self, true)?.ok_or(PrivateStoreError::StoreBusy)?;
+        platform::verify_lock_authority(self, &lock)?;
+        let result = platform::load_record(self).map(|record| record.map(|value| value.fence()));
+        platform::verify_lock_authority(self, &lock)?;
+        result
     }
 
     /// Loads only the current credential lifecycle status under lock.
@@ -753,13 +555,9 @@ impl PrivateCredentialStore {
         self.load().map(|fence| fence.map(|value| value.status()))
     }
 
-    /// Initializes an absent store with one validated record.
-    ///
-    /// # Errors
-    ///
-    /// Rejects foreign scope, an existing record, or unsafe storage.
-    pub fn initialize(&self, record: &CredentialRecord) -> Result<(), PrivateStoreError> {
-        self.require_account_store()?;
+    /// Seeds an absent store with a record in any lifecycle state.
+    #[cfg(test)]
+    fn initialize(&self, record: &CredentialRecord) -> Result<(), PrivateStoreError> {
         self.require_scope(record)?;
         self.with_lock(|store| {
             if platform::load_record(store)?.is_some() {
@@ -773,10 +571,9 @@ impl PrivateCredentialStore {
     ///
     /// # Errors
     ///
-    /// Rejects non-slot stores, foreign profiles, existing records, or unsafe
-    /// storage.
+    /// Rejects foreign profiles, non-Ready records, existing records, or
+    /// unsafe storage.
     pub fn initialize_selected(&self, record: &CredentialRecord) -> Result<(), PrivateStoreError> {
-        self.require_slot_store()?;
         self.require_scope(record)?;
         if record.status() != CredentialStatus::Ready {
             return Err(PrivateStoreError::CredentialNotReady);
@@ -786,55 +583,6 @@ impl PrivateCredentialStore {
                 return Err(PrivateStoreError::AlreadyInitialized);
             }
             platform::write_record(store, record)
-        })
-    }
-
-    /// Races to bootstrap this explicit profile/account store.
-    ///
-    /// Exactly one concurrent caller receives [`CredentialBootstrap::Created`].
-    /// Other callers reload the winner under the same exclusive lock and
-    /// receive only its credential-free fence.
-    ///
-    /// # Errors
-    ///
-    /// Rejects a foreign candidate or an unsafe/malformed existing store.
-    pub fn bootstrap(
-        &self,
-        candidate: &CredentialRecord,
-    ) -> Result<CredentialBootstrap, PrivateStoreError> {
-        self.require_account_store()?;
-        self.require_scope(candidate)?;
-        self.with_lock(|store| {
-            if let Some(existing) = platform::load_record(store)? {
-                Ok(CredentialBootstrap::Existing(existing.fence()))
-            } else {
-                platform::write_record(store, candidate)?;
-                Ok(CredentialBootstrap::Created(candidate.fence()))
-            }
-        })
-    }
-
-    /// Races to bootstrap an explicit selected-account slot.
-    ///
-    /// # Errors
-    ///
-    /// Rejects non-slot stores, foreign profiles, or unsafe/malformed storage.
-    pub fn bootstrap_selected(
-        &self,
-        candidate: &CredentialRecord,
-    ) -> Result<CredentialBootstrap, PrivateStoreError> {
-        self.require_slot_store()?;
-        self.require_scope(candidate)?;
-        if candidate.status() != CredentialStatus::Ready {
-            return Err(PrivateStoreError::CredentialNotReady);
-        }
-        self.with_lock(|store| {
-            if let Some(existing) = platform::load_record(store)? {
-                Ok(CredentialBootstrap::Existing(existing.fence()))
-            } else {
-                platform::write_record(store, candidate)?;
-                Ok(CredentialBootstrap::Created(candidate.fence()))
-            }
         })
     }
 
@@ -857,34 +605,8 @@ impl PrivateCredentialStore {
             return Err(PrivateStoreError::CredentialNotReady);
         }
 
-        #[cfg(any(
-            target_os = "android",
-            target_os = "dragonfly",
-            target_os = "freebsd",
-            target_os = "ios",
-            target_os = "linux",
-            target_os = "macos",
-            target_os = "netbsd",
-            target_os = "openbsd"
-        ))]
-        {
-            let lock = platform::lock_shared(self, false)?.ok_or(PrivateStoreError::LockFailed)?;
-            self.ready_lease_under_lock(expected, lock)
-        }
-
-        #[cfg(not(any(
-            target_os = "android",
-            target_os = "dragonfly",
-            target_os = "freebsd",
-            target_os = "ios",
-            target_os = "linux",
-            target_os = "macos",
-            target_os = "netbsd",
-            target_os = "openbsd"
-        )))]
-        {
-            Err(PrivateStoreError::UnsupportedPlatform)
-        }
+        let lock = platform::lock_shared(self, false)?.ok_or(PrivateStoreError::LockFailed)?;
+        self.ready_lease_under_lock(expected, lock)
     }
 
     /// Attempts to acquire a shared Ready lease without waiting.
@@ -904,36 +626,10 @@ impl PrivateCredentialStore {
             return Err(PrivateStoreError::CredentialNotReady);
         }
 
-        #[cfg(any(
-            target_os = "android",
-            target_os = "dragonfly",
-            target_os = "freebsd",
-            target_os = "ios",
-            target_os = "linux",
-            target_os = "macos",
-            target_os = "netbsd",
-            target_os = "openbsd"
-        ))]
-        {
-            let Some(lock) = platform::lock_shared(self, true)? else {
-                return Ok(None);
-            };
-            self.ready_lease_under_lock(expected, lock).map(Some)
-        }
-
-        #[cfg(not(any(
-            target_os = "android",
-            target_os = "dragonfly",
-            target_os = "freebsd",
-            target_os = "ios",
-            target_os = "linux",
-            target_os = "macos",
-            target_os = "netbsd",
-            target_os = "openbsd"
-        )))]
-        {
-            Err(PrivateStoreError::UnsupportedPlatform)
-        }
+        let Some(lock) = platform::lock_shared(self, true)? else {
+            return Ok(None);
+        };
+        self.ready_lease_under_lock(expected, lock).map(Some)
     }
 
     /// Atomically replaces the record using monotonic generation CAS.
@@ -967,9 +663,7 @@ impl PrivateCredentialStore {
             {
                 return Err(PrivateStoreError::CredentialQuarantined);
             }
-            if matches!(self.scope, StoreScope::Slot(_))
-                && replacement.account_binding() != current.account_binding()
-            {
+            if replacement.account_binding() != current.account_binding() {
                 return Err(PrivateStoreError::ForeignAccount);
             }
             platform::write_record(store, replacement)
@@ -985,14 +679,13 @@ impl PrivateCredentialStore {
     ///
     /// # Errors
     ///
-    /// Rejects non-slot stores, stale fences, non-Ready records, generation
-    /// jumps, foreign profiles, or unsafe storage.
+    /// Rejects stale fences, non-Ready records, generation jumps, foreign
+    /// profiles, or unsafe storage.
     pub fn replace_selected_login(
         &self,
         expected: &CredentialFence,
         replacement: CredentialRecord,
     ) -> Result<CredentialFence, PrivateStoreError> {
-        self.require_slot_store()?;
         self.require_fence_scope(expected)?;
         self.require_scope(&replacement)?;
         if replacement.status() != CredentialStatus::Ready {
@@ -1013,19 +706,6 @@ impl PrivateCredentialStore {
             platform::write_record(store, &replacement)?;
             Ok(replacement.fence())
         })
-    }
-
-    /// Alias for [`Self::replace`] naming its compare-and-swap semantics.
-    ///
-    /// # Errors
-    ///
-    /// Returns the same errors as [`Self::replace`].
-    pub fn compare_and_swap(
-        &self,
-        expected_generation: CredentialGeneration,
-        replacement: &CredentialRecord,
-    ) -> Result<(), PrivateStoreError> {
-        self.replace(expected_generation, replacement)
     }
 
     /// Begins refresh from one exact credential fence.
@@ -1126,10 +806,10 @@ impl PrivateCredentialStore {
         Ok(Some(record_lock))
     }
 
-    /// Begins refresh using generation CAS for compatibility-oriented callers.
+    /// Begins refresh using generation CAS.
     ///
-    /// Profile and account are still fixed by this store handle; the current
-    /// record must be Ready or `RefreshRequired`.
+    /// The profile is fixed by this store handle; the current record must be
+    /// Ready or `RefreshRequired`.
     ///
     /// # Errors
     ///
@@ -1624,7 +1304,7 @@ impl PrivateCredentialStore {
 
     /// Offline local logout tombstone (no network). Absent → `SignedOut`.
     ///
-    /// An explicitly selected v2 slot may contain a prior profile. Local
+    /// An explicitly selected slot may contain a prior profile. Local
     /// logout retires that record into an empty current-profile tombstone; it
     /// never grants authority to load, refresh, or reuse the old payload.
     ///
@@ -1674,11 +1354,6 @@ impl PrivateCredentialStore {
         if record.profile_id() != &self.profile_id {
             return Err(PrivateStoreError::ForeignProfile);
         }
-        if let StoreScope::Account(account) = &self.scope
-            && record.account_binding() != account
-        {
-            return Err(PrivateStoreError::ForeignAccount);
-        }
         Ok(())
     }
 
@@ -1686,28 +1361,7 @@ impl PrivateCredentialStore {
         if fence.profile_id() != &self.profile_id {
             return Err(PrivateStoreError::ForeignProfile);
         }
-        if let StoreScope::Account(account) = &self.scope
-            && fence.account_binding() != account
-        {
-            return Err(PrivateStoreError::ForeignAccount);
-        }
         Ok(())
-    }
-
-    fn require_account_store(&self) -> Result<(), PrivateStoreError> {
-        if matches!(&self.scope, StoreScope::Account(_)) {
-            Ok(())
-        } else {
-            Err(PrivateStoreError::WrongStoreKind)
-        }
-    }
-
-    fn require_slot_store(&self) -> Result<(), PrivateStoreError> {
-        if matches!(&self.scope, StoreScope::Slot(_)) {
-            Ok(())
-        } else {
-            Err(PrivateStoreError::WrongStoreKind)
-        }
     }
 
     fn claim_loaded_record(
@@ -1741,7 +1395,7 @@ impl PrivateCredentialStore {
             core: RefreshClaimCore {
                 authority: self.authority,
                 record_name: self.record_name.clone(),
-                scope: self.scope.clone(),
+                slot_id: self.slot_id.clone(),
                 record: current,
                 previous_generation,
                 previous_status,
@@ -1805,7 +1459,7 @@ impl PrivateCredentialStore {
     fn require_claim_scope(&self, claim: &RefreshClaimCore) -> Result<(), PrivateStoreError> {
         if claim.authority != self.authority
             || claim.record_name != self.record_name
-            || claim.scope != self.scope
+            || claim.slot_id != self.slot_id
         {
             return Err(PrivateStoreError::RefreshClaimMismatch);
         }
@@ -1827,16 +1481,6 @@ impl PrivateCredentialStore {
         Ok(())
     }
 
-    #[cfg(any(
-        target_os = "android",
-        target_os = "dragonfly",
-        target_os = "freebsd",
-        target_os = "ios",
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "netbsd",
-        target_os = "openbsd"
-    ))]
     fn ready_lease_under_lock(
         &self,
         expected: &CredentialFence,
@@ -1856,16 +1500,6 @@ impl PrivateCredentialStore {
         })
     }
 
-    #[cfg(any(
-        target_os = "android",
-        target_os = "dragonfly",
-        target_os = "freebsd",
-        target_os = "ios",
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "netbsd",
-        target_os = "openbsd"
-    ))]
     fn with_lock<T>(
         &self,
         operation: impl FnOnce(&Self) -> Result<T, PrivateStoreError>,
@@ -1877,16 +1511,6 @@ impl PrivateCredentialStore {
         result
     }
 
-    #[cfg(any(
-        target_os = "android",
-        target_os = "dragonfly",
-        target_os = "freebsd",
-        target_os = "ios",
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "netbsd",
-        target_os = "openbsd"
-    ))]
     fn with_shared_lock<T>(
         &self,
         operation: impl FnOnce(&Self) -> Result<T, PrivateStoreError>,
@@ -1900,16 +1524,6 @@ impl PrivateCredentialStore {
 
     /// Runs a claim-owned record write: exclusive on the record lock file only,
     /// because the claim's execution lock already owns the private directory.
-    #[cfg(any(
-        target_os = "android",
-        target_os = "dragonfly",
-        target_os = "freebsd",
-        target_os = "ios",
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "netbsd",
-        target_os = "openbsd"
-    ))]
     fn with_claim_record_lock<T>(
         &self,
         claim: &RefreshClaimCore,
@@ -1922,58 +1536,6 @@ impl PrivateCredentialStore {
         platform::verify_lock_authority(self, &lock)?;
         platform::verify_lock_authority(self, &claim.execution_lock)?;
         result
-    }
-
-    #[cfg(not(any(
-        target_os = "android",
-        target_os = "dragonfly",
-        target_os = "freebsd",
-        target_os = "ios",
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "netbsd",
-        target_os = "openbsd"
-    )))]
-    fn with_lock<T>(
-        &self,
-        _operation: impl FnOnce(&Self) -> Result<T, PrivateStoreError>,
-    ) -> Result<T, PrivateStoreError> {
-        Err(PrivateStoreError::UnsupportedPlatform)
-    }
-
-    #[cfg(not(any(
-        target_os = "android",
-        target_os = "dragonfly",
-        target_os = "freebsd",
-        target_os = "ios",
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "netbsd",
-        target_os = "openbsd"
-    )))]
-    fn with_shared_lock<T>(
-        &self,
-        _operation: impl FnOnce(&Self) -> Result<T, PrivateStoreError>,
-    ) -> Result<T, PrivateStoreError> {
-        Err(PrivateStoreError::UnsupportedPlatform)
-    }
-
-    #[cfg(not(any(
-        target_os = "android",
-        target_os = "dragonfly",
-        target_os = "freebsd",
-        target_os = "ios",
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "netbsd",
-        target_os = "openbsd"
-    )))]
-    fn with_claim_record_lock<T>(
-        &self,
-        _claim: &RefreshClaimCore,
-        _operation: impl FnOnce(&Self) -> Result<T, PrivateStoreError>,
-    ) -> Result<T, PrivateStoreError> {
-        Err(PrivateStoreError::UnsupportedPlatform)
     }
 }
 
@@ -2046,15 +1608,12 @@ pub enum PrivateStoreError {
     /// The stored or proposed profile does not match this handle.
     #[error("foreign credential profile")]
     ForeignProfile,
-    /// The stored or proposed account does not match this handle.
+    /// A generic replacement tried to change the stored actual account.
     #[error("foreign credential account")]
     ForeignAccount,
     /// The stored selected-account slot does not match this handle.
     #[error("foreign credential slot")]
     ForeignSlot,
-    /// An operation was used with the wrong v1 account/v2 slot store kind.
-    #[error("credential store kind mismatch")]
-    WrongStoreKind,
     /// The exact credential fence no longer matches stored state.
     #[error("credential fence mismatch")]
     FenceMismatch,
@@ -2158,26 +1717,7 @@ impl From<DiskStatus> for CredentialStatus {
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct StoredDocumentV1 {
-    format_version: u32,
-    profile_id: String,
-    account_binding: String,
-    generation: u64,
-    status: DiskStatus,
-    payload: String,
-}
-
-impl Drop for StoredDocumentV1 {
-    fn drop(&mut self) {
-        self.profile_id.zeroize();
-        self.account_binding.zeroize();
-        self.payload.zeroize();
-    }
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct StoredDocumentV2 {
+struct StoredDocument {
     format_version: u32,
     profile_id: String,
     slot_id: String,
@@ -2187,7 +1727,7 @@ struct StoredDocumentV2 {
     payload: String,
 }
 
-impl Drop for StoredDocumentV2 {
+impl Drop for StoredDocument {
     fn drop(&mut self) {
         self.profile_id.zeroize();
         self.slot_id.zeroize();
@@ -2205,31 +1745,16 @@ fn encode_record(
     store: &PrivateCredentialStore,
     record: &CredentialRecord,
 ) -> Result<Zeroizing<Vec<u8>>, PrivateStoreError> {
-    let encoded = match &store.scope {
-        StoreScope::Account(_) => {
-            let document = StoredDocumentV1 {
-                format_version: FORMAT_VERSION_V1,
-                profile_id: String::from(record.profile_id().as_str()),
-                account_binding: String::from(record.account_binding().as_str()),
-                generation: record.generation().get(),
-                status: record.status().into(),
-                payload: STANDARD.encode(record.payload().expose_secret()),
-            };
-            serde_json::to_vec(&document).map_err(|_| PrivateStoreError::InvalidRecord)?
-        }
-        StoreScope::Slot(slot) => {
-            let document = StoredDocumentV2 {
-                format_version: FORMAT_VERSION_V2,
-                profile_id: String::from(record.profile_id().as_str()),
-                slot_id: String::from(slot.as_str()),
-                account_binding: String::from(record.account_binding().as_str()),
-                generation: record.generation().get(),
-                status: record.status().into(),
-                payload: STANDARD.encode(record.payload().expose_secret()),
-            };
-            serde_json::to_vec(&document).map_err(|_| PrivateStoreError::InvalidRecord)?
-        }
+    let document = StoredDocument {
+        format_version: FORMAT_VERSION,
+        profile_id: String::from(record.profile_id().as_str()),
+        slot_id: String::from(store.slot_id.as_str()),
+        account_binding: String::from(record.account_binding().as_str()),
+        generation: record.generation().get(),
+        status: record.status().into(),
+        payload: STANDARD.encode(record.payload().expose_secret()),
     };
+    let encoded = serde_json::to_vec(&document).map_err(|_| PrivateStoreError::InvalidRecord)?;
     if u64::try_from(encoded.len()).map_or(true, |length| length > MAX_RECORD_FILE_BYTES) {
         return Err(PrivateStoreError::RecordTooLarge);
     }
@@ -2242,39 +1767,23 @@ fn decode_record(
 ) -> Result<CredentialRecord, PrivateStoreError> {
     let probe: VersionProbe =
         serde_json::from_slice(bytes).map_err(|_| PrivateStoreError::MalformedRecord)?;
-    match (&store.scope, probe.format_version) {
-        (StoreScope::Account(_), FORMAT_VERSION_V1) => {
-            let mut document: StoredDocumentV1 =
-                serde_json::from_slice(bytes).map_err(|_| PrivateStoreError::MalformedRecord)?;
-            decode_document(
-                &mut document.profile_id,
-                &mut document.account_binding,
-                document.generation,
-                document.status,
-                &mut document.payload,
-            )
-        }
-        (StoreScope::Slot(expected_slot), FORMAT_VERSION_V2) => {
-            let mut document: StoredDocumentV2 =
-                serde_json::from_slice(bytes).map_err(|_| PrivateStoreError::MalformedRecord)?;
-            let slot = CredentialSlotId::new(std::mem::take(&mut document.slot_id))
-                .map_err(|_| PrivateStoreError::MalformedRecord)?;
-            if &slot != expected_slot {
-                return Err(PrivateStoreError::ForeignSlot);
-            }
-            decode_document(
-                &mut document.profile_id,
-                &mut document.account_binding,
-                document.generation,
-                document.status,
-                &mut document.payload,
-            )
-        }
-        (StoreScope::Account(_), FORMAT_VERSION_V2) | (StoreScope::Slot(_), FORMAT_VERSION_V1) => {
-            Err(PrivateStoreError::WrongStoreKind)
-        }
-        _ => Err(PrivateStoreError::UnsupportedVersion),
+    if probe.format_version != FORMAT_VERSION {
+        return Err(PrivateStoreError::UnsupportedVersion);
     }
+    let mut document: StoredDocument =
+        serde_json::from_slice(bytes).map_err(|_| PrivateStoreError::MalformedRecord)?;
+    let slot = CredentialSlotId::new(std::mem::take(&mut document.slot_id))
+        .map_err(|_| PrivateStoreError::MalformedRecord)?;
+    if slot != store.slot_id {
+        return Err(PrivateStoreError::ForeignSlot);
+    }
+    decode_document(
+        &mut document.profile_id,
+        &mut document.account_binding,
+        document.generation,
+        document.status,
+        &mut document.payload,
+    )
 }
 
 fn decode_document(
@@ -2331,9 +1840,11 @@ mod platform {
 
     use super::*;
 
+    pub(super) type DirectoryHandle = File;
+
     pub(super) fn open_private_directory(
         path: &Path,
-    ) -> Result<(File, StoreAuthority), PrivateStoreError> {
+    ) -> Result<(DirectoryHandle, StoreAuthority), PrivateStoreError> {
         let parent = path.parent().ok_or(PrivateStoreError::InvalidPath)?;
         let root = rustix::fs::open(
             "/",
@@ -2836,16 +2347,6 @@ mod platform {
             return Err(PrivateStoreError::UnsafeRecord);
         }
         let record = decode_record(store, &bytes)?;
-        if matches!(&store.scope, StoreScope::Account(_))
-            && record.profile_id() != &store.profile_id
-        {
-            return Err(PrivateStoreError::ForeignProfile);
-        }
-        if let StoreScope::Account(account) = &store.scope
-            && record.account_binding() != account
-        {
-            return Err(PrivateStoreError::ForeignAccount);
-        }
         Ok(Some(record))
     }
 
@@ -3007,7 +2508,27 @@ mod platform {
 mod platform {
     use super::*;
 
+    /// Uninhabited: no store handle can be constructed on this target.
+    pub(super) type DirectoryHandle = std::convert::Infallible;
+
     pub(super) struct StoreLock;
+
+    pub(super) fn open_private_directory(
+        _path: &Path,
+    ) -> Result<(DirectoryHandle, StoreAuthority), PrivateStoreError> {
+        Err(PrivateStoreError::UnsupportedPlatform)
+    }
+
+    pub(super) fn lock(_store: &PrivateCredentialStore) -> Result<StoreLock, PrivateStoreError> {
+        Err(PrivateStoreError::UnsupportedPlatform)
+    }
+
+    pub(super) fn lock_shared(
+        _store: &PrivateCredentialStore,
+        _nonblocking: bool,
+    ) -> Result<Option<StoreLock>, PrivateStoreError> {
+        Err(PrivateStoreError::UnsupportedPlatform)
+    }
 
     impl StoreLock {
         pub(super) fn file_identity(&self) -> Result<StoreAuthority, PrivateStoreError> {
@@ -3104,6 +2625,7 @@ mod tests {
         directory: TempDir,
         path: PathBuf,
         profile: SubscriptionIntegrationProfileId,
+        slot: CredentialSlotId,
         account: AccountBinding,
     }
 
@@ -3115,12 +2637,13 @@ mod tests {
                 path: directory.path().join("credentials.json"),
                 directory,
                 profile: SubscriptionIntegrationProfileId::new("profile")?,
+                slot: CredentialSlotId::new("primary")?,
                 account: AccountBinding::new("opaque-account")?,
             })
         }
 
         fn store(&self) -> Result<PrivateCredentialStore, PrivateStoreError> {
-            PrivateCredentialStore::open(&self.path, self.profile.clone(), self.account.clone())
+            PrivateCredentialStore::open_slot(&self.path, self.profile.clone(), self.slot.clone())
         }
 
         fn record(
@@ -3329,7 +2852,7 @@ mod tests {
             Err(PrivateStoreError::CredentialQuarantined)
         );
         assert_eq!(
-            restarted.compare_and_swap(unknown.generation(), &replacement),
+            restarted.replace(unknown.generation(), &replacement),
             Err(PrivateStoreError::CredentialQuarantined)
         );
         assert_eq!(restarted.load()?.ok_or("quarantine was lost")?, unknown);
@@ -3737,7 +3260,8 @@ mod tests {
     }
 
     #[test]
-    fn concurrent_bootstrap_has_one_explicit_winner() -> Result<(), Box<dyn std::error::Error>> {
+    fn concurrent_initialization_has_one_explicit_winner() -> Result<(), Box<dyn std::error::Error>>
+    {
         let fixture = Fixture::new()?;
         let barrier = Arc::new(Barrier::new(3));
         let mut workers = Vec::new();
@@ -3756,25 +3280,19 @@ mod tests {
                 )
                 .map_err(|_| PrivateStoreError::InvalidRecord)?;
                 barrier.wait();
-                store.bootstrap(&candidate)
+                store.initialize_selected(&candidate)
             }));
         }
         barrier.wait();
         let outcomes = workers
             .into_iter()
-            .map(|worker| worker.join().map_err(|_| "bootstrap worker panicked"))
+            .map(|worker| worker.join().map_err(|_| "initialization worker panicked"))
             .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(outcomes.iter().filter(|outcome| outcome.is_ok()).count(), 1);
         assert_eq!(
             outcomes
                 .iter()
-                .filter(|outcome| matches!(outcome, Ok(CredentialBootstrap::Created(_))))
-                .count(),
-            1
-        );
-        assert_eq!(
-            outcomes
-                .iter()
-                .filter(|outcome| matches!(outcome, Ok(CredentialBootstrap::Existing(_))))
+                .filter(|outcome| matches!(outcome, Err(PrivateStoreError::AlreadyInitialized)))
                 .count(),
             1
         );
@@ -3898,10 +3416,10 @@ mod tests {
         fs::set_permissions(&actual, fs::Permissions::from_mode(0o700))?;
         let alias = root.path().join("alias");
         symlink(&actual, &alias)?;
-        let result = PrivateCredentialStore::open(
+        let result = PrivateCredentialStore::open_slot(
             alias.join("credentials.json"),
             SubscriptionIntegrationProfileId::new("profile")?,
-            AccountBinding::new("account")?,
+            CredentialSlotId::new("primary")?,
         );
         assert!(matches!(result, Err(PrivateStoreError::UnsafeDirectory)));
         Ok(())
@@ -3918,7 +3436,7 @@ mod tests {
 
         let rotation = RotatedDirectory::replace(fixture.directory.path())?;
         assert_eq!(
-            store.compare_and_swap(CredentialGeneration::new(1)?, &replacement),
+            store.replace(CredentialGeneration::new(1)?, &replacement),
             Err(PrivateStoreError::UnsafeDirectory)
         );
         assert!(matches!(
@@ -3975,7 +3493,7 @@ mod tests {
         let before = fs::read(&fixture.path)?;
         let replacement = fixture.record(2, CredentialStatus::Ready, b"new")?;
         let (result, rotation) = run_after_blocked_directory_rotation(&fixture, move |store| {
-            store.compare_and_swap(
+            store.replace(
                 CredentialGeneration::new(1).map_err(|_| PrivateStoreError::InvalidRecord)?,
                 &replacement,
             )
@@ -4049,10 +3567,10 @@ mod tests {
         };
         let ready = std::env::var_os(LOCK_HELPER_READY).ok_or("missing ready path")?;
         let release = std::env::var_os(LOCK_HELPER_RELEASE).ok_or("missing release path")?;
-        let store = PrivateCredentialStore::open(
+        let store = PrivateCredentialStore::open_slot(
             PathBuf::from(path),
             SubscriptionIntegrationProfileId::new("profile")?,
-            AccountBinding::new("opaque-account")?,
+            CredentialSlotId::new("primary")?,
         )?;
         if std::env::var_os(LOCK_HELPER_SHARED_LEASE).is_some() {
             let fence = store.load()?.ok_or("missing helper credential")?;
@@ -4178,14 +3696,6 @@ mod tests {
             json!({
                 "format_version": 999,
                 "profile_id": "profile",
-                "account_binding": "opaque-account",
-                "generation": 1,
-                "status": "ready",
-                "payload": "eA=="
-            }),
-            json!({
-                "format_version": 2,
-                "profile_id": "profile",
                 "slot_id": "primary",
                 "account_binding": "opaque-account",
                 "generation": 1,
@@ -4198,12 +3708,31 @@ mod tests {
                 "account_binding": "opaque-account",
                 "generation": 1,
                 "status": "ready",
+                "payload": "eA=="
+            }),
+            json!({
+                "format_version": 2,
+                "profile_id": "profile",
+                "slot_id": "primary",
+                "account_binding": "opaque-account",
+                "generation": 1,
+                "status": "ready",
                 "payload": "eA==",
                 "future_security_field": true
             }),
             json!({
-                "format_version": 1,
+                "format_version": 2,
                 "profile_id": "foreign",
+                "slot_id": "primary",
+                "account_binding": "opaque-account",
+                "generation": 1,
+                "status": "ready",
+                "payload": "eA=="
+            }),
+            json!({
+                "format_version": 2,
+                "profile_id": "profile",
+                "slot_id": "other-slot",
                 "account_binding": "opaque-account",
                 "generation": 1,
                 "status": "ready",
@@ -4212,9 +3741,10 @@ mod tests {
         ];
         let expected = [
             PrivateStoreError::UnsupportedVersion,
-            PrivateStoreError::WrongStoreKind,
+            PrivateStoreError::UnsupportedVersion,
             PrivateStoreError::MalformedRecord,
             PrivateStoreError::ForeignProfile,
+            PrivateStoreError::ForeignSlot,
         ];
         for (document, expected) in documents.into_iter().zip(expected) {
             fs::write(&fixture.path, serde_json::to_vec(&document)?)?;
@@ -4233,7 +3763,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_slot_v2_switches_accounts_only_through_exact_plus_one()
+    fn selected_slot_switches_accounts_only_through_exact_plus_one()
     -> Result<(), Box<dyn std::error::Error>> {
         let fixture = Fixture::new()?;
         let slot = CredentialSlotId::new("primary")?;
@@ -4248,10 +3778,6 @@ mod tests {
         assert_eq!(document["format_version"], 2);
         assert_eq!(document["slot_id"], "primary");
         assert_eq!(document["account_binding"], "opaque-account");
-        assert!(matches!(
-            fixture.store()?.load(),
-            Err(PrivateStoreError::WrongStoreKind)
-        ));
 
         let account_b = AccountBinding::new("actual-account-b")?;
         let before_switch = store.load()?.ok_or("missing selected account")?;
@@ -4292,19 +3818,6 @@ mod tests {
         let tombstone = store.load()?.ok_or("missing slot tombstone")?;
         assert_eq!(tombstone.account_binding(), &account_b);
         assert_eq!(tombstone.status(), CredentialStatus::Revoked);
-
-        let v1_fixture = Fixture::new()?;
-        v1_fixture.store()?.initialize(&v1_fixture.record(
-            1,
-            CredentialStatus::Ready,
-            b"legacy",
-        )?)?;
-        let slot_on_v1 =
-            PrivateCredentialStore::open_slot(&v1_fixture.path, v1_fixture.profile.clone(), slot)?;
-        assert!(matches!(
-            slot_on_v1.load(),
-            Err(PrivateStoreError::WrongStoreKind)
-        ));
         Ok(())
     }
 
@@ -4524,6 +4037,7 @@ mod tests {
             directory: TempDir,
             path: PathBuf,
             profile: SubscriptionIntegrationProfileId,
+            slot: CredentialSlotId,
             account: AccountBinding,
         }
 
@@ -4535,12 +4049,17 @@ mod tests {
                     path: directory.path().join("credentials.json"),
                     directory,
                     profile: SubscriptionIntegrationProfileId::new("profile")?,
+                    slot: CredentialSlotId::new("primary")?,
                     account: AccountBinding::new("opaque-account")?,
                 })
             }
 
             fn store(&self) -> Result<PrivateCredentialStore, PrivateStoreError> {
-                PrivateCredentialStore::open(&self.path, self.profile.clone(), self.account.clone())
+                PrivateCredentialStore::open_slot(
+                    &self.path,
+                    self.profile.clone(),
+                    self.slot.clone(),
+                )
             }
 
             fn record(
@@ -5380,58 +4899,6 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn same_path_cross_kind_claim_never_reaches_listener() -> ServerResult {
-            let endpoint = endpoint().await?;
-            let limits = Limits::default();
-            let client = client(endpoint.client_config, limits.clone())?;
-            let cross_kind = HttpFixture::new()?;
-            let slot = PrivateCredentialStore::open_slot(
-                &cross_kind.path,
-                cross_kind.profile.clone(),
-                CredentialSlotId::new("primary")?,
-            )?;
-            slot.initialize_selected(&cross_kind.record(
-                1,
-                CredentialStatus::Ready,
-                b"cross-kind-old",
-            )?)?;
-            let claim = slot.begin_refresh(&slot.load()?.ok_or("missing slot")?)?;
-            let account = cross_kind.store()?;
-            let cross_kind_error = account
-                .execute_claimed_http(
-                    claim,
-                    &client,
-                    request(endpoint.origin, &limits, "/cross-kind")?,
-                    control(),
-                )
-                .await
-                .err()
-                .ok_or("cross-kind exchange unexpectedly succeeded")?;
-            assert_eq!(
-                cross_kind_error.disposition(),
-                ClaimedHttpDisposition::ClaimRejected
-            );
-            assert_eq!(
-                cross_kind_error.store_error(),
-                Some(PrivateStoreError::RefreshClaimMismatch)
-            );
-            assert_eq!(cross_kind_error.transport_failure(), None);
-            drop(cross_kind_error);
-            assert_eq!(
-                load_raw_for_test(&slot)?
-                    .ok_or("missing cross-kind quarantine")?
-                    .status(),
-                CredentialStatus::RefreshOutcomeUnknown
-            );
-            assert!(
-                timeout(Duration::from_millis(100), endpoint.listener.accept())
-                    .await
-                    .is_err()
-            );
-            Ok(())
-        }
-
-        #[tokio::test]
         async fn stale_claim_cannot_restore_over_changed_unknown() -> ServerResult {
             let endpoint = endpoint().await?;
             let limits = Limits::default();
@@ -5622,10 +5089,10 @@ mod tests {
         -> ServerResult {
             let fixture = HttpFixture::new()?;
             let sibling_account = AccountBinding::new("sibling-account")?;
-            let sibling_store = PrivateCredentialStore::open(
+            let sibling_store = PrivateCredentialStore::open_slot(
                 fixture.directory.path().join("sibling.json"),
                 fixture.profile.clone(),
-                sibling_account.clone(),
+                fixture.slot.clone(),
             )?;
             let sibling_record = CredentialRecord::new(
                 fixture.profile.clone(),

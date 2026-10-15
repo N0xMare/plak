@@ -273,9 +273,8 @@ impl Default for SqliteStoreOptions {
 impl SqliteStoreOptions {
     /// Creates explicit semantic/object and actor-queue bounds.
     ///
-    /// Ordinary open admits shape, schema, and counters. Pass
-    /// [`Self::with_complete_verify_on_open`] before
-    /// any integrity-clean claim.
+    /// Open admits shape, schema, and counters; it does not reconstruct every
+    /// retained object, so ready time does not grow with retained history.
     #[must_use]
     pub const fn new(limits: MemoryStoreLimits, queue_capacity: NonZeroUsize) -> Self {
         Self {
@@ -296,23 +295,6 @@ impl SqliteStoreOptions {
     pub const fn queue_capacity(self) -> NonZeroUsize {
         self.queue_capacity
     }
-
-    /// Returns whether open reconstructs every object and receipt.
-    #[must_use]
-    pub const fn complete_verify_on_open(self) -> bool {
-        self.complete_verify_on_open
-    }
-
-    /// Completes object, receipt, and foreign-key verification at open.
-    ///
-    /// Use this before any integrity-clean claim.
-    /// Ordinary attach stays on the default so ready time does not grow with
-    /// retained history.
-    #[must_use]
-    pub const fn with_complete_verify_on_open(mut self, complete_verify_on_open: bool) -> Self {
-        self.complete_verify_on_open = complete_verify_on_open;
-        self
-    }
 }
 
 /// Local retained-state and accepted-mutation counters.
@@ -332,9 +314,8 @@ pub struct SqliteStoreStats {
 /// Bounded persistence-shape evidence for product startup admission.
 ///
 /// This classification is deliberately not semantic-integrity, recovery, or
-/// usability authority. Ordinary [`SqliteSessionStore::open`] admits shape,
-/// schema, and counters for attach. Only
-/// [`SqliteSessionStore::open_verified`] claims an integrity-clean handle.
+/// usability authority. [`SqliteSessionStore::open`] admits shape, schema, and
+/// counters for attach.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SqlitePersistenceShape {
     /// No database exists, or an existing private file has no `SQLite` objects.
@@ -687,8 +668,8 @@ impl SqliteSessionStore {
     /// Opens or creates a private fresh-schema database.
     ///
     /// This admits bounded shape, exact schema, and counters. It does not
-    /// reconstruct every retained object. Call [`Self::open_verified`] before
-    /// any integrity-clean claim.
+    /// reconstruct every retained object; complete verification is not a
+    /// product operation.
     ///
     /// # Errors
     ///
@@ -701,16 +682,25 @@ impl SqliteSessionStore {
         )
     }
 
-    /// Opens after complete object, receipt, and foreign-key verification.
+    /// Test support: opens after complete object, receipt, and foreign-key
+    /// verification inside the writer's admission transaction.
+    ///
+    /// Not a product operation. It holds the writer lock for an O(store)
+    /// reconstruction under the 30-second readiness window, so live writers
+    /// would see `BackendBusy` and a large store a readiness timeout.
     ///
     /// # Errors
     ///
     /// Returns a redaction-safe I/O, schema, or corruption error.
+    #[doc(hidden)]
     pub fn open_verified(path: impl AsRef<Path>) -> Result<Self, SessionStoreError> {
         Self::open_with_clock_and_options(
             path,
             Arc::new(SystemLeaseClock::new()?),
-            SqliteStoreOptions::default().with_complete_verify_on_open(true),
+            SqliteStoreOptions {
+                complete_verify_on_open: true,
+                ..SqliteStoreOptions::default()
+            },
         )
     }
 

@@ -454,10 +454,11 @@ quarantine and require a fresh login.
 
 ### 3.4 Isolation between accounts and routes
 
-A credential handle is scoped either to one account binding or to one selected
-account slot. **No account is inferred from a slot**: each record stores its own
-provider-derived account binding, and a record whose account or slot does not
-match the handle is refused as foreign.
+A credential handle is scoped to one integration profile and one selected
+account slot; there is no account-scoped store kind. **No account is inferred
+from a slot**: each record stores its own provider-derived account binding,
+which only an exact-generation login replacement may change, and a record whose
+profile or slot does not match the handle is refused as foreign.
 
 Subscription and separately billed API routes never silently share credentials,
 origins, accounting, or fallback. Credential authority selects one exact URL

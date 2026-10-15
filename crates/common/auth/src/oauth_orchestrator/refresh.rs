@@ -294,8 +294,9 @@ mod tests {
     };
     use crate::{
         AccountBinding, ClaimedHttpError, ClaimedHttpResponse, CredentialFence,
-        CredentialGeneration, CredentialRecord, CredentialStatus, PrivateCredentialStore,
-        PrivateStoreError, RefreshClaim, SecretBytes, SubscriptionIntegrationProfileId,
+        CredentialGeneration, CredentialRecord, CredentialSlotId, CredentialStatus,
+        PrivateCredentialStore, PrivateStoreError, RefreshClaim, SecretBytes,
+        SubscriptionIntegrationProfileId,
     };
 
     struct RecordingObserver {
@@ -455,7 +456,8 @@ mod tests {
         let path = directory.path().join("credential.json");
         let profile = SubscriptionIntegrationProfileId::new("profile")?;
         let account = AccountBinding::new("opaque-account")?;
-        let store = PrivateCredentialStore::open(&path, profile.clone(), account.clone())?;
+        let slot = CredentialSlotId::new("primary")?;
+        let store = PrivateCredentialStore::open_slot(&path, profile.clone(), slot)?;
         let record = CredentialRecord::new(
             profile,
             account,
@@ -463,7 +465,7 @@ mod tests {
             CredentialStatus::Ready,
             SecretBytes::new(b"payload".to_vec()),
         )?;
-        store.initialize(&record)?;
+        store.initialize_selected(&record)?;
         let fence = store.load()?.ok_or("missing record")?;
         Ok((directory, store, fence))
     }

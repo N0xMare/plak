@@ -1855,8 +1855,9 @@ mod tests {
     fn busy_store_fence_read_is_retried_after_writer_lease_clears()
     -> Result<(), Box<dyn std::error::Error>> {
         use plakous::auth::{
-            AccountBinding, CredentialGeneration, CredentialRecord, CredentialStatus,
-            PrivateCredentialStore, SecretBytes, SubscriptionIntegrationProfileId,
+            AccountBinding, CredentialGeneration, CredentialRecord, CredentialSlotId,
+            CredentialStatus, PrivateCredentialStore, SecretBytes,
+            SubscriptionIntegrationProfileId,
         };
         use plakous::model::{SubscriptionUsageRead, SubscriptionUsageUnavailable, Timestamp};
         use std::os::unix::fs::PermissionsExt as _;
@@ -1864,12 +1865,12 @@ mod tests {
         std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))?;
         let profile = SubscriptionIntegrationProfileId::new("usage-test-profile")?;
         let account = AccountBinding::new("usage-test-account")?;
-        let store = PrivateCredentialStore::open(
+        let store = PrivateCredentialStore::open_slot(
             directory.path().join("credential.json"),
             profile.clone(),
-            account.clone(),
+            CredentialSlotId::new("usage-test-slot")?,
         )?;
-        store.initialize(&CredentialRecord::new(
+        store.initialize_selected(&CredentialRecord::new(
             profile,
             account,
             CredentialGeneration::new(1)?,

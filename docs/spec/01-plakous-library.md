@@ -1205,13 +1205,23 @@ branch's integrity-sealed `branch_horizons` row (horizon and cumulative pruned
 checkpoints), queues the released roots in `gc_candidates`, and deletes the
 checkpoints. Session deletion queues its roots in the same transaction too.
 Neither acknowledgement waits for an object graph traversal or sweep.
+A `pruned_checkpoints` row lives until its session is deleted, so the table
+grows with every checkpoint a session has ever pruned: the bound is the
+session's lifetime, not its retained window. A reopened branch seeds its known
+prune horizon from `branch_horizons`, so reopening never re-prunes or re-records
+ids at or below that horizon.
 
 Schema 24 stores object metadata in a rowid `runtime_objects` table with an
 integer primary key, unique `(kind,codec,digest)` address and `byte_len`.
 `runtime_object_bytes` stores the payload by integer id; edges and checkpoint
 roots still reference the unique address. Accounting sums metadata lengths plus
 37 bytes per edge, without reading payload pages. Full verification checks
-payload presence, canonical bytes, exact lengths and foreign keys.
+payload presence, canonical bytes, exact lengths and foreign keys. It is test
+support only (the store's hidden `open_verified`), not a product operation and
+not on the facade: it runs inside the writer's admission transaction, so on a
+live store it would hold the writer lock for an O(store) reconstruction under
+the readiness window. Ordinary open admits shape, schema and counters; loads
+and read-only inspections validate the object graphs they touch.
 
 The persistent candidate queue is drained by bounded `IMMEDIATE` transactions:
 examine at most 256 candidates and delete at most 8 MiB of accounted bytes per
@@ -3057,6 +3067,15 @@ generation and, under the same compatibility lock, moves a cleared marker
 bound to exactly the replaced receipt (with a matching epoch and no
 process-local quarantine) onto it, so the login stays usable. An armed,
 mismatched or ambiguous marker is never moved and stays fail-closed.
+`NativeSubscriptions::status` reports a provider without storage as signed out
+without creating anything. Once the layout exists it takes the provider's
+exclusive compatibility lock, the same lock model resolution holds across its
+online refresh, so a status read can wait behind that exchange. The wait is
+intended: the status gate is not a pure read. A marker/epoch disagreement
+latches the sticky process-local recovery quarantine, and a cleared marker is
+re-pinned durably after a legitimate refresh. Both files are rewritten as a
+pair by login, clear and consent rebind, so an unlocked read could observe one
+half of that pair and latch a quarantine that no durable state justifies.
 `SubscriptionPaths` remains the explicit public layout input, and facade
 construction performs no filesystem or network I/O. Credential generations
 and secrets remain owned by the separate auth credential store.
@@ -3341,7 +3360,7 @@ the name of the environment variable that won, and there is no revocation call.
 
 ### 7.3 Refresh, generations, and quarantine
 
-Refresh is serialized by an in-process single-flight plus an account-scoped
+Refresh is serialized by an in-process single-flight plus a per-slot
 cross-process lock with monotonic generations. Before any refresh network call
 the credential slot records `RefreshOutcomeUnknown`; an ambiguous refresh
 leaves that state and blocks inference. Clock allowance is per vertical: xAI
