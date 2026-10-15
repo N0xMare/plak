@@ -1093,9 +1093,16 @@ jobs run before queued reads. A full lane returns `BackendBusy` without blocking
 the caller or consuming capacity in the other lane, and logs a WARN under target
 `plakous_store::sqlite_actor` naming the lane, its capacity and the overflows
 since the last such line: the first overflow, then at most one line per lane
-every 10 s, with no session content. Background housekeeping runs
-one step when both foreground queues are empty, or after 32 foreground jobs to
-prevent starvation; no second writer or connection is introduced. `usage()`
+every 10 s, with no session content. A request the exited actor can no longer
+take, or whose reply it dropped, returns `BackendUnavailable` and logs a WARN
+under the same target naming the lane and `reason=disconnected|reply_dropped`.
+Every failed SQLite operation logs a content-free WARN under
+`plakous_store::sqlite_operation`: SQLite's result code, or for errors rusqlite
+raises itself a static category (`no_rows`, `invalid_query`, `invalid_value`,
+`other_rusqlite`). Lookups that may find nothing read optionally, so a missing
+row anywhere else is `Corrupt`, not `BackendUnavailable`. Background
+housekeeping runs one step when both foreground queues are empty, or after 32
+foreground jobs to prevent starvation; no second writer or connection is introduced. `usage()`
 reads a shared counter snapshot without dispatching an actor job. The actor
 publishes the snapshot before acknowledging a mutation, including after an error
 that may have followed a committed transaction. SQLite's page cache is 64 MiB.
