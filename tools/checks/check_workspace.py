@@ -1012,6 +1012,8 @@ _SHARED_PLAKOUS_SYMBOLS = {
     "tools": {
         "ToolPreempt",
         "AlwaysAllowPolicy",
+        # A template's `mcp:<id>` names parse through the facade's server id.
+        "McpServerName",
         "ExecutionBackendError",
         "JobConfig",
         "JobHost",

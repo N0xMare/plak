@@ -91,6 +91,7 @@ pub mod prompt_inputs;
 pub mod runtime;
 pub(crate) mod storage_pressure;
 pub mod surface_protocol;
+pub mod tool_plan;
 pub mod tools;
 pub mod topology_extensions;
 pub mod topology_navigator;
