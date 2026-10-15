@@ -567,6 +567,8 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # detail, which may carry the provider's credential-filtered error
     # message; never request or response bodies.
     ("plakous-hosted", "src/runtime/events.rs"): {"warn"},
+    # A wake the session store refused logs its cause class, never content.
+    ("plakous-hosted", "src/runtime/host_loop/wake.rs"): {"warn"},
     ("plak", "src/sidecars/python_bundle.rs"): {"cfg"},
     # The sidecar's stdio loop multiplexes the client channel and the evaluator.
     # Presentation-only invariants and the per-frame tracing span.
