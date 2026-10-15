@@ -59,11 +59,37 @@ mod messages;
 mod model;
 mod route;
 
-pub use chat::*;
-pub use dialect::*;
-pub use discovery::*;
-pub use execution::*;
-pub use key_usage::*;
-pub use messages::*;
-pub use model::*;
-pub use route::*;
+pub use chat::{
+    CHAT_COMPLETIONS_FAMILY_ID, OPENROUTER_CHAT_COMPLETIONS_PATH, OPENROUTER_CHAT_PROTOCOL_ID,
+    OpenRouterChatBuildError, OpenRouterChatEndpointCandidate, OpenRouterChatHttpConfig,
+    OpenRouterChatLanguageModel, OpenRouterChatModelEvidence, OpenRouterChatProfile,
+    OpenRouterChatReasoningAlias, OpenRouterChatReasoningReplay, OpenRouterChatRoutingPolicy,
+    OpenRouterChatTarget, OpenRouterReasoningFacts, OpenRouterToolChoiceModes,
+};
+pub use dialect::{
+    OPENROUTER_RESPONSES_PATH, OPENROUTER_RESPONSES_PROTOCOL_ID, OpenRouterAccessMode,
+    OpenRouterDialect, OpenRouterRouteKind,
+};
+pub use discovery::{OpenRouterChatDiscoveryConfig, OpenRouterChatDiscoveryError};
+pub use execution::{
+    OpenRouterResponsesHttpConfig, OpenRouterResponsesLanguageModel,
+    OpenRouterResponsesLanguageModelConfigError,
+};
+pub use key_usage::{OpenRouterKeyUsage, OpenRouterKeyUsageError, decode_openrouter_key_usage};
+pub use messages::{
+    MESSAGES_FAMILY_ID, OPENROUTER_MESSAGES_PATH, OPENROUTER_MESSAGES_PROTOCOL_ID,
+    OpenRouterMessagesBuildError, OpenRouterMessagesHttpConfig, OpenRouterMessagesLanguageModel,
+    OpenRouterMessagesRoutingPolicy, OpenRouterMessagesTarget,
+};
+pub use model::{
+    OPENROUTER_RESPONSES_PROFILE, OpenRouterResponsesBuildError, OpenRouterResponsesRoutingPolicy,
+    OpenRouterResponsesTarget, compile_openrouter_responses_configuration,
+};
+pub use route::{
+    OpenRouterApiKey, OpenRouterApiKeyGenerationGrant, OpenRouterApiKeySource,
+    OpenRouterAttribution, OpenRouterAuthError, OpenRouterCatalogCredentialRequest,
+    OpenRouterChatCredentialRequest, OpenRouterChatRoute, OpenRouterChatRouteIdentity,
+    OpenRouterCredentialBinding, OpenRouterCredentialRequest, OpenRouterMessagesCredentialRequest,
+    OpenRouterOrigin, OpenRouterRetentionPolicy, OpenRouterRouteError, OpenRouterRoutingPolicy,
+    StaticOpenRouterApiKeySource,
+};

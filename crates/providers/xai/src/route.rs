@@ -33,6 +33,7 @@ use crate::{XaiAccessMode, XaiDialect, XaiRouteKind};
 const XAI_GROK_SUBSCRIPTION_RESPONSES_PATH: &str = "/v1/responses";
 
 /// Logs which runtime authority predicate rejected a revalidation.
+#[cfg(feature = "native-auth")]
 #[inline]
 pub(crate) fn log_authority_rejection(predicate: &'static str) {
     tracing::debug!(

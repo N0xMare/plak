@@ -234,8 +234,8 @@ fn agent(
 async fn production_api_executes_sonnet_and_opus_5_family_low_medium_through_agent() -> TestResult {
     for model in [
         crate::CLAUDE_SONNET_5_MODEL_ID,
-        crate::CLAUDE_OPUS_5_MODEL_ID,
-        crate::CLAUDE_OPUS_5_5_MODEL_ID,
+        crate::config::CLAUDE_OPUS_5_MODEL_ID,
+        crate::config::CLAUDE_OPUS_5_5_MODEL_ID,
     ] {
         for effort in [ReasoningEffort::Low, ReasoningEffort::Medium] {
             let body = SUCCESS_SSE.replace("claude-sonnet-5", model);

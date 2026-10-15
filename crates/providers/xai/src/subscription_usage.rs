@@ -11,12 +11,10 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 /// Exact read-only billing path in the reviewed official Grok Build source.
-pub const GROK_SUBSCRIPTION_USAGE_PATH: &str = "/v1/billing?format=credits";
-/// Official public source revision qualifying this decoder.
-pub const GROK_SUBSCRIPTION_USAGE_SOURCE_REVISION: &str =
-    "77cd7eb675ba911c225c3aaeeece3a20cbccc426";
+#[cfg(feature = "native-auth")]
+pub(crate) const GROK_SUBSCRIPTION_USAGE_PATH: &str = "/v1/billing?format=credits";
 /// Maximum body accepted by the usage control-plane decoder.
-pub const MAX_GROK_SUBSCRIPTION_USAGE_BODY_BYTES: usize = 256 * 1024;
+pub(crate) const MAX_GROK_SUBSCRIPTION_USAGE_BODY_BYTES: usize = 256 * 1024;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -10,14 +10,12 @@ use plakous_model::{HostedTool, ModelRequest, ReasoningEffort, ReasoningPolicy, 
 
 use crate::{ConfigError, OpenAiRoute, ResponsesFeature, StorageMode};
 
-/// Revision of the exact built-in `OpenAI` Platform model manifest.
-pub const OPENAI_PLATFORM_MODEL_MANIFEST_REVISION: &str = "openai-platform-models-2026-09-22-r3";
 /// The only harness profile admitted by this manifest revision.
-pub const OPENAI_GPT_56_PLATFORM_PROFILE_ID: &str = "openai.platform.gpt-5.6.2026-07-31.r2";
+pub(crate) const OPENAI_GPT_56_PLATFORM_PROFILE_ID: &str = "openai.platform.gpt-5.6.2026-07-31.r2";
 /// Reviewed GPT-6 Sol/Luna Responses profile.
-pub const OPENAI_GPT_6_PLATFORM_PROFILE_ID: &str = "openai.platform.gpt-6.2026-09-22.r1";
+pub(crate) const OPENAI_GPT_6_PLATFORM_PROFILE_ID: &str = "openai.platform.gpt-6.2026-09-22.r1";
 /// UTC second at which the official model documentation was reviewed.
-pub const OPENAI_PLATFORM_MODEL_MANIFEST_REVIEWED_AT_UNIX_SECONDS: u64 = 1_790_035_200;
+pub(crate) const OPENAI_PLATFORM_MODEL_MANIFEST_REVIEWED_AT_UNIX_SECONDS: u64 = 1_790_035_200;
 /// Fixed end of the 90-day compatibility window for this review.
 pub const OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS: u64 = 1_797_811_200;
 

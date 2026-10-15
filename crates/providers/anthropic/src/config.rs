@@ -19,50 +19,54 @@ use crate::{
 const MANUAL_THINKING_MINIMUM_TOKENS: u32 = 1_024;
 
 /// Immutable revision of the crate-reviewed Anthropic Platform admission manifest.
-pub const ANTHROPIC_PLATFORM_ADMISSION_REVISION: &str =
+pub(crate) const ANTHROPIC_PLATFORM_ADMISSION_REVISION: &str =
     "anthropic.platform.admission.2026-09-22.v3";
 /// UTC review time of the immutable admission manifest.
-pub const ANTHROPIC_PLATFORM_ADMISSION_REVIEWED_AT_SECONDS: u64 = 1_790_035_200;
+pub(crate) const ANTHROPIC_PLATFORM_ADMISSION_REVIEWED_AT_SECONDS: u64 = 1_790_035_200;
 /// Exclusive UTC expiry of the immutable admission manifest.
 ///
 /// A crate release with newly reviewed model facts is required after this time;
 /// resolving the same caller selection again cannot extend it.
-pub const ANTHROPIC_PLATFORM_ADMISSION_EXPIRES_AT_SECONDS: u64 = 1_821_571_200;
+pub(crate) const ANTHROPIC_PLATFORM_ADMISSION_EXPIRES_AT_SECONDS: u64 = 1_821_571_200;
 /// Exact remote model ID admitted by the current reviewed manifest.
 pub const CLAUDE_SONNET_4_6_MODEL_ID: &str = "claude-sonnet-4-6";
 /// Exact family identity admitted for [`CLAUDE_SONNET_4_6_MODEL_ID`].
-pub const CLAUDE_SONNET_4_FAMILY_ID: &str = "claude-4-sonnet";
+pub(crate) const CLAUDE_SONNET_4_FAMILY_ID: &str = "claude-4-sonnet";
 /// Conservative streaming/client-tools profile admitted by the current manifest.
-pub const CLAUDE_SONNET_4_CLIENT_TOOLS_PROFILE_ID: &str = "anthropic.messages.client-tools.v1";
+pub(crate) const CLAUDE_SONNET_4_CLIENT_TOOLS_PROFILE_ID: &str =
+    "anthropic.messages.client-tools.v1";
 /// Streaming/client-tools/manual-thinking profile admitted by the current manifest.
-pub const CLAUDE_SONNET_4_CLIENT_TOOLS_THINKING_PROFILE_ID: &str =
+pub(crate) const CLAUDE_SONNET_4_CLIENT_TOOLS_THINKING_PROFILE_ID: &str =
     "anthropic.messages.client-tools-thinking.v1";
 /// Exact pinned Claude Sonnet 5 API model ID admitted for offline preparation.
 pub const CLAUDE_SONNET_5_MODEL_ID: &str = "claude-sonnet-5";
 /// Exact family identity admitted for [`CLAUDE_SONNET_5_MODEL_ID`].
-pub const CLAUDE_SONNET_5_FAMILY_ID: &str = "claude-5-sonnet";
+pub(crate) const CLAUDE_SONNET_5_FAMILY_ID: &str = "claude-5-sonnet";
 /// Conservative Sonnet 5 profile: streaming text/client tools with thinking disabled.
-pub const CLAUDE_SONNET_5_CLIENT_TOOLS_PROFILE_ID: &str =
+pub(crate) const CLAUDE_SONNET_5_CLIENT_TOOLS_PROFILE_ID: &str =
     "anthropic.messages.sonnet-5-client-tools.v1";
 /// Sonnet 5 Platform profile for exact hosted programmatic tool calling.
 pub const CLAUDE_SONNET_5_HOSTED_PTC_PROFILE_ID: &str =
     "anthropic.messages.sonnet-5-hosted-ptc-20260120.v1";
 /// Exact conservative Messages integration revision.
-pub const ANTHROPIC_SONNET_5_INTEGRATION_REVISION: &str =
+pub(crate) const ANTHROPIC_SONNET_5_INTEGRATION_REVISION: &str =
     "anthropic.messages.sonnet-5.2026-08-11.v1";
 /// Exact direct API-key auth profile.
-pub const ANTHROPIC_API_KEY_AUTH_PROFILE_ID: &str = "anthropic.platform.api-key";
+pub(crate) const ANTHROPIC_API_KEY_AUTH_PROFILE_ID: &str = "anthropic.platform.api-key";
 /// Exact direct API-key auth revision.
-pub const ANTHROPIC_API_KEY_AUTH_REVISION: &str = "anthropic.platform.api-key.v1";
+pub(crate) const ANTHROPIC_API_KEY_AUTH_REVISION: &str = "anthropic.platform.api-key.v1";
 /// Exact direct API-key authority class.
-pub const ANTHROPIC_API_KEY_AUTHORITY_CLASS: &str = "anthropic.platform.api-key";
+pub(crate) const ANTHROPIC_API_KEY_AUTHORITY_CLASS: &str = "anthropic.platform.api-key";
 /// Exact explicit credential selection for this offline profile.
-pub const ANTHROPIC_API_KEY_CREDENTIAL_SELECTION: &str = "anthropic.platform.explicit-api-key";
+pub(crate) const ANTHROPIC_API_KEY_CREDENTIAL_SELECTION: &str =
+    "anthropic.platform.explicit-api-key";
 
+#[cfg(test)]
 /// Exact Opus 5 Platform model identity.
-pub const CLAUDE_OPUS_5_MODEL_ID: &str = "claude-opus-5";
+pub(crate) const CLAUDE_OPUS_5_MODEL_ID: &str = "claude-opus-5";
+#[cfg(test)]
 /// Exact Opus 5.5 Platform model identity.
-pub const CLAUDE_OPUS_5_5_MODEL_ID: &str = "claude-opus-5-5";
+pub(crate) const CLAUDE_OPUS_5_5_MODEL_ID: &str = "claude-opus-5-5";
 /// Stable API-key adaptive-thinking/local-tools integration profile.
 pub const ANTHROPIC_API_ADAPTIVE_PROFILE_ID: &str = "anthropic.platform.adaptive-client-tools.v1";
 

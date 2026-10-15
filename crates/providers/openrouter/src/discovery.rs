@@ -171,7 +171,7 @@ fn validate_config(
         || config.maximum_body_bytes == 0
         || config.maximum_body_bytes > 4 * 1024 * 1024
         || config.evidence_ttl.is_zero()
-        || config.evidence_ttl.as_secs() > crate::OPENROUTER_EVIDENCE_MAX_AGE_SECONDS
+        || config.evidence_ttl.as_secs() > crate::dialect::OPENROUTER_EVIDENCE_MAX_AGE_SECONDS
         || config.evidence_ttl.subsec_nanos() != 0
     {
         return Err(OpenRouterChatDiscoveryError::InvalidPolicy);
@@ -466,17 +466,17 @@ impl AdmissionWire {
             Self::Chat => (
                 crate::OPENROUTER_CHAT_PROTOCOL_ID,
                 crate::chat::OPENROUTER_CHAT_PROFILE,
-                crate::OPENROUTER_CHAT_DIALECT_REVISION,
+                crate::chat::OPENROUTER_CHAT_DIALECT_REVISION,
             ),
             Self::Responses => (
                 crate::OPENROUTER_RESPONSES_PROTOCOL_ID,
                 crate::OPENROUTER_RESPONSES_PROFILE,
-                crate::OPENROUTER_RESPONSES_DIALECT_REVISION,
+                crate::dialect::OPENROUTER_RESPONSES_DIALECT_REVISION,
             ),
             Self::Messages => (
                 crate::OPENROUTER_MESSAGES_PROTOCOL_ID,
                 crate::messages::PROFILE,
-                crate::OPENROUTER_MESSAGES_DIALECT_REVISION,
+                crate::messages::OPENROUTER_MESSAGES_DIALECT_REVISION,
             ),
         }
     }

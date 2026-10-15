@@ -48,17 +48,51 @@ pub use api_models::{
     list_openai_api_models, openai_api_bundled_listing, openai_api_key_fingerprint,
     openai_api_models,
 };
-pub use config::*;
-pub use error::*;
-pub use manifest::{
-    OPENAI_GPT_6_PLATFORM_PROFILE_ID, OPENAI_GPT_56_PLATFORM_PROFILE_ID,
-    OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS,
-    OPENAI_PLATFORM_MODEL_MANIFEST_REVIEWED_AT_UNIX_SECONDS,
-    OPENAI_PLATFORM_MODEL_MANIFEST_REVISION,
+pub use config::{
+    AccessMode, AuthError, CodexSubscriptionRouteConfig, ConfigError, ConformanceStatus,
+    CredentialAuthorityId, CredentialReference, EndpointOrigin, OPENAI_CHATGPT_ORIGIN,
+    OPENAI_CODEX_COMPATIBILITY_PROFILE_ID, OPENAI_CODEX_ENCRYPTED_REASONING_INCLUDE,
+    OPENAI_CODEX_REFERENCE_CLIENT_VERSION, OPENAI_CODEX_RESPONSES_PATH,
+    OPENAI_CODEX_RESPONSES_PROTOCOL_ID, OPENAI_CODEX_SOURCE_REVISION,
+    OPENAI_CODEX_SUBSCRIPTION_ROUTE_ID, OPENAI_PLATFORM_AUTH_PROFILE_ID,
+    OPENAI_PLATFORM_AUTH_REVISION, OPENAI_PLATFORM_AUTHORITY_CLASS,
+    OPENAI_PLATFORM_CREDENTIAL_SELECTION, OPENAI_PLATFORM_ORIGIN, OPENAI_PLATFORM_ROUTE_ID,
+    OPENAI_RESPONSES_ADAPTER_REVISION, OPENAI_RESPONSES_PROTOCOL_ID, OpenAiApiKeyGenerationGrant,
+    OpenAiPlatformRouteConfig, OpenAiProjectId, OpenAiRoute, OpenAiRouteConformance, OpenAiTarget,
+    PlatformCredentialSource, PlatformProjectPolicy, PlatformStoragePolicy, ResponsesDialect,
+    ResponsesFeature, Routability, SecretString, StaticPlatformCredentialSource, StorageMode,
 };
-pub use model::*;
+pub use error::{ErrorPhase, MAX_PROVIDER_REQUEST_ID_BYTES, OpenAiError, RetryClass};
+pub use manifest::OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS;
 #[cfg(feature = "native-auth")]
-pub use native_auth::*;
+pub use model::{OpenAiLanguageModel, compile_codex_subscription_configuration};
+pub use model::{
+    OpenAiPlatformConfigurationAuthority, OpenAiPlatformModelBuilder, OpenAiPlatformModelFacts,
+    OpenAiPlatformResolveError, StandardOpenAiHttpBuildError, StandardOpenAiHttpConfig,
+    compile_openai_platform_configuration, openai_platform_request_policy,
+};
+#[cfg(feature = "native-auth")]
+pub use native_auth::{
+    CodexBrowserLogin, CodexCatalogApiSupport, CodexCatalogCapacityFacts, CodexCatalogEntry,
+    CodexCatalogServiceTier, CodexCatalogToolMode, CodexCatalogVisibility,
+    CodexCompatibilityAcceptance, CodexCredentialStatus, CodexDeviceLogin, CodexModelCatalog,
+    CodexModelResolutionEvidence, CodexModelResolver, CodexRemoteBrowserLogin,
+    CodexSubscriptionCredentialManager, CodexSubscriptionIntegrationProfile,
+    CodexSubscriptionLocalAdmin, NativeCodexAuthError, RELEASE_ENROLLED_CODEX_MODELS,
+    SubscriptionIntegrationProvenance, release_enrolled_codex_model,
+    release_enrolled_codex_tool_mode,
+};
 pub use plakous_responses_dialect::ResponsesProviderConfigurationError;
-pub use platform_local::*;
-pub use subscription_usage::*;
+pub use platform_local::{OpenAiPlatformBuildError, OpenAiPlatformLocalModel, OpenAiPlatformModel};
+pub use subscription_usage::decode_codex_subscription_usage;
+
+// Crate-internal paths resolve through the crate root; the public surface is
+// the explicit lists above.
+#[cfg(feature = "native-auth")]
+pub(crate) use config::{
+    NativeCodexCatalogWitness, NativeCodexCredentialAuthority, NativeCodexForcedRefresh,
+    NativeCodexPreflight, NativeCodexPreflightRequest, NativeCodexRuntimeAuthority,
+};
+
+#[cfg(feature = "native-auth")]
+pub(crate) use native_auth::NativeCodexAuthorization;

@@ -20,33 +20,37 @@ use plakous_responses_dialect::{
     ResponsesRequestPolicy, ResponsesStreamDialectData, ResponsesUsagePolicy,
 };
 
-use crate::{XAI_SUBSCRIPTION_RESEARCH_BASELINE, XaiDialect, XaiRouteKind};
+use crate::{XaiDialect, XaiRouteKind, dialect::XAI_SUBSCRIPTION_RESEARCH_BASELINE};
 
+#[cfg(test)]
 /// Exact official Grok OAuth subscription base URL.
-pub const SUPERGROK_SUBSCRIPTION_BASE_URL: &str = "https://cli-chat-proxy.grok.com/v1";
+pub(crate) const SUPERGROK_SUBSCRIPTION_BASE_URL: &str = "https://cli-chat-proxy.grok.com/v1";
 /// Exact SuperGrok subscription proxy origin. OAuth has a distinct pinned OIDC origin.
 pub const SUPERGROK_RESPONSES_ORIGIN: &str = "https://cli-chat-proxy.grok.com";
 /// Exact authenticated subscription catalog resource path.
-pub const SUPERGROK_MODELS_PATH: &str = "/v1/models";
+#[cfg(feature = "native-auth")]
+pub(crate) const SUPERGROK_MODELS_PATH: &str = "/v1/models";
 /// Exact SuperGrok Responses resource path.
 pub const SUPERGROK_RESPONSES_PATH: &str = "/v1/responses";
 /// Stable request/adapter revision retained by admission and recovery facts.
 pub const XAI_RESPONSES_ADAPTER_REVISION: &str = "plakous-xai-responses-adapter-v7";
 /// Exact reviewed route/model capability-table revision.
-pub const SUPERGROK_FEATURE_REVISION: &str = "plak-xai-subscription-feature-matrix-v8";
+pub(crate) const SUPERGROK_FEATURE_REVISION: &str = "plak-xai-subscription-feature-matrix-v8";
 /// Closed shared-host behavior revision for this dialect table.
-pub const SUPERGROK_RESPONSES_DIALECT_REVISION: u32 = 5;
+#[cfg(feature = "native-auth")]
+pub(crate) const SUPERGROK_RESPONSES_DIALECT_REVISION: u32 = 5;
 /// Exact provider-owned tool presentation admitted for SuperGrok inference.
 #[cfg(feature = "native-auth")]
-pub const SUPERGROK_TOOL_PRESENTATION_MODE: ToolPresentationMode = ToolPresentationMode::Direct;
+pub(crate) const SUPERGROK_TOOL_PRESENTATION_MODE: ToolPresentationMode =
+    ToolPresentationMode::Direct;
 /// Native completed reasoning/output-item replay envelope.
-pub const SUPERGROK_OUTPUT_ITEM_REPLAY_KIND: &str = "xai.output_item";
+pub(crate) const SUPERGROK_OUTPUT_ITEM_REPLAY_KIND: &str = "xai.output_item";
 /// Revision of [`SUPERGROK_OUTPUT_ITEM_REPLAY_KIND`].
-pub const SUPERGROK_OUTPUT_ITEM_REPLAY_VERSION: u32 = 2;
+pub(crate) const SUPERGROK_OUTPUT_ITEM_REPLAY_VERSION: u32 = 2;
 /// Native future-output replay envelope retained by the current projector.
-pub const SUPERGROK_OPAQUE_OUTPUT_REPLAY_KIND: &str = "xai.opaque_output";
+pub(crate) const SUPERGROK_OPAQUE_OUTPUT_REPLAY_KIND: &str = "xai.opaque_output";
 /// Revision of [`SUPERGROK_OPAQUE_OUTPUT_REPLAY_KIND`].
-pub const SUPERGROK_OPAQUE_OUTPUT_REPLAY_VERSION: u32 = 1;
+pub(crate) const SUPERGROK_OPAQUE_OUTPUT_REPLAY_VERSION: u32 = 1;
 
 /// How one provider event is handled by the SuperGrok dialect.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

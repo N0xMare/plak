@@ -49,7 +49,7 @@ use thiserror::Error;
 
 use crate::OPENAI_RESPONSES_ADAPTER_REVISION;
 #[cfg(feature = "native-auth")]
-use crate::OPENAI_RESPONSES_DIALECT_REVISION;
+use crate::config::OPENAI_RESPONSES_DIALECT_REVISION;
 use crate::manifest::admit_reviewed_platform_model;
 #[cfg(feature = "native-auth")]
 use crate::native_auth::{
@@ -58,9 +58,9 @@ use crate::native_auth::{
     revalidate_codex_responses,
 };
 use crate::{
-    ConfigError, CredentialReference, EndpointOrigin, OPENAI_GPT_6_PLATFORM_PROFILE_ID,
-    OPENAI_GPT_56_PLATFORM_PROFILE_ID, OPENAI_PLATFORM_ORIGIN, OpenAiPlatformRouteConfig,
-    OpenAiTarget, PlatformCredentialSource, PlatformStoragePolicy,
+    ConfigError, CredentialReference, EndpointOrigin, OPENAI_PLATFORM_ORIGIN,
+    OpenAiPlatformRouteConfig, OpenAiTarget, PlatformCredentialSource, PlatformStoragePolicy,
+    manifest::OPENAI_GPT_6_PLATFORM_PROFILE_ID, manifest::OPENAI_GPT_56_PLATFORM_PROFILE_ID,
 };
 
 const DEFAULT_OPENAI_OPERATION_TIMEOUT: Duration = Duration::from_secs(120);
@@ -1559,10 +1559,10 @@ mod platform_tests {
 
     use super::{OpenAiPlatformModelBuilder, OpenAiPlatformModelFacts};
     use crate::{
-        CredentialAuthorityId, CredentialReference, EndpointOrigin,
-        OPENAI_PLATFORM_MODEL_MANIFEST_REVIEWED_AT_UNIX_SECONDS, OPENAI_PLATFORM_ORIGIN,
+        CredentialAuthorityId, CredentialReference, EndpointOrigin, OPENAI_PLATFORM_ORIGIN,
         OpenAiPlatformRouteConfig, OpenAiProjectId, PlatformProjectPolicy, PlatformStoragePolicy,
         SecretString, StaticPlatformCredentialSource,
+        manifest::OPENAI_PLATFORM_MODEL_MANIFEST_REVIEWED_AT_UNIX_SECONDS,
     };
 
     fn source(reference: &CredentialReference) -> Arc<StaticPlatformCredentialSource> {

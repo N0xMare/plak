@@ -166,7 +166,7 @@ impl PreparedMessagesRequest {
 
     pub(crate) fn stream_binding(&self) -> Result<PreparedMessagesStreamBinding, AnthropicError> {
         let dialect = MessagesStreamDialectHooks::new(
-            crate::ANTHROPIC_CODE_EXECUTION_CALLER,
+            crate::dialect::ANTHROPIC_CODE_EXECUTION_CALLER,
             plakous_model::NamespaceId::new("anthropic.programmatic_tool").map_err(|error| {
                 AnthropicError::new(
                     AnthropicErrorKind::InvalidConfiguration,
@@ -487,10 +487,10 @@ fn policy_for(
         }
         policy = policy.with_programmatic_tool_calling(
             vec![
-                crate::ANTHROPIC_CODE_EXECUTION_CALLER.to_owned(),
-                crate::ANTHROPIC_CODE_EXECUTION_CALLER_20260521.to_owned(),
+                crate::dialect::ANTHROPIC_CODE_EXECUTION_CALLER.to_owned(),
+                crate::dialect::ANTHROPIC_CODE_EXECUTION_CALLER_20260521.to_owned(),
             ],
-            crate::ANTHROPIC_CODE_EXECUTION_TOOL,
+            crate::dialect::ANTHROPIC_CODE_EXECUTION_TOOL,
             plakous_model::NamespaceId::new("anthropic.programmatic_tool").map_err(|error| {
                 AnthropicError::new(
                     AnthropicErrorKind::InvalidConfiguration,

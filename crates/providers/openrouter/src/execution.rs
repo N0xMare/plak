@@ -36,8 +36,8 @@ use plakous_responses_dialect::{
 use thiserror::Error;
 
 use crate::{
-    OPENROUTER_RESPONSES_DIALECT_REVISION, OpenRouterApiKeyGenerationGrant, OpenRouterDialect,
-    OpenRouterResponsesTarget, compile_openrouter_responses_configuration,
+    OpenRouterApiKeyGenerationGrant, OpenRouterDialect, OpenRouterResponsesTarget,
+    compile_openrouter_responses_configuration, dialect::OPENROUTER_RESPONSES_DIALECT_REVISION,
 };
 
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(5 * 60);
@@ -435,8 +435,8 @@ impl LanguageModel for OpenRouterResponsesLanguageModel {
                     request,
                     authority.clone(),
                     plakous_responses_dialect::ResponsesReplayKind::new(
-                        crate::OPENROUTER_OUTPUT_ITEM_REPLAY_KIND,
-                        crate::OPENROUTER_OUTPUT_ITEM_REPLAY_VERSION,
+                        crate::dialect::OPENROUTER_OUTPUT_ITEM_REPLAY_KIND,
+                        crate::dialect::OPENROUTER_OUTPUT_ITEM_REPLAY_VERSION,
                     ),
                     None,
                     None,

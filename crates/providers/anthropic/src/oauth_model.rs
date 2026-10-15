@@ -1149,7 +1149,7 @@ mod tests {
         .with_session_lineage(SessionLineage::Root);
         assert_eq!(
             resolved.route().origin(),
-            crate::CLAUDE_OAUTH_MESSAGES_ORIGIN
+            crate::oauth::CLAUDE_OAUTH_MESSAGES_ORIGIN
         );
         let mut model = ClaudeOAuthLanguageModel::new(
             resolved,

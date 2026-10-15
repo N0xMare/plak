@@ -52,7 +52,7 @@ pub const OPENROUTER_MESSAGES_PROTOCOL_ID: &str = "openrouter.messages.v1";
 /// Provider-neutral Messages family identity.
 pub const MESSAGES_FAMILY_ID: &str = "messages-family";
 /// OpenRouter Messages dialect revision.
-pub const OPENROUTER_MESSAGES_DIALECT_REVISION: u32 = 1;
+pub(crate) const OPENROUTER_MESSAGES_DIALECT_REVISION: u32 = 1;
 
 pub(crate) const PROFILE: &str = "openrouter.messages.dynamic-custom-v1";
 const MODEL_FAMILY: &str = "openrouter.messages";
@@ -1043,7 +1043,7 @@ fn validate_evidence(
     if context.protocol_family().as_str() != MESSAGES_FAMILY_ID {
         return Err(OpenRouterMessagesBuildError::ForeignContextFamily);
     }
-    if !crate::context_within_discovery(context, evidence.context_length()) {
+    if !crate::chat::context_within_discovery(context, evidence.context_length()) {
         return Err(OpenRouterMessagesBuildError::ContextExceedsDiscovery);
     }
     if !evidence.validates(route.identity(), now) {

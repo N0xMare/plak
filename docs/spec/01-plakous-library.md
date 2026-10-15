@@ -3406,8 +3406,10 @@ the already-stored refresh token, not an in-place replay of the ambiguous POST.
 Transport failure, HTTP 429 or 5xx, a 2xx that fails local validation, and a
 task abort after the POST started all restore `Ready`; HTTP 4xx,
 `invalid_grant`, and `AccountChanged` stay terminal `Unknown` and require a new
-login. An aborted xAI refresh restores only the exact `Unknown` fence its own
-claim wrote, and nothing if it was dropped before claiming; the restore never
+login. Every xAI restore, after a retryable failure or an abort, targets only
+the exact `Unknown` fence its own claim wrote; a peer that reclaimed the record
+in between keeps it. An aborted refresh restores nothing if it was dropped
+before claiming; the abort restore never
 waits, and on store contention it leaves `Unknown` for the next refresh to
 reclaim.
 

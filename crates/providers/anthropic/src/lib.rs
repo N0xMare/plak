@@ -59,38 +59,27 @@ pub use api_models::{
     list_anthropic_api_models,
 };
 pub use cch::{
-    CLAUDE_OAUTH_BILLING_HEADER, CLAUDE_OAUTH_BILLING_HEADER_SUBAGENT, CLAUDE_OAUTH_CC_VERSION,
-    CLAUDE_OAUTH_CCH_PLACEHOLDER, attest_claude_oauth_cch, claude_oauth_billing_header,
-    claude_oauth_cch_matches_body, first_user_text,
+    attest_claude_oauth_cch, claude_oauth_billing_header, claude_oauth_cch_matches_body,
+    first_user_text,
 };
 pub use config::{
-    ANTHROPIC_API_ADAPTIVE_PROFILE_ID, ANTHROPIC_API_KEY_AUTH_PROFILE_ID,
-    ANTHROPIC_API_KEY_AUTH_REVISION, ANTHROPIC_API_KEY_AUTHORITY_CLASS,
-    ANTHROPIC_API_KEY_CREDENTIAL_SELECTION, ANTHROPIC_PLATFORM_ADMISSION_EXPIRES_AT_SECONDS,
-    ANTHROPIC_PLATFORM_ADMISSION_REVIEWED_AT_SECONDS, ANTHROPIC_PLATFORM_ADMISSION_REVISION,
-    ANTHROPIC_SONNET_5_INTEGRATION_REVISION, AnthropicPlatformCapabilityProfile,
-    AnthropicPlatformModelConfig, AnthropicPlatformModelResolver, CLAUDE_OPUS_5_5_MODEL_ID,
-    CLAUDE_OPUS_5_MODEL_ID, CLAUDE_SONNET_4_6_MODEL_ID, CLAUDE_SONNET_4_CLIENT_TOOLS_PROFILE_ID,
-    CLAUDE_SONNET_4_CLIENT_TOOLS_THINKING_PROFILE_ID, CLAUDE_SONNET_4_FAMILY_ID,
-    CLAUDE_SONNET_5_CLIENT_TOOLS_PROFILE_ID, CLAUDE_SONNET_5_FAMILY_ID,
+    ANTHROPIC_API_ADAPTIVE_PROFILE_ID, AnthropicPlatformCapabilityProfile,
+    AnthropicPlatformModelConfig, AnthropicPlatformModelResolver, CLAUDE_SONNET_4_6_MODEL_ID,
     CLAUDE_SONNET_5_HOSTED_PTC_PROFILE_ID, CLAUDE_SONNET_5_MODEL_ID,
     compile_anthropic_sonnet_5_configuration,
 };
 pub use dialect::{
-    ANTHROPIC_API_VERSION, ANTHROPIC_CODE_EXECUTION_CALLER,
-    ANTHROPIC_CODE_EXECUTION_CALLER_20260521, ANTHROPIC_CODE_EXECUTION_TOOL, AnthropicBetaFeature,
-    AnthropicMessagesDialect, FeatureMatrixEntry, FeatureStatus, MESSAGES_FEATURE_MATRIX_V1,
+    ANTHROPIC_API_VERSION, AnthropicBetaFeature, AnthropicMessagesDialect, FeatureMatrixEntry,
+    FeatureStatus,
 };
 pub use error::{
-    AnthropicError, AnthropicErrorKind, AnthropicErrorPhase, MAX_PROVIDER_ERROR_BODY_BYTES,
-    MAX_PROVIDER_ERROR_CODE_BYTES, MAX_PROVIDER_ERROR_MESSAGE_BYTES, MAX_PROVIDER_REQUEST_ID_BYTES,
+    AnthropicError, AnthropicErrorKind, AnthropicErrorPhase, MAX_PROVIDER_REQUEST_ID_BYTES,
     RetryAdvice, RetrySafety, classify_provider_error_with_safety,
 };
 pub use http::{
     AnthropicHttpDeadline, AnthropicLocalHttpService, AnthropicLocalHttpServiceFactory,
     AnthropicRetryGrant, AnthropicRetryRevalidation, ClaudeCredentialRenewal,
-    STANDARD_ANTHROPIC_EVENT_CAPACITY, call_local_anthropic_operation,
-    start_anthropic_messages_model_call,
+    call_local_anthropic_operation, start_anthropic_messages_model_call,
 };
 pub use model::AnthropicLanguageModel;
 #[cfg(feature = "native-auth")]
@@ -100,19 +89,13 @@ pub use native_auth::{
     ClaudeSubscriptionIntegrationProfile, ClaudeSubscriptionStatus,
 };
 pub use oauth::{
-    CLAUDE_ENROLLMENTS, CLAUDE_OAUTH_ADAPTER_REVISION, CLAUDE_OAUTH_AUTHORIZE_ORIGIN,
-    CLAUDE_OAUTH_AUTHORIZE_PATH, CLAUDE_OAUTH_AUTHORIZE_SCOPES, CLAUDE_OAUTH_BASELINE_BETAS,
-    CLAUDE_OAUTH_CLIENT_ID, CLAUDE_OAUTH_COMPATIBILITY_PROFILE_ID, CLAUDE_OAUTH_DEFAULT_MODEL_ID,
-    CLAUDE_OAUTH_EXPIRES_AT_UNIX, CLAUDE_OAUTH_IDENTITY, CLAUDE_OAUTH_INFERENCE_SCOPE,
-    CLAUDE_OAUTH_KILL_SWITCH_REVISION, CLAUDE_OAUTH_LEGACY_REDIRECT_URI,
-    CLAUDE_OAUTH_MESSAGES_ORIGIN, CLAUDE_OAUTH_MESSAGES_PATH, CLAUDE_OAUTH_MESSAGES_USER_AGENT,
-    CLAUDE_OAUTH_NOTICE_REVISION, CLAUDE_OAUTH_PROTOCOL_ID, CLAUDE_OAUTH_REDIRECT_URI,
-    CLAUDE_OAUTH_REFRESH_SCOPES, CLAUDE_OAUTH_REVIEWED_AT_UNIX, CLAUDE_OAUTH_ROUTE_ID,
-    CLAUDE_OAUTH_SOURCE_REVISION, CLAUDE_OAUTH_STAINLESS_LANG,
+    CLAUDE_ENROLLMENTS, CLAUDE_OAUTH_ADAPTER_REVISION, CLAUDE_OAUTH_BASELINE_BETAS,
+    CLAUDE_OAUTH_COMPATIBILITY_PROFILE_ID, CLAUDE_OAUTH_IDENTITY,
+    CLAUDE_OAUTH_KILL_SWITCH_REVISION, CLAUDE_OAUTH_MESSAGES_USER_AGENT, CLAUDE_OAUTH_PROTOCOL_ID,
+    CLAUDE_OAUTH_ROUTE_ID, CLAUDE_OAUTH_SOURCE_REVISION, CLAUDE_OAUTH_STAINLESS_LANG,
     CLAUDE_OAUTH_STAINLESS_PACKAGE_VERSION, CLAUDE_OAUTH_STAINLESS_RETRY_COUNT,
     CLAUDE_OAUTH_STAINLESS_RUNTIME, CLAUDE_OAUTH_STAINLESS_RUNTIME_VERSION,
-    CLAUDE_OAUTH_STAINLESS_TIMEOUT, CLAUDE_OAUTH_TOKEN_ORIGIN, CLAUDE_OAUTH_TOKEN_PATH,
-    CLAUDE_OAUTH_USER_AGENT, ClaudeEnrollment, ClaudeOAuthTokenGrant, claude_authorize_url,
+    CLAUDE_OAUTH_STAINLESS_TIMEOUT, ClaudeEnrollment, ClaudeOAuthTokenGrant, claude_authorize_url,
     claude_enrollment, claude_max_output_tokens, claude_oauth_beta_header,
     claude_oauth_enrolled_model, claude_oauth_enrolled_models,
     claude_oauth_reasoning_effort_options, claude_oauth_request_max_tokens,
@@ -141,7 +124,5 @@ pub use stream::{
     SseMessage,
 };
 pub use subscription_usage::{
-    CLAUDE_SUBSCRIPTION_PROFILE_PATH, CLAUDE_SUBSCRIPTION_USAGE_DOCUMENTATION,
-    CLAUDE_SUBSCRIPTION_USAGE_PATH, ClaudeOauthProfile, MAX_CLAUDE_SUBSCRIPTION_USAGE_BODY_BYTES,
-    decode_claude_oauth_profile, decode_claude_subscription_usage,
+    ClaudeOauthProfile, decode_claude_oauth_profile, decode_claude_subscription_usage,
 };

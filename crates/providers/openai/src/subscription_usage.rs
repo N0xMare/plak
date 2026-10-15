@@ -8,12 +8,10 @@ use plakous_model::{
 use serde::Deserialize;
 
 /// Exact read-only path in the pinned official Codex client.
-pub const CODEX_SUBSCRIPTION_USAGE_PATH: &str = "/backend-api/wham/usage";
-/// Exact official source revision qualifying this decoder and route.
-pub const CODEX_SUBSCRIPTION_USAGE_SOURCE_REVISION: &str =
-    "a956835d020762cb2b570053af06f643a11c0ecc";
+#[cfg(feature = "native-auth")]
+pub(crate) const CODEX_SUBSCRIPTION_USAGE_PATH: &str = "/backend-api/wham/usage";
 /// Maximum body accepted by the usage control-plane decoder.
-pub const MAX_CODEX_SUBSCRIPTION_USAGE_BODY_BYTES: usize = 256 * 1024;
+pub(crate) const MAX_CODEX_SUBSCRIPTION_USAGE_BODY_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Deserialize)]
 struct UsagePayload {

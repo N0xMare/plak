@@ -31,7 +31,9 @@ use plakous_model::ReasoningEffort;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::{XAI_PLATFORM_API_KEY_ORIGIN, XaiPlatformApiKeySource, XaiPlatformBuildError};
+use crate::{
+    XaiPlatformApiKeySource, XaiPlatformBuildError, platform::XAI_PLATFORM_API_KEY_ORIGIN,
+};
 
 /// Exact Models API path on the Platform origin.
 const XAI_MODELS_PATH: &str = "/v1/models";

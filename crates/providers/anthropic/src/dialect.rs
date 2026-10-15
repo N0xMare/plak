@@ -9,11 +9,11 @@ pub const ANTHROPIC_API_VERSION: &str = "2023-06-01";
 
 /// Exact caller discriminator documented for the targeted programmatic
 /// code-execution wire shape. Other revisions require a dialect update.
-pub const ANTHROPIC_CODE_EXECUTION_CALLER: &str = "code_execution_20260120";
+pub(crate) const ANTHROPIC_CODE_EXECUTION_CALLER: &str = "code_execution_20260120";
 /// Second admitted request-side hosted code caller version.
-pub const ANTHROPIC_CODE_EXECUTION_CALLER_20260521: &str = "code_execution_20260521";
+pub(crate) const ANTHROPIC_CODE_EXECUTION_CALLER_20260521: &str = "code_execution_20260521";
 /// Exact server-tool request version for the first hosted PTC slice.
-pub const ANTHROPIC_CODE_EXECUTION_TOOL: &str = "code_execution_20260120";
+pub(crate) const ANTHROPIC_CODE_EXECUTION_TOOL: &str = "code_execution_20260120";
 
 /// Explicitly selectable Anthropic beta capabilities.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -205,7 +205,7 @@ pub struct FeatureMatrixEntry {
 }
 
 /// The stable feature declaration for adapter revision 1.
-pub const MESSAGES_FEATURE_MATRIX_V1: &[FeatureMatrixEntry] = &[
+pub(crate) const MESSAGES_FEATURE_MATRIX_V1: &[FeatureMatrixEntry] = &[
     FeatureMatrixEntry {
         feature: "text",
         status: FeatureStatus::CodecOnly,

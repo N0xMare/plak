@@ -760,11 +760,11 @@ sensitive text. Credential sources resolve into origin- and audience-bound
 authorization, and an adapter cannot forward a secret to a different origin
 through a redirect or a route mutation.
 
-A debug xAI build emits a `plak.xai.authority` tracing event naming only
+An xAI build emits a debug-level `plak.xai.authority` tracing event naming only
 the failed predicate per revalidation attempt, plus a static category if its
 subsequent refresh or receipt renewal fails. A retry can emit another event. Predicate names are a
 closed static vocabulary; events contain no account, credential, route path,
-model, selection epoch, or other identifier. The witness is observational and
+model, selection epoch, or other identifier. The event is observational and
 does not change the public authority error, check order, dispatch, or reopen
 behavior.
 

@@ -589,12 +589,18 @@ fn public_constants_are_backed_by_shared_oauth_pin_tables() {
         endpoints.catalog().origin,
         crate::SUPERGROK_RESPONSES_ORIGIN
     );
-    assert_eq!(endpoints.catalog().path, crate::SUPERGROK_MODELS_PATH);
+    assert_eq!(
+        endpoints.catalog().path,
+        crate::responses_dialect::SUPERGROK_MODELS_PATH
+    );
     assert_eq!(endpoints.usage().origin, crate::SUPERGROK_RESPONSES_ORIGIN);
-    assert_eq!(endpoints.usage().path, crate::GROK_SUBSCRIPTION_USAGE_PATH);
+    assert_eq!(
+        endpoints.usage().path,
+        crate::subscription_usage::GROK_SUBSCRIPTION_USAGE_PATH
+    );
     assert_ne!(
         endpoints.catalog().origin,
-        crate::XAI_PLATFORM_API_KEY_ORIGIN
+        crate::platform::XAI_PLATFORM_API_KEY_ORIGIN
     );
 }
 
@@ -714,7 +720,7 @@ async fn subscription_usage_sends_exact_one_attempt_profile_and_retains_ready_le
     let request = std::str::from_utf8(&requests[0])?;
     assert!(request.starts_with(&format!(
         "GET {} HTTP/1.1\r\n",
-        crate::GROK_SUBSCRIPTION_USAGE_PATH
+        crate::subscription_usage::GROK_SUBSCRIPTION_USAGE_PATH
     )));
     for header in [
         "authorization: Bearer opaque-usage-access\r\n",
@@ -782,7 +788,7 @@ async fn subscription_usage_maps_status_media_schema_and_body_bound_without_retr
         (
             "200 OK",
             "application/json",
-            "x".repeat(crate::MAX_GROK_SUBSCRIPTION_USAGE_BODY_BYTES + 1),
+            "x".repeat(crate::subscription_usage::MAX_GROK_SUBSCRIPTION_USAGE_BODY_BYTES + 1),
             SubscriptionUsageUnavailable::InvalidResponse,
         ),
     ] {

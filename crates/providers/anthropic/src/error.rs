@@ -303,13 +303,13 @@ impl fmt::Display for AnthropicError {
 impl std::error::Error for AnthropicError {}
 
 /// Maximum provider error response bytes inspected by the classifier.
-pub const MAX_PROVIDER_ERROR_BODY_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_PROVIDER_ERROR_BODY_BYTES: usize = 64 * 1024;
 
 /// Maximum decoded bytes accepted in a provider error type.
-pub const MAX_PROVIDER_ERROR_CODE_BYTES: usize = 128;
+pub(crate) const MAX_PROVIDER_ERROR_CODE_BYTES: usize = 128;
 
 /// Maximum decoded bytes accepted in a provider error message.
-pub const MAX_PROVIDER_ERROR_MESSAGE_BYTES: usize = 4 * 1024;
+pub(crate) const MAX_PROVIDER_ERROR_MESSAGE_BYTES: usize = 4 * 1024;
 
 /// Maximum decoded bytes accepted in a provider request ID.
 pub const MAX_PROVIDER_REQUEST_ID_BYTES: usize = 256;

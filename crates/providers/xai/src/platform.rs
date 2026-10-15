@@ -15,21 +15,15 @@ use thiserror::Error;
 use crate::{XaiDialect, XaiRouteKind};
 
 /// Exact first-party xAI Platform inference origin.
-pub const XAI_PLATFORM_API_KEY_ORIGIN: &str = "https://api.x.ai";
-/// Exact first-party xAI Platform REST base URL.
-pub const XAI_PLATFORM_API_KEY_BASE_URL: &str = "https://api.x.ai/v1";
+pub(crate) const XAI_PLATFORM_API_KEY_ORIGIN: &str = "https://api.x.ai";
 /// Exact create-response resource path.
-pub const XAI_PLATFORM_RESPONSES_PATH: &str = "/v1/responses";
-/// Exact authenticated language-model catalog path.
-pub const XAI_PLATFORM_LANGUAGE_MODELS_PATH: &str = "/v1/language-models";
+pub(crate) const XAI_PLATFORM_RESPONSES_PATH: &str = "/v1/responses";
 /// Closed integration policy revision.
-pub const XAI_PLATFORM_POLICY_REVISION: &str = "plakous-xai-platform-2026-08-12-r1";
+pub(crate) const XAI_PLATFORM_POLICY_REVISION: &str = "plakous-xai-platform-2026-08-12-r1";
 /// Earlier model retained only as documentation reference.
-pub const XAI_PLATFORM_GROK_45_MODEL: &str = "grok-4.5";
-/// Exact static profile for the admitted model/configuration compiler.
-pub const XAI_PLATFORM_GROK_45_PROFILE: &str = "xai.platform.grok-4.5.2026-08-12-r1";
+pub(crate) const XAI_PLATFORM_GROK_45_MODEL: &str = "grok-4.5";
 /// Documentation-reported context for the exact model, retained as reference evidence only.
-pub const XAI_PLATFORM_GROK_45_REFERENCE_CONTEXT_TOKENS: u32 = 500_000;
+pub(crate) const XAI_PLATFORM_GROK_45_REFERENCE_CONTEXT_TOKENS: u32 = 500_000;
 /// Exact model admitted for Platform execution and the separate hosted-code witness.
 pub const XAI_PLATFORM_GROK_46_MODEL: &str = "grok-4.6";
 /// Input window of the admitted model: `context_length` in the authenticated
@@ -42,11 +36,11 @@ pub const XAI_PLATFORM_GROK_46_HOSTED_CODE_PROFILE: &str =
 pub const XAI_PLATFORM_GROK_46_HOSTED_CODE_REVISION: &str =
     "plakous-xai-platform-grok-4.6-code-interpreter-2026-08-23-r1";
 /// Exact request tool discriminator supported by the reviewed hosted-code witness.
-pub const XAI_PLATFORM_CODE_INTERPRETER_TOOL_TYPE: &str = "code_interpreter";
+pub(crate) const XAI_PLATFORM_CODE_INTERPRETER_TOOL_TYPE: &str = "code_interpreter";
 /// Documented create-response default/output ceiling used as an explicit local cap.
 pub const XAI_PLATFORM_MAX_OUTPUT_TOKENS: u32 = 128_000;
 /// Documented selector required for replayable local reasoning history.
-pub const XAI_PLATFORM_ENCRYPTED_REASONING_INCLUDE: &str = "reasoning.encrypted_content";
+pub(crate) const XAI_PLATFORM_ENCRYPTED_REASONING_INCLUDE: &str = "reasoning.encrypted_content";
 /// API-key auth profile identity retained by shared configuration authority.
 pub const XAI_PLATFORM_API_KEY_AUTH_PROFILE: &str = "xai.platform.api-key";
 /// API-key auth semantics revision retained by shared configuration authority.

@@ -5404,7 +5404,7 @@ async fn subscription_usage_retains_one_ready_lease_without_recursive_store_lock
     let request = std::str::from_utf8(&requests[0])?;
     assert!(request.starts_with(&format!(
         "GET {} HTTP/1.1\r\n",
-        crate::CODEX_SUBSCRIPTION_USAGE_PATH
+        crate::subscription_usage::CODEX_SUBSCRIPTION_USAGE_PATH
     )));
     assert!(request.contains("authorization: Bearer opaque-seeded-access\r\n"));
     assert!(request.contains("chatgpt-account-id: usage-account\r\n"));

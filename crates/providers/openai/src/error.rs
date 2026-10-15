@@ -55,7 +55,7 @@ pub struct OpenAiError {
 }
 
 /// Maximum bytes retained for a validated provider error code.
-pub const MAX_PROVIDER_CODE_BYTES: usize = 128;
+pub(crate) const MAX_PROVIDER_CODE_BYTES: usize = 128;
 
 /// Maximum bytes retained for a validated provider request ID.
 pub const MAX_PROVIDER_REQUEST_ID_BYTES: usize = 256;

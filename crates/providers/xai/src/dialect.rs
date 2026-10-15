@@ -4,7 +4,7 @@ use plakous_responses::ResponsesDialectProfile;
 use serde::{Deserialize, Serialize};
 
 /// Research baseline for the shared Grok subscription Responses grammar.
-pub const XAI_SUBSCRIPTION_RESEARCH_BASELINE: &str = "2026-08-22";
+pub(crate) const XAI_SUBSCRIPTION_RESEARCH_BASELINE: &str = "2026-08-22";
 
 /// The versioned SuperGrok Responses grammar.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]

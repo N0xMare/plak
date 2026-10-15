@@ -40,7 +40,7 @@ use crate::{CodexSubscriptionCredentialManager, NativeCodexAuthError, NativeCode
 /// Semantic revision of the thin OpenAI Responses adapter.
 pub const OPENAI_RESPONSES_ADAPTER_REVISION: &str = "plak-openai-responses-v6";
 /// Numeric closed-data revision supplied to the shared Responses host.
-pub const OPENAI_RESPONSES_DIALECT_REVISION: u32 = 6;
+pub(crate) const OPENAI_RESPONSES_DIALECT_REVISION: u32 = 6;
 
 /// The stable `OpenAI` Platform route identifier.
 pub const OPENAI_PLATFORM_ROUTE_ID: &str = "openai.platform";
@@ -53,7 +53,7 @@ pub const OPENAI_PLATFORM_ORIGIN: &str = "https://api.openai.com/";
 /// The only origin authorized for direct ChatGPT/Codex subscription requests.
 pub const OPENAI_CHATGPT_ORIGIN: &str = "https://chatgpt.com/";
 /// The fixed Responses resource path for the first-party Platform route.
-pub const OPENAI_PLATFORM_RESPONSES_PATH: &str = "/v1/responses";
+pub(crate) const OPENAI_PLATFORM_RESPONSES_PATH: &str = "/v1/responses";
 /// Exact API-key authentication profile selected for Platform requests.
 pub const OPENAI_PLATFORM_AUTH_PROFILE_ID: &str = "openai.platform.api_key";
 /// Revision of the reviewed Platform API-key header contract.
@@ -69,7 +69,8 @@ pub const OPENAI_CODEX_RESPONSES_PATH: &str = "/backend-api/codex/responses";
 /// Exact Codex include selector used to retain replayable reasoning material.
 pub const OPENAI_CODEX_ENCRYPTED_REASONING_INCLUDE: &str = "reasoning.encrypted_content";
 /// The fixed authenticated model-catalog path for the direct Codex route.
-pub const OPENAI_CODEX_MODELS_PATH: &str = "/backend-api/codex/models";
+#[cfg(feature = "native-auth")]
+pub(crate) const OPENAI_CODEX_MODELS_PATH: &str = "/backend-api/codex/models";
 /// Exact reference-client release presented to the authenticated catalog.
 ///
 /// The backend versions the returned model projection from this value. It is
@@ -77,15 +78,18 @@ pub const OPENAI_CODEX_MODELS_PATH: &str = "/backend-api/codex/models";
 /// version floor.
 pub const OPENAI_CODEX_REFERENCE_CLIENT_VERSION: &str = "0.160.1";
 /// Official Codex revision defining the pinned catalog contract.
-pub const OPENAI_CODEX_CATALOG_SOURCE_REVISION: &str = "a956835d020762cb2b570053af06f643a11c0ecc";
+#[cfg(feature = "native-auth")]
+pub(crate) const OPENAI_CODEX_CATALOG_SOURCE_REVISION: &str =
+    "a956835d020762cb2b570053af06f643a11c0ecc";
 /// Immutable native compatibility profile accepted by this revision.
 pub const OPENAI_CODEX_COMPATIBILITY_PROFILE_ID: &str = "openai.codex.compat.2026-07-31.r1";
 /// Official Codex source revision pinned by the native compatibility profile.
 pub const OPENAI_CODEX_SOURCE_REVISION: &str = "c4f2746c43a3ab87c2978657d7f2c274546e97fe";
 /// Native Codex route conformance revision.
-pub const OPENAI_CODEX_CONFORMANCE_REVISION: &str = "plak-openai-codex-compat-2026-07-31-r1";
+#[cfg(feature = "native-auth")]
+pub(crate) const OPENAI_CODEX_CONFORMANCE_REVISION: &str = "plak-openai-codex-compat-2026-07-31-r1";
 /// Version of the conservative O1 Platform wire-conformance evidence.
-pub const OPENAI_O1_CONFORMANCE_REVISION: &str = "plak-openai-o1-platform-wire-v1";
+pub(crate) const OPENAI_O1_CONFORMANCE_REVISION: &str = "plak-openai-o1-platform-wire-v1";
 
 /// A harness-relevant Responses feature with an independent support claim.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]

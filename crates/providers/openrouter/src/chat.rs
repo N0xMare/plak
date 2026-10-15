@@ -54,7 +54,7 @@ pub const OPENROUTER_CHAT_PROTOCOL_ID: &str = "openrouter.chat-completions.v1";
 /// Provider-neutral family identity used by prepared projections.
 pub const CHAT_COMPLETIONS_FAMILY_ID: &str = "chat-completions-family";
 /// OpenRouter Chat dialect revision.
-pub const OPENROUTER_CHAT_DIALECT_REVISION: u32 = 1;
+pub(crate) const OPENROUTER_CHAT_DIALECT_REVISION: u32 = 1;
 pub(crate) const OPENROUTER_CHAT_PROFILE: &str = "openrouter.chat.dynamic-v1";
 const OPENROUTER_CHAT_MODEL_FAMILY: &str = "openrouter.dynamic-chat";
 const OPENROUTER_CHAT_IMPLEMENTATION: &str = "plakous.openrouter.chat";

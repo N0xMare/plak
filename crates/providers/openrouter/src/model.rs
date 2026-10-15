@@ -18,17 +18,17 @@ use plakous_responses_dialect::{
 use thiserror::Error;
 
 use crate::{
-    OPENROUTER_RESPONSES_DIALECT_REVISION, OPENROUTER_RESPONSES_PATH,
-    OPENROUTER_RESPONSES_PROTOCOL_ID, OpenRouterApiKeyGenerationGrant, OpenRouterAuthError,
-    OpenRouterChatModelEvidence, OpenRouterChatRoute,
+    OPENROUTER_RESPONSES_PATH, OPENROUTER_RESPONSES_PROTOCOL_ID, OpenRouterApiKeyGenerationGrant,
+    OpenRouterAuthError, OpenRouterChatModelEvidence, OpenRouterChatRoute,
+    dialect::OPENROUTER_RESPONSES_DIALECT_REVISION,
 };
 
 /// Custom Responses integration-profile identity.
 pub const OPENROUTER_RESPONSES_PROFILE: &str = "openrouter.responses.dynamic-custom-v1";
 /// Custom implementation namespace retained by configured targets.
-pub const OPENROUTER_RESPONSES_IMPLEMENTATION: &str = "openrouter.responses.custom";
+pub(crate) const OPENROUTER_RESPONSES_IMPLEMENTATION: &str = "openrouter.responses.custom";
 /// Custom implementation provenance namespace.
-pub const OPENROUTER_RESPONSES_PROVENANCE: &str = "openrouter.responses.experimental";
+pub(crate) const OPENROUTER_RESPONSES_PROVENANCE: &str = "openrouter.responses.experimental";
 
 /// Complete routing disposition for the currently admitted Responses target.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]

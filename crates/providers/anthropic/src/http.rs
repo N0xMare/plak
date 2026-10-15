@@ -30,8 +30,8 @@ use tower_service::Service;
 
 use crate::{
     ANTHROPIC_API_VERSION, ANTHROPIC_MESSAGES_PATH, AnthropicError, AnthropicErrorKind,
-    AnthropicErrorPhase, AnthropicPlatformRoute, MAX_PROVIDER_ERROR_BODY_BYTES,
-    PreparedMessagesRequest, RetryAdvice, RetrySafety, classify_provider_error_with_safety,
+    AnthropicErrorPhase, AnthropicPlatformRoute, PreparedMessagesRequest, RetryAdvice, RetrySafety,
+    classify_provider_error_with_safety, error::MAX_PROVIDER_ERROR_BODY_BYTES,
 };
 
 const CONTENT_TYPE: HeaderName = HeaderName::from_static("content-type");
@@ -48,7 +48,7 @@ const RATE_LIMIT_CLAIM: HeaderName =
 const DEFAULT_EXCHANGE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Recommended nonzero family observation capacity.
-pub const STANDARD_ANTHROPIC_EVENT_CAPACITY: NonZeroUsize = match NonZeroUsize::new(32) {
+pub(crate) const STANDARD_ANTHROPIC_EVENT_CAPACITY: NonZeroUsize = match NonZeroUsize::new(32) {
     Some(value) => value,
     None => unreachable!(),
 };
@@ -800,7 +800,7 @@ impl MessagesHttpHooks for AnthropicHttpHooks {
                 HeaderName::from_static("x-claude-code-session-id"),
                 session_id,
             );
-            crate::CLAUDE_OAUTH_MESSAGES_PATH
+            crate::oauth::CLAUDE_OAUTH_MESSAGES_PATH
         } else {
             headers.insert(X_API_KEY, credential);
             ANTHROPIC_MESSAGES_PATH

@@ -20,11 +20,11 @@ use thiserror::Error;
 use crate::{OpenRouterAuthError, OpenRouterChatRoute};
 
 /// The one authenticated allowance path an inference key may call.
-pub const OPENROUTER_KEY_USAGE_PATH: &str = "/api/v1/key";
+pub(crate) const OPENROUTER_KEY_USAGE_PATH: &str = "/api/v1/key";
 /// Maximum body accepted by the allowance decoder.
-pub const MAX_OPENROUTER_KEY_USAGE_BODY_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_OPENROUTER_KEY_USAGE_BODY_BYTES: usize = 64 * 1024;
 /// Complete operation bound for the single allowance GET.
-pub const OPENROUTER_KEY_USAGE_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const OPENROUTER_KEY_USAGE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// One decoded observation of the inference key's own allowance.
 ///

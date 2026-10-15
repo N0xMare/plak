@@ -81,22 +81,24 @@ use crate::{
 
 /// Exact immutable compatibility profile accepted by this implementation.
 pub const XAI_GROK_COMPATIBILITY_PROFILE: &str = XAI_PROFILE.profile_id;
+#[cfg(test)]
 /// Official OIDC discovery document pinned by the profile.
-pub const XAI_OIDC_DISCOVERY: &str = XAI_OAUTH.oidc_discovery_url.unwrap();
+pub(crate) const XAI_OIDC_DISCOVERY: &str = XAI_OAUTH.oidc_discovery_url.unwrap();
 /// Immutable upstream source revision reviewed for public-client compatibility.
-pub const XAI_OPENCODE_SOURCE_REVISION: &str = XAI_PROFILE.source_revision;
+pub(crate) const XAI_OPENCODE_SOURCE_REVISION: &str = XAI_PROFILE.source_revision;
+#[cfg(test)]
 /// Immutable upstream source file reviewed for public-client compatibility.
-pub const XAI_OPENCODE_SOURCE: &str = XAI_PROFILE.source_locator.unwrap();
+pub(crate) const XAI_OPENCODE_SOURCE: &str = XAI_PROFILE.source_locator.unwrap();
 /// Pinned xAI public OAuth client identifier.
-pub const XAI_PUBLIC_CLIENT_ID: &str = XAI_OAUTH.client_id;
+pub(crate) const XAI_PUBLIC_CLIENT_ID: &str = XAI_OAUTH.client_id;
 /// Fixed loopback redirect registered for the pinned public client.
-pub const XAI_LOOPBACK_REDIRECT: &str = XAI_OAUTH.loopback_redirect_uri;
+pub(crate) const XAI_LOOPBACK_REDIRECT: &str = XAI_OAUTH.loopback_redirect_uri;
 /// Exact requested scope set, in its pinned wire order.
-pub const XAI_OAUTH_SCOPE: &str = XAI_OAUTH.scopes;
+pub(crate) const XAI_OAUTH_SCOPE: &str = XAI_OAUTH.scopes;
 /// Exact operator notice revision for this experimental compatibility profile.
-pub const XAI_GROK_COMPATIBILITY_NOTICE_REVISION: &str = XAI_PROFILE.notice_revision;
+pub(crate) const XAI_GROK_COMPATIBILITY_NOTICE_REVISION: &str = XAI_PROFILE.notice_revision;
 /// Locally reviewable kill-switch revision bound into exact acceptance.
-pub const XAI_GROK_KILL_SWITCH_REVISION: &str = XAI_PROFILE.kill_switch_revision;
+pub(crate) const XAI_GROK_KILL_SWITCH_REVISION: &str = XAI_PROFILE.kill_switch_revision;
 /// Historical SuperGrok coding model still admitted when present in catalog.
 pub const XAI_GROK_BUILD_MODEL: &str = "grok-build-0.1";
 /// Primary SuperGrok agentic coding model for ordinary smoke and harness work.
@@ -225,24 +227,25 @@ pub fn subscription_coding_model_ids() -> impl Iterator<Item = &'static str> {
 /// Immutable `Grok Build` source revision reviewed for OAuth compatibility.
 ///
 /// This remains part of credential/route compatibility authority. Model-row
-/// evidence advances independently through [`XAI_GROK_MODEL_CATALOG_SOURCE_REVISION`].
+/// evidence advances independently through `XAI_GROK_MODEL_CATALOG_SOURCE_REVISION`.
 pub const XAI_GROK_BUILD_SOURCE_REVISION: &str = "afbc0fb710320c7add294c2106d447ecc3e3af2e";
 /// Current immutable Grok Build model-catalog evidence revision.
 ///
 /// Model enrollment advances independently from OAuth compatibility so adding
 /// a reviewed model cannot invalidate an otherwise unchanged credential.
-pub const XAI_GROK_MODEL_CATALOG_SOURCE_REVISION: &str = "5163763e703c319e4554c2f455535c5adb6e51e8";
+pub(crate) const XAI_GROK_MODEL_CATALOG_SOURCE_REVISION: &str =
+    "5163763e703c319e4554c2f455535c5adb6e51e8";
 /// Mutable official documentation locator for local function calling.
 ///
 /// This URL is diagnostic context only. It is never capability authority;
 /// pinned source revisions, the fixed profile, and the authenticated exact-ID
 /// catalog receipt own that decision.
-pub const XAI_FUNCTION_CALLING_DOCUMENTATION_LOCATOR: &str =
+pub(crate) const XAI_FUNCTION_CALLING_DOCUMENTATION_LOCATOR: &str =
     "https://docs.x.ai/docs/guides/function-calling";
 /// Mutable official documentation locator for the Grok Build model page.
 ///
 /// This URL is diagnostic context only and is not immutable model evidence.
-pub const XAI_GROK_BUILD_MODEL_DOCUMENTATION_LOCATOR: &str =
+pub(crate) const XAI_GROK_BUILD_MODEL_DOCUMENTATION_LOCATOR: &str =
     "https://docs.x.ai/docs/models/grok-build";
 
 const XAI_ISSUER: &str = XAI_OAUTH.auth_origin;
@@ -252,7 +255,7 @@ const TOKEN_PATH: &str = XAI_OAUTH.token_path;
 const USERINFO_PATH: &str = XAI_OAUTH.userinfo_path;
 const REVOCATION_PATH: &str = XAI_OAUTH.revoke_path;
 const JWKS_PATH: &str = XAI_OAUTH.jwks_path;
-const CATALOG_PATH: &str = crate::SUPERGROK_MODELS_PATH;
+const CATALOG_PATH: &str = crate::responses_dialect::SUPERGROK_MODELS_PATH;
 const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 const USER_AGENT: &str = concat!("plak/", env!("CARGO_PKG_VERSION"));
 const COMPATIBILITY_REVIEWED_UNIX: u64 = XAI_PROFILE.reviewed_at_unix;
@@ -843,8 +846,8 @@ impl XaiModelResolutionEvidence {
             evidence_revision: self.evidence_revision,
             adapter_revision: &self.adapter_revision,
             profile_revision: &self.profile_revision,
-            feature_revision: crate::SUPERGROK_FEATURE_REVISION,
-            dialect_revision: crate::SUPERGROK_RESPONSES_DIALECT_REVISION,
+            feature_revision: crate::responses_dialect::SUPERGROK_FEATURE_REVISION,
+            dialect_revision: crate::responses_dialect::SUPERGROK_RESPONSES_DIALECT_REVISION,
             source_revision: model_catalog_source_revision(
                 self.descriptor.requested_model().as_str(),
             ),
@@ -1176,7 +1179,7 @@ impl XaiNativeAuthManager {
     ///
     /// This method never binds or listens on the callback port. The xAI
     /// authorization request still uses the pinned
-    /// [`XAI_LOOPBACK_REDIRECT`], and completion accepts only that exact
+    /// `XAI_LOOPBACK_REDIRECT`, and completion accepts only that exact
     /// absolute callback origin, port, and path.
     ///
     /// # Errors
@@ -3470,7 +3473,7 @@ impl AuthEndpoints {
             },
             usage: Endpoint {
                 origin: crate::SUPERGROK_RESPONSES_ORIGIN.to_owned(),
-                path: crate::GROK_SUBSCRIPTION_USAGE_PATH.to_owned(),
+                path: crate::subscription_usage::GROK_SUBSCRIPTION_USAGE_PATH.to_owned(),
             },
         }
     }
@@ -3489,7 +3492,7 @@ impl AuthEndpoints {
             revocation: endpoint(REVOCATION_PATH),
             jwks: endpoint(JWKS_PATH),
             catalog: endpoint(CATALOG_PATH),
-            usage: endpoint(crate::GROK_SUBSCRIPTION_USAGE_PATH),
+            usage: endpoint(crate::subscription_usage::GROK_SUBSCRIPTION_USAGE_PATH),
         }
     }
 

@@ -13,21 +13,22 @@ use serde::Deserialize;
 use crate::{AnthropicError, AnthropicErrorKind, AnthropicErrorPhase};
 
 /// Public Claude Code OAuth client identifier (not a secret).
-pub const CLAUDE_OAUTH_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+pub(crate) const CLAUDE_OAUTH_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 /// Authorize origin for inference-capable Claude Max tokens.
-pub const CLAUDE_OAUTH_AUTHORIZE_ORIGIN: &str = "https://claude.com";
+pub(crate) const CLAUDE_OAUTH_AUTHORIZE_ORIGIN: &str = "https://claude.com";
 /// Authorize path. Console/platform authorize can mint tokens that refresh but
 /// are rejected by `/v1/messages`.
-pub const CLAUDE_OAUTH_AUTHORIZE_PATH: &str = "/cai/oauth/authorize";
+pub(crate) const CLAUDE_OAUTH_AUTHORIZE_PATH: &str = "/cai/oauth/authorize";
 /// Token origin.
-pub const CLAUDE_OAUTH_TOKEN_ORIGIN: &str = "https://platform.claude.com";
+pub(crate) const CLAUDE_OAUTH_TOKEN_ORIGIN: &str = "https://platform.claude.com";
 /// Token path.
-pub const CLAUDE_OAUTH_TOKEN_PATH: &str = "/v1/oauth/token";
+pub(crate) const CLAUDE_OAUTH_TOKEN_PATH: &str = "/v1/oauth/token";
 /// Canonical HTTPS redirect registered for the public client.
-pub const CLAUDE_OAUTH_REDIRECT_URI: &str = "https://platform.claude.com/oauth/code/callback";
+pub(crate) const CLAUDE_OAUTH_REDIRECT_URI: &str =
+    "https://platform.claude.com/oauth/code/callback";
 /// Historical console callback still observed on some pasted results. Token
 /// exchange always uses [`CLAUDE_OAUTH_REDIRECT_URI`].
-pub const CLAUDE_OAUTH_LEGACY_REDIRECT_URI: &str =
+pub(crate) const CLAUDE_OAUTH_LEGACY_REDIRECT_URI: &str =
     "https://console.anthropic.com/oauth/code/callback";
 /// One enrolled Claude OAuth coding model: the OAuth catalog, the OAuth
 /// context contract, the effort ladder and the OAuth Messages costume read
@@ -198,17 +199,17 @@ pub fn claude_oauth_reasoning_effort_options(model: &str) -> &'static [Reasoning
     }
 }
 /// Exact authorize scope string in pinned wire order.
-pub const CLAUDE_OAUTH_AUTHORIZE_SCOPES: &str = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
+pub(crate) const CLAUDE_OAUTH_AUTHORIZE_SCOPES: &str = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
 /// Refresh scopes omit `org:create_api_key`.
-pub const CLAUDE_OAUTH_REFRESH_SCOPES: &str =
+pub(crate) const CLAUDE_OAUTH_REFRESH_SCOPES: &str =
     "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
 /// Required inference scope on an admitted token.
-pub const CLAUDE_OAUTH_INFERENCE_SCOPE: &str = "user:inference";
+pub(crate) const CLAUDE_OAUTH_INFERENCE_SCOPE: &str = "user:inference";
 
 /// Messages API origin (same host as Platform; OAuth uses Bearer + `?beta=true`).
-pub const CLAUDE_OAUTH_MESSAGES_ORIGIN: &str = "https://api.anthropic.com";
+pub(crate) const CLAUDE_OAUTH_MESSAGES_ORIGIN: &str = "https://api.anthropic.com";
 /// OAuth Messages path including the required beta query.
-pub const CLAUDE_OAUTH_MESSAGES_PATH: &str = "/v1/messages?beta=true";
+pub(crate) const CLAUDE_OAUTH_MESSAGES_PATH: &str = "/v1/messages?beta=true";
 /// Exact route identity isolated from Console API-key `anthropic.platform`.
 pub const CLAUDE_OAUTH_ROUTE_ID: &str = "anthropic.claude_oauth";
 /// Exact compatibility profile identity.
@@ -217,13 +218,13 @@ pub const CLAUDE_OAUTH_COMPATIBILITY_PROFILE_ID: &str =
 /// Pin revision for this OAuth dialect.
 pub const CLAUDE_OAUTH_SOURCE_REVISION: &str = "claude-oauth.2026-09-22.v3";
 /// Operator notice revision for Claude OAuth compatibility consent.
-pub const CLAUDE_OAUTH_NOTICE_REVISION: &str = "anthropic.claude.oauth.notice.2026-08-20.r1";
+pub(crate) const CLAUDE_OAUTH_NOTICE_REVISION: &str = "anthropic.claude.oauth.notice.2026-08-20.r1";
 /// Kill-switch revision for Claude OAuth compatibility.
 pub const CLAUDE_OAUTH_KILL_SWITCH_REVISION: &str = "anthropic.claude.oauth.kill.2026-08-20.r1";
 /// UTC review time for the Claude OAuth pin table.
-pub const CLAUDE_OAUTH_REVIEWED_AT_UNIX: u64 = 1_790_035_200;
+pub(crate) const CLAUDE_OAUTH_REVIEWED_AT_UNIX: u64 = 1_790_035_200;
 /// Exclusive expiry for the Claude OAuth pin table.
-pub const CLAUDE_OAUTH_EXPIRES_AT_UNIX: u64 = 1_821_571_200;
+pub(crate) const CLAUDE_OAUTH_EXPIRES_AT_UNIX: u64 = 1_821_571_200;
 /// Protocol identity shared with the Messages kernel.
 pub const CLAUDE_OAUTH_PROTOCOL_ID: &str = "anthropic.messages";
 /// Adapter revision for Claude OAuth lowering.
@@ -291,7 +292,7 @@ pub fn claude_oauth_request_max_tokens(model: &str) -> Option<u32> {
 pub const CLAUDE_OAUTH_IDENTITY: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
 
 /// Plak User-Agent used by OAuth token exchange and non-inference traffic.
-pub const CLAUDE_OAUTH_USER_AGENT: &str = concat!("plak/", env!("CARGO_PKG_VERSION"));
+pub(crate) const CLAUDE_OAUTH_USER_AGENT: &str = concat!("plak/", env!("CARGO_PKG_VERSION"));
 /// Claude Code 2.1.295 Messages `User-Agent` (edge costume, not token exchange).
 pub const CLAUDE_OAUTH_MESSAGES_USER_AGENT: &str = "claude-cli/2.1.295 (external, cli)";
 /// Stainless `x-stainless-lang` observed on Claude Code 2.1.270 Messages.
@@ -327,8 +328,6 @@ pub fn claude_oauth_stainless_os() -> &'static str {
         other => other,
     }
 }
-/// Default Claude OAuth coding model for the first enrolled profile.
-pub const CLAUDE_OAUTH_DEFAULT_MODEL_ID: &str = "claude-sonnet-5";
 
 /// Reviewed maximum output for sync Messages on an enrolled coding model.
 ///
@@ -710,7 +709,7 @@ mod tests {
             "claude-cli/2.1.295 (external, cli)"
         );
         assert_eq!(
-            crate::CLAUDE_OAUTH_BILLING_HEADER,
+            crate::cch::CLAUDE_OAUTH_BILLING_HEADER,
             "x-anthropic-billing-header: cc_version=2.1.295.8a8; cc_entrypoint=cli; cch=00000;"
         );
         assert_eq!(

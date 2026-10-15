@@ -47,8 +47,9 @@ use crate::oauth::{
     parse_claude_oauth_authorization_input, parse_claude_oauth_token_grant,
 };
 use crate::{
-    CLAUDE_SUBSCRIPTION_PROFILE_PATH, CLAUDE_SUBSCRIPTION_USAGE_PATH,
-    MAX_CLAUDE_SUBSCRIPTION_USAGE_BODY_BYTES,
+    subscription_usage::CLAUDE_SUBSCRIPTION_PROFILE_PATH,
+    subscription_usage::CLAUDE_SUBSCRIPTION_USAGE_PATH,
+    subscription_usage::MAX_CLAUDE_SUBSCRIPTION_USAGE_BODY_BYTES,
 };
 use plakous_exchange::network_failure;
 

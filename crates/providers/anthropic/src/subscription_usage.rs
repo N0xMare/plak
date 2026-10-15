@@ -17,14 +17,11 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 /// Exact read-only path in the reviewed Claude Code `/usage` client.
-pub const CLAUDE_SUBSCRIPTION_USAGE_PATH: &str = "/api/oauth/usage";
+pub(crate) const CLAUDE_SUBSCRIPTION_USAGE_PATH: &str = "/api/oauth/usage";
 /// Exact read-only path Claude Code's `/status` uses for account identity.
-pub const CLAUDE_SUBSCRIPTION_PROFILE_PATH: &str = "/api/oauth/profile";
-/// Official documentation locator for the status-line overlay of the same windows.
-pub const CLAUDE_SUBSCRIPTION_USAGE_DOCUMENTATION: &str =
-    "https://code.claude.com/docs/en/statusline";
+pub(crate) const CLAUDE_SUBSCRIPTION_PROFILE_PATH: &str = "/api/oauth/profile";
 /// Maximum body accepted by the usage control-plane decoder.
-pub const MAX_CLAUDE_SUBSCRIPTION_USAGE_BODY_BYTES: usize = 256 * 1024;
+pub(crate) const MAX_CLAUDE_SUBSCRIPTION_USAGE_BODY_BYTES: usize = 256 * 1024;
 const FIVE_HOUR_SECONDS: u64 = 5 * 60 * 60;
 const SEVEN_DAY_SECONDS: u64 = 7 * 24 * 60 * 60;
 

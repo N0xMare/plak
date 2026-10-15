@@ -88,9 +88,9 @@ use crate::{
     AuthError, CodexSubscriptionRouteConfig, EndpointOrigin, NativeCodexCatalogWitness,
     NativeCodexCredentialAuthority, NativeCodexForcedRefresh, NativeCodexPreflight,
     NativeCodexPreflightRequest, NativeCodexRuntimeAuthority, OPENAI_CHATGPT_ORIGIN,
-    OPENAI_CODEX_COMPATIBILITY_PROFILE_ID, OPENAI_CODEX_MODELS_PATH, OPENAI_CODEX_SOURCE_REVISION,
+    OPENAI_CODEX_COMPATIBILITY_PROFILE_ID, OPENAI_CODEX_SOURCE_REVISION,
     OPENAI_RESPONSES_ADAPTER_REVISION, OpenAiLanguageModel, OpenAiRoute, OpenAiTarget,
-    StandardOpenAiHttpConfig, StorageMode,
+    StandardOpenAiHttpConfig, StorageMode, config::OPENAI_CODEX_MODELS_PATH,
 };
 use plakous_responses_dialect::ResponsesPhysicalRequestBinding;
 use plakous_responses_dialect::{
@@ -101,15 +101,15 @@ use plakous_responses_dialect::{
 };
 
 /// Exact `OpenAI` authentication origin pinned by the native profile.
-pub const OPENAI_AUTH_ORIGIN: &str = CODEX_OAUTH.auth_origin;
+pub(crate) const OPENAI_AUTH_ORIGIN: &str = CODEX_OAUTH.auth_origin;
 /// Public/native client registration observed in the pinned official Codex source.
-pub const OPENAI_CODEX_NATIVE_CLIENT_ID: &str = CODEX_OAUTH.client_id;
+pub(crate) const OPENAI_CODEX_NATIVE_CLIENT_ID: &str = CODEX_OAUTH.client_id;
 /// Exact scope request observed in the pinned official Codex browser flow.
-pub const OPENAI_CODEX_OAUTH_SCOPES: &str = CODEX_OAUTH.scopes;
+pub(crate) const OPENAI_CODEX_OAUTH_SCOPES: &str = CODEX_OAUTH.scopes;
 /// Compatibility notice that must be accepted without coercion.
-pub const OPENAI_CODEX_COMPATIBILITY_NOTICE_REVISION: &str = CODEX_PROFILE.notice_revision;
+pub(crate) const OPENAI_CODEX_COMPATIBILITY_NOTICE_REVISION: &str = CODEX_PROFILE.notice_revision;
 /// Locally reviewable kill-switch revision bound into the profile.
-pub const OPENAI_CODEX_KILL_SWITCH_REVISION: &str = CODEX_PROFILE.kill_switch_revision;
+pub(crate) const OPENAI_CODEX_KILL_SWITCH_REVISION: &str = CODEX_PROFILE.kill_switch_revision;
 
 #[cfg(test)]
 const AUTHORIZE_PATH: &str = CODEX_OAUTH.authorize_path;
@@ -705,7 +705,7 @@ impl CodexSubscriptionCredentialManager {
             &self.client,
             &self.endpoints.chatgpt_origin,
             Method::GET,
-            crate::CODEX_SUBSCRIPTION_USAGE_PATH,
+            crate::subscription_usage::CODEX_SUBSCRIPTION_USAGE_PATH,
             headers,
             Vec::new(),
             deadline,
@@ -4407,7 +4407,7 @@ impl CodexModelResolutionEvidence {
             adapter_revision: self.adapter_revision,
             profile_revision: self.profile_revision,
             reference_client_version: crate::OPENAI_CODEX_REFERENCE_CLIENT_VERSION,
-            catalog_source_revision: crate::OPENAI_CODEX_CATALOG_SOURCE_REVISION,
+            catalog_source_revision: crate::config::OPENAI_CODEX_CATALOG_SOURCE_REVISION,
             capacity_facts: self.capacity_facts,
             reasoning_efforts: self.reasoning_efforts.identity_byte(),
             tool_mode: self.tool_mode,
@@ -4528,7 +4528,7 @@ fn resolution_route_fingerprint(
             descriptor.requested_model().as_str().as_bytes(),
             descriptor.profile().as_str().as_bytes(),
             crate::OPENAI_CODEX_REFERENCE_CLIENT_VERSION.as_bytes(),
-            crate::OPENAI_CODEX_CATALOG_SOURCE_REVISION.as_bytes(),
+            crate::config::OPENAI_CODEX_CATALOG_SOURCE_REVISION.as_bytes(),
             &has_context_window,
             &context_window,
             &has_max_context_window,
@@ -5484,7 +5484,7 @@ impl CodexCatalogSource {
             public: CodexModelCatalog {
                 entries,
                 profile_id: OPENAI_CODEX_COMPATIBILITY_PROFILE_ID,
-                source_revision: crate::OPENAI_CODEX_CATALOG_SOURCE_REVISION,
+                source_revision: crate::config::OPENAI_CODEX_CATALOG_SOURCE_REVISION,
             },
             descriptors,
             ambiguous_slugs,

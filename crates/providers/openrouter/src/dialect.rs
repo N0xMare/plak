@@ -9,17 +9,17 @@ use plakous_responses_dialect::{
 use serde::{Deserialize, Serialize};
 
 /// Maximum freshness window accepted for authenticated dynamic discovery.
-pub const OPENROUTER_EVIDENCE_MAX_AGE_SECONDS: u64 = 14 * 24 * 60 * 60;
+pub(crate) const OPENROUTER_EVIDENCE_MAX_AGE_SECONDS: u64 = 14 * 24 * 60 * 60;
 /// Fixed OpenRouter Responses resource.
 pub const OPENROUTER_RESPONSES_PATH: &str = "/api/v1/responses";
 /// Dynamic Custom/experimental Responses protocol identity.
 pub const OPENROUTER_RESPONSES_PROTOCOL_ID: &str = "openrouter.responses.v1";
 /// Current OpenRouter Responses host-table revision.
-pub const OPENROUTER_RESPONSES_DIALECT_REVISION: u32 = 3;
+pub(crate) const OPENROUTER_RESPONSES_DIALECT_REVISION: u32 = 3;
 /// Completed output-item replay envelope retained by the Responses artifact.
-pub const OPENROUTER_OUTPUT_ITEM_REPLAY_KIND: &str = "openrouter.responses.output-item";
+pub(crate) const OPENROUTER_OUTPUT_ITEM_REPLAY_KIND: &str = "openrouter.responses.output-item";
 /// Revision of [`OPENROUTER_OUTPUT_ITEM_REPLAY_KIND`].
-pub const OPENROUTER_OUTPUT_ITEM_REPLAY_VERSION: u32 = 3;
+pub(crate) const OPENROUTER_OUTPUT_ITEM_REPLAY_VERSION: u32 = 3;
 
 /// One current OpenRouter Responses grammar.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]

@@ -37,10 +37,10 @@ use plakous_responses_dialect::{
 use thiserror::Error;
 
 use crate::{
-    OPENAI_PLATFORM_RESPONSES_PATH, OPENAI_RESPONSES_ADAPTER_REVISION,
-    OPENAI_RESPONSES_DIALECT_REVISION, OpenAiApiKeyGenerationGrant,
+    OPENAI_RESPONSES_ADAPTER_REVISION, OpenAiApiKeyGenerationGrant,
     OpenAiPlatformConfigurationAuthority, PlatformProjectPolicy, StandardOpenAiHttpConfig,
-    compile_openai_platform_configuration, openai_platform_request_policy,
+    compile_openai_platform_configuration, config::OPENAI_PLATFORM_RESPONSES_PATH,
+    config::OPENAI_RESPONSES_DIALECT_REVISION, openai_platform_request_policy,
 };
 
 const PREFLIGHT_REVISION: u32 = 1;
@@ -53,13 +53,6 @@ const HEADER_CONTENT_TYPE: HeaderName = HeaderName::from_static("content-type");
 const HEADER_AUTHORIZATION: HeaderName = HeaderName::from_static("authorization");
 const HEADER_PROJECT: HeaderName = HeaderName::from_static("openai-project");
 const HEADER_REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
-
-/// Exact hosted-tool discriminator for the qualified Platform PTC slice.
-pub const OPENAI_PLATFORM_PROGRAMMATIC_TOOL_TYPE: &str = "programmatic_tool_calling";
-/// Exact native program item discriminator retained by the qualified codec.
-pub const OPENAI_PLATFORM_PROGRAM_ITEM_TYPE: &str = "program";
-/// Exact native program-result discriminator retained by the qualified codec.
-pub const OPENAI_PLATFORM_PROGRAM_OUTPUT_ITEM_TYPE: &str = "program_output";
 
 struct PlatformExecution {
     authority: OpenAiPlatformConfigurationAuthority,

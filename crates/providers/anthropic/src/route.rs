@@ -12,7 +12,7 @@ use secrecy::{ExposeSecret as _, SecretString as SecrecyString};
 
 use crate::{
     AnthropicError, AnthropicErrorKind, AnthropicErrorPhase, AnthropicMessagesDialect,
-    FeatureMatrixEntry, MESSAGES_FEATURE_MATRIX_V1,
+    FeatureMatrixEntry, dialect::MESSAGES_FEATURE_MATRIX_V1,
 };
 
 /// The only HTTPS origin authorized by [`AnthropicPlatformRoute`].
@@ -491,7 +491,7 @@ impl AnthropicPlatformRoute {
                     error.to_string(),
                 )
             })?,
-            origin: crate::CLAUDE_OAUTH_MESSAGES_ORIGIN,
+            origin: crate::oauth::CLAUDE_OAUTH_MESSAGES_ORIGIN,
             account,
             transport: AnthropicMessagesTransport::HttpsSse,
             auth: AnthropicApiKeyAuth::platform(token),

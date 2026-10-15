@@ -235,7 +235,7 @@ fn route_capabilities(
             crate::native_auth::subscription_model_supports_reasoning(model.remote_id().as_str());
         let evidence_note = format!(
             "{}; exact reviewed model {}; application-local function tools only; fixed profile {}; pinned OpenCode source {}; {} {}; non-normative mutable documentation locators: function calling {}, model page {}; adapter {}; authenticated exact-ID catalog receipt; no aliases, hosted tools, media, structured output, continuation, or catalog-derived context authority; reasoning={}",
-            crate::SUPERGROK_FEATURE_REVISION,
+            crate::responses_dialect::SUPERGROK_FEATURE_REVISION,
             model.remote_id().as_str(),
             crate::native_auth::XAI_GROK_COMPATIBILITY_PROFILE,
             crate::native_auth::XAI_OPENCODE_SOURCE_REVISION,
@@ -401,7 +401,8 @@ mod shared_host_model {
         supergrok_credential_rejected, supergrok_responses_preflight,
     };
     use crate::{
-        SUPERGROK_RESPONSES_DIALECT, SUPERGROK_RESPONSES_DIALECT_REVISION, XaiResolvedModel,
+        SUPERGROK_RESPONSES_DIALECT, XaiResolvedModel,
+        responses_dialect::SUPERGROK_RESPONSES_DIALECT_REVISION,
     };
 
     const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(120);

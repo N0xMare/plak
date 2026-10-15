@@ -3,12 +3,13 @@
 pub(crate) const CLAUDE_IMAGE_MAX_TOKENS: u64 = 3279;
 
 use crate::{
-    ANTHROPIC_PLATFORM_ADMISSION_EXPIRES_AT_SECONDS, ANTHROPIC_PLATFORM_ADMISSION_REVISION,
     AnthropicAccountIdentity, AnthropicApiKeySource, AnthropicError, AnthropicErrorKind,
     AnthropicErrorPhase, AnthropicHttpDeadline, AnthropicLocalHttpServiceFactory,
     AnthropicPlatformCapabilityProfile, AnthropicPlatformModelConfig,
     AnthropicPlatformModelResolver, AnthropicPlatformRoute, MessagesRequestTranslator,
-    ResolvedAnthropicMessages, ThinkingSupport, ToolOwnership, start_anthropic_messages_model_call,
+    ResolvedAnthropicMessages, ThinkingSupport, ToolOwnership,
+    config::ANTHROPIC_PLATFORM_ADMISSION_EXPIRES_AT_SECONDS,
+    config::ANTHROPIC_PLATFORM_ADMISSION_REVISION, start_anthropic_messages_model_call,
 };
 use plakous_http::{Client, Limits, Origin};
 use plakous_model::{
@@ -245,13 +246,13 @@ impl AnthropicLanguageModel {
                 descriptor.profile().clone(),
                 ProviderProfileRevisionId::new("anthropic.platform.messages.v1")
                     .map_err(configuration_error)?,
-                ModelAdapterProfileId::new(crate::ANTHROPIC_API_KEY_AUTH_PROFILE_ID)
+                ModelAdapterProfileId::new(crate::config::ANTHROPIC_API_KEY_AUTH_PROFILE_ID)
                     .map_err(configuration_error)?,
-                ProviderProfileRevisionId::new(crate::ANTHROPIC_API_KEY_AUTH_REVISION)
+                ProviderProfileRevisionId::new(crate::config::ANTHROPIC_API_KEY_AUTH_REVISION)
                     .map_err(configuration_error)?,
-                ProviderAuthorityClassId::new(crate::ANTHROPIC_API_KEY_AUTHORITY_CLASS)
+                ProviderAuthorityClassId::new(crate::config::ANTHROPIC_API_KEY_AUTHORITY_CLASS)
                     .map_err(configuration_error)?,
-                CredentialSelectionId::new(crate::ANTHROPIC_API_KEY_CREDENTIAL_SELECTION)
+                CredentialSelectionId::new(crate::config::ANTHROPIC_API_KEY_CREDENTIAL_SELECTION)
                     .map_err(configuration_error)?,
                 descriptor.requested_model().clone(),
             ),
