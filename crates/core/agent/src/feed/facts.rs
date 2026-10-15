@@ -603,12 +603,8 @@ fn terminal_facts(
         if parent
             .manifest()
             .ledger()
-            .operations()
-            .into_iter()
-            .any(|prior| {
-                prior.operation_id() == record.operation_id()
-                    && matches!(prior.state(), DurableOperationState::Finalized(_))
-            })
+            .operation(record.operation_id())
+            .is_some_and(|prior| matches!(prior.state(), DurableOperationState::Finalized(_)))
         {
             continue;
         }
@@ -637,9 +633,7 @@ fn evaluation_call(checkpoint: &RuntimeCheckpoint, operation_id: u64) -> Option<
     checkpoint
         .manifest()
         .ledger()
-        .operations()
-        .into_iter()
-        .find(|record| record.operation_id() == operation_id)
+        .operation(operation_id)
         .and_then(|record| match record.kind() {
             DurableOperationKind::CompositionEvaluation { call_id, .. } => Some(*call_id),
             _ => None,

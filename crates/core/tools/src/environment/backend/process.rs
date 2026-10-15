@@ -76,6 +76,19 @@ fn supervision_poll_interval(elapsed: Duration) -> Duration {
     }
 }
 
+/// One backoff step of a wait that has lasted `elapsed`, cut short so that it
+/// never sleeps past a deadline `remaining` away.
+fn supervision_sleep(elapsed: Duration, remaining: Duration) -> Duration {
+    supervision_poll_interval(elapsed).min(remaining)
+}
+
+fn sleep_until_next_poll(started: Instant, deadline: Instant) {
+    std::thread::sleep(supervision_sleep(
+        started.elapsed(),
+        deadline.saturating_duration_since(Instant::now()),
+    ));
+}
+
 struct HostProcessOwner {
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
@@ -88,8 +101,9 @@ impl HostProcessOwner {
             // without its handle means that a prior join observed a panic.
             return Err(io_error("host process supervisor failed"));
         };
+        let started = Instant::now();
         while Instant::now() < deadline && !thread.is_finished() {
-            std::thread::sleep(Duration::from_millis(2));
+            sleep_until_next_poll(started, deadline);
         }
         if !thread.is_finished() {
             return Ok(false);
@@ -2670,6 +2684,7 @@ fn write_joined_input(
 ) -> Result<(), ExecutionBackendError> {
     let deadline = Instant::now() + duration;
     let mut written = 0;
+    let mut blocked_since = Instant::now();
     while written < bytes.len() {
         if Instant::now() >= deadline {
             return Err(backend_error(
@@ -2679,9 +2694,12 @@ fn write_joined_input(
         }
         match stdin.write(&bytes[written..]) {
             Ok(0) => return Err(io_error("joined process stdin closed during initial input")),
-            Ok(count) => written = written.saturating_add(count),
+            Ok(count) => {
+                written = written.saturating_add(count);
+                blocked_since = Instant::now();
+            }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(2));
+                sleep_until_next_poll(blocked_since, deadline);
             }
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
             Err(_) => return Err(io_error("joined process initial input failed")),
@@ -2926,16 +2944,17 @@ fn supervise_joined_pty(
         deadline,
         Duration::from_millis(stop_grace_millis.load(Ordering::Acquire)),
     );
+    let draining = Instant::now();
     if matches!(reason, JoinedProcessStatus::Exited(_)) && cleanup.is_ok() {
         while Instant::now() < deadline && !reader_thread.is_finished() {
-            std::thread::sleep(Duration::from_millis(2));
+            sleep_until_next_poll(draining, deadline);
         }
     }
     io_stop.store(true, Ordering::Release);
     let _ = input_owner.try_send(PtyInputCommand::Stop);
     while Instant::now() < deadline && (!reader_thread.is_finished() || !input_thread.is_finished())
     {
-        std::thread::sleep(Duration::from_millis(2));
+        sleep_until_next_poll(draining, deadline);
     }
     let reader_joined = join_thread_until(reader_thread, deadline);
     let input_joined = join_thread_until(input_thread, deadline);
@@ -3718,12 +3737,16 @@ fn set_nonblocking<Fd: AsFd>(fd: &Fd) -> Result<(), ExecutionBackendError> {
 
 fn write_process_input(mut stdin: std::process::ChildStdin, bytes: &[u8], stop: &AtomicBool) {
     let mut written = 0_usize;
+    let mut blocked_since = Instant::now();
     while written < bytes.len() && !stop.load(Ordering::Acquire) {
         match stdin.write(&bytes[written..]) {
             Ok(0) => return,
-            Ok(count) => written = written.saturating_add(count),
+            Ok(count) => {
+                written = written.saturating_add(count);
+                blocked_since = Instant::now();
+            }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(2));
+                std::thread::sleep(supervision_poll_interval(blocked_since.elapsed()));
             }
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
             Err(_) => return,
@@ -3877,14 +3900,16 @@ fn wait_for_output_readers_until(
     stderr: &std::thread::JoinHandle<()>,
     deadline: Instant,
 ) {
+    let started = Instant::now();
     while Instant::now() < deadline && (!stdout.is_finished() || !stderr.is_finished()) {
-        std::thread::sleep(Duration::from_millis(2));
+        sleep_until_next_poll(started, deadline);
     }
 }
 
 fn join_thread_until(thread: std::thread::JoinHandle<()>, deadline: Instant) -> bool {
+    let started = Instant::now();
     while Instant::now() < deadline && !thread.is_finished() {
-        std::thread::sleep(Duration::from_millis(2));
+        sleep_until_next_poll(started, deadline);
     }
     thread.is_finished() && thread.join().is_ok()
 }
@@ -5094,8 +5119,23 @@ mod job_tests {
 
 #[cfg(test)]
 mod supervision_poll_tests {
-    use super::supervision_poll_interval;
+    use super::{supervision_poll_interval, supervision_sleep};
     use std::time::Duration;
+
+    #[test]
+    fn bounded_waits_back_off_but_never_sleep_past_their_deadline() {
+        let long = Duration::from_secs(5);
+        assert_eq!(
+            supervision_sleep(Duration::ZERO, long),
+            Duration::from_millis(2)
+        );
+        assert_eq!(supervision_sleep(long, long), Duration::from_millis(32));
+        assert_eq!(
+            supervision_sleep(long, Duration::from_millis(5)),
+            Duration::from_millis(5)
+        );
+        assert_eq!(supervision_sleep(long, Duration::ZERO), Duration::ZERO);
+    }
 
     #[test]
     fn long_lived_children_are_polled_slowly_and_young_ones_promptly() {
