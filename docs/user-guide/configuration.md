@@ -238,7 +238,8 @@ tool commands, since hook `[env]` does not carry over.
 
 A repository can carry its own Plak configuration. Launching anywhere inside a
 project that has `.plak/config.toml` or `.plak/agents/` resolves the nearest
-such directory as the project root:
+such directory as the project root. Product homes are never projects: neither
+`$PLAK_HOME` nor, when `PLAK_HOME` points elsewhere, the default `~/.plak`. A project home holds:
 
 ```
 <project>/.plak/

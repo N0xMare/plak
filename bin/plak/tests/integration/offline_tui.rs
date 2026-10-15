@@ -2077,6 +2077,7 @@ fn a_reload_onto_the_same_state_key_resumes_exactly() {
     let fixture = Fixture::new(&tool_then_answer("same-key answer"));
     let key = Command::new(env!("CARGO_BIN_EXE_plak"))
         .args(["version", "--state-key"])
+        .current_dir(fixture.workspace())
         .env("HOME", fixture.root.join("fake-home"))
         .env("TMPDIR", fixture.root.join("tmp"))
         .env("PLAK_HOME", fixture.home())

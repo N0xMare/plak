@@ -18,6 +18,7 @@ fn plak_command(home: &std::path::Path) -> Command {
     command
         .env("PLAK_HOME", home)
         .env("HOME", home)
+        .current_dir(home)
         .env("XDG_CONFIG_HOME", home.join("xdg-config"))
         .env("XDG_DATA_HOME", home.join("xdg-data"))
         .env("XDG_STATE_HOME", home.join("xdg-state"));

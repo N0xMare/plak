@@ -59,7 +59,7 @@ impl PlakPaths {
     /// Resolve the nearest project configuration home from a workspace.
     #[must_use]
     pub fn for_workspace(home: PathBuf, workspace: &Path) -> Self {
-        let project_root = discover_project_root(workspace, &home, None);
+        let project_root = discover_project_root(workspace, &[home.as_path()], None);
         Self { home, project_root }
     }
 
@@ -103,14 +103,29 @@ impl PlakPaths {
     /// project home merely because `.plak` exists: it must hold `config.toml`
     /// or an `agents` directory.
     pub fn from_env() -> Result<Self, String> {
-        let paths = Self::resolve(
-            std::env::var_os("PLAK_HOME").as_deref(),
-            std::env::var_os("HOME").as_deref(),
-        )?;
+        let plak_home = std::env::var_os("PLAK_HOME");
+        let home = std::env::var_os("HOME");
+        let paths = Self::resolve(plak_home.as_deref(), home.as_deref())?;
         Ok(match std::env::current_dir() {
-            Ok(cwd) => Self::for_workspace(paths.home, &cwd),
+            Ok(cwd) => paths.discovered_from(home.as_deref(), &cwd),
             Err(_) => paths,
         })
+    }
+
+    /// Discovery from the launch directory. The default `$HOME/.plak` is a
+    /// product home even when `PLAK_HOME` points elsewhere, so it is never
+    /// taken as the project override of everything below `$HOME`.
+    fn discovered_from(self, home: Option<&std::ffi::OsStr>, cwd: &Path) -> Self {
+        let default_home = home
+            .filter(|home| !home.is_empty())
+            .map(|home| PathBuf::from(home).join(".plak"));
+        let mut product_homes = vec![self.home.as_path()];
+        product_homes.extend(default_home.as_deref());
+        let project_root = discover_project_root(cwd, &product_homes, None);
+        Self {
+            project_root,
+            ..self
+        }
     }
 
     #[must_use]
@@ -374,12 +389,14 @@ impl PlakPaths {
 /// trusting a redirected path or reading the global home as an override.
 fn discover_project_root(
     cwd: &Path,
-    product_home: &Path,
+    product_homes: &[&Path],
     stop_at: Option<&Path>,
 ) -> Option<PathBuf> {
     let cwd = fs::canonicalize(cwd).ok()?;
-    let product_home =
-        fs::canonicalize(product_home).unwrap_or_else(|_| product_home.to_path_buf());
+    let product_homes: Vec<PathBuf> = product_homes
+        .iter()
+        .map(|home| fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf()))
+        .collect();
     let stop_at = stop_at.and_then(|stop| fs::canonicalize(stop).ok());
     for ancestor in cwd.ancestors() {
         let home = ancestor.join(".plak");
@@ -387,7 +404,7 @@ fn discover_project_root(
             .map(|metadata| metadata.file_type().is_dir())
             .unwrap_or(false)
             && (home.join("config.toml").is_file() || home.join("agents").is_dir());
-        if is_home && fs::canonicalize(&home).unwrap_or(home.clone()) != product_home {
+        if is_home && !product_homes.contains(&fs::canonicalize(&home).unwrap_or(home.clone())) {
             return Some(ancestor.to_path_buf());
         }
         if stop_at.as_deref() == Some(ancestor) {
@@ -584,14 +601,20 @@ mod tests {
         let nested = outer.join("a/b/c");
         fs::create_dir_all(&nested).unwrap();
         // No `.plak` anywhere: nothing is discovered.
-        assert_eq!(discover_project_root(&nested, &product_home, stop), None);
+        assert_eq!(
+            discover_project_root(&nested, &[product_home.as_path()], stop),
+            None
+        );
         // An empty `.plak` is not a configuration home.
         fs::create_dir(outer.join(".plak")).unwrap();
-        assert_eq!(discover_project_root(&nested, &product_home, stop), None);
+        assert_eq!(
+            discover_project_root(&nested, &[product_home.as_path()], stop),
+            None
+        );
         // `agents/` alone makes it a home, and it answers from a deep cwd.
         fs::create_dir(outer.join(".plak/agents")).unwrap();
         assert_eq!(
-            discover_project_root(&nested, &product_home, stop),
+            discover_project_root(&nested, &[product_home.as_path()], stop),
             Some(outer.canonicalize().unwrap())
         );
         // A closer home wins over an outer one.
@@ -599,12 +622,12 @@ mod tests {
         fs::create_dir_all(inner.join(".plak")).unwrap();
         fs::write(inner.join(".plak/config.toml"), "").unwrap();
         assert_eq!(
-            discover_project_root(&nested, &product_home, stop),
+            discover_project_root(&nested, &[product_home.as_path()], stop),
             Some(inner.canonicalize().unwrap())
         );
         // From the home directory itself the same root answers.
         assert_eq!(
-            discover_project_root(&inner, &product_home, stop),
+            discover_project_root(&inner, &[product_home.as_path()], stop),
             Some(inner.canonicalize().unwrap())
         );
     }
@@ -641,6 +664,27 @@ mod tests {
     }
 
     #[test]
+    fn launch_discovery_never_takes_the_default_home_for_a_project() {
+        let root = tempfile::tempdir().unwrap();
+        let user = root.path().join("user");
+        let work = user.join("work/repo");
+        fs::create_dir_all(user.join(".plak/agents")).unwrap();
+        fs::write(user.join(".plak/config.toml"), "").unwrap();
+        fs::create_dir_all(&work).unwrap();
+        let private = root.path().join("private-home");
+        let paths =
+            PlakPaths::explicit(private.clone()).discovered_from(Some(user.as_os_str()), &work);
+        assert_eq!(paths.project_root(), None);
+        // A real project below `$HOME` is still discovered.
+        fs::create_dir_all(work.join(".plak/agents")).unwrap();
+        let paths = PlakPaths::explicit(private).discovered_from(Some(user.as_os_str()), &work);
+        assert_eq!(
+            paths.project_root(),
+            Some(work.canonicalize().unwrap().as_path())
+        );
+    }
+
+    #[test]
     fn project_discovery_never_returns_the_product_home() {
         let root = tempfile::tempdir().unwrap();
         let product_home = root.path().join(".plak");
@@ -648,7 +692,7 @@ mod tests {
         // From the home's own parent, the product home is excluded even though
         // it is a real configuration home.
         assert_eq!(
-            discover_project_root(root.path(), &product_home, Some(root.path())),
+            discover_project_root(root.path(), &[product_home.as_path()], Some(root.path())),
             None
         );
     }
@@ -665,7 +709,7 @@ mod tests {
         std::os::unix::fs::symlink(real.join(".plak"), work.join(".plak")).unwrap();
         // `.plak` itself is a symlink: not a configuration home.
         assert_eq!(
-            discover_project_root(&work, &product_home, Some(root.path())),
+            discover_project_root(&work, &[product_home.as_path()], Some(root.path())),
             None
         );
     }

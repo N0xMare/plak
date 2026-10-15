@@ -85,6 +85,7 @@ fn telemetry_sql_with_product_attach() {
     let output = Command::new(plak_bin())
         .env("PLAK_HOME", paths.home())
         .env("HOME", paths.home())
+        .current_dir(paths.home())
         .args([
             "telemetry",
             "sql",
@@ -116,6 +117,7 @@ fn telemetry_status_reports_schema_version() {
     let output = Command::new(plak_bin())
         .env("PLAK_HOME", paths.home())
         .env("HOME", paths.home())
+        .current_dir(paths.home())
         .args(["telemetry", "status"])
         .output()
         .expect("spawn plak telemetry status");

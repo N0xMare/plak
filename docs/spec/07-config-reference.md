@@ -29,7 +29,9 @@ $PLAK_HOME/            # default ~/.plak
 or `.plak/agents/` resolves that directory as the *project root*: the nearest
 ancestor wins, `.plak` must be a real directory (a symlink or plain file is
 ignored), an empty `.plak` is ignored, and `$PLAK_HOME` itself is never a
-project. Only `config.toml` and `agents/` participate; sessions, secrets,
+project. Launch discovery likewise skips the default home `$HOME/.plak` when
+`PLAK_HOME` points elsewhere: it is a product home, not the project of
+everything below `$HOME`. Only `config.toml` and `agents/` participate; sessions, secrets,
 databases, logs, telemetry and cache always live under `$PLAK_HOME`.
 Imports and attached maintainer actions use the same ancestor discovery from
 the recorded workspace, not the invoking shell's cwd or the literal workspace

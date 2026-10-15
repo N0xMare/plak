@@ -11,6 +11,7 @@ fn missing_fixture_session_does_not_create_logs_or_state() -> Result<(), Box<dyn
             "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         ])
         .env_clear()
+        .current_dir(home.path())
         .env("PLAK_HOME", home.path())
         .output()?;
     assert!(!result.status.success());

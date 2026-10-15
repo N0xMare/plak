@@ -376,6 +376,7 @@ fn run_plak(home: &std::path::Path, args: &[&str]) -> std::process::Output {
     Command::new(plak_bin())
         .env("PLAK_HOME", home)
         .env("HOME", home) // some paths fall back to HOME
+        .current_dir(home)
         .env_remove("OPENAI_API_KEY")
         .env_remove("XAI_API_KEY")
         .env_remove("ANTHROPIC_API_KEY")
@@ -440,6 +441,7 @@ fn session_show_uses_read_only_entry_even_with_diagnostics_enabled() {
     let output = Command::new(plak_bin())
         .env("PLAK_HOME", home)
         .env("HOME", home)
+        .current_dir(home)
         .env("PLAK_LOG", "info")
         .args(["session", "show", &record.id])
         .output()
@@ -530,6 +532,7 @@ fn session_show_missing_home_does_not_create_product_state() {
     let output = Command::new(plak_bin())
         .env("PLAK_HOME", &missing)
         .env("HOME", dir.path())
+        .current_dir(dir.path())
         .env("PLAK_LOG", "info")
         .args(["session", "show", "00000000-0000-4000-8000-000000000001"])
         .output()
@@ -555,6 +558,7 @@ fn session_show_leaves_an_incompatible_runtime_store_untouched() {
     let output = Command::new(plak_bin())
         .env("PLAK_HOME", home)
         .env("HOME", home)
+        .current_dir(home)
         .env("PLAK_LOG", "info")
         .args(["session", "show", &record.id])
         .output()
@@ -1144,6 +1148,7 @@ fn run_plak_without_provider(home: &std::path::Path, args: &[&str]) -> std::proc
     Command::new(plak_bin())
         .env("PLAK_HOME", home)
         .env("HOME", home)
+        .current_dir(home)
         .env_remove("OPENAI_API_KEY")
         .env_remove("XAI_API_KEY")
         .env_remove("ANTHROPIC_API_KEY")
@@ -1309,6 +1314,7 @@ fn key_clear_fails_closed_when_process_env_still_wins() {
     let out = Command::new(plak_bin())
         .env("PLAK_HOME", home)
         .env("HOME", home)
+        .current_dir(home)
         .env(
             "OPENROUTER_API_KEY",
             concat!("sk-or-v1-", "env-shadow-test-key"),
@@ -1328,6 +1334,7 @@ fn key_clear_fails_closed_when_process_env_still_wins() {
     let clear = Command::new(plak_bin())
         .env("PLAK_HOME", home)
         .env("HOME", home)
+        .current_dir(home)
         .env(
             "OPENROUTER_API_KEY",
             concat!("sk-or-v1-", "env-shadow-test-key"),
@@ -1407,6 +1414,7 @@ fn bare_plak_non_tty_fails_with_run_hint() {
     let out = Command::new(plak_bin())
         .env("PLAK_HOME", home)
         .env("HOME", home)
+        .current_dir(home)
         .env_remove("OPENAI_API_KEY")
         .env_remove("XAI_API_KEY")
         .env_remove("ANTHROPIC_API_KEY")
@@ -1903,6 +1911,7 @@ fn a_non_private_home_is_refused_with_its_fix_and_never_repaired() {
     let out = Command::new(plak_bin())
         .env("PLAK_HOME", &fresh)
         .env("HOME", dir.path())
+        .current_dir(dir.path())
         .args(["session", "list"])
         .output()
         .expect("spawn plak");
@@ -1922,6 +1931,7 @@ fn a_non_private_home_is_refused_with_its_fix_and_never_repaired() {
         Command::new(plak_bin())
             .env("PLAK_HOME", &home)
             .env("HOME", dir.path())
+            .current_dir(dir.path())
             .args(args)
             .output()
             .expect("spawn plak")
