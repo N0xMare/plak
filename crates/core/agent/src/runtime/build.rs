@@ -813,246 +813,28 @@ impl PreparedAgent {
         let output_bound_rederived = bootstrap
             .as_ref()
             .and_then(|bootstrap| bootstrap.checkpoint.manifest().output_bound_rederived());
-        let persisted_presentation = if let Some(bootstrap) = bootstrap.as_ref() {
-            let persisted_plan = bootstrap
-                .checkpoint
-                .manifest()
-                .rehydrate_harness_plan()
-                .map_err(runtime_manifest_error)?;
-            if builder
-                .harness_plan
-                .as_ref()
-                .is_some_and(|provided| provided != &persisted_plan)
-            {
-                return Err(AgentError::new(
-                    AgentErrorKind::IncompatibleSession,
-                    "builder harness plan disagrees with durable semantics",
-                ));
-            }
-            builder.harness_plan = Some(persisted_plan);
-            builder.job_config = stored_job_config(
-                bootstrap
-                    .checkpoint
-                    .manifest()
-                    .tools()
-                    .environment()
-                    .bytes(),
-            )?;
-            let (registry, presentation) = reconstruct_persisted_tools(
-                bootstrap.checkpoint.manifest(),
-                &builder.tool_bindings,
-            )?;
-            validate_reopened_projection(builder.tool_projection_v2.as_ref(), &presentation)?;
-            builder.tools = registry;
-            builder.tool_projection_v2 = match &presentation {
-                ToolPresentation::V1(_) => None,
-                ToolPresentation::V2(projection) => Some(projection.as_ref().clone()),
-            };
-            if let Some(local_composition) = builder.local_composition.as_mut() {
-                let target = builder
-                    .tool_projection_v2
-                    .as_ref()
-                    .ok_or_else(|| {
-                        AgentError::new(
-                            AgentErrorKind::InvalidInput,
-                            "durable local composition reconstruction has no V2 outer projection",
-                        )
-                    })?
-                    .target()
-                    .clone();
-                let reconstructed = local_composition
-                    .integration
-                    .rebuild_descriptor(builder.job_config, builder.tools.clone(), target)
-                    .map_err(|error| AgentError::new(AgentErrorKind::InvalidInput, error))?;
-                if reconstructed.identity != local_composition.descriptor.identity {
-                    return Err(AgentError::new(
-                        AgentErrorKind::InvalidInput,
-                        "durable local composition descriptor disagrees with reconstructed tool semantics",
-                    ));
-                }
-                local_composition.descriptor = reconstructed;
-            }
-            Some(presentation)
-        } else {
-            None
-        };
-        if persisted_presentation.is_none()
-            && let Some(local_composition) = builder.local_composition.as_mut()
-        {
-            let target = local_composition
-                .descriptor
-                .outer_projection
-                .target()
-                .clone();
-            let reconstructed = local_composition
-                .integration
-                .rebuild_descriptor(builder.job_config, builder.tools.clone(), target)
-                .map_err(|error| AgentError::new(AgentErrorKind::InvalidInput, error))?;
-            if reconstructed.identity != local_composition.descriptor.identity {
-                return Err(AgentError::new(
-                    AgentErrorKind::InvalidInput,
-                    "fresh local composition descriptor disagrees with reconstructed tool semantics",
-                ));
-            }
-            local_composition.descriptor = reconstructed;
-        }
-        let runtime_durability = bootstrap
-            .as_ref()
-            .map_or(RuntimeDurability::Disabled, |bootstrap| {
-                bootstrap.checkpoint.manifest().durability()
-            });
-        validate_configuration_runtime_authority(
-            &builder.provider_configuration,
-            builder.provider_configuration.effective().descriptor(),
-            &builder.initial_model_authority,
-            builder.clock.now(),
-        )
-        .map_err(|_| {
-            AgentError::new(
-                AgentErrorKind::InvalidInput,
-                "initial model authority disagrees with the effective provider configuration",
-            )
-        })?;
-        let behavior = builder.provider_configuration.effective().behavior();
-        if !matches!(
-            (behavior.local_durability, runtime_durability),
-            (
-                LocalDurabilityDisposition::Ephemeral,
-                RuntimeDurability::Disabled
-            ) | (
-                LocalDurabilityDisposition::BestEffort,
-                RuntimeDurability::BestEffort
-            ) | (
-                LocalDurabilityDisposition::DurableRequired,
-                RuntimeDurability::Required
-            )
-        ) {
-            return Err(AgentError::new(
-                AgentErrorKind::InvalidInput,
-                "configured provider tools or durability disagree with agent construction",
-            ));
-        }
-        let model_error_target = ModelErrorTarget::from_descriptor(
-            builder.provider_configuration.effective().descriptor(),
-        )
-        .map_err(|_| {
-            AgentError::new(
-                AgentErrorKind::InvalidInput,
-                "resolved model identities are unsafe for public error attribution",
-            )
-        })?;
-        if builder.instructions.len() > 256 {
-            return Err(AgentError::new(
-                AgentErrorKind::InvalidInput,
-                "agent instruction prefix exceeds the canonical block limit",
-            ));
-        }
-        tokio::runtime::Handle::try_current().map_err(|_| {
-            AgentError::new(
-                AgentErrorKind::InvalidInput,
-                "agent construction requires an active Tokio runtime",
-            )
-        })?;
+        let persisted_presentation =
+            adopt_persisted_tool_semantics(&mut builder, bootstrap.as_ref())?;
+        let model_error_target = validate_construction_inputs(&builder, bootstrap.as_ref())?;
 
-        let agent_id = AgentId::generate(builder.clock.as_ref(), builder.ids.as_ref())
-            .map_err(|error| AgentError::from_identity(&error))?;
-        let (session_id, branch_id, run_id) = if let Some(bootstrap) = bootstrap.as_ref() {
-            let session = bootstrap.branch.head().session();
-            (
-                session.session_id(),
-                session.branch_id(),
-                restored_frame
-                    .as_ref()
-                    .map_or(bootstrap.branch.lease().owner(), |frame| {
-                        frame.provider_request().metadata().run_id()
-                    }),
-            )
-        } else {
-            (
-                SessionId::generate(builder.clock.as_ref(), builder.ids.as_ref())
-                    .map_err(|error| AgentError::from_identity(&error))?,
-                BranchId::generate(builder.clock.as_ref(), builder.ids.as_ref())
-                    .map_err(|error| AgentError::from_identity(&error))?,
-                RunId::generate(builder.clock.as_ref(), builder.ids.as_ref())
-                    .map_err(|error| AgentError::from_identity(&error))?,
-            )
-        };
-        let close_event_id = EventId::generate(builder.clock.as_ref(), builder.event_ids.as_ref())
-            .map_err(|_| event_error(ViewError::Identity))?;
-        let environment = run_environment(
-            &builder.workspace,
+        let ConstructionIdentities {
+            agent: agent_id,
+            session: session_id,
+            branch: branch_id,
+            run: run_id,
+            close_event: close_event_id,
+        } = construction_identities(&builder, bootstrap.as_ref(), restored_frame.as_ref())?;
+        let (environment, job_sessions) = attach_job_environment(
+            &builder,
+            bootstrap.as_ref(),
+            agent_id,
+            session_id,
+            branch_id,
             run_id,
-            builder.host_process_options.clone(),
-            builder.job_config,
         )?;
-        let fresh_sessions = environment
-            .joined_process_sessions()
-            .map_err(|error| AgentError::from_tool(&plakous_tools::backend_runtime_error(error)))?;
-        plakous_tools::internal::seed_job_counter(&fresh_sessions, builder.job_counter_seed);
-        let job_sessions = if let Some(host) = &builder.job_host {
-            host.attach(
-                plakous_tools::JobOwner {
-                    session_id,
-                    branch_id,
-                    agent_id,
-                },
-                fresh_sessions,
-            )
-            .map_err(|error| AgentError::from_tool(&plakous_tools::backend_runtime_error(error)))?
-        } else {
-            fresh_sessions
-        };
-        plakous_tools::internal::set_job_owner(&job_sessions, agent_id.to_string());
-        if let Some(bootstrap) = &bootstrap {
-            plakous_tools::internal::seed_job_counter(
-                &job_sessions,
-                bootstrap.checkpoint.manifest().jobs().next_id(),
-            );
-            let rows = bootstrap.checkpoint.manifest().jobs().rows();
-            let unmatched = job_sessions
-                .jobs()
-                .iter()
-                .filter(|view| {
-                    view.status != plakous_tools::JobStatus::Running
-                        && !rows.iter().any(|row| {
-                            row.number == view.number
-                                && row.session_id.as_bytes() == view.session_id
-                                && row.owner_generation.get() == view.owner_generation
-                        })
-                })
-                .map(|view| view.number)
-                .collect::<Vec<_>>();
-            plakous_tools::internal::consume_jobs(&job_sessions, &unmatched);
-            plakous_tools::internal::restore_job_terminals(
-                &job_sessions,
-                &bootstrap
-                    .checkpoint
-                    .manifest()
-                    .jobs()
-                    .rows()
-                    .iter()
-                    .map(crate::manifest::JobRow::view)
-                    .collect::<Vec<_>>(),
-            );
-        }
-        environment.adopt_joined_process_sessions(&job_sessions);
         let event_limits = subscription_limits(config)?;
         let telemetry_context = TelemetryContext::new(agent_id, session_id, branch_id, run_id);
-        let tool_scheduler = builder.tool_scheduler.take();
-        let tools = match tool_scheduler {
-            Some((scheduler, config)) => ToolRuntime::with_scheduler(
-                builder.tools.clone(),
-                Arc::new(environment),
-                Arc::clone(&builder.policy),
-                scheduler,
-                config,
-            ),
-            None => ToolRuntime::new(
-                builder.tools.clone(),
-                Arc::new(environment),
-                Arc::clone(&builder.policy),
-            ),
-        };
+        let tools = construction_tool_runtime(&mut builder, environment);
         let (harness_plan, request_policy, instructions, tool_exposure_map) =
             resolve_construction_harness_plan(&builder, &tools)?;
         let tool_presentation =
@@ -1076,101 +858,24 @@ impl PreparedAgent {
         )?;
         let stable_request_prefix = tool_presentation.request_prefix(stable_request_prefix)?;
         let authority = if let Some(bootstrap) = bootstrap {
-            let manifest = bootstrap.checkpoint.manifest();
-            // A different model is the caller's binding failing revalidation;
-            // the same model with a different prefix is this build drifting.
-            if manifest.binding().model_binding()
-                != builder
-                    .provider_configuration
-                    .effective()
-                    .descriptor()
-                    .semantic_binding_digest()
-                    .map_err(|_| {
-                        AgentError::new(
-                            AgentErrorKind::InvalidInput,
-                            "resolved model binding could not be validated",
-                        )
-                    })?
-            {
-                return Err(AgentError::new(
-                    AgentErrorKind::InvalidInput,
-                    "builder model binding disagrees with the durable checkpoint",
-                ));
-            }
-            let durable_prefix = manifest.canonical().stable_prefix();
-            if durable_prefix != &stable_request_prefix {
-                return Err(AgentError::new(
-                    AgentErrorKind::IncompatibleSession,
-                    checkpoint_prefix_mismatch(stable_request_prefix.drift_from(durable_prefix)),
-                ));
-            }
-            let witness = runtime_revalidation_witness(
-                builder.model.as_ref(),
-                &builder.provider_configuration,
-                &tools,
-                &tool_presentation,
-                builder.workspace.as_ref(),
-                builder.local_composition.as_ref(),
-                refreshed_reopen_admission(
-                    manifest,
-                    &builder.provider_configuration,
-                    &bootstrap.admission,
-                )?,
-                builder.clock.now(),
-            )?;
-            let restored_plan = match bootstrap
-                .checkpoint
-                .rehydrate(&witness)
-                .map_err(runtime_rehydration_error)?
-            {
-                RuntimeRehydration::Quiescent { harness_plan, .. } => harness_plan,
-                RuntimeRehydration::WorkingRecovery { harness_plan, .. }
-                    if restored_frame.is_some() || local_terminal_recovery =>
-                {
-                    harness_plan
-                }
-                RuntimeRehydration::WorkingRecovery { .. } => {
-                    return Err(AgentError::new(
-                        AgentErrorKind::OutcomeUnknown,
-                        "working checkpoint requires the explicit recovery workflow",
-                    ));
-                }
-            };
-            if restored_plan != harness_plan {
-                return Err(AgentError::new(
-                    AgentErrorKind::IncompatibleSession,
-                    "builder harness plan disagrees with durable reconstruction",
-                ));
-            }
-            PreparedCheckpoint::new(
-                bootstrap.checkpoint,
-                bootstrap.bundle,
-                Some(bootstrap.branch),
-            )
-        } else {
-            let checkpoint_id = CheckpointId::try_from(run_id.as_uuid())
-                .map_err(|error| AgentError::from_identity(&error))?;
-            let checkpoint = initial_memory_checkpoint(
-                session_id,
-                branch_id,
-                checkpoint_id,
+            reopened_checkpoint_authority(
+                &builder,
+                bootstrap,
                 &stable_request_prefix,
                 &harness_plan,
-                &builder.provider_configuration,
-                builder.model.as_ref(),
                 &tools,
                 &tool_presentation,
-                builder.workspace.as_ref(),
-                builder.local_composition.as_ref(),
-                builder.clock.now(),
-                None,
-                RuntimeDurability::Disabled,
-                CanonicalHistory::default(),
-                builder.job_counter_seed,
-            )?;
-            let bundle = RuntimeCheckpointCodec::bundle(&checkpoint, None)
-                .map_err(checkpoint_bundle_error)?;
-            PreparedCheckpoint::new(Arc::new(checkpoint), bundle, None)
+                restored_frame.is_some() || local_terminal_recovery,
+            )?
+        } else {
+            fresh_checkpoint_authority(
+                &builder,
+                (session_id, branch_id, run_id),
+                &stable_request_prefix,
+                &harness_plan,
+                &tools,
+                &tool_presentation,
+            )?
         };
         let (initial_command_ledger, next_command_sequence, next_operation_sequence) =
             rehydrate_runtime_indexes(
@@ -1178,40 +883,7 @@ impl PreparedAgent {
                 &BTreeMap::new(),
                 authority.durable_facts().is_some(),
             )?;
-        let interpreter_observation = if builder.local_composition.as_ref().is_some_and(|value| {
-            value.integration.lifecycle() == LocalCompositionLifecycle::AgentIncarnationPersistent
-        }) {
-            let generation = authority
-                .checkpoint()
-                .manifest()
-                .interpreter_observation()
-                .map(InterpreterObservation::generation)
-                .map_or(Ok(1), |generation| {
-                    generation.checked_add(1).ok_or_else(|| {
-                        AgentError::new(
-                            AgentErrorKind::Session,
-                            "interpreter generation identity space was exhausted on reopen",
-                        )
-                    })
-                })?;
-            Some(
-                InterpreterObservation::new(
-                    generation,
-                    InterpreterAvailability::Reset,
-                    Some(InterpreterResetReason::ProcessReopen),
-                    authority
-                        .checkpoint()
-                        .manifest()
-                        .interpreter_observation()
-                        .and_then(InterpreterObservation::affected_cell)
-                        .map(str::to_owned),
-                    None,
-                )
-                .map_err(runtime_manifest_error)?,
-            )
-        } else {
-            None
-        };
+        let interpreter_observation = reopened_interpreter_observation(&builder, &authority)?;
         let authoritative_conversation = authority.conversation();
         let events = EventHub::new(
             agent_id,
@@ -1231,64 +903,7 @@ impl PreparedAgent {
         .map_err(event_error)?;
 
         let restored = restored_frame
-            .map(|frame| {
-                let command_id =
-                    CommandId::new(frame.root().command_id.clone()).map_err(control_agent_error)?;
-                let lifecycle = queued_turn_machine(frame.root().turn_id)?;
-                let effect = if let RestoredContinuationFrame::EffectDecision(effect_frame) = &frame
-                {
-                    if builder.clock.now() >= effect_frame.decision_expires_at {
-                        return Err(AgentError::new(
-                            AgentErrorKind::OutcomeUnknown,
-                            "persisted effect decision expired",
-                        ));
-                    }
-                    let pending_index = usize::try_from(effect_frame.pending_index)
-                        .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-                    let Some(ContinuationToolSlot::PendingDecision { call, .. }) =
-                        effect_frame.slots.get(pending_index)
-                    else {
-                        return Err(AgentError::from_store(SessionStoreError::corrupt()));
-                    };
-                    let arguments = tool_presentation
-                        .registry_arguments(call)
-                        .map_err(|error| AgentError::from_tool(&error))?;
-                    let prepared = tool_presentation
-                        .prepare(
-                            ToolInvocationRequest::new(
-                                run_id,
-                                effect_frame.root.turn_id,
-                                effect_frame.attempt_id,
-                                call.call_id(),
-                                call.exposed_name().clone(),
-                                call.correlation().clone(),
-                                Arc::<str>::from(arguments),
-                            ),
-                            tools.environment(),
-                        )
-                        .map_err(|error| AgentError::from_tool(&error))?;
-                    let pending = tools
-                        .restore_pending_effect_decision(
-                            prepared.invocation.clone(),
-                            effect_frame.decision.binding_digest(),
-                            plakous_tools::EffectDecisionPrompt::new(&effect_frame.decision_prompt),
-                        )
-                        .map_err(|error| AgentError::from_tool(&error))?;
-                    Some(RestoredEffectDecision {
-                        invocation: prepared.invocation,
-                        projection_receipt: prepared.projection_receipt,
-                        pending,
-                    })
-                } else {
-                    None
-                };
-                Ok(RestoredStartup {
-                    frame,
-                    effect,
-                    command_id,
-                    lifecycle,
-                })
-            })
+            .map(|frame| restore_startup(&builder, frame, run_id, &tools, &tool_presentation))
             .transpose()?;
         Ok(Self {
             job_sessions,
@@ -1375,6 +990,521 @@ impl PreparedAgent {
         self.next_operation_sequence = next_operation_sequence;
         Ok(())
     }
+}
+
+/// Adopts the persisted harness plan, job environment and tool presentation of
+/// a reopened session, then checks any local composition against the tool
+/// semantics it will run with.
+fn adopt_persisted_tool_semantics(
+    builder: &mut AgentBuilder,
+    bootstrap: Option<&DurableRuntimeBootstrap>,
+) -> Result<Option<ToolPresentation>, AgentError> {
+    let persisted_presentation = if let Some(bootstrap) = bootstrap {
+        let persisted_plan = bootstrap
+            .checkpoint
+            .manifest()
+            .rehydrate_harness_plan()
+            .map_err(runtime_manifest_error)?;
+        if builder
+            .harness_plan
+            .as_ref()
+            .is_some_and(|provided| provided != &persisted_plan)
+        {
+            return Err(AgentError::new(
+                AgentErrorKind::IncompatibleSession,
+                "builder harness plan disagrees with durable semantics",
+            ));
+        }
+        builder.harness_plan = Some(persisted_plan);
+        builder.job_config = stored_job_config(
+            bootstrap
+                .checkpoint
+                .manifest()
+                .tools()
+                .environment()
+                .bytes(),
+        )?;
+        let (registry, presentation) =
+            reconstruct_persisted_tools(bootstrap.checkpoint.manifest(), &builder.tool_bindings)?;
+        validate_reopened_projection(builder.tool_projection_v2.as_ref(), &presentation)?;
+        builder.tools = registry;
+        builder.tool_projection_v2 = match &presentation {
+            ToolPresentation::V1(_) => None,
+            ToolPresentation::V2(projection) => Some(projection.as_ref().clone()),
+        };
+        if let Some(local_composition) = builder.local_composition.as_mut() {
+            let target = builder
+                .tool_projection_v2
+                .as_ref()
+                .ok_or_else(|| {
+                    AgentError::new(
+                        AgentErrorKind::InvalidInput,
+                        "durable local composition reconstruction has no V2 outer projection",
+                    )
+                })?
+                .target()
+                .clone();
+            let reconstructed = local_composition
+                .integration
+                .rebuild_descriptor(builder.job_config, builder.tools.clone(), target)
+                .map_err(|error| AgentError::new(AgentErrorKind::InvalidInput, error))?;
+            if reconstructed.identity != local_composition.descriptor.identity {
+                return Err(AgentError::new(
+                    AgentErrorKind::InvalidInput,
+                    "durable local composition descriptor disagrees with reconstructed tool semantics",
+                ));
+            }
+            local_composition.descriptor = reconstructed;
+        }
+        Some(presentation)
+    } else {
+        None
+    };
+    if persisted_presentation.is_none()
+        && let Some(local_composition) = builder.local_composition.as_mut()
+    {
+        let target = local_composition
+            .descriptor
+            .outer_projection
+            .target()
+            .clone();
+        let reconstructed = local_composition
+            .integration
+            .rebuild_descriptor(builder.job_config, builder.tools.clone(), target)
+            .map_err(|error| AgentError::new(AgentErrorKind::InvalidInput, error))?;
+        if reconstructed.identity != local_composition.descriptor.identity {
+            return Err(AgentError::new(
+                AgentErrorKind::InvalidInput,
+                "fresh local composition descriptor disagrees with reconstructed tool semantics",
+            ));
+        }
+        local_composition.descriptor = reconstructed;
+    }
+    Ok(persisted_presentation)
+}
+
+/// Validates the builder against the effective provider configuration and
+/// the construction environment; returns the public error attribution target.
+fn validate_construction_inputs(
+    builder: &AgentBuilder,
+    bootstrap: Option<&DurableRuntimeBootstrap>,
+) -> Result<ModelErrorTarget, AgentError> {
+    let runtime_durability = bootstrap.map_or(RuntimeDurability::Disabled, |bootstrap| {
+        bootstrap.checkpoint.manifest().durability()
+    });
+    validate_configuration_runtime_authority(
+        &builder.provider_configuration,
+        builder.provider_configuration.effective().descriptor(),
+        &builder.initial_model_authority,
+        builder.clock.now(),
+    )
+    .map_err(|_| {
+        AgentError::new(
+            AgentErrorKind::InvalidInput,
+            "initial model authority disagrees with the effective provider configuration",
+        )
+    })?;
+    let behavior = builder.provider_configuration.effective().behavior();
+    if !matches!(
+        (behavior.local_durability, runtime_durability),
+        (
+            LocalDurabilityDisposition::Ephemeral,
+            RuntimeDurability::Disabled
+        ) | (
+            LocalDurabilityDisposition::BestEffort,
+            RuntimeDurability::BestEffort
+        ) | (
+            LocalDurabilityDisposition::DurableRequired,
+            RuntimeDurability::Required
+        )
+    ) {
+        return Err(AgentError::new(
+            AgentErrorKind::InvalidInput,
+            "configured provider tools or durability disagree with agent construction",
+        ));
+    }
+    let model_error_target =
+        ModelErrorTarget::from_descriptor(builder.provider_configuration.effective().descriptor())
+            .map_err(|_| {
+                AgentError::new(
+                    AgentErrorKind::InvalidInput,
+                    "resolved model identities are unsafe for public error attribution",
+                )
+            })?;
+    if builder.instructions.len() > 256 {
+        return Err(AgentError::new(
+            AgentErrorKind::InvalidInput,
+            "agent instruction prefix exceeds the canonical block limit",
+        ));
+    }
+    tokio::runtime::Handle::try_current().map_err(|_| {
+        AgentError::new(
+            AgentErrorKind::InvalidInput,
+            "agent construction requires an active Tokio runtime",
+        )
+    })?;
+    Ok(model_error_target)
+}
+
+struct ConstructionIdentities {
+    agent: AgentId,
+    session: SessionId,
+    branch: BranchId,
+    run: RunId,
+    close_event: EventId,
+}
+
+/// Mints the agent identity and adopts or mints the session, branch and run.
+fn construction_identities(
+    builder: &AgentBuilder,
+    bootstrap: Option<&DurableRuntimeBootstrap>,
+    restored_frame: Option<&RestoredContinuationFrame>,
+) -> Result<ConstructionIdentities, AgentError> {
+    let agent_id = AgentId::generate(builder.clock.as_ref(), builder.ids.as_ref())
+        .map_err(|error| AgentError::from_identity(&error))?;
+    let (session_id, branch_id, run_id) = if let Some(bootstrap) = bootstrap {
+        let session = bootstrap.branch.head().session();
+        (
+            session.session_id(),
+            session.branch_id(),
+            restored_frame.map_or(bootstrap.branch.lease().owner(), |frame| {
+                frame.provider_request().metadata().run_id()
+            }),
+        )
+    } else {
+        (
+            SessionId::generate(builder.clock.as_ref(), builder.ids.as_ref())
+                .map_err(|error| AgentError::from_identity(&error))?,
+            BranchId::generate(builder.clock.as_ref(), builder.ids.as_ref())
+                .map_err(|error| AgentError::from_identity(&error))?,
+            RunId::generate(builder.clock.as_ref(), builder.ids.as_ref())
+                .map_err(|error| AgentError::from_identity(&error))?,
+        )
+    };
+    let close_event_id = EventId::generate(builder.clock.as_ref(), builder.event_ids.as_ref())
+        .map_err(|_| event_error(ViewError::Identity))?;
+    Ok(ConstructionIdentities {
+        agent: agent_id,
+        session: session_id,
+        branch: branch_id,
+        run: run_id,
+        close_event: close_event_id,
+    })
+}
+
+/// Builds the run environment and joins it to the job host, restoring the
+/// persisted job counter and terminal job rows of a reopened session.
+fn attach_job_environment(
+    builder: &AgentBuilder,
+    bootstrap: Option<&DurableRuntimeBootstrap>,
+    agent_id: AgentId,
+    session_id: SessionId,
+    branch_id: BranchId,
+    run_id: RunId,
+) -> Result<(ExecutionEnvironment, plakous_tools::JoinedProcessSessions), AgentError> {
+    let environment = run_environment(
+        &builder.workspace,
+        run_id,
+        builder.host_process_options.clone(),
+        builder.job_config,
+    )?;
+    let fresh_sessions = environment
+        .joined_process_sessions()
+        .map_err(|error| AgentError::from_tool(&plakous_tools::backend_runtime_error(error)))?;
+    plakous_tools::internal::seed_job_counter(&fresh_sessions, builder.job_counter_seed);
+    let job_sessions = if let Some(host) = &builder.job_host {
+        host.attach(
+            plakous_tools::JobOwner {
+                session_id,
+                branch_id,
+                agent_id,
+            },
+            fresh_sessions,
+        )
+        .map_err(|error| AgentError::from_tool(&plakous_tools::backend_runtime_error(error)))?
+    } else {
+        fresh_sessions
+    };
+    plakous_tools::internal::set_job_owner(&job_sessions, agent_id.to_string());
+    if let Some(bootstrap) = bootstrap {
+        plakous_tools::internal::seed_job_counter(
+            &job_sessions,
+            bootstrap.checkpoint.manifest().jobs().next_id(),
+        );
+        let rows = bootstrap.checkpoint.manifest().jobs().rows();
+        let unmatched = job_sessions
+            .jobs()
+            .iter()
+            .filter(|view| {
+                view.status != plakous_tools::JobStatus::Running
+                    && !rows.iter().any(|row| {
+                        row.number == view.number
+                            && row.session_id.as_bytes() == view.session_id
+                            && row.owner_generation.get() == view.owner_generation
+                    })
+            })
+            .map(|view| view.number)
+            .collect::<Vec<_>>();
+        plakous_tools::internal::consume_jobs(&job_sessions, &unmatched);
+        plakous_tools::internal::restore_job_terminals(
+            &job_sessions,
+            &bootstrap
+                .checkpoint
+                .manifest()
+                .jobs()
+                .rows()
+                .iter()
+                .map(crate::manifest::JobRow::view)
+                .collect::<Vec<_>>(),
+        );
+    }
+    environment.adopt_joined_process_sessions(&job_sessions);
+    Ok((environment, job_sessions))
+}
+
+fn construction_tool_runtime(
+    builder: &mut AgentBuilder,
+    environment: ExecutionEnvironment,
+) -> ToolRuntime {
+    match builder.tool_scheduler.take() {
+        Some((scheduler, config)) => ToolRuntime::with_scheduler(
+            builder.tools.clone(),
+            Arc::new(environment),
+            Arc::clone(&builder.policy),
+            scheduler,
+            config,
+        ),
+        None => ToolRuntime::new(
+            builder.tools.clone(),
+            Arc::new(environment),
+            Arc::clone(&builder.policy),
+        ),
+    }
+}
+
+/// Admits a reopened checkpoint as the authority after checking that this
+/// build reproduces its binding, request prefix and harness plan.
+fn reopened_checkpoint_authority(
+    builder: &AgentBuilder,
+    bootstrap: DurableRuntimeBootstrap,
+    stable_request_prefix: &StableRequestPrefix,
+    harness_plan: &ResolvedHarnessPlan,
+    tools: &ToolRuntime,
+    tool_presentation: &ToolPresentation,
+    restores_working: bool,
+) -> Result<PreparedCheckpoint, AgentError> {
+    let manifest = bootstrap.checkpoint.manifest();
+    // A different model is the caller's binding failing revalidation;
+    // the same model with a different prefix is this build drifting.
+    if manifest.binding().model_binding()
+        != builder
+            .provider_configuration
+            .effective()
+            .descriptor()
+            .semantic_binding_digest()
+            .map_err(|_| {
+                AgentError::new(
+                    AgentErrorKind::InvalidInput,
+                    "resolved model binding could not be validated",
+                )
+            })?
+    {
+        return Err(AgentError::new(
+            AgentErrorKind::InvalidInput,
+            "builder model binding disagrees with the durable checkpoint",
+        ));
+    }
+    let durable_prefix = manifest.canonical().stable_prefix();
+    if durable_prefix != stable_request_prefix {
+        return Err(AgentError::new(
+            AgentErrorKind::IncompatibleSession,
+            checkpoint_prefix_mismatch(stable_request_prefix.drift_from(durable_prefix)),
+        ));
+    }
+    let witness = runtime_revalidation_witness(
+        builder.model.as_ref(),
+        &builder.provider_configuration,
+        tools,
+        tool_presentation,
+        builder.workspace.as_ref(),
+        builder.local_composition.as_ref(),
+        refreshed_reopen_admission(
+            manifest,
+            &builder.provider_configuration,
+            &bootstrap.admission,
+        )?,
+        builder.clock.now(),
+    )?;
+    let restored_plan = match bootstrap
+        .checkpoint
+        .rehydrate(&witness)
+        .map_err(runtime_rehydration_error)?
+    {
+        RuntimeRehydration::Quiescent { harness_plan, .. } => harness_plan,
+        RuntimeRehydration::WorkingRecovery { harness_plan, .. } if restores_working => {
+            harness_plan
+        }
+        RuntimeRehydration::WorkingRecovery { .. } => {
+            return Err(AgentError::new(
+                AgentErrorKind::OutcomeUnknown,
+                "working checkpoint requires the explicit recovery workflow",
+            ));
+        }
+    };
+    if &restored_plan != harness_plan {
+        return Err(AgentError::new(
+            AgentErrorKind::IncompatibleSession,
+            "builder harness plan disagrees with durable reconstruction",
+        ));
+    }
+    Ok(PreparedCheckpoint::new(
+        bootstrap.checkpoint,
+        bootstrap.bundle,
+        Some(bootstrap.branch),
+    ))
+}
+
+/// Builds the in-memory initial checkpoint of a fresh session.
+fn fresh_checkpoint_authority(
+    builder: &AgentBuilder,
+    (session_id, branch_id, run_id): (SessionId, BranchId, RunId),
+    stable_request_prefix: &StableRequestPrefix,
+    harness_plan: &ResolvedHarnessPlan,
+    tools: &ToolRuntime,
+    tool_presentation: &ToolPresentation,
+) -> Result<PreparedCheckpoint, AgentError> {
+    let checkpoint_id = CheckpointId::try_from(run_id.as_uuid())
+        .map_err(|error| AgentError::from_identity(&error))?;
+    let checkpoint = initial_memory_checkpoint(
+        session_id,
+        branch_id,
+        checkpoint_id,
+        stable_request_prefix,
+        harness_plan,
+        &builder.provider_configuration,
+        builder.model.as_ref(),
+        tools,
+        tool_presentation,
+        builder.workspace.as_ref(),
+        builder.local_composition.as_ref(),
+        builder.clock.now(),
+        None,
+        RuntimeDurability::Disabled,
+        CanonicalHistory::default(),
+        builder.job_counter_seed,
+    )?;
+    let bundle =
+        RuntimeCheckpointCodec::bundle(&checkpoint, None).map_err(checkpoint_bundle_error)?;
+    Ok(PreparedCheckpoint::new(Arc::new(checkpoint), bundle, None))
+}
+
+/// A persistent interpreter restarts on every reopen: the next generation is
+/// recorded as reset by the process reopen.
+fn reopened_interpreter_observation(
+    builder: &AgentBuilder,
+    authority: &PreparedCheckpoint,
+) -> Result<Option<InterpreterObservation>, AgentError> {
+    let observation = if builder.local_composition.as_ref().is_some_and(|value| {
+        value.integration.lifecycle() == LocalCompositionLifecycle::AgentIncarnationPersistent
+    }) {
+        let generation = authority
+            .checkpoint()
+            .manifest()
+            .interpreter_observation()
+            .map(InterpreterObservation::generation)
+            .map_or(Ok(1), |generation| {
+                generation.checked_add(1).ok_or_else(|| {
+                    AgentError::new(
+                        AgentErrorKind::Session,
+                        "interpreter generation identity space was exhausted on reopen",
+                    )
+                })
+            })?;
+        Some(
+            InterpreterObservation::new(
+                generation,
+                InterpreterAvailability::Reset,
+                Some(InterpreterResetReason::ProcessReopen),
+                authority
+                    .checkpoint()
+                    .manifest()
+                    .interpreter_observation()
+                    .and_then(InterpreterObservation::affected_cell)
+                    .map(str::to_owned),
+                None,
+            )
+            .map_err(runtime_manifest_error)?,
+        )
+    } else {
+        None
+    };
+    Ok(observation)
+}
+
+/// Re-arms a restored continuation frame, including a still-pending effect
+/// decision.
+fn restore_startup(
+    builder: &AgentBuilder,
+    frame: RestoredContinuationFrame,
+    run_id: RunId,
+    tools: &ToolRuntime,
+    tool_presentation: &ToolPresentation,
+) -> Result<RestoredStartup, AgentError> {
+    let command_id =
+        CommandId::new(frame.root().command_id.clone()).map_err(control_agent_error)?;
+    let lifecycle = queued_turn_machine(frame.root().turn_id)?;
+    let effect = if let RestoredContinuationFrame::EffectDecision(effect_frame) = &frame {
+        if builder.clock.now() >= effect_frame.decision_expires_at {
+            return Err(AgentError::new(
+                AgentErrorKind::OutcomeUnknown,
+                "persisted effect decision expired",
+            ));
+        }
+        let pending_index = usize::try_from(effect_frame.pending_index)
+            .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
+        let Some(ContinuationToolSlot::PendingDecision { call, .. }) =
+            effect_frame.slots.get(pending_index)
+        else {
+            return Err(AgentError::from_store(SessionStoreError::corrupt()));
+        };
+        let arguments = tool_presentation
+            .registry_arguments(call)
+            .map_err(|error| AgentError::from_tool(&error))?;
+        let prepared = tool_presentation
+            .prepare(
+                ToolInvocationRequest::new(
+                    run_id,
+                    effect_frame.root.turn_id,
+                    effect_frame.attempt_id,
+                    call.call_id(),
+                    call.exposed_name().clone(),
+                    call.correlation().clone(),
+                    Arc::<str>::from(arguments),
+                ),
+                tools.environment(),
+            )
+            .map_err(|error| AgentError::from_tool(&error))?;
+        let pending = tools
+            .restore_pending_effect_decision(
+                prepared.invocation.clone(),
+                effect_frame.decision.binding_digest(),
+                plakous_tools::EffectDecisionPrompt::new(&effect_frame.decision_prompt),
+            )
+            .map_err(|error| AgentError::from_tool(&error))?;
+        Some(RestoredEffectDecision {
+            invocation: prepared.invocation,
+            projection_receipt: prepared.projection_receipt,
+            pending,
+        })
+    } else {
+        None
+    };
+    Ok(RestoredStartup {
+        frame,
+        effect,
+        command_id,
+        lifecycle,
+    })
 }
 
 pub(super) fn resolve_construction_harness_plan(
