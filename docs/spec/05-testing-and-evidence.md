@@ -2239,7 +2239,7 @@ The turn retry policy (spec 01 §13.1) is pinned at three levels. Unit tests in
 `Retry-After` clamping and equal jitter through an injected sample. Loopback
 tests pin each family:
 
-- Responses, `attempt_host_tests.rs` in `plakous-responses-dialect`: a reset
+- Responses, `attempt_host/tests.rs` in `plakous-responses-dialect`: a reset
   after send is replayed for a cost-only turn and never for a server-effect or
   session-workflow request; a stream cut before any tool call is replayed with
   the retry marker ahead of the replay's events; an in-band `rate_limit_exceeded`
