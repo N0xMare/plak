@@ -32,32 +32,14 @@ use crate::{XaiAccessMode, XaiDialect, XaiRouteKind};
 
 const XAI_GROK_SUBSCRIPTION_RESPONSES_PATH: &str = "/v1/responses";
 
-#[cfg(test)]
-static AUTHORITY_WITNESSES: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
-
+/// Logs which runtime authority predicate rejected a revalidation.
 #[inline]
-pub(crate) fn authority_revalidation_witness(predicate: &'static str) {
-    #[cfg(test)]
-    if let Ok(mut witnesses) = AUTHORITY_WITNESSES.lock() {
-        witnesses.push(predicate);
-    }
-    #[cfg(debug_assertions)]
-    tracing::warn!(
+pub(crate) fn log_authority_rejection(predicate: &'static str) {
+    tracing::debug!(
         target: "plak.xai.authority",
-        process_id = std::process::id(),
         predicate,
         "xAI runtime authority revalidation rejected"
     );
-    #[cfg(not(debug_assertions))]
-    let _ = predicate;
-}
-
-#[cfg(test)]
-pub(crate) fn take_authority_revalidation_witnesses() -> Vec<&'static str> {
-    AUTHORITY_WITNESSES.lock().map_or_else(
-        |_| Vec::new(),
-        |mut witnesses| std::mem::take(&mut *witnesses),
-    )
 }
 
 /// A validated HTTPS origin without path, query, fragment, or user information.
@@ -824,7 +806,7 @@ impl XaiGrokSubscriptionRoute {
             native_catalog,
         } = &self.state
         else {
-            authority_revalidation_witness("route.unavailable");
+            log_authority_rejection("route.unavailable");
             return Err(RuntimeModelAuthorityError::Unavailable);
         };
         let generation = credential_authority.credential_generation();
@@ -836,7 +818,7 @@ impl XaiGrokSubscriptionRoute {
             || descriptor.reported_model() != Some(model)
             || descriptor.profile() != profile
         {
-            authority_revalidation_witness("route.identity_or_descriptor");
+            log_authority_rejection("route.identity_or_descriptor");
             return Err(RuntimeModelAuthorityError::Invalid);
         }
         if !native_catalog.admits(model, profile)
@@ -849,27 +831,27 @@ impl XaiGrokSubscriptionRoute {
                 !crate::native_auth::is_subscription_coding_model_id(entry.model().as_str())
             })
         {
-            authority_revalidation_witness("route.catalog_model");
+            log_authority_rejection("route.catalog_model");
             return Err(RuntimeModelAuthorityError::Invalid);
         }
         if generation == 0 || generation != native_catalog.credential_generation() {
-            authority_revalidation_witness("route.generation");
+            log_authority_rejection("route.generation");
             return Err(RuntimeModelAuthorityError::Invalid);
         }
         if credential_authority.selection_epoch() != native_catalog.selection_epoch()
             || !valid_selection_epoch(native_catalog.selection_epoch())
         {
-            authority_revalidation_witness("route.selection_epoch");
+            log_authority_rejection("route.selection_epoch");
             return Err(RuntimeModelAuthorityError::Invalid);
         }
         if checked_at < native_catalog.observed_at() || checked_at >= native_catalog.expires_at() {
-            authority_revalidation_witness("route.catalog_time");
+            log_authority_rejection("route.catalog_time");
             return Err(RuntimeModelAuthorityError::Stale);
         }
         let manager_authority = credential_authority.revalidate_runtime_authority(checked_at)?;
         let witness = self
             .runtime_admission_witness(descriptor, model, profile)
-            .inspect_err(|_| authority_revalidation_witness("route.admission_witness"))?;
+            .inspect_err(|_| log_authority_rejection("route.admission_witness"))?;
         Ok(RuntimeModelAuthority::new(
             descriptor,
             identity.account_binding(),

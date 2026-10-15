@@ -136,10 +136,6 @@ impl OpenRouterApiKeySource for ProductOpenRouterApiKeySource {
     ) -> Result<OpenRouterApiKeyGenerationGrant, OpenRouterAuthError> {
         self.generation()
     }
-
-    fn authority_id(&self) -> &'static str {
-        "plak.product-secrets.openrouter.v1"
-    }
 }
 
 /// Reads model identifiers through the existing authenticated facade catalog route.

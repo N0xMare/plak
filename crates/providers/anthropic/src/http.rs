@@ -1018,15 +1018,20 @@ fn optional_ascii_header(headers: &plakous_http::Headers, name: &HeaderName) -> 
         .map(str::to_owned)
 }
 
+/// Parses `Retry-After` with the shared kernel parser (whole seconds or
+/// HTTP-date). Advice beyond the representable 24 h saturates there, so the
+/// retry kernel's 60 s clamp still applies instead of dropping the advice.
 fn retry_after_millis(headers: &plakous_http::Headers) -> Option<u64> {
-    headers
-        .get(&RETRY_AFTER)?
-        .to_str()
-        .ok()?
-        .parse::<u64>()
-        .ok()?
-        .checked_mul(1_000)
-        .filter(|value| *value <= 86_400_000)
+    retry_after_advice_millis(headers.get(&RETRY_AFTER)?.to_str().ok()?)
+}
+
+fn retry_after_advice_millis(value: &str) -> Option<u64> {
+    let advice = plakous_attempt::retry_after_seconds(value)?;
+    Some(
+        u64::try_from(advice.as_millis()).map_or(ModelRetryDelay::MAX_MILLIS, |millis| {
+            millis.min(ModelRetryDelay::MAX_MILLIS)
+        }),
+    )
 }
 
 fn is_event_stream(headers: &plakous_http::Headers) -> bool {
@@ -1721,6 +1726,33 @@ mod tests {
             ModelRetryability::Eligible {
                 retry_after: Some(retry_after),
             }
+        );
+    }
+
+    #[test]
+    fn retry_after_uses_the_shared_parser_and_saturates_long_advice() {
+        use super::retry_after_advice_millis;
+        use crate::{AnthropicError, AnthropicErrorKind, AnthropicErrorPhase};
+
+        assert_eq!(retry_after_advice_millis(" 7 "), Some(7_000));
+        assert_eq!(
+            retry_after_advice_millis("Wed, 21 Oct 2015 07:28:00 GMT"),
+            Some(0)
+        );
+        assert_eq!(
+            retry_after_advice_millis("172800"),
+            Some(ModelRetryDelay::MAX_MILLIS)
+        );
+        assert_eq!(retry_after_advice_millis("soon"), None);
+        let error = AnthropicError::new(
+            AnthropicErrorKind::RateLimited,
+            AnthropicErrorPhase::Connect,
+            "rate limited",
+        )
+        .with_retry_after_millis(Some(172_800_000));
+        assert_eq!(
+            error.retry_after_millis(),
+            Some(ModelRetryDelay::MAX_MILLIS)
         );
     }
 

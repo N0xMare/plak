@@ -196,11 +196,12 @@ impl AnthropicError {
 
     /// Adds bounded provider retry-delay advice in milliseconds.
     ///
-    /// Values above 24 hours are discarded. This is descriptive metadata and
-    /// never causes this crate to retry an operation.
+    /// Values above 24 hours saturate at 24 hours. This is descriptive
+    /// metadata and never causes this crate to retry an operation.
     #[must_use]
     pub fn with_retry_after_millis(mut self, retry_after_millis: Option<u64>) -> Self {
-        self.retry_after_millis = retry_after_millis.filter(|value| *value <= 86_400_000);
+        self.retry_after_millis =
+            retry_after_millis.map(|value| value.min(plakous_model::ModelRetryDelay::MAX_MILLIS));
         self
     }
 
@@ -347,23 +348,6 @@ pub(crate) fn valid_provider_metadata(value: &str, max_bytes: usize) -> bool {
         })
 }
 
-/// Classifies an HTTP or in-stream Anthropic error body without retaining raw content.
-#[must_use]
-pub fn classify_provider_error(
-    status: Option<u16>,
-    body: &[u8],
-    header_request_id: Option<&str>,
-    phase: AnthropicErrorPhase,
-) -> AnthropicError {
-    classify_provider_error_with_safety(
-        status,
-        body,
-        header_request_id,
-        phase,
-        RetrySafety::new(true, false, false),
-    )
-}
-
 /// Classifies a provider error using explicit acceptance/output/effect facts.
 ///
 /// Transient status alone never permits retry after provider acceptance,
@@ -451,20 +435,34 @@ pub fn classify_provider_error_with_safety(
 mod tests {
     use super::*;
 
+    fn classify_accepted(
+        status: Option<u16>,
+        body: &[u8],
+        header_request_id: Option<&str>,
+        phase: AnthropicErrorPhase,
+    ) -> AnthropicError {
+        classify_provider_error_with_safety(
+            status,
+            body,
+            header_request_id,
+            phase,
+            RetrySafety::new(true, false, false),
+        )
+    }
+
     const SECRET_SENTINEL: &str = "ANTHROPIC_SECRET_SENTINEL_DO_NOT_RETAIN";
 
     #[test]
     fn a_prompt_too_long_rejection_is_a_limit_and_other_invalid_requests_are_not() {
         let overflow = br#"{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 270013 tokens > 200000 maximum"}}"#;
-        let error =
-            classify_provider_error(Some(400), overflow, None, AnthropicErrorPhase::Connect);
+        let error = classify_accepted(Some(400), overflow, None, AnthropicErrorPhase::Connect);
         assert_eq!(error.kind(), AnthropicErrorKind::Limit);
         assert!(
             !error.message().contains("270013"),
             "provider prose is never retained"
         );
         let other = br#"{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: must be at most 8192"}}"#;
-        let error = classify_provider_error(Some(400), other, None, AnthropicErrorPhase::Connect);
+        let error = classify_accepted(Some(400), other, None, AnthropicErrorPhase::Connect);
         assert_eq!(error.kind(), AnthropicErrorKind::InvalidRequest);
     }
 
@@ -545,7 +543,7 @@ mod tests {
         let body = format!(
             "{{\"type\":\"error\",\"error\":{{\"type\":\"overloaded_error\",\"message\":\"sk-{SECRET_SENTINEL}\"}},\"request_id\":\"req_body_01\"}}"
         );
-        let error = classify_provider_error(
+        let error = classify_accepted(
             Some(529),
             body.as_bytes(),
             Some("req_header_01"),

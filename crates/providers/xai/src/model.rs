@@ -731,7 +731,7 @@ mod shared_host_model {
             checked_at: Timestamp,
         ) -> Result<RuntimeModelAuthority, RuntimeModelAuthorityError> {
             if checked_at >= self.admitted_until {
-                crate::route::authority_revalidation_witness("route.admitted_window");
+                crate::route::log_authority_rejection("route.admitted_window");
                 return Err(RuntimeModelAuthorityError::Stale);
             }
             target.resolved.route().revalidate_runtime_authority(
@@ -768,13 +768,13 @@ mod shared_host_model {
                 return self.revalidate_target(&current, checked_at);
             }
             let Some(authority) = stale.resolved.route().credential_authority() else {
-                crate::route::authority_revalidation_witness("route.refresh_unavailable");
+                crate::route::log_authority_rejection("route.refresh_unavailable");
                 return Err(RuntimeModelAuthorityError::Stale);
             };
             let renewed = authority.renew(&self.renewal_floor).await;
             self.renewal_floor.clear();
             let renewed = renewed.map_err(|error| {
-                crate::route::authority_revalidation_witness("route.renew");
+                crate::route::log_authority_rejection("route.renew");
                 match error {
                     crate::XaiAuthError::BindingMismatch => {
                         RuntimeModelAuthorityError::ForeignAuthority
@@ -788,7 +788,7 @@ mod shared_host_model {
                 .renewed(renewed)
                 .map_err(|_| RuntimeModelAuthorityError::ForeignAuthority)?;
             let resolved = stale.resolved.renewed(route).ok_or_else(|| {
-                crate::route::authority_revalidation_witness("route.renewed_target");
+                crate::route::log_authority_rejection("route.renewed_target");
                 RuntimeModelAuthorityError::ForeignAuthority
             })?;
             let execution = SuperGrokResponsesExecution::new(resolved.clone(), self.client.clone())

@@ -2091,6 +2091,57 @@ async fn cancelling_refresh_waiting_on_a_peer_claim_leaves_the_peer_claim_alone(
     Ok(())
 }
 
+/// After our POST fails, a peer may reclaim our Unknown record before the
+/// post-start-failure hook runs. The hook restores only its own claimed
+/// fence, so the peer's Unknown claim survives.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn post_start_failure_restore_leaves_a_peer_reclaimed_unknown_alone() -> TestResult {
+    let _serial = AUTH_TEST_GATE.lock().await;
+    let temp = tempdir()?;
+    let peer = mock_peer().await?;
+    let manager = manager(&temp, &peer)?;
+    install_stored(
+        &manager,
+        "peer-reclaim-subject",
+        "peer-reclaim-access",
+        "peer-reclaim-refresh",
+        system_unix_seconds()?,
+    )?;
+    let peer_store = PrivateCredentialStore::open_slot(
+        temp.path().join("credentials").join("xai.json"),
+        auth_profile_id()?,
+        CredentialSlotId::new("test-selected")?,
+    )?;
+    let ready = required(peer_store.load()?, "ready fence")?;
+    let ours = peer_store.begin_refresh(&ready)?.start().fence();
+    let peers = peer_store
+        .begin_refresh_reclaiming_unknown(&ours)?
+        .start()
+        .fence();
+    assert_ne!(ours, peers);
+
+    let core = &*manager.core;
+    let mut hooks = XaiRefreshHooks {
+        cancel_guard: XaiRefreshCancelGuard::new(&core.store, None),
+        core,
+        expected_account: None,
+        expected_selection_epoch: None,
+        expected_authority: None,
+        _flight: core.refresh_flight.lock().await,
+        request_permit: None,
+        started: Instant::now(),
+        force: false,
+    };
+    hooks.cancel_guard.claimed(ours);
+    hooks.after_post_start_failure(&core.store, &XaiNativeAuthError::Transport(None));
+    hooks.cancel_guard.finished();
+    drop(hooks);
+
+    assert_eq!(peer_store.load()?, Some(peers));
+    peer.abort_join().await?;
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn claimed_store_busy_rejects_before_wire_and_restores_exact_claim() -> TestResult {
     let _serial = AUTH_TEST_GATE.lock().await;
@@ -3072,7 +3123,6 @@ async fn runtime_authority_binds_exact_model_route_catalog_selection_and_profile
 async fn runtime_authority_revalidation_rejects_catalog_receipt_and_generation_drift() -> TestResult
 {
     let _serial = AUTH_TEST_GATE.lock().await;
-    let _ = crate::route::take_authority_revalidation_witnesses();
     let temp = tempdir()?;
     let auth = mock_peer().await?;
     let manager = manager(&temp, &auth)?;
@@ -3192,17 +3242,6 @@ async fn runtime_authority_revalidation_rejects_catalog_receipt_and_generation_d
         receipt_revalidation(checked_at),
         Err(RuntimeModelAuthorityError::Stale)
     ));
-    {
-        let witnesses = crate::route::take_authority_revalidation_witnesses();
-        assert!(witnesses.contains(&"route.catalog_time"));
-        assert!(witnesses.contains(&"native.route_current.catalog"));
-        assert!(witnesses.contains(&"native.route_current.generation"));
-        assert!(
-            witnesses.iter().all(
-                |predicate| predicate.starts_with("route.") || predicate.starts_with("native.")
-            )
-        );
-    }
     assert!(inference.requests.lock().await.is_empty());
     assert_eq!(auth.requests.lock().await.len(), 1);
     auth.shutdown().await?;

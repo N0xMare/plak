@@ -769,12 +769,7 @@ impl MessagesHttpHooks for OpenRouterMessagesHooks {
             Ok(status) => error.with_http_status(status),
             Err(_) => error,
         };
-        let error = match metadata.retry_after.and_then(|advice| {
-            plakous_model::ModelRetryDelay::from_millis(
-                u64::try_from(advice.as_millis()).unwrap_or(u64::MAX),
-            )
-            .ok()
-        }) {
+        let error = match metadata.retry_after.and_then(retry_delay) {
             Some(advice) => error.with_retry_after(advice),
             None => error,
         };
@@ -1136,8 +1131,32 @@ pub enum OpenRouterMessagesBuildError {
     Authentication(#[from] crate::OpenRouterAuthError),
 }
 
+/// Saturates provider advice at the representable 24 h so long advice
+/// reaches the retry kernel's 60 s clamp instead of being dropped.
+fn retry_delay(advice: Duration) -> Option<plakous_model::ModelRetryDelay> {
+    let millis = u64::try_from(advice.as_millis())
+        .unwrap_or(u64::MAX)
+        .min(plakous_model::ModelRetryDelay::MAX_MILLIS);
+    plakous_model::ModelRetryDelay::from_millis(millis).ok()
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn long_retry_after_advice_saturates_instead_of_dropping() {
+        use std::time::Duration;
+
+        use plakous_model::ModelRetryDelay;
+
+        assert_eq!(
+            retry_delay(Duration::from_secs(172_800)).map(ModelRetryDelay::as_millis),
+            Some(ModelRetryDelay::MAX_MILLIS)
+        );
+        assert_eq!(
+            retry_delay(Duration::from_secs(7)).map(ModelRetryDelay::as_millis),
+            Some(7_000)
+        );
+    }
 
     /// The `OpenRouter` Messages row of the provider-error matrix.
     ///

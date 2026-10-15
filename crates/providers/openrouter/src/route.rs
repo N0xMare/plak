@@ -564,11 +564,6 @@ pub trait OpenRouterApiKeySource: Send + Sync + 'static {
         }
         Ok(key)
     }
-
-    /// Returns the legacy source authority label for compatibility diagnostics.
-    ///
-    /// Route identity is derived from [`Self::credential_binding`], not this value.
-    fn authority_id(&self) -> &str;
 }
 
 /// A caller-injected in-memory API-key source.
@@ -748,10 +743,6 @@ impl OpenRouterApiKeySource for StaticOpenRouterApiKeySource {
             return Err(OpenRouterAuthError::BindingMismatch);
         }
         self.resolve(request)
-    }
-
-    fn authority_id(&self) -> &str {
-        self.credential_binding.credential_authority()
     }
 }
 

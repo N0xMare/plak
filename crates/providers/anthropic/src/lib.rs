@@ -84,7 +84,7 @@ pub use dialect::{
 pub use error::{
     AnthropicError, AnthropicErrorKind, AnthropicErrorPhase, MAX_PROVIDER_ERROR_BODY_BYTES,
     MAX_PROVIDER_ERROR_CODE_BYTES, MAX_PROVIDER_ERROR_MESSAGE_BYTES, MAX_PROVIDER_REQUEST_ID_BYTES,
-    RetryAdvice, RetrySafety, classify_provider_error, classify_provider_error_with_safety,
+    RetryAdvice, RetrySafety, classify_provider_error_with_safety,
 };
 pub use http::{
     AnthropicHttpDeadline, AnthropicLocalHttpService, AnthropicLocalHttpServiceFactory,

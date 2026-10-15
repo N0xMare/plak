@@ -52,6 +52,16 @@ struct Cents {
     val: i64,
 }
 
+impl Cents {
+    /// Billing stores credits as negative cents; `i64::MIN` has no magnitude
+    /// and marks the body malformed.
+    fn magnitude(&self) -> Result<i64, SubscriptionUsageValueError> {
+        self.val
+            .checked_abs()
+            .ok_or(SubscriptionUsageValueError::Collection)
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UsagePeriod {
@@ -87,7 +97,7 @@ pub fn decode_grok_subscription_usage(
     let Some(config) = response.config else {
         return SubscriptionUsageSnapshot::new(observed_at, plan, Vec::new());
     };
-    let balances = project_balances(&config);
+    let balances = project_balances(&config)?;
     let period = match config.current_period.as_ref() {
         Some(period) => Some(SubscriptionUsagePeriod::ProviderPeriod {
             kind: period
@@ -169,9 +179,15 @@ fn included_percent(config: &BillingConfig) -> Option<f64> {
 /// response omits is omitted here rather than projected as zero, while a
 /// balance the response reports as zero (proto3 sends `{}`) stays a reported
 /// zero.
-fn project_balances(config: &BillingConfig) -> Vec<SubscriptionUsageBalance> {
+fn project_balances(
+    config: &BillingConfig,
+) -> Result<Vec<SubscriptionUsageBalance>, SubscriptionUsageValueError> {
     let mut balances = Vec::new();
-    if let Some(prepaid) = config.prepaid_balance.as_ref().map(|cents| cents.val.abs())
+    if let Some(prepaid) = config
+        .prepaid_balance
+        .as_ref()
+        .map(Cents::magnitude)
+        .transpose()?
         && let Ok(balance) = SubscriptionUsageBalance::new(
             SUBSCRIPTION_BALANCE_PREPAID_CREDITS.to_owned(),
             Some(prepaid),
@@ -184,17 +200,26 @@ fn project_balances(config: &BillingConfig) -> Vec<SubscriptionUsageBalance> {
     // On-demand billing announces itself with a positive cap; a reported zero
     // cap is the provider saying pay-as-you-go is not enabled, which the
     // product states as such.
-    if let Some(cap) = config.on_demand_cap.as_ref().map(|cents| cents.val.abs())
+    let used = config
+        .on_demand_used
+        .as_ref()
+        .map(Cents::magnitude)
+        .transpose()?;
+    if let Some(cap) = config
+        .on_demand_cap
+        .as_ref()
+        .map(Cents::magnitude)
+        .transpose()?
         && let Ok(balance) = SubscriptionUsageBalance::new(
             SUBSCRIPTION_BALANCE_PAY_AS_YOU_GO.to_owned(),
             None,
-            config.on_demand_used.as_ref().map(|cents| cents.val.abs()),
+            used,
             Some(cap),
         )
     {
         balances.push(balance);
     }
-    balances
+    Ok(balances)
 }
 
 fn parse_timestamp(value: &str) -> Result<Timestamp, SubscriptionUsageValueError> {
@@ -279,6 +304,24 @@ mod tests {
         assert_eq!(balances[1].id(), SUBSCRIPTION_BALANCE_PAY_AS_YOU_GO);
         assert_eq!(balances[1].used_cents(), Some(0));
         assert_eq!(balances[1].cap_cents(), Some(0));
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_cent_amounts_without_a_magnitude() -> Result<(), Box<dyn std::error::Error>> {
+        let observed = Timestamp::new(1, 0)?;
+        for field in ["prepaidBalance", "onDemandCap", "onDemandUsed"] {
+            let body = format!(
+                r#"{{"config":{{"onDemandCap":{{"val":5}},"{field}":{{"val":-9223372036854775808}}}}}}"#
+            );
+            assert!(
+                matches!(
+                    decode_grok_subscription_usage(body.as_bytes(), observed),
+                    Err(SubscriptionUsageValueError::Collection)
+                ),
+                "{field}"
+            );
+        }
         Ok(())
     }
 

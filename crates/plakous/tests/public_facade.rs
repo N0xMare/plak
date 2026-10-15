@@ -1273,10 +1273,6 @@ fn openrouter_facade_is_custom_bounded_and_redacted() -> Result<(), Box<dyn std:
         ) -> Result<OpenRouterApiKeyGenerationGrant, OpenRouterAuthError> {
             Ok(self.generation)
         }
-
-        fn authority_id(&self) -> &'static str {
-            "facade-only-authority"
-        }
     }
 
     let source = Arc::new(StaticOpenRouterApiKeySource::new(

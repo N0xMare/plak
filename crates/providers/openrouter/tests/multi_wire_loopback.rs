@@ -2323,10 +2323,6 @@ struct WorkflowKeySource {
 }
 
 impl plakous_openrouter::OpenRouterApiKeySource for WorkflowKeySource {
-    fn authority_id(&self) -> &str {
-        self.inner.authority_id()
-    }
-
     fn credential_binding(&self) -> Option<&plakous_openrouter::OpenRouterCredentialBinding> {
         self.inner.credential_binding()
     }

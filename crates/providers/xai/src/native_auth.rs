@@ -2007,8 +2007,12 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
             }
             _ => CredentialRefreshFailureClass::Transport,
         };
+        let Some(claimed) = self.cancel_guard.claimed.as_ref() else {
+            return;
+        };
         restore_xai_unknown_to_ready(
             store,
+            claimed,
             self.core.refresh_observer.as_deref(),
             failure_class,
             self.started,
@@ -2179,26 +2183,23 @@ fn http_phase(phase: plakous_model::ModelRetryPhase) -> plakous_http::Phase {
     }
 }
 
-/// Restores a durable xAI Unknown record to Ready on the same refresh token
-/// and reports the restoration to the credential-lifecycle observer, so
-/// `plak doctor`'s latest refresh row reflects the real last transition.
+/// Restores this refresh's own claimed Unknown record to Ready on the same
+/// refresh token and reports the restoration to the credential-lifecycle
+/// observer, so `plak doctor`'s latest refresh row reflects the real last
+/// transition. A peer that reclaimed the record since owns it: the fence
+/// mismatch leaves it alone.
 fn restore_xai_unknown_to_ready(
     store: &PrivateCredentialStore,
+    claimed: &CredentialFence,
     observer: Option<&dyn CredentialRefreshObserver>,
     failure_class: CredentialRefreshFailureClass,
     started: Instant,
     transport_phase: Option<plakous_http::Phase>,
 ) {
-    let Ok(Some(fence)) = store.load() else {
-        return;
-    };
-    if fence.status() != CredentialStatus::RefreshOutcomeUnknown {
+    if store.restore_unknown_to_ready(claimed).is_err() {
         return;
     }
-    let generation = fence.generation().get();
-    if store.restore_unknown_to_ready(&fence).is_err() {
-        return;
-    }
+    let generation = claimed.generation().get();
     if let Some(observer) = observer {
         observer.observe(CredentialRefreshEvent {
             phase: CredentialRefreshPhase::Restored,
@@ -2637,7 +2638,7 @@ impl ManagerCore {
     ) -> Result<(), XaiNativeAuthError> {
         self.ensure_active().inspect_err(|_| {
             if witness_failures {
-                crate::route::authority_revalidation_witness("native.route_current.catalog");
+                crate::route::log_authority_rejection("native.route_current.catalog");
             }
         })?;
         let fence = self
@@ -2645,46 +2646,42 @@ impl ManagerCore {
             .load()
             .inspect_err(|_| {
                 if witness_failures {
-                    crate::route::authority_revalidation_witness("native.route_current.fence_read");
+                    crate::route::log_authority_rejection("native.route_current.fence_read");
                 }
             })?
             .ok_or_else(|| {
                 if witness_failures {
-                    crate::route::authority_revalidation_witness(
-                        "native.route_current.fence_missing",
-                    );
+                    crate::route::log_authority_rejection("native.route_current.fence_missing");
                 }
                 XaiNativeAuthError::NotLoggedIn
             })?;
         if fence.status() != CredentialStatus::Ready {
             if witness_failures {
-                crate::route::authority_revalidation_witness("native.route_current.fence_status");
+                crate::route::log_authority_rejection("native.route_current.fence_status");
             }
             return Err(XaiNativeAuthError::SelectionChanged);
         }
         if fence.generation() != expected_receipt.fence.generation() {
             if witness_failures {
-                crate::route::authority_revalidation_witness("native.route_current.generation");
+                crate::route::log_authority_rejection("native.route_current.generation");
             }
             return Err(XaiNativeAuthError::SelectionChanged);
         }
         if fence.account_binding() != &expected_receipt.public.account {
             if witness_failures {
-                crate::route::authority_revalidation_witness("native.route_current.account");
+                crate::route::log_authority_rejection("native.route_current.account");
             }
             return Err(XaiNativeAuthError::SelectionChanged);
         }
         if fence != expected_receipt.fence {
             if witness_failures {
-                crate::route::authority_revalidation_witness("native.route_current.fence_binding");
+                crate::route::log_authority_rejection("native.route_current.fence_binding");
             }
             return Err(XaiNativeAuthError::SelectionChanged);
         }
         let stored = self.read_stored(&expected_receipt.fence).inspect_err(|_| {
             if witness_failures {
-                crate::route::authority_revalidation_witness(
-                    "native.route_current.stored_selection",
-                );
+                crate::route::log_authority_rejection("native.route_current.stored_selection");
             }
         })?;
         self.validate_expected_selection(
@@ -2694,26 +2691,24 @@ impl ManagerCore {
         )
         .inspect_err(|_| {
             if witness_failures {
-                crate::route::authority_revalidation_witness(
-                    "native.route_current.stored_selection",
-                );
+                crate::route::log_authority_rejection("native.route_current.stored_selection");
             }
         })?;
         let now = system_unix_seconds().inspect_err(|_| {
             if witness_failures {
-                crate::route::authority_revalidation_witness("native.route_current.clock");
+                crate::route::log_authority_rejection("native.route_current.clock");
             }
         })?;
         let active = self
             .active_catalog_receipt(&fence, &stored, now)
             .inspect_err(|_| {
                 if witness_failures {
-                    crate::route::authority_revalidation_witness("native.route_current.catalog");
+                    crate::route::log_authority_rejection("native.route_current.catalog");
                 }
             })?;
         if active != *expected_receipt {
             if witness_failures {
-                crate::route::authority_revalidation_witness("native.route_current.catalog");
+                crate::route::log_authority_rejection("native.route_current.catalog");
             }
             return Err(XaiNativeAuthError::CatalogUnavailable);
         }
@@ -3094,7 +3089,7 @@ impl NativeRouteAuthority {
             || receipt.authority_id != expected.authority_id
             || receipt.fence.generation() < expected.fence.generation()
         {
-            crate::route::authority_revalidation_witness("native.renew.binding");
+            crate::route::log_authority_rejection("native.renew.binding");
             return Err(crate::XaiAuthError::BindingMismatch);
         }
         let resolution_lease = self
@@ -3146,24 +3141,24 @@ impl crate::XaiSubscriptionCredentialAuthority for NativeRouteAuthority {
         if checked_at < self.expected_receipt.public.observed_at
             || checked_at >= self.expected_receipt.public.expires_at
         {
-            crate::route::authority_revalidation_witness("native.catalog_time");
+            crate::route::log_authority_rejection("native.catalog_time");
             return Err(RuntimeModelAuthorityError::Stale);
         }
         let stored = self
             .core
             .read_stored(&self.expected_receipt.fence)
             .map_err(|_| {
-                crate::route::authority_revalidation_witness("native.stored_selection");
+                crate::route::log_authority_rejection("native.stored_selection");
                 RuntimeModelAuthorityError::Stale
             })?;
         if stored.selection_epoch != self.expected_receipt.selection_epoch {
-            crate::route::authority_revalidation_witness("native.stored_selection");
+            crate::route::log_authority_rejection("native.stored_selection");
             return Err(RuntimeModelAuthorityError::Stale);
         }
         let current_unix =
             system_unix_seconds().map_err(|_| RuntimeModelAuthorityError::Unavailable)?;
         if access_needs_refresh(stored.expires_at, current_unix, ACCESS_REFRESH_LEAD_SECONDS) {
-            crate::route::authority_revalidation_witness("native.credential_time");
+            crate::route::log_authority_rejection("native.credential_time");
             return Err(RuntimeModelAuthorityError::Stale);
         }
         let credential_valid_until = Timestamp::new(
@@ -3174,7 +3169,7 @@ impl crate::XaiSubscriptionCredentialAuthority for NativeRouteAuthority {
         )
         .map_err(|_| RuntimeModelAuthorityError::Invalid)?;
         if credential_valid_until <= checked_at {
-            crate::route::authority_revalidation_witness("native.credential_time");
+            crate::route::log_authority_rejection("native.credential_time");
             return Err(RuntimeModelAuthorityError::Stale);
         }
         Ok(crate::XaiRevalidatedSubscriptionAuthority::new(
