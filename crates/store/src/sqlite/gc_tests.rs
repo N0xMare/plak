@@ -168,6 +168,17 @@ pub(super) fn advance_branch(
     graph: &mut BTreeMap<RuntimeObjectAddress, RuntimeObject>,
     identity: u128,
 ) -> TestResult {
+    advance_branch_with_payload(branch, b, graph, identity, "")
+}
+
+/// Commits the next checkpoint, whose new history item carries `payload`.
+pub(super) fn advance_branch_with_payload(
+    branch: &mut Branch,
+    b: &mut Backend,
+    graph: &mut BTreeMap<RuntimeObjectAddress, RuntimeObject>,
+    identity: u128,
+    payload: &str,
+) -> TestResult {
     let topology = fixture::topology(
         branch.head.session().session_id(),
         branch.head.session().branch_id(),
@@ -183,7 +194,7 @@ pub(super) fn advance_branch(
         branch.lease.fence().get(),
     )?;
     branch.value += 1;
-    let checkpoint = fixture::checkpoint_with_context(
+    let checkpoint = fixture::checkpoint_with_payload(
         topology,
         branch.value,
         RuntimeDurability::Required,
@@ -194,6 +205,7 @@ pub(super) fn advance_branch(
             .canonical()
             .context()
             .clone(),
+        payload,
     )?;
     let bundle = fixture::bundle(&checkpoint, Some(&branch.bundle))?;
     graph.extend(

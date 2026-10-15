@@ -168,7 +168,10 @@ impl ActorSender {
                 self.overflowed(lane);
                 SessionStoreError::BackendBusy
             }
-            mpsc::TrySendError::Disconnected(_) => SessionStoreError::BackendUnavailable,
+            mpsc::TrySendError::Disconnected(_) => {
+                actor_lost(lane, "disconnected");
+                SessionStoreError::BackendUnavailable
+            }
         })?;
         // Coalesce wakeups: queued jobs, not tokens, are the source of truth.
         let _ = self.wake.try_send(());
@@ -195,6 +198,17 @@ impl ActorSender {
             );
         }
     }
+}
+
+/// The actor thread exited (a job panicked): `disconnected` refuses a new
+/// request, `reply_dropped` loses the reply of one already queued.
+fn actor_lost(lane: Lane, reason: &'static str) {
+    tracing::warn!(
+        target: "plakous_store::sqlite_actor",
+        lane = lane.label(),
+        reason,
+        "SQLite store actor is gone; request refused as unavailable"
+    );
 }
 
 impl ActorReceiver {
@@ -939,9 +953,10 @@ impl SqliteSessionStore {
         let queued = self.sender.send(lane, job);
         Box::pin(async move {
             queued?;
-            response
-                .await
-                .map_err(|_| SessionStoreError::BackendUnavailable)?
+            response.await.map_err(|_| {
+                actor_lost(lane, "reply_dropped");
+                SessionStoreError::BackendUnavailable
+            })?
         })
     }
 }
@@ -5853,6 +5868,12 @@ fn map_sqlite(error: rusqlite::Error) -> SessionStoreError {
             sqlite_extended_code = failure.extended_code,
             "SQLite store operation failed"
         );
+    } else {
+        tracing::warn!(
+            target: "plakous_store::sqlite_operation",
+            error_category = rusqlite_error_category(&error),
+            "SQLite store operation failed"
+        );
     }
     let mapped = match &error {
         rusqlite::Error::SqliteFailure(f, _) if f.code == ErrorCode::DiskFull => {
@@ -5868,13 +5889,35 @@ fn map_sqlite(error: rusqlite::Error) -> SessionStoreError {
         {
             SessionStoreError::corrupt()
         }
-        rusqlite::Error::InvalidColumnType(..)
+        // Every lookup that may find nothing reads through `optional()`; a
+        // missing row elsewhere is a store invariant breach, not an outage.
+        rusqlite::Error::QueryReturnedNoRows
+        | rusqlite::Error::InvalidColumnType(..)
         | rusqlite::Error::IntegralValueOutOfRange(..)
         | rusqlite::Error::FromSqlConversionFailure(..) => SessionStoreError::corrupt(),
         _ => SessionStoreError::BackendUnavailable,
     };
     drop(error);
     mapped
+}
+
+/// A content-free category for errors raised by rusqlite rather than SQLite.
+const fn rusqlite_error_category(error: &rusqlite::Error) -> &'static str {
+    match error {
+        rusqlite::Error::QueryReturnedNoRows => "no_rows",
+        rusqlite::Error::InvalidQuery
+        | rusqlite::Error::InvalidParameterName(_)
+        | rusqlite::Error::InvalidParameterCount(..)
+        | rusqlite::Error::InvalidColumnIndex(_)
+        | rusqlite::Error::InvalidColumnName(_)
+        | rusqlite::Error::ExecuteReturnedResults
+        | rusqlite::Error::QueryReturnedMoreThanOneRow
+        | rusqlite::Error::MultipleStatement => "invalid_query",
+        rusqlite::Error::InvalidColumnType(..)
+        | rusqlite::Error::IntegralValueOutOfRange(..)
+        | rusqlite::Error::FromSqlConversionFailure(..) => "invalid_value",
+        _ => "other_rusqlite",
+    }
 }
 
 const fn sqlite_failure_category(code: ErrorCode) -> &'static str {

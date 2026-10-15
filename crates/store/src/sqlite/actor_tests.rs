@@ -777,11 +777,32 @@ fn lane_overflow_logs_the_first_then_once_per_interval_with_the_count() {
     assert_eq!(log.record(start + OVERFLOW_LOG_INTERVAL * 2), Some(1));
 }
 
-/// Captures WARN events of the actor target as `field=value` lines.
-#[derive(Clone, Default)]
-struct ActorWarnings(Arc<Mutex<Vec<String>>>);
+const ACTOR_TARGET: &str = "plakous_store::sqlite_actor";
 
-impl tracing::Subscriber for ActorWarnings {
+/// Captures WARN events of one target as `field=value` lines.
+#[derive(Clone)]
+struct Warnings {
+    target: &'static str,
+    lines: Arc<Mutex<Vec<String>>>,
+}
+
+impl Warnings {
+    fn of(target: &'static str) -> Self {
+        Self {
+            target,
+            lines: Arc::default(),
+        }
+    }
+
+    fn lines(&self) -> Vec<String> {
+        self.lines
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
+impl tracing::Subscriber for Warnings {
     fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
         true
     }
@@ -799,12 +820,10 @@ impl tracing::Subscriber for ActorWarnings {
             }
         }
         let metadata = event.metadata();
-        if *metadata.level() == tracing::Level::WARN
-            && metadata.target() == "plakous_store::sqlite_actor"
-        {
+        if *metadata.level() == tracing::Level::WARN && metadata.target() == self.target {
             let mut fields = Fields(String::new());
             event.record(&mut fields);
-            self.0
+            self.lines
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push(fields.0);
@@ -816,7 +835,7 @@ impl tracing::Subscriber for ActorWarnings {
 
 #[test]
 fn a_full_lane_warns_with_its_name_capacity_and_count() -> TestResult {
-    let warnings = ActorWarnings::default();
+    let warnings = Warnings::of(ACTOR_TARGET);
     let (sender, _receiver) = actor_queue(1);
     tracing::subscriber::with_default(warnings.clone(), || -> TestResult {
         sender.send(Lane::Read, Box::new(|_| {}))?;
@@ -833,11 +852,7 @@ fn a_full_lane_warns_with_its_name_capacity_and_count() -> TestResult {
         );
         Ok(())
     })?;
-    let logged = warnings
-        .0
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clone();
+    let logged = warnings.lines();
     assert_eq!(logged.len(), 2, "{logged:?}");
     assert!(
         logged[0].contains("lane=\"read\"")
@@ -847,6 +862,114 @@ fn a_full_lane_warns_with_its_name_capacity_and_count() -> TestResult {
     );
     assert!(logged[1].contains("lane=\"critical\""), "{logged:?}");
     Ok(())
+}
+
+#[test]
+fn a_send_to_a_gone_actor_warns_and_refuses_as_unavailable() {
+    let warnings = Warnings::of(ACTOR_TARGET);
+    let (sender, receiver) = actor_queue(1);
+    drop(receiver);
+    let refused = tracing::subscriber::with_default(warnings.clone(), || {
+        sender.send(Lane::Critical, Box::new(|_| {}))
+    });
+    assert_eq!(refused.err(), Some(SessionStoreError::BackendUnavailable));
+    let logged = warnings.lines();
+    assert_eq!(logged.len(), 1, "{logged:?}");
+    assert!(
+        logged[0].contains("lane=\"critical\"") && logged[0].contains("reason=\"disconnected\""),
+        "{logged:?}"
+    );
+}
+
+#[test]
+fn a_reply_lost_with_the_actor_warns_and_refuses_as_unavailable() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
+    let runtime = tokio::runtime::Builder::new_current_thread().build()?;
+    let warnings = Warnings::of(ACTOR_TARGET);
+    let lost = tracing::subscriber::with_default(warnings.clone(), || {
+        runtime.block_on(store.dispatch_read(|_| -> Result<(), SessionStoreError> {
+            panic!("the actor job panics before replying")
+        }))
+    });
+    assert_eq!(lost.err(), Some(SessionStoreError::BackendUnavailable));
+    let join = store
+        .worker
+        .join
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take()
+        .ok_or("actor join handle")?;
+    assert!(join.join().is_err(), "the actor thread did not panic");
+    let refused =
+        tracing::subscriber::with_default(warnings.clone(), || runtime.block_on(store.stats()));
+    assert_eq!(refused.err(), Some(SessionStoreError::BackendUnavailable));
+    let logged = warnings.lines();
+    assert_eq!(logged.len(), 2, "{logged:?}");
+    assert!(
+        logged[0].contains("lane=\"read\"") && logged[0].contains("reason=\"reply_dropped\""),
+        "{logged:?}"
+    );
+    assert!(
+        logged[1].contains("lane=\"read\"") && logged[1].contains("reason=\"disconnected\""),
+        "{logged:?}"
+    );
+    Ok(())
+}
+
+/// Errors outside SQLite's own failure codes keep a content-free category in
+/// the log; a point lookup that finds no row is an invariant breach.
+#[test]
+fn non_sqlite_failures_warn_with_a_static_category() {
+    let warnings = Warnings::of("plakous_store::sqlite_operation");
+    let mapped = tracing::subscriber::with_default(warnings.clone(), || {
+        [
+            rusqlite::Error::QueryReturnedNoRows,
+            rusqlite::Error::InvalidQuery,
+            rusqlite::Error::InvalidColumnName("private column".to_owned()),
+            rusqlite::Error::InvalidColumnType(
+                0,
+                "private column".to_owned(),
+                rusqlite::types::Type::Blob,
+            ),
+            rusqlite::Error::InvalidPath("private/database/path".into()),
+        ]
+        .map(map_sqlite)
+    });
+    assert_eq!(
+        mapped,
+        [
+            SessionStoreError::corrupt(),
+            SessionStoreError::BackendUnavailable,
+            SessionStoreError::BackendUnavailable,
+            SessionStoreError::corrupt(),
+            SessionStoreError::BackendUnavailable,
+        ]
+    );
+    let logged = warnings.lines();
+    let categories: Vec<_> = logged
+        .iter()
+        .map(|line| {
+            line.split_whitespace()
+                .find_map(|field| field.strip_prefix("error_category="))
+                .unwrap_or_default()
+        })
+        .collect();
+    assert_eq!(
+        categories,
+        [
+            "\"no_rows\"",
+            "\"invalid_query\"",
+            "\"invalid_query\"",
+            "\"invalid_value\"",
+            "\"other_rusqlite\"",
+        ],
+        "{logged:?}"
+    );
+    assert!(
+        logged.iter().all(|line| !line.contains("private")),
+        "{logged:?}"
+    );
 }
 
 /// A tree's pollers await each read they issue, so a long critical job

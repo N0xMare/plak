@@ -1,4 +1,6 @@
-use super::gc_tests::{Branch, advance_branch, backend, fork_branch, seed};
+use super::gc_tests::{
+    Branch, advance_branch, advance_branch_with_payload, backend, fork_branch, seed,
+};
 use super::*;
 use std::time::{Duration, Instant};
 
@@ -206,6 +208,170 @@ fn measure_prune_and_delete_against_fork_count() -> TestResult {
             delete_elapsed.as_millis(),
         );
         assert!(receipt.pruned_checkpoints() > 0);
+    }
+    Ok(())
+}
+
+fn chain_with_payload(
+    b: &mut Backend,
+    graph: &mut Graph,
+    identity: &mut u128,
+    checkpoints: u32,
+    payload: &str,
+) -> TestResult<Branch> {
+    *identity += 10;
+    let mut branch = open_session(b, graph, *identity)?;
+    for _ in 0..checkpoints {
+        *identity += 10;
+        advance_branch_with_payload(&mut branch, b, graph, *identity, payload)?;
+    }
+    Ok(branch)
+}
+
+/// Appends `records` opaque feed records of `bytes` each to one session.
+fn inflate_feed(c: &Connection, branch: &Branch, records: u32, bytes: u32) -> TestResult {
+    let session = branch.head.session();
+    c.execute(
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<?3)
+         INSERT INTO session_feed(session_id,seq,branch_id,change,checkpoint_id,record,integrity)
+         SELECT ?1,s.feed_tail+n.i,?2,4,NULL,randomblob(?4),zeroblob(32)
+         FROM n, sessions s WHERE s.session_id=?1",
+        params![
+            id(session.session_id()),
+            id(session.branch_id()),
+            records,
+            bytes
+        ],
+    )?;
+    c.execute(
+        "UPDATE sessions SET feed_tail=feed_tail+?2,feed_bytes=feed_bytes+?2*?3
+         WHERE session_id=?1",
+        params![id(session.session_id()), records, bytes],
+    )?;
+    Ok(())
+}
+
+fn timed<T>(
+    jobs: &mut Vec<(String, Duration)>,
+    label: &str,
+    job: impl FnOnce() -> Result<T, SessionStoreError>,
+) -> TestResult<T> {
+    let started = Instant::now();
+    let result = job()?;
+    jobs.push((label.to_owned(), started.elapsed()));
+    Ok(result)
+}
+
+/// The single actor jobs that retiring one child runs, in a store shaped like
+/// a long root session: forks and live children beside the root, and a
+/// retiring child with large history items and a large feed. Retirement is
+/// the child's retention prune, lease release, archive with feed trim and
+/// session delete, then every background step until the store is idle (GC
+/// reclaim, WAL checkpoint, incremental vacuum). Run explicitly:
+/// `cargo test -p plakous-store --all-features --lib -- --ignored
+/// --nocapture measure_child_retirement_actor_jobs`.
+#[test]
+#[ignore = "measurement, not a gate"]
+fn measure_child_retirement_actor_jobs() -> TestResult {
+    const FORKS: u32 = 1_000;
+    const ROOT_CHECKPOINTS: u32 = 500;
+    const CHILDREN: u32 = 16;
+    const CHILD_CHECKPOINTS: u32 = 64;
+    const RETIRED_CHECKPOINTS: u32 = 128;
+    const FEED_RECORD_BYTES: u32 = 4 * 1024;
+    let payload = "x".repeat(64 * 1024);
+    for feed_records in [1_024_u32, 14_336] {
+        let dir = tempfile::tempdir()?;
+        let mut b = backend(&dir.path().join("runtime.sqlite3"))?;
+        let mut graph = Graph::new();
+        let mut identity = 1_000_000_u128;
+        let started = Instant::now();
+        identity += 10;
+        let root = open_session(&mut b, &mut graph, identity)?;
+        for _ in 0..FORKS {
+            identity += 10;
+            fork_branch(&root, &mut b, &mut graph, identity)?;
+        }
+        chain(&mut b, &mut graph, &mut identity, ROOT_CHECKPOINTS)?;
+        for _ in 0..CHILDREN {
+            chain_with_payload(&mut b, &mut graph, &mut identity, CHILD_CHECKPOINTS, "c")?;
+        }
+        let retired = chain_with_payload(
+            &mut b,
+            &mut graph,
+            &mut identity,
+            RETIRED_CHECKPOINTS,
+            &payload,
+        )?;
+        inflate_feed(&b.connection, &retired, feed_records, FEED_RECORD_BYTES)?;
+        checkpoint_wal(&b.connection, true)?;
+        b.gc_pending = false;
+        b.vacuum_pending = false;
+        b.wal_pending = false;
+        let setup_elapsed = started.elapsed();
+
+        let mut jobs = Vec::new();
+        let session_id = retired.head.session().session_id();
+        timed(&mut jobs, "prune", || {
+            prune(
+                &mut b,
+                &PruneBranch::new(retired.lease.clone(), retired.head, BTreeSet::new(), 1),
+            )
+        })?;
+        timed(&mut jobs, "release_many", || {
+            release_many(&mut b, std::slice::from_ref(&retired.lease))
+        })?;
+        let head = session_head(&b.connection, session_id)?.ok_or("session")?;
+        let archived = timed(&mut jobs, "archive", || {
+            let receipt = archive(&mut b, ArchiveSession::new(session_id, head.revision()))?;
+            feed::trim(&mut b, session_id);
+            Ok(receipt)
+        })?;
+        timed(&mut jobs, "delete", || {
+            delete(
+                &mut b,
+                DeleteSession::new(session_id, archived.session().revision()),
+            )
+        })?;
+        let mut steps = 0_u32;
+        loop {
+            let label = if b.gc_pending {
+                "gc_reclaim"
+            } else if b.wal_pending {
+                "wal_checkpoint"
+            } else {
+                "vacuum"
+            };
+            let started = Instant::now();
+            if !b.background_step() {
+                break;
+            }
+            jobs.push((label.to_owned(), started.elapsed()));
+            steps += 1;
+            assert!(steps < 10_000, "background work did not settle");
+        }
+        let (longest, longest_ms) = jobs
+            .iter()
+            .max_by_key(|(_, elapsed)| *elapsed)
+            .map(|(label, elapsed)| (label.clone(), elapsed.as_millis()))
+            .ok_or("jobs")?;
+        let mut by_kind = BTreeMap::<&str, (u32, Duration)>::new();
+        for (label, elapsed) in &jobs {
+            let entry = by_kind.entry(label.as_str()).or_default();
+            entry.0 += 1;
+            entry.1 = entry.1.max(*elapsed);
+        }
+        let kinds: Vec<_> = by_kind
+            .iter()
+            .map(|(label, (count, max))| format!("{label}:{count}x/max{}ms", max.as_millis()))
+            .collect();
+        eprintln!(
+            "retirement measurement: schema={SCHEMA_VERSION} forks={FORKS} root_checkpoints={ROOT_CHECKPOINTS} children={CHILDREN} retired_checkpoints={RETIRED_CHECKPOINTS} feed_records={feed_records} feed_mib={} setup_ms={} longest={longest} longest_ms={longest_ms} jobs=[{}]",
+            u64::from(feed_records) * u64::from(FEED_RECORD_BYTES) / (1024 * 1024),
+            setup_elapsed.as_millis(),
+            kinds.join(" "),
+        );
+        assert!(by_kind.contains_key("gc_reclaim"));
     }
     Ok(())
 }
