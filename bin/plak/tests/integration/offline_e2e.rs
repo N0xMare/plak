@@ -3277,10 +3277,15 @@ fn process_tool_answer_script(answer: &str) -> Value {
 /// the bound never runs a trap, so the marker cannot appear on the forceful
 /// path. `owned.pid` records the pid as the child saw it, which on macOS is
 /// the host pid and on Linux is namespace-local — only the marker is portable.
+/// The shell waits in a builtin read of its own FIFO, so TERM runs the trap at
+/// once instead of after a foreground child; a deferred trap can lose the
+/// marker to the bounded stop's KILL under load.
 fn owned_shutdown_command() -> &'static str {
     "trap 'printf stopped > stopped.txt; exit 0' TERM\n\
+     mkfifo stop-wait\n\
+     exec 3<>stop-wait\n\
      printf '%s' \"$$\" > owned.pid\n\
-     while :; do sleep 0.1; done\n"
+     read line <&3\n"
 }
 
 /// [`sleeping_tool_script`] over [`owned_shutdown_command`]: the turn parks
@@ -3301,7 +3306,8 @@ fn promoted_run_script(command: &str) -> Value {
     script
 }
 
-const RUN_OWNED_COMMAND: &str = "trap 'printf stopped > stopped.txt; exit 0' TERM; printf '%s' \"$$\" > owned.pid; while :; do sleep 0.1; done";
+/// One line of [`owned_shutdown_command`], since the run face echoes it.
+const RUN_OWNED_COMMAND: &str = "trap 'printf stopped > stopped.txt; exit 0' TERM; mkfifo stop-wait; exec 3<>stop-wait; printf '%s' \"$$\" > owned.pid; read line <&3";
 
 struct RunJobCli {
     child: Child,
@@ -3429,8 +3435,8 @@ fn run_max_turns_stops_a_real_promoted_process_and_exits_six() {
     // the promoted job until it prints: output exists only once the TERM trap
     // is installed, and a stop that beat the trap would leave no marker.
     let mut script = promoted_run_script(
-        "trap 'printf stopped > stopped.txt; exit 0' TERM; printf '%s' \"$$\" > owned.pid; \
-         while :; do echo trapped; sleep 0.1; done",
+        "trap 'printf stopped > stopped.txt; exit 0' TERM; mkfifo stop-wait; \
+         exec 3<>stop-wait; printf '%s' \"$$\" > owned.pid; echo trapped; read line <&3",
     );
     script["steps"].as_array_mut().unwrap().insert(
         1,
@@ -5121,11 +5127,13 @@ fn semantic_pilot_sidecar_drives_the_real_tui_and_host_mailbox() {
     // Streamed deltas are a prefix of the terminal response: the runtime
     // emits only the missing suffix once the authoritative text lands.
     let second_answer = format!("{streamed}second streamed answer");
-    let fixture = Fixture::new(&json!({
+    let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
+    let release = fixture.root.join("release-second-answer");
+    fixture.write_script(&json!({
         "version": 1,
         "steps": [
             {"output": {"text": "semantic pilot answer"}},
-            {"prefix": streamed, "output": {"text": second_answer}, "stall_ms": 500}
+            {"prefix": streamed, "output": {"text": second_answer}, "gate": {"file": release}}
         ]
     }));
     let mut pilot = PilotClient::new(fixture.root.join("pilot"));
@@ -5181,7 +5189,12 @@ fn semantic_pilot_sidecar_drives_the_real_tui_and_host_mailbox() {
         .expect("first turn id")
         .to_owned();
 
-    pilot_burst_preserves_the_parked_draft_and_turn(&mut pilot, &mut terminal, &first_turn);
+    pilot_burst_preserves_the_parked_draft_and_turn(
+        &mut pilot,
+        &mut terminal,
+        &first_turn,
+        &release,
+    );
 
     let quit = pilot.act("quit", None);
     assert_eq!(quit["error"], Value::Null);
@@ -5191,13 +5204,14 @@ fn semantic_pilot_sidecar_drives_the_real_tui_and_host_mailbox() {
 
 /// Observation pressure: a second turn whose 16KB streamed prefix bursts
 /// host events while the settings modal owns the screen and a private
-/// draft sits parked in the composer. The scripted stall keeps the turn
-/// in progress while the modal opens, and the burst must not split the
-/// turn, lose the draft, or let a stale fence mutate.
+/// draft sits parked in the composer. The scripted gate holds the turn in
+/// progress until the modal owns the parked draft, and the burst must not
+/// split the turn, lose the draft, or let a stale fence mutate.
 fn pilot_burst_preserves_the_parked_draft_and_turn(
     pilot: &mut PilotClient,
     terminal: &mut TerminalChild,
     first_turn: &str,
+    release: &Path,
 ) {
     let drafted_second = pilot.act("type-text", Some("second prompt"));
     assert_eq!(drafted_second["status"], "applied");
@@ -5219,6 +5233,7 @@ fn pilot_burst_preserves_the_parked_draft_and_turn(
         modal["snapshot"]["composer"]["char_count"], 10,
         "a modal owns the key chain over a parked draft, never clears it"
     );
+    std::fs::write(release, b"release").unwrap();
 
     let completed = pilot.observe_until("the second turn's completed marker", |document| {
         document["snapshot"]["turn"]["phase"] == "completed"
