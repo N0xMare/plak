@@ -49,10 +49,10 @@ pub struct CliFailure {
     refusal: Option<StoreRefusal>,
 }
 
-/// A semantic-store refusal of a read that the same read may clear when
+/// A semantic- or product-store refusal that the same call may clear when
 /// retried: nothing was written and no authority was lost.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum StoreRefusal {
+pub enum StoreRefusal {
     /// Another connection held the store, or its request queue was full.
     Busy,
     /// The store could not be reached or was shutting down.
@@ -70,7 +70,9 @@ impl StoreRefusal {
         }
     }
 
-    pub(crate) const fn as_str(self) -> &'static str {
+    /// The refusal class `plak.log` and the paused-wake notice name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Busy => "busy",
             Self::Unavailable => "unavailable",
@@ -132,6 +134,15 @@ impl From<ReadFailure> for CliFailure {
     }
 }
 
+impl From<crate::session_store::RecordStoreError> for CliFailure {
+    fn from(error: crate::session_store::RecordStoreError) -> Self {
+        let refusal = error.refusal();
+        let mut cli = Self::new(String::from(error));
+        cli.refusal = refusal;
+        cli
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum LookupFailure {
     Recovery(plakous::sessions::AgentSessionsError),
@@ -188,7 +199,8 @@ impl CliFailure {
         }
     }
 
-    /// The transient store refusal of a failed read, when it was one.
+    /// The transient store refusal of a failed read or refused product
+    /// write, when it was one.
     #[must_use]
     pub(crate) const fn store_refusal(&self) -> Option<StoreRefusal> {
         self.refusal

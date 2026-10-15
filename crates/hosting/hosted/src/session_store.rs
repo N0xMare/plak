@@ -10,10 +10,70 @@
 
 use std::path::Path;
 
+use crate::error::StoreRefusal;
 use crate::sessions::SessionRecord;
 use crate::sessions::projector::{
     ProductIntents, ProjectionCommit, SessionViews, Submission, ViewWrites,
 };
+
+/// A product-store failure. With a [`StoreRefusal`] it wrote nothing and the
+/// same call may succeed when retried; without one it is final for the call.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecordStoreError {
+    message: String,
+    refusal: Option<StoreRefusal>,
+}
+
+impl RecordStoreError {
+    /// A transient refusal: nothing was written.
+    pub fn refused(refusal: StoreRefusal, message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            refusal: Some(refusal),
+        }
+    }
+
+    /// The transient refusal class, when the failure is one.
+    #[must_use]
+    pub const fn refusal(&self) -> Option<StoreRefusal> {
+        self.refusal
+    }
+
+    /// Human-readable failure message.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl std::fmt::Display for RecordStoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for RecordStoreError {}
+
+impl From<String> for RecordStoreError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            refusal: None,
+        }
+    }
+}
+
+impl From<&str> for RecordStoreError {
+    fn from(message: &str) -> Self {
+        message.to_owned().into()
+    }
+}
+
+impl From<RecordStoreError> for String {
+    fn from(error: RecordStoreError) -> Self {
+        error.message
+    }
+}
 
 /// Durable product session records with compare-and-swap commits.
 pub trait SessionRecordStore: Send + Sync {
@@ -47,12 +107,13 @@ pub trait SessionRecordStore: Send + Sync {
     /// under the record's revision CAS, before dispatch.
     ///
     /// # Errors
-    /// A concurrent commit, an identity conflict, or a store failure.
+    /// A concurrent commit, an identity conflict, or a store failure; a store
+    /// that another writer holds refuses with [`StoreRefusal::Busy`].
     fn save_submission(
         &self,
         session: &mut SessionRecord,
         submission: &Submission,
-    ) -> Result<(), String>;
+    ) -> Result<(), RecordStoreError>;
 
     /// Removes an unrecorded submission together with the record changes,
     /// under the record's revision CAS, and writes a pause cause when no
@@ -158,7 +219,7 @@ mod memory {
     use std::path::Path;
     use std::sync::Mutex;
 
-    use super::SessionRecordStore;
+    use super::{RecordStoreError, SessionRecordStore};
     use crate::sessions::projector::{
         ProductIntents, ProjectionCommit, SessionViews, Submission, ViewWrites,
     };
@@ -655,7 +716,7 @@ mod memory {
             &self,
             session: &mut SessionRecord,
             submission: &Submission,
-        ) -> Result<(), String> {
+        ) -> Result<(), RecordStoreError> {
             let mut state = self
                 .state
                 .lock()

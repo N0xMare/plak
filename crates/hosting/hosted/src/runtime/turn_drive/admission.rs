@@ -121,6 +121,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                         submitted_at_ms: item.submitted_at_ms,
                     },
                 )
+                .map_err(String::from)
                 .inspect_err(|error| {
                     log_queue_persist_failed(
                         home,

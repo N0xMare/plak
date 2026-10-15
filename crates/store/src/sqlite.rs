@@ -9,9 +9,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
-#[cfg(feature = "perf-instrumentation")]
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use futures_channel::oneshot;
 use plakous_agent::internal::{
@@ -88,11 +86,49 @@ enum ExecutedJob {
     Background,
 }
 
+impl Lane {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Critical => "critical",
+            Self::Read => "read",
+        }
+    }
+}
+
+/// The least time between two overflow warnings of one lane.
+const OVERFLOW_LOG_INTERVAL: Duration = Duration::from_secs(10);
+
+/// Rate limit for one lane's queue-full warnings: the first overflow logs,
+/// then at most one line per [`OVERFLOW_LOG_INTERVAL`] carrying the count.
+#[derive(Default)]
+struct OverflowLog {
+    logged_at: Option<Instant>,
+    unlogged: u64,
+}
+
+impl OverflowLog {
+    /// Counts one overflow at `now`; returns the overflows the caller logs
+    /// now, including this one, or `None` while the interval holds them.
+    fn record(&mut self, now: Instant) -> Option<u64> {
+        self.unlogged = self.unlogged.saturating_add(1);
+        if self
+            .logged_at
+            .is_some_and(|at| now.saturating_duration_since(at) < OVERFLOW_LOG_INTERVAL)
+        {
+            return None;
+        }
+        self.logged_at = Some(now);
+        Some(std::mem::take(&mut self.unlogged))
+    }
+}
+
 #[derive(Clone)]
 struct ActorSender {
     critical: mpsc::SyncSender<Job>,
     read: mpsc::SyncSender<Job>,
     wake: mpsc::SyncSender<()>,
+    capacity: usize,
+    overflow: Arc<[Mutex<OverflowLog>; 2]>,
 }
 
 struct ActorReceiver {
@@ -110,6 +146,8 @@ fn actor_queue(capacity: usize) -> (ActorSender, ActorReceiver) {
             critical: critical_tx,
             read: read_tx,
             wake: wake_tx,
+            capacity,
+            overflow: Arc::default(),
         },
         ActorReceiver {
             critical: critical_rx,
@@ -126,12 +164,36 @@ impl ActorSender {
             Lane::Read => &self.read,
         };
         sender.try_send(job).map_err(|error| match error {
-            mpsc::TrySendError::Full(_) => SessionStoreError::BackendBusy,
+            mpsc::TrySendError::Full(_) => {
+                self.overflowed(lane);
+                SessionStoreError::BackendBusy
+            }
             mpsc::TrySendError::Disconnected(_) => SessionStoreError::BackendUnavailable,
         })?;
         // Coalesce wakeups: queued jobs, not tokens, are the source of truth.
         let _ = self.wake.try_send(());
         Ok(())
+    }
+}
+
+impl ActorSender {
+    /// A full lane refuses its job as busy; the refusal reaches the caller,
+    /// and this warning makes the cause visible in the log.
+    fn overflowed(&self, lane: Lane) {
+        let log = &self.overflow[lane as usize];
+        let overflows = log
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .record(Instant::now());
+        if let Some(overflows) = overflows {
+            tracing::warn!(
+                target: "plakous_store::sqlite_actor",
+                lane = lane.label(),
+                capacity = self.capacity,
+                overflows,
+                "SQLite store request lane is full; requests refused as busy"
+            );
+        }
     }
 }
 

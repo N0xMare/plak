@@ -44,7 +44,7 @@ impl SessionRecordStore for PresentingStore {
         &self,
         session: &mut SessionRecord,
         submission: &Submission,
-    ) -> Result<(), String> {
+    ) -> Result<(), crate::session_store::RecordStoreError> {
         self.inner.save_submission(session, submission)
     }
 

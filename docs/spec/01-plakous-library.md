@@ -1090,7 +1090,10 @@ The single actor has separately bounded critical and read queues (the configured
 queue capacity applies to each). Authority changes, recovery, flush and shutdown
 are critical; branch/checkpoint/feed loads, listing and stats are reads. Critical
 jobs run before queued reads. A full lane returns `BackendBusy` without blocking
-the caller or consuming capacity in the other lane. Background housekeeping runs
+the caller or consuming capacity in the other lane, and logs a WARN under target
+`plakous_store::sqlite_actor` naming the lane, its capacity and the overflows
+since the last such line: the first overflow, then at most one line per lane
+every 10 s, with no session content. Background housekeeping runs
 one step when both foreground queues are empty, or after 32 foreground jobs to
 prevent starvation; no second writer or connection is introduced. `usage()`
 reads a shared counter snapshot without dispatching an actor job. The actor

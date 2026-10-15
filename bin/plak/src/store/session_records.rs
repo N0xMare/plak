@@ -43,10 +43,10 @@ impl SqliteSessionStore {
         self.opens.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    fn with_store<T>(
+    fn with_store<T, E: From<String>>(
         &self,
-        operation: impl FnOnce(&mut crate::store::ProductStore) -> Result<T, String>,
-    ) -> Result<T, String> {
+        operation: impl FnOnce(&mut crate::store::ProductStore) -> Result<T, E>,
+    ) -> Result<T, E> {
         // A panic rolls SQLite transactions back before the mutex unlocks.
         let mut connection = self
             .connection
@@ -62,7 +62,8 @@ impl SqliteSessionStore {
         }
         if connection.is_none() {
             *connection = Some(
-                crate::store::ProductStore::open(&self.paths).map_err(|error| error.to_string())?,
+                crate::store::ProductStore::open(&self.paths)
+                    .map_err(|error| E::from(error.to_string()))?,
             );
             #[cfg(test)]
             self.opens
@@ -70,7 +71,7 @@ impl SqliteSessionStore {
         }
         let store = connection
             .as_mut()
-            .ok_or_else(|| "product store is unavailable".to_owned())?;
+            .ok_or_else(|| E::from("product store is unavailable".to_owned()))?;
         operation(store)
     }
 }
@@ -103,7 +104,7 @@ impl SessionRecordStore for SqliteSessionStore {
         &self,
         session: &mut SessionRecord,
         submission: &plakous_hosted::sessions::projector::Submission,
-    ) -> Result<(), String> {
+    ) -> Result<(), plakous_hosted::session_store::RecordStoreError> {
         self.with_store(|store| store.commit_submission(session, submission))
     }
 

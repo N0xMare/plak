@@ -765,3 +765,149 @@ async fn validated_checkpoint_cache_hit_still_verifies_checkpoint_row_seal() -> 
     );
     Ok(())
 }
+
+#[test]
+fn lane_overflow_logs_the_first_then_once_per_interval_with_the_count() {
+    let mut log = OverflowLog::default();
+    let start = Instant::now();
+    assert_eq!(log.record(start), Some(1));
+    assert_eq!(log.record(start + Duration::from_secs(1)), None);
+    assert_eq!(log.record(start + OVERFLOW_LOG_INTERVAL / 2), None);
+    assert_eq!(log.record(start + OVERFLOW_LOG_INTERVAL), Some(3));
+    assert_eq!(log.record(start + OVERFLOW_LOG_INTERVAL * 2), Some(1));
+}
+
+/// Captures WARN events of the actor target as `field=value` lines.
+#[derive(Clone, Default)]
+struct ActorWarnings(Arc<Mutex<Vec<String>>>);
+
+impl tracing::Subscriber for ActorWarnings {
+    fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+        true
+    }
+    fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        tracing::span::Id::from_u64(1)
+    }
+    fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+    fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+    fn event(&self, event: &tracing::Event<'_>) {
+        struct Fields(String);
+        impl tracing::field::Visit for Fields {
+            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn fmt::Debug) {
+                use std::fmt::Write as _;
+                let _ = write!(self.0, "{}={value:?} ", field.name());
+            }
+        }
+        let metadata = event.metadata();
+        if *metadata.level() == tracing::Level::WARN
+            && metadata.target() == "plakous_store::sqlite_actor"
+        {
+            let mut fields = Fields(String::new());
+            event.record(&mut fields);
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(fields.0);
+        }
+    }
+    fn enter(&self, _: &tracing::span::Id) {}
+    fn exit(&self, _: &tracing::span::Id) {}
+}
+
+#[test]
+fn a_full_lane_warns_with_its_name_capacity_and_count() -> TestResult {
+    let warnings = ActorWarnings::default();
+    let (sender, _receiver) = actor_queue(1);
+    tracing::subscriber::with_default(warnings.clone(), || -> TestResult {
+        sender.send(Lane::Read, Box::new(|_| {}))?;
+        for _ in 0..3 {
+            assert_eq!(
+                sender.send(Lane::Read, Box::new(|_| {})).err(),
+                Some(SessionStoreError::BackendBusy)
+            );
+        }
+        sender.send(Lane::Critical, Box::new(|_| {}))?;
+        assert_eq!(
+            sender.send(Lane::Critical, Box::new(|_| {})).err(),
+            Some(SessionStoreError::BackendBusy)
+        );
+        Ok(())
+    })?;
+    let logged = warnings
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    assert_eq!(logged.len(), 2, "{logged:?}");
+    assert!(
+        logged[0].contains("lane=\"read\"")
+            && logged[0].contains("capacity=1")
+            && logged[0].contains("overflows=1"),
+        "{logged:?}"
+    );
+    assert!(logged[1].contains("lane=\"critical\""), "{logged:?}");
+    Ok(())
+}
+
+/// A tree's pollers await each read they issue, so a long critical job
+/// queues one read per polling reader, however many cadence ticks it spans.
+#[test]
+fn polling_readers_queue_one_read_each_behind_a_long_critical_job() -> TestResult {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    // A root and eight children, three store-reading tasks each.
+    const READERS: usize = 27;
+    let directory = tempfile::tempdir()?;
+    let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
+    let runtime = tokio::runtime::Builder::new_current_thread().build()?;
+    let (parked, release) = park(&store);
+    let issued = AtomicUsize::new(0);
+    let stop = AtomicBool::new(false);
+    thread::scope(|scope| -> TestResult {
+        let readers: Vec<_> = (0..READERS)
+            .map(|_| {
+                scope.spawn(|| -> Result<(), SessionStoreError> {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .build()
+                        .map_err(|_| SessionStoreError::BackendUnavailable)?;
+                    while !stop.load(Ordering::SeqCst) {
+                        let read = store.stats();
+                        issued.fetch_add(1, Ordering::SeqCst);
+                        runtime.block_on(read)?;
+                        thread::sleep(Duration::from_millis(2));
+                    }
+                    Ok(())
+                })
+            })
+            .collect();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while issued.load(Ordering::SeqCst) < READERS {
+            assert!(Instant::now() < deadline, "readers did not start");
+            thread::sleep(Duration::from_millis(1));
+        }
+        // Many cadence ticks pass while the critical job holds the actor.
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(issued.load(Ordering::SeqCst), READERS);
+        let mut probes = Vec::new();
+        loop {
+            let mut probe = store.stats();
+            match probe.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
+                Poll::Pending => probes.push(probe),
+                Poll::Ready(result) => {
+                    assert_eq!(result.err(), Some(SessionStoreError::BackendBusy));
+                    break;
+                }
+            }
+        }
+        assert_eq!(probes.len(), DEFAULT_QUEUE_CAPACITY - READERS);
+        stop.store(true, Ordering::SeqCst);
+        release.send(())?;
+        runtime.block_on(parked)?;
+        for probe in probes {
+            runtime.block_on(probe)?;
+        }
+        for reader in readers {
+            reader.join().map_err(|_| "reader panicked")??;
+        }
+        Ok(())
+    })
+}

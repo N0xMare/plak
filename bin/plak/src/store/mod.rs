@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use plakous::sessions::SessionLocator;
+use plakous_hosted::error::StoreRefusal;
+use plakous_hosted::session_store::RecordStoreError;
 use plakous_hosted::sessions::TranscriptRow;
 use rusqlite::{Connection, OpenFlags, OptionalExtension as _, Transaction, params};
 #[cfg(unix)]
@@ -50,6 +52,18 @@ fn product_sqlite_path(paths: &PlakPaths) -> Result<PathBuf, ProductStoreOpenErr
             ProductStoreOpenError::unavailable("product store file name is missing")
         })?,
     ))
+}
+
+/// A write transaction the product store could not begin. Another connection
+/// holding the write lock past the busy timeout is a transient refusal:
+/// nothing was written and the same commit may succeed later.
+fn write_refusal(error: rusqlite::Error) -> RecordStoreError {
+    match error.sqlite_error_code() {
+        Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked) => {
+            RecordStoreError::refused(StoreRefusal::Busy, "product store is busy")
+        }
+        _ => "could not start a product store write".into(),
+    }
 }
 
 /// Stable admission category for opening the private product database.
@@ -362,13 +376,14 @@ impl ProductStore {
 
     pub fn commit(&mut self, session: &mut SessionRecord) -> Result<(), String> {
         self.commit_with_submission(session, None, None, None)
+            .map_err(String::from)
     }
 
     pub fn commit_submission(
         &mut self,
         session: &mut SessionRecord,
         submission: &plakous_hosted::sessions::projector::Submission,
-    ) -> Result<(), String> {
+    ) -> Result<(), RecordStoreError> {
         self.commit_with_submission(session, Some(submission), None, None)
     }
 
@@ -379,6 +394,7 @@ impl ProductStore {
         pause_cause: Option<plakous_hosted::sessions::projector::HostPauseCause>,
     ) -> Result<(), String> {
         self.commit_with_submission(session, None, Some(command_id), pause_cause)
+            .map_err(String::from)
     }
 
     fn commit_with_submission(
@@ -387,7 +403,7 @@ impl ProductStore {
         submission: Option<&plakous_hosted::sessions::projector::Submission>,
         discarded: Option<&str>,
         pause_cause: Option<plakous_hosted::sessions::projector::HostPauseCause>,
-    ) -> Result<(), String> {
+    ) -> Result<(), RecordStoreError> {
         #[cfg(feature = "test-hooks")]
         let _settle = SettleCommitTrace;
         let expected = session.store_revision;
@@ -395,7 +411,7 @@ impl ProductStore {
         let transaction = self
             .connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(|_| "product store is busy".to_owned())?;
+            .map_err(write_refusal)?;
         let next = commit_in_transaction(
             &transaction,
             session,
@@ -624,7 +640,7 @@ impl ProductStore {
         let transaction = self
             .connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(|_| "product store is busy".to_owned())?;
+            .map_err(|error| String::from(write_refusal(error)))?;
         let deleted = transaction
             .execute(
                 "DELETE FROM sessions WHERE id = ?1 AND revision = ?2",
@@ -1655,6 +1671,34 @@ mod tests {
         store.commit(&mut session).unwrap();
         assert_eq!(session.store_revision, 1);
         assert_eq!(store.load(&session.id).unwrap().id, session.id);
+    }
+
+    #[test]
+    fn a_held_product_writer_refuses_a_submission_as_typed_busy() {
+        let root = tempdir().unwrap();
+        let paths = PlakPaths::explicit(root.path().join("home"));
+        let mut store = ProductStore::open(&paths).unwrap();
+        let mut session = SessionRecord::new(root.path().join("workspace"));
+        store.commit(&mut session).unwrap();
+        let item = QueueItem::new("wake");
+        session.pending_queue.push(item.clone());
+        let request = submission(&item, "wake-command");
+        let mut writer = Connection::open(paths.product_database()).unwrap();
+        let transaction = writer
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        store.connection.busy_timeout(Duration::ZERO).unwrap();
+        let before = session.clone();
+        let refused = store.commit_submission(&mut session, &request).unwrap_err();
+        assert_eq!(refused.refusal(), Some(StoreRefusal::Busy));
+        assert_eq!(refused.message(), "product store is busy");
+        assert_eq!(session, before);
+        transaction.rollback().unwrap();
+        store.commit_submission(&mut session, &request).unwrap();
+        assert_eq!(
+            store.load_intents(&session.id).unwrap().submissions,
+            [request]
+        );
     }
 
     #[test]

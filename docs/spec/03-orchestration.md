@@ -1689,8 +1689,12 @@ unavailable) and the wake is then retried every 60 s until the store answers;
 a retried wake still prepares exactly one delivery. Every wake refusal is
 logged at WARN under target `plak.wake` with its cause class (`busy`,
 `unavailable`, or `refused` for a permanent refusal) and no session content.
-Integrity, ownership, compatibility and product-store refusals keep the pause
-until the next user prompt.
+A product store that refuses the wake's delivery submission as busy (another
+connection holds its write lock past the busy timeout; nothing was written)
+is retried the same way: the root batch recorded for that submission is
+withdrawn with its mail unread, and the retry records a fresh one.
+Integrity, ownership, compatibility and other product-store refusals keep the
+pause until the next user prompt.
 The host parks the wake and stays attached. Non-live trees are not reloaded
 on idle ticks. It never repeatedly dispatches paid compaction for the same idle
 wake. Prompt and wake preflight share one scheduled-compaction trigger and

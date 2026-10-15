@@ -22,6 +22,11 @@ pub(crate) enum StoreCall {
 
 pub(crate) trait StoreFaults: Send + Sync {
     fn before(&self, call: StoreCall, session: Option<&SessionRecord>) -> Result<(), String>;
+
+    /// A transient refusal for the calls whose port error carries one.
+    fn refusal(&self, _call: StoreCall) -> Option<crate::error::StoreRefusal> {
+        None
+    }
 }
 
 pub(crate) struct FaultStore<F> {
@@ -77,7 +82,13 @@ impl<F: StoreFaults> SessionRecordStore for FaultStore<F> {
         &self,
         session: &mut SessionRecord,
         submission: &sessions::projector::Submission,
-    ) -> Result<(), String> {
+    ) -> Result<(), crate::session_store::RecordStoreError> {
+        if let Some(refusal) = self.faults.refusal(StoreCall::SaveSubmission) {
+            return Err(crate::session_store::RecordStoreError::refused(
+                refusal,
+                "injected submission refusal",
+            ));
+        }
         self.faults
             .before(StoreCall::SaveSubmission, Some(session))?;
         self.inner.save_submission(session, submission)

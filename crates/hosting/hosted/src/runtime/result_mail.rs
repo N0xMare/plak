@@ -189,6 +189,29 @@ fn record_root_batch(
     Ok(())
 }
 
+fn withdraw_root_batch(
+    rows: &dyn TopologyRows,
+    command_id: &str,
+    batch: &ResultMailBatch,
+) -> Result<(), String> {
+    let withdraw = |tree: &mut crate::agent_tree::ProductAgentTree| {
+        tree.withdraw_command(command_id);
+        Ok::<(), String>(())
+    };
+    if let Some(runtime) = crate::topology_runtime::lookup(&batch.tree_id) {
+        return runtime.mutate_then_emit(false, withdraw);
+    }
+    let mut tree = rows
+        .tree(&batch.tree_id)?
+        .ok_or_else(|| "result tree is unavailable".to_owned())?;
+    let revision = tree.revision;
+    withdraw(&mut tree)?;
+    if tree.revision != revision {
+        rows.save_tree(&mut tree)?;
+    }
+    Ok(())
+}
+
 /// The tree side of the product-to-tree join at open (spec 03 section
 /// 14.3): the product names its pending root command ids and the tree
 /// withdraws every other unrecorded root batch of the session's tree, with
@@ -290,6 +313,7 @@ pub(super) fn prepare(
         Some(batch),
         &format!("plak.queue.{}.{}", item.id, item.revision),
     )
+    .map_err(String::from)
 }
 
 pub(super) fn prepare_instruction(
@@ -300,7 +324,7 @@ pub(super) fn prepare_instruction(
     command: &str,
     batch: Option<ResultMailBatch>,
     trigger_ids: &[String],
-) -> Result<SessionRecord, String> {
+) -> Result<SessionRecord, crate::session_store::RecordStoreError> {
     prepare_with_command(
         rows,
         store,
@@ -331,20 +355,20 @@ pub(super) fn prepare_with_command(
     command: &str,
     batch: Option<ResultMailBatch>,
     command_id: &str,
-) -> Result<SessionRecord, String> {
+) -> Result<SessionRecord, crate::session_store::RecordStoreError> {
     if store
         .load_intents(&session.id)?
         .submission(command_id)
         .is_some()
     {
-        return Err("result delivery must reuse its existing immutable submission".to_owned());
+        return Err("result delivery must reuse its existing immutable submission".into());
     }
     let mut candidate = session.clone();
     if let Some(batch) = &batch {
         record_root_batch(rows, command_id, command, batch)?;
     }
     candidate.touch();
-    store.save_submission(
+    let saved = store.save_submission(
         &mut candidate,
         &crate::sessions::projector::Submission {
             command_id: command_id.to_owned(),
@@ -361,7 +385,17 @@ pub(super) fn prepare_with_command(
             canonical_command: command.to_owned(),
             submitted_at_ms: item.submitted_at_ms,
         },
-    )?;
+    );
+    if let Err(error) = saved {
+        // A refused submission wrote nothing, so its batch is withdrawn with
+        // the mail unread and a retry records a fresh one.
+        if error.refusal().is_some()
+            && let Some(batch) = &batch
+        {
+            withdraw_root_batch(rows, command_id, batch)?;
+        }
+        return Err(error);
+    }
     Ok(candidate)
 }
 

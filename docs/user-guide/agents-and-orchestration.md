@@ -113,7 +113,7 @@ auto-continue disabled must use `wait_agent` to learn child results before
 ending a turn. An idle wake
 failure pauses auto-continue, emits an error note and leaves the host attached;
 child mail remains unread until an admitted turn consumes it. A busy or
-unavailable session store does not pause it: the wake is retried, then
+unavailable session store, or a busy product store, does not pause it: the wake is retried, then
 re-armed every 60 s (see [tui](tui.md)). Each
 bound is a closed range up to its built-in ceiling; anything outside it is a
 load error. Full key list and defaults in

@@ -66,7 +66,8 @@ background process could still wake the root, the HUD says so and the
 transcript keeps one `auto-continue paused until the next prompt` line. A
 paused tree leaves one `agents paused · /tree resume` line. Both lines come
 back the same after a restart or `/resume`, without a second copy. A wake the
-session store refuses because it is busy or unavailable is retried on its own
+session store refuses because it is busy or unavailable, or whose delivery the
+product store refuses because another writer holds it, is retried on its own
 for about 30 s; after that the transcript shows one `Sub-agent auto-continue
 paused: the session store is busy` (or `unavailable`) line and the wake is
 retried every 60 s, so it resumes without a prompt once the store answers.

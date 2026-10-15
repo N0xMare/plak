@@ -348,7 +348,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             batch,
             &ids,
         )
-        .map_err(CliFailure::new)?;
+        .map_err(CliFailure::from)?;
         self.child_wake.park();
         Ok(HostStep::Prompt {
             text: item.text.clone(),
@@ -2576,6 +2576,96 @@ mod tests {
                 assert_eq!(warnings.take(), [] as [String; 0]);
             });
         }
+    }
+
+    /// Refuses as many submissions as it counts, as a product store another
+    /// writer holds would.
+    struct BusySubmissions(std::sync::atomic::AtomicUsize);
+
+    impl crate::runtime::fault_store::StoreFaults for BusySubmissions {
+        fn before(
+            &self,
+            _: crate::runtime::fault_store::StoreCall,
+            _: Option<&crate::sessions::SessionRecord>,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn refusal(
+            &self,
+            call: crate::runtime::fault_store::StoreCall,
+        ) -> Option<crate::error::StoreRefusal> {
+            use std::sync::atomic::Ordering;
+            let refused = call == crate::runtime::fault_store::StoreCall::SaveSubmission
+                && self
+                    .0
+                    .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                        left.checked_sub(1)
+                    })
+                    .is_ok();
+            refused.then_some(crate::error::StoreRefusal::Busy)
+        }
+    }
+
+    #[test]
+    fn a_busy_product_store_submission_retries_and_wakes_exactly_once() {
+        with_wake_warnings(1, |host, runtime, observed, warnings| {
+            let now = Instant::now();
+            host.child_wake_prompt(now).unwrap();
+            host.config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
+                host.config.store.clone(),
+                BusySubmissions(std::sync::atomic::AtomicUsize::new(1)),
+            ));
+            let ready = now + QUIET_WINDOW;
+            assert!(matches!(
+                host.child_wake_prompt(ready).unwrap(),
+                HostStep::Continue
+            ));
+            assert!(!host.config.session.child_wake_suppressed);
+            assert_eq!(notice_texts(observed), [] as [String; 0]);
+            let logged = warnings.take();
+            assert_eq!(logged.len(), 1, "{logged:?}");
+            assert!(logged[0].contains("cause=\"busy\""), "{logged:?}");
+            assert_eq!(
+                submissions(host),
+                [] as [crate::sessions::projector::Submission; 0]
+            );
+            // The refused submission's batch is withdrawn with its mail unread.
+            let (unresolved, unread) = runtime
+                .read(|tree| {
+                    (
+                        tree.commands()
+                            .values()
+                            .filter(|command| command.unresolved())
+                            .count(),
+                        tree.pending_mail("root").len(),
+                    )
+                })
+                .unwrap();
+            assert_eq!((unresolved, unread), (0, 1));
+
+            let (text, item, echoed) = take_prompt(
+                host.child_wake_prompt(ready + TRANSIENT_FIRST_DELAY)
+                    .unwrap(),
+            );
+            assert_eq!(submissions(host).len(), 1);
+            host.run_prompt(text, item, echoed, None).unwrap();
+            assert!(accepted(host, &submissions(host)[0]));
+            assert!(
+                runtime
+                    .read(|tree| tree.pending_mail("root").is_empty())
+                    .unwrap()
+            );
+            let later = ready + TRANSIENT_REARM;
+            for at in [later, later + QUIET_WINDOW] {
+                assert!(matches!(
+                    host.child_wake_prompt(at).unwrap(),
+                    HostStep::Continue
+                ));
+            }
+            assert_eq!(submissions(host).len(), 1);
+            assert_eq!(warnings.take(), [] as [String; 0]);
+        });
     }
 
     #[test]
