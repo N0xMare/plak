@@ -35,7 +35,7 @@ use crate::{
     StoreAdmission, ToolAuditIdentity, ToolCallerLineageView, TurnCommand, ViewError,
 };
 use plakous_model::{
-    AttemptId, CallId, EntryId, EventId, Timestamp, ToolCallBlock, WorkingProjection,
+    AttemptId, CallId, Digest, EntryId, EventId, Timestamp, ToolCallBlock, WorkingProjection,
 };
 use plakous_tools::{
     EffectDecision, ProgressSink, ToolInvocation, ToolOutcomeKind, ToolPolicyDenial,
@@ -351,53 +351,7 @@ impl Driver {
             binding_digest,
         );
         let operation_id = self.take_operation_id()?;
-        let slots = continuation
-            .calls
-            .iter()
-            .cloned()
-            .zip(continuation.result_entry_ids.iter().copied())
-            .enumerate()
-            .map(|(index, (slot_call, result_entry_id))| {
-                match index.cmp(&continuation.source_index) {
-                    std::cmp::Ordering::Less => {
-                        let item = continuation.items[index].clone().ok_or_else(|| {
-                            AgentError::new(
-                                AgentErrorKind::Internal,
-                                "effect-decision barrier has an incomplete tool prefix",
-                            )
-                        })?;
-                        let completed_operation =
-                            continuation.operations.get(index).copied().ok_or_else(|| {
-                                AgentError::new(
-                                    AgentErrorKind::Internal,
-                                    "effect-decision barrier lost a completed tool operation",
-                                )
-                            })?;
-                        Ok(ContinuationToolSlot::Completed {
-                            call: slot_call,
-                            result_entry_id,
-                            item,
-                            operation_id: completed_operation,
-                        })
-                    }
-                    std::cmp::Ordering::Equal => Ok(ContinuationToolSlot::PendingDecision {
-                        call: slot_call,
-                        result_entry_id,
-                        binding_digest,
-                    }),
-                    std::cmp::Ordering::Greater => Ok(ContinuationToolSlot::NotAdmitted {
-                        call: slot_call,
-                        result_entry_id,
-                    }),
-                }
-            })
-            .collect::<Result<Vec<_>, AgentError>>()?;
-        if continuation.operations.len() != continuation.source_index {
-            return Err(AgentError::new(
-                AgentErrorKind::Internal,
-                "effect-decision barrier contains mixed batch progress",
-            ));
-        }
+        let slots = effect_decision_slots(continuation, binding_digest)?;
         // The provider response and source-ordered slots below are the
         // uncommitted exchange.  `WorkingProjection` remains the exact empty
         // model-visible overlay at this pre-promotion barrier; an incomplete
@@ -458,38 +412,8 @@ impl Driver {
                 decision_prompt: prompt.description().as_str().to_owned(),
                 decision_expires_at: expires_at,
                 dispatch_capability_minted: false,
-                hosted_continuation_operation: {
-                    let authority = self.authority.checkpoint();
-                    let matches = authority
-                        .manifest()
-                        .ledger()
-                        .operations()
-                        .into_iter()
-                        .filter(|record| {
-                            matches!(
-                                (record.kind(), record.state()),
-                                (
-                                    DurableOperationKind::ToolBatchContinuation {
-                                        turn_id,
-                                        attempt_id: operation_attempt,
-                                    },
-                                    DurableOperationState::ContinuationRequired(_)
-                                ) if *turn_id == command.turn_id && *operation_attempt == attempt_id
-                            )
-                        })
-                        .map(|record| OperationId(record.operation_id()))
-                        .collect::<Vec<_>>();
-                    match matches.as_slice() {
-                        [] => None,
-                        [operation] => Some(*operation),
-                        _ => {
-                            return Err(AgentError::new(
-                                AgentErrorKind::Internal,
-                                "effect decision found multiple hosted continuation owners",
-                            ));
-                        }
-                    }
-                },
+                hosted_continuation_operation: self
+                    .hosted_continuation_operation(command, attempt_id)?,
                 observation_budget: self.observation_budget,
                 model_admission_reference,
                 policy_reference,
@@ -500,43 +424,15 @@ impl Driver {
                 "runtime continuation could not be canonically encoded",
             )
         })?;
-        self.prepare_operation_with_id(
-            StoreAdmission::Ordinary,
-            command.turn_id,
+        self.persist_effect_decision_operation(
+            command,
+            attempt_id,
+            call,
             operation_id,
-            DurableOperationKind::EffectDecision {
-                turn_id: command.turn_id,
-                attempt_id,
-                call_id: call.call_id(),
-            },
             binding_digest,
-            Some(continuation_bytes.clone()),
-            None,
-        )
-        .await
-        .map_err(|error| {
-            AgentError::new(
-                error.kind(),
-                format!("continuation preparation failed: {}", error.message()),
-            )
-        })?;
-        let decision_state = PendingEffectDecisionState::new(runtime_component(
-            RuntimeComponentKind::Operation,
             continuation_bytes,
-        )?)
-        .map_err(runtime_manifest_error)?;
-        self.transition_operation(
-            command.turn_id,
-            operation_id,
-            DurableOperationState::DecisionRequired(decision_state),
         )
-        .await
-        .map_err(|error| {
-            AgentError::new(
-                error.kind(),
-                format!("continuation publication failed: {}", error.message()),
-            )
-        })?;
+        .await?;
         let published = match command.shared.events.publish_with(
             EventContext::call(command.turn_id, attempt_id, call.call_id()),
             |_event_id| AgentEventKind::EffectDecisionRequired {
@@ -576,6 +472,92 @@ impl Driver {
             self.config.effect_decision_timeout,
         ))
         .await
+    }
+
+    /// The hosted tool-batch continuation operation that owns this attempt, if any.
+    fn hosted_continuation_operation(
+        &self,
+        command: &PromptCommand,
+        attempt_id: AttemptId,
+    ) -> Result<Option<OperationId>, AgentError> {
+        let authority = self.authority.checkpoint();
+        let matches = authority
+            .manifest()
+            .ledger()
+            .operations()
+            .into_iter()
+            .filter(|record| {
+                matches!(
+                    (record.kind(), record.state()),
+                    (
+                        DurableOperationKind::ToolBatchContinuation {
+                            turn_id,
+                            attempt_id: operation_attempt,
+                        },
+                        DurableOperationState::ContinuationRequired(_)
+                    ) if *turn_id == command.turn_id && *operation_attempt == attempt_id
+                )
+            })
+            .map(|record| OperationId(record.operation_id()))
+            .collect::<Vec<_>>();
+        match matches.as_slice() {
+            [] => Ok(None),
+            [operation] => Ok(Some(*operation)),
+            _ => Err(AgentError::new(
+                AgentErrorKind::Internal,
+                "effect decision found multiple hosted continuation owners",
+            )),
+        }
+    }
+
+    /// Prepares the effect-decision operation and publishes it as decision-required.
+    async fn persist_effect_decision_operation(
+        &mut self,
+        command: &PromptCommand,
+        attempt_id: AttemptId,
+        call: &ToolCallBlock,
+        operation_id: OperationId,
+        binding_digest: Digest,
+        continuation_bytes: Vec<u8>,
+    ) -> Result<(), AgentError> {
+        self.prepare_operation_with_id(
+            StoreAdmission::Ordinary,
+            command.turn_id,
+            operation_id,
+            DurableOperationKind::EffectDecision {
+                turn_id: command.turn_id,
+                attempt_id,
+                call_id: call.call_id(),
+            },
+            binding_digest,
+            Some(continuation_bytes.clone()),
+            None,
+        )
+        .await
+        .map_err(|error| {
+            AgentError::new(
+                error.kind(),
+                format!("continuation preparation failed: {}", error.message()),
+            )
+        })?;
+        let decision_state = PendingEffectDecisionState::new(runtime_component(
+            RuntimeComponentKind::Operation,
+            continuation_bytes,
+        )?)
+        .map_err(runtime_manifest_error)?;
+        self.transition_operation(
+            command.turn_id,
+            operation_id,
+            DurableOperationState::DecisionRequired(decision_state),
+        )
+        .await
+        .map_err(|error| {
+            AgentError::new(
+                error.kind(),
+                format!("continuation publication failed: {}", error.message()),
+            )
+        })?;
+        Ok(())
     }
 
     fn project_resolved_effect_decision(
@@ -859,4 +841,59 @@ impl Driver {
         );
         self.remember_effect_decision(decision, resolution);
     }
+}
+
+/// The source-ordered tool slots of a batch paused at its pending effect decision.
+fn effect_decision_slots(
+    continuation: &ToolBatchContinuation<'_>,
+    binding_digest: Digest,
+) -> Result<Vec<ContinuationToolSlot>, AgentError> {
+    let slots = continuation
+        .calls
+        .iter()
+        .cloned()
+        .zip(continuation.result_entry_ids.iter().copied())
+        .enumerate()
+        .map(
+            |(index, (slot_call, result_entry_id))| match index.cmp(&continuation.source_index) {
+                std::cmp::Ordering::Less => {
+                    let item = continuation.items[index].clone().ok_or_else(|| {
+                        AgentError::new(
+                            AgentErrorKind::Internal,
+                            "effect-decision barrier has an incomplete tool prefix",
+                        )
+                    })?;
+                    let completed_operation =
+                        continuation.operations.get(index).copied().ok_or_else(|| {
+                            AgentError::new(
+                                AgentErrorKind::Internal,
+                                "effect-decision barrier lost a completed tool operation",
+                            )
+                        })?;
+                    Ok(ContinuationToolSlot::Completed {
+                        call: slot_call,
+                        result_entry_id,
+                        item,
+                        operation_id: completed_operation,
+                    })
+                }
+                std::cmp::Ordering::Equal => Ok(ContinuationToolSlot::PendingDecision {
+                    call: slot_call,
+                    result_entry_id,
+                    binding_digest,
+                }),
+                std::cmp::Ordering::Greater => Ok(ContinuationToolSlot::NotAdmitted {
+                    call: slot_call,
+                    result_entry_id,
+                }),
+            },
+        )
+        .collect::<Result<Vec<_>, AgentError>>()?;
+    if continuation.operations.len() != continuation.source_index {
+        return Err(AgentError::new(
+            AgentErrorKind::Internal,
+            "effect-decision barrier contains mixed batch progress",
+        ));
+    }
+    Ok(slots)
 }
