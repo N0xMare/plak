@@ -12,6 +12,23 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
+def snapshot_env(home: str) -> dict[str, str]:
+    """Environment for the snapshot install block over text fixtures.
+
+    The block runs the installed `plak` for its state key. A text fixture
+    such as "plak one" is a shell script whose first word is `plak`, so it
+    resolves through PATH; a stub there keeps an operator build out of it.
+    """
+    stub = pathlib.Path(home).parent / "path-stub"
+    stub.mkdir(exist_ok=True)
+    (stub / "plak").write_text("#!/bin/sh\nexit 1\n")
+    (stub / "plak").chmod(0o755)
+    env = os.environ.copy()
+    env["HOME"] = home
+    env["PATH"] = str(stub) + os.pathsep + env["PATH"]
+    return env
+
+
 class BuildPlakTests(unittest.TestCase):
     def test_install_link_refuses_foreign_destinations(self) -> None:
         source = (ROOT / "tools/build/build-plak.sh").read_text()
@@ -185,8 +202,7 @@ class BuildPlakTests(unittest.TestCase):
             base = pathlib.Path(directory).resolve()
             out = base / "target"
             out.mkdir()
-            env = os.environ.copy()
-            env["HOME"] = str(base / "home")
+            env = snapshot_env(str(base / "home"))
             root = base / "home/.local/lib/plak/maintainer"
 
             def install(content: str) -> list[str]:
@@ -287,8 +303,7 @@ class BuildPlakTests(unittest.TestCase):
                 out.mkdir()
                 for name in ("plak", "plakous-js-host", "monty"):
                     (out / name).write_text(name)
-                env = os.environ.copy()
-                env["HOME"] = str(base / "home")
+                env = snapshot_env(str(base / "home"))
                 command = ["bash", "-c", script, "snapshot", str(out / "plak"),
                            str(out / "plakous-js-host"), str(out / "monty")]
                 installed = subprocess.run(command, capture_output=True, text=True, env=env)
@@ -337,8 +352,7 @@ class BuildPlakTests(unittest.TestCase):
                     out.mkdir()
                     for name in ("plak", "plakous-js-host", "monty"):
                         (out / name).write_text(name)
-                    env = os.environ.copy()
-                    env["HOME"] = str(linked)
+                    env = snapshot_env(str(linked))
                     result = subprocess.run(
                         ["bash", "-c", script, "snapshot", str(out / "plak"),
                          str(out / "plakous-js-host"), str(out / "monty")],
@@ -362,8 +376,7 @@ class BuildPlakTests(unittest.TestCase):
             out.mkdir()
             for name in ("plak", "plakous-js-host", "monty"):
                 (out / name).write_text(name)
-            env = os.environ.copy()
-            env["HOME"] = str(base / "home")
+            env = snapshot_env(str(base / "home"))
             command = ["bash", "-c", script, "snapshot", str(out / "plak"),
                        str(out / "plakous-js-host"), str(out / "monty")]
             processes = [subprocess.Popen(command, stdout=subprocess.PIPE,
@@ -387,6 +400,8 @@ class BuildPlakTests(unittest.TestCase):
                                  hashlib.sha256(worker.read_bytes()).hexdigest())
             cache = base / "home/.local/lib/plak"
             self.assertEqual(list(cache.rglob(".staging.*")), [])
+            # The fixture's state-key probe reached only the PATH stub.
+            self.assertEqual(list(cache.rglob("state-key")), [])
 
     def test_install_preserves_legacy_producer_and_canonical_workers(self) -> None:
         source = (ROOT / "tools/build/build-plak.sh").read_text()
@@ -405,8 +420,7 @@ class BuildPlakTests(unittest.TestCase):
             os.utime(legacy, (0, 0))
             out = base / "target"
             out.mkdir()
-            env = os.environ.copy()
-            env["HOME"] = str(base / "home")
+            env = snapshot_env(str(base / "home"))
             for index in range(10):
                 for name in ("plak", "plakous-js-host", "monty"):
                     (out / name).write_text(f"{name} build {index}")
@@ -443,8 +457,7 @@ class BuildPlakTests(unittest.TestCase):
             out.mkdir()
             for name in ("plak", "plakous-js-host", "monty"):
                 (out / name).write_text('#!/bin/sh\necho r1.e1.p1.t1\n')
-            env = os.environ.copy()
-            env["HOME"] = str(linked)
+            env = snapshot_env(str(linked))
             result = subprocess.run(
                 ["bash", "-c", script, "snapshot", str(out / "plak"),
                  str(out / "plakous-js-host"), str(out / "monty")],
@@ -467,8 +480,7 @@ class BuildPlakTests(unittest.TestCase):
             base = pathlib.Path(directory).resolve()
             out = base / "target"
             out.mkdir()
-            env = os.environ.copy()
-            env["HOME"] = str(base / "home")
+            env = snapshot_env(str(base / "home"))
 
             def install(key: str, build: int) -> pathlib.Path:
                 (out / "plak").write_text(
