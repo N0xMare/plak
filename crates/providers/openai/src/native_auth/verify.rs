@@ -3,15 +3,15 @@
 use super::{
     ACCESS_REFRESH_SKEW, AUTH_REQUEST_CAP, AccountBinding, Algorithm, BTreeMap, BTreeSet,
     CodexSubscriptionCredentialManager, DEFAULT_ACCESS_TOKEN_LIFETIME, DecodingKey, Deserialize,
-    Duration, FetchedJwks, Instant, JWKS_MAX_AGE, JWKS_PATH, JwksResolvePolicy,
-    MAX_ID_TOKEN_LIFETIME, MAX_JWKS_KEYS, MAX_TOKEN_BYTES, Method, NativeCodexAuthError,
-    OAuthLoginTokenResponse, OAuthRefreshTokenResponse, OPENAI_AUTH_ORIGIN,
-    OPENAI_CODEX_NATIVE_CLIENT_ID, OPENAI_CODEX_OAUTH_SCOPES, StatusCode, StoredCredential,
-    USER_INFO_PATH, Validation, base_headers, bearer_headers, capped_login_deadline,
-    constant_time_value_eq, decode, decode_header, execute_bounded, generate_selection_epoch,
-    login_account_verification_or, login_signing_keys_or, login_token_response_or, now_unix_secs,
-    parse_cache_control_max_age, parse_strict_json, remaining_login_time, require_json_media_type,
-    require_status, resolve_signing_key, scheduled_access_expiry, validate_identifier,
+    Duration, FetchedJwks, Instant, JWKS_MAX_AGE, JWKS_PATH, MAX_ID_TOKEN_LIFETIME, MAX_JWKS_KEYS,
+    MAX_TOKEN_BYTES, Method, NativeCodexAuthError, OAuthLoginTokenResponse,
+    OAuthRefreshTokenResponse, OPENAI_AUTH_ORIGIN, OPENAI_CODEX_NATIVE_CLIENT_ID,
+    OPENAI_CODEX_OAUTH_SCOPES, StatusCode, StoredCredential, USER_INFO_PATH, Validation,
+    base_headers, bearer_headers, capped_login_deadline, constant_time_value_eq, decode,
+    decode_header, execute_bounded, generate_selection_epoch, login_account_verification_or,
+    login_signing_keys_or, login_token_response_or, now_unix_secs, parse_cache_control_max_age,
+    parse_strict_json, remaining_login_time, require_json_media_type, require_status,
+    scheduled_access_expiry, validate_identifier,
 };
 use base64::Engine as _;
 use zeroize::Zeroize as _;
@@ -354,29 +354,15 @@ impl CodexSubscriptionCredentialManager {
         login: bool,
         deadline: Instant,
     ) -> Result<RsaJwk, NativeCodexAuthError> {
-        let signing_transport =
-            || login_signing_keys_or(login, NativeCodexAuthError::Transport(None));
-        let remaining = remaining_login_time(deadline, signing_transport())?;
-        // Holding the cancellation-safe async mutex across fetch makes this a
-        // true single flight. Cancellation drops the guard, so no stuck
-        // `refreshing` bit can strand later callers.
-        let mut state = tokio::time::timeout(remaining, self.jwks.lock())
+        self.jwks
+            .resolve(
+                kid,
+                Some(deadline),
+                || login_signing_keys_or(login, NativeCodexAuthError::Transport(None)),
+                || login_signing_keys_or(login, NativeCodexAuthError::Validation),
+                || self.fetch_jwks_snapshot(login, deadline),
+            )
             .await
-            .map_err(|_| signing_transport())?;
-        remaining_login_time(deadline, signing_transport())?;
-        let signing_validation = || login_signing_keys_or(login, NativeCodexAuthError::Validation);
-        resolve_signing_key(
-            &mut state,
-            kid,
-            &JwksResolvePolicy::codex(),
-            signing_validation,
-            signing_validation,
-            || async {
-                remaining_login_time(deadline, signing_transport())?;
-                self.fetch_jwks_snapshot(login, deadline).await
-            },
-        )
-        .await
     }
 
     async fn fetch_jwks_snapshot(

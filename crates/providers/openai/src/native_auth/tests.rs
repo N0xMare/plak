@@ -983,7 +983,7 @@ fn subscription_gate(
 }
 
 /// The selection epoch of a seeded login; a relogin mints a fresh one.
-const SEEDED_SELECTION_EPOCH: &str = "seeded-login-selection-epoch-0123456789abcdef";
+const SEEDED_SELECTION_EPOCH: &str = "seeded-login-selection-epoch-0123456789abcd";
 
 fn seed_ready_credential(
     slot: &Path,

@@ -31,15 +31,16 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use plakous_auth::oauth_orchestrator::write_all_before_deadline;
 use plakous_auth::oauth_orchestrator::{
     BrowserLoopbackHooks, BuildRequestFailure, ClaimedRefreshHooks, ClaimedRevokeHooks,
-    CredentialRefreshObserver, FetchedJwks, JwksCacheState, JwksResolvePolicy,
-    LoopbackConnectionEvent, PullBodyError, bind_loopback_listener, parse_cache_control_max_age,
-    pull_claimed_body, resolve_signing_key, run_browser_loopback_session, run_claimed_refresh,
-    run_claimed_revoke,
+    CredentialRefreshObserver, FetchedJwks, JwksCache, JwksResolvePolicy, LoopbackConnectionEvent,
+    PullBodyError, bind_loopback_listener, parse_cache_control_max_age, pull_claimed_body,
+    run_browser_loopback_session, run_claimed_refresh, run_claimed_revoke,
 };
+#[cfg(test)]
+use plakous_auth::oauth_workflow::format_http11_text_response;
 use plakous_auth::oauth_workflow::{
-    AuthorizeUrlRequest, CallbackQueryPolicy, DevicePollSchedule, OAuthCallbackOutcome,
-    OAuthWorkflowError, access_needs_refresh, authorization_code_token_form,
-    build_authorization_url, decode_json_bounded, format_http11_text_response,
+    AuthorizeUrlRequest, CallbackQueryPolicy, DevicePollSchedule, LoopbackCallbackOutcome,
+    LoopbackCallbackPage, OAuthCallbackOutcome, OAuthWorkflowError, access_needs_refresh,
+    authorization_code_token_form, build_authorization_url, capped_deadline, decode_json_bounded,
     parse_http11_get_request, parse_oauth_callback_query, parse_remote_authorization_input,
     remaining_until, unsigned_access_token_exp, urlencoded_form_bytes,
 };
@@ -53,7 +54,7 @@ use plakous_auth::{
     CredentialSlotId, CredentialStatus, OfflineCredentialLifecycle, PrivateCredentialStore,
     PrivateStoreError, ReadyCredentialLease, RefreshClaim, SecretBytes,
     SecretString as AuthSecretString, SubscriptionIntegrationProfileId as AuthProfileId,
-    generate_oauth_correlation_token,
+    generate_login_selection_epoch, generate_oauth_correlation_token, valid_login_selection_epoch,
 };
 use plakous_exchange::network_failure;
 use plakous_http::{
@@ -473,7 +474,7 @@ pub struct CodexSubscriptionCredentialManager {
     selected: Mutex<SelectedAccount>,
     lifecycle: AsyncMutex<()>,
     flights: AuthSingleFlight,
-    jwks: AsyncMutex<JwksCacheState<RsaJwk>>,
+    jwks: JwksCache<RsaJwk>,
     authority_binding: Digest,
     request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
     refresh_observer: Option<Arc<dyn CredentialRefreshObserver>>,
@@ -557,7 +558,7 @@ impl CodexSubscriptionCredentialManager {
             selected: Mutex::new(selected),
             lifecycle: AsyncMutex::new(()),
             flights: AuthSingleFlight::new(),
-            jwks: AsyncMutex::new(JwksCacheState::with_max_negative(MAX_JWKS_NEGATIVE_KEYS)),
+            jwks: JwksCache::new(JwksResolvePolicy::codex(), MAX_JWKS_NEGATIVE_KEYS),
             authority_binding,
             request_gate: None,
             refresh_observer: None,
@@ -1007,11 +1008,7 @@ fn capped_login_deadline(
     cap: Duration,
     expired: NativeCodexAuthError,
 ) -> Result<Instant, NativeCodexAuthError> {
-    let now = Instant::now();
-    if now >= deadline {
-        return Err(expired);
-    }
-    Ok(deadline.min(now.checked_add(cap).unwrap_or(deadline)))
+    capped_deadline(deadline, cap, Instant::now()).ok_or(expired)
 }
 
 /// Non-cloneable browser login handle. Diagnostics redact URL correlation data.
@@ -1264,22 +1261,14 @@ fn parse_stored(payload: &SecretBytes) -> Result<StoredCredential, NativeCodexAu
     }
     let credential: StoredCredential = serde_json::from_slice(payload.expose_secret())
         .map_err(|_| NativeCodexAuthError::LoginRequired)?;
-    if !valid_selection_epoch(&credential.selection_epoch) {
+    if !valid_login_selection_epoch(&credential.selection_epoch) {
         return Err(NativeCodexAuthError::LoginRequired);
     }
     Ok(credential)
 }
 
 fn generate_selection_epoch() -> Result<String, NativeCodexAuthError> {
-    let token = generate_oauth_correlation_token().map_err(|_| NativeCodexAuthError::Binding)?;
-    Ok(token.expose_secret().to_owned())
-}
-
-fn valid_selection_epoch(value: &str) -> bool {
-    (32..=128).contains(&value.len())
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    generate_login_selection_epoch().map_err(|_| NativeCodexAuthError::Binding)
 }
 
 fn stored_record(
@@ -1790,6 +1779,13 @@ fn parse_browser_callback(
     parse_oauth_callback_query(query, codex_callback_policy()).map_err(map_oauth_workflow_error)
 }
 
+const CODEX_CALLBACK_PAGE: LoopbackCallbackPage<'static> = LoopbackCallbackPage {
+    complete: "Login complete",
+    rejected: "Login rejected",
+    failed: "Login failed",
+    headers: &[("Cache-Control", "no-store")],
+};
+
 struct CodexBrowserLoopbackHooks<'a> {
     manager: &'a CodexSubscriptionCredentialManager,
     /// Session deadline retained after the attempt is consumed by complete.
@@ -1836,18 +1832,11 @@ impl BrowserLoopbackHooks for CodexBrowserLoopbackHooks<'_> {
     }
 
     fn callback_response_bytes(&self, complete: Result<&Self::Output, &Self::Error>) -> Vec<u8> {
-        let (status, body) = match complete {
-            Ok(_) => (StatusCode::OK, "Login complete"),
-            Err(NativeCodexAuthError::Callback) => (StatusCode::BAD_REQUEST, "Login rejected"),
-            Err(_) => (StatusCode::BAD_REQUEST, "Login failed"),
-        };
-        format_http11_text_response(
-            status.as_u16(),
-            status.canonical_reason().unwrap_or("Result"),
-            body,
-            &[("Cache-Control", "no-store")],
-        )
-        .into_bytes()
+        CODEX_CALLBACK_PAGE.response_bytes(match complete {
+            Ok(_) => LoopbackCallbackOutcome::Complete,
+            Err(NativeCodexAuthError::Callback) => LoopbackCallbackOutcome::Rejected,
+            Err(_) => LoopbackCallbackOutcome::Failed,
+        })
     }
 
     async fn complete_callback(

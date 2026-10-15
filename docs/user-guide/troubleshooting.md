@@ -550,7 +550,8 @@ are directories you own and can write.
 ## `native credential profile changed …`
 
 A stored subscription credential uses a record format this build no longer
-reads. Claude logins made before the grant-bound record format are one case.
+reads. Claude logins made before the grant-bound record format are one case;
+Grok logins made before the current login selection format are another.
 Plak does not convert old records. Run the two commands the message names; the
 rest of the home is untouched. Bare `plak status` puts that repair on the
 account's Setup needed row (`Profile changed · plak logout <account> --local,

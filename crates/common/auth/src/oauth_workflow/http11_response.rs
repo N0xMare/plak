@@ -24,6 +24,43 @@ pub fn format_http11_text_response(
     response
 }
 
+/// How a loopback callback ended, as its browser result page reports it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LoopbackCallbackOutcome {
+    /// The login completed.
+    Complete,
+    /// The callback itself was refused (state, shape, or provider error).
+    Rejected,
+    /// The callback was accepted but the login did not complete.
+    Failed,
+}
+
+/// Dialect text and headers of the loopback callback result page.
+#[derive(Clone, Copy, Debug)]
+pub struct LoopbackCallbackPage<'a> {
+    /// Body for [`LoopbackCallbackOutcome::Complete`] (`200 OK`).
+    pub complete: &'a str,
+    /// Body for [`LoopbackCallbackOutcome::Rejected`] (`400 Bad Request`).
+    pub rejected: &'a str,
+    /// Body for [`LoopbackCallbackOutcome::Failed`] (`400 Bad Request`).
+    pub failed: &'a str,
+    /// Headers after the fixed framing headers.
+    pub headers: &'a [(&'a str, &'a str)],
+}
+
+impl LoopbackCallbackPage<'_> {
+    /// The complete `HTTP/1.1` response for `outcome`.
+    #[must_use]
+    pub fn response_bytes(&self, outcome: LoopbackCallbackOutcome) -> Vec<u8> {
+        let (status, reason, body) = match outcome {
+            LoopbackCallbackOutcome::Complete => (200, "OK", self.complete),
+            LoopbackCallbackOutcome::Rejected => (400, "Bad Request", self.rejected),
+            LoopbackCallbackOutcome::Failed => (400, "Bad Request", self.failed),
+        };
+        format_http11_text_response(status, reason, body, self.headers).into_bytes()
+    }
+}
+
 #[cfg(test)]
 #[allow(
     clippy::expect_used,
@@ -31,7 +68,39 @@ pub fn format_http11_text_response(
     reason = "unit tests may assert with expect/unwrap"
 )]
 mod tests {
-    use super::format_http11_text_response;
+    use super::{LoopbackCallbackOutcome, LoopbackCallbackPage, format_http11_text_response};
+
+    #[test]
+    fn callback_page_maps_each_outcome_to_its_status_and_body() {
+        let page = LoopbackCallbackPage {
+            complete: "done",
+            rejected: "refused",
+            failed: "broken",
+            headers: &[("Cache-Control", "no-store")],
+        };
+        for (outcome, head, body) in [
+            (
+                LoopbackCallbackOutcome::Complete,
+                "HTTP/1.1 200 OK\r\n",
+                "done",
+            ),
+            (
+                LoopbackCallbackOutcome::Rejected,
+                "HTTP/1.1 400 Bad Request\r\n",
+                "refused",
+            ),
+            (
+                LoopbackCallbackOutcome::Failed,
+                "HTTP/1.1 400 Bad Request\r\n",
+                "broken",
+            ),
+        ] {
+            let response = String::from_utf8(page.response_bytes(outcome)).unwrap();
+            assert!(response.starts_with(head), "{response}");
+            assert!(response.contains("\r\nCache-Control: no-store\r\n"));
+            assert!(response.ends_with(&format!("\r\n\r\n{body}")));
+        }
+    }
 
     #[test]
     fn formats_success_and_failure_with_extra_headers() {

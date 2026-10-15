@@ -315,7 +315,8 @@ pub(super) fn map_xai_error(error: plakous_xai::XaiNativeAuthError) -> NativeSub
         plakous_xai::XaiNativeAuthError::CompatibilityInactive => {
             NativeSubscriptionError::ProfileInactive
         }
-        plakous_xai::XaiNativeAuthError::Store(plakous_auth::PrivateStoreError::ForeignProfile) => {
+        plakous_xai::XaiNativeAuthError::Store(plakous_auth::PrivateStoreError::ForeignProfile)
+        | plakous_xai::XaiNativeAuthError::StoredCredentialFormatRetired => {
             NativeSubscriptionError::CredentialProfileChanged
         }
         plakous_xai::XaiNativeAuthError::Store(_) => NativeSubscriptionError::UnsafeStorage,

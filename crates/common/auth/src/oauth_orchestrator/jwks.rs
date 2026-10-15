@@ -1,8 +1,9 @@
 //! JWKS fetch/cache/single-flight orchestrator for subscription OIDC.
 //!
-//! Dialects hold the async mutex (single-flight) and supply fetch + crypto
-//! validation. Shared ladder: purge negatives → fresh hit → negative miss →
-//! fetch rounds → install → hit or record negative.
+//! [`JwksCache`] holds the async mutex across the fetch (single-flight) and
+//! bounds both the mutex wait and each fetch by the caller's deadline; dialects
+//! supply fetch + crypto validation. Shared ladder: purge negatives → fresh hit
+//! → negative miss → fetch rounds → install → hit or record negative.
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -10,7 +11,7 @@ use std::time::{Duration, Instant};
 
 /// In-process JWKS snapshot + negative cache.
 #[derive(Clone, Debug)]
-pub struct JwksCacheState<K> {
+pub(crate) struct JwksCacheState<K> {
     /// Validated signing keys keyed by `kid`.
     pub keys: BTreeMap<String, K>,
     /// Positive snapshot expiry (`None` = empty).
@@ -147,12 +148,12 @@ impl JwksResolvePolicy {
 
 /// Resolve one signing key by `kid` against a locked cache state.
 ///
-/// `fetch` runs while the dialect still holds the cache mutex (single-flight).
+/// `fetch` runs while [`JwksCache`] still holds the cache mutex (single-flight).
 ///
 /// # Errors
 ///
 /// Propagates `fetch` errors and maps miss/negative through the provided closures.
-pub async fn resolve_signing_key<K, E, F, Fut>(
+pub(crate) async fn resolve_signing_key<K, E, F, Fut>(
     state: &mut JwksCacheState<K>,
     kid: &str,
     policy: &JwksResolvePolicy,
@@ -198,6 +199,82 @@ where
 
     state.record_negative(kid, Instant::now() + policy.negative_ttl);
     Err(miss_error())
+}
+
+/// Single-flight JWKS cache shared by every subscription OIDC dialect.
+///
+/// The cancellation-safe async mutex is held across the fetch, so concurrent
+/// resolvers of a missing key wait for one fetch instead of issuing their own.
+/// Cancellation drops the guard, so no stuck in-flight state can strand later
+/// callers.
+#[derive(Debug)]
+pub struct JwksCache<K> {
+    state: tokio::sync::Mutex<JwksCacheState<K>>,
+    policy: JwksResolvePolicy,
+}
+
+impl<K: Clone> JwksCache<K> {
+    /// Empty cache that keeps at most `max_negative` unresolved key ids.
+    #[must_use]
+    pub fn new(policy: JwksResolvePolicy, max_negative: usize) -> Self {
+        Self {
+            state: tokio::sync::Mutex::new(JwksCacheState::with_max_negative(max_negative)),
+            policy,
+        }
+    }
+
+    /// Resolves `kid`, fetching under the single flight when needed.
+    ///
+    /// With a `deadline`, the wait for an in-flight fetch and every fetch
+    /// round start only while time remains; the wait itself is bounded by the
+    /// remaining time. `expired` names the failure once the deadline passed.
+    /// A negative-cached or still-unresolved `kid` fails with `unresolved`.
+    ///
+    /// # Errors
+    ///
+    /// `expired`, `unresolved`, or the error `fetch` returns.
+    pub async fn resolve<E, F, Fut>(
+        &self,
+        kid: &str,
+        deadline: Option<Instant>,
+        expired: impl Fn() -> E,
+        unresolved: impl Fn() -> E,
+        mut fetch: F,
+    ) -> Result<K, E>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = Result<FetchedJwks<K>, E>>,
+    {
+        let remaining = || match deadline {
+            None => Ok(None),
+            Some(deadline) => crate::oauth_workflow::remaining_until(deadline, Instant::now())
+                .map(Some)
+                .ok_or_else(&expired),
+        };
+        let mut state = match remaining()? {
+            None => self.state.lock().await,
+            Some(wait) => tokio::time::timeout(wait, self.state.lock())
+                .await
+                .map_err(|_| expired())?,
+        };
+        remaining()?;
+        resolve_signing_key(
+            &mut state,
+            kid,
+            &self.policy,
+            &unresolved,
+            &unresolved,
+            || {
+                let started = remaining();
+                let fetched = fetch();
+                async move {
+                    started?;
+                    fetched.await
+                }
+            },
+        )
+        .await
+    }
 }
 
 /// Parse `Cache-Control: max-age=` (first matching directive).
@@ -290,6 +367,100 @@ mod tests {
             .await,
             Err("negative")
         );
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+    }
+
+    fn snapshot(kid: &str, key: u8) -> FetchedJwks<TestKey> {
+        FetchedJwks {
+            keys: BTreeMap::from([(kid.into(), TestKey(key))]),
+            expires_at: Instant::now() + Duration::from_secs(60),
+        }
+    }
+
+    #[tokio::test]
+    async fn deadline_bounds_the_wait_behind_an_in_flight_fetch() {
+        let cache = std::sync::Arc::new(JwksCache::new(JwksResolvePolicy::xai(), 8));
+        let (fetch_started, started) = tokio::sync::oneshot::channel();
+        let (release_fetch, release) = tokio::sync::oneshot::channel::<()>();
+        let holder = tokio::spawn({
+            let cache = std::sync::Arc::clone(&cache);
+            async move {
+                let mut signal = Some((fetch_started, release));
+                cache
+                    .resolve(
+                        "k1",
+                        None,
+                        || "expired",
+                        || "unresolved",
+                        || {
+                            let (fetch_started, release) = signal.take().unwrap();
+                            async move {
+                                fetch_started.send(()).unwrap();
+                                release.await.unwrap();
+                                Ok(snapshot("k1", 1))
+                            }
+                        },
+                    )
+                    .await
+            }
+        });
+        started.await.unwrap();
+        let begun = Instant::now();
+        let waited = cache
+            .resolve(
+                "k1",
+                Some(Instant::now() + Duration::from_millis(50)),
+                || "expired",
+                || "unresolved",
+                || async { Err("fetch") },
+            )
+            .await;
+        assert_eq!(waited, Err("expired"));
+        assert!(begun.elapsed() < Duration::from_secs(5));
+        release_fetch.send(()).unwrap();
+        assert_eq!(holder.await.unwrap(), Ok(TestKey(1)));
+    }
+
+    #[tokio::test]
+    async fn expired_deadline_refuses_before_fetching() {
+        let cache = JwksCache::new(JwksResolvePolicy::codex(), 8);
+        let fetches = AtomicUsize::new(0);
+        let result = cache
+            .resolve(
+                "k1",
+                Some(Instant::now()),
+                || "expired",
+                || "unresolved",
+                || async {
+                    fetches.fetch_add(1, Ordering::SeqCst);
+                    Ok(snapshot("k1", 1))
+                },
+            )
+            .await;
+        assert_eq!(result, Err("expired"));
+        assert_eq!(fetches.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn concurrent_misses_share_one_fetch() {
+        let cache = JwksCache::new(JwksResolvePolicy::codex(), 8);
+        let fetches = AtomicUsize::new(0);
+        let resolve = || {
+            cache.resolve(
+                "k1",
+                Some(Instant::now() + Duration::from_secs(30)),
+                || "expired",
+                || "unresolved",
+                || async {
+                    fetches.fetch_add(1, Ordering::SeqCst);
+                    tokio::task::yield_now().await;
+                    Ok(snapshot("k1", 1))
+                },
+            )
+        };
+        let (first, second) = tokio::join!(resolve(), resolve());
+        assert_eq!(first, Ok(TestKey(1)));
+        assert_eq!(second, Ok(TestKey(1)));
         assert_eq!(fetches.load(Ordering::SeqCst), 1);
     }
 

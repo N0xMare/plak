@@ -262,6 +262,28 @@ pub fn generate_oauth_correlation_token() -> Result<SecretString, BindingError> 
     Ok(SecretString::from(random_token()?))
 }
 
+/// Mints one login selection epoch: 32 random bytes, base64url without padding.
+///
+/// Every successful subscription login stores a fresh one beside its tokens and
+/// refresh carries it unchanged, so a refreshed generation is told apart from a
+/// relogin of the same account. It is random but not secret.
+///
+/// # Errors
+///
+/// [`BindingError::RandomnessUnavailable`] when OS randomness fails.
+pub fn generate_login_selection_epoch() -> Result<String, BindingError> {
+    random_token()
+}
+
+/// Whether `value` has the exact shape [`generate_login_selection_epoch`] mints.
+#[must_use]
+pub fn valid_login_selection_epoch(value: &str) -> bool {
+    value.len() == GENERATED_TOKEN_LENGTH
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
 fn random_token() -> Result<String, BindingError> {
     let mut bytes = [0_u8; RANDOM_TOKEN_BYTES];
     getrandom::fill(&mut bytes).map_err(|_| BindingError::RandomnessUnavailable)?;
@@ -308,6 +330,25 @@ fn constant_time_bounded_eq(expected: &[u8], returned: &[u8]) -> bool {
     reason = "unit tests may assert with expect/unwrap"
 )]
 mod tests {
+    #[test]
+    fn login_selection_epoch_has_one_encoding() {
+        let first = generate_login_selection_epoch().unwrap();
+        let second = generate_login_selection_epoch().unwrap();
+        assert_ne!(first, second);
+        assert!(valid_login_selection_epoch(&first));
+        let rejected = [
+            String::new(),
+            "0123456789abcdef".repeat(4),
+            first[1..].to_owned(),
+            format!("{first}A"),
+            format!("{}=", &first[1..]),
+            format!("{}.", &first[1..]),
+        ];
+        for value in &rejected {
+            assert!(!valid_login_selection_epoch(value), "{value}");
+        }
+    }
+
     use super::*;
 
     #[test]

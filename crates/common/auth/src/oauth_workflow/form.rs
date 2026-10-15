@@ -138,6 +138,15 @@ pub fn remaining_until(deadline: Instant, now: Instant) -> Option<Duration> {
     }
 }
 
+/// Deadline of one request inside a flow: `now + cap`, never past `deadline`.
+///
+/// Returns [`None`] when `now >= deadline`.
+#[must_use]
+pub fn capped_deadline(deadline: Instant, cap: Duration, now: Instant) -> Option<Instant> {
+    remaining_until(deadline, now)?;
+    Some(deadline.min(now.checked_add(cap).unwrap_or(deadline)))
+}
+
 /// `true` when access expiry is at or inside the refresh skew window.
 #[must_use]
 pub fn access_needs_refresh(expires_at: u64, now: u64, skew_seconds: u64) -> bool {
@@ -152,7 +161,7 @@ pub fn access_needs_refresh(expires_at: u64, now: u64, skew_seconds: u64) -> boo
 )]
 mod tests {
     use super::{
-        access_needs_refresh, authorization_code_token_form, decode_json_bounded,
+        access_needs_refresh, authorization_code_token_form, capped_deadline, decode_json_bounded,
         refresh_token_form, remaining_until, unsigned_access_token_exp, urlencoded_form,
         urlencoded_form_bytes,
     };
@@ -260,6 +269,24 @@ mod tests {
         );
         assert_eq!(
             unsigned_access_token_exp(&format!("e30.{payload}.sig.extra"), 4096),
+            None
+        );
+    }
+
+    #[test]
+    fn capped_deadline_never_passes_the_flow_deadline() {
+        let now = Instant::now();
+        let deadline = now + Duration::from_secs(10);
+        assert_eq!(
+            capped_deadline(deadline, Duration::from_secs(3), now),
+            Some(now + Duration::from_secs(3))
+        );
+        assert_eq!(
+            capped_deadline(deadline, Duration::from_secs(30), now),
+            Some(deadline)
+        );
+        assert_eq!(
+            capped_deadline(deadline, Duration::from_secs(3), deadline),
             None
         );
     }

@@ -3146,7 +3146,12 @@ OpenAI and xAI keep signed-token/JWKS validation and request dispatch in
 private provider-local modules. Verification owns its decoded identity and key
 shapes; dispatch owns the execution facts and response-head guard. Credential
 managers retain selected-account state and claimed refresh/revoke orchestration.
-The established provider exports remain the entry points.
+The established provider exports remain the entry points. Both share one
+implementation, in the auth crate, of the JWKS single flight (one async mutex
+held across the key-set fetch; a login bounds both the wait behind another
+fetch and each fetch round by its flow deadline), the login selection epoch,
+the loopback callback result page and the flow-deadline helpers; the providers
+supply only pins, key shapes and error mapping.
 
 | Vertical | Grant | Pins |
 | --- | --- | --- |
@@ -3591,7 +3596,9 @@ Between turns the host may still re-resolve a root at a quiescent prompt
 boundary (below).
 
 The login selection epoch is a random, non-secret value stored inside the
-private credential payload. Every successful login mints a new one; refresh
+private credential payload: 32 random bytes, base64url without padding
+(43 characters), the one encoding every subscription vertical mints and
+accepts. Every successful login mints a new one; refresh
 carries it unchanged, so a refreshed generation keeps the selection and any new
 login, even of the same account, changes it. Admission and renewal bind a
 one-way digest of it, never the raw value. It is credential evidence, not a
@@ -3602,7 +3609,13 @@ selection epoch is refused as login-required (remedy
 `plak login codex`) and never synthesized: `plak status` and the usage read
 report it as login-required without network I/O, a refresh claim that finds a
 payload it cannot parse restores it (nothing was sent) rather than quarantining
-it, and this build does not attempt a remote revoke of it. Codex's 401 recovery
+it, and this build does not attempt a remote revoke of it. A stored SuperGrok
+payload of version 2 (whose selection epoch was 64 hex digits) is retired: the
+current payload is version 3, and a version-2 record is refused as a retired
+credential format (remedy `plak logout grok --local`, then `plak login grok`)
+and never converted. The usage read reports it as login-required without
+network I/O, and a refresh or revoke claim that finds it restores it (nothing
+was sent) rather than quarantining it. Codex's 401 recovery
 forces one claimed refresh bound to the rejected receipt's account and login
 selection, and only while the store, read under the refresh flight, still holds
 the rejected generation, so it never claims, rotates or quarantines a newer

@@ -3,13 +3,13 @@
 use super::{
     AccountBinding, Algorithm, AlgorithmParameters, BTreeMap, BTreeSet,
     DEFAULT_TOKEN_LIFETIME_SECONDS, DecodingKey, Deserialize, EllipticCurve, FetchedJwks, Instant,
-    JWKS_TTL, Jwk, JwkSet, JwksResolvePolicy, KeyAlgorithm, KeyOperations, LoginHttpStage,
-    MAX_AUTH_BODY_BYTES, MAX_JWKS_KEYS, MAX_STRING_BYTES, ManagerCore, PublicKeyUse, StoredTokens,
-    TOKEN_CLOCK_LEEWAY_SECONDS, TokenResponse, Validation, XAI_ISSUER, XAI_OAUTH_SCOPE,
-    XAI_PUBLIC_CLIENT_ID, XaiNativeAuthError, decode, decode_header, decode_json,
+    JWKS_TTL, Jwk, JwkSet, KeyAlgorithm, KeyOperations, LoginHttpStage, MAX_AUTH_BODY_BYTES,
+    MAX_JWKS_KEYS, MAX_STRING_BYTES, ManagerCore, PublicKeyUse, STORED_TOKENS_VERSION,
+    StoredTokens, TOKEN_CLOCK_LEEWAY_SECONDS, TokenResponse, Validation, XAI_ISSUER,
+    XAI_OAUTH_SCOPE, XAI_PUBLIC_CLIENT_ID, XaiNativeAuthError, decode, decode_header, decode_json,
     generate_selection_epoch, login_account_verification_or, login_signing_keys_or,
-    login_token_exchange_or, resolve_signing_key, system_unix_seconds, unsigned_access_token_exp,
-    valid_selection_epoch, valid_token_component,
+    login_token_exchange_or, system_unix_seconds, unsigned_access_token_exp,
+    valid_login_selection_epoch, valid_token_component,
 };
 use zeroize::Zeroize as _;
 
@@ -37,9 +37,12 @@ impl ManagerCore {
             let id_token = tokens.id_token.as_deref().ok_or_else(|| {
                 login_token_exchange_or(true, XaiNativeAuthError::InvalidTokenResponse)
             })?;
-            Some(self.validate_id_token(id_token, nonce, now, true).await?)
+            Some(
+                self.validate_id_token(id_token, nonce, now, flow_deadline)
+                    .await?,
+            )
         } else if let Some(id_token) = tokens.id_token.as_deref() {
-            Some(self.validate_id_token(id_token, nonce, now, false).await?)
+            Some(self.validate_id_token(id_token, nonce, now, None).await?)
         } else {
             None
         };
@@ -101,7 +104,7 @@ impl ManagerCore {
             ));
         }
         Ok(StoredTokens {
-            version: 2,
+            version: STORED_TOKENS_VERSION,
             issuer: XAI_ISSUER.to_owned(),
             client_id: XAI_PUBLIC_CLIENT_ID.to_owned(),
             subject: user_subject.as_str().to_owned(),
@@ -110,7 +113,7 @@ impl ManagerCore {
             refresh_token: refresh,
             expires_at,
             selection_epoch: match retained_selection_epoch {
-                Some(value) if valid_selection_epoch(value) => value.to_owned(),
+                Some(value) if valid_login_selection_epoch(value) => value.to_owned(),
                 Some(_) => return Err(XaiNativeAuthError::InvalidStoredCredential),
                 None => generate_selection_epoch()?,
             },
@@ -122,8 +125,9 @@ impl ManagerCore {
         token: &str,
         nonce: Option<&str>,
         now: u64,
-        login: bool,
+        flow_deadline: Option<Instant>,
     ) -> Result<AccountBinding, XaiNativeAuthError> {
+        let login = flow_deadline.is_some();
         let header = decode_header(token).map_err(|_| {
             login_account_verification_or(login, XaiNativeAuthError::InvalidIdToken)
         })?;
@@ -150,7 +154,7 @@ impl ManagerCore {
                 XaiNativeAuthError::InvalidIdToken,
             ));
         }
-        let jwk = self.jwk_for(&kid, login).await?;
+        let jwk = self.jwk_for(&kid, flow_deadline).await?;
         validate_jwk_metadata(&jwk, &kid).map_err(|error| login_signing_keys_or(login, error))?;
         let key = DecodingKey::from_jwk(&jwk)
             .map_err(|_| login_signing_keys_or(login, XaiNativeAuthError::InvalidJwks))?;
@@ -186,18 +190,22 @@ impl ManagerCore {
             .map_err(|error| login_account_verification_or(login, XaiNativeAuthError::from(error)))
     }
 
-    pub(super) async fn jwk_for(&self, kid: &str, login: bool) -> Result<Jwk, XaiNativeAuthError> {
-        // Holding the async mutex across fetch is true single-flight for JWKS.
-        let mut cache = self.jwks.lock().await;
-        let unknown = || login_signing_keys_or(login, XaiNativeAuthError::UnknownSigningKey);
-        resolve_signing_key(
-            &mut cache,
+    /// A login bounds the single-flight wait and fetch by its flow deadline,
+    /// failing with the same `LoginExpired` the enclosing flow would.
+    pub(super) async fn jwk_for(
+        &self,
+        kid: &str,
+        flow_deadline: Option<Instant>,
+    ) -> Result<Jwk, XaiNativeAuthError> {
+        let login = flow_deadline.is_some();
+        // Boxed so the single-flight wait does not inflate every login future.
+        Box::pin(self.jwks.resolve(
             kid,
-            &JwksResolvePolicy::xai(),
-            unknown,
-            unknown,
+            flow_deadline,
+            || XaiNativeAuthError::LoginExpired,
+            || login_signing_keys_or(login, XaiNativeAuthError::UnknownSigningKey),
             || self.fetch_jwks_snapshot(login),
-        )
+        ))
         .await
     }
 

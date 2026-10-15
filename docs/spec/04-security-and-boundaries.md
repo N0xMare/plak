@@ -452,6 +452,12 @@ an in-place replay of the ambiguous POST. Chapter 01 §7.3 holds the exact split
 between restoring and terminal outcomes. Codex and Claude remain fail-closed at
 quarantine and require a fresh login.
 
+A stored credential whose payload format this build retired (Claude records
+before the grant-bound format, SuperGrok version-2 payloads) is refused, never
+converted, and a claim that finds one restores it because nothing was sent;
+the repair is `plak logout <account> --local`, then `plak login <account>`
+(chapter 01 §7).
+
 ### 3.4 Isolation between accounts and routes
 
 A credential handle is scoped to one integration profile and one selected

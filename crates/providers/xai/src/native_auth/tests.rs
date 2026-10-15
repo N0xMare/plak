@@ -1839,8 +1839,7 @@ async fn refresh_is_same_account_single_flight_and_rotates_durably() -> TestResu
     let refreshed_fence = required(manager.core.store.load()?, "refreshed fence")?;
     let refreshed = manager.core.read_stored(&refreshed_fence)?;
     assert_eq!(
-        refreshed.selection_epoch,
-        "1111111111111111111111111111111111111111111111111111111111111111",
+        refreshed.selection_epoch, "selection-epoch-one-0123456789abcdefghijklm",
         "refresh must retain the login-selection epoch"
     );
     wait_for_requests(&peer, 2).await?;
@@ -2638,15 +2637,15 @@ async fn unknown_kid_forced_refresh_is_single_flight() -> TestResult {
     peer.responses.send(response(&jwks(TEST_KID))).await?;
     let (first, second) = tokio::time::timeout(Duration::from_secs(5), async {
         tokio::join!(
-            manager.core.jwk_for("unknown-key", false),
-            manager.core.jwk_for("unknown-key", false)
+            manager.core.jwk_for("unknown-key", None),
+            manager.core.jwk_for("unknown-key", None)
         )
     })
     .await?;
     assert!(matches!(first, Err(XaiNativeAuthError::UnknownSigningKey)));
     assert!(matches!(second, Err(XaiNativeAuthError::UnknownSigningKey)));
     assert!(matches!(
-        manager.core.jwk_for("unknown-key", false).await,
+        manager.core.jwk_for("unknown-key", None).await,
         Err(XaiNativeAuthError::UnknownSigningKey)
     ));
     wait_for_requests(&peer, 1).await?;
@@ -2741,7 +2740,7 @@ async fn resolver_rejects_requested_alias_or_bogus_id_before_credentials_and_wir
     assert_eq!(evidence.selected_credential_generation(), 1);
     assert_eq!(
         evidence.credential_selection_epoch(),
-        "1111111111111111111111111111111111111111111111111111111111111111"
+        "selection-epoch-one-0123456789abcdefghijklm"
     );
     assert_eq!(evidence.route_fingerprint(), identity.fingerprint());
     assert_eq!(
@@ -2843,7 +2842,7 @@ async fn resolver_rejects_generation_only_relogin_race_before_return() -> TestRe
 
     let baseline = required(manager.core.store.load()?, "resolution race fence")?;
     let replacement = StoredTokens {
-        version: 2,
+        version: STORED_TOKENS_VERSION,
         issuer: XAI_ISSUER.to_owned(),
         client_id: XAI_PUBLIC_CLIENT_ID.to_owned(),
         subject: "generation-race-subject".to_owned(),
@@ -2851,8 +2850,7 @@ async fn resolver_rejects_generation_only_relogin_race_before_return() -> TestRe
         access_token: "generation-race-access-two".to_owned(),
         refresh_token: "generation-race-refresh-two".to_owned(),
         expires_at: system_unix_seconds()? + 3_600,
-        selection_epoch: "1111111111111111111111111111111111111111111111111111111111111111"
-            .to_owned(),
+        selection_epoch: "selection-epoch-one-0123456789abcdefghijklm".to_owned(),
     };
     let mutation = manager.core.store.replace_selected_login(
         &baseline,
@@ -3111,7 +3109,7 @@ async fn runtime_authority_binds_exact_model_route_catalog_selection_and_profile
         "runtime-authority-account",
         "runtime-authority-access-token",
         "runtime-authority-refresh-token",
-        "1111111111111111111111111111111111111111111111111111111111111111",
+        "selection-epoch-one-0123456789abcdefghijklm",
     ] {
         assert!(
             !rendered.contains(forbidden),
@@ -3769,7 +3767,7 @@ async fn same_account_relogin_epoch_invalidates_captured_route_before_inference(
 
     let baseline = required(manager.core.store.load()?, "baseline fence")?;
     let replacement = StoredTokens {
-        version: 2,
+        version: STORED_TOKENS_VERSION,
         issuer: XAI_ISSUER.to_owned(),
         client_id: XAI_PUBLIC_CLIENT_ID.to_owned(),
         subject: "epoch-subject".to_owned(),
@@ -3777,8 +3775,7 @@ async fn same_account_relogin_epoch_invalidates_captured_route_before_inference(
         access_token: "epoch-access-two".to_owned(),
         refresh_token: "epoch-refresh-two".to_owned(),
         expires_at: system_unix_seconds()? + 3_600,
-        selection_epoch: "2222222222222222222222222222222222222222222222222222222222222222"
-            .to_owned(),
+        selection_epoch: "selection-epoch-two-0123456789abcdefghijklm".to_owned(),
     };
     let record = credential_record(
         AccountBinding::new("epoch-subject")?,
@@ -6296,7 +6293,7 @@ fn stored_record(
 ) -> Result<CredentialRecord, XaiNativeAuthError> {
     let account = AccountBinding::new(subject)?;
     let stored = StoredTokens {
-        version: 2,
+        version: STORED_TOKENS_VERSION,
         issuer: XAI_ISSUER.to_owned(),
         client_id: XAI_PUBLIC_CLIENT_ID.to_owned(),
         subject: subject.to_owned(),
@@ -6304,8 +6301,7 @@ fn stored_record(
         access_token: access.to_owned(),
         refresh_token: refresh.to_owned(),
         expires_at,
-        selection_epoch: "1111111111111111111111111111111111111111111111111111111111111111"
-            .to_owned(),
+        selection_epoch: "selection-epoch-one-0123456789abcdefghijklm".to_owned(),
     };
     credential_record(account, generation, &stored)
 }
@@ -7318,5 +7314,55 @@ async fn a_waiter_behind_a_failed_renewal_keeps_its_floor() -> TestResult {
     assert_eq!(waiter?.credential_generation(), rotated.generation().get());
     auth.shutdown().await?;
     inference.abort_join().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn retired_hex_epoch_record_needs_a_new_login_without_network() -> TestResult {
+    let _serial = AUTH_TEST_GATE.lock().await;
+    let temp = tempdir()?;
+    let peer = mock_peer().await?;
+    let manager = manager(&temp, &peer)?;
+    let retired = StoredTokens {
+        version: 2,
+        issuer: XAI_ISSUER.to_owned(),
+        client_id: XAI_PUBLIC_CLIENT_ID.to_owned(),
+        subject: "retired-subject".to_owned(),
+        scope: XAI_OAUTH_SCOPE.to_owned(),
+        access_token: "retired-access".to_owned(),
+        refresh_token: "retired-refresh".to_owned(),
+        expires_at: system_unix_seconds()? + 1,
+        selection_epoch: "ab".repeat(32),
+    };
+    manager.core.store.initialize_selected(&credential_record(
+        AccountBinding::new("retired-subject")?,
+        CredentialGeneration::new(1)?,
+        &retired,
+    )?)?;
+    assert!(matches!(
+        manager.status(),
+        Err(XaiNativeAuthError::StoredCredentialFormatRetired)
+    ));
+    assert!(matches!(
+        manager.subscription_usage().await,
+        SubscriptionUsageRead::Unavailable {
+            reason: SubscriptionUsageUnavailable::CredentialState(
+                SubscriptionUsageCredentialState::LoginRequired
+            ),
+            ..
+        }
+    ));
+    assert!(matches!(
+        manager.refresh_if_needed().await,
+        Err(XaiNativeAuthError::StoredCredentialFormatRetired)
+    ));
+    let restored = required(manager.core.store.load()?, "restored retired fence")?;
+    assert_eq!(restored.status(), CredentialStatus::Ready);
+    assert!(matches!(
+        manager.refresh_catalog().await,
+        Err(XaiNativeAuthError::StoredCredentialFormatRetired)
+    ));
+    assert!(peer.requests.lock().await.is_empty());
+    peer.shutdown().await?;
     Ok(())
 }

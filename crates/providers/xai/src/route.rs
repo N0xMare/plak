@@ -840,7 +840,7 @@ impl XaiGrokSubscriptionRoute {
             return Err(RuntimeModelAuthorityError::Invalid);
         }
         if credential_authority.selection_epoch() != native_catalog.selection_epoch()
-            || !valid_selection_epoch(native_catalog.selection_epoch())
+            || !plakous_auth::valid_login_selection_epoch(native_catalog.selection_epoch())
         {
             log_authority_rejection("route.selection_epoch");
             return Err(RuntimeModelAuthorityError::Invalid);
@@ -867,11 +867,6 @@ impl XaiGrokSubscriptionRoute {
         )?
         .with_admission_witness(witness))
     }
-}
-
-#[cfg(feature = "native-auth")]
-fn valid_selection_epoch(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 impl fmt::Debug for XaiGrokSubscriptionRoute {

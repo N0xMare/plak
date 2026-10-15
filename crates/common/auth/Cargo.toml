@@ -25,6 +25,7 @@ thiserror.workspace = true
 tokio = { workspace = true, optional = true, features = [
     "io-util",
     "net",
+    "sync",
     "time",
 ] }
 secrecy.workspace = true

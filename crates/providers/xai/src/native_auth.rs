@@ -28,16 +28,17 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use plakous_auth::oauth_orchestrator::{
     BrowserLoopbackHooks, BuildRequestFailure, ClaimedRefreshHooks, ClaimedRevokeHooks,
     CredentialRefreshEvent, CredentialRefreshFailureClass, CredentialRefreshObserver,
-    CredentialRefreshPhase, FetchedJwks, JwksCacheState, JwksResolvePolicy,
-    LoopbackConnectionEvent, PullBodyError, bind_loopback_listener, pull_claimed_body,
-    resolve_signing_key, run_browser_loopback_session, run_claimed_refresh, run_claimed_revoke,
+    CredentialRefreshPhase, FetchedJwks, JwksCache, JwksResolvePolicy, LoopbackConnectionEvent,
+    PullBodyError, bind_loopback_listener, pull_claimed_body, run_browser_loopback_session,
+    run_claimed_refresh, run_claimed_revoke, until_deadline,
 };
 use plakous_auth::oauth_workflow::{
-    AuthorizeUrlRequest, CallbackQueryPolicy, DevicePollSchedule, OAuthCallbackOutcome,
-    OAuthWorkflowError, access_needs_refresh, authorization_code_token_form,
-    build_authorization_url, decode_json_bounded, format_http11_text_response, is_http_token_byte,
-    parse_absolute_redirect_query, parse_http11_get_request, parse_remote_authorization_input,
-    refresh_token_form, remaining_until, unsigned_access_token_exp, urlencoded_form,
+    AuthorizeUrlRequest, CallbackQueryPolicy, DevicePollSchedule, LoopbackCallbackOutcome,
+    LoopbackCallbackPage, OAuthCallbackOutcome, OAuthWorkflowError, access_needs_refresh,
+    authorization_code_token_form, build_authorization_url, decode_json_bounded,
+    is_http_token_byte, parse_absolute_redirect_query, parse_http11_get_request,
+    parse_remote_authorization_input, refresh_token_form, remaining_until,
+    unsigned_access_token_exp, urlencoded_form,
 };
 use plakous_auth::subscription_limit::{
     SubscriptionRequestClass, SubscriptionRequestGate, SubscriptionRequestPermit,
@@ -46,7 +47,8 @@ use plakous_auth::{
     AccountBinding, CallbackBinding, ClaimedHttpDisposition, ClaimedHttpError, ClaimedHttpResponse,
     CredentialFence, CredentialGeneration, CredentialRecord, CredentialSlotId, CredentialStatus,
     OfflineCredentialLifecycle, PkceS256, PrivateCredentialStore, PrivateStoreError,
-    ReadyCredentialLease, RefreshClaim, SecretBytes, SecretString,
+    ReadyCredentialLease, RefreshClaim, SecretBytes, SecretString, generate_login_selection_epoch,
+    valid_login_selection_epoch,
 };
 use plakous_exchange::network_failure;
 use plakous_http::{
@@ -284,6 +286,9 @@ const MAX_CALLBACK_BYTES: usize = 8 * 1024;
 const MAX_LOOPBACK_CONNECTIONS: usize = 4;
 const MAX_STRING_BYTES: usize = 64 * 1024;
 const MAX_JWKS_KEYS: usize = 16;
+/// Stored token payload version. Version 2 carried a hex login selection
+/// epoch; it is refused as retired and needs a new login.
+const STORED_TOKENS_VERSION: u32 = 3;
 const MAX_CATALOG_MODELS: usize = 256;
 // Catalog evidence is bound into the descriptor and rechecked at every admit.
 // A 30-minute fence (e2e `plak run` headroom) expired in the middle of a TUI
@@ -945,7 +950,7 @@ impl XaiNativeAuthManager {
                 acceptance,
                 endpoints: AuthEndpoints::production(),
                 compatibility_expires_unix: AtomicU64::new(COMPATIBILITY_EXPIRES_UNIX),
-                jwks: AsyncMutex::new(JwksCacheState::with_max_negative(MAX_JWKS_KEYS)),
+                jwks: JwksCache::new(JwksResolvePolicy::xai(), MAX_JWKS_KEYS),
                 refresh_flight: AsyncMutex::new(()),
                 catalog: Mutex::new(None),
                 request_gate: None,
@@ -999,7 +1004,11 @@ impl XaiNativeAuthManager {
     ///
     /// Fails closed on malformed or unsafe storage.
     pub fn status(&self) -> Result<Option<XaiSubscriptionStatus>, XaiNativeAuthError> {
-        Ok(self.core.store.load()?.map(|fence| XaiSubscriptionStatus {
+        let Some(fence) = self.core.store.load()? else {
+            return Ok(None);
+        };
+        refuse_retired_payload(&self.core.store, &fence)?;
+        Ok(Some(XaiSubscriptionStatus {
             generation: fence.generation(),
             status: fence.status(),
             account: fence.account_binding().clone(),
@@ -1062,8 +1071,14 @@ impl XaiNativeAuthManager {
             Ok(stored) => stored,
             Err(_) => return unavailable(SubscriptionUsageUnavailable::InvalidResponse),
         };
-        if stored.validate(fence.account_binding()).is_err() {
-            return unavailable(SubscriptionUsageUnavailable::AccountChanged);
+        match stored.validate(fence.account_binding()) {
+            Ok(()) => {}
+            Err(XaiNativeAuthError::StoredCredentialFormatRetired) => {
+                return unavailable(SubscriptionUsageUnavailable::CredentialState(
+                    SubscriptionUsageCredentialState::LoginRequired,
+                ));
+            }
+            Err(_) => return unavailable(SubscriptionUsageUnavailable::AccountChanged),
         }
         let Ok(now) = system_unix_seconds() else {
             return unavailable(SubscriptionUsageUnavailable::LocalState);
@@ -1461,7 +1476,7 @@ impl XaiNativeAuthManager {
                 },
                 endpoints: AuthEndpoints::test(issuer_origin),
                 compatibility_expires_unix: AtomicU64::new(COMPATIBILITY_EXPIRES_UNIX),
-                jwks: AsyncMutex::new(JwksCacheState::with_max_negative(MAX_JWKS_KEYS)),
+                jwks: JwksCache::new(JwksResolvePolicy::xai(), MAX_JWKS_KEYS),
                 refresh_flight: AsyncMutex::new(()),
                 catalog: Mutex::new(None),
                 request_gate: None,
@@ -1772,7 +1787,7 @@ struct ManagerCore {
     acceptance: XaiCompatibilityAcceptance,
     endpoints: AuthEndpoints,
     compatibility_expires_unix: AtomicU64,
-    jwks: AsyncMutex<JwksCacheState<Jwk>>,
+    jwks: JwksCache<Jwk>,
     refresh_flight: AsyncMutex<()>,
     catalog: Mutex<Option<CatalogReceiptCore>>,
     request_gate: Option<Arc<dyn SubscriptionRequestGate>>,
@@ -1877,7 +1892,7 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
             }
         };
         if let Err(error) = old.validate(claim.fence().account_binding()) {
-            return Err(BuildRequestFailure::LeaveQuarantined(error));
+            return Err(retired_or_quarantined(error));
         }
         if let Some(expected_epoch) = self.expected_selection_epoch
             && (old.selection_epoch != expected_epoch
@@ -2065,7 +2080,7 @@ impl ClaimedRevokeHooks for XaiRevokeHooks<'_> {
             }
         };
         if let Err(error) = old.validate(claim.fence().account_binding()) {
-            return Err(BuildRequestFailure::LeaveQuarantined(error));
+            return Err(retired_or_quarantined(error));
         }
         let refresh = Zeroizing::new(std::mem::take(&mut old.refresh_token));
         let form = urlencoded_form(&[
@@ -2486,7 +2501,7 @@ impl ManagerCore {
             || receipt.public.observed_at.seconds() > now
             || receipt.public.expires_at.seconds() <= now
             || receipt.public.expires_at.seconds() > COMPATIBILITY_EXPIRES_UNIX
-            || !valid_selection_epoch(&receipt.selection_epoch)
+            || !valid_login_selection_epoch(&receipt.selection_epoch)
             || receipt.authority_id != route_credential_authority_id(&self.store)
         {
             return Err(XaiNativeAuthError::CatalogUnavailable);
@@ -3348,6 +3363,9 @@ pub enum XaiNativeAuthError {
     /// Stored opaque provider data was malformed or foreign.
     #[error("the stored xAI credential is invalid")]
     InvalidStoredCredential,
+    /// The stored credential was written in a format this build no longer reads.
+    #[error("the stored xAI credential format is retired; log in again")]
+    StoredCredentialFormatRetired,
     /// The fresh account-scoped model catalog did not admit the exact pinned model.
     #[error("the exact xAI subscription model is not available in a fresh catalog")]
     CatalogUnavailable,
@@ -3620,7 +3638,10 @@ struct StoredTokens {
 
 impl StoredTokens {
     fn validate(&self, account: &AccountBinding) -> Result<(), XaiNativeAuthError> {
-        if self.version != 2
+        if self.version < STORED_TOKENS_VERSION {
+            return Err(XaiNativeAuthError::StoredCredentialFormatRetired);
+        }
+        if self.version != STORED_TOKENS_VERSION
             || self.issuer != XAI_ISSUER
             || self.client_id != XAI_PUBLIC_CLIENT_ID
             || self.subject != account.as_str()
@@ -3629,7 +3650,7 @@ impl StoredTokens {
             || self.access_token.len() > MAX_STRING_BYTES
             || self.refresh_token.is_empty()
             || self.refresh_token.len() > MAX_STRING_BYTES
-            || !valid_selection_epoch(&self.selection_epoch)
+            || !valid_login_selection_epoch(&self.selection_epoch)
         {
             return Err(XaiNativeAuthError::InvalidStoredCredential);
         }
@@ -3817,6 +3838,17 @@ enum LoopbackRequest {
     Preflight { origin: AllowedBrowserOrigin },
 }
 
+const XAI_CALLBACK_PAGE: LoopbackCallbackPage<'static> = LoopbackCallbackPage {
+    complete: "Authorization complete. Return to your application.",
+    rejected: "Authorization failed. Return to your application.",
+    failed: "Authorization failed. Return to your application.",
+    headers: &[
+        ("Cache-Control", "no-store"),
+        ("Pragma", "no-cache"),
+        ("X-Content-Type-Options", "nosniff"),
+    ],
+};
+
 struct XaiBrowserLoopbackHooks {
     /// Session deadline retained after the flow is consumed by complete.
     deadline: Instant,
@@ -3874,30 +3906,11 @@ impl BrowserLoopbackHooks for XaiBrowserLoopbackHooks {
     }
 
     fn callback_response_bytes(&self, complete: Result<&Self::Output, &Self::Error>) -> Vec<u8> {
-        let (status, reason, body) = if complete.is_ok() {
-            (
-                200,
-                "OK",
-                "Authorization complete. Return to your application.",
-            )
+        XAI_CALLBACK_PAGE.response_bytes(if complete.is_ok() {
+            LoopbackCallbackOutcome::Complete
         } else {
-            (
-                400,
-                "Bad Request",
-                "Authorization failed. Return to your application.",
-            )
-        };
-        format_http11_text_response(
-            status,
-            reason,
-            body,
-            &[
-                ("Cache-Control", "no-store"),
-                ("Pragma", "no-cache"),
-                ("X-Content-Type-Options", "nosniff"),
-            ],
-        )
-        .into_bytes()
+            LoopbackCallbackOutcome::Failed
+        })
     }
 
     async fn complete_callback(
@@ -4033,13 +4046,14 @@ fn parse_callback_url(full_redirect_url: &str) -> Result<BrowserCallback, XaiNat
     .map_err(|_| XaiNativeAuthError::InvalidCallback)
 }
 
-async fn until_flow_deadline<F, T>(deadline: Instant, future: F) -> Result<T, XaiNativeAuthError>
+fn until_flow_deadline<F, T>(
+    deadline: Instant,
+    future: F,
+) -> impl Future<Output = Result<T, XaiNativeAuthError>>
 where
     F: Future<Output = Result<T, XaiNativeAuthError>>,
 {
-    tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), future)
-        .await
-        .map_err(|_| XaiNativeAuthError::LoginExpired)?
+    until_deadline(deadline, || XaiNativeAuthError::LoginExpired, future)
 }
 
 fn credential_record(
@@ -4077,19 +4091,37 @@ fn route_credential_authority_id(store: &PrivateCredentialStore) -> String {
     encoded
 }
 
-fn generate_selection_epoch() -> Result<String, XaiNativeAuthError> {
-    let mut random = [0_u8; 32];
-    getrandom::fill(&mut random).map_err(|_| XaiNativeAuthError::RandomnessUnavailable)?;
-    let mut encoded = String::with_capacity(64);
-    for byte in random {
-        use std::fmt::Write as _;
-        let _ = write!(&mut encoded, "{byte:02x}");
+/// Refuses a Ready record whose payload predates [`STORED_TOKENS_VERSION`].
+/// A lease held elsewhere is not waited for; the next read names it.
+fn refuse_retired_payload(
+    store: &PrivateCredentialStore,
+    fence: &CredentialFence,
+) -> Result<(), XaiNativeAuthError> {
+    if fence.status() != CredentialStatus::Ready {
+        return Ok(());
     }
-    Ok(encoded)
+    let Ok(Some(lease)) = store.try_acquire_ready(fence) else {
+        return Ok(());
+    };
+    match serde_json::from_slice::<StoredTokens>(lease.payload().expose_secret()) {
+        Ok(stored) if stored.version < STORED_TOKENS_VERSION => {
+            Err(XaiNativeAuthError::StoredCredentialFormatRetired)
+        }
+        _ => Ok(()),
+    }
 }
 
-fn valid_selection_epoch(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+/// A retired payload is restored (nothing was sent, and the record needs a new
+/// login rather than quarantine); any other invalid payload stays quarantined.
+fn retired_or_quarantined(error: XaiNativeAuthError) -> BuildRequestFailure<XaiNativeAuthError> {
+    match error {
+        XaiNativeAuthError::StoredCredentialFormatRetired => BuildRequestFailure::Restore(error),
+        error => BuildRequestFailure::LeaveQuarantined(error),
+    }
+}
+
+fn generate_selection_epoch() -> Result<String, XaiNativeAuthError> {
+    generate_login_selection_epoch().map_err(|_| XaiNativeAuthError::RandomnessUnavailable)
 }
 
 #[cfg(test)]

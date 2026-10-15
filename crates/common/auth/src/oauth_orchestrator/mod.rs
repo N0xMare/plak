@@ -21,6 +21,7 @@
 //! Intentional wire deltas stay dialect-owned. Device authorization wire
 //! remains dialect-owned (shared poll only).
 
+use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::{Duration, Instant};
 
@@ -46,10 +47,7 @@ pub use hooks::{
     CredentialRefreshFailureClass, CredentialRefreshObserver, CredentialRefreshPhase,
     HttpStatusClass,
 };
-pub use jwks::{
-    FetchedJwks, JwksCacheState, JwksResolvePolicy, parse_cache_control_max_age,
-    resolve_signing_key,
-};
+pub use jwks::{FetchedJwks, JwksCache, JwksResolvePolicy, parse_cache_control_max_age};
 pub use refresh::{run_claimed_refresh, run_claimed_refresh_from_claim};
 pub use revoke::run_claimed_revoke;
 
@@ -211,6 +209,25 @@ async fn restore_unstarted_until(
     }
 }
 
+/// Runs `future` until `deadline`; past it, the future is dropped and the
+/// flow fails with `expired`.
+///
+/// # Errors
+///
+/// `expired` at the deadline, otherwise the error `future` returns.
+pub async fn until_deadline<F, T, E>(
+    deadline: Instant,
+    expired: impl FnOnce() -> E,
+    future: F,
+) -> Result<T, E>
+where
+    F: Future<Output = Result<T, E>>,
+{
+    tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), future)
+        .await
+        .unwrap_or_else(|_| Err(expired()))
+}
+
 /// Pull the claimed response body through clean EOF with a hard byte bound.
 ///
 /// Dialects call this from validate/accept hooks. Cancellation policy is
@@ -329,6 +346,17 @@ async fn handle_build_failure<E>(
 )]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn until_deadline_drops_the_future_at_the_deadline() {
+        let deadline = Instant::now() + Duration::from_millis(20);
+        let expired: Result<(), &str> =
+            until_deadline(deadline, || "expired", std::future::pending()).await;
+        assert_eq!(expired, Err("expired"));
+        let later = Instant::now() + Duration::from_secs(30);
+        let finished = until_deadline(later, || "expired", async { Ok::<_, &str>(7) }).await;
+        assert_eq!(finished, Ok(7));
+    }
 
     #[test]
     fn pull_body_error_is_redacted() {
