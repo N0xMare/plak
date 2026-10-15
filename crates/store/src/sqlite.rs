@@ -1798,11 +1798,13 @@ CREATE INDEX checkpoints_parent ON checkpoints(parent_id);
 CREATE INDEX checkpoints_fork ON checkpoints(fork_checkpoint);
 CREATE INDEX runtime_object_edges_child ON runtime_object_edges(child_kind,child_codec,child_digest);
 CREATE INDEX commit_receipts_expected ON commit_receipts(expected_checkpoint);
+CREATE INDEX commit_receipts_session ON commit_receipts(session_id);
 CREATE INDEX branches_checkpoint ON branches(checkpoint_id);
 CREATE INDEX branches_fork ON branches(fork_checkpoint);
 CREATE INDEX create_receipts_checkpoint ON create_receipts(checkpoint_id);
 CREATE INDEX fork_receipts_source ON fork_receipts(source_checkpoint);
 CREATE INDEX fork_receipts_target ON fork_receipts(target_checkpoint);
+CREATE INDEX fork_receipts_source_session ON fork_receipts(source_session);
 CREATE INDEX branch_horizons_checkpoint ON branch_horizons(horizon_checkpoint);
 CREATE INDEX pruned_checkpoints_branch ON pruned_checkpoints(session_id,branch_id);
 ";
@@ -4859,6 +4861,24 @@ fn load_archive(
     .transpose()
 }
 
+/// A checkpoint of another session whose parent or fork source is in session
+/// `?1`.
+const SESSION_FOREIGN_DEPENDENCY: &str = "SELECT 1 FROM checkpoints c WHERE c.session_id<>?1 AND (c.parent_id IN (SELECT checkpoint_id FROM checkpoints WHERE session_id=?1) OR c.fork_checkpoint IN (SELECT checkpoint_id FROM checkpoints WHERE session_id=?1)) LIMIT 1";
+
+/// Session `?1`'s dependent rows, children before parents; its checkpoints
+/// and session row go after their released roots are queued.
+const SESSION_ROW_DELETES: [&str; 9] = [
+    "DELETE FROM fork_receipts WHERE source_session=?1",
+    "DELETE FROM fork_receipts WHERE target_session=?1",
+    "DELETE FROM commit_receipts WHERE session_id=?1",
+    "DELETE FROM archive_receipts WHERE session_id=?1",
+    "DELETE FROM create_receipts WHERE session_id=?1",
+    "DELETE FROM branch_horizons WHERE session_id=?1",
+    "DELETE FROM pruned_checkpoints WHERE session_id=?1",
+    "DELETE FROM branches WHERE session_id=?1",
+    "DELETE FROM session_feed WHERE session_id=?1",
+];
+
 #[allow(
     clippy::too_many_lines,
     reason = "the one semantic deletion transaction stays linear for authority review"
@@ -4886,53 +4906,20 @@ fn delete(b: &mut Backend, r: DeleteSession) -> Result<DeleteReceipt, SessionSto
     }
     let branches = count_where(&tx, "branches", r.session_id())?;
     let checkpoints = count_where(&tx, "checkpoints", r.session_id())?;
-    let foreign_dependency: Option<i64> = tx.query_row(
-        "SELECT 1 FROM checkpoints c WHERE c.session_id<>?1 AND (c.parent_id IN (SELECT checkpoint_id FROM checkpoints WHERE session_id=?1) OR c.fork_checkpoint IN (SELECT checkpoint_id FROM checkpoints WHERE session_id=?1)) LIMIT 1",
-        [id(r.session_id())], |row| row.get(0)).optional().map_err(map_sqlite)?;
+    let foreign_dependency: Option<i64> = tx
+        .query_row(SESSION_FOREIGN_DEPENDENCY, [id(r.session_id())], |row| {
+            row.get(0)
+        })
+        .optional()
+        .map_err(map_sqlite)?;
     if foreign_dependency.is_some() {
         return Err(SessionStoreError::corrupt());
     }
 
-    tx.execute(
-        "DELETE FROM fork_receipts WHERE source_session=?1 OR target_session=?1",
-        [id(r.session_id())],
-    )
-    .map_err(map_sqlite)?;
-    tx.execute(
-        "DELETE FROM commit_receipts WHERE session_id=?1",
-        [id(r.session_id())],
-    )
-    .map_err(map_sqlite)?;
-    tx.execute(
-        "DELETE FROM archive_receipts WHERE session_id=?1",
-        [id(r.session_id())],
-    )
-    .map_err(map_sqlite)?;
-    tx.execute(
-        "DELETE FROM create_receipts WHERE session_id=?1",
-        [id(r.session_id())],
-    )
-    .map_err(map_sqlite)?;
-    tx.execute(
-        "DELETE FROM branch_horizons WHERE session_id=?1",
-        [id(r.session_id())],
-    )
-    .map_err(map_sqlite)?;
-    tx.execute(
-        "DELETE FROM pruned_checkpoints WHERE session_id=?1",
-        [id(r.session_id())],
-    )
-    .map_err(map_sqlite)?;
-    tx.execute(
-        "DELETE FROM branches WHERE session_id=?1",
-        [id(r.session_id())],
-    )
-    .map_err(map_sqlite)?;
-    tx.execute(
-        "DELETE FROM session_feed WHERE session_id=?1",
-        [id(r.session_id())],
-    )
-    .map_err(map_sqlite)?;
+    for statement in SESSION_ROW_DELETES {
+        tx.execute(statement, [id(r.session_id())])
+            .map_err(map_sqlite)?;
+    }
     capture_released_roots(&tx, "session_id=?1", &id(r.session_id()))?;
     tx.execute(
         "DELETE FROM checkpoints WHERE session_id=?1",

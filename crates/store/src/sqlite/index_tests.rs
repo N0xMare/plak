@@ -99,20 +99,18 @@ fn prune_candidate_query_probes_only_indexes() -> TestResult {
 #[test]
 fn session_delete_scopes_its_per_session_rows_by_index() -> TestResult {
     let c = reference()?;
-    for table in [
-        "archive_receipts",
-        "create_receipts",
-        "branch_horizons",
-        "pruned_checkpoints",
-        "branches",
-        "session_feed",
-        "checkpoints",
-        "sessions",
-    ] {
-        let details = plan(&c, &format!("DELETE FROM {table} WHERE session_id=?1"))?;
+    let statements = [SESSION_FOREIGN_DEPENDENCY]
+        .into_iter()
+        .chain(SESSION_ROW_DELETES)
+        .chain([
+            "DELETE FROM checkpoints WHERE session_id=?1",
+            "DELETE FROM sessions WHERE session_id=?1",
+        ]);
+    for statement in statements {
+        let details = plan(&c, statement)?;
         assert!(
             scans(&details).is_empty(),
-            "{table} delete scans: {details:#?}"
+            "{statement} scans: {details:#?}"
         );
     }
     Ok(())
@@ -175,16 +173,17 @@ fn timed_delete(b: &mut Backend, branch: &Branch) -> TestResult<Duration> {
 #[ignore = "measurement, not a gate"]
 fn measure_prune_and_delete_against_fork_count() -> TestResult {
     const CHECKPOINTS: u32 = 500;
-    for forks in [0_u32, 500, 1_000] {
+    for forks in [0_u32, 1_000, 3_000] {
         let dir = tempfile::tempdir()?;
         let mut b = backend(&dir.path().join("runtime.sqlite3"))?;
         let mut graph = Graph::new();
         let mut identity = 1_000_000_u128;
         let started = Instant::now();
-        if forks > 0 {
+        // One session holds at most 1024 branches.
+        for session in 0..forks.div_ceil(1_000) {
             identity += 10;
             let source = open_session(&mut b, &mut graph, identity)?;
-            for _ in 0..forks {
+            for _ in 0..(forks - session * 1_000).min(1_000) {
                 identity += 10;
                 fork_branch(&source, &mut b, &mut graph, identity)?;
             }

@@ -1220,9 +1220,11 @@ Every foreign-key child column is indexed (the leading columns of a primary
 key, unique constraint or index cover it), so the per-row foreign-key checks of
 a checkpoint, branch or session delete probe each child table by index rather
 than scanning it; prune and session-deletion cost therefore does not grow with
-the fork receipts and branches elsewhere in the store. A unit test asserts an
-index search in the query plan of every foreign-key child probe and of the
-prune candidate query.
+the fork receipts and branches elsewhere in the store. Session deletion likewise
+removes its fork receipts (as source and as target), commit receipts and other
+per-session rows through indexes. Unit tests assert an index search in the
+query plan of every foreign-key child probe, of the prune candidate query and of
+every session-deletion statement.
 
 Schema 25 stores object metadata in a rowid `runtime_objects` table with an
 integer primary key, unique `(kind,codec,digest)` address and `byte_len`.
@@ -7212,6 +7214,11 @@ or a branch this store itself holds is not proof, and each keeps the lease's
 clock exactly as it was, with the refusal saying that the holder could not be
 confirmed gone and roughly how long the wait is. A store that sees its grant
 superseded on renew, revive or release drops its claim for that grant.
+Each held claim keeps one descriptor open, so a store holds at most 128 claims
+at once; a grant past that bound skips its claim exactly like a claim that fails
+to open or lock, keeping the lease's clock rule, rather than letting held leases
+exhaust the process's descriptor limit and starve the database's own temporary
+files.
 
 The lock files are not database state. A missing holder lock file establishes
 no proof of owner loss, so acquisition preserves the lease's clock-based rule.

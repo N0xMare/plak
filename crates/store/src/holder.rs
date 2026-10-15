@@ -50,6 +50,12 @@ pub(crate) struct HolderClaim {
     _file: File,
 }
 
+/// Most claims one store holds at once. Each held claim keeps a descriptor
+/// open, so without a bound enough concurrent leases exhaust the process's
+/// descriptor limit and the database's own temporary files fail to open.
+/// Claims past the bound are skipped like any other failed claim.
+const MAX_HELD_CLAIMS: usize = 128;
+
 /// Every claim this store currently holds, by branch.
 #[derive(Debug, Default)]
 pub(crate) struct HolderClaims {
@@ -81,6 +87,9 @@ impl HolderClaims {
     pub(crate) fn claim(&mut self, session: SessionRef, fence: NonZeroU64) {
         let key = (session.session_id(), session.branch_id());
         self.held.remove(&key);
+        if self.held.len() >= MAX_HELD_CLAIMS {
+            return;
+        }
         let Some(path) = self.path(session) else {
             return;
         };
@@ -405,6 +414,36 @@ mod tests {
         assert!(path.exists(), "a held branch has a lock file");
         claims.release(session());
         assert!(!path.exists(), "a released branch leaves nothing behind");
+    }
+
+    /// Held claims are bounded, so leases can never take the descriptors the
+    /// database itself needs. A claim past the bound is skipped like any other
+    /// claim that fails, and a released claim frees its slot.
+    #[test]
+    fn held_claims_stop_at_their_descriptor_budget() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let database = directory.path().join("runtime.sqlite3");
+        let branch = |n: u128| {
+            SessionRef::new(
+                session().session_id(),
+                BranchId::try_from(uuid::Uuid::from_u128(0xb4a4_0000 + n)).expect("branch"),
+            )
+        };
+        let mut claims = HolderClaims::beside(&database);
+        for n in 0..=128 {
+            claims.claim(branch(n), fence(1));
+        }
+        let held = (0..=128).filter(|&n| claims.holds(branch(n))).count();
+        assert_eq!(held, 128, "claims past the budget are skipped");
+        assert!(!claims.holds(branch(128)));
+        claims.release(branch(0));
+        claims.claim(branch(128), fence(1));
+        assert!(claims.holds(branch(128)), "a released claim frees its slot");
+        claims.claim(branch(127), fence(2));
+        assert!(
+            claims.holds(branch(127)),
+            "re-claiming a held branch keeps its slot"
+        );
     }
 
     /// Opening a database leaves nothing beside it.
