@@ -1024,7 +1024,7 @@ async fn expire_ready_generation(
     let store = Arc::clone(&manager.store);
     run_blocking(move || {
         let fence = store
-            .reload()
+            .load()
             .map_err(|_| NativeCodexAuthError::Store)?
             .ok_or(NativeCodexAuthError::Unavailable)?;
         let lease = store
@@ -2185,7 +2185,7 @@ fn externally_replace_ready_generation(
         CredentialSlotId::new("primary")?,
     )?;
     let current = store
-        .reload()?
+        .load()?
         .ok_or("external rotation found no credential")?;
     let next = current.generation().next()?;
     let replacement = stored_record(&relogin_credential(account, marker)?, next)?;
@@ -2411,7 +2411,7 @@ async fn resolution_evidence_is_exact_and_deterministic() -> TestResult {
     );
     assert_eq!(target_epoch, first.credential_selection_epoch());
     assert_eq!(
-        manager.load_fence(true).await?.generation().get(),
+        manager.load_fence().await?.generation().get(),
         first.selected_credential_generation()
     );
     let attempt = "00000000-0000-7000-8000-000000000234";
@@ -2868,7 +2868,7 @@ async fn resolved_model_rejects_external_generation_rotation_before_dispatch() -
     .err()
     .ok_or("externally rotated resolved model unexpectedly dispatched")?;
     assert_eq!(error.kind(), ModelErrorKind::InvalidConfiguration);
-    assert_eq!(manager.load_fence(true).await?, rotated);
+    assert_eq!(manager.load_fence().await?, rotated);
     let (requests, unexpected_connection) = server.await??;
     assert_eq!(requests.len(), 1, "only catalog discovery may dispatch");
     assert!(!unexpected_connection, "rotated model reached the wire");
@@ -3015,7 +3015,7 @@ async fn resolved_model_rejects_external_rotation_before_later_round() -> TestRe
     .err()
     .ok_or("later round used an externally rotated credential")?;
     assert_eq!(error.kind(), ModelErrorKind::InvalidConfiguration);
-    assert_eq!(manager.load_fence(true).await?, rotated);
+    assert_eq!(manager.load_fence().await?, rotated);
 
     let (requests, unexpected_connection) = server.await??;
     assert_eq!(requests.len(), 2, "catalog and first round only");
@@ -5341,7 +5341,7 @@ async fn browser_callback_is_exact_state_bound_and_one_use() -> TestResult {
     assert_eq!(manager.status()?, CodexCredentialStatus::Ready);
     let expired = expire_ready_generation(&manager).await?;
     manager.refresh_if_needed().await?;
-    let refreshed = manager.load_fence(true).await?;
+    let refreshed = manager.load_fence().await?;
     assert_eq!(refreshed.generation(), expired.generation().next()?.next()?);
     assert_eq!(refreshed.status(), CredentialStatus::Ready);
     let refreshed_lease = manager.acquire_ready_lease(refreshed.clone()).await?;
@@ -5471,7 +5471,7 @@ async fn subscription_usage_expired_access_reports_refresh_required_without_refr
     let (_directory, slot) = private_slot()?;
     seed_ready_credential(&slot, "usage-account", "usage-subject", now_unix_secs())?;
     let manager = manager_for_endpoint(&slot, &endpoint)?;
-    let before = manager.load_fence(true).await?;
+    let before = manager.load_fence().await?;
     // Dropped after its first poll, as the hosted timeout drops a slow read.
     let _ = tokio::time::timeout(Duration::ZERO, manager.subscription_usage()).await;
     assert!(matches!(
@@ -5483,7 +5483,7 @@ async fn subscription_usage_expired_access_reports_refresh_required_without_refr
             ..
         }
     ));
-    let after = manager.load_fence(true).await?;
+    let after = manager.load_fence().await?;
     assert_eq!(after, before);
     assert_eq!(after.status(), CredentialStatus::Ready);
     assert!(
@@ -5515,7 +5515,7 @@ async fn subscription_usage_reports_peer_refresh_claim_as_busy_not_quarantined()
     let fence = peer.load()?.ok_or("missing Ready fence")?;
     let claim = peer.begin_refresh(&fence)?.start();
     assert_eq!(
-        manager.load_fence(true).await?.status(),
+        manager.load_fence().await?.status(),
         CredentialStatus::RefreshOutcomeUnknown
     );
     assert!(matches!(
@@ -5637,7 +5637,7 @@ async fn refresh_preserves_omitted_tokens_and_uses_access_jwt_expiry() -> TestRe
     );
 
     manager.refresh_if_needed().await?;
-    let refreshed = manager.load_fence(true).await?;
+    let refreshed = manager.load_fence().await?;
     assert_eq!(refreshed.generation(), expired.generation().next()?.next()?);
     let lease = manager.acquire_ready_lease(refreshed).await?;
     let credential = parse_stored(lease.payload())?;
@@ -5752,7 +5752,7 @@ async fn a_401_triggers_one_refresh_and_retry() -> TestResult {
         now_unix_secs() + 3_600,
     )?;
     let manager = manager_for_endpoint(&slot, &endpoint)?;
-    let baseline = manager.load_fence(true).await?;
+    let baseline = manager.load_fence().await?;
     let refresh_body = serde_json::to_vec(&serde_json::json!({
         "access_token": access_token_with_expiry(now_unix_secs() + 3_600)?,
         "refresh_token": "refresh-rotated",
@@ -5773,12 +5773,12 @@ async fn a_401_triggers_one_refresh_and_retry() -> TestResult {
     // Without a rejection the scheduled ladder is a no-op on a fresh token.
     manager.refresh_if_needed().await?;
     assert_eq!(
-        manager.load_fence(true).await?.generation(),
+        manager.load_fence().await?.generation(),
         baseline.generation()
     );
 
     manager.refresh_after_rejection().await?;
-    let refreshed = manager.load_fence(true).await?;
+    let refreshed = manager.load_fence().await?;
     assert_eq!(
         refreshed.generation(),
         baseline.generation().next()?.next()?
@@ -5991,7 +5991,7 @@ async fn claimed_refresh_store_busy_restores_without_send_and_responses_do_not_m
     let (directory, slot) = private_slot()?;
     seed_ready_credential(&slot, "busy-account", "busy-subject", now_unix_secs())?;
     let manager = manager_for_endpoint(&slot, &target)?;
-    let main_before = manager.load_fence(true).await?;
+    let main_before = manager.load_fence().await?;
 
     let sibling = Arc::new(PrivateCredentialStore::open_slot(
         directory.path().join("sibling.json"),
@@ -6039,7 +6039,7 @@ async fn claimed_refresh_store_busy_restores_without_send_and_responses_do_not_m
             .await
             .is_err()
     );
-    assert_eq!(manager.load_fence(true).await?, main_before);
+    assert_eq!(manager.load_fence().await?, main_before);
     // Cross-store quarantine must fail. Consuming the sibling response
     // also releases the directory lock so the worker can claim.
     let wrong_store = Arc::clone(&manager.store);
@@ -6604,10 +6604,7 @@ async fn another_manager_refreshing_the_shared_store_renews_the_running_receipt(
         .await?;
     // Another process's 401 recovery claims the next generation.
     peers[0].refresh_after_rejection().await?;
-    assert_eq!(
-        fixture.manager.load_fence(true).await?.generation().get(),
-        3
-    );
+    assert_eq!(fixture.manager.load_fence().await?.generation().get(), 3);
 
     let response = run_text(
         &fixture.model,
@@ -6691,10 +6688,7 @@ async fn a_token_entering_its_refresh_lead_mid_turn_renews_with_one_claimed_refr
         dispatched(&fixture.gate, SubscriptionRequestClass::Inference)?,
         1
     );
-    assert_eq!(
-        fixture.manager.load_fence(true).await?.generation().get(),
-        3
-    );
+    assert_eq!(fixture.manager.load_fence().await?.generation().get(), 3);
     Ok(())
 }
 
@@ -6782,10 +6776,7 @@ async fn a_401_forced_refresh_never_replays_and_the_next_operation_renews_once()
         rejected.is_err(),
         "a 401 dispatch is not replayed on the moved generation"
     );
-    assert_eq!(
-        fixture.manager.load_fence(true).await?.generation().get(),
-        3
-    );
+    assert_eq!(fixture.manager.load_fence().await?.generation().get(), 3);
     run_text(
         &fixture.model,
         &fixture.descriptor,
@@ -6805,10 +6796,7 @@ async fn a_401_forced_refresh_never_replays_and_the_next_operation_renews_once()
         ]
     );
     assert!(!unexpected);
-    assert_eq!(
-        fixture.manager.load_fence(true).await?.generation().get(),
-        3
-    );
+    assert_eq!(fixture.manager.load_fence().await?.generation().get(), 3);
     Ok(())
 }
 
@@ -6838,7 +6826,7 @@ async fn a_renewal_cancelled_during_its_catalog_fetch_installs_nothing() -> Test
     resolver.refresh_catalog().await?;
     let (model, _) = resolver.resolve_with_evidence(RENEW_MODEL)?;
     peer.refresh_after_rejection().await?;
-    let moved = manager.load_fence(true).await?;
+    let moved = manager.load_fence().await?;
 
     let mut renewing = Arc::clone(&model).revalidate_runtime_authority(system_timestamp());
     tokio::select! {
@@ -6850,7 +6838,7 @@ async fn a_renewal_cancelled_during_its_catalog_fetch_installs_nothing() -> Test
     drop(renewing);
     // The renewal reached its catalog request and was dropped there.
     server.abort();
-    assert_eq!(manager.load_fence(true).await?, moved);
+    assert_eq!(manager.load_fence().await?, moved);
     assert_eq!(moved.status(), CredentialStatus::Ready);
     // Nothing was installed: the receipt is still the stale one.
     assert!(
@@ -7132,7 +7120,7 @@ fn replace_record(
     payload: SecretBytes,
 ) -> TestResult<CredentialFence> {
     let store = slot_store(slot)?;
-    let current = store.reload()?.ok_or("no credential")?;
+    let current = store.load()?.ok_or("no credential")?;
     let record = CredentialRecord::new(
         AuthProfileId::new(OPENAI_CODEX_COMPATIBILITY_PROFILE_ID)?,
         AccountBinding::new(account)?,
@@ -7157,16 +7145,16 @@ async fn a_401_recovery_refreshes_only_its_own_login_and_generation() -> TestRes
         refresh_exchange(subject)?,
     )
     .await?;
-    let rejected = fixture.manager.load_fence(true).await?;
+    let rejected = fixture.manager.load_fence().await?;
     let selection = fixture.evidence.credential_selection_epoch();
     // Another process already rotated the rejected generation: no second claim.
     peers[0].refresh_after_rejection().await?;
-    let rotated = fixture.manager.load_fence(true).await?;
+    let rotated = fixture.manager.load_fence().await?;
     fixture
         .manager
         .refresh_rejected_selection(&rejected, selection)
         .await?;
-    assert_eq!(fixture.manager.load_fence(true).await?, rotated);
+    assert_eq!(fixture.manager.load_fence().await?, rotated);
     // A newer login L2 is never claimed, rotated or quarantined by L1's 401.
     fixture
         .manager
@@ -7176,7 +7164,7 @@ async fn a_401_recovery_refreshes_only_its_own_login_and_generation() -> TestRes
             Instant::now() + Duration::from_secs(5),
         )
         .await?;
-    let newer = fixture.manager.load_fence(true).await?;
+    let newer = fixture.manager.load_fence().await?;
     assert_eq!(
         fixture
             .manager
@@ -7184,7 +7172,7 @@ async fn a_401_recovery_refreshes_only_its_own_login_and_generation() -> TestRes
             .await,
         Err(NativeCodexAuthError::SelectionChanged)
     );
-    let after = fixture.manager.load_fence(true).await?;
+    let after = fixture.manager.load_fence().await?;
     assert_eq!(after, newer);
     assert_eq!(after.status(), CredentialStatus::Ready);
     let (requests, unexpected) = server.await??;
@@ -7248,7 +7236,7 @@ async fn an_earlier_build_login_is_never_claimed_into_quarantine() -> TestResult
         Err(NativeCodexAuthError::LoginRequired)
     ));
     assert_eq!(
-        slot_store(&slot)?.reload()?.ok_or("gone")?.status(),
+        slot_store(&slot)?.load()?.ok_or("gone")?.status(),
         CredentialStatus::RefreshRequired
     );
     // Remote revoke is not attempted for a login this build cannot parse;
@@ -7264,7 +7252,7 @@ async fn an_earlier_build_login_is_never_claimed_into_quarantine() -> TestResult
         Err(NativeCodexAuthError::LoginRequired)
     );
     assert_eq!(
-        slot_store(&slot)?.reload()?.ok_or("gone")?.status(),
+        slot_store(&slot)?.load()?.ok_or("gone")?.status(),
         CredentialStatus::Ready
     );
     assert_eq!(manager.status()?, CodexCredentialStatus::LoginRequired);
@@ -7304,7 +7292,7 @@ async fn a_renewal_restores_another_login_found_under_its_claim() -> TestResult 
     let (requests, unexpected) = server.await??;
     assert_eq!(request_kinds(&requests), ["catalog"]);
     assert!(!unexpected, "another login's refresh reached the wire");
-    let after = slot_store(&fixture.slot)?.reload()?.ok_or("gone")?;
+    let after = slot_store(&fixture.slot)?.load()?.ok_or("gone")?;
     assert_eq!(after.status(), CredentialStatus::RefreshRequired);
     assert_eq!(after.account_binding(), replaced.account_binding());
     assert!(after.generation() > replaced.generation());
@@ -7485,13 +7473,13 @@ async fn a_dropped_revalidation_lets_its_claimed_refresh_complete() -> TestResul
     let _ = release_tx.send(());
     let requests = server.await??;
     assert_eq!(request_kinds(&requests), ["catalog", "refresh", "userinfo"]);
-    let mut settled = manager.load_fence(true).await?;
+    let mut settled = manager.load_fence().await?;
     for _ in 0..50 {
         if settled.status() == CredentialStatus::Ready && settled.generation().get() == 3 {
             break;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
-        settled = manager.load_fence(true).await?;
+        settled = manager.load_fence().await?;
     }
     assert_eq!(
         settled.status(),
@@ -7575,13 +7563,13 @@ async fn a_dispatch_dropped_during_its_401_refresh_lets_the_refresh_complete() -
         request_kinds(&requests),
         ["catalog", "inference", "refresh", "userinfo"]
     );
-    let mut settled = manager.load_fence(true).await?;
+    let mut settled = manager.load_fence().await?;
     for _ in 0..50 {
         if settled.status() == CredentialStatus::Ready && settled.generation().get() == 3 {
             break;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
-        settled = manager.load_fence(true).await?;
+        settled = manager.load_fence().await?;
     }
     assert_eq!(
         settled.status(),

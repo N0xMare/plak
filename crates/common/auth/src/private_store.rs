@@ -489,15 +489,6 @@ impl PrivateCredentialStore {
         )
     }
 
-    /// Reloads under lock; an explicit alias useful at mutation boundaries.
-    ///
-    /// # Errors
-    ///
-    /// Returns the same errors as [`Self::load`].
-    pub fn reload(&self) -> Result<Option<CredentialFence>, PrivateStoreError> {
-        self.load()
-    }
-
     /// Reports whether a durable [`CredentialStatus::RefreshOutcomeUnknown`]
     /// `unknown` fence is a settled outcome rather than a refresh claim still
     /// in flight in this or another process.

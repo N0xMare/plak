@@ -1265,6 +1265,7 @@ name = "plakous-anthropic"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "plakous-attempt",
  "plakous-auth",
  "plakous-exchange",
  "plakous-http",

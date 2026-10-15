@@ -411,7 +411,7 @@ impl CodexSubscriptionLocalAdmin {
                 PrivateCredentialStore::open_slot(&slot_path, profile, slot)
                     .map_err(|_| NativeCodexAuthError::Store)?,
             );
-            let _validated = store.reload().map_err(|_| NativeCodexAuthError::Store)?;
+            let _validated = store.load().map_err(|_| NativeCodexAuthError::Store)?;
             Ok(store)
         })
         .await?;
@@ -940,7 +940,7 @@ fn map_oauth_workflow_error(error: OAuthWorkflowError) -> NativeCodexAuthError {
 fn local_credential_status(
     store: &PrivateCredentialStore,
 ) -> Result<CodexCredentialStatus, NativeCodexAuthError> {
-    let fence = store.reload().map_err(|_| NativeCodexAuthError::Store)?;
+    let fence = store.load().map_err(|_| NativeCodexAuthError::Store)?;
     if let Some(fence) = fence
         .as_ref()
         .filter(|fence| fence.status() == CredentialStatus::Ready)
@@ -2400,7 +2400,7 @@ impl ClaimedRefreshHooks for CodexRefreshHooks<'_> {
     }
 
     async fn fence_needing_refresh(&mut self) -> Result<Option<CredentialFence>, Self::Error> {
-        let initial = self.manager.load_fence(false).await?;
+        let initial = self.manager.load_fence().await?;
         let selected = self.manager.selected_account()?;
         if initial.account_binding() != &selected {
             return Err(NativeCodexAuthError::AccountChanged);
@@ -2424,7 +2424,7 @@ impl ClaimedRefreshHooks for CodexRefreshHooks<'_> {
         }
 
         self.flight = Some(self.manager.enter_flight(&initial).await?);
-        let current = self.manager.load_fence(true).await?;
+        let current = self.manager.load_fence().await?;
         if current.account_binding() != &selected {
             return Err(NativeCodexAuthError::AccountChanged);
         }
@@ -2652,12 +2652,12 @@ impl ClaimedRevokeHooks for CodexRevokeHooks<'_> {
     }
 
     async fn fence_to_revoke(&mut self) -> Result<CredentialFence, Self::Error> {
-        let current = self.manager.load_fence(true).await?;
+        let current = self.manager.load_fence().await?;
         if current.account_binding() != &self.manager.selected_account()? {
             return Err(NativeCodexAuthError::AccountChanged);
         }
         self.flight = Some(self.manager.enter_flight(&current).await?);
-        let current = self.manager.load_fence(true).await?;
+        let current = self.manager.load_fence().await?;
         if current.account_binding() != &self.manager.selected_account()? {
             return Err(NativeCodexAuthError::AccountChanged);
         }
@@ -2904,11 +2904,11 @@ impl CodexSubscriptionCredentialManager {
         Ok(status)
     }
 
-    async fn load_fence(&self, reload: bool) -> Result<CredentialFence, NativeCodexAuthError> {
+    async fn load_fence(&self) -> Result<CredentialFence, NativeCodexAuthError> {
         let store = Arc::clone(&self.store);
         run_blocking(move || {
-            let value = if reload { store.reload() } else { store.load() };
-            value
+            store
+                .load()
                 .map_err(|_| NativeCodexAuthError::Store)?
                 .ok_or(NativeCodexAuthError::Unavailable)
         })
@@ -3010,7 +3010,7 @@ impl CodexSubscriptionCredentialManager {
         }
         let expected = witness.credential_fence();
         let current = self
-            .load_fence(true)
+            .load_fence()
             .await
             .map_err(|_| RuntimeModelAuthorityError::Unavailable)?;
         let selected = self
@@ -3136,7 +3136,7 @@ impl CodexSubscriptionCredentialManager {
             .native_codex_credential_selection()
             .map(|(fence, epoch)| (fence.clone(), epoch))
             .ok_or(NativeCodexAuthError::Unavailable)?;
-        let current = self.load_fence(true).await?;
+        let current = self.load_fence().await?;
         if current != expected_fence {
             return Err(NativeCodexAuthError::Unavailable);
         }
@@ -4792,7 +4792,7 @@ fn validate_catalog_fence(
 ) -> Result<(), NativeCodexAuthError> {
     let current = manager
         .store
-        .reload()
+        .load()
         .map_err(|_| NativeCodexAuthError::Store)?
         .ok_or(NativeCodexAuthError::Unavailable)?;
     if current.status() != CredentialStatus::Ready {
@@ -5134,7 +5134,7 @@ impl CodexCatalogSource {
             .map(|gate| gate.acquire(SubscriptionRequestClass::Catalog))
             .transpose()
             .map_err(|_| NativeCodexAuthError::Catalog)?;
-        let fence = self.manager.load_fence(true).await?;
+        let fence = self.manager.load_fence().await?;
         if fence.status() != CredentialStatus::Ready
             || fence.account_binding() != &self.manager.selected_account()?
         {
