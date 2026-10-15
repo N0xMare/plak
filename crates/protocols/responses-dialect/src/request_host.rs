@@ -267,10 +267,13 @@ enum ServiceTierPolicy {
 /// Where harness/profile instruction text is lowered on the wire.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InstructionPlacementPolicy {
-    /// Top-level `instructions` string (OpenAI/Codex default).
+    /// Top-level `instructions` string (OpenAI Platform default).
     TopLevelInstructions,
     /// First `input[]` item as `{role:"system", type:"message", content:[...]}` (SuperGrok).
     InputSystemMessageFirst,
+    /// Codex keeps top-level `tools` and prefixes `input[]` with an identified
+    /// developer instruction message instead of a top-level `instructions` string.
+    CodexDeveloperInstructions,
     /// Codex Responses Lite puts tools and developer instructions in input.
     CodexResponsesLite,
 }
@@ -410,6 +413,7 @@ impl ResponsesRequestPolicy {
         );
         Self {
             service_tier: ServiceTierPolicy::ExactNamed("priority"),
+            instruction_placement: InstructionPlacementPolicy::CodexDeveloperInstructions,
             ..policy
         }
     }
@@ -666,7 +670,12 @@ impl ResponsesRequestPolicy {
         let flags = [
             u8::from(self.image_input),
             u8::from(self.parallel_tool_calls),
-            u8::from(self.is_codex_responses_lite()),
+            match self.instruction_placement {
+                InstructionPlacementPolicy::TopLevelInstructions
+                | InstructionPlacementPolicy::InputSystemMessageFirst => 0,
+                InstructionPlacementPolicy::CodexResponsesLite => 1,
+                InstructionPlacementPolicy::CodexDeveloperInstructions => 2,
+            },
         ];
         Digest::sha256(
             DigestDomain::ModelBinding,
@@ -2143,6 +2152,20 @@ pub fn lower_responses_request(
             Value::String(instructions.clone()),
         );
     }
+    let codex_instructions = matches!(
+        config.policy.instruction_placement,
+        InstructionPlacementPolicy::CodexDeveloperInstructions
+            | InstructionPlacementPolicy::CodexResponsesLite
+    );
+    // Codex derives prefix item ids from the thread's cache affinity, so
+    // retries and reopened sessions keep their identity.
+    let affinity_bytes = || {
+        config
+            .cache_affinity
+            .map(Digest::identity_bytes)
+            .ok_or(ResponsesRequestOptionError::PromptCacheAffinity)
+    };
+    let mut prefix = Vec::new();
     if config.policy.is_codex_responses_lite() {
         if matches!(request.reasoning(), ReasoningPolicy::Disabled) {
             return Err(ResponsesRequestOptionError::UnknownReasoningPolicy.into());
@@ -2150,45 +2173,42 @@ pub fn lower_responses_request(
         if !request.hosted_tools().is_empty() {
             return Err(ResponsesRequestOptionError::NativeOptions.into());
         }
-        let affinity = config
-            .cache_affinity
-            .ok_or(ResponsesRequestOptionError::PromptCacheAffinity)?;
-        let tool_bytes =
-            serde_json::to_vec(&tools).map_err(|_| ResponsesRequestError::Serialization)?;
-        let affinity_bytes = affinity.identity_bytes();
-        let tool_id = plakous_model::sha256_hex(&[
-            b"codex-responses-lite-tools-v1",
-            &affinity_bytes,
-            &tool_bytes,
-        ]);
-        let mut prefix = vec![json!({
-            "type": "additional_tools",
-            "id": format!("at_{}", &tool_id[..32]),
-            "role": "developer",
-            "tools": if tools.is_empty() {
-                Vec::new()
-            } else {
-                vec![json!({
+        affinity_bytes()?;
+        if !tools.is_empty() {
+            let tool_bytes =
+                serde_json::to_vec(&tools).map_err(|_| ResponsesRequestError::Serialization)?;
+            let tool_id = plakous_model::sha256_hex(&[
+                b"codex-responses-lite-tools-v1",
+                &affinity_bytes()?,
+                &tool_bytes,
+            ]);
+            prefix.push(json!({
+                "type": "additional_tools",
+                "id": format!("at_{}", &tool_id[..32]),
+                "role": "developer",
+                "tools": [{
                     "type": "namespace",
                     "name": "functions",
                     "description": "",
                     "tools": tools,
-                })]
-            },
-        })];
-        if let Some(instructions) = instruction_text {
-            let instruction_id = plakous_model::sha256_hex(&[
-                b"codex-responses-lite-instructions-v1",
-                &affinity_bytes,
-                instructions.as_bytes(),
-            ]);
-            let mut message = message_item("developer", vec![input_text_part(&instructions)]);
-            message["id"] = json!(format!("msg_{}", &instruction_id[..32]));
-            prefix.push(message);
+                }],
+            }));
         }
-        if let Some(Value::Array(input)) = body.get_mut("input") {
-            input.splice(0..0, prefix);
-        }
+    }
+    if codex_instructions && let Some(instructions) = instruction_text {
+        let instruction_id = plakous_model::sha256_hex(&[
+            b"codex-responses-lite-instructions-v1",
+            &affinity_bytes()?,
+            instructions.as_bytes(),
+        ]);
+        let mut message = message_item("developer", vec![input_text_part(&instructions)]);
+        message["id"] = json!(format!("msg_{}", &instruction_id[..32]));
+        prefix.push(message);
+    }
+    if let Some(Value::Array(input)) = body.get_mut("input") {
+        input.splice(0..0, prefix);
+    }
+    if config.policy.is_codex_responses_lite() {
         body.insert("parallel_tool_calls".to_owned(), Value::Bool(false));
     } else if !tools.is_empty() {
         body.insert("tools".to_owned(), Value::Array(tools));

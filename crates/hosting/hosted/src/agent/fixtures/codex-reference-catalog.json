@@ -2,9 +2,9 @@
   "schema": "plak.provider-authority.reference-client-catalog.v1",
   "provider": "openai",
   "vertical": "codex-oauth",
-  "client_version": "0.160.1",
-  "source_tag": "rust-v0.160.0",
-  "source_revision": "a956835d020762cb2b570053af06f643a11c0ecc",
+  "client_version": "0.162.1",
+  "source_tag": "rust-v0.162.1",
+  "source_revision": "092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
   "source_path": "codex-rs/models-manager/models.json",
   "models": {
     "gpt-6-astra": {

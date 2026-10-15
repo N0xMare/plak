@@ -2446,11 +2446,11 @@ Platform credentials never cross origins or fall back to one another, and
 catalog, inference, receipts, cache, continuation, usage, and retry state stay
 profile-isolated.
 
-The Codex OAuth reference client is `0.160.1`; the authenticated catalog request
-sends `client_version=0.160.1`. Its catalog contract is the `rust-v0.160.0`
-source revision's `models.json`, which the 0.160.1 release bundles unchanged in
+The Codex OAuth reference client is `0.162.1`; the authenticated catalog request
+sends `client_version=0.162.1`. Its catalog contract is the `rust-v0.162.1`
+source revision's `models.json`, which is unchanged from `rust-v0.160.0` in
 every field Plak pins (tool mode, reasoning levels, windows, truncation,
-Responses Lite, parallel calls, service tiers). The 0.160.1 client also sends
+Responses Lite, parallel calls, service tiers). The reference client also sends
 `x-codex-beta-features: remote_compaction_v2` on ordinary turns; Plak sends that
 header only on a remote-compaction request, because it claims a capability
 only that request uses. Its compiled compatibility
@@ -2458,11 +2458,20 @@ profile was reviewed on 2026-10-14 and expires at 2026-11-13T23:59:59Z; an
 acceptance recorded before the review date is not current, so the operator
 accepts the notice again without a new login (§7.2). Authenticated catalog
 `use_responses_lite` evidence selects the request mode and binds its identity.
-Lite requests prepend a developer `additional_tools` item (client tools under
-`functions`) and a developer instruction message to the input. They omit
-top-level `tools` and `instructions`, set `parallel_tool_calls=false`, use
+No Codex request carries a top-level `instructions` string: instructions travel
+as a developer message prepended to the input, identified as `msg_` plus a
+digest of the session's cache affinity and the instruction text, so retries and
+reopened sessions keep the same item identity. Ordinary requests keep top-level
+`tools`. Lite requests additionally prepend a developer `additional_tools` item
+(client tools under `functions`, omitted when there are no client tools) before
+that message, omit top-level `tools`, set `parallel_tool_calls=false`, use
 `reasoning.context=all_turns` and low text verbosity, and bind the exact
 `x-openai-internal-codex-responses-lite: true` header to physical dispatch.
+Plak serializes the request body with sorted keys rather than the reference
+client's routing-first field order; field order carries no semantics.
+The reference client's opt-in incremental tool declarations are not adopted.
+Retry advice the reference client reads from a `response.failed` event's
+`error.headers` is not read; that failure keeps the ordinary jittered backoff.
 Tool calls and results retain their call identities on subsequent turns.
 Remote compaction uses the same selected mode. Platform API requests retain
 their separate policy; OAuth catalog facts do not establish API model facts.
@@ -4688,7 +4697,7 @@ native Code Mode eligibility all read it through `NativeProvider::enrolls` and
 `NativeProvider::enrolled_tool_mode`, and the neutral tools and composition
 crates hold no model ids. Provider catalog admission alone cannot make a
 product session executable.
-The reviewed Codex 0.160.1 `CodeModeOnly` rows use Responses Lite and do not
+The reviewed Codex 0.162.1 `CodeModeOnly` rows use Responses Lite and do not
 advertise parallel tool calls. Their selected product configuration disables
 parallel calls for native, Direct, JavaScript and Python presentations so it
 can compile against the exact resolved descriptor. A future catalog row with

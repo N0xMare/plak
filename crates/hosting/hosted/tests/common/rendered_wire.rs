@@ -1005,7 +1005,14 @@ pub(crate) mod suite {
                 continue;
             };
             for item in items {
-                if item.get("role").and_then(Value::as_str) == Some("system") {
+                // Codex carries instructions as an identified developer message.
+                let role = item.get("role").and_then(Value::as_str);
+                let codex_instructions = role == Some("developer")
+                    && item
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .is_some_and(|id| id.starts_with("msg_"));
+                if role == Some("system") || codex_instructions {
                     if let Some(text) = message_text(item).or_else(|| responses_message_text(item))
                     {
                         texts.push(text.to_owned());

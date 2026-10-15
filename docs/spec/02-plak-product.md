@@ -474,7 +474,7 @@ its costume: the OpenAI API presents the Codex pack, the xAI API the Grok pack
 and the Anthropic API the Claude pack, each with that pack's base instruction. An API key reads no authenticated catalog, so the
 product's API enrollment table carries each row's tool mode: every enrolled
 OpenAI row is `CodeModeOnly` (reviewed against the same model ids in the Codex
-0.160.1 reference catalog, and held to that fixture by a test), and the
+0.162.1 reference catalog, and held to that fixture by a test), and the
 Anthropic and xAI rows are Direct. On a `CodeModeOnly` OpenAI row
 `plakous-default` binds `native-ptc` (Codex Code Mode, `exec`/`wait` over the
 Codex nested catalog) and `direct` remains the second presentation;

@@ -4726,7 +4726,7 @@ async fn device_jwks_userinfo_catalog_and_lite_inference_are_exact() -> TestResu
     assert!(device_head.starts_with("POST /api/accounts/deviceauth/usercode HTTP/1.1\r\n"));
     let catalog_head = std::str::from_utf8(&requests[6])?;
     assert!(
-        catalog_head.starts_with("GET /backend-api/codex/models?client_version=0.160.1 HTTP/1.1")
+        catalog_head.starts_with("GET /backend-api/codex/models?client_version=0.162.1 HTTP/1.1")
     );
     let inference = &requests[7];
     let head_end = inference

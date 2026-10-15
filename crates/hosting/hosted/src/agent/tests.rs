@@ -2678,7 +2678,7 @@ fn new_oauth_product_selections_pass_effective_capability_compile()
                 assert_eq!(
                     codex_reference["models"][model]["use_responses_lite"],
                     serde_json::json!(true),
-                    "effective capability fixture must match the 0.160.1 reference catalog"
+                    "effective capability fixture must match the 0.162.1 reference catalog"
                 );
                 let observed = &codex_observed["models"][model]["use_responses_lite"];
                 assert!(

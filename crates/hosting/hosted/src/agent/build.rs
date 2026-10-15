@@ -2307,7 +2307,7 @@ pub fn selected_coding_provider_configuration_with_processing_tier(
                 ReasoningIncludeDisposition::EncryptedContent,
                 ReplayDisposition::StrictEncrypted,
                 // Every release-enrolled CodeModeOnly row in the reviewed
-                // 0.160.1 reference catalog uses Responses Lite, whose descriptor does
+                // 0.162.1 reference catalog uses Responses Lite, whose descriptor does
                 // not advertise ParallelTools. A future catalog change may
                 // expose it, but disabling parallel calls remains safe.
                 if native_tool_mode == Some(NativeToolMode::CodeModeOnly) {

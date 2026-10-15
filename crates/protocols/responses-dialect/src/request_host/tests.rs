@@ -2038,6 +2038,79 @@ fn nested_digest_versions_are_part_of_authority_and_prefix_identity() -> TestRes
 }
 
 #[test]
+fn codex_instructions_are_an_identified_input_developer_message() -> TestResult {
+    let (protocol, family, model) = target_values()?;
+    let build = |tools: Vec<_>| -> Result<_, Box<dyn std::error::Error>> {
+        Ok(crate::test_support::model_request_builder(
+            ConversationView::from_items(vec![user(10, "Find the answer.")?])?,
+            metadata()?,
+        )
+        .instructions(vec![InstructionBlock::new(
+            InstructionSource::Developer,
+            "Be precise.",
+        )?])
+        .tools(tools)
+        .reasoning(ReasoningPolicy::Enabled {
+            effort: Some(ReasoningEffort::Medium),
+            requirement: CapabilityRequirement::Required,
+        })
+        .build()?)
+    };
+    let affinity = Digest::sha256(DigestDomain::CacheAffinity, 1, &[b"codex-instructions"])?;
+    let lower = |request: &_, policy| {
+        lower_responses_request(
+            request,
+            ResponsesRequestConfig::new(&protocol, Some(&family), &model, policy, None)
+                .with_cache_affinity(Some(&affinity)),
+        )
+    };
+    let codex = ResponsesRequestPolicy::openai_codex(false, true, "reasoning.encrypted_content");
+    let with_tools = build(vec![tool("lookup", false)?])?;
+    let ordinary = lower(&with_tools, codex)?;
+    assert!(ordinary.body().get("instructions").is_none());
+    assert_eq!(ordinary.body()["tools"][0]["name"], "lookup");
+    let input = ordinary.body()["input"].as_array().ok_or("input")?;
+    assert_eq!(input.len(), 2);
+    assert_eq!(input[0]["type"], "message");
+    assert_eq!(input[0]["role"], "developer");
+    assert_eq!(input[0]["content"][0]["text"], "Be precise.");
+    let message_id = input[0]["id"].as_str().ok_or("message id")?;
+    assert!(message_id.starts_with("msg_") && message_id.len() == 36);
+    assert_eq!(input[1]["role"], "user");
+    assert_eq!(
+        lower(&with_tools, codex)?.body()["input"][0]["id"],
+        input[0]["id"],
+        "the instruction item identity is stable across retries"
+    );
+
+    let lite_policy = ResponsesRequestPolicy::openai_codex_lite("reasoning.encrypted_content");
+    let lite = lower(&with_tools, lite_policy)?;
+    let lite_input = lite.body()["input"].as_array().ok_or("lite input")?;
+    assert_eq!(lite_input[0]["type"], "additional_tools");
+    assert_eq!(lite_input[1]["role"], "developer");
+    assert_eq!(lite_input[1]["id"], input[0]["id"]);
+    let toolless = lower(&build(Vec::new())?, lite_policy)?;
+    let toolless_input = toolless.body()["input"]
+        .as_array()
+        .ok_or("tool-less input")?;
+    assert_eq!(toolless_input[0]["role"], "developer");
+    assert!(
+        toolless_input
+            .iter()
+            .all(|item| item["type"] != "additional_tools"),
+        "a tool-less Lite request declares no additional tools"
+    );
+    let mut top_level = codex;
+    top_level.instruction_placement = InstructionPlacementPolicy::TopLevelInstructions;
+    assert_ne!(
+        codex.execution_identity()?,
+        top_level.execution_identity()?,
+        "instruction placement binds the request policy identity"
+    );
+    Ok(())
+}
+
+#[test]
 fn platform_golden_preserves_ordered_request_shape() -> TestResult {
     let (protocol, family, model) = target_values()?;
     let request = crate::test_support::model_request_builder(

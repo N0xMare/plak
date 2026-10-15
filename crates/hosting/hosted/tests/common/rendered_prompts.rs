@@ -1422,67 +1422,67 @@ pub(crate) mod suite {
     const PROMPT_RENDER_PINS: &[(&str, &str)] = &[
         (
             "codex.direct.root.single-agent",
-            "b567311a4ca9d2e22459dca0e0bd0dcbfc83b2c6621c5ad8cc2e74edf7d289ab",
+            "9b3e2a96f0b82b96abf03c37e6f8bd92af27d8d139a817953fe7d3bc94b97d98",
         ),
         (
             "codex.direct.root",
-            "7bcd080613a3044f703044a362c356ad1b5e5e5cace3760d4448bed838f3440d",
+            "ceff7ff0071222a86d20aef4917a05f0fe2bed56a8681af580feac8688a56974",
         ),
         (
             "codex.direct.nested-parent",
-            "a4ea710a1ae5a936b6b0e6e5c221cfd626de91bae428565c52232cb1239eada2",
+            "2d522e2cefd1788e4f84a5cf416cbd14ae72e8d32012e4673055023ae8cf290e",
         ),
         (
             "codex.direct.child",
-            "38568b3569defe3998bc0172c5673bce4f06ab548c4b3fa5c1aadff0d559e535",
+            "8d5a39a82f5d12b9dc7b36887d9149cf364d558457f12b03114071f58554ee40",
         ),
         (
             "codex.native-ptc.root.single-agent",
-            "90f03d19827f6aef7e34cd5684bd409fe57ae3f5a515b685a8a621b56f216b3f",
+            "cd1615baf46b062303245405d5594086c71d890659751e51d02af1eb29d4fe8e",
         ),
         (
             "codex.native-ptc.root",
-            "9578bf20261a661a74b1ff5ff25e9ec260d0f4d681d450f0b3426ae971c6d65d",
+            "cb029f572f8e8352f508dd283d33883c86ee8977f0253b53efa47f63f586f72d",
         ),
         (
             "codex.native-ptc.nested-parent",
-            "b82f62a032869d13541b34c1616de658d2f671a63b4defa0ba0696e08ab970ad",
+            "b9d8fad08238660c2e5d8ef86a78c0a7694bdd75c2bfae01b29f1c783b7330d7",
         ),
         (
             "codex.native-ptc.child",
-            "22e08be88dbd0a93d9e6ca3004919e522f5238222ad0be21d52eb16b3a37c0f7",
+            "4ad402672d903f8d1c3b1aef7a275222f858a11e897224802116cd0aad68ea12",
         ),
         (
             "codex.js-ptc.root.single-agent",
-            "5f3cf63b5527b5b468385593f02bdf3423b6a39471ce6716783a9e4ef89d1520",
+            "ccf54ea77d3c298cc8ffd7beb517d488045234ccb8dd437e3eecdafbd46bd87c",
         ),
         (
             "codex.js-ptc.root",
-            "38d438accd1d8ea1e2467860c07c5ff9b6825b2a61139527bf8509c09cd05242",
+            "23a5c72d19866676423e9af289e65008f0c26c191f75e1969a52849a4207b8b3",
         ),
         (
             "codex.js-ptc.nested-parent",
-            "55483e4fd7c1a5ea32f2c5433d69d0c734c9e76497ed17e4b0fdec0a895f857b",
+            "977367afaf8d56223de0d81796e83c0ba714084c37e2e10941a5bf79fd7876a8",
         ),
         (
             "codex.js-ptc.child",
-            "b89c62e5f3314304fa3e00c7a7d082df668379b919d10355a721182638186b29",
+            "135a39f5c949c075b0671429a16910b1c7dff72e20ca6317a34412c0084b0df8",
         ),
         (
             "codex.py-ptc.root.single-agent",
-            "d3f9c551fb9e94d70090d1a88351b26e1299ed593431016297b6b198339fccef",
+            "b796bb05eb6129c31c1f1cd38291b1f0feeef3426365077f44cc2676f0173fab",
         ),
         (
             "codex.py-ptc.root",
-            "ab8c30f9f644bd1c692a2bec21dec06f06df332f0f79ae4cdc82ae973eb9793d",
+            "2a0bab9d23342a18fa86dcb5dab127ea1457ce8e540512d0b68532f33e5f2902",
         ),
         (
             "codex.py-ptc.nested-parent",
-            "ef86962160af8537ab59147936663333b7cc572cd9eec7c772a1aca7d6399590",
+            "b95056fe3bdb67ef9d953528ff31b13f2c88434bd59ac8463e6386be5d00653e",
         ),
         (
             "codex.py-ptc.child",
-            "04e2703d478c688aa74a0d702283506cf3641931b44df2513e53c7a882206e92",
+            "9a674bbd813fb174786b42ac8ee1b22513b7eee5dc6cf6c23d8d592df6749758",
         ),
         (
             "grok.direct.root.single-agent",

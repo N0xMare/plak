@@ -102,9 +102,11 @@ pub(crate) fn codex_responses_preflight<'a>(
             .and_then(|first| first.get("type"))
             .and_then(serde_json::Value::as_str)
             == Some("additional_tools");
-        if responses_lite != lite_prefix
-            || (responses_lite
-                && (body.get("tools").is_some() || body.get("instructions").is_some()))
+        // Codex carries instructions only as an input developer message; a
+        // tool-less Lite request has no `additional_tools` prefix.
+        if body.get("instructions").is_some()
+            || (!responses_lite && lite_prefix)
+            || (responses_lite && body.get("tools").is_some())
         {
             return Err(ResponsesDispatchRejection::Binding);
         }

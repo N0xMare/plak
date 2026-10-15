@@ -76,11 +76,11 @@ pub(crate) const OPENAI_CODEX_MODELS_PATH: &str = "/backend-api/codex/models";
 /// The backend versions the returned model projection from this value. It is
 /// therefore compatibility identity, not Plak's package version or a minimum
 /// version floor.
-pub const OPENAI_CODEX_REFERENCE_CLIENT_VERSION: &str = "0.160.1";
+pub const OPENAI_CODEX_REFERENCE_CLIENT_VERSION: &str = "0.162.1";
 /// Official Codex revision defining the pinned catalog contract.
 #[cfg(feature = "native-auth")]
 pub(crate) const OPENAI_CODEX_CATALOG_SOURCE_REVISION: &str =
-    "a956835d020762cb2b570053af06f643a11c0ecc";
+    "092d3acd6bec3e3a14bdc7e7a2810ab628ab759d";
 /// Immutable native compatibility profile accepted by this revision.
 pub const OPENAI_CODEX_COMPATIBILITY_PROFILE_ID: &str = "openai.codex.compat.2026-07-31.r1";
 /// Official Codex source revision pinned by the native compatibility profile.
