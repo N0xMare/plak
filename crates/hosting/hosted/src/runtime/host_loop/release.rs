@@ -206,11 +206,21 @@ mod tests {
             );
             let started = Instant::now();
             host.finish_projection(false).unwrap();
-            host.release().unwrap();
             assert!(
                 started.elapsed() < Duration::from_millis(300),
-                "finish/tree/post-release stacked another bound: {:?}",
+                "finish stacked another bound: {:?}",
                 started.elapsed()
+            );
+            // Release itself is durable lease and store work, unbounded by
+            // the quit deadline and slow on a disk-backed TMPDIR; what must
+            // not happen is a post-release pass started on a spent budget.
+            let id = host.config.session.id.clone();
+            crate::runtime::projection::probe::track(&id);
+            host.release().unwrap();
+            assert_eq!(
+                crate::runtime::projection::probe::take(&id).release,
+                0,
+                "post-release pass started on a spent quit budget"
             );
         }
     }
