@@ -82,6 +82,16 @@ impl StoredCredential {
     }
 }
 
+/// What `plak logout` reached at the provider.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Revocation {
+    /// The provider revoked the credential; the local state it left.
+    Revoked(CredentialState),
+    /// This build refused the stored record before any request, so it was
+    /// not revoked remotely; local retirement is its repair.
+    Unusable,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LoginOutcome {
     Completed(CredentialState),
@@ -135,7 +145,7 @@ pub trait AccountOps {
 
     fn refresh(&mut self, provider: NativeProvider) -> CliResult<CredentialState>;
 
-    fn revoke(&mut self, provider: NativeProvider) -> CliResult<CredentialState>;
+    fn revoke(&mut self, provider: NativeProvider) -> CliResult<Revocation>;
 
     fn logout_local(&mut self, provider: NativeProvider) -> CliResult<CredentialState>;
 
@@ -328,6 +338,23 @@ fn stored_credential_from(
     }
 }
 
+/// A record this build refuses is never answered with a remedy naming
+/// `plak logout`, the command that asked.
+fn revocation_from(
+    result: Result<
+        plakous::subscriptions::NativeAuthStatus,
+        plakous::subscriptions::NativeSubscriptionError,
+    >,
+) -> Result<Revocation, plakous::subscriptions::NativeSubscriptionError> {
+    match result {
+        Ok(status) => Ok(Revocation::Revoked(credential_state(status))),
+        Err(plakous::subscriptions::NativeSubscriptionError::CredentialProfileChanged) => {
+            Ok(Revocation::Unusable)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 impl PlakousApplication {
     fn read_offline(&mut self, provider: NativeProvider) -> Result<CliStatus, OfflineReadError> {
         match self.executor.block_on(self.subscriptions.status(provider)) {
@@ -481,12 +508,12 @@ impl AccountOps for PlakousApplication {
         self.refreshed_credential(provider, result)
     }
 
-    fn revoke(&mut self, provider: NativeProvider) -> CliResult<CredentialState> {
-        self.executor
+    fn revoke(&mut self, provider: NativeProvider) -> CliResult<Revocation> {
+        let result = self
+            .executor
             .block_on(self.subscriptions.revoke(provider))
-            .map_err(application_execution_failure)?
-            .map(credential_state)
-            .map_err(|error| self.subscription_failure(error, Some(provider)))
+            .map_err(application_execution_failure)?;
+        revocation_from(result).map_err(|error| self.subscription_failure(error, Some(provider)))
     }
 
     fn logout_local(&mut self, provider: NativeProvider) -> CliResult<CredentialState> {
@@ -554,7 +581,13 @@ impl PresentationBackend for PlakousApplication {
 mod tests {
     use plakous::subscriptions::NativeSubscriptionError;
 
-    use super::{OfflineReadError, StoredCredential, stored_credential_from};
+    use plakous::subscriptions::{NativeAuthStatus, NativeProvider};
+
+    use super::{
+        OfflineReadError, Revocation, StoredCredential, revocation_from, stored_credential_from,
+    };
+    use crate::commands::support::native_subscription_failure;
+    use crate::presentation::CredentialState;
 
     #[test]
     fn logout_reads_a_foreign_or_retired_record_as_unusable_not_a_failure() {
@@ -572,5 +605,58 @@ mod tests {
                 NativeSubscriptionError::UnsafeStorage
             ))
         ));
+    }
+
+    #[test]
+    fn no_remedy_names_the_logout_or_refresh_that_produced_it() {
+        use NativeSubscriptionError as E;
+        let state = std::path::Path::new("/nonexistent-plak-state");
+        assert_eq!(
+            revocation_from(Ok(NativeAuthStatus::Revoked)),
+            Ok(Revocation::Revoked(CredentialState::Revoked))
+        );
+        for error in [
+            E::UnsafeStorage,
+            E::CredentialProfileChanged,
+            E::UnsupportedPlatform,
+            E::AcceptanceRequired,
+            E::ProfileInactive,
+            E::InvalidReceipt,
+            E::CredentialUnavailable,
+            E::Authentication,
+            E::AuthenticationBinding,
+            E::AuthenticationProviderRejected,
+            E::AuthenticationValidation,
+            E::AuthenticationAccountChanged,
+            E::LoginTokenExchange,
+            E::LoginTokenTransport,
+            E::LoginTokenRejected,
+            E::LoginTokenResponseInvalid,
+            E::LoginSigningKeys,
+            E::LoginAccountVerification,
+            E::LoginPersistence,
+            E::InvalidCallback,
+            E::ModelUnavailable,
+            E::CatalogCredentialRejected,
+            E::CatalogAuthorizationHeaderRejected,
+            E::CatalogAccountHeaderRejected,
+            E::CatalogRefreshRejected,
+            E::Transport(None),
+            E::Internal,
+        ] {
+            for provider in [
+                NativeProvider::Codex,
+                NativeProvider::Xai,
+                NativeProvider::Claude,
+            ] {
+                let message = native_subscription_failure(error, Some(provider), state)
+                    .message()
+                    .to_owned();
+                assert!(!message.contains("plak refresh"), "{error:?}: {message}");
+                if let Err(error) = revocation_from(Err(error)) {
+                    assert!(!message.contains("plak logout"), "{error:?}: {message}");
+                }
+            }
+        }
     }
 }

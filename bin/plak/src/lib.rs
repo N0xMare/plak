@@ -4390,6 +4390,7 @@ mod tests {
         model_summaries: Vec<CliModelSummary>,
         models_failure: Option<CliFailure>,
         openrouter_key_usage: Option<product_usage::VerticalObservation>,
+        revoke_refused: bool,
     }
 
     impl FakeBackend {
@@ -4408,6 +4409,7 @@ mod tests {
                 model_summaries: Vec::new(),
                 models_failure: None,
                 openrouter_key_usage: None,
+                revoke_refused: false,
             }
         }
     }
@@ -4529,9 +4531,16 @@ mod tests {
             Ok(self.terminal)
         }
 
-        fn revoke(&mut self, provider: NativeProvider) -> CliResult<CredentialState> {
+        fn revoke(
+            &mut self,
+            provider: NativeProvider,
+        ) -> CliResult<commands::application::Revocation> {
             self.calls.push(Call::Revoke(provider));
-            Ok(self.terminal)
+            Ok(if self.revoke_refused {
+                commands::application::Revocation::Unusable
+            } else {
+                commands::application::Revocation::Revoked(self.terminal)
+            })
         }
 
         fn logout_local(&mut self, provider: NativeProvider) -> CliResult<CredentialState> {
@@ -7320,6 +7329,37 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
             assert_eq!(stderr, expected, "{credential:?}");
             assert!(!String::from_utf8_lossy(&stderr).contains("plak login"));
         }
+    }
+
+    #[test]
+    fn logout_retires_locally_when_the_provider_path_refuses_the_record() {
+        // Offline status read the record as usable, but the manager refused
+        // it: logout must still finish locally instead of naming itself.
+        let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Revoked);
+        backend.credential = CredentialState::Ready;
+        backend.revoke_refused = true;
+        let (result, stdout, stderr) = invoke(
+            Command::AuthLogout {
+                provider: NativeProvider::Xai,
+                local_only: false,
+            },
+            &mut backend,
+            b"",
+        );
+        assert_eq!(result, Ok(ProcessOutcome::Success));
+        assert_eq!(
+            backend.calls,
+            vec![
+                Call::Status(NativeProvider::Xai),
+                Call::Revoke(NativeProvider::Xai),
+                Call::LogoutLocal(NativeProvider::Xai),
+            ]
+        );
+        assert_eq!(stdout, [] as [u8; 0]);
+        assert_eq!(
+            String::from_utf8_lossy(&stderr),
+            "grok: local credential retired; this build cannot use it, so it was not revoked at the provider and the remote grant may remain active\n"
+        );
     }
 
     #[test]

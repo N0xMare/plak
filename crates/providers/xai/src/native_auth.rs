@@ -525,8 +525,13 @@ impl XaiOfflineSelectedSlot {
     ///
     /// # Errors
     ///
-    /// Fails closed on unsafe or malformed explicit storage.
+    /// Fails closed on unsafe or malformed explicit storage, and refuses a
+    /// Ready record whose payload format is retired exactly as the online
+    /// manager does, so offline status never reads it as usable.
     pub fn status(&self) -> Result<XaiOfflineCredentialStatus, XaiNativeAuthError> {
+        if let Some(fence) = self.store.load()? {
+            refuse_retired_payload(&self.store, &fence)?;
+        }
         offline_status(self.store.status()?)
     }
 

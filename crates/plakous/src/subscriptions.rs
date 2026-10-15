@@ -1348,6 +1348,12 @@ impl NativeSubscriptions {
                 Err(NativeSubscriptionError::CredentialUnavailable) => {
                     return unavailable(self.fenced_credential_reason(provider).await);
                 }
+                // A record this build refuses needs a new login.
+                Err(NativeSubscriptionError::CredentialProfileChanged) => {
+                    return unavailable(SubscriptionUsageUnavailable::CredentialState(
+                        SubscriptionUsageCredentialState::LoginRequired,
+                    ));
+                }
                 Err(_) => return unavailable(SubscriptionUsageUnavailable::LocalState),
             },
             NativeProvider::Xai => match self.xai_online().await {
@@ -1355,12 +1361,24 @@ impl NativeSubscriptions {
                 Err(NativeSubscriptionError::CredentialUnavailable) => {
                     return unavailable(self.fenced_credential_reason(provider).await);
                 }
+                // A record this build refuses needs a new login.
+                Err(NativeSubscriptionError::CredentialProfileChanged) => {
+                    return unavailable(SubscriptionUsageUnavailable::CredentialState(
+                        SubscriptionUsageCredentialState::LoginRequired,
+                    ));
+                }
                 Err(_) => return unavailable(SubscriptionUsageUnavailable::LocalState),
             },
             NativeProvider::Claude => match self.claude_online().await {
                 Ok(online) => online.manager.subscription_usage().await,
                 Err(NativeSubscriptionError::CredentialUnavailable) => {
                     return unavailable(self.fenced_credential_reason(provider).await);
+                }
+                // A record this build refuses needs a new login.
+                Err(NativeSubscriptionError::CredentialProfileChanged) => {
+                    return unavailable(SubscriptionUsageUnavailable::CredentialState(
+                        SubscriptionUsageCredentialState::LoginRequired,
+                    ));
                 }
                 Err(_) => return unavailable(SubscriptionUsageUnavailable::LocalState),
             },

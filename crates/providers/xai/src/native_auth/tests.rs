@@ -7362,6 +7362,24 @@ async fn retired_hex_epoch_record_needs_a_new_login_without_network() -> TestRes
         manager.refresh_catalog().await,
         Err(XaiNativeAuthError::StoredCredentialFormatRetired)
     ));
+    drop(manager);
+
+    // Credential-free offline status reads the record exactly as the manager
+    // refuses it, and offline local logout is its repair.
+    let path = temp.path().join("credentials").join("xai.json");
+    let offline = XaiOfflineSelectedSlot::open_explicit(
+        path.clone(),
+        CredentialSlotId::new("test-selected")?,
+    )?;
+    assert!(matches!(
+        offline.status(),
+        Err(XaiNativeAuthError::StoredCredentialFormatRetired)
+    ));
+    assert_eq!(offline.logout_local()?, XaiOfflineCredentialStatus::Revoked);
+    assert_eq!(offline.status()?, XaiOfflineCredentialStatus::Revoked);
+    let reopened = XaiNativeAuthManager::open_test_slot(path, peer.client.clone(), &peer.origin)?;
+    let reopened = required(reopened.status()?, "retired tombstone")?;
+    assert_eq!(reopened.status, CredentialStatus::Revoked);
     assert!(peer.requests.lock().await.is_empty());
     peer.shutdown().await?;
     Ok(())

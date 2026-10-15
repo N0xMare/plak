@@ -9,7 +9,7 @@ use std::io::{self, IsTerminal as _};
 use crate::terminal_application::read_terminal_secret_line;
 use plakous::subscriptions::{NativeLoginMode, NativeProvider, NativeSubscriptions};
 
-use super::application::{AccountOps, StoredCredential};
+use super::application::{AccountOps, Revocation, StoredCredential};
 use super::support::{
     cli_provider_name, compatibility_status_name, credential_status_name, profile_date,
     profile_inactive_failure, require_locally_retired, require_ready, require_revoked,
@@ -126,12 +126,7 @@ pub fn auth_logout(
             retire_local(backend, provider)?;
             format!("{name}: not logged in; nothing to log out")
         }
-        StoredCredential::Unusable => {
-            retire_local(backend, provider)?;
-            format!(
-                "{name}: local credential retired; this build cannot use it, so it was not revoked at the provider and the remote grant may remain active"
-            )
-        }
+        StoredCredential::Unusable => retire_unusable(backend, provider)?,
         StoredCredential::Usable(compatibility) => {
             accept_compatibility_status(
                 backend,
@@ -141,16 +136,28 @@ pub fn auth_logout(
                 stdin,
                 stderr,
             )?;
-            let status = backend.revoke(provider)?;
-            require_revoked(
-                status,
-                "remote revocation did not reach a revoked credential state",
-            )?;
-            format!("{name}: remote credential revoked")
+            match backend.revoke(provider)? {
+                Revocation::Revoked(status) => {
+                    require_revoked(
+                        status,
+                        "remote revocation did not reach a revoked credential state",
+                    )?;
+                    format!("{name}: remote credential revoked")
+                }
+                Revocation::Unusable => retire_unusable(backend, provider)?,
+            }
         }
     };
     writeln!(stderr, "{message}").map_err(|_| CliFailure::new("stderr failed"))?;
     Ok(ProcessOutcome::Success)
+}
+
+fn retire_unusable(backend: &mut impl AccountOps, provider: NativeProvider) -> CliResult<String> {
+    retire_local(backend, provider)?;
+    Ok(format!(
+        "{}: local credential retired; this build cannot use it, so it was not revoked at the provider and the remote grant may remain active",
+        cli_provider_name(provider)
+    ))
 }
 
 fn retire_local(

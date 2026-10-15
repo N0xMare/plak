@@ -5712,7 +5712,10 @@ Every row exits 0. `--local` is the explicit "do not contact the provider"
 option: it retires only the stored credential and its recovery marker whatever
 the state, for example when the provider is unreachable. A failed remote
 revoke of a usable credential stays a failure; it never falls back to local
-retirement. If a revision change makes a private selected-slot credential's
+retirement. The one exception is a record the revoke path itself refuses as
+foreign or retired before sending anything: that is the unusable row, retired
+locally with the same output, so no logout failure names `plak logout` as its
+repair. If a revision change makes a private selected-slot credential's
 profile foreign, status and login name the profile change and direct the
 operator to `plak logout <account>` followed by `plak login <account>`; login
 itself does not discard the old record (chapter 04 §3.6). On bare `plak status`

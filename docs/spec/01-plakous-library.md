@@ -3615,8 +3615,9 @@ it, and this build does not attempt a remote revoke of it. A stored SuperGrok
 payload of version 2 (whose selection epoch was 64 hex digits) is retired: the
 current payload is version 3, and a version-2 record is refused as a retired
 credential format (remedy `plak logout grok`, then `plak login grok`)
-and never converted. The usage read reports it as login-required without
-network I/O, and a refresh or revoke claim that finds it restores it (nothing
+and never converted. Credential-free offline status refuses it the same way
+(it never reads as Ready), the usage read reports it as login-required without
+network I/O, offline local logout retires it, and a refresh or revoke claim that finds it restores it (nothing
 was sent) rather than quarantining it. Codex's 401 recovery
 forces one claimed refresh bound to the rejected receipt's account and login
 selection, and only while the store, read under the refresh flight, still holds

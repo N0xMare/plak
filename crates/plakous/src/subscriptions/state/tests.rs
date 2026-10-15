@@ -562,6 +562,82 @@ async fn claude_foreign_profile_requires_explicit_local_logout_before_fresh_logi
 
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
+async fn xai_retired_payload_reads_as_profile_changed_and_local_logout_repairs_it()
+-> Result<(), Box<dyn Error>> {
+    let provider = NativeProvider::Xai;
+    let root = unique_test_root("xai-retired-payload-local-retirement")?;
+    let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
+    paths.prepare()?;
+    let notice = NativeSubscriptions::notice(provider);
+    let now = unix_now()?;
+    store_acceptance(&paths, notice, now)?;
+    let profile = plakous_auth::SubscriptionIntegrationProfileId::new(notice.profile_id())?;
+    let store = plakous_auth::PrivateCredentialStore::open_slot(
+        paths.provider_record(provider),
+        profile.clone(),
+        plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)?,
+    )?;
+    // The version 2 payload an earlier build wrote (hex selection epoch).
+    let retired = serde_json::to_vec(&serde_json::json!({
+        "version": 2,
+        "issuer": "https://auth.x.ai",
+        "client_id": "retired-client",
+        "subject": "retired-subject",
+        "scope": "openid",
+        "access_token": "retired-access",
+        "refresh_token": "retired-refresh",
+        "expires_at": now + 3_600,
+        "selection_epoch": "ab".repeat(32),
+    }))?;
+    store.initialize_selected(&plakous_auth::CredentialRecord::new(
+        profile,
+        plakous_auth::AccountBinding::new("retired-subject")?,
+        plakous_auth::CredentialGeneration::new(1)?,
+        plakous_auth::CredentialStatus::Ready,
+        plakous_auth::SecretBytes::new(retired),
+    )?)?;
+    let subscriptions = NativeSubscriptions::new(paths.clone());
+    // Offline status refuses the record exactly as refresh does; neither
+    // reports it Ready, and neither contacts the provider.
+    assert_eq!(
+        subscriptions.status(provider).await,
+        Err(NativeSubscriptionError::CredentialProfileChanged)
+    );
+    assert_eq!(
+        subscriptions.refresh(provider).await,
+        Err(NativeSubscriptionError::CredentialProfileChanged)
+    );
+    assert!(matches!(
+        subscriptions.subscription_usage(provider).await,
+        SubscriptionUsageRead::Unavailable {
+            reason: SubscriptionUsageUnavailable::CredentialState(
+                SubscriptionUsageCredentialState::LoginRequired
+            ),
+            ..
+        }
+    ));
+    assert_eq!(
+        subscriptions.logout_local(provider).await?,
+        NativeAuthStatus::Revoked
+    );
+    assert_eq!(
+        subscriptions.status(provider).await?.credential(),
+        NativeAuthStatus::Revoked
+    );
+    let pending = subscriptions
+        .begin_login(provider, NativeLoginMode::RemoteBrowser)
+        .await?;
+    assert_eq!(
+        pending.instructions().completion(),
+        NativeLoginCompletion::AuthorizationCodeOrRedirectUrl
+    );
+    drop(pending);
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
 async fn explicit_login_retires_armed_recovery_before_starting_a_fresh_attempt()
 -> Result<(), Box<dyn Error>> {
     for provider in [

@@ -586,7 +586,8 @@ account — the CLI does not pretend otherwise.
 login required, foreign profile, retired format) locally rather than refusing,
 and says the remote grant may remain; it attempts a remote revoke only for a
 usable credential and never falls back to local retirement when that revoke
-fails. `--local` performs the local retirement without contacting the provider.
+fails (a record the revoke path refuses as foreign or retired before sending
+anything is retired locally like any other unusable record). `--local` performs the local retirement without contacting the provider.
 Local retirement also retires a structurally valid selected-slot record
 from an older profile into an empty, current-profile revoked tombstone at the
 next generation. It never treats that old credential as valid for status,
