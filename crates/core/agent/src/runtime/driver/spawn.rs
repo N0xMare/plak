@@ -120,7 +120,7 @@ impl PreparedAgent {
         } else {
             (None, None)
         };
-        // A plain resume keeps the anchor the last turn terminal recorded; a
+        // A plain resume keeps the anchor the head checkpoint recorded; a
         // parked continuation frame replaces it with its own.
         let mut context_anchor = checkpoint_owner
             .checkpoint()

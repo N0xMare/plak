@@ -298,8 +298,8 @@ async fn a_restored_server_pause_resumes_with_the_frame_anchor() -> TestResult {
     assert_eq!(frame_anchor.provider_input_tokens(), 5);
     assert_eq!(
         parked.manifest().canonical().context().occupancy_anchor(),
-        None,
-        "a working checkpoint carries the anchor only in its frame"
+        Some(frame_anchor),
+        "the parked checkpoint publishes the anchor its frame carries"
     );
     let address =
         DurableSessionAddress::new(original.session_id(), original.branch_id(), parked.id());

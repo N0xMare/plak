@@ -653,9 +653,9 @@ impl fmt::Debug for CompactionProvenance {
 #[derive(Clone, Eq, PartialEq)]
 pub struct RuntimeContextState {
     affinity: ModelCacheAffinity,
-    /// The driver's context-measure anchor as of the last turn terminal
-    /// (spec 01, 10.3). Every transition and compaction successor starts
-    /// without one.
+    /// The driver's context-measure anchor as of this checkpoint's
+    /// publication (spec 01, 10.3). Every transition and compaction successor
+    /// starts without one.
     occupancy_anchor: Option<ContextAnchor>,
     request_anchor: Option<plakous_model::ContextRequestAnchor>,
     transition: Option<RuntimeContextTransition>,
@@ -1287,7 +1287,7 @@ impl RuntimeContextState {
         &self.affinity
     }
 
-    /// Returns the context-measure anchor recorded at the last turn terminal.
+    /// Returns the context-measure anchor recorded at this checkpoint.
     #[must_use]
     pub const fn occupancy_anchor(&self) -> Option<ContextAnchor> {
         self.occupancy_anchor

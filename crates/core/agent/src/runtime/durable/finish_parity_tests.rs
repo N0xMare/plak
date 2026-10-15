@@ -14,6 +14,16 @@ async fn assert_finish_parity(
     refused: bool,
     make: impl Fn() -> TestResult<AgentBuilder>,
 ) -> TestResult<Arc<TurnResult>> {
+    Ok(finish_parity(label, refused, make).await?.0)
+}
+
+/// [`assert_finish_parity`], also returning the occupancy anchor the live
+/// consequence commit recorded.
+async fn finish_parity(
+    label: &str,
+    refused: bool,
+    make: impl Fn() -> TestResult<AgentBuilder>,
+) -> TestResult<(Arc<TurnResult>, Option<plakous_model::ContextAnchor>)> {
     let store = Arc::new(TestCreateStore::default());
     let sessions = DurableSessionRuntime::current(
         store.clone(),
@@ -126,6 +136,23 @@ async fn assert_finish_parity(
         "{label}: the recovered commit follows the decision commit"
     );
     assert_consequence_parity(label, &live, &recovered, &result)?;
+    let live_anchor = live.manifest().canonical().context().occupancy_anchor();
+    // The reopened owner's measure is the one its next turn starts from.
+    let next_turn_status = reopened
+        .session_endpoint()
+        .context_status(
+            reopened.session_id(),
+            reopened.branch_id(),
+            recovered.id(),
+            None,
+        )
+        .await
+        .map_err(|_| format!("{label}: reopened context status"))?;
+    assert_eq!(
+        next_turn_status.context_anchor(),
+        live_anchor,
+        "{label}: the next turn starts from the live occupancy anchor"
+    );
     let recovered_facts = lock_mutex(&store.accepted_commits)
         .last()
         .ok_or("recovered consequence")?
@@ -165,7 +192,7 @@ async fn assert_finish_parity(
         );
     }
     reopened.shutdown().await?;
-    Ok(replayed)
+    Ok((replayed, live_anchor))
 }
 
 fn assert_consequence_parity(
@@ -194,6 +221,11 @@ fn assert_consequence_parity(
         live.canonical().context().request_anchor(),
         recovered.canonical().context().request_anchor(),
         "{label}: request anchor"
+    );
+    assert_eq!(
+        live.canonical().context().occupancy_anchor(),
+        recovered.canonical().context().occupancy_anchor(),
+        "{label}: occupancy anchor"
     );
     let (live_records, recovered_records) =
         (live.ledger().operations(), recovered.ledger().operations());
@@ -279,6 +311,18 @@ async fn the_recovered_finish_commit_equals_the_live_consequence_commit() -> Tes
         text_final_builder(true, 1)
     })
     .await?;
+    Ok(())
+}
+
+/// A usage-reporting final anchors the live terminal, so the turn after its
+/// recovered finish starts anchored rather than from a whole-request estimate.
+#[tokio::test]
+async fn the_turn_after_a_recovered_finish_starts_from_the_live_occupancy_anchor() -> TestResult {
+    let (_, anchor) = finish_parity("finish-parity:next-turn-anchor", false, || {
+        text_final_builder(true, 0)
+    })
+    .await?;
+    assert!(anchor.is_some(), "the live terminal records an anchor");
     Ok(())
 }
 

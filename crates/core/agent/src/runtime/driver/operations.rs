@@ -160,8 +160,11 @@ impl Driver {
             } else {
                 admission
             };
+        // Both anchors ride every publication, so a recovered finish of a
+        // turn's decision commit restores the measure its live terminal had.
         let context = context
-            .with_request_anchor(self.request_anchor.clone())
+            .with_occupancy_anchor(self.context_anchor)
+            .and_then(|context| context.with_request_anchor(self.request_anchor.clone()))
             .map_err(runtime_manifest_error)?;
         let retain = lifecycle == RuntimeLifecycle::Quiescent && ledger_needs_retention(&ledger);
         let ledger = if retain {
@@ -1568,14 +1571,6 @@ impl Driver {
         family: Option<FamilyArtifact>,
         notice_consumptions: &[u32],
     ) -> Result<Arc<RuntimeCheckpoint>, AgentError> {
-        let context = if lifecycle == RuntimeLifecycle::Quiescent {
-            context
-                .with_occupancy_anchor(self.context_anchor)
-                .and_then(|context| context.with_request_anchor(self.request_anchor.clone()))
-                .map_err(runtime_manifest_error)?
-        } else {
-            context
-        };
         let published = self
             .publish_checkpoint_consuming_jobs(
                 StoreAdmission::Settlement,

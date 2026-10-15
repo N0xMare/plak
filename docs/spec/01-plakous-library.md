@@ -5606,7 +5606,11 @@ its identity digest without retaining lowered text or image payloads. An oversiz
 prepared record is a ContextLimit-class preparation failure eligible for compaction. Both anchors are checkpointed: counts,
 lowered item digests and the exact
 route/model/binding authority survive verified resume, including parked
-continuation frames. The overflow-recovery, failed-paid-fold, and pressure-paid-fold guards are also
+continuation frames. Every publication, not only a turn terminal, carries the
+driver's current anchors, so a turn's decision commit already holds the anchors
+its live terminal records; a recovered finish (§5.5) publishes them unchanged
+and the next turn starts from the same anchored measure as after the live
+terminal. The overflow-recovery, failed-paid-fold, and pressure-paid-fold guards are also
 carried in each frame, inside the same `TurnBudgets` value every provider
 outcome record carries (§5.5), so a resume cannot reset any per-root-turn budget.
 The pressure guard is spent immediately before the paid call, never by an
