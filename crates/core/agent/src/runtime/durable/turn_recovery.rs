@@ -10,6 +10,7 @@ mod landed_control_guard_tests;
 #[cfg(test)]
 mod closure_parity_tests;
 
+mod abandonment_rows;
 #[cfg(test)]
 mod admission_compaction;
 pub(in crate::runtime) mod controls;
@@ -19,6 +20,7 @@ mod replay;
 mod terminal_siblings;
 mod verdict;
 
+use abandonment_rows::{ClosureFacts, TurnFoldFacts, TurnRow};
 pub use verdict::{CheckpointRecoveryVerdict, checkpoint_recovery_verdict};
 pub(in crate::runtime) use verdict::{RecoveryEvidence, RecoveryVerdict, recovery_verdict};
 
@@ -418,6 +420,13 @@ fn abandonment_evidence_fold(
     let code_cell = code_cell_abandonment_fold(checkpoint)
         .ok()
         .filter(|fold| fold.turn_abandonment && !fold.operations.is_empty());
+    let facts = TurnFoldFacts {
+        ledger,
+        turn_id,
+        code_cell: code_cell.is_some(),
+        root_dispatched,
+        batch_pending,
+    };
     for obligation in obligations {
         let record = ledger
             .operation(obligation.operation_id())
@@ -495,104 +504,20 @@ fn abandonment_evidence_fold(
                 "abandoning a turn requires every obligation to be its own",
             ));
         }
-        match (obligation.kind(), obligation.action(), record.state()) {
-            (
-                RecoveryObligationKind::Command,
-                RecoveryAction::ProvenNotDispatched,
-                DurableOperationState::Prepared,
-            ) if root_operation.is_none()
-                && (code_cell.is_some()
-                    || root_is_only_turn_operation(
-                        ledger,
-                        turn_id,
-                        OperationId(record.operation_id()),
-                    )) =>
-            {
-                root_operation = Some(OperationId(record.operation_id()));
-            }
-            (
-                RecoveryObligationKind::Command,
-                RecoveryAction::FinalizationRequired,
-                DurableOperationState::Completed(_),
-            ) if code_cell.is_some() => {}
-            (
-                RecoveryObligationKind::CodeCell | RecoveryObligationKind::Effect,
-                RecoveryAction::FinalizationRequired,
-                DurableOperationState::Completed(_) | DurableOperationState::ProvenNotDispatched(_),
-            ) if code_cell.is_some() => settled_operations.push(OperationId(record.operation_id())),
-            (
-                RecoveryObligationKind::Effect,
-                RecoveryAction::FinalizationRequired,
-                DurableOperationState::Completed(_),
-            ) if root_dispatched
-                && ledger.operations().into_iter().any(|provider| {
-                    matches!((record.kind(), provider.kind()),
-                    (DurableOperationKind::Effect { attempt_id: effect_attempt, .. },
-                     DurableOperationKind::Provider { attempt_id: provider_attempt, .. })
-                    if effect_attempt == provider_attempt)
-                        && operation_turn_id(provider) == Some(turn_id)
-                        && matches!(provider.state(), DurableOperationState::Completed(_))
-                }) =>
-            {
-                let operation = OperationId(record.operation_id());
+        let operation = OperationId(record.operation_id());
+        match abandonment_rows::turn_row(&facts, obligation, record, root_operation.is_none()) {
+            Some(TurnRow::Root) => root_operation = Some(operation),
+            Some(TurnRow::Retained) => {}
+            Some(TurnRow::Settled) => settled_operations.push(operation),
+            Some(TurnRow::CompletedUnadded) => {
                 settled_operations.push(operation);
                 uncommitted_effect_operations.push(operation);
             }
-            (
-                RecoveryObligationKind::CodeCell,
-                RecoveryAction::FinalizationRequired,
-                DurableOperationState::Completed(_),
-            ) if batch_pending => {
-                let operation = OperationId(record.operation_id());
-                settled_operations.push(operation);
-                uncommitted_effect_operations.push(operation);
-            }
-            (
-                RecoveryObligationKind::Command,
-                RecoveryAction::FinalizationRequired,
-                DurableOperationState::Dispatched,
-            ) if root_operation.is_none() => {
-                root_operation = Some(OperationId(record.operation_id()));
-            }
-            (
-                RecoveryObligationKind::ProviderAttempt,
-                RecoveryAction::ProviderEvidenceRequired,
-                DurableOperationState::Prepared
-                | DurableOperationState::Dispatched
-                | DurableOperationState::LocatorBound(_)
-                | DurableOperationState::OutcomeUnknown(_),
-            ) => provider_operations.push(OperationId(record.operation_id())),
-            // Completed rounds and joined processes retain their exact evidence.
-            // Another obligation may still be unfinished, but these are not
-            // uncertain and cannot justify abandonment on their own.
-            (
-                RecoveryObligationKind::ProviderAttempt | RecoveryObligationKind::ProcessSession,
-                RecoveryAction::FinalizationRequired,
-                DurableOperationState::Completed(_),
-            ) => settled_operations.push(OperationId(record.operation_id())),
-            (
-                RecoveryObligationKind::Effect,
-                RecoveryAction::EffectEvidenceRequired,
-                DurableOperationState::Prepared
-                | DurableOperationState::Claimed(_)
-                | DurableOperationState::Dispatched
-                | DurableOperationState::OutcomeUnknown(_),
-            ) => effect_operations.push(OperationId(record.operation_id())),
-            // The one effect state that is evidence rather than silence.
-            // Closing it as uncertain would put a warning about the workspace
-            // in front of a user over a command this session can prove never
-            // started.
-            (
-                RecoveryObligationKind::Effect,
-                RecoveryAction::EffectEvidenceRequired,
-                DurableOperationState::ProvenNotDispatched(_),
-            ) => unrun_effect_operations.push(OperationId(record.operation_id())),
-            (
-                RecoveryObligationKind::ProcessSession,
-                RecoveryAction::EffectEvidenceRequired,
-                DurableOperationState::Prepared | DurableOperationState::Dispatched,
-            ) => process_operations.push(OperationId(record.operation_id())),
-            _ => {
+            Some(TurnRow::ProviderUncertain) => provider_operations.push(operation),
+            Some(TurnRow::EffectUncertain) => effect_operations.push(operation),
+            Some(TurnRow::EffectUnrun) => unrun_effect_operations.push(operation),
+            Some(TurnRow::ProcessUncertain) => process_operations.push(operation),
+            None => {
                 return Err(refuse(
                     "this checkpoint is outstanding on more than work a turn can abandon",
                 ));
@@ -1530,10 +1455,6 @@ struct RootClosureState {
     family_artifact: Option<crate::FamilyArtifact>,
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "each abandonment debt retains its own evidence and claim"
-)]
 fn abandonment_closure_state(
     source: &RuntimeCheckpoint,
     fold: AbandonedTurnRecoveryFold,
@@ -1541,10 +1462,6 @@ fn abandonment_closure_state(
     checkpoint_id: CheckpointId,
 ) -> Result<RootClosureState, AgentError> {
     let source_manifest = source.manifest();
-    let cause = abandonment_cause(&fold);
-    let completed_effect_only = !fold.uncommitted_effect_operations.is_empty()
-        && fold.effect_operations.is_empty()
-        && fold.process_operations.is_empty();
     let mut ledger = source_manifest.ledger().clone();
     for operation in &fold.settled_operations {
         let record = ledger
@@ -1561,83 +1478,17 @@ fn abandonment_closure_state(
         fold_rows::fold_row(source, fold.turn_id, fold.root_operation)?
             .filter(|row| row.claim() == claim)
     };
-    let segment = if let Some(note) = row.and_then(|row| row.note(cause)) {
-        abandoned_turn_segment_with_note(fold.turn_id, note)?
-    } else if claim == AbandonedTurnClaim::CompactionNotApplied
-        && source_manifest
-            .ledger()
-            .operations()
-            .into_iter()
-            .any(|record| {
-                operation_turn_id(record) == Some(fold.turn_id)
-                    && replay::retained_round(record).is_ok_and(|retained| retained)
-            })
-    {
-        abandoned_turn_segment_with_note(
-            fold.turn_id,
-            match cause {
-                AbandonmentCause::ProcessLost => {
-                    "this turn was abandoned after the process was lost while the conversation was being compacted. Compaction was not applied and may have been billed. Earlier completed rounds of this turn remain in this history; the history before this point is unchanged."
-                }
-                AbandonmentCause::Interrupted => {
-                    "this turn stopped while the conversation was being compacted. Compaction was not applied and may have been billed. Earlier completed rounds of this turn remain in this history; the history before this point is unchanged."
-                }
-            },
-        )?
-    } else if let Some(unsent) = unsent_decision(source, fold.turn_id, fold.root_operation) {
-        abandoned_turn_segment_with_note(
-            fold.turn_id,
-            match unsent {
-                replay::UnsentDecision::Retry => {
-                    "this turn was abandoned after its model request failed and a retry was decided. The decided retry was not sent and is not retried; the history before this point is unchanged."
-                }
-                replay::UnsentDecision::Fold => {
-                    "this turn was abandoned after the provider refused its request as over the context window. Compaction did not start, and the refused request was not sent again; the history before this point is unchanged."
-                }
-            },
-        )?
-    } else if fold.tool_round_completed
-        && model_round_boundary(source, fold.turn_id, fold.root_operation)
-    {
-        abandoned_turn_segment_with_note(
-            fold.turn_id,
-            "this turn was abandoned after its model round completed, before the next model request was prepared. The completed model response remains in this history; no next request was dispatched or retried.",
-        )?
-    } else if fold.tool_round_completed && claim == AbandonedTurnClaim::RunningTool {
-        abandoned_turn_segment_with_note(
-            fold.turn_id,
-            "this turn was abandoned after its tool round completed, before the next model \
-     request was prepared. Completed tool results remain in this history. A process \
-     it started was still running; its outcome is unknown, it may have changed the \
-     workspace, and it is not retried. Check the workspace before carrying on.",
-        )?
-    } else if claim == AbandonedTurnClaim::RunningTool && completed_effect_only {
-        abandoned_turn_segment_with_note(
-            fold.turn_id,
-            "this turn was abandoned after a tool finished, but its result was not added \
-             to the conversation. It may have changed the workspace and is not retried. \
-             Check the workspace before relying on what came before this point.",
-        )?
-    } else if claim == AbandonedTurnClaim::NothingStarted
-        && code_cell_abandonment_fold(source).is_ok_and(|cell| cell.turn_abandonment)
-    {
-        abandoned_turn_segment_with_note(
-            fold.turn_id,
-            "this turn's remaining Code Cell work was abandoned before dispatch. The abandoned \
-     operations never started and are not retried; completed work retains its own \
-     evidence. No cell result is inferred from this abandonment.",
-        )?
-    } else if claim == AbandonedTurnClaim::NothingStarted
-        && root_is_only_turn_operation(source_manifest.ledger(), fold.turn_id, fold.root_operation)
-    {
-        abandoned_turn_segment_with_note(
-            fold.turn_id,
-            "this turn was abandoned after its process was lost, before any model request \
-     or tool started. Nothing ran, no result was inferred, and the prompt is not retried.",
-        )?
-    } else {
-        abandoned_turn_segment(fold.turn_id, claim, cause)?
+    let facts = ClosureFacts {
+        source,
+        fold: &fold,
+        claim,
+        cause: abandonment_cause(&fold),
+        row,
+        completed_effect_only: !fold.uncommitted_effect_operations.is_empty()
+            && fold.effect_operations.is_empty()
+            && fold.process_operations.is_empty(),
     };
+    let segment = abandonment_rows::abandonment_segment(&facts)?;
     let segment = if controls::has_unapplied_steering(&ledger, fold.turn_id) {
         let [ContentBlock::Text(text)] = segment.items()[0].blocks() else {
             return Err(AgentError::from_store(SessionStoreError::corrupt()));
@@ -1658,178 +1509,15 @@ fn abandonment_closure_state(
         .clone()
         .append(segment)
         .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-    let unknown = [
-        (&fold.provider_operations, abandoned_operation_evidence()?),
-        (&fold.effect_operations, abandoned_effect_evidence()?),
-        (&fold.process_operations, abandoned_process_evidence()?),
-        (
-            &fold.compaction_operations,
-            abandoned_compaction_evidence()?,
-        ),
-    ];
-    for (operations, evidence) in unknown {
-        for operation in operations {
-            ledger = close_as_unobserved(&ledger, *operation, &evidence, checkpoint_id)?;
-        }
-    }
-    // Preserve completed provider/process evidence and proven-unrun effects.
-    // Rewriting them as unknown would lose facts; none strengthens the note.
-    for operation in fold
-        .settled_operations
-        .iter()
-        .chain(&fold.unrun_effect_operations)
-    {
-        let record = ledger
-            .operation(operation.0)
-            .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
-        if controls::same_turn_control(&ledger, record, fold.turn_id) {
-            ledger = controls::settle_control(&ledger, record, checkpoint_id)?;
-            continue;
-        }
-        if matches!(record.state(), DurableOperationState::Prepared) {
-            ledger = finalize_not_started(&ledger, record, checkpoint_id, history.identity())?;
-            continue;
-        }
-        if matches!(record.state(), DurableOperationState::Dispatched)
-            && pending_steering(source, record, fold.turn_id)
-        {
-            ledger = ledger
-                .transition_operation(
-                    operation.0,
-                    DurableOperationTransition::new(
-                        checkpoint_id,
-                        DurableOperationState::Completed(runtime_component(
-                            RuntimeComponentKind::Operation,
-                            controls::STEERING_NOT_APPLIED.to_vec(),
-                        )?),
-                    ),
-                )
-                .map_err(runtime_manifest_error)?;
-        }
-        let evidence = ledger
-            .operation(operation.0)
-            .and_then(|record| match record.state() {
-                DurableOperationState::Completed(evidence)
-                | DurableOperationState::ProvenNotDispatched(evidence) => Some(evidence.clone()),
-                _ => None,
-            })
-            .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
-        ledger = ledger
-            .transition_operation(
-                operation.0,
-                DurableOperationTransition::new(
-                    checkpoint_id,
-                    DurableOperationState::Finalized(evidence),
-                ),
-            )
-            .map_err(runtime_manifest_error)?;
-    }
-    if fold.root == AbandonedRoot::Prepared {
-        let record = ledger
-            .operation(fold.root_operation.0)
-            .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
-        ledger = finalize_not_started(&ledger, record, checkpoint_id, history.identity())?;
-    }
-    if fold.root == AbandonedRoot::Dispatched {
-        let cancelled = DurableAgentError::from_error(&AgentError::new(
-            AgentErrorKind::Session,
-            row.and_then(fold_rows::FoldRow::cancellation).unwrap_or(match claim {
-                AbandonedTurnClaim::ModelRequest => {
-                    "the turn was abandoned after its model request's outcome became uncertain"
-                }
-                AbandonedTurnClaim::RunningTool if completed_effect_only => {
-                    "the turn was abandoned after a tool finished, but its result was not added to the conversation; it may have changed the workspace and is not retried"
-                }
-                AbandonedTurnClaim::RunningTool => {
-                    "the turn was abandoned after the process was lost while a tool was running"
-                }
-                AbandonedTurnClaim::CompactionNotApplied => {
-                    "the turn was abandoned after the process was lost during compaction"
-                }
-                AbandonedTurnClaim::NothingStarted
-                    if unsent_decision(source, fold.turn_id, fold.root_operation)
-                        == Some(replay::UnsentDecision::Retry) =>
-                {
-                    "the turn was abandoned after a decided retry was not sent"
-                }
-                AbandonedTurnClaim::NothingStarted
-                    if unsent_decision(source, fold.turn_id, fold.root_operation)
-                        == Some(replay::UnsentDecision::Fold) =>
-                {
-                    "the turn was abandoned after its request was refused as over the context window; compaction did not start"
-                }
-                AbandonedTurnClaim::ToolRoundCompleted => {
-                    if model_round_boundary(source, fold.turn_id, fold.root_operation) {
-                        "the turn was interrupted after its model round completed, before the next model request"
-                    } else {
-                        "the turn was interrupted after its tool round completed, before the next model request"
-                    }
-                }
-                _ if root_is_only_turn_operation(
-                    source_manifest.ledger(),
-                    fold.turn_id,
-                    fold.root_operation,
-                ) =>
-                {
-                    "the turn was abandoned after the process was lost, before any work started"
-                }
-                _ => {
-                    "the turn was abandoned after the process was lost; the tool its last round asked for never started"
-                }
-            }),
-        ))?;
-        let pending = encode_pending_terminal_record(PendingTerminalResultRecord {
-            remedy: None,
-            version: TERMINAL_RESULT_RECORD_VERSION,
-            command_id: fold.command_id.as_str().to_owned(),
-            turn_id: fold.turn_id,
-            operation_id: fold.root_operation,
-            outcome: DurableTerminalOutcome::Cancelled(cancelled),
-            usage: terminal_turn_usage(&source_manifest.ledger().operations(), fold.turn_id)?,
-        })
-        .map_err(|_| {
-            AgentError::new(
-                AgentErrorKind::Internal,
-                "abandoned terminal record could not be encoded",
-            )
-        })?;
-        let finalized = finalized_operation_evidence(
-            &runtime_component(RuntimeComponentKind::Operation, pending)?,
-            checkpoint_id,
-            history.identity(),
-        )?;
-        ledger = ledger
-            .transition_operation(
-                fold.root_operation.0,
-                DurableOperationTransition::new(
-                    checkpoint_id,
-                    DurableOperationState::Finalized(finalized),
-                ),
-            )
-            .map_err(runtime_manifest_error)?;
-    }
-    if fold.root == AbandonedRoot::PendingTerminal {
-        let evidence = ledger
-            .operation(fold.root_operation.0)
-            .and_then(|record| match record.state() {
-                DurableOperationState::Completed(evidence) => Some(evidence),
-                _ => None,
-            })
-            .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
-        ledger = ledger
-            .transition_operation(
-                fold.root_operation.0,
-                DurableOperationTransition::new(
-                    checkpoint_id,
-                    DurableOperationState::Finalized(finalized_operation_evidence(
-                        evidence,
-                        checkpoint_id,
-                        history.identity(),
-                    )?),
-                ),
-            )
-            .map_err(runtime_manifest_error)?;
-    }
+    let ledger = abandonment_rows::close_uncertain_operations(ledger, &fold, checkpoint_id)?;
+    let ledger = abandonment_rows::finalize_retained_operations(
+        ledger,
+        source,
+        &fold,
+        checkpoint_id,
+        history.identity(),
+    )?;
+    let ledger = abandonment_rows::close_root(ledger, &facts, checkpoint_id, history.identity())?;
     Ok(RootClosureState {
         history,
         ledger,
