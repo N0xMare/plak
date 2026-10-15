@@ -178,8 +178,8 @@ use crate::commands::host_config::{
     deferred_attach_refusal_reason, tui_attach_eligibility,
 };
 use crate::commands::login::{
-    auth_login, auth_logout_local, auth_logout_remote, auth_refresh, auth_status, key_clear,
-    key_set, key_status, print_compatibility_notice,
+    auth_login, auth_logout, auth_logout_local, auth_refresh, auth_status, key_clear, key_set,
+    key_status, print_compatibility_notice,
 };
 use crate::commands::session::{
     confirm_session_mutation, load_exact_product_session, repair_invalid_new_session_binding,
@@ -1192,7 +1192,7 @@ fn execute_command(
         Command::AuthLogout {
             provider,
             local_only: false,
-        } => auth_logout_remote(backend, provider, stdin, stderr),
+        } => auth_logout(backend, provider, stdin, stderr),
         Command::Models(provider) => list_models(backend, provider, stdin, stdout, stderr),
         Command::ModelsOpenRouter => commands::catalog::list_openrouter_models(backend, stdout),
         Command::ModelsPlatform(provider) => {
@@ -3852,7 +3852,7 @@ mod tests {
             (
                 NativeSubscriptionError::CredentialProfileChanged,
                 codex,
-                "native credential profile changed; run `plak logout codex --local`, then `plak login codex`",
+                "native credential profile changed; run `plak logout codex`, then `plak login codex`",
                 3,
             ),
             (
@@ -4053,14 +4053,17 @@ mod tests {
         );
         assert_eq!(
             cell,
-            "Profile changed · plak logout claude --local, then plak login claude"
+            "Profile changed · plak logout claude, then plak login claude"
         );
         let long = native_subscription_failure(
             NativeSubscriptionError::CredentialProfileChanged,
             Some(NativeProvider::Claude),
             state,
         );
-        assert!(long.message().contains("plak logout claude --local"));
+        assert!(
+            long.message()
+                .contains("run `plak logout claude`, then `plak login claude`")
+        );
         assert!(long.message().contains("plak login claude"));
         assert_eq!(
             commands::support::oauth_status_failure_cell(
@@ -4172,7 +4175,7 @@ mod tests {
         };
         let claude = row("Claude Subscription");
         assert!(
-            claude.contains("Profile changed · plak logout claude --local, then plak login claude"),
+            claude.contains("Profile changed · plak logout claude, then plak login claude"),
             "{claude}\n{stdout}"
         );
         let codex = row("Codex Subscription");
@@ -4425,6 +4428,19 @@ mod tests {
                 compatibility: self.compatibility,
                 credential: self.credential,
             })
+        }
+
+        fn stored_credential(
+            &mut self,
+            provider: NativeProvider,
+        ) -> CliResult<commands::application::StoredCredential> {
+            self.calls.push(Call::Status(provider));
+            Ok(commands::application::StoredCredential::from_status(
+                CliStatus {
+                    compatibility: self.compatibility,
+                    credential: self.credential,
+                },
+            ))
         }
 
         fn subscription_usage(
@@ -6657,6 +6673,7 @@ mod tests {
                 }
             };
             let mut backend = FakeBackend::new(CompatibilityState::Required, terminal);
+            backend.credential = CredentialState::Ready;
             let (result, _, _) =
                 invoke(command, &mut backend, b"exact-review\r\nsynthetic-code\r\n");
             assert_eq!(result, Ok(ProcessOutcome::Success));
@@ -7168,6 +7185,7 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
             CredentialState::Unsupported,
         ] {
             let mut remote = FakeBackend::new(CompatibilityState::Current, terminal);
+            remote.credential = CredentialState::Ready;
             let (result, _, _) = invoke(
                 Command::AuthLogout {
                     provider: NativeProvider::Codex,
@@ -7206,6 +7224,7 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
         }
 
         let mut remote = FakeBackend::new(CompatibilityState::Current, CredentialState::Revoked);
+        remote.credential = CredentialState::RefreshRequired;
         let (_, _, stderr) = invoke(
             Command::AuthLogout {
                 provider: NativeProvider::Xai,
@@ -7239,6 +7258,67 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
             );
             assert_eq!(result, Ok(ProcessOutcome::Success));
             assert_eq!(stderr, expected);
+        }
+    }
+
+    #[test]
+    fn logout_without_a_flag_retires_unusable_or_absent_credentials_locally() {
+        let unusable = b"grok: local credential retired; this build cannot use it, so it was not revoked at the provider and the remote grant may remain active\n";
+        let absent = b"grok: not logged in; nothing to log out\n";
+        for (compatibility, credential, terminal, expected) in [
+            (
+                CompatibilityState::Current,
+                CredentialState::Quarantined,
+                CredentialState::Revoked,
+                unusable.as_slice(),
+            ),
+            (
+                CompatibilityState::Required,
+                CredentialState::LoginRequired,
+                CredentialState::Revoked,
+                unusable.as_slice(),
+            ),
+            (
+                CompatibilityState::Inactive,
+                CredentialState::Ready,
+                CredentialState::Revoked,
+                unusable.as_slice(),
+            ),
+            (
+                CompatibilityState::Required,
+                CredentialState::SignedOut,
+                CredentialState::SignedOut,
+                absent.as_slice(),
+            ),
+            (
+                CompatibilityState::Current,
+                CredentialState::Revoked,
+                CredentialState::Revoked,
+                absent.as_slice(),
+            ),
+        ] {
+            let mut backend = FakeBackend::new(compatibility, terminal);
+            backend.credential = credential;
+            let (result, stdout, stderr) = invoke(
+                Command::AuthLogout {
+                    provider: NativeProvider::Xai,
+                    local_only: false,
+                },
+                &mut backend,
+                b"",
+            );
+            assert_eq!(result, Ok(ProcessOutcome::Success), "{credential:?}");
+            assert_eq!(
+                backend.calls,
+                vec![
+                    Call::Status(NativeProvider::Xai),
+                    Call::LogoutLocal(NativeProvider::Xai),
+                ],
+                "{credential:?} must not prompt or reach the provider"
+            );
+            assert_eq!(stdout, [] as [u8; 0]);
+            assert_eq!(stderr, expected, "{credential:?}");
+            assert!(!String::from_utf8_lossy(&stderr).contains("plak login"));
         }
     }
 

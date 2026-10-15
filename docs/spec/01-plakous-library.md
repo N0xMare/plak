@@ -3614,7 +3614,7 @@ payload it cannot parse restores it (nothing was sent) rather than quarantining
 it, and this build does not attempt a remote revoke of it. A stored SuperGrok
 payload of version 2 (whose selection epoch was 64 hex digits) is retired: the
 current payload is version 3, and a version-2 record is refused as a retired
-credential format (remedy `plak logout grok --local`, then `plak login grok`)
+credential format (remedy `plak logout grok`, then `plak login grok`)
 and never converted. The usage read reports it as login-required without
 network I/O, and a refresh or revoke claim that finds it restores it (nothing
 was sent) rather than quarantining it. Codex's 401 recovery

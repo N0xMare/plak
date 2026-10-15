@@ -70,8 +70,10 @@ takes the pasted code or callback URL; `c` then Enter re-copies. An SSH session
 refuses a local login outright and prints
 `plak login <account> --remote` rather than switching mode silently.
 
-`plak logout <account>` retires the credential; `--local` skips the remote
-revoke. Claude OAuth has no pinned remote revoke, so its logout is always local.
+`plak logout <account>` revokes a usable credential at the provider and retires
+it; a credential this build cannot use is retired locally, and the output says
+the remote grant may remain active. `--local` never contacts the provider.
+Claude OAuth has no pinned remote revoke, so its logout is always local.
 
 Credentials live under `$XDG_STATE_HOME/plak/subscriptions/<provider>/`
 (falling back to `~/.local/state`), mode `0700`, with the credential file at
@@ -185,7 +187,7 @@ table with no rows is omitted.
 `Refresh required`, `Unavailable`, `Revoked`, `Login required · plak login <account>`
 (an earlier-build login, or a payload this build cannot parse), `Unsupported`.
 When the local read itself fails, the cell is the state and the repair instead,
-for example `Profile changed · plak logout claude --local, then plak login claude`
+for example `Profile changed · plak logout claude, then plak login claude`
 or `Unsafe storage · …` with the path and chmod. A repair too long for the
 column is `Unsafe storage · run plak status <account> for the fix`; that
 command prints the full path and chmod. The other rows still print, and

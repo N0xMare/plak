@@ -9,7 +9,7 @@ use std::io::{self, IsTerminal as _};
 use crate::terminal_application::read_terminal_secret_line;
 use plakous::subscriptions::{NativeLoginMode, NativeProvider, NativeSubscriptions};
 
-use super::application::AccountOps;
+use super::application::{AccountOps, StoredCredential};
 use super::support::{
     cli_provider_name, compatibility_status_name, credential_status_name, profile_date,
     profile_inactive_failure, require_locally_retired, require_ready, require_revoked,
@@ -91,25 +91,17 @@ pub fn auth_refresh(
     Ok(ProcessOutcome::Success)
 }
 
-/// `plak logout <provider> --local`: retire the local credential only.
+/// `plak logout <provider> --local`: retire the local credential without
+/// contacting the provider.
 pub fn auth_logout_local(
     backend: &mut impl AccountOps,
     provider: NativeProvider,
     stderr: &mut dyn io::Write,
 ) -> CliResult<ProcessOutcome> {
-    let status = backend.logout_local(provider)?;
-    require_locally_retired(
-        status,
-        "local logout did not reach a safely retired local credential state",
-    )?;
+    let status = retire_local(backend, provider)?;
     let outcome = match status {
         CredentialState::SignedOut => "no local credential remains; recovery state cleared",
-        CredentialState::Revoked => "local credential revoked; recovery state cleared",
-        _ => {
-            return Err(CliFailure::new(
-                "local credential retirement invariant failed",
-            ));
-        }
+        _ => "local credential revoked; recovery state cleared",
     };
     writeln!(
         stderr,
@@ -120,26 +112,57 @@ pub fn auth_logout_local(
     Ok(ProcessOutcome::Success)
 }
 
-/// `plak logout <provider>`: revoke the remote credential.
-pub fn auth_logout_remote(
+/// `plak logout <provider>`: revoke a usable credential at the provider;
+/// retire one this build cannot use locally, saying the remote grant may remain.
+pub fn auth_logout(
     backend: &mut impl AccountOps,
     provider: NativeProvider,
     stdin: &mut dyn io::BufRead,
     stderr: &mut dyn io::Write,
 ) -> CliResult<ProcessOutcome> {
-    ensure_compatibility(backend, provider, stdin, stderr)?;
-    let status = backend.revoke(provider)?;
-    require_revoked(
-        status,
-        "remote revocation did not reach a revoked credential state",
-    )?;
-    writeln!(
-        stderr,
-        "{}: remote credential revoked",
-        cli_provider_name(provider)
-    )
-    .map_err(|_| CliFailure::new("stderr failed"))?;
+    let name = cli_provider_name(provider);
+    let message = match backend.stored_credential(provider)? {
+        StoredCredential::Absent => {
+            retire_local(backend, provider)?;
+            format!("{name}: not logged in; nothing to log out")
+        }
+        StoredCredential::Unusable => {
+            retire_local(backend, provider)?;
+            format!(
+                "{name}: local credential retired; this build cannot use it, so it was not revoked at the provider and the remote grant may remain active"
+            )
+        }
+        StoredCredential::Usable(compatibility) => {
+            accept_compatibility_status(
+                backend,
+                provider,
+                Asker::Other,
+                compatibility,
+                stdin,
+                stderr,
+            )?;
+            let status = backend.revoke(provider)?;
+            require_revoked(
+                status,
+                "remote revocation did not reach a revoked credential state",
+            )?;
+            format!("{name}: remote credential revoked")
+        }
+    };
+    writeln!(stderr, "{message}").map_err(|_| CliFailure::new("stderr failed"))?;
     Ok(ProcessOutcome::Success)
+}
+
+fn retire_local(
+    backend: &mut impl AccountOps,
+    provider: NativeProvider,
+) -> CliResult<CredentialState> {
+    let status = backend.logout_local(provider)?;
+    require_locally_retired(
+        status,
+        "local logout did not reach a safely retired local credential state",
+    )?;
+    Ok(status)
 }
 
 /// `plak key set <account>`: cooked-mode hidden read, then a stored key file.

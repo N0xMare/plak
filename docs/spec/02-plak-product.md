@@ -1585,7 +1585,7 @@ version. There is no top-level prompt positional.
 | Command | Arguments and flags |
 | --- | --- |
 | `login [<codex\|grok\|claude>] [--remote]` | `grok` and `supergrok` name the SuperGrok vertical; bare `xai` is refused as ambiguous |
-| `logout [<account>] [--local]` | `--local` retires locally without a remote revoke |
+| `logout [<account>] [--local]` | revokes a usable credential, retires an unusable one locally; `--local` never contacts the provider |
 | `status [<account>]` | credential readiness; bare form reports every vertical |
 | `refresh [<account>]` | rotate one refreshable credential |
 | `key set\|clear <openai\|xai-api\|anthropic\|openrouter>`, `key status [<account>]` | `set` and `clear` refuse an account that is not an API-key account |
@@ -1799,7 +1799,7 @@ a secret, is never echoed.
 
 Every native-subscription failure carries its repair in the same line, after
 `; `: the exact command (`plak login <account>`, `plak refresh <account>`,
-`plak logout <account> --local`, `plak models <account>`), the network, or a
+`plak logout <account>`, `plak models <account>`), the network, or a
 newer build. A transport failure retains the typed network phase when known,
 and says `credential unchanged` only when no request bytes were sent. Refresh
 failure text names the account and advises retry when online, not signing in
@@ -5699,14 +5699,26 @@ the telemetry schema cannot be read.
 
 ### 8.5 Logout
 
-`plak logout <account>` performs a **remote revoke** where the provider offers
-one, and `--local` retires only the stored credential and its recovery marker.
-If a revision change makes a private selected-slot credential's profile foreign,
-status and login name the profile change and direct the operator to an explicit
-`plak logout <account> --local` followed by `plak login <account>`. On bare
-`plak status` that repair is the account's Setup needed row, and the other
-accounts are still listed. Local logout
-replaces the old record with a token-free revoked tombstone; reauthorization
+`plak logout <account>` first reads the local credential offline and never
+asks the operator to log in in order to log out:
+
+| Local credential | Action | Output |
+| --- | --- | --- |
+| ready or refresh required, compiled profile active | exact acceptance, then a **remote revoke** where the provider offers one | remote credential revoked |
+| quarantined, login required, foreign profile or retired payload format, or an inactive compiled profile | local retirement, no network I/O | retired locally; not revoked at the provider; the remote grant may remain active |
+| signed out or already revoked | local retirement of any recovery marker, no network I/O | nothing to log out |
+
+Every row exits 0. `--local` is the explicit "do not contact the provider"
+option: it retires only the stored credential and its recovery marker whatever
+the state, for example when the provider is unreachable. A failed remote
+revoke of a usable credential stays a failure; it never falls back to local
+retirement. If a revision change makes a private selected-slot credential's
+profile foreign, status and login name the profile change and direct the
+operator to `plak logout <account>` followed by `plak login <account>`; login
+itself does not discard the old record (chapter 04 §3.6). On bare `plak status`
+that repair is the account's Setup needed row, and the other accounts are still
+listed. Local retirement replaces the old record with a token-free revoked
+tombstone; reauthorization
 and exact compatibility acceptance are still required for the new profile.
 Codex and SuperGrok have a revoke endpoint; **Claude does not**, so a Claude
 logout retires locally and the grant stays live upstream until the operator
@@ -5725,7 +5737,7 @@ prints the same two facts for one account on one line.
 An OAuth account whose offline read fails is still a row, under Setup needed.
 Its PROFILE is `—` and its CREDENTIAL names the state and the repair from the
 same classification as other native-subscription failures: `Profile changed ·
-plak logout <account> --local, then plak login <account>` when the stored
+plak logout <account>, then plak login <account>` when the stored
 profile is foreign, `Unsafe storage · …` with the path and the mode repair the
 store inspection names, and that classification's repair text otherwise. When
 that unsafe-storage repair would exceed the 512-character cell cap, the cell is

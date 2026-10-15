@@ -455,7 +455,7 @@ quarantine and require a fresh login.
 A stored credential whose payload format this build retired (Claude records
 before the grant-bound format, SuperGrok version-2 payloads) is refused, never
 converted, and a claim that finds one restores it because nothing was sent;
-the repair is `plak logout <account> --local`, then `plak login <account>`
+the repair is `plak logout <account>`, then `plak login <account>`
 (chapter 01 §7).
 
 ### 3.4 Isolation between accounts and routes
@@ -582,7 +582,12 @@ Logout is local retirement or, where the provider offers one, a remote
 revocation. Where no remote revoke exists, logout retires the local credential
 and the grant stays live upstream until the user removes it in their provider
 account — the CLI does not pretend otherwise.
-An explicit local logout also retires a structurally valid selected-slot record
+`plak logout` retires a stored credential this build cannot use (quarantined,
+login required, foreign profile, retired format) locally rather than refusing,
+and says the remote grant may remain; it attempts a remote revoke only for a
+usable credential and never falls back to local retirement when that revoke
+fails. `--local` performs the local retirement without contacting the provider.
+Local retirement also retires a structurally valid selected-slot record
 from an older profile into an empty, current-profile revoked tombstone at the
 next generation. It never treats that old credential as valid for status,
 login, refresh, or dispatch. Wrong-slot, malformed, and unsafe records remain

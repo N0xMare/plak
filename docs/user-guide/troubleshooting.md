@@ -552,10 +552,13 @@ are directories you own and can write.
 A stored subscription credential uses a record format this build no longer
 reads. Claude logins made before the grant-bound record format are one case;
 Grok logins made before the current login selection format are another.
-Plak does not convert old records. Run the two commands the message names; the
-rest of the home is untouched. Bare `plak status` puts that repair on the
-account's Setup needed row (`Profile changed · plak logout <account> --local,
-then plak login <account>`) and still lists every other account, exiting 0.
+Plak does not convert old records. Run the two commands the message names:
+`plak logout <account>` retires the old record locally (this build cannot revoke
+it at the provider, so it says the old grant may remain active), then
+`plak login <account>` authorizes a fresh one. The rest of the home is
+untouched. Bare `plak status` puts that repair on the account's Setup needed
+row (`Profile changed · plak logout <account>, then plak login <account>`) and
+still lists every other account, exiting 0.
 `plak status <account>` and the other credential commands still print the
 repair on stderr and exit 3.
 

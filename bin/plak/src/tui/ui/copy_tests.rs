@@ -11,7 +11,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use unicode_width::UnicodeWidthStr as _;
 
-const SHELL: &str = "plak logout claude --local\n\n    plak logout codex --local";
+const SHELL: &str = "plak logout claude\n\n    plak logout codex";
 
 fn fenced(lang: &str, body: &str) -> String {
     if lang.is_empty() {
@@ -129,7 +129,7 @@ fn copying_a_fenced_block_drops_rails_and_keeps_lists_quotes_and_tables() {
     assert!(layout.copy[bash_lang].code.is_none());
     assert_eq!(
         layout.copy[claude[0]].code.as_deref(),
-        Some("plak logout claude --local")
+        Some("plak logout claude")
     );
     assert!(layout.copy[claude[0]].decoration > 2);
 

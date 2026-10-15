@@ -497,7 +497,7 @@ pub fn native_subscription_failure(
             "native compatibility receipt is invalid; {login} to accept the notice again"
         )),
         E::CredentialProfileChanged => auth(format!(
-            "native credential profile changed; run `plak logout {name} --local`, then `plak login {name}`"
+            "native credential profile changed; run `plak logout {name}`, then `plak login {name}`"
         )),
         E::CredentialUnavailable => auth(format!(
             "no ready {name} credential (signed out, quarantined or revoked); {login}"
@@ -595,7 +595,7 @@ pub(crate) fn oauth_status_failure_cell(
     let name = cli_provider_name(provider);
     match error {
         E::CredentialProfileChanged => {
-            format!("Profile changed · plak logout {name} --local, then plak login {name}")
+            format!("Profile changed · plak logout {name}, then plak login {name}")
         }
         E::CredentialUnavailable => {
             status_credential_cell(provider, CredentialState::LoginRequired)

@@ -88,12 +88,17 @@ and names this command.
 
 ### `plak logout <codex|grok|claude> [--local]`
 
-Retires the credential. `--local` clears the local copy without a remote revoke.
-Claude OAuth has no pinned remote revoke, so its logout is always local.
+Retires the credential. A usable credential is revoked at the provider first.
+A stored credential this build cannot use — quarantined, login required, from a
+changed profile or a retired format, or under an inactive compiled profile — is
+retired locally, and the output says the remote grant may remain active. With
+nothing stored, logout says there is nothing to log out. `--local` never
+contacts the provider: it retires the local copy without a remote revoke, for
+example when the provider cannot be reached. Claude OAuth has no pinned remote
+revoke, so its logout is always local.
 If a native profile changes, `plak status` or `plak login` may report a changed
-credential profile. Run `plak logout <account> --local`, then
-`plak login <account>` to accept the new notice and authorize a fresh grant.
-Local logout does not revoke the previous grant at the provider.
+credential profile. Run `plak logout <account>`, then `plak login <account>` to
+accept the new notice and authorize a fresh grant.
 
 ### `plak refresh <codex|grok|claude>`
 
@@ -146,7 +151,7 @@ Setup needed heading, and when none are there is no Ready heading.
 
 A provider whose local credential cannot be read is still listed, under Setup
 needed, and bare `plak status` still exits 0. CREDENTIAL then names the state
-and the repair, for example `Profile changed · plak logout claude --local, then
+and the repair, for example `Profile changed · plak logout claude, then
 plak login claude`, `Login required · plak login codex` for an earlier-build
 Codex login, or `Unsafe storage · …` with the chmod to run. A repair too long
 for the column is `Unsafe storage · run plak status <account> for the fix`;

@@ -21,7 +21,9 @@ use super::support::{
     product_state_roots_from,
 };
 use crate::home::paths as product_paths;
-use crate::presentation::{CliModelSummary, CliStatus, CredentialState, PresentationBackend};
+use crate::presentation::{
+    CliModelSummary, CliStatus, CompatibilityState, CredentialState, PresentationBackend,
+};
 use plakous_hosted::agent as product_agent;
 use plakous_hosted::error::{CliFailure, CliFailureKind, CliResult};
 use plakous_hosted::openrouter as product_openrouter;
@@ -48,6 +50,38 @@ pub enum LoginResponse<'a> {
     Automatic { timeout: std::time::Duration },
 }
 
+/// What `plak logout` finds in the local store, read offline.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StoredCredential {
+    /// Nothing stored, or already retired by an earlier logout.
+    Absent,
+    /// A credential the provider can still revoke, with the acceptance state
+    /// its remote revoke needs.
+    Usable(CompatibilityState),
+    /// A stored credential this build cannot use, so it cannot revoke it
+    /// remotely either: quarantined, login-required, from another profile, or
+    /// under an inactive compiled compatibility profile.
+    Unusable,
+}
+
+impl StoredCredential {
+    pub(crate) fn from_status(status: CliStatus) -> Self {
+        match status.credential {
+            CredentialState::SignedOut | CredentialState::Revoked => Self::Absent,
+            CredentialState::Ready | CredentialState::RefreshRequired
+                if status.compatibility != CompatibilityState::Inactive =>
+            {
+                Self::Usable(status.compatibility)
+            }
+            CredentialState::Ready
+            | CredentialState::RefreshRequired
+            | CredentialState::Quarantined
+            | CredentialState::LoginRequired
+            | CredentialState::Unsupported => Self::Unusable,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LoginOutcome {
     Completed(CredentialState),
@@ -61,6 +95,11 @@ pub trait AccountOps {
     fn notice(&self, provider: NativeProvider) -> CliNotice;
 
     fn offline_status(&mut self, provider: NativeProvider) -> CliResult<CliStatus>;
+
+    /// Offline classification for `plak logout`. A record this build refuses
+    /// (another profile or a retired payload format) is [`StoredCredential::Unusable`]
+    /// rather than a failure, because local retirement is its repair.
+    fn stored_credential(&mut self, provider: NativeProvider) -> CliResult<StoredCredential>;
 
     /// Offline status for the all-accounts table. A failure is that row's
     /// credential cell, not a reason to drop the other accounts.
@@ -277,6 +316,18 @@ enum OfflineReadError {
     Subscription(plakous::subscriptions::NativeSubscriptionError),
 }
 
+fn stored_credential_from(
+    read: Result<CliStatus, OfflineReadError>,
+) -> Result<StoredCredential, OfflineReadError> {
+    match read {
+        Ok(status) => Ok(StoredCredential::from_status(status)),
+        Err(OfflineReadError::Subscription(
+            plakous::subscriptions::NativeSubscriptionError::CredentialProfileChanged,
+        )) => Ok(StoredCredential::Unusable),
+        Err(error) => Err(error),
+    }
+}
+
 impl PlakousApplication {
     fn read_offline(&mut self, provider: NativeProvider) -> Result<CliStatus, OfflineReadError> {
         match self.executor.block_on(self.subscriptions.status(provider)) {
@@ -303,6 +354,16 @@ impl AccountOps for PlakousApplication {
 
     fn offline_status(&mut self, provider: NativeProvider) -> CliResult<CliStatus> {
         self.read_offline(provider).map_err(|error| match error {
+            OfflineReadError::Execution => application_execution_failure(()),
+            OfflineReadError::Subscription(error) => {
+                self.subscription_failure(error, Some(provider))
+            }
+        })
+    }
+
+    fn stored_credential(&mut self, provider: NativeProvider) -> CliResult<StoredCredential> {
+        let read = self.read_offline(provider);
+        stored_credential_from(read).map_err(|error| match error {
             OfflineReadError::Execution => application_execution_failure(()),
             OfflineReadError::Subscription(error) => {
                 self.subscription_failure(error, Some(provider))
@@ -486,5 +547,30 @@ impl PresentationBackend for PlakousApplication {
 
     fn models(&mut self, provider: NativeProvider) -> CliResult<Vec<CliModelSummary>> {
         AccountOps::models(self, provider)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use plakous::subscriptions::NativeSubscriptionError;
+
+    use super::{OfflineReadError, StoredCredential, stored_credential_from};
+
+    #[test]
+    fn logout_reads_a_foreign_or_retired_record_as_unusable_not_a_failure() {
+        assert!(matches!(
+            stored_credential_from(Err(OfflineReadError::Subscription(
+                NativeSubscriptionError::CredentialProfileChanged
+            ))),
+            Ok(StoredCredential::Unusable)
+        ));
+        assert!(matches!(
+            stored_credential_from(Err(OfflineReadError::Subscription(
+                NativeSubscriptionError::UnsafeStorage
+            ))),
+            Err(OfflineReadError::Subscription(
+                NativeSubscriptionError::UnsafeStorage
+            ))
+        ));
     }
 }

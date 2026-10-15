@@ -3,7 +3,14 @@ plak logout — retire OAuth credentials
 USAGE:
   plak logout <codex|grok|claude> [--local]
 
-OPTIONS:
-  --local   Clear local only (no remote revoke)
+DESCRIPTION:
+  Revokes a usable credential at the provider, then retires it locally.
+  A credential this build cannot use (quarantined, login required, changed
+  profile) is retired locally; its remote grant may remain active.
+  With nothing stored, says there is nothing to log out.
 
+OPTIONS:
+  --local   Do not contact the provider; retire the local credential only
+
+NOTES:
   Claude OAuth has no pinned remote revoke; logout retires the local credential.

@@ -1615,8 +1615,8 @@ Ready.
 | plakous/ | facade |
 
 ```bash
-plak logout claude --local
-    plak logout codex --local
+plak logout claude
+    plak logout codex
 ```
 ";
         let (lines, copy) = render_markdown_rows(source, 60, &MarkdownTheme::default());
@@ -1661,15 +1661,9 @@ plak logout claude --local
             text(claude)
         );
         assert_eq!(copy[claude].decoration, 2);
-        assert_eq!(
-            copy[claude].code.as_deref(),
-            Some("plak logout claude --local")
-        );
+        assert_eq!(copy[claude].code.as_deref(), Some("plak logout claude"));
         let codex = at("plak logout codex");
-        assert_eq!(
-            copy[codex].code.as_deref(),
-            Some("    plak logout codex --local")
-        );
+        assert_eq!(copy[codex].code.as_deref(), Some("    plak logout codex"));
 
         let clipped_line = "let x = collection.iter().map(|item| item.value).sum::<u64>();";
         let (clipped, clipped_copy) = render_markdown_rows(
