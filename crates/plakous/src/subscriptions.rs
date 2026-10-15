@@ -44,7 +44,7 @@ use std::error::Error;
 use std::fmt;
 use std::future::Future;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 // The product's per-model operation budget is 300 seconds. Native inference
 // must not silently inherit the shorter provider-library API default.
@@ -761,8 +761,9 @@ impl NativeModelCatalog {
 pub enum NativeLoginMode {
     /// Authorization-code-with-PKCE through a fixed loopback callback.
     Browser,
-    /// Authorization-code-with-PKCE completed by pasting the final redirect URL.
-    RemoteBrowser,
+    /// The browser runs on another machine: Codex uses the device-code flow;
+    /// xAI and Claude complete with the code their hosted page displays.
+    Remote,
 }
 
 /// How one displayed native-login instruction is completed.
@@ -770,8 +771,9 @@ pub enum NativeLoginMode {
 pub enum NativeLoginCompletion {
     /// The provider loopback callback completes without more input.
     Automatic,
-    /// The operator must paste the complete final redirect URL.
-    RedirectUrl,
+    /// The operator enters the displayed one-time code at the verification
+    /// URL; completion polls the provider without more local input.
+    DeviceCode,
     /// The operator may paste the displayed authorization code or final URL.
     AuthorizationCodeOrRedirectUrl,
 }
@@ -783,6 +785,37 @@ pub enum NativeLoginCompletion {
 pub struct NativeLoginInstructions<'a> {
     verification_uri: &'a str,
     completion: NativeLoginCompletion,
+    device_code: Option<NativeDeviceCode<'a>>,
+}
+
+/// The one-time code of a pending device-code login.
+///
+/// The code is short-lived and shown only to the operator who started the
+/// login. Debug output is redacted.
+#[derive(Clone, Copy)]
+pub struct NativeDeviceCode<'a> {
+    user_code: &'a str,
+    deadline: Instant,
+}
+
+impl NativeDeviceCode<'_> {
+    /// Returns the code the operator enters at the verification URL.
+    #[must_use]
+    pub const fn user_code(&self) -> &str {
+        self.user_code
+    }
+
+    /// Returns how long the code stays valid from now.
+    #[must_use]
+    pub fn expires_in(&self) -> Duration {
+        self.deadline.saturating_duration_since(Instant::now())
+    }
+}
+
+impl fmt::Debug for NativeDeviceCode<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("NativeDeviceCode(<redacted one-time code>)")
+    }
 }
 
 impl NativeLoginInstructions<'_> {
@@ -792,10 +825,18 @@ impl NativeLoginInstructions<'_> {
         self.verification_uri
     }
 
-    /// Returns whether completion is automatic or needs a pasted redirect URL.
+    /// Returns whether completion is automatic, polls a device code, or needs
+    /// pasted input.
     #[must_use]
     pub const fn completion(&self) -> NativeLoginCompletion {
         self.completion
+    }
+
+    /// Returns the one-time code when completion is
+    /// [`NativeLoginCompletion::DeviceCode`].
+    #[must_use]
+    pub const fn device_code(&self) -> Option<NativeDeviceCode<'_>> {
+        self.device_code
     }
 }
 
@@ -951,9 +992,9 @@ enum PendingNativeLoginKind {
         manager: Arc<plakous_openai::CodexSubscriptionCredentialManager>,
         login: plakous_openai::CodexBrowserLogin,
     },
-    CodexRemote {
+    CodexDevice {
         manager: Arc<plakous_openai::CodexSubscriptionCredentialManager>,
-        login: plakous_openai::CodexRemoteBrowserLogin,
+        login: plakous_openai::CodexDeviceLogin,
     },
     XaiRemote(plakous_xai::XaiRemoteBrowserLogin),
     Claude(plakous_anthropic::ClaudeOAuthLogin),
@@ -967,24 +1008,33 @@ impl PendingNativeLogin {
             PendingNativeLoginKind::CodexLocal { login, .. } => NativeLoginInstructions {
                 verification_uri: login.authorization_url(),
                 completion: NativeLoginCompletion::Automatic,
+                device_code: None,
             },
-            PendingNativeLoginKind::CodexRemote { login, .. } => NativeLoginInstructions {
-                verification_uri: login.authorization_url(),
-                completion: NativeLoginCompletion::RedirectUrl,
+            PendingNativeLoginKind::CodexDevice { login, .. } => NativeLoginInstructions {
+                verification_uri: login.verification_url(),
+                completion: NativeLoginCompletion::DeviceCode,
+                device_code: Some(NativeDeviceCode {
+                    user_code: login.user_code(),
+                    deadline: login.deadline(),
+                }),
             },
             PendingNativeLoginKind::XaiRemote(login) => NativeLoginInstructions {
                 verification_uri: login.authorization_url(),
                 completion: NativeLoginCompletion::AuthorizationCodeOrRedirectUrl,
+                device_code: None,
             },
             PendingNativeLoginKind::Claude(login) => NativeLoginInstructions {
                 verification_uri: login.authorization_url(),
                 completion: NativeLoginCompletion::AuthorizationCodeOrRedirectUrl,
+                device_code: None,
             },
         }
     }
 
     /// Consumes the pending operation, validates the provider identity, and
-    /// commits a Ready selected credential.
+    /// commits a Ready selected credential. A device-code login first waits
+    /// for the operator's approval without touching local state, so dropping
+    /// the future while it waits leaves no credential and no login recovery.
     ///
     /// The exact local compatibility-acceptance bytes captured when login
     /// began are revalidated immediately before provider completion and again
@@ -997,25 +1047,47 @@ impl PendingNativeLogin {
     /// Returns a redacted authentication, transport, profile, or storage error.
     pub async fn complete(self) -> Result<NativeAuthStatus, NativeSubscriptionError> {
         let Self { inner, consent } = self;
-        complete_pending_with_consent(&consent, unix_now, || async move {
-            match inner {
-                PendingNativeLoginKind::CodexLocal { manager, login } => manager
-                    .complete_browser_login(login)
-                    .await
-                    .map(map_codex_status)
-                    .map_err(map_codex_error),
-                PendingNativeLoginKind::CodexRemote { .. }
-                | PendingNativeLoginKind::XaiRemote(_)
-                | PendingNativeLoginKind::Claude(_) => Err(NativeSubscriptionError::Internal),
+        match inner {
+            PendingNativeLoginKind::CodexLocal { manager, login } => {
+                complete_pending_with_consent(&consent, unix_now, || async move {
+                    manager
+                        .complete_browser_login(login)
+                        .await
+                        .map(map_codex_status)
+                        .map_err(map_codex_error)
+                })
+                .await
             }
-        })
-        .await
+            PendingNativeLoginKind::CodexDevice { manager, login } => {
+                let poller = Arc::clone(&manager);
+                Box::pin(complete_approved_with_consent(
+                    &consent,
+                    unix_now,
+                    async move {
+                        poller
+                            .poll_device_authorization(login)
+                            .await
+                            .map_err(map_codex_error)
+                    },
+                    |authorization| async move {
+                        manager
+                            .complete_device_authorization(authorization)
+                            .await
+                            .map(map_codex_status)
+                            .map_err(map_codex_error)
+                    },
+                ))
+                .await
+            }
+            PendingNativeLoginKind::XaiRemote(_) | PendingNativeLoginKind::Claude(_) => {
+                Err(NativeSubscriptionError::Internal)
+            }
+        }
     }
 
     /// Completes one paste-complete browser login from the provider's result.
     ///
-    /// Codex remote validates its exact callback URL and state. xAI (local and
-    /// remote) accepts the displayed Grok Build authorization code or exact
+    /// xAI (local and remote) accepts the displayed Grok Build authorization code or exact
     /// callback URL — xAI's hosted page does not complete via loopback.
     /// Claude accepts the HTTPS callback URL, `code=` query, `code#state`, or
     /// a bare authorization code. Attempt-owned PKCE is retained.
@@ -1030,11 +1102,6 @@ impl PendingNativeLogin {
         let Self { inner, consent } = self;
         complete_pending_with_consent(&consent, unix_now, || async move {
             match inner {
-                PendingNativeLoginKind::CodexRemote { manager, login } => manager
-                    .complete_remote_browser_login(login, authorization_input)
-                    .await
-                    .map(map_codex_status)
-                    .map_err(map_codex_error),
                 PendingNativeLoginKind::XaiRemote(login) => login
                     .complete(authorization_input)
                     .await
@@ -1045,11 +1112,32 @@ impl PendingNativeLogin {
                     .await
                     .map(|status| map_credential_status(status.status()))
                     .map_err(map_claude_error),
-                PendingNativeLoginKind::CodexLocal { .. } => Err(NativeSubscriptionError::Internal),
+                PendingNativeLoginKind::CodexLocal { .. }
+                | PendingNativeLoginKind::CodexDevice { .. } => {
+                    Err(NativeSubscriptionError::Internal)
+                }
             }
         })
         .await
     }
+}
+
+/// Waits for an out-of-band approval before any local state changes, then
+/// completes it under the same consent, lock and recovery rules as every login.
+async fn complete_approved_with_consent<A, T, F, Fut, C>(
+    consent: &PendingCompatibilityConsent,
+    now: C,
+    approval: A,
+    operation: F,
+) -> Result<NativeAuthStatus, NativeSubscriptionError>
+where
+    A: Future<Output = Result<T, NativeSubscriptionError>>,
+    F: FnOnce(T) -> Fut,
+    Fut: Future<Output = Result<NativeAuthStatus, NativeSubscriptionError>>,
+    C: FnMut() -> Result<u64, NativeSubscriptionError>,
+{
+    let approved = approval.await?;
+    complete_pending_with_consent(consent, now, || operation(approved)).await
 }
 
 async fn complete_pending_with_consent<F, Fut, C>(
@@ -1500,7 +1588,7 @@ impl NativeSubscriptions {
         })
     }
 
-    /// Starts one exact local or remote-browser login after compatibility admission.
+    /// Starts one exact local or remote login after compatibility admission.
     ///
     /// # Errors
     ///
@@ -1547,9 +1635,10 @@ impl NativeSubscriptions {
                             .map_err(map_codex_error)?,
                         manager,
                     },
-                    NativeLoginMode::RemoteBrowser => PendingNativeLoginKind::CodexRemote {
+                    NativeLoginMode::Remote => PendingNativeLoginKind::CodexDevice {
                         login: manager
-                            .begin_remote_browser_login()
+                            .begin_device_login()
+                            .await
                             .map_err(map_codex_error)?,
                         manager,
                     },
@@ -1567,7 +1656,7 @@ impl NativeSubscriptions {
                 // xAI's hosted page always shows a code to paste into Grok Build,
                 // local or remote. Do not bind or wait on loopback.
                 let inner = match mode {
-                    NativeLoginMode::Browser | NativeLoginMode::RemoteBrowser => {
+                    NativeLoginMode::Browser | NativeLoginMode::Remote => {
                         PendingNativeLoginKind::XaiRemote(
                             online
                                 .manager

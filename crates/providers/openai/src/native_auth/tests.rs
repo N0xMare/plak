@@ -904,7 +904,7 @@ async fn assert_device_login_stall_expires(phase: LoginStallPhase) -> TestResult
     let deadline = Instant::now() + Duration::from_secs(20);
     let login = device_login_for_deadline_test(deadline);
     let worker_manager = Arc::clone(&manager);
-    let completion = tokio::spawn(async move { worker_manager.complete_device_login(login).await });
+    let completion = tokio::spawn(async move { complete_device(&worker_manager, login).await });
     let outcome = expire_observed_login_stall(completion, stalled, deadline).await?;
     assert_eq!(outcome, Err(phase.expected_error()), "{phase:?}");
     let requests = tokio::time::timeout(Duration::from_secs(2), server).await???;
@@ -4556,7 +4556,7 @@ async fn device_jwks_userinfo_catalog_and_lite_inference_are_exact() -> TestResu
     assert!(login.verification_url().ends_with(DEVICE_VERIFICATION_PATH));
     assert_eq!(login.user_code(), "ABCD-1234");
     assert_eq!(
-        manager.complete_device_login(login).await?,
+        complete_device(&manager, login).await?,
         CodexCredentialStatus::Ready
     );
     let resolver = CodexModelResolver::new_for_test(
@@ -4906,7 +4906,7 @@ async fn browser_and_device_deadlines_bound_near_expiry_lifecycle_waits() -> Tes
     let device_login = device_login_for_deadline_test(Instant::now() + Duration::from_millis(200));
     let worker_manager = Arc::clone(&device_manager);
     let device_completion =
-        tokio::spawn(async move { worker_manager.complete_device_login(device_login).await });
+        tokio::spawn(async move { complete_device(&worker_manager, device_login).await });
     assert_eq!(device_server.await??.len(), 1);
     let device_outcome = tokio::time::timeout(Duration::from_secs(2), device_completion).await??;
     assert_eq!(device_outcome, Err(NativeCodexAuthError::Provider));
@@ -4942,110 +4942,262 @@ async fn expired_commit_and_stalled_callback_writer_are_fail_closed_and_bounded(
     Ok(())
 }
 
+const DEVICE_TEST_VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+const DEVICE_TEST_CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+
+fn device_code_reply(authorization_code: &str) -> TestResult<Vec<u8>> {
+    Ok(response(
+        "200 OK",
+        "application/json",
+        &serde_json::to_vec(&serde_json::json!({
+            "authorization_code": authorization_code,
+            "code_challenge": DEVICE_TEST_CHALLENGE,
+            "code_verifier": DEVICE_TEST_VERIFIER
+        }))?,
+        "",
+    ))
+}
+
+fn device_pending_reply(status: &str) -> Vec<u8> {
+    response(status, "application/json", br#"{"error":"pending"}"#, "")
+}
+
+async fn complete_device(
+    manager: &CodexSubscriptionCredentialManager,
+    login: CodexDeviceLogin,
+) -> Result<CodexCredentialStatus, NativeCodexAuthError> {
+    let authorization = manager.poll_device_authorization(login).await?;
+    manager.complete_device_authorization(authorization).await
+}
+
 #[tokio::test]
-async fn remote_browser_login_is_listener_free_pinned_and_state_bound() -> TestResult {
-    let _browser_test = BROWSER_TEST_LOCK.lock().await;
-    // The pinned callback ports are held for the whole flow; a bind refused
-    // because another process already holds one leaves it just as occupied.
-    let _callback_ports = (
-        TcpListener::bind(("127.0.0.1", 1455)).await.ok(),
-        TcpListener::bind(("127.0.0.1", 1457)).await.ok(),
-    );
+async fn device_user_code_not_found_is_typed_unavailable() -> TestResult {
     let endpoint = test_endpoint().await?;
     let (_directory, slot) = private_slot()?;
     let manager = manager_for_endpoint(&slot, &endpoint)?;
-    let login = manager.begin_remote_browser_login()?;
-    let authorization = Url::parse(login.authorization_url())?;
-    let expected_challenge = login.attempt.pkce.challenge().as_str().to_owned();
-    let expected_verifier = login.attempt.pkce.verifier().expose_secret().to_owned();
-    assert_eq!(
-        authorization
-            .query_pairs()
-            .find(|(key, _)| key == "redirect_uri")
-            .map(|(_, value)| value.into_owned()),
-        Some(REMOTE_BROWSER_REDIRECT_URI.to_owned())
-    );
-    assert!(authorization.query_pairs().all(|(key, _)| key != "nonce"));
-    assert_eq!(
-        authorization_query_value(&authorization, "code_challenge")?,
-        expected_challenge
-    );
-    assert_eq!(
-        authorization_query_value(&authorization, "code_challenge_method")?,
-        "S256"
-    );
-    let state = authorization_query_value(&authorization, "state")?;
-    let token = id_token(TEST_KID, "subject-remote-browser", "account-remote-browser")?;
-    let server = spawn_sequence_then_probe(
+    let server = spawn_sequence(
         endpoint,
-        vec![
-            response(
-                "200 OK",
-                "application/json",
-                &token_body(
-                    &token,
-                    "opaque-access-remote-browser",
-                    "refresh-remote-browser",
-                    3_600,
-                )?,
-                "",
-            ),
-            response(
-                "200 OK",
-                "application/json",
-                &jwks_body(TEST_KID, TEST_MODULUS)?,
-                "Cache-Control: max-age=300\r\n",
-            ),
-            response(
-                "200 OK",
-                "application/json",
-                br#"{"sub":"subject-remote-browser"}"#,
-                "",
-            ),
-        ],
+        vec![response("404 Not Found", "text/plain", b"not found", "")],
     );
-    let callback_query = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("code", "remote-browser-code")
-        .append_pair("scope", OPENAI_CODEX_OAUTH_SCOPES)
-        .append_pair("state", &state)
-        .finish();
-    let full_redirect_url = format!("{REMOTE_BROWSER_REDIRECT_URI}?{callback_query}");
     assert_eq!(
-        manager
-            .complete_remote_browser_login(login, &full_redirect_url)
-            .await?,
-        CodexCredentialStatus::Ready
+        manager.begin_device_login().await.err(),
+        Some(NativeCodexAuthError::DeviceLoginUnavailable)
     );
-    assert_eq!(manager.status()?, CodexCredentialStatus::Ready);
-
-    let second_login = manager.begin_remote_browser_login()?;
-    assert_eq!(
-        manager
-            .complete_remote_browser_login(second_login, &full_redirect_url)
-            .await,
-        Err(NativeCodexAuthError::Callback)
+    let requests = server.await??;
+    assert!(
+        std::str::from_utf8(&requests[0])?
+            .starts_with("POST /api/accounts/deviceauth/usercode HTTP/1.1\r\n")
     );
-    assert_eq!(manager.status()?, CodexCredentialStatus::Ready);
-    let (requests, unexpected_connection) = server.await??;
-    assert_eq!(requests.len(), 3);
-    assert!(!unexpected_connection);
-    let token_request = std::str::from_utf8(&requests[0])?;
-    assert!(token_request.starts_with("POST /oauth/token HTTP/1.1\r\n"));
-    assert!(!token_request.contains("originator:"));
-    assert!(token_request.contains("redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback"));
-    assert!(token_request.contains(&format!("code_verifier={expected_verifier}")));
+    assert_eq!(manager.status()?, CodexCredentialStatus::SignedOut);
     Ok(())
 }
 
 #[tokio::test]
-async fn remote_browser_login_cannot_resurrect_a_concurrent_logout() -> TestResult {
+async fn device_login_shows_url_code_and_expiry_and_redacts_secrets() -> TestResult {
     let endpoint = test_endpoint().await?;
     let (_directory, slot) = private_slot()?;
     let manager = manager_for_endpoint(&slot, &endpoint)?;
-    let login = manager.begin_remote_browser_login()?;
-    let authorization = Url::parse(login.authorization_url())?;
-    assert!(authorization.query_pairs().all(|(key, _)| key != "nonce"));
-    let state = authorization_query_value(&authorization, "state")?;
+    let server = spawn_sequence(
+        endpoint,
+        vec![response(
+            "200 OK",
+            "application/json",
+            br#"{"device_auth_id":"device-secret-id","usercode":"WXYZ-9876","interval":"5","expires_at":"ignored"}"#,
+            "",
+        )],
+    );
+    let login = manager.begin_device_login().await?;
+    let requests = server.await??;
+    let request = std::str::from_utf8(&requests[0])?;
+    assert!(request.contains(&format!(
+        r#"{{"client_id":"{OPENAI_CODEX_NATIVE_CLIENT_ID}"}}"#
+    )));
+    let verification = Url::parse(login.verification_url())?;
+    assert_eq!(verification.path(), DEVICE_VERIFICATION_PATH);
+    assert_eq!(login.user_code(), "WXYZ-9876");
+    assert_eq!(login.interval, Duration::from_secs(5));
+    let expires_in = login.deadline().saturating_duration_since(Instant::now());
+    assert!(
+        expires_in <= DEVICE_DEADLINE && expires_in + Duration::from_secs(60) > DEVICE_DEADLINE
+    );
+    let debug = format!("{login:?}");
+    assert!(!debug.contains("device-secret-id") && !debug.contains("WXYZ-9876"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn device_interval_is_floored_at_one_second_and_bounded_above() -> TestResult {
+    for (interval, expected) in [("0", Some(1)), (" 2 ", Some(2)), ("31", None), ("x", None)] {
+        let endpoint = test_endpoint().await?;
+        let (_directory, slot) = private_slot()?;
+        let manager = manager_for_endpoint(&slot, &endpoint)?;
+        let body = serde_json::to_vec(&serde_json::json!({
+            "device_auth_id": "device-interval",
+            "user_code": "ABCD-1234",
+            "interval": interval,
+        }))?;
+        let server = spawn_sequence(
+            endpoint,
+            vec![response("200 OK", "application/json", &body, "")],
+        );
+        let begun = manager.begin_device_login().await;
+        server.await??;
+        match expected {
+            Some(seconds) => assert_eq!(begun?.interval, Duration::from_secs(seconds)),
+            None => assert_eq!(begun.err(), Some(NativeCodexAuthError::Validation)),
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn device_poll_waits_out_pending_statuses_then_exchanges_at_device_redirect() -> TestResult {
+    let endpoint = test_endpoint().await?;
+    let origin = endpoint.origin.clone();
+    let (_directory, slot) = private_slot()?;
+    let manager = manager_for_endpoint(&slot, &endpoint)?;
+    let mut replies = vec![
+        response(
+            "200 OK",
+            "application/json",
+            br#"{"device_auth_id":"device-poll-id","user_code":"ABCD-1234","interval":"0"}"#,
+            "",
+        ),
+        device_pending_reply("403 Forbidden"),
+        device_pending_reply("404 Not Found"),
+        device_code_reply("device-poll-code")?,
+    ];
+    replies.extend(browser_login_responses(
+        "device-poll-subject",
+        "device-poll-account",
+        "device-poll",
+    )?);
+    let server = spawn_sequence(endpoint, replies);
+    let login = manager.begin_device_login().await?;
+    let started = Instant::now();
+    let authorization = manager.poll_device_authorization(login).await?;
+    // Two pending answers at the one-second floor.
+    assert!(started.elapsed() >= Duration::from_secs(2));
+    assert!(!format!("{authorization:?}").contains("device-poll-code"));
+    assert_eq!(manager.status()?, CodexCredentialStatus::SignedOut);
+    assert_eq!(
+        manager.complete_device_authorization(authorization).await?,
+        CodexCredentialStatus::Ready
+    );
+    let requests = server.await??;
+    assert_eq!(requests.len(), 7);
+    for poll in &requests[1..4] {
+        let poll = std::str::from_utf8(poll)?;
+        assert!(poll.starts_with("POST /api/accounts/deviceauth/token HTTP/1.1\r\n"));
+        assert!(poll.ends_with(r#"{"device_auth_id":"device-poll-id","user_code":"ABCD-1234"}"#));
+    }
+    let token_request = std::str::from_utf8(&requests[4])?;
+    assert!(token_request.starts_with("POST /oauth/token HTTP/1.1\r\n"));
+    assert!(token_request.contains("grant_type=authorization_code"));
+    assert!(token_request.contains("code=device-poll-code"));
+    let device_redirect: String = url::form_urlencoded::byte_serialize(
+        endpoint_url(&origin, DEVICE_REDIRECT_PATH)?
+            .as_str()
+            .as_bytes(),
+    )
+    .collect();
+    assert!(token_request.contains(&format!("redirect_uri={device_redirect}")));
+    assert!(token_request.contains(&format!("code_verifier={DEVICE_TEST_VERIFIER}")));
+    Ok(())
+}
+
+#[tokio::test]
+async fn device_poll_expiry_is_typed_and_stores_nothing() -> TestResult {
+    let endpoint = test_endpoint().await?;
+    let (_directory, slot) = private_slot()?;
+    let manager = manager_for_endpoint(&slot, &endpoint)?;
+    let server = spawn_sequence(endpoint, vec![device_pending_reply("403 Forbidden")]);
+    let mut login = device_login_for_deadline_test(Instant::now() + Duration::from_millis(300));
+    login.interval = Duration::from_secs(1);
+    assert_eq!(
+        manager.poll_device_authorization(login).await.err(),
+        Some(NativeCodexAuthError::DeviceCodeExpired)
+    );
+    assert_eq!(server.await??.len(), 1);
+    assert_eq!(manager.status()?, CodexCredentialStatus::SignedOut);
+    assert!(manager.store.load()?.is_none());
+
+    let expired = device_login_for_deadline_test(Instant::now());
+    assert_eq!(
+        manager.poll_device_authorization(expired).await.err(),
+        Some(NativeCodexAuthError::DeviceCodeExpired)
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn device_poll_cancelled_while_pending_stores_nothing() -> TestResult {
+    let endpoint = test_endpoint().await?;
+    let (_directory, slot) = private_slot()?;
+    let manager = manager_for_endpoint(&slot, &endpoint)?;
+    let server = spawn_sequence(endpoint, vec![device_pending_reply("403 Forbidden")]);
+    let mut login = device_login_for_deadline_test(Instant::now() + Duration::from_secs(60));
+    login.interval = Duration::from_secs(30);
+    let poll = manager.poll_device_authorization(login);
+    assert!(
+        tokio::time::timeout(Duration::from_secs(2), poll)
+            .await
+            .is_err()
+    );
+    assert_eq!(server.await??.len(), 1);
+    assert_eq!(manager.status()?, CodexCredentialStatus::SignedOut);
+    assert!(manager.store.load()?.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn device_poll_rejects_unexpected_status_and_mismatched_challenge() -> TestResult {
+    let endpoint = test_endpoint().await?;
+    let (_directory, slot) = private_slot()?;
+    let manager = manager_for_endpoint(&slot, &endpoint)?;
+    let mismatched = response(
+        "200 OK",
+        "application/json",
+        &serde_json::to_vec(&serde_json::json!({
+            "authorization_code": "device-mismatch-code",
+            "code_challenge": DEVICE_TEST_CHALLENGE.replace('E', "F"),
+            "code_verifier": DEVICE_TEST_VERIFIER
+        }))?,
+        "",
+    );
+    let server = spawn_sequence(
+        endpoint,
+        vec![
+            response("500 Internal Server Error", "text/plain", b"no", ""),
+            mismatched,
+        ],
+    );
+    let deadline = Instant::now() + Duration::from_secs(20);
+    assert_eq!(
+        manager
+            .poll_device_authorization(device_login_for_deadline_test(deadline))
+            .await
+            .err(),
+        Some(NativeCodexAuthError::Provider)
+    );
+    assert_eq!(
+        manager
+            .poll_device_authorization(device_login_for_deadline_test(deadline))
+            .await
+            .err(),
+        Some(NativeCodexAuthError::Validation)
+    );
+    assert_eq!(server.await??.len(), 2);
+    assert_eq!(manager.status()?, CodexCredentialStatus::SignedOut);
+    Ok(())
+}
+
+#[tokio::test]
+async fn device_login_cannot_resurrect_a_concurrent_logout() -> TestResult {
+    let endpoint = test_endpoint().await?;
+    let (_directory, slot) = private_slot()?;
+    let manager = manager_for_endpoint(&slot, &endpoint)?;
+    let login = device_login_for_deadline_test(Instant::now() + Duration::from_secs(20));
 
     seed_ready_credential(
         &slot,
@@ -5059,30 +5211,19 @@ async fn remote_browser_login_cannot_resurrect_a_concurrent_logout() -> TestResu
         .ok_or("concurrent credential missing")?;
     manager.store.logout(concurrent.generation())?;
 
-    let server = spawn_sequence(
-        endpoint,
-        browser_login_responses(
-            "stale-remote-subject",
-            "stale-remote-account",
-            "stale-remote",
-        )?,
-    );
-    let callback_query = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("code", "stale-remote-code")
-        .append_pair("scope", OPENAI_CODEX_OAUTH_SCOPES)
-        .append_pair("state", &state)
-        .finish();
+    let mut replies = vec![device_code_reply("stale-device-code")?];
+    replies.extend(browser_login_responses(
+        "stale-device-subject",
+        "stale-device-account",
+        "stale-device",
+    )?);
+    let server = spawn_sequence(endpoint, replies);
     assert_eq!(
-        manager
-            .complete_remote_browser_login(
-                login,
-                &format!("{REMOTE_BROWSER_REDIRECT_URI}?{callback_query}"),
-            )
-            .await,
+        complete_device(&manager, login).await,
         Err(NativeCodexAuthError::LoginPersistence)
     );
     assert_eq!(manager.status()?, CodexCredentialStatus::Revoked);
-    assert_eq!(server.await??.len(), 3);
+    assert_eq!(server.await??.len(), 4);
     Ok(())
 }
 
@@ -5137,64 +5278,6 @@ async fn local_browser_login_rejects_concurrent_credential_rotation() -> TestRes
     let current = manager.store.load()?.ok_or("rotated credential missing")?;
     assert_eq!(current, rotated);
     assert_eq!(manager.status()?, CodexCredentialStatus::Ready);
-    Ok(())
-}
-
-#[tokio::test]
-async fn remote_browser_provider_error_and_expiry_stop_before_transport() -> TestResult {
-    let endpoint = test_endpoint().await?;
-    let (_directory, slot) = private_slot()?;
-    let manager = manager_for_endpoint(&slot, &endpoint)?;
-
-    let provider_error_login = manager.begin_remote_browser_login()?;
-    let provider_error_authorization = Url::parse(provider_error_login.authorization_url())?;
-    let provider_error_state = provider_error_authorization
-        .query_pairs()
-        .find(|(key, _)| key == "state")
-        .map(|(_, value)| value.into_owned())
-        .ok_or("missing state")?;
-    let provider_error_query = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("error", "access_denied")
-        .append_pair("error_description", "cancelled")
-        .append_pair("state", &provider_error_state)
-        .finish();
-    assert_eq!(
-        manager
-            .complete_remote_browser_login(
-                provider_error_login,
-                &format!("{REMOTE_BROWSER_REDIRECT_URI}?{provider_error_query}"),
-            )
-            .await,
-        Err(NativeCodexAuthError::Provider)
-    );
-
-    let mut expired_login = manager.begin_remote_browser_login()?;
-    let expired_authorization = Url::parse(expired_login.authorization_url())?;
-    let expired_state = expired_authorization
-        .query_pairs()
-        .find(|(key, _)| key == "state")
-        .map(|(_, value)| value.into_owned())
-        .ok_or("missing state")?;
-    expired_login.attempt.deadline = Instant::now();
-    let expired_query = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("code", "expired-code")
-        .append_pair("state", &expired_state)
-        .finish();
-    assert_eq!(
-        manager
-            .complete_remote_browser_login(
-                expired_login,
-                &format!("{REMOTE_BROWSER_REDIRECT_URI}?{expired_query}"),
-            )
-            .await,
-        Err(NativeCodexAuthError::Callback)
-    );
-    assert_eq!(manager.status()?, CodexCredentialStatus::SignedOut);
-    assert!(
-        tokio::time::timeout(Duration::from_millis(100), endpoint.listener.accept())
-            .await
-            .is_err()
-    );
     Ok(())
 }
 
@@ -6189,10 +6272,6 @@ fn public_constants_are_backed_by_shared_oauth_pin_tables() {
         CODEX_OAUTH.device_redirect_path.unwrap()
     );
     assert_eq!(BROWSER_CALLBACK_PATH, CODEX_OAUTH.browser_callback_path);
-    assert_eq!(
-        REMOTE_BROWSER_REDIRECT_URI,
-        CODEX_OAUTH.loopback_redirect_uri
-    );
     assert_eq!(PROFILE_REVIEWED_AT, CODEX_PROFILE.reviewed_at_unix);
     assert_eq!(PROFILE_EXPIRES_AT, CODEX_PROFILE.expires_at_unix);
     assert_eq!(PROFILE_KILLED, CODEX_PROFILE.killed);
@@ -6373,64 +6452,6 @@ fn strict_parsers_accept_exact_callback_scopes_and_reject_drift() -> TestResult 
         Ok(OAuthCallbackOutcome::ProviderError { .. })
     ));
     Ok(())
-}
-
-#[test]
-fn remote_browser_callback_url_requires_exact_reviewed_origin_path_and_query() {
-    let state = "01234567890123456789012345678901";
-    let parse_remote = |input: &str| {
-        parse_remote_authorization_input(
-            input,
-            state,
-            REMOTE_BROWSER_REDIRECT_URI,
-            codex_callback_policy(),
-        )
-    };
-    let success_query = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("code", "authorization-code")
-        .append_pair("scope", OPENAI_CODEX_OAUTH_SCOPES)
-        .append_pair("state", state)
-        .finish();
-    assert!(parse_remote(&format!("{REMOTE_BROWSER_REDIRECT_URI}?{success_query}")).is_ok());
-    assert!(matches!(
-        parse_remote(&format!(
-            "{REMOTE_BROWSER_REDIRECT_URI}?error=access_denied&error_description=cancelled&state={state}"
-        )),
-        Ok(OAuthCallbackOutcome::ProviderError { .. })
-    ));
-
-    let invalid = [
-        format!("/auth/callback?code=x&state={state}"),
-        format!("https://localhost:1455/auth/callback?code=x&state={state}"),
-        format!("http://127.0.0.1:1455/auth/callback?code=x&state={state}"),
-        format!("http://localhost/auth/callback?code=x&state={state}"),
-        format!("http://localhost:1457/auth/callback?code=x&state={state}"),
-        format!("http://localhost:1455/other?code=x&state={state}"),
-        format!("http://localhost:1455/auth/callback/?code=x&state={state}"),
-        format!("http://user@localhost:1455/auth/callback?code=x&state={state}"),
-        format!("{REMOTE_BROWSER_REDIRECT_URI}?code=x&state={state}#fragment"),
-        format!("{REMOTE_BROWSER_REDIRECT_URI}?code=x&code=y&state={state}"),
-        format!("{REMOTE_BROWSER_REDIRECT_URI}?code=&state={state}"),
-        format!("{REMOTE_BROWSER_REDIRECT_URI}?code=x&state={state}&state=other"),
-        format!("{REMOTE_BROWSER_REDIRECT_URI}?code=x&state={state}&unknown=y"),
-        format!("{REMOTE_BROWSER_REDIRECT_URI}?code=x&scope=openid&state={state}"),
-        format!("{REMOTE_BROWSER_REDIRECT_URI}?error=denied&code=x&state={state}"),
-        format!("{REMOTE_BROWSER_REDIRECT_URI}?error_description=denied&state={state}"),
-        format!("{REMOTE_BROWSER_REDIRECT_URI}?state={state}"),
-        format!("{REMOTE_BROWSER_REDIRECT_URI}?code=x"),
-    ];
-    for full_redirect_url in invalid {
-        assert!(
-            parse_remote(&full_redirect_url).is_err(),
-            "accepted invalid remote callback: {full_redirect_url}"
-        );
-    }
-
-    let oversized = format!(
-        "{REMOTE_BROWSER_REDIRECT_URI}?code={}&state={state}",
-        "x".repeat(MAX_CALLBACK_BYTES)
-    );
-    assert!(parse_remote(&oversized).is_err());
 }
 
 // Receipt renewal: a running Codex model survives a shared-store refresh on

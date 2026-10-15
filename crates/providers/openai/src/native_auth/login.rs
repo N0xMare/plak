@@ -1,4 +1,4 @@
-//! Browser, remote-browser and device login flows and their loopback hooks.
+//! Browser and device login flows and the browser loopback hooks.
 
 use super::{
     AUTH_REQUEST_CAP, AccountBinding, Arc, AuthSecretString, AuthorizeUrlRequest,
@@ -8,16 +8,16 @@ use super::{
     DEVICE_TOKEN_PATH, DEVICE_USER_CODE_PATH, DEVICE_VERIFICATION_PATH, Deserialize,
     DevicePollSchedule, Duration, Instant, LoopbackCallbackOutcome, LoopbackCallbackPage,
     LoopbackConnectionEvent, MAX_CALLBACK_BYTES, MAX_DEVICE_INTERVAL_SECONDS,
-    MAX_OAUTH_VALUE_BYTES, Method, NativeCodexAuthError, OAuthCallbackOutcome,
-    OAuthLoginTokenResponse, OPENAI_CODEX_NATIVE_CLIENT_ID, OPENAI_CODEX_OAUTH_SCOPES,
-    REMOTE_BROWSER_REDIRECT_URI, Serialize, StatusCode, StoredCredential, TOKEN_PATH, TcpListener,
+    MAX_OAUTH_VALUE_BYTES, MIN_DEVICE_INTERVAL_SECONDS, Method, NativeCodexAuthError,
+    OAuthCallbackOutcome, OAuthLoginTokenResponse, OPENAI_CODEX_NATIVE_CLIENT_ID,
+    OPENAI_CODEX_OAUTH_SCOPES, Serialize, StatusCode, StoredCredential, TOKEN_PATH, TcpListener,
     Zeroizing, authorization_code_token_form, bind_loopback_listener, build_authorization_url,
     capped_login_deadline, constant_time_value_eq, endpoint_url, execute_bounded, fmt, form_body,
     form_headers, generate_oauth_correlation_token, json_headers, map_oauth_workflow_error,
-    now_unix_secs, parse_http11_get_request, parse_oauth_callback_query,
-    parse_remote_authorization_input, parse_strict_json, remaining_login_time,
-    require_json_media_type, require_status, run_blocking, run_browser_loopback_session,
-    stored_record, validate_oauth_value, validate_profile_at, validate_user_code,
+    now_unix_secs, parse_http11_get_request, parse_oauth_callback_query, parse_strict_json,
+    remaining_login_time, require_json_media_type, require_status, run_blocking,
+    run_browser_loopback_session, stored_record, validate_oauth_value, validate_profile_at,
+    validate_user_code,
 };
 #[cfg(test)]
 use super::{CALLBACK_RESPONSE_CAP, format_http11_text_response, write_all_before_deadline};
@@ -52,27 +52,9 @@ impl fmt::Debug for CodexBrowserLogin {
     }
 }
 
-/// Non-cloneable browser login handle for a callback pasted from another machine.
-/// Diagnostics redact URL correlation data.
-pub struct CodexRemoteBrowserLogin {
-    pub(super) attempt: BrowserLoginAttempt,
-}
-
-impl CodexRemoteBrowserLogin {
-    /// Returns the exact provider URL the application may show to the operator.
-    #[must_use]
-    pub fn authorization_url(&self) -> &str {
-        &self.attempt.authorization_url
-    }
-}
-
-impl fmt::Debug for CodexRemoteBrowserLogin {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("CodexRemoteBrowserLogin(<redacted one-use login>)")
-    }
-}
-
 /// Non-cloneable pinned custom-device-flow login handle.
+///
+/// The device authorization id is a secret; Debug output is redacted.
 pub struct CodexDeviceLogin {
     pub(super) verification_url: String,
     pub(super) user_code: AuthSecretString,
@@ -94,11 +76,36 @@ impl CodexDeviceLogin {
     pub fn user_code(&self) -> &str {
         self.user_code.expose_secret()
     }
+
+    /// Returns when this device code stops being polled.
+    #[must_use]
+    pub const fn deadline(&self) -> Instant {
+        self.deadline
+    }
 }
 
 impl fmt::Debug for CodexDeviceLogin {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("CodexDeviceLogin(<redacted one-use login>)")
+    }
+}
+
+/// A device authorization the operator approved, not yet exchanged.
+///
+/// Polling it out of [`CodexDeviceLogin`] touches no credential state, so an
+/// application can wait for approval without arming any local recovery. The
+/// authorization code and server-issued PKCE verifier are secrets; Debug output
+/// is redacted.
+pub struct CodexDeviceAuthorization {
+    authorization_code: AuthSecretString,
+    pkce: plakous_auth::PkceS256,
+    deadline: Instant,
+    credential_baseline: Option<CredentialFence>,
+}
+
+impl fmt::Debug for CodexDeviceAuthorization {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("CodexDeviceAuthorization(<redacted one-use authorization>)")
     }
 }
 
@@ -162,24 +169,6 @@ impl CodexSubscriptionCredentialManager {
         })
     }
 
-    /// Starts an authorization-code-with-PKCE login whose final redirect URL
-    /// can be pasted back from a browser running on another machine.
-    ///
-    /// This does not bind or listen on a local socket. The provider redirect is
-    /// pinned to `http://localhost:1455/auth/callback` for exact manual review.
-    ///
-    /// # Errors
-    ///
-    /// Rejects stale profile acceptance or failure to create strong state and
-    /// PKCE material.
-    pub fn begin_remote_browser_login(
-        &self,
-    ) -> Result<CodexRemoteBrowserLogin, NativeCodexAuthError> {
-        Ok(CodexRemoteBrowserLogin {
-            attempt: self.new_browser_login_attempt(REMOTE_BROWSER_REDIRECT_URI.to_owned())?,
-        })
-    }
-
     /// Completes one exact browser callback, validates OIDC and `UserInfo`, then
     /// atomically installs the selected account generation.
     ///
@@ -198,32 +187,6 @@ impl CodexSubscriptionCredentialManager {
             attempt: Some(login.attempt),
         };
         run_browser_loopback_session(login.listener, &mut hooks).await
-    }
-
-    /// Completes one exact pasted browser redirect, validates OIDC and
-    /// `UserInfo`, then atomically installs the selected account generation.
-    ///
-    /// # Errors
-    ///
-    /// Rejects an expired handle; an oversized or inexact redirect URL; an
-    /// invalid bare authorization code; invalid callback query grammar or
-    /// state; and any transport, token, identity, account-continuity, or
-    /// persistence failure.
-    pub async fn complete_remote_browser_login(
-        &self,
-        login: CodexRemoteBrowserLogin,
-        authorization_input: &str,
-    ) -> Result<CodexCredentialStatus, NativeCodexAuthError> {
-        self.validate_profile_admission()?;
-        let callback = parse_remote_authorization_input(
-            authorization_input,
-            login.attempt.state.expose_secret(),
-            REMOTE_BROWSER_REDIRECT_URI,
-            codex_callback_policy(),
-        )
-        .map_err(map_oauth_workflow_error)?;
-        self.complete_browser_callback(login.attempt, callback)
-            .await
     }
 
     pub(super) async fn complete_browser_callback(
@@ -269,8 +232,10 @@ impl CodexSubscriptionCredentialManager {
     ///
     /// # Errors
     ///
-    /// Rejects stale profile acceptance and malformed or failed pinned device
-    /// authorization responses.
+    /// Returns [`NativeCodexAuthError::DeviceLoginUnavailable`] when the
+    /// provider does not offer device-code login (HTTP 404), and rejects stale
+    /// profile acceptance and malformed or failed pinned device authorization
+    /// responses.
     pub async fn begin_device_login(&self) -> Result<CodexDeviceLogin, NativeCodexAuthError> {
         self.validate_profile_admission()?;
         let credential_baseline = self.store.load().map_err(|_| NativeCodexAuthError::Store)?;
@@ -288,6 +253,9 @@ impl CodexSubscriptionCredentialManager {
             Instant::now() + Duration::from_secs(30),
         )
         .await?;
+        if reply.status == StatusCode::NOT_FOUND {
+            return Err(NativeCodexAuthError::DeviceLoginUnavailable);
+        }
         require_status(&reply, StatusCode::OK)?;
         require_json_media_type(&reply)?;
         let mut response: DeviceUserCodeResponse = parse_strict_json(&reply.body)?;
@@ -295,9 +263,10 @@ impl CodexSubscriptionCredentialManager {
         validate_user_code(&response.user_code)?;
         let interval = response
             .interval
+            .trim()
             .parse::<u64>()
             .map_err(|_| NativeCodexAuthError::Validation)?;
-        if interval == 0 || interval > MAX_DEVICE_INTERVAL_SECONDS {
+        if interval > MAX_DEVICE_INTERVAL_SECONDS {
             return Err(NativeCodexAuthError::Validation);
         }
         Ok(CodexDeviceLogin {
@@ -305,26 +274,31 @@ impl CodexSubscriptionCredentialManager {
                 .into(),
             user_code: AuthSecretString::from(std::mem::take(&mut response.user_code)),
             device_auth_id: AuthSecretString::from(std::mem::take(&mut response.device_auth_id)),
-            interval: Duration::from_secs(interval),
+            interval: Duration::from_secs(interval.max(MIN_DEVICE_INTERVAL_SECONDS)),
             deadline: Instant::now() + DEVICE_DEADLINE,
             credential_baseline,
         })
     }
 
-    /// Completes one pinned custom device flow and atomically installs it.
+    /// Polls one pinned device flow until the operator approves it.
+    ///
+    /// Pending statuses (403 and 404) sleep for the server interval. Nothing
+    /// is stored and no lock is held, so dropping this future cancels the
+    /// login without residue.
     ///
     /// # Errors
     ///
-    /// Rejects expiration, malformed verifier/challenge material, and any
-    /// transport, token, identity, account-continuity, or persistence failure.
-    pub async fn complete_device_login(
+    /// Returns [`NativeCodexAuthError::DeviceCodeExpired`] at the device-code
+    /// deadline, and rejects any other status, transport failure, and
+    /// malformed or inconsistent verifier/challenge material.
+    pub async fn poll_device_authorization(
         &self,
         login: CodexDeviceLogin,
-    ) -> Result<CodexCredentialStatus, NativeCodexAuthError> {
+    ) -> Result<CodexDeviceAuthorization, NativeCodexAuthError> {
         self.validate_profile_admission()?;
         let mut code = loop {
             if Instant::now() >= login.deadline {
-                return Err(NativeCodexAuthError::Provider);
+                return Err(NativeCodexAuthError::DeviceCodeExpired);
             }
             let body = serde_json::to_vec(&DevicePollRequest {
                 device_auth_id: login.device_auth_id.expose_secret(),
@@ -341,7 +315,7 @@ impl CodexSubscriptionCredentialManager {
                 capped_login_deadline(
                     login.deadline,
                     AUTH_REQUEST_CAP,
-                    NativeCodexAuthError::Provider,
+                    NativeCodexAuthError::DeviceCodeExpired,
                 )?,
             )
             .await?;
@@ -361,7 +335,7 @@ impl CodexSubscriptionCredentialManager {
                     )
                     .map_err(|_| NativeCodexAuthError::Validation)?;
                     if schedule.is_expired(Instant::now()) {
-                        return Err(NativeCodexAuthError::Provider);
+                        return Err(NativeCodexAuthError::DeviceCodeExpired);
                     }
                     tokio::time::sleep(schedule.sleep_for(Instant::now())).await;
                 }
@@ -379,23 +353,51 @@ impl CodexSubscriptionCredentialManager {
         if !constant_time_value_eq(pkce.challenge().as_str(), &code.code_challenge) {
             return Err(NativeCodexAuthError::Validation);
         }
+        Ok(CodexDeviceAuthorization {
+            authorization_code: AuthSecretString::from(std::mem::take(
+                &mut code.authorization_code,
+            )),
+            pkce,
+            deadline: login.deadline,
+            credential_baseline: login.credential_baseline,
+        })
+    }
+
+    /// Exchanges one approved device authorization at the fixed device
+    /// redirect with its server-issued PKCE verifier, validates OIDC and
+    /// `UserInfo`, then atomically installs it exactly like a browser login.
+    ///
+    /// # Errors
+    ///
+    /// Rejects expiration and any transport, token, identity,
+    /// account-continuity, or persistence failure.
+    pub async fn complete_device_authorization(
+        &self,
+        authorization: CodexDeviceAuthorization,
+    ) -> Result<CodexCredentialStatus, NativeCodexAuthError> {
+        self.validate_profile_admission()?;
         let redirect_uri = endpoint_url(&self.endpoints.auth_origin, DEVICE_REDIRECT_PATH)?;
-        let remaining = remaining_login_time(login.deadline, NativeCodexAuthError::Provider)?;
+        let remaining =
+            remaining_login_time(authorization.deadline, NativeCodexAuthError::Provider)?;
         let _lifecycle = tokio::time::timeout(remaining, self.lifecycle.lock())
             .await
             .map_err(|_| NativeCodexAuthError::Provider)?;
         self.validate_profile_admission()?;
         let credential = self
             .exchange_authorization_code(
-                &code.authorization_code,
+                authorization.authorization_code.expose_secret(),
                 redirect_uri.as_str(),
-                pkce.verifier().expose_secret(),
+                authorization.pkce.verifier().expose_secret(),
                 None,
-                login.deadline,
+                authorization.deadline,
             )
             .await?;
-        self.commit_login(credential, login.credential_baseline, login.deadline)
-            .await?;
+        self.commit_login(
+            credential,
+            authorization.credential_baseline,
+            authorization.deadline,
+        )
+        .await?;
         Ok(CodexCredentialStatus::Ready)
     }
 
@@ -566,7 +568,7 @@ impl Drop for DeviceCodeResponse {
     }
 }
 
-pub(super) fn codex_callback_policy() -> CallbackQueryPolicy {
+fn codex_callback_policy() -> CallbackQueryPolicy {
     CallbackQueryPolicy::codex(OPENAI_CODEX_OAUTH_SCOPES)
 }
 

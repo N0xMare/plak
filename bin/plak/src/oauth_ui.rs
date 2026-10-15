@@ -234,7 +234,8 @@ pub fn ssh_session_from_env(
 
 /// Explicit refusal when local browser login is requested under SSH.
 #[must_use]
-pub fn ssh_local_login_refusal_message(account: &str) -> String {
+pub fn ssh_local_login_refusal_message(provider: plakous::subscriptions::NativeProvider) -> String {
+    let account = account_cli_name(provider);
     format!(
         "SSH session detected — local browser login is not available here.\n\
          \n\
@@ -242,34 +243,85 @@ pub fn ssh_local_login_refusal_message(account: &str) -> String {
          \n\
            plak login {account} --remote\n\
          \n\
-         Then open the authorize URL in a browser on your machine and paste the\n\
-         authorization code or callback URL when prompted."
+         {}",
+        remote_follow_up(provider)
     )
 }
 
 /// Remotely-oriented recovery lines for local-login failures.
 #[must_use]
-pub fn remote_login_hint(account: &str) -> String {
+pub fn remote_login_hint(provider: plakous::subscriptions::NativeProvider) -> String {
+    let account = account_cli_name(provider);
     format!(
         "If you are on SSH, headless, or the browser is elsewhere, run:\n\
          \n\
            plak login {account} --remote\n\
          \n\
-         Then paste the authorization code or callback URL when prompted."
+         {}",
+        remote_follow_up(provider)
     )
+}
+
+fn remote_follow_up(provider: plakous::subscriptions::NativeProvider) -> &'static str {
+    if provider == plakous::subscriptions::NativeProvider::Codex {
+        "Then open the verification URL in a browser on any device and enter\n\
+         the one-time code it shows."
+    } else {
+        "Then open the authorize URL in a browser on your machine and paste the\n\
+         authorization code or callback URL when prompted."
+    }
 }
 
 /// Format the hard-timeout operator error (static-friendly for tests).
 #[must_use]
-pub fn local_login_timeout_message(account: &str, waited: Duration) -> String {
+pub fn local_login_timeout_message(
+    provider: plakous::subscriptions::NativeProvider,
+    waited: Duration,
+) -> String {
     format!(
         "no browser callback within {}s\n\n{}",
         waited.as_secs(),
-        remote_login_hint(account)
+        remote_login_hint(provider)
     )
 }
 
-/// Paste-complete login instructions (Claude, Grok, Codex remote).
+/// Device-code login prompt: where to go, the one-time code, its lifetime,
+/// and the anti-phishing rule. Nothing is read from the terminal.
+pub fn write_device_code_prompt(
+    out: &mut dyn Write,
+    account: &str,
+    verification_url: &str,
+    user_code: &str,
+    expires_in: Duration,
+) -> io::Result<()> {
+    writeln!(out)?;
+    writeln!(out, "Sign in to {account} from a browser on any device:")?;
+    writeln!(out)?;
+    writeln!(out, "  1. Open:        {verification_url}")?;
+    writeln!(out, "  2. Enter code:  {user_code}")?;
+    writeln!(out)?;
+    writeln!(
+        out,
+        "The code expires in {} minutes.",
+        expires_in.as_secs().div_ceil(60)
+    )?;
+    writeln!(
+        out,
+        "Continue only if you started this login in plak; if someone gave you this code, cancel."
+    )?;
+    writeln!(out, "Waiting for approval · Ctrl-C cancels")?;
+    out.flush()
+}
+
+/// Operator error when a device code ran out before approval.
+#[must_use]
+pub fn device_code_expired_message(account: &str) -> String {
+    format!(
+        "the device code expired before it was approved; run `plak login {account} --remote` for a new code"
+    )
+}
+
+/// Paste-complete login instructions (Claude, Grok).
 pub fn write_authorization_paste_instructions(
     out: &mut dyn Write,
     provider: plakous::subscriptions::NativeProvider,
@@ -277,20 +329,6 @@ pub fn write_authorization_paste_instructions(
 ) -> io::Result<()> {
     use plakous::subscriptions::{NativeLoginCompletion, NativeProvider};
     match completion {
-        NativeLoginCompletion::RedirectUrl => {
-            writeln!(
-                out,
-                "After authorizing in the browser, paste the COMPLETE final"
-            )?;
-            writeln!(
-                out,
-                "callback URL from the address bar (localhost may fail to load — expected)."
-            )?;
-            writeln!(
-                out,
-                "Must include ?code=…&state=… (e.g. http://localhost:1455/auth/callback?…)."
-            )?;
-        }
         NativeLoginCompletion::AuthorizationCodeOrRedirectUrl
             if provider == NativeProvider::Claude =>
         {
@@ -327,7 +365,7 @@ pub fn write_authorization_paste_instructions(
             )?;
             writeln!(out, "  • the bare authorization code alone (also accepted)")?;
         }
-        NativeLoginCompletion::Automatic => {}
+        NativeLoginCompletion::Automatic | NativeLoginCompletion::DeviceCode => {}
     }
     writeln!(out, "At the prompt:")?;
     writeln!(out, "  • paste the callback URL or bare code, then Enter")?;
@@ -453,15 +491,45 @@ mod tests {
     }
 
     #[test]
-    fn remote_hint_mentions_flag() {
-        let h = remote_login_hint("codex");
-        assert!(h.contains("--remote"));
+    fn remote_hint_mentions_flag_and_the_provider_remote_step() {
+        use plakous::subscriptions::NativeProvider;
+        let h = remote_login_hint(NativeProvider::Codex);
         assert!(h.contains("plak login codex --remote"));
+        assert!(h.contains("one-time code"));
+        assert!(!h.contains("callback URL"));
+        let h = remote_login_hint(NativeProvider::Claude);
+        assert!(h.contains("plak login claude --remote"));
+        assert!(h.contains("paste the"));
+    }
+
+    #[test]
+    fn device_code_prompt_shows_url_code_expiry_and_anti_phishing_rule() {
+        let mut buf = Vec::new();
+        write_device_code_prompt(
+            &mut buf,
+            "codex",
+            "https://auth.example/codex/device",
+            "ABCD-1234",
+            Duration::from_secs(899),
+        )
+        .unwrap();
+        let text = String::from_utf8(buf).unwrap();
+        assert!(text.contains("https://auth.example/codex/device"));
+        assert!(text.contains("ABCD-1234"));
+        assert!(text.contains("expires in 15 minutes"));
+        assert!(text.contains(
+            "Continue only if you started this login in plak; if someone gave you this code, cancel."
+        ));
+        assert!(text.contains("Ctrl-C cancels"));
+        assert!(!text.to_ascii_lowercase().contains("paste"));
     }
 
     #[test]
     fn timeout_message_includes_wait_and_remote() {
-        let m = local_login_timeout_message("grok", Duration::from_secs(120));
+        let m = local_login_timeout_message(
+            plakous::subscriptions::NativeProvider::Xai,
+            Duration::from_secs(120),
+        );
         assert!(m.contains("120"));
         assert!(m.contains("plak login grok --remote"));
     }
@@ -494,7 +562,7 @@ mod tests {
 
     #[test]
     fn ssh_refusal_is_explicit_not_auto_remote() {
-        let m = ssh_local_login_refusal_message("codex");
+        let m = ssh_local_login_refusal_message(plakous::subscriptions::NativeProvider::Codex);
         assert!(m.contains("SSH session detected"));
         assert!(m.contains("plak login codex --remote"));
         assert!(!m.to_ascii_lowercase().contains("auto"));

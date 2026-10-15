@@ -78,9 +78,17 @@ not paste the localhost URL back; it reminds at 30s and times out at 120s, and
 `c` re-copies the URL while it waits. Grok and Claude open a browser and then
 ask you to paste a code from the callback page.
 
-`--remote` is for SSH and headless hosts: Plak prints the URL and takes the
-pasted code or callback URL. An SSH session refuses a local login outright and
-tells you to re-run with `--remote` rather than switching mode silently.
+`--remote` is for SSH and headless hosts. For Codex it is a device-code login:
+Plak prints a verification URL and a one-time code, you open the URL in a
+browser on any device and enter the code, and Plak finishes on its own (nothing
+is pasted back; Ctrl-C cancels; the code expires after 15 minutes). Continue
+only if you started that login yourself; if someone gave you a code, cancel.
+If the provider does not offer device-code login for your account, run
+`plak login codex` on a machine with a browser, or forward the callback port
+(`ssh -L 1455:localhost:1455 <host>`) and run `plak login codex` on the host.
+For Grok and Claude, Plak prints the URL and takes the pasted code or callback
+URL. An SSH session refuses a local login outright and tells you to re-run
+with `--remote` rather than switching mode silently.
 
 The SuperGrok account answers to `grok` and `supergrok`; bare `xai` is refused
 as ambiguous. API keys use `plak key set` instead. Login is CLI-only; the TUI's Providers tab shows status

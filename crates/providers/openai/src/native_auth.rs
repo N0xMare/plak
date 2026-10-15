@@ -17,11 +17,10 @@ pub use catalog::{
     CodexCatalogToolMode, CodexCatalogVisibility, CodexModelCatalog, RELEASE_ENROLLED_CODEX_MODELS,
     release_enrolled_codex_model, release_enrolled_codex_tool_mode,
 };
-pub use login::{CodexBrowserLogin, CodexDeviceLogin, CodexRemoteBrowserLogin};
+pub use login::{CodexBrowserLogin, CodexDeviceAuthorization, CodexDeviceLogin};
 #[cfg(test)]
 use login::{
-    DeviceCodeResponse, DeviceUserCodeResponse, codex_callback_policy, parse_browser_callback,
-    write_callback_response,
+    DeviceCodeResponse, DeviceUserCodeResponse, parse_browser_callback, write_callback_response,
 };
 use refresh::RefreshForce;
 use verify::{RsaJwk, validate_exact_scopes};
@@ -62,8 +61,8 @@ use plakous_auth::oauth_workflow::{
     AuthorizeUrlRequest, CallbackQueryPolicy, DevicePollSchedule, LoopbackCallbackOutcome,
     LoopbackCallbackPage, OAuthCallbackOutcome, OAuthWorkflowError, access_needs_refresh,
     authorization_code_token_form, build_authorization_url, capped_deadline, decode_json_bounded,
-    parse_http11_get_request, parse_oauth_callback_query, parse_remote_authorization_input,
-    remaining_until, unsigned_access_token_exp, urlencoded_form_bytes,
+    parse_http11_get_request, parse_oauth_callback_query, remaining_until,
+    unsigned_access_token_exp, urlencoded_form_bytes,
 };
 use plakous_auth::subscription_limit::{
     SubscriptionLimitError, SubscriptionRequestClass, SubscriptionRequestGate,
@@ -151,7 +150,6 @@ const CODEX_REFERENCE_MEASUREMENT_REVISION: &str =
 const RESPONSES_FAMILY_ID: &str = "responses-family";
 const RESPONSES_CANONICAL_PROJECTION_REVISION: &str = "responses-canonical-projection-v4";
 const RESPONSES_EXACT_WIRE_ACCOUNTING_REVISION: &str = "responses-exact-wire-accounting-v3";
-const REMOTE_BROWSER_REDIRECT_URI: &str = CODEX_OAUTH.loopback_redirect_uri;
 const PROFILE_REVIEWED_AT: u64 = CODEX_PROFILE.reviewed_at_unix;
 const PROFILE_EXPIRES_AT: u64 = CODEX_PROFILE.expires_at_unix;
 const PROFILE_KILLED: bool = CODEX_PROFILE.killed;
@@ -172,6 +170,7 @@ const MAX_SERVICE_TIER_ID_BYTES: usize = 64;
 const MAX_SERVICE_TIER_NAME_BYTES: usize = 128;
 const MAX_SERVICE_TIER_DESCRIPTION_BYTES: usize = 512;
 const MAX_DEVICE_INTERVAL_SECONDS: u64 = 30;
+const MIN_DEVICE_INTERVAL_SECONDS: u64 = 1;
 const DEVICE_DEADLINE: Duration = Duration::from_secs(15 * 60);
 const BROWSER_DEADLINE: Duration = Duration::from_secs(10 * 60);
 const AUTH_REQUEST_CAP: Duration = Duration::from_secs(30);
@@ -308,6 +307,12 @@ pub enum NativeCodexAuthError {
     /// A bounded local callback was invalid or expired.
     #[error("native Codex browser callback was invalid")]
     Callback,
+    /// The provider does not offer device-code login for this account or server.
+    #[error("native Codex device-code login is not available for this account/server")]
+    DeviceLoginUnavailable,
+    /// The device code expired before the operator approved it.
+    #[error("native Codex device code expired before it was approved")]
+    DeviceCodeExpired,
     /// The login token request failed before a complete response was available.
     #[error("native Codex login token transport failed")]
     LoginTokenTransport,

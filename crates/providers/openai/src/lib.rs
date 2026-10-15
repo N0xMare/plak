@@ -75,8 +75,8 @@ pub use model::{
 pub use native_auth::{
     CodexBrowserLogin, CodexCatalogApiSupport, CodexCatalogCapacityFacts, CodexCatalogEntry,
     CodexCatalogServiceTier, CodexCatalogToolMode, CodexCatalogVisibility,
-    CodexCompatibilityAcceptance, CodexCredentialStatus, CodexDeviceLogin, CodexModelCatalog,
-    CodexModelResolutionEvidence, CodexModelResolver, CodexRemoteBrowserLogin,
+    CodexCompatibilityAcceptance, CodexCredentialStatus, CodexDeviceAuthorization,
+    CodexDeviceLogin, CodexModelCatalog, CodexModelResolutionEvidence, CodexModelResolver,
     CodexSubscriptionCredentialManager, CodexSubscriptionIntegrationProfile,
     CodexSubscriptionLocalAdmin, NativeCodexAuthError, RELEASE_ENROLLED_CODEX_MODELS,
     SubscriptionIntegrationProvenance, release_enrolled_codex_model,

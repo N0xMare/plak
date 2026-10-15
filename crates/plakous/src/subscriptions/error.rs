@@ -47,6 +47,10 @@ pub enum NativeSubscriptionError {
     LoginPersistence,
     /// The browser callback URL or local callback request was invalid.
     InvalidCallback,
+    /// The provider does not offer device-code login for this account or server.
+    DeviceLoginUnavailable,
+    /// The device code expired before the operator approved it.
+    DeviceCodeExpired,
     /// The exact requested model was not admitted by fresh account-scoped evidence.
     ModelUnavailable,
     /// The explicit provider configuration was not admitted by exact resolved facts.
@@ -124,6 +128,10 @@ impl fmt::Display for NativeSubscriptionError {
             Self::LoginAccountVerification => "native subscription account verification failed",
             Self::LoginPersistence => "native subscription credential persistence failed",
             Self::InvalidCallback => "native subscription browser callback was rejected",
+            Self::DeviceLoginUnavailable => {
+                "device-code login is not available for this account/server"
+            }
+            Self::DeviceCodeExpired => "device code expired before it was approved",
             Self::ModelUnavailable => "requested native subscription model is unavailable",
             Self::ProviderConfigurationRejected => {
                 "explicit native provider configuration was rejected"
@@ -286,6 +294,12 @@ pub(super) fn map_codex_error(
         }
         plakous_openai::NativeCodexAuthError::Coordination => NativeSubscriptionError::Internal,
         plakous_openai::NativeCodexAuthError::Callback => NativeSubscriptionError::InvalidCallback,
+        plakous_openai::NativeCodexAuthError::DeviceLoginUnavailable => {
+            NativeSubscriptionError::DeviceLoginUnavailable
+        }
+        plakous_openai::NativeCodexAuthError::DeviceCodeExpired => {
+            NativeSubscriptionError::DeviceCodeExpired
+        }
         plakous_openai::NativeCodexAuthError::Binding => {
             NativeSubscriptionError::AuthenticationBinding
         }

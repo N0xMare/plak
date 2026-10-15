@@ -535,6 +535,12 @@ pub fn native_subscription_failure(
         E::InvalidCallback => auth(format!(
             "browser authorization input rejected; paste the full callback URL (http://127.0.0.1:<port>/callback?code=...&state=...) or the bare code from that page; then start a fresh login with `plak login {name}`"
         )),
+        E::DeviceLoginUnavailable => auth(format!(
+            "device-code login is not available for this account/server; remedy: run `plak login {name}` on a machine with a browser, or forward port 1455 (ssh -L 1455:localhost:1455 <host>) and run `plak login {name}` there"
+        )),
+        E::DeviceCodeExpired => auth(format!(
+            "the device code expired before it was approved; run `plak login {name} --remote` for a new code"
+        )),
         E::ModelUnavailable
         | E::ProviderConfigurationRejected
         | E::ProviderConfigurationPolicyMismatch(_)

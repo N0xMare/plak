@@ -65,9 +65,21 @@ search runs through the shell, so the host needs `grep`, `rg` or `find`. The sep
 - **Claude** uses an HTTPS redirect with no loopback; paste the authorization
   code shown on the callback page.
 
-`--remote` is for a browser that is not on this host. Plak prints the URL and
-takes the pasted code or callback URL; `c` then Enter re-copies. An SSH session
-refuses a local login outright and prints
+`--remote` is for a browser that is not on this host.
+
+- **Codex** uses a device code. Plak prints a verification URL and a one-time
+  code; open the URL in a browser on any device, sign in, and enter the code.
+  Plak completes by itself once you approve; nothing is pasted back. The code
+  expires after 15 minutes and Ctrl-C cancels; neither leaves anything stored.
+  Continue only if you started the login in plak; if someone gave you a code,
+  cancel. If the provider says device-code login is not available for your
+  account, run `plak login codex` on a machine with a browser, or forward the
+  callback port with `ssh -L 1455:localhost:1455 <host>` and run
+  `plak login codex` on the host.
+- **Grok** and **Claude** print the authorize URL and take the pasted code or
+  callback URL; `c` then Enter re-copies.
+
+An SSH session refuses a local login outright and prints
 `plak login <account> --remote` rather than switching mode silently.
 
 `plak logout <account>` revokes a usable credential at the provider and retires

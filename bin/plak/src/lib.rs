@@ -4382,6 +4382,7 @@ mod tests {
         login_failure: Option<&'static str>,
         login_begin_failure: Option<&'static str>,
         login_input: Option<String>,
+        login_timeout: Option<Duration>,
         completed_login_modes: Vec<NativeLoginMode>,
         compatibility: CompatibilityState,
         credential: CredentialState,
@@ -4401,6 +4402,7 @@ mod tests {
                 login_failure: None,
                 login_begin_failure: None,
                 login_input: None,
+                login_timeout: None,
                 completed_login_modes: Vec::new(),
                 compatibility,
                 credential: CredentialState::SignedOut,
@@ -4488,16 +4490,33 @@ mod tests {
             if let Some(error) = self.login_begin_failure {
                 return Err(CliFailure::new(error));
             }
+            let completion = self.login_completion.unwrap_or(match (provider, mode) {
+                (_, NativeLoginMode::Browser) => {
+                    plakous::subscriptions::NativeLoginCompletion::Automatic
+                }
+                (NativeProvider::Codex, NativeLoginMode::Remote) => {
+                    plakous::subscriptions::NativeLoginCompletion::DeviceCode
+                }
+                (_, NativeLoginMode::Remote) => {
+                    plakous::subscriptions::NativeLoginCompletion::AuthorizationCodeOrRedirectUrl
+                }
+            });
+            let device_code = (completion
+                == plakous::subscriptions::NativeLoginCompletion::DeviceCode)
+                .then(|| commands::application::DeviceCodePrompt {
+                    user_code: zeroize::Zeroizing::new("FAKE-CODE".to_owned()),
+                    expires_in: Duration::from_secs(900),
+                });
             Ok(commands::application::LoginChallenge {
                 pending: FakePendingLogin(mode),
-                authorize_url: "https://auth.invalid/authorize?fixture=1".to_owned(),
-                completion: self
-                    .login_completion
-                    .unwrap_or(if mode == NativeLoginMode::Browser {
-                        plakous::subscriptions::NativeLoginCompletion::Automatic
-                    } else {
-                        plakous::subscriptions::NativeLoginCompletion::RedirectUrl
-                    }),
+                authorize_url: if device_code.is_some() {
+                    "https://auth.invalid/codex/device"
+                } else {
+                    "https://auth.invalid/authorize?fixture=1"
+                }
+                .to_owned(),
+                completion,
+                device_code,
             })
         }
 
@@ -4512,7 +4531,7 @@ mod tests {
                     self.login_input = Some(input.to_owned());
                 }
                 commands::application::LoginResponse::Automatic { timeout } => {
-                    assert_eq!(timeout, oauth_ui::LOCAL_HARD_TIMEOUT);
+                    self.login_timeout = Some(timeout);
                     self.login_input = None;
                 }
             }
@@ -6278,7 +6297,7 @@ mod tests {
                 parse(args(&["login", name, "--remote"])),
                 Ok(Command::AuthLogin {
                     provider,
-                    mode: NativeLoginMode::RemoteBrowser,
+                    mode: NativeLoginMode::Remote,
                 })
             );
             assert!(parse(args(&["login", name, "--device"])).is_err());
@@ -6305,7 +6324,7 @@ mod tests {
             parse(args(&["login", "grok", "--remote"])),
             Ok(Command::AuthLogin {
                 provider: NativeProvider::Xai,
-                mode: NativeLoginMode::RemoteBrowser,
+                mode: NativeLoginMode::Remote,
             })
         );
     }
@@ -6648,9 +6667,9 @@ mod tests {
             (
                 Command::AuthLogin {
                     provider: NativeProvider::Xai,
-                    mode: NativeLoginMode::RemoteBrowser,
+                    mode: NativeLoginMode::Remote,
                 },
-                Call::Login(NativeProvider::Xai, NativeLoginMode::RemoteBrowser),
+                Call::Login(NativeProvider::Xai, NativeLoginMode::Remote),
                 CredentialState::Ready,
             ),
             (
@@ -6986,6 +7005,7 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
         assert_eq!(input.position(), 0);
         assert_eq!(backend.completed_login_modes, [NativeLoginMode::Browser]);
         assert_eq!(backend.login_input, None);
+        assert_eq!(backend.login_timeout, Some(oauth_ui::LOCAL_HARD_TIMEOUT));
         assert_eq!(ui.browser_urls, ui.presented_urls);
         assert_eq!(ui.browser_urls.len(), 1);
         assert!(
@@ -6999,12 +7019,119 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
     }
 
     #[test]
+    fn codex_remote_login_shows_the_device_code_and_never_reads_stdin() {
+        let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
+        let mut input = Cursor::new(b"must remain unread\n");
+        // A device-code login is the SSH path; the SSH refusal is for local login.
+        let mut ui = commands::login_flow::TestLoginUi {
+            ssh: true,
+            ..commands::login_flow::TestLoginUi::default()
+        };
+        let mut output = Vec::new();
+        assert_eq!(
+            auth_login(
+                &mut backend,
+                NativeProvider::Codex,
+                NativeLoginMode::Remote,
+                &mut input,
+                &mut output,
+                &mut ui
+            ),
+            Ok(ProcessOutcome::Success)
+        );
+        assert_eq!(input.position(), 0);
+        assert_eq!(backend.completed_login_modes, [NativeLoginMode::Remote]);
+        assert_eq!(backend.login_input, None);
+        assert_eq!(backend.login_timeout, Some(Duration::from_secs(930)));
+        assert_eq!(ui.browser_urls, [] as [String; 0]);
+        assert_eq!(ui.copied_urls, [] as [String; 0]);
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("https://auth.invalid/codex/device"));
+        assert!(output.contains("FAKE-CODE"));
+        assert!(output.contains("expires in 15 minutes"));
+        assert!(output.contains(
+            "Continue only if you started this login in plak; if someone gave you this code, cancel."
+        ));
+        assert!(!output.contains("must remain unread"));
+        assert!(!output.to_ascii_lowercase().contains("paste"));
+    }
+
+    #[test]
+    fn codex_device_login_cancel_expiry_and_refusal_do_not_retry_or_change_credentials() {
+        let state = Path::new("/nonexistent-plak-state");
+        for (outcome, failure, expected) in [
+            (
+                Some(commands::application::LoginOutcome::Cancelled),
+                None,
+                "login cancelled".to_owned(),
+            ),
+            (
+                Some(commands::application::LoginOutcome::TimedOut),
+                None,
+                "device code expired before it was approved; run `plak login codex --remote`"
+                    .to_owned(),
+            ),
+            (
+                None,
+                Some(NativeSubscriptionError::DeviceCodeExpired),
+                "device code expired before it was approved; run `plak login codex --remote`"
+                    .to_owned(),
+            ),
+        ] {
+            let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
+            backend.credential = CredentialState::Ready;
+            backend.login_outcome = outcome;
+            let failure_message = failure.map(|error| {
+                native_subscription_failure(error, Some(NativeProvider::Codex), state)
+                    .message()
+                    .to_owned()
+            });
+            backend.login_failure = failure_message.map(|message| &*message.leak());
+            let mut ui = commands::login_flow::TestLoginUi::default();
+            let result = auth_login(
+                &mut backend,
+                NativeProvider::Codex,
+                NativeLoginMode::Remote,
+                &mut Cursor::new([]),
+                &mut Vec::new(),
+                &mut ui,
+            );
+            let message = result.unwrap_err().message().to_owned();
+            assert!(message.contains(&expected), "{message}");
+            assert_eq!(
+                backend.calls,
+                [
+                    Call::Status(NativeProvider::Codex),
+                    Call::Login(NativeProvider::Codex, NativeLoginMode::Remote)
+                ]
+            );
+            assert_eq!(backend.completed_login_modes, [NativeLoginMode::Remote]);
+            assert_eq!(backend.credential, CredentialState::Ready);
+        }
+    }
+
+    #[test]
+    fn device_login_unavailable_names_the_browser_and_port_forward_remedies() {
+        let message = native_subscription_failure(
+            NativeSubscriptionError::DeviceLoginUnavailable,
+            Some(NativeProvider::Codex),
+            Path::new("/nonexistent-plak-state"),
+        )
+        .message()
+        .to_owned();
+        assert_eq!(
+            message,
+            "device-code login is not available for this account/server; remedy: run `plak login codex` on a machine with a browser, or forward port 1455 (ssh -L 1455:localhost:1455 <host>) and run `plak login codex` there"
+        );
+    }
+
+    #[test]
     fn pasted_login_uses_the_challenge_completion_and_never_echoes_the_response() {
         for (provider, mode, completion, browser_count) in [
             (
                 NativeProvider::Xai,
-                NativeLoginMode::RemoteBrowser,
-                plakous::subscriptions::NativeLoginCompletion::RedirectUrl,
+                NativeLoginMode::Remote,
+                plakous::subscriptions::NativeLoginCompletion::AuthorizationCodeOrRedirectUrl,
                 0,
             ),
             (
@@ -7134,8 +7261,8 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
         assert!(
             auth_login(
                 &mut backend,
-                NativeProvider::Codex,
-                NativeLoginMode::RemoteBrowser,
+                NativeProvider::Xai,
+                NativeLoginMode::Remote,
                 &mut Cursor::new(b"\n"),
                 &mut Vec::new(),
                 &mut ui
@@ -7145,8 +7272,8 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
         assert_eq!(
             backend.calls,
             [
-                Call::Status(NativeProvider::Codex),
-                Call::Login(NativeProvider::Codex, NativeLoginMode::RemoteBrowser)
+                Call::Status(NativeProvider::Xai),
+                Call::Login(NativeProvider::Xai, NativeLoginMode::Remote)
             ]
         );
         assert_eq!(backend.completed_login_modes, [] as [NativeLoginMode; 0]);

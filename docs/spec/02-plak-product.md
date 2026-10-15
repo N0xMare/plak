@@ -1584,7 +1584,7 @@ version. There is no top-level prompt positional.
 
 | Command | Arguments and flags |
 | --- | --- |
-| `login [<codex\|grok\|claude>] [--remote]` | `grok` and `supergrok` name the SuperGrok vertical; bare `xai` is refused as ambiguous |
+| `login [<codex\|grok\|claude>] [--remote]` | `grok` and `supergrok` name the SuperGrok vertical; bare `xai` is refused as ambiguous; `--remote` is the device-code flow for `codex` and a pasted code for `grok` and `claude` (§8.3) |
 | `logout [<account>] [--local]` | revokes a usable credential, retires an unusable one locally; `--local` never contacts the provider |
 | `status [<account>]` | credential readiness; bare form reports every vertical |
 | `refresh [<account>]` | rotate one refreshable credential |
@@ -5561,11 +5561,26 @@ the browser is relative to this machine.
   URL here. A loopback callback can only be received when a browser on this
   machine can reach localhost, which is what local buys.
 - **Remote** (`plak login <account> --remote`) binds no socket and opens no
-  browser. The operator carries the URL to another machine and pastes the
-  provider's answer back.
+  browser. For Codex it is the provider's device-code flow: the CLI shows the
+  verification URL, a one-time code, the code's lifetime and the rule
+  "continue only if you started this login in plak; if someone gave you this
+  code, cancel", then waits for approval without reading the terminal; Ctrl-C
+  cancels. SuperGrok and Claude carry the authorize URL to another machine and
+  paste the code their page displays back. There is no pasted-callback path
+  for Codex and no separate `--device` flag.
 
 The CLI **refuses** a local login when it detects an SSH session rather than
 silently switching modes, and tells the operator to re-run with `--remote`.
+
+A Codex device code lasts 15 minutes. Waiting for approval writes nothing
+locally: no credential and no login-recovery marker exist until the approved
+code is exchanged, so Ctrl-C or expiry while waiting leaves the account as it
+was. An expired code fails with "the device code expired before it was
+approved; run `plak login codex --remote` for a new code". When the provider
+answers the device-code request with 404, login fails with "device-code login
+is not available for this account/server" and names the remedies: run
+`plak login codex` on a machine with a browser, or forward port 1455
+(`ssh -L 1455:localhost:1455 <host>`) and run `plak login codex` there.
 
 **Only one vertical has a loopback flow at all.** Codex binds the first free of
 its two pinned loopback ports and completes by itself with nothing pasted;
@@ -5573,7 +5588,8 @@ Claude and SuperGrok are paste-completed *even locally*, because neither
 provider's page calls back to localhost. That is why the host's waiting event
 carries a flag that really means "this attempt needs a paste".
 
-Every vertical is authorization-code with PKCE (S256). Callback input validates
+Every vertical is authorization-code with PKCE (S256); the Codex device flow
+exchanges its code with the PKCE verifier the provider issued (chapter 04 §3.6). Callback input validates
 the exact redirect origin, port, path, and query grammar and compares state in
 constant time; a nonce is validated where the provider issues one. Claude
 accepts any of the four shapes its page can produce — `code#state`, the

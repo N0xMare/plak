@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use plakous::subscriptions::{NativeLoginCompletion, NativeLoginMode, NativeProvider};
 
-use super::application::{AccountOps, LoginOutcome, LoginResponse};
+use super::application::{AccountOps, LoginChallenge, LoginOutcome, LoginResponse};
 use super::login::read_remote_authorization_interactive;
 use crate::oauth_ui;
 use crate::presentation::{CredentialState, MAX_REMOTE_AUTHORIZATION_INPUT_BYTES};
@@ -81,10 +81,13 @@ pub(crate) fn perform_login(
     let account = oauth_ui::account_cli_name(provider);
     if mode == NativeLoginMode::Browser && ui.ssh_session_detected() {
         return Err(CliFailure::new(oauth_ui::ssh_local_login_refusal_message(
-            account,
+            provider,
         )));
     }
     let challenge = accounts.begin_login(provider, mode)?;
+    if challenge.completion == NativeLoginCompletion::DeviceCode {
+        return finish_device_login(accounts, challenge, account, stderr);
+    }
     let completion = challenge.completion;
     let authorize_url = challenge.authorize_url;
     let paste_complete = completion != NativeLoginCompletion::Automatic;
@@ -149,7 +152,7 @@ pub(crate) fn perform_login(
         {
             CliFailure::new(format!(
                 "{message}\n\n{}",
-                oauth_ui::remote_login_hint(account)
+                oauth_ui::remote_login_hint(provider)
             ))
         } else {
             base
@@ -159,8 +162,45 @@ pub(crate) fn perform_login(
         LoginOutcome::Completed(state) => Ok(state),
         LoginOutcome::Cancelled => Err(CliFailure::new("login cancelled")),
         LoginOutcome::TimedOut => Err(CliFailure::new(oauth_ui::local_login_timeout_message(
-            account,
+            provider,
             oauth_ui::LOCAL_HARD_TIMEOUT,
+        ))),
+    }
+}
+
+/// Grace past the device-code lifetime so the provider's own expiry, not the
+/// local wait, normally ends an unapproved login.
+const DEVICE_WAIT_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Shows the device code and waits for approval elsewhere; stdin is never read.
+fn finish_device_login<A: AccountOps>(
+    accounts: &mut A,
+    challenge: LoginChallenge<A::PendingLogin>,
+    account: &str,
+    stderr: &mut dyn io::Write,
+) -> CliResult<CredentialState> {
+    let Some(device_code) = challenge.device_code else {
+        return Err(CliFailure::new("device-code login returned no code"));
+    };
+    oauth_ui::write_device_code_prompt(
+        stderr,
+        account,
+        &challenge.authorize_url,
+        &device_code.user_code,
+        device_code.expires_in,
+    )
+    .map_err(|_| CliFailure::new("stderr failed"))?;
+    let outcome = accounts.finish_login(
+        challenge.pending,
+        LoginResponse::Automatic {
+            timeout: device_code.expires_in + DEVICE_WAIT_GRACE,
+        },
+    )?;
+    match outcome {
+        LoginOutcome::Completed(state) => Ok(state),
+        LoginOutcome::Cancelled => Err(CliFailure::new("login cancelled")),
+        LoginOutcome::TimedOut => Err(CliFailure::new(oauth_ui::device_code_expired_message(
+            account,
         ))),
     }
 }

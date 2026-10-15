@@ -274,6 +274,8 @@ enum TopCommand {
     Login {
         /// Account id (`codex` | `grok` | `claude`). Omit to print usage.
         account: Option<String>,
+        /// The browser is on another machine: codex shows a one-time device
+        /// code; grok and claude take the code their page displays.
         #[arg(long, action = ArgAction::SetTrue)]
         remote: bool,
     },
@@ -417,7 +419,7 @@ impl TopCommand {
             } => Ok(Command::AuthLogin {
                 provider: parse_oauth_account(&account)?,
                 mode: if remote {
-                    NativeLoginMode::RemoteBrowser
+                    NativeLoginMode::Remote
                 } else {
                     NativeLoginMode::Browser
                 },
@@ -2027,7 +2029,7 @@ mod tests {
                     c,
                     Command::AuthLogin {
                         provider: NativeProvider::Claude,
-                        mode: NativeLoginMode::RemoteBrowser,
+                        mode: NativeLoginMode::Remote,
                     }
                 )
             }),

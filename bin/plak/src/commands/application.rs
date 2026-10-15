@@ -43,6 +43,14 @@ pub struct LoginChallenge<P> {
     pub pending: P,
     pub authorize_url: String,
     pub completion: NativeLoginCompletion,
+    /// Present exactly when `completion` is a device code.
+    pub device_code: Option<DeviceCodePrompt>,
+}
+
+/// The one-time code a device-code login shows, and how long it stays valid.
+pub struct DeviceCodePrompt {
+    pub user_code: zeroize::Zeroizing<String>,
+    pub expires_in: std::time::Duration,
 }
 
 pub enum LoginResponse<'a> {
@@ -462,10 +470,15 @@ impl AccountOps for PlakousApplication {
         let instructions = pending.instructions();
         let authorize_url = instructions.verification_uri().to_owned();
         let completion = instructions.completion();
+        let device_code = instructions.device_code().map(|code| DeviceCodePrompt {
+            user_code: zeroize::Zeroizing::new(code.user_code().to_owned()),
+            expires_in: code.expires_in(),
+        });
         Ok(LoginChallenge {
             pending: (provider, pending),
             authorize_url,
             completion,
+            device_code,
         })
     }
 
@@ -636,6 +649,8 @@ mod tests {
             E::LoginAccountVerification,
             E::LoginPersistence,
             E::InvalidCallback,
+            E::DeviceLoginUnavailable,
+            E::DeviceCodeExpired,
             E::ModelUnavailable,
             E::CatalogCredentialRejected,
             E::CatalogAuthorizationHeaderRejected,

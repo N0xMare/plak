@@ -595,6 +595,21 @@ success, failure, Ctrl-C, or panic, flushing pending terminal input on failure
 before echo returns. The opaque pending login token remains the only completion
 authority; input and clipboard effects cannot reconstruct or replace it.
 
+Codex remote login is the provider's device-code flow, not a pasted callback.
+The device-code request and polls go only to the pinned auth origin with the
+pinned client id. The approved poll returns an authorization code together with
+a **server-issued** PKCE verifier and challenge; Plak recomputes the S256
+challenge from the verifier and requires a constant-time match before the
+token exchange, which uses the fixed device redirect `{issuer}/deviceauth/callback`.
+The device authorization id, authorization code and verifier are secrets: they
+are never logged, persisted or shown, and every handle carrying them has a
+redacted Debug form. The one-time user code is shown only to the operator who
+started the login, together with an anti-phishing line. The resulting
+credential is validated, fenced and committed exactly like a browser login
+(same OIDC, `UserInfo`, account-continuity, consent and profile rules). Polling
+holds no lock and writes nothing, so cancellation or expiry before approval
+leaves no credential and no login-recovery marker.
+
 Logout is local retirement or, where the provider offers one, a remote
 revocation. Where no remote revoke exists, logout retires the local credential
 and the grant stays live upstream until the user removes it in their provider

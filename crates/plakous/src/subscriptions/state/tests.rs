@@ -94,7 +94,7 @@ async fn xai_inference_observer_is_passive_and_receives_exact_request_bytes()
             .execute(
                 request,
                 plakous_http::ExchangeControl::with_cancellation(
-                    std::time::Instant::now() + Duration::from_secs(1),
+                    Instant::now() + Duration::from_secs(1),
                     cancelled,
                 ),
             )
@@ -549,7 +549,7 @@ async fn claude_foreign_profile_requires_explicit_local_logout_before_fresh_logi
         }
     );
     let pending = subscriptions
-        .begin_login(NativeProvider::Claude, NativeLoginMode::RemoteBrowser)
+        .begin_login(NativeProvider::Claude, NativeLoginMode::Remote)
         .await?;
     assert_eq!(
         pending.instructions().completion(),
@@ -625,7 +625,7 @@ async fn xai_retired_payload_reads_as_profile_changed_and_local_logout_repairs_i
         NativeAuthStatus::Revoked
     );
     let pending = subscriptions
-        .begin_login(provider, NativeLoginMode::RemoteBrowser)
+        .begin_login(provider, NativeLoginMode::Remote)
         .await?;
     assert_eq!(
         pending.instructions().completion(),
@@ -633,6 +633,30 @@ async fn xai_retired_payload_reads_as_profile_changed_and_local_logout_repairs_i
     );
     drop(pending);
     fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+/// Begins and drops one login without provider traffic. Codex remote login
+/// requests a device code, so Codex begins its loopback browser login; its
+/// pinned ports may be held by another process, which still proves admission
+/// ran (the binding refusal comes after it).
+async fn begin_offline_login(
+    subscriptions: &NativeSubscriptions,
+    provider: NativeProvider,
+) -> Result<(), Box<dyn Error>> {
+    let (mode, completion) = match provider {
+        NativeProvider::Codex => (NativeLoginMode::Browser, NativeLoginCompletion::Automatic),
+        NativeProvider::Xai | NativeProvider::Claude => (
+            NativeLoginMode::Remote,
+            NativeLoginCompletion::AuthorizationCodeOrRedirectUrl,
+        ),
+    };
+    match subscriptions.begin_login(provider, mode).await {
+        Ok(pending) => assert_eq!(pending.instructions().completion(), completion),
+        Err(NativeSubscriptionError::AuthenticationBinding)
+            if provider == NativeProvider::Codex => {}
+        Err(error) => return Err(error.into()),
+    }
     Ok(())
 }
 
@@ -662,20 +686,9 @@ async fn explicit_login_retires_armed_recovery_before_starting_a_fresh_attempt()
                 credential: NativeAuthStatus::Quarantined,
             }
         );
-        let pending = subscriptions
-            .begin_login(provider, NativeLoginMode::RemoteBrowser)
-            .await?;
-        assert_eq!(
-            pending.instructions().completion(),
-            match provider {
-                NativeProvider::Codex => NativeLoginCompletion::RedirectUrl,
-                NativeProvider::Xai => {
-                    NativeLoginCompletion::AuthorizationCodeOrRedirectUrl
-                }
-                NativeProvider::Claude => NativeLoginCompletion::AuthorizationCodeOrRedirectUrl,
-            }
-        );
-        drop(pending);
+        // Codex remote login requests a device code from the provider, so
+        // this offline test begins its loopback browser login instead.
+        begin_offline_login(&subscriptions, provider).await?;
         assert!(!login_recovery_required(&paths, provider)?);
         assert_eq!(
             subscriptions.status(provider).await?,
@@ -695,20 +708,7 @@ async fn explicit_login_retires_armed_recovery_before_starting_a_fresh_attempt()
                 credential: NativeAuthStatus::SignedOut,
             }
         );
-        let pending = subscriptions
-            .begin_login(provider, NativeLoginMode::RemoteBrowser)
-            .await?;
-        assert_eq!(
-            pending.instructions().completion(),
-            match provider {
-                NativeProvider::Codex => NativeLoginCompletion::RedirectUrl,
-                NativeProvider::Xai => {
-                    NativeLoginCompletion::AuthorizationCodeOrRedirectUrl
-                }
-                NativeProvider::Claude => NativeLoginCompletion::AuthorizationCodeOrRedirectUrl,
-            }
-        );
-        drop(pending);
+        begin_offline_login(&subscriptions, provider).await?;
         assert_eq!(
             subscriptions.logout_local(provider).await?,
             NativeAuthStatus::SignedOut
@@ -778,6 +778,87 @@ async fn subscription_usage_reports_busy_while_a_sibling_holds_the_compatibility
             if reason != SubscriptionUsageUnavailable::Busy
                 && reason != SubscriptionUsageUnavailable::Transport(None)
     ));
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn device_approval_wait_leaves_no_recovery_when_cancelled_or_expired()
+-> Result<(), Box<dyn Error>> {
+    let root = unique_test_root("device-approval")?;
+    let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
+    let notice = fixture_notice();
+    let provider = notice.provider();
+    let accepted_at = notice.reviewed_at() + 1;
+    store_acceptance(&paths, notice, accepted_at)?;
+    let loaded = load_acceptance_exact(&paths, notice, accepted_at + 1)?;
+    let consent = PendingCompatibilityConsent {
+        state: SubscriptionState::new(paths.clone()),
+        notice,
+        exact_receipt: loaded.exact_bytes,
+        generation: loaded.generation,
+    };
+    let no_residue = |paths: &SubscriptionPaths| -> Result<(), Box<dyn Error>> {
+        assert!(!login_recovery_required(paths, provider)?);
+        assert!(!paths.login_recovery_path(provider).exists());
+        assert!(!paths.provider_record(provider).exists());
+        Ok(())
+    };
+    let calls = Arc::new(AtomicUsize::new(0));
+
+    // Ctrl-C while the operator has not approved yet drops the wait.
+    let cancelled_calls = Arc::clone(&calls);
+    let waiting = complete_approved_with_consent(
+        &consent,
+        || Ok(accepted_at + 2),
+        std::future::pending::<Result<(), NativeSubscriptionError>>(),
+        move |()| async move {
+            cancelled_calls.fetch_add(1, AtomicOrdering::SeqCst);
+            Ok(NativeAuthStatus::Ready)
+        },
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), waiting)
+            .await
+            .is_err()
+    );
+    no_residue(&paths)?;
+
+    let expired_calls = Arc::clone(&calls);
+    assert_eq!(
+        complete_approved_with_consent(
+            &consent,
+            || Ok(accepted_at + 2),
+            async { Err::<(), _>(NativeSubscriptionError::DeviceCodeExpired) },
+            move |()| async move {
+                expired_calls.fetch_add(1, AtomicOrdering::SeqCst);
+                Ok(NativeAuthStatus::Ready)
+            },
+        )
+        .await,
+        Err(NativeSubscriptionError::DeviceCodeExpired)
+    );
+    assert_eq!(calls.load(AtomicOrdering::SeqCst), 0);
+    no_residue(&paths)?;
+
+    // An approval reaches the guarded exchange; its failure restores recovery.
+    let armed_paths = paths.clone();
+    assert_eq!(
+        complete_approved_with_consent(
+            &consent,
+            || Ok(accepted_at + 2),
+            async { Ok("approved") },
+            |approved| async move {
+                assert_eq!(approved, "approved");
+                assert!(login_recovery_required(&armed_paths, provider)?);
+                Err(NativeSubscriptionError::LoginTokenRejected)
+            },
+        )
+        .await,
+        Err(NativeSubscriptionError::LoginTokenRejected)
+    );
+    no_residue(&paths)?;
     fs::remove_dir_all(root)?;
     Ok(())
 }
