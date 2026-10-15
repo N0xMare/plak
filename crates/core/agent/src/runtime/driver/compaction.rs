@@ -55,8 +55,9 @@ use plakous_model::{
     HistorySegmentKind, LanguageModel, ModelCacheAffinity, ModelError, ModelErrorKind,
     ModelErrorPhase, ModelEvent, ModelOperationRoot, ModelPreparationContext,
     ModelPreparationError, ModelRequest, ModelResponse, ModelStreamItem, PreparedCallRecord,
-    Provenance, ProviderCallRecoveryLocator, ProviderCallRecoveryLocatorStage, RequestMetadata,
-    SemanticCompactionCut, TextBlock, Timestamp, TurnId, Usage, ValidationMode,
+    PreparedModelCall, Provenance, ProviderCallRecoveryLocator, ProviderCallRecoveryLocatorStage,
+    RequestMetadata, SemanticCompactionCut, TextBlock, Timestamp, TurnId, Usage,
+    ValidatedRequestPlan, ValidationMode,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -73,6 +74,54 @@ struct CompactionDetail {
     diagnostic: Option<String>,
     exhausted: bool,
     rung: Option<&'static str>,
+}
+
+/// The fixed inputs of one compaction attempt, shared by its phases.
+struct CompactionAttempt<'a> {
+    active: Option<&'a PromptCommand>,
+    request: &'a AgentCompactSessionRequest,
+    origin: CompactOrigin,
+    source: DurableSessionAddress,
+    identity: DurableCompactionIdentity,
+}
+
+/// The head one pass of the compaction ladder measured as its source.
+struct MeasuredSource {
+    checkpoint: Arc<RuntimeCheckpoint>,
+    cache_affinity: ModelCacheAffinity,
+    projection: ConversationView,
+    harness_plan: Digest,
+    before: ContextEvaluationAudit,
+    occupancy_before: Option<u64>,
+    fits: bool,
+    native: bool,
+    scheduled_pending_qualified: bool,
+}
+
+/// The paid request one pass selected, before provider preparation.
+struct CompactionRequestPlan {
+    request: ModelRequest,
+    cut_identity: Digest,
+    record_version: u32,
+}
+
+/// The selected request with its sole prepared dispatch capability.
+struct PreparedCompaction {
+    request: ModelRequest,
+    cut_identity: Digest,
+    record_version: u32,
+    validated: ValidatedRequestPlan,
+    prepared: PreparedModelCall,
+    native_protected_history: bool,
+}
+
+/// How one compaction phase ended.
+enum CompactionPhase<T> {
+    Next(T),
+    /// The native facet cannot hold this source; rerun the pass on the sealed
+    /// harness cut, keeping the workflow's sole dispatch attempt.
+    RetryWithoutNative,
+    Done(Result<AgentCompactSessionOutcome, AgentSessionEndpointError>),
 }
 
 enum TurnCompactionOutcome {
@@ -826,7 +875,6 @@ impl Driver {
 
     #[allow(
         clippy::too_many_arguments,
-        clippy::too_many_lines,
         reason = "the one driver-owned compaction sequence keeps every paid and publication fence visible"
     )]
     async fn compact_session_after_runtime(
@@ -844,794 +892,1022 @@ impl Driver {
             .begin_operation_root(ModelOperationRoot::SessionWorkflow(identity.workflow_id))
             .map_err(ModelError::from)
             .map_err(|error| self.compact_preparation_endpoint_error(error))?;
+        let attempt = CompactionAttempt {
+            active,
+            request: &request,
+            origin,
+            source,
+            identity,
+        };
         let mut native_allowed = true;
         loop {
-            let checkpoint = self.authority.checkpoint();
-            let source_cache_affinity = checkpoint
-                .manifest()
-                .canonical()
-                .context()
-                .affinity()
-                .clone();
-            let source_projection = checkpoint.manifest().canonical().projection();
-            let (source_request, qualification_request) = self.compaction_measurement_requests(
-                &checkpoint,
-                &source_projection,
-                &request,
-                &identity,
-                &runtime,
-                native_allowed,
-            )?;
-            let native =
-                native_allowed && native_compaction_facet_enrolled(&runtime.provider_configuration);
-            committed_detail.rung = Some(if native {
-                "native facet"
-            } else {
-                "harness summary"
-            });
-            let scheduled_pending_qualified = if request.reason == AgentCompactionReason::Scheduled
-                && let Some(qualification_request) = qualification_request
-            {
-                let qualification_status = self
-                    .measure_compaction_projection(
-                        &runtime,
-                        qualification_request,
-                        CompactionFitBasis::ActiveHead,
-                        None,
-                        runtime.clock.now(),
-                    )
-                    .await
-                    .map_err(|error| compact_runtime_endpoint_error(&error))?
-                    .0;
-                !matches!(qualification_status.kind(), ContextStatusKind::Fits { .. })
-            } else {
-                false
-            };
             let measured = self
-                .measure_compaction_projection(
+                .measure_compaction_source(
+                    &attempt,
                     &runtime,
-                    source_request,
+                    native_allowed,
+                    measured_source_tokens,
+                    committed_detail,
+                )
+                .await?;
+            if let CompactOrigin::TurnFence { pressure_forced } = origin
+                && !self.paid_fold_admissible(pressure_forced)
+            {
+                return self
+                    .compaction_source_placeholders(&attempt, &runtime, &measured, false)
+                    .await;
+            }
+            let plan = match self
+                .select_compaction_request(&attempt, &runtime, &measured, committed_detail)
+                .await?
+            {
+                CompactionPhase::Next(plan) => plan,
+                CompactionPhase::RetryWithoutNative => {
+                    native_allowed = false;
+                    continue;
+                }
+                CompactionPhase::Done(outcome) => return outcome,
+            };
+            let prepared = match self
+                .prepare_compaction_dispatch(&attempt, &runtime, &measured, plan, committed_detail)
+                .await?
+            {
+                CompactionPhase::Next(prepared) => prepared,
+                CompactionPhase::RetryWithoutNative => {
+                    native_allowed = false;
+                    continue;
+                }
+                CompactionPhase::Done(outcome) => return outcome,
+            };
+            return Box::pin(self.dispatch_compaction(
+                &attempt,
+                runtime,
+                &measured,
+                prepared,
+                committed_detail,
+            ))
+            .await;
+        }
+    }
+
+    /// Measures the current head as this pass's compaction source and picks its rung.
+    async fn measure_compaction_source(
+        &mut self,
+        attempt: &CompactionAttempt<'_>,
+        runtime: &ExactCompactionRuntime,
+        native_allowed: bool,
+        measured_source_tokens: &mut Option<u64>,
+        committed_detail: &mut CompactionDetail,
+    ) -> Result<MeasuredSource, AgentSessionEndpointError> {
+        let request = attempt.request;
+        let checkpoint = self.authority.checkpoint();
+        let cache_affinity = checkpoint
+            .manifest()
+            .canonical()
+            .context()
+            .affinity()
+            .clone();
+        let projection = checkpoint.manifest().canonical().projection();
+        let (source_request, qualification_request) = self.compaction_measurement_requests(
+            &checkpoint,
+            &projection,
+            request,
+            &attempt.identity,
+            runtime,
+            native_allowed,
+        )?;
+        let native =
+            native_allowed && native_compaction_facet_enrolled(&runtime.provider_configuration);
+        committed_detail.rung = Some(if native {
+            "native facet"
+        } else {
+            "harness summary"
+        });
+        let scheduled_pending_qualified = if request.reason == AgentCompactionReason::Scheduled
+            && let Some(qualification_request) = qualification_request
+        {
+            let qualification_status = self
+                .measure_compaction_projection(
+                    runtime,
+                    qualification_request,
                     CompactionFitBasis::ActiveHead,
                     None,
                     runtime.clock.now(),
                 )
-                .await;
-            let (before, occupancy_before, source_fits) = match measured {
-                Ok((source_status, before)) => (
-                    before,
-                    source_status.unanchored_occupancy_tokens(),
-                    matches!(source_status.kind(), ContextStatusKind::Fits { .. }),
-                ),
-                Err(error)
-                    if request.reason == AgentCompactionReason::Scheduled
-                        && request.pending_user_input.is_some()
-                        && !scheduled_pending_qualified =>
-                {
-                    // Skip-if-fits is idle-only: a pending user that still Fits must
-                    // not start a paid compact when source measurement fails.
-                    // Fence (b) has no pending user; measurement failure must not
-                    // become Unavailable (WouldOverflow / mid-turn source).
-                    return Err(compact_runtime_endpoint_error(&error));
-                }
-                Err(_) if native || origin.is_turn_fence() => (
-                    unmeasured_native_compact_audit(source_projection.identity())
-                        .map_err(|error| compact_runtime_endpoint_error(&error))?,
-                    None,
-                    true,
-                ),
-                Err(error) => {
-                    return Err(compact_runtime_endpoint_rejected(format!(
-                        "compaction source measurement failed: {}",
-                        compact_diagnostic(&error)
-                    )));
-                }
-            };
-            *measured_source_tokens = Some(before.input_tokens());
-            let source_harness_plan = checkpoint
-                .manifest()
-                .canonical()
-                .stable_prefix()
-                .resolved_harness_plan_identity()
-                .ok_or(AgentSessionEndpointError::Rejected {
-                    reason: "compaction source omitted its harness plan identity".into(),
-                })?;
-            if let CompactOrigin::TurnFence { pressure_forced } = origin
-                && !self.paid_fold_admissible(pressure_forced)
+                .await
+                .map_err(|error| compact_runtime_endpoint_error(&error))?
+                .0;
+            !matches!(qualification_status.kind(), ContextStatusKind::Fits { .. })
+        } else {
+            false
+        };
+        let measured = self
+            .measure_compaction_projection(
+                runtime,
+                source_request,
+                CompactionFitBasis::ActiveHead,
+                None,
+                runtime.clock.now(),
+            )
+            .await;
+        let (before, occupancy_before, fits) = match measured {
+            Ok((source_status, before)) => (
+                before,
+                source_status.unanchored_occupancy_tokens(),
+                matches!(source_status.kind(), ContextStatusKind::Fits { .. }),
+            ),
+            Err(error)
+                if request.reason == AgentCompactionReason::Scheduled
+                    && request.pending_user_input.is_some()
+                    && !scheduled_pending_qualified =>
             {
-                return Box::pin(self.replace_protected_tool_results(
-                    active,
-                    origin,
-                    &runtime,
-                    identity,
-                    &request.operation_id,
-                    source,
-                    source_projection.identity(),
-                    source_harness_plan,
-                    before,
-                    occupancy_before,
-                    false,
-                ))
-                .await;
+                // Skip-if-fits is idle-only: a pending user that still Fits must
+                // not start a paid compact when source measurement fails.
+                // Fence (b) has no pending user; measurement failure must not
+                // become Unavailable (WouldOverflow / mid-turn source).
+                return Err(compact_runtime_endpoint_error(&error));
             }
-            let (mut compaction_request, cut_identity, record_version, cut) = if native {
-                let prefix = native_compaction_dispatch_prefix(
-                    checkpoint.manifest().canonical().stable_prefix(),
-                )
-                .map_err(|error| compact_runtime_endpoint_error(&error))?;
-                (
-                    ModelRequest::from_parts(
-                        prefix,
-                        source_projection.clone(),
-                        RequestMetadata::for_session_workflow(
-                            self.run_id,
-                            identity.workflow_id,
-                            identity.attempt_id,
-                            runtime.clock.now(),
-                        ),
-                    )
-                    .map_err(compact_runtime_endpoint_rejected)?,
-                    source_projection.identity(),
-                    3_u32,
-                    None,
-                )
-            } else {
-                let plan = ContextHistoryPlan::new(&source_projection)
-                    .map_err(compact_runtime_endpoint_rejected)?;
-                let cut = match SemanticCompactionCut::seal(&source_projection, &plan) {
-                    Ok(cut) => cut,
-                    Err(plakous_model::SemanticCompactionCutError::NoEligibleSelectedPrefix) => {
-                        // Ladder rung three. The native facet is not enrolled on
-                        // this route and protection leaves no older intent group
-                        // to fold, which is the single-turn shape where the whole
-                        // session is the latest intent and its causal tail. Replace
-                        // the oldest completed tool-result bodies instead of
-                        // refusing; `NoEligibleRange` still comes back when even
-                        // that cannot fit, keeping the existing refusal.
-                        return Box::pin(self.replace_protected_tool_results(
-                            active,
-                            origin,
-                            &runtime,
-                            identity,
-                            &request.operation_id,
-                            source,
-                            source_projection.identity(),
-                            source_harness_plan,
-                            before,
-                            occupancy_before,
-                            false,
-                        ))
-                        .await;
-                    }
-                    Err(error) => return Err(compact_runtime_endpoint_rejected(error)),
-                };
-                // A source that fits always has a tail that fits. When it does not,
-                // a retained tail that cannot fit on its own means no summary can
-                // make a fitting successor, so paying for one is waste: the free
-                // rung runs instead, exactly as when nothing older is foldable.
-                // At the idle fence the successor must also hold the pending
-                // prompt, so a pending prompt that does not fit beside the source
-                // runs the gate with that prompt after the tail.
-                let pending_segment = if scheduled_pending_qualified {
-                    request
-                        .pending_user_input
-                        .as_deref()
-                        .map(|text| pending_user_segment(&checkpoint, text))
-                        .transpose()?
-                } else {
-                    None
-                };
-                if (!source_fits || pending_segment.is_some())
-                    && self
-                        .retained_tail_cannot_fit(
-                            &runtime,
-                            checkpoint.manifest().canonical().stable_prefix(),
-                            &cut,
-                            pending_segment,
-                            identity,
-                            source_cache_affinity.clone(),
-                        )
-                        .await
-                {
-                    return Box::pin(self.replace_protected_tool_results(
-                        active,
-                        origin,
-                        &runtime,
-                        identity,
-                        &request.operation_id,
-                        source,
-                        source_projection.identity(),
-                        source_harness_plan,
-                        before,
-                        occupancy_before,
-                        false,
-                    ))
-                    .await;
-                }
-                let prefix = harness_compaction_prefix(
-                    checkpoint.manifest().canonical().stable_prefix(),
-                    runtime.provider_configuration.selected_identity(),
-                    runtime.provider_configuration.effective_identity(),
-                )
-                .map_err(|error| compact_runtime_endpoint_error(&error))?;
-                let input = harness_compaction_input(&cut, identity.workflow_id)
-                    .map_err(|error| compact_runtime_endpoint_error(&error))?;
-                (
-                    ModelRequest::from_parts(
-                        prefix,
-                        input,
-                        RequestMetadata::for_session_workflow(
-                            self.run_id,
-                            identity.workflow_id,
-                            identity.attempt_id,
-                            runtime.clock.now(),
-                        ),
-                    )
-                    .map_err(compact_runtime_endpoint_rejected)?,
-                    cut.identity(),
-                    2_u32,
-                    Some(cut),
-                )
-            };
-            if native && !source_fits {
-                let probe = ModelRequest::from_parts(
-                    compaction_request.stable_prefix().clone(),
-                    compaction_request.input().clone(),
+            Err(_) if native || attempt.origin.is_turn_fence() => (
+                unmeasured_native_compact_audit(projection.identity())
+                    .map_err(|error| compact_runtime_endpoint_error(&error))?,
+                None,
+                true,
+            ),
+            Err(error) => {
+                return Err(compact_runtime_endpoint_rejected(format!(
+                    "compaction source measurement failed: {}",
+                    compact_diagnostic(&error)
+                )));
+            }
+        };
+        *measured_source_tokens = Some(before.input_tokens());
+        let harness_plan = checkpoint
+            .manifest()
+            .canonical()
+            .stable_prefix()
+            .resolved_harness_plan_identity()
+            .ok_or(AgentSessionEndpointError::Rejected {
+                reason: "compaction source omitted its harness plan identity".into(),
+            })?;
+        Ok(MeasuredSource {
+            checkpoint,
+            cache_affinity,
+            projection,
+            harness_plan,
+            before,
+            occupancy_before,
+            fits,
+            native,
+            scheduled_pending_qualified,
+        })
+    }
+
+    /// The free placeholder rung over this pass's measured source.
+    async fn compaction_source_placeholders(
+        &mut self,
+        attempt: &CompactionAttempt<'_>,
+        runtime: &ExactCompactionRuntime,
+        measured: &MeasuredSource,
+        native_protected_history: bool,
+    ) -> Result<AgentCompactSessionOutcome, AgentSessionEndpointError> {
+        Box::pin(self.replace_protected_tool_results(
+            attempt.active,
+            attempt.origin,
+            runtime,
+            attempt.identity,
+            &attempt.request.operation_id,
+            attempt.source,
+            measured.projection.identity(),
+            measured.harness_plan,
+            measured.before,
+            measured.occupancy_before,
+            native_protected_history,
+        ))
+        .await
+    }
+
+    /// Selects the paid request for this pass: the native facet over the whole
+    /// source, or the sealed harness cut at the shallowest fitting depth.
+    async fn select_compaction_request(
+        &mut self,
+        attempt: &CompactionAttempt<'_>,
+        runtime: &ExactCompactionRuntime,
+        measured: &MeasuredSource,
+        committed_detail: &mut CompactionDetail,
+    ) -> Result<CompactionPhase<CompactionRequestPlan>, AgentSessionEndpointError> {
+        let identity = attempt.identity;
+        let (mut plan, cut) = if measured.native {
+            let prefix = native_compaction_dispatch_prefix(
+                measured.checkpoint.manifest().canonical().stable_prefix(),
+            )
+            .map_err(|error| compact_runtime_endpoint_error(&error))?;
+            let plan = CompactionRequestPlan {
+                request: ModelRequest::from_parts(
+                    prefix,
+                    measured.projection.clone(),
                     RequestMetadata::for_session_workflow(
                         self.run_id,
                         identity.workflow_id,
-                        compaction_attempt_id(identity.workflow_id, b"native-fit")
-                            .map_err(|error| compact_runtime_endpoint_error(&error))?,
+                        identity.attempt_id,
                         runtime.clock.now(),
                     ),
                 )
-                .map_err(compact_runtime_endpoint_rejected)?;
-                if self
-                    .measure_compaction_projection(
-                        &runtime,
-                        probe,
-                        CompactionFitBasis::PaidFoldInput,
-                        Some(source_cache_affinity.clone()),
-                        runtime.clock.now(),
+                .map_err(compact_runtime_endpoint_rejected)?,
+                cut_identity: measured.projection.identity(),
+                record_version: 3_u32,
+            };
+            (plan, None)
+        } else {
+            match self
+                .harness_compaction_request(attempt, runtime, measured)
+                .await?
+            {
+                CompactionPhase::Next((plan, cut)) => (plan, Some(cut)),
+                CompactionPhase::RetryWithoutNative => {
+                    return Ok(CompactionPhase::RetryWithoutNative);
+                }
+                CompactionPhase::Done(outcome) => return Ok(CompactionPhase::Done(outcome)),
+            }
+        };
+        if measured.native && !measured.fits {
+            let probe = ModelRequest::from_parts(
+                plan.request.stable_prefix().clone(),
+                plan.request.input().clone(),
+                RequestMetadata::for_session_workflow(
+                    self.run_id,
+                    identity.workflow_id,
+                    compaction_attempt_id(identity.workflow_id, b"native-fit")
+                        .map_err(|error| compact_runtime_endpoint_error(&error))?,
+                    runtime.clock.now(),
+                ),
+            )
+            .map_err(compact_runtime_endpoint_rejected)?;
+            if self
+                .measure_compaction_projection(
+                    runtime,
+                    probe,
+                    CompactionFitBasis::PaidFoldInput,
+                    Some(measured.cache_affinity.clone()),
+                    runtime.clock.now(),
+                )
+                .await
+                .is_ok_and(|(status, _)| {
+                    matches!(
+                        status.kind(),
+                        ContextStatusKind::WouldOverflow(_)
+                            | ContextStatusKind::ProtectedOverflow(_)
                     )
-                    .await
-                    .is_ok_and(|(status, _)| {
-                        matches!(
-                            status.kind(),
-                            ContextStatusKind::WouldOverflow(_)
-                                | ContextStatusKind::ProtectedOverflow(_)
-                        )
-                    })
-                {
-                    committed_detail.diagnostic = Some(
+                })
+            {
+                committed_detail.diagnostic = Some(
                     "native facet preparation refused for capacity; trying the sealed harness cut"
                         .into(),
                 );
-                    native_allowed = false;
-                    continue;
-                }
+                return Ok(CompactionPhase::RetryWithoutNative);
             }
-            if let Some(cut) = cut
-                && harness_compaction_reduction_count(&cut) > 0
-            {
-                // Measure each candidate with its own offline attempt identity.
-                // Only the selected request is prepared with the provider attempt
-                // below, persisted, and dispatched. A refusal during a fit probe
-                // must never consume or reuse that dispatch capability.
-                for depth in 0..=harness_compaction_reduction_count(&cut) {
-                    let input =
-                        harness_compaction_input_at_depth(&cut, identity.workflow_id, depth)
-                            .map_err(|error| compact_runtime_endpoint_error(&error))?;
-                    let candidate = ModelRequest::from_parts(
-                        compaction_request.stable_prefix().clone(),
-                        input,
-                        compaction_request.metadata(),
-                    )
-                    .map_err(compact_runtime_endpoint_rejected)?;
-                    let probe = ModelRequest::from_parts(
-                        candidate.stable_prefix().clone(),
-                        candidate.input().clone(),
-                        RequestMetadata::for_session_workflow(
-                            self.run_id,
-                            identity.workflow_id,
-                            compaction_attempt_id(
-                                identity.workflow_id,
-                                format!("summary-fit-{depth}").as_bytes(),
-                            )
-                            .map_err(|error| compact_runtime_endpoint_error(&error))?,
-                            candidate.metadata().created_at(),
-                        ),
-                    )
-                    .map_err(compact_runtime_endpoint_rejected)?;
-                    let measurement = self
-                        .measure_compaction_projection(
-                            &runtime,
-                            probe,
-                            CompactionFitBasis::PaidFoldInput,
-                            Some(source_cache_affinity.clone()),
-                            runtime.clock.now(),
-                        )
-                        .await;
-                    match measurement {
-                        Ok((status, _)) => {
-                            compaction_request = candidate;
-                            if !matches!(
-                                status.kind(),
-                                ContextStatusKind::WouldOverflow(_)
-                                    | ContextStatusKind::ProtectedOverflow(_)
-                            ) {
-                                break;
-                            }
-                        }
-                        // Unrelated preparation failures do not authorize further
-                        // elision. The unchanged preparation/fallback path below
-                        // reports the actual failure with no paid dispatch.
-                        Err(_) => break,
+        }
+        if let Some(cut) = cut
+            && harness_compaction_reduction_count(&cut) > 0
+        {
+            self.fit_harness_summary_depth(
+                runtime,
+                identity.workflow_id,
+                &measured.cache_affinity,
+                &cut,
+                &mut plan.request,
+            )
+            .await?;
+        }
+        Ok(CompactionPhase::Next(plan))
+    }
+
+    /// The harness summary request over the sealed cut of this pass's source,
+    /// or the free rung when no summary can make a fitting successor.
+    async fn harness_compaction_request(
+        &mut self,
+        attempt: &CompactionAttempt<'_>,
+        runtime: &ExactCompactionRuntime,
+        measured: &MeasuredSource,
+    ) -> Result<
+        CompactionPhase<(CompactionRequestPlan, SemanticCompactionCut)>,
+        AgentSessionEndpointError,
+    > {
+        let identity = attempt.identity;
+        let plan = ContextHistoryPlan::new(&measured.projection)
+            .map_err(compact_runtime_endpoint_rejected)?;
+        let cut = match SemanticCompactionCut::seal(&measured.projection, &plan) {
+            Ok(cut) => cut,
+            Err(plakous_model::SemanticCompactionCutError::NoEligibleSelectedPrefix) => {
+                // Ladder rung three. The native facet is not enrolled on
+                // this route and protection leaves no older intent group
+                // to fold, which is the single-turn shape where the whole
+                // session is the latest intent and its causal tail. Replace
+                // the oldest completed tool-result bodies instead of
+                // refusing; `NoEligibleRange` still comes back when even
+                // that cannot fit, keeping the existing refusal.
+                return Ok(CompactionPhase::Done(
+                    self.compaction_source_placeholders(attempt, runtime, measured, false)
+                        .await,
+                ));
+            }
+            Err(error) => return Err(compact_runtime_endpoint_rejected(error)),
+        };
+        // A source that fits always has a tail that fits. When it does not,
+        // a retained tail that cannot fit on its own means no summary can
+        // make a fitting successor, so paying for one is waste: the free
+        // rung runs instead, exactly as when nothing older is foldable.
+        // At the idle fence the successor must also hold the pending
+        // prompt, so a pending prompt that does not fit beside the source
+        // runs the gate with that prompt after the tail.
+        let pending_segment = if measured.scheduled_pending_qualified {
+            attempt
+                .request
+                .pending_user_input
+                .as_deref()
+                .map(|text| pending_user_segment(&measured.checkpoint, text))
+                .transpose()?
+        } else {
+            None
+        };
+        if (!measured.fits || pending_segment.is_some())
+            && self
+                .retained_tail_cannot_fit(
+                    runtime,
+                    measured.checkpoint.manifest().canonical().stable_prefix(),
+                    &cut,
+                    pending_segment,
+                    identity,
+                    measured.cache_affinity.clone(),
+                )
+                .await
+        {
+            return Ok(CompactionPhase::Done(
+                self.compaction_source_placeholders(attempt, runtime, measured, false)
+                    .await,
+            ));
+        }
+        let prefix = harness_compaction_prefix(
+            measured.checkpoint.manifest().canonical().stable_prefix(),
+            runtime.provider_configuration.selected_identity(),
+            runtime.provider_configuration.effective_identity(),
+        )
+        .map_err(|error| compact_runtime_endpoint_error(&error))?;
+        let input = harness_compaction_input(&cut, identity.workflow_id)
+            .map_err(|error| compact_runtime_endpoint_error(&error))?;
+        let plan = CompactionRequestPlan {
+            request: ModelRequest::from_parts(
+                prefix,
+                input,
+                RequestMetadata::for_session_workflow(
+                    self.run_id,
+                    identity.workflow_id,
+                    identity.attempt_id,
+                    runtime.clock.now(),
+                ),
+            )
+            .map_err(compact_runtime_endpoint_rejected)?,
+            cut_identity: cut.identity(),
+            record_version: 2_u32,
+        };
+        Ok(CompactionPhase::Next((plan, cut)))
+    }
+
+    /// Replaces `request` with the shallowest summary depth whose paid input fits.
+    async fn fit_harness_summary_depth(
+        &self,
+        runtime: &ExactCompactionRuntime,
+        workflow_id: crate::SessionWorkflowId,
+        cache_affinity: &ModelCacheAffinity,
+        cut: &SemanticCompactionCut,
+        request: &mut ModelRequest,
+    ) -> Result<(), AgentSessionEndpointError> {
+        // Measure each candidate with its own offline attempt identity.
+        // Only the selected request is prepared with the provider attempt
+        // below, persisted, and dispatched. A refusal during a fit probe
+        // must never consume or reuse that dispatch capability.
+        for depth in 0..=harness_compaction_reduction_count(cut) {
+            let input = harness_compaction_input_at_depth(cut, workflow_id, depth)
+                .map_err(|error| compact_runtime_endpoint_error(&error))?;
+            let candidate = ModelRequest::from_parts(
+                request.stable_prefix().clone(),
+                input,
+                request.metadata(),
+            )
+            .map_err(compact_runtime_endpoint_rejected)?;
+            let probe = ModelRequest::from_parts(
+                candidate.stable_prefix().clone(),
+                candidate.input().clone(),
+                RequestMetadata::for_session_workflow(
+                    self.run_id,
+                    workflow_id,
+                    compaction_attempt_id(workflow_id, format!("summary-fit-{depth}").as_bytes())
+                        .map_err(|error| compact_runtime_endpoint_error(&error))?,
+                    candidate.metadata().created_at(),
+                ),
+            )
+            .map_err(compact_runtime_endpoint_rejected)?;
+            let measurement = self
+                .measure_compaction_projection(
+                    runtime,
+                    probe,
+                    CompactionFitBasis::PaidFoldInput,
+                    Some(cache_affinity.clone()),
+                    runtime.clock.now(),
+                )
+                .await;
+            match measurement {
+                Ok((status, _)) => {
+                    *request = candidate;
+                    if !matches!(
+                        status.kind(),
+                        ContextStatusKind::WouldOverflow(_)
+                            | ContextStatusKind::ProtectedOverflow(_)
+                    ) {
+                        break;
                     }
                 }
+                // Unrelated preparation failures do not authorize further
+                // elision. The unchanged preparation/fallback path below
+                // reports the actual failure with no paid dispatch.
+                Err(_) => break,
             }
-            let descriptor = runtime
-                .provider_configuration
-                .effective()
-                .descriptor()
-                .clone();
-            let mut validated = descriptor
+        }
+        Ok(())
+    }
+
+    /// Validates, authorizes and prepares the selected request. Preparation
+    /// creates the workflow's sole dispatch capability; nothing is persisted yet.
+    async fn prepare_compaction_dispatch(
+        &mut self,
+        attempt: &CompactionAttempt<'_>,
+        runtime: &ExactCompactionRuntime,
+        measured: &MeasuredSource,
+        plan: CompactionRequestPlan,
+        committed_detail: &mut CompactionDetail,
+    ) -> Result<CompactionPhase<PreparedCompaction>, AgentSessionEndpointError> {
+        let CompactionRequestPlan {
+            request: mut compaction_request,
+            cut_identity,
+            record_version,
+        } = plan;
+        let descriptor = runtime
+            .provider_configuration
+            .effective()
+            .descriptor()
+            .clone();
+        let mut validated = descriptor
+            .validate_request(compaction_request.clone(), ValidationMode::Strict)
+            .map_err(ModelError::from)
+            .map_err(|error| self.compact_preparation_endpoint_error(error))?;
+        let (preparation, portable_preparation) = self
+            .compaction_preparation_contexts(
+                runtime,
+                &descriptor,
+                &validated,
+                measured.cache_affinity.clone(),
+            )
+            .await?;
+        // A compaction carries cache affinity and closed-history proof. Its
+        // input is the sealed cut, a strict subset of the live turn's active family
+        // artifact covers, so attaching that artifact asks the route to reuse
+        // state that does not match this request's canonical coverage. On the
+        // Responses wire `from_active_artifact` refuses that outright on a
+        // coverage mismatch, which is how the live Grok and Codex growth turns
+        // of 2026-09-18 lost every compaction they attempted; all five
+        // Responses routes now prepare fresh on that condition.
+        //
+        // The previous-response continuation is a second, separate attachment.
+        // Only the two Anthropic Messages routes read it, so it was never what
+        // Grok or Codex hit, but a compaction must not continue the live turn's
+        // response there either, for the same coverage reason. Neither is
+        // attached here, and `the_prepared_compaction_attaches_no_artifact_and_no_continuation`
+        // pins that so a future caller cannot re-attach either one.
+        let mut prepared =
+            Arc::clone(&runtime.model).prepare_call(validated.clone(), preparation.clone());
+        let native_protected_history = measured.native
+            && prepared.as_ref().is_err_and(|error| {
+                error.rejection_kind()
+                    == Some(plakous_model::ModelPreparationErrorKind::ProtectedHistory)
+            });
+        if native_protected_history {
+            let history = portable_compaction_history(compaction_request.input().history())
+                .map_err(|error| compact_runtime_endpoint_error(&error))?;
+            compaction_request = ModelRequest::from_parts(
+                compaction_request.stable_prefix().clone(),
+                ConversationView::from_shared(history, plakous_model::WorkingProjection::default()),
+                compaction_request.metadata(),
+            )
+            .map_err(compact_runtime_endpoint_rejected)?;
+            validated = descriptor
                 .validate_request(compaction_request.clone(), ValidationMode::Strict)
                 .map_err(ModelError::from)
                 .map_err(|error| self.compact_preparation_endpoint_error(error))?;
-            descriptor
-                .preflight_context_admission_requirement(
-                    validated.request().context_admission_requirement(),
-                )
-                .map_err(ModelPreparationError::from)
-                .map_err(ModelError::from)
-                .map_err(|error| self.compact_preparation_endpoint_error(error))?;
-            let prepared_at = runtime.clock.now();
-            let authority = Arc::clone(&runtime.model)
-                .revalidate_runtime_authority(prepared_at)
-                .await
-                .map_err(ModelPreparationError::from)
-                .map_err(ModelError::from)
-                .map_err(|error| self.compact_preparation_endpoint_error(error))?;
-            validate_configuration_runtime_authority(
-                &runtime.provider_configuration,
-                &descriptor,
-                &authority,
-                prepared_at,
+            // The failed lowering created no dispatch capability. Retry fresh
+            // once; only this selected call can ever be persisted and paid.
+            prepared =
+                Arc::clone(&runtime.model).prepare_call(validated.clone(), portable_preparation);
+        }
+        let prepared = match prepared {
+            Ok(prepared) => prepared,
+            Err(error)
+                if measured.native
+                    && ModelError::from(error.clone()).kind() == ModelErrorKind::ContextLimit =>
+            {
+                let error =
+                    self.project_model_error(ModelError::from(error), ModelErrorPhase::Preparation);
+                committed_detail.diagnostic = Some(format!(
+                    "native facet preparation refused for capacity: {}",
+                    compact_diagnostic(&error)
+                ));
+                // Preparation created no capability or durable operation. Keep
+                // this workflow's sole dispatch attempt and try its sealed cut.
+                return Ok(CompactionPhase::RetryWithoutNative);
+            }
+            Err(error) => {
+                return Ok(CompactionPhase::Done(
+                    self.compaction_preparation_unavailable(
+                        attempt,
+                        runtime,
+                        measured,
+                        error,
+                        native_protected_history,
+                        committed_detail,
+                    )
+                    .await,
+                ));
+            }
+        };
+        Ok(CompactionPhase::Next(PreparedCompaction {
+            request: compaction_request,
+            cut_identity,
+            record_version,
+            validated,
+            prepared,
+            native_protected_history,
+        }))
+    }
+
+    /// The preparation context for the selected request and its portable
+    /// variant without the completed-history prefix.
+    async fn compaction_preparation_contexts(
+        &self,
+        runtime: &ExactCompactionRuntime,
+        descriptor: &plakous_model::ResolvedModelDescriptor,
+        validated: &ValidatedRequestPlan,
+        cache_affinity: ModelCacheAffinity,
+    ) -> Result<(ModelPreparationContext, ModelPreparationContext), AgentSessionEndpointError> {
+        descriptor
+            .preflight_context_admission_requirement(
+                validated.request().context_admission_requirement(),
             )
+            .map_err(ModelPreparationError::from)
             .map_err(ModelError::from)
             .map_err(|error| self.compact_preparation_endpoint_error(error))?;
-            // Paid dispatch uses the source branch's cache affinity; only the
-            // successor checkpoint rotates to `target_affinity_entropy`.
-            let preparation = ModelPreparationContext::new(authority, prepared_at)
-                .with_required_input_bound()
-                .with_request_anchor(self.request_anchor.clone())
-                .with_cache_affinity(source_cache_affinity);
-            let portable_preparation = preparation.clone();
-            let preparation = self.with_completed_history_prefix(&validated, preparation);
-            // A compaction carries cache affinity and closed-history proof. Its
-            // input is the sealed cut, a strict subset of the live turn's active family
-            // artifact covers, so attaching that artifact asks the route to reuse
-            // state that does not match this request's canonical coverage. On the
-            // Responses wire `from_active_artifact` refuses that outright on a
-            // coverage mismatch, which is how the live Grok and Codex growth turns
-            // of 2026-09-18 lost every compaction they attempted; all five
-            // Responses routes now prepare fresh on that condition.
-            //
-            // The previous-response continuation is a second, separate attachment.
-            // Only the two Anthropic Messages routes read it, so it was never what
-            // Grok or Codex hit, but a compaction must not continue the live turn's
-            // response there either, for the same coverage reason. Neither is
-            // attached here, and `the_prepared_compaction_attaches_no_artifact_and_no_continuation`
-            // pins that so a future caller cannot re-attach either one.
-            let mut prepared =
-                Arc::clone(&runtime.model).prepare_call(validated.clone(), preparation.clone());
-            let native_protected_history = native
-                && prepared.as_ref().is_err_and(|error| {
-                    error.rejection_kind()
-                        == Some(plakous_model::ModelPreparationErrorKind::ProtectedHistory)
-                });
-            if native_protected_history {
-                let history = portable_compaction_history(compaction_request.input().history())
-                    .map_err(|error| compact_runtime_endpoint_error(&error))?;
-                compaction_request = ModelRequest::from_parts(
-                    compaction_request.stable_prefix().clone(),
-                    ConversationView::from_shared(
-                        history,
-                        plakous_model::WorkingProjection::default(),
-                    ),
-                    compaction_request.metadata(),
-                )
-                .map_err(compact_runtime_endpoint_rejected)?;
-                validated = descriptor
-                    .validate_request(compaction_request.clone(), ValidationMode::Strict)
-                    .map_err(ModelError::from)
-                    .map_err(|error| self.compact_preparation_endpoint_error(error))?;
-                // The failed lowering created no dispatch capability. Retry fresh
-                // once; only this selected call can ever be persisted and paid.
-                prepared = Arc::clone(&runtime.model)
-                    .prepare_call(validated.clone(), portable_preparation);
-            }
-            let prepared = match prepared {
-                Ok(prepared) => prepared,
-                Err(error)
-                    if native
-                        && ModelError::from(error.clone()).kind()
-                            == ModelErrorKind::ContextLimit =>
-                {
-                    let error = self
-                        .project_model_error(ModelError::from(error), ModelErrorPhase::Preparation);
-                    committed_detail.diagnostic = Some(format!(
-                        "native facet preparation refused for capacity: {}",
-                        compact_diagnostic(&error)
-                    ));
-                    // Preparation created no capability or durable operation. Keep
-                    // this workflow's sole dispatch attempt and try its sealed cut.
-                    native_allowed = false;
-                    continue;
+        let prepared_at = runtime.clock.now();
+        let authority = Arc::clone(&runtime.model)
+            .revalidate_runtime_authority(prepared_at)
+            .await
+            .map_err(ModelPreparationError::from)
+            .map_err(ModelError::from)
+            .map_err(|error| self.compact_preparation_endpoint_error(error))?;
+        validate_configuration_runtime_authority(
+            &runtime.provider_configuration,
+            descriptor,
+            &authority,
+            prepared_at,
+        )
+        .map_err(ModelError::from)
+        .map_err(|error| self.compact_preparation_endpoint_error(error))?;
+        // Paid dispatch uses the source branch's cache affinity; only the
+        // successor checkpoint rotates to `target_affinity_entropy`.
+        let preparation = ModelPreparationContext::new(authority, prepared_at)
+            .with_required_input_bound()
+            .with_request_anchor(self.request_anchor.clone())
+            .with_cache_affinity(cache_affinity);
+        let portable_preparation = preparation.clone();
+        let preparation = self.with_completed_history_prefix(validated, preparation);
+        Ok((preparation, portable_preparation))
+    }
+
+    /// The compaction's own request could not be prepared. Nothing has been
+    /// dispatched and nothing is owed, so this is not a terminal outcome for
+    /// the ladder: it is one rung being unavailable. Falling to placeholders
+    /// here is what stops the next round reaching the provider over the
+    /// window. The live Grok growth case did exactly that — two compactions
+    /// unavailable because an active Responses artifact no longer matched the
+    /// request's canonical coverage, then a provider capacity denial, with no
+    /// placeholder record anywhere.
+    async fn compaction_preparation_unavailable(
+        &mut self,
+        attempt: &CompactionAttempt<'_>,
+        runtime: &ExactCompactionRuntime,
+        measured: &MeasuredSource,
+        error: ModelPreparationError,
+        native_protected_history: bool,
+        committed_detail: &mut CompactionDetail,
+    ) -> Result<AgentCompactSessionOutcome, AgentSessionEndpointError> {
+        let error = self.project_model_error(ModelError::from(error), ModelErrorPhase::Preparation);
+        let rung = if measured.native {
+            "native facet"
+        } else {
+            "harness summary"
+        };
+        let preparation_refusal =
+            format!("{rung} preparation failed: {}", compact_diagnostic(&error));
+        committed_detail.diagnostic = Some(preparation_refusal.clone());
+        self.compaction_source_placeholders(attempt, runtime, measured, native_protected_history)
+            .await
+            .and_then(|outcome| match outcome {
+                // Placeholders could not act either; report the original
+                // preparation failure rather than inventing a range
+                // outcome for a rung that never got to run.
+                AgentCompactSessionOutcome::NoEligibleRange => {
+                    committed_detail.exhausted = true;
+                    Err(compact_runtime_endpoint_rejected(format!(
+                        "{preparation_refusal}; no fitting offline successor (tool-result placeholders or replay omission)"
+                    )))
                 }
-                // The compaction's own request could not be prepared. Nothing has
-                // been dispatched and nothing is owed, so this is not a terminal
-                // outcome for the ladder: it is one rung being unavailable. Falling
-                // to placeholders here is what stops the next round reaching the
-                // provider over the window. The live Grok growth case did exactly
-                // that — two compactions unavailable because an active Responses
-                // artifact no longer matched the request's canonical coverage,
-                // then a provider capacity denial, with no placeholder record anywhere.
-                Err(error) => {
-                    let error = self
-                        .project_model_error(ModelError::from(error), ModelErrorPhase::Preparation);
-                    let rung = if native {
-                        "native facet"
-                    } else {
-                        "harness summary"
-                    };
-                    let preparation_refusal =
-                        format!("{rung} preparation failed: {}", compact_diagnostic(&error));
-                    committed_detail.diagnostic = Some(preparation_refusal.clone());
-                    return Box::pin(self.replace_protected_tool_results(
-                    active,
-                origin,
-                    &runtime,
+                outcome => Ok(outcome),
+            })
+    }
+
+    /// Persists the prepared request, dispatches it once, and settles the
+    /// outcome: publish on success, terminalize on failure.
+    async fn dispatch_compaction(
+        &mut self,
+        attempt: &CompactionAttempt<'_>,
+        runtime: ExactCompactionRuntime,
+        measured: &MeasuredSource,
+        prepared: PreparedCompaction,
+        committed_detail: &mut CompactionDetail,
+    ) -> Result<AgentCompactSessionOutcome, AgentSessionEndpointError> {
+        let identity = attempt.identity;
+        let source = attempt.source;
+        let native_protected_history = prepared.native_protected_history;
+        let prepared_record = prepared.prepared.record().clone();
+        let target_affinity_entropy = self.compaction_target_affinity_entropy(identity)?;
+        let record = DurableCompactionRequestRecord {
+            version: prepared.record_version,
+            workflow_id: identity.workflow_id,
+            turn_fence: attempt.origin.is_turn_fence(),
+            operation_id: attempt.request.operation_id.clone(),
+            source_session: source.session_id,
+            source_branch: source.branch_id,
+            source_checkpoint: source.checkpoint_id,
+            source_history: measured.projection.history().identity(),
+            cut: prepared.cut_identity,
+            request: prepared.request,
+            provider_configuration: runtime.provider_configuration.as_ref().clone(),
+            source_harness_plan: measured.harness_plan,
+            before_measurement: measured.before.measurement_identity(),
+            before_status: measured.before.status_identity(),
+            before_input_tokens: measured.before.input_tokens(),
+            target_affinity_entropy,
+        };
+        let (compaction_operation, provider_operation) = self
+            .prepare_compaction_operations(identity, &record, &prepared_record)
+            .await
+            .map_err(|error| compact_runtime_endpoint_error(&error))?;
+        let locator_refusal = match prepared_record.recovery_locator() {
+            None => None,
+            Some(prepared_locator) => match self
+                .persist_compaction_locator(
                     identity,
-                    &request.operation_id,
-                    source,
-                    source_projection.identity(),
-                    source_harness_plan,
-                    before,
-                    occupancy_before,
-                    native_protected_history,
-                ))
+                    provider_operation,
+                    identity.prepared_locator_checkpoint,
+                    prepared_locator,
+                    ProviderCallRecoveryLocatorStage::Prepared,
+                )
                 .await
-                .and_then(|outcome| match outcome {
-                    // Placeholders could not act either; report the original
-                    // preparation failure rather than inventing a range
-                    // outcome for a rung that never got to run.
-                    AgentCompactSessionOutcome::NoEligibleRange => {
-                        committed_detail.exhausted = true;
-                        Err(compact_runtime_endpoint_rejected(format!(
-                            "{preparation_refusal}; no fitting offline successor (tool-result placeholders or replay omission)"
-                        )))
-                    }
-                    outcome => Ok(outcome),
-                });
+            {
+                Ok(()) => None,
+                // An ordinary refusal leaves both operations `Prepared`, so
+                // the failure below settles them as proven not dispatched.
+                Err(error) if ordinary_capacity_refusal(&error).is_some() => Some(error),
+                Err(_) => {
+                    return Ok(AgentCompactSessionOutcome::RecoveryRequired {
+                        checkpoint: self.authority.checkpoint().id(),
+                        diagnostic: None,
+                    });
                 }
-            };
-            let prepared_record = prepared.record().clone();
-            let entropy_left = self
-                .ids
-                .next_uuid(self.clock.now())
-                .map_err(compact_runtime_endpoint_rejected)?;
-            let entropy_right = self
-                .ids
-                .next_uuid(self.clock.now())
-                .map_err(compact_runtime_endpoint_rejected)?;
-            let target_affinity_entropy = *Digest::sha256(
-                DigestDomain::ProviderOperation,
-                3,
-                &[
-                    b"plakous-agent/session-compaction-affinity-v1",
-                    identity.workflow_id.as_bytes(),
-                    entropy_left.as_bytes(),
-                    entropy_right.as_bytes(),
-                ],
-            )
-            .map_err(compact_runtime_endpoint_rejected)?
-            .bytes();
-            let record = DurableCompactionRequestRecord {
-                version: record_version,
-                workflow_id: identity.workflow_id,
-                turn_fence: origin.is_turn_fence(),
-                operation_id: request.operation_id.clone(),
-                source_session: source.session_id,
-                source_branch: source.branch_id,
-                source_checkpoint: source.checkpoint_id,
-                source_history: source_projection.history().identity(),
-                cut: cut_identity,
-                request: compaction_request,
-                provider_configuration: runtime.provider_configuration.as_ref().clone(),
-                source_harness_plan,
-                before_measurement: before.measurement_identity(),
-                before_status: before.status_identity(),
-                before_input_tokens: before.input_tokens(),
-                target_affinity_entropy,
-            };
-            let (compaction_operation, provider_operation) = self
-                .prepare_compaction_operations(identity, &record, &prepared_record)
+            },
+        };
+        let mut live = LiveCompaction::prepared(
+            attempt.origin,
+            attempt.active.cloned(),
+            identity,
+            (compaction_operation, provider_operation),
+            record,
+            prepared.prepared,
+            prepared.validated,
+            runtime,
+        );
+        let result = if let Some(error) = locator_refusal {
+            Err(error)
+        } else {
+            if matches!(
+                attempt.origin,
+                CompactOrigin::TurnFence {
+                    pressure_forced: true
+                }
+            ) {
+                self.turn_budgets.pressure_fold_spent = true;
+            }
+            Box::pin(self.run_compaction_call(&mut live)).await
+        };
+        match result {
+            Ok(response) => {
+                self.settle_compaction_response(
+                    attempt,
+                    measured,
+                    &mut live,
+                    &response,
+                    native_protected_history,
+                    committed_detail,
+                )
                 .await
-                .map_err(|error| compact_runtime_endpoint_error(&error))?;
-            let locator_refusal = match prepared_record.recovery_locator() {
-                None => None,
-                Some(prepared_locator) => match self
-                    .persist_compaction_locator(
-                        identity,
-                        provider_operation,
-                        identity.prepared_locator_checkpoint,
-                        prepared_locator,
-                        ProviderCallRecoveryLocatorStage::Prepared,
-                    )
-                    .await
-                {
-                    Ok(()) => None,
-                    // An ordinary refusal leaves both operations `Prepared`, so
-                    // the failure below settles them as proven not dispatched.
-                    Err(error) if ordinary_capacity_refusal(&error).is_some() => Some(error),
-                    Err(_) => {
-                        return Ok(AgentCompactSessionOutcome::RecoveryRequired {
-                            checkpoint: self.authority.checkpoint().id(),
-                            diagnostic: None,
-                        });
-                    }
-                },
-            };
-            let mut live = LiveCompaction::prepared(
-                origin,
-                active.cloned(),
+            }
+            Err(error) => {
+                self.settle_compaction_failure(
+                    attempt,
+                    measured,
+                    &mut live,
+                    &error,
+                    native_protected_history,
+                    committed_detail,
+                )
+                .await
+            }
+        }
+    }
+
+    /// Fresh entropy for the successor checkpoint's cache affinity.
+    fn compaction_target_affinity_entropy(
+        &mut self,
+        identity: DurableCompactionIdentity,
+    ) -> Result<[u8; 32], AgentSessionEndpointError> {
+        let entropy_left = self
+            .ids
+            .next_uuid(self.clock.now())
+            .map_err(compact_runtime_endpoint_rejected)?;
+        let entropy_right = self
+            .ids
+            .next_uuid(self.clock.now())
+            .map_err(compact_runtime_endpoint_rejected)?;
+        Ok(*Digest::sha256(
+            DigestDomain::ProviderOperation,
+            3,
+            &[
+                b"plakous-agent/session-compaction-affinity-v1",
+                identity.workflow_id.as_bytes(),
+                entropy_left.as_bytes(),
+                entropy_right.as_bytes(),
+            ],
+        )
+        .map_err(compact_runtime_endpoint_rejected)?
+        .bytes())
+    }
+
+    /// Settles a paid call that did not return a response.
+    async fn settle_compaction_failure(
+        &mut self,
+        attempt: &CompactionAttempt<'_>,
+        measured: &MeasuredSource,
+        live: &mut LiveCompaction,
+        error: &AgentError,
+        native_protected_history: bool,
+        committed_detail: &mut CompactionDetail,
+    ) -> Result<AgentCompactSessionOutcome, AgentSessionEndpointError> {
+        let identity = attempt.identity;
+        let origin = attempt.origin;
+        let (compaction_operation, provider_operation) = live.operations();
+        // A fold that did not commit may still have been billed. The
+        // next rounds use the free rung with escalating backoff and
+        // a per-turn failure cap. A successful fold re-arms pressure
+        // for later newly consumed work.
+        let failed = self
+            .terminalize_compaction_failure(
                 identity,
-                (compaction_operation, provider_operation),
-                record,
-                prepared,
-                validated,
-                runtime,
-            );
-            let result = if let Some(error) = locator_refusal {
-                Err(error)
-            } else {
+                compaction_operation,
+                provider_operation,
+                live.source(),
+                live.record(),
+                error,
+                live.origin(),
+                live.turn_id(),
+                None,
+                Some((live.prepared_record().identity(), identity.attempt_id)),
+            )
+            .await;
+        if origin.is_turn_fence() {
+            let head = self.authority.checkpoint();
+            let operations = head.manifest().ledger().operations();
+            let billed = operations
+                .iter()
+                .find(|record| record.operation_id() == provider_operation.0)
+                .is_some_and(|record| {
+                    record.transitions().iter().any(|transition| {
+                        matches!(transition.state(), DurableOperationState::Dispatched)
+                    }) && !record.transitions().iter().any(|transition| {
+                        matches!(
+                            transition.state(),
+                            DurableOperationState::ProvenNotDispatched(_)
+                        )
+                    })
+                });
+            self.turn_budgets.paid_fold_spent |= billed;
+            if !billed {
+                self.turn_budgets.pressure_fold_spent = false;
+            }
+        }
+        // A definite paid-fold failure mid-turn changed nothing, so the
+        // free rung still has the whole source to work on, and the
+        // turn goes on under the window instead of over it. It is a
+        // new workflow: the failed fold keeps its own record. A
+        // cancelled fold is not retried in any form, and an idle
+        // `/compact` reports its failure to the operator who asked.
+        if !origin.is_turn_fence()
+            || !matches!(failed, AgentCompactSessionOutcome::Failed { .. })
+            || error.kind() == AgentErrorKind::Cancelled
+        {
+            return Ok(failed);
+        }
+        self.placeholders_after_failed_fold(
+            attempt,
+            live.runtime(),
+            measured,
+            native_protected_history,
+            failed,
+            committed_detail,
+        )
+        .await
+    }
+
+    /// Settles a paid call that returned a response: complete both
+    /// operations, then publish the successor.
+    async fn settle_compaction_response(
+        &mut self,
+        attempt: &CompactionAttempt<'_>,
+        measured: &MeasuredSource,
+        live: &mut LiveCompaction,
+        response: &ModelResponse,
+        native_protected_history: bool,
+        committed_detail: &mut CompactionDetail,
+    ) -> Result<AgentCompactSessionOutcome, AgentSessionEndpointError> {
+        let identity = attempt.identity;
+        let origin = attempt.origin;
+        let (compaction_operation, provider_operation) = live.operations();
+        let Ok(completed) = compaction_operation_component(response) else {
+            // Paid compact already completed. Encoding or byte-budget
+            // failure retains its unresolved fence; it never permits replay.
+            return Ok(AgentCompactSessionOutcome::RecoveryRequired {
+                checkpoint: self.authority.checkpoint().id(),
+                diagnostic: None,
+            });
+        };
+        if self
+            .transition_compaction_operations(
+                identity,
+                compaction_operation,
+                provider_operation,
+                identity.completed_checkpoint,
+                DurableOperationState::Completed(completed),
+            )
+            .await
+            .is_err()
+        {
+            return Ok(AgentCompactSessionOutcome::RecoveryRequired {
+                checkpoint: self.authority.checkpoint().id(),
+                diagnostic: None,
+            });
+        }
+        match self
+            .publish_compaction_success(
+                identity,
+                compaction_operation,
+                provider_operation,
+                live.record(),
+                live.prepared_record(),
+                response,
+                Arc::clone(&live.runtime().model),
+                &live.runtime().provider_configuration,
+                live.runtime().clock.as_ref(),
+                live.runtime().model_operation_timeout,
+                live.origin(),
+                live.turn_id(),
+            )
+            .await
+        {
+            Ok((target, occupancy_after)) => {
                 if matches!(
                     origin,
                     CompactOrigin::TurnFence {
                         pressure_forced: true
                     }
                 ) {
-                    self.turn_budgets.pressure_fold_spent = true;
+                    self.pressure_folds_committed += 1;
                 }
-                Box::pin(self.run_compaction_call(&mut live)).await
-            };
-            let response = match result {
-                Ok(response) => response,
-                Err(error) => {
-                    // A fold that did not commit may still have been billed. The
-                    // next rounds use the free rung with escalating backoff and
-                    // a per-turn failure cap. A successful fold re-arms pressure
-                    // for later newly consumed work.
-                    let failed = self
-                        .terminalize_compaction_failure(
-                            identity,
-                            compaction_operation,
-                            provider_operation,
-                            live.source(),
-                            live.record(),
-                            &error,
-                            live.origin(),
-                            live.turn_id(),
-                            None,
-                            Some((live.prepared_record().identity(), identity.attempt_id)),
-                        )
-                        .await;
-                    if origin.is_turn_fence() {
-                        let head = self.authority.checkpoint();
-                        let operations = head.manifest().ledger().operations();
-                        let billed = operations
-                            .iter()
-                            .find(|record| record.operation_id() == provider_operation.0)
-                            .is_some_and(|record| {
-                                record.transitions().iter().any(|transition| {
-                                    matches!(transition.state(), DurableOperationState::Dispatched)
-                                }) && !record.transitions().iter().any(|transition| {
-                                    matches!(
-                                        transition.state(),
-                                        DurableOperationState::ProvenNotDispatched(_)
-                                    )
-                                })
-                            });
-                        self.turn_budgets.paid_fold_spent |= billed;
-                        if !billed {
-                            self.turn_budgets.pressure_fold_spent = false;
-                        }
-                    }
-                    // A definite paid-fold failure mid-turn changed nothing, so the
-                    // free rung still has the whole source to work on, and the
-                    // turn goes on under the window instead of over it. It is a
-                    // new workflow: the failed fold keeps its own record. A
-                    // cancelled fold is not retried in any form, and an idle
-                    // `/compact` reports its failure to the operator who asked.
-                    if !origin.is_turn_fence()
-                        || !matches!(failed, AgentCompactSessionOutcome::Failed { .. })
-                        || error.kind() == AgentErrorKind::Cancelled
-                    {
-                        return Ok(failed);
-                    }
-                    let head = self.authority.checkpoint();
-                    let topology = head.manifest().topology();
-                    let current = DurableSessionAddress::new(
-                        topology.session_id,
-                        topology.branch_id,
-                        topology.checkpoint_id,
-                    );
-                    let fallback_operation = format!("{}:placeholders", request.operation_id);
-                    let Ok(fallback) = DurableCompactionIdentity::new(&fallback_operation, current)
-                    else {
-                        return Ok(failed);
-                    };
-                    return match Box::pin(self.replace_protected_tool_results(
-                        active,
-                        origin,
-                        live.runtime(),
-                        fallback,
-                        &fallback_operation,
-                        current,
-                        source_projection.identity(),
-                        source_harness_plan,
-                        before,
-                        occupancy_before,
-                        native_protected_history,
-                    ))
-                    .await
-                    {
-                        Ok(placeholders @ AgentCompactSessionOutcome::Compacted { .. }) => {
-                            if let AgentCompactSessionOutcome::Failed { diagnostic, .. } = &failed {
-                                committed_detail.diagnostic.clone_from(diagnostic);
-                            }
-                            Ok(placeholders)
-                        }
-                        Ok(AgentCompactSessionOutcome::NoEligibleRange) => {
-                            committed_detail.exhausted = true;
-                            Ok(failed)
-                        }
-                        _ => Ok(failed),
-                    };
+                if origin.is_turn_fence() {
+                    self.turn_budgets.pressure_fold_spent =
+                        self.pressure_folds_committed >= COMMITTED_PRESSURE_FOLD_CAP;
                 }
-            };
-            let Ok(completed) = compaction_operation_component(&response) else {
-                // Paid compact already completed. Encoding or byte-budget
-                // failure retains its unresolved fence; it never permits replay.
-                return Ok(AgentCompactSessionOutcome::RecoveryRequired {
-                    checkpoint: self.authority.checkpoint().id(),
-                    diagnostic: None,
-                });
-            };
-            if self
-                .transition_compaction_operations(
-                    identity,
-                    compaction_operation,
-                    provider_operation,
-                    identity.completed_checkpoint,
-                    DurableOperationState::Completed(completed),
-                )
-                .await
-                .is_err()
-            {
-                return Ok(AgentCompactSessionOutcome::RecoveryRequired {
-                    checkpoint: self.authority.checkpoint().id(),
-                    diagnostic: None,
-                });
+                Ok(AgentCompactSessionOutcome::Compacted {
+                    workflow_id: identity.workflow_id,
+                    source: live.source().checkpoint_id,
+                    target,
+                    summary: committed_compaction_summary(&self.authority).map(|summary| {
+                        summary.with_occupancy(measured.occupancy_before, occupancy_after)
+                    }),
+                    feed_seq: self.authority.feed_seq_at(target),
+                })
             }
-            return match self
-                .publish_compaction_success(
-                    identity,
-                    compaction_operation,
-                    provider_operation,
-                    live.record(),
-                    live.prepared_record(),
-                    &response,
-                    Arc::clone(&live.runtime().model),
-                    &live.runtime().provider_configuration,
-                    live.runtime().clock.as_ref(),
-                    live.runtime().model_operation_timeout,
-                    live.origin(),
-                    live.turn_id(),
+            Err(
+                CompactionCompletionError::RecoveryRequired(error)
+                | CompactionCompletionError::Semantic(error),
+            ) => {
+                if origin.is_turn_fence() {
+                    self.turn_budgets.paid_fold_spent = true;
+                }
+                let failed = self
+                    .terminalize_compaction_failure(
+                        identity,
+                        compaction_operation,
+                        provider_operation,
+                        live.source(),
+                        live.record(),
+                        &error,
+                        live.origin(),
+                        live.turn_id(),
+                        response.usage(),
+                        None,
+                    )
+                    .await;
+                if !origin.is_turn_fence()
+                    || !matches!(failed, AgentCompactSessionOutcome::Failed { .. })
+                {
+                    return Ok(failed);
+                }
+                self.placeholders_after_failed_fold(
+                    attempt,
+                    live.runtime(),
+                    measured,
+                    native_protected_history,
+                    failed,
+                    committed_detail,
                 )
                 .await
-            {
-                Ok((target, occupancy_after)) => {
-                    if matches!(
-                        origin,
-                        CompactOrigin::TurnFence {
-                            pressure_forced: true
-                        }
-                    ) {
-                        self.pressure_folds_committed += 1;
-                    }
-                    if origin.is_turn_fence() {
-                        self.turn_budgets.pressure_fold_spent =
-                            self.pressure_folds_committed >= COMMITTED_PRESSURE_FOLD_CAP;
-                    }
-                    Ok(AgentCompactSessionOutcome::Compacted {
-                        workflow_id: identity.workflow_id,
-                        source: live.source().checkpoint_id,
-                        target,
-                        summary: committed_compaction_summary(&self.authority).map(|summary| {
-                            summary.with_occupancy(occupancy_before, occupancy_after)
-                        }),
-                        feed_seq: self.authority.feed_seq_at(target),
-                    })
+            }
+        }
+    }
+
+    /// The free rung after a definite paid-fold failure at a turn fence, as a
+    /// new workflow on the current head; `failed` stands when it cannot act.
+    async fn placeholders_after_failed_fold(
+        &mut self,
+        attempt: &CompactionAttempt<'_>,
+        runtime: &ExactCompactionRuntime,
+        measured: &MeasuredSource,
+        native_protected_history: bool,
+        failed: AgentCompactSessionOutcome,
+        committed_detail: &mut CompactionDetail,
+    ) -> Result<AgentCompactSessionOutcome, AgentSessionEndpointError> {
+        let head = self.authority.checkpoint();
+        let topology = head.manifest().topology();
+        let current = DurableSessionAddress::new(
+            topology.session_id,
+            topology.branch_id,
+            topology.checkpoint_id,
+        );
+        let fallback_operation = format!("{}:placeholders", attempt.request.operation_id);
+        let Ok(fallback) = DurableCompactionIdentity::new(&fallback_operation, current) else {
+            return Ok(failed);
+        };
+        match Box::pin(self.replace_protected_tool_results(
+            attempt.active,
+            attempt.origin,
+            runtime,
+            fallback,
+            &fallback_operation,
+            current,
+            measured.projection.identity(),
+            measured.harness_plan,
+            measured.before,
+            measured.occupancy_before,
+            native_protected_history,
+        ))
+        .await
+        {
+            Ok(placeholders @ AgentCompactSessionOutcome::Compacted { .. }) => {
+                if let AgentCompactSessionOutcome::Failed { diagnostic, .. } = &failed {
+                    committed_detail.diagnostic.clone_from(diagnostic);
                 }
-                Err(
-                    CompactionCompletionError::RecoveryRequired(error)
-                    | CompactionCompletionError::Semantic(error),
-                ) => {
-                    if origin.is_turn_fence() {
-                        self.turn_budgets.paid_fold_spent = true;
-                    }
-                    let failed = self
-                        .terminalize_compaction_failure(
-                            identity,
-                            compaction_operation,
-                            provider_operation,
-                            live.source(),
-                            live.record(),
-                            &error,
-                            live.origin(),
-                            live.turn_id(),
-                            response.usage(),
-                            None,
-                        )
-                        .await;
-                    if !origin.is_turn_fence()
-                        || !matches!(failed, AgentCompactSessionOutcome::Failed { .. })
-                    {
-                        return Ok(failed);
-                    }
-                    let head = self.authority.checkpoint();
-                    let topology = head.manifest().topology();
-                    let current = DurableSessionAddress::new(
-                        topology.session_id,
-                        topology.branch_id,
-                        topology.checkpoint_id,
-                    );
-                    let fallback_operation = format!("{}:placeholders", request.operation_id);
-                    let Ok(fallback) = DurableCompactionIdentity::new(&fallback_operation, current)
-                    else {
-                        return Ok(failed);
-                    };
-                    match Box::pin(self.replace_protected_tool_results(
-                        active,
-                        origin,
-                        live.runtime(),
-                        fallback,
-                        &fallback_operation,
-                        current,
-                        source_projection.identity(),
-                        source_harness_plan,
-                        before,
-                        occupancy_before,
-                        native_protected_history,
-                    ))
-                    .await
-                    {
-                        Ok(placeholders @ AgentCompactSessionOutcome::Compacted { .. }) => {
-                            if let AgentCompactSessionOutcome::Failed { diagnostic, .. } = &failed {
-                                committed_detail.diagnostic.clone_from(diagnostic);
-                            }
-                            Ok(placeholders)
-                        }
-                        Ok(AgentCompactSessionOutcome::NoEligibleRange) => {
-                            committed_detail.exhausted = true;
-                            Ok(failed)
-                        }
-                        _ => Ok(failed),
-                    }
-                }
-            };
+                Ok(placeholders)
+            }
+            Ok(AgentCompactSessionOutcome::NoEligibleRange) => {
+                committed_detail.exhausted = true;
+                Ok(failed)
+            }
+            _ => Ok(failed),
         }
     }
 
