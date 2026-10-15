@@ -150,7 +150,8 @@ class GatePlanTests(unittest.TestCase):
 
     @patch.object(GATE, "reader_inputs", return_value=({}, []))
     def test_gate_inputs_select_whole_check_and_tooling(self, _readers):
-        for path in ("scripts/dev-check.sh", "scripts/dev-tools.sh", "Justfile",
+        for path in ("scripts/dev-check.sh", "scripts/dev-tools.sh", "scripts/test-tmpdir.sh",
+                     "Justfile",
                      ".config/nextest.toml",
                      "tools/checks/gate_plan.py", "tools/checks/changed_packages.py",
                      "tools/checks/budget_filterset.py", "tools/checks/check_workspace.py",

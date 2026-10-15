@@ -135,12 +135,13 @@ entries. Completeness tests
 inventory existing quoted docs/config paths and known executable-discovery
 markers; artifact coverage includes every package in its Cargo metadata
 workspace dependency closure. They do not prove arbitrary dynamic readers.
-`dev-check.sh` and the test recipes set `TMPDIR=$PWD/target/plak-test-tmp`
-and `PLAK_HOME=$TMPDIR/plak-isolated-home` (mode 0700) for nextest, so a test
-that forgets a product home cannot create the operator's `~/.plak`.
-(`dev-check.sh` uses a per-checkout `/dev/shm` directory on Linux, where fsync
-under gate load breaks process deadlines); set it yourself if you run
-`cargo nextest` by hand. There is no CI.
+`dev-check.sh` and the test recipes set `TMPDIR` from `scripts/test-tmpdir.sh`
+(a per-checkout 0700 directory under `/dev/shm` on Linux, where fsync under gate
+load breaks process deadlines, and under `/private/tmp` on macOS, outside
+`HOME`; `PLAK_TEST_TMPDIR` overrides) and `PLAK_HOME=$TMPDIR/plak-isolated-home`
+(mode 0700) for nextest, so a test that forgets a product home cannot create the
+operator's `~/.plak`. Set both yourself if you run `cargo nextest` by hand:
+`TMPDIR="$(bash scripts/test-tmpdir.sh)"`. There is no CI.
 
 Transport faults for smoke and soak runs: a `test-hooks` build of `plak` reads
 `PLAK_TEST_FAULTS`, e.g.

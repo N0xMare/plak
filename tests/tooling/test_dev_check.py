@@ -54,6 +54,7 @@ class DevCheckWorkerTests(unittest.TestCase):
         (self.root / "scripts").mkdir()
         shutil.copyfile(ROOT / "scripts/dev-check.sh", self.root / "scripts/dev-check.sh")
         shutil.copyfile(ROOT / "scripts/dev-tools.sh", self.root / "scripts/dev-tools.sh")
+        shutil.copyfile(ROOT / "scripts/test-tmpdir.sh", self.root / "scripts/test-tmpdir.sh")
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.log = self.root / "calls.jsonl"
@@ -63,7 +64,8 @@ class DevCheckWorkerTests(unittest.TestCase):
                         CARGO_TARGET_DIR=str(self.root / 'custom target'),
                         CARGO_BUILD_TARGET='host-triple')
         self.env.pop('PLAK_MONTY_WORKER', None)
-        self.env.pop('PLAK_TEST_TMPDIR', None)
+        # Keep gate scratch inside the fixture instead of the shared per-checkout root.
+        self.env['PLAK_TEST_TMPDIR'] = str(self.root / 'test-tmp')
         # The gate must create the isolated product home itself. An ambient
         # PLAK_HOME would look like the non-test cargo commands inherited one.
         self.env.pop('PLAK_HOME', None)

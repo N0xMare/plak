@@ -77,16 +77,9 @@ done
 export PATH="$root/.dev-tools/bin:$PATH"
 bash scripts/dev-tools.sh check
 
-# macOS NOFOLLOW needs a real workspace path; Linux budget tests need RAM-backed
-# fsync under parallel gate load. Placement changes, not deadline assertions.
-if [[ -z "${PLAK_TEST_TMPDIR:-}" && "$(uname -s)" == Linux && -d /dev/shm && -w /dev/shm ]]; then
-  test_tmpdir="/dev/shm/plak-test-$(id -u)-$(printf '%s' "$PWD" | cksum | cut -d' ' -f1)"
-  rm -rf "$test_tmpdir"
-else
-  test_tmpdir="${PLAK_TEST_TMPDIR:-$PWD/target/plak-test-tmp}"
-fi
-mkdir -p "$test_tmpdir"
-TMPDIR="$(cd "$test_tmpdir" && pwd -P)"
+# Linux budget tests need RAM-backed fsync under parallel gate load; macOS
+# NOFOLLOW needs a physical path outside HOME. Placement changes, not deadlines.
+TMPDIR="$(bash scripts/test-tmpdir.sh --fresh)"
 export TMPDIR
 # Nextest must not inherit the operator product home. A maintainer binary
 # writes its diagnostics log as soon as it starts, and an unresolved

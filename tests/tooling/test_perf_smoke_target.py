@@ -23,6 +23,8 @@ class PerfSmokeTargetTests(unittest.TestCase):
             (root / "tmp").mkdir()
             script = root / "scripts" / "perf-smoke.sh"
             script.write_text(prefix)
+            (root / "scripts" / "test-tmpdir.sh").write_bytes(
+                (ROOT / "scripts" / "test-tmpdir.sh").read_bytes())
             cargo = root / "bin" / "cargo"
             cargo.write_text("#!" + sys.executable + "\n"
                              "import os, pathlib\n"

@@ -650,22 +650,29 @@ the full tier in the pinned offline musl container before publication (chapter 0
 compile and nextest invocation, and subprocess Cargo checks inherit that
 target. A GNU-host gate does not qualify the supported musl platform.
 
-The script defaults to `TMPDIR=$PWD/target/plak-test-tmp` before anything runs
-and creates that directory. On Linux the default is instead a fresh
-per-checkout directory under `/dev/shm`, emptied at the start of each run.
-Linux `fsync` is a real device flush that can exceed the stop, cancel and quit
-bounds under gate load. macOS `fsync` does not flush the device, so the two
-platforms only agree when the Linux scratch is RAM-backed. Maintainers may
-select another disposable filesystem with `PLAK_TEST_TMPDIR`; the script resolves
-its physical path before exporting `TMPDIR`. This changes test storage placement,
-not deadlines or assertions, and
-must be recorded when interpreting filesystem-sensitive results. On macOS `/tmp` and
-`/var` are symlinks, the SQLite stores open with `SQLITE_OPEN_NOFOLLOW`, and the
-credential store walks refuse symlinked parents, so a default temporary root
-makes every host test that opens `runtime.sqlite3` fail with
-`SQLITE_CANTOPEN_SYMLINK`. Anyone invoking `cargo nextest` by hand MUST set a
-physical, non-symlinked `TMPDIR`. `just test` sets the repository default for
-you.
+Every test entry point (`dev-check.sh`, `just test`, `just coverage`,
+`perf-smoke.sh` and `crash-sweep.py`) exports `TMPDIR` from one selector,
+`scripts/test-tmpdir.sh`, before anything runs. On Linux it is a per-checkout
+directory under `/dev/shm`; on macOS a per-checkout directory under
+`/private/tmp`, so neither lies under the operator's `HOME`, where a spawned
+binary's project discovery could reach the real `~/.plak`. The directory is
+named `plak-test-<uid>-<cksum of the checkout path>`, must be owned by the
+caller and mode `0700`, and must resolve to itself with no symlinked
+component; `dev-check.sh` empties it at the start of each run. When the shared
+root or the directory fails those checks, or on another system, the selector
+falls back to `target/plak-test-tmp` in the checkout. Linux `fsync` is a real
+device flush that can exceed the stop, cancel and quit bounds under gate load.
+macOS `fsync` does not flush the device, so the two platforms only agree when
+the Linux scratch is RAM-backed. Maintainers may select another disposable
+filesystem with `PLAK_TEST_TMPDIR`; the selector resolves its physical path
+before `TMPDIR` is exported. This changes test storage placement, not
+deadlines or assertions, and must be recorded when interpreting
+filesystem-sensitive results. On macOS `/tmp` and `/var` are symlinks, the
+SQLite stores open with `SQLITE_OPEN_NOFOLLOW`, and the credential store walks
+refuse symlinked parents, so a default temporary root makes every host test
+that opens `runtime.sqlite3` fail with `SQLITE_CANTOPEN_SYMLINK`. Anyone
+invoking `cargo nextest` by hand MUST set a physical, non-symlinked `TMPDIR`
+outside `HOME`; `TMPDIR="$(bash scripts/test-tmpdir.sh)"` selects the same one.
 
 The same scripts export `PLAK_HOME` to `$TMPDIR/plak-isolated-home` (mode
 `0700`) on every nextest lane. Offline tests must not create the operator's
@@ -2865,7 +2872,7 @@ the environmental assumption, never to weaken the assertion.
 
 | Class | Cause | Fix in force |
 | --- | --- | --- |
-| Symlinked temporary root | macOS `/tmp` and `/var` are symlinks; SQLite opens with `SQLITE_OPEN_NOFOLLOW` and the credential walk refuses symlinked parents | `TMPDIR=$PWD/target/plak-test-tmp`, set by `dev-check.sh` and `just test`, and required for hand-run nextest |
+| Symlinked temporary root | macOS `/tmp` and `/var` are symlinks; SQLite opens with `SQLITE_OPEN_NOFOLLOW` and the credential walk refuses symlinked parents | A physical per-checkout `TMPDIR` outside `HOME` (`/private/tmp/plak-test-*` on macOS) from `scripts/test-tmpdir.sh`, set by `dev-check.sh` and the test recipes, and required for hand-run nextest |
 | Fixed-port OAuth loopback | Native auth tests bind fixed ports and share process-local fixtures | The `native-auth-serial` group, covering `native_auth::` and the `local_transport` binary |
 | CLI contract interference | Process-level binary contracts collide when run in parallel | The `cli-contract-serial` group |
 | Child-start deadline under load | Crash matrices relaunch the current test binary and wait for durable cut markers; CPU and SQLite contention can exceed a bounded start deadline | The durability lane (§2.3): platform and full run these alone with `--test-threads=1`, under a 240-second slow timeout. `just check` does not run them |

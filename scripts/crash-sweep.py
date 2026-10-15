@@ -15,8 +15,9 @@ def main() -> int:
     args = parser.parse_args()
     if args.jobs < 1 or args.repeat < 1:
         parser.error("--jobs and --repeat must be positive")
-    scratch = Path("target/plak-test-tmp").resolve()
-    scratch.mkdir(parents=True, exist_ok=True)
+    selector = Path(__file__).resolve().parent / "test-tmpdir.sh"
+    scratch = Path(subprocess.run(["bash", str(selector)], check=True,
+                                  capture_output=True, text=True).stdout.strip())
     home = scratch / "plak-isolated-home"
     home.mkdir(mode=0o700, exist_ok=True)
     env = dict(os.environ, TMPDIR=str(scratch), PLAK_HOME=str(home),

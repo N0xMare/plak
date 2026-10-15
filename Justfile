@@ -51,8 +51,8 @@ dev-tools *ARGS:
 test:
     #!/usr/bin/env bash
     set -euo pipefail
-    mkdir -p target/plak-test-tmp
-    export TMPDIR="$PWD/target/plak-test-tmp"
+    TMPDIR="$(bash scripts/test-tmpdir.sh)"
+    export TMPDIR
     isolated_home="$TMPDIR/plak-isolated-home"
     mkdir -p "$isolated_home"
     chmod 700 "$isolated_home"
@@ -72,8 +72,9 @@ coverage:
     #!/usr/bin/env bash
     set -euo pipefail
     command -v cargo-llvm-cov >/dev/null || { echo "install: cargo install cargo-llvm-cov" >&2; exit 1; }
-    mkdir -p target/plak-test-tmp target/llvm-cov
-    export TMPDIR="$PWD/target/plak-test-tmp"
+    mkdir -p target/llvm-cov
+    TMPDIR="$(bash scripts/test-tmpdir.sh)"
+    export TMPDIR
     isolated_home="$TMPDIR/plak-isolated-home"
     mkdir -p "$isolated_home"
     chmod 700 "$isolated_home"

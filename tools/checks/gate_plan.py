@@ -40,8 +40,8 @@ CHECK_GROUPS = tuple(group for group in GROUPS if group in {
 # Executed by check, or used to choose its commands and test inventory. Editing
 # the planner must widen even if the edited package rules would select less.
 GATE_INPUTS = {
-    "scripts/dev-check.sh", "scripts/dev-tools.sh", "Justfile",
-    ".config/nextest.toml",
+    "scripts/dev-check.sh", "scripts/dev-tools.sh", "scripts/test-tmpdir.sh",
+    "Justfile", ".config/nextest.toml",
     "tools/checks/gate_plan.py", "tools/checks/changed_packages.py",
     "tools/checks/budget_filterset.py", "tools/checks/check_workspace.py",
     "tools/checks/check_features.py", "tools/checks/plakous_policy.py",

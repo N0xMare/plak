@@ -17,9 +17,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-test_tmpdir="${PLAK_TEST_TMPDIR:-$PWD/target/plak-test-tmp}"
-mkdir -p "$test_tmpdir"
-TMPDIR="$(cd "$test_tmpdir" && pwd -P)"
+TMPDIR="$(bash scripts/test-tmpdir.sh)"
 export TMPDIR
 
 # A `python3` on PATH may be a shim that cannot run (this repository has met
