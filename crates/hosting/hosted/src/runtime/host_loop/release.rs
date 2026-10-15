@@ -117,9 +117,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 #[cfg(test)]
                 let pass = super::super::projection::probe::CALLER
                     .scope(super::super::projection::probe::Caller::Release, pass);
-                if let Ok(projected) =
-                    tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), pass).await
-                {
+                // A spent budget starts no pass: a timeout only drops its
+                // future, so a page commit already on the blocking pool lands.
+                let projected = if super::Instant::now() < deadline {
+                    tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), pass)
+                        .await
+                        .ok()
+                } else {
+                    None
+                };
+                if let Some(projected) = projected {
                     projected.map(|_| ()).map_err(CliFailure::new)
                 } else {
                     super::log_ev(

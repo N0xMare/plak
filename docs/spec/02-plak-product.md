@@ -1205,7 +1205,8 @@ cleanup failure) is followed by one lease-free pass through the common
 projector entry, bounded at 400 ms outside quit. Every quit projection stage
 (terminal publication, final product and tree projection, and this post-release
 pass) uses the same absolute deadline, one second after quit began, rather than
-stacking fresh bounds. It applies the release record and any
+stacking fresh bounds; a release that returns after that deadline starts no
+post-release pass. It applies the release record and any
 abandonment or job terminals committed during release. A timed-out pass is
 logged as benign projection debt: it does not change the release result or
 the CLI or one-shot exit status, and the next plain open applies the remaining
