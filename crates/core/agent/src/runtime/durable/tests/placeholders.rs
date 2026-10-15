@@ -182,7 +182,7 @@ pub(super) fn placeholder_fixture_producing_artifacts(
     clippy::too_many_arguments,
     reason = "one test fixture constructor, every axis explicit at the call site"
 )]
-fn placeholder_fixture_pausing(
+pub(super) fn placeholder_fixture_pausing(
     workspace: Arc<WorkspacePolicy>,
     entry_base: u128,
     ceiling: u64,

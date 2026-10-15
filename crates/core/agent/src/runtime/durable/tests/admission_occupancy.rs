@@ -1,4 +1,5 @@
 //! Turn-admission compaction at the anchored occupancy trigger.
+use super::fence_compaction::compaction_workflow_count;
 use super::*;
 
 /// A child session has no host idle fence, so its turn admission is the only

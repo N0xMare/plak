@@ -367,7 +367,7 @@ async fn pending_v2_custom_patch_reopens_and_executes_without_provider_replay() 
 }
 
 /// Raised tool-result texts committed to `checkpoint`'s canonical history.
-fn committed_tool_result_texts(checkpoint: &RuntimeCheckpoint) -> Vec<String> {
+pub(super) fn committed_tool_result_texts(checkpoint: &RuntimeCheckpoint) -> Vec<String> {
     checkpoint
         .manifest()
         .canonical()

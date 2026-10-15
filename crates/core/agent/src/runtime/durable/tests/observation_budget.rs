@@ -1,5 +1,6 @@
 //! Observation allowances on rounds without provider usage, and across the
 //! durable effect-decision and server-pause frames.
+use super::fence_compaction::compaction_workflow_count;
 use super::*;
 
 /// A round whose request was admitted on an unanchored estimate and whose

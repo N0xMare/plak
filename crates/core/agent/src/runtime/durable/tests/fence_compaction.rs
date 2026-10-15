@@ -1,6 +1,6 @@
 use super::*;
 
-fn compaction_workflow_count(checkpoint: &RuntimeCheckpoint) -> usize {
+pub(super) fn compaction_workflow_count(checkpoint: &RuntimeCheckpoint) -> usize {
     checkpoint
         .manifest()
         .ledger()
