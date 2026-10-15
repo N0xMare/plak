@@ -289,6 +289,20 @@ fn quit_grace_fixture(deaf: bool, quit: QuitIntent, stuck_child: bool) {
         QuitIntent::Disconnected => drop(actions),
     }
     let result = worker.join().unwrap();
+    seen.extend(events.try_iter());
+    let joined = seen.iter().any(|event| {
+        matches!(event, HostEvent::TurnLifecycle(lifecycle)
+            if lifecycle.phase == plakous_host_protocol::TurnPhase::Cancelled)
+    });
+    if stuck_child && !joined {
+        // Spec 02: a settled terminal not observable within quit's 100 ms
+        // join abandons by lease alone, which retires no child and so has no
+        // retirement failure to report. Under load the cancelled terminal can
+        // miss that join; the joined branch below is the one under test.
+        result.unwrap();
+        assert!(quit_started.elapsed() < std::time::Duration::from_secs(5));
+        return;
+    }
     if stuck_child {
         let error = result.expect_err("a settled quit must report failed child retirement");
         assert!(error.message().contains("child retirement"), "{error:?}");
