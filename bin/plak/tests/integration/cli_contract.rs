@@ -1726,7 +1726,13 @@ fn another_builds_state_is_named_once_left_untouched_and_its_sessions_refused() 
         "{notice}"
     );
     assert!(notice.contains("2 legacy state entries"), "{notice}");
-    assert!(notice.contains("bytes"), "{notice}");
+    // The real binary sizes legacy entries within a wall-clock budget; the
+    // byte total and its exhausted form are pinned by the unit tests.
+    assert!(
+        notice.contains("2 legacy state entries (") && notice.contains(" bytes) remain")
+            || notice.contains("2 legacy state entries (size unknown) remain"),
+        "{notice}"
+    );
     assert!(notice.contains("plak doctor"), "{notice}");
     assert!(paths.product_database().exists());
     let after = kept
