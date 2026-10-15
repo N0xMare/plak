@@ -2,6 +2,9 @@ use super::codec::{
     obligation_kind, obligation_kind_tag, recovery_action, recovery_action_tag, recovery_phase,
     recovery_phase_tag,
 };
+use super::context_state::{
+    compaction_provenance_identity, read_compaction_provenance, write_compaction_provenance_fields,
+};
 use super::*;
 use crate::checkpoint_bundle::RUNTIME_FORMAT_EPOCH;
 use crate::{
