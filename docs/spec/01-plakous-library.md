@@ -3445,18 +3445,35 @@ waits, and on store contention it leaves `Unknown` for the next refresh to
 reclaim.
 
 A subscription usage read is observational and is bounded by its caller's
-timeout, which may drop it at any point. No usage read, on any account, ever
-starts a refresh: a claim dropped after its POST may have started can leave a
-durable `Unknown` (Codex, Claude) or restore a refresh token the provider may
-already have rotated (Grok). An expired access token is reported as
+timeout, which may drop it at any point. A usage read never starts a refresh
+for an expired token: an expired access token is reported as
 `RefreshRequired` without network I/O or a claim; the next inference turn, or
-an explicit refresh, refreshes it. A usage read that finds a durable `Unknown`
+an explicit refresh, refreshes it. When the usage endpoint itself rejects a
+locally fresh access token (HTTP 401 or 403, any account), the facade runs one
+forced claimed refresh through the same single-flight ladder model dispatch
+uses, as its own task so a dropped caller cannot strand the claim mid-exchange,
+and then reads exactly once more. A failed grant reports the credential's
+resulting state (`RefreshRequired`, `Quarantined`, `LoginRequired`, ...), or
+`Unauthorized` when the credential stays `Ready`; the refresh failure itself is
+in telemetry. Model dispatch keeps its one-refresh-then-fail rule. The
+operator's `refresh_now` forces one grant regardless of expiry and reports the
+new access-token expiry; it never reports success without a grant. A usage read that finds a durable `Unknown`
 record while a refresh claim still owns the execution lock, in this or another
 process, or whose record changes under the probe, reports retryable `Busy`
 rather than quarantine; the probe neither waits nor writes.
 
 Refresh emits a `CredentialRefresh` telemetry observation labelled `codex`,
-`xai`, or `claude`.
+`xai`, or `claude`. A failure carries a closed, content-free sub-reason
+(`CredentialRefreshFailureReason`: `token_shape`, `response_too_large`,
+`expires_in`, `access_token_expired`, `missing_refresh_token`,
+`id_token_header`, `id_token_unknown_kid`, `id_token_signing_key`,
+`id_token_signature`, `id_token_iss`, `id_token_aud`, `id_token_exp`,
+`id_token_iat`, `id_token_nbf`, `id_token_azp`, `id_token_sub`,
+`id_token_claims`, `subject_mismatch`, `selection_changed`, `retired_format`,
+`stored_credential`, `provider_rejected`) plus the response's `expires_in` and
+the returned ID token's `iat` age and `exp` distance from now in seconds (read
+unverified, for diagnostics only). Identity checks report only matched or not
+matched; no token, subject, or account id is carried.
 
 ### 7.4 Admission and revalidation
 
@@ -6255,7 +6272,7 @@ supplies its typed wake classification, without topology entering L0.
   `missed_input_tokens` is an optional non-negative integer, absent when the
   provider omitted the count. The observation carries no provider message id
   and no raw unknown spelling. Malformed diagnostics are not an observation.
-  The product persists that pair in telemetry schema 17, with the count
+  The product persists that pair in telemetry schema 18, with the count
   column nullable, and does not project it to OTEL. Turn model rounds and
   compaction provider streams both record it. It is not canonical usage;
 - `ModelArtifactPrefixDrift { fields }`, a model round whose stable request
@@ -6299,7 +6316,7 @@ busy, stale, unavailable, invalid_input, or rejected) in `CompactionFinished`,
 and retains the measured source tokens even when the ladder cannot commit.
 The exact bounded diagnostic remains in the session event's `detail`, never
 in the content-incapable telemetry sink. The product persists the refusal class
-in telemetry schema 17 and projects it to OTEL.
+in telemetry schema 18 and projects it to OTEL.
 
 Driver shutdown emits content-free `DurabilityAttemptFinished` phase timings
 for tool drain, job-terminal publication, heartbeat join, lease release and

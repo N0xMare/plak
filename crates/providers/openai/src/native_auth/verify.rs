@@ -14,6 +14,7 @@ use super::{
     scheduled_access_expiry, validate_identifier,
 };
 use base64::Engine as _;
+use plakous_auth::oauth_orchestrator::CredentialRefreshFailureReason;
 use zeroize::Zeroize as _;
 
 #[derive(Clone, Deserialize)]
@@ -139,7 +140,7 @@ impl CodexSubscriptionCredentialManager {
         let scopes = validate_exact_scopes(OPENAI_CODEX_OAUTH_SCOPES)
             .map_err(|error| login_token_response_or(login, error))?;
         let mut claims = self
-            .validate_id_token(&tokens.id_token, login, deadline)
+            .validate_id_token(&tokens.id_token, login, deadline, &mut None)
             .await?;
         remaining_login_time(
             deadline,
@@ -181,6 +182,7 @@ impl CodexSubscriptionCredentialManager {
         mut tokens: OAuthRefreshTokenResponse,
         mut old: StoredCredential,
         deadline: Instant,
+        reason: &mut Option<CredentialRefreshFailureReason>,
     ) -> Result<StoredCredential, NativeCodexAuthError> {
         remaining_login_time(deadline, NativeCodexAuthError::Transport(None))?;
         if tokens
@@ -196,17 +198,22 @@ impl CodexSubscriptionCredentialManager {
                 .as_ref()
                 .is_some_and(|value| value.is_empty() || value.len() > MAX_TOKEN_BYTES)
         {
+            *reason = Some(CredentialRefreshFailureReason::TokenShape);
             return Err(NativeCodexAuthError::Validation);
         }
         if old.scopes != validate_exact_scopes(OPENAI_CODEX_OAUTH_SCOPES)? {
+            *reason = Some(CredentialRefreshFailureReason::StoredCredential);
             return Err(NativeCodexAuthError::Validation);
         }
 
         let mut replacement_id_expiry = None;
         if let Some(id_token) = tokens.id_token.as_deref() {
-            let claims = self.validate_id_token(id_token, false, deadline).await?;
+            let claims = self
+                .validate_id_token(id_token, false, deadline, reason)
+                .await?;
             if claims.sub != old.subject || claims.openai_auth.chatgpt_account_id != old.account_id
             {
+                *reason = Some(CredentialRefreshFailureReason::SubjectMismatch);
                 return Err(NativeCodexAuthError::AccountChanged);
             }
             replacement_id_expiry = Some(claims.exp);
@@ -236,7 +243,10 @@ impl CodexSubscriptionCredentialManager {
                 now.checked_add(DEFAULT_ACCESS_TOKEN_LIFETIME)
                     .ok_or(NativeCodexAuthError::Validation)?,
             );
-            old.access_expires_at = scheduled_access_expiry(&old.access_token, fallback, now)?;
+            old.access_expires_at = scheduled_access_expiry(&old.access_token, fallback, now)
+                .inspect_err(|_| {
+                    *reason = Some(CredentialRefreshFailureReason::AccessTokenExpired);
+                })?;
         }
         Ok(old)
     }
@@ -246,21 +256,34 @@ impl CodexSubscriptionCredentialManager {
         id_token: &str,
         login: bool,
         deadline: Instant,
+        reason: &mut Option<CredentialRefreshFailureReason>,
     ) -> Result<IdTokenClaims, NativeCodexAuthError> {
         remaining_login_time(
             deadline,
             login_account_verification_or(login, NativeCodexAuthError::Transport(None)),
         )?;
+        let invalid = |reason_slot: &mut Option<CredentialRefreshFailureReason>, why| {
+            *reason_slot = Some(why);
+            login_account_verification_or(login, NativeCodexAuthError::Validation)
+        };
         let header = decode_header(id_token)
-            .map_err(|_| login_account_verification_or(login, NativeCodexAuthError::Validation))?;
-        let kid = validate_jose_header(&header, login)?;
-        let jwk = self.jwk_for(&kid, login, deadline).await?;
+            .map_err(|_| invalid(reason, CredentialRefreshFailureReason::IdTokenHeader))?;
+        let kid = validate_jose_header(&header, login)
+            .inspect_err(|_| *reason = Some(CredentialRefreshFailureReason::IdTokenHeader))?;
+        let jwk = self
+            .jwk_for(&kid, login, deadline)
+            .await
+            .inspect_err(|error| {
+                if matches!(error, NativeCodexAuthError::Validation) {
+                    *reason = Some(CredentialRefreshFailureReason::IdTokenUnknownKid);
+                }
+            })?;
         remaining_login_time(
             deadline,
             login_account_verification_or(login, NativeCodexAuthError::Transport(None)),
         )?;
         let key = DecodingKey::from_rsa_components(&jwk.n, &jwk.e)
-            .map_err(|_| login_account_verification_or(login, NativeCodexAuthError::Validation))?;
+            .map_err(|_| invalid(reason, CredentialRefreshFailureReason::IdTokenSigningKey))?;
         let mut validation = Validation::new(Algorithm::RS256);
         validation.set_audience(&[OPENAI_CODEX_NATIVE_CLIENT_ID]);
         validation.set_issuer(&[OPENAI_AUTH_ORIGIN.trim_end_matches('/')]);
@@ -268,7 +291,7 @@ impl CodexSubscriptionCredentialManager {
         validation.leeway = 30;
         validation.reject_tokens_expiring_in_less_than = ACCESS_REFRESH_SKEW;
         let claims = decode::<IdTokenClaims>(id_token, &key, &validation)
-            .map_err(|_| login_account_verification_or(login, NativeCodexAuthError::Validation))?
+            .map_err(|error| invalid(reason, jwt_failure_reason(&error)))?
             .claims;
         let audience_is_exact = match &claims.aud {
             AudienceClaim::One(value) => value == OPENAI_CODEX_NATIVE_CLIENT_ID,
@@ -277,33 +300,43 @@ impl CodexSubscriptionCredentialManager {
             }
         };
         let now = now_unix_secs();
-        if claims.iss != OPENAI_AUTH_ORIGIN.trim_end_matches('/')
-            || !audience_is_exact
-            || claims
-                .azp
-                .as_deref()
-                .is_some_and(|authorized_party| authorized_party != OPENAI_CODEX_NATIVE_CLIENT_ID)
-            || claims.sub.is_empty()
-            || claims.sub.len() > 256
-            || claims.iat > now.saturating_add(30)
-            || claims
-                .nbf
-                .is_some_and(|not_before| not_before > now.saturating_add(30))
-            || claims.exp <= now.saturating_add(ACCESS_REFRESH_SKEW)
-            || claims.exp <= claims.iat
+        let failed = if claims.iss != OPENAI_AUTH_ORIGIN.trim_end_matches('/') {
+            Some(CredentialRefreshFailureReason::IdTokenIss)
+        } else if !audience_is_exact {
+            Some(CredentialRefreshFailureReason::IdTokenAud)
+        } else if claims
+            .azp
+            .as_deref()
+            .is_some_and(|authorized_party| authorized_party != OPENAI_CODEX_NATIVE_CLIENT_ID)
+        {
+            Some(CredentialRefreshFailureReason::IdTokenAzp)
+        } else if claims.sub.is_empty() || claims.sub.len() > 256 {
+            Some(CredentialRefreshFailureReason::IdTokenSub)
+        } else if claims.iat > now.saturating_add(30) {
+            Some(CredentialRefreshFailureReason::IdTokenIat)
+        } else if claims
+            .nbf
+            .is_some_and(|not_before| not_before > now.saturating_add(30))
+        {
+            Some(CredentialRefreshFailureReason::IdTokenNbf)
+        } else if claims.exp <= now.saturating_add(ACCESS_REFRESH_SKEW) {
+            Some(CredentialRefreshFailureReason::IdTokenExp)
+        } else if claims.exp <= claims.iat
             || claims.exp.saturating_sub(claims.iat) > MAX_ID_TOKEN_LIFETIME
         {
-            return Err(login_account_verification_or(
-                login,
-                NativeCodexAuthError::Validation,
-            ));
+            Some(CredentialRefreshFailureReason::IdTokenClaims)
+        } else {
+            None
+        };
+        if let Some(why) = failed {
+            return Err(invalid(reason, why));
         }
         remaining_login_time(
             deadline,
             login_account_verification_or(login, NativeCodexAuthError::Transport(None)),
         )?;
         AccountBinding::new(&claims.openai_auth.chatgpt_account_id)
-            .map_err(|_| login_account_verification_or(login, NativeCodexAuthError::Validation))?;
+            .map_err(|_| invalid(reason, CredentialRefreshFailureReason::IdTokenClaims))?;
         Ok(claims)
     }
 
@@ -422,6 +455,30 @@ impl CodexSubscriptionCredentialManager {
             keys,
             expires_at: Instant::now() + maximum_age,
         })
+    }
+}
+
+/// Names the `jsonwebtoken` check that rejected an ID token (content-free).
+fn jwt_failure_reason(error: &jsonwebtoken::errors::Error) -> CredentialRefreshFailureReason {
+    use jsonwebtoken::errors::ErrorKind as K;
+    match error.kind() {
+        K::InvalidSignature => CredentialRefreshFailureReason::IdTokenSignature,
+        K::ExpiredSignature => CredentialRefreshFailureReason::IdTokenExp,
+        K::ImmatureSignature => CredentialRefreshFailureReason::IdTokenNbf,
+        K::InvalidIssuer => CredentialRefreshFailureReason::IdTokenIss,
+        K::InvalidAudience => CredentialRefreshFailureReason::IdTokenAud,
+        K::InvalidSubject => CredentialRefreshFailureReason::IdTokenSub,
+        K::MissingRequiredClaim(claim) if claim == "sub" => {
+            CredentialRefreshFailureReason::IdTokenSub
+        }
+        K::MissingRequiredClaim(claim) if claim == "exp" => {
+            CredentialRefreshFailureReason::IdTokenExp
+        }
+        K::InvalidAlgorithm => CredentialRefreshFailureReason::IdTokenHeader,
+        K::InvalidToken | K::Base64(_) | K::Utf8(_) | K::Json(_) => {
+            CredentialRefreshFailureReason::TokenShape
+        }
+        _ => CredentialRefreshFailureReason::IdTokenClaims,
     }
 }
 

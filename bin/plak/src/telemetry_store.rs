@@ -15,7 +15,7 @@ use rusqlite::{Connection, OpenFlags, params};
 use crate::home::paths::PlakPaths;
 use plakous_hosted::product_observation::{ChildKind, ProductObservation};
 
-pub(crate) const TELEMETRY_SCHEMA_VERSION: i64 = 17;
+pub(crate) const TELEMETRY_SCHEMA_VERSION: i64 = 18;
 
 /// Default disposable telemetry retention.
 pub const DEFAULT_TELEMETRY_MAX_BYTES: u64 = 512 * 1024 * 1024;
@@ -228,7 +228,8 @@ CREATE TABLE credential_refreshes (
   transport_phase TEXT,
   http_status INTEGER,
   elapsed_ns INTEGER,
-  generation INTEGER NOT NULL
+  generation INTEGER NOT NULL,
+  failure_reason TEXT
 );
 
 CREATE TABLE prompt_cache_diagnoses (
@@ -338,6 +339,7 @@ SELECT
   http_status,
   elapsed_ns,
   generation,
+  failure_reason,
   at
 FROM credential_refreshes;
 ";
@@ -1850,11 +1852,13 @@ fn write_observation(
             http_status,
             elapsed,
             generation,
+            detail,
         } => {
             transaction.execute(
                 "INSERT INTO credential_refreshes (
-                    at, provider, phase, failure_class, http_status, elapsed_ns, generation, transport_phase
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    at, provider, phase, failure_class, http_status, elapsed_ns, generation, transport_phase,
+                    failure_reason
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     timestamp,
                     provider.as_str(),
@@ -1864,6 +1868,7 @@ fn write_observation(
                     elapsed.map(duration_ns),
                     i64::try_from(generation).unwrap_or(i64::MAX),
                     transport_phase.map(credential_transport_phase_text),
+                    detail.reason.map(plakous::agent::CredentialRefreshFailureReason::as_str),
                 ],
             )?;
         }
@@ -2024,6 +2029,7 @@ pub struct CredentialRefreshRow {
     pub http_status: Option<u16>,
     pub generation: u64,
     pub at_ns: i64,
+    pub failure_reason: Option<String>,
 }
 
 impl TelemetryStore {
@@ -2065,7 +2071,8 @@ impl TelemetryStore {
         })?;
         TelemetryStore::require_attached_schema(&connection)?;
         let row = connection.query_row(
-            "SELECT provider, phase, failure_class, http_status_class, http_status, generation, at, transport_phase
+            "SELECT provider, phase, failure_class, http_status_class, http_status, generation, at, transport_phase,
+                    failure_reason
                  FROM v_credential_refreshes
                  WHERE provider = ?1
                    AND (?2 = 0 OR phase IN ('completed', 'restored', 'outcome_unknown', 'quarantined'))
@@ -2083,6 +2090,7 @@ impl TelemetryStore {
                     generation: row.get::<_, i64>(5)?.try_into().unwrap_or(0),
                     at_ns: row.get(6)?,
                     transport_phase: row.get(7)?,
+                    failure_reason: row.get(8)?,
                 })
             },
         );
@@ -2319,6 +2327,7 @@ mod tests {
                     http_status: Some(503),
                     elapsed: Some(Duration::from_millis(30)),
                     generation: 40,
+                    detail: plakous::agent::CredentialRefreshDetail::default(),
                 },
             ),
             TelemetryObservation::new(
@@ -2783,7 +2792,7 @@ mod tests {
             store.query_i64("SELECT COUNT(*) FROM v_replay_loss"),
             Some(2)
         );
-        assert_eq!(store.query_i64("PRAGMA user_version"), Some(17));
+        assert_eq!(store.query_i64("PRAGMA user_version"), Some(18));
         assert_eq!(
             store.query_i64(
                 "SELECT COUNT(*) FROM model_retries WHERE cause_kind = 'record_rejected_in_transit'"
@@ -3463,6 +3472,7 @@ mod tests {
                     http_status: None,
                     elapsed: None,
                     generation: 39,
+                    detail: plakous::agent::CredentialRefreshDetail::default(),
                 },
             )),
             TelemetryItem::Agent(TelemetryObservation::new(
@@ -3476,6 +3486,12 @@ mod tests {
                     http_status: Some(503),
                     elapsed: Some(Duration::from_millis(30_000)),
                     generation: 40,
+                    detail: plakous::agent::CredentialRefreshDetail {
+                        reason: Some(plakous::agent::CredentialRefreshFailureReason::IdTokenExp),
+                        expires_in_secs: Some(21_600),
+                        id_token_iat_age_secs: Some(3_700),
+                        id_token_exp_in_secs: Some(-100),
+                    },
                 },
             )),
         ])?;
@@ -3497,6 +3513,7 @@ mod tests {
         assert_eq!(latest.http_status, Some(503));
         assert_eq!(latest.generation, 40);
         assert_eq!(latest.transport_phase.as_deref(), Some("resolution"));
+        assert_eq!(latest.failure_reason.as_deref(), Some("id_token_exp"));
         Ok(())
     }
 

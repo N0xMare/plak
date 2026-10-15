@@ -371,8 +371,8 @@ pub(super) fn map_xai_error(error: plakous_xai::XaiNativeAuthError) -> NativeSub
         plakous_xai::XaiNativeAuthError::RandomnessUnavailable
         | plakous_xai::XaiNativeAuthError::LoopbackUnavailable
         | plakous_xai::XaiNativeAuthError::AuthorizationDenied
-        | plakous_xai::XaiNativeAuthError::InvalidTokenResponse
-        | plakous_xai::XaiNativeAuthError::InvalidIdToken
+        | plakous_xai::XaiNativeAuthError::InvalidTokenResponse(_)
+        | plakous_xai::XaiNativeAuthError::InvalidIdToken(_)
         | plakous_xai::XaiNativeAuthError::InvalidJwks
         | plakous_xai::XaiNativeAuthError::UnknownSigningKey
         | plakous_xai::XaiNativeAuthError::AccountChanged

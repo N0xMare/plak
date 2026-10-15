@@ -126,6 +126,39 @@ pub fn unsigned_access_token_exp(token: &str, max_bytes: usize) -> Option<u64> {
         .map(|claims| claims.exp)
 }
 
+#[derive(Deserialize)]
+struct IdTokenTiming {
+    iat: Option<u64>,
+    exp: Option<u64>,
+}
+
+/// Reads `iat` and `exp` from an **unverified** JWT for diagnostics only.
+///
+/// Never used for admission. Same shape and size bounds as
+/// [`unsigned_access_token_exp`]; returns `(iat, exp)`.
+#[must_use]
+pub fn unverified_jwt_timing(token: &str, max_bytes: usize) -> Option<(Option<u64>, Option<u64>)> {
+    if token.is_empty() || token.len() > max_bytes {
+        return None;
+    }
+    let mut segments = token.split('.');
+    let _header = segments.next()?;
+    let payload = segments.next()?;
+    let _signature = segments.next()?;
+    if segments.next().is_some() || payload.is_empty() {
+        return None;
+    }
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .ok()?;
+    if decoded.is_empty() || decoded.len() > max_bytes {
+        return None;
+    }
+    decode_json_bounded::<IdTokenTiming>(&decoded, max_bytes)
+        .ok()
+        .map(|claims| (claims.iat, claims.exp))
+}
+
 /// Returns the positive duration remaining until `deadline` at `now`.
 ///
 /// Returns [`None`] when `now >= deadline` (expired or exact).

@@ -43,10 +43,11 @@ use jsonwebtoken::jwk::{
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use plakous_auth::oauth_orchestrator::{
     BrowserLoopbackHooks, BuildRequestFailure, ClaimedRefreshHooks, ClaimedRevokeHooks,
-    CredentialRefreshEvent, CredentialRefreshFailureClass, CredentialRefreshObserver,
-    CredentialRefreshPhase, FetchedJwks, JwksCache, JwksResolvePolicy, LoopbackConnectionEvent,
-    PullBodyError, bind_loopback_listener, pull_claimed_body, run_browser_loopback_session,
-    run_claimed_refresh, run_claimed_revoke, until_deadline,
+    CredentialRefreshDetail, CredentialRefreshEvent, CredentialRefreshFailureClass,
+    CredentialRefreshFailureReason, CredentialRefreshObserver, CredentialRefreshPhase, FetchedJwks,
+    JwksCache, JwksResolvePolicy, LoopbackConnectionEvent, PullBodyError, bind_loopback_listener,
+    pull_claimed_body, run_browser_loopback_session, run_claimed_refresh, run_claimed_revoke,
+    until_deadline,
 };
 use plakous_auth::oauth_workflow::{
     AuthorizeUrlRequest, CallbackQueryPolicy, DevicePollSchedule, LoopbackCallbackOutcome,
@@ -1326,6 +1327,30 @@ impl XaiNativeAuthManager {
         self.core.refresh_if_needed(None, None, None).await
     }
 
+    /// Claims one refresh grant regardless of the stored expiry (operator
+    /// `refresh`, or a usage read the provider rejected with 401/403).
+    ///
+    /// # Errors
+    ///
+    /// Same fail-closed failures as [`Self::refresh_if_needed`].
+    pub async fn refresh_now(&self) -> Result<(), XaiNativeAuthError> {
+        self.core.refresh_with_force(None, None, None, true).await
+    }
+
+    /// Stored access-token expiry (Unix seconds) of the Ready credential.
+    ///
+    /// # Errors
+    ///
+    /// Fails for a missing, non-Ready, or unreadable record.
+    pub fn access_expires_at(&self) -> Result<u64, XaiNativeAuthError> {
+        let fence = self
+            .core
+            .store
+            .load()?
+            .ok_or(XaiNativeAuthError::NotLoggedIn)?;
+        Ok(self.core.read_stored(&fence)?.expires_at)
+    }
+
     /// Replaces the current credential with a local revoked tombstone.
     ///
     /// # Errors
@@ -1780,6 +1805,7 @@ impl ManagerCore {
             request_permit: None,
             started: Instant::now(),
             force,
+            detail: CredentialRefreshDetail::default(),
         };
         let result = run_claimed_refresh(&self.store, &self.client, &mut hooks).await;
         hooks.cancel_guard.finished();
@@ -2498,11 +2524,11 @@ pub enum XaiNativeAuthError {
     #[error("the xAI login credential could not be persisted")]
     LoginPersistence,
     /// A strict OAuth token response check failed.
-    #[error("the xAI OAuth token response is invalid")]
-    InvalidTokenResponse,
+    #[error("the xAI OAuth token response is invalid ({})", .0.as_str())]
+    InvalidTokenResponse(CredentialRefreshFailureReason),
     /// ID-token signature, header, claims, nonce, or times failed validation.
-    #[error("the xAI ID token is invalid")]
-    InvalidIdToken,
+    #[error("the xAI ID token is invalid ({})", .0.as_str())]
+    InvalidIdToken(CredentialRefreshFailureReason),
     /// JWKS grammar, bounds, or key metadata was invalid.
     #[error("the xAI JWKS response is invalid")]
     InvalidJwks,
@@ -2716,9 +2742,15 @@ impl TokenResponse {
                 .id_token
                 .as_ref()
                 .is_some_and(|value| value.len() > MAX_STRING_BYTES)
-            || self.expires_in.is_some_and(|value| value == 0)
         {
-            return Err(XaiNativeAuthError::InvalidTokenResponse);
+            return Err(XaiNativeAuthError::InvalidTokenResponse(
+                CredentialRefreshFailureReason::TokenShape,
+            ));
+        }
+        if self.expires_in.is_some_and(|value| value == 0) {
+            return Err(XaiNativeAuthError::InvalidTokenResponse(
+                CredentialRefreshFailureReason::ExpiresIn,
+            ));
         }
         Ok(())
     }
@@ -2849,7 +2881,9 @@ impl DeviceResponse {
                 .as_deref()
                 .is_some_and(|value| !valid_https_url(value))
         {
-            return Err(XaiNativeAuthError::InvalidTokenResponse);
+            return Err(XaiNativeAuthError::InvalidTokenResponse(
+                CredentialRefreshFailureReason::TokenShape,
+            ));
         }
         Ok(())
     }
@@ -3044,11 +3078,10 @@ fn map_oauth_workflow_error(error: OAuthWorkflowError) -> XaiNativeAuthError {
         OAuthWorkflowError::Binding | OAuthWorkflowError::Callback => {
             XaiNativeAuthError::InvalidCallback
         }
-        OAuthWorkflowError::ResponseTooLarge
-        | OAuthWorkflowError::InvalidJson
-        | OAuthWorkflowError::InvalidUrl
-        | OAuthWorkflowError::InvalidForm => XaiNativeAuthError::InvalidTokenResponse,
-        _ => XaiNativeAuthError::InvalidTokenResponse,
+        OAuthWorkflowError::ResponseTooLarge => XaiNativeAuthError::InvalidTokenResponse(
+            CredentialRefreshFailureReason::ResponseTooLarge,
+        ),
+        _ => XaiNativeAuthError::InvalidTokenResponse(CredentialRefreshFailureReason::TokenShape),
     }
 }
 
@@ -3138,8 +3171,15 @@ fn bearer_header(token: &str) -> Result<HeaderValue, XaiNativeAuthError> {
 
 fn decode_json<T: DeserializeOwned>(bytes: &[u8], maximum: usize) -> Result<T, XaiNativeAuthError> {
     // Size bound first so unique-key walk never scans oversized bodies.
-    if bytes.is_empty() || bytes.len() > maximum {
-        return Err(XaiNativeAuthError::InvalidTokenResponse);
+    if bytes.len() > maximum {
+        return Err(XaiNativeAuthError::InvalidTokenResponse(
+            CredentialRefreshFailureReason::ResponseTooLarge,
+        ));
+    }
+    if bytes.is_empty() {
+        return Err(XaiNativeAuthError::InvalidTokenResponse(
+            CredentialRefreshFailureReason::TokenShape,
+        ));
     }
     validate_unique_object(bytes)?;
     decode_json_bounded(bytes, maximum).map_err(map_oauth_workflow_error)
@@ -3171,12 +3211,12 @@ fn validate_unique_object(bytes: &[u8]) -> Result<(), XaiNativeAuthError> {
         }
     }
     let mut deserializer = serde_json::Deserializer::from_slice(bytes);
-    deserializer
-        .deserialize_map(UniqueObject)
-        .map_err(|_| XaiNativeAuthError::InvalidTokenResponse)?;
-    deserializer
-        .end()
-        .map_err(|_| XaiNativeAuthError::InvalidTokenResponse)
+    deserializer.deserialize_map(UniqueObject).map_err(|_| {
+        XaiNativeAuthError::InvalidTokenResponse(CredentialRefreshFailureReason::TokenShape)
+    })?;
+    deserializer.end().map_err(|_| {
+        XaiNativeAuthError::InvalidTokenResponse(CredentialRefreshFailureReason::TokenShape)
+    })
 }
 
 fn valid_token_component(value: &str, maximum: usize) -> bool {

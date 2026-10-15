@@ -3,14 +3,15 @@
 use super::{
     AccountBinding, BuildRequestFailure, ClaimedHttpDisposition, ClaimedHttpError,
     ClaimedHttpResponse, ClaimedRefreshHooks, ClaimedRevokeHooks, CredentialFence,
-    CredentialGeneration, CredentialRecord, CredentialRefreshEvent, CredentialRefreshFailureClass,
-    CredentialRefreshObserver, CredentialRefreshPhase, CredentialStatus, ExchangeControl, Instant,
-    MAX_AUTH_BODY_BYTES, MAX_TOKEN_BYTES, ManagerCore, PrivateCredentialStore, PrivateStoreError,
+    CredentialGeneration, CredentialRecord, CredentialRefreshDetail, CredentialRefreshEvent,
+    CredentialRefreshFailureClass, CredentialRefreshFailureReason, CredentialRefreshObserver,
+    CredentialRefreshPhase, CredentialStatus, ExchangeControl, Instant, MAX_AUTH_BODY_BYTES,
+    MAX_STRING_BYTES, MAX_TOKEN_BYTES, ManagerCore, PrivateCredentialStore, PrivateStoreError,
     PullBodyError, REQUEST_TIMEOUT, RefreshClaim, Request, RevokeResponse, StoredTokens,
     SubscriptionRequestClass, SubscriptionRequestPermit, TokenResponse, XAI_PUBLIC_CLIENT_ID,
     XaiNativeAuthError, Zeroizing, claimed_response_is_json, credential_record, decode_json,
     network_failure, pull_claimed_body, refresh_token_form, retired_or_quarantined,
-    route_credential_authority_id, urlencoded_form,
+    route_credential_authority_id, system_unix_seconds, urlencoded_form,
 };
 
 /// Prepared refresh state carried through form-body claimed refresh.
@@ -34,6 +35,8 @@ pub(super) struct XaiRefreshHooks<'a> {
     pub(super) started: Instant,
     /// Refresh even when the stored expiry is outside the lead (HTTP 401).
     pub(super) force: bool,
+    /// Numbers of the received token response, for failure diagnostics.
+    pub(super) detail: CredentialRefreshDetail,
 }
 
 #[allow(
@@ -162,6 +165,12 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
                 .await
                 .map_err(map_xai_pull_body_error)?;
             let tokens: TokenResponse = decode_json(&response_body, MAX_TOKEN_BYTES)?;
+            self.detail = CredentialRefreshDetail::from_response(
+                system_unix_seconds().unwrap_or(0),
+                tokens.expires_in,
+                tokens.id_token.as_deref(),
+                MAX_STRING_BYTES,
+            );
             let stored = self
                 .core
                 .validate_tokens(
@@ -227,17 +236,22 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
         true
     }
 
+    fn failure_detail(&mut self, error: &Self::Error) -> CredentialRefreshDetail {
+        self.detail.with_reason(xai_failure_reason(error))
+    }
+
     fn after_post_start_failure(&mut self, store: &PrivateCredentialStore, error: &Self::Error) {
         if !xai_refresh_failure_is_retryable(error) {
             return;
         }
+        let detail = self.failure_detail(error);
         let failure_class = match error {
             XaiNativeAuthError::Transport(Some(cause)) if cause.timed_out => {
                 CredentialRefreshFailureClass::Timeout
             }
             XaiNativeAuthError::Store(_) => CredentialRefreshFailureClass::Store,
             XaiNativeAuthError::NotReady => CredentialRefreshFailureClass::NotReady,
-            XaiNativeAuthError::InvalidTokenResponse | XaiNativeAuthError::InvalidIdToken => {
+            XaiNativeAuthError::InvalidTokenResponse(_) | XaiNativeAuthError::InvalidIdToken(_) => {
                 CredentialRefreshFailureClass::Validation
             }
             _ => CredentialRefreshFailureClass::Transport,
@@ -255,7 +269,36 @@ impl ClaimedRefreshHooks for XaiRefreshHooks<'_> {
                 XaiNativeAuthError::Transport(Some(cause)) => Some(http_phase(cause.phase)),
                 _ => None,
             },
+            detail,
         );
+    }
+}
+
+/// Content-free sub-reason of an xAI refresh failure, when it names a check.
+pub(super) fn xai_failure_reason(
+    error: &XaiNativeAuthError,
+) -> Option<CredentialRefreshFailureReason> {
+    match error {
+        XaiNativeAuthError::InvalidTokenResponse(reason)
+        | XaiNativeAuthError::InvalidIdToken(reason) => Some(*reason),
+        XaiNativeAuthError::UnknownSigningKey => {
+            Some(CredentialRefreshFailureReason::IdTokenUnknownKid)
+        }
+        XaiNativeAuthError::InvalidJwks => Some(CredentialRefreshFailureReason::IdTokenSigningKey),
+        XaiNativeAuthError::AccountChanged => Some(CredentialRefreshFailureReason::SubjectMismatch),
+        XaiNativeAuthError::SelectionChanged => {
+            Some(CredentialRefreshFailureReason::SelectionChanged)
+        }
+        XaiNativeAuthError::StoredCredentialFormatRetired => {
+            Some(CredentialRefreshFailureReason::RetiredFormat)
+        }
+        XaiNativeAuthError::InvalidStoredCredential => {
+            Some(CredentialRefreshFailureReason::StoredCredential)
+        }
+        XaiNativeAuthError::RefreshQuarantined | XaiNativeAuthError::HttpStatus(_) => {
+            Some(CredentialRefreshFailureReason::ProviderRejected)
+        }
+        _ => None,
     }
 }
 
@@ -392,8 +435,8 @@ pub(super) fn xai_refresh_failure_is_retryable(error: &XaiNativeAuthError) -> bo
     matches!(
         error,
         XaiNativeAuthError::Transport(_)
-            | XaiNativeAuthError::InvalidTokenResponse
-            | XaiNativeAuthError::InvalidIdToken
+            | XaiNativeAuthError::InvalidTokenResponse(_)
+            | XaiNativeAuthError::InvalidIdToken(_)
             | XaiNativeAuthError::NotReady
             // Local lock contention and lock-identity failures prove nothing
             // about the provider's view of the grant.
@@ -430,6 +473,7 @@ pub(super) fn restore_xai_unknown_to_ready(
     failure_class: CredentialRefreshFailureClass,
     started: Instant,
     transport_phase: Option<plakous_http::Phase>,
+    detail: CredentialRefreshDetail,
 ) {
     if store.restore_unknown_to_ready(claimed).is_err() {
         return;
@@ -443,6 +487,7 @@ pub(super) fn restore_xai_unknown_to_ready(
             http_status: None,
             elapsed: started.elapsed(),
             generation,
+            detail,
         });
     }
 }
@@ -499,6 +544,7 @@ impl Drop for XaiRefreshCancelGuard<'_> {
                 http_status: None,
                 elapsed: self.started.elapsed(),
                 generation: claimed.generation().get(),
+                detail: CredentialRefreshDetail::default(),
             });
         }
     }
@@ -507,7 +553,9 @@ impl Drop for XaiRefreshCancelGuard<'_> {
 pub(super) fn map_xai_pull_body_error(error: PullBodyError) -> XaiNativeAuthError {
     match error {
         PullBodyError::Transport => XaiNativeAuthError::Transport(None),
-        PullBodyError::TooLarge => XaiNativeAuthError::InvalidTokenResponse,
+        PullBodyError::TooLarge => XaiNativeAuthError::InvalidTokenResponse(
+            CredentialRefreshFailureReason::ResponseTooLarge,
+        ),
         _ => XaiNativeAuthError::Transport(None),
     }
 }

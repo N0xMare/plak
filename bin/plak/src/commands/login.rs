@@ -80,11 +80,22 @@ pub fn auth_refresh(
     stderr: &mut dyn io::Write,
 ) -> CliResult<ProcessOutcome> {
     ensure_compatibility(backend, provider, stdin, stderr)?;
-    let status = backend.refresh(provider)?;
+    let (status, expires_at) = backend.refresh_now(provider)?;
     require_ready(provider, status)?;
+    let until = i64::try_from(expires_at)
+        .ok()
+        .and_then(|seconds| jiff::Timestamp::from_second(seconds).ok())
+        .map_or_else(
+            || "unknown".to_owned(),
+            |at| {
+                at.to_zoned(crate::local_time_zone().clone())
+                    .strftime("%Y-%m-%d %H:%M %Z")
+                    .to_string()
+            },
+        );
     writeln!(
         stderr,
-        "{}: refresh succeeded — credential ready.",
+        "{}: new refresh grant issued — access token valid until {until}.",
         cli_provider_name(provider)
     )
     .map_err(|_| CliFailure::new("stderr failed"))?;

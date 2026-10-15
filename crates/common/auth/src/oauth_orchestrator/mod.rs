@@ -43,9 +43,9 @@ pub use browser::{
     read_http11_request_head, run_browser_loopback_session, write_all_before_deadline,
 };
 pub use hooks::{
-    BuildRequestFailure, ClaimedRefreshHooks, ClaimedRevokeHooks, CredentialRefreshEvent,
-    CredentialRefreshFailureClass, CredentialRefreshObserver, CredentialRefreshPhase,
-    HttpStatusClass,
+    BuildRequestFailure, ClaimedRefreshHooks, ClaimedRevokeHooks, CredentialRefreshDetail,
+    CredentialRefreshEvent, CredentialRefreshFailureClass, CredentialRefreshFailureReason,
+    CredentialRefreshObserver, CredentialRefreshPhase, HttpStatusClass,
 };
 pub use jwks::{FetchedJwks, JwksCache, JwksResolvePolicy, parse_cache_control_max_age};
 pub use refresh::{run_claimed_refresh, run_claimed_refresh_from_claim};
@@ -75,6 +75,26 @@ fn emit_refresh(
     http_status: Option<u16>,
     transport_phase: Option<plakous_http::Phase>,
 ) {
+    emit_refresh_detailed(
+        observer,
+        attempt,
+        phase,
+        failure_class,
+        http_status,
+        transport_phase,
+        CredentialRefreshDetail::default(),
+    );
+}
+
+fn emit_refresh_detailed(
+    observer: Option<&dyn CredentialRefreshObserver>,
+    attempt: &RefreshAttempt,
+    phase: CredentialRefreshPhase,
+    failure_class: Option<CredentialRefreshFailureClass>,
+    http_status: Option<u16>,
+    transport_phase: Option<plakous_http::Phase>,
+    detail: CredentialRefreshDetail,
+) {
     let Some(observer) = observer else {
         return;
     };
@@ -85,6 +105,7 @@ fn emit_refresh(
         transport_phase,
         elapsed: attempt.started.elapsed(),
         generation: attempt.generation,
+        detail,
     };
     let _ = catch_unwind(AssertUnwindSafe(|| observer.observe(event)));
 }

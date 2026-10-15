@@ -2,13 +2,13 @@
 
 use super::{
     AccountBinding, Algorithm, AlgorithmParameters, BTreeMap, BTreeSet,
-    DEFAULT_TOKEN_LIFETIME_SECONDS, DecodingKey, Deserialize, EllipticCurve, FetchedJwks, Instant,
-    JWKS_TTL, Jwk, JwkSet, KeyAlgorithm, KeyOperations, LoginHttpStage, MAX_AUTH_BODY_BYTES,
-    MAX_JWKS_KEYS, MAX_STRING_BYTES, ManagerCore, PublicKeyUse, STORED_TOKENS_VERSION,
-    StoredTokens, TOKEN_CLOCK_LEEWAY_SECONDS, TokenResponse, Validation, XAI_ISSUER,
-    XAI_OAUTH_SCOPE, XAI_PUBLIC_CLIENT_ID, XaiNativeAuthError, decode, decode_header, decode_json,
-    generate_selection_epoch, login_account_verification_or, login_signing_keys_or,
-    login_token_exchange_or, system_unix_seconds, unsigned_access_token_exp,
+    CredentialRefreshFailureReason, DEFAULT_TOKEN_LIFETIME_SECONDS, DecodingKey, Deserialize,
+    EllipticCurve, FetchedJwks, Instant, JWKS_TTL, Jwk, JwkSet, KeyAlgorithm, KeyOperations,
+    LoginHttpStage, MAX_AUTH_BODY_BYTES, MAX_JWKS_KEYS, MAX_STRING_BYTES, ManagerCore,
+    PublicKeyUse, STORED_TOKENS_VERSION, StoredTokens, TOKEN_CLOCK_LEEWAY_SECONDS, TokenResponse,
+    Validation, XAI_ISSUER, XAI_OAUTH_SCOPE, XAI_PUBLIC_CLIENT_ID, XaiNativeAuthError, decode,
+    decode_header, decode_json, generate_selection_epoch, login_account_verification_or,
+    login_signing_keys_or, login_token_exchange_or, system_unix_seconds, unsigned_access_token_exp,
     valid_login_selection_epoch, valid_token_component,
 };
 use zeroize::Zeroize as _;
@@ -35,7 +35,12 @@ impl ManagerCore {
         // present token is still fully verified when supplied.
         let id_subject = if login {
             let id_token = tokens.id_token.as_deref().ok_or_else(|| {
-                login_token_exchange_or(true, XaiNativeAuthError::InvalidTokenResponse)
+                login_token_exchange_or(
+                    true,
+                    XaiNativeAuthError::InvalidTokenResponse(
+                        CredentialRefreshFailureReason::TokenShape,
+                    ),
+                )
             })?;
             Some(
                 self.validate_id_token(id_token, nonce, now, flow_deadline)
@@ -76,7 +81,12 @@ impl ManagerCore {
         };
         let refresh = if tokens.refresh_token.is_empty() {
             old_refresh.map(ToOwned::to_owned).ok_or_else(|| {
-                login_token_exchange_or(login, XaiNativeAuthError::InvalidTokenResponse)
+                login_token_exchange_or(
+                    login,
+                    XaiNativeAuthError::InvalidTokenResponse(
+                        CredentialRefreshFailureReason::MissingRefreshToken,
+                    ),
+                )
             })?
         } else {
             std::mem::take(&mut tokens.refresh_token)
@@ -84,7 +94,12 @@ impl ManagerCore {
         let reported_expires_at = now
             .checked_add(tokens.expires_in.unwrap_or(DEFAULT_TOKEN_LIFETIME_SECONDS))
             .ok_or_else(|| {
-                login_token_exchange_or(login, XaiNativeAuthError::InvalidTokenResponse)
+                login_token_exchange_or(
+                    login,
+                    XaiNativeAuthError::InvalidTokenResponse(
+                        CredentialRefreshFailureReason::ExpiresIn,
+                    ),
+                )
             })?;
         // A decoded access-token expiry is only a scheduling hint. Bound the
         // provider default by it so an omitted `expires_in` cannot keep an
@@ -100,7 +115,9 @@ impl ManagerCore {
         if expires_at <= now.saturating_add(TOKEN_CLOCK_LEEWAY_SECONDS) {
             return Err(login_token_exchange_or(
                 login,
-                XaiNativeAuthError::InvalidTokenResponse,
+                XaiNativeAuthError::InvalidTokenResponse(
+                    CredentialRefreshFailureReason::AccessTokenExpired,
+                ),
             ));
         }
         Ok(StoredTokens {
@@ -128,9 +145,11 @@ impl ManagerCore {
         flow_deadline: Option<Instant>,
     ) -> Result<AccountBinding, XaiNativeAuthError> {
         let login = flow_deadline.is_some();
-        let header = decode_header(token).map_err(|_| {
-            login_account_verification_or(login, XaiNativeAuthError::InvalidIdToken)
-        })?;
+        let invalid = |reason| {
+            login_account_verification_or(login, XaiNativeAuthError::InvalidIdToken(reason))
+        };
+        let header = decode_header(token)
+            .map_err(|_| invalid(CredentialRefreshFailureReason::IdTokenHeader))?;
         if header.alg != Algorithm::ES256
             || header.typ.as_deref().is_some_and(|value| value != "JWT")
             || header.jku.is_some()
@@ -140,19 +159,13 @@ impl ManagerCore {
             || header.crit.is_some()
             || !header.extras.inner().is_empty()
         {
-            return Err(login_account_verification_or(
-                login,
-                XaiNativeAuthError::InvalidIdToken,
-            ));
+            return Err(invalid(CredentialRefreshFailureReason::IdTokenHeader));
         }
-        let kid = header.kid.ok_or_else(|| {
-            login_account_verification_or(login, XaiNativeAuthError::InvalidIdToken)
-        })?;
+        let kid = header
+            .kid
+            .ok_or_else(|| invalid(CredentialRefreshFailureReason::IdTokenHeader))?;
         if !valid_token_component(&kid, 128) {
-            return Err(login_account_verification_or(
-                login,
-                XaiNativeAuthError::InvalidIdToken,
-            ));
+            return Err(invalid(CredentialRefreshFailureReason::IdTokenHeader));
         }
         let jwk = self.jwk_for(&kid, flow_deadline).await?;
         validate_jwk_metadata(&jwk, &kid).map_err(|error| login_signing_keys_or(login, error))?;
@@ -164,27 +177,33 @@ impl ManagerCore {
         validation.set_required_spec_claims(&["iss", "aud", "sub", "exp"]);
         validation.leeway = TOKEN_CLOCK_LEEWAY_SECONDS;
         validation.reject_tokens_expiring_in_less_than = 0;
-        let data = decode::<IdClaims>(token, &key, &validation).map_err(|_| {
-            login_account_verification_or(login, XaiNativeAuthError::InvalidIdToken)
-        })?;
+        let data = decode::<IdClaims>(token, &key, &validation)
+            .map_err(|error| invalid(jwt_failure_reason(&error)))?;
         let mut claims = data.claims;
-        if claims.iss != XAI_ISSUER
-            || !claims.aud.is_exact(XAI_PUBLIC_CLIENT_ID)
-            || claims
-                .azp
-                .as_deref()
-                .is_some_and(|authorized_party| authorized_party != XAI_PUBLIC_CLIENT_ID)
-            || claims.iat > now.saturating_add(TOKEN_CLOCK_LEEWAY_SECONDS)
-            || claims
-                .nbf
-                .is_some_and(|value| value > now.saturating_add(TOKEN_CLOCK_LEEWAY_SECONDS))
-            || !valid_token_component(&claims.sub, 256)
-            || nonce.is_some_and(|expected| claims.nonce.as_deref() != Some(expected))
+        let leeway_now = now.saturating_add(TOKEN_CLOCK_LEEWAY_SECONDS);
+        let failed = if claims.iss != XAI_ISSUER {
+            Some(CredentialRefreshFailureReason::IdTokenIss)
+        } else if !claims.aud.is_exact(XAI_PUBLIC_CLIENT_ID) {
+            Some(CredentialRefreshFailureReason::IdTokenAud)
+        } else if claims
+            .azp
+            .as_deref()
+            .is_some_and(|authorized_party| authorized_party != XAI_PUBLIC_CLIENT_ID)
         {
-            return Err(login_account_verification_or(
-                login,
-                XaiNativeAuthError::InvalidIdToken,
-            ));
+            Some(CredentialRefreshFailureReason::IdTokenAzp)
+        } else if claims.iat > leeway_now {
+            Some(CredentialRefreshFailureReason::IdTokenIat)
+        } else if claims.nbf.is_some_and(|value| value > leeway_now) {
+            Some(CredentialRefreshFailureReason::IdTokenNbf)
+        } else if !valid_token_component(&claims.sub, 256) {
+            Some(CredentialRefreshFailureReason::IdTokenSub)
+        } else if nonce.is_some_and(|expected| claims.nonce.as_deref() != Some(expected)) {
+            Some(CredentialRefreshFailureReason::IdTokenClaims)
+        } else {
+            None
+        };
+        if let Some(reason) = failed {
+            return Err(invalid(reason));
         }
         AccountBinding::new(std::mem::take(&mut claims.sub))
             .map_err(|error| login_account_verification_or(login, XaiNativeAuthError::from(error)))
@@ -320,6 +339,30 @@ struct UserInfo {
 impl Drop for UserInfo {
     fn drop(&mut self) {
         self.sub.zeroize();
+    }
+}
+
+/// Names the `jsonwebtoken` check that rejected an ID token (content-free).
+fn jwt_failure_reason(error: &jsonwebtoken::errors::Error) -> CredentialRefreshFailureReason {
+    use jsonwebtoken::errors::ErrorKind as K;
+    match error.kind() {
+        K::InvalidSignature => CredentialRefreshFailureReason::IdTokenSignature,
+        K::ExpiredSignature => CredentialRefreshFailureReason::IdTokenExp,
+        K::ImmatureSignature => CredentialRefreshFailureReason::IdTokenNbf,
+        K::InvalidIssuer => CredentialRefreshFailureReason::IdTokenIss,
+        K::InvalidAudience => CredentialRefreshFailureReason::IdTokenAud,
+        K::InvalidSubject => CredentialRefreshFailureReason::IdTokenSub,
+        K::MissingRequiredClaim(claim) if claim == "sub" => {
+            CredentialRefreshFailureReason::IdTokenSub
+        }
+        K::MissingRequiredClaim(claim) if claim == "exp" => {
+            CredentialRefreshFailureReason::IdTokenExp
+        }
+        K::InvalidAlgorithm => CredentialRefreshFailureReason::IdTokenHeader,
+        K::InvalidToken | K::Base64(_) | K::Utf8(_) | K::Json(_) => {
+            CredentialRefreshFailureReason::TokenShape
+        }
+        _ => CredentialRefreshFailureReason::IdTokenClaims,
     }
 }
 

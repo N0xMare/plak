@@ -1,14 +1,14 @@
 use std::sync::{Arc, Mutex, OnceLock};
 
 use plakous_agent::{
-    Clock, CredentialProviderLabel, CredentialRefreshFailureClass, CredentialRefreshPhase,
-    HttpStatusClass, TelemetryContext, TelemetryEmitter, TelemetryObservation,
-    TelemetryObservationKind,
+    Clock, CredentialProviderLabel, CredentialRefreshDetail, CredentialRefreshFailureClass,
+    CredentialRefreshFailureReason, CredentialRefreshPhase, HttpStatusClass, TelemetryContext,
+    TelemetryEmitter, TelemetryObservation, TelemetryObservationKind,
 };
 use plakous_auth::oauth_orchestrator::{
     CredentialRefreshEvent as AuthRefreshEvent, CredentialRefreshFailureClass as AuthFailureClass,
-    CredentialRefreshObserver, CredentialRefreshPhase as AuthRefreshPhase,
-    HttpStatusClass as AuthHttpStatusClass,
+    CredentialRefreshFailureReason as AuthFailureReason, CredentialRefreshObserver,
+    CredentialRefreshPhase as AuthRefreshPhase, HttpStatusClass as AuthHttpStatusClass,
 };
 use plakous_model::{SystemClock, Timestamp};
 
@@ -61,6 +61,12 @@ impl CredentialRefreshObserver for FacadeCredentialObserver {
                 http_status: event.http_status,
                 elapsed: Some(event.elapsed),
                 generation: event.generation,
+                detail: CredentialRefreshDetail {
+                    reason: event.detail.reason.and_then(map_failure_reason),
+                    expires_in_secs: event.detail.expires_in_secs,
+                    id_token_iat_age_secs: event.detail.id_token_iat_age_secs,
+                    id_token_exp_in_secs: event.detail.id_token_exp_in_secs,
+                },
             },
         ));
     }
@@ -94,6 +100,36 @@ fn map_refresh_failure(class: AuthFailureClass) -> CredentialRefreshFailureClass
     }
 }
 
+fn map_failure_reason(reason: AuthFailureReason) -> Option<CredentialRefreshFailureReason> {
+    Some(match reason {
+        AuthFailureReason::TokenShape => CredentialRefreshFailureReason::TokenShape,
+        AuthFailureReason::ResponseTooLarge => CredentialRefreshFailureReason::ResponseTooLarge,
+        AuthFailureReason::ExpiresIn => CredentialRefreshFailureReason::ExpiresIn,
+        AuthFailureReason::AccessTokenExpired => CredentialRefreshFailureReason::AccessTokenExpired,
+        AuthFailureReason::MissingRefreshToken => {
+            CredentialRefreshFailureReason::MissingRefreshToken
+        }
+        AuthFailureReason::IdTokenHeader => CredentialRefreshFailureReason::IdTokenHeader,
+        AuthFailureReason::IdTokenUnknownKid => CredentialRefreshFailureReason::IdTokenUnknownKid,
+        AuthFailureReason::IdTokenSigningKey => CredentialRefreshFailureReason::IdTokenSigningKey,
+        AuthFailureReason::IdTokenSignature => CredentialRefreshFailureReason::IdTokenSignature,
+        AuthFailureReason::IdTokenIss => CredentialRefreshFailureReason::IdTokenIss,
+        AuthFailureReason::IdTokenAud => CredentialRefreshFailureReason::IdTokenAud,
+        AuthFailureReason::IdTokenExp => CredentialRefreshFailureReason::IdTokenExp,
+        AuthFailureReason::IdTokenIat => CredentialRefreshFailureReason::IdTokenIat,
+        AuthFailureReason::IdTokenNbf => CredentialRefreshFailureReason::IdTokenNbf,
+        AuthFailureReason::IdTokenAzp => CredentialRefreshFailureReason::IdTokenAzp,
+        AuthFailureReason::IdTokenSub => CredentialRefreshFailureReason::IdTokenSub,
+        AuthFailureReason::IdTokenClaims => CredentialRefreshFailureReason::IdTokenClaims,
+        AuthFailureReason::SubjectMismatch => CredentialRefreshFailureReason::SubjectMismatch,
+        AuthFailureReason::SelectionChanged => CredentialRefreshFailureReason::SelectionChanged,
+        AuthFailureReason::RetiredFormat => CredentialRefreshFailureReason::RetiredFormat,
+        AuthFailureReason::StoredCredential => CredentialRefreshFailureReason::StoredCredential,
+        AuthFailureReason::ProviderRejected => CredentialRefreshFailureReason::ProviderRejected,
+        _ => return None,
+    })
+}
+
 fn map_http_status_class(class: AuthHttpStatusClass) -> HttpStatusClass {
     match class {
         AuthHttpStatusClass::ClientError => HttpStatusClass::ClientError,
@@ -120,6 +156,21 @@ fn map_transport_phase(phase: plakous_http::Phase) -> plakous_model::ModelRetryP
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn credential_refresh_reason_keeps_its_label_across_layers() {
+        for reason in [
+            AuthFailureReason::IdTokenExp,
+            AuthFailureReason::RetiredFormat,
+            AuthFailureReason::SubjectMismatch,
+            AuthFailureReason::ProviderRejected,
+        ] {
+            assert_eq!(
+                map_failure_reason(reason).map(CredentialRefreshFailureReason::as_str),
+                Some(reason.as_str())
+            );
+        }
+    }
 
     #[test]
     fn credential_refresh_local_dispatch_refusal_is_not_transport() {

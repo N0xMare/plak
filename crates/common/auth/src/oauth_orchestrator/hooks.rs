@@ -70,6 +70,138 @@ impl HttpStatusClass {
     }
 }
 
+/// Closed, content-free sub-reason for a refresh failure.
+///
+/// Names which local check rejected a received body (or why no request was
+/// sent). It never carries token values, subjects, or account identifiers.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum CredentialRefreshFailureReason {
+    /// The token response did not match the expected JSON shape or token syntax.
+    TokenShape,
+    /// The response body exceeded its bound.
+    ResponseTooLarge,
+    /// `expires_in` was missing, out of range, or overflowed the clock.
+    ExpiresIn,
+    /// The returned access token was already expired (or inside clock leeway).
+    AccessTokenExpired,
+    /// No refresh token was returned and none could be retained.
+    MissingRefreshToken,
+    /// The ID token header was malformed or not the pinned algorithm/shape.
+    IdTokenHeader,
+    /// The ID token named a signing key absent from the provider key set.
+    IdTokenUnknownKid,
+    /// The provider signing key set or key metadata was invalid.
+    IdTokenSigningKey,
+    /// The ID token signature did not verify.
+    IdTokenSignature,
+    /// The ID token issuer did not match.
+    IdTokenIss,
+    /// The ID token audience did not match.
+    IdTokenAud,
+    /// The ID token was expired.
+    IdTokenExp,
+    /// The ID token was issued in the future.
+    IdTokenIat,
+    /// The ID token is not valid yet.
+    IdTokenNbf,
+    /// The ID token authorized party did not match.
+    IdTokenAzp,
+    /// The ID token subject claim was missing or malformed.
+    IdTokenSub,
+    /// Another ID token claim was missing or malformed.
+    IdTokenClaims,
+    /// The refreshed identity did not match the stored account (matched / did
+    /// not match only; never the subject itself).
+    SubjectMismatch,
+    /// The stored login selection changed while the refresh was prepared.
+    SelectionChanged,
+    /// The stored record was written in a retired format; no request was sent.
+    RetiredFormat,
+    /// The stored record could not be decoded or validated; no request was sent.
+    StoredCredential,
+    /// The provider answered with a non-success status.
+    ProviderRejected,
+}
+
+impl CredentialRefreshFailureReason {
+    /// Stable `snake_case` label for logs and telemetry.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TokenShape => "token_shape",
+            Self::ResponseTooLarge => "response_too_large",
+            Self::ExpiresIn => "expires_in",
+            Self::AccessTokenExpired => "access_token_expired",
+            Self::MissingRefreshToken => "missing_refresh_token",
+            Self::IdTokenHeader => "id_token_header",
+            Self::IdTokenUnknownKid => "id_token_unknown_kid",
+            Self::IdTokenSigningKey => "id_token_signing_key",
+            Self::IdTokenSignature => "id_token_signature",
+            Self::IdTokenIss => "id_token_iss",
+            Self::IdTokenAud => "id_token_aud",
+            Self::IdTokenExp => "id_token_exp",
+            Self::IdTokenIat => "id_token_iat",
+            Self::IdTokenNbf => "id_token_nbf",
+            Self::IdTokenAzp => "id_token_azp",
+            Self::IdTokenSub => "id_token_sub",
+            Self::IdTokenClaims => "id_token_claims",
+            Self::SubjectMismatch => "subject_mismatch",
+            Self::SelectionChanged => "selection_changed",
+            Self::RetiredFormat => "retired_format",
+            Self::StoredCredential => "stored_credential",
+            Self::ProviderRejected => "provider_rejected",
+        }
+    }
+}
+
+/// Content-free numbers and sub-reason attached to a refresh failure.
+///
+/// Deltas are seconds relative to the local clock at validation time. They
+/// come from the received response only; no token value is retained.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CredentialRefreshDetail {
+    /// Which check rejected the response, when known.
+    pub reason: Option<CredentialRefreshFailureReason>,
+    /// The response's `expires_in`, when present.
+    pub expires_in_secs: Option<u64>,
+    /// `now - iat` of the returned ID token (positive means issued in the past).
+    pub id_token_iat_age_secs: Option<i64>,
+    /// `exp - now` of the returned ID token (negative means already expired).
+    pub id_token_exp_in_secs: Option<i64>,
+}
+
+impl CredentialRefreshDetail {
+    /// Records the numbers of one received token response (no token value).
+    ///
+    /// `id_token` is decoded without verification for its `iat`/`exp` only.
+    #[must_use]
+    pub fn from_response(
+        now_unix: u64,
+        expires_in_secs: Option<u64>,
+        id_token: Option<&str>,
+        max_bytes: usize,
+    ) -> Self {
+        let delta = |a: u64, b: u64| i64::try_from(i128::from(a) - i128::from(b)).ok();
+        let (iat, exp) = id_token
+            .and_then(|token| crate::oauth_workflow::unverified_jwt_timing(token, max_bytes))
+            .unwrap_or((None, None));
+        Self {
+            reason: None,
+            expires_in_secs,
+            id_token_iat_age_secs: iat.and_then(|iat| delta(now_unix, iat)),
+            id_token_exp_in_secs: exp.and_then(|exp| delta(exp, now_unix)),
+        }
+    }
+
+    /// Returns this detail with `reason` set.
+    #[must_use]
+    pub const fn with_reason(mut self, reason: Option<CredentialRefreshFailureReason>) -> Self {
+        self.reason = reason;
+        self
+    }
+}
+
 /// One content-free claimed-refresh (or revoke) ladder observation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CredentialRefreshEvent {
@@ -88,6 +220,8 @@ pub struct CredentialRefreshEvent {
     pub elapsed: Duration,
     /// Durable credential generation at the claim.
     pub generation: u64,
+    /// Sub-reason and response numbers for a failure (empty on success).
+    pub detail: CredentialRefreshDetail,
 }
 
 /// Dialect-supplied observer for claimed-refresh ladder exits.
@@ -253,6 +387,14 @@ pub trait ClaimedRefreshHooks {
     /// Optional content-free observer for ladder exits. Default: none.
     fn refresh_observer(&self) -> Option<&dyn CredentialRefreshObserver> {
         None
+    }
+
+    /// Content-free sub-reason and response numbers for a failed refresh.
+    ///
+    /// Called once before the failure is observed; the error is never logged.
+    fn failure_detail(&mut self, error: &Self::Error) -> CredentialRefreshDetail {
+        let _ = error;
+        CredentialRefreshDetail::default()
     }
 
     /// When true, [`PrivateCredentialStore::begin_refresh_reclaiming_unknown`]

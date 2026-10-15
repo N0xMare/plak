@@ -978,7 +978,9 @@ fn oauth_objects_reject_duplicates_and_accept_provider_optional_metadata() -> Te
     let duplicate = br#"{"access_token":"a","refresh_token":"r","token_type":"Bearer","expires_in":3600,"scope":"openid","future":1,"future":2}"#;
     assert!(matches!(
         decode_json::<TokenResponse>(duplicate, MAX_TOKEN_BYTES),
-        Err(XaiNativeAuthError::InvalidTokenResponse)
+        Err(XaiNativeAuthError::InvalidTokenResponse(
+            CredentialRefreshFailureReason::TokenShape
+        ))
     ));
     let minimum = br#"{"access_token":"a","refresh_token":"r"}"#;
     let parsed = decode_json::<TokenResponse>(minimum, MAX_TOKEN_BYTES)?;
@@ -992,7 +994,9 @@ fn oauth_objects_reject_duplicates_and_accept_provider_optional_metadata() -> Te
     let parsed = decode_json::<TokenResponse>(zero_expiry, MAX_TOKEN_BYTES)?;
     assert!(matches!(
         parsed.validate(),
-        Err(XaiNativeAuthError::InvalidTokenResponse)
+        Err(XaiNativeAuthError::InvalidTokenResponse(
+            CredentialRefreshFailureReason::ExpiresIn
+        ))
     ));
     Ok(())
 }
@@ -1483,7 +1487,7 @@ async fn device_login_rejects_missing_and_zero_expiry_without_poll_or_persistenc
         peer.responses.send(response(&body)).await?;
         assert!(matches!(
             manager.begin_device_login().await,
-            Err(XaiNativeAuthError::InvalidTokenResponse)
+            Err(XaiNativeAuthError::InvalidTokenResponse(_))
         ));
         wait_for_requests(&peer, 1).await?;
         assert_eq!(peer.requests.lock().await.len(), 1);
@@ -1944,7 +1948,9 @@ async fn invalid_nonce_and_userinfo_account_change_never_persist() -> TestResult
     .await?;
     assert!(matches!(
         nonce_result,
-        Err(XaiNativeAuthError::InvalidIdToken)
+        Err(XaiNativeAuthError::InvalidIdToken(
+            CredentialRefreshFailureReason::IdTokenClaims
+        ))
     ));
     assert!(nonce_manager.status()?.is_none());
 
@@ -2195,6 +2201,7 @@ async fn post_start_failure_restore_leaves_a_peer_reclaimed_unknown_alone() -> T
         request_permit: None,
         started: Instant::now(),
         force: false,
+        detail: CredentialRefreshDetail::default(),
     };
     hooks.cancel_guard.claimed(ours);
     hooks.after_post_start_failure(&core.store, &XaiNativeAuthError::Transport(None));
@@ -2352,7 +2359,7 @@ async fn claimed_refresh_body_parse_and_account_failures_consume_quarantine_term
         .await?;
     assert!(matches!(
         parse_manager.refresh_if_needed().await,
-        Err(XaiNativeAuthError::InvalidTokenResponse)
+        Err(XaiNativeAuthError::InvalidTokenResponse(_))
     ));
     assert_eq!(
         required(parse_manager.status()?, "parse restore")?.status(),
@@ -2422,6 +2429,89 @@ async fn refresh_accepts_id_token_within_clock_leeway_not_refresh_lead() -> Test
     let status = required(manager.status()?, "leeway refresh status")?;
     assert_eq!(status.status(), CredentialStatus::Ready);
     assert_eq!(status.generation().get(), 3);
+    peer.shutdown().await?;
+    Ok(())
+}
+
+#[derive(Default)]
+struct RecordingRefreshObserver {
+    events: std::sync::Mutex<Vec<CredentialRefreshEvent>>,
+}
+
+impl CredentialRefreshObserver for RecordingRefreshObserver {
+    fn observe(&self, event: CredentialRefreshEvent) {
+        self.events
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(event);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refresh_failure_names_the_rejecting_check_and_response_timing() -> TestResult {
+    let _serial = AUTH_TEST_GATE.lock().await;
+    let temp = tempdir()?;
+    let peer = mock_peer().await?;
+    let observer = Arc::new(RecordingRefreshObserver::default());
+    let manager = manager(&temp, &peer)?.with_credential_refresh_observer(observer.clone())?;
+    install_stored(
+        &manager,
+        "expired-id-subject",
+        "expired-id-access",
+        "expired-id-refresh",
+        system_unix_seconds()? + 1,
+    )?;
+    let now = system_unix_seconds()?;
+    peer.responses
+        .send(response(&token_response(
+            "expired-id-new-access",
+            "expired-id-new-refresh",
+            &id_token_with_exp("expired-id-subject", None, now - 600)?,
+        )))
+        .await?;
+    peer.responses.send(response(&jwks(TEST_KID))).await?;
+    let result = tokio::time::timeout(Duration::from_secs(5), manager.refresh_if_needed()).await?;
+    assert!(
+        matches!(
+            result,
+            Err(XaiNativeAuthError::InvalidIdToken(
+                CredentialRefreshFailureReason::IdTokenExp
+            ))
+        ),
+        "{result:?}"
+    );
+    let events = observer
+        .events
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    let last = events.last().ok_or("no refresh observation")?;
+    assert_eq!(last.phase, CredentialRefreshPhase::Restored);
+    assert_eq!(
+        last.failure_class,
+        Some(CredentialRefreshFailureClass::Validation)
+    );
+    assert_eq!(
+        last.detail.reason,
+        Some(CredentialRefreshFailureReason::IdTokenExp)
+    );
+    assert_eq!(last.detail.expires_in_secs, Some(3600));
+    let exp_in = last
+        .detail
+        .id_token_exp_in_secs
+        .ok_or("exp delta missing")?;
+    assert!((-700..=-590).contains(&exp_in), "{exp_in}");
+    let iat_age = last
+        .detail
+        .id_token_iat_age_secs
+        .ok_or("iat delta missing")?;
+    assert!((0..=10).contains(&iat_age), "{iat_age}");
+    assert!(
+        events
+            .iter()
+            .all(|event| event.phase == CredentialRefreshPhase::Began
+                || event.detail.reason == Some(CredentialRefreshFailureReason::IdTokenExp))
+    );
     peer.shutdown().await?;
     Ok(())
 }

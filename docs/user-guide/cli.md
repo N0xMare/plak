@@ -110,8 +110,8 @@ accept the new notice and authorize a fresh grant.
 
 ### `plak refresh <codex|grok|claude>`
 
-Forces a token refresh now. Ordinary commands refresh on their own; you only
-need this to test the refresh path.
+Claims a new refresh grant now, even when the access token is still fresh, and
+prints the new access-token expiry. Ordinary commands refresh on their own.
 
 A subscription refresh that fails before sending names the network phase (DNS,
 connect or TLS) and leaves the credential unchanged. Retry when online; an

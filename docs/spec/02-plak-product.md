@@ -167,7 +167,7 @@ launch directory — the cwd of the process, resolved once.
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
   carry/<id>.<uuid>.json      session export documents, 0600 in 0700 (§2.5.1)
   references/<id>.json        imported archives, 0600 in 0700 (§2.5.1)
-  telemetry/telemetry-v17.sqlite3 disposable analytics, schema 17
+  telemetry/telemetry-v18.sqlite3 disposable analytics, schema 18
   logs/plak.log               PLAK_LOG boundary spans
 ```
 
@@ -5276,7 +5276,7 @@ prose enters the row. The cause column is unconstrained SQL `TEXT`, populated
 by `ModelRetryCause::kind()`: its closed spelling set is `http_status`, `connect`,
 `record_rejected_in_transit`, `transport_after_send`, and `stream_interrupted`.
 The new string value requires no column of its own. The disposable store is
-schema 17. Request host, route and body size are log fields, not SQL columns.
+schema 18. Request host, route and body size are log fields, not SQL columns.
 The bounded writer has the same best-effort drop behavior
 as other analytics; these rows are not recovery authority. `v_replay_loss` is
 the canned view printed by `plak telemetry status --views`, including declined
@@ -5402,9 +5402,12 @@ local refusal is never reported as a transport failure. A non-Ready vertical
 renders one plain line naming
 the CLI command that repairs it, and **no bar**, because login is CLI-only.
 
-No usage read refreshes a token, on any account (chapter 01 §7.3): an
+No usage read refreshes an expired token, on any account (chapter 01 §7.3): an
 expired access token is `RefreshRequired` without network I/O, and the next
-turn, or `plak refresh <account>`, refreshes it. A still-expired Ready token
+turn, or `plak refresh <account>`, refreshes it. A usage endpoint that rejects
+a fresh token (401/403) gets one forced claimed refresh and one more read; a
+failed grant shows the credential's resulting state, decorated with the
+recorded refresh failure below. A still-expired Ready token
 is never provider staleness. Shared Ready leases do not block a credential-free fence read.
 `Busy` means local writer or refresh contention: a writer's brief record
 replacement, or a refresh claim still in flight in this or another process,
@@ -5419,7 +5422,12 @@ The Usage tab and `plak usage` decorate only their display copy with the newest
 failed credential refresh recorded in telemetry. A newer `Began` row does not
 hide that failure; a later `Completed` clears it (equal timestamps use insertion
 order). Refresh-required and quarantine prose is replaced by the failure's local
-`HH:MM`, transport phase or non-network cause, and remedy. Otherwise the failure
+`HH:MM`, transport phase or non-network cause (a validation failure names its
+sub-reason, for example `refresh response could not be validated
+(id_token_exp)`; a retired-format record says it was written by an older build,
+no request was sent, and names `plak login <account>`), and remedy. A failure
+row whose claim generation is more than one behind the current credential
+record (a later login, logout, or refresh) is history and is not shown. Otherwise the failure
 is a separate note; valid allowance bars remain valid. `plak status` and the
 Providers page use the same reader and wording without changing credential
 readiness. Only a `Restored` result says `credential unchanged`; unknown or

@@ -6,9 +6,10 @@ use plakous_http::Client as HttpClient;
 
 use super::hooks::ClaimedRefreshHooks;
 use super::{
-    CredentialRefreshFailureClass, CredentialRefreshPhase, RESTORE_POLL_INITIAL, RESTORE_POLL_MAX,
-    RefreshAttempt, emit_claimed_http_failure, emit_refresh, handle_build_failure,
-    http_status_class, quarantine_or_map, restore_or_map,
+    BuildRequestFailure, CredentialRefreshFailureClass, CredentialRefreshPhase,
+    RESTORE_POLL_INITIAL, RESTORE_POLL_MAX, RefreshAttempt, emit_claimed_http_failure,
+    emit_refresh, emit_refresh_detailed, handle_build_failure, http_status_class,
+    quarantine_or_map, restore_or_map,
 };
 use crate::{PrivateCredentialStore, PrivateStoreError, RefreshClaim};
 
@@ -124,18 +125,23 @@ where
     let (prepared, request) = match hooks.build_refresh_request(&claim) {
         Ok(value) => value,
         Err(failure) => {
+            let detail = match &failure {
+                BuildRequestFailure::LeaveQuarantined(error)
+                | BuildRequestFailure::Restore(error) => hooks.failure_detail(error),
+            };
             let (error, phase, failure_class) =
                 handle_build_failure(store, claim, failure, attempt.deadline, |error| {
                     hooks.map_store_error(error)
                 })
                 .await;
-            emit_refresh(
+            emit_refresh_detailed(
                 hooks.refresh_observer(),
                 &attempt,
                 phase,
                 failure_class,
                 None,
                 None,
+                detail,
             );
             return Err(error);
         }
@@ -191,6 +197,7 @@ where
     let record = match hooks.validate_tokens(prepared, &mut response).await {
         Ok(record) => record,
         Err(error) => {
+            let detail = hooks.failure_detail(&error);
             let transport_failure = response.transport_failure();
             let failure_class =
                 if let Some(class) = super::transport_failure_class(transport_failure) {
@@ -202,7 +209,7 @@ where
                 };
             let (error, quarantined) =
                 quarantine_or_map(store, response, error, |e| hooks.map_store_error(e));
-            emit_refresh(
+            emit_refresh_detailed(
                 hooks.refresh_observer(),
                 &attempt,
                 if quarantined {
@@ -217,6 +224,7 @@ where
                 }),
                 http_status,
                 transport_failure.map(plakous_http::Failure::phase),
+                detail,
             );
             hooks.after_post_start_failure(store, &error);
             return Err(error);
@@ -289,8 +297,9 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::oauth_orchestrator::hooks::{
-        BuildRequestFailure, ClaimedRefreshHooks, CredentialRefreshEvent,
-        CredentialRefreshFailureClass, CredentialRefreshObserver, CredentialRefreshPhase,
+        BuildRequestFailure, ClaimedRefreshHooks, CredentialRefreshDetail, CredentialRefreshEvent,
+        CredentialRefreshFailureClass, CredentialRefreshFailureReason, CredentialRefreshObserver,
+        CredentialRefreshPhase,
     };
     use crate::{
         AccountBinding, ClaimedHttpError, ClaimedHttpResponse, CredentialFence,
@@ -435,6 +444,22 @@ mod tests {
         fn refresh_observer(&self) -> Option<&dyn CredentialRefreshObserver> {
             Some(self.observer)
         }
+
+        fn failure_detail(&mut self, error: &Self::Error) -> CredentialRefreshDetail {
+            match *error {
+                "corrupt" => CredentialRefreshDetail {
+                    reason: Some(CredentialRefreshFailureReason::StoredCredential),
+                    ..CredentialRefreshDetail::default()
+                },
+                "validate" => CredentialRefreshDetail {
+                    reason: Some(CredentialRefreshFailureReason::IdTokenExp),
+                    expires_in_secs: Some(21_600),
+                    id_token_iat_age_secs: Some(3_700),
+                    id_token_exp_in_secs: Some(-100),
+                },
+                _ => CredentialRefreshDetail::default(),
+            }
+        }
     }
 
     fn dummy_request() -> Result<Request, Box<dyn std::error::Error>> {
@@ -526,6 +551,11 @@ mod tests {
         assert_eq!(
             events[1].failure_class,
             Some(CredentialRefreshFailureClass::Validation)
+        );
+        assert_eq!(events[0].detail, CredentialRefreshDetail::default());
+        assert_eq!(
+            events[1].detail.reason,
+            Some(CredentialRefreshFailureReason::StoredCredential)
         );
         Ok(())
     }
@@ -727,6 +757,15 @@ mod tests {
         assert_eq!(
             events[1].failure_class,
             Some(CredentialRefreshFailureClass::Validation)
+        );
+        assert_eq!(
+            events[1].detail,
+            CredentialRefreshDetail {
+                reason: Some(CredentialRefreshFailureReason::IdTokenExp),
+                expires_in_secs: Some(21_600),
+                id_token_iat_age_secs: Some(3_700),
+                id_token_exp_in_secs: Some(-100),
+            }
         );
         Ok(())
     }

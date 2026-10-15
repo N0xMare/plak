@@ -12,8 +12,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use futures_util::lock::Mutex as AsyncMutex;
 use plakous_auth::oauth_orchestrator::{
-    BuildRequestFailure, ClaimedRefreshHooks, CredentialRefreshObserver, PullBodyError,
-    pull_claimed_body, run_claimed_refresh,
+    BuildRequestFailure, ClaimedRefreshHooks, CredentialRefreshDetail,
+    CredentialRefreshFailureReason, CredentialRefreshObserver, PullBodyError, pull_claimed_body,
+    run_claimed_refresh,
 };
 use plakous_auth::oauth_workflow::{access_needs_refresh, remaining_until};
 use plakous_auth::subscription_limit::{
@@ -606,6 +607,20 @@ impl ClaudeNativeAuthManager {
         self.refresh_with_force(true).await
     }
 
+    /// Stored access-token expiry (Unix seconds) of the Ready credential.
+    ///
+    /// # Errors
+    ///
+    /// Fails for a missing, non-Ready, or unreadable record.
+    pub fn access_expires_at(&self) -> Result<u64, ClaudeNativeAuthError> {
+        let fence = self
+            .core
+            .store
+            .load()?
+            .ok_or(ClaudeNativeAuthError::NotLoggedIn)?;
+        Ok(self.core.read_stored(&fence)?.expires_at)
+    }
+
     async fn refresh_with_force(&self, force: bool) -> Result<(), ClaudeNativeAuthError> {
         validate_current_ready_record(&self.core.store)?;
         let flight = self.core.refresh_flight.lock().await;
@@ -616,6 +631,7 @@ impl ClaudeNativeAuthManager {
             _flight: flight,
             request_permit: None,
             force,
+            detail: CredentialRefreshDetail::default(),
         };
         run_claimed_refresh(&self.core.store, &self.core.client, &mut hooks).await
     }
@@ -1059,6 +1075,8 @@ struct ClaudeRefreshHooks<'a> {
     request_permit: Option<Box<dyn SubscriptionRequestPermit>>,
     /// Refresh even when the stored expiry is outside the skew (HTTP 401).
     force: bool,
+    /// Numbers and rejecting check of the received response, for diagnostics.
+    detail: CredentialRefreshDetail,
 }
 
 struct ClaudeRefreshPrepared {
@@ -1166,23 +1184,35 @@ impl ClaimedRefreshHooks for ClaudeRefreshHooks<'_> {
         prepared: Self::Prepared,
         response: &mut ClaimedHttpResponse,
     ) -> Result<CredentialRecord, Self::Error> {
+        let mut reject = |reason| {
+            self.detail.reason = Some(reason);
+            ClaudeNativeAuthError::RefreshQuarantined
+        };
         if !response.status().is_success() {
-            return Err(ClaudeNativeAuthError::RefreshQuarantined);
+            return Err(reject(CredentialRefreshFailureReason::ProviderRejected));
         }
         let body = pull_claimed_body(response, MAX_TOKEN_BYTES)
             .await
             .map_err(map_pull_body_error)?;
         let grant = parse_claude_oauth_token_grant(&body)
-            .map_err(|_| ClaudeNativeAuthError::RefreshQuarantined)?;
+            .map_err(|_| reject(CredentialRefreshFailureReason::TokenShape))?;
+        self.detail = CredentialRefreshDetail::from_response(
+            system_unix_seconds().unwrap_or(0),
+            u64::try_from(grant.expires_in()).ok(),
+            None,
+            MAX_TOKEN_BYTES,
+        );
         if grant
             .scope()
             .is_none_or(|scope| !claude_oauth_scope_admits_inference(scope))
         {
+            self.detail.reason = Some(CredentialRefreshFailureReason::TokenShape);
             return Err(ClaudeNativeAuthError::RefreshQuarantined);
         }
         if let (Some(old), Some(new)) = (&prepared.account_uuid, grant.account_uuid())
             && old != new
         {
+            self.detail.reason = Some(CredentialRefreshFailureReason::SubjectMismatch);
             return Err(ClaudeNativeAuthError::RefreshQuarantined);
         }
         let account_uuid = grant.account_uuid().cloned().or(prepared.account_uuid);
@@ -1242,6 +1272,23 @@ impl ClaimedRefreshHooks for ClaudeRefreshHooks<'_> {
 
     fn refresh_observer(&self) -> Option<&dyn CredentialRefreshObserver> {
         self.observer
+    }
+
+    fn failure_detail(&mut self, error: &Self::Error) -> CredentialRefreshDetail {
+        let fallback = match error {
+            ClaudeNativeAuthError::InvalidTokenResponse => {
+                Some(CredentialRefreshFailureReason::TokenShape)
+            }
+            ClaudeNativeAuthError::InvalidStoredCredential => {
+                Some(CredentialRefreshFailureReason::StoredCredential)
+            }
+            ClaudeNativeAuthError::StoredCredentialFormatRetired => {
+                Some(CredentialRefreshFailureReason::RetiredFormat)
+            }
+            _ => None,
+        };
+        let reason = self.detail.reason.or(fallback);
+        self.detail.with_reason(reason)
     }
 }
 

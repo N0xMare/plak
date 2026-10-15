@@ -259,6 +259,27 @@ impl NativeSubscriptionStatus {
     }
 }
 
+/// Result of one operator-forced refresh grant.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ForcedRefresh {
+    status: NativeAuthStatus,
+    access_expires_at: u64,
+}
+
+impl ForcedRefresh {
+    /// Durable credential state after the grant.
+    #[must_use]
+    pub const fn status(self) -> NativeAuthStatus {
+        self.status
+    }
+
+    /// New access-token expiry, Unix seconds.
+    #[must_use]
+    pub const fn access_expires_at(self) -> u64 {
+        self.access_expires_at
+    }
+}
+
 /// Credential-free summary of one exact account-admitted native model.
 ///
 /// The capability bits are limited to Plak's portable request surface. A
@@ -1471,10 +1492,67 @@ impl NativeSubscriptions {
                 Err(_) => return unavailable(SubscriptionUsageUnavailable::LocalState),
             },
         };
+        let observation = if is_usage_rejection(&observation) {
+            self.recover_rejected_usage(provider, observation).await
+        } else {
+            observation
+        };
         if lock.verify().is_err() {
             return unavailable(SubscriptionUsageUnavailable::AccountChanged);
         }
         observation
+    }
+
+    /// A usage endpoint that rejected the access token gets one forced
+    /// refresh grant through the same claimed single-flight ladder model
+    /// dispatch uses, then exactly one more read. A failed grant reports the
+    /// credential's resulting state; the refresh failure itself is in
+    /// telemetry for the display layer to name.
+    async fn recover_rejected_usage(
+        &self,
+        provider: NativeProvider,
+        rejected: SubscriptionUsageRead,
+    ) -> SubscriptionUsageRead {
+        match self.refresh_locked(provider, true).await {
+            Ok(NativeAuthStatus::Ready) => self.read_usage_once(provider).await.unwrap_or(rejected),
+            Ok(_) | Err(_) => match self.fenced_credential_reason(provider).await {
+                SubscriptionUsageUnavailable::LocalState => rejected,
+                reason => SubscriptionUsageRead::Unavailable {
+                    observed_at: Timestamp::new(unix_now().unwrap_or(0), 0)
+                        .unwrap_or_else(|_| unreachable!("Unix epoch is a valid timestamp")),
+                    reason,
+                },
+            },
+        }
+    }
+
+    async fn read_usage_once(&self, provider: NativeProvider) -> Option<SubscriptionUsageRead> {
+        Some(match provider {
+            NativeProvider::Codex => {
+                self.codex_online()
+                    .await
+                    .ok()?
+                    .manager
+                    .subscription_usage()
+                    .await
+            }
+            NativeProvider::Xai => {
+                self.xai_online()
+                    .await
+                    .ok()?
+                    .manager
+                    .subscription_usage()
+                    .await
+            }
+            NativeProvider::Claude => {
+                self.claude_online()
+                    .await
+                    .ok()?
+                    .manager
+                    .subscription_usage()
+                    .await
+            }
+        })
     }
 
     /// Names why the selected credential was refused before any network I/O:
@@ -1726,14 +1804,72 @@ impl NativeSubscriptions {
         provider: NativeProvider,
     ) -> Result<NativeAuthStatus, NativeSubscriptionError> {
         let lock = self.acquire_compatibility_lock(provider).await?;
+        let status = self.refresh_locked(provider, false).await?;
+        lock.verify()?;
+        Ok(status)
+    }
+
+    /// Claims one refresh grant regardless of the stored expiry and reports
+    /// the new access-token expiry. It never reports success without a grant.
+    ///
+    /// # Errors
+    ///
+    /// The same fail-closed failures as [`Self::refresh`].
+    pub async fn refresh_now(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<ForcedRefresh, NativeSubscriptionError> {
+        let lock = self.acquire_compatibility_lock(provider).await?;
+        let status = self.refresh_locked(provider, true).await?;
+        let access_expires_at = match provider {
+            NativeProvider::Codex => self
+                .codex_online()
+                .await?
+                .manager
+                .access_expires_at()
+                .map_err(map_codex_error)?,
+            NativeProvider::Claude => self
+                .claude_online()
+                .await?
+                .manager
+                .access_expires_at()
+                .map_err(map_claude_error)?,
+            NativeProvider::Xai => self
+                .xai_online()
+                .await?
+                .manager
+                .access_expires_at()
+                .map_err(map_xai_error)?,
+        };
+        lock.verify()?;
+        Ok(ForcedRefresh {
+            status,
+            access_expires_at,
+        })
+    }
+
+    /// Runs one refresh under the held compatibility lock; `force` claims a
+    /// grant even when the stored access token is still fresh.
+    async fn refresh_locked(
+        &self,
+        provider: NativeProvider,
+        force: bool,
+    ) -> Result<NativeAuthStatus, NativeSubscriptionError> {
         let status = match provider {
             NativeProvider::Codex => {
                 let online = self.codex_online().await?;
-                online
-                    .manager
-                    .refresh_if_needed()
-                    .await
-                    .map_err(map_codex_error)?;
+                let manager = Arc::clone(&online.manager);
+                if force {
+                    detached(async move { manager.refresh_after_rejection().await })
+                        .await?
+                        .map_err(map_codex_error)?;
+                } else {
+                    online
+                        .manager
+                        .refresh_if_needed()
+                        .await
+                        .map_err(map_codex_error)?;
+                }
                 online
                     .manager
                     .status()
@@ -1742,11 +1878,18 @@ impl NativeSubscriptions {
             }
             NativeProvider::Claude => {
                 let online = self.claude_online().await?;
-                online
-                    .manager
-                    .refresh_if_needed()
-                    .await
-                    .map_err(map_claude_error)?;
+                let manager = Arc::clone(&online.manager);
+                if force {
+                    detached(async move { manager.refresh_after_rejection().await })
+                        .await?
+                        .map_err(map_claude_error)?;
+                } else {
+                    online
+                        .manager
+                        .refresh_if_needed()
+                        .await
+                        .map_err(map_claude_error)?;
+                }
                 online
                     .manager
                     .status()
@@ -1759,11 +1902,18 @@ impl NativeSubscriptions {
             }
             NativeProvider::Xai => {
                 let online = self.xai_online().await?;
-                online
-                    .manager
-                    .refresh_if_needed()
-                    .await
-                    .map_err(map_xai_error)?;
+                let manager = Arc::clone(&online.manager);
+                if force {
+                    detached(async move { manager.refresh_now().await })
+                        .await?
+                        .map_err(map_xai_error)?;
+                } else {
+                    online
+                        .manager
+                        .refresh_if_needed()
+                        .await
+                        .map_err(map_xai_error)?;
+                }
                 online
                     .manager
                     .status()
@@ -1793,7 +1943,6 @@ impl NativeSubscriptions {
             run_blocking(move || paths.repin_after_refresh(provider, &consent_generation))
                 .await??;
         }
-        lock.verify()?;
         Ok(status)
     }
 
@@ -3245,6 +3394,28 @@ fn timestamp_now() -> Result<Timestamp, NativeSubscriptionError> {
         .duration_since(UNIX_EPOCH)
         .map_err(|_| NativeSubscriptionError::Internal)?;
     Timestamp::new(duration.as_secs(), duration.subsec_nanos())
+        .map_err(|_| NativeSubscriptionError::Internal)
+}
+
+fn is_usage_rejection(read: &SubscriptionUsageRead) -> bool {
+    matches!(
+        read,
+        SubscriptionUsageRead::Unavailable {
+            reason: SubscriptionUsageUnavailable::Unauthorized,
+            ..
+        }
+    )
+}
+
+/// Runs a claimed refresh as its own task: a dropped caller (a usage-read
+/// timeout, a closed menu) never strands a started claim mid-exchange.
+async fn detached<F>(refresh: F) -> Result<F::Output, NativeSubscriptionError>
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    tokio::spawn(refresh)
+        .await
         .map_err(|_| NativeSubscriptionError::Internal)
 }
 

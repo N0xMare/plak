@@ -4,20 +4,21 @@ use super::{
     ACCESS_REFRESH_SKEW, Arc, AuthSingleFlightGuard, BuildRequestFailure, CancellationToken,
     ClaimedHttpDisposition, ClaimedHttpError, ClaimedHttpResponse, ClaimedRefreshHooks,
     ClaimedRevokeHooks, Client, CodexCredentialStatus, CodexSubscriptionCredentialManager,
-    CredentialFence, CredentialGeneration, CredentialRecord, CredentialRefreshObserver,
-    CredentialStatus, Digest, Duration, ExchangeControl, ExpectedSelection, Instant,
-    MAX_AUTH_BODY_BYTES, Method, NativeCodexAuthError, NativeCodexAuthorization,
-    NativeCodexCatalogWitness, NativeCodexCredentialAuthority, NativeCodexPreflightRequest,
-    OAuthRefreshTokenResponse, OPENAI_CODEX_COMPATIBILITY_PROFILE_ID,
-    OPENAI_CODEX_NATIVE_CLIENT_ID, OPENAI_CODEX_OAUTH_SCOPES, PROFILE_EXPIRES_AT,
-    PrivateCredentialStore, PrivateStoreError, PullBodyError, REVOKE_PATH, ReadyCredentialLease,
-    RefreshClaim, Request, ResolvedModelDescriptor, RuntimeModelAuthority,
-    RuntimeModelAuthorityError, Serialize, StatusCode, StoredCredential, SubscriptionRequestClass,
-    SubscriptionRequestPermit, TOKEN_PATH, Timestamp, access_needs_refresh, claimed_request,
-    credential_selection_epoch, json_headers, local_logout, network_failure, now_unix_secs,
-    parse_stored, parse_strict_json, pull_claimed_body, pull_claimed_body_cancellable,
-    run_blocking, run_claimed_refresh, run_claimed_revoke, stored_record, validate_exact_scopes,
-    validate_profile, validate_profile_at,
+    CredentialFence, CredentialGeneration, CredentialRecord, CredentialRefreshDetail,
+    CredentialRefreshFailureReason, CredentialRefreshObserver, CredentialStatus, Digest, Duration,
+    ExchangeControl, ExpectedSelection, Instant, MAX_AUTH_BODY_BYTES, MAX_TOKEN_BYTES, Method,
+    NativeCodexAuthError, NativeCodexAuthorization, NativeCodexCatalogWitness,
+    NativeCodexCredentialAuthority, NativeCodexPreflightRequest, OAuthRefreshTokenResponse,
+    OPENAI_CODEX_COMPATIBILITY_PROFILE_ID, OPENAI_CODEX_NATIVE_CLIENT_ID,
+    OPENAI_CODEX_OAUTH_SCOPES, PROFILE_EXPIRES_AT, PrivateCredentialStore, PrivateStoreError,
+    PullBodyError, REVOKE_PATH, ReadyCredentialLease, RefreshClaim, Request,
+    ResolvedModelDescriptor, RuntimeModelAuthority, RuntimeModelAuthorityError, Serialize,
+    StatusCode, StoredCredential, SubscriptionRequestClass, SubscriptionRequestPermit, TOKEN_PATH,
+    Timestamp, access_needs_refresh, claimed_request, credential_selection_epoch, json_headers,
+    local_logout, network_failure, now_unix_secs, parse_stored, parse_strict_json,
+    pull_claimed_body, pull_claimed_body_cancellable, run_blocking, run_claimed_refresh,
+    run_claimed_revoke, stored_record, validate_exact_scopes, validate_profile,
+    validate_profile_at,
 };
 
 #[derive(Serialize)]
@@ -47,6 +48,8 @@ pub(super) struct CodexRefreshHooks<'a> {
     pub(super) cancelled_during_exchange: bool,
     /// Whether to refresh even when the stored expiry is outside the lead.
     pub(super) force: RefreshForce<'a>,
+    /// Numbers and rejecting check of the received response, for diagnostics.
+    pub(super) detail: CredentialRefreshDetail,
 }
 
 /// When a claimed refresh runs although the stored access token is not yet
@@ -176,7 +179,14 @@ impl ClaimedRefreshHooks for CodexRefreshHooks<'_> {
         // was, never quarantined, and needs a new login.
         let old = match parse_stored(claim.payload()) {
             Ok(old) => old,
-            Err(error) => return Err(BuildRequestFailure::Restore(error)),
+            Err(error) => {
+                self.detail.reason = Some(if error == NativeCodexAuthError::LoginRequired {
+                    CredentialRefreshFailureReason::RetiredFormat
+                } else {
+                    CredentialRefreshFailureReason::StoredCredential
+                });
+                return Err(BuildRequestFailure::Restore(error));
+            }
         };
         let scopes = match validate_exact_scopes(OPENAI_CODEX_OAUTH_SCOPES) {
             Ok(scopes) => scopes,
@@ -280,13 +290,23 @@ impl ClaimedRefreshHooks for CodexRefreshHooks<'_> {
         }
         let body = pull_claimed_body_cancellable(response, self.cancellation).await?;
         if !response.status().is_success() {
+            self.detail.reason = Some(CredentialRefreshFailureReason::ProviderRejected);
             return Err(NativeCodexAuthError::Provider);
         }
-        let tokens: OAuthRefreshTokenResponse = parse_strict_json(&body)?;
+        let tokens: OAuthRefreshTokenResponse = parse_strict_json(&body).inspect_err(|_| {
+            self.detail.reason = Some(CredentialRefreshFailureReason::TokenShape);
+        })?;
+        self.detail = CredentialRefreshDetail::from_response(
+            now_unix_secs(),
+            None,
+            tokens.id_token.as_deref(),
+            MAX_TOKEN_BYTES,
+        );
         let mut validation = Box::pin(self.manager.validate_refresh_response(
             tokens,
             prepared,
             self.deadline,
+            &mut self.detail.reason,
         ));
         let validated = if let Some(cancellation) = self.cancellation {
             tokio::select! {
@@ -326,6 +346,23 @@ impl ClaimedRefreshHooks for CodexRefreshHooks<'_> {
 
     fn map_store_error(&mut self, _error: PrivateStoreError) -> Self::Error {
         NativeCodexAuthError::Store
+    }
+
+    fn failure_detail(&mut self, error: &Self::Error) -> CredentialRefreshDetail {
+        let fallback = match error {
+            NativeCodexAuthError::AccountChanged => {
+                Some(CredentialRefreshFailureReason::SubjectMismatch)
+            }
+            NativeCodexAuthError::SelectionChanged => {
+                Some(CredentialRefreshFailureReason::SelectionChanged)
+            }
+            NativeCodexAuthError::Provider => {
+                Some(CredentialRefreshFailureReason::ProviderRejected)
+            }
+            _ => None,
+        };
+        let reason = self.detail.reason.or(fallback);
+        self.detail.with_reason(reason)
     }
 
     fn output_from_completed(
@@ -524,6 +561,7 @@ impl CodexSubscriptionCredentialManager {
             transport_cancellation: None,
             cancelled_during_exchange: false,
             force,
+            detail: CredentialRefreshDetail::default(),
         };
         run_claimed_refresh(&self.store, &self.client, &mut hooks).await
     }

@@ -19,9 +19,11 @@ API sessions. The ambiguous bare spelling `xai` is refused.
 Login and key entry are CLI-only. The TUI's Providers tab is read-only: per
 vertical it names the account, its status, and the command that connects it.
 
-Usage never refreshes a token. An expired Codex, Grok or Claude access token
-shows that the credential needs a token refresh: the next turn refreshes it,
-or run `plak refresh <account>`. An ended usage window means stale provider
+Usage never refreshes an expired token. An expired Codex, Grok or Claude access
+token shows that the credential needs a token refresh: the next turn refreshes
+it, or run `plak refresh <account>`. If the provider rejects a token that is
+still fresh, the usage read forces one refresh and reads again; if that
+refresh fails, the provider line shows why. An ended usage window means stale provider
 data, not an expired local token.
 
 API-key environment variables override stored key files. In particular,
@@ -215,8 +217,8 @@ ago`.
 
 ## Refresh and quarantine
 
-Ordinary commands refresh their own tokens; `plak refresh <account>` forces one
-immediately, which is mostly useful for testing.
+Ordinary commands refresh their own tokens; `plak refresh <account>` claims a
+new grant immediately and prints when the new access token expires.
 
 A refresh by one Plak process does not interrupt another: running Codex and
 Grok sessions and children renew their credential before their next model

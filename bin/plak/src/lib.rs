@@ -4368,6 +4368,7 @@ mod tests {
         Acknowledge(NativeProvider, String),
         Login(NativeProvider, NativeLoginMode),
         Refresh(NativeProvider),
+        RefreshNow(NativeProvider),
         Revoke(NativeProvider),
         LogoutLocal(NativeProvider),
         Models(NativeProvider),
@@ -4548,6 +4549,11 @@ mod tests {
         fn refresh(&mut self, provider: NativeProvider) -> CliResult<CredentialState> {
             self.calls.push(Call::Refresh(provider));
             Ok(self.terminal)
+        }
+
+        fn refresh_now(&mut self, provider: NativeProvider) -> CliResult<(CredentialState, u64)> {
+            self.calls.push(Call::RefreshNow(provider));
+            Ok((self.terminal, 1_720_000_000))
         }
 
         fn revoke(
@@ -6674,7 +6680,7 @@ mod tests {
             ),
             (
                 Command::AuthRefresh(NativeProvider::Codex),
-                Call::Refresh(NativeProvider::Codex),
+                Call::RefreshNow(NativeProvider::Codex),
                 CredentialState::Ready,
             ),
             (
@@ -6688,9 +6694,10 @@ mod tests {
         ];
         for (command, action, terminal) in cases {
             let provider = match &action {
-                Call::Login(provider, _) | Call::Refresh(provider) | Call::Revoke(provider) => {
-                    *provider
-                }
+                Call::Login(provider, _)
+                | Call::Refresh(provider)
+                | Call::RefreshNow(provider)
+                | Call::Revoke(provider) => *provider,
                 Call::Status(_)
                 | Call::Usage(_)
                 | Call::Acknowledge(_, _)
@@ -6714,6 +6721,28 @@ mod tests {
                 ]
             );
         }
+    }
+
+    #[test]
+    fn refresh_forces_a_grant_and_reports_its_expiry() {
+        let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
+        backend.credential = CredentialState::Ready;
+        let (result, _, stderr) =
+            invoke(Command::AuthRefresh(NativeProvider::Xai), &mut backend, b"");
+        assert_eq!(result, Ok(ProcessOutcome::Success));
+        assert!(
+            backend
+                .calls
+                .contains(&Call::RefreshNow(NativeProvider::Xai))
+        );
+        assert!(!backend.calls.contains(&Call::Refresh(NativeProvider::Xai)));
+        let stderr = String::from_utf8_lossy(&stderr);
+        assert!(stderr.contains("new refresh grant issued"), "{stderr}");
+        assert!(
+            stderr.contains("access token valid until 2024-07-03"),
+            "{stderr}"
+        );
+        assert!(!stderr.contains("refresh succeeded"), "{stderr}");
     }
 
     #[test]

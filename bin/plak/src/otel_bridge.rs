@@ -826,6 +826,7 @@ fn emit_observation(worker: &mut BridgeWorker, observation: TelemetryObservation
             http_status,
             elapsed,
             generation,
+            detail,
         } => {
             let mut attributes = vec![
                 KeyValue::new(
@@ -868,6 +869,13 @@ fn emit_observation(worker: &mut BridgeWorker, observation: TelemetryObservation
                     &mut attributes,
                     "plak.credential.http_status",
                     u64::from(http_status),
+                );
+            }
+            if let Some(reason) = detail.reason {
+                push_str(
+                    &mut attributes,
+                    "plak.credential.failure_reason",
+                    reason.as_str(),
                 );
             }
             push_u64(&mut attributes, "plak.credential.generation", generation);
@@ -2061,6 +2069,7 @@ mod tests {
                 http_status: Some(503),
                 elapsed: Some(Duration::from_millis(30)),
                 generation: 40,
+                detail: plakous::agent::CredentialRefreshDetail::default(),
             },
             TelemetryObservationKind::PromptCacheDiagnosis {
                 reason: plakous::model::PromptCacheMissReason::Other,

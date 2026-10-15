@@ -28,8 +28,8 @@ pub use device_poll::DevicePollSchedule;
 pub use error::OAuthWorkflowError;
 pub use form::{
     access_needs_refresh, authorization_code_token_form, capped_deadline, decode_json_bounded,
-    refresh_token_form, remaining_until, unsigned_access_token_exp, urlencoded_form,
-    urlencoded_form_bytes,
+    refresh_token_form, remaining_until, unsigned_access_token_exp, unverified_jwt_timing,
+    urlencoded_form, urlencoded_form_bytes,
 };
 pub use http11_get::{Http11GetRequest, is_http_token_byte, parse_http11_get_request};
 pub use http11_response::{

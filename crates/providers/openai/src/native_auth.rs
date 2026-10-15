@@ -51,8 +51,9 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use plakous_auth::oauth_orchestrator::write_all_before_deadline;
 use plakous_auth::oauth_orchestrator::{
     BrowserLoopbackHooks, BuildRequestFailure, ClaimedRefreshHooks, ClaimedRevokeHooks,
-    CredentialRefreshObserver, FetchedJwks, JwksCache, JwksResolvePolicy, LoopbackConnectionEvent,
-    PullBodyError, bind_loopback_listener, parse_cache_control_max_age, pull_claimed_body,
+    CredentialRefreshDetail, CredentialRefreshFailureReason, CredentialRefreshObserver,
+    FetchedJwks, JwksCache, JwksResolvePolicy, LoopbackConnectionEvent, PullBodyError,
+    bind_loopback_listener, parse_cache_control_max_age, pull_claimed_body,
     run_browser_loopback_session, run_claimed_refresh, run_claimed_revoke,
 };
 #[cfg(test)]
@@ -647,6 +648,24 @@ impl CodexSubscriptionCredentialManager {
     /// Fails closed on unsafe or malformed storage.
     pub fn status(&self) -> Result<CodexCredentialStatus, NativeCodexAuthError> {
         local_credential_status(&self.store)
+    }
+
+    /// Stored access-token expiry (Unix seconds) of the Ready credential.
+    ///
+    /// # Errors
+    ///
+    /// Fails for a missing, non-Ready, or unreadable record.
+    pub fn access_expires_at(&self) -> Result<u64, NativeCodexAuthError> {
+        let fence = self
+            .store
+            .load()
+            .map_err(|_| NativeCodexAuthError::Store)?
+            .ok_or(NativeCodexAuthError::Unavailable)?;
+        let lease = self
+            .store
+            .acquire_ready(&fence)
+            .map_err(|_| NativeCodexAuthError::Unavailable)?;
+        Ok(parse_stored(lease.payload())?.access_expires_at)
     }
 
     /// Performs exactly one read-only Codex subscription usage request.

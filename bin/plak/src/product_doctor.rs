@@ -321,6 +321,33 @@ pub enum OauthRecordStatus {
     },
 }
 
+static CREDENTIAL_STATE_HOME: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Records the subscription state home once per process so refresh-failure
+/// display can compare telemetry rows with the current credential generation.
+pub(crate) fn install_credential_state_home(state_home: PathBuf) {
+    let _ = CREDENTIAL_STATE_HOME.set(state_home);
+}
+
+fn current_credential_generation(provider: &str) -> Option<u64> {
+    let record = CREDENTIAL_STATE_HOME
+        .get()?
+        .join("plak/subscriptions")
+        .join(provider)
+        .join("credential.json");
+    match inspect_oauth_record(&record) {
+        OauthRecordStatus::Present { generation, .. } => Some(generation),
+        OauthRecordStatus::Missing | OauthRecordStatus::Unreadable(_) => None,
+    }
+}
+
+/// A failure row belongs to the record its claim left behind: quarantine keeps
+/// the claim generation and a restore advances it once. A record newer than
+/// that (a later login, logout, or refresh) makes the row history, not state.
+fn refresh_row_is_current(row_generation: u64, record_generation: Option<u64>) -> bool {
+    record_generation.is_none_or(|current| current <= row_generation.saturating_add(1))
+}
+
 /// The newest terminal refresh outcome is display evidence only, never admission
 /// or recovery authority. A later Began row does not erase the last failure.
 pub(crate) fn last_failed_refresh(
@@ -336,6 +363,10 @@ pub(crate) fn last_failed_refresh(
     };
     let row =
         crate::telemetry_store::TelemetryStore::latest_refresh_outcome(paths, provider).ok()??;
+    if !refresh_row_is_current(row.generation, current_credential_generation(provider)) {
+        return None;
+    }
+    let reason = row.failure_reason.as_deref();
     let at = jiff::Timestamp::from_nanosecond(i128::from(row.at_ns)).ok()?;
     let local = at.to_zoned(zone.clone());
     let clock = local.strftime("%H:%M");
@@ -366,7 +397,17 @@ pub(crate) fn last_failed_refresh(
             || "provider rejected the refresh".to_owned(),
             |status| format!("provider returned HTTP {status}"),
         ),
-        (Some("validation"), _) => "refresh response could not be validated".to_owned(),
+        (Some("validation"), _) if reason == Some("retired_format") => {
+            "the stored credential was written by an older plak build (no request was sent)"
+                .to_owned()
+        }
+        (Some("validation"), _) if reason == Some("stored_credential") => {
+            "the stored credential could not be read (no request was sent)".to_owned()
+        }
+        (Some("validation"), _) => reason.map_or_else(
+            || "refresh response could not be validated".to_owned(),
+            |reason| format!("refresh response could not be validated ({reason})"),
+        ),
         (Some("store"), _) => "credential storage failure".to_owned(),
         (Some("cancelled"), _) => "refresh cancelled".to_owned(),
         (Some("not_ready"), _) => "refresh dispatch was not ready".to_owned(),
@@ -379,6 +420,8 @@ pub(crate) fn last_failed_refresh(
     };
     let remedy = if row.phase == "restored" && matches!(class, Some("transport" | "timeout")) {
         "retry when online".to_owned()
+    } else if matches!(reason, Some("retired_format" | "stored_credential")) {
+        format!("run plak login {account}")
     } else if provider == "xai" {
         "run plak refresh grok; run plak login grok if that fails".to_owned()
     } else if row.phase == "restored" {
@@ -1475,6 +1518,76 @@ mod tests {
         assert!(message.contains("while sending"), "{message}");
         assert!(message.contains("refresh outcome unknown"), "{message}");
         assert!(!message.contains("credential unchanged"), "{message}");
+        Ok(())
+    }
+
+    #[test]
+    fn last_failed_refresh_names_the_sub_reason_and_a_retired_record_needs_login()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (_guard, paths) = crate::product_paths::PlakPaths::isolated_test_home();
+        paths.ensure_layout()?;
+        drop(crate::telemetry_store::TelemetryStore::open(&paths)?);
+        let db = rusqlite::Connection::open(paths.telemetry_database())?;
+        let zone = jiff::tz::TimeZone::UTC;
+        db.execute_batch(
+            "INSERT INTO credential_refreshes
+            (at, provider, phase, failure_class, failure_reason, generation) VALUES
+            (1720000100000000000, 'xai', 'restored', 'validation', 'id_token_exp', 2);",
+        )?;
+        let message = last_failed_refresh(&paths, "grok", &zone).ok_or("missing row")?;
+        assert!(
+            message.contains("refresh response could not be validated (id_token_exp)"),
+            "{message}"
+        );
+        db.execute_batch(
+            "INSERT INTO credential_refreshes
+            (at, provider, phase, failure_class, failure_reason, generation) VALUES
+            (1720000200000000000, 'codex', 'restored', 'validation', 'retired_format', 5);",
+        )?;
+        let message = last_failed_refresh(&paths, "codex", &zone).ok_or("missing row")?;
+        assert!(
+            message.contains("written by an older plak build"),
+            "{message}"
+        );
+        assert!(!message.contains("could not be validated"), "{message}");
+        assert!(message.ends_with("run plak login codex"), "{message}");
+        assert!(!message.contains("plak refresh"), "{message}");
+        Ok(())
+    }
+
+    #[test]
+    fn last_failed_refresh_hides_rows_older_than_the_current_credential()
+    -> Result<(), Box<dyn std::error::Error>> {
+        assert!(refresh_row_is_current(215, None));
+        assert!(refresh_row_is_current(215, Some(215)));
+        assert!(refresh_row_is_current(215, Some(216)));
+        assert!(!refresh_row_is_current(215, Some(217)));
+
+        let (_guard, paths) = crate::product_paths::PlakPaths::isolated_test_home();
+        paths.ensure_layout()?;
+        let state = tempfile::tempdir()?;
+        let record = state.path().join("plak/subscriptions/xai");
+        fs::create_dir_all(&record)?;
+        fs::write(
+            record.join("credential.json"),
+            br#"{"status":"ready","generation":217}"#,
+        )?;
+        install_credential_state_home(state.path().to_path_buf());
+        drop(crate::telemetry_store::TelemetryStore::open(&paths)?);
+        let db = rusqlite::Connection::open(paths.telemetry_database())?;
+        db.execute_batch(
+            "INSERT INTO credential_refreshes
+            (at, provider, phase, failure_class, generation) VALUES
+            (1720000100000000000, 'xai', 'restored', 'validation', 215);",
+        )?;
+        let zone = jiff::tz::TimeZone::UTC;
+        assert_eq!(last_failed_refresh(&paths, "grok", &zone), None);
+        db.execute_batch(
+            "INSERT INTO credential_refreshes
+            (at, provider, phase, failure_class, generation) VALUES
+            (1720000200000000000, 'xai', 'restored', 'validation', 216);",
+        )?;
+        assert!(last_failed_refresh(&paths, "grok", &zone).is_some());
         Ok(())
     }
 

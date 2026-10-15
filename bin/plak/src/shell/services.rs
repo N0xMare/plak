@@ -54,8 +54,12 @@ impl Services {
     /// It is built on first use rather than at CLI
     /// entry, so a command that opens no state root pays nothing for it.
     pub(crate) fn from_env(telemetry_sink_factory: Option<TelemetrySinkFactory>) -> Self {
+        let home = Home::from_env();
+        if let Ok(state) = home.state() {
+            crate::product_doctor::install_credential_state_home(state.to_path_buf());
+        }
         Self {
-            home: Home::from_env(),
+            home,
             session_records: OnceLock::new(),
             telemetry_sink_factory,
             extra_telemetry_sink: OnceLock::new(),

@@ -189,28 +189,41 @@ impl TelemetrySink for TelemetryWriter {
     fn try_emit(&self, observation: TelemetryObservation) -> Result<(), TelemetrySinkError> {
         if let TelemetryObservationKind::CredentialRefresh {
             provider,
-            phase:
-                phase @ (CredentialRefreshPhase::OutcomeUnknown | CredentialRefreshPhase::Quarantined),
-            failure_class,
+            phase,
+            failure_class: failure_class @ Some(_),
             transport_phase,
             http_status,
             generation,
+            detail,
             ..
         } = observation.kind()
         {
-            let phase_label = match phase {
-                CredentialRefreshPhase::OutcomeUnknown => "outcome_unknown",
-                CredentialRefreshPhase::Quarantined => "quarantined",
-                _ => "unknown",
+            let (phase_label, message) = match phase {
+                CredentialRefreshPhase::OutcomeUnknown => (
+                    "outcome_unknown",
+                    "credential refresh left the durable record unknown",
+                ),
+                CredentialRefreshPhase::Quarantined => (
+                    "quarantined",
+                    "credential refresh left the durable record unknown",
+                ),
+                CredentialRefreshPhase::Restored => {
+                    ("restored", "credential refresh failed; record restored")
+                }
+                _ => ("unknown", "credential refresh failed"),
             };
             tracing::warn!(
                 provider = provider.as_str(),
                 phase = phase_label,
                 failure_class = ?failure_class,
+                failure_reason = detail.reason.map(plakous::agent::CredentialRefreshFailureReason::as_str),
+                expires_in_secs = detail.expires_in_secs,
+                id_token_iat_age_secs = detail.id_token_iat_age_secs,
+                id_token_exp_in_secs = detail.id_token_exp_in_secs,
                 transport_phase = ?transport_phase,
                 http_status,
                 generation,
-                "credential refresh left the durable record unknown"
+                "{message}"
             );
         }
         let sender = self

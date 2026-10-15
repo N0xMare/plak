@@ -124,8 +124,8 @@ fn telemetry_status_reports_schema_version() {
     assert!(output.status.success(), "{output:?}");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("Schema version 17"),
-        "expected schema v17 in status: {stdout}"
+        stdout.contains("Schema version 18"),
+        "expected schema v18 in status: {stdout}"
     );
 }
 
@@ -137,7 +137,7 @@ fn jobs_telemetry_schema_is_content_free_and_route_joinable() {
     assert!(
         paths
             .telemetry_database()
-            .ends_with("telemetry-v17.sqlite3")
+            .ends_with("telemetry-v18.sqlite3")
     );
     let connection = Connection::open(paths.telemetry_database()).expect("telemetry db");
     let mut query = connection

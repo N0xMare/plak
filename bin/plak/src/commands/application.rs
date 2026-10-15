@@ -153,6 +153,10 @@ pub trait AccountOps {
 
     fn refresh(&mut self, provider: NativeProvider) -> CliResult<CredentialState>;
 
+    /// Claims one refresh grant regardless of expiry; returns the new state
+    /// and access-token expiry (Unix seconds).
+    fn refresh_now(&mut self, provider: NativeProvider) -> CliResult<(CredentialState, u64)>;
+
     fn revoke(&mut self, provider: NativeProvider) -> CliResult<Revocation>;
 
     fn logout_local(&mut self, provider: NativeProvider) -> CliResult<CredentialState>;
@@ -519,6 +523,22 @@ impl AccountOps for PlakousApplication {
             .block_on(self.subscriptions.refresh(provider))
             .map_err(application_execution_failure)?;
         self.refreshed_credential(provider, result)
+    }
+
+    fn refresh_now(&mut self, provider: NativeProvider) -> CliResult<(CredentialState, u64)> {
+        let result = self
+            .executor
+            .block_on(self.subscriptions.refresh_now(provider))
+            .map_err(application_execution_failure)?;
+        let expires_at = result
+            .as_ref()
+            .ok()
+            .map(|forced| forced.access_expires_at());
+        let state = self.refreshed_credential(
+            provider,
+            result.map(plakous::subscriptions::ForcedRefresh::status),
+        )?;
+        Ok((state, expires_at.unwrap_or(0)))
     }
 
     fn revoke(&mut self, provider: NativeProvider) -> CliResult<Revocation> {

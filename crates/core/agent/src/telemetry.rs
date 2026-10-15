@@ -548,6 +548,8 @@ pub enum TelemetryObservationKind {
         elapsed: Option<Duration>,
         /// Durable credential generation at the claim.
         generation: u64,
+        /// Sub-reason label and response timing numbers of a failure.
+        detail: CredentialRefreshDetail,
     },
 }
 
@@ -635,6 +637,104 @@ pub enum CredentialRefreshPhase {
     Quarantined,
     /// Pre-send failure restored the pre-claim record.
     Restored,
+}
+
+/// Closed, content-free sub-reason of a refresh failure (which local check
+/// rejected a received body, or why no request was sent).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum CredentialRefreshFailureReason {
+    /// `token_shape`.
+    TokenShape,
+    /// `response_too_large`.
+    ResponseTooLarge,
+    /// `expires_in`.
+    ExpiresIn,
+    /// `access_token_expired`.
+    AccessTokenExpired,
+    /// `missing_refresh_token`.
+    MissingRefreshToken,
+    /// `id_token_header`.
+    IdTokenHeader,
+    /// `id_token_unknown_kid`.
+    IdTokenUnknownKid,
+    /// `id_token_signing_key`.
+    IdTokenSigningKey,
+    /// `id_token_signature`.
+    IdTokenSignature,
+    /// `id_token_iss`.
+    IdTokenIss,
+    /// `id_token_aud`.
+    IdTokenAud,
+    /// `id_token_exp`.
+    IdTokenExp,
+    /// `id_token_iat`.
+    IdTokenIat,
+    /// `id_token_nbf`.
+    IdTokenNbf,
+    /// `id_token_azp`.
+    IdTokenAzp,
+    /// `id_token_sub`.
+    IdTokenSub,
+    /// `id_token_claims`.
+    IdTokenClaims,
+    /// `subject_mismatch`.
+    SubjectMismatch,
+    /// `selection_changed`.
+    SelectionChanged,
+    /// `retired_format`.
+    RetiredFormat,
+    /// `stored_credential`.
+    StoredCredential,
+    /// `provider_rejected`.
+    ProviderRejected,
+}
+
+impl CredentialRefreshFailureReason {
+    /// Stable `snake_case` label for logs and telemetry.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TokenShape => "token_shape",
+            Self::ResponseTooLarge => "response_too_large",
+            Self::ExpiresIn => "expires_in",
+            Self::AccessTokenExpired => "access_token_expired",
+            Self::MissingRefreshToken => "missing_refresh_token",
+            Self::IdTokenHeader => "id_token_header",
+            Self::IdTokenUnknownKid => "id_token_unknown_kid",
+            Self::IdTokenSigningKey => "id_token_signing_key",
+            Self::IdTokenSignature => "id_token_signature",
+            Self::IdTokenIss => "id_token_iss",
+            Self::IdTokenAud => "id_token_aud",
+            Self::IdTokenExp => "id_token_exp",
+            Self::IdTokenIat => "id_token_iat",
+            Self::IdTokenNbf => "id_token_nbf",
+            Self::IdTokenAzp => "id_token_azp",
+            Self::IdTokenSub => "id_token_sub",
+            Self::IdTokenClaims => "id_token_claims",
+            Self::SubjectMismatch => "subject_mismatch",
+            Self::SelectionChanged => "selection_changed",
+            Self::RetiredFormat => "retired_format",
+            Self::StoredCredential => "stored_credential",
+            Self::ProviderRejected => "provider_rejected",
+        }
+    }
+}
+
+/// Content-free sub-reason and response numbers of a refresh failure.
+///
+/// Deltas are seconds relative to the local clock at validation. No token
+/// value, subject, or account id is carried.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CredentialRefreshDetail {
+    /// Which check rejected the response, when known.
+    pub reason: Option<CredentialRefreshFailureReason>,
+    /// The response's `expires_in`, when present.
+    pub expires_in_secs: Option<u64>,
+    /// `now - iat` of the returned ID token.
+    pub id_token_iat_age_secs: Option<i64>,
+    /// `exp - now` of the returned ID token.
+    pub id_token_exp_in_secs: Option<i64>,
 }
 
 /// Closed failure class for a credential-refresh observation.
@@ -1132,6 +1232,7 @@ mod tests {
             http_status: Some(503),
             elapsed: Some(Duration::from_millis(30)),
             generation: 40,
+            detail: CredentialRefreshDetail::default(),
         };
         let copied = kind;
         let TelemetryObservationKind::CredentialRefresh {
