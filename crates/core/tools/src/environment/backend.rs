@@ -19,7 +19,8 @@ pub use workspace_types::{
 mod deterministic;
 pub use deterministic::{
     DeterministicBackendStatus, DeterministicExecutionBackend, DeterministicProcessPolicy,
-    DeterministicProcessStep, RecordedLiteralProcess,
+    DeterministicProcessStep, DeterministicServiceEndpoint, DeterministicServiceStep,
+    RecordedLiteralProcess, RecordedServiceProcess,
 };
 mod workspace;
 use workspace::{
@@ -40,6 +41,13 @@ use process::{
     validate_process_values,
 };
 use workspace::resolve_existing_no_symlink;
+mod service;
+use service::spawn_host_service;
+pub use service::{
+    MAX_SERVICE_ENVIRONMENT_ENTRIES, MAX_SERVICE_STDERR_TAIL_BYTES, PreparedServiceProcess,
+    SERVICE_PROCESS_TERMINATE_GRACE, ServiceHandle, ServiceProcess, ServiceProcessRequest,
+    ServiceSecretValue,
+};
 
 use plakous_model::{CancellationToken, SafeDiagnostic};
 use std::collections::BTreeMap;
@@ -445,6 +453,19 @@ pub trait ExecutionBackend: sealed::Sealed + Send + Sync + 'static {
         limits: ExecutionEnvironmentLimits,
         control: ExecutionOperationControl,
     ) -> ExecutionBackendFuture<LiteralProcessResult>;
+
+    /// Starts one long-lived service process with piped stdio in the
+    /// workspace root.
+    ///
+    /// `control` covers startup only: cancellation observed before the
+    /// service is returned leaves no process behind. After return, the
+    /// service lives until [`ServiceHandle::terminate`] or drop.
+    fn spawn_service(
+        &self,
+        workspace: ExecutionWorkspace,
+        request: PreparedServiceProcess,
+        control: ExecutionOperationControl,
+    ) -> ExecutionBackendFuture<ServiceProcess>;
 }
 
 /// Truthful host backend with bounded filesystem and Unix process access.
@@ -553,6 +574,15 @@ impl ExecutionBackend for HostExecutionBackend {
             control,
             Arc::clone(&self.process),
         )
+    }
+
+    fn spawn_service(
+        &self,
+        workspace: ExecutionWorkspace,
+        request: PreparedServiceProcess,
+        control: ExecutionOperationControl,
+    ) -> ExecutionBackendFuture<ServiceProcess> {
+        spawn_host_service(workspace, request, control, Arc::clone(&self.process))
     }
 }
 
@@ -675,19 +705,9 @@ impl ExecutionEnvironment {
         if let Err(error) = control.check_cancelled() {
             return ready_error(error);
         }
-        let environment = self
-            .config()
-            .environment_delegations()
-            .iter()
-            .filter_map(|binding| {
-                self.operation_backend
-                    .resolve_environment(binding)
-                    .map(|value| (binding.name().clone(), value))
-            })
-            .collect::<Vec<_>>();
         let prepared = PreparedLiteralProcess {
             request,
-            environment: environment.into(),
+            environment: self.resolved_delegations(),
         };
         let future = self.operation_backend.execute_literal_process(
             ExecutionWorkspace::from_environment(self),
@@ -702,6 +722,59 @@ impl ExecutionEnvironment {
             enforce_process_output_limits(&result, limits)?;
             Ok(result)
         })
+    }
+
+    /// Starts one long-lived service process through the exact live backend.
+    ///
+    /// The child environment starts empty and receives exactly: the
+    /// configured environment delegations (the allowlist literal processes
+    /// receive), the captured PATH and HOME fallbacks, the request's declared
+    /// values, and its secrets. Credential delegations never enter it.
+    /// Cancellation observed before the service is returned terminates and
+    /// joins any started process group.
+    pub fn spawn_service(
+        &self,
+        request: ServiceProcessRequest,
+        control: ExecutionOperationControl,
+    ) -> ExecutionBackendFuture<ServiceProcess> {
+        if let Err(error) = self.verify_operation_backend() {
+            return ready_error(error);
+        }
+        if let Err(error) = control.check_cancelled() {
+            return ready_error(error.with_proven_no_effect(true));
+        }
+        let prepared = PreparedServiceProcess {
+            request,
+            inherited: self.resolved_delegations(),
+        };
+        let future = self.operation_backend.spawn_service(
+            ExecutionWorkspace::from_environment(self),
+            prepared,
+            control.clone(),
+        );
+        Box::pin(async move {
+            let service = future.await?;
+            if control.cancellation().is_cancelled() {
+                service
+                    .handle
+                    .terminate(SERVICE_PROCESS_TERMINATE_GRACE)
+                    .await?;
+                return Err(service::cancelled_after_spawn());
+            }
+            Ok(service)
+        })
+    }
+
+    fn resolved_delegations(&self) -> Arc<[(EnvironmentVariableName, EnvironmentVariableValue)]> {
+        self.config()
+            .environment_delegations()
+            .iter()
+            .filter_map(|binding| {
+                self.operation_backend
+                    .resolve_environment(binding)
+                    .map(|value| (binding.name().clone(), value))
+            })
+            .collect()
     }
 
     fn verify_operation_backend(&self) -> Result<(), ExecutionBackendError> {

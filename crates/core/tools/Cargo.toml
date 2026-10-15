@@ -27,7 +27,8 @@ regex.workspace = true
 rustix = { workspace = true, features = ["fs", "process"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-tokio = { workspace = true, features = ["rt", "sync", "time"] }
+tokio = { workspace = true, features = ["io-util", "process", "rt", "sync", "time"] }
+zeroize.workspace = true
 
 [dev-dependencies]
 nix.workspace = true

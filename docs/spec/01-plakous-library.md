@@ -4534,6 +4534,34 @@ there is no OS sandbox (chapter 04 §2.3). Joined proof requires the owned
 process group to be absent and its leader reaped after bounded cleanup; a child
 that leaves that group leaves its cleanup authority.
 
+**Service processes.** `ExecutionEnvironment::spawn_service` starts one
+long-lived child with piped stdin and stdout, the sealed backend operation a
+stdio protocol server (an MCP server) runs on. The `ServiceProcessRequest` is
+built by the embedder from frozen configuration: a program (absolute, or a
+basename looked up on the child's PATH), separate arguments, declared literal
+environment values, resolved secret values (`ServiceSecretValue`: not
+cloneable, not serializable, redacted in `Debug`, zeroized on drop), and a
+stderr tail bound of at most 8 KiB. No tool input deserializes into it, so a
+model never supplies a service's argv or environment. A name may appear once
+across declared and secret values. The child starts in the workspace root, in
+a fresh process group, with an emptied environment that then receives exactly
+the allowlist literal processes receive (the configured environment
+delegations, resolved by the backend, plus the captured PATH with any required
+prefix and the captured HOME fallback), the declared values (replacing an
+inherited value of the same name), and the secrets; credential delegations
+never enter it. The operation control covers startup only: cancellation
+observed before the service is returned terminates and joins any started group
+and reports `Cancelled`. Stderr is drained into a ring of the newest bytes;
+`ServiceHandle::stderr_tail` returns it as lossy UTF-8 with control characters
+other than newline and tab replaced, for bind and crash diagnostics only, never
+as model-visible output. `ServiceHandle::terminate(grace)` sends SIGTERM to the
+group, waits `grace` (2 s by default), sends SIGKILL, and waits a further
+bounded 2 s for the leader to be reaped and the group to be absent, else
+reports `CleanupUnresolved`; dropping the handle unjoined SIGKILLs the group.
+The deterministic backend serves a service from a scripted FIFO of in-memory
+duplex peers held by the test, records argv and environment names without
+values, and counts live services in its drain status.
+
 ### 8.6 Provider-hosted execution
 
 Provider-hosted execution is a separate ownership class. It MUST remain

@@ -6,17 +6,22 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use super::service::{ServiceHandle, ServiceOwner, ServiceStderrTail};
 use super::{
     EnvironmentDelegation, EnvironmentVariableName, EnvironmentVariableValue, ExecutionBackend,
     ExecutionBackendErrorKind, ExecutionBackendFuture, ExecutionBackendIdentity,
     ExecutionEnvironmentError, ExecutionEnvironmentErrorKind, ExecutionEnvironmentLimits,
     ExecutionOperationControl, ExecutionWorkspace, LiteralProcessIntent, LiteralProcessResult,
-    MAX_EXECUTION_VALUE_BYTES, PreparedLiteralProcess, RepositoryQuery, RepositoryQueryResult,
-    WorkspaceMutationTransaction, WorkspaceMutationTransactionResult, WorkspaceReadSlice,
-    WorkspaceReadSliceRequest, WorkspaceSnapshotCache, backend_error, lock, mutate_workspace_sync,
-    query_repository_sync, read_workspace_sync, ready_error, resolve_existing_no_symlink,
-    run_filesystem_blocking, sealed, workspace_error,
+    MAX_EXECUTION_VALUE_BYTES, PreparedLiteralProcess, PreparedServiceProcess, RepositoryQuery,
+    RepositoryQueryResult, ServiceProcess, WorkspaceMutationTransaction,
+    WorkspaceMutationTransactionResult, WorkspaceReadSlice, WorkspaceReadSliceRequest,
+    WorkspaceSnapshotCache, backend_error, lock, mutate_workspace_sync, query_repository_sync,
+    read_workspace_sync, ready_error, resolve_existing_no_symlink, run_filesystem_blocking, sealed,
+    workspace_error,
 };
+
+/// Duplex buffer between a fake service and its test peer.
+const DETERMINISTIC_SERVICE_DUPLEX_BYTES: usize = 64 * 1024;
 
 /// Immutable process permission simulation used by the fake backend.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -57,6 +62,99 @@ pub enum DeterministicProcessStep {
     },
     /// Reports that process execution is unavailable.
     Unsupported,
+}
+
+/// One deterministic service behavior consumed in FIFO order.
+#[non_exhaustive]
+pub enum DeterministicServiceStep {
+    /// Connects the service's stdio to an in-memory peer held by the test.
+    Duplex(DeterministicServiceEndpoint),
+    /// Reports that service spawning is unavailable.
+    Unsupported,
+}
+
+impl DeterministicServiceStep {
+    /// Creates a duplex step and the test's peer stream.
+    ///
+    /// Bytes the service writes to its stdin are read from the peer; bytes
+    /// written to the peer are read from the service's stdout. `stderr` seeds
+    /// the service's stderr tail.
+    #[must_use]
+    pub fn duplex(stderr: impl Into<Vec<u8>>) -> (Self, tokio::io::DuplexStream) {
+        let (service, peer) = tokio::io::duplex(DETERMINISTIC_SERVICE_DUPLEX_BYTES);
+        (
+            Self::Duplex(DeterministicServiceEndpoint {
+                stream: service,
+                stderr: stderr.into(),
+            }),
+            peer,
+        )
+    }
+}
+
+impl fmt::Debug for DeterministicServiceStep {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Duplex(_) => formatter.write_str("Duplex"),
+            Self::Unsupported => formatter.write_str("Unsupported"),
+        }
+    }
+}
+
+/// The service side of a [`DeterministicServiceStep::duplex`] pair.
+pub struct DeterministicServiceEndpoint {
+    stream: tokio::io::DuplexStream,
+    stderr: Vec<u8>,
+}
+
+/// Redacted capture of one fake service spawn: argv and environment names.
+#[derive(Clone, Eq, PartialEq)]
+pub struct RecordedServiceProcess {
+    program: Arc<str>,
+    arguments: Arc<[String]>,
+    environment_names: Arc<[EnvironmentVariableName]>,
+    secret_environment_names: Arc<[EnvironmentVariableName]>,
+}
+
+impl RecordedServiceProcess {
+    /// Returns exact program text.
+    #[must_use]
+    pub fn program(&self) -> &str {
+        &self.program
+    }
+
+    /// Returns exact separate argv values.
+    #[must_use]
+    pub fn arguments(&self) -> &[String] {
+        &self.arguments
+    }
+
+    /// Returns inherited and declared environment names without values.
+    #[must_use]
+    pub fn environment_names(&self) -> &[EnvironmentVariableName] {
+        &self.environment_names
+    }
+
+    /// Returns secret environment names without values.
+    #[must_use]
+    pub fn secret_environment_names(&self) -> &[EnvironmentVariableName] {
+        &self.secret_environment_names
+    }
+}
+
+impl fmt::Debug for RecordedServiceProcess {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RecordedServiceProcess")
+            .field("program_bytes", &self.program.len())
+            .field("argument_count", &self.arguments.len())
+            .field("environment_count", &self.environment_names.len())
+            .field(
+                "secret_environment_count",
+                &self.secret_environment_names.len(),
+            )
+            .finish()
+    }
 }
 
 /// Redacted capture proving literal argv and allowlisted environment names.
@@ -125,27 +223,34 @@ impl fmt::Debug for RecordedLiteralProcess {
 /// Live-resource counts for deterministic cleanup assertions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DeterministicBackendStatus {
-    active_processes: usize,
-    active_descendants: usize,
+    processes: usize,
+    descendants: usize,
+    services: usize,
 }
 
 impl DeterministicBackendStatus {
     /// Returns active simulated direct processes.
     #[must_use]
     pub const fn active_processes(self) -> usize {
-        self.active_processes
+        self.processes
     }
 
     /// Returns active simulated descendants.
     #[must_use]
     pub const fn active_descendants(self) -> usize {
-        self.active_descendants
+        self.descendants
+    }
+
+    /// Returns live simulated service processes.
+    #[must_use]
+    pub const fn active_services(self) -> usize {
+        self.services
     }
 
     /// Reports whether all owned process resources were joined.
     #[must_use]
     pub const fn is_drained(self) -> bool {
-        self.active_processes == 0 && self.active_descendants == 0
+        self.processes == 0 && self.descendants == 0 && self.services == 0
     }
 }
 
@@ -159,6 +264,9 @@ pub struct DeterministicExecutionBackend {
     process_calls: Mutex<Vec<RecordedLiteralProcess>>,
     active_processes: Arc<AtomicUsize>,
     active_descendants: Arc<AtomicUsize>,
+    service_steps: Mutex<VecDeque<DeterministicServiceStep>>,
+    service_calls: Mutex<Vec<RecordedServiceProcess>>,
+    active_services: Arc<AtomicUsize>,
     mutation_lock: Arc<Mutex<()>>,
     workspace_snapshots: Arc<Mutex<WorkspaceSnapshotCache>>,
 }
@@ -207,9 +315,28 @@ impl DeterministicExecutionBackend {
             process_calls: Mutex::new(Vec::new()),
             active_processes: Arc::new(AtomicUsize::new(0)),
             active_descendants: Arc::new(AtomicUsize::new(0)),
+            service_steps: Mutex::new(VecDeque::new()),
+            service_calls: Mutex::new(Vec::new()),
+            active_services: Arc::new(AtomicUsize::new(0)),
             mutation_lock: Arc::new(Mutex::new(())),
             workspace_snapshots: Arc::new(Mutex::new(WorkspaceSnapshotCache::default())),
         })
+    }
+
+    /// Appends FIFO service steps consumed by `spawn_service`.
+    #[must_use]
+    pub fn with_service_steps(
+        self,
+        steps: impl IntoIterator<Item = DeterministicServiceStep>,
+    ) -> Self {
+        lock(&self.service_steps).extend(steps);
+        self
+    }
+
+    /// Returns redacted service captures in spawn order.
+    #[must_use]
+    pub fn service_calls(&self) -> Vec<RecordedServiceProcess> {
+        lock(&self.service_calls).clone()
     }
 
     /// Returns redacted process captures in dispatch order.
@@ -222,8 +349,9 @@ impl DeterministicExecutionBackend {
     #[must_use]
     pub fn status(&self) -> DeterministicBackendStatus {
         DeterministicBackendStatus {
-            active_processes: self.active_processes.load(Ordering::Acquire),
-            active_descendants: self.active_descendants.load(Ordering::Acquire),
+            processes: self.active_processes.load(Ordering::Acquire),
+            descendants: self.active_descendants.load(Ordering::Acquire),
+            services: self.active_services.load(Ordering::Acquire),
         }
     }
 }
@@ -360,9 +488,60 @@ impl ExecutionBackend for DeterministicExecutionBackend {
             }),
         }
     }
+
+    fn spawn_service(
+        &self,
+        _workspace: ExecutionWorkspace,
+        request: PreparedServiceProcess,
+        control: ExecutionOperationControl,
+    ) -> ExecutionBackendFuture<ServiceProcess> {
+        if let Err(error) = control.check_cancelled() {
+            return ready_error(error.with_proven_no_effect(true));
+        }
+        let environment_names = request
+            .child_environment()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>();
+        lock(&self.service_calls).push(RecordedServiceProcess {
+            program: Arc::from(request.request().program()),
+            arguments: request.request().arguments().into(),
+            environment_names: environment_names.into(),
+            secret_environment_names: request
+                .request()
+                .secret_environment_names()
+                .cloned()
+                .collect(),
+        });
+        let Some(DeterministicServiceStep::Duplex(endpoint)) =
+            lock(&self.service_steps).pop_front()
+        else {
+            return ready_error(backend_error(
+                ExecutionBackendErrorKind::Unsupported,
+                "deterministic service script has no duplex step",
+            ));
+        };
+        let guard = FakeProcessGuard::new(
+            Arc::clone(&self.active_services),
+            Arc::clone(&self.active_descendants),
+            0,
+        );
+        let stderr_tail = Arc::new(ServiceStderrTail::new(
+            request.request().stderr_tail_bytes(),
+        ));
+        stderr_tail.push(&endpoint.stderr);
+        let (stdout, stdin) = tokio::io::split(endpoint.stream);
+        Box::pin(async move {
+            Ok(ServiceProcess::new(
+                Box::pin(stdin),
+                Box::pin(stdout),
+                ServiceHandle::new(ServiceOwner::Fake(guard), stderr_tail),
+            ))
+        })
+    }
 }
 
-struct FakeProcessGuard {
+pub(super) struct FakeProcessGuard {
     processes: Arc<AtomicUsize>,
     descendants_counter: Arc<AtomicUsize>,
     descendants: usize,

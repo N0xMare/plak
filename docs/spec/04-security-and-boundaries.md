@@ -125,6 +125,12 @@ This is the same on Linux and macOS: there is no OS sandbox for process tools
 on either platform (§2.3). A container or VM around Plak is the only hard
 boundary.
 
+Long-lived service processes (stdio MCP servers, chapter 01 §8.5) are
+host-authority processes too. Their argv comes only from frozen configuration,
+never from a model, and their environment is emptied and curated the same way
+(delegated allowlist, captured PATH and HOME, declared values, named secrets);
+once running, a server can do anything the operator can.
+
 A terminal provider refusal can revoke provisional streamed output before any
 local effect is admitted. Messages discards the refused response's client-tool
 proposals, text, and reasoning from canonical output; it never executes those
@@ -252,6 +258,10 @@ A finer descriptor reports three independent axes:
 | Filesystem | descriptor-relative resolution beneath a verified root, refusing symlinks | host path policy only, validated at check time |
 | Process | inherits host authority | inherits host authority |
 | Network | inherits host authority | inherits host authority |
+
+The process and network rows cover service processes as well: a service runs
+in its own process group under the same host backend and reports the same
+`Host` descriptor; only its lifetime (group termination and join) is owned.
 
 That descriptor is **not an effect grant**. Network and destructive-action
 authorization belong separately to the tool policy. A profile that requires

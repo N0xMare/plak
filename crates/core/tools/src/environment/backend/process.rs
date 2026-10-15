@@ -3240,7 +3240,7 @@ fn captured_process_home(home: Option<PathBuf>) -> Option<PathBuf> {
         .filter(|home| home.is_dir() && home != Path::new("/"))
 }
 
-fn host_process_path(
+pub(super) fn host_process_path(
     process: &HostProcessContext,
     environment: &[(EnvironmentVariableName, EnvironmentVariableValue)],
 ) -> Result<String, ExecutionBackendError> {
@@ -3263,7 +3263,7 @@ fn host_process_path(
 /// empty `HOME`. Bash reads `~/.profile` from the passwd entry whether or not
 /// `HOME` is set, so an unset `HOME` breaks every `$HOME`-relative profile line
 /// and every tool that resolves `$HOME` inside the model's shell.
-fn host_process_home<'context>(
+pub(super) fn host_process_home<'context>(
     process: &'context HostProcessContext,
     environment: &[(EnvironmentVariableName, EnvironmentVariableValue)],
 ) -> Option<&'context Path> {
@@ -3294,7 +3294,7 @@ fn restore_path_after_login(
 /// programs are looked up on the prepared PATH or the default host PATH so
 /// models can call `true` / `printf` without absolute paths. Relative paths
 /// containing `/` remain rejected (no workspace-relative program resolution).
-fn resolve_host_process_program(
+pub(super) fn resolve_host_process_program(
     program: &str,
     process: &HostProcessContext,
     environment: &[(EnvironmentVariableName, EnvironmentVariableValue)],
@@ -3967,7 +3967,7 @@ fn terminate_direct_pty_child(
     ))
 }
 
-fn process_group_exists(process_group: rustix::process::Pid) -> bool {
+pub(super) fn process_group_exists(process_group: rustix::process::Pid) -> bool {
     rustix::process::test_kill_process_group(process_group).is_ok()
 }
 
