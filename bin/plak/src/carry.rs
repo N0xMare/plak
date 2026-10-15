@@ -2820,6 +2820,127 @@ mod tests {
         assert!(output.len() <= MAX_REFERENCE_OUTPUT_BYTES);
     }
 
+    /// The document embeds no canonical conversation items, so canonical
+    /// encodings such as tool execution owners are not part of its version.
+    /// A field that starts carrying history must trip this and bump `VERSION`.
+    #[test]
+    fn an_exported_document_carries_no_tool_owner_encoding() {
+        fn owner_free(value: &serde_json::Value) -> bool {
+            match value {
+                serde_json::Value::Object(map) => map.iter().all(|(key, value)| {
+                    !matches!(key.as_str(), "owner" | "Local" | "Mcp" | "ProviderHosted")
+                        && owner_free(value)
+                }),
+                serde_json::Value::Array(values) => values.iter().all(owner_free),
+                serde_json::Value::String(text) => {
+                    !matches!(text.as_str(), "Local" | "Mcp" | "ProviderHosted")
+                }
+                _ => true,
+            }
+        }
+        use plakous::model::{
+            CallId, McpServerId, ToolCallBlock, ToolCallState, ToolCorrelation, ToolExecutionOwner,
+            ToolName, ToolResultBlock, ToolResultKind,
+        };
+        let item = |id: u128, actor, block| {
+            ConversationItem::new(
+                EntryId::try_from(uuid::Uuid::from_u128(id)).unwrap(),
+                actor,
+                vec![block],
+                Provenance::ModelOutput,
+            )
+            .unwrap()
+        };
+        let mut segments = Vec::new();
+        for (call, owner) in [
+            (1, ToolExecutionOwner::Local),
+            (
+                2,
+                ToolExecutionOwner::Mcp {
+                    server: McpServerId::new("docs").unwrap(),
+                },
+            ),
+        ] {
+            let id = CallId::try_from(uuid::Uuid::from_u128(call)).unwrap();
+            let call_item = item(
+                call << 8,
+                Actor::Assistant,
+                ContentBlock::ToolCall(
+                    ToolCallBlock::new(
+                        id,
+                        ToolName::new("lookup").unwrap(),
+                        owner.clone(),
+                        ToolCallState::Requested,
+                        ToolCorrelation::default(),
+                        r#"{"q":"x"}"#,
+                    )
+                    .unwrap(),
+                ),
+            );
+            let result_item = item(
+                (call << 8) | 1,
+                Actor::Tool,
+                ContentBlock::ToolResult(
+                    ToolResultBlock::new(
+                        id,
+                        owner,
+                        ToolResultKind::Success,
+                        vec![ToolResultPart::Text(TextBlock::new("found", None).unwrap())],
+                        ToolCorrelation::default(),
+                    )
+                    .unwrap(),
+                ),
+            );
+            segments.push(
+                HistorySegment::new(
+                    HistorySegmentKind::ToolExchange,
+                    vec![call_item, result_item],
+                )
+                .unwrap(),
+            );
+        }
+        let mut document = sample_document();
+        document.checkpoint = build_checkpoint(
+            "source-account".into(),
+            ModelId::new("source-model").unwrap(),
+            &document.source,
+            &document.prompt_history,
+            0,
+            (&[], 0),
+            &segments,
+        );
+        document.archive = bounded_archive(archive_entries(&segments));
+        assert_eq!(document.archive.entries.len(), 2);
+        let value = serde_json::to_value(&document).unwrap();
+        let mut keys: Vec<&str> = value
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "archive",
+                "binding",
+                "checkpoint",
+                "format",
+                "pending_work",
+                "prompt_history",
+                "queue",
+                "source",
+                "source_subagents",
+                "title",
+                "transcript",
+                "version",
+                "workspace_root",
+            ],
+            "a new document field may embed canonical history; review it and bump VERSION"
+        );
+        assert!(owner_free(&value), "{value}");
+    }
+
     #[test]
     fn native_compaction_is_omitted_from_archive_and_restart_checkpoint() {
         let item = ConversationItem::new(
