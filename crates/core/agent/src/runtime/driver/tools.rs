@@ -5,6 +5,7 @@ use crate::runtime::composition::projection::local_composition_exec_registry_arg
 use crate::runtime::continuation::{ContinuationToolSlot, ToolBatchContinuation};
 use crate::runtime::control::effect_intent_bytes;
 use crate::runtime::driver::ToolDispatchOrigin;
+use crate::runtime::driver::composition::LocalCompositionFailureEvidence;
 use crate::runtime::driver::execution::{
     canonicalize_observed_tool_execution, execute_indexed_read_only, publish_observation_clip,
 };
@@ -352,97 +353,93 @@ impl Driver {
                 ));
             }
         };
-        let value: serde_json::Value = serde_json::from_slice(evidence.bytes())
-            .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-        let fields = value
-            .as_array()
-            .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
-        let tag = fields
-            .first()
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
-        let (kind, parts, child_ids, updates) = match tag {
-            "plakous-local-composition-failure-v1" if fields.len() == 4 => {
-                const MAX_CANCELLED_REPORT_BYTES: usize = 1_048_576;
-                let child_ids: Vec<u64> = serde_json::from_value(fields[3].clone())
-                    .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-                let detail = fields[2]
-                    .as_str()
+        let (kind, parts, child_ids, updates) = if let Some(failure) =
+            LocalCompositionFailureEvidence::decode(evidence.bytes())
+        {
+            const MAX_CANCELLED_REPORT_BYTES: usize = 1_048_576;
+            let child_ids = failure.child_operations().to_vec();
+            let detail = failure.detail();
+            let mut report = format!("local composition was interrupted: {detail}");
+            let ledger = self.authority.checkpoint();
+            for child_id in &child_ids {
+                let child = ledger
+                    .manifest()
+                    .ledger()
+                    .operation(*child_id)
                     .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
-                let mut report = format!("local composition was interrupted: {detail}");
-                let ledger = self.authority.checkpoint();
-                for child_id in &child_ids {
-                    let child = ledger
-                        .manifest()
-                        .ledger()
-                        .operation(*child_id)
+                let (DurableOperationState::Completed(evidence)
+                | DurableOperationState::ProvenNotDispatched(evidence)
+                | DurableOperationState::Finalized(evidence)) = child.state()
+                else {
+                    return Err(AgentError::new(
+                        AgentErrorKind::OutcomeUnknown,
+                        "cancelled composition has an unresolved nested effect",
+                    ));
+                };
+                if let DurableOperationKind::Effect { call_id, .. } = child.kind() {
+                    let outcome: serde_json::Value = serde_json::from_slice(evidence.bytes())
+                        .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
+                    let outcome_fields = outcome
+                        .as_array()
                         .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
-                    let (DurableOperationState::Completed(evidence)
-                    | DurableOperationState::ProvenNotDispatched(evidence)
-                    | DurableOperationState::Finalized(evidence)) = child.state()
-                    else {
-                        return Err(AgentError::new(
-                            AgentErrorKind::OutcomeUnknown,
-                            "cancelled composition has an unresolved nested effect",
-                        ));
-                    };
-                    if let DurableOperationKind::Effect { call_id, .. } = child.kind() {
-                        let outcome: serde_json::Value = serde_json::from_slice(evidence.bytes())
-                            .map_err(|_| {
-                            AgentError::from_store(SessionStoreError::corrupt())
-                        })?;
-                        let outcome_fields = outcome
-                            .as_array()
-                            .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
-                        if outcome_fields.first().and_then(serde_json::Value::as_str)
-                            == Some("completed-tool-outcome-v1")
-                        {
-                            let execution: ToolExecutionResult = serde_json::from_value(
-                                outcome_fields.get(2).cloned().ok_or_else(|| {
-                                    AgentError::from_store(SessionStoreError::corrupt())
-                                })?,
-                            )
+                    if outcome_fields.first().and_then(serde_json::Value::as_str)
+                        == Some("completed-tool-outcome-v1")
+                    {
+                        let execution: ToolExecutionResult =
+                            serde_json::from_value(outcome_fields.get(2).cloned().ok_or_else(
+                                || AgentError::from_store(SessionStoreError::corrupt()),
+                            )?)
                             .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-                            let rendered =
-                                serde_json::to_string(&execution.result).map_err(|_| {
-                                    AgentError::from_store(SessionStoreError::corrupt())
-                                })?;
-                            let line = format!("\ncompleted nested call {call_id}: {rendered}");
-                            let remaining = MAX_CANCELLED_REPORT_BYTES.saturating_sub(report.len());
-                            if remaining == 0 {
-                                break;
-                            }
-                            let mut end = remaining.min(line.len());
-                            while !line.is_char_boundary(end) {
-                                end -= 1;
-                            }
-                            report.push_str(&line[..end]);
-                            if end < line.len() {
-                                report.push_str("\n[nested results truncated]");
-                                break;
-                            }
+                        let rendered = serde_json::to_string(&execution.result)
+                            .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
+                        let line = format!("\ncompleted nested call {call_id}: {rendered}");
+                        let remaining = MAX_CANCELLED_REPORT_BYTES.saturating_sub(report.len());
+                        if remaining == 0 {
+                            break;
+                        }
+                        let mut end = remaining.min(line.len());
+                        while !line.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        report.push_str(&line[..end]);
+                        if end < line.len() {
+                            report.push_str("\n[nested results truncated]");
+                            break;
                         }
                     }
                 }
-                (
-                    ToolResultKind::Failure,
-                    vec![ToolResultPart::Text(TextBlock::new(report, None).map_err(
-                        |_| AgentError::from_store(SessionStoreError::corrupt()),
-                    )?)],
-                    child_ids,
-                    Vec::new(),
-                )
             }
-            "plakous-local-composition-cell-v2" if fields.len() == 8 => {
-                let child_ids: Vec<u64> = serde_json::from_value(fields[4].clone())
-                    .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-                let parts: Vec<ToolResultPart> = serde_json::from_value(fields[7].clone())
-                    .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-                let updates: Vec<ToolResultUpdateBlock> = serde_json::from_value(fields[6].clone())
-                    .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
-                (ToolResultKind::Success, parts, child_ids, updates)
+            (
+                ToolResultKind::Failure,
+                vec![ToolResultPart::Text(TextBlock::new(report, None).map_err(
+                    |_| AgentError::from_store(SessionStoreError::corrupt()),
+                )?)],
+                child_ids,
+                Vec::new(),
+            )
+        } else {
+            let value: serde_json::Value = serde_json::from_slice(evidence.bytes())
+                .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
+            let fields = value
+                .as_array()
+                .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
+            let tag = fields
+                .first()
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
+            match tag {
+                "plakous-local-composition-cell-v2" if fields.len() == 8 => {
+                    let child_ids: Vec<u64> = serde_json::from_value(fields[4].clone())
+                        .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
+                    let parts: Vec<ToolResultPart> = serde_json::from_value(fields[7].clone())
+                        .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
+                    let updates: Vec<ToolResultUpdateBlock> =
+                        serde_json::from_value(fields[6].clone())
+                            .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
+                    (ToolResultKind::Success, parts, child_ids, updates)
+                }
+                _ => return Err(AgentError::from_store(SessionStoreError::corrupt())),
             }
-            _ => return Err(AgentError::from_store(SessionStoreError::corrupt())),
         };
         let result = ToolResultBlock::new(
             call.call_id(),

@@ -70,6 +70,39 @@ use std::panic::AssertUnwindSafe;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+const LOCAL_COMPOSITION_FAILURE_TAG: &str = "plakous-local-composition-failure-v1";
+
+/// What a failed local composition records on its marker operation. It is
+/// encoded as the tagged tuple `[tag, kind, message, child operation ids]`.
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub(super) struct LocalCompositionFailureEvidence(String, AgentErrorKind, String, Vec<u64>);
+
+impl LocalCompositionFailureEvidence {
+    fn new(kind: AgentErrorKind, message: &str, child_operations: Vec<u64>) -> Self {
+        Self(
+            LOCAL_COMPOSITION_FAILURE_TAG.to_owned(),
+            kind,
+            message.to_owned(),
+            child_operations,
+        )
+    }
+
+    /// Decodes failure evidence; `None` when the bytes carry another tag.
+    pub(super) fn decode(bytes: &[u8]) -> Option<Self> {
+        serde_json::from_slice::<Self>(bytes)
+            .ok()
+            .filter(|evidence| evidence.0 == LOCAL_COMPOSITION_FAILURE_TAG)
+    }
+
+    pub(super) fn detail(&self) -> &str {
+        &self.2
+    }
+
+    pub(super) fn child_operations(&self) -> &[u64] {
+        &self.3
+    }
+}
+
 impl Driver {
     pub(super) fn is_local_composition_invocation(&self, invocation: &ToolInvocation) -> bool {
         self.local_composition.as_ref().is_some_and(|state| {
@@ -313,14 +346,13 @@ impl Driver {
                 let state = self.operation_state(operation_id)?;
                 let evidence = runtime_component(
                     RuntimeComponentKind::Operation,
-                    serde_json::to_vec(&(
-                        "plakous-local-composition-failure-v1",
+                    serde_json::to_vec(&LocalCompositionFailureEvidence::new(
                         error.kind(),
                         error.message(),
                         child_operations
                             .iter()
                             .map(|operation| operation.0)
-                            .collect::<Vec<_>>(),
+                            .collect(),
                     ))
                     .map_err(|_| {
                         AgentError::new(
@@ -2199,5 +2231,43 @@ impl Driver {
             },
         );
         value
+    }
+}
+
+#[cfg(test)]
+mod failure_evidence_tests {
+    use super::LocalCompositionFailureEvidence;
+    use crate::AgentErrorKind;
+
+    #[test]
+    fn failure_evidence_keeps_its_tagged_tuple_bytes() -> Result<(), serde_json::Error> {
+        let evidence = LocalCompositionFailureEvidence::new(
+            AgentErrorKind::Tool,
+            "the cell failed",
+            vec![7, 9],
+        );
+        let bytes = serde_json::to_vec(&evidence)?;
+        assert_eq!(
+            bytes,
+            serde_json::to_vec(&(
+                "plakous-local-composition-failure-v1",
+                AgentErrorKind::Tool,
+                "the cell failed",
+                vec![7_u64, 9],
+            ))?
+        );
+        let decoded = LocalCompositionFailureEvidence::decode(&bytes).ok_or_else(|| {
+            <serde_json::Error as serde::de::Error>::custom("failure evidence did not decode")
+        })?;
+        assert_eq!(decoded.detail(), "the cell failed");
+        assert_eq!(decoded.child_operations(), [7, 9]);
+        let other = serde_json::to_vec(&(
+            "plakous-local-composition-cell-v2",
+            AgentErrorKind::Tool,
+            "x",
+            Vec::<u64>::new(),
+        ))?;
+        assert!(LocalCompositionFailureEvidence::decode(&other).is_none());
+        Ok(())
     }
 }
