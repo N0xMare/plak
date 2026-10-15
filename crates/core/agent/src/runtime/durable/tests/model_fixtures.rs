@@ -125,6 +125,7 @@ pub(super) struct ArtifactModel {
     pub(super) held_call_started: Notify,
     pub(super) held_call_release: Mutex<Option<Arc<Notify>>>,
     pub(super) context_tokens_from_prepare: Option<(usize, u64)>,
+    pub(super) context_growth_ends_at_fold: AtomicBool,
     /// Counts the request's own history bytes instead of a fixed 64.
     ///
     /// The placeholder rung shrinks canonical history, so a fixture whose count
@@ -249,6 +250,7 @@ impl ArtifactModel {
             held_call_started: Notify::new(),
             held_call_release: Mutex::new(None),
             context_tokens_from_prepare: None,
+            context_growth_ends_at_fold: AtomicBool::new(false),
             byte_derived_context_tokens: false,
             context_token_multiplier: AtomicUsize::new(1),
             summary_context_overhead: AtomicUsize::new(0),
@@ -748,12 +750,16 @@ impl LanguageModel for ArtifactModel {
             // Turn rounds and the paid summary keep the fixture's flat count.
             semantic_history_tokens(plan.request().input().history())
         } else {
-            self.context_tokens_from_prepare.map_or(
-                64,
-                |(from, tokens)| {
-                    if prepare >= from { tokens } else { 64 }
-                },
-            )
+            let folded = self.context_growth_ends_at_fold.load(Ordering::Acquire)
+                && !lock_mutex(&self.observed_compaction_contexts).is_empty();
+            self.context_tokens_from_prepare
+                .map_or(64, |(from, tokens)| {
+                    if prepare >= from && !folded {
+                        tokens
+                    } else {
+                        64
+                    }
+                })
         };
         if gated_replay {
             counted_tokens = (lowered_bytes.len() as u64).div_ceil(4);

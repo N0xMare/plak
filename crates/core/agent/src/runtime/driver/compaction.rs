@@ -89,6 +89,23 @@ impl TurnCompactionOutcome {
     }
 }
 
+/// A finalized compaction provider record that failed after dispatch, so it
+/// was billed and did not commit.
+fn failed_paid_fold(workflow: crate::SessionWorkflowId, record: &DurableOperationRecord) -> bool {
+    record.transitions().last().is_some_and(|finalization| {
+        compaction_checkpoint_id(workflow, b"failed").ok() == Some(finalization.checkpoint_id())
+    }) && record
+        .transitions()
+        .iter()
+        .any(|transition| matches!(transition.state(), DurableOperationState::Dispatched))
+        && !record.transitions().iter().any(|transition| {
+            matches!(
+                transition.state(),
+                DurableOperationState::ProvenNotDispatched(_)
+            )
+        })
+}
+
 fn has_zero_headroom(status: &ContextStatus) -> bool {
     use plakous_model::ContextHeadroom;
     match status.kind() {
@@ -208,18 +225,7 @@ impl Driver {
                     {
                         consecutive_failures = 0;
                         rounds = 0;
-                    } else if compaction_checkpoint_id(*workflow, b"failed").ok()
-                        == Some(finalization.checkpoint_id())
-                        && record.transitions().iter().any(|transition| {
-                            matches!(transition.state(), DurableOperationState::Dispatched)
-                        })
-                        && !record.transitions().iter().any(|transition| {
-                            matches!(
-                                transition.state(),
-                                DurableOperationState::ProvenNotDispatched(_)
-                            )
-                        })
-                    {
+                    } else if failed_paid_fold(*workflow, record) {
                         failures += 1;
                         consecutive_failures += 1;
                         rounds = 0;
@@ -325,7 +331,21 @@ impl Driver {
             }
             return Ok(TurnCompactionOutcome::Deferred);
         };
-        let occupied = if status.wire_input().is_some() {
+        let occupied = self.anchored_occupied_tokens(&status);
+        let trigger = status.compaction_trigger_tokens();
+        if !should_schedule_mid_turn_compaction_with_trigger(status.kind(), occupied, trigger) {
+            if pressure {
+                return self.run_turn_fence_compaction(command, true).await;
+            }
+            return Ok(TurnCompactionOutcome::Deferred);
+        }
+        self.run_turn_fence_compaction(command, false).await
+    }
+
+    /// Occupancy measured from a current-binding anchor; an unanchored
+    /// estimate has none, so it never reaches the occupancy trigger.
+    fn anchored_occupied_tokens(&self, status: &ContextStatus) -> Option<u64> {
+        if status.wire_input().is_some() {
             self.request_anchor
                 .as_ref()
                 .filter(|anchor| {
@@ -339,15 +359,29 @@ impl Driver {
                 self.context_anchor,
                 self.nested_committed_observation_tokens,
             )
-        };
-        let trigger = status.compaction_trigger_tokens();
-        if !should_schedule_mid_turn_compaction_with_trigger(status.kind(), occupied, trigger) {
-            if pressure {
-                return self.run_turn_fence_compaction(command, true).await;
-            }
-            return Ok(TurnCompactionOutcome::Deferred);
         }
-        self.run_turn_fence_compaction(command, false).await
+    }
+
+    /// Whether the newest finalized provider call is a fold that failed after
+    /// dispatch: the same source would fail the same way, so the occupancy
+    /// trigger waits for a model round instead of paying again.
+    fn paid_fold_failed_since_last_round(&self) -> bool {
+        let checkpoint = self.authority.checkpoint();
+        let operations = checkpoint.manifest().ledger().operations();
+        for record in operations.iter().rev() {
+            if !matches!(record.state(), DurableOperationState::Finalized(_)) {
+                continue;
+            }
+            match record.kind() {
+                DurableOperationKind::Provider {
+                    root: ModelOperationRoot::SessionWorkflow(workflow),
+                    ..
+                } => return failed_paid_fold(*workflow, record),
+                DurableOperationKind::Provider { .. } => return false,
+                _ => {}
+            }
+        }
+        false
     }
 
     /// Compacts after the provider refused a round's input as over its window.
@@ -390,10 +424,21 @@ impl Driver {
         let Some(status) = self.measure_scheduling_context(command).await else {
             return Ok(());
         };
-        if !matches!(
+        let overflow = matches!(
             status.kind(),
             ContextStatusKind::WouldOverflow(_) | ContextStatusKind::ProtectedOverflow(_)
-        ) {
+        );
+        // A session without a host idle fence (a child) is compacted here at the
+        // same anchored occupancy trigger. A host fence that already folded left
+        // the successor unanchored, and one that failed after dispatch is not
+        // repeated before another model round.
+        let occupancy = matches!(status.kind(), ContextStatusKind::Fits { .. })
+            && self
+                .anchored_occupied_tokens(&status)
+                .zip(status.compaction_trigger_tokens())
+                .is_some_and(|(occupied, trigger)| occupied >= trigger)
+            && !self.paid_fold_failed_since_last_round();
+        if !overflow && !occupancy {
             return Ok(());
         }
         // Seal against committed intent before the follow-up changes the cut.

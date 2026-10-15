@@ -5,10 +5,12 @@
 )]
 mod fake_composition;
 
+mod admission_occupancy;
 #[path = "../artifact_prefix_tests.rs"]
 mod artifact_prefix_tests;
 #[path = "../atomic_transition_tests.rs"]
 mod atomic_transition_tests;
+mod cancelled_steer;
 mod cleanup_precedence;
 mod clip_budget;
 #[path = "../code_cell_crash_tests.rs"]
@@ -17,6 +19,7 @@ mod code_cell_crash;
 mod code_cell_recovery;
 #[path = "../command_ack_tests.rs"]
 mod command_ack_tests;
+mod command_feed_open;
 #[path = "../command_retention_tests.rs"]
 mod command_retention;
 #[path = "../composition_steer_tests.rs"]

@@ -172,7 +172,7 @@ async fn failed_pressure_fold_with_positive_headroom_continues() -> TestResult {
             false,
         )
         .with_tool_call_on(2)
-        .with_context_tokens_from_prepare(3, 1_000);
+        .with_context_tokens_from_prepare(4, 1_000);
         fixture.response_provenance = true;
         fixture
             .fail_compaction_prepare

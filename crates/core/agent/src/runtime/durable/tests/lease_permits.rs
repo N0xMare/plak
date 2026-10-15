@@ -656,6 +656,10 @@ async fn successful_compaction_controls(as_stream: bool) -> TestResult {
         900_000,
         LocalDurabilityDisposition::DurableRequired,
     )?;
+    // The fold frees the window, so the queued turns admit without folding.
+    model
+        .context_growth_ends_at_fold
+        .store(true, Ordering::Release);
     let release = Arc::new(Notify::new());
     *lock_mutex(&model.held_call_release) = Some(release.clone());
     let store = Arc::new(TestCreateStore::default());

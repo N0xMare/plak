@@ -683,7 +683,8 @@ Details:
   which the Context tab shows, but only once a provider count anchors the
   measure; a request already over the ceiling, or a provider overflow, compacts
   and resends once. A failed paid fold is never redispatched; repeated failures
-  back off and stop paid folds for the rest of the turn.
+  back off and stop paid folds for the rest of the turn. Sub-agents compact at
+  the same trigger when they start each turn.
 - `/compact` compacts by hand at the next safe idle boundary, or says
   `nothing in this conversation can be compacted yet`. Compaction never buys
   more of a subscription limit.

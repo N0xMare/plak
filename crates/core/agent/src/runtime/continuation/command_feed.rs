@@ -3,10 +3,13 @@
 use crate::feed::{FeedChange, FeedFact, FeedPage, FeedSeq};
 use crate::runtime::checkpoint::io::{StoreCallError, StorePhase, store_call};
 use crate::runtime::checkpoint::owner::DurableBranchFacts;
-use crate::{AgentError, CheckpointId, CommandId, RuntimeCheckpoint, SessionStoreError};
+use crate::{AgentError, CommandId, RuntimeCheckpoint, SessionStoreError};
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroUsize;
 
+/// Walks the session feed backwards in bounded pages, following exact
+/// checkpoint links from `authority`, until every command the ledger retains
+/// has its admission sequence or the retained feed ends.
 pub(in crate::runtime) async fn command_feed_sequences(
     authority: &RuntimeCheckpoint,
     branch: &DurableBranchFacts,
@@ -19,146 +22,56 @@ pub(in crate::runtime) async fn command_feed_sequences(
         .map(|command| command.command_id().to_owned())
         .collect::<BTreeSet<_>>();
     let mut sequences = BTreeMap::new();
-    let mut checkpoint = authority.id();
-    let mut upper = None;
-    while !wanted.is_empty() {
-        let receipt = match store_call(
-            StorePhase::RecoverCommit,
-            branch.store_timeouts().operation,
-            branch.store().recover_commit(checkpoint),
-        )
-        .await
-        {
-            Ok(committed) => committed.receipt(),
-            Err(error) if error.is(SessionStoreError::NotFound) => {
-                // Genesis and fork/rebind publications have no commit receipt.
-                let current = store_call(
-                    StorePhase::LoadCheckpoint,
-                    branch.store_timeouts().operation,
-                    branch.store().load_checkpoint(checkpoint),
-                )
-                .await;
-                match current {
-                    Ok(current) => {
-                        let topology = current.checkpoint().manifest().topology();
-                        let Some(parent) = topology.parent_checkpoint_id else {
-                            break;
-                        };
-                        if parent == checkpoint {
-                            return Err(AgentError::from_store(SessionStoreError::corrupt()));
-                        }
-                        if topology
-                            .fork
-                            .is_some_and(|fork| fork.checkpoint_id == parent)
-                        {
-                            checkpoint = parent;
-                            continue;
-                        }
-                    }
-                    Err(error)
-                        if error.is(SessionStoreError::Pruned)
-                            || error.is(SessionStoreError::NotFound) => {}
-                    Err(error) => return Err(error.into_agent()),
-                }
-                retained_feed_ancestry(
-                    authority,
-                    branch,
-                    checkpoint,
-                    upper,
-                    &mut wanted,
-                    &mut sequences,
-                )
-                .await?;
-                break;
-            }
-            Err(error) if error.is(SessionStoreError::Pruned) => {
-                retained_feed_ancestry(
-                    authority,
-                    branch,
-                    checkpoint,
-                    upper,
-                    &mut wanted,
-                    &mut sequences,
-                )
-                .await?;
-                break;
-            }
-            Err(error) => return Err(error.into_agent()),
-        };
-        let seq = receipt.feed_seq();
-        let parent = receipt.previous().checkpoint().checkpoint_id();
-        if receipt.checkpoint().checkpoint_id() != checkpoint
-            || parent == checkpoint
-            || upper.is_some_and(|upper| seq.get() > upper)
-        {
-            return Err(AgentError::from_store(SessionStoreError::corrupt()));
-        }
-        let page = store_call(
-            StorePhase::ReadFeed,
-            branch.store_timeouts().operation,
-            branch.store().read_feed(
-                authority.manifest().topology().session_id,
-                FeedSeq::new(
-                    seq.get()
-                        .checked_sub(1)
-                        .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?,
-                ),
-                NonZeroUsize::MIN,
-            ),
-        )
-        .await
-        .map_err(StoreCallError::into_agent)?;
-        let FeedPage::Records { records, .. } = page else {
-            break;
-        };
-        let Some(record) = records.first() else {
-            return Err(AgentError::from_store(SessionStoreError::corrupt()));
-        };
-        if record.header().seq != seq
-            || !matches!(record.header().change,
-            FeedChange::Advanced { checkpoint: published, parent: recorded_parent, .. }
-                if published == checkpoint && recorded_parent == parent)
-        {
-            return Err(AgentError::from_store(SessionStoreError::corrupt()));
-        }
-        collect_sequences(record.facts(), seq, &mut wanted, &mut sequences);
-        checkpoint = parent;
-        upper = Some(
-            seq.get()
-                .checked_sub(1)
-                .ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?,
-        );
+    if !wanted.is_empty() {
+        feed_ancestry(authority, branch, &mut wanted, &mut sequences).await?;
     }
     Ok(sequences)
 }
 
-async fn retained_feed_ancestry(
+async fn feed_ancestry(
     authority: &RuntimeCheckpoint,
     branch: &DurableBranchFacts,
-    mut checkpoint: CheckpointId,
-    upper: Option<u64>,
     wanted: &mut BTreeSet<String>,
     sequences: &mut BTreeMap<CommandId, FeedSeq>,
 ) -> Result<(), AgentError> {
     let session = authority.manifest().topology().session_id;
     let timeout = branch.store_timeouts().operation;
-    let mut upper = if let Some(upper) = upper {
-        upper
-    } else {
-        let page = store_call(
-            StorePhase::ReadFeed,
-            timeout,
-            branch
-                .store()
-                .read_feed(session, FeedSeq::new(0), NonZeroUsize::MIN),
-        )
-        .await
-        .map_err(StoreCallError::into_agent)?;
-        match page {
-            FeedPage::Records { window, .. } | FeedPage::BehindRetention { window, .. } => {
-                window.tail().get()
+    let mut checkpoint = authority.id();
+    // The head's receipt bounds the walk below a sibling's later records;
+    // genesis, fork and pruned heads start from the feed tail instead.
+    let mut upper = match store_call(
+        StorePhase::RecoverCommit,
+        timeout,
+        branch.store().recover_commit(checkpoint),
+    )
+    .await
+    {
+        Ok(committed) => {
+            let receipt = committed.receipt();
+            if receipt.checkpoint().checkpoint_id() != checkpoint {
+                return Err(AgentError::from_store(SessionStoreError::corrupt()));
+            }
+            receipt.feed_seq().get()
+        }
+        Err(error)
+            if error.is(SessionStoreError::NotFound) || error.is(SessionStoreError::Pruned) =>
+        {
+            let page = store_call(
+                StorePhase::ReadFeed,
+                timeout,
+                branch
+                    .store()
+                    .read_feed(session, FeedSeq::new(0), NonZeroUsize::MIN),
+            )
+            .await
+            .map_err(StoreCallError::into_agent)?;
+            match page {
+                FeedPage::Records { window, .. } | FeedPage::BehindRetention { window, .. } => {
+                    window.tail().get()
+                }
             }
         }
+        Err(error) => return Err(error.into_agent()),
     };
     let mut retained_from = 1;
     while !wanted.is_empty() && upper >= retained_from {

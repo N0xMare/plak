@@ -81,7 +81,9 @@ pub(super) fn scheduled_tool_group_fence_builder(
             false,
         )
         .with_tool_call_on(2)
-        .with_context_tokens_from_prepare(3, context_tokens),
+        // Prepare 3 is the third turn's admission measure; growth starts at
+        // its request so only the tool-group fence sees it.
+        .with_context_tokens_from_prepare(4, context_tokens),
     );
     let builder = scheduled_tool_group_fence_builder_with_model(
         workspace,
@@ -270,7 +272,7 @@ async fn scheduled_tool_group_fence_compacts_on_exhausted_reserve_below_occupanc
         false,
     )
     .with_tool_call_on(2)
-    .with_context_tokens_from_prepare(3, 1_000);
+    .with_context_tokens_from_prepare(4, 1_000);
     fixture.response_provenance = true;
     let model = Arc::new(fixture);
     let agent = scheduled_tool_group_fence_builder_with_model(
@@ -389,7 +391,7 @@ async fn scheduled_tool_group_fence_compacts_on_exhausted_reserve_below_occupanc
     Ok(())
 }
 
-/// The tool-group fence acts on an anchor a reopen restored from the
+/// The turn fences act on an anchor a reopen restored from the
 /// checkpoint: the reopened model reports no usage, so the persisted anchor is
 /// the only one the measure can have.
 #[tokio::test]
@@ -411,7 +413,9 @@ async fn a_reopened_session_fences_on_its_persisted_anchor() -> TestResult {
             9_880,
             false,
         )
-        .with_context_tokens_from_prepare(0, 900_000),
+        // The second turn's request anchors the session after its own
+        // admission measure.
+        .with_context_tokens_from_prepare(2, 900_000),
     );
     let agent = sessions
         .create(
@@ -448,7 +452,8 @@ async fn a_reopened_session_fences_on_its_persisted_anchor() -> TestResult {
             9_890,
             false,
         )
-        .with_tool_call_on(0),
+        // Call 0 is the admission fold on the persisted anchor.
+        .with_tool_call_on(1),
     );
     let DurableRuntimeOpen::Opened(agent) = sessions
         .open(
@@ -474,7 +479,7 @@ async fn a_reopened_session_fences_on_its_persisted_anchor() -> TestResult {
     assert_eq!(result.tool_calls(), 1);
     assert!(
         compaction_workflow_count(result.checkpoint()) >= 1,
-        "the persisted anchor must let the tool-group fence compact"
+        "the persisted anchor must let the reopened turn's fences compact"
     );
     assert!(
         lock_mutex(&silent.prepared_estimates)
@@ -1023,9 +1028,6 @@ async fn a_pressure_fold_does_not_block_occupancy_or_provider_overflow_folds() -
         );
         model.script_tool_rounds_around_compactions();
         model.item_context.store(true, Ordering::Release);
-        model
-            .item_provider_input_tokens
-            .store(98_000, Ordering::Release);
         let registry = oversized_tool_registry(&[250_000, 2_000])?;
         let configured = configured_test_model(
             model.clone(),
@@ -1053,6 +1055,11 @@ async fn a_pressure_fold_does_not_block_occupancy_or_provider_overflow_folds() -
             .result()
             .await?;
         assert!(matches!(seed.outcome(), TurnResultOutcome::Completed(_)));
+        // Near-full occupancy starts after the seed, so the next turn's
+        // admission does not fold before its oversized read.
+        model
+            .item_provider_input_tokens
+            .store(98_000, Ordering::Release);
         let result = agent
             .prompt("read oversized result")
             .await?

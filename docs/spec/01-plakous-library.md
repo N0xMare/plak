@@ -2173,11 +2173,13 @@ if retention removed it between the reads.
 rebind outcomes name the sequence of the record that made them durable, so a
 live consumer knows how far to read before it reports the outcome. Reopen
 rebuilds command acknowledgements before admitting commands: it recovers the
-original admission sequence by walking the exact head's ancestry through
-commit receipts and reading just each receipt's feed record. Once checkpoints
-are pruned, it follows the same ancestry's retained feed links in bounded
-pages, retaining only outstanding ledger command matches, never an index of
-all feed records or sibling branches. It stops when every command is found or
+original admission sequence by walking the exact head's ancestry through the
+retained feed's exact checkpoint links in bounded pages of at most 256 records,
+backwards from the head's commit receipt (from the feed tail when the head has
+no receipt or it was pruned), retaining only outstanding ledger command matches,
+never an index of all feed records or sibling branches. Opening a session
+therefore reads one receipt and a few feed pages, not one receipt and one feed
+record per ancestor commit. It stops when every command is found or
 the retained boundary is reached; pruning a receipt alone never loses a
 retained admission fact. Fork and rebind
 boundaries inherit commands from their source, never from sibling branches. A
@@ -2366,6 +2368,11 @@ artifact, a round whose full stable prefix differs, `tool_choice` included,
 emits `ModelArtifactPrefixDrift` telemetry naming the fields (§11.2); the
 artifact binding holds only the reuse digest, so a producer from before a
 reopen is unnamed.
+There is no artifact replay floor: an artifact authorizes every compatible
+historical envelope in its covered prefix. The exact binding, the stable-prefix
+reuse identity and fresh preparation on any prefix difference are the guards;
+the offline compaction rules of §10.2 keep a pass from re-admitting replay a
+later artifact would resurrect.
 Fresh Responses lowering preserves local and MCP calls in their stored
 `Requested` state, with the ordinary protected call/result correlation checks.
 Tool execution appends results without changing that stored state. A projected
@@ -2378,6 +2385,11 @@ replay fail as typed `ProtectedHistory`, not a generic projection diagnostic;
 assistant refusals are not converted to ordinary output text. This lowering
 is shared by Codex, OpenAI Platform, SuperGrok, xAI Platform and OpenRouter
 Responses.
+Known limits: prefix-drift telemetry is not persisted, so after a reopen the
+round that produced the active artifact stays unnamed; and opaque-only
+replay-required items have no fresh lowering, so a request that must drop
+their artifact fails as `ProtectedHistory` instead of sending them without
+replay.
 Unknown wire variants never crash a stream:
 they are retained safely or rejected as a typed unsupported feature, and never
 create a capability claim.
@@ -5233,7 +5245,15 @@ identical prepared wire digests. In that case the driver publishes the
 independently measured portable successor with its replay-loss Steering note,
 rather than retaining historical replay that a later artifact could resurrect.
 This rule is route-neutral; replay actually present on the fresh wire remains
-protected. Native route enrollment alone does not authorize portable projection:
+protected. A family artifact still authorizes every compatible historical
+replay envelope in its prefix: there is no artifact replay floor, and the
+artifact encoding carries none. The identical-wire rule above, the strict
+shrink proof on the fresh unanchored basis, a constant position-zero
+compaction line and the per-turn pressure-fold cap are what keep offline passes
+from repeating. A native compaction is measured on the same active-head
+lowering its dispatch uses; it has no separate coverage basis. There is no
+separate cap on rounds whose output is withheld; the root round limit and the
+pressure-fold cap bound them. Native route enrollment alone does not authorize portable projection:
 apart from that identical-wire rule, it is permitted only after a native
 `ProtectedHistory` refusal or when the unprojected successor cannot be prepared
 or no unchanged placeholder depth Fits and strictly shrinks.
@@ -5688,10 +5708,18 @@ preparing an unchanged successor does not prove that it fits.
 There are two fences.
 
 - **Fence (a), idle pre-dispatch.** The host schedules a compact before
-  dispatching new user intent. The driver also checks an already-overflowing
-  committed history before appending a follow-up's prompt, sealing against that
-  head while budgeting the pending prompt in the retained-tail fit check. The
-  admitted root stays Working throughout; this is not a second inference loop.
+  dispatching new user intent. The driver also checks the committed history
+  before appending every admitted turn's prompt, children included: it
+  compacts when that history already overflows, or when a current-binding
+  anchor puts occupancy at or over the trigger, sealing against that head while
+  budgeting the pending prompt in the retained-tail fit check. This is the only
+  fence before a prompt in a session without a host idle fence, such as a
+  child. A host fold that committed left the successor unanchored, so the
+  occupancy trigger does not repeat it; when the newest finalized provider call
+  is a fold that failed after dispatch, the occupancy trigger waits for another
+  model round, and the turn's paid-fold cap and backoff apply as at fence (b).
+  The admitted root stays Working throughout; this is not a second inference
+  loop.
 - **Fence (b), sequenced tool-group.** A scheduled compact starts only after a
   committed complete tool-call/result group and before the next model round of
   the **same** turn — never mid-stream, mid-tool, during an in-flight model

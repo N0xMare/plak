@@ -1158,7 +1158,10 @@ its prior history remain intact, and the caller receives `capacity`. Lost or
 cancelled startup ownership is not proof of refusal and therefore retains the
 session for recovery instead of deleting it.
 
-Children are ordinary sessions and keep the ordinary compaction program.
+Children are ordinary sessions and keep the ordinary compaction program. A
+child has no host idle fence, so the driver's turn-admission fence compacts
+each admitted child turn whose anchored occupancy meets the trigger (spec 01
+§10.3, fence (a)).
 Whenever a child ends with terminal typed `ContextLimit`, its attempt fails with
 kind `context_exhausted`, whether or not the compaction ladder was exhausted.
 Its failure message tells the parent to respawn with a handoff, not a follow-up

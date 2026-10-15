@@ -328,7 +328,8 @@ async fn durable_open_reads_bounded_ancestry_pages_without_unrelated_tail() -> T
         assert_ne!(budgets, [] as [usize; 0]);
         assert!(budgets.iter().all(|budget| *budget <= 256), "{budgets:?}");
         if !pruned {
-            assert!(budgets.iter().all(|budget| *budget == 1));
+            // The head's receipt bounds one page that holds all twelve turns.
+            assert_eq!(budgets.len(), 1, "{budgets:?}");
         }
         if pruned && !trimmed {
             assert!(budgets.iter().any(|budget| *budget > 1));

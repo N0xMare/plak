@@ -61,13 +61,15 @@ async fn assert_finish_parity(
             )
         })
         .collect::<Vec<_>>();
-    assert_eq!(decisions.len(), 1, "{label}: one decision commit");
-    let cut = Arc::clone(&decisions[0]);
-    assert_eq!(
-        live.manifest().topology().parent_checkpoint_id,
-        Some(cut.id()),
-        "{label}: the live consequence commit follows the decision commit"
-    );
+    // A multi-round turn leaves an earlier closable head per round; the
+    // consequence commit follows the newest one.
+    let cut = decisions
+        .iter()
+        .find(|decision| live.manifest().topology().parent_checkpoint_id == Some(decision.id()))
+        .map(Arc::clone)
+        .ok_or_else(|| {
+            format!("{label}: the live consequence commit follows no decision commit")
+        })?;
     if refused {
         assert_eq!(
             agent.checkpoint().id(),
@@ -187,6 +189,11 @@ fn assert_consequence_parity(
         live.family_artifact(),
         recovered.family_artifact(),
         "{label}: family artifact"
+    );
+    assert_eq!(
+        live.canonical().context().request_anchor(),
+        recovered.canonical().context().request_anchor(),
+        "{label}: request anchor"
     );
     let (live_records, recovered_records) =
         (live.ledger().operations(), recovered.ledger().operations());
@@ -329,6 +336,47 @@ async fn a_recovered_context_limit_finish_preserves_the_withheld_prompt_remedy_a
     assert_eq!(
         model.calls.load(Ordering::Acquire),
         1,
+        "recovery never redispatches"
+    );
+    Ok(())
+}
+
+/// A turn whose first round published a family artifact and reported usage,
+/// then failed for context capacity on its next round, finishes on reopen
+/// with the artifact and request anchor the live terminal committed.
+#[tokio::test]
+async fn a_recovered_capacity_failure_after_a_tool_round_equals_the_live_terminal() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let descriptor = durable_test_descriptor("test.route")?;
+    let model = Arc::new(
+        ArtifactModel::new(
+            descriptor.clone(),
+            artifact_authority(&descriptor, 1)?,
+            1,
+            0xF1_6100,
+            false,
+        )
+        .with_tool_first()
+        .with_provider_overflows([1])
+        .with_report_usage(),
+    );
+    model.foreign_overflow.store(true, Ordering::Release);
+    let (registry, _) = session_update_registry(SessionUpdateFixtureMode::Active)?;
+    let result = assert_finish_parity("finish-parity:capacity-artifact", false, || {
+        session_update_builder(workspace.clone(), model.clone(), registry.clone())
+    })
+    .await?;
+    assert!(
+        matches!(result.outcome(), TurnResultOutcome::Failed(error)
+            if error.model_kind() == Some(ModelErrorKind::ContextLimit)),
+        "{:?}",
+        result.outcome()
+    );
+    assert_eq!(result.tool_calls(), 1);
+    assert_eq!(
+        model.calls.load(Ordering::Acquire),
+        2,
         "recovery never redispatches"
     );
     Ok(())
