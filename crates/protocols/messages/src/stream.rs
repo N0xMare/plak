@@ -1301,7 +1301,7 @@ impl MessagesStreamProjector {
                 if matches!(caller, ToolCaller::ExplicitDirect) {
                     self.explicit_direct_tool_ids.insert(value.id.clone());
                 }
-                // Unadvertised direct names stay PlakLocal Requested so admit_tool can
+                // Unadvertised direct names stay Local Requested so admit_tool can
                 // return a typed failure listing the presented catalog.
                 let correlation =
                     ToolCorrelation::new(Some(value.id.clone()), None, ToolCallerLineage::Direct)
@@ -1625,7 +1625,7 @@ impl MessagesStreamProjector {
             OpenBlock::ToolUse(input) => {
                 if matches!(
                     input.owner,
-                    ToolExecutionOwner::PlakLocal | ToolExecutionOwner::PlakMcp { .. }
+                    ToolExecutionOwner::Local | ToolExecutionOwner::Mcp { .. }
                 ) {
                     // A closed wire block may still contain truncated JSON when a
                     // classifier revokes it. Only the terminal can authorize parsing.
@@ -4588,7 +4588,7 @@ mod projector_tests {
                         started.block(),
                         plakous_model::BlockStart::ToolCall { tool, owner, state, .. }
                             if tool == &ToolName::new("Write").expect("name")
-                                && *owner == plakous_model::ToolExecutionOwner::PlakLocal
+                                && *owner == plakous_model::ToolExecutionOwner::Local
                                 && *state == plakous_model::ToolCallState::Requested
                     )
             )),

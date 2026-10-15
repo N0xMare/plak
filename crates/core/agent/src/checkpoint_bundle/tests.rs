@@ -134,7 +134,7 @@ fn claude_shaped_tool_exchange_with_thinking(
             ContentBlock::ToolCall(ToolCallBlock::new(
                 call_id,
                 ToolName::new("Read")?,
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolCallState::Requested,
                 correlation.clone(),
                 "{\"file_path\":\"SEED.txt\"}",
@@ -147,7 +147,7 @@ fn claude_shaped_tool_exchange_with_thinking(
         Actor::Tool,
         vec![ContentBlock::ToolResult(ToolResultBlock::new(
             call_id,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolResultKind::Success,
             vec![ToolResultPart::Text(TextBlock::new("seed-ok", None)?)],
             correlation,
@@ -1258,7 +1258,7 @@ fn claude_messages_large_thinking_tool_exchange_advances() -> TestResult {
                     ContentBlock::ToolCall(ToolCallBlock::new(
                         call_id,
                         ToolName::new("Read")?,
-                        ToolExecutionOwner::PlakLocal,
+                        ToolExecutionOwner::Local,
                         ToolCallState::Requested,
                         correlation.clone(),
                         "{\"file_path\":\"SEED.txt\"}",
@@ -1271,7 +1271,7 @@ fn claude_messages_large_thinking_tool_exchange_advances() -> TestResult {
                 Actor::Tool,
                 vec![ContentBlock::ToolResult(ToolResultBlock::new(
                     call_id,
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolResultKind::Success,
                     vec![ToolResultPart::Text(TextBlock::new("seed-ok", None)?)],
                     correlation,
@@ -1326,7 +1326,7 @@ fn claude_read_edit_then_quiescent_final_text_advances() -> TestResult {
                     ContentBlock::ToolCall(ToolCallBlock::new(
                         edit_call,
                         ToolName::new("Edit")?,
-                        ToolExecutionOwner::PlakLocal,
+                        ToolExecutionOwner::Local,
                         ToolCallState::Requested,
                         edit_correlation.clone(),
                         "{\"file_path\":\"SEED.txt\",\"old_string\":\"seed-ok\",\"new_string\":\"edited\"}",
@@ -1339,7 +1339,7 @@ fn claude_read_edit_then_quiescent_final_text_advances() -> TestResult {
                 Actor::Tool,
                 vec![ContentBlock::ToolResult(ToolResultBlock::new(
                     edit_call,
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolResultKind::Success,
                     vec![ToolResultPart::Text(TextBlock::new(
                         "SEED.txt updated",

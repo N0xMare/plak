@@ -335,7 +335,7 @@ impl LanguageModel for ScriptedModel {
                         ToolCallBlock::new(
                             CallId::try_from(uuid::Uuid::new_v4()).map_err(invalid_event)?,
                             ToolName::new(*name).map_err(invalid_event)?,
-                            ToolExecutionOwner::PlakLocal,
+                            ToolExecutionOwner::Local,
                             ToolCallState::Requested,
                             ToolCorrelation::new(None, None, ToolCallerLineage::Direct)
                                 .map_err(invalid_event)?,

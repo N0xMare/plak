@@ -301,7 +301,7 @@ fn request_with_retired_responses_exec(
     let call = ToolCallBlock::new(
         call_id,
         ToolName::new("exec")?,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         correlation.clone(),
         serde_json::to_string(source)?,
@@ -323,7 +323,7 @@ fn request_with_retired_responses_exec(
             Actor::Tool,
             vec![ContentBlock::ToolResult(ToolResultBlock::new(
                 call_id,
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolResultKind::Success,
                 vec![ToolResultPart::Text(TextBlock::new(
                     "retired exec result",

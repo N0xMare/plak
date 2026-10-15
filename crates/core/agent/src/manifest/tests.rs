@@ -1596,7 +1596,7 @@ fn composition_call(call_id: CallId, tool: &str) -> TestResult<ToolCallBlock> {
     Ok(ToolCallBlock::new(
         call_id,
         ToolName::new(tool)?,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::new(None, None, plakous_model::ToolCallerLineage::Direct)?,
         "{}",
@@ -3226,7 +3226,7 @@ fn a_round_tripped_records_absent_field_shape_is_frozen() -> TestResult {
         call: ToolCallBlock::new(
             CallId::try_from(Uuid::from_u128(77_001))?,
             ToolName::new("probe")?,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolCallState::Requested,
             ToolCorrelation::default(),
             "{}",

@@ -294,8 +294,8 @@ pub(in crate::runtime) mod test_support {
                 .flat_map(plakous_model::ConversationItem::blocks)
                 .any(|block| {
                     matches!(block, plakous_model::ContentBlock::ToolCall(call)
-                        if matches!(call.owner(), plakous_model::ToolExecutionOwner::PlakLocal
-                            | plakous_model::ToolExecutionOwner::PlakMcp { .. })
+                        if matches!(call.owner(), plakous_model::ToolExecutionOwner::Local
+                            | plakous_model::ToolExecutionOwner::Mcp { .. })
                         && matches!(call.state(), plakous_model::ToolCallState::Requested
                             | plakous_model::ToolCallState::Pending))
                 })

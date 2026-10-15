@@ -1094,7 +1094,7 @@ fn lower_history(
                             }
                         }
                         ContentBlock::ToolCall(call) => {
-                            if call.owner() != &ToolExecutionOwner::PlakLocal
+                            if call.owner() != &ToolExecutionOwner::Local
                                 || call.state() == ToolCallState::Pending
                                 || call.correlation().container_id().is_some()
                                 || call.correlation().caller_lineage() != &ToolCallerLineage::Direct
@@ -1232,7 +1232,7 @@ fn lower_history(
                             .ok_or_else(|| {
                                 invalid("tool-result update has no preceding assistant call")
                             })?;
-                        if update.owner() != &ToolExecutionOwner::PlakLocal
+                        if update.owner() != &ToolExecutionOwner::Local
                             || update.correlation() != &expected.correlation
                         {
                             return Err(invalid(
@@ -1254,7 +1254,7 @@ fn lower_history(
                         .pop_front()
                         .ok_or_else(|| invalid("tool result has no preceding assistant call"))?;
                     if result.call_id() != expected.call_id
-                        || result.owner() != &ToolExecutionOwner::PlakLocal
+                        || result.owner() != &ToolExecutionOwner::Local
                         || result.correlation() != &expected.correlation
                     {
                         return Err(invalid(
@@ -1645,7 +1645,7 @@ mod tests {
         let block = ContentBlock::ToolCall(plakous_model::ToolCallBlock::new(
             call_id,
             ToolName::new(name)?,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             state,
             correlation.clone(),
             raw_arguments,
@@ -1660,7 +1660,7 @@ mod tests {
     ) -> TestResult<ContentBlock> {
         Ok(ContentBlock::ToolResult(ToolResultBlock::new(
             call_id,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolResultKind::Success,
             vec![ToolResultPart::Text(TextBlock::new(text, None)?)],
             correlation,
@@ -1674,7 +1674,7 @@ mod tests {
     ) -> TestResult<ContentBlock> {
         Ok(ContentBlock::ToolResultUpdate(ToolResultUpdateBlock::new(
             call_id,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             TextBlock::new(text, None)?,
             correlation,
         )?))

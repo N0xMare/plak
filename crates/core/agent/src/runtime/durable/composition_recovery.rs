@@ -264,7 +264,7 @@ fn code_cell_abandonment_segment(
     .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
     let result = ToolResultBlock::new(
         request.call.call_id(),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolResultKind::Failure,
         vec![ToolResultPart::Text(text)],
         request.call.correlation().clone(),
@@ -628,7 +628,7 @@ pub(in crate::runtime) fn code_cell_abandonment_fold(
                     != continuation.request().bytes()
                 || continued.evaluation_operation_id != *parent
                 || continued.call.call_id() != *call_id
-                || continued.call.owner() != &ToolExecutionOwner::PlakLocal
+                || continued.call.owner() != &ToolExecutionOwner::Local
                 || continued.call.state() != ToolCallState::Requested
                 || continued.descriptor_identity != request.descriptor_identity
                 || continued.host_identity != request.host_identity
@@ -641,7 +641,7 @@ pub(in crate::runtime) fn code_cell_abandonment_fold(
     let Some((evaluation_operation, evaluation_attempt, evaluation_request)) = evaluation else {
         return Err(AgentError::from_store(SessionStoreError::corrupt()));
     };
-    if evaluation_request.call.owner() != &ToolExecutionOwner::PlakLocal
+    if evaluation_request.call.owner() != &ToolExecutionOwner::Local
         || evaluation_request.call.state() != ToolCallState::Requested
     {
         return Err(AgentError::from_store(SessionStoreError::corrupt()));

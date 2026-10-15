@@ -3093,7 +3093,7 @@ mod tests {
                 ToolCallBlock::new(
                     call_id,
                     ToolName::new("read").expect("tool"),
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolCallState::Requested,
                     correlation.clone(),
                     "{}",
@@ -3107,7 +3107,7 @@ mod tests {
             ContentBlock::ToolResult(
                 ToolResultBlock::new(
                     call_id,
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolResultKind::Success,
                     vec![ToolResultPart::Text(
                         TextBlock::new("ok", None).expect("text"),
@@ -4412,7 +4412,7 @@ mod tests {
                 ToolCallBlock::new(
                     call_id,
                     ToolName::new("read").expect("tool"),
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolCallState::Requested,
                     ToolCorrelation::default(),
                     "{}",
@@ -4441,7 +4441,7 @@ mod tests {
             ContentBlock::ToolResult(
                 ToolResultBlock::new(
                     call_id,
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolResultKind::Success,
                     vec![ToolResultPart::Text(
                         TextBlock::new("ok", None).expect("text"),
@@ -4476,7 +4476,7 @@ mod tests {
                 ToolCallBlock::new(
                     call_id,
                     ToolName::new("read").expect("tool"),
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolCallState::Requested,
                     correlation.clone(),
                     "{}",
@@ -4490,7 +4490,7 @@ mod tests {
             ContentBlock::ToolResult(
                 ToolResultBlock::new(
                     call_id,
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolResultKind::Success,
                     vec![ToolResultPart::Text(
                         TextBlock::new("ok", None).expect("text"),
@@ -4604,7 +4604,7 @@ mod tests {
                 ToolCallBlock::new(
                     call_id,
                     ToolName::new("read").expect("tool"),
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolCallState::Requested,
                     correlation.clone(),
                     "{}",
@@ -4621,7 +4621,7 @@ mod tests {
             ContentBlock::ToolResult(
                 ToolResultBlock::new(
                     call_id,
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolResultKind::Success,
                     vec![ToolResultPart::Text(
                         TextBlock::new("ok", None).expect("text"),

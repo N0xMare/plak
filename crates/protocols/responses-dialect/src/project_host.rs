@@ -1022,7 +1022,7 @@ fn validate_call_semantics(
         || !arguments_match
         || !matches!(
             call.owner(),
-            ToolExecutionOwner::PlakLocal | ToolExecutionOwner::PlakMcp { .. }
+            ToolExecutionOwner::Local | ToolExecutionOwner::Mcp { .. }
         )
         || !raw_caller_matches(native, call.correlation().caller_lineage())
         || call.state() != ToolCallState::Requested
@@ -1801,7 +1801,7 @@ mod tests {
         let request = request_with_tool(false);
         let aliased = |exposed: &str, canonical: &str| {
             let ContentBlock::ToolCall(call) = call_block(
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolCallState::Requested,
                 "remote-1",
                 exposed,
@@ -1834,7 +1834,7 @@ mod tests {
         let raw = raw_item(native.clone());
         let replay = envelope(&native);
         let request = request_with_tool(false);
-        let mcp = ToolExecutionOwner::PlakMcp {
+        let mcp = ToolExecutionOwner::Mcp {
             server: McpServerId::new("test-mcp").expect("server"),
         };
         let canonical = item(
@@ -1857,28 +1857,28 @@ mod tests {
                 "{}",
             ),
             call_block(
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolCallState::Pending,
                 "remote-1",
                 "lookup",
                 "{}",
             ),
             call_block(
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolCallState::Requested,
                 "wrong-id",
                 "lookup",
                 "{}",
             ),
             call_block(
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolCallState::Requested,
                 "remote-1",
                 "other",
                 "{}",
             ),
             call_block(
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolCallState::Requested,
                 "remote-1",
                 "lookup",
@@ -1900,7 +1900,7 @@ mod tests {
             vec![
                 replay_block(replay.clone()),
                 call_block(
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolCallState::Requested,
                     "remote-1",
                     "lookup",
@@ -1918,7 +1918,7 @@ mod tests {
             vec![
                 replay_block(replay.clone()),
                 call_block(
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolCallState::Requested,
                     "remote-1",
                     "lookup",
@@ -1927,7 +1927,7 @@ mod tests {
                 ContentBlock::ToolResult(
                     ToolResultBlock::new(
                         CallId::try_from(Uuid::from_u128(10)).expect("call"),
-                        ToolExecutionOwner::PlakLocal,
+                        ToolExecutionOwner::Local,
                         ToolResultKind::Success,
                         vec![ToolResultPart::Text(
                             TextBlock::new("result", None).expect("text"),
@@ -1956,7 +1956,7 @@ mod tests {
             vec![
                 replay_block(custom_replay.clone()),
                 call_block(
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolCallState::Requested,
                     "remote-2",
                     "lookup",
@@ -1989,7 +1989,7 @@ mod tests {
             vec![
                 replay_block(empty_replay.clone()),
                 call_block(
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolCallState::Requested,
                     "remote-3",
                     "lookup",
@@ -2020,7 +2020,7 @@ mod tests {
                 vec![
                     replay_block(invalid_replay.clone()),
                     call_block(
-                        ToolExecutionOwner::PlakLocal,
+                        ToolExecutionOwner::Local,
                         ToolCallState::Requested,
                         "remote-invalid",
                         "lookup",

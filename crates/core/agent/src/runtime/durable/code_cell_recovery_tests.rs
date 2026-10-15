@@ -171,7 +171,7 @@ async fn seed_mixed_debt(
                 ToolCallBlock::new(
                     CallId::try_from(uuid::Uuid::from_u128(0xc0de_3001))?,
                     ToolName::new("probe")?,
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolCallState::Requested,
                     ToolCorrelation::new(None, None, plakous_model::ToolCallerLineage::Direct)?,
                     "{}",

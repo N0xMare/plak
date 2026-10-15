@@ -3060,7 +3060,7 @@ impl<'a> ToolResultMatches<'a> {
             || &source.caller_lineage != result.correlation().caller_lineage()
             || !matches!(
                 result.owner(),
-                ToolExecutionOwner::PlakLocal | ToolExecutionOwner::PlakMcp { .. }
+                ToolExecutionOwner::Local | ToolExecutionOwner::Mcp { .. }
             )
         {
             return Err(ResponsesProtectedToolError::OwnerMismatch.into());
@@ -3152,7 +3152,7 @@ fn derive_tool_calls(
             }
             if !matches!(
                 call.owner(),
-                ToolExecutionOwner::PlakLocal | ToolExecutionOwner::PlakMcp { .. }
+                ToolExecutionOwner::Local | ToolExecutionOwner::Mcp { .. }
             ) {
                 return Err(ResponsesProtectedToolError::OwnerMismatch.into());
             }
@@ -3293,7 +3293,7 @@ fn lower_item(
                 }
                 if !matches!(
                     call.owner(),
-                    ToolExecutionOwner::PlakLocal | ToolExecutionOwner::PlakMcp { .. }
+                    ToolExecutionOwner::Local | ToolExecutionOwner::Mcp { .. }
                 ) {
                     return Err(
                         ResponsesRequestContentError::ProviderHostedCallWithoutReplay.into(),
@@ -3554,7 +3554,7 @@ fn has_complete_portable_item_semantics(item: &ConversationItem) -> bool {
                 if call.state() == ToolCallState::Requested
                     && matches!(
                         call.owner(),
-                        ToolExecutionOwner::PlakLocal | ToolExecutionOwner::PlakMcp { .. }
+                        ToolExecutionOwner::Local | ToolExecutionOwner::Mcp { .. }
                     ) =>
             {
                 semantic_blocks = semantic_blocks.saturating_add(1);

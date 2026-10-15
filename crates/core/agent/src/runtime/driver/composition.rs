@@ -1280,7 +1280,7 @@ impl Driver {
                 )?;
                 let Ok(update) = ToolResultUpdateBlock::new(
                     call_id,
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     text,
                     correlation,
                 ) else {

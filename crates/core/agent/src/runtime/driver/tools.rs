@@ -443,7 +443,7 @@ impl Driver {
         };
         let result = ToolResultBlock::new(
             call.call_id(),
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             kind,
             parts,
             call.correlation().clone(),
@@ -1847,7 +1847,7 @@ pub(super) fn superseded_tool_execution(
         .map_err(|_| internal())?;
     let result = ToolResultBlock::new(
         call.call_id(),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolResultKind::Failure,
         vec![ToolResultPart::Text(text)],
         call.correlation().clone(),

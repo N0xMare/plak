@@ -2607,7 +2607,7 @@ mod tests {
         let call = ToolCallBlock::new(
             call_id,
             ToolName::new("lookup")?,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolCallState::Requested,
             correlation.clone(),
             r#"{"q":"fixture"}"#,
@@ -2624,7 +2624,7 @@ mod tests {
             .staged_canonical_item_prefix_identity(std::slice::from_ref(&call_item))?;
         let result = ToolResultBlock::new(
             call_id,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolResultKind::Success,
             vec![ToolResultPart::Text(TextBlock::new(
                 "fixture result",

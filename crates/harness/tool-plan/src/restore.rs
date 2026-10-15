@@ -217,7 +217,7 @@ mod tests {
         let call = ToolCallBlock::new(
             call_id,
             ToolName::new(exposed).expect("name"),
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolCallState::Requested,
             ToolCorrelation::default(),
             arguments.to_owned(),
@@ -226,7 +226,7 @@ mod tests {
         .with_canonical_name(ToolName::new(canonical).expect("canonical name"));
         let result = ToolResultBlock::new(
             call_id,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolResultKind::Success,
             vec![ToolResultPart::Text(
                 TextBlock::new(result, None).expect("text"),

@@ -540,9 +540,9 @@ media_block!(AudioBlock, "A canonical audio block.");
 #[non_exhaustive]
 pub enum ToolExecutionOwner {
     /// A tool executed by the local Plakous runtime.
-    PlakLocal,
+    Local,
     /// A tool executed through a configured remote tool server.
-    PlakMcp {
+    Mcp {
         /// The server that owns execution.
         server: McpServerId,
     },
@@ -1030,7 +1030,7 @@ impl ToolResultUpdateBlock {
     ) -> Result<Self, ContentError> {
         if !matches!(
             owner,
-            ToolExecutionOwner::PlakLocal | ToolExecutionOwner::PlakMcp { .. }
+            ToolExecutionOwner::Local | ToolExecutionOwner::Mcp { .. }
         ) {
             return Err(ContentError::InvalidToolResultUpdateOwner);
         }
@@ -2366,7 +2366,7 @@ mod tests {
         let mut call = serde_json::to_value(ToolCallBlock::new(
             CallId::try_from(Uuid::from_u128(10))?,
             ToolName::new("lookup")?,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolCallState::Requested,
             ToolCorrelation::default(),
             "{\"value\":1}",
@@ -2392,7 +2392,7 @@ mod tests {
         let call = ToolCallBlock::new(
             CallId::try_from(Uuid::from_u128(30))?,
             ToolName::new("edit")?,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolCallState::Requested,
             ToolCorrelation::default(),
             "{}",
@@ -2417,7 +2417,7 @@ mod tests {
             ToolCorrelation::new(Some("remote-exec".into()), None, ToolCallerLineage::Direct)?;
         let update = ToolResultUpdateBlock::new(
             call_id,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             TextBlock::new("still running", None)?,
             correlation,
         )?;
@@ -2466,7 +2466,7 @@ mod tests {
         let local = ToolCallBlock::new(
             CallId::try_from(Uuid::from_u128(20))?,
             ToolName::new("local_lookup")?,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolCallState::Pending,
             ToolCorrelation::new(None, None, programmatic.clone())?,
             r#"{"query":"local"}"#,
@@ -2474,7 +2474,7 @@ mod tests {
         let mcp = ToolCallBlock::new(
             CallId::try_from(Uuid::from_u128(21))?,
             ToolName::new("mcp_lookup")?,
-            ToolExecutionOwner::PlakMcp {
+            ToolExecutionOwner::Mcp {
                 server: McpServerId::new("remote-catalog")?,
             },
             ToolCallState::Pending,
@@ -2502,8 +2502,8 @@ mod tests {
             hosted.correlation().caller_lineage(),
             &ToolCallerLineage::Direct
         );
-        assert!(matches!(local.owner(), ToolExecutionOwner::PlakLocal));
-        assert!(matches!(mcp.owner(), ToolExecutionOwner::PlakMcp { .. }));
+        assert!(matches!(local.owner(), ToolExecutionOwner::Local));
+        assert!(matches!(mcp.owner(), ToolExecutionOwner::Mcp { .. }));
         assert!(matches!(
             hosted.owner(),
             ToolExecutionOwner::ProviderHosted { .. }

@@ -223,7 +223,7 @@ impl ArtifactModel {
             tamper_affinity: false,
             tamper_run: false,
             tool_call_on: None,
-            tool_owner: ToolExecutionOwner::PlakLocal,
+            tool_owner: ToolExecutionOwner::Local,
             tool_correlation: ToolCorrelation::default(),
             secondary_tool_correlation: None,
             secondary_tool_name: None,
@@ -322,7 +322,7 @@ impl ArtifactModel {
     }
 
     pub(super) fn with_programmatic_mcp_tool(mut self) -> TestResult<Self> {
-        self.tool_owner = ToolExecutionOwner::PlakMcp {
+        self.tool_owner = ToolExecutionOwner::Mcp {
             server: plakous_model::McpServerId::new("test-mcp")?,
         };
         self.tool_correlation = ToolCorrelation::new(

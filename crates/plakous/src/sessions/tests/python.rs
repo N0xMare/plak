@@ -158,7 +158,7 @@ fn tool_call(id: Uuid, name: &str, arguments: &serde_json::Value) -> TestResult<
     Ok(ContentBlock::ToolCall(ToolCallBlock::new(
         CallId::try_from(id)?,
         ToolName::new(name)?,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::new(
             Some(format!("py-{id}")),

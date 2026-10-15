@@ -960,7 +960,7 @@ pub(crate) fn normalized_tool_failure(
         .map_err(|_| AgentError::from_tool(error))?;
     ToolResultBlock::new(
         call.call_id(),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolResultKind::Failure,
         vec![ToolResultPart::Text(text)],
         call.correlation().clone(),
@@ -990,7 +990,7 @@ pub(super) fn no_active_cell_wait_result(
     .map_err(|_| internal())?;
     ToolResultBlock::new(
         call.call_id(),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolResultKind::Success,
         vec![ToolResultPart::Text(text)],
         call.correlation().clone(),

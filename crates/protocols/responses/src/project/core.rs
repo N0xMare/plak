@@ -1506,7 +1506,7 @@ mod tests {
             entry,
             "call_1",
             name,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             "",
             &mut out,
         )

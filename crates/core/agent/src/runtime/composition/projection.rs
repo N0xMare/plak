@@ -464,7 +464,7 @@ pub(in crate::runtime) fn local_composition_nested_execution_owner(
             "nested local composition projection widens the frozen executable registry",
         ));
     }
-    Ok(ToolExecutionOwner::PlakLocal)
+    Ok(ToolExecutionOwner::Local)
 }
 
 #[cfg(test)]

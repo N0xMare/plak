@@ -280,7 +280,7 @@ fn nested_observation_token_upper_bound_counts_tool_result_text() {
     let body = "x".repeat(40_960);
     let result = ToolResultBlock::new(
         call,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolResultKind::Success,
         vec![ToolResultPart::Text(
             TextBlock::new(body, None).expect("text"),
@@ -455,7 +455,7 @@ mod placeholders {
                 ToolCallBlock::new(
                     CallId::try_from(Uuid::from_u128(call_id)).expect("call"),
                     ToolName::new(tool).expect("tool name"),
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolCallState::Completed,
                     correlation(),
                     arguments.to_owned(),
@@ -474,7 +474,7 @@ mod placeholders {
             vec![ContentBlock::ToolResult(
                 ToolResultBlock::new(
                     CallId::try_from(Uuid::from_u128(call_id)).expect("call"),
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolResultKind::Success,
                     vec![ToolResultPart::Text(
                         TextBlock::new(body, None).expect("text"),

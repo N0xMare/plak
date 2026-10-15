@@ -585,7 +585,7 @@ fn terminal_tool_execution(
     };
     let result = ToolResultBlock::new(
         call.call_id(),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         kind,
         request.outcome.parts().to_vec(),
         call.correlation().clone(),
@@ -908,7 +908,7 @@ mod tests {
     fn execution(text: &str, dispatched: bool) -> Result<ToolExecutionResult, TestError> {
         let result = ToolResultBlock::new(
             CallId::try_from(uuid::Uuid::from_u128(902))?,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolResultKind::Success,
             vec![plakous_model::ToolResultPart::Text(
                 plakous_model::TextBlock::new(text, None)?,
@@ -958,7 +958,7 @@ mod tests {
         Ok(ToolCallBlock::new(
             CallId::try_from(uuid::Uuid::from_u128(902))?,
             plakous_model::ToolName::new("await_agents")?,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             plakous_model::ToolCallState::Requested,
             plakous_model::ToolCorrelation::default(),
             "{}",

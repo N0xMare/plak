@@ -1034,7 +1034,7 @@ fn loopback_response(
                 CallId::try_from(loopback_identity(plan, identity_namespace, round, b"call")?)
                     .map_err(invalid_model_fixture)?,
                 ToolName::new(name).map_err(invalid_model_fixture)?,
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolCallState::Requested,
                 ToolCorrelation::default(),
                 serde_json::to_string(&arguments).map_err(invalid_model_fixture)?,
@@ -1048,7 +1048,7 @@ fn loopback_response(
                 CallId::try_from(loopback_identity(plan, identity_namespace, round, b"call")?)
                     .map_err(invalid_model_fixture)?,
                 ToolName::new(name).map_err(invalid_model_fixture)?,
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolCallState::Requested,
                 ToolCorrelation::default(),
                 serde_json::to_string(&arguments).map_err(invalid_model_fixture)?,
@@ -1074,7 +1074,7 @@ fn loopback_response(
                 CallId::try_from(loopback_identity(plan, identity_namespace, round, b"call")?)
                     .map_err(invalid_model_fixture)?,
                 ToolName::new("loopback_effect").map_err(invalid_model_fixture)?,
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolCallState::Requested,
                 ToolCorrelation::default(),
                 "{}",
@@ -1460,7 +1460,7 @@ fn scripted_tool_call(
         ToolCallBlock::new(
             CallId::try_from(Uuid::from_u128(identity)).map_err(invalid_model_fixture)?,
             ToolName::new(name.to_owned()).map_err(invalid_model_fixture)?,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolCallState::Requested,
             ToolCorrelation::default(),
             arguments,

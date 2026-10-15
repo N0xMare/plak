@@ -418,7 +418,7 @@ impl ToolOutcome {
         };
         ToolResultBlock::new(
             invocation.call_id(),
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             kind,
             self.parts.clone(),
             invocation.correlation().clone(),

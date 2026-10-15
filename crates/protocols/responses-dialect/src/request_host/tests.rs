@@ -315,8 +315,8 @@ fn native_compaction_prior(
 fn requested_calls_with_results_prepare_fresh_on_shared_responses_routes() -> TestResult {
     let (protocol, family, model) = target_values()?;
     for owner in [
-        ToolExecutionOwner::PlakLocal,
-        ToolExecutionOwner::PlakMcp {
+        ToolExecutionOwner::Local,
+        ToolExecutionOwner::Mcp {
             server: plakous_model::McpServerId::new("fixture")?,
         },
     ] {
@@ -483,7 +483,7 @@ fn projector_shaped_history_reopens_with_exact_artifact_and_prepares_fresh() -> 
     let call = ToolCallBlock::new(
         id::<CallId>(28)?,
         ToolName::new("lookup")?,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::new(Some("call-1".to_owned()), None, ToolCallerLineage::Direct)?,
         "{}",
@@ -836,7 +836,7 @@ fn cross_provider_history(
     let call = ToolCallBlock::new(
         id::<CallId>(base)?,
         ToolName::new("lookup")?,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::new(
             Some(format!("call-{base}")),
@@ -884,7 +884,7 @@ fn cross_provider_history(
             Actor::Tool,
             vec![ContentBlock::ToolResult(ToolResultBlock::new(
                 call.call_id(),
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolResultKind::Success,
                 vec![ToolResultPart::Text(TextBlock::new(
                     "portable result",
@@ -3093,7 +3093,7 @@ fn ordered_function_and_custom_tool_groups_lower_exactly() -> TestResult {
     let function_call = ToolCallBlock::new(
         id::<CallId>(20)?,
         ToolName::new("lookup")?,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::new(
             Some("remote-function".to_owned()),
@@ -3105,7 +3105,7 @@ fn ordered_function_and_custom_tool_groups_lower_exactly() -> TestResult {
     let custom_call = ToolCallBlock::new(
         id::<CallId>(21)?,
         ToolName::new("write_code")?,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::new(
             Some("remote-custom".to_owned()),
@@ -3129,7 +3129,7 @@ fn ordered_function_and_custom_tool_groups_lower_exactly() -> TestResult {
         vec![
             ContentBlock::ToolResult(ToolResultBlock::new(
                 function_call.call_id(),
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolResultKind::Success,
                 vec![ToolResultPart::Text(TextBlock::new(
                     long_result.clone(),
@@ -3139,13 +3139,13 @@ fn ordered_function_and_custom_tool_groups_lower_exactly() -> TestResult {
             )?),
             ContentBlock::ToolResultUpdate(ToolResultUpdateBlock::new(
                 custom_call.call_id(),
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 TextBlock::new("halfway", None)?,
                 custom_call.correlation().clone(),
             )?),
             ContentBlock::ToolResult(ToolResultBlock::new(
                 custom_call.call_id(),
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolResultKind::Success,
                 vec![ToolResultPart::Text(TextBlock::new("written", None)?)],
                 custom_call.correlation().clone(),
@@ -3183,7 +3183,7 @@ fn ordered_function_and_custom_tool_groups_lower_exactly() -> TestResult {
     let invalid_custom = ToolCallBlock::new(
         id::<CallId>(27)?,
         ToolName::new("write_code")?,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::new(
             Some("invalid-custom".to_owned()),
@@ -3205,7 +3205,7 @@ fn ordered_function_and_custom_tool_groups_lower_exactly() -> TestResult {
                 Actor::Tool,
                 vec![ContentBlock::ToolResult(ToolResultBlock::new(
                     invalid_custom.call_id(),
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolResultKind::Success,
                     vec![ToolResultPart::Text(TextBlock::new("written", None)?)],
                     invalid_custom.correlation().clone(),
@@ -3247,7 +3247,7 @@ fn code_mode_exec_cell_replays_as_a_function_call_on_a_direct_target() -> TestRe
     let exec_call = ToolCallBlock::new(
         id::<CallId>(40)?,
         ToolName::new("exec")?,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::new(
             Some("call_exec_1".to_owned()),
@@ -3260,7 +3260,7 @@ fn code_mode_exec_cell_replays_as_a_function_call_on_a_direct_target() -> TestRe
     let wait_call = ToolCallBlock::new(
         id::<CallId>(41)?,
         ToolName::new("wait")?,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::new(
             Some("call_wait_1".to_owned()),
@@ -3284,20 +3284,20 @@ fn code_mode_exec_cell_replays_as_a_function_call_on_a_direct_target() -> TestRe
         vec![
             ContentBlock::ToolResultUpdate(ToolResultUpdateBlock::new(
                 exec_call.call_id(),
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 TextBlock::new("/home/op", None)?,
                 exec_call.correlation().clone(),
             )?),
             ContentBlock::ToolResult(ToolResultBlock::new(
                 exec_call.call_id(),
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolResultKind::Success,
                 vec![ToolResultPart::Text(TextBlock::new("cell done", None)?)],
                 exec_call.correlation().clone(),
             )?),
             ContentBlock::ToolResult(ToolResultBlock::new(
                 wait_call.call_id(),
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolResultKind::Success,
                 vec![ToolResultPart::Text(TextBlock::new("waited", None)?)],
                 wait_call.correlation().clone(),
@@ -3415,7 +3415,7 @@ fn fresh_codex_body_matches_portable_reasoning_projection() -> TestResult {
     let call = ToolCallBlock::new(
         id::<CallId>(930)?,
         ToolName::new("lookup")?,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::default(),
         r#"{"q":"cache"}"#,
@@ -3443,7 +3443,7 @@ fn fresh_codex_body_matches_portable_reasoning_projection() -> TestResult {
             Actor::Tool,
             vec![ContentBlock::ToolResult(ToolResultBlock::new(
                 call.call_id(),
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolResultKind::Success,
                 vec![ToolResultPart::Text(TextBlock::new("result", None)?)],
                 ToolCorrelation::default(),
@@ -3506,14 +3506,14 @@ fn result_before_call_fails_with_exact_protected_group_error() -> TestResult {
     let call = ToolCallBlock::new(
         id::<CallId>(30)?,
         ToolName::new("lookup")?,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::default(),
         r#"{"q":"order"}"#,
     )?;
     let result = ToolResultBlock::new(
         call.call_id(),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolResultKind::Success,
         vec![ToolResultPart::Text(TextBlock::new("found", None)?)],
         ToolCorrelation::default(),
@@ -3668,7 +3668,7 @@ fn openai_platform_programmatic_request_and_replay_are_exact_in_both_storage_mod
     let call = ToolCallBlock::new(
         id::<CallId>(146)?,
         ToolName::new("lookup")?,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::new(Some("call_1".to_owned()), None, lineage.clone())?,
         r#"{"q":"x"}"#,
@@ -3699,7 +3699,7 @@ fn openai_platform_programmatic_request_and_replay_are_exact_in_both_storage_mod
         Actor::Tool,
         vec![ContentBlock::ToolResult(ToolResultBlock::new(
             call.call_id(),
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolResultKind::Success,
             vec![ToolResultPart::Text(TextBlock::new("found", None)?)],
             ToolCorrelation::new(Some("call_1".to_owned()), None, lineage)?,
@@ -3744,7 +3744,7 @@ fn openai_platform_programmatic_request_and_replay_are_exact_in_both_storage_mod
     let second_call = ToolCallBlock::new(
         id::<CallId>(150)?,
         ToolName::new("lookup")?,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::new(Some("call_2".to_owned()), None, second_lineage.clone())?,
         r#"{"q":"y"}"#,
@@ -3766,7 +3766,7 @@ fn openai_platform_programmatic_request_and_replay_are_exact_in_both_storage_mod
         Actor::Tool,
         vec![ContentBlock::ToolResult(ToolResultBlock::new(
             second_call.call_id(),
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolResultKind::Success,
             vec![ToolResultPart::Text(TextBlock::new("found again", None)?)],
             ToolCorrelation::new(Some("call_2".to_owned()), None, second_lineage)?,

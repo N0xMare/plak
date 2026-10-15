@@ -194,7 +194,7 @@ impl LanguageModel for ConsumerModel {
                         ToolCallBlock::new(
                             CallId::try_from(uuid::Uuid::from_u128(100 + index as u128)).unwrap(),
                             ToolName::new(name).unwrap(),
-                            ToolExecutionOwner::PlakLocal,
+                            ToolExecutionOwner::Local,
                             ToolCallState::Requested,
                             ToolCorrelation::new(None, None, ToolCallerLineage::Direct).unwrap(),
                             serde_json::to_string(input).unwrap(),

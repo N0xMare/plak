@@ -462,7 +462,7 @@ impl ToolOwnership {
         self.owners
             .get(tool)
             .cloned()
-            .unwrap_or(ToolExecutionOwner::PlakLocal)
+            .unwrap_or(ToolExecutionOwner::Local)
     }
     /// Reports whether the exact tool was included.
     pub fn contains(&self, tool: &ToolName) -> bool {
@@ -730,7 +730,7 @@ pub fn lower_request_with_active_artifact(
         ownership
             .owners
             .entry(name.clone())
-            .or_insert(ToolExecutionOwner::PlakLocal);
+            .or_insert(ToolExecutionOwner::Local);
         let caller = request
             .tools()
             .iter()
@@ -3397,7 +3397,7 @@ mod tests {
                     let tool_call = ToolCallBlock::new(
                         CallId::try_from(TestUuid::from_u128(103))?,
                         ToolName::new("process_session_start")?,
-                        ToolExecutionOwner::PlakLocal,
+                        ToolExecutionOwner::Local,
                         plakous_model::ToolCallState::Requested,
                         plakous_model::ToolCorrelation::new(
                             Some("call_current".into()),
@@ -3947,7 +3947,7 @@ mod tests {
         let call = ToolCallBlock::new(
             CallId::try_from(uuid::Uuid::from_u128(11))?,
             ToolName::new("process_session_start")?,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             plakous_model::ToolCallState::Requested,
             plakous_model::ToolCorrelation::new(
                 Some("call_1".into()),
@@ -3980,7 +3980,7 @@ mod tests {
         let call = ToolCallBlock::new(
             CallId::try_from(uuid::Uuid::from_u128(12))?,
             ToolName::new("Bash")?,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             plakous_model::ToolCallState::Requested,
             plakous_model::ToolCorrelation::new(
                 Some("call_2".into()),
@@ -4010,7 +4010,7 @@ mod tests {
         let exec_call = ToolCallBlock::new(
             CallId::try_from(uuid::Uuid::from_u128(21))?,
             ToolName::new("exec")?,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             plakous_model::ToolCallState::Requested,
             plakous_model::ToolCorrelation::new(
                 Some("call_exec_1".into()),
@@ -4036,7 +4036,7 @@ mod tests {
         let unparsed = ToolCallBlock::new(
             CallId::try_from(uuid::Uuid::from_u128(22))?,
             ToolName::new("exec")?,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             plakous_model::ToolCallState::Requested,
             plakous_model::ToolCorrelation::new(
                 Some("call_exec_2".into()),
@@ -4059,7 +4059,7 @@ mod tests {
         let call = ToolCallBlock::new(
             CallId::try_from(uuid::Uuid::from_u128(12))?,
             ToolName::new("local_lookup")?,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             plakous_model::ToolCallState::Requested,
             plakous_model::ToolCorrelation::new(
                 Some("call_local_1".into()),
@@ -4327,14 +4327,14 @@ mod tests {
         )?;
         let result = plakous_model::ToolResultBlock::new(
             call_id,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolResultKind::Success,
             vec![ToolResultPart::Text(TestTextBlock::new("done", None)?)],
             correlation.clone(),
         )?;
         let update = ToolResultUpdateBlock::new(
             call_id,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             TestTextBlock::new("late", None)?,
             correlation.clone(),
         )?;
@@ -4350,7 +4350,7 @@ mod tests {
         let mut pending = vec![PendingTool {
             call_id,
             remote_id: "remote-exec".into(),
-            owner: ToolExecutionOwner::PlakLocal,
+            owner: ToolExecutionOwner::Local,
             correlation,
         }];
         let mut index = 0;
@@ -4372,13 +4372,13 @@ mod tests {
         )?;
         let update = ToolResultUpdateBlock::new(
             call_id,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             plakous_model::TextBlock::new("working", None)?,
             correlation.clone(),
         )?;
         let result = plakous_model::ToolResultBlock::new(
             call_id,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolResultKind::Success,
             vec![
                 ToolResultPart::Image(plakous_model::ImageBlock::with_detail(
@@ -4398,7 +4398,7 @@ mod tests {
             &PendingTool {
                 call_id,
                 remote_id: "remote-exec".into(),
-                owner: ToolExecutionOwner::PlakLocal,
+                owner: ToolExecutionOwner::Local,
                 correlation,
             },
             &[&update],
@@ -4415,7 +4415,7 @@ mod tests {
         Ok(ContentBlock::ToolCall(ToolCallBlock::new(
             CallId::try_from(TestUuid::from_u128(n))?,
             ToolName::new("read_file")?,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             plakous_model::ToolCallState::Requested,
             plakous_model::ToolCorrelation::new(
                 Some(format!("call_{n}")),
@@ -4430,7 +4430,7 @@ mod tests {
         Ok(ContentBlock::ToolResult(
             plakous_model::ToolResultBlock::new(
                 CallId::try_from(TestUuid::from_u128(n))?,
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolResultKind::Success,
                 vec![ToolResultPart::Text(TestTextBlock::new("ok", None)?)],
                 plakous_model::ToolCorrelation::new(

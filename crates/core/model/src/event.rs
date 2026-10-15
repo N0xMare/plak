@@ -2072,7 +2072,7 @@ fn validate_revoked_output(open: &OpenAssembly) -> Result<(), ModelError> {
         next_block += 1;
         match block {
             PartialBlock::ToolCall {
-                owner: ToolExecutionOwner::PlakLocal | ToolExecutionOwner::PlakMcp { .. },
+                owner: ToolExecutionOwner::Local | ToolExecutionOwner::Mcp { .. },
                 state: ToolCallState::Requested,
                 ..
             } => {}
@@ -2735,8 +2735,8 @@ mod tests {
             provider_kind: crate::NamespaceId::new("hosted.search")?,
         };
         let response = output_response(vec![vec![
-            call(1, "edit", ToolExecutionOwner::PlakLocal)?,
-            call(2, "write", ToolExecutionOwner::PlakLocal)?,
+            call(1, "edit", ToolExecutionOwner::Local)?,
+            call(2, "write", ToolExecutionOwner::Local)?,
             call(3, "web_search", hosted)?,
         ]])?
         .with_canonical_tool_names(|call| {
@@ -3318,12 +3318,8 @@ mod tests {
     fn refusal_can_revoke_unfinished_local_arguments_but_not_remote_inputs()
     -> Result<(), Box<dyn std::error::Error>> {
         for (owner, reason, accepted) in [
-            (ToolExecutionOwner::PlakLocal, FinishReason::Refusal, true),
-            (
-                ToolExecutionOwner::PlakLocal,
-                FinishReason::ToolCalls,
-                false,
-            ),
+            (ToolExecutionOwner::Local, FinishReason::Refusal, true),
+            (ToolExecutionOwner::Local, FinishReason::ToolCalls, false),
             (
                 ToolExecutionOwner::ProviderHosted {
                     provider_kind: crate::NamespaceId::new("remote")?,
@@ -3364,8 +3360,8 @@ mod tests {
     fn refusal_revokes_only_unexecuted_client_proposals() -> Result<(), Box<dyn std::error::Error>>
     {
         for owner in [
-            ToolExecutionOwner::PlakLocal,
-            ToolExecutionOwner::PlakMcp {
+            ToolExecutionOwner::Local,
+            ToolExecutionOwner::Mcp {
                 server: crate::McpServerId::new("test-server")?,
             },
             ToolExecutionOwner::ProviderHosted {
@@ -3411,9 +3407,9 @@ mod tests {
     fn discarded_refusal_still_binds_identity_usage_and_effects()
     -> Result<(), Box<dyn std::error::Error>> {
         for (owner, changed_id, changed_usage, accepted) in [
-            (ToolExecutionOwner::PlakLocal, false, false, true),
-            (ToolExecutionOwner::PlakLocal, true, false, false),
-            (ToolExecutionOwner::PlakLocal, false, true, false),
+            (ToolExecutionOwner::Local, false, false, true),
+            (ToolExecutionOwner::Local, true, false, false),
+            (ToolExecutionOwner::Local, false, true, false),
             (
                 ToolExecutionOwner::ProviderHosted {
                     provider_kind: crate::NamespaceId::new("remote")?,
@@ -3743,7 +3739,7 @@ mod tests {
                     ContentBlock::ToolCall(ToolCallBlock::new(
                         call(3)?,
                         ToolName::new("lookup")?,
-                        ToolExecutionOwner::PlakLocal,
+                        ToolExecutionOwner::Local,
                         ToolCallState::Requested,
                         ToolCorrelation::default(),
                         "{\"key\":1}",
@@ -3783,7 +3779,7 @@ mod tests {
                 BlockStart::ToolCall {
                     call_id: call(3)?,
                     tool: ToolName::new("lookup")?,
-                    owner: ToolExecutionOwner::PlakLocal,
+                    owner: ToolExecutionOwner::Local,
                     state: ToolCallState::Requested,
                     correlation: ToolCorrelation::default(),
                 },
@@ -3977,7 +3973,7 @@ mod tests {
             BlockStart::ToolCall {
                 call_id: call(2)?,
                 tool: ToolName::new("lookup")?,
-                owner: ToolExecutionOwner::PlakLocal,
+                owner: ToolExecutionOwner::Local,
                 state: ToolCallState::Requested,
                 correlation: ToolCorrelation::default(),
             },

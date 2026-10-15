@@ -410,7 +410,7 @@ fn tool_batch_scenario(
         ToolCallBlock::new(
             id::<CallId>(101)?,
             definition.name().clone(),
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolCallState::Requested,
             ToolCorrelation::default(),
             r#"{"value":"a"}"#,
@@ -418,7 +418,7 @@ fn tool_batch_scenario(
         ToolCallBlock::new(
             id::<CallId>(102)?,
             definition.name().clone(),
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolCallState::Requested,
             ToolCorrelation::default(),
             r#"{"value":"b"}"#,
@@ -449,7 +449,7 @@ fn tool_batch_scenario(
                 BlockStart::ToolCall {
                     call_id: call.call_id(),
                     tool: call.exposed_name().clone(),
-                    owner: ToolExecutionOwner::PlakLocal,
+                    owner: ToolExecutionOwner::Local,
                     state: ToolCallState::Requested,
                     correlation: ToolCorrelation::default(),
                 },
@@ -486,7 +486,7 @@ fn canonical_tool_result(
         Actor::Tool,
         vec![ContentBlock::ToolResult(ToolResultBlock::new(
             call.call_id(),
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolResultKind::Success,
             vec![ToolResultPart::Text(TextBlock::new(text, None)?)],
             call.correlation().clone(),
@@ -780,7 +780,7 @@ async fn pending_decision_fixture() -> TestResult<(
         let call = ToolCallBlock::new(
             id::<CallId>(101)?,
             definition.name().clone(),
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolCallState::Requested,
             ToolCorrelation::default(),
             r#"{"value":"x"}"#,
@@ -816,7 +816,7 @@ async fn pending_decision_fixture() -> TestResult<(
                             BlockStart::ToolCall {
                                 call_id: call.call_id(),
                                 tool: call.exposed_name().clone(),
-                                owner: ToolExecutionOwner::PlakLocal,
+                                owner: ToolExecutionOwner::Local,
                                 state: ToolCallState::Requested,
                                 correlation: ToolCorrelation::default(),
                             },
@@ -1831,7 +1831,7 @@ fn unfinished_tool_scenario(
     let call = ToolCallBlock::new(
         id::<CallId>(101)?,
         definition.name().clone(),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::default(),
         r#"{"value":"incomplete"}"#,
@@ -1863,7 +1863,7 @@ fn unfinished_tool_scenario(
                 BlockStart::ToolCall {
                     call_id: call.call_id(),
                     tool: call.exposed_name().clone(),
-                    owner: ToolExecutionOwner::PlakLocal,
+                    owner: ToolExecutionOwner::Local,
                     state: ToolCallState::Requested,
                     correlation: ToolCorrelation::default(),
                 },
@@ -2176,7 +2176,7 @@ fn single_tool_call_scenario(
     let call = ToolCallBlock::new(
         id::<CallId>(entry + 1)?,
         definition.name().clone(),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::default(),
         r#"{"value":"x"}"#,
@@ -2208,7 +2208,7 @@ fn single_tool_call_scenario(
                 BlockStart::ToolCall {
                     call_id: call.call_id(),
                     tool: call.exposed_name().clone(),
-                    owner: ToolExecutionOwner::PlakLocal,
+                    owner: ToolExecutionOwner::Local,
                     state: ToolCallState::Requested,
                     correlation: ToolCorrelation::default(),
                 },

@@ -1186,14 +1186,14 @@ mod tests {
         let call = ToolCallBlock::new(
             CallId::try_from(uuid::Uuid::from_u128(902))?,
             ToolName::new("loopback_effect")?,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolCallState::Requested,
             ToolCorrelation::default(),
             "{}",
         )?;
         let result = ToolResultBlock::new(
             call.call_id(),
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolResultKind::Failure,
             plakous_tools::ToolOutcome::failure_text("superseded by steering")?
                 .parts()

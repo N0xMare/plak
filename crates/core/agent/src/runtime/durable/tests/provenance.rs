@@ -718,7 +718,7 @@ fn nested_canonical_failure_is_catchable_and_success_strings_are_exact() -> Test
     ] {
         let result = ToolResultBlock::new(
             CallId::try_from(Uuid::from_u128(7))?,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             kind,
             vec![ToolResultPart::Text(TextBlock::new(body, None)?)],
             ToolCorrelation::new(None, None, plakous_model::ToolCallerLineage::Direct)?,

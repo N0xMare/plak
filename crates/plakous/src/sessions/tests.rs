@@ -7242,7 +7242,7 @@ mod portable_history {
                         vec![ContentBlock::ToolCall(ToolCallBlock::new(
                             call_id,
                             ToolName::new("read")?,
-                            ToolExecutionOwner::PlakLocal,
+                            ToolExecutionOwner::Local,
                             ToolCallState::Requested,
                             correlation.clone(),
                             "{\"path\":\"seed.txt\"}",
@@ -7253,7 +7253,7 @@ mod portable_history {
                         Actor::Tool,
                         vec![ContentBlock::ToolResult(ToolResultBlock::new(
                             call_id,
-                            ToolExecutionOwner::PlakLocal,
+                            ToolExecutionOwner::Local,
                             ToolResultKind::Success,
                             vec![ToolResultPart::Text(TextBlock::new("seed contents", None)?)],
                             correlation,

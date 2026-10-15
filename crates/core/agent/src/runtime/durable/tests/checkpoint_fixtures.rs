@@ -402,7 +402,7 @@ pub(super) async fn seed_code_cell_recovery_checkpoint(
     let call = ToolCallBlock::new(
         call_id,
         ToolName::new("exec".to_owned())?,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         correlation,
         "text('started')",
@@ -515,7 +515,7 @@ pub(super) async fn seed_code_cell_recovery_checkpoint(
     let continuation_call = ToolCallBlock::new(
         continuation_call_id,
         ToolName::new("wait".to_owned())?,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::new(
             Some("remote-code-cell-wait".to_owned()),

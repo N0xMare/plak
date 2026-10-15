@@ -40,7 +40,7 @@ fn source(name: &str, retain_owner: bool) -> SessionTranscriptSource {
             ToolCallBlock::new(
                 call_id,
                 ToolName::new(if index == 0 { name } else { "read_file" }).unwrap(),
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolCallState::Requested,
                 correlation.clone(),
                 if index != 0 {
@@ -56,7 +56,7 @@ fn source(name: &str, retain_owner: bool) -> SessionTranscriptSource {
         results.push(ContentBlock::ToolResult(
             ToolResultBlock::new(
                 call_id,
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 if index == 2 {
                     ToolResultKind::Failure
                 } else {
@@ -310,7 +310,7 @@ fn append_exchange(
                             ToolCallBlock::new(
                                 call_id,
                                 ToolName::new(name).unwrap(),
-                                ToolExecutionOwner::PlakLocal,
+                                ToolExecutionOwner::Local,
                                 ToolCallState::Requested,
                                 correlation.clone(),
                                 arguments,
@@ -326,7 +326,7 @@ fn append_exchange(
                         vec![ContentBlock::ToolResult(
                             ToolResultBlock::new(
                                 call_id,
-                                ToolExecutionOwner::PlakLocal,
+                                ToolExecutionOwner::Local,
                                 ToolResultKind::Success,
                                 vec![ToolResultPart::Text(
                                     TextBlock::new("Script completed", None).unwrap(),
@@ -673,7 +673,7 @@ fn effect_projection_skips_malformed_oversized_and_pruned_evidence_and_redacts_p
         ToolCallBlock::new(
             id(2),
             ToolName::new("read_file").unwrap(),
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolCallState::Requested,
             ToolCorrelation::new(
                 None,
@@ -692,7 +692,7 @@ fn effect_projection_skips_malformed_oversized_and_pruned_evidence_and_redacts_p
     assert!(!oversized.iter().any(|call| call.call_id == id(2)));
     let result = ToolResultBlock::new(
         id(2),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolResultKind::Success,
         vec![ToolResultPart::Text(
             TextBlock::new("token=sk-abcdefghijklmnopqrstuvwxyz0123", None).unwrap(),

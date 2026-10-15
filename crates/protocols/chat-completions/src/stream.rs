@@ -1205,7 +1205,7 @@ impl ChatStreamProjector {
                 BlockStart::ToolCall {
                     call_id,
                     tool: name.clone(),
-                    owner: ToolExecutionOwner::PlakLocal,
+                    owner: ToolExecutionOwner::Local,
                     state: ToolCallState::Requested,
                     correlation: correlation.clone(),
                 },
@@ -1221,7 +1221,7 @@ impl ChatStreamProjector {
                     ToolCallBlock::new(
                         call_id,
                         name,
-                        ToolExecutionOwner::PlakLocal,
+                        ToolExecutionOwner::Local,
                         ToolCallState::Requested,
                         correlation,
                         call.arguments.clone(),
@@ -2494,7 +2494,7 @@ mod tests {
         let blocks = terminal.response().output()[0].blocks();
         assert_eq!(blocks.len(), 2);
         assert!(
-            matches!(&blocks[0], ContentBlock::ToolCall(call) if call.exposed_name().as_str() == "lookup" && call.raw_arguments() == "{\"q\":\"x\"}" && call.correlation().remote_call_id() == Some("call-a") && call.owner() == &ToolExecutionOwner::PlakLocal)
+            matches!(&blocks[0], ContentBlock::ToolCall(call) if call.exposed_name().as_str() == "lookup" && call.raw_arguments() == "{\"q\":\"x\"}" && call.correlation().remote_call_id() == Some("call-a") && call.owner() == &ToolExecutionOwner::Local)
         );
         assert!(
             matches!(&blocks[1], ContentBlock::ToolCall(call) if call.exposed_name().as_str() == "write" && call.raw_arguments() == "{\"n\":2}")

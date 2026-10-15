@@ -261,7 +261,7 @@ fn commands_operations_and_workflows_report_only_this_commits_delta() -> TestRes
     let call = ToolCallBlock::new(
         id::<CallId>(8_001)?,
         ToolName::new("read_file")?,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::default(),
         r#"{"path":"src/lib.rs"}"#,
@@ -446,7 +446,7 @@ fn a_provider_programmatic_call_names_its_hosted_program() -> TestResult {
     let call = ToolCallBlock::new(
         id::<CallId>(8_101)?,
         ToolName::new("read_file")?,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::new(
             Some("remote-1".to_owned()),

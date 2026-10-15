@@ -788,7 +788,7 @@ pub(super) fn collect_local_calls<'a>(
                 ));
             }
             match call.owner() {
-                ToolExecutionOwner::PlakLocal | ToolExecutionOwner::PlakMcp { .. }
+                ToolExecutionOwner::Local | ToolExecutionOwner::Mcp { .. }
                     if matches!(
                         call.state(),
                         ToolCallState::Requested | ToolCallState::Pending
@@ -796,7 +796,7 @@ pub(super) fn collect_local_calls<'a>(
                 {
                     calls.push(call);
                 }
-                ToolExecutionOwner::PlakLocal | ToolExecutionOwner::PlakMcp { .. } => {
+                ToolExecutionOwner::Local | ToolExecutionOwner::Mcp { .. } => {
                     return Err(ModelError::new(
                         ModelErrorKind::InvalidEvent,
                         "model requested local dispatch with a terminal tool-call state",

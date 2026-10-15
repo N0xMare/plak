@@ -15,7 +15,7 @@ fn observation_redacts_before_subject_and_argument_bounds() {
             .parse::<CallId>()
             .expect("call ID"),
         ToolName::new("exec_command").expect("name"),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::new(
             Some("remote-command".into()),
@@ -50,7 +50,7 @@ fn long_patch_subject_keeps_complete_diffstat() {
             .parse::<CallId>()
             .expect("call ID"),
         ToolName::new("apply_patch").expect("name"),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::new(
             Some("remote-patch".into()),
@@ -75,7 +75,7 @@ fn subjects_are_single_line_and_bounded_without_marker_text() {
             .parse::<CallId>()
             .expect("call ID"),
         ToolName::new("read_file").expect("name"),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::new(
             Some("remote-read".into()),
@@ -105,7 +105,7 @@ fn local_composition_exec_admission_unquotes_the_canonical_custom_tool_string() 
             .parse::<CallId>()
             .expect("call ID"),
         ToolName::new("exec").expect("tool name"),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::new(
             Some("remote-exec".to_owned()),
@@ -140,7 +140,7 @@ fn local_composition_exec_admission_preserves_a_structured_function_object() {
             .parse::<CallId>()
             .expect("call ID"),
         ToolName::new("execute").expect("tool name"),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::new(
             Some("remote-execute".to_owned()),
@@ -275,7 +275,7 @@ fn local_composition_nested_owner_resolves_only_the_exact_projected_process_name
                 &ToolName::new(exposed).expect("projected name"),
             )
             .expect("projected owner"),
-            ToolExecutionOwner::PlakLocal
+            ToolExecutionOwner::Local
         );
     }
     let error = crate::runtime::composition::projection::local_composition_nested_execution_owner(
@@ -763,7 +763,7 @@ fn clip_tool_result_keeps_small_text_and_replaces_overflow_with_budget_notice() 
         .expect("correlation");
     let small = ToolResultBlock::new(
         call,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolResultKind::Success,
         vec![ToolResultPart::Text(
             TextBlock::new("seed-ok", None).expect("text"),
@@ -779,7 +779,7 @@ fn clip_tool_result_keeps_small_text_and_replaces_overflow_with_budget_notice() 
 
     let large = ToolResultBlock::new(
         call,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolResultKind::Success,
         vec![ToolResultPart::Text(
             TextBlock::new("x".repeat(80), None).expect("text"),
@@ -802,7 +802,7 @@ fn clip_tool_result_keeps_small_text_and_replaces_overflow_with_budget_notice() 
 
     let leftover = ToolResultBlock::new(
         call,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolResultKind::Success,
         vec![ToolResultPart::Text(
             TextBlock::new("more", None).expect("text"),
@@ -844,7 +844,7 @@ fn clip_tool_result_preserves_process_session_handles() {
     .to_string();
     let result = ToolResultBlock::new(
         call,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolResultKind::Success,
         vec![ToolResultPart::Text(
             TextBlock::new(body, None).expect("text"),
@@ -908,7 +908,7 @@ fn a_wait_with_no_active_cell_is_answered_as_an_empty_success() {
             .parse::<CallId>()
             .expect("call ID"),
         ToolName::new("wait").expect("tool name"),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::new(
             Some("remote-wait".to_owned()),
@@ -955,7 +955,7 @@ fn a_large_structured_result_previews_as_bounded_json_with_its_small_fields() {
     let body = serde_json::json!({"exit_code": 101, "output": output}).to_string();
     let result = ToolResultBlock::new(
         call,
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolResultKind::Success,
         vec![ToolResultPart::Text(
             TextBlock::new(body, None).expect("text"),
@@ -986,7 +986,7 @@ fn await_result(body: String) -> plakous_model::ToolResultBlock {
     use uuid::Uuid;
     ToolResultBlock::new(
         CallId::try_from(Uuid::from_u128(12)).expect("call"),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolResultKind::Success,
         vec![ToolResultPart::Text(
             TextBlock::new(body, None).expect("text"),
@@ -1067,7 +1067,7 @@ fn observation_stops_at_a_complete_part_before_redacting_and_bounding() {
     let body = serde_json::json!({"output": "x".repeat(2 * 1024), "api_key": "short"}).to_string();
     let result = ToolResultBlock::new(
         CallId::try_from(Uuid::from_u128(11)).expect("call"),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolResultKind::Success,
         vec![
             ToolResultPart::Text(TextBlock::new(body.clone(), None).expect("text")),
@@ -1097,7 +1097,7 @@ fn batch_item(index: u128, body: &str) -> plakous_model::ConversationItem {
     use uuid::Uuid;
     let result = ToolResultBlock::new(
         CallId::try_from(Uuid::from_u128(100 + index)).expect("call"),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolResultKind::Success,
         vec![ToolResultPart::Text(
             TextBlock::new(body, None).expect("text"),
@@ -1197,7 +1197,7 @@ fn history_call(arguments: &serde_json::Value) -> ToolCallBlock {
             .parse::<CallId>()
             .expect("call ID"),
         ToolName::new("exec_command").expect("name"),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolCallState::Requested,
         ToolCorrelation::new(None, None, plakous_model::ToolCallerLineage::Direct)
             .expect("correlation"),
@@ -1211,7 +1211,7 @@ fn history_result(text: &str) -> plakous_model::ToolResultBlock {
         "00000000-0000-7000-8000-000000000905"
             .parse::<CallId>()
             .expect("call ID"),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         plakous_model::ToolResultKind::Success,
         vec![plakous_model::ToolResultPart::Text(
             plakous_model::TextBlock::new(text, None).expect("text"),

@@ -274,7 +274,7 @@ mod tests {
                 vec![ContentBlock::ToolCall(ToolCallBlock::new(
                     id,
                     ToolName::new("exec_command")?,
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolCallState::Requested,
                     ToolCorrelation::default(),
                     arguments,
@@ -286,7 +286,7 @@ mod tests {
                 Actor::Tool,
                 vec![ContentBlock::ToolResult(ToolResultBlock::new(
                     id,
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolResultKind::Success,
                     result
                         .iter()

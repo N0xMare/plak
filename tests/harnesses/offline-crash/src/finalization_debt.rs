@@ -549,7 +549,7 @@ fn evaluation_request(
         call: ToolCallBlock::new(
             call_id,
             ToolName::new("exec")?,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolCallState::Requested,
             ToolCorrelation::new(None, None, ToolCallerLineage::Direct)?,
             "text('settled')",

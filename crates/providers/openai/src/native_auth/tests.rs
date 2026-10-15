@@ -2965,7 +2965,7 @@ async fn resolved_model_rejects_external_rotation_before_later_round() -> TestRe
         .ok_or("first native round omitted its local tool call")?;
     let result = ToolResultBlock::new(
         call.call_id(),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolResultKind::Success,
         vec![ToolResultPart::Text(TextBlock::new("rotated", None)?)],
         call.correlation().clone(),
@@ -4645,10 +4645,10 @@ async fn device_jwks_userinfo_catalog_and_lite_inference_are_exact() -> TestResu
             _ => None,
         })
         .ok_or("native response omitted local tool call")?;
-    assert_eq!(call.owner(), &ToolExecutionOwner::PlakLocal);
+    assert_eq!(call.owner(), &ToolExecutionOwner::Local);
     let result = ToolResultBlock::new(
         call.call_id(),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolResultKind::Success,
         vec![ToolResultPart::Text(TextBlock::new(
             "lookup complete",

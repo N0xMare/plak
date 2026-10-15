@@ -4073,7 +4073,7 @@ async fn generation_rotation_between_tool_rounds_renews_before_later_dispatch() 
 
     let tool_result = ToolResultBlock::new(
         call.call_id(),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolResultKind::Success,
         vec![ToolResultPart::Text(TextBlock::new(
             "fixture result",
@@ -5570,7 +5570,7 @@ async fn native_subscription_completes_two_round_local_tool_protocol() -> TestRe
 
     let tool_result = ToolResultBlock::new(
         call.call_id(),
-        ToolExecutionOwner::PlakLocal,
+        ToolExecutionOwner::Local,
         ToolResultKind::Success,
         vec![ToolResultPart::Text(TextBlock::new(
             "fixture result",

@@ -257,7 +257,7 @@ fn tool_exchange(
         Actor::Tool,
         vec![ContentBlock::ToolResult(ToolResultBlock::new(
             call.call_id(),
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolResultKind::Success,
             vec![ToolResultPart::Text(TextBlock::new(
                 "fixture result",

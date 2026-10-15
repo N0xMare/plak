@@ -656,7 +656,7 @@ impl ConfiguredTool {
             (self.execution, owner),
             (
                 ToolExecutionDisposition::Local,
-                ToolExecutionOwner::PlakLocal | ToolExecutionOwner::PlakMcp { .. },
+                ToolExecutionOwner::Local | ToolExecutionOwner::Mcp { .. },
             ) | (
                 ToolExecutionDisposition::ProviderHosted,
                 ToolExecutionOwner::ProviderHosted { .. },
@@ -3000,12 +3000,12 @@ mod tests {
             ToolExecutionDisposition::Local,
             ToolCallerDisposition::DirectAndProviderProgrammatic,
         );
-        let mcp = ToolExecutionOwner::PlakMcp {
+        let mcp = ToolExecutionOwner::Mcp {
             server: crate::McpServerId::new("plak-mcp")?,
         };
         assert_eq!(direct.validate_owner_projection(&mcp), Ok(()));
         assert_eq!(
-            programmatic.validate_owner_projection(&ToolExecutionOwner::PlakLocal),
+            programmatic.validate_owner_projection(&ToolExecutionOwner::Local),
             Ok(())
         );
         assert_eq!(programmatic.validate_owner_projection(&mcp), Ok(()));
@@ -3020,7 +3020,7 @@ mod tests {
         };
         assert_eq!(hosted.validate_owner_projection(&family_owner), Ok(()));
         assert_eq!(
-            hosted.validate_owner_projection(&ToolExecutionOwner::PlakLocal),
+            hosted.validate_owner_projection(&ToolExecutionOwner::Local),
             Err(ToolOwnerProjectionError::OwnerMismatch)
         );
         assert_eq!(

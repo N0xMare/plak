@@ -676,7 +676,7 @@ async fn local_tool_and_encrypted_reasoning_round_trip_reconstructs_exact_bindin
         Actor::Tool,
         vec![ContentBlock::ToolResult(ToolResultBlock::new(
             call.call_id(),
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolResultKind::Success,
             vec![ToolResultPart::Text(TextBlock::new(
                 "fixture result",

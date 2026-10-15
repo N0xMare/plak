@@ -298,9 +298,9 @@ fn hosted_ptc_request_is_exact_and_customer_tool_allows_both_callers() -> TestRe
 }
 
 #[test]
-fn hosted_ptc_retains_plak_mcp_owner_and_programmatic_wire_shape() -> TestResult {
+fn hosted_ptc_retains_mcp_owner_and_programmatic_wire_shape() -> TestResult {
     let mut owners = BTreeMap::new();
-    let mcp = ToolExecutionOwner::PlakMcp {
+    let mcp = ToolExecutionOwner::Mcp {
         server: plakous_model::McpServerId::new("weather-mcp")?,
     };
     owners.insert(ToolName::new("weather")?, mcp.clone());
@@ -322,9 +322,9 @@ fn hosted_ptc_retains_plak_mcp_owner_and_programmatic_wire_shape() -> TestResult
 }
 
 #[test]
-fn direct_plak_mcp_batch_keeps_exact_owner_and_wire_shape() -> TestResult {
+fn direct_mcp_batch_keeps_exact_owner_and_wire_shape() -> TestResult {
     let mut owners = BTreeMap::new();
-    let mcp = ToolExecutionOwner::PlakMcp {
+    let mcp = ToolExecutionOwner::Mcp {
         server: plakous_model::McpServerId::new("weather-mcp")?,
     };
     owners.insert(ToolName::new("weather")?, mcp.clone());
@@ -377,7 +377,7 @@ fn programmatic_customer_call_retains_local_owner_and_lineage() -> TestResult {
             _ => None,
         })
         .ok_or("nested weather call")?;
-    assert_eq!(nested.0, &ToolExecutionOwner::PlakLocal);
+    assert_eq!(nested.0, &ToolExecutionOwner::Local);
     assert_eq!(nested.1, &ToolCallState::Requested);
     assert_eq!(nested.2.container_id(), Some("container_1"));
     assert_eq!(
@@ -413,7 +413,7 @@ fn programmatic_customer_call_retains_local_owner_and_lineage() -> TestResult {
 
 #[test]
 fn programmatic_customer_call_retains_mcp_owner_and_lineage() -> TestResult {
-    let mcp = ToolExecutionOwner::PlakMcp {
+    let mcp = ToolExecutionOwner::Mcp {
         server: plakous_model::McpServerId::new("weather-mcp")?,
     };
     let mut decoder = AnthropicMessagesStreamDecoder::new(

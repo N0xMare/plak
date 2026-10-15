@@ -2233,7 +2233,7 @@ mod shared_host_model {
             let call = ToolCallBlock::new(
                 call_id,
                 ToolName::new("fixture_tool")?,
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolCallState::Requested,
                 correlation.clone(),
                 r#"{"path":"fixture.txt"}"#,
@@ -2248,7 +2248,7 @@ mod shared_host_model {
                 covered_projection_after_output(&first_plan, std::slice::from_ref(&call_item))?;
             let result = ToolResultBlock::new(
                 call_id,
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolResultKind::Success,
                 vec![ToolResultPart::Text(TextBlock::new(
                     "fixture result",

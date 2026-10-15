@@ -167,11 +167,7 @@ pub(in crate::runtime::durable) async fn cut_text_turn(
                         "web_search",
                     )
                 } else {
-                    (
-                        ToolExecutionOwner::PlakLocal,
-                        ToolCallState::Requested,
-                        "probe",
-                    )
+                    (ToolExecutionOwner::Local, ToolCallState::Requested, "probe")
                 };
                 let call = ToolCallBlock::new(
                     CallId::try_from(uuid::Uuid::from_u128(0xE6C_1001))?,

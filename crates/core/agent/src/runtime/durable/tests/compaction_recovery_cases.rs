@@ -2574,7 +2574,7 @@ fn native_compaction_successor_retains_user_groups_and_appends_compaction()
                 vec![ContentBlock::ToolCall(ToolCallBlock::new(
                     call_id,
                     ToolName::new("read")?,
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolCallState::Requested,
                     correlation.clone(),
                     "{}",
@@ -2586,7 +2586,7 @@ fn native_compaction_successor_retains_user_groups_and_appends_compaction()
                 Actor::Tool,
                 vec![ContentBlock::ToolResult(ToolResultBlock::new(
                     call_id,
-                    ToolExecutionOwner::PlakLocal,
+                    ToolExecutionOwner::Local,
                     ToolResultKind::Success,
                     vec![ToolResultPart::Text(TextBlock::new("ok", None)?)],
                     correlation,

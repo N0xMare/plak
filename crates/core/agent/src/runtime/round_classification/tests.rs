@@ -135,10 +135,10 @@ fn round_classifier_terminal_finishes_stop_length_refusal_policy() -> TestResult
 
 #[test]
 fn round_classifier_local_calls_preserve_order_and_owners() -> TestResult {
-    let local = call(1, ToolExecutionOwner::PlakLocal, ToolCallState::Requested)?;
+    let local = call(1, ToolExecutionOwner::Local, ToolCallState::Requested)?;
     let mcp = call(
         2,
-        ToolExecutionOwner::PlakMcp {
+        ToolExecutionOwner::Mcp {
             server: McpServerId::new("probe")?,
         },
         ToolCallState::Pending,
@@ -204,7 +204,7 @@ fn round_classifier_output_limit_uses_prepared_wire_bound() -> TestResult {
         FinishReason::Length,
         vec![call(
             1,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolCallState::Requested,
         )?],
         false,
@@ -239,7 +239,7 @@ fn round_classifier_incomplete_local_call_precedes_budget_and_pause() -> TestRes
             finish,
             vec![call(
                 1,
-                ToolExecutionOwner::PlakLocal,
+                ToolExecutionOwner::Local,
                 ToolCallState::Requested,
             )?],
             false,
@@ -259,7 +259,7 @@ fn round_classifier_over_budget_rejects_tools_and_assistant() -> TestResult {
         FinishReason::ToolCalls,
         vec![call(
             1,
-            ToolExecutionOwner::PlakLocal,
+            ToolExecutionOwner::Local,
             ToolCallState::Requested,
         )?],
         false,
@@ -305,7 +305,7 @@ fn round_classifier_tool_call_finish_requires_local_calls() -> TestResult {
 
 #[test]
 fn round_classifier_duplicate_call_identity_response_and_history() -> TestResult {
-    let local = call(1, ToolExecutionOwner::PlakLocal, ToolCallState::Requested)?;
+    let local = call(1, ToolExecutionOwner::Local, ToolCallState::Requested)?;
     let duplicate = response(
         FinishReason::Length,
         vec![local.clone(), local.clone()],
@@ -334,7 +334,7 @@ fn round_classifier_terminal_local_states_refuse_before_other_checks() -> TestRe
     for state in [ToolCallState::Completed, ToolCallState::Failed] {
         let response = response(
             FinishReason::Length,
-            vec![call(1, ToolExecutionOwner::PlakLocal, state)?],
+            vec![call(1, ToolExecutionOwner::Local, state)?],
             false,
         )?;
         let Err(RoundClassificationError::InvalidCalls(error)) = classify(&response, true) else {

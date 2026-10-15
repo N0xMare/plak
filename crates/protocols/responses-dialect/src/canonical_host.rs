@@ -47,16 +47,16 @@ pub enum ResponsesCanonicalToolKind {
 #[non_exhaustive]
 pub enum ResponsesCanonicalToolOwner {
     /// Execute through the local Plakous tool runtime.
-    PlakLocal,
+    Local,
     /// Execute through one exact configured MCP server.
-    PlakMcp(McpServerId),
+    Mcp(McpServerId),
 }
 
 impl ResponsesCanonicalToolOwner {
     fn canonical(&self) -> ToolExecutionOwner {
         match self {
-            Self::PlakLocal => ToolExecutionOwner::PlakLocal,
-            Self::PlakMcp(server) => ToolExecutionOwner::PlakMcp {
+            Self::Local => ToolExecutionOwner::Local,
+            Self::Mcp(server) => ToolExecutionOwner::Mcp {
                 server: server.clone(),
             },
         }
@@ -88,7 +88,7 @@ impl ResponsesCanonicalTool {
         Self::new(
             name,
             ResponsesCanonicalToolKind::Function,
-            ResponsesCanonicalToolOwner::PlakLocal,
+            ResponsesCanonicalToolOwner::Local,
         )
     }
 
@@ -98,7 +98,7 @@ impl ResponsesCanonicalTool {
         Self::new(
             name,
             ResponsesCanonicalToolKind::Custom,
-            ResponsesCanonicalToolOwner::PlakLocal,
+            ResponsesCanonicalToolOwner::Local,
         )
     }
 
@@ -2115,7 +2115,7 @@ fn local_or_advertised_tool(
             ))
         }
         Some(tool) => Ok((tool.owner.canonical(), tool.kind)),
-        None => Ok((ToolExecutionOwner::PlakLocal, expected_kind)),
+        None => Ok((ToolExecutionOwner::Local, expected_kind)),
     }
 }
 
@@ -2678,7 +2678,7 @@ mod tests {
     }
 
     #[test]
-    fn hosted_programmatic_owner_projection_retains_plak_mcp() {
+    fn hosted_programmatic_owner_projection_retains_mcp() {
         let programmatic = producing_request_with_tool_and_caller(
             false,
             plakous_model::ToolCallerDisposition::DirectAndProviderProgrammatic,
@@ -2697,9 +2697,7 @@ mod tests {
             [ResponsesCanonicalTool::new(
                 ToolName::new("lookup").expect("tool"),
                 ResponsesCanonicalToolKind::Function,
-                ResponsesCanonicalToolOwner::PlakMcp(
-                    McpServerId::new("lookup-mcp").expect("server"),
-                ),
+                ResponsesCanonicalToolOwner::Mcp(McpServerId::new("lookup-mcp").expect("server")),
             )],
         )
         .expect("MCP projection");
@@ -2771,7 +2769,7 @@ mod tests {
         assert!(matches!(
             output[2].blocks(),
             [ContentBlock::ToolCall(call), ContentBlock::Opaque(_)]
-                if call.owner() == &ToolExecutionOwner::PlakLocal
+                if call.owner() == &ToolExecutionOwner::Local
                     && call.state() == ToolCallState::Requested
                     && call.correlation().remote_call_id() == Some("call_1")
                     && call.raw_arguments() == "{\"q\":1}"
@@ -3251,7 +3249,7 @@ mod tests {
             projected.canonical_output()[0].blocks(),
             [ContentBlock::ToolCall(call), ContentBlock::Opaque(_)]
                 if call.exposed_name().as_str() == "process_session_poll"
-                    && *call.owner() == ToolExecutionOwner::PlakLocal
+                    && *call.owner() == ToolExecutionOwner::Local
                     && call.state() == ToolCallState::Requested
         ));
     }
@@ -3416,7 +3414,7 @@ mod tests {
                 }
             })
             .expect("nested tool call");
-        assert_eq!(call.owner(), &ToolExecutionOwner::PlakLocal);
+        assert_eq!(call.owner(), &ToolExecutionOwner::Local);
         assert_eq!(
             call.correlation()
                 .caller_lineage()
