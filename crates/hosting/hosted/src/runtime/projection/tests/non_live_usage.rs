@@ -188,7 +188,9 @@ fn non_live_passes_present_usage_once_to_ledger_events_and_log() {
                 .block_on(async {
                     match entry {
                         "after_ack" => {
-                            super::super::queue_after_ack(&sessions, &presenting, &id, locator)
+                            // Unbounded: the live loop's wall-clock bound only
+                            // defers the pass, so it is not presentation law.
+                            super::super::after_ack_pass(&sessions, &presenting, &id, locator)
                                 .await
                                 .unwrap();
                         }

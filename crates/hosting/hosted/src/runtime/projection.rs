@@ -48,16 +48,28 @@ pub(in crate::runtime) async fn queue_after_ack(
     product_id: &str,
     followed: plakous::sessions::SessionLocator,
 ) -> Result<crate::sessions::QueueCommands, String> {
-    tokio::time::timeout(super::host_loop::FINAL_PROJECTION_BOUND, async {
-        let views = project_to_tail(sessions, store, product_id, followed).await?;
-        let intents = blocking(store, product_id, |store, id| store.load_intents(id)).await?;
-        Ok(crate::sessions::QueueCommands::from_join(
-            &intents,
-            Some(&views),
-        ))
-    })
+    tokio::time::timeout(
+        super::host_loop::FINAL_PROJECTION_BOUND,
+        after_ack_pass(sessions, store, product_id, followed),
+    )
     .await
     .unwrap_or_else(|_| Err("the after-ack projector pass exceeded its bound".to_owned()))
+}
+
+/// The pass `queue_after_ack` bounds: the feed to its tail, then the queue
+/// those views and the stored intents name.
+async fn after_ack_pass(
+    sessions: &AgentSessions,
+    store: &Arc<dyn SessionRecordStore>,
+    product_id: &str,
+    followed: plakous::sessions::SessionLocator,
+) -> Result<crate::sessions::QueueCommands, String> {
+    let views = project_to_tail(sessions, store, product_id, followed).await?;
+    let intents = blocking(store, product_id, |store, id| store.load_intents(id)).await?;
+    Ok(crate::sessions::QueueCommands::from_join(
+        &intents,
+        Some(&views),
+    ))
 }
 
 /// Step 0 of the reopen (spec 02 §4.2): a lease-free projector pass to the

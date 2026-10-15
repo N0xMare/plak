@@ -245,7 +245,7 @@ fn non_live_recovery_terminal(interrupted: bool, duplicate: bool) {
                     if let Some(submission) = &duplicate_submission {
                         assert!(!crate::runtime::turn_drive::duplicate_consumed(&sessions, &records, &record.id, submission, locator).await.unwrap());
                     } else {
-                        super::super::queue_after_ack(&sessions, &records, &record.id, locator).await.unwrap();
+                        super::super::after_ack_pass(&sessions, &records, &record.id, locator).await.unwrap();
                     }
                 }
                 assert_eq!(store.projected_usage_emissions().len(), 1);
