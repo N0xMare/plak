@@ -900,6 +900,22 @@ backend's service-process seam), `which-command`, the `reqwest` HTTP clients,
 pull `schemars`, `pastey`, `dyn-clone`, `async-trait`, `rand`, `tower-service`
 and `uuid` into the test graph only.
 
+The Plak-run `fetch_url` (`plakous-tool-web`, feature `fetch`) converts HTML to
+Markdown with crates.io `htmd` 0.5.6 (Apache-2.0, edition 2024, no stated MSRV;
+builds on the pinned toolchain). Markdown keeps the headings, links, lists and
+code blocks a model reads, which a text renderer such as `html2text` flattens.
+It parses with `html5ever` 0.38 into `markup5ever_rcdom` 0.38.0+unofficial
+(both MIT OR Apache-2.0, MSRV 1.71; the rcdom release is the one htmd
+publishes against html5ever 0.38) and adds `markup5ever`, `xml5ever`,
+`tendril`, `string_cache`, `string_cache_codegen`, `web_atoms`,
+`precomputed-hash`, `new_debug_unreachable` and the `phf` 0.13 family (all
+MIT or MIT OR Apache-2.0) to the lock graph. The converter walks the tree
+recursively, so `fetch_url` bounds the parsed depth at 512 elements and
+converts on a thread with its own 32 MiB stack. URL parsing and IDNA use the
+already locked `url` crate. The feature is enabled only by facade features
+that already link `plakous-http` (chapter 01 section 12.1), so no
+composition-only closure reaches the converter.
+
 ### 7.1 Rules
 
 - crates.io is the only allowed registry; unknown registries and unknown Git

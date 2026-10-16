@@ -163,6 +163,7 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES = {
     # Every facade feature that links plakous-http builds the Plak-run
     # `fetch_url`; composition-only closures stay HTTP-free.
     ("plakous", "anthropic", "plakous-tool-web/fetch"),
+    ("plakous", "mcp", "plakous-tool-web/fetch"),
     ("plakous", "native-subscriptions", "plakous-tool-web/fetch"),
     ("plakous", "openai", "plakous-tool-web/fetch"),
     ("plakous", "openrouter", "plakous-tool-web/fetch"),
@@ -216,7 +217,7 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
 EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-py-worker": "a57158273317e3c1c0ebe404e30d6e81f3c7074a51c9b713ad946093bcee9bda",
     "plakous-js-runtime": "6c68fa7e92379b21f826b9a64729008865573b5cd9dd0439cea8d765ae10e99e",
-    "plakous": "d96bff7390682a856ffcb7b35d4cb5bda002e9e00f78a38a70ba0eb96185b98b",
+    "plakous": "e86cad332afa3636afdaf0f8f4651651f9740a903710a289fad2e282787c0930",
     "plakous-agent": "bd86d54cede49bb93150a0461f2c803b79525872d1fe243715261f9f0d6ef8e8",
     "plakous-anthropic": "961f43653d38f0f9b3251cfd6933f814a289210cc87e98081af2aef3ab00189a",
     "plakous-attempt": "6fa8c59b329b4de7ae6eb497bf4b3e2d93f916551c682c2f1a803a506ee65992",

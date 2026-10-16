@@ -1516,7 +1516,11 @@ pub(super) fn bind_node_tool_plan(
     // deferred retrieval slot, and a refusal there starts no MCP server.
     // MCP entries then bind on the process pool.
     let plan = crate::tool_plan::bind_tool_plan(selection, route, route_label)
-        .map_err(|refusal| CliFailure::new(refusal.to_string()))?;
+        .map_err(|refusal| CliFailure::new(refusal.to_string()))?
+        .with_fetch_url_limits(
+            crate::frozen_tables::fetch_url_limits(&tools.tool_sections)
+                .map_err(CliFailure::new)?,
+        );
     let mcp = crate::mcp_binding::bind_mcp_tools(
         selection,
         &tools.tool_sections,

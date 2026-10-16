@@ -533,8 +533,7 @@ impl ToolPlan {
 
     /// This plan with `fetch_url` bound under `limits`, the node's frozen
     /// `[tools.fetch_url]` table.
-    #[allow(dead_code, reason = "wired from the frozen tool tables at bind")]
-    pub(crate) const fn with_fetch_url_limits(mut self, limits: FetchUrlLimits) -> Self {
+    pub(crate) fn with_fetch_url_limits(mut self, limits: FetchUrlLimits) -> Self {
         self.fetch_url_limits = limits;
         self
     }
@@ -1152,15 +1151,11 @@ mod tests {
     #[test]
     fn image_gen_is_refused_as_not_built_in() -> TestResult {
         for route in ToolRoute::ALL {
-            for tool in ["image_gen"] {
-                assert_eq!(
-                    refusal_text(&[tool], route)?,
-                    format!(
-                        "{tool} is not available in this build; remedy: remove {tool} from \
-                         the template's tools"
-                    )
-                );
-            }
+            assert_eq!(
+                refusal_text(&["image_gen"], route)?,
+                "image_gen is not available in this build; remedy: remove image_gen from the \
+                 template's tools"
+            );
         }
         let qualified = HostedRetrievalTable::new(
             HostedRetrievalSupport::Supported,

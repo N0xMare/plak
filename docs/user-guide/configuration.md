@@ -212,7 +212,7 @@ list adds more, by name:
 | Name | What it is |
 | --- | --- |
 | `web_search`, `web_fetch`, `x_search` | Search and fetch run by the provider of the route the agent binds. A route that cannot serve one refuses the session or spawn with a remedy (for example, put `x_search` on a grok template and spawn it). |
-| `fetch_url` | A plain HTTP fetch Plak runs itself. |
+| `fetch_url` | One HTTPS fetch Plak runs itself, on every route: HTML comes back as Markdown, text and JSON as text, small PNG/JPEG/WebP as images. Only public internet addresses are reachable; see *fetch_url* below. |
 | `image_gen` | Image generation. |
 | `mcp:<id>` | Every tool an MCP server allows. |
 | `mcp:<id>/<tool>` | One tool of an MCP server. |
@@ -237,6 +237,23 @@ transport = "http"
 url = "https://mcp.linear.app/mcp"
 bearer_secret = "linear"
 ```
+
+`fetch_url` takes its limits from `[tools.fetch_url]`:
+
+```toml
+[tools.fetch_url]
+max_bytes = 2097152      # response body cap, 1..=8388608; a call may only lower it
+timeout_seconds = 30     # whole fetch including redirects, 1..=120
+```
+
+It sends one `GET` with no cookies or credentials, upgrades `http://` to
+`https://`, follows up to 5 redirects (never from https to http) and refuses
+loopback, private, link-local and cloud-metadata destinations on every hop. It
+does not read `robots.txt`: each call is one fetch you directed, not a crawl.
+Text over 256 KiB is saved to a file the result names on a `full output:`
+line. The model chooses the URL, so anything it has read can leave in a query
+string; leave `fetch_url` off templates that must not send workspace content
+out.
 
 Secrets are never written in `config.toml`. Store one under a name and refer
 to the name:

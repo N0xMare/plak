@@ -262,7 +262,7 @@ pub(crate) fn server_spec(
     secrets: &Arc<dyn NamedSecrets>,
 ) -> Result<McpServerSpec, String> {
     let invalid = || format!("mcp server {server} has an invalid frozen definition");
-    let mut tables = toml::from_str::<RenderedTables>(rendered).map_err(|_| invalid())?;
+    let mut tables = crate::frozen_tables::parse::<RenderedTables>(rendered).ok_or_else(invalid)?;
     let definition = tables
         .mcp_servers
         .remove(server.as_str())

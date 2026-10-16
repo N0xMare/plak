@@ -61,7 +61,7 @@ The shared Responses host behavior identity advances for this terminal
 interpretation, so an older admitted route binding cannot silently retain the
 previous stop behavior.
 
-The threat register is seventeen entries. Each names the threat, the control
+The threat register is eighteen entries. Each names the threat, the control
 that answers it, and the section here that states that control in full.
 
 | # | Threat | Control | Section |
@@ -84,6 +84,7 @@ that answers it, and the section here that states that control in full.
 | 15a | Multi-agent work amplifies authority or cost beyond the root turn | Tier ceilings, grants, spawn and capacity budgets, sealed candidates, per-cell budgets | chapter 03 |
 | 16 | Guessed, stale, or cross-scope capacity evidence admits an oversized request | Exact-scope capacity certificate, full prepared-projection measurement, enforced output maximum, pre-dispatch refusal | §4.4 |
 | 17 | Paid compaction publishes a partial transition, loses its receipt, or repeats a paid call | Exact source and operation binding, recovery-only checkpoint before ambiguous paid work, one lease-fenced atomic publication, never redispatch after possible acceptance (an unapplied fold is abandoned, never re-sent), and at most one paid fold per root turn after one fails to commit | §4.1, §4.3 |
+| 18 | A model-chosen URL reaches loopback, private or cloud-metadata services (SSRF) through `fetch_url` | One public-only `AddressPolicy` client checked on the exact address connected for every hop, local and metadata host names refused before resolution, at most five re-checked redirects with no https-to-http downgrade, no cookies or credentials sent, bounded body and deadline; exfiltration through the URL itself is residual | §2.8, §9 |
 
 ### 1.1 Shells are the widest boundary
 
@@ -397,6 +398,28 @@ before resolution (chapter 01 §13.1 lists the table). Provider, OAuth, catalog
 and discovery clients install no policy: their origins are fixed configuration,
 not model input. The policy is a mechanism; it does not by itself make a
 model-directed fetch safe against exfiltration through the URL it requests.
+
+### 2.8 Plak-run network fetch
+
+`fetch_url` is the one tool that sends a request to a destination the model
+chose. It runs in Plak, not at a provider, and is granted by a template's
+`tools` list (chapter 01 section 8.5). Each call is one `GET` through a client
+that installs `AddressPolicy::public_only` (section 2.7), so the policy is
+checked on the exact address connected for the first hop and every redirect
+hop, and DNS rebinding cannot move a vetted name onto a refused address. A
+refusal names the host and the refused class, never the resolved addresses.
+Redirects are re-parsed and re-checked, at most five, and a redirect from
+https to http is refused. No cookie, credential, authorization header or
+proxy is ever used: the request carries only `Accept`,
+`Accept-Encoding: identity` and `User-Agent: plak/<version>`. The body is cut
+at its cap (at most 8 MiB) and the whole fetch, redirects and conversion
+included, has one deadline (at most 120 s). There is no `robots.txt` check: a
+call is one user-directed fetch of one URL, never a crawl, and no link in the
+page is followed.
+
+The result is data, not instruction: it starts with the untrusted-data line.
+The policy does not stop a model from placing workspace content in the URL it
+requests; that exfiltration path is residual risk (section 9).
 
 ## 3. Credentials
 
@@ -1132,6 +1155,13 @@ immediately**; do not wait for a Plak fix.
 Residual risk is accepted only when it is explicit in the public contract and
 does not weaken credential isolation, canonical-state integrity, effect
 fencing, or route and spend authority.
+
+`fetch_url` does not prevent exfiltration through the URL it requests: the
+model chooses the URL, path and query, so any text the model has seen can be
+sent to a public host it names. Unlike a provider's hosted fetch that only
+fetches URLs already present in the conversation, `fetch_url` fetches any
+public https URL. A template that must not leak workspace content does not
+list `fetch_url`.
 
 Evidence follows one ladder: unit, then scripted fault, then offline protocol
 and store integration, then explicitly authorized live. A claim about a

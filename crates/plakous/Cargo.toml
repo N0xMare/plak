@@ -52,7 +52,7 @@ full = [
 ]
 # Model Context Protocol client: the server pool, frozen listings and the MCP
 # tool pack. Configuration, secrets and views stay with the embedding product.
-mcp = ["dep:plakous-mcp"]
+mcp = ["dep:plakous-mcp", "plakous-tool-web/fetch"]
 # Plak's product closure: both evaluators plus subscription authentication.
 native-subscriptions = [
     "composition",

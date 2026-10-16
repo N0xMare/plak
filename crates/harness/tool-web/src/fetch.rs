@@ -513,7 +513,10 @@ impl ToolExecutor for FetchUrlTool {
                 invocation.arguments().value().as_ref().clone(),
                 self.fetcher.limits,
             )?;
-            let subject = host(&call.url).to_owned();
+            let subject = match call.url.port() {
+                Some(port) => format!("{}:{port}", host(&call.url)),
+                None => host(&call.url).to_owned(),
+            };
             let _ = context.progress().report(&subject, None, None);
             let deadline = Instant::now()
                 + Duration::from_secs(u64::from(self.fetcher.limits.timeout_seconds));

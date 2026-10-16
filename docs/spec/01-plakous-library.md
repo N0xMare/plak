@@ -3983,6 +3983,40 @@ requires `OutcomeUnknown`. Child environments are frozen
 and filtered, starting from a captured environment rather than ambient process
 state; credentials require explicit delegation.
 
+Network authority is granted by selection, not by approval. The one Plakous
+tool that reaches the network on the model's behalf, `fetch_url`
+(`plakous::tools::web::FetchUrlPack`, built whenever the facade links
+`plakous-http`, section 12.1), is `PlakLocal`, `ToolEffect::ReadOnly`,
+`ToolConcurrency::Parallel` and nested-eligible: a template that lists it
+grants every call, and no call asks again. Its authority is a single `GET` of
+one URL the model names: absolute `https` (`http` is upgraded before the first
+request), no user name or password, no fragment sent; `Accept: text/markdown,
+text/html;q=0.9, text/plain;q=0.8, application/json;q=0.5, */*;q=0.1`,
+`Accept-Encoding: identity` and the host's `User-Agent` (Plak sends
+`plak/<version>`), never a cookie, credential or authorization header. At most
+five redirects are followed, each re-parsed and re-checked like the first URL;
+a redirect to `http` is refused as a downgrade. Every hop goes through one
+client with `AddressPolicy::public_only` (chapter 04 section 2.7), and a
+refusal is a tool error naming the host and the refused class (a local or
+metadata host name, or no public address), never the resolved addresses.
+The body cap (default 2 MiB, at most 8 MiB from `[tools.fetch_url]`; the
+call's `max_bytes` may only lower it) cuts the body with a note, and one
+whole-fetch deadline (default 30 s, 1..=120) covers redirects and conversion.
+`text/html` and `application/xhtml+xml` become Markdown with `script`,
+`style`, `noscript`, `svg` and `iframe` dropped, and a document nested deeper
+than 512 elements is refused; `text/*`, `application/json`, `application/xml`
+and `+json`/`+xml` types return as text; UTF-8 is decoded lossily with a note,
+and a declared non-UTF-8 charset is refused. PNG, JPEG and WebP up to
+196,608 bytes whose signature matches the declared type return as an image
+part; every other type is refused with its type and size. The result starts
+with the untrusted-data line, `url:`, `final url:` when it differs, `status:`
+and `content type:`; text beyond 256 KiB keeps its first and last 16 KiB
+around a `full output: <path>` line naming an issued job-output file
+(`JoinedProcessSessions::spill_output`). A status of 400 or more is a tool
+error carrying the status and the first 8 KiB of the body. The registration
+identity names no limit. There is no `robots.txt` check: a call is one
+user-directed fetch, never a crawl.
+
 A repository query walks a live tree, so it surveys rather than transacts. Every
 directory child is opened relative to its parent descriptor with `O_NOFOLLOW`:
 symbolic links are refused and never followed, and the walk stays beneath the
@@ -6890,10 +6924,18 @@ must be followed by release or abandonment. It adds no public Agent method and
 does not change transfer shutdown's job disposition.
 
 
+Every feature that links `plakous-http` (`anthropic`, `openai`, `xai`,
+`openrouter`, `native-subscriptions` and `mcp`, and through them `auth` and
+`full`) also builds `plakous-tool-web/fetch`, the Plak-run `fetch_url` tool
+and its HTML-to-Markdown converter, so `plakous::tools::web::FetchUrlPack`
+exists exactly when an HTTP stack is linked. It adds no facade feature;
+composition-only closures reach neither `plakous-http` nor `htmd`.
+
 Evaluator deployment, subscription authentication, and durability are therefore
 independent choices. `tools/checks/check_features.py` pins this over the
 complete closure Cargo reports: a `composition` selection reaches no
-`plakous-auth`, `plakous-http`, `plakous-py-eval`, `rquickjs`, or `tungstenite`.
+`htmd`, `plakous-auth`, `plakous-http`, `plakous-py-eval`, `rquickjs`, or
+`tungstenite`.
 
 Every feature combination preserves the facade boundary: a consumer never needs
 a component crate to complete a workflow.

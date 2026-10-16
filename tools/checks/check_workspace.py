@@ -1215,6 +1215,8 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plakous-hosted", "src/openrouter.rs"): {
         "openrouter": {"OpenRouterRetrieval", "OpenRouterRetrievalPort"},
     },
+    # The frozen [tools.fetch_url] table read into the tool's bounds.
+    ("plakous-hosted", "src/frozen_tables.rs"): {"tools": {"FetchUrlLimits"}},
     # The compile-time check that the host release timeout covers the store deadline.
     ("plakous-hosted", "src/lib.rs"): {"agent": {"DEFAULT_STORE_OPERATION_TIMEOUT"}},
     ("plak", "src/commands/reload_rehearsal.rs"): {

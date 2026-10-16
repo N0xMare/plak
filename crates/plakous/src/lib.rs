@@ -1123,6 +1123,7 @@ pub mod tools {
         /// HTTP stack.
         #[cfg(any(
             feature = "anthropic",
+            feature = "mcp",
             feature = "native-subscriptions",
             feature = "openai",
             feature = "openrouter",
