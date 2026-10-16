@@ -305,7 +305,7 @@ pub(crate) fn server_spec(
             }
         }
         "http" => http_spec(server, &definition, secrets)
-            .map_err(|error| error.unwrap_or_else(|| invalid()))?,
+            .map_err(|error| error.unwrap_or_else(invalid))?,
         _ => return Err(invalid()),
     };
     let spec = spec
@@ -354,7 +354,10 @@ fn http_spec(
     if !slots.is_empty() {
         endpoint = endpoint
             .with_secret_headers(
-                slots.iter().map(|(slot, _)| slot.clone()),
+                slots
+                    .iter()
+                    .map(|(slot, _)| slot.clone())
+                    .collect::<Vec<_>>(),
                 header_resolver(server, slots, secrets),
             )
             .map_err(refused)?;

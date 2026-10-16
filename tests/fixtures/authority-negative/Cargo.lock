@@ -89,6 +89,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "base64"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1034,7 +1040,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e75fe14a82d81e5f5af639997db37d8b96045938a7ac6ab18cdbe1c7467e05e1"
 dependencies = [
  "aws-lc-rs",
- "base64",
+ "base64 0.22.1",
  "getrandom 0.2.17",
  "js-sys",
  "serde",
@@ -1329,7 +1335,7 @@ dependencies = [
 name = "plakous-auth"
 version = "0.1.0"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "getrandom 0.4.3",
  "plakous-http",
  "rustix",
@@ -1437,10 +1443,14 @@ dependencies = [
 name = "plakous-mcp"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
+ "http",
+ "plakous-http",
  "plakous-model",
  "plakous-tools",
  "rmcp",
  "serde_json",
+ "sse-stream",
  "tokio",
  "tracing",
 ]
@@ -1480,7 +1490,7 @@ dependencies = [
 name = "plakous-openai"
 version = "0.1.0"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "jsonwebtoken",
  "plakous-attempt",
  "plakous-auth",
@@ -1658,7 +1668,7 @@ dependencies = [
 name = "plakous-xai"
 version = "0.1.0"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "futures-util",
  "getrandom 0.4.3",
  "jsonwebtoken",
@@ -1880,12 +1890,16 @@ version = "3.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab5023804cbe0304cbe06197ac16e645a0a0d0ffa2953bf735c15c2fa0213350"
 dependencies = [
+ "base64 0.23.1",
+ "bytes",
  "chrono",
  "futures",
+ "http",
  "indexmap",
  "pin-project-lite",
  "serde",
  "serde_json",
+ "sse-stream",
  "thiserror 2.0.20",
  "tokio",
  "tokio-stream",
@@ -2154,6 +2168,19 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.60.2",
+]
+
+[[package]]
+name = "sse-stream"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c123f296ade4ec4b8b0f6162116e6629f5146922ca5ab40ca9d3c2e73ab4761e"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "http-body",
+ "http-body-util",
+ "pin-project-lite",
 ]
 
 [[package]]

@@ -254,7 +254,9 @@ that later changes a tool answers that tool with an error telling you to start
 a new session. A tool listed through `mcp:<id>` whose input schema Plak cannot
 represent is left out with a logged notice; naming it as `mcp:<id>/<tool>`
 refuses the session instead. MCP results reach the model marked as untrusted
-data. The `http` transport is not available in this build yet.
+data. An `http` server is reached at its `url` (HTTPS, or plain HTTP only to
+`127.0.0.1` or `[::1]`); `bearer_secret` and `secret_headers` name stored
+secrets that are sent as `Authorization: Bearer` and as those headers.
 
 A child gets at most its parent's tools: a working-set template may not list
 `fetch_url`, `image_gen` or an MCP tool its root template lacks, and the same

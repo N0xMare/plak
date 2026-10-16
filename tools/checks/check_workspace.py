@@ -1173,8 +1173,9 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     # service processes, and the named-secret value type.
     ("plakous-hosted", "src/mcp_binding.rs"): {
         "mcp": {
-            "McpPool", "McpSecretResolver", "McpServerSpec", "McpToolPack", "McpToolSelection",
-            "ServiceSecretValue",
+            "HeaderName", "HeaderValue", "McpError", "McpHttpEndpoint", "McpHttpSecret",
+            "McpHttpSecretResolver", "McpPool", "McpSecretResolver", "McpServerSpec",
+            "McpToolPack", "McpToolSelection", "SensitiveBytes", "ServiceSecretValue",
         },
         "model": {"RunId"},
         "tools": {
@@ -1186,8 +1187,6 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plakous-hosted", "src/tools.rs"): {
         "prompts": {"UNTRUSTED_TOOL_DATA_AGREEMENTS", "UNTRUSTED_TOOL_DATA_CONTRIBUTION_ID"},
     },
-    # A named secret is handed to an MCP server spawn as a service secret value.
-    ("plak", "src/home/secrets.rs"): {"mcp": {"ServiceSecretValue"}},
     # Binding reads each route's release-owned hosted retrieval table.
     ("plakous-hosted", "src/tool_plan.rs"): {
         "model": {
