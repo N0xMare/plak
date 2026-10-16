@@ -6,8 +6,8 @@
 //! performs the search or fetch inside that request. Only the rendered tool
 //! result enters history.
 //!
-//! One module per tool family: [`search`] (`web_search`), [`web_fetch`]
-//! (hosted page fetch) and [`x_search`]. The Plak-run `fetch_url` is a
+//! One module per tool family: `search` (`web_search`), `web_fetch`
+//! (hosted page fetch) and `x_search`. The Plak-run `fetch_url` is a
 //! separate tool and lives in its own module.
 
 #![forbid(unsafe_code)]
