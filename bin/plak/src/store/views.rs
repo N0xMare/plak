@@ -1414,7 +1414,7 @@ mod tests {
 
     #[test]
     fn historical_clear_and_submissions_are_consumed_without_withdrawal_after_retention() {
-        assert_eq!(crate::store::SCHEMA_VERSION, 31);
+        assert_eq!(crate::store::SCHEMA_VERSION, 32);
         let root = tempdir().unwrap();
         let (mut store, id) = store_with_session(root.path());
         let mut source = store.load(&id).unwrap();
@@ -1910,7 +1910,7 @@ mod tests {
         let root = tempdir().unwrap();
         let paths = PlakPaths::explicit(root.path().join("p"));
         let (mut store, session) = store_with_session(root.path());
-        assert_eq!(super::super::SCHEMA_VERSION, 31);
+        assert_eq!(super::super::SCHEMA_VERSION, 32);
         let empty = SessionViews::empty();
         let first = with_bookkeeping(views_at(1, &[]));
         store

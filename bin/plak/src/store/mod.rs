@@ -24,7 +24,7 @@ use sessions::{
     StoreBaseline, digest_parts,
 };
 
-pub(crate) const SCHEMA_VERSION: i64 = 31;
+pub(crate) const SCHEMA_VERSION: i64 = 32;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_LIST_SESSIONS_SQL: i64 = 500;
 const MAX_LIST_PROMPTS_SQL: i64 = 500;
@@ -2100,7 +2100,7 @@ mod tests {
     fn current_schema_rejects_previous_product_store_without_modification() {
         // A product schema change moves the state directory; a store at
         // another version in this directory is refused with its rows intact.
-        assert_eq!(SCHEMA_VERSION, 31);
+        assert_eq!(SCHEMA_VERSION, 32);
         let root = tempdir().unwrap();
         let paths = PlakPaths::explicit(root.path().join("p"));
         paths.ensure_layout().unwrap();
@@ -2110,7 +2110,7 @@ mod tests {
             store.commit(&mut session).unwrap();
         }
         let connection = Connection::open(paths.product_database()).unwrap();
-        connection.pragma_update(None, "user_version", 30).unwrap();
+        connection.pragma_update(None, "user_version", 31).unwrap();
         drop(connection);
 
         let error = ProductStore::open(&paths).unwrap_err();
@@ -2119,7 +2119,7 @@ mod tests {
             ProductStoreOpenErrorKind::UnsupportedPersistence
         );
         assert!(
-            error.to_string().contains("product schema 30, expected 31"),
+            error.to_string().contains("product schema 31, expected 32"),
             "{error}"
         );
         assert!(

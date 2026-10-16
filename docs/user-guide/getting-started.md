@@ -178,7 +178,7 @@ CHECK              RESULT   DETAIL                                       FIX
 Version            OK       available · 0.1.0                            —
 Home               OK       available · /home/you/.plak                  —
 Config             OK       valid · /home/you/.plak/config.toml          —
-Product db         OK       available · /home/you/.plak/state/r25.e26.p31.t6/product.sqlite3 —
+Product db         OK       available · /home/you/.plak/state/r25.e26.p32.t6/product.sqlite3 —
 Composition host   OK       included · not required by the selected …    —
 Oauth codex        OK       ready · generation 13 · record 22h old …     —
 
