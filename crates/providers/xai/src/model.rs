@@ -560,6 +560,7 @@ mod shared_host_model {
     /// renewal replaces the whole target; a prepared call keeps its own.
     struct SuperGrokDispatchTarget {
         resolved: XaiResolvedModel,
+        execution: Arc<SuperGrokResponsesExecution>,
         service: Arc<ResponsesAttemptService<SuperGrokResponsesExecution, SuperGrokDispatchGuard>>,
     }
 
@@ -584,12 +585,12 @@ mod shared_host_model {
     fn dispatch_service(
         client: &plakous_http::Client,
         attempt_data: &ResponsesAttemptDialectData,
-        execution: SuperGrokResponsesExecution,
+        execution: &Arc<SuperGrokResponsesExecution>,
     ) -> Result<DispatchService, XaiLanguageModelConfigError> {
         Ok(Arc::new(
             ResponsesAttemptService::new(
                 client.clone(),
-                Arc::new(execution),
+                Arc::clone(execution),
                 attempt_data.clone(),
                 supergrok_authorization()?,
             )
@@ -675,9 +676,14 @@ mod shared_host_model {
                 false,
             )
             .map_err(|_| XaiLanguageModelConfigError::SharedBinding)?;
-            let service = dispatch_service(&client, &attempt_data, execution)?;
+            let execution = Arc::new(execution);
+            let service = dispatch_service(&client, &attempt_data, &execution)?;
             Ok(Self {
-                target: Mutex::new(Arc::new(SuperGrokDispatchTarget { resolved, service })),
+                target: Mutex::new(Arc::new(SuperGrokDispatchTarget {
+                    resolved,
+                    execution,
+                    service,
+                })),
                 renewal: AsyncMutex::new(()),
                 renewal_floor: crate::XaiRenewalFloor::default(),
                 admitted_from,
@@ -715,6 +721,40 @@ mod shared_host_model {
         #[must_use]
         pub const fn descriptor(&self) -> &ResolvedModelDescriptor {
             &self.descriptor
+        }
+
+        /// The session's hosted web and X search side-request executor on
+        /// this exact route, login, model and client, at the lowest effort
+        /// the model's ladder admits.
+        #[must_use]
+        pub fn retrieval(self: &Arc<Self>) -> crate::XaiRetrieval {
+            let effort = plakous_responses_dialect::lowest_responses_effort(
+                crate::subscription_model_reasoning_effort_options(
+                    self.descriptor.requested_model().as_str(),
+                ),
+            );
+            crate::XaiRetrieval::supergrok(Arc::clone(self), effort)
+        }
+
+        pub(crate) const fn client(&self) -> &plakous_http::Client {
+            &self.client
+        }
+
+        /// Revalidates admission exactly as before a model round (renewing a
+        /// stale receipt), then authorizes one physical side request
+        /// carrying `body` on the current receipt.
+        pub(crate) async fn side_request(
+            self: &Arc<Self>,
+            body: &[u8],
+        ) -> Result<(plakous_http::Request, SuperGrokDispatchGuard), &'static str> {
+            Arc::clone(self)
+                .revalidate_runtime_authority(self.clock.now())
+                .await
+                .map_err(|_| "SuperGrok admission is no longer current")?;
+            let target = self
+                .current_target()
+                .map_err(|_| "SuperGrok target is unavailable")?;
+            crate::native_auth::supergrok_side_request(&target.execution, body).await
         }
 
         fn current_target(
@@ -802,9 +842,14 @@ mod shared_host_model {
                 }
                 execution
             };
-            let service = dispatch_service(&self.client, &self.attempt_data, execution)
+            let execution = Arc::new(execution);
+            let service = dispatch_service(&self.client, &self.attempt_data, &execution)
                 .map_err(|_| RuntimeModelAuthorityError::Invalid)?;
-            let target = Arc::new(SuperGrokDispatchTarget { resolved, service });
+            let target = Arc::new(SuperGrokDispatchTarget {
+                resolved,
+                execution,
+                service,
+            });
             let authority = self.revalidate_target(&target, checked_at)?;
             *self
                 .target

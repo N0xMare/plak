@@ -2634,17 +2634,17 @@ impl NativeSubscriptions {
                         })?
                     }
                 };
-                let (model, resolution) = resolver
-                    .resolve_with_evidence(selected_model.as_str())
+                let (model, resolution, retrieval) = resolver
+                    .resolve_with_retrieval(selected_model.as_str())
                     .map_err(|error| {
-                    let error = match error {
-                        plakous_openai::NativeCodexAuthError::Validation => {
-                            NativeSubscriptionError::ResolutionEvidenceRejected
-                        }
-                        other => map_codex_error(other),
-                    };
-                    NativeModelResolutionError::after_selection(selected_model.clone(), error)
-                })?;
+                        let error = match error {
+                            plakous_openai::NativeCodexAuthError::Validation => {
+                                NativeSubscriptionError::ResolutionEvidenceRejected
+                            }
+                            other => map_codex_error(other),
+                        };
+                        NativeModelResolutionError::after_selection(selected_model.clone(), error)
+                    })?;
                 let model = guidance::with_content_filter_guidance(
                     model,
                     resolution.content_filter_guidance(),
@@ -2691,7 +2691,9 @@ impl NativeSubscriptions {
                         descriptor,
                         model,
                         evidence,
-                        retrieval: None,
+                        retrieval: Some(Arc::new(crate::openai::CodexRetrievalPort::new(
+                            retrieval,
+                        ))),
                     },
                     compile_authority,
                 ))
@@ -2719,9 +2721,9 @@ impl NativeSubscriptions {
                     .map_err(|error| {
                         NativeModelResolutionError::after_selection(selected_model.clone(), error)
                     })?;
-                let (model, resolution) = online
+                let (model, resolution, retrieval) = online
                     .manager
-                    .resolve_model_with_evidence(selected_model.as_str(), inference_client, config)
+                    .resolve_model_with_retrieval(selected_model.as_str(), inference_client, config)
                     .await
                     .map_err(|error| {
                         NativeModelResolutionError::after_selection(
@@ -2771,7 +2773,7 @@ impl NativeSubscriptions {
                         descriptor,
                         model,
                         evidence,
-                        retrieval: None,
+                        retrieval: Some(Arc::new(crate::xai::XaiRetrievalPort::new(retrieval))),
                     },
                     compile_authority,
                 ))

@@ -61,6 +61,12 @@ impl SuperGrokDispatchGuard {
     }
 }
 
+impl plakous_responses_dialect::ResponsesRetrievalGuard for SuperGrokDispatchGuard {
+    fn transport_failed(&mut self, failure: plakous_http::Failure) {
+        Self::transport_failed(self, failure);
+    }
+}
+
 impl fmt::Debug for SuperGrokDispatchGuard {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("SuperGrokDispatchGuard(<redacted lease-bound authority>)")
@@ -221,6 +227,91 @@ pub(crate) fn supergrok_responses_preflight<'a>(
             },
         ))
     })
+}
+
+/// Authorizes one physical hosted-retrieval side request carrying `body` with
+/// the model round's sequence: refresh, credential preflight, inference
+/// permit, grant, dispatch authorization, then grant revalidation. The guard
+/// retains the grant and permit through the response head.
+pub(crate) async fn supergrok_side_request(
+    execution: &SuperGrokResponsesExecution,
+    body: &[u8],
+) -> Result<(Request, SuperGrokDispatchGuard), &'static str> {
+    let route = execution.resolved.route();
+    let identity = route.identity().ok_or("SuperGrok route is not routable")?;
+    if !supergrok_origin_allowed(identity.origin().as_str())
+        || route.responses_path() != Some(crate::SUPERGROK_RESPONSES_PATH)
+        || route.dialect() != XaiDialect::GrokSubscriptionResponses2026_07
+    {
+        return Err("SuperGrok route binding changed");
+    }
+    let authority = route
+        .credential_authority()
+        .ok_or("SuperGrok credential authority is unavailable")?;
+    let input_liability = u64::try_from(body.len())
+        .ok()
+        .and_then(|bytes| bytes.checked_add(SUBSCRIPTION_INPUT_TOKEN_OVERHEAD))
+        .ok_or("SuperGrok side request exceeds the inference bound")?;
+    authority
+        .refresh_if_needed()
+        .await
+        .map_err(|_| "SuperGrok login could not be refreshed")?;
+    authority
+        .preflight()
+        .map_err(|_| "SuperGrok login is not ready")?;
+    #[cfg(test)]
+    let permit = match &execution.request_gate {
+        Some(gate) => gate.acquire_inference(input_liability).ok(),
+        None => authority
+            .acquire_inference_permit(input_liability)
+            .ok()
+            .flatten(),
+    };
+    #[cfg(not(test))]
+    let permit = authority
+        .acquire_inference_permit(input_liability)
+        .ok()
+        .flatten();
+    let mut permit = permit.ok_or("SuperGrok inference permit was refused")?;
+    let grant = authority
+        .acquire()
+        .map_err(|_| "SuperGrok grant is unavailable")?;
+    let origin =
+        Origin::parse(identity.origin().as_str()).map_err(|_| "SuperGrok origin is invalid")?;
+    let mut headers = HeaderMap::new();
+    headers.insert(HEADER_ACCEPT, HeaderValue::from_static("text/event-stream"));
+    headers.insert(
+        HEADER_CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    headers.insert(
+        HEADER_AUTHORIZATION,
+        bearer_header(grant.expose()).map_err(|_| "SuperGrok grant is not a header value")?,
+    );
+    headers.insert(HEADER_USER_AGENT, HeaderValue::from_static(USER_AGENT));
+    insert_subscription_inference_headers(&mut headers);
+    let wire = Request::new(
+        origin,
+        Method::POST,
+        crate::SUPERGROK_RESPONSES_PATH,
+        headers,
+        SensitiveBytes::new(body.to_vec()).into_bytes(),
+        execution.client.limits(),
+    )
+    .map_err(|_| "SuperGrok side request could not be built")?;
+    permit
+        .authorize_dispatch()
+        .map_err(|_| "SuperGrok inference permit was refused")?;
+    authority
+        .revalidate(&grant)
+        .map_err(|_| "SuperGrok grant is no longer current")?;
+    Ok((
+        wire,
+        SuperGrokDispatchGuard {
+            grant,
+            permit: Some(permit),
+        },
+    ))
 }
 
 /// Credential-rejection hook for the shared Responses attempt host: after an

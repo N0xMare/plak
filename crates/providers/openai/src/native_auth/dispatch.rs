@@ -35,6 +35,12 @@ impl CodexDispatchGuard {
     }
 }
 
+impl plakous_responses_dialect::ResponsesRetrievalGuard for CodexDispatchGuard {
+    fn transport_failed(&mut self, failure: plakous_http::Failure) {
+        Self::transport_failed(self, failure);
+    }
+}
+
 /// Credential-rejection hook for the shared Responses attempt host: after an
 /// HTTP 401 head, force one claimed refresh of the rejected receipt's own login
 /// selection so the single re-dispatch carries the renewed grant. A rejected grant fails closed here and the original 401
@@ -254,6 +260,102 @@ pub(crate) fn codex_responses_preflight<'a>(
             },
         ))
     })
+}
+
+/// Authorizes one physical Codex search side request carrying `body` with
+/// the model round's sequence: route evidence, credential preflight bound to
+/// a fresh side-request physical binding, inference permit, Codex headers,
+/// then authorization revalidation and dispatch authorization. The guard
+/// retains the credential lease and permit through the response head.
+pub(crate) async fn codex_side_request(
+    target: &OpenAiTarget,
+    client: &Client,
+    body: &[u8],
+    deadline: Instant,
+    cancellation: &plakous_model::CancellationToken,
+) -> Result<(Request, CodexDispatchGuard), &'static str> {
+    target
+        .validate_current_route_evidence()
+        .map_err(|_| "Codex route evidence is not current")?;
+    if !codex_origin_allowed(target.route().origin())
+        || target.route().storage() != StorageMode::Stateless
+    {
+        return Err("Codex route binding changed");
+    }
+    let attempt = plakous_model::AttemptId::generate(
+        &plakous_model::SystemClock,
+        &plakous_model::SystemIdGenerator,
+    )
+    .map_err(|_| "Codex side request id could not be generated")?;
+    let operation = plakous_responses_dialect::ResponsesOperationBinding::retrieval_side_request(
+        body,
+        plakous_attempt::LedgerPolicy::OPENAI_STRICT,
+        plakous_responses_dialect::ResponsesAuthSlots::Secondary,
+    )
+    .map_err(|_| "Codex side request binding could not be built")?;
+    let physical = plakous_attempt::PhysicalRequestBinding::new(
+        plakous_attempt::AttemptBinding::new(operation, attempt),
+        1,
+    );
+    let input_liability = u64::try_from(body.len())
+        .ok()
+        .and_then(crate::model::codex_complete_input_token_upper_bound)
+        .and_then(|tokens| tokens.checked_add(SUBSCRIPTION_INPUT_TOKEN_OVERHEAD))
+        .ok_or("Codex side request exceeds the inference bound")?;
+    let mut authorization = target
+        .route()
+        .native_codex_preflight(NativeCodexPreflightRequest::new(
+            target.clone(),
+            physical.clone(),
+            deadline,
+            cancellation.clone(),
+        ))
+        .await
+        .map_err(|_| "Codex login could not be authorized")?;
+    target
+        .route()
+        .bind_native_codex_authorization(&mut authorization, physical.clone())
+        .map_err(|_| "Codex login changed")?;
+    let mut permit = target
+        .route()
+        .acquire_native_codex_inference(input_liability)
+        .map_err(|_| "Codex inference permit was refused")?;
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        HeaderName::from_static("accept"),
+        HeaderValue::from_static("application/json"),
+    );
+    headers.insert(
+        HeaderName::from_static("content-type"),
+        HeaderValue::from_static("application/json"),
+    );
+    authorization
+        .authorize_headers(target, &mut headers)
+        .map_err(|_| "Codex login could not be authorized")?;
+    let origin =
+        Origin::parse(target.route().origin().as_str()).map_err(|_| "Codex origin is invalid")?;
+    let wire = Request::new(
+        origin,
+        Method::POST,
+        crate::CODEX_SEARCH_PATH,
+        headers,
+        SensitiveBytes::new(body.to_vec()).into_bytes(),
+        client.limits(),
+    )
+    .map_err(|_| "Codex side request could not be built")?;
+    authorization
+        .revalidate(target, &physical)
+        .map_err(|_| "Codex login changed")?;
+    permit
+        .authorize_dispatch()
+        .map_err(|_| "Codex inference permit was refused")?;
+    Ok((
+        wire,
+        CodexDispatchGuard {
+            authorization,
+            permit,
+        },
+    ))
 }
 
 pub(super) fn remote_compaction_v2_header(

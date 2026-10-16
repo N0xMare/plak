@@ -4842,11 +4842,35 @@ and refuses excluded domains; the xAI API port (`plakous::xai::XaiRetrievalPort`
 over `XaiRetrieval`, from `XaiPlatformModel::retrieval`) serves web search with
 `allowed_domains` or `excluded_domains` and X search with `allowed_x_handles`,
 `from_date` and `to_date`. Both reuse the session executor's key grant,
-project, model and client and bind through the same deferred port. The Codex
-`alpha/search` request body, allowlist and `results[]` mapping exist in
-`plakous-openai` (`CodexSearchRequest`), but no Codex, SuperGrok or OpenRouter
-route has a port yet, so those rows refuse as not built in even when
-qualified. Route-specific inline allowlists and
+project, model and client and bind through the same deferred port. SuperGrok
+uses the same `XaiRetrievalPort` over `XaiRetrieval`, from
+`XaiLanguageModel::retrieval` at the lowest effort the model's enrolled ladder
+admits: before every physical request it revalidates the model's runtime
+authority as before a model round (renewing a stale receipt), then runs a
+model round's dispatch sequence (refresh when due, credential preflight, one
+inference permit, the grant, dispatch authorization, grant revalidation) and
+sends `POST /responses` on the SuperGrok origin with the bearer grant and the
+subscription inference headers, without `x-grok-conv-id`. The Codex port
+(`plakous::openai::CodexRetrievalPort` over `CodexRetrieval`, from
+`OpenAiLanguageModel::codex_retrieval`) serves web search without domain
+filters: each call is one `POST /backend-api/codex/alpha/search`
+(`CodexSearchRequest`) with a fresh request id, the session's model, the query
+as the one user message and as the one `search_query` command. Before every
+physical request it revalidates runtime authority as before a model round,
+binds a Codex credential preflight to a fresh side-request physical binding
+(`ResponsesOperationBinding::retrieval_side_request`), reserves one inference
+permit, applies the Codex headers (`authorization`, `chatgpt-account-id`,
+`originator`, `user-agent`, `accept: application/json`), then revalidates the
+authorization and authorizes the permit. Its reply is one bounded JSON
+document read under the same `RetryPolicy::TURN`
+(`run_responses_json_side_request`): `output` is the answer, `results[]` the
+sources, and `encrypted_output` is dropped. On both subscription routes the
+credential lease and the permit are retained through the response head, and a
+physical request that never started returns its permit, as on a model round.
+Codex and SuperGrok resolution attach the port to the resolved provider
+(`ResolvedProvider::retrieval_port`); every route now has a port, so a
+qualified row refuses as not built in only for a kind its port does not
+serve. Route-specific inline allowlists and
 class-specific unknown-outcome messages land with the first route whose
 parity requires inline retrieval.
 Exact outcome locators (OpenAI background resume, xAI deferred/stored) are a

@@ -463,6 +463,7 @@ impl ResponsesRetrievalTransport for Fixed {
                 Bytes::copy_from_slice(body),
                 &Limits::default(),
             )
+            .map(Into::into)
             .map_err(|_| ResponsesRetrievalError::invalid_request("fixture request"))
         })
     }
@@ -565,5 +566,157 @@ async fn a_rate_limit_is_retried_and_a_client_error_is_not() -> TestResult {
         "the provider refused the side request (HTTP 400, Client specified an invalid argument: x_search is not enabled)"
     );
     assert_eq!(transport.authorized.load(Ordering::SeqCst), 4);
+    Ok(())
+}
+
+/// Records what happens to each physical request's guard.
+struct Recorded(Arc<Mutex<Vec<&'static str>>>);
+
+impl ResponsesRetrievalGuard for Recorded {
+    fn transport_failed(&mut self, _: HttpFailure) {
+        if let Ok(mut events) = self.0.lock() {
+            events.push("failed");
+        }
+    }
+}
+
+impl Drop for Recorded {
+    fn drop(&mut self) {
+        if let Ok(mut events) = self.0.lock() {
+            events.push("released");
+        }
+    }
+}
+
+/// [`Fixed`] with a recorded guard on every physical request.
+struct Guarded {
+    fixed: Fixed,
+    events: Arc<Mutex<Vec<&'static str>>>,
+}
+
+impl ResponsesRetrievalTransport for Guarded {
+    fn authorize<'a>(&'a self, body: &'a [u8]) -> ResponsesRetrievalAuthorization<'a> {
+        Box::pin(async move {
+            let dispatch = self.fixed.authorize(body).await?;
+            Ok(dispatch.with_guard(Recorded(Arc::clone(&self.events))))
+        })
+    }
+}
+
+fn limits() -> ResponsesRetrievalLimits {
+    ResponsesRetrievalLimits {
+        exchange_timeout: Duration::from_secs(10),
+        jitter: Some(Jitter::SHORTEST),
+    }
+}
+
+async fn closed_origin() -> TestResult<Origin> {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
+    let port = listener.local_addr()?.port();
+    drop(listener);
+    Ok(Origin::loopback_http(
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        port,
+    )?)
+}
+
+#[tokio::test]
+async fn a_guard_learns_of_a_connect_failure_and_is_released_at_the_response_head() -> TestResult {
+    let peer = peer(vec![sse_response(&answered_search())]).await?;
+    let transport = Guarded {
+        fixed: fixed(vec![closed_origin().await?, peer.origin.clone()]),
+        events: Arc::new(Mutex::new(Vec::new())),
+    };
+    let client = Client::new_http1(Limits::default())?;
+    let outcome = run_responses_retrieval(
+        &client,
+        &transport,
+        &openai_search(),
+        &CancellationToken::new(),
+        limits(),
+    )
+    .await?;
+    assert_eq!(outcome.text, "Rust 1.99 shipped.");
+    assert_eq!(
+        *transport.events.lock().map_err(|_| "poisoned")?,
+        ["failed", "released", "released"]
+    );
+    Ok(())
+}
+
+fn cost_only(_: &[u8]) -> ReplaySafety {
+    ReplaySafety::CostOnly
+}
+
+fn server_effect(_: &[u8]) -> ReplaySafety {
+    ReplaySafety::ServerEffect
+}
+
+#[tokio::test]
+async fn a_json_side_request_returns_its_document_after_a_retried_rate_limit() -> TestResult {
+    let document = r#"{"output":"Rust 1.99 shipped.","results":[]}"#;
+    let peer = peer(vec![
+        http_response(429, "retry-after: 0\r\n", "{}"),
+        http_response(200, "content-type: application/json\r\n", document),
+    ])
+    .await?;
+    let transport = fixed(vec![peer.origin.clone()]);
+    let client = Client::new_http1(Limits::default())?;
+    let body = br#"{"q":"rust"}"#;
+    let returned = run_responses_json_side_request(
+        &client,
+        &transport,
+        body,
+        cost_only,
+        &CancellationToken::new(),
+        limits(),
+    )
+    .await?;
+    assert_eq!(returned, document.as_bytes());
+    assert_eq!(transport.authorized.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        *peer.requests.lock().map_err(|_| "poisoned")?,
+        [body.to_vec(), body.to_vec()]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_json_side_request_outside_the_allowlist_or_over_its_bound_fails() -> TestResult {
+    let oversized = "a".repeat(MAX_DOCUMENT_BYTES + 1);
+    let peer = peer(vec![http_response(
+        200,
+        "content-type: application/json\r\n",
+        &oversized,
+    )])
+    .await?;
+    let transport = fixed(vec![peer.origin.clone()]);
+    let client = Client::new_http1(Limits::default())?;
+    let refused = run_responses_json_side_request(
+        &client,
+        &transport,
+        b"{}",
+        server_effect,
+        &CancellationToken::new(),
+        limits(),
+    )
+    .await
+    .err()
+    .ok_or("an unclassified body was sent")?;
+    assert_eq!(refused.kind(), ResponsesRetrievalErrorKind::InvalidRequest);
+    assert_eq!(transport.authorized.load(Ordering::SeqCst), 0);
+    let bounded = run_responses_json_side_request(
+        &client,
+        &transport,
+        b"{}",
+        cost_only,
+        &CancellationToken::new(),
+        limits(),
+    )
+    .await
+    .err()
+    .ok_or("an oversized document was accepted")?;
+    assert_eq!(bounded.kind(), ResponsesRetrievalErrorKind::InvalidResponse);
+    assert_eq!(transport.authorized.load(Ordering::SeqCst), 1);
     Ok(())
 }

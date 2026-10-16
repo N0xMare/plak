@@ -38,6 +38,7 @@ pub const RESPONSES_WEB_SEARCH_SOURCES_INCLUDE: &str = "web_search_call.action.s
 pub const RESPONSES_RETRIEVAL_MAX_OUTPUT_TOKENS: u32 = 4096;
 
 const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
+const MAX_DOCUMENT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_OUTPUT_ITEMS: usize = 256;
 const SSE_LIMITS: SseLimits = SseLimits {
     max_line_bytes: 4 * 1024 * 1024,
@@ -451,9 +452,62 @@ impl fmt::Display for ResponsesRetrievalError {
 
 impl std::error::Error for ResponsesRetrievalError {}
 
+/// What a route retains from authorization through the response head of one
+/// physical side request, such as a credential lease and an inference permit.
+pub trait ResponsesRetrievalGuard: Send {
+    /// The physical request failed before its response head.
+    fn transport_failed(&mut self, failure: HttpFailure);
+}
+
+/// One authorized physical side request and what the route retains until
+/// its response head.
+pub struct ResponsesRetrievalDispatch {
+    request: HttpRequest,
+    guard: Option<Box<dyn ResponsesRetrievalGuard>>,
+}
+
+impl ResponsesRetrievalDispatch {
+    /// A request that retains nothing.
+    #[must_use]
+    pub fn new(request: HttpRequest) -> Self {
+        Self {
+            request,
+            guard: None,
+        }
+    }
+
+    /// Retains `guard` until the response head, or reports a transport
+    /// failure before it to the guard.
+    #[must_use]
+    pub fn with_guard(mut self, guard: impl ResponsesRetrievalGuard + 'static) -> Self {
+        self.guard = Some(Box::new(guard));
+        self
+    }
+}
+
+impl From<HttpRequest> for ResponsesRetrievalDispatch {
+    fn from(request: HttpRequest) -> Self {
+        Self::new(request)
+    }
+}
+
+impl fmt::Debug for ResponsesRetrievalDispatch {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ResponsesRetrievalDispatch")
+            .field("guarded", &self.guard.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
 /// The future [`ResponsesRetrievalTransport::authorize`] returns.
-pub type ResponsesRetrievalAuthorization<'a> =
-    Pin<Box<dyn Future<Output = Result<HttpRequest, ResponsesRetrievalError>> + Send + 'a>>;
+pub type ResponsesRetrievalAuthorization<'a> = Pin<
+    Box<
+        dyn Future<Output = Result<ResponsesRetrievalDispatch, ResponsesRetrievalError>>
+            + Send
+            + 'a,
+    >,
+>;
 
 /// The route's half of a side request.
 pub trait ResponsesRetrievalTransport: Send + Sync {
@@ -502,12 +556,61 @@ pub async fn run_responses_retrieval(
             "side request body is outside the hosted retrieval allowlist",
         ));
     }
-    let terminal = exchange_with_retry(client, transport, &body, cancellation, limits).await?;
+    let Received::Terminal(terminal) =
+        exchange_with_retry(client, transport, &body, Reply::Sse, cancellation, limits).await?
+    else {
+        return Err(ResponsesRetrievalError::invalid_response(
+            "side request reply was not a stream",
+        ));
+    };
     assemble(&terminal, request.query.call_item())
 }
 
+/// Runs one side request whose reply is a single JSON document, under the
+/// same bounded retry as [`run_responses_retrieval`], and returns the
+/// bounded success body for the route to decode.
+///
+/// # Errors
+///
+/// Refuses a body `classify` does not call [`ReplaySafety::CostOnly`] before
+/// dispatch; otherwise returns the final failure after retries.
+pub async fn run_responses_json_side_request(
+    client: &Client,
+    transport: &dyn ResponsesRetrievalTransport,
+    body: &[u8],
+    classify: fn(&[u8]) -> ReplaySafety,
+    cancellation: &CancellationToken,
+    limits: ResponsesRetrievalLimits,
+) -> Result<Vec<u8>, ResponsesRetrievalError> {
+    if classify(body) != ReplaySafety::CostOnly {
+        return Err(ResponsesRetrievalError::invalid_request(
+            "side request body is outside the hosted retrieval allowlist",
+        ));
+    }
+    match exchange_with_retry(client, transport, body, Reply::Json, cancellation, limits).await? {
+        Received::Document(document) => Ok(document),
+        Received::Terminal(_) => Err(ResponsesRetrievalError::invalid_response(
+            "side request reply was not a document",
+        )),
+    }
+}
+
+/// How a side request's success body is read.
+#[derive(Clone, Copy)]
+enum Reply {
+    /// A Responses event stream up to its terminal response.
+    Sse,
+    /// One bounded JSON document.
+    Json,
+}
+
+enum Received {
+    Terminal(Value),
+    Document(Vec<u8>),
+}
+
 enum Attempted {
-    Done(Value),
+    Done(Received),
     Retry {
         point: FailurePoint,
         retry_after: Option<Duration>,
@@ -519,9 +622,10 @@ async fn exchange_with_retry(
     client: &Client,
     transport: &dyn ResponsesRetrievalTransport,
     body: &[u8],
+    reply: Reply,
     cancellation: &CancellationToken,
     limits: ResponsesRetrievalLimits,
-) -> Result<Value, ResponsesRetrievalError> {
+) -> Result<Received, ResponsesRetrievalError> {
     let mut physical = 0_u32;
     let mut waited = Duration::ZERO;
     loop {
@@ -530,7 +634,7 @@ async fn exchange_with_retry(
         }
         physical = physical.saturating_add(1);
         let (point, retry_after, mut error) =
-            match exchange_once(client, transport, body, cancellation, limits).await {
+            match exchange_once(client, transport, body, reply, cancellation, limits).await {
                 Ok(Attempted::Done(terminal)) => return Ok(terminal),
                 Ok(Attempted::Retry {
                     point,
@@ -575,10 +679,11 @@ async fn exchange_once(
     client: &Client,
     transport: &dyn ResponsesRetrievalTransport,
     body: &[u8],
+    reply: Reply,
     cancellation: &CancellationToken,
     limits: ResponsesRetrievalLimits,
 ) -> Result<Attempted, ResponsesRetrievalError> {
-    let request = transport.authorize(body).await?;
+    let ResponsesRetrievalDispatch { request, mut guard } = transport.authorize(body).await?;
     let http_cancellation = HttpCancellationToken::new();
     let started = Instant::now();
     let deadline = started
@@ -600,6 +705,9 @@ async fn exchange_once(
     let response = match exchanged.value {
         Ok(response) => response,
         Err(failure) => {
+            if let Some(guard) = guard.as_mut() {
+                guard.transport_failed(failure);
+            }
             return Ok(Attempted::Retry {
                 point: transport_point(failure),
                 retry_after: None,
@@ -607,6 +715,7 @@ async fn exchange_once(
             });
         }
     };
+    drop(guard);
     let status = response.status().as_u16();
     if status != 200 {
         let retry_after = response
@@ -633,10 +742,55 @@ async fn exchange_once(
         error.status = Some(status);
         return Err(error);
     }
-    let mut body = response.into_body();
+    let body = response.into_body();
+    match reply {
+        Reply::Sse => read_stream(body, cancellation, &http_cancellation).await,
+        Reply::Json => read_document(body, cancellation, &http_cancellation).await,
+    }
+}
+
+async fn read_document(
+    mut body: plakous_http::ResponseBody,
+    cancellation: &CancellationToken,
+    http_cancellation: &HttpCancellationToken,
+) -> Result<Attempted, ResponsesRetrievalError> {
+    let mut document = Vec::new();
+    loop {
+        let next = cancellable(body.next_chunk(), cancellation, http_cancellation).await;
+        if next.cancelled {
+            let _ = body.close().await;
+            return Err(cancelled());
+        }
+        match next.value {
+            Some(Ok(chunk)) => {
+                if document.len().saturating_add(chunk.len()) > MAX_DOCUMENT_BYTES {
+                    let _ = body.close().await;
+                    return Err(ResponsesRetrievalError::invalid_response(
+                        "side request reply exceeded its bound",
+                    ));
+                }
+                document.extend_from_slice(&chunk);
+            }
+            Some(Err(failure)) => {
+                return Ok(Attempted::Retry {
+                    point: FailurePoint::MidStream,
+                    retry_after: None,
+                    error: unavailable(failure),
+                });
+            }
+            None => return Ok(Attempted::Done(Received::Document(document))),
+        }
+    }
+}
+
+async fn read_stream(
+    mut body: plakous_http::ResponseBody,
+    cancellation: &CancellationToken,
+    http_cancellation: &HttpCancellationToken,
+) -> Result<Attempted, ResponsesRetrievalError> {
     let mut collector = Collector::default();
     loop {
-        let next = cancellable(body.next_chunk(), cancellation, &http_cancellation).await;
+        let next = cancellable(body.next_chunk(), cancellation, http_cancellation).await;
         if next.cancelled {
             let _ = body.close().await;
             return Err(cancelled());
@@ -668,7 +822,7 @@ async fn exchange_once(
         }
     }
     match collector.finish() {
-        Ok(terminal) => Ok(Attempted::Done(terminal)),
+        Ok(terminal) => Ok(Attempted::Done(Received::Terminal(terminal))),
         Err(Broken::Transient(error)) => Ok(Attempted::Retry {
             point: FailurePoint::MidStream,
             retry_after: None,

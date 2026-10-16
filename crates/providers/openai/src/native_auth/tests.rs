@@ -7628,3 +7628,5 @@ async fn a_dispatch_dropped_during_its_401_refresh_lets_the_refresh_complete() -
     assert_eq!(settled.generation().get(), 3);
     Ok(())
 }
+
+mod retrieval;

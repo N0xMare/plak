@@ -78,12 +78,16 @@ impl OpenAiRetrieval {
 impl ResponsesRetrievalTransport for OpenAiRetrieval {
     fn authorize<'a>(&'a self, body: &'a [u8]) -> ResponsesRetrievalAuthorization<'a> {
         Box::pin(async move {
-            self.model.side_request(body).await.map_err(|message| {
-                ResponsesRetrievalError::new(
-                    ResponsesRetrievalErrorKind::Unauthorized,
-                    format!("side request authority is not current: {message}"),
-                )
-            })
+            self.model
+                .side_request(body)
+                .await
+                .map(Into::into)
+                .map_err(|message| {
+                    ResponsesRetrievalError::new(
+                        ResponsesRetrievalErrorKind::Unauthorized,
+                        format!("side request authority is not current: {message}"),
+                    )
+                })
         })
     }
 }

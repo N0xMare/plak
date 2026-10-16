@@ -2355,7 +2355,14 @@ items and events, a cut stream and `response.failed` (server error retried,
 anything else not), and the same loopback retries; the OpenAI and xAI API
 executors pin their side request's path, key, project and model over loopback
 TLS, and a revoked xAI key refuses before the socket. The Codex
-`alpha/search` body, allowlist and `results[]` mapping are pinned offline.
+`alpha/search` body, allowlist and `results[]` mapping are pinned offline. The
+SuperGrok and Codex executors pin over loopback TLS their path, OAuth headers,
+body and one authorized inference permit (acquired before its dispatch
+authorization), and that a logged-out or changed login refuses before the
+socket without a permit; the kernel pins that a route's guard learns of a
+connect failure and is released at the response head, and the bounded JSON
+side request (a rate limit retried, an unclassified body refused before
+dispatch, an oversized document refused).
 The wrapper pack pins its descriptions, argument validation and result
 rendering; binding pins that a `Supported` row with a port binds the pack and
 every shipped row refuses. The one paid probe per (route, tool) is opt-in and

@@ -24,7 +24,7 @@ use refresh::{XaiRefreshCancelGuard, XaiRefreshHooks, XaiRevokeHooks};
 use dispatch::supergrok_generation_fingerprint;
 pub(crate) use dispatch::{
     SuperGrokDispatchGuard, SuperGrokResponsesExecution, revalidate_supergrok_responses,
-    supergrok_credential_rejected, supergrok_responses_preflight,
+    supergrok_credential_rejected, supergrok_responses_preflight, supergrok_side_request,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -1246,6 +1246,47 @@ impl XaiNativeAuthManager {
         client: Client,
         config: StandardXaiHttpConfig,
     ) -> Result<(Arc<dyn LanguageModel>, XaiModelResolutionEvidence), XaiNativeAuthError> {
+        let (model, evidence) = self
+            .resolve_exact_model(requested_model, client, config)
+            .await?;
+        let model: Arc<dyn LanguageModel> = model;
+        Ok((model, evidence))
+    }
+
+    /// Resolves the model as [`Self::resolve_model_with_evidence`] does,
+    /// with the hosted web and X search side-request executor on the same
+    /// route, login, model and client.
+    ///
+    /// # Errors
+    ///
+    /// Same failures as [`Self::resolve_model_with_evidence`].
+    pub async fn resolve_model_with_retrieval(
+        &self,
+        requested_model: &str,
+        client: Client,
+        config: StandardXaiHttpConfig,
+    ) -> Result<
+        (
+            Arc<dyn LanguageModel>,
+            XaiModelResolutionEvidence,
+            crate::XaiRetrieval,
+        ),
+        XaiNativeAuthError,
+    > {
+        let (model, evidence) = self
+            .resolve_exact_model(requested_model, client, config)
+            .await?;
+        let retrieval = model.retrieval();
+        let model: Arc<dyn LanguageModel> = model;
+        Ok((model, evidence, retrieval))
+    }
+
+    async fn resolve_exact_model(
+        &self,
+        requested_model: &str,
+        client: Client,
+        config: StandardXaiHttpConfig,
+    ) -> Result<(Arc<XaiLanguageModel>, XaiModelResolutionEvidence), XaiNativeAuthError> {
         let requested = ModelId::new(requested_model)?;
         if !is_subscription_coding_model_id(requested.as_str()) {
             return Err(XaiNativeAuthError::RequestedModelNotAdmitted);

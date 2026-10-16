@@ -51,6 +51,8 @@ pub use api_models::{
     list_openai_api_models, openai_api_bundled_listing, openai_api_key_fingerprint,
     openai_api_models,
 };
+#[cfg(feature = "native-auth")]
+pub use codex_search::CodexRetrieval;
 pub use codex_search::{
     CODEX_SEARCH_PATH, CodexSearchRequest, classify_codex_search_body, decode_codex_search_response,
 };

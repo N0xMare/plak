@@ -29,7 +29,7 @@ use verify::{rsa_components_are_acceptable, validate_jose_header};
 
 pub(crate) use dispatch::{
     CodexDispatchGuard, CodexResponsesDialect, codex_credential_rejected,
-    codex_responses_preflight, revalidate_codex_responses,
+    codex_responses_preflight, codex_side_request, revalidate_codex_responses,
 };
 #[cfg(test)]
 use dispatch::{
@@ -2583,6 +2583,40 @@ impl CodexModelResolver {
         &self,
         model_id: &str,
     ) -> Result<(Arc<dyn LanguageModel>, CodexModelResolutionEvidence), NativeCodexAuthError> {
+        let (model, evidence) = self.resolve_exact(model_id)?;
+        let model: Arc<dyn LanguageModel> = model;
+        Ok((model, evidence))
+    }
+
+    /// Resolves the model as [`Self::resolve_with_evidence`] does, with the
+    /// hosted web search side-request executor on the same route, login,
+    /// model and client.
+    ///
+    /// # Errors
+    ///
+    /// Same failures as [`Self::resolve_with_evidence`].
+    pub fn resolve_with_retrieval(
+        &self,
+        model_id: &str,
+    ) -> Result<
+        (
+            Arc<dyn LanguageModel>,
+            CodexModelResolutionEvidence,
+            crate::CodexRetrieval,
+        ),
+        NativeCodexAuthError,
+    > {
+        let (model, evidence) = self.resolve_exact(model_id)?;
+        let retrieval = model.codex_retrieval();
+        let model: Arc<dyn LanguageModel> = model;
+        Ok((model, evidence, retrieval))
+    }
+
+    fn resolve_exact(
+        &self,
+        model_id: &str,
+    ) -> Result<(Arc<OpenAiLanguageModel>, CodexModelResolutionEvidence), NativeCodexAuthError>
+    {
         self.validate_route_account()?;
         let catalog = self
             .catalog
@@ -2703,8 +2737,7 @@ impl CodexModelResolver {
         }
         let model = OpenAiLanguageModel::new_codex(target, inference_client, self.config, renewal)
             .map_err(|_| NativeCodexAuthError::Catalog)?;
-        let model: Arc<dyn LanguageModel> = Arc::new(model);
-        Ok((model, evidence))
+        Ok((Arc::new(model), evidence))
     }
 }
 

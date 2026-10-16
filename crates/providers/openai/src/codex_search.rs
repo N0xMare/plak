@@ -1,20 +1,36 @@
-//! The Codex `alpha/search` side request: body and response mapping.
+//! The Codex `alpha/search` side request: body, response mapping and, with
+//! native auth, the executor that sends it.
 //!
 //! Codex Responses Lite rows carry no hosted tools, so the reference client
 //! searches through a separate `<base>/alpha/search` request. This module
-//! owns that request's exact body, its cost-only allowlist and the mapping
-//! of its `results[]` onto sources. The route transport that would send it
-//! under the subscription grant is not built yet, so the Codex route has no
-//! retrieval port and its rows refuse at bind.
+//! owns that request's exact body, its cost-only allowlist, the mapping of
+//! its `results[]` onto sources, and [`CodexRetrieval`], which sends it under
+//! the session's own subscription login with a model round's admission
+//! revalidation, credential preflight and inference permit per physical
+//! request.
 
 use std::collections::BTreeSet;
+#[cfg(feature = "native-auth")]
+use std::fmt;
+#[cfg(feature = "native-auth")]
+use std::sync::Arc;
 
 use plakous_attempt::ReplaySafety;
+#[cfg(feature = "native-auth")]
+use plakous_model::CancellationToken;
 use plakous_responses_dialect::{
     RESPONSES_RETRIEVAL_MAX_OUTPUT_TOKENS, ResponsesRetrievalError, ResponsesRetrievalErrorKind,
     ResponsesRetrievalOutcome, ResponsesRetrievalSource, ResponsesRetrievalUsage,
 };
+#[cfg(feature = "native-auth")]
+use plakous_responses_dialect::{
+    ResponsesRetrievalAuthorization, ResponsesRetrievalDispatch, ResponsesRetrievalLimits,
+    ResponsesRetrievalQuery, ResponsesRetrievalTransport, run_responses_json_side_request,
+};
 use serde_json::{Value, json};
+
+#[cfg(feature = "native-auth")]
+use crate::OpenAiLanguageModel;
 
 /// The search endpoint path under the Codex backend base.
 pub const CODEX_SEARCH_PATH: &str = "/backend-api/codex/alpha/search";
@@ -170,6 +186,152 @@ pub fn decode_codex_search_response(
             ..ResponsesRetrievalUsage::default()
         },
     })
+}
+
+/// One session's hosted web search on the Codex subscription route.
+#[cfg(feature = "native-auth")]
+pub struct CodexRetrieval {
+    model: Arc<OpenAiLanguageModel>,
+    limits: ResponsesRetrievalLimits,
+}
+
+#[cfg(feature = "native-auth")]
+impl CodexRetrieval {
+    pub(crate) fn new(model: Arc<OpenAiLanguageModel>) -> Self {
+        Self {
+            model,
+            limits: ResponsesRetrievalLimits::default(),
+        }
+    }
+
+    /// Replaces the exchange bounds and backoff sample.
+    #[must_use]
+    pub const fn with_limits(mut self, limits: ResponsesRetrievalLimits) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    /// The exact side request for `query` under the fresh request `id`.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a query the search command cannot express: post search and
+    /// domain filters.
+    pub fn request(
+        &self,
+        id: impl Into<String>,
+        query: ResponsesRetrievalQuery,
+    ) -> Result<CodexSearchRequest, ResponsesRetrievalError> {
+        if let Some(refused) = refuse_unexpressible(&query) {
+            return Err(refused);
+        }
+        let (ResponsesRetrievalQuery::WebSearch { query, .. }
+        | ResponsesRetrievalQuery::PostSearch { query, .. }) = query;
+        Ok(CodexSearchRequest::new(
+            id,
+            self.model.descriptor().requested_model().as_str(),
+            query,
+        ))
+    }
+
+    /// Runs one side request.
+    ///
+    /// # Errors
+    ///
+    /// Returns the side request's failure after its bounded retries.
+    pub async fn retrieve(
+        &self,
+        query: ResponsesRetrievalQuery,
+        cancellation: &CancellationToken,
+    ) -> Result<ResponsesRetrievalOutcome, ResponsesRetrievalError> {
+        let id = plakous_model::AttemptId::generate(
+            &plakous_model::SystemClock,
+            &plakous_model::SystemIdGenerator,
+        )
+        .map_err(|_| {
+            ResponsesRetrievalError::new(
+                ResponsesRetrievalErrorKind::InvalidRequest,
+                "side request id could not be generated",
+            )
+        })?;
+        let body = self.request(id.to_string(), query)?.body()?;
+        let transport = CodexSideRequest {
+            retrieval: self,
+            cancellation: cancellation.clone(),
+        };
+        let document = run_responses_json_side_request(
+            self.model.client(),
+            &transport,
+            &body,
+            classify_codex_search_body,
+            cancellation,
+            self.limits,
+        )
+        .await?;
+        decode_codex_search_response(&document)
+    }
+}
+
+/// Refuses what the search command cannot express: post search and domain
+/// filters.
+#[cfg(feature = "native-auth")]
+pub(crate) fn refuse_unexpressible(
+    query: &ResponsesRetrievalQuery,
+) -> Option<ResponsesRetrievalError> {
+    let refused = match query {
+        ResponsesRetrievalQuery::WebSearch {
+            allowed_domains,
+            blocked_domains,
+            ..
+        } if allowed_domains.is_empty() && blocked_domains.is_empty() => return None,
+        ResponsesRetrievalQuery::WebSearch { .. } => {
+            "this route's web search cannot filter domains"
+        }
+        ResponsesRetrievalQuery::PostSearch { .. } => "this route does not search posts",
+    };
+    Some(ResponsesRetrievalError::new(
+        ResponsesRetrievalErrorKind::InvalidRequest,
+        refused,
+    ))
+}
+
+/// One logical side request's transport: the caller's cancellation also
+/// bounds each physical request's credential preflight.
+#[cfg(feature = "native-auth")]
+struct CodexSideRequest<'a> {
+    retrieval: &'a CodexRetrieval,
+    cancellation: CancellationToken,
+}
+
+#[cfg(feature = "native-auth")]
+impl ResponsesRetrievalTransport for CodexSideRequest<'_> {
+    fn authorize<'a>(&'a self, body: &'a [u8]) -> ResponsesRetrievalAuthorization<'a> {
+        Box::pin(async move {
+            let deadline = std::time::Instant::now() + self.retrieval.limits.exchange_timeout;
+            let (request, guard) = self
+                .retrieval
+                .model
+                .codex_side_request(body, deadline, &self.cancellation)
+                .await
+                .map_err(|message| {
+                    ResponsesRetrievalError::new(
+                        ResponsesRetrievalErrorKind::Unauthorized,
+                        format!("side request authority is not current: {message}"),
+                    )
+                })?;
+            Ok(ResponsesRetrievalDispatch::new(request).with_guard(guard))
+        })
+    }
+}
+
+#[cfg(feature = "native-auth")]
+impl fmt::Debug for CodexRetrieval {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CodexRetrieval")
+            .field("route", &"codex")
+            .finish_non_exhaustive()
+    }
 }
 
 #[cfg(test)]

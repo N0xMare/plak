@@ -64,6 +64,95 @@ async fn capture_codex_authenticated_catalog() -> Result<(), Box<dyn Error>> {
     fs::write(output, bytes)?;
     Ok(())
 }
+/// Opt-in paid probe, never in a gate tier: one hosted-retrieval side request
+/// per (route, tool) on the operator's Codex and SuperGrok logins. A pass is a
+/// non-empty answer with at least one source. Run with
+/// `PLAK_LIVE_RETRIEVAL_PROBE=1 PLAK_CAPTURE_STATE_HOME=<Plak XDG state home>
+/// PLAK_LIVE_CODEX_MODEL=<model> PLAK_LIVE_GROK_MODEL=<model> cargo nextest run
+/// -p plakous --features native-subscriptions --run-ignored only
+/// -E 'test(live_retrieval_probe)'`; a route whose model variable is unset is
+/// skipped.
+#[tokio::test]
+#[ignore = "paid live probe"]
+async fn live_retrieval_probe_subscriptions() -> Result<(), Box<dyn Error>> {
+    use plakous_tools::{ExecutionOperationControl, RetrievalRequest};
+
+    if std::env::var("PLAK_LIVE_RETRIEVAL_PROBE").as_deref() != Ok("1") {
+        return Err("set PLAK_LIVE_RETRIEVAL_PROBE=1 to spend one probe per tool".into());
+    }
+    let state_home =
+        std::env::var_os("PLAK_CAPTURE_STATE_HOME").ok_or("PLAK_CAPTURE_STATE_HOME is required")?;
+    let subscriptions =
+        NativeSubscriptions::new(SubscriptionPaths::from_xdg_state_home(state_home)?);
+    let web_search = RetrievalRequest::WebSearch {
+        query: "Rust programming language latest stable release".to_owned(),
+        allowed_domains: Vec::new(),
+        blocked_domains: Vec::new(),
+    };
+    let x_search = RetrievalRequest::PostSearch {
+        query: "Rust programming language release".to_owned(),
+        handles: vec!["rustlang".to_owned()],
+        from_date: None,
+        to_date: None,
+    };
+    for (provider, model_variable, requests) in [
+        (
+            NativeProvider::Codex,
+            "PLAK_LIVE_CODEX_MODEL",
+            vec![web_search.clone()],
+        ),
+        (
+            NativeProvider::Xai,
+            "PLAK_LIVE_GROK_MODEL",
+            vec![web_search, x_search],
+        ),
+    ] {
+        let Ok(model) = std::env::var(model_variable) else {
+            eprintln!("{provider:?}: {model_variable} unset, skipped");
+            continue;
+        };
+        let limits =
+            SubscriptionRequestLimits::new(2, 2, 4, 1_000_000, Some(Duration::from_secs(300)), 0)?;
+        let gate: Arc<dyn SubscriptionRequestGate> =
+            Arc::new(InMemorySubscriptionRequestGate::new(
+                limits,
+                Arc::new(SystemSubscriptionGateClock::default()),
+            ));
+        let resolved = subscriptions
+            .resolve_gated_native_model(
+                provider,
+                &NativeModelSelector::Exact(ModelId::new(model)?),
+                gate,
+                SessionLineage::Root,
+            )
+            .await
+            .map_err(|error| format!("{provider:?} resolution failed: {error:?}"))?;
+        let port = resolved
+            .retrieval
+            .clone()
+            .ok_or("the route built no retrieval port")?;
+        for request in requests {
+            let outcome = port
+                .retrieve(
+                    request,
+                    ExecutionOperationControl::new(plakous_model::CancellationToken::new()),
+                )
+                .await?;
+            eprintln!(
+                "{provider:?}: sources={} usage={:?}",
+                outcome.sources.len(),
+                outcome.usage
+            );
+            assert!(
+                !outcome.text.trim().is_empty(),
+                "the search answered nothing"
+            );
+            assert!(!outcome.sources.is_empty(), "the search reported no source");
+        }
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn xai_inference_observer_is_passive_and_receives_exact_request_bytes()
 -> Result<(), Box<dyn Error>> {

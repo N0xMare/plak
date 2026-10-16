@@ -853,7 +853,10 @@ no separate authority: each wrapper call is one side request whose hosted
 work is bounded by the body it sends (`max_uses` 5 for web search, 1 for page
 fetch, `max_tokens` 4,096, at most three `pause_turn` continuations, and the
 turn retry budget per exchange; on OpenRouter, one `web` plugin with
-`max_results` 5 and no continuation). The OpenRouter plugin is charged per
+`max_results` 5 and no continuation). On the Codex and SuperGrok
+subscription routes each physical side request also spends one inference
+permit of the session's subscription request gate, reserved and authorized as
+for a model round. The OpenRouter plugin is charged per
 request even on a free model, so a free OpenRouter model is not free search.
 The wrappers are opt-in per template; no shipped preset enables them.
 

@@ -532,6 +532,8 @@ pub mod mcp {
 /// Exact-origin OpenAI API-key execution and the separate Codex subscription integration.
 #[cfg(feature = "openai")]
 pub mod openai {
+    #[cfg(feature = "native-subscriptions")]
+    pub use crate::responses_retrieval::CodexRetrievalPort;
     pub use crate::responses_retrieval::OpenAiRetrievalPort;
     pub use plakous_openai::{
         AccessMode as OpenAiAccessMode, AuthError as OpenAiAuthError, CodexSubscriptionRouteConfig,

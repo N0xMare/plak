@@ -767,6 +767,47 @@ impl OpenAiLanguageModel {
         })
     }
 
+    /// The session's hosted web search side-request executor on this exact
+    /// route, login, model and client.
+    #[must_use]
+    pub fn codex_retrieval(self: &Arc<Self>) -> crate::CodexRetrieval {
+        crate::CodexRetrieval::new(Arc::clone(self))
+    }
+
+    pub(crate) const fn client(&self) -> &plakous_http::Client {
+        &self.client
+    }
+
+    pub(crate) const fn descriptor(&self) -> &ResolvedModelDescriptor {
+        &self.descriptor
+    }
+
+    /// Revalidates admission exactly as before a model round (renewing a
+    /// stale receipt), then authorizes one physical Codex search side
+    /// request carrying `body` on the current receipt.
+    pub(crate) async fn codex_side_request(
+        self: &Arc<Self>,
+        body: &[u8],
+        deadline: Instant,
+        cancellation: &plakous_model::CancellationToken,
+    ) -> Result<(plakous_http::Request, CodexDispatchGuard), &'static str> {
+        Arc::clone(self)
+            .revalidate_runtime_authority(SystemClock.now())
+            .await
+            .map_err(|_| "Codex admission is no longer current")?;
+        let current = self
+            .current_target()
+            .map_err(|_| "Codex target is unavailable")?;
+        crate::native_auth::codex_side_request(
+            &current.target,
+            &self.client,
+            body,
+            deadline,
+            cancellation,
+        )
+        .await
+    }
+
     fn current_target(&self) -> Result<Arc<CodexDispatchTarget>, RuntimeModelAuthorityError> {
         self.target
             .lock()

@@ -176,6 +176,37 @@ impl ResponsesOperationBinding {
     pub const fn replay_safety(&self) -> ReplaySafety {
         self.replay_safety
     }
+
+    /// The binding of one hosted-retrieval side request carrying `body`, a
+    /// body the caller's per-tool allowlist already classified cost-only.
+    ///
+    /// A side request has no admitted model-request authority or dialect
+    /// execution data; both are the fixed side-request identity, so the
+    /// binding never matches a model attempt. The body is bound exactly.
+    ///
+    /// # Errors
+    ///
+    /// Fails only when a digest cannot be built.
+    pub fn retrieval_side_request(
+        body: &[u8],
+        ledger_policy: LedgerPolicy,
+        auth_slots: ResponsesAuthSlots,
+    ) -> Result<Self, ResponsesAttemptBuildError> {
+        let side_request = Digest::sha256(
+            DigestDomain::ModelBinding,
+            1,
+            &[b"responses-retrieval-side-request-v1"],
+        )
+        .map_err(|_| ResponsesAttemptBuildError::Binding)?;
+        Ok(Self {
+            request_authority: side_request,
+            execution: side_request,
+            request_body: request_body_digest(body)?,
+            ledger_policy,
+            auth_slots,
+            replay_safety: ReplaySafety::CostOnly,
+        })
+    }
 }
 
 /// Exact logical-attempt identity.

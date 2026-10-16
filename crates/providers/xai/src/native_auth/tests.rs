@@ -7533,3 +7533,5 @@ async fn retired_hex_epoch_record_needs_a_new_login_without_network() -> TestRes
     peer.shutdown().await?;
     Ok(())
 }
+
+mod retrieval;
