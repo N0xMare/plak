@@ -1261,6 +1261,7 @@ impl ProductConfig {
             name,
             account: template.account.clone(),
             model: template.model.clone(),
+            tools: template.tools.clone(),
         })
     }
 

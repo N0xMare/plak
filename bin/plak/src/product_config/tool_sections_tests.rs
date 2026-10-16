@@ -458,3 +458,33 @@ fn a_trusted_project_adds_and_replaces_tool_tables_by_name() {
     assert!(sections.mcp_servers.contains_key("linear"));
     assert_eq!(sections.web_search.as_ref().unwrap().max_uses, 3);
 }
+
+/// A `[root] agent` template's tools travel from the files to the session
+/// bind: the policy fact carries them, and the root takes them only while it
+/// runs that template's exact tuple. Binding them on the route is the
+/// hosted half (`a_codex_root_template_selecting_x_search_refuses_the_native_bind`).
+#[test]
+fn the_root_template_fact_carries_its_tools_to_the_session_bind() {
+    let temp = tempfile::tempdir().unwrap();
+    let paths = PlakPaths::explicit(temp.path().join("home"));
+    paths.ensure_layout().unwrap();
+    fs::write(
+        paths.user_agents_dir().join("root-agent.toml"),
+        template_text("tools = [\"x_search\"]\n"),
+    )
+    .unwrap();
+    fs::write(paths.config_file(), "[root]\nagent = \"root-agent\"\n").unwrap();
+    let policy = SessionPolicy::load(&paths).unwrap();
+    let fact = policy.root_template.unwrap();
+    let selection = RootTemplateFact::root_tool_selection(Some(&fact), Some("codex"), Some("m"));
+    let names: Vec<String> = selection
+        .entries()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(names, ["x_search"]);
+    assert!(
+        RootTemplateFact::root_tool_selection(Some(&fact), Some("codex"), Some("other")).is_empty()
+    );
+    assert!(RootTemplateFact::root_tool_selection(None, Some("codex"), Some("m")).is_empty());
+}

@@ -3501,6 +3501,70 @@ async fn api_child_pin_follows_the_api_table_for_its_node_model() {
     crate::topology_runtime::force_release(&tree_id).await;
 }
 
+/// A child binds its own frozen card's tool selection, never its parent's:
+/// a parent selecting nothing spawns an `x_search` card that carries it, and a
+/// card selecting nothing binds nothing.
+#[tokio::test]
+async fn a_child_binds_its_own_frozen_card_tools() {
+    use crate::agent_tree::ProductAgentTree;
+    use crate::agent_tree_protocol::{SpawnAgentRequest, TemplateName, Tier, WriterMode};
+    use crate::orchestration::{BindHints, OrchestrationSnapshot, RosterBinding, RosterInput};
+
+    let workspace = tempfile::tempdir().expect("workspace");
+    let mut input = RosterInput::unpinned("gpt-5.6-sol");
+    input.bind_hints = BindHints::from_names(&["grok", "codex"], &[]);
+    for (name, account, tools) in [
+        ("searcher", "grok", vec!["x_search".to_owned()]),
+        ("plain", "codex", Vec::new()),
+    ] {
+        let mut card = RosterBinding::leaf(account, "model-a");
+        card.template = name.to_owned();
+        card.description = format!("{name} worker");
+        card.tools = tools;
+        let name = TemplateName::parse(name).expect("template name");
+        input.working_set.insert(name.clone());
+        input.templates.insert(name, card);
+    }
+    let tree_id = crate::topology_runtime::test_support::unique_tree_id();
+    let mut tree = ProductAgentTree::bootstrap_root(
+        &tree_id,
+        "root",
+        "root",
+        workspace.path().to_path_buf(),
+        "gpt-5.6-sol",
+        WriterMode::SingleLease,
+    )
+    .expect("tree");
+    tree.install_snapshot(OrchestrationSnapshot::freeze(input));
+    let mut children = Vec::new();
+    for name in ["searcher", "plain"] {
+        let spawned = tree
+            .spawn_agent(
+                "root",
+                &SpawnAgentRequest::test_named(name, Tier::ReadOnly, name, "look"),
+                None,
+            )
+            .unwrap_or_else(|error| panic!("{name}: {error:?}"));
+        children.push((name, spawned.agent_id));
+    }
+    crate::topology_runtime::insert_root(tree_id.clone(), tree, None).expect("hub");
+    for (name, agent_id) in children {
+        let names: Vec<String> = frozen_child_tool_selection(&tree_id, &agent_id)
+            .expect(name)
+            .entries()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        let expected: &[&str] = if name == "searcher" {
+            &["x_search"]
+        } else {
+            &[]
+        };
+        assert_eq!(names, expected, "{name}");
+    }
+    crate::topology_runtime::force_release(&tree_id).await;
+}
+
 /// For every presentation x fence x composition runtime, the surface compiles
 /// under the runtime's reserved markers and renames only what declares an
 /// alternate: pi's `wait` becomes `wait_jobs` beside the native-ptc `wait`
@@ -4118,6 +4182,53 @@ async fn supergrok_hub_creates_and_reopens_on_every_fence() -> Result<(), Box<dy
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
+    Ok(())
+}
+
+/// A codex root running its `[root] agent` template binds that template's
+/// selection, and `x_search` refuses the codex bind with its one-line
+/// remedy; a root bound by an explicit tuple takes no template tools.
+#[test]
+fn a_codex_root_template_selecting_x_search_refuses_the_native_bind()
+-> Result<(), Box<dyn std::error::Error>> {
+    use crate::agent::build::bind_node_tool_plan;
+    let fact = crate::binding::RootTemplateFact {
+        name: "root-agent".to_owned(),
+        account: "codex".to_owned(),
+        model: "gpt-6-astra".to_owned(),
+        tools: crate::tool_plan::TemplateToolSelection::parse(["x_search"])?,
+    };
+    let explicit = crate::binding::RootTemplateFact::root_tool_selection(
+        Some(&fact),
+        Some("codex"),
+        Some("gpt-6-sol"),
+    );
+    assert!(explicit.is_empty());
+    assert!(
+        bind_node_tool_plan(
+            &explicit,
+            crate::tool_plan::ToolRoute::native(NativeProvider::Codex),
+            "codex",
+        )
+        .is_ok()
+    );
+    let selection = crate::binding::RootTemplateFact::root_tool_selection(
+        Some(&fact),
+        Some("codex"),
+        Some("gpt-6-astra"),
+    );
+    let refused = bind_node_tool_plan(
+        &selection,
+        crate::tool_plan::ToolRoute::native(NativeProvider::Codex),
+        "codex",
+    )
+    .err()
+    .ok_or("x_search bound on codex")?;
+    assert_eq!(
+        refused.message(),
+        "x_search is not available on codex; \
+         remedy: put x_search on a grok or xai-api template and spawn it"
+    );
     Ok(())
 }
 

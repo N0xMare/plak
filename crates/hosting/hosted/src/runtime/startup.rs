@@ -558,7 +558,7 @@ fn native_spec<P: plakous_host_protocol::ProtocolExtension>(
     Ok(ProductAgentSpec {
         prompt_host_facts: config.prompt_host_facts(),
         product_home: Some(config.product_home.clone()),
-        tool_selection: crate::tool_plan::TemplateToolSelection::default(),
+        tool_selection: root_tool_selection(config, &config.session),
         provider: config
             .target
             .native_provider()
@@ -729,7 +729,21 @@ pub(super) fn api_parent_from_config<P: plakous_host_protocol::ProtocolExtension
         config.topology_enabled,
     );
     parent.prompt_host_facts = config.prompt_host_facts();
+    parent.tool_selection = root_tool_selection(config, session);
     Ok(parent)
+}
+
+/// The root's optional tools: its `[root] agent` template's list when this
+/// session runs that template's exact tuple, otherwise none.
+pub(super) fn root_tool_selection<P: plakous_host_protocol::ProtocolExtension>(
+    config: &HostConfig<P>,
+    session: &SessionRecord,
+) -> crate::tool_plan::TemplateToolSelection {
+    crate::binding::RootTemplateFact::root_tool_selection(
+        config.root_template.as_ref(),
+        session.account.as_deref(),
+        session.model.as_deref(),
+    )
 }
 
 pub(super) fn openrouter_cached_evidence<P: plakous_host_protocol::ProtocolExtension>(
@@ -807,7 +821,7 @@ pub(super) fn api_compaction_runtime_binding<P: plakous_host_protocol::ProtocolE
         } if cached.matches(&literal_model, target.protocol()) => Some(cached.evidence.clone()),
         _ => None,
     };
-    let parent = api_topology_parent(
+    let mut parent = api_topology_parent(
         config.product_home.clone(),
         durable_tree_id(&config.topology_rows(), &config.session),
         &config.session,
@@ -821,6 +835,7 @@ pub(super) fn api_compaction_runtime_binding<P: plakous_host_protocol::ProtocolE
         config.max_model_rounds,
         config.topology_enabled,
     );
+    parent.tool_selection = root_tool_selection(config, &config.session);
     ApplicationExecutor::new()
         .map_err(|_| CliFailure::new("application executor unavailable"))?
         .block_on(async {
@@ -854,7 +869,7 @@ pub(super) async fn cached_api_runtime_for_record<P: plakous_host_protocol::Prot
         _ => None,
     };
     let effort = effort_from_record(record.effort.as_deref())?;
-    let parent = api_topology_parent(
+    let mut parent = api_topology_parent(
         config.product_home.clone(),
         durable_tree_id(&config.topology_rows(), record),
         record,
@@ -868,6 +883,7 @@ pub(super) async fn cached_api_runtime_for_record<P: plakous_host_protocol::Prot
         config.max_model_rounds,
         config.topology_enabled,
     );
+    parent.tool_selection = root_tool_selection(config, record);
     let prepared = Box::pin(api_session_runtime_binding(
         &parent,
         opening_durable_session,
@@ -909,7 +925,7 @@ pub(super) fn host_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
     let spec = ProductAgentSpec {
         prompt_host_facts: config.prompt_host_facts(),
         product_home: Some(config.product_home.clone()),
-        tool_selection: crate::tool_plan::TemplateToolSelection::default(),
+        tool_selection: root_tool_selection(config, &config.session),
         provider: config
             .target
             .native_provider()
@@ -993,7 +1009,7 @@ pub(super) async fn open_session_for_host<P: plakous_host_protocol::ProtocolExte
     let spec = ProductAgentSpec {
         prompt_host_facts: config.prompt_host_facts(),
         product_home: Some(config.product_home.clone()),
-        tool_selection: crate::tool_plan::TemplateToolSelection::default(),
+        tool_selection: root_tool_selection(config, session),
         provider: config
             .target
             .native_provider()

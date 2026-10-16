@@ -1446,7 +1446,7 @@ pub(super) async fn openrouter_child_runtime_binding(
         // The tree host wakes every child on its tracked work (spec 03 §5.2).
         prompt_host_facts: plakous_host_protocol::PromptHostFacts { host_wakes: true },
         product_home: parent.product_home().map(Path::to_path_buf),
-        tool_selection: crate::tool_plan::TemplateToolSelection::default(),
+        tool_selection: frozen_child_tool_selection(tree_id, agent_id)?,
         workspace_root,
         cwd: child_path,
         plan_state_authority: child_plan_state_authority(tree_id, agent_id)?,
@@ -1476,6 +1476,31 @@ pub(super) async fn openrouter_child_runtime_binding(
     .await
     .map(|prepared| prepared.runtime)
     .map_err(|error| error.message().to_owned())
+}
+
+/// A child's optional tools: its own frozen card's list, never its
+/// parent's. A node with no template, or a card outside this epoch, has none.
+pub(super) fn frozen_child_tool_selection(
+    tree_id: &str,
+    agent_id: &str,
+) -> Result<crate::tool_plan::TemplateToolSelection, String> {
+    let Some(runtime) = crate::topology_runtime::lookup(tree_id) else {
+        return Ok(crate::tool_plan::TemplateToolSelection::default());
+    };
+    runtime
+        .read(|tree| {
+            let Some(binding) = tree
+                .node(agent_id)
+                .ok()
+                .and_then(|node| node.template.as_ref())
+                .and_then(|template| tree.snapshot.binding(template))
+            else {
+                return Ok(crate::tool_plan::TemplateToolSelection::default());
+            };
+            crate::tool_plan::TemplateToolSelection::parse(&binding.tools)
+                .map_err(|error| format!("child template {} tools: {error}", binding.template))
+        })
+        .map_err(|error| error.message)?
 }
 
 pub(super) fn frozen_openrouter_child_pin(
@@ -1676,7 +1701,7 @@ pub async fn spawned_child_spec(
         // The tree host wakes every child on its tracked work (spec 03 §5.2).
         prompt_host_facts: plakous_host_protocol::PromptHostFacts { host_wakes: true },
         product_home: parent.product_home().map(Path::to_path_buf),
-        tool_selection: crate::tool_plan::TemplateToolSelection::default(),
+        tool_selection: frozen_child_tool_selection(&tree_id, agent_id)?,
         provider: target_provider,
         resolved,
         effort: effort_explicit.then_some(target_effort),

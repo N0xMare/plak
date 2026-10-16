@@ -151,7 +151,7 @@ pub(crate) use children::assignment_start_prompt;
 #[cfg(test)]
 use children::{
     SESSION_LEASE_HOLD_HINT, child_plan_state_authority, child_session_workspace_root,
-    child_turn_was_cancelled, finalize_topology_child_turn, frozen_openrouter_child_pin,
-    openrouter_child_runtime_binding, openrouter_frozen_pin, spawn_child_operation_id,
-    submit_harness_prompt,
+    child_turn_was_cancelled, finalize_topology_child_turn, frozen_child_tool_selection,
+    frozen_openrouter_child_pin, openrouter_child_runtime_binding, openrouter_frozen_pin,
+    spawn_child_operation_id, submit_harness_prompt,
 };

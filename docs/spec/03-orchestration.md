@@ -383,7 +383,12 @@ states the tier and workspace it actually has.
 
 A node's grant also includes its own template's optional `tools`, resolved
 against its route when it binds (chapter 01); a tool the route cannot serve
-refuses the bind rather than being silently omitted.
+refuses the bind rather than being silently omitted. A child binds its own
+frozen card's list, never its parent's. The root binds its `[root] agent`
+template's list only while it runs that template's exact account and model;
+a root bound by explicit `--account` / `--model` has none. Unlike a child's
+card, the root's list is read from the live configuration when the session is
+created, reopened, cleared or rebound.
 
 ### 3.1 A child gets at most its parent's tools
 

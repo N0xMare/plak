@@ -1499,7 +1499,7 @@ pub(super) fn compiled_configuration_with_direct_extensions(
 
 /// The tool plan of one node, bound before anything attaches or compiles;
 /// a refusal fails the session's creation, or the spawn, with its one line.
-fn bind_node_tool_plan(
+pub(super) fn bind_node_tool_plan(
     selection: &crate::tool_plan::TemplateToolSelection,
     route: Option<crate::tool_plan::ToolRoute>,
     route_label: &str,

@@ -625,6 +625,7 @@ mod tests {
             name: "scout".to_owned(),
             account: "codex".to_owned(),
             model: "gpt-5.6-luna".to_owned(),
+            tools: crate::tool_plan::TemplateToolSelection::default(),
         });
 
         // A session bound by explicit --account/--model is not running `[root]`,

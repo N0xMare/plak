@@ -71,6 +71,27 @@ pub struct RootTemplateFact {
     pub account: String,
     /// Exact model id the template binds.
     pub model: String,
+    /// The optional tools the template selects.
+    pub tools: crate::tool_plan::TemplateToolSelection,
+}
+
+impl RootTemplateFact {
+    /// The root's tool selection: the `[root] agent` template's list when
+    /// the session runs exactly that template's tuple, and none for a root
+    /// bound by explicit `--account` / `--model` or with no `[root] agent`.
+    #[must_use]
+    pub fn root_tool_selection(
+        configured: Option<&Self>,
+        account: Option<&str>,
+        model: Option<&str>,
+    ) -> crate::tool_plan::TemplateToolSelection {
+        configured
+            .filter(|fact| {
+                account == Some(fact.account.as_str()) && model == Some(fact.model.as_str())
+            })
+            .map(|fact| fact.tools.clone())
+            .unwrap_or_default()
+    }
 }
 
 /// Identity of the one product wire-resolution rule used by binding resolution.

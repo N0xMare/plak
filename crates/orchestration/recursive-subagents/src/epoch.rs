@@ -19,6 +19,7 @@ use crate::protocol::{
 };
 use crate::tree::text::{
     PLAK_TEMPLATE_CARDS_HEADER, PLAK_TEMPLATE_CARDS_NONE, delegation_policy_sentence,
+    template_card_tools,
 };
 use plakous::model::ProcessingTierDisposition;
 use plakous_host_protocol::selection::{CompositionSelection, ProtocolSelection};
@@ -119,7 +120,7 @@ impl RosterBinding {
 
     /// Host-computed capability line under the user's description:
     /// tier ceiling, the card's own spawn menu, adopt, cost tier, model when
-    /// shown.
+    /// shown, then the optional tools the template selects.
     #[must_use]
     pub fn capability_line(&self) -> String {
         let menu: Vec<&str> = self.spawn_menu().map(TemplateName::as_str).collect();
@@ -138,6 +139,9 @@ impl RosterBinding {
         }
         if self.show_model && !self.tuple_id.is_empty() {
             line.push_str(&format!(" · model {}", self.tuple_id));
+        }
+        if let Some(tools) = template_card_tools(&self.tools) {
+            line.push_str(&format!(" · {tools}"));
         }
         line
     }
@@ -746,6 +750,22 @@ mod tests {
             assert_eq!(reread, snapshot);
             assert!(reread.digest_matches());
         }
+    }
+
+    #[test]
+    fn a_card_names_its_template_tools_after_the_model() {
+        let mut card = RosterBinding::leaf("codex", "gpt-6-luna");
+        card.template = "scout".to_owned();
+        card.show_model = true;
+        assert_eq!(
+            card.capability_line(),
+            "tier ≤ mutate · spawns none · adopts no · model gpt-6-luna"
+        );
+        card.tools = vec!["x_search".to_owned(), "mcp:github".to_owned()];
+        assert_eq!(
+            card.capability_line(),
+            "tier ≤ mutate · spawns none · adopts no · model gpt-6-luna · tools x_search, mcp:github"
+        );
     }
 
     #[test]
