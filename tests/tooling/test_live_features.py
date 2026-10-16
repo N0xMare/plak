@@ -129,6 +129,10 @@ class RetrievalOracleTests(unittest.TestCase):
     def test_rust_version_and_x_posts(self):
         self.assertEqual(features.rust_version("It is 1.99.0."), "1.99.0")
         self.assertIsNone(features.rust_version("latest"))
+        manifest = (b'[pkg.cargo]\nversion = "0.100.0 (5f94df478 2026-08-27)"\n'
+                    b'[pkg.rust]\nversion = "1.99.1 (58cf8f9c3 2026-10-13)"\n')
+        self.assertEqual(features.channel_rust_version(manifest), "1.99.1")
+        self.assertIsNone(features.channel_rust_version(b"[pkg.cargo]\nversion = \"0.1\"\n"))
         self.assertEqual(features.x_status_ids([
             "https://x.com/rustlang/status/1234567890",
             "https://twitter.com/rustlang/statuses/42",

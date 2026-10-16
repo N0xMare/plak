@@ -25,6 +25,7 @@ import shutil
 import socket
 import subprocess
 import time
+import tomllib
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -246,6 +247,16 @@ RUST_VERSION = re.compile(r"\b1\.(\d{2,3})\.(\d+)\b")
 def rust_version(answer: str) -> str | None:
     match = RUST_VERSION.search(answer)
     return match.group(0) if match else None
+
+
+RUST_STABLE_CHANNEL = "https://static.rust-lang.org/dist/channel-rust-stable.toml"
+
+
+def channel_rust_version(manifest: bytes) -> str | None:
+    """The `rust` package version a release channel manifest names."""
+    packages = tomllib.loads(manifest.decode("utf-8")).get("pkg", {})
+    version = packages.get("rust", {}).get("version")
+    return rust_version(version) if isinstance(version, str) else None
 
 
 # --- environment helpers -----------------------------------------------------
@@ -628,6 +639,15 @@ class Features:
         version = rust_version(answer_text(out, records))
         if not version:
             raise ScenarioFailure(MODEL, f"session {session}: answer has no Rust version")
+        try:
+            stable = channel_rust_version(http_get(RUST_STABLE_CHANNEL, timeout=30))
+        except (OSError, urllib.error.URLError, ValueError) as error:
+            raise ScenarioFailure(HARNESS, f"stable channel manifest unreadable: {error}")
+        if not stable:
+            raise ScenarioFailure(HARNESS, "stable channel manifest names no rust version")
+        if version != stable:
+            raise ScenarioFailure(MODEL, f"session {session}: answered {version}; the stable "
+                                         f"channel is {stable}")
         page = _fact_on_pages(version, urls)
         if not page:
             raise ScenarioFailure(MODEL, f"session {session}: {version} is on no readable "
