@@ -125,7 +125,7 @@ impl plakous::xai::XaiPlatformApiKeySource for ProductPlatformCredentials {
         &self,
     ) -> Result<plakous::xai::XaiPlatformCredentialGrant, plakous::xai::XaiPlatformBuildError> {
         let key = self
-            .key("xai")
+            .key("xai-api")
             .map_err(|_| plakous::xai::XaiPlatformBuildError::Authentication)?;
         let authority = plakous::xai::XaiPlatformApiKeyAuthority::new(
             "plak/xai-api",
@@ -150,7 +150,7 @@ impl plakous::xai::XaiPlatformApiKeySource for ProductPlatformCredentials {
             return Err(plakous::xai::XaiPlatformBuildError::Authentication);
         }
         let key = self
-            .key("xai")
+            .key("xai-api")
             .map_err(|_| plakous::xai::XaiPlatformBuildError::Authentication)?;
         let key = plakous::xai::XaiPlatformApiKey::new(key)?;
         if &key.grant(authority)? != expected {
@@ -208,5 +208,18 @@ mod tests {
             source.generation_grant(&reference, &origin),
             Err(OpenAiAuthError::BindingMismatch)
         ));
+    }
+
+    #[test]
+    fn xai_api_key_file_reaches_grant_and_bearer() {
+        use plakous::xai::XaiPlatformApiKeySource;
+        let directory = tempfile::tempdir().unwrap();
+        let paths = PlakPaths::explicit(directory.path().to_owned());
+        paths.ensure_layout().unwrap();
+        // An exported XAI_API_KEY takes precedence; either source must resolve.
+        std::fs::write(paths.api_key_file("xai"), "xai-test-key\n").unwrap();
+        let source = ProductPlatformCredentials::shared(&paths).unwrap();
+        let grant = XaiPlatformApiKeySource::grant(&*source).unwrap();
+        XaiPlatformApiKeySource::api_key(&*source, &grant).unwrap();
     }
 }
