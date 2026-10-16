@@ -202,7 +202,7 @@ fn local_composition_child_call_identity_is_deterministic_and_digest_sensitive()
 }
 
 #[test]
-fn local_composition_nested_owner_resolves_only_the_exact_projected_process_names() {
+fn local_composition_nested_owner_resolves_the_exact_projected_names_and_their_registered_owner() {
     use std::sync::Arc;
 
     use plakous_compose::{
@@ -222,6 +222,42 @@ fn local_composition_nested_owner_resolves_only_the_exact_projected_process_name
     )
     .expect("process registrations");
     CodexNativeLocalCodeModeV1::register_markers_into(&mut builder).expect("composition markers");
+    let probe = ToolName::new("mcp__fake__probe").expect("extension name");
+    builder
+        .register(
+            plakous_tools::ToolRegistration::new(
+                plakous_tools::RegisteredToolId::new("mcp.fake.probe").expect("registration id"),
+                plakous_tools::ToolExecutorId::new("mcp.fake.probe.executor").expect("executor id"),
+                plakous_tools::ToolExecutorBindingIdentity::new(1, &[b"mcp.fake.probe"])
+                    .expect("binding identity"),
+                plakous_model::ToolDefinition::new(
+                    probe.clone(),
+                    "1.0.0",
+                    "Probe one value.",
+                    plakous_model::ToolInputContract::structured(serde_json::json!({
+                        "$schema": "https://json-schema.org/draft/2020-12/schema",
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                        "additionalProperties": false
+                    }))
+                    .expect("input contract"),
+                    plakous_model::ToolOutputContract::model_content(128, 1_048_576)
+                        .expect("output contract"),
+                    plakous_model::ToolConcurrency::Serial,
+                    plakous_model::ToolEffect::Mutating,
+                )
+                .expect("extension definition"),
+                Arc::new(plakous_test_support::ScriptedTool::new([
+                    plakous_tools::ToolOutcome::success_text("ok"),
+                ])),
+            )
+            .with_owner(plakous_tools::ToolOwnerClass::Mcp(
+                plakous_tools::McpServerName::new("fake").expect("server name"),
+            ))
+            .nested_eligible(),
+        )
+        .expect("MCP extension");
     let registry = builder.freeze();
     let effective_digest = Digest::sha256(
         DigestDomain::EffectiveProviderConfiguration,
@@ -245,10 +281,11 @@ fn local_composition_nested_owner_resolves_only_the_exact_projected_process_name
         1,
     )
     .expect("projection target");
-    let descriptor = CodexMinimalLocalCodeModeV1::compile(
+    let descriptor = CodexMinimalLocalCodeModeV1::compile_with_extensions(
         plakous_tools::JobConfig::default(),
         registry.clone(),
         target,
+        std::slice::from_ref(&probe),
     )
     .expect("minimal descriptor");
     let run_id = "00000000-0000-7000-8000-000000000920"
@@ -278,6 +315,19 @@ fn local_composition_nested_owner_resolves_only_the_exact_projected_process_name
             ToolExecutionOwner::Local
         );
     }
+    // A nested call to an MCP server's tool is recorded under that server,
+    // exactly as a Direct call to it is.
+    assert_eq!(
+        crate::runtime::composition::projection::local_composition_nested_execution_owner(
+            &runtime,
+            descriptor.nested_projection(),
+            &probe,
+        )
+        .expect("extension owner"),
+        ToolExecutionOwner::Mcp {
+            server: plakous_model::McpServerId::new("fake").expect("server id")
+        }
+    );
     let error = crate::runtime::composition::projection::local_composition_nested_execution_owner(
         &runtime,
         descriptor.nested_projection(),

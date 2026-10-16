@@ -12,7 +12,7 @@ use plakous_model::{
     MediaSource, ProjectedToolPresentationV2, TextBlock, ToolCallBlock, ToolExecutionOwner,
     ToolResultKind, ToolResultPart,
 };
-use plakous_tools::{ToolProjectionMap, ToolRuntimeError, ToolRuntimeErrorKind};
+use plakous_tools::{ToolOwnerClass, ToolProjectionMap, ToolRuntimeError, ToolRuntimeErrorKind};
 use std::time::Duration;
 pub(in crate::runtime) fn local_composition_exec_registry_arguments<'a>(
     call: &'a ToolCallBlock,
@@ -464,7 +464,21 @@ pub(in crate::runtime) fn local_composition_nested_execution_owner(
             "nested local composition projection widens the frozen executable registry",
         ));
     }
-    Ok(ToolExecutionOwner::Local)
+    // A nested call takes its registration's owner, as a landed Direct call
+    // does, so an MCP tool's nested call and its result name the same server.
+    let mut owners = exposure.canonical_operations().values().map(|identity| {
+        registry
+            .owner(identity.name())
+            .map_or(ToolExecutionOwner::Local, ToolOwnerClass::execution_owner)
+    });
+    let owner = owners.next().unwrap_or(ToolExecutionOwner::Local);
+    if owners.any(|other| other != owner) {
+        return Err(AgentError::new(
+            AgentErrorKind::Internal,
+            "nested local composition exposure spans more than one tool owner",
+        ));
+    }
+    Ok(owner)
 }
 
 #[cfg(test)]
