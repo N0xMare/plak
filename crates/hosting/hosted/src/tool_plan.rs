@@ -5,7 +5,7 @@
 //! Binding resolves it against the route and the MCP listings into a
 //! crate-private `ToolPlan`, or refuses it with a `ToolPlanRefusal`.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::{Arc, OnceLock};
 
@@ -318,12 +318,51 @@ pub(crate) enum PlannedTool {
     },
 }
 
+/// A node's template selection with the canonical `[tools.*]` /
+/// `[mcp_servers.*]` tables it reaches, frozen where the node's card is: the
+/// epoch snapshot for a child, the session's bind for a root.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct NodeToolSelection {
+    /// The template's `tools` list.
+    pub selection: TemplateToolSelection,
+    /// Canonical tables keyed `tools.<name>` / `mcp_servers.<id>`.
+    pub tool_sections: BTreeMap<String, String>,
+}
+
+impl NodeToolSelection {
+    /// A selection that reaches no table.
+    #[must_use]
+    pub fn new(selection: TemplateToolSelection) -> Self {
+        Self {
+            selection,
+            tool_sections: BTreeMap::new(),
+        }
+    }
+}
+
 /// The optional tools a session appends after its core menu, in the one
 /// order every bind of the same selection and listings produces.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+///
+/// Two seams fill it: hosted-retrieval wrappers through the route's
+/// [`RetrievalBinding`] (registered by `WebToolPack` in `with_plan`), and MCP
+/// tools through the registrations [`ToolPlan::with_mcp`] carries.
+#[derive(Clone, Default)]
 pub(crate) struct ToolPlan {
     tools: Vec<PlannedTool>,
     retrieval: Option<RetrievalBinding>,
+    mcp_registrations: Vec<plakous::tools::ToolRegistration>,
+    notices: Vec<String>,
+}
+
+impl fmt::Debug for ToolPlan {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ToolPlan")
+            .field("tools", &self.tools)
+            .field("retrieval", &self.retrieval)
+            .field("notices", &self.notices)
+            .finish_non_exhaustive()
+    }
 }
 
 /// The vocabulary the hosted-retrieval wrappers wear and the route's port
@@ -445,7 +484,33 @@ impl ToolPlan {
         Self {
             tools,
             retrieval: None,
+            mcp_registrations: Vec::new(),
+            notices: Vec::new(),
         }
+    }
+
+    /// This plan with `selection`'s bound MCP tools added in plan order.
+    pub(crate) fn with_mcp(
+        self,
+        selection: &TemplateToolSelection,
+        mcp: crate::mcp_binding::BoundMcpTools,
+    ) -> Self {
+        Self {
+            retrieval: self.retrieval,
+            mcp_registrations: mcp.registrations,
+            notices: mcp.notices,
+            ..Self::new(selection, mcp.names)
+        }
+    }
+
+    /// The registration of one planned MCP tool.
+    pub(crate) fn mcp_registration(
+        &self,
+        exposed: &ToolName,
+    ) -> Option<&plakous::tools::ToolRegistration> {
+        self.mcp_registrations
+            .iter()
+            .find(|registration| registration.name() == exposed)
     }
 
     /// The planned tools in plan order.
@@ -542,8 +607,9 @@ impl ToolRoute {
 /// silently left out. A hosted retrieval tool binds its local wrapper only
 /// where the route's release-owned table qualifies it and the route has a
 /// retrieval port serving it; that port is a deferred slot the session's
-/// executor connects once it exists. Every Plak-run and MCP tool
-/// is refused as not built in. Only the empty selection binds.
+/// executor connects once it exists. Every Plak-run tool is refused as not
+/// built in. MCP entries pass through: `crate::mcp_binding::bind_mcp_tools`
+/// binds them.
 ///
 /// # Errors
 ///
@@ -601,7 +667,8 @@ pub(crate) fn bind_tool_plan_with(
                 }
                 _ => false,
             },
-            SelectedTool::McpServer(_) | SelectedTool::McpTool { .. } => false,
+            // MCP entries bind through `crate::mcp_binding`.
+            SelectedTool::McpServer(_) | SelectedTool::McpTool { .. } => continue,
         };
         if !served {
             return Err(refusal(entry, table, route_label));
@@ -912,7 +979,7 @@ mod tests {
             ])?,
             listing.into_iter().rev(),
         );
-        assert_eq!(forward, reverse);
+        assert_eq!(forward.tools(), reverse.tools());
         assert_eq!(
             forward.tools(),
             [
@@ -1064,14 +1131,9 @@ mod tests {
     }
 
     #[test]
-    fn plak_run_and_mcp_tools_are_refused_as_not_built_in() -> TestResult {
+    fn plak_run_tools_are_refused_as_not_built_in() -> TestResult {
         for route in ToolRoute::ALL {
-            for tool in [
-                "fetch_url",
-                "image_gen",
-                "mcp:github",
-                "mcp:linear/list_issues",
-            ] {
+            for tool in ["fetch_url", "image_gen"] {
                 assert_eq!(
                     refusal_text(&[tool], route)?,
                     format!(
@@ -1316,19 +1378,72 @@ mod tests {
     }
 
     #[test]
-    fn binding_refuses_the_first_entry_and_binds_only_the_empty_selection() -> TestResult {
+    fn binding_refuses_the_first_optional_entry_and_passes_mcp_entries() -> TestResult {
         let refused = bind_tool_plan(
-            &TemplateToolSelection::parse(["mcp:github", "web_search"])?,
+            &TemplateToolSelection::parse(["mcp:github", "fetch_url", "web_search"])?,
             ToolRoute::Codex,
             "codex",
         )
         .err()
-        .ok_or("a non-empty selection bound")?;
-        assert_eq!(refused.tool(), &SelectedTool::McpServer(server("github")?));
+        .ok_or("an optional tool bound")?;
+        assert_eq!(
+            refused.tool(),
+            &SelectedTool::Optional(OptionalTool::FetchUrl)
+        );
+        let mcp_only = TemplateToolSelection::parse(["mcp:github", "mcp:linear/list_issues"])?;
         for route in ToolRoute::ALL {
-            let plan = bind_tool_plan(&TemplateToolSelection::default(), route, "any")?;
-            assert!(plan.tools().is_empty(), "{route:?}");
+            for selection in [&TemplateToolSelection::default(), &mcp_only] {
+                let plan = bind_tool_plan(selection, route, "any")?;
+                assert!(plan.tools().is_empty(), "{route:?}");
+                assert!(plan.retrieval().is_none());
+            }
         }
+        Ok(())
+    }
+
+    /// Hosted-retrieval wrappers and MCP tools share one plan: the wrappers
+    /// keep their port and come first, the MCP tools follow by server and
+    /// exposed name.
+    #[test]
+    fn wrappers_and_mcp_tools_share_one_plan() -> TestResult {
+        let qualified = HostedRetrievalTable::new(
+            HostedRetrievalSupport::Supported,
+            HostedRetrievalSupport::Supported,
+            HostedRetrievalSupport::Supported,
+        );
+        let selection = TemplateToolSelection::parse(["mcp:fake", "web_search"])?;
+        let plan = bind_tool_plan_with(
+            &selection,
+            qualified,
+            CodingPresentation::Claude,
+            "claude",
+            Some(search_and_fetch_port()),
+        )?
+        .with_mcp(
+            &selection,
+            crate::mcp_binding::BoundMcpTools {
+                names: vec![(server("fake")?, ToolName::new("mcp__fake__echo")?)],
+                registrations: Vec::new(),
+                notices: vec!["omitted".to_owned()],
+            },
+        );
+        assert!(plan.retrieval().is_some());
+        assert_eq!(
+            plan.tools(),
+            [
+                PlannedTool::Optional(OptionalTool::WebSearch),
+                PlannedTool::Mcp {
+                    server: server("fake")?,
+                    exposed: ToolName::new("mcp__fake__echo")?,
+                },
+            ]
+        );
+        // A planned MCP tool without its registration refuses the append.
+        assert!(
+            crate::tools::ProductToolExtensions::empty()
+                .with_plan(&plan)
+                .is_err()
+        );
         Ok(())
     }
 

@@ -738,7 +738,7 @@ pub(super) fn api_parent_from_config<P: plakous_host_protocol::ProtocolExtension
 pub(super) fn root_tool_selection<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
     session: &SessionRecord,
-) -> crate::tool_plan::TemplateToolSelection {
+) -> crate::tool_plan::NodeToolSelection {
     crate::binding::RootTemplateFact::root_tool_selection(
         config.root_template.as_ref(),
         session.account.as_deref(),

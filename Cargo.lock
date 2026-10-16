@@ -3741,6 +3741,7 @@ dependencies = [
  "plakous-compose",
  "plakous-http",
  "plakous-js-eval",
+ "plakous-mcp",
  "plakous-model",
  "plakous-openai",
  "plakous-openrouter",
@@ -3950,6 +3951,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-rustls",
+ "toml",
  "tracing",
  "uuid",
 ]

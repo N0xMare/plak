@@ -511,6 +511,20 @@ pub mod model {
         hex_lower, now_unix_millis, now_unix_secs, sha256_bytes, sha256_hex,
     };
 }
+/// Model Context Protocol client: a process-wide server pool, frozen tool
+/// listings and the MCP tool pack.
+#[cfg(feature = "mcp")]
+pub mod mcp {
+    pub use plakous_mcp::{
+        FrozenMcpListing, HeaderName, HeaderValue, MAX_DESCRIPTION_BYTES, MAX_EXPOSED_NAME_BYTES,
+        MAX_INLINE_TEXT_BYTES, MAX_LISTED_TOOLS, MAX_LISTING_BYTES, MAX_SSE_EVENT_BYTES, McpError,
+        McpErrorKind, McpHttpEndpoint, McpHttpSecret, McpHttpSecretResolver, McpLease, McpPool,
+        McpSecretResolver, McpServerSpec, McpServerState, McpServerStatus, McpToolPack,
+        McpToolRecord, McpToolSelection, SchemaRefusal, SensitiveBytes, exposed_tool_name,
+        untrusted_header,
+    };
+    pub use plakous_tools::ServiceSecretValue;
+}
 /// Exact-origin OpenAI API-key execution and the separate Codex subscription integration.
 #[cfg(feature = "openai")]
 pub mod openai {

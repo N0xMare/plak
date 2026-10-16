@@ -1479,13 +1479,14 @@ pub(super) async fn openrouter_child_runtime_binding(
 }
 
 /// A child's optional tools: its own frozen card's list, never its
-/// parent's. A node with no template, or a card outside this epoch, has none.
+/// parent's, with the epoch's frozen tables. A node with no template, or a
+/// card outside this epoch, has none.
 pub(super) fn frozen_child_tool_selection(
     tree_id: &str,
     agent_id: &str,
-) -> Result<crate::tool_plan::TemplateToolSelection, String> {
+) -> Result<crate::tool_plan::NodeToolSelection, String> {
     let Some(runtime) = crate::topology_runtime::lookup(tree_id) else {
-        return Ok(crate::tool_plan::TemplateToolSelection::default());
+        return Ok(crate::tool_plan::NodeToolSelection::default());
     };
     runtime
         .read(|tree| {
@@ -1495,10 +1496,14 @@ pub(super) fn frozen_child_tool_selection(
                 .and_then(|node| node.template.as_ref())
                 .and_then(|template| tree.snapshot.binding(template))
             else {
-                return Ok(crate::tool_plan::TemplateToolSelection::default());
+                return Ok(crate::tool_plan::NodeToolSelection::default());
             };
-            crate::tool_plan::TemplateToolSelection::parse(&binding.tools)
-                .map_err(|error| format!("child template {} tools: {error}", binding.template))
+            let selection = crate::tool_plan::TemplateToolSelection::parse(&binding.tools)
+                .map_err(|error| format!("child template {} tools: {error}", binding.template))?;
+            Ok(crate::tool_plan::NodeToolSelection {
+                selection,
+                tool_sections: tree.snapshot.tool_sections.clone(),
+            })
         })
         .map_err(|error| error.message)?
 }

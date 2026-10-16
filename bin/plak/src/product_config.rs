@@ -1262,6 +1262,7 @@ impl ProductConfig {
             account: template.account.clone(),
             model: template.model.clone(),
             tools: template.tools.clone(),
+            tool_sections: self.tool_sections.reached(&template.tools),
         })
     }
 

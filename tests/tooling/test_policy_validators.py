@@ -816,7 +816,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                 self.assertEqual(validator(workspace), [])
 
     def test_product_explicit_api_features_cannot_be_borrowed_from_hosted(self) -> None:
-        expected = {"native-subscriptions", "openai", "anthropic", "xai",
+        expected = {"native-subscriptions", "mcp", "openai", "anthropic", "xai",
                     "openrouter", "sessions-sqlite"}
         self.assertEqual(set(self.workspace.policy.facade_features["plak"]), expected)
         self.assertEqual(workspace_policy.validate_facade_features(self.workspace), [])
@@ -2018,7 +2018,7 @@ class FeaturePolicyTests(unittest.TestCase):
             )
             for package in packages
         }
-        self.assertEqual(profile_counts["plakous"], 2**9 + 2)
+        self.assertEqual(profile_counts["plakous"], 2**10 + 2)
         # sqlite, perf-instrumentation, repository-only commit-trace.
         self.assertEqual(profile_counts["plakous-store"], 2**3 + 1)
         # git-cli, jj-lib, maintainer, otel, test-hooks, test-support.

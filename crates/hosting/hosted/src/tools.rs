@@ -9,13 +9,15 @@ use std::sync::Arc;
 
 use plakous::model::ToolName;
 use plakous::tools::{
-    CodingPresentation, CompiledSurface, FrozenToolRegistry, MenuEntry, PassthroughPack, PromptPin,
-    ProviderModelProjectionIdentityV2, ToolPack, ToolRegistration, ToolRegistryBuilder,
-    ToolRuntimeError, compile_over, register_packs, standard_coding_menus,
+    CodingPresentation, CompiledSurface, Earned, FrozenToolRegistry, MenuEntry, PassthroughPack,
+    PromptContribution, PromptPin, ProviderModelProjectionIdentityV2, ToolPack, ToolRegistration,
+    ToolRegistryBuilder, ToolRuntimeError, compile_over, register_packs, standard_coding_menus,
 };
 
 use crate::error::{CliFailure, CliResult};
-use plakous::prompts::identity::ProductAgreementPack;
+use plakous::prompts::identity::{
+    ProductAgreementPack, UNTRUSTED_TOOL_DATA_AGREEMENTS, UNTRUSTED_TOOL_DATA_CONTRIBUTION_ID,
+};
 
 /// One immutable ordered declaration of product-owned tool extensions.
 ///
@@ -27,6 +29,7 @@ pub struct ProductToolExtensions {
     registrations: Arc<[ToolRegistration]>,
     host_facts: plakous_host_protocol::PromptHostFacts,
     retrieval: Option<Arc<crate::tool_plan::DeferredRetrievalPort>>,
+    contributions: Arc<[PromptContribution]>,
 }
 
 impl ProductToolExtensions {
@@ -63,6 +66,7 @@ impl ProductToolExtensions {
             registrations: registrations.into(),
             host_facts: plakous_host_protocol::PromptHostFacts::default(),
             retrieval: None,
+            contributions: Arc::new([]),
         })
     }
 
@@ -77,42 +81,72 @@ impl ProductToolExtensions {
     }
 
     /// Appends a bound tool plan after these extensions: the one append path
-    /// for every tool a template selects.
+    /// for every tool a template selects, in plan order.
     ///
-    /// Hosted-retrieval wrappers register through their pack, in plan order,
-    /// on the port the plan bound. The empty plan leaves the extensions, and
-    /// every surface and identity compiled from them, unchanged.
+    /// Hosted-retrieval wrappers register through their pack on the port the
+    /// plan bound; MCP tools append the registrations MCP binding froze, and
+    /// the first one earns the untrusted-data paragraph. A planned tool
+    /// without a registration refuses the bind. The empty plan leaves the
+    /// extensions, and every surface and identity compiled from them,
+    /// unchanged.
     pub(crate) fn with_plan(self, plan: &crate::tool_plan::ToolPlan) -> CliResult<Self> {
         let mut wrappers = Vec::new();
+        let mut mcp = Vec::new();
         for tool in plan.tools() {
-            let wrapper = match tool {
-                crate::tool_plan::PlannedTool::Optional(optional) => optional.web_tool(),
-                crate::tool_plan::PlannedTool::Mcp { .. } => None,
-            };
-            let Some(wrapper) = wrapper else {
-                return Err(CliFailure::new(format!(
-                    "planned tool {tool:?} has no registration in this build"
-                )));
-            };
-            wrappers.push(wrapper);
+            match tool {
+                crate::tool_plan::PlannedTool::Optional(optional) => {
+                    let wrapper = optional.web_tool().ok_or_else(|| {
+                        CliFailure::new(format!(
+                            "planned tool {tool:?} has no registration in this build"
+                        ))
+                    })?;
+                    wrappers.push(wrapper);
+                }
+                crate::tool_plan::PlannedTool::Mcp { exposed, .. } => {
+                    let registration = plan.mcp_registration(exposed).ok_or_else(|| {
+                        CliFailure::new(format!("planned tool {exposed} has no registration"))
+                    })?;
+                    mcp.push(registration.clone());
+                }
+            }
         }
-        if wrappers.is_empty() {
+        if wrappers.is_empty() && mcp.is_empty() {
             return Ok(self);
         }
-        let binding = plan
-            .retrieval()
-            .ok_or_else(|| CliFailure::new("planned hosted retrieval has no retrieval port"))?;
-        let pack =
-            plakous::tools::web::WebToolPack::new(binding.presentation(), wrappers, binding.port())
-                .map_err(|error| CliFailure::new(format!("hosted retrieval wrappers: {error}")))?;
-        let appended = pack
-            .registrations()
+        let mut appended = Vec::new();
+        let mut slot = None;
+        if !wrappers.is_empty() {
+            let binding = plan
+                .retrieval()
+                .ok_or_else(|| CliFailure::new("planned hosted retrieval has no retrieval port"))?;
+            slot = binding.slot();
+            let pack = plakous::tools::web::WebToolPack::new(
+                binding.presentation(),
+                wrappers,
+                binding.port(),
+            )
             .map_err(|error| CliFailure::new(format!("hosted retrieval wrappers: {error}")))?;
+            appended.extend(
+                pack.registrations().map_err(|error| {
+                    CliFailure::new(format!("hosted retrieval wrappers: {error}"))
+                })?,
+            );
+        }
+        let earning = mcp.first().map(|registration| registration.name().clone());
+        appended.extend(mcp);
         let host_facts = self.host_facts;
         let mut extended =
             Self::from_nested_registrations(self.registrations.iter().cloned().chain(appended))?
                 .with_host_facts(host_facts);
-        extended.retrieval = binding.slot();
+        extended.retrieval = slot;
+        if let Some(earning) = earning {
+            extended.contributions = vec![PromptContribution::new(
+                UNTRUSTED_TOOL_DATA_CONTRIBUTION_ID,
+                Earned::ToolPresented(earning),
+                UNTRUSTED_TOOL_DATA_AGREEMENTS,
+            )]
+            .into();
+        }
         Ok(extended)
     }
 
@@ -165,8 +199,15 @@ impl ToolPack for ProductToolExtensions {
         PassthroughPack::appended_menu(&self.names().cloned().collect::<Vec<_>>())
     }
 
-    /// A product pack pins nothing: every string it shows the model is its own
-    /// `ToolDefinition` description, pinned by the route render.
+    /// The untrusted-data paragraph, when a planned MCP tool earns it.
+    fn contributions(&self) -> &[PromptContribution] {
+        &self.contributions
+    }
+
+    /// A product pack pins nothing of its own: every tool string it shows the
+    /// model is that tool's `ToolDefinition` description, pinned by the route
+    /// render, and the untrusted-data paragraph is pinned with the identity
+    /// text.
     fn pins(&self) -> &'static [PromptPin] {
         &[]
     }
@@ -274,7 +315,7 @@ impl ToolPack for OccupancyMenu {
             .collect())
     }
 
-    fn contributions(&self) -> &[plakous::tools::PromptContribution] {
+    fn contributions(&self) -> &[PromptContribution] {
         self.pack.contributions()
     }
     fn pins(&self) -> &'static [PromptPin] {
@@ -523,6 +564,14 @@ mod tests {
                 .with_plan(&ToolPlan::new(&selection, []))
                 .is_err()
         );
+        let unbound = ToolPlan::new(
+            &TemplateToolSelection::parse(["mcp:fake"])?,
+            [(
+                plakous::tools::McpServerName::new("fake")?,
+                ToolName::new("mcp__fake__echo")?,
+            )],
+        );
+        assert!(extensions(&[]).with_plan(&unbound).is_err());
         Ok(())
     }
 

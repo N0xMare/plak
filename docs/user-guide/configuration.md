@@ -247,6 +247,15 @@ plak secret list           # names only
 plak secret rm github
 ```
 
+A stdio MCP server starts when the first session that names it binds, is
+shared by every session in the same workspace, and stops five minutes after
+the last one ends. Its tool list is frozen when the session binds; a server
+that later changes a tool answers that tool with an error telling you to start
+a new session. A tool listed through `mcp:<id>` whose input schema Plak cannot
+represent is left out with a logged notice; naming it as `mcp:<id>/<tool>`
+refuses the session instead. MCP results reach the model marked as untrusted
+data. The `http` transport is not available in this build yet.
+
 A child gets at most its parent's tools: a working-set template may not list
 `fetch_url`, `image_gen` or an MCP tool its root template lacks, and the same
 holds for every `spawns` entry. `web_search`, `web_fetch` and `x_search` are

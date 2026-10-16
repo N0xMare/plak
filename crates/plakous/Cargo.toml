@@ -41,12 +41,16 @@ full = [
     "auth",
     "composition",
     "composition-python",
+    "mcp",
     "native-subscriptions",
     "openai",
     "openrouter",
     "sessions-sqlite",
     "xai",
 ]
+# Model Context Protocol client: the server pool, frozen listings and the MCP
+# tool pack. Configuration, secrets and views stay with the embedding product.
+mcp = ["dep:plakous-mcp"]
 # Plak's product closure: both evaluators plus subscription authentication.
 native-subscriptions = [
     "composition",
@@ -75,6 +79,7 @@ plakous-code-mode = { version = "0.1.0", path = "../runtimes/code-mode", optiona
 plakous-js-eval = { version = "0.1.0", path = "../runtimes/js-eval", optional = true }
 plakous-py-eval = { version = "0.1.0", path = "../runtimes/py-eval", optional = true }
 plakous-compose = { version = "0.1.0", path = "../harness/compose" }
+plakous-mcp = { version = "0.1.0", path = "../harness/mcp", optional = true }
 plakous-model = { version = "0.1.0", path = "../core/model" }
 plakous-tool-files = { version = "0.1.0", path = "../harness/tool-files" }
 plakous-tool-plan = { version = "0.1.0", path = "../harness/tool-plan" }

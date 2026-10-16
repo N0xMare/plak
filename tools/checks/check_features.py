@@ -48,7 +48,7 @@ from check_workspace import _blank_rust_non_code  # noqa: E402
 ROOT = Path(__file__).resolve().parents[2]
 # Layers whose manifests carry a reviewed security-surface digest.
 DIGEST_LAYERS = L0_LAYERS + BELOW_FACADE_LAYERS
-MAX_OPTIONAL_FEATURES = 9
+MAX_OPTIONAL_FEATURES = 10
 
 
 def cache_path(root: Path = ROOT) -> Path:

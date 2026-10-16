@@ -73,6 +73,9 @@ pub struct RootTemplateFact {
     pub model: String,
     /// The optional tools the template selects.
     pub tools: crate::tool_plan::TemplateToolSelection,
+    /// The canonical `[tools.*]` / `[mcp_servers.*]` tables those tools
+    /// reach, keyed `tools.<name>` / `mcp_servers.<id>`.
+    pub tool_sections: std::collections::BTreeMap<String, String>,
 }
 
 impl RootTemplateFact {
@@ -84,12 +87,15 @@ impl RootTemplateFact {
         configured: Option<&Self>,
         account: Option<&str>,
         model: Option<&str>,
-    ) -> crate::tool_plan::TemplateToolSelection {
+    ) -> crate::tool_plan::NodeToolSelection {
         configured
             .filter(|fact| {
                 account == Some(fact.account.as_str()) && model == Some(fact.model.as_str())
             })
-            .map(|fact| fact.tools.clone())
+            .map(|fact| crate::tool_plan::NodeToolSelection {
+                selection: fact.tools.clone(),
+                tool_sections: fact.tool_sections.clone(),
+            })
             .unwrap_or_default()
     }
 }

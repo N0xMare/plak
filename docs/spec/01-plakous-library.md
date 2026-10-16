@@ -4982,9 +4982,15 @@ confers no Codex or provider-native enrollment.
 Code Mode exposes custom/freeform `exec` and function `wait`. The frozen
 seven-tool reference catalog is exactly `exec_command`, `write_stdin`,
 `apply_patch`, `update_plan`, `read_file`, `search_repository`, and
-`inspect_image`, mapped to existing canonical capabilities and executors. It
-MUST NOT contain itself, hosted PTC tools, MCP, subagents, dynamic discovery,
-or consumer-private tools. For admitted `CodeModeOnly` targets the default
+`inspect_image`, mapped to existing canonical capabilities and executors. That
+`ExactReference` catalog MUST NOT contain itself, hosted PTC tools, MCP,
+subagents, dynamic discovery, or consumer-private tools. The product catalogs
+(minimal and native-PTC Code Mode, `js-ptc`, `py-ptc`) admit MCP tools as
+ordered explicit extensions, nested-eligible, under the existing product bounds
+(`MAX_PRODUCT_CATALOG_TOOLS`, `MAX_CATALOG_BYTES`); overflow or a normalized
+identifier collision refuses the bind. Hosted-retrieval wrappers stay
+direct-only. A nested MCP call is a child call with `LocalProgrammatic` lineage
+and the `PlakMcp` owner and follows the nested failure rules. For admitted `CodeModeOnly` targets the default
 instead selects a separately identified minimum-optimal native profile
 containing `exec_command`, `write_stdin`, `apply_patch`, and `update_plan` on a
 full surface. An occupancy grant may omit `apply_patch`; the process and plan
@@ -6800,7 +6806,13 @@ projection over that same attach path and implies `composition`.
 
 `native-subscriptions` adds the subscription tier —
 `subscriptions`, and the provider crates' native-auth facets — and implies both `composition`
-and `composition-python`, which is Plak's product closure.
+and `composition-python`.
+`mcp` re-exports `plakous-mcp` as `plakous::mcp` (`McpPool`, `McpServerSpec`,
+`McpToolPack`, the frozen listing and record types, `McpError`, and
+`ServiceSecretValue` for secret resolvers); it links no other optional Plakous
+crate. `native-subscriptions` does not imply it; Plak's product closure is
+`native-subscriptions` plus `mcp`. Configuration parsing, named-secret storage
+and operator views stay with the product.
 `sessions-sqlite` enables `SessionBackend::sqlite`. `full` is all of the above.
 
 The `sessions-sqlite` feature also compiles the doc-hidden

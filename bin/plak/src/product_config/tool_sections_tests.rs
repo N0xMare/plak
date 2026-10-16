@@ -478,13 +478,20 @@ fn the_root_template_fact_carries_its_tools_to_the_session_bind() {
     let fact = policy.root_template.unwrap();
     let selection = RootTemplateFact::root_tool_selection(Some(&fact), Some("codex"), Some("m"));
     let names: Vec<String> = selection
+        .selection
         .entries()
         .iter()
         .map(ToString::to_string)
         .collect();
     assert_eq!(names, ["x_search"]);
     assert!(
-        RootTemplateFact::root_tool_selection(Some(&fact), Some("codex"), Some("other")).is_empty()
+        RootTemplateFact::root_tool_selection(Some(&fact), Some("codex"), Some("other"))
+            .selection
+            .is_empty()
     );
-    assert!(RootTemplateFact::root_tool_selection(None, Some("codex"), Some("m")).is_empty());
+    assert!(
+        RootTemplateFact::root_tool_selection(None, Some("codex"), Some("m"))
+            .selection
+            .is_empty()
+    );
 }

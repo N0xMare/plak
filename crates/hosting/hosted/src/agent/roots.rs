@@ -158,6 +158,8 @@ pub struct ProductStateRoots {
     /// product home.
     openrouter_credentials: Arc<dyn crate::openrouter::OpenRouterCredentials>,
     platform_credentials: Arc<dyn crate::platform::PlatformCredentials>,
+    /// The named secrets MCP server definitions refer to.
+    named_secrets: Arc<dyn crate::mcp_binding::NamedSecrets>,
     /// Whether API model lists are fetched live, and the window selection a
     /// new API session binds (product `[api] full_window`).
     api_model_lists: crate::platform::ApiModelLists,
@@ -205,6 +207,7 @@ impl ProductStateRoots {
             roster_source: roster,
             openrouter_credentials,
             platform_credentials,
+            named_secrets: Arc::new(crate::mcp_binding::NoNamedSecrets),
             api_model_lists: crate::platform::ApiModelLists::Offline,
             api_window: crate::platform::ApiWindow::Working,
             created_semantic_evidence: None,
@@ -413,6 +416,21 @@ impl ProductStateRoots {
         &self.roster_source
     }
 
+    /// Binds the product's named-secret store; without one every secret an
+    /// MCP server definition names is unset.
+    #[must_use]
+    pub fn with_named_secrets(
+        mut self,
+        secrets: Arc<dyn crate::mcp_binding::NamedSecrets>,
+    ) -> Self {
+        self.named_secrets = secrets;
+        self
+    }
+
+    pub(crate) fn named_secrets(&self) -> Arc<dyn crate::mcp_binding::NamedSecrets> {
+        Arc::clone(&self.named_secrets)
+    }
+
     pub(crate) fn platform_credentials(&self) -> &dyn crate::platform::PlatformCredentials {
         self.platform_credentials.as_ref()
     }
@@ -449,6 +467,7 @@ impl ProductStateRoots {
             roster_source: Arc::new(doubles::UnpinnedRosterSource),
             openrouter_credentials: Arc::new(doubles::NoOpenRouterCredential),
             platform_credentials: Arc::new(crate::platform::UnavailableCredentials),
+            named_secrets: Arc::new(crate::mcp_binding::NoNamedSecrets),
             api_model_lists: crate::platform::ApiModelLists::Offline,
             api_window: crate::platform::ApiWindow::Working,
             created_semantic_evidence: None,
@@ -625,7 +644,7 @@ mod tests {
             max_model_rounds: 8,
             topology_enabled: true,
             product_home: Some(home.path().to_path_buf()),
-            tool_selection: crate::tool_plan::TemplateToolSelection::default(),
+            tool_selection: crate::tool_plan::NodeToolSelection::default(),
         });
         let result = crate::agent::build::topology_extensions_if_enabled(
             &parent,

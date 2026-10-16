@@ -1111,7 +1111,7 @@ impl Fixture {
             created_output_bound: None,
             prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),
             product_home: None,
-            tool_selection: crate::tool_plan::TemplateToolSelection::default(),
+            tool_selection: crate::tool_plan::NodeToolSelection::default(),
             workspace_root: root.path().to_path_buf(),
             cwd: root.path().to_path_buf(),
             plan_state_authority: tree_id.into(),

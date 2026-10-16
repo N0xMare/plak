@@ -96,7 +96,7 @@ pub(super) fn openrouter_test_parent() -> ApiTopologyParent {
         created_output_bound: None,
         prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),
         product_home: None,
-        tool_selection: crate::tool_plan::TemplateToolSelection::default(),
+        tool_selection: crate::tool_plan::NodeToolSelection::default(),
         workspace_root: PathBuf::from("/tmp/or-root"),
         cwd: PathBuf::from("/tmp/or-root"),
         plan_state_authority: "tree-or".into(),
@@ -3551,6 +3551,7 @@ async fn a_child_binds_its_own_frozen_card_tools() {
     for (name, agent_id) in children {
         let names: Vec<String> = frozen_child_tool_selection(&tree_id, &agent_id)
             .expect(name)
+            .selection
             .entries()
             .iter()
             .map(ToString::to_string)
@@ -4197,18 +4198,26 @@ fn a_codex_root_template_selecting_x_search_refuses_the_native_bind()
         account: "codex".to_owned(),
         model: "gpt-6-astra".to_owned(),
         tools: crate::tool_plan::TemplateToolSelection::parse(["x_search"])?,
+        tool_sections: std::collections::BTreeMap::new(),
     };
+    let directory = tempfile::tempdir()?;
+    let roots = test_state_roots(
+        directory.path().join("product"),
+        directory.path().join("state"),
+    )?;
     let explicit = crate::binding::RootTemplateFact::root_tool_selection(
         Some(&fact),
         Some("codex"),
         Some("gpt-6-sol"),
     );
-    assert!(explicit.is_empty());
+    assert!(explicit.selection.is_empty());
     assert!(
         bind_node_tool_plan(
             &explicit,
             crate::tool_plan::ToolRoute::native(NativeProvider::Codex),
             "codex",
+            directory.path(),
+            &roots,
         )
         .is_ok()
     );
@@ -4221,6 +4230,8 @@ fn a_codex_root_template_selecting_x_search_refuses_the_native_bind()
         &selection,
         crate::tool_plan::ToolRoute::native(NativeProvider::Codex),
         "codex",
+        directory.path(),
+        &roots,
     )
     .err()
     .ok_or("x_search bound on codex")?;
@@ -4252,15 +4263,17 @@ async fn a_selected_tool_the_route_cannot_serve_refuses_api_session_creation()
                 provider: crate::binding::PlatformProvider::Anthropic,
             },
             "mcp:github",
-            "mcp:github is not available in this build; \
-             remedy: remove mcp:github from the template's tools",
+            "mcp server github is not configured; remedy: add [mcp_servers.github] \
+             to config.toml or remove mcp:github from the template's tools",
         ),
     ] {
         let mut parent = openrouter_test_parent();
         parent.workspace_root = directory.path().to_path_buf();
         parent.cwd = directory.path().to_path_buf();
         parent.target = target;
-        parent.tool_selection = crate::tool_plan::TemplateToolSelection::parse([selection])?;
+        parent.tool_selection = crate::tool_plan::NodeToolSelection::new(
+            crate::tool_plan::TemplateToolSelection::parse([selection])?,
+        );
         let refused = api_session_runtime_binding(&parent, false, SessionToolFence::Full, None)
             .await
             .err()

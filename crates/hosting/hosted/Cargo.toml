@@ -14,12 +14,13 @@ class = "published-internal"
 
 [dependencies]
 plakous-host-protocol = { version = "0.1.0", path = "../host-protocol" }
-plakous = { version = "0.1.0", path = "../../plakous", default-features = false, features = ["native-subscriptions", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"] }
+plakous = { version = "0.1.0", path = "../../plakous", default-features = false, features = ["native-subscriptions", "mcp", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"] }
 plakous-recursive-subagents = { version = "0.1.0", path = "../../orchestration/recursive-subagents", default-features = false }
 plakous-workspace = { version = "0.1.0", path = "../../orchestration/workspace", default-features = false }
 nix.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+toml.workspace = true
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 tracing.workspace = true

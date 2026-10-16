@@ -264,6 +264,32 @@ impl std::fmt::Debug for NamedSecret {
     }
 }
 
+/// The named-secret store as hosting reads it: each MCP server spawn asks
+/// for the secrets its definition names.
+pub struct ProductNamedSecrets {
+    paths: PlakPaths,
+}
+
+impl ProductNamedSecrets {
+    #[must_use]
+    pub fn shared(paths: &PlakPaths) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            paths: paths.clone(),
+        })
+    }
+}
+
+impl plakous_hosted::mcp_binding::NamedSecrets for ProductNamedSecrets {
+    fn read(
+        &self,
+        name: &str,
+    ) -> Result<Option<plakous_hosted::mcp_binding::NamedSecretValue>, String> {
+        Ok(read_named_secret(&self.paths, name)?.map(|secret| {
+            plakous_hosted::mcp_binding::NamedSecretValue::new(secret.expose_secret().to_owned())
+        }))
+    }
+}
+
 /// Byte bound on one named secret value.
 pub const MAX_NAMED_SECRET_BYTES: usize = 16 * 1024;
 

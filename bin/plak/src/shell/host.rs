@@ -188,5 +188,6 @@ pub fn product_state_roots(paths: &PlakPaths) -> plakous_hosted::agent::ProductS
         )),
     )
     .expect("temporary product home is absolute")
+    .with_named_secrets(crate::home::secrets::ProductNamedSecrets::shared(paths))
     .with_job_output_root(paths.job_outputs())
 }

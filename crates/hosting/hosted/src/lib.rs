@@ -101,6 +101,7 @@ pub use error::{CliFailure, CliFailureKind, CliResult, ProcessOutcome};
 
 mod api_runtime;
 mod call_detail;
+pub mod mcp_binding;
 mod process_environment;
 
 // A session release joins one in-flight store call and then commits the shutdown receipt, each

@@ -230,10 +230,12 @@ dependency explicitly enable `uuid/v4`; both support standalone
 `native-subscriptions` implies `composition` and `composition-python`, so the
 product closure is unchanged by the split.
 
-`plakous` carries nine public optional features. The reviewed closure cap in
-`tools/checks/check_features.py` is **9**. The cap bounds the per-package subset
-enumeration, so the facade's own run is 514 closures. Any tenth public feature
-needs its own reviewed amendment here.
+`plakous` carries ten public optional features. The reviewed closure cap in
+`tools/checks/check_features.py` is **10**: the tenth is `mcp`, the MCP client,
+which no other facade feature implies and only `full` and Plak's product
+closure enable. The cap bounds the per-package subset enumeration, so the
+facade's own run is 1026 closures. Any eleventh public feature needs its own
+reviewed amendment here.
 The checker reports hits/misses and atomically caches Cargo tree/metadata
 outputs in `${CARGO_TARGET_DIR:-$ROOT/target}/feature-closure-cache.json` by a
 SHA-256 of `cargo --version`, Cargo.lock, tracked Cargo.toml files,

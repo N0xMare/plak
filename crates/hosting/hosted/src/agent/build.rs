@@ -516,7 +516,7 @@ pub struct ProductAgentSpec {
     pub product_home: Option<PathBuf>,
     /// The optional tools this node's template selects. Binding resolves them
     /// on this session's route or refuses session creation.
-    pub tool_selection: crate::tool_plan::TemplateToolSelection,
+    pub tool_selection: crate::tool_plan::NodeToolSelection,
 }
 
 /// Product topology parent for an API-key hub root.
@@ -552,7 +552,7 @@ pub struct ApiTopologyParent {
     /// [`ProductAgentSpec::product_home`].
     pub product_home: Option<PathBuf>,
     /// See [`ProductAgentSpec::tool_selection`].
-    pub tool_selection: crate::tool_plan::TemplateToolSelection,
+    pub tool_selection: crate::tool_plan::NodeToolSelection,
 }
 
 /// Spawn/mail/rejoin parent: OAuth native spec or API-key hub root.
@@ -1499,17 +1499,32 @@ pub(super) fn compiled_configuration_with_direct_extensions(
 
 /// The tool plan of one node, bound before anything attaches or compiles;
 /// a refusal fails the session's creation, or the spawn, with its one line.
+/// MCP servers are started or leased in the node's workspace root.
 pub(super) fn bind_node_tool_plan(
-    selection: &crate::tool_plan::TemplateToolSelection,
+    tools: &crate::tool_plan::NodeToolSelection,
     route: Option<crate::tool_plan::ToolRoute>,
     route_label: &str,
+    workspace_root: &Path,
+    state_roots: &ProductStateRoots,
 ) -> CliResult<crate::tool_plan::ToolPlan> {
+    let selection = &tools.selection;
     if selection.is_empty() {
         return Ok(crate::tool_plan::ToolPlan::default());
     }
     let route = route.ok_or_else(|| CliFailure::new("native provider is unsupported"))?;
-    crate::tool_plan::bind_tool_plan(selection, route, route_label)
-        .map_err(|refusal| CliFailure::new(refusal.to_string()))
+    // Optional tools first: hosted-retrieval wrappers bind on the route's
+    // deferred retrieval slot, and a refusal there starts no MCP server.
+    // MCP entries then bind on the process pool.
+    let plan = crate::tool_plan::bind_tool_plan(selection, route, route_label)
+        .map_err(|refusal| CliFailure::new(refusal.to_string()))?;
+    let mcp = crate::mcp_binding::bind_mcp_tools(
+        selection,
+        &tools.tool_sections,
+        workspace_root,
+        state_roots.named_secrets(),
+    )
+    .map_err(CliFailure::new)?;
+    Ok(plan.with_mcp(selection, mcp))
 }
 
 /// One Direct extension as the provider configuration states it. A tool an
@@ -2596,7 +2611,7 @@ pub fn api_topology_parent(
         // than letting the binder rediscover it.
         prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),
         product_home: Some(product_home),
-        tool_selection: crate::tool_plan::TemplateToolSelection::default(),
+        tool_selection: crate::tool_plan::NodeToolSelection::default(),
         workspace_root: record.workspace_root.clone(),
         cwd,
         plan_state_authority,
@@ -2671,6 +2686,8 @@ async fn api_session_runtime_binding_with_owner(
         &parent.tool_selection,
         Some(crate::tool_plan::ToolRoute::api(parent.target)),
         parent.target.account(),
+        &parent.workspace_root,
+        &parent.state_roots,
     )?;
     let spawn_parent = SpawnParent::Api(parent.clone());
     let topology_extensions = topology_extensions_if_enabled_with_owner(
@@ -3370,6 +3387,8 @@ pub(super) fn coding_session_runtime_binding_for(
         &tool_selection,
         crate::tool_plan::ToolRoute::native(provider),
         state_roots.roster_source().account_name(provider),
+        &workspace_root,
+        &state_roots,
     )?;
     let product_extensions = topology_extensions_if_enabled(
         &SpawnParent::from_native(topology_spec.clone()),

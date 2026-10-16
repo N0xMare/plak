@@ -53,6 +53,7 @@ struct PoolInner {
     /// The transport client HTTP servers derive theirs from; a default
     /// `WebPKI` client when the host supplied none.
     http: Option<plakous_http::Client>,
+    runtime: Option<tokio::runtime::Handle>,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -91,6 +92,20 @@ impl McpPool {
         }
     }
 
+    /// This pool with its connections and idle timers running on `runtime`,
+    /// so a server outlives the executor of the session that started it.
+    /// A builder step: apply it before the first lease.
+    #[must_use]
+    pub fn running_on(self, runtime: tokio::runtime::Handle) -> Self {
+        Self {
+            inner: Arc::new(PoolInner {
+                http: self.inner.http.clone(),
+                runtime: Some(runtime),
+                ..PoolInner::default()
+            }),
+        }
+    }
+
     /// Leases the entry for `spec` in `environment`'s workspace, starting its
     /// server if it is not running, and returns once its tools are listed.
     ///
@@ -121,6 +136,7 @@ impl McpPool {
                         spec,
                         environment,
                         http: self.inner.http.clone(),
+                        runtime: self.inner.runtime.clone(),
                         pool: Arc::downgrade(&self.inner),
                         state: tokio::sync::Mutex::new(EntryState::Stopped),
                         leases: Mutex::new(Leases::default()),
@@ -258,7 +274,12 @@ impl Drop for McpLease {
             }
             leases.generation
         };
-        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+        let Some(runtime) = self
+            .entry
+            .runtime
+            .clone()
+            .or_else(|| tokio::runtime::Handle::try_current().ok())
+        else {
             return;
         };
         let entry = Arc::downgrade(&self.entry);
@@ -297,6 +318,7 @@ pub(crate) struct Entry {
     spec: McpServerSpec,
     environment: Arc<ExecutionEnvironment>,
     http: Option<plakous_http::Client>,
+    runtime: Option<tokio::runtime::Handle>,
     pool: Weak<PoolInner>,
     state: tokio::sync::Mutex<EntryState>,
     leases: Mutex<Leases>,
@@ -338,15 +360,33 @@ impl Entry {
             EntryState::Closed => return Err(closed()),
             EntryState::Stopped | EntryState::Failed { .. } => {}
         }
-        let connection = Arc::new(match self.spec.transport() {
-            Transport::Stdio(stdio) => {
-                Connection::start_stdio(&self.spec, stdio, &self.environment, &self.key.root)
-                    .await?
+        let start = {
+            let (spec, environment, http, root) = (
+                self.spec.clone(),
+                Arc::clone(&self.environment),
+                self.http.clone(),
+                self.key.root.clone(),
+            );
+            async move {
+                match spec.transport() {
+                    Transport::Stdio(stdio) => {
+                        Connection::start_stdio(&spec, stdio, &environment, &root).await
+                    }
+                    Transport::Http(endpoint) => {
+                        Connection::start_http(&spec, endpoint, http.as_ref(), &root).await
+                    }
+                }
             }
-            Transport::Http(endpoint) => {
-                Connection::start_http(&self.spec, endpoint, self.http.as_ref(), &self.key.root)
-                    .await?
-            }
+        };
+        let connection = Arc::new(match &self.runtime {
+            Some(runtime) => runtime.spawn(start).await.map_err(|error| {
+                McpError::with_source(
+                    McpErrorKind::Startup,
+                    format!("mcp server {} start did not finish", self.key.server),
+                    error,
+                )
+            })??,
+            None => start.await?,
         });
         *state = EntryState::Running(Arc::clone(&connection));
         Ok(connection)

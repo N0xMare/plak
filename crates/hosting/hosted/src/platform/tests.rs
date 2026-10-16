@@ -167,7 +167,7 @@ async fn resumed_js_session_keeps_construction_jobs_after_policy_change() {
         max_model_rounds: crate::agent::NATIVE_RUN_MAX_MODEL_ROUNDS,
         topology_enabled: false,
         product_home: Some(directory.path().to_path_buf()),
-        tool_selection: crate::tool_plan::TemplateToolSelection::default(),
+        tool_selection: crate::tool_plan::NodeToolSelection::default(),
     };
     let original =
         crate::agent::build_api_root_coding_session(parent.clone(), "fixture:jobs:create", None)

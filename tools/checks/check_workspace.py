@@ -502,6 +502,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plak", "src/commands/exchange_capture.rs"): {"env", "warn"},
     # A published export whose directory sync failed is kept and logged.
     ("plak", "src/carry.rs"): {"warn"},
+    ("plakous-hosted", "src/mcp_binding.rs"): {"warn"},
     # `test-hooks` only: scripted offline model plans for child fixtures.
     ("plak", "src/test_hooks.rs"): {"json"},
     ("plak", "src/build_identity.rs"): {"cfg"},
@@ -1168,6 +1169,25 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         "tools": {"ToolOwnerClass"},
     },
     ("plakous-hosted", "src/api_runtime.rs"): {"tools": {"RegisteredToolIdentity"}},
+    # MCP binding: the facade's MCP client, a host environment for the pool's
+    # service processes, and the named-secret value type.
+    ("plakous-hosted", "src/mcp_binding.rs"): {
+        "mcp": {
+            "McpPool", "McpSecretResolver", "McpServerSpec", "McpToolPack", "McpToolSelection",
+            "ServiceSecretValue",
+        },
+        "model": {"RunId"},
+        "tools": {
+            "EnvironmentVariableName", "ExecutionEnvironment", "ExecutionEnvironmentConfig",
+            "ExecutionEnvironmentScope",
+        },
+    },
+    # The untrusted-data paragraph an MCP tool earns.
+    ("plakous-hosted", "src/tools.rs"): {
+        "prompts": {"UNTRUSTED_TOOL_DATA_AGREEMENTS", "UNTRUSTED_TOOL_DATA_CONTRIBUTION_ID"},
+    },
+    # A named secret is handed to an MCP server spawn as a service secret value.
+    ("plak", "src/home/secrets.rs"): {"mcp": {"ServiceSecretValue"}},
     # Binding reads each route's release-owned hosted retrieval table.
     ("plakous-hosted", "src/tool_plan.rs"): {
         "model": {
@@ -3414,6 +3434,7 @@ def main() -> int:
             "composition-python",
             "default",
             "full",
+            "mcp",
             "native-subscriptions",
             "openai",
             "openrouter",

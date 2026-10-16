@@ -1,7 +1,11 @@
-//! `mcp-fake-server [--style initialize|discover] [--tools standard|hundred] [--http]`
+//! `mcp-fake-server [--style initialize|discover]
+//! [--tools standard|hundred|unlowerable] [--expect-env NAME=VALUE] [--http]`
 //! serves the scripted MCP server over stdio; the `exit` tool exits with
-//! status 3 mid-call. With `--http` it serves streamable HTTP on a loopback
-//! port instead, prints `listening on <url>` on stdout, and requires
+//! status 3 mid-call. `unlowerable` adds `tangled`, whose `allOf` schema no
+//! portable schema can carry. `--expect-env` exits with status 4 before
+//! serving unless the environment holds exactly that value. With `--http` it
+//! serves streamable HTTP on a loopback port instead, prints
+//! `listening on <url>` on stdout, and requires
 //! `Authorization: Bearer $MCP_FAKE_BEARER` when that variable is set.
 
 #![forbid(unsafe_code)]
@@ -18,6 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut style = Style::Initialize;
     let mut hundred = false;
     let mut http = false;
+    let mut unlowerable = false;
     let mut arguments = std::env::args().skip(1);
     while let Some(argument) = arguments.next() {
         if argument == "--http" {
@@ -29,6 +34,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ("--style", Some("discover")) => style = Style::Discover,
             ("--tools", Some("standard")) => hundred = false,
             ("--tools", Some("hundred")) => hundred = true,
+            ("--tools", Some("unlowerable")) => unlowerable = true,
+            ("--expect-env", Some(expected)) => {
+                let (name, value) = expected
+                    .split_once('=')
+                    .ok_or("--expect-env takes NAME=VALUE")?;
+                if std::env::var(name).ok().as_deref() != Some(value) {
+                    std::process::exit(4);
+                }
+            }
             _ => return Err(format!("unknown argument {argument}").into()),
         }
     }
@@ -39,6 +53,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|index| tool(&format!("t{index}"), "numbered", json!({"type": "object"})))
                 .collect(),
         );
+    }
+    if unlowerable {
+        let mut tools = plakous_mcp_fake_server::standard_tools();
+        tools.push(tool(
+            "tangled",
+            "Has a schema no portable schema carries.",
+            json!({"allOf": [{"type": "object"}, {"type": "object"}]}),
+        ));
+        server = server.with_tools(tools);
     }
     if http {
         let gate = HttpGate {
