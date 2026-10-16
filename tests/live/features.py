@@ -41,6 +41,9 @@ CATALOG = (
     ("mcp_http", "cli"),
     ("mcp_github_stdio", "cli"),
     ("mcp_github_http", "cli"),
+    ("mcp_everything_all", "cli"),
+    ("mcp_github_all_stdio", "cli"),
+    ("mcp_github_all_http", "cli"),
     ("web_search", "cli"),
     ("web_fetch", "cli"),
     ("x_search", "cli"),
@@ -62,6 +65,7 @@ EVERYTHING_VERSION = "1.0.0"
 GITHUB_MCP_IMAGE = ("ghcr.io/github/github-mcp-server@sha256:"
                     "ffced0d76e77428532a2ced185516992d77fd146d69eec2f244e6237d1a97796")
 GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp/x/repos/readonly"
+GITHUB_MCP_ALL_URL = "https://api.githubcopilot.com/mcp/readonly"
 GITHUB_READ_TOOLS = ("get_file_contents", "list_commits", "search_repositories")
 
 # Plak's own bind/admission refusals. A tool row or image row that does not
@@ -458,7 +462,11 @@ class Features:
     def mcp_http(self) -> str:
         return self._mcp_everything("mcp_http", "http")
 
-    def _mcp_everything(self, name: str, transport: str) -> str:
+    def mcp_everything_all(self) -> str:
+        """Every tool the reference server lists (no allowlist), over stdio."""
+        return self._mcp_everything("mcp_everything_all", "stdio", wildcard=True)
+
+    def _mcp_everything(self, name: str, transport: str, wildcard: bool = False) -> str:
         entry = everything_server()
         node = shutil.which("node")
         if not node:
@@ -469,6 +477,7 @@ class Features:
         a, b = 1000 + secrets.randbelow(90000), 1000 + secrets.randbelow(90000)
         server = None
         tools = ["get-sum", "get-env"]
+        allowlist = "" if wildcard else f"tools = {toml_array(tools)}\n"
         if transport == "stdio":
             wrapper = base / "server.sh"
             wrapper.write_text(
@@ -479,7 +488,7 @@ class Features:
             config = ("[mcp_servers.everything]\ntransport = \"stdio\"\n"
                       f"command = {toml_string(str(wrapper))}\n"
                       f"env = {{ PLAK_LIVE_MCP_TOKEN = {toml_string(token)} }}\n"
-                      f"tools = {toml_array(tools)}\nstartup_seconds = 60\n")
+                      f"{allowlist}startup_seconds = 60\n")
         else:
             port = free_port()
             server_log = (base / "server.log").open("w")
@@ -492,8 +501,7 @@ class Features:
                 server.terminate()
                 raise ScenarioFailure(HARNESS, "reference MCP server did not start")
             config = ("[mcp_servers.everything]\ntransport = \"http\"\n"
-                      f"url = \"http://127.0.0.1:{port}/mcp\"\n"
-                      f"tools = {toml_array(tools)}\n")
+                      f"url = \"http://127.0.0.1:{port}/mcp\"\n{allowlist}")
         cell = (" Make both calls from inside one exec cell (Code Mode), not as direct "
                 "tool calls." if code_mode(self.route) else "")
         prompt = (f"Use the MCP server named everything. Call its get-sum tool with a={a} and "
@@ -546,6 +554,25 @@ class Features:
                   "secret_env = { GITHUB_PERSONAL_ACCESS_TOKEN = \"github\" }\n"
                   f"tools = {toml_array(GITHUB_READ_TOOLS)}\nstartup_seconds = 120\n")
         return self._mcp_github("mcp_github_stdio", config)
+
+    def mcp_github_all_stdio(self) -> str:
+        """The server's whole read-only default tool set, no allowlist anywhere."""
+        if not shutil.which("docker"):
+            raise ScenarioFailure(HARNESS, "docker is not on PATH")
+        config = ("[mcp_servers.github]\ntransport = \"stdio\"\ncommand = \"docker\"\n"
+                  "args = " + toml_array([
+                      "run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN",
+                      GITHUB_MCP_IMAGE, "stdio", "--read-only"]) + "\n"
+                  "secret_env = { GITHUB_PERSONAL_ACCESS_TOKEN = \"github\" }\n"
+                  "startup_seconds = 120\n")
+        return self._mcp_github("mcp_github_all_stdio", config)
+
+    def mcp_github_all_http(self) -> str:
+        """The remote server's read-only endpoint over every toolset, no allowlist."""
+        config = ("[mcp_servers.github]\ntransport = \"http\"\n"
+                  f"url = {toml_string(GITHUB_MCP_ALL_URL)}\nbearer_secret = \"github\"\n"
+                  "headers = { X-MCP-Readonly = \"true\" }\n")
+        return self._mcp_github("mcp_github_all_http", config)
 
     def mcp_github_http(self) -> str:
         config = ("[mcp_servers.github]\ntransport = \"http\"\n"
