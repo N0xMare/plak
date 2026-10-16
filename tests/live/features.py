@@ -527,7 +527,8 @@ class Features:
             posts = (base / "server.log").read_text().count("Received MCP POST request")
             detail += f"; server saw {posts} POSTs and returned its own token"
         if code_mode(self.route):
-            if not any("mcp__everything__get-sum" in source for source in cell_sources(requests)):
+            if not any(name in source for source in cell_sources(requests)
+                       for name in ("mcp__everything__get-sum", "mcp__everything__get_sum")):
                 raise ScenarioFailure(MODEL, f"{detail}: no Code Mode cell called get-sum")
             detail += "; called from a Code Mode cell"
         return detail
