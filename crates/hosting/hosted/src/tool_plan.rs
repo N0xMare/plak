@@ -1216,12 +1216,6 @@ mod tests {
 
     #[test]
     fn hosted_retrieval_refusal_text_per_route() -> TestResult {
-        let offered = |tool: &str, route: &str| {
-            format!(
-                "{tool} is not yet qualified on {route}; remedy: remove {tool} from the \
-                 template's tools until a release qualifies it there"
-            )
-        };
         let web_fetch_elsewhere = |route: &str| {
             format!(
                 "web_fetch is not available on {route}; \
@@ -1238,11 +1232,6 @@ mod tests {
             (ToolRoute::Codex, "web_fetch", web_fetch_elsewhere("codex")),
             (ToolRoute::Codex, "x_search", x_search_elsewhere("codex")),
             (ToolRoute::Grok, "web_fetch", web_fetch_elsewhere("grok")),
-            (
-                ToolRoute::Claude,
-                "web_fetch",
-                offered("web_fetch", "claude"),
-            ),
             (ToolRoute::Claude, "x_search", x_search_elsewhere("claude")),
             (
                 ToolRoute::OpenAi,
@@ -1250,11 +1239,6 @@ mod tests {
                 web_fetch_elsewhere("openai"),
             ),
             (ToolRoute::OpenAi, "x_search", x_search_elsewhere("openai")),
-            (
-                ToolRoute::Anthropic,
-                "web_fetch",
-                offered("web_fetch", "anthropic"),
-            ),
             (
                 ToolRoute::Anthropic,
                 "x_search",
@@ -1276,16 +1260,6 @@ mod tests {
                 x_search_elsewhere("openrouter"),
             ),
         ];
-        for route in ToolRoute::ALL
-            .into_iter()
-            .filter(|route| !matches!(route, ToolRoute::Grok | ToolRoute::XaiApi))
-        {
-            assert_eq!(
-                refusal_text(&["web_search"], route)?,
-                offered("web_search", route_label(route)),
-                "{route:?}"
-            );
-        }
         for (route, tool, text) in expected {
             assert_eq!(refusal_text(&[tool], route)?, text, "{route:?} {tool}");
         }
@@ -1651,7 +1625,7 @@ mod tests {
             );
         }
         // A route whose port does not serve a kind refuses a qualified row
-        // as not built in, and every shipped row still refuses.
+        // as not built in.
         let refused = bind_tool_plan_on(
             &selection,
             ToolRoute::Codex,
@@ -1662,9 +1636,6 @@ mod tests {
         .err()
         .ok_or("an unserved kind bound")?;
         assert!(refused.to_string().contains("not available in this build"));
-        for route in [ToolRoute::Anthropic, ToolRoute::Claude] {
-            assert!(bind_tool_plan(&selection, route, "x").is_err());
-        }
         Ok(())
     }
 
@@ -1718,7 +1689,6 @@ mod tests {
             );
             assert!(refused.is_err(), "{unserved:?} bound on openrouter");
         }
-        assert!(bind_tool_plan(&selection, ToolRoute::OpenRouter, "openrouter").is_err());
         Ok(())
     }
 
@@ -1784,12 +1754,8 @@ mod tests {
                 )
                 .await;
             assert!(answered.is_ok(), "{label}");
-            // The shipped tables qualify only the xAI rows.
-            assert_eq!(
-                bind_tool_plan(&selection, route, label).is_ok(),
-                matches!(route, ToolRoute::XaiApi | ToolRoute::Grok),
-                "{label}"
-            );
+            // The shipped tables qualify web search on every route.
+            assert!(bind_tool_plan(&selection, route, label).is_ok(), "{label}");
         }
         // The OpenAI API and Codex ports serve no X search.
         let x_search = TemplateToolSelection::parse(["x_search"])?;

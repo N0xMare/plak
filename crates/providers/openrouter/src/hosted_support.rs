@@ -5,7 +5,7 @@ use plakous_model::{HostedRetrievalSupport, HostedRetrievalTable};
 
 /// OpenRouter route.
 pub const OPENROUTER_HOSTED_RETRIEVAL: HostedRetrievalTable = HostedRetrievalTable::new(
-    HostedRetrievalSupport::NOT_QUALIFIED,
+    HostedRetrievalSupport::Supported,
     HostedRetrievalSupport::NOT_OFFERED,
     HostedRetrievalSupport::NOT_OFFERED,
 );

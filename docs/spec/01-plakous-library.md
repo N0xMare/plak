@@ -4933,8 +4933,8 @@ Anthropic API and Claude OAuth ports issue side requests with no client tools,
 `max_tokens` 4,096, `max_uses` 5 for search and 1 for fetch, and adaptive
 thinking at the lowest effort the model admits where the model requires
 thinking. A template binds a wrapper only where its route's release-owned
-table row is `Supported` and the route has a port serving it; every row
-ships unsupported, so binding refuses. The Anthropic API and Claude OAuth
+table row is `Supported` and the route has a port serving it; elsewhere
+binding refuses. The Anthropic API and Claude OAuth
 routes have one (`plakous::anthropic::AnthropicRetrievalPort` over
 `AnthropicRetrieval`): `AnthropicLanguageModel::configured_with_retrieval`
 and the Claude subscription resolution (`ResolvedProvider::retrieval_port`)
@@ -5054,9 +5054,9 @@ from the provider facade modules) with one `HostedRetrievalSupport` row per
 tool: `Supported`, or `Unsupported` with reason `NotOffered` (the provider has
 no such tool) or `NotQualified` (it has one, but no live qualification on this
 route is recorded). A row moves to `Supported` only with a reviewed live
-qualification. Web search and X search are `Supported` on SuperGrok and the
-xAI API; web search is `NotQualified` on every other route; web fetch on
-Claude and the Anthropic API is `NotQualified`; every other row is
+qualification. Every row that has a provider tool is `Supported`: web search
+on every route, web fetch on Claude and the Anthropic API, and X search on
+SuperGrok and the xAI API; every other row is
 `NotOffered`. The tables do not key on the model: no row differs per model.
 
 ## 9. Code Mode and local programmatic composition
