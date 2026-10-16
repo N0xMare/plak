@@ -19,6 +19,7 @@ plakous-http = { version = "0.1.0", path = "../../common/http" }
 plakous-model = { version = "0.1.0", path = "../../core/model" }
 plakous-tools = { version = "0.1.0", path = "../../core/tools" }
 rmcp = { version = "=3.5.1", default-features = false, features = ["client", "transport-async-rw", "transport-streamable-http-client"] }
+serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 sse-stream = "0.2.5"
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }

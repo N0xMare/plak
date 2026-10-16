@@ -4112,6 +4112,7 @@ dependencies = [
  "plakous-model",
  "plakous-tools",
  "rmcp",
+ "serde",
  "serde_json",
  "sse-stream",
  "tempfile",

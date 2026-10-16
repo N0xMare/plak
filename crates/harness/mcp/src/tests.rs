@@ -614,3 +614,79 @@ async fn wait_for(mut condition: impl FnMut() -> bool) -> TestResult {
     }
     Err("condition not reached".into())
 }
+
+/// A persisted record rebuilds the same pack on a later lease without a new
+/// listing; a server whose tool changed in between fails the call unsent.
+#[tokio::test]
+async fn persisted_records_rebuild_the_pack_and_a_changed_tool_is_refused_unsent() -> TestResult {
+    let mut changed = standard_tools();
+    changed[0] = tool("echo", "Echoes text twice.", json!({"type": "object"}));
+    let (harness, observed) = harness(vec![
+        (Style::Initialize, standard_tools()),
+        (Style::Initialize, standard_tools()),
+        (Style::Initialize, changed),
+    ])?;
+    let first = McpPool::new();
+    let lease = first
+        .lease(spec()?, Arc::clone(&harness.environment))
+        .await?;
+    let listing = lease
+        .freeze(&McpToolSelection::Named(vec!["echo".into(), "slow".into()]))
+        .await?;
+    let encoded = serde_json::to_string(listing.records())?;
+    first.shutdown().await;
+    let decoded: Vec<crate::McpToolRecord> = serde_json::from_str(&encoded)?;
+    assert_eq!(decoded, listing.records());
+
+    let reopened = McpPool::new();
+    let lease = reopened
+        .lease(spec()?, Arc::clone(&harness.environment))
+        .await?;
+    let rebuilt = McpToolPack::from_records(lease, decoded.clone())?;
+    let names = rebuilt
+        .registrations()?
+        .iter()
+        .map(|registration| registration.name().as_str().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["mcp__fake__echo", "mcp__fake__slow"]);
+    reopened.shutdown().await;
+
+    let drifted = McpPool::new();
+    let lease = drifted
+        .lease(spec()?, Arc::clone(&harness.environment))
+        .await?;
+    let Value::Object(arguments) = json!({"text": "x"}) else {
+        return Err("arguments".into());
+    };
+    let outcome = match call(
+        &lease.entry,
+        &decoded[0],
+        arguments,
+        &CancellationToken::new(),
+        progress()?.0,
+    )
+    .await?
+    {
+        CallResult::Outcome(outcome) => outcome,
+        CallResult::Complete(_) => return Err("a changed tool was dispatched".into()),
+    };
+    assert_eq!(outcome.kind(), ToolOutcomeKind::Failure);
+    assert!(outcome.joined_text().starts_with("mcp tool changed"));
+    assert_eq!(observed[2].calls(), Vec::<String>::new());
+
+    // A record of another server is refused by the pack; a record whose
+    // exposed name does not follow from its server and tool does not decode.
+    let mut foreign: Value = serde_json::from_str(&encoded)?;
+    foreign[0]["server"] = json!("other");
+    foreign[0]["exposed_name"] = json!("mcp__other__echo");
+    let foreign: Vec<crate::McpToolRecord> = serde_json::from_value(foreign)?;
+    let refused = McpToolPack::from_records(lease, foreign)
+        .err()
+        .ok_or("a foreign record was accepted")?;
+    assert_eq!(refused.kind(), McpErrorKind::Selection);
+    let mut renamed: Value = serde_json::from_str(&encoded)?;
+    renamed[0]["exposed_name"] = json!("mcp__fake__other");
+    assert!(serde_json::from_value::<Vec<crate::McpToolRecord>>(renamed).is_err());
+    drifted.shutdown().await;
+    Ok(())
+}

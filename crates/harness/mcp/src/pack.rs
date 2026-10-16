@@ -17,6 +17,7 @@ use rmcp::model::{CallToolRequest, CallToolRequestParams, ClientRequest, ServerR
 use rmcp::service::PeerRequestOptions;
 use serde_json::Value;
 
+use crate::error::{McpError, McpErrorKind};
 use crate::http::{self, HttpRefusal};
 use crate::listing::{FrozenMcpListing, McpToolRecord};
 use crate::pool::{Connection, Entry, McpLease};
@@ -57,6 +58,34 @@ impl McpToolPack {
             lease: Arc::new(lease),
             records: listing.records().to_vec(),
         }
+    }
+
+    /// A pack over a leased server and records frozen earlier, as an exact
+    /// reopen rebuilds them: the server is not listed again, and a tool whose
+    /// live definition differs fails its call as changed.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a record of another server.
+    pub fn from_records(lease: McpLease, records: Vec<McpToolRecord>) -> Result<Self, McpError> {
+        if let Some(record) = records
+            .iter()
+            .find(|record| record.server() != lease.server())
+        {
+            return Err(McpError::new(
+                McpErrorKind::Selection,
+                format!(
+                    "mcp tool record {} belongs to server {}, not {}",
+                    record.exposed_name().as_str(),
+                    record.server(),
+                    lease.server()
+                ),
+            ));
+        }
+        Ok(Self {
+            lease: Arc::new(lease),
+            records,
+        })
     }
 
     fn names(&self) -> Vec<ToolName> {

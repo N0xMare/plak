@@ -4718,7 +4718,12 @@ digest of the listed name, description and input schema. The exposed name is
 `mcp__<server>__<tool>`, every MCP-name byte outside `[A-Za-z0-9_-]` mapped to
 `_`; a name over 64 bytes keeps 55 bytes plus `_` and the first 8 hex digits of
 the SHA-256 of the MCP name. Two tools mapping to one exposed name refuse the
-bind naming both. Lowering onto `PortableToolSchemaV2` applies only
+bind naming both. A record serializes for an embedder to persist; decoding
+refuses an invalid server id, an exposed name its server and MCP name do not
+produce, and a description over 4 KiB. `McpToolPack::from_records` rebuilds
+the pack from persisted records over a later lease without listing again
+(a record of another server refuses), so the next call's digest check is
+where drift surfaces. Lowering onto `PortableToolSchemaV2` applies only
 meaning-preserving or tightening rewrites: annotation keywords (`$schema`,
 `$id`, `$comment`, `default`, `examples`, `format`, `readOnly`, `writeOnly`,
 `deprecated`) and `pattern` are dropped, local non-recursive `$ref`s into
