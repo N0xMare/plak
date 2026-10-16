@@ -36,7 +36,7 @@ use wire::{
 /// object address carries it and nothing from another epoch decodes. Any
 /// pre-release change to a persisted runtime encoding bumps this one number;
 /// the per-component revision constants inside the graph are frozen.
-pub const RUNTIME_FORMAT_EPOCH: u32 = 26;
+pub const RUNTIME_FORMAT_EPOCH: u32 = 27;
 
 const OBJECT_ADDRESS_BYTES: usize = 1 + 4 + 32;
 const MAX_CHECKPOINT_OBJECTS: usize = MAX_RUNTIME_RECORDS * 8 + 64;

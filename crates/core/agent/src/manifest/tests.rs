@@ -2678,7 +2678,7 @@ fn effect_decision_pause_is_exact_pre_dispatch_and_closed() -> TestResult {
 
 #[test]
 fn lifecycle_codec_golden_matrix_is_closed_bounded_and_tamper_checked() -> TestResult {
-    assert_eq!(RUNTIME_FORMAT_EPOCH, 26);
+    assert_eq!(RUNTIME_FORMAT_EPOCH, 27);
     assert_eq!(RUNTIME_LIFECYCLE_CODEC_REVISION, 3);
     let signature = RecoveryHandlerSignature::new;
     let command = RecoveryObligation::new(
@@ -3288,7 +3288,7 @@ fn job_row(number: u32) -> TestResult<JobRow> {
 
 #[test]
 fn quiescent_job_ledger_and_terminal_evidence_round_trip() -> TestResult {
-    assert_eq!(RUNTIME_FORMAT_EPOCH, 26);
+    assert_eq!(RUNTIME_FORMAT_EPOCH, 27);
     let mut manifest = manifest(ProducerProvenance::new("plakous", "jobs", "offline")?, None)?;
     let mut row = job_row(3)?;
     row.terminal = Some(JobTerminal {

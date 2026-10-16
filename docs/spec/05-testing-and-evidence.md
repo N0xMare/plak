@@ -240,7 +240,7 @@ keep the stop name process-allowlist gated without changing its effect tag.
 The job-ledger fixture carries a promoted row across later turns and their operation-only and
 terminal commits, copies terminal evidence in a history-unchanged Quiescent
 checkpoint, and proves repeated recording is a no-op. Manifest round trips pin
-the row/terminal bounds, same-batch consumption, clear counter and epoch 26.
+the row/terminal bounds, same-batch consumption, clear counter and epoch 27.
 Fresh-service reopen retains exit-code and output-tail answers until consumption;
 stop on an already terminal snapshot preserves its original outcome. Row-cap
 fixtures keep foreground retention separate from promoted, unconsumed jobs.

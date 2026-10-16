@@ -177,7 +177,7 @@ Monty worker package needs.
 | Store | Owner | Current version |
 | --- | --- | --- |
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **25** |
-| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **26** |
+| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **27** |
 | Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **31** |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **6** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **17**, disposable, never recovery authority |
@@ -190,7 +190,7 @@ of the one before, and no other store crosses between builds. A pre-release
 format change bumps the store's schema or the runtime format epoch; the
 per-component revision constants inside the checkpoint graph are frozen. Plak
 keeps each build's stores in a state directory named by all four versions
-(chapter 02 §2.5), currently `r25.e26.p32.t6`, so a build never opens files from another version tuple as
+(chapter 02 §2.5), currently `r25.e27.p32.t6`, so a build never opens files from another version tuple as
 session authority. Explicit legacy pruning may take schema-blind SQLite and
 holder locks to prove a directory is
 unused (chapter 02 §2.5). A session another build wrote is
