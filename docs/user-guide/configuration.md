@@ -213,7 +213,7 @@ list adds more, by name:
 | --- | --- |
 | `web_search`, `web_fetch`, `x_search` | Search and fetch run by the provider of the route the agent binds. A route that cannot serve one refuses the session or spawn with a remedy (for example, put `x_search` on a grok template and spawn it). |
 | `fetch_url` | One HTTPS fetch Plak runs itself, on every route: HTML comes back as Markdown, text and JSON as text, small PNG/JPEG/WebP as images. Only public internet addresses are reachable; see *fetch_url* below. |
-| `image_gen` | Generates or edits one image through the route's provider and saves it as a new workspace file; it never overwrites a file. Each call is a paid request. It runs on the xAI API. OpenAI API (and Codex and Grok, which have no image transport yet) refuse it until a live check qualifies them; Claude, Anthropic and OpenRouter refuse it because they have no image endpoint. |
+| `image_gen` | Generates or edits one image through the route's provider and saves it as a new workspace file; it never overwrites a file. Each call is a paid request. It runs on the xAI API and the Grok subscription. OpenAI API (and Codex, which has no image transport yet) refuse it until a live check qualifies them; Claude, Anthropic and OpenRouter refuse it because they have no image endpoint. |
 | `mcp:<id>` | Every tool an MCP server allows. |
 | `mcp:<id>/<tool>` | One tool of an MCP server. |
 

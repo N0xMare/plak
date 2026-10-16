@@ -1270,6 +1270,7 @@ impl XaiNativeAuthManager {
             Arc<dyn LanguageModel>,
             XaiModelResolutionEvidence,
             crate::XaiRetrieval,
+            crate::XaiImages,
         ),
         XaiNativeAuthError,
     > {
@@ -1277,8 +1278,9 @@ impl XaiNativeAuthManager {
             .resolve_exact_model(requested_model, client, config)
             .await?;
         let retrieval = model.retrieval();
+        let images = model.images();
         let model: Arc<dyn LanguageModel> = model;
-        Ok((model, evidence, retrieval))
+        Ok((model, evidence, retrieval, images))
     }
 
     async fn resolve_exact_model(

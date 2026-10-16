@@ -235,6 +235,8 @@ pub(crate) fn supergrok_responses_preflight<'a>(
 /// retains the grant and permit through the response head.
 pub(crate) async fn supergrok_side_request(
     execution: &SuperGrokResponsesExecution,
+    path: &'static str,
+    accept: &'static str,
     body: &[u8],
 ) -> Result<(Request, SuperGrokDispatchGuard), &'static str> {
     let route = execution.resolved.route();
@@ -279,7 +281,7 @@ pub(crate) async fn supergrok_side_request(
     let origin =
         Origin::parse(identity.origin().as_str()).map_err(|_| "SuperGrok origin is invalid")?;
     let mut headers = HeaderMap::new();
-    headers.insert(HEADER_ACCEPT, HeaderValue::from_static("text/event-stream"));
+    headers.insert(HEADER_ACCEPT, HeaderValue::from_static(accept));
     headers.insert(
         HEADER_CONTENT_TYPE,
         HeaderValue::from_static("application/json"),
@@ -293,7 +295,7 @@ pub(crate) async fn supergrok_side_request(
     let wire = Request::new(
         origin,
         Method::POST,
-        crate::SUPERGROK_RESPONSES_PATH,
+        path,
         headers,
         SensitiveBytes::new(body.to_vec()).into_bytes(),
         execution.client.limits(),

@@ -744,6 +744,11 @@ mod shared_host_model {
             crate::XaiRetrieval::supergrok(Arc::clone(self), effort)
         }
 
+        /// The session's image generation on the same login and client.
+        pub fn images(self: &Arc<Self>) -> crate::XaiImages {
+            crate::XaiImages::supergrok(Arc::clone(self))
+        }
+
         pub(crate) const fn client(&self) -> &plakous_http::Client {
             &self.client
         }
@@ -755,6 +760,17 @@ mod shared_host_model {
             self: &Arc<Self>,
             body: &[u8],
         ) -> Result<(plakous_http::Request, SuperGrokDispatchGuard), &'static str> {
+            self.side_request_to(crate::SUPERGROK_RESPONSES_PATH, "text/event-stream", body)
+                .await
+        }
+
+        /// [`Self::side_request`] to another `path` of the same origin.
+        pub(crate) async fn side_request_to(
+            self: &Arc<Self>,
+            path: &'static str,
+            accept: &'static str,
+            body: &[u8],
+        ) -> Result<(plakous_http::Request, SuperGrokDispatchGuard), &'static str> {
             Arc::clone(self)
                 .revalidate_runtime_authority(self.clock.now())
                 .await
@@ -762,7 +778,7 @@ mod shared_host_model {
             let target = self
                 .current_target()
                 .map_err(|_| "SuperGrok target is unavailable")?;
-            crate::native_auth::supergrok_side_request(&target.execution, body).await
+            crate::native_auth::supergrok_side_request(&target.execution, path, accept, body).await
         }
 
         fn current_target(

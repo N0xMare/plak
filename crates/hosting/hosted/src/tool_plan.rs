@@ -681,8 +681,8 @@ impl ToolRoute {
     /// Whether the route serves `image_gen`.
     pub(crate) const fn image_gen(self) -> ImageGenRow {
         match self {
-            Self::XaiApi => ImageGenRow::Supported,
-            Self::Codex | Self::Grok | Self::OpenAi => ImageGenRow::NotQualified,
+            Self::XaiApi | Self::Grok => ImageGenRow::Supported,
+            Self::Codex | Self::OpenAi => ImageGenRow::NotQualified,
             Self::Claude | Self::Anthropic | Self::OpenRouter => ImageGenRow::NotOffered,
         }
     }
@@ -937,7 +937,7 @@ fn not_offered_remedy(tool: &SelectedTool) -> &'static str {
             "put x_search on a grok or xai-api template and spawn it"
         }
         SelectedTool::Optional(OptionalTool::ImageGen) => {
-            "put image_gen on a codex, openai or xai-api template and spawn it"
+            "put image_gen on a grok or xai-api template and spawn it"
         }
         _ => "put it on a template whose route offers it and spawn it",
     }
@@ -1304,16 +1304,16 @@ mod tests {
         for route in ToolRoute::ALL {
             let label = route_label(route);
             let expected = match route {
-                ToolRoute::XaiApi => continue,
-                ToolRoute::Codex | ToolRoute::Grok | ToolRoute::OpenAi => {
+                ToolRoute::Grok | ToolRoute::XaiApi => continue,
+                ToolRoute::Codex | ToolRoute::OpenAi => {
                     format!(
                         "image_gen is not yet qualified on {label}; remedy: remove image_gen \
                          from the template's tools until a release qualifies it there"
                     )
                 }
                 ToolRoute::Claude | ToolRoute::Anthropic | ToolRoute::OpenRouter => format!(
-                    "image_gen is not available on {label}; remedy: put image_gen on a codex, \
-                     openai or xai-api template and spawn it"
+                    "image_gen is not available on {label}; remedy: put image_gen on a grok \
+                     or xai-api template and spawn it"
                 ),
             };
             assert_eq!(refusal_text(&["image_gen"], route)?, expected, "{route:?}");

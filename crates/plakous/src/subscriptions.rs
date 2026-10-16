@@ -2732,7 +2732,7 @@ impl NativeSubscriptions {
                     .map_err(|error| {
                         NativeModelResolutionError::after_selection(selected_model.clone(), error)
                     })?;
-                let (model, resolution, retrieval) = online
+                let (model, resolution, retrieval, images) = online
                     .manager
                     .resolve_model_with_retrieval(selected_model.as_str(), inference_client, config)
                     .await
@@ -2787,7 +2787,9 @@ impl NativeSubscriptions {
                         retrieval: Some(Arc::new(
                             crate::responses_retrieval::XaiRetrievalPort::new(retrieval),
                         )),
-                        image_gen: None,
+                        image_gen: Some(Arc::new(crate::responses_images::XaiImagePort::new(
+                            images,
+                        ))),
                     },
                     compile_authority,
                 ))

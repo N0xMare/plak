@@ -346,7 +346,7 @@ pub mod sessions;
 mod anthropic_retrieval;
 #[cfg(feature = "openrouter")]
 mod openrouter_retrieval;
-#[cfg(any(feature = "openai", feature = "xai"))]
+#[cfg(any(feature = "openai", feature = "xai", feature = "native-subscriptions"))]
 mod responses_images;
 #[cfg(any(feature = "openai", feature = "xai", feature = "native-subscriptions"))]
 mod responses_retrieval;

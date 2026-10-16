@@ -6,9 +6,12 @@ use std::sync::Arc;
 use plakous_tool_web::{ImageGenFuture, ImageGenPort, ImageGenRequest};
 use plakous_tools::ExecutionOperationControl;
 
-#[cfg(feature = "openai")]
+#[cfg(any(feature = "openai", feature = "native-subscriptions"))]
 use plakous_openai as responses;
-#[cfg(all(feature = "xai", not(feature = "openai")))]
+#[cfg(all(
+    feature = "xai",
+    not(any(feature = "openai", feature = "native-subscriptions"))
+))]
 use plakous_xai as responses;
 use responses::{ResponsesImageFlavor, ResponsesImageRequest, ResponsesImageSource};
 
@@ -58,10 +61,10 @@ impl ImageGenPort for OpenAiImagePort {
 }
 
 /// One session's xAI API image generation as an [`ImageGenPort`].
-#[cfg(feature = "xai")]
+#[cfg(any(feature = "xai", feature = "native-subscriptions"))]
 pub struct XaiImagePort(Arc<plakous_xai::XaiImages>);
 
-#[cfg(feature = "xai")]
+#[cfg(any(feature = "xai", feature = "native-subscriptions"))]
 impl XaiImagePort {
     /// Wraps the session's images executor.
     #[must_use]
@@ -70,7 +73,7 @@ impl XaiImagePort {
     }
 }
 
-#[cfg(feature = "xai")]
+#[cfg(any(feature = "xai", feature = "native-subscriptions"))]
 impl ImageGenPort for XaiImagePort {
     fn max_edit_images(&self) -> usize {
         ResponsesImageFlavor::Xai.max_edit_images()

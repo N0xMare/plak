@@ -4108,12 +4108,16 @@ final, so a generation is never sent twice. The OpenAI API port
 `OpenAiPlatformModel::images`, model `gpt-image-2`) and the xAI API port
 (`plakous::xai::XaiImagePort` over `XaiImages`, from
 `XaiPlatformModel::images`, model `grok-imagine-image-2.0`) reuse the
-session executor's key, project and client. The Codex paths and model are
-recorded in `plakous-openai`, but no Codex or SuperGrok images transport is
-built. `plakous-hosted` binds `image_gen` only where the route's release-owned
+session executor's key, project and client. The SuperGrok port (the same
+`XaiImagePort` over `XaiImages` from `XaiLanguageModel::images`, exposed as
+`ResolvedProvider::image_gen_port`) sends the same body to `/v1/images/generations`
+and `/v1/images/edits` on the subscription origin under the session's OAuth
+grant and inference permit, revalidated before each physical request and held
+until the response head. The Codex paths and model are recorded in
+`plakous-openai`, but no Codex images transport is built. `plakous-hosted` binds `image_gen` only where the route's release-owned
 row is `Supported` and the route has a port, on a deferred port the
-executor connects once. The xAI API row is `Supported`; the Codex, SuperGrok
-and OpenAI API rows are unqualified and the Claude, Anthropic API and
+executor connects once. The xAI API and SuperGrok rows are `Supported`; the
+Codex and OpenAI API rows are unqualified and the Claude, Anthropic API and
 OpenRouter rows unoffered, so binding refuses there until a live receipt
 qualifies a row.
 
