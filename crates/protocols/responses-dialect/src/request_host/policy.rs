@@ -237,7 +237,11 @@ fn validate_selected_behavior(
         return Err(mismatch("output"));
     }
     match (behavior.output_bound, policy.max_output_tokens) {
-        (OutputBoundDisposition::Enforced(_), MaxOutputTokensPolicy::Emit)
+        // A route-derived bound (OpenRouter) is emitted like a chosen one.
+        (
+            OutputBoundDisposition::Enforced(_) | OutputBoundDisposition::DerivedFromRoute(_),
+            MaxOutputTokensPolicy::Emit,
+        )
         | (OutputBoundDisposition::NoRequestBound, MaxOutputTokensPolicy::Omit) => {}
         _ => return Err(mismatch("output_bound")),
     }

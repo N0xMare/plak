@@ -161,6 +161,10 @@ impl OpenRouterResponsesLanguageModel {
             ),
             behavior,
         )?;
+        // Name the failing fact: the shared-host constructor below folds every
+        // target and compile refusal into one construction error.
+        let runtime = target.runtime_authority(SystemClock.now())?;
+        compile_openrouter_responses_configuration(&selected, &target, &runtime)?;
         let model = Arc::new(
             Self::new(target, selected, client)
                 .map_err(|_| crate::OpenRouterResponsesBuildError::Configuration)?,

@@ -192,6 +192,12 @@ impl OpenRouterReasoningFacts {
     pub const fn mandatory(&self) -> bool {
         self.mandatory
     }
+
+    /// Returns whether the model takes a reasoning token budget.
+    #[must_use]
+    pub const fn supports_max_tokens(&self) -> bool {
+        self.supports_max_tokens
+    }
 }
 
 /// One bounded endpoint candidate reported for an exact dynamic model.

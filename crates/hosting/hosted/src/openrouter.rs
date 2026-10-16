@@ -597,13 +597,26 @@ fn reasoning_disposition(
     effort: Option<ReasoningEffort>,
     evidence: &OpenRouterChatModelEvidence,
 ) -> CliResult<ReasoningEffortDisposition> {
+    let reasoning = evidence.reasoning();
+    let budget_mapped = budget_mapped_efforts();
     reasoning_disposition_for_efforts(
         wire,
         effort,
-        evidence
-            .reasoning()
-            .and_then(OpenRouterReasoningFacts::supported_efforts),
+        reasoning
+            .and_then(OpenRouterReasoningFacts::supported_efforts)
+            .or_else(|| {
+                reasoning
+                    .is_some_and(OpenRouterReasoningFacts::supports_max_tokens)
+                    .then_some(budget_mapped.as_slice())
+            }),
     )
+}
+
+/// A model that attests a reasoning token budget (`supports_max_tokens`) but
+/// enumerates no efforts takes OpenRouter's normalized `low`/`medium`/`high`,
+/// which the gateway maps onto a share of that budget.
+fn budget_mapped_efforts() -> Vec<String> {
+    ["low", "medium", "high"].map(str::to_owned).to_vec()
 }
 
 fn reasoning_disposition_for_efforts(
@@ -972,6 +985,25 @@ mod tests {
                     .contains("attests no reasoning effort enumeration"),
                 "{wire:?}: {}",
                 error.message()
+            );
+        }
+    }
+
+    #[test]
+    fn a_budget_only_reasoning_model_takes_normalized_efforts() {
+        let mapped = budget_mapped_efforts();
+        for wire in [
+            ResolvedProtocol::Chat,
+            ResolvedProtocol::Responses,
+            ResolvedProtocol::Messages,
+        ] {
+            assert!(matches!(
+                reasoning_disposition_for_efforts(wire, Some(ReasoningEffort::Low), Some(&mapped)),
+                Ok(ReasoningEffortDisposition::Enabled(ReasoningEffort::Low))
+            ));
+            assert!(
+                reasoning_disposition_for_efforts(wire, Some(ReasoningEffort::Max), Some(&mapped))
+                    .is_err()
             );
         }
     }

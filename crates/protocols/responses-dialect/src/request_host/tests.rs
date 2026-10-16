@@ -5361,3 +5361,19 @@ fn gateway_managed_router_policy_is_exact_endpoint_neutral_and_identity_bearing(
     assert!(ResponsesRouterPolicy::gateway_managed(Some("DENY".to_owned()), None).is_err());
     Ok(())
 }
+
+#[test]
+fn a_route_derived_output_bound_compiles_where_the_policy_emits_one() -> TestResult {
+    let mut selected = selected_responses_configuration()?;
+    let mut behavior = selected.behavior().clone();
+    behavior.output_bound = OutputBoundDisposition::DerivedFromRoute(NonZeroU32::MIN);
+    selected = SelectedProviderConfiguration::new(selected.route().clone(), behavior)?;
+    let descriptor = descriptor("responses-test-route")?;
+    compile_provider_configuration(
+        &selected,
+        descriptor.clone(),
+        configuration_authority(&descriptor)?,
+        ResponsesRequestPolicy::supergrok_stateless(),
+    )?;
+    Ok(())
+}

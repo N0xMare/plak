@@ -1056,22 +1056,26 @@ fn messages_capabilities(
     evidence: &OpenRouterChatModelEvidence,
 ) -> Result<CapabilitySet, plakous_model::IdentityError> {
     let provenance = FactProvenance::new(FactSource::BuiltIn, Timestamp::new(0, 0)?, None);
-    let mut features: BTreeMap<_, _> = [Capability::Streaming, Capability::Tools]
-        .into_iter()
-        .map(|capability| {
-            (
-                capability,
-                FeatureSupport::new(
-                    Support::Native,
-                    CapabilityConstraints::new(
-                        None,
-                        Some("Custom OpenRouter Messages dialect".to_owned()),
-                    ),
-                    provenance,
+    let mut features: BTreeMap<_, _> = [
+        Capability::Streaming,
+        Capability::Tools,
+        Capability::Reasoning,
+    ]
+    .into_iter()
+    .map(|capability| {
+        (
+            capability,
+            FeatureSupport::new(
+                Support::Native,
+                CapabilityConstraints::new(
+                    None,
+                    Some("Custom OpenRouter Messages dialect".to_owned()),
                 ),
-            )
-        })
-        .collect();
+                provenance,
+            ),
+        )
+    })
+    .collect();
     if let Some(image) = crate::chat::image_input_fact(evidence) {
         features.insert(Capability::ImageInput, image);
     }

@@ -210,7 +210,11 @@ fn responses_capabilities() -> Result<CapabilitySet, plakous_model::IdentityErro
             0,
         )?),
     );
-    let features = [Capability::Streaming, Capability::Tools]
+    let features = [
+        Capability::Streaming,
+        Capability::Tools,
+        Capability::Reasoning,
+    ]
         .into_iter()
         .map(|capability| {
             (
@@ -314,6 +318,9 @@ pub enum OpenRouterResponsesBuildError {
     /// Selected or configured provider behavior was inconsistent.
     #[error(transparent)]
     ProviderConfiguration(#[from] plakous_model::ProviderConfigurationError),
+    /// The selected behavior did not compile for the Responses dialect.
+    #[error(transparent)]
+    ResponsesConfiguration(#[from] ResponsesProviderConfigurationError),
 }
 
 #[cfg(test)]

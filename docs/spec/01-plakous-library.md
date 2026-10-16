@@ -2829,6 +2829,14 @@ context window and reasoning facts, and the model parameters that wire uses:
 `tools`, `max_tokens`, `reasoning`, explicit `tool_choice` for Responses and
 Messages, and `stop` for Chat and Messages. Unused parameters carry no authority.
 
+A selected reasoning effort is admitted when the model's `reasoning.supported_efforts`
+names it, or, when the model enumerates none but attests `supports_max_tokens`,
+for OpenRouter's normalized `low`, `medium` and `high`, which the gateway maps
+onto a share of the reasoning budget. All three wires carry reasoning: Chat and
+Responses as `reasoning.effort`, Messages as adaptive `thinking` with
+`output_config.effort`. Responses emits the route-derived output bound as
+`max_output_tokens`, as it emits a chosen one.
+
 For both reasoning-on-wire and reasoning-omitted requests, the admission
 projection covers every eligible endpoint, not a selected provider: availability,
 the minimum prompt/completion/context guarantees (an unknown guarantee stays
