@@ -1126,6 +1126,21 @@ fn assemble(
         match item.get("type").and_then(Value::as_str) {
             Some("reasoning") => {}
             Some("message") => message(item, &mut text, &mut add)?,
+            // xAI reports its X search as `custom_tool_call` items named
+            // after the server-side X tool it ran (`x_keyword_search`,
+            // `x_semantic_search`, ...); their citations are on the message.
+            Some("custom_tool_call")
+                if call_item == "x_search_call"
+                    && item
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| name.starts_with("x_")) =>
+            {
+                calls = calls.saturating_add(1);
+                if item.get("status").and_then(Value::as_str) == Some("failed") {
+                    failed_calls = failed_calls.saturating_add(1);
+                }
+            }
             Some(kind) if kind == call_item => {
                 calls = calls.saturating_add(1);
                 if item.get("status").and_then(Value::as_str) == Some("failed") {

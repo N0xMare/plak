@@ -5,14 +5,14 @@ use plakous_model::{HostedRetrievalSupport, HostedRetrievalTable};
 
 /// SuperGrok subscription route.
 pub const SUPERGROK_HOSTED_RETRIEVAL: HostedRetrievalTable = HostedRetrievalTable::new(
-    HostedRetrievalSupport::NOT_QUALIFIED,
+    HostedRetrievalSupport::Supported,
     HostedRetrievalSupport::NOT_OFFERED,
-    HostedRetrievalSupport::NOT_QUALIFIED,
+    HostedRetrievalSupport::Supported,
 );
 
 /// xAI API route.
 pub const XAI_API_HOSTED_RETRIEVAL: HostedRetrievalTable = HostedRetrievalTable::new(
-    HostedRetrievalSupport::NOT_QUALIFIED,
+    HostedRetrievalSupport::Supported,
     HostedRetrievalSupport::NOT_OFFERED,
-    HostedRetrievalSupport::NOT_QUALIFIED,
+    HostedRetrievalSupport::Supported,
 );

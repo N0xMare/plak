@@ -4938,8 +4938,9 @@ request: a one-message `input`, one hosted tool, `tool_choice:"required"`,
 admits, and `include:["web_search_call.action.sources"]` for web search. Its
 grammar ignores progress events and admits in the terminal response only
 assistant messages, reasoning items and call items of the offered tool
-(`web_search_call`, or `x_search_call` for X search); sources are the call's
-`action.sources` and the answer's `url_citation` annotations, and a failed
+(`web_search_call`, or `x_search_call` for X search, where xAI reports each
+server-side X tool it ran as a `custom_tool_call` named `x_*`); sources are
+the call's `action.sources` and the answer's `url_citation` annotations, and a failed
 call without an answer is the tool's error. The OpenAI API port
 (`plakous::openai::OpenAiRetrievalPort` over `OpenAiRetrieval`, from
 `OpenAiPlatformModel::retrieval`) serves web search with `filters.allowed_domains`
@@ -5025,9 +5026,9 @@ from the provider facade modules) with one `HostedRetrievalSupport` row per
 tool: `Supported`, or `Unsupported` with reason `NotOffered` (the provider has
 no such tool) or `NotQualified` (it has one, but no live qualification on this
 route is recorded). A row moves to `Supported` only with a reviewed live
-qualification. Every row of this build is `Unsupported`: web search is
-`NotQualified` on every route; web fetch on Claude and the Anthropic API and X
-search on SuperGrok and the xAI API are `NotQualified`; every other row is
+qualification. Web search and X search are `Supported` on SuperGrok and the
+xAI API; web search is `NotQualified` on every other route; web fetch on
+Claude and the Anthropic API is `NotQualified`; every other row is
 `NotOffered`. The tables do not key on the model: no row differs per model.
 
 ## 9. Code Mode and local programmatic composition

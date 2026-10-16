@@ -2366,7 +2366,7 @@ executor pins its headers, credential path and revalidation before each
 physical request.
 The Responses kernel pins the same for its side requests: OpenAI and xAI
 body goldens (web search, X search) with their allowlist, synthetic streams
-with sources, empty sources, a failed call, `x_search_call` mapping, refused
+with sources, empty sources, a failed call, the captured xAI X-tool items, refused
 items and events, a cut stream and `response.failed` (server error retried,
 anything else not), and the same loopback retries; the OpenAI and xAI API
 executors pin their side request's path, key, project and model over loopback

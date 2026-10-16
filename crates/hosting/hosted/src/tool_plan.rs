@@ -1224,22 +1224,6 @@ mod tests {
     }
 
     #[test]
-    fn every_hosted_retrieval_row_starts_unsupported() {
-        for route in ToolRoute::ALL {
-            for tool in OptionalTool::ALL
-                .iter()
-                .filter_map(|tool| tool.hosted_retrieval())
-            {
-                assert_ne!(
-                    route.hosted_retrieval().support(tool),
-                    HostedRetrievalSupport::Supported,
-                    "{route:?} {tool:?} moves to Supported only with a live qualification"
-                );
-            }
-        }
-    }
-
-    #[test]
     fn hosted_retrieval_refusal_text_per_route() -> TestResult {
         let offered = |tool: &str, route: &str| {
             format!(
@@ -1263,7 +1247,6 @@ mod tests {
             (ToolRoute::Codex, "web_fetch", web_fetch_elsewhere("codex")),
             (ToolRoute::Codex, "x_search", x_search_elsewhere("codex")),
             (ToolRoute::Grok, "web_fetch", web_fetch_elsewhere("grok")),
-            (ToolRoute::Grok, "x_search", offered("x_search", "grok")),
             (
                 ToolRoute::Claude,
                 "web_fetch",
@@ -1292,11 +1275,6 @@ mod tests {
                 web_fetch_elsewhere("xai-api"),
             ),
             (
-                ToolRoute::XaiApi,
-                "x_search",
-                offered("x_search", "xai-api"),
-            ),
-            (
                 ToolRoute::OpenRouter,
                 "web_fetch",
                 web_fetch_elsewhere("openrouter"),
@@ -1307,7 +1285,10 @@ mod tests {
                 x_search_elsewhere("openrouter"),
             ),
         ];
-        for route in ToolRoute::ALL {
+        for route in ToolRoute::ALL
+            .into_iter()
+            .filter(|route| !matches!(route, ToolRoute::Grok | ToolRoute::XaiApi))
+        {
             assert_eq!(
                 refusal_text(&["web_search"], route)?,
                 offered("web_search", route_label(route)),
@@ -1811,8 +1792,12 @@ mod tests {
                 )
                 .await;
             assert!(answered.is_ok(), "{label}");
-            // The shipped tables still refuse every row.
-            assert!(bind_tool_plan(&selection, route, label).is_err(), "{label}");
+            // The shipped tables qualify only the xAI rows.
+            assert_eq!(
+                bind_tool_plan(&selection, route, label).is_ok(),
+                matches!(route, ToolRoute::XaiApi | ToolRoute::Grok),
+                "{label}"
+            );
         }
         // The OpenAI API and Codex ports serve no X search.
         let x_search = TemplateToolSelection::parse(["x_search"])?;

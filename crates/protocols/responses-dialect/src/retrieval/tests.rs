@@ -318,19 +318,34 @@ fn a_failed_tool_call_without_an_answer_is_an_error() {
     );
 }
 
+/// The item shapes of a live xAI `x_search` side response: each server-side X
+/// tool it ran is a `custom_tool_call`, and the citations are on the answer.
 #[test]
-fn x_search_call_items_map_to_sources() -> TestResult {
+fn xai_x_tool_calls_count_and_the_answer_cites_the_posts() -> TestResult {
     let body = sse(&[completed(json!([
-        {"type": "x_search_call", "id": "xs_1", "status": "completed",
-         "action": {"type": "search", "sources": [{"type": "url", "url": "https://x.com/rustlang/status/1"}]}},
-        answer("Rust 1.99 is out.", json!([
+        {"type": "reasoning", "id": "rs_1", "status": "completed",
+         "summary": [{"type": "summary_text", "text": "Searching X."}]},
+        {"type": "custom_tool_call", "id": "ctc_1", "call_id": "xs_call-1-0",
+         "name": "x_keyword_search", "status": "completed",
+         "input": "{\"query\":\"from:rustlang\",\"limit\":\"5\",\"mode\":\"Latest\"}"},
+        {"type": "reasoning", "id": "tco_1", "status": "completed", "summary": []},
+        answer("Rust 1.99 is out. [[1]](https://x.com/rustlang/status/1)", json!([
             {"type": "url_citation", "url": "https://x.com/rustlang/status/1", "title": "1"},
         ])),
     ]))]);
     let outcome = collect(&body, "x_search_call").map_err(|_| "broken")?;
-    assert_eq!(outcome.text, "Rust 1.99 is out.");
     assert_eq!(outcome.sources.len(), 1);
+    assert_eq!(outcome.sources[0].url, "https://x.com/rustlang/status/1");
     assert_eq!(outcome.usage.hosted_requests, 1);
+    let web = sse(&[completed(json!([
+        {"type": "custom_tool_call", "id": "ctc_1", "call_id": "c", "name": "x_keyword_search",
+         "status": "completed", "input": "{}"},
+        answer("x", json!([])),
+    ]))]);
+    assert_eq!(
+        fatal_kind(collect(&web, "web_search_call")),
+        Some((false, ResponsesRetrievalErrorKind::InvalidResponse))
+    );
     Ok(())
 }
 
