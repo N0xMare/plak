@@ -4112,9 +4112,10 @@ session executor's key, project and client. The Codex paths and model are
 recorded in `plakous-openai`, but no Codex or SuperGrok images transport is
 built. `plakous-hosted` binds `image_gen` only where the route's release-owned
 row is `Supported` and the route has a port, on a deferred port the
-executor connects once; every row ships unqualified (Codex, SuperGrok,
-OpenAI API, xAI API) or unoffered (Claude, Anthropic API, OpenRouter), so
-binding refuses until a live receipt qualifies a row.
+executor connects once. The xAI API row is `Supported`; the Codex, SuperGrok
+and OpenAI API rows are unqualified and the Claude, Anthropic API and
+OpenRouter rows unoffered, so binding refuses there until a live receipt
+qualifies a row.
 
 A repository query walks a live tree, so it surveys rather than transacts. Every
 directory child is opened relative to its parent descriptor with `O_NOFOLLOW`:

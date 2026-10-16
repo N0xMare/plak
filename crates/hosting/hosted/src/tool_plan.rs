@@ -436,10 +436,6 @@ impl RetrievalPort for DeferredRetrievalPort {
 /// [`ImageGenRow::Supported`] only with a live receipt.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ImageGenRow {
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "every row ships unqualified until a live receipt")
-    )]
     Supported,
     /// The provider has an images endpoint; no release has qualified it on
     /// this route.
@@ -685,7 +681,8 @@ impl ToolRoute {
     /// Whether the route serves `image_gen`.
     pub(crate) const fn image_gen(self) -> ImageGenRow {
         match self {
-            Self::Codex | Self::Grok | Self::OpenAi | Self::XaiApi => ImageGenRow::NotQualified,
+            Self::XaiApi => ImageGenRow::Supported,
+            Self::Codex | Self::Grok | Self::OpenAi => ImageGenRow::NotQualified,
             Self::Claude | Self::Anthropic | Self::OpenRouter => ImageGenRow::NotOffered,
         }
     }
@@ -1302,11 +1299,12 @@ mod tests {
     }
 
     #[test]
-    fn image_gen_starts_unqualified_or_unoffered_on_every_route() -> TestResult {
+    fn image_gen_refusal_text_on_the_unqualified_and_unoffered_routes() -> TestResult {
         for route in ToolRoute::ALL {
             let label = route_label(route);
             let expected = match route {
-                ToolRoute::Codex | ToolRoute::Grok | ToolRoute::OpenAi | ToolRoute::XaiApi => {
+                ToolRoute::XaiApi => continue,
+                ToolRoute::Codex | ToolRoute::Grok | ToolRoute::OpenAi => {
                     format!(
                         "image_gen is not yet qualified on {label}; remedy: remove image_gen \
                          from the template's tools until a release qualifies it there"

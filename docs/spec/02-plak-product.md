@@ -5067,8 +5067,8 @@ x_search on a grok or xai-api template and spawn it` for `x_search`), and
 template's tools until a release qualifies it there` where it has one.
 `image_gen` is judged the same way by its own release-owned row: not
 available on claude, anthropic and openrouter (`put image_gen on a codex,
-openai or xai-api template and spawn it`), not yet qualified on codex, grok,
-openai and xai-api; a qualified row binds only where the route has an image
+openai or xai-api template and spawn it`), not yet qualified on codex, grok
+and openai, qualified on xai-api; a qualified row binds only where the route has an image
 port (the OpenAI and xAI API routes).
 `fetch_url` runs in Plak, needs no route support and binds on every route,
 under the node's frozen `[tools.fetch_url]` limits (chapter 01 section 8.5). A
