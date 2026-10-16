@@ -949,6 +949,7 @@ impl CompatibilityNotice {
 pub struct PendingNativeLogin {
     inner: PendingNativeLoginKind,
     consent: PendingCompatibilityConsent,
+    replaced_unusable: bool,
 }
 
 #[derive(Clone)]
@@ -1022,6 +1023,13 @@ enum PendingNativeLoginKind {
 }
 
 impl PendingNativeLogin {
+    /// Whether opening this login retired a stored record this build could not
+    /// use (a retired payload format or another profile). Hosts say so.
+    #[must_use]
+    pub const fn replaced_unusable_record(&self) -> bool {
+        self.replaced_unusable
+    }
+
     /// Returns the exact authorization URL intended for display.
     #[must_use]
     pub fn instructions(&self) -> NativeLoginInstructions<'_> {
@@ -1067,7 +1075,7 @@ impl PendingNativeLogin {
     ///
     /// Returns a redacted authentication, transport, profile, or storage error.
     pub async fn complete(self) -> Result<NativeAuthStatus, NativeSubscriptionError> {
-        let Self { inner, consent } = self;
+        let Self { inner, consent, .. } = self;
         match inner {
             PendingNativeLoginKind::CodexLocal { manager, login } => {
                 complete_pending_with_consent(&consent, unix_now, || async move {
@@ -1120,7 +1128,7 @@ impl PendingNativeLogin {
         self,
         authorization_input: &str,
     ) -> Result<NativeAuthStatus, NativeSubscriptionError> {
-        let Self { inner, consent } = self;
+        let Self { inner, consent, .. } = self;
         complete_pending_with_consent(&consent, unix_now, || async move {
             match inner {
                 PendingNativeLoginKind::XaiRemote(login) => login
@@ -1177,14 +1185,21 @@ where
         .await?;
     consent.validate_at(now()?).await?;
     lock.verify()?;
-    let recovery = consent.arm_recovery()?;
+    let mut armed = ArmedLoginRecovery {
+        consent,
+        operation: Some(consent.arm_recovery()?),
+    };
     if let Err(error) = consent.validate_at(now()?).await {
         lock.verify()?;
-        consent.restore_recovery(&recovery)?;
+        consent.restore_recovery(&armed.settle())?;
         return Err(error);
     }
     lock.verify()?;
-    let status = match operation().await {
+    let result = operation().await;
+    // From here every exit settles the marker explicitly; only a future
+    // dropped while the provider exchange was pending reaches the guard.
+    let recovery = armed.settle();
+    let status = match result {
         Ok(status) => status,
         Err(error) => {
             lock.verify()?;
@@ -1219,6 +1234,43 @@ where
     consent.clear_recovery(&recovery, generation)?;
     lock.verify()?;
     Ok(NativeAuthStatus::Ready)
+}
+
+/// Login recovery armed for one in-flight completion.
+///
+/// A completion future dropped before its provider exchange settles (Ctrl-C
+/// or a timeout while the browser callback is pending) restores the marker
+/// exactly as the error path does: only while the credential generation is
+/// still the one seen at arming, so a credential the exchange may already
+/// have committed keeps its recovery marker. A killed process never runs
+/// this, so crash recovery still sees the armed marker.
+struct ArmedLoginRecovery<'a> {
+    consent: &'a PendingCompatibilityConsent,
+    operation: Option<LoginRecoveryOperation>,
+}
+
+impl ArmedLoginRecovery<'_> {
+    fn settle(&mut self) -> LoginRecoveryOperation {
+        self.operation
+            .take()
+            .unwrap_or_else(|| unreachable!("login recovery is settled exactly once"))
+    }
+}
+
+impl Drop for ArmedLoginRecovery<'_> {
+    fn drop(&mut self) {
+        let Some(operation) = self.operation.take() else {
+            return;
+        };
+        if self
+            .consent
+            .state
+            .current_credential_generation(self.consent.notice.provider())
+            .is_ok_and(|current| current == operation.credential_generation_before)
+        {
+            let _ = self.consent.restore_recovery(&operation);
+        }
+    }
 }
 
 /// The single credential admission rule for every dispatch-shaped path: model
@@ -1680,10 +1732,21 @@ impl NativeSubscriptions {
         let lock = self.acquire_compatibility_lock(provider).await?;
         // Login must open even when a prior credential is quarantined / recovery
         // is armed — the operator's explicit login is how they heal that state.
-        // Retire only a quarantined slot. A healthy credential remains in place
-        // until the new login commits, while an ambiguous prior login cannot
-        // block its own explicit recovery path.
-        if self.status_unlocked(provider).await?.credential() == NativeAuthStatus::Quarantined {
+        // Retire only a quarantined slot or a record this build cannot use (a
+        // retired payload format or another profile); the latter is announced
+        // through `replaced_unusable_record`. A healthy credential remains in
+        // place until the new login commits.
+        let retire = match self.status_unlocked(provider).await {
+            Ok(status) => match status.credential() {
+                NativeAuthStatus::Quarantined => Some(false),
+                NativeAuthStatus::LoginRequired => Some(true),
+                _ => None,
+            },
+            Err(NativeSubscriptionError::CredentialProfileChanged) => Some(true),
+            Err(error) => return Err(error),
+        };
+        let replaced_unusable = retire == Some(true);
+        if retire.is_some() {
             let status = self.logout_local_unlocked(provider).await?;
             if !matches!(
                 status,
@@ -1721,7 +1784,11 @@ impl NativeSubscriptions {
                         manager,
                     },
                 };
-                Ok(PendingNativeLogin { inner, consent })
+                Ok(PendingNativeLogin {
+                    inner,
+                    consent,
+                    replaced_unusable,
+                })
             }
             NativeProvider::Xai => {
                 let online = self.xai_online_for_login().await?;
@@ -1743,7 +1810,11 @@ impl NativeSubscriptions {
                         )
                     }
                 };
-                Ok(PendingNativeLogin { inner, consent })
+                Ok(PendingNativeLogin {
+                    inner,
+                    consent,
+                    replaced_unusable,
+                })
             }
             NativeProvider::Claude => {
                 let online = self.claude_online_for_login().await?;
@@ -1758,6 +1829,7 @@ impl NativeSubscriptions {
                         online.manager.begin_login().map_err(map_claude_error)?,
                     ),
                     consent,
+                    replaced_unusable,
                 })
             }
         }?;

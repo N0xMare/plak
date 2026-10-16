@@ -3852,7 +3852,7 @@ mod tests {
             (
                 NativeSubscriptionError::CredentialProfileChanged,
                 codex,
-                "native credential profile changed; run `plak logout codex`, then `plak login codex`",
+                "the stored codex login was written by an older build or another profile; run `plak login codex`, which replaces it",
                 3,
             ),
             (
@@ -4051,19 +4051,14 @@ mod tests {
             NativeProvider::Claude,
             state,
         );
-        assert_eq!(
-            cell,
-            "Profile changed · plak logout claude, then plak login claude"
-        );
+        assert_eq!(cell, "Profile changed · run plak login claude");
         let long = native_subscription_failure(
             NativeSubscriptionError::CredentialProfileChanged,
             Some(NativeProvider::Claude),
             state,
         );
-        assert!(
-            long.message()
-                .contains("run `plak logout claude`, then `plak login claude`")
-        );
+        assert!(long.message().contains("which replaces it"));
+        assert!(!long.message().contains("plak logout"));
         assert!(long.message().contains("plak login claude"));
         assert_eq!(
             commands::support::oauth_status_failure_cell(
@@ -4175,7 +4170,7 @@ mod tests {
         };
         let claude = row("Claude Subscription");
         assert!(
-            claude.contains("Profile changed · plak logout claude, then plak login claude"),
+            claude.contains("Profile changed · run plak login claude"),
             "{claude}\n{stdout}"
         );
         let codex = row("Codex Subscription");
@@ -4440,12 +4435,13 @@ mod tests {
             provider: NativeProvider,
         ) -> CliResult<commands::application::StoredCredential> {
             self.calls.push(Call::Status(provider));
-            Ok(commands::application::StoredCredential::from_status(
-                CliStatus {
+            Ok(
+                commands::application::CredentialVerdict::from_status(CliStatus {
                     compatibility: self.compatibility,
                     credential: self.credential,
-                },
-            ))
+                })
+                .stored(),
+            )
         }
 
         fn subscription_usage(
@@ -4518,6 +4514,7 @@ mod tests {
                 .to_owned(),
                 completion,
                 device_code,
+                replaced_unusable: self.credential == CredentialState::LoginRequired,
             })
         }
 
@@ -6724,6 +6721,42 @@ mod tests {
     }
 
     #[test]
+    fn login_over_an_unusable_record_replaces_it_and_says_so_once() {
+        let mut backend = FakeBackend::new(CompatibilityState::Required, CredentialState::Ready);
+        backend.credential = CredentialState::LoginRequired;
+        let (result, _, stderr) = invoke(
+            Command::AuthLogin {
+                provider: NativeProvider::Xai,
+                mode: NativeLoginMode::Remote,
+            },
+            &mut backend,
+            b"exact-review\r\nsynthetic-code\r\n",
+        );
+        assert_eq!(result, Ok(ProcessOutcome::Success));
+        let stderr = String::from_utf8_lossy(&stderr);
+        assert_eq!(
+            stderr
+                .matches("replacing the stored login this build cannot use")
+                .count(),
+            1,
+            "{stderr}"
+        );
+        assert!(!stderr.contains("plak logout"), "{stderr}");
+
+        let mut healthy = FakeBackend::new(CompatibilityState::Required, CredentialState::Ready);
+        healthy.credential = CredentialState::Ready;
+        let (_, _, stderr) = invoke(
+            Command::AuthLogin {
+                provider: NativeProvider::Xai,
+                mode: NativeLoginMode::Remote,
+            },
+            &mut healthy,
+            b"exact-review\r\nsynthetic-code\r\n",
+        );
+        assert!(!String::from_utf8_lossy(&stderr).contains("replacing the stored login"));
+    }
+
+    #[test]
     fn refresh_forces_a_grant_and_reports_its_expiry() {
         let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
         backend.credential = CredentialState::Ready;
@@ -6923,7 +6956,7 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
         );
         assert_eq!(
             stdout,
-            b"grok: compatibility=acceptance-required, credential=refresh-required; run plak login grok\n"
+            b"grok: compatibility=acceptance-required, credential=refresh-required; run plak refresh grok\n"
         );
         assert_eq!(stderr, [] as [u8; 0]);
 

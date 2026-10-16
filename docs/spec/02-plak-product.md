@@ -5813,8 +5813,8 @@ prints the same two facts for one account on one line.
 An OAuth account whose offline read fails is still a row, under Setup needed.
 Its PROFILE is `—` and its CREDENTIAL names the state and the repair from the
 same classification as other native-subscription failures: `Profile changed ·
-plak logout <account>, then plak login <account>` when the stored
-profile is foreign, `Unsafe storage · …` with the path and the mode repair the
+run plak login <account>` when the stored record is foreign or retired (login
+replaces it and says so), `Unsafe storage · …` with the path and the mode repair the
 store inspection names, and that classification's repair text otherwise. When
 that unsafe-storage repair would exceed the 512-character cell cap, the cell is
 `Unsafe storage · run plak status <account> for the fix` instead of a path cut

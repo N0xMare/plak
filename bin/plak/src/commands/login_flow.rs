@@ -85,6 +85,13 @@ pub(crate) fn perform_login(
         )));
     }
     let challenge = accounts.begin_login(provider, mode)?;
+    if challenge.replaced_unusable {
+        writeln!(
+            stderr,
+            "{account}: replacing the stored login this build cannot use (older format or another profile); the remote grant may remain active"
+        )
+        .map_err(|_| CliFailure::new("stderr failed"))?;
+    }
     if challenge.completion == NativeLoginCompletion::DeviceCode {
         return finish_device_login(accounts, challenge, account, stderr);
     }

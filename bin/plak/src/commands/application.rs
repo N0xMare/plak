@@ -45,6 +45,8 @@ pub struct LoginChallenge<P> {
     pub completion: NativeLoginCompletion,
     /// Present exactly when `completion` is a device code.
     pub device_code: Option<DeviceCodePrompt>,
+    /// Opening the login retired a stored record this build could not use.
+    pub replaced_unusable: bool,
 }
 
 /// The one-time code a device-code login shows, and how long it stays valid.
@@ -72,21 +74,114 @@ pub enum StoredCredential {
     Unusable,
 }
 
-impl StoredCredential {
+/// The one classification of a stored subscription credential.
+///
+/// Offline status, login, logout, refresh, usage and model runs all read a
+/// record through this, so the offline and online paths cannot disagree about
+/// what it is or what repairs it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CredentialVerdict {
+    /// Nothing stored, or a revoked tombstone.
+    SignedOut,
+    /// Ready under an admissible compatibility profile.
+    Usable(CompatibilityState),
+    /// The access token must be refreshed before use.
+    NeedsRefresh(CompatibilityState),
+    /// A refresh outcome is ambiguous.
+    Quarantined,
+    /// A record this build cannot use; a new login replaces it.
+    NeedsLogin(LoginReason),
+    /// The compiled compatibility profile is no longer admissible.
+    ProfileInactive,
+    /// Native subscription storage is unavailable on this platform.
+    Unsupported,
+}
+
+/// Why a stored record needs a new login.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LoginReason {
+    /// Written by an earlier build in a retired payload format.
+    RetiredFormat,
+    /// Written under another compatibility profile (or an older build whose
+    /// format reads as one).
+    ProfileChanged,
+}
+
+/// The account command that observed a credential; its remedy never names it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AccountCommand {
+    Status,
+    Login,
+    Logout,
+    LogoutLocal,
+    Refresh,
+    Usage,
+    Run,
+}
+
+impl CredentialVerdict {
     pub(crate) fn from_status(status: CliStatus) -> Self {
+        let inactive = status.compatibility == CompatibilityState::Inactive;
         match status.credential {
-            CredentialState::SignedOut | CredentialState::Revoked => Self::Absent,
-            CredentialState::Ready | CredentialState::RefreshRequired
-                if status.compatibility != CompatibilityState::Inactive =>
-            {
-                Self::Usable(status.compatibility)
+            CredentialState::SignedOut | CredentialState::Revoked => Self::SignedOut,
+            CredentialState::Ready | CredentialState::RefreshRequired if inactive => {
+                Self::ProfileInactive
             }
-            CredentialState::Ready
-            | CredentialState::RefreshRequired
-            | CredentialState::Quarantined
-            | CredentialState::LoginRequired
-            | CredentialState::Unsupported => Self::Unusable,
+            CredentialState::Ready => Self::Usable(status.compatibility),
+            CredentialState::RefreshRequired => Self::NeedsRefresh(status.compatibility),
+            CredentialState::Quarantined => Self::Quarantined,
+            CredentialState::LoginRequired => Self::NeedsLogin(LoginReason::RetiredFormat),
+            CredentialState::Unsupported => Self::Unsupported,
         }
+    }
+
+    /// Classifies an offline read; a record refused as another profile is a
+    /// verdict, not a failure.
+    fn classify(read: Result<CliStatus, OfflineReadError>) -> Result<Self, OfflineReadError> {
+        match read {
+            Ok(status) => Ok(Self::from_status(status)),
+            Err(OfflineReadError::Subscription(
+                plakous::subscriptions::NativeSubscriptionError::CredentialProfileChanged,
+            )) => Ok(Self::NeedsLogin(LoginReason::ProfileChanged)),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub(crate) const fn stored(self) -> StoredCredential {
+        match self {
+            Self::SignedOut => StoredCredential::Absent,
+            Self::Usable(compatibility) | Self::NeedsRefresh(compatibility) => {
+                StoredCredential::Usable(compatibility)
+            }
+            Self::Quarantined | Self::NeedsLogin(_) | Self::ProfileInactive | Self::Unsupported => {
+                StoredCredential::Unusable
+            }
+        }
+    }
+
+    /// The repair for this record as observed by `after`, never naming
+    /// `after` itself: a failed step always points somewhere else.
+    pub(crate) fn remedy(self, provider: NativeProvider, after: AccountCommand) -> Option<String> {
+        let name = super::support::cli_provider_name(provider);
+        let login = format!("run plak login {name}");
+        let refresh = format!("run plak refresh {name}");
+        let retire = format!("run plak logout {name} --local");
+        let primary = match self {
+            Self::Usable(_) => return None,
+            Self::Quarantined if provider == NativeProvider::Xai => {
+                format!("{refresh}; {login} if that fails")
+            }
+            Self::SignedOut | Self::NeedsLogin(_) | Self::Quarantined => login.clone(),
+            Self::NeedsRefresh(_) => refresh.clone(),
+            Self::ProfileInactive => "use a newer plak build".to_owned(),
+            Self::Unsupported => "use an API-key account (plak key set <account>)".to_owned(),
+        };
+        Some(match after {
+            AccountCommand::Refresh if primary.starts_with(&refresh) => login,
+            AccountCommand::Login if primary.contains(&login) => retire,
+            AccountCommand::LogoutLocal if primary.contains("--local") => login,
+            _ => primary,
+        })
     }
 }
 
@@ -341,13 +436,7 @@ enum OfflineReadError {
 fn stored_credential_from(
     read: Result<CliStatus, OfflineReadError>,
 ) -> Result<StoredCredential, OfflineReadError> {
-    match read {
-        Ok(status) => Ok(StoredCredential::from_status(status)),
-        Err(OfflineReadError::Subscription(
-            plakous::subscriptions::NativeSubscriptionError::CredentialProfileChanged,
-        )) => Ok(StoredCredential::Unusable),
-        Err(error) => Err(error),
-    }
+    CredentialVerdict::classify(read).map(CredentialVerdict::stored)
 }
 
 /// A record this build refuses is never answered with a remedy naming
@@ -471,6 +560,7 @@ impl AccountOps for PlakousApplication {
             .block_on(self.subscriptions.begin_login(provider, mode))
             .map_err(application_execution_failure)?
             .map_err(|error| self.subscription_failure(error, Some(provider)))?;
+        let replaced_unusable = pending.replaced_unusable_record();
         let instructions = pending.instructions();
         let authorize_url = instructions.verification_uri().to_owned();
         let completion = instructions.completion();
@@ -483,6 +573,7 @@ impl AccountOps for PlakousApplication {
             authorize_url,
             completion,
             device_code,
+            replaced_unusable,
         })
     }
 
@@ -621,6 +712,138 @@ mod tests {
     };
     use crate::commands::support::native_subscription_failure;
     use crate::presentation::CredentialState;
+
+    /// Every stored-credential state (including records written by an earlier
+    /// build) x every account command: one verdict, a remedy that never names
+    /// the command that observed it, and no remedy chain that loops.
+    #[test]
+    fn stored_credential_matrix_is_consistent_and_never_loops() {
+        use super::{AccountCommand as C, CredentialVerdict as V, LoginReason};
+        use crate::presentation::{CliStatus, CompatibilityState as K};
+        let read_of = |compatibility, credential| {
+            Ok(CliStatus {
+                compatibility,
+                credential,
+            })
+        };
+        let states: Vec<(&str, Result<CliStatus, OfflineReadError>)> = vec![
+            (
+                "signed out",
+                read_of(K::Current, CredentialState::SignedOut),
+            ),
+            (
+                "revoked tombstone",
+                read_of(K::Current, CredentialState::Revoked),
+            ),
+            ("ready", read_of(K::Current, CredentialState::Ready)),
+            (
+                "ready, acceptance required",
+                read_of(K::Required, CredentialState::Ready),
+            ),
+            (
+                "needs refresh",
+                read_of(K::Current, CredentialState::RefreshRequired),
+            ),
+            (
+                "quarantined",
+                read_of(K::Current, CredentialState::Quarantined),
+            ),
+            (
+                "previous-build codex format",
+                read_of(K::Current, CredentialState::LoginRequired),
+            ),
+            (
+                "inactive profile",
+                read_of(K::Inactive, CredentialState::Ready),
+            ),
+            (
+                "unsupported platform",
+                read_of(K::Current, CredentialState::Unsupported),
+            ),
+            (
+                "previous-build grok/claude format or foreign profile",
+                Err(OfflineReadError::Subscription(
+                    NativeSubscriptionError::CredentialProfileChanged,
+                )),
+            ),
+        ];
+        let commands = [
+            C::Status,
+            C::Login,
+            C::Logout,
+            C::LogoutLocal,
+            C::Refresh,
+            C::Usage,
+            C::Run,
+        ];
+        let names = |command| match command {
+            C::Status => "plak status",
+            C::Login => "plak login",
+            C::Logout => "plak logout",
+            C::LogoutLocal => "--local",
+            C::Refresh => "plak refresh",
+            C::Usage => "plak usage",
+            C::Run => "plak run",
+        };
+        for provider in [
+            NativeProvider::Codex,
+            NativeProvider::Xai,
+            NativeProvider::Claude,
+        ] {
+            for (label, fixture) in &states {
+                let read = match fixture {
+                    Ok(state) => Ok(*state),
+                    Err(_) => Err(OfflineReadError::Subscription(
+                        NativeSubscriptionError::CredentialProfileChanged,
+                    )),
+                };
+                let verdict = V::classify(read).unwrap_or_else(|_| panic!("{label}"));
+                // Logout's view is the same verdict.
+                let stored = verdict.stored();
+                match verdict {
+                    V::Usable(_) | V::NeedsRefresh(_) => {
+                        assert!(matches!(stored, StoredCredential::Usable(_)), "{label}");
+                    }
+                    V::SignedOut => assert_eq!(stored, StoredCredential::Absent, "{label}"),
+                    _ => assert_eq!(stored, StoredCredential::Unusable, "{label}"),
+                }
+                if matches!(verdict, V::NeedsLogin(_)) {
+                    assert!(matches!(
+                        verdict,
+                        V::NeedsLogin(LoginReason::RetiredFormat | LoginReason::ProfileChanged)
+                    ));
+                }
+                for after in commands {
+                    let remedy = verdict.remedy(provider, after);
+                    if let Some(remedy) = &remedy {
+                        assert!(
+                            !remedy.contains(names(after)),
+                            "{provider:?} {label} after {after:?}: {remedy}"
+                        );
+                    }
+                    // Follow the remedy assuming each step fails: the next
+                    // remedy never repeats the command that just failed.
+                    let mut previous = after;
+                    let mut current = remedy;
+                    for _ in 0..4 {
+                        let Some(text) = current else { break };
+                        let next = if text.contains("--local") {
+                            C::LogoutLocal
+                        } else if text.starts_with("run plak refresh") {
+                            C::Refresh
+                        } else if text.starts_with("run plak login") {
+                            C::Login
+                        } else {
+                            break;
+                        };
+                        assert_ne!(next, previous, "{provider:?} {label}: {text} loops");
+                        current = verdict.remedy(provider, next);
+                        previous = next;
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn logout_reads_a_foreign_or_retired_record_as_unusable_not_a_failure() {

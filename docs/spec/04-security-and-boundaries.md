@@ -481,9 +481,36 @@ quarantine and require a fresh login.
 
 A stored credential whose payload format this build retired (Claude records
 before the grant-bound format, SuperGrok version-2 payloads) is refused, never
-converted, and a claim that finds one restores it because nothing was sent;
-the repair is `plak logout <account>`, then `plak login <account>`
-(chapter 01 §7).
+converted, and a claim that finds one restores it because nothing was sent.
+The repair is `plak login <account>`: login retires such a record (or one
+written under another compatibility profile) itself before authorizing, and
+says so in one line, because this build cannot revoke it remotely and the old
+grant may remain active. `plak logout <account>` also retires it locally.
+Quarantined records keep their rule: login retires them silently.
+
+**The subscription store is shared by every build.** Native subscription
+records live under the XDG state home (`plak/subscriptions/<account>/`), not
+under a build's state-key directory, so every installed build reads and writes
+the same files. Each record kind is therefore versioned and refused, never
+converted, when it is not current: the selected-slot credential record is bound
+to its compatibility profile id (another profile reads as profile-changed); the
+SuperGrok and Claude payloads carry an explicit version (3; earlier versions
+are retired format); the Codex payload is identified by its exact shape
+(a payload without the current login selection reads as login-required); the
+compatibility receipt carries schema 2 and the login-recovery marker version 2
+(an older one is not accepted and requires a fresh acceptance or login). A
+refused record never authorizes a request. One classification of a stored
+credential (signed out, usable, needs refresh, quarantined, needs login with
+its reason, profile inactive, unsupported) drives `plak status`, login,
+logout, refresh, the usage read and model runs, and its repair never names the
+command that produced it.
+
+Login recovery is armed only around the provider exchange. A completion
+dropped before the exchange settles (Ctrl-C or the CLI timeout while a browser
+callback is pending) restores the marker exactly as a failed exchange does,
+while the credential generation is unchanged; a killed process leaves the
+armed marker for crash recovery. Paste-complete logins (Grok, Claude) and the
+Codex device flow arm only after the code or approval has arrived.
 
 ### 3.4 Isolation between accounts and routes
 

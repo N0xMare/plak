@@ -104,9 +104,10 @@ nothing stored, logout says there is nothing to log out. `--local` never
 contacts the provider: it retires the local copy without a remote revoke, for
 example when the provider cannot be reached. Claude OAuth has no pinned remote
 revoke, so its logout is always local.
-If a native profile changes, `plak status` or `plak login` may report a changed
-credential profile. Run `plak logout <account>`, then `plak login <account>` to
-accept the new notice and authorize a fresh grant.
+If a stored login was written by an older build or under another native
+profile, `plak status` says so and names `plak login <account>`. That login
+replaces the old record itself, says so in one line, and authorizes a fresh
+grant (the old grant may remain active at the provider).
 
 ### `plak refresh <codex|grok|claude>`
 
@@ -159,8 +160,7 @@ Setup needed heading, and when none are there is no Ready heading.
 
 A provider whose local credential cannot be read is still listed, under Setup
 needed, and bare `plak status` still exits 0. CREDENTIAL then names the state
-and the repair, for example `Profile changed · plak logout claude, then
-plak login claude`, `Login required · plak login codex` for an earlier-build
+and the repair, for example `Profile changed · run plak login claude`, `Login required · plak login codex` for an earlier-build
 Codex login, or `Unsafe storage · …` with the chmod to run. A repair too long
 for the column is `Unsafe storage · run plak status <account> for the fix`;
 that command prints the full path and chmod. The other accounts,

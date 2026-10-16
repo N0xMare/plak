@@ -502,7 +502,7 @@ async fn public_catalog_policy_requires_ready_and_exact_terminal_dispatch_eviden
 
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
-async fn claude_foreign_profile_requires_explicit_local_logout_before_fresh_login()
+async fn claude_foreign_profile_is_retired_by_logout_or_replaced_by_login()
 -> Result<(), Box<dyn Error>> {
     let root = unique_test_root("claude-foreign-profile-local-retirement")?;
     let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
@@ -616,22 +616,25 @@ async fn xai_retired_payload_reads_as_profile_changed_and_local_logout_repairs_i
             ..
         }
     ));
-    assert_eq!(
-        subscriptions.logout_local(provider).await?,
-        NativeAuthStatus::Revoked
-    );
-    assert_eq!(
-        subscriptions.status(provider).await?.credential(),
-        NativeAuthStatus::Revoked
-    );
+    // `plak login` replaces the unusable record itself and says so.
     let pending = subscriptions
         .begin_login(provider, NativeLoginMode::Remote)
         .await?;
+    assert!(pending.replaced_unusable_record());
     assert_eq!(
         pending.instructions().completion(),
         NativeLoginCompletion::AuthorizationCodeOrRedirectUrl
     );
     drop(pending);
+    assert_eq!(
+        subscriptions.status(provider).await?.credential(),
+        NativeAuthStatus::Revoked
+    );
+    let again = subscriptions
+        .begin_login(provider, NativeLoginMode::Remote)
+        .await?;
+    assert!(!again.replaced_unusable_record());
+    drop(again);
     fs::remove_dir_all(root)?;
     Ok(())
 }
@@ -860,6 +863,45 @@ async fn device_approval_wait_leaves_no_recovery_when_cancelled_or_expired()
         Err(NativeSubscriptionError::LoginTokenRejected)
     );
     no_residue(&paths)?;
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn dropping_a_browser_completion_while_its_callback_is_pending_leaves_no_recovery()
+-> Result<(), Box<dyn Error>> {
+    let root = unique_test_root("dropped-browser-completion")?;
+    let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
+    let notice = fixture_notice();
+    let provider = notice.provider();
+    let accepted_at = notice.reviewed_at() + 1;
+    store_acceptance(&paths, notice, accepted_at)?;
+    let loaded = load_acceptance_exact(&paths, notice, accepted_at + 1)?;
+    let consent = PendingCompatibilityConsent {
+        state: SubscriptionState::new(paths.clone()),
+        notice,
+        exact_receipt: loaded.exact_bytes,
+        generation: loaded.generation,
+    };
+    let armed_paths = paths.clone();
+    // The Codex browser loopback waits for its callback inside the guarded
+    // operation, after recovery is armed; Ctrl-C or the CLI timeout drops it.
+    let waiting = complete_pending_with_consent(
+        &consent,
+        || Ok(accepted_at + 2),
+        move || async move {
+            assert!(login_recovery_required(&armed_paths, provider)?);
+            std::future::pending::<Result<NativeAuthStatus, NativeSubscriptionError>>().await
+        },
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), waiting)
+            .await
+            .is_err()
+    );
+    assert!(!login_recovery_required(&paths, provider)?);
+    assert!(!paths.provider_record(provider).exists());
     fs::remove_dir_all(root)?;
     Ok(())
 }

@@ -30,11 +30,9 @@ pub fn auth_status(
     stdout: &mut dyn io::Write,
 ) -> CliResult<ProcessOutcome> {
     let status = backend.offline_status(provider)?;
-    let repair = if status.credential == CredentialState::Ready {
-        String::new()
-    } else {
-        format!("; run plak login {}", cli_provider_name(provider))
-    };
+    let repair = super::application::CredentialVerdict::from_status(status)
+        .remedy(provider, super::application::AccountCommand::Status)
+        .map_or_else(String::new, |remedy| format!("; {remedy}"));
     writeln!(
         stdout,
         "{}: compatibility={}, credential={}{repair}",

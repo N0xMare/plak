@@ -102,7 +102,7 @@ impl fmt::Display for NativeSubscriptionError {
         formatter.write_str(match self {
             Self::UnsafeStorage => "native subscription storage is unsafe",
             Self::CredentialProfileChanged => {
-                "native credential profile changed; run `plak logout <account>`, then `plak login <account>`"
+                "stored native login was written by an older build or another profile; run `plak login <account>`, which replaces it"
             }
             Self::UnsupportedPlatform => "native subscription storage is unsupported",
             Self::AcceptanceRequired => "exact native compatibility acceptance is required",
