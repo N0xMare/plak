@@ -1332,9 +1332,11 @@ fn execute_command(
         Command::KeySet { account } => key_set(&account, stdin, stderr),
         Command::KeyClear { account } => key_clear(&account, stdout),
         Command::KeyStatus { account } => key_status(account, stdout),
-        Command::SecretSet { name } => commands::secret::secret_set(&name, stdin, stderr),
-        Command::SecretRm { name } => commands::secret::secret_rm(&name, stdout),
-        Command::SecretList => commands::secret::secret_list(stdout),
+        Command::SecretSet { name } => {
+            commands::secret::secret_set(services.paths()?, &name, stdin, stderr)
+        }
+        Command::SecretRm { name } => commands::secret::secret_rm(services.paths()?, &name, stdout),
+        Command::SecretList => commands::secret::secret_list(services.paths()?, stdout),
         Command::StatusAll => {
             struct StatusRow {
                 ready: bool,
