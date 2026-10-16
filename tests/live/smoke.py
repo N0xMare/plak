@@ -11,7 +11,9 @@ wrong), provider (the real provider refused) or pending (a known gap that an
 in-flight slice closes). Artifacts land in target/live/smoke-<route>-<stamp>/.
 
 `wrap_up` and `py_ptc` are opt-in and stay out of the default run. Select
-them with `--only wrap_up` or `--only py_ptc`. Long-session scenarios
+them with `--only wrap_up` or `--only py_ptc`. The feature scenarios in
+`features.py` (image input, fetch_url, MCP, hosted retrieval, image
+generation) are opt-in the same way; a route row Plak refuses is `refused`. Long-session scenarios
 (`in_turn_compaction`, `overflow`, `kill_reopen`, `child_compaction`) are
 also opt-in; they live in `long_session.py` and are selected the same way.
 """
@@ -29,6 +31,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import live  # noqa: E402
 import jobs  # noqa: E402
+import features  # noqa: E402
 from live import HARNESS, MODEL, PASS, PENDING, PROVIDER, ScenarioFailure  # noqa: E402
 
 CALC = "def add(a, b):\n    return a - b\n\n\ndef subtract(a, b):\n    return a - b\n"
@@ -579,7 +582,7 @@ def main(argv: list[str]) -> int:
         except Exception as error:  # a bug in this driver is a harness failure too
             outcome, detail = HARNESS, f"driver error: {error!r}"
             (artifacts / name / "traceback.txt").write_text(traceback.format_exc())
-        if outcome != PASS and name in EXPECTED_PENDING:
+        if outcome not in (PASS, features.REFUSED) and name in EXPECTED_PENDING:
             outcome, detail = PENDING, f"{detail} [{EXPECTED_PENDING[name]}]"
         segments = env.capture_segments[segment_start:]
         complete = capture_complete(segments)
@@ -596,8 +599,13 @@ def main(argv: list[str]) -> int:
         results.append(result)
         print(f"{result.outcome:8} {name}: {detail}", flush=True)
     binary_end = live.binary_sha256(env.binary)
-    evidence_complete = (capture_complete(env.capture_segments)
-                         and all(item["capture_complete"] for item in evidence.values()))
+    # A refused route row stops before inference, so it has no exchange to capture.
+    scored = [name for name, item in evidence.items()
+              if next(r.outcome for r in results if r.scenario == name) != features.REFUSED]
+    scored_segments = [Path(segment) for name in scored
+                       for segment in evidence[name]["segments"]]
+    evidence_complete = (not scored or capture_complete(scored_segments)) and all(
+        evidence[name]["capture_complete"] for name in scored)
     (artifacts / "report.json").write_text(json.dumps(
         {**live.route_report(route), "binary": str(env.binary),
          "binary_sha256_start": binary_start,
@@ -610,7 +618,7 @@ def main(argv: list[str]) -> int:
          "capture_complete": evidence_complete,
          "results": [r.__dict__ for r in results]}, indent=2) + "\n")
     print("\n" + live.table(results) + f"\n\nartifacts: {artifacts}")
-    return 0 if (all(r.outcome in (PASS, PENDING) for r in results)
+    return 0 if (all(r.outcome in (PASS, PENDING, features.REFUSED) for r in results)
                  and evidence_complete
                  and binary_start == binary_end) else 1
 
@@ -621,8 +629,9 @@ def scenario_usage(env_home: Path, private: Path, before: live.TokenUsage) -> li
     Long-session, wrap_up and py_ptc keep their logs off the shared smoke home.
     """
     usage = live.usage_delta(live.session_usage(env_home), before)
-    if private.is_dir():
-        usage = usage.add(live.session_usage(private))
+    for home in sorted(private.parent.glob(private.name + "*")):
+        if home.is_dir():
+            usage = usage.add(live.session_usage(home))
     return usage
 
 
@@ -630,6 +639,8 @@ def run_named(runner: Smoke, name: str) -> str:
     """A default or opt-in smoke scenario, or a long-session scenario."""
     if name in dict((*Smoke.SCENARIOS, *Smoke.OPT_IN)):
         return getattr(runner, name)()
+    if name in dict(features.CATALOG):
+        return features.play(runner.route, runner.env, name)
     import long_session
     return long_session.play(runner.route, runner.env, name)
 
@@ -639,7 +650,7 @@ def selected_scenarios(only: set[str]) -> tuple[tuple[str, str], ...]:
     if not only:
         return Smoke.SCENARIOS
     import long_session
-    catalog = (*Smoke.SCENARIOS, *Smoke.OPT_IN, *long_session.CATALOG)
+    catalog = (*Smoke.SCENARIOS, *Smoke.OPT_IN, *long_session.CATALOG, *features.CATALOG)
     return tuple(item for item in catalog if item[0] in only)
 
 

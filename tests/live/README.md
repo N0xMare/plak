@@ -155,6 +155,45 @@ the turn completes, the captured exchanges show `exec_py`, the second cell's
 `TOKEN[::-1]` and the `handled ValueError` output, and the answer carries the
 reversed token, which exists only in the repository.
 
+**Feature scenarios** (`features.py`) are opt-in through `--only` and are
+not in the twelve. Each is one `plak run` (the image round trip is two) in a
+fresh repo with a private `PLAK_HOME` whose root template lists exactly the
+optional tools it needs (`tools = [...]`, spec 07 §3.4 and §3.5). Oracles read
+`plak session log <id> --json`, the repository, the raw exchange capture and
+the MCP servers' own records, never the model's claim alone. A bind or
+admission refusal of a route row (`<tool> is not yet qualified on <route>`,
+`is not available on`, `does not accept image input`) scores `refused:
+route row unsupported`, distinct from a failure; smoke exits 0 on it.
+
+```sh
+just smoke claude-sonnet55-low --only image_input,fetch_url,mcp_stdio,mcp_http
+just smoke codex --only mcp_github_stdio,mcp_github_http
+just smoke api-anthropic --only web_search,web_fetch
+just smoke grok --only x_search
+PLAK_LIVE_VISION_ROUTE=claude-haiku55-low just smoke api-openai --only image_gen_roundtrip
+```
+
+| Scenario | Tools | Passes when |
+| --- | --- | --- |
+| `image_input` | none | `--image` of a cat photo; the answer names a cat, and a captured request carries an image block (Messages `image`, Responses `input_image` or Chat `image_url`) that decodes to an image; the report says whether it is the exact file bytes |
+| `fetch_url` | `fetch_url` | the session log has a `fetch_url` call of the raw GitHub URL of `vendor/monty-typeshed/PLAK-PATCH.md` at a public commit, and the answer carries the one SHA-256 that file records |
+| `mcp_stdio`, `mcp_http` | `mcp:everything` | the reference server `@modelcontextprotocol/server-everything` (pinned, installed once under `target/live/assets/`) over stdio or streamable HTTP on loopback, allowlisted to `get-sum` and `get-env`; the log has both calls, the answer has the sum of two random operands and a token that only the server's environment holds; stdio also needs the server's stdin to show `tools/call get-sum` with those arguments. On Codex and the OpenAI API the prompt asks for the calls inside a Code Mode cell, and a captured `exec` source must name the MCP tool |
+| `mcp_github_stdio`, `mcp_github_http` | `mcp:github` | the official GitHub MCP server (stdio: the digest-pinned `ghcr.io/github/github-mcp-server` image with `--read-only --tools get_file_contents,list_commits,search_repositories`; HTTP: `https://api.githubcopilot.com/mcp/x/repos/readonly`), Plak allowlisted to those read tools; the log has a `get_file_contents` call (or, in Code Mode, a captured cell naming it) and the answer carries the same SHA-256 |
+| `web_search` | `web_search` | the log has the search call, its result lists sources, the answer names a Rust version and that exact string is on a cited page the driver fetches itself |
+| `web_fetch` | `web_fetch` | the log has the fetch call and the answer carries the marker SHA-256 |
+| `x_search` | `x_search` | the log has the call, its sources include X post URLs, and the answer names one of those posts |
+| `image_gen_roundtrip` | `image_gen` | the log has an `image_gen` call, the workspace gains a PNG or JPEG, and a second run on `PLAK_LIVE_VISION_ROUTE` (default `claude-haiku55-low`) with that file as `--image` names a cat |
+
+The marker commit is the newest first-parent ancestor of `HEAD` that
+`raw.githubusercontent.com` serves (`PLAK_LIVE_PUBLIC_REV` pins one), so an
+unpushed lane commit uses the public commit it is built on. The cat photo is
+`Cat03.jpg` from Wikimedia Commons, downloaded once to
+`target/live/assets/` (`PLAK_LIVE_CAT_IMAGE` names another file). The GitHub
+scenarios need `gh` logged in and, for stdio, Docker: the driver pipes
+`gh auth token` into `plak secret set github` inside the scenario's private
+home only; the token is never printed or written anywhere else. The server is
+read-only and allowlisted to read tools, so no write tool is ever offered.
+
 **Long session** (`long_session.py`) is opt-in and is not one of the twelve, and
 it is not the hour soak loop. `just smoke <route> --only <names>` and
 `just soak <route> --long-session --only <names>` run a named subset.
@@ -351,7 +390,9 @@ paid ids at informational depth.
 | `api-xai` | `xai-api` | `grok-4.7` | low | light |
 
 `claude` and `claude-sonnet-medium` (`claude-sonnet-5` low and medium) still
-run, but they are not in this matrix. The four direct API rows are light and
+run, but they are not in this matrix. Nor are two feature-scenario roster
+rows: `api-anthropic-low` (`anthropic`, `claude-haiku-5-5`, low) and
+`or-gemma4-free` (`openrouter`, `google/gemma-4-31b-it:free`). The four direct API rows are light and
 not best-effort: `api-openai` is `gpt-6-luna` low, `api-openai-medium` is
 `gpt-6-luna` medium, `api-anthropic` is `claude-haiku-5-5` medium, and
 `api-xai` is `grok-4.7` low.

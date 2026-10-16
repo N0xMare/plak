@@ -158,6 +158,13 @@ ROUTES = {
         "api-anthropic", "anthropic", "claude-haiku-5-5", "medium", None,
         _ANTHROPIC_API, LIGHT),
     "api-xai": _route("api-xai", "xai-api", "grok-4.7", "low", None, _XAI_API, LIGHT),
+    # Feature-scenario roster rows (image input, tools), outside the bar matrix.
+    "api-anthropic-low": _route(
+        "api-anthropic-low", "anthropic", "claude-haiku-5-5", "low", None, _ANTHROPIC_API,
+        LIGHT, planned=False),
+    "or-gemma4-free": _route(
+        "or-gemma4-free", "openrouter", "google/gemma-4-31b-it:free", None, None, _OR_CHAT,
+        INFORMATIONAL, planned=False),
 }
 
 

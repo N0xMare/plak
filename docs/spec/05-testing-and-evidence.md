@@ -2549,6 +2549,19 @@ in `tests/live/` (whose README lists every scenario and its oracle):
   pre-release bar runs all eleven on every `full` row (§3.4). Any other jobs
   run is opt-in. The dry-run estimator prices that full-row cell (§3.4).
 
+- Opt-in feature scenarios in `tests/live/features.py`, selected with `just
+  smoke <route> --only <names>`, cover image input, `fetch_url`, MCP over
+  stdio and streamable HTTP (the reference `server-everything` and the
+  official read-only GitHub server), hosted `web_search`, `web_fetch` and
+  `x_search`, and an image-generation round trip into a vision route. Each
+  run's private home lists exactly the optional tools it needs. Oracles are
+  `plak session log --json` tool calls, the raw capture (an image block in
+  the request), the MCP server's own records, and values the model cannot
+  guess (a SHA-256 in a file at a public commit, random operands, a token only
+  the server holds); a retrieval fact must appear on a cited page the driver
+  fetches itself. A route row that Plak refuses at bind or admission scores
+  `refused`, which is the product's statement rather than a failure.
+
 All four build `plak` with `test-hooks`; only the smoke and headless soak
 inject faults. Each result is
 `pass`, `harness` (Plak's failure, including a dead end: a failed turn after
@@ -2679,7 +2692,8 @@ qualification.
 
 Route names are the keys of `ROUTES` in `tests/live/live.py`. Account, model,
 effort and protocol are that route's fields. Routes with `planned` false stay
-runnable and are not in the matrix: `claude` and `claude-sonnet-medium`.
+runnable and are not in the matrix: `claude`, `claude-sonnet-medium`, and the
+feature-scenario roster rows `api-anthropic-low` and `or-gemma4-free`.
 `deepseek` is Chat, with no protocol. `deepseek-messages` is the same model
 with protocol `messages`. `or-ling` and `or-qwen38` are paid model ids at
 informational depth.
