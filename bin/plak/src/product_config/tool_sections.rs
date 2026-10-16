@@ -89,7 +89,7 @@ pub struct XSearchOptions {
 pub enum McpTransport {
     /// A child process speaking MCP on stdin/stdout.
     Stdio {
-        /// argv[0], resolved on the captured PATH at spawn.
+        /// `argv[0]`, resolved on the captured PATH at spawn.
         command: String,
         /// The remaining argv.
         args: Vec<String>,
