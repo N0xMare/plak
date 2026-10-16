@@ -30,6 +30,7 @@ mod platform;
 mod platform_binding;
 mod platform_model;
 mod responses_dialect;
+mod retrieval;
 mod route;
 mod subscription_usage;
 
@@ -57,6 +58,11 @@ pub use native_auth::{
     subscription_coding_model_ids, subscription_model_reasoning_effort_options,
     subscription_model_supports_reasoning,
 };
+pub use plakous_responses_dialect::{
+    ResponsesRetrievalError, ResponsesRetrievalErrorKind, ResponsesRetrievalLimits,
+    ResponsesRetrievalOutcome, ResponsesRetrievalQuery, ResponsesRetrievalSource,
+    ResponsesRetrievalUsage, lowest_responses_effort,
+};
 pub use platform::{
     XAI_PLATFORM_API_KEY_AUTH_PROFILE, XAI_PLATFORM_API_KEY_AUTH_REVISION,
     XAI_PLATFORM_API_KEY_AUTHORITY_CLASS, XAI_PLATFORM_API_KEY_CREDENTIAL_SELECTION,
@@ -80,6 +86,7 @@ pub use responses_dialect::{
     SUPERGROK_RESPONSES_DIALECT, SUPERGROK_RESPONSES_ORIGIN, SUPERGROK_RESPONSES_PATH,
     SuperGrokEventDelta, SuperGrokResponsesDialect, XAI_RESPONSES_ADAPTER_REVISION,
 };
+pub use retrieval::XaiRetrieval;
 pub use route::{
     XaiAuthError, XaiCredentialBinding, XaiGrokSubscriptionRoute, XaiOrigin, XaiRouteError,
     XaiRouteIdentity, XaiSubscriptionBlockReason,

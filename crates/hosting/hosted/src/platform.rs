@@ -242,13 +242,16 @@ pub(crate) async fn construct_platform_runtime_with(
             let selected = authority
                 .selected_configuration(exact_route_retention(&provisional))
                 .map_err(api_error)?;
-            Arc::new(
+            let model = Arc::new(
                 OpenAiPlatformModel::with_exchange_observer(authority, selected, observer.clone())
                     .map_err(api_error)?,
-            )
-            .configured()
-            .await
-            .map_err(api_error)?
+            );
+            spec.topology_extensions.connect_retrieval(Some(Arc::new(
+                plakous::openai::OpenAiRetrievalPort::new(
+                    model.retrieval(plakous::openai::lowest_responses_effort(&row.efforts)),
+                ),
+            )))?;
+            model.configured().await.map_err(api_error)?
         }
         PlatformProvider::Anthropic => {
             let model = row
@@ -287,7 +290,7 @@ pub(crate) async fn construct_platform_runtime_with(
             )
             .map_err(api_error)?;
             let authority = source.grant().map_err(api_error)?.authority().clone();
-            Arc::new(
+            let model = Arc::new(
                 plakous::xai::XaiPlatformModel::with_admitted_facts(
                     authority,
                     source,
@@ -298,10 +301,13 @@ pub(crate) async fn construct_platform_runtime_with(
                     &row.binding_evidence_for(provider, window),
                 )
                 .map_err(api_error)?,
-            )
-            .configured()
-            .await
-            .map_err(api_error)?
+            );
+            spec.topology_extensions.connect_retrieval(Some(Arc::new(
+                plakous::xai::XaiRetrievalPort::new(
+                    model.retrieval(plakous::openai::lowest_responses_effort(&row.efforts)),
+                ),
+            )))?;
+            model.configured().await.map_err(api_error)?
         }
     };
     crate::api_runtime::runtime_binding(spec, configured, registry)

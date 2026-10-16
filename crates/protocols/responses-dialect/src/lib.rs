@@ -37,6 +37,7 @@ mod model_host;
 mod project_host;
 mod request_host;
 mod response_host;
+mod retrieval;
 mod stream_host;
 mod wire_accounting;
 
@@ -243,6 +244,15 @@ pub use response_host::{
     parse_custom_tool_call, parse_function_call, parse_message, parse_output_item,
     parse_provider_error_with_policy, parse_reasoning, parse_unique_json_value,
     validate_output_identity_roles,
+};
+pub use retrieval::{
+    RESPONSES_RETRIEVAL_MAX_OUTPUT_TOKENS, RESPONSES_WEB_SEARCH_SOURCES_INCLUDE,
+    RESPONSES_WEB_SEARCH_TOOL_TYPE, RESPONSES_X_SEARCH_TOOL_TYPE, ResponsesRetrievalAuthorization,
+    ResponsesRetrievalError, ResponsesRetrievalErrorKind, ResponsesRetrievalFlavor,
+    ResponsesRetrievalLimits, ResponsesRetrievalOutcome, ResponsesRetrievalQuery,
+    ResponsesRetrievalRequest, ResponsesRetrievalSource, ResponsesRetrievalTransport,
+    ResponsesRetrievalUsage, classify_responses_retrieval_body, lowest_responses_effort,
+    run_responses_retrieval,
 };
 pub use stream_host::{
     ResponsesEventPolicy, ResponsesFamilySseDecoder, ResponsesFamilyStreamError,

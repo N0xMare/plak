@@ -342,6 +342,8 @@ pub mod sessions;
 mod anthropic_retrieval;
 #[cfg(feature = "openrouter")]
 mod openrouter_retrieval;
+#[cfg(any(feature = "openai", feature = "xai"))]
+mod responses_retrieval;
 #[cfg(test)]
 mod test_model;
 
@@ -530,6 +532,7 @@ pub mod mcp {
 /// Exact-origin OpenAI API-key execution and the separate Codex subscription integration.
 #[cfg(feature = "openai")]
 pub mod openai {
+    pub use crate::responses_retrieval::OpenAiRetrievalPort;
     pub use plakous_openai::{
         AccessMode as OpenAiAccessMode, AuthError as OpenAiAuthError, CodexSubscriptionRouteConfig,
         ConfigError as OpenAiConfigError, CredentialAuthorityId, CredentialReference,
@@ -543,6 +546,7 @@ pub mod openai {
         openai_api_bundled_listing, openai_api_key_fingerprint, openai_api_models,
     };
     pub use plakous_openai::{CODEX_HOSTED_RETRIEVAL, OPENAI_API_HOSTED_RETRIEVAL};
+    pub use plakous_openai::{OpenAiRetrieval, lowest_responses_effort};
 
     #[cfg(feature = "native-subscriptions")]
     pub use plakous_openai::OpenAiLanguageModel;
@@ -1176,6 +1180,8 @@ pub mod tools {
 /// Exact-origin xAI API-key execution and the separate SuperGrok subscription integration.
 #[cfg(feature = "xai")]
 pub mod xai {
+    pub use crate::responses_retrieval::XaiRetrievalPort;
+    pub use plakous_xai::XaiRetrieval;
     pub use plakous_xai::{
         GrokCodingProfile, SUPERGROK_RESPONSES_ORIGIN, SUPERGROK_RESPONSES_PATH,
         SuperGrokResponsesDialect, XAI_PLATFORM_GROK_46_CONTEXT_TOKENS, XAI_PLATFORM_GROK_46_MODEL,

@@ -305,6 +305,56 @@ impl XaiPlatformModel {
             service,
         })
     }
+    /// The session's hosted web and X search side-request executor on this
+    /// exact route, key grant, model and client, at `effort` (pass the
+    /// lowest effort the model's ladder admits).
+    #[must_use]
+    pub fn retrieval(self: &Arc<Self>, effort: Option<&'static str>) -> crate::XaiRetrieval {
+        crate::XaiRetrieval::new(Arc::clone(self), effort)
+    }
+    pub(crate) fn client(&self) -> &Client {
+        &self.execution.client
+    }
+    pub(crate) fn requested_model(&self) -> &str {
+        &self.execution.model
+    }
+    /// Revalidates admission exactly as before a model round, then builds
+    /// the authorized request carrying `body` with the grant's current key.
+    pub(crate) async fn side_request(
+        self: &Arc<Self>,
+        body: &[u8],
+    ) -> Result<Request, &'static str> {
+        let execution = &self.execution;
+        Arc::clone(self)
+            .revalidate_runtime_authority(execution.clock.now())
+            .await
+            .map_err(|_| "xAI API admission is no longer current")?;
+        check_grant(execution).map_err(|_| "xAI API key grant is no longer current")?;
+        let key = execution
+            .source
+            .api_key(&execution.grant)
+            .map_err(|_| "xAI API key is unavailable")?;
+        if key.grant(execution.grant.authority.clone()).ok().as_ref() != Some(&execution.grant) {
+            return Err("xAI API key does not match the session's grant");
+        }
+        let mut headers = HeaderMap::new();
+        headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert(
+            AUTHORIZATION,
+            key.bearer()
+                .map_err(|_| "xAI API key is not a header value")?,
+        );
+        Request::new(
+            execution.origin.clone(),
+            Method::POST,
+            XAI_PLATFORM_RESPONSES_PATH,
+            headers,
+            SensitiveBytes::new(body.to_vec()).into_bytes(),
+            execution.client.limits(),
+        )
+        .map_err(|_| "xAI side request could not be built")
+    }
     /// Returns the maintained descriptor with caller-declared context evidence.
     #[must_use]
     pub const fn descriptor(&self) -> &ResolvedModelDescriptor {

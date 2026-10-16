@@ -1353,3 +1353,102 @@ async fn expired_route_authority_rejects_before_rereading_credentials() -> TestR
     assert_eq!(source.resolutions.load(Ordering::SeqCst), 0);
     Ok(())
 }
+
+fn web_search_query() -> plakous_openai::ResponsesRetrievalQuery {
+    plakous_openai::ResponsesRetrievalQuery::WebSearch {
+        query: "Rust programming language latest stable release".to_owned(),
+        allowed_domains: Vec::new(),
+        blocked_domains: Vec::new(),
+    }
+}
+
+#[tokio::test]
+async fn web_search_side_request_uses_the_session_key_project_and_model() -> TestResult {
+    let facts = OpenAiPlatformModelFacts::Gpt56Luna;
+    let call = serde_json::json!({"type": "web_search_call", "id": "ws_1", "status": "completed",
+        "action": {"type": "search", "sources": [{"type": "url", "url": "https://www.rust-lang.org/"}]}});
+    let message = serde_json::json!({"type": "message", "role": "assistant", "content": [
+        {"type": "output_text", "text": "Rust 1.99.", "annotations": []}]});
+    let (client, origin, peer) = endpoint(sse_response(vec![
+        created(facts.model_id()),
+        terminal(facts.model_id(), serde_json::json!([call, message])),
+    ]))
+    .await?;
+    let authority = authority(facts)?;
+    let selected = selected_configuration(&authority, ReasoningEffort::Low)?;
+    let model = Arc::new(OpenAiPlatformModel::with_local_transport(
+        authority, selected, client, origin,
+    )?);
+    let retrieval = model.retrieval(Some("low"));
+    let outcome = retrieval
+        .retrieve(web_search_query(), &plakous_model::CancellationToken::new())
+        .await?;
+    assert_eq!(outcome.text, "Rust 1.99.");
+    assert_eq!(outcome.sources.len(), 1);
+    assert_eq!(outcome.usage.hosted_requests, 1);
+    let wire = peer.await??;
+    let head_end = wire
+        .windows(4)
+        .position(|part| part == b"\r\n\r\n")
+        .ok_or("request head")?;
+    let head = String::from_utf8_lossy(&wire[..head_end]).to_ascii_lowercase();
+    assert!(head.starts_with("post /v1/responses "), "{head}");
+    assert!(head.contains("authorization: bearer synthetic-platform-key"));
+    assert!(head.contains("openai-project: proj_test"));
+    let body: serde_json::Value = serde_json::from_slice(&wire[head_end + 4..])?;
+    assert_eq!(body["model"], facts.model_id());
+    assert_eq!(body["reasoning"], serde_json::json!({"effort": "low"}));
+    assert_eq!(
+        body["tools"],
+        serde_json::json!([{"type": "web_search", "search_context_size": "medium"}])
+    );
+    assert_eq!(body["store"], false);
+    Ok(())
+}
+
+/// Opt-in paid probe, never in a gate tier: one web search side request on
+/// the Platform API with the operator's key. A pass is a non-empty answer with
+/// at least one source. Run with `PLAK_LIVE_RETRIEVAL_PROBE=1
+/// OPENAI_API_KEY=... cargo nextest run -p plakous-openai --run-ignored only
+/// -E 'test(live_retrieval_probe)'`.
+#[tokio::test]
+#[ignore = "paid live probe"]
+async fn live_retrieval_probe_openai_api() -> TestResult {
+    if std::env::var("PLAK_LIVE_RETRIEVAL_PROBE").as_deref() != Ok("1") {
+        return Err("set PLAK_LIVE_RETRIEVAL_PROBE=1 to spend one probe".into());
+    }
+    let key = std::env::var("OPENAI_API_KEY")?;
+    let facts = OpenAiPlatformModelFacts::Gpt56Luna;
+    let reference = CredentialReference::application("live-probe")?;
+    let source = Arc::new(StaticPlatformCredentialSource::new(
+        SecretString::new(key)?,
+        reference.clone(),
+        CredentialAuthorityId::new("live-probe")?,
+    ));
+    let authority = OpenAiPlatformModelBuilder::new(
+        reference,
+        source,
+        facts,
+        PlatformStoragePolicy::Stateless,
+        PlatformProjectPolicy::DefaultProject,
+    )
+    .context_envelope(std::num::NonZeroU64::new(65536).ok_or("nonzero")?)
+    .seal()?;
+    let selected = selected_configuration(&authority, ReasoningEffort::Low)?;
+    let model = Arc::new(OpenAiPlatformModel::new(authority, selected)?);
+    let outcome = model
+        .retrieval(Some("low"))
+        .retrieve(web_search_query(), &plakous_model::CancellationToken::new())
+        .await?;
+    eprintln!(
+        "web_search: sources={} usage={:?}",
+        outcome.sources.len(),
+        outcome.usage
+    );
+    assert!(
+        !outcome.text.trim().is_empty(),
+        "web_search answered nothing"
+    );
+    assert!(!outcome.sources.is_empty(), "web_search reported no source");
+    Ok(())
+}

@@ -1042,3 +1042,146 @@ async fn public_constructor_keeps_caller_capacity_distinct_from_maintained_adapt
     assert_eq!(source.resolves.load(Ordering::SeqCst), 0);
     Ok(())
 }
+
+fn x_search_query() -> ResponsesRetrievalQuery {
+    ResponsesRetrievalQuery::PostSearch {
+        query: "Rust programming language release".to_owned(),
+        handles: vec!["rustlang".to_owned()],
+        from_date: None,
+        to_date: None,
+    }
+}
+
+#[tokio::test]
+async fn x_search_side_request_uses_the_session_key_and_model() -> TestResult {
+    let call = serde_json::json!({"type": "x_search_call", "id": "xs_1", "status": "completed",
+        "action": {"type": "search", "sources": [{"type": "url", "url": "https://x.com/rustlang/status/1"}]}});
+    let message = serde_json::json!({"type": "message", "role": "assistant", "content": [
+        {"type": "output_text", "text": "Rust 1.99 is out.", "annotations": []}]});
+    let (client, origin, peer) = endpoint(sse_response(vec![
+        created(XAI_PLATFORM_GROK_46_MODEL),
+        terminal(
+            XAI_PLATFORM_GROK_46_MODEL,
+            serde_json::json!([call, message]),
+        ),
+    ]))
+    .await?;
+    let source = Arc::new(Source::new());
+    let model = Arc::new(XaiPlatformModel::with_local_transport(
+        authority(),
+        source.clone(),
+        NonZeroU64::new(65_536).unwrap(),
+        selected(ReasoningEffort::Low)?,
+        clock(),
+        client,
+        origin,
+    )?);
+    let outcome = model
+        .retrieval(None)
+        .retrieve(x_search_query(), &CancellationToken::new())
+        .await?;
+    assert_eq!(outcome.text, "Rust 1.99 is out.");
+    assert_eq!(outcome.sources.len(), 1);
+    assert_eq!(outcome.usage.hosted_requests, 1);
+    assert_eq!(source.resolves.load(Ordering::SeqCst), 1);
+    let wire = peer.await??;
+    let head_end = wire
+        .windows(4)
+        .position(|part| part == b"\r\n\r\n")
+        .ok_or("request head")?;
+    let head = String::from_utf8_lossy(&wire[..head_end]).to_ascii_lowercase();
+    assert!(head.starts_with("post /v1/responses "), "{head}");
+    assert!(head.contains("authorization: bearer synthetic-xai-platform-key"));
+    let body: serde_json::Value = serde_json::from_slice(&wire[head_end + 4..])?;
+    assert_eq!(body["model"], XAI_PLATFORM_GROK_46_MODEL);
+    assert_eq!(
+        body["tools"],
+        serde_json::json!([{"type": "x_search", "allowed_x_handles": ["rustlang"]}])
+    );
+    assert_eq!(body.get("reasoning"), None);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_revoked_key_refuses_the_side_request_before_the_socket() -> TestResult {
+    let (client, origin, peer) = endpoint(sse_response(Vec::new())).await?;
+    let source = Arc::new(Source::new());
+    let model = Arc::new(XaiPlatformModel::with_local_transport(
+        authority(),
+        source.clone(),
+        NonZeroU64::new(65_536).unwrap(),
+        selected(ReasoningEffort::Low)?,
+        clock(),
+        client,
+        origin,
+    )?);
+    *source.key.lock().map_err(|_| "poisoned")? = None;
+    let error = model
+        .retrieval(None)
+        .retrieve(x_search_query(), &CancellationToken::new())
+        .await
+        .err()
+        .ok_or("a revoked key searched")?;
+    assert_eq!(error.kind(), ResponsesRetrievalErrorKind::Unauthorized);
+    assert_eq!(error.physical_requests(), 1);
+    assert_eq!(source.resolves.load(Ordering::SeqCst), 0);
+    peer.abort();
+    Ok(())
+}
+
+struct LiveSource(String);
+
+impl XaiPlatformApiKeySource for LiveSource {
+    fn grant(&self) -> Result<XaiPlatformCredentialGrant, XaiPlatformBuildError> {
+        XaiPlatformApiKey::new(self.0.clone())?.grant(authority())
+    }
+    fn api_key(
+        &self,
+        _: &XaiPlatformCredentialGrant,
+    ) -> Result<XaiPlatformApiKey, XaiPlatformBuildError> {
+        XaiPlatformApiKey::new(self.0.clone())
+    }
+}
+
+/// Opt-in paid probe, never in a gate tier: one web search and one X search
+/// side request on the xAI API with the operator's key. A pass is a non-empty
+/// answer with at least one source per tool. Run with
+/// `PLAK_LIVE_RETRIEVAL_PROBE=1 XAI_API_KEY=... cargo nextest run -p
+/// plakous-xai --run-ignored only -E 'test(live_retrieval_probe)'`.
+#[tokio::test]
+#[ignore = "paid live probe"]
+async fn live_retrieval_probe_xai_api() -> TestResult {
+    if std::env::var("PLAK_LIVE_RETRIEVAL_PROBE").as_deref() != Ok("1") {
+        return Err("set PLAK_LIVE_RETRIEVAL_PROBE=1 to spend one probe per tool".into());
+    }
+    let key = std::env::var("XAI_API_KEY")?;
+    let model = Arc::new(XaiPlatformModel::new(
+        authority(),
+        Arc::new(LiveSource(key)),
+        NonZeroU64::new(65_536).unwrap(),
+        selected(ReasoningEffort::Low)?,
+        Arc::new(SystemClock),
+    )?);
+    let retrieval = model.retrieval(None);
+    for query in [
+        ResponsesRetrievalQuery::WebSearch {
+            query: "Rust programming language latest stable release".to_owned(),
+            allowed_domains: Vec::new(),
+            blocked_domains: Vec::new(),
+        },
+        x_search_query(),
+    ] {
+        let outcome = retrieval.retrieve(query, &CancellationToken::new()).await?;
+        eprintln!(
+            "sources={} usage={:?}",
+            outcome.sources.len(),
+            outcome.usage
+        );
+        assert!(
+            !outcome.text.trim().is_empty(),
+            "the search answered nothing"
+        );
+        assert!(!outcome.sources.is_empty(), "the search reported no source");
+    }
+    Ok(())
+}

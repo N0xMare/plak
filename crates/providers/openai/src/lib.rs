@@ -32,6 +32,7 @@
 )]
 
 mod api_models;
+mod codex_search;
 mod config;
 mod error;
 mod hosted_support;
@@ -42,12 +43,16 @@ mod native_auth;
 #[cfg(feature = "native-auth")]
 mod oauth_pins;
 mod platform_local;
+mod retrieval;
 mod subscription_usage;
 
 pub use api_models::{
     OpenAiApiModel, OpenAiApiModelStatus, OpenAiListedModel, accept_openai_listed_models,
     list_openai_api_models, openai_api_bundled_listing, openai_api_key_fingerprint,
     openai_api_models,
+};
+pub use codex_search::{
+    CODEX_SEARCH_PATH, CodexSearchRequest, classify_codex_search_body, decode_codex_search_response,
 };
 pub use config::{
     AccessMode, AuthError, CodexSubscriptionRouteConfig, ConfigError, ConformanceStatus,
@@ -85,7 +90,13 @@ pub use native_auth::{
     release_enrolled_codex_tool_mode,
 };
 pub use plakous_responses_dialect::ResponsesProviderConfigurationError;
+pub use plakous_responses_dialect::{
+    ResponsesRetrievalError, ResponsesRetrievalErrorKind, ResponsesRetrievalLimits,
+    ResponsesRetrievalOutcome, ResponsesRetrievalQuery, ResponsesRetrievalSource,
+    ResponsesRetrievalUsage, lowest_responses_effort,
+};
 pub use platform_local::{OpenAiPlatformBuildError, OpenAiPlatformLocalModel, OpenAiPlatformModel};
+pub use retrieval::OpenAiRetrieval;
 pub use subscription_usage::decode_codex_subscription_usage;
 
 // Crate-internal paths resolve through the crate root; the public surface is

@@ -4792,7 +4792,27 @@ annotations (streamed `delta` or non-streamed `message`) and refuses tool
 calls, other annotation types, a second choice and unknown message fields;
 main-exchange streams keep refusing annotations. Binding precedes model
 construction on API routes, so the plan binds a deferred port the executor
-connects once; a call before that connection is an ordinary tool error. Route-specific inline allowlists and
+connects once; a call before that connection is an ordinary tool error.
+The Responses kernel (`plakous-responses-dialect`) runs one exchange per side
+request: a one-message `input`, one hosted tool, `tool_choice:"required"`,
+`max_output_tokens` 4,096, `store:false`, the lowest effort the model's ladder
+admits, and `include:["web_search_call.action.sources"]` for web search. Its
+grammar ignores progress events and admits in the terminal response only
+assistant messages, reasoning items and call items of the offered tool
+(`web_search_call`, or `x_search_call` for X search); sources are the call's
+`action.sources` and the answer's `url_citation` annotations, and a failed
+call without an answer is the tool's error. The OpenAI API port
+(`plakous::openai::OpenAiRetrievalPort` over `OpenAiRetrieval`, from
+`OpenAiPlatformModel::retrieval`) serves web search with `filters.allowed_domains`
+and refuses excluded domains; the xAI API port (`plakous::xai::XaiRetrievalPort`
+over `XaiRetrieval`, from `XaiPlatformModel::retrieval`) serves web search with
+`allowed_domains` or `excluded_domains` and X search with `allowed_x_handles`,
+`from_date` and `to_date`. Both reuse the session executor's key grant,
+project, model and client and bind through the same deferred port. The Codex
+`alpha/search` request body, allowlist and `results[]` mapping exist in
+`plakous-openai` (`CodexSearchRequest`), but no Codex, SuperGrok or OpenRouter
+route has a port yet, so those rows refuse as not built in even when
+qualified. Route-specific inline allowlists and
 class-specific unknown-outcome messages land with the first route whose
 parity requires inline retrieval.
 Exact outcome locators (OpenAI background resume, xAI deferred/stored) are a
@@ -7138,9 +7158,15 @@ exactly one `web_search_20260318` or `web_fetch_20260318` tool with
 `allowed_callers:["direct"]` and only the fields the side-request builder
 emits is cost-only; on Chat, exactly one enabled `web` plugin with only
 `id`, `max_results`, `include_domains` and `exclude_domains`, no tools, and
-only the side-request builder's top-level fields is cost-only; any other body
-is a server effect and is refused before dispatch. A main-exchange Chat body
-with an enabled plugin remains a server effect. Hosted fields in a main exchange, search included, remain
+only the side-request builder's top-level fields is cost-only; on Responses,
+exactly one `web_search` tool (with only
+`search_context_size`, `filters.allowed_domains`, `allowed_domains`,
+`excluded_domains`) or `x_search` tool (with only `allowed_x_handles`,
+`from_date`, `to_date`), `tool_choice:"required"`, `store:false`, and at most
+the web search sources include is cost-only; a Codex `alpha/search` body is
+cost-only only when its commands are `search_query` entries carrying only `q`.
+Any other body is a server effect and is refused before dispatch. A
+main-exchange Chat body with an enabled plugin remains a server effect. Hosted fields in a main exchange, search included, remain
 server-effect. A server-effect operation also declares that capability to the
 attempt ledger at admission.
 

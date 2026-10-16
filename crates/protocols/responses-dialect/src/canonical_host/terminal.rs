@@ -814,6 +814,7 @@ pub(super) fn validate_opaque_kind(
         kind,
         "computer_call"
             | "web_search_call"
+            | "x_search_call"
             | "file_search_call"
             | "approval_request"
             | "compaction"

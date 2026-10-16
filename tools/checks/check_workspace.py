@@ -1204,8 +1204,12 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "RetrievalFuture", "RetrievalKind", "RetrievalRequest",
         },
     },
-    # The Anthropic API executor connects its side-request port.
-    ("plakous-hosted", "src/platform.rs"): {"anthropic": {"AnthropicRetrievalPort"}},
+    # The Anthropic, OpenAI and xAI API executors connect their side-request ports.
+    ("plakous-hosted", "src/platform.rs"): {
+        "anthropic": {"AnthropicRetrievalPort"},
+        "openai": {"OpenAiRetrievalPort", "lowest_responses_effort"},
+        "xai": {"XaiRetrievalPort"},
+    },
     # The OpenRouter executor connects its side-request port.
     ("plakous-hosted", "src/openrouter.rs"): {
         "openrouter": {"OpenRouterRetrieval", "OpenRouterRetrievalPort"},

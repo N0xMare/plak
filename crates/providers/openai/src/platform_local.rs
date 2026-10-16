@@ -76,6 +76,8 @@ pub struct OpenAiPlatformModel {
     configuration: CompiledProviderConfiguration,
     generation: OpenAiApiKeyGenerationGrant,
     clock: Arc<dyn Clock>,
+    client: Client,
+    dial_origin: Origin,
 }
 
 impl OpenAiPlatformModel {
@@ -245,6 +247,8 @@ impl OpenAiPlatformModel {
             execution.dial_origin.clone(),
             descriptor.route().clone(),
         );
+        let side_client = client.clone();
+        let side_origin = execution.dial_origin.clone();
         let service = Arc::new(
             ResponsesAttemptService::new(client, execution, attempt_data.clone(), authorization)
                 .map_err(|_| OpenAiPlatformBuildError::SharedBinding)?,
@@ -264,7 +268,63 @@ impl OpenAiPlatformModel {
             configuration,
             generation,
             clock,
+            client: side_client,
+            dial_origin: side_origin,
         })
+    }
+
+    /// The session's hosted web search side-request executor on this exact
+    /// route, key generation, model and client, at `effort` (pass the lowest
+    /// effort the model's ladder admits).
+    #[must_use]
+    pub fn retrieval(self: &Arc<Self>, effort: Option<&'static str>) -> crate::OpenAiRetrieval {
+        crate::OpenAiRetrieval::new(Arc::clone(self), effort)
+    }
+
+    pub(crate) const fn client(&self) -> &Client {
+        &self.client
+    }
+
+    pub(crate) fn requested_model(&self) -> &str {
+        self.descriptor.requested_model().as_str()
+    }
+
+    /// Revalidates admission exactly as before a model round, then builds
+    /// the authorized Platform request carrying `body`.
+    pub(crate) async fn side_request(
+        self: &Arc<Self>,
+        body: &[u8],
+    ) -> Result<Request, &'static str> {
+        Arc::clone(self)
+            .revalidate_runtime_authority(self.clock.now())
+            .await
+            .map_err(|_| "OpenAI API admission is no longer current")?;
+        let route = self.authority.target().route();
+        let authorization = route
+            .platform_bearer_header(self.generation)
+            .map_err(|_| "OpenAI API key generation is no longer current")?;
+        let mut headers = HeaderMap::new();
+        headers.insert(HEADER_ACCEPT, HeaderValue::from_static("text/event-stream"));
+        headers.insert(
+            HEADER_CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        headers.insert(HEADER_AUTHORIZATION, authorization);
+        if let PlatformProjectPolicy::Project(project) = self.authority.project() {
+            headers.insert(
+                HEADER_PROJECT,
+                HeaderValue::from_str(project.as_str()).map_err(|_| "OpenAI project is invalid")?,
+            );
+        }
+        Request::new(
+            self.dial_origin.clone(),
+            Method::POST,
+            OPENAI_PLATFORM_RESPONSES_PATH,
+            headers,
+            SensitiveBytes::new(body.to_vec()).into_bytes(),
+            self.client.limits(),
+        )
+        .map_err(|_| "OpenAI side request could not be built")
     }
 
     /// Joins the executable model with its sealed configuration and fresh runtime authority.

@@ -2347,7 +2347,16 @@ present, duplicated and empty), refused tool calls and foreign annotations,
 loopback retries, and that a main-exchange stream refuses annotations and a
 main body with an enabled plugin stays a server effect; the OpenRouter
 executor pins its headers, credential path and revalidation before each
-physical request. The wrapper pack pins its descriptions, argument validation and result
+physical request.
+The Responses kernel pins the same for its side requests: OpenAI and xAI
+body goldens (web search, X search) with their allowlist, synthetic streams
+with sources, empty sources, a failed call, `x_search_call` mapping, refused
+items and events, a cut stream and `response.failed` (server error retried,
+anything else not), and the same loopback retries; the OpenAI and xAI API
+executors pin their side request's path, key, project and model over loopback
+TLS, and a revoked xAI key refuses before the socket. The Codex
+`alpha/search` body, allowlist and `results[]` mapping are pinned offline.
+The wrapper pack pins its descriptions, argument validation and result
 rendering; binding pins that a `Supported` row with a port binds the pack and
 every shipped row refuses. The one paid probe per (route, tool) is opt-in and
 `#[ignore]`d (`live_retrieval_probe_*`), never in a gate tier.

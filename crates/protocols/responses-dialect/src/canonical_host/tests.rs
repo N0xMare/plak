@@ -1559,3 +1559,24 @@ fn bounded_unknown_output_is_provider_neutral() {
         .is_err()
     );
 }
+
+/// Hosted retrieval runs only in isolated side requests: a main exchange
+/// that reports a hosted search call is refused under every policy.
+#[test]
+fn main_exchange_refuses_hosted_search_items_under_every_policy() {
+    for policy in [
+        ResponsesCanonicalPolicy::minimal(),
+        ResponsesCanonicalPolicy::codex(),
+        ResponsesCanonicalPolicy::grok(),
+    ] {
+        for kind in ["web_search_call", "x_search_call"] {
+            assert!(
+                matches!(
+                    validate_opaque_kind(kind, policy),
+                    Err(ResponsesCanonicalProjectError::Unsupported(_))
+                ),
+                "{kind}"
+            );
+        }
+    }
+}

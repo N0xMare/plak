@@ -573,8 +573,9 @@ impl ToolRoute {
     pub(crate) const fn retrieval_kinds(self) -> &'static [RetrievalKind] {
         match self {
             Self::Claude | Self::Anthropic => &[RetrievalKind::WebSearch, RetrievalKind::PageFetch],
-            Self::OpenRouter => &[RetrievalKind::WebSearch],
-            Self::Codex | Self::Grok | Self::OpenAi | Self::XaiApi => &[],
+            Self::OpenRouter | Self::OpenAi => &[RetrievalKind::WebSearch],
+            Self::XaiApi => &[RetrievalKind::WebSearch, RetrievalKind::PostSearch],
+            Self::Codex | Self::Grok => &[],
         }
     }
 
@@ -1340,7 +1341,7 @@ mod tests {
         }
         // Routes without a port refuse a qualified row as not built in, and
         // every shipped row still refuses.
-        let refused = bind_tool_plan_on(&selection, ToolRoute::OpenAi, qualified, "openai")
+        let refused = bind_tool_plan_on(&selection, ToolRoute::Codex, qualified, "codex")
             .err()
             .ok_or("a portless route bound")?;
         assert!(refused.to_string().contains("not available in this build"));
@@ -1394,6 +1395,64 @@ mod tests {
             assert!(refused.is_err(), "{unserved:?} bound on openrouter");
         }
         assert!(bind_tool_plan(&selection, ToolRoute::OpenRouter, "openrouter").is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn qualified_openai_and_xai_api_rows_bind_deferred_ports_the_executors_connect()
+    -> TestResult {
+        let supported = HostedRetrievalSupport::Supported;
+        let qualified = HostedRetrievalTable::new(supported, supported, supported);
+        for (route, label, tools, names, kinds) in [
+            (
+                ToolRoute::OpenAi,
+                "openai",
+                &["web_search"][..],
+                &["web_search"][..],
+                vec![RetrievalKind::WebSearch],
+            ),
+            (
+                ToolRoute::XaiApi,
+                "xai-api",
+                &["web_search", "x_search"][..],
+                &["web_search", "x_search"][..],
+                vec![RetrievalKind::WebSearch, RetrievalKind::PostSearch],
+            ),
+        ] {
+            let selection = TemplateToolSelection::parse(tools.iter().copied())?;
+            let plan = bind_tool_plan_on(&selection, route, qualified, label)?;
+            let extensions = crate::tools::ProductToolExtensions::empty()
+                .with_plan(&plan)
+                .map_err(|error| error.to_string())?;
+            assert_eq!(
+                extensions.names().map(ToolName::as_str).collect::<Vec<_>>(),
+                names,
+                "{label}"
+            );
+            extensions
+                .connect_retrieval(Some(Arc::new(FakePort(kinds)) as Arc<dyn RetrievalPort>))
+                .map_err(|error| error.to_string())?;
+            let answered = plan
+                .retrieval()
+                .ok_or("no binding")?
+                .port()
+                .retrieve(
+                    RetrievalRequest::WebSearch {
+                        query: "rust".to_owned(),
+                        allowed_domains: Vec::new(),
+                        blocked_domains: Vec::new(),
+                    },
+                    control(),
+                )
+                .await;
+            assert!(answered.is_ok(), "{label}");
+            // The shipped tables still refuse every row.
+            assert!(bind_tool_plan(&selection, route, label).is_err(), "{label}");
+        }
+        // The OpenAI API port serves no X search, and the route's table
+        // offers none.
+        let x_search = TemplateToolSelection::parse(["x_search"])?;
+        assert!(bind_tool_plan_on(&x_search, ToolRoute::OpenAi, qualified, "openai").is_err());
         Ok(())
     }
 
