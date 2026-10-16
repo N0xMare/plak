@@ -31,6 +31,9 @@ use tokio::time::Instant;
 
 /// The gateway plugin a web search side request enables.
 pub const CHAT_WEB_PLUGIN_ID: &str = "web";
+/// The search engine the `web` plugin is pinned to. Left unset, the gateway
+/// picks one per model and, for some models, runs no search at all.
+pub const CHAT_WEB_PLUGIN_ENGINE: &str = "exa";
 /// Results the `web` plugin may add to one side request.
 pub const CHAT_WEB_PLUGIN_MAX_RESULTS: u32 = 5;
 /// Output cap of one side request.
@@ -110,6 +113,7 @@ struct Provider<'a> {
 #[derive(Serialize)]
 struct Plugin<'a> {
     id: &'static str,
+    engine: &'static str,
     max_results: u32,
     #[serde(skip_serializing_if = "<[String]>::is_empty")]
     include_domains: &'a [String],
@@ -196,6 +200,7 @@ impl ChatRetrievalRequest {
             },
             plugins: [Plugin {
                 id: CHAT_WEB_PLUGIN_ID,
+                engine: CHAT_WEB_PLUGIN_ENGINE,
                 max_results: CHAT_WEB_PLUGIN_MAX_RESULTS,
                 include_domains: &self.include_domains,
                 exclude_domains: &self.exclude_domains,
@@ -226,7 +231,13 @@ pub fn classify_chat_retrieval_body(body: &[u8]) -> ReplaySafety {
         "stream",
         "stream_options",
     ];
-    const PLUGIN_FIELDS: [&str; 4] = ["id", "max_results", "include_domains", "exclude_domains"];
+    const PLUGIN_FIELDS: [&str; 5] = [
+        "id",
+        "engine",
+        "max_results",
+        "include_domains",
+        "exclude_domains",
+    ];
     let Ok(Value::Object(body)) = serde_json::from_slice::<Value>(body) else {
         return ReplaySafety::ServerEffect;
     };
@@ -241,6 +252,7 @@ pub fn classify_chat_retrieval_body(body: &[u8]) -> ReplaySafety {
         return ReplaySafety::ServerEffect;
     };
     if plugin.get("id").and_then(Value::as_str) != Some(CHAT_WEB_PLUGIN_ID)
+        || plugin.get("engine").and_then(Value::as_str) != Some(CHAT_WEB_PLUGIN_ENGINE)
         || plugin
             .keys()
             .any(|key| !PLUGIN_FIELDS.contains(&key.as_str()))

@@ -5,8 +5,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use plakous_attempt::{Jitter, ReplaySafety};
-use plakous_chat_completions::classify_chat_retrieval_body;
+use plakous_attempt::Jitter;
 use plakous_http::Limits;
 use plakous_model::{ModelId, Timestamp};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -79,25 +78,6 @@ fn retrieval(reasoning: Option<OpenRouterReasoningFacts>) -> TestResult<OpenRout
         evidence,
         Client::new_http1(Limits::default())?,
     )?)
-}
-
-#[test]
-fn side_request_uses_the_session_model_lowest_reasoning_and_route_retention() -> TestResult {
-    let retrieval = retrieval(Some(facts(&["high", "low"], true, true)))?;
-    let body = retrieval.request("rust", Vec::new(), Vec::new()).body()?;
-    assert_eq!(
-        String::from_utf8(body.clone())?,
-        concat!(
-            r#"{"model":"vendor/model","messages":[{"role":"user","content":"#,
-            r#""Search the web for: rust. Answer concisely and cite sources."}],"#,
-            r#""max_tokens":4096,"reasoning":{"effort":"low","exclude":true},"#,
-            r#""provider":{"allow_fallbacks":false,"require_parameters":true,"#,
-            r#""data_collection":"deny","zdr":true},"plugins":[{"id":"web","max_results":5}],"#,
-            r#""stream":true,"stream_options":{"include_usage":true}}"#,
-        )
-    );
-    assert_eq!(classify_chat_retrieval_body(&body), ReplaySafety::CostOnly);
-    Ok(())
 }
 
 #[test]

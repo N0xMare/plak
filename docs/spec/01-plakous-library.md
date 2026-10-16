@@ -4947,8 +4947,9 @@ one streamed `POST /api/v1/chat/completions` with the one user message,
 false, `require_parameters` true, and the route's data-collection and ZDR
 policy), reasoning off where the model's reasoning is optional and on at its
 lowest attested effort where it is mandatory, and exactly one
-`{id:"web", max_results:5}` plugin with the requested domain filters as
-`include_domains`/`exclude_domains`. Before every physical request it
+`{id:"web", engine:"exa", max_results:5}` plugin with the requested domain
+filters as `include_domains`/`exclude_domains`. The engine is pinned because
+the gateway's default engine silently runs no search for some models. Before every physical request it
 revalidates the discovery evidence and requires the credential generation it
 was built under, then resolves the key through
 `OpenRouterApiKeySource::resolve_retrieval` with an
@@ -7365,8 +7366,9 @@ explicit cost-only allowlisting when that hosted tool goes live. A retrieval
 side request is classified by its own typed per-tool allowlist: on Messages,
 exactly one `web_search_20260318` or `web_fetch_20260318` tool with
 `allowed_callers:["direct"]` and only the fields the side-request builder
-emits is cost-only; on Chat, exactly one enabled `web` plugin with only
-`id`, `max_results`, `include_domains` and `exclude_domains`, no tools, and
+emits is cost-only; on Chat, exactly one enabled `web` plugin with
+`engine:"exa"` and otherwise only `id`, `max_results`, `include_domains` and
+`exclude_domains`, no tools, and
 only the side-request builder's top-level fields is cost-only; on Responses,
 exactly one `web_search` tool (with only
 `search_context_size`, `filters.allowed_domains`, `allowed_domains`,

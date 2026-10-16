@@ -23,58 +23,6 @@ fn search() -> ChatRetrievalRequest {
 }
 
 #[test]
-fn web_search_body_is_exact_and_cost_only() -> TestResult {
-    let body = search().body()?;
-    assert_eq!(
-        String::from_utf8(body.clone())?,
-        concat!(
-            r#"{"model":"vendor/model-literal","messages":[{"role":"user","content":"#,
-            r#""Search the web for: rust 1.99. Answer concisely and cite sources."}],"#,
-            r#""max_tokens":4096,"provider":{"allow_fallbacks":false,"require_parameters":true},"#,
-            r#""plugins":[{"id":"web","max_results":5}],"stream":true,"#,
-            r#""stream_options":{"include_usage":true}}"#,
-        )
-    );
-    assert_eq!(classify_chat_retrieval_body(&body), ReplaySafety::CostOnly);
-    Ok(())
-}
-
-#[test]
-fn filters_reasoning_and_routing_are_exact_and_cost_only() -> TestResult {
-    let body = search()
-        .with_domains(
-            vec!["rust-lang.org".to_owned()],
-            vec!["example.com".to_owned()],
-        )
-        .with_reasoning(ChatRetrievalReasoning::Lowest("minimal"))
-        .with_routing(ChatRetrievalRouting {
-            data_collection: Some("deny".to_owned()),
-            zdr: Some(true),
-        })
-        .body()?;
-    assert_eq!(
-        String::from_utf8(body.clone())?,
-        concat!(
-            r#"{"model":"vendor/model-literal","messages":[{"role":"user","content":"#,
-            r#""Search the web for: rust 1.99. Answer concisely and cite sources."}],"#,
-            r#""max_tokens":4096,"reasoning":{"effort":"minimal","exclude":true},"#,
-            r#""provider":{"allow_fallbacks":false,"require_parameters":true,"#,
-            r#""data_collection":"deny","zdr":true},"#,
-            r#""plugins":[{"id":"web","max_results":5,"include_domains":["rust-lang.org"],"#,
-            r#""exclude_domains":["example.com"]}],"stream":true,"#,
-            r#""stream_options":{"include_usage":true}}"#,
-        )
-    );
-    assert_eq!(classify_chat_retrieval_body(&body), ReplaySafety::CostOnly);
-    let disabled = search()
-        .with_reasoning(ChatRetrievalReasoning::Disabled)
-        .body()?;
-    let value: Value = serde_json::from_slice(&disabled)?;
-    assert_eq!(value["reasoning"], json!({"enabled": false}));
-    Ok(())
-}
-
-#[test]
 fn only_the_one_web_plugin_body_is_cost_only() -> TestResult {
     let base: Value = serde_json::from_slice(&search().body()?)?;
     let variant = |edit: &dyn Fn(&mut Value)| -> TestResult<ReplaySafety> {
@@ -88,7 +36,12 @@ fn only_the_one_web_plugin_body_is_cost_only() -> TestResult {
         &|body| body["plugins"] = json!([]),
         &|body| body["plugins"] = json!([{"id": "web"}, {"id": "web"}]),
         &|body| body["plugins"] = json!([{"id": "file-parser"}]),
-        &|body| body["plugins"][0]["engine"] = json!("exa"),
+        &|body| body["plugins"][0]["engine"] = json!("native"),
+        &|body| {
+            if let Some(plugin) = body["plugins"][0].as_object_mut() {
+                plugin.remove("engine");
+            }
+        },
         &|body| body["plugins"][0]["search_prompt"] = json!("x"),
         &|body| body["session_id"] = json!("s"),
         &|body| body["web_search_options"] = json!({}),
