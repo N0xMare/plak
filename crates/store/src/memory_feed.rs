@@ -49,6 +49,7 @@ impl MemoryFeedLimits {
     }
 
     /// The most records one trim transaction deletes.
+    #[cfg(feature = "sqlite")]
     pub(crate) const fn trim_batch(self) -> NonZeroUsize {
         self.trim_batch
     }

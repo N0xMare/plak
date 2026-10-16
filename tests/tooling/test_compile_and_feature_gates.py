@@ -132,6 +132,7 @@ class FeatureClosureCacheTests(unittest.TestCase):
              mock.patch.object(feature_gate, "validate_feature_contracts", return_value=[]), \
              mock.patch.object(feature_gate, "validate_excluded_closures", return_value=[]), \
              mock.patch.object(feature_gate, "validate_test_only_dependency_features", return_value=[]), \
+             mock.patch.object(feature_gate, "check_facade_profiles", return_value=[]), \
              mock.patch.object(feature_gate.sys, "stdout", new_callable=io.StringIO) as output:
             self.assertEqual(feature_gate.main(), 0)
             cache.assert_not_called()
@@ -151,11 +152,14 @@ class FeatureClosureCacheTests(unittest.TestCase):
                  mock.patch.object(feature_gate, "validate_feature_contracts", return_value=[]), \
                  mock.patch.object(feature_gate, "validate_excluded_closures", return_value=[]), \
                  mock.patch.object(feature_gate, "validate_test_only_dependency_features", return_value=[]), \
+                 mock.patch.object(feature_gate, "check_facade_profiles", return_value=[]) as facade, \
                  mock.patch.object(feature_gate.sys, "stdout", new_callable=io.StringIO) as output:
                 self.assertEqual(feature_gate.main(), 0)
                 cache.assert_not_called()
                 digest.assert_not_called()
                 self.assertIn("bypass", output.getvalue())
+                # --build checks every facade subset itself.
+                self.assertEqual(facade.called, flag == "--no-cache")
 
     def test_failed_query_is_not_cached(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -165,6 +169,50 @@ class FeatureClosureCacheTests(unittest.TestCase):
                     cache.output(["cargo", "tree"], ROOT)
             self.assertEqual(cache.outputs, {})
 
+
+
+class FacadeProfileTests(unittest.TestCase):
+    MANIFESTS = {"plakous": {"features": {"default": [], "full": ["b", "a"], "a": [], "b": []}}}
+
+    @staticmethod
+    def message(level: str, rendered: str) -> str:
+        return json.dumps({"reason": "compiler-message",
+                           "message": {"level": level, "rendered": rendered}})
+
+    def check(self, results):  # type: ignore[no-untyped-def]
+        with mock.patch.object(feature_gate.subprocess, "run", side_effect=results) as run, \
+             mock.patch.object(feature_gate.sys, "stderr", new_callable=io.StringIO) as stderr, \
+             mock.patch.object(feature_gate.sys, "stdout", new_callable=io.StringIO):
+            errors = feature_gate.check_facade_profiles(self.MANIFESTS, ROOT)
+        return errors, [call.args[0] for call in run.call_args_list], stderr.getvalue()
+
+    def test_checks_the_empty_set_and_each_public_feature_alone(self):
+        clean = subprocess.CompletedProcess([], 0, json.dumps({"reason": "build-finished"}), "")
+        errors, commands, _ = self.check([clean] * 3)
+        self.assertEqual(errors, [])
+        base = ["cargo", "check", "--locked", "--offline", "-p", "plakous", "--no-default-features"]
+        tail = ["--lib", "--message-format=json"]
+        self.assertEqual(commands, [base + tail, base + ["--features", "a"] + tail,
+                                    base + ["--features", "b"] + tail])
+
+    def test_compile_errors_and_warnings_fail_with_rendered_diagnostics(self):
+        failed = subprocess.CompletedProcess([], 101, self.message("error", "error[E0433]: x\n"), "")
+        warned = subprocess.CompletedProcess([], 0, "\n".join([
+            "not json", self.message("note", "note: ignored\n"), self.message("warning", "warning: y\n"),
+        ]), "")
+        aborted = subprocess.CompletedProcess([], 101, "", "error: no matching package\n")
+        errors, _, stderr = self.check([failed, warned, aborted])
+        self.assertEqual(errors, ["plakous [minimal]: cargo check failed",
+                                  "plakous [a]: cargo check reported 1 warning(s)",
+                                  "plakous [b]: cargo check failed"])
+        self.assertIn("error[E0433]: x", stderr)
+        self.assertIn("warning: y", stderr)
+        self.assertNotIn("note: ignored", stderr)
+        self.assertIn("no matching package", stderr)
+
+    def test_missing_facade_is_an_error(self):
+        self.assertEqual(feature_gate.check_facade_profiles({}, ROOT),
+                         ["plakous: package missing from workspace metadata"])
 
 class PublicCompileGateTests(unittest.TestCase):
     def setUp(self):

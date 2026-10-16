@@ -246,6 +246,14 @@ bypass the cache. When `git ls-files` fails (including a container source
 export without `.git`), the checker reports a cache bypass and queries Cargo
 directly; no cache is read or written.
 
+Closures prove dependency edges, not that the code compiles. Without
+`--build`, the checker therefore also runs `cargo check --lib` on `plakous`
+with no features and with each public feature alone (eleven profiles); a
+rustc warning or error in any workspace crate of that profile fails it. Cargo's
+fingerprints are its cache: an unchanged profile is a no-op (about 1 s for
+all eleven), and a facade or dependency source change rechecks only the
+affected crates. `--build` checks every subset and skips this step.
+
 The checker also pins, over the complete closure Cargo reports, what a named
 selection must *not* reach. A `composition` selection reaches no
 `plakous-auth`, `plakous-http`, `plakous-py-eval`, `monty-pool`, `rquickjs`, or

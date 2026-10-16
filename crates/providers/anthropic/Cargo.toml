@@ -17,7 +17,6 @@ default = []
 native-auth = [
     "dep:plakous-auth",
     "dep:thiserror",
-    "dep:tokio",
     "dep:zeroize",
     "plakous-auth/http-refresh",
 ]
@@ -35,7 +34,7 @@ time = { version = "0.3", features = ["parsing"] }
 thiserror = { workspace = true, optional = true }
 tower-service.workspace = true
 futures-util = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["rt", "time"], optional = true }
+tokio = { workspace = true, features = ["macros", "rt", "time"] }
 zeroize = { workspace = true, optional = true }
 
 [dev-dependencies]

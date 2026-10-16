@@ -170,6 +170,7 @@ impl MemoryStoreLimits {
         }
     }
 
+    #[cfg(feature = "sqlite")]
     pub(crate) const fn feed_limits(self) -> MemoryFeedLimits {
         self.feed
     }

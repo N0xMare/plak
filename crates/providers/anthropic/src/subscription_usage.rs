@@ -17,8 +17,10 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 /// Exact read-only path in the reviewed Claude Code `/usage` client.
+#[cfg(feature = "native-auth")]
 pub(crate) const CLAUDE_SUBSCRIPTION_USAGE_PATH: &str = "/api/oauth/usage";
 /// Exact read-only path Claude Code's `/status` uses for account identity.
+#[cfg(feature = "native-auth")]
 pub(crate) const CLAUDE_SUBSCRIPTION_PROFILE_PATH: &str = "/api/oauth/profile";
 /// Maximum body accepted by the usage control-plane decoder.
 pub(crate) const MAX_CLAUDE_SUBSCRIPTION_USAGE_BODY_BYTES: usize = 256 * 1024;

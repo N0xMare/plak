@@ -20,8 +20,10 @@ pub(crate) const CLAUDE_OAUTH_AUTHORIZE_ORIGIN: &str = "https://claude.com";
 /// are rejected by `/v1/messages`.
 pub(crate) const CLAUDE_OAUTH_AUTHORIZE_PATH: &str = "/cai/oauth/authorize";
 /// Token origin.
+#[cfg(feature = "native-auth")]
 pub(crate) const CLAUDE_OAUTH_TOKEN_ORIGIN: &str = "https://platform.claude.com";
 /// Token path.
+#[cfg(feature = "native-auth")]
 pub(crate) const CLAUDE_OAUTH_TOKEN_PATH: &str = "/v1/oauth/token";
 /// Canonical HTTPS redirect registered for the public client.
 pub(crate) const CLAUDE_OAUTH_REDIRECT_URI: &str =
@@ -218,12 +220,15 @@ pub const CLAUDE_OAUTH_COMPATIBILITY_PROFILE_ID: &str =
 /// Pin revision for this OAuth dialect.
 pub const CLAUDE_OAUTH_SOURCE_REVISION: &str = "claude-oauth.2026-09-22.v3";
 /// Operator notice revision for Claude OAuth compatibility consent.
+#[cfg(feature = "native-auth")]
 pub(crate) const CLAUDE_OAUTH_NOTICE_REVISION: &str = "anthropic.claude.oauth.notice.2026-08-20.r1";
 /// Kill-switch revision for Claude OAuth compatibility.
 pub const CLAUDE_OAUTH_KILL_SWITCH_REVISION: &str = "anthropic.claude.oauth.kill.2026-08-20.r1";
 /// UTC review time for the Claude OAuth pin table.
+#[cfg(feature = "native-auth")]
 pub(crate) const CLAUDE_OAUTH_REVIEWED_AT_UNIX: u64 = 1_790_035_200;
 /// Exclusive expiry for the Claude OAuth pin table.
+#[cfg(feature = "native-auth")]
 pub(crate) const CLAUDE_OAUTH_EXPIRES_AT_UNIX: u64 = 1_821_571_200;
 /// Protocol identity shared with the Messages kernel.
 pub const CLAUDE_OAUTH_PROTOCOL_ID: &str = "anthropic.messages";
@@ -292,6 +297,7 @@ pub fn claude_oauth_request_max_tokens(model: &str) -> Option<u32> {
 pub const CLAUDE_OAUTH_IDENTITY: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
 
 /// Plak User-Agent used by OAuth token exchange and non-inference traffic.
+#[cfg(feature = "native-auth")]
 pub(crate) const CLAUDE_OAUTH_USER_AGENT: &str = concat!("plak/", env!("CARGO_PKG_VERSION"));
 /// Claude Code 2.1.295 Messages `User-Agent` (edge costume, not token exchange).
 pub const CLAUDE_OAUTH_MESSAGES_USER_AGENT: &str = "claude-cli/2.1.295 (external, cli)";

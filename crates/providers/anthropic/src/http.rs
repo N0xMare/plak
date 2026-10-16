@@ -240,6 +240,7 @@ impl AnthropicLocalHttpServiceFactory {
     }
 
     /// Carries one subscription permit into the physical request builder.
+    #[cfg(feature = "native-auth")]
     #[must_use]
     pub(crate) fn with_dispatch_authorization(
         mut self,

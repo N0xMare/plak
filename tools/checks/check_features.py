@@ -18,6 +18,9 @@ provider, store, harness, facade) and stay hardcoded below.
 closure Cargo reports, the packages a named feature profile must not reach.
 This is what makes the facade's evaluator decoupling provable: `composition`
 buys Code Mode and the JavaScript sidecar and nothing else.
+
+Without `--build`, the facade library is also `cargo check`ed with no features
+and with each public feature alone; a rustc warning or error fails the run.
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -49,6 +53,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # Layers whose manifests carry a reviewed security-surface digest.
 DIGEST_LAYERS = L0_LAYERS + BELOW_FACADE_LAYERS
 MAX_OPTIONAL_FEATURES = 10
+FACADE = "plakous"
 
 
 def cache_path(root: Path = ROOT) -> Path:
@@ -219,7 +224,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-js-runtime": "6c68fa7e92379b21f826b9a64729008865573b5cd9dd0439cea8d765ae10e99e",
     "plakous": "e86cad332afa3636afdaf0f8f4651651f9740a903710a289fad2e282787c0930",
     "plakous-agent": "bd86d54cede49bb93150a0461f2c803b79525872d1fe243715261f9f0d6ef8e8",
-    "plakous-anthropic": "961f43653d38f0f9b3251cfd6933f814a289210cc87e98081af2aef3ab00189a",
+    "plakous-anthropic": "b24186b9bde9a727d28a12bc90cb6919922118e77f3d048ab3d29a994a0598fa",
     "plakous-attempt": "6fa8c59b329b4de7ae6eb497bf4b3e2d93f916551c682c2f1a803a506ee65992",
     "plakous-auth": "5f45056d97e40ee2e4281e6b625a1d9a95e464d30d4c24126fb7fb2e95835c2a",
     "plakous-code-mode": "6126837839f8d7f0647eaff50f357f144940d5eca849a54805f70102d4de3cf9",
@@ -768,6 +773,57 @@ def cargo_command(
     return command
 
 
+def facade_profiles(manifests: dict[str, dict[str, object]]) -> list[tuple[str, ...]]:
+    """Return the facade's empty feature set and each public feature alone."""
+    return [()] + [(feature,) for feature in optional_features(manifests[FACADE])]
+
+
+def compiler_diagnostics(stdout: str) -> list[str]:
+    """Return the rendered rustc warnings and errors in Cargo's JSON messages."""
+    rendered = []
+    for line in stdout.splitlines():
+        try:
+            message = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(message, dict) or message.get("reason") != "compiler-message":
+            continue
+        diagnostic = message.get("message") or {}
+        if diagnostic.get("level") in {"warning", "error"}:
+            rendered.append(diagnostic.get("rendered") or diagnostic.get("message") or "")
+    return rendered
+
+
+def check_facade_profiles(manifests: dict[str, dict[str, object]], root: Path = ROOT) -> list[str]:
+    """`cargo check` the facade library per profile; any rustc diagnostic fails.
+
+    Closures prove dependency edges, not that the code compiles: a facade
+    feature alone can name a module only another feature compiles. Cargo's
+    fingerprints keep an unchanged profile at a no-op.
+    """
+    if FACADE not in manifests:
+        return [f"{FACADE}: package missing from workspace metadata"]
+    errors = []
+    started = time.monotonic()
+    profiles = facade_profiles(manifests)
+    for selected in profiles:
+        name = "+".join(selected) or "minimal"
+        command = cargo_command("check", selected, False) + ["--lib", "--message-format=json"]
+        result = subprocess.run(command, cwd=root, text=True, capture_output=True, check=False)
+        diagnostics = compiler_diagnostics(result.stdout)
+        for diagnostic in diagnostics:
+            sys.stderr.write(diagnostic)
+        if result.returncode:
+            if not diagnostics:
+                sys.stderr.write(result.stderr)
+            errors.append(f"{FACADE} [{name}]: cargo check failed")
+        elif diagnostics:
+            errors.append(f"{FACADE} [{name}]: cargo check reported {len(diagnostics)} warning(s)")
+    print(f"checked {len(profiles)} facade feature profiles in {time.monotonic() - started:.0f}s",
+          flush=True)
+    return errors
+
+
 def closure(
     package: str, selected: tuple[str, ...], default: bool, internal_packages: set[str]
 ) -> set[str]:
@@ -866,6 +922,9 @@ def main() -> int:
     if CARGO_OUTPUTS is not None:
         CARGO_OUTPUTS.save()
         CARGO_OUTPUTS = None
+    # --build already checks every facade subset.
+    if not args.build:
+        errors.extend(check_facade_profiles(manifests))
     if errors:
         for error in errors:
             print(f"error: {error}", file=sys.stderr)

@@ -9,9 +9,12 @@ use plakous_tools::{
     RetrievalOutcome, RetrievalPort, RetrievalRequest, RetrievalSource, RetrievalUsage,
 };
 
-#[cfg(feature = "openai")]
+#[cfg(any(feature = "openai", feature = "native-subscriptions"))]
 use plakous_openai as responses;
-#[cfg(all(feature = "xai", not(feature = "openai")))]
+#[cfg(all(
+    feature = "xai",
+    not(any(feature = "openai", feature = "native-subscriptions"))
+))]
 use plakous_xai as responses;
 use responses::{
     ResponsesRetrievalError, ResponsesRetrievalErrorKind, ResponsesRetrievalOutcome,
@@ -50,10 +53,10 @@ impl RetrievalPort for OpenAiRetrievalPort {
 }
 
 /// One session's Codex subscription hosted web search as a [`RetrievalPort`].
-#[cfg(all(feature = "openai", feature = "native-subscriptions"))]
+#[cfg(feature = "native-subscriptions")]
 pub struct CodexRetrievalPort(Arc<plakous_openai::CodexRetrieval>);
 
-#[cfg(all(feature = "openai", feature = "native-subscriptions"))]
+#[cfg(feature = "native-subscriptions")]
 impl CodexRetrievalPort {
     /// Wraps the session's side-request executor.
     #[must_use]
@@ -62,7 +65,7 @@ impl CodexRetrievalPort {
     }
 }
 
-#[cfg(all(feature = "openai", feature = "native-subscriptions"))]
+#[cfg(feature = "native-subscriptions")]
 impl RetrievalPort for CodexRetrievalPort {
     fn kinds(&self) -> &[RetrievalKind] {
         &[RetrievalKind::WebSearch]
@@ -82,10 +85,10 @@ impl RetrievalPort for CodexRetrievalPort {
 
 /// One session's xAI API or SuperGrok hosted web and X search as a
 /// [`RetrievalPort`].
-#[cfg(feature = "xai")]
+#[cfg(any(feature = "xai", feature = "native-subscriptions"))]
 pub struct XaiRetrievalPort(Arc<plakous_xai::XaiRetrieval>);
 
-#[cfg(feature = "xai")]
+#[cfg(any(feature = "xai", feature = "native-subscriptions"))]
 impl XaiRetrievalPort {
     /// Wraps the session's side-request executor.
     #[must_use]
@@ -94,7 +97,7 @@ impl XaiRetrievalPort {
     }
 }
 
-#[cfg(feature = "xai")]
+#[cfg(any(feature = "xai", feature = "native-subscriptions"))]
 impl RetrievalPort for XaiRetrievalPort {
     fn kinds(&self) -> &[RetrievalKind] {
         &[RetrievalKind::WebSearch, RetrievalKind::PostSearch]

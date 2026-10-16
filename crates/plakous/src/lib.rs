@@ -338,11 +338,11 @@ pub mod construction;
 /// leases, compare-and-swap operations, object graphs, and SQL remain private.
 pub mod sessions;
 
-#[cfg(feature = "anthropic")]
+#[cfg(any(feature = "anthropic", feature = "native-subscriptions"))]
 mod anthropic_retrieval;
 #[cfg(feature = "openrouter")]
 mod openrouter_retrieval;
-#[cfg(any(feature = "openai", feature = "xai"))]
+#[cfg(any(feature = "openai", feature = "xai", feature = "native-subscriptions"))]
 mod responses_retrieval;
 #[cfg(test)]
 mod test_model;
@@ -1206,8 +1206,8 @@ pub mod xai {
         XaiAuthError, XaiGrokSubscriptionRoute, XaiListedModel, XaiModel, XaiModelError,
         XaiPlatformApiKey, XaiPlatformApiKeyAuthority, XaiPlatformApiKeySource,
         XaiPlatformBuildError, XaiPlatformCredentialGrant, XaiPlatformModel, XaiResolvedModel,
-        XaiRouteError, accept_xai_listed_models, grok_max_output_tokens, list_xai_api_models,
-        xai_api_bundled_listing, xai_api_key_fingerprint, xai_api_models, xai_platform_selection,
+        XaiRouteError, accept_xai_listed_models, list_xai_api_models, xai_api_bundled_listing,
+        xai_api_key_fingerprint, xai_api_models, xai_platform_selection,
         xai_platform_selection_for,
     };
     pub use plakous_xai::{SUPERGROK_HOSTED_RETRIEVAL, XAI_API_HOSTED_RETRIEVAL};
@@ -1215,6 +1215,6 @@ pub mod xai {
     #[cfg(feature = "native-subscriptions")]
     pub use plakous_xai::{
         StandardXaiHttpConfig, XaiLanguageModel, XaiLanguageModelConfigError,
-        compile_supergrok_subscription_configuration,
+        compile_supergrok_subscription_configuration, grok_max_output_tokens,
     };
 }

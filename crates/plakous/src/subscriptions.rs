@@ -2557,9 +2557,9 @@ impl NativeSubscriptions {
                     descriptor,
                     model,
                     evidence,
-                    retrieval: Some(Arc::new(crate::anthropic::AnthropicRetrievalPort::new(
-                        retrieval,
-                    ))),
+                    retrieval: Some(Arc::new(
+                        crate::anthropic_retrieval::AnthropicRetrievalPort::new(retrieval),
+                    )),
                 };
                 let compile_authority = attach.then_some(authority);
                 Ok((resolved, compile_authority))
@@ -2691,9 +2691,9 @@ impl NativeSubscriptions {
                         descriptor,
                         model,
                         evidence,
-                        retrieval: Some(Arc::new(crate::openai::CodexRetrievalPort::new(
-                            retrieval,
-                        ))),
+                        retrieval: Some(Arc::new(
+                            crate::responses_retrieval::CodexRetrievalPort::new(retrieval),
+                        )),
                     },
                     compile_authority,
                 ))
@@ -2773,7 +2773,9 @@ impl NativeSubscriptions {
                         descriptor,
                         model,
                         evidence,
-                        retrieval: Some(Arc::new(crate::xai::XaiRetrievalPort::new(retrieval))),
+                        retrieval: Some(Arc::new(
+                            crate::responses_retrieval::XaiRetrievalPort::new(retrieval),
+                        )),
                     },
                     compile_authority,
                 ))
