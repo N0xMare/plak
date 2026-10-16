@@ -253,7 +253,7 @@ reach the server; it starts nothing until a template that lists it binds.
 | key | type | default | constraint | meaning |
 | --- | --- | --- | --- | --- |
 | `transport` | string | `(required)` | stdio\|http | How the server is reached. |
-| `command` | string | `(required for stdio)` | non-empty; stdio only | argv[0], resolved on the captured PATH at spawn. |
+| `command` | string | `(required for stdio)` | non-empty; stdio only | argv[0], resolved on the captured PATH at spawn to the first executable file of that name (a non-executable file earlier on PATH is skipped, as execvp does). |
 | `args` | array of string | `[]` | stdio only | The rest of argv. |
 | `env` | table of string | `{}` | keys `[A-Za-z_][A-Za-z0-9_]*`; stdio only | Literal, non-secret environment. |
 | `secret_env` | table of string | `{}` | keys as `env`, none also in `env`; values are secret names; stdio only | Environment variables whose values are named secrets. |

@@ -3352,7 +3352,12 @@ pub(super) fn resolve_host_process_program(
             continue;
         }
         let candidate = Path::new(directory).join(program);
-        if candidate.is_file() {
+        // execvp semantics: a non-executable file of the same name earlier on
+        // PATH (uv installs a sourceable `~/.local/bin/env`) does not shadow
+        // the real program later on PATH.
+        if candidate.is_file()
+            && rustix::fs::access(&candidate, rustix::fs::Access::EXEC_OK).is_ok()
+        {
             return Ok(candidate);
         }
     }
@@ -4639,6 +4644,37 @@ mod process_policy_tests {
             prefix: None,
         };
         assert_eq!(host_process_home(&homeless, &[]), None);
+    }
+
+    #[test]
+    fn program_lookup_skips_a_non_executable_file_earlier_on_path() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let root = tempfile::tempdir().expect("tempdir");
+        let shadow = root.path().join("shadow");
+        let real = root.path().join("real");
+        fs::create_dir(&shadow).expect("shadow dir");
+        fs::create_dir(&real).expect("real dir");
+        fs::write(shadow.join("tool"), "# sourced, not run\n").expect("shadow file");
+        fs::set_permissions(shadow.join("tool"), fs::Permissions::from_mode(0o644))
+            .expect("shadow mode");
+        fs::write(real.join("tool"), "#!/bin/sh\n").expect("real file");
+        fs::set_permissions(real.join("tool"), fs::Permissions::from_mode(0o755))
+            .expect("real mode");
+        let process = HostProcessContext {
+            fallback_path: format!("{}:{}", shadow.display(), real.display()),
+            home: None,
+            prefix: None,
+        };
+        assert_eq!(
+            resolve_host_process_program("tool", &process, &[]).expect("resolved"),
+            real.join("tool")
+        );
+        let only_shadow = HostProcessContext {
+            fallback_path: shadow.display().to_string(),
+            home: None,
+            prefix: None,
+        };
+        assert!(resolve_host_process_program("tool", &only_shadow, &[]).is_err());
     }
 }
 
