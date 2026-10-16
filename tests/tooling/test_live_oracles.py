@@ -316,6 +316,7 @@ class LiveOracleTests(unittest.TestCase):
                     return "synthetic success"
 
                 with patch.object(live, "write_home"), \
+                        patch.object(live, "capture_root_mismatch", return_value=None), \
                         patch.object(smoke.Smoke, "SCENARIOS", ((condition, "cli"),)), \
                         patch.object(smoke.Smoke, condition, scenario, create=True), \
                         patch.object(smoke, "EXPECTED_PENDING",

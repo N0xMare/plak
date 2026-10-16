@@ -52,7 +52,9 @@ python3 tests/live/jobs.py grok --only crash_jobs
 The Python drivers default to `target/release/plak`. Build it with
 `cargo build --release --locked -p plak --features plak/test-hooks` before a
 direct Python invocation; `--binary PATH` selects another capture-capable
-executable. `test-hooks` enables `PLAK_TEST_FAULTS` (spec 05 §2.8).
+executable. A `test-hooks` binary only captures under the
+`tests/provider-authority` of the checkout that built it, so run the driver
+from that checkout: smoke refuses a binary built elsewhere before launching. `test-hooks` enables `PLAK_TEST_FAULTS` (spec 05 §2.8).
 The drivers put ordinary artifacts under
 `target/live/<kind>-<route>-<stamp>/`: a private `PLAK_HOME`, the repos the
 agent worked in, every JSONL transcript and stderr, the TUI's PTY bytes, and a

@@ -562,6 +562,10 @@ def main(argv: list[str]) -> int:
     route = live.ROUTES[args.route]
     stamp = time.strftime("%Y%m%d-%H%M%S")
     artifacts = args.artifacts or live.ROOT / "target" / "live" / f"smoke-{route.name}-{stamp}"
+    mismatch = live.capture_root_mismatch(args.binary.resolve())
+    if mismatch:
+        print(f"smoke: {mismatch}", file=sys.stderr)
+        return 2
     env = live.Env(args.binary.resolve(), artifacts / "home", artifacts)
     env.fixture_seed = args.fixture_seed
     binary_start = live.binary_sha256(env.binary)

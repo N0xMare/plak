@@ -33,6 +33,26 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def capture_root_mismatch(binary: Path, root: Path = ROOT) -> str | None:
+    """Why `binary` cannot capture into this checkout's `tests/provider-authority`.
+
+    A `test-hooks` build accepts capture directories only under the
+    `tests/provider-authority` of the checkout that compiled it (its
+    `bin/plak` manifest directory is baked in), so a driver must run from that
+    checkout. Otherwise every launch fails before anything is sent.
+    """
+    manifest = str(root.resolve() / "bin" / "plak").encode()
+    try:
+        data = binary.read_bytes()
+    except OSError as error:
+        return f"cannot read {binary}: {error}"
+    if manifest in data:
+        return None
+    return (f"{binary} was not built from this checkout ({root}); its capture root is "
+            "another checkout's tests/provider-authority. Run the driver from the "
+            "checkout that built the binary.")
+
+
 def binary_sha256(binary: Path) -> str:
     """Identify the exact executable used by a live report, not its checkout."""
     return hashlib.sha256(binary.read_bytes()).hexdigest()

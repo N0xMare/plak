@@ -117,6 +117,20 @@ class RetrievalOracleTests(unittest.TestCase):
         self.assertIn(self.RESULT, list(features.json_strings(body)))
 
 
+class CaptureRootTests(unittest.TestCase):
+    def test_binary_from_another_checkout_is_refused_up_front(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "checkout"
+            (root / "bin" / "plak").mkdir(parents=True)
+            ours, theirs = Path(tmp) / "ours", Path(tmp) / "theirs"
+            ours.write_bytes(b"\0" + str(root.resolve() / "bin" / "plak").encode() + b"\0")
+            theirs.write_bytes(b"\0/elsewhere/bin/plak\0")
+            self.assertIsNone(live.capture_root_mismatch(ours, root))
+            self.assertIn("not built from this checkout",
+                          live.capture_root_mismatch(theirs, root))
+
+
 class MarkerTests(unittest.TestCase):
     def test_marker_file_records_exactly_one_sha256(self):
         text = (ROOT / features.MARKER_PATH).read_text()
