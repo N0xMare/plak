@@ -1119,6 +1119,20 @@ pub mod tools {
     /// Hosted retrieval: the neutral port a route implements and the local
     /// wrapper tools that call it, one isolated side request per call.
     pub mod web {
+        /// The Plak-run `fetch_url` tool, built whenever the facade links an
+        /// HTTP stack.
+        #[cfg(any(
+            feature = "anthropic",
+            feature = "native-subscriptions",
+            feature = "openai",
+            feature = "openrouter",
+            feature = "xai"
+        ))]
+        pub use plakous_tool_web::{
+            DEFAULT_FETCH_MAX_BYTES, DEFAULT_FETCH_TIMEOUT_SECONDS, FetchUrlLimits, FetchUrlPack,
+            MAX_FETCH_MAX_BYTES, MAX_FETCH_REDIRECTS, MAX_FETCH_TIMEOUT_SECONDS,
+            MAX_INLINE_FETCH_TEXT_BYTES,
+        };
         pub use plakous_tool_web::{
             MAX_DOMAINS, MAX_PROMPT_BYTES, MAX_QUERY_BYTES, MAX_URL_BYTES, WebTool, WebToolPack,
             render_outcome,

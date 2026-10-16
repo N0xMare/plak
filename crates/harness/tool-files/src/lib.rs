@@ -1133,12 +1133,23 @@ impl ToolExecutor for InspectImageTool {
     }
 }
 
-struct ImageHeader<'a> {
-    media_type: &'a str,
-    dimensions: Option<(u32, u32)>,
+/// What an image's signature and header say about it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ImageHeader {
+    /// `image/png`, `image/gif`, `image/jpeg` or `image/webp`.
+    pub media_type: &'static str,
+    /// Width and height, when the header states them.
+    pub dimensions: Option<(u32, u32)>,
 }
 
-fn inspect_image_header(bytes: &[u8]) -> Result<ImageHeader<'static>, ToolRuntimeError> {
+/// Identifies a PNG, GIF, JPEG or WebP image by its signature and reads its
+/// dimensions where the header states them.
+///
+/// # Errors
+///
+/// Refuses bytes that are no supported image, and dimensions that are zero or
+/// exceed 100,000,000 pixels.
+pub fn inspect_image_header(bytes: &[u8]) -> Result<ImageHeader, ToolRuntimeError> {
     let info = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") && bytes.len() >= 24 {
         ImageHeader {
             media_type: "image/png",

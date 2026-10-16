@@ -15,8 +15,8 @@ use plakous::model::{
 };
 use plakous::subscriptions::NativeProvider;
 use plakous::tools::web::{
-    RetrievalError, RetrievalErrorKind, RetrievalFuture, RetrievalKind, RetrievalPort,
-    RetrievalRequest, WebTool,
+    FetchUrlLimits, RetrievalError, RetrievalErrorKind, RetrievalFuture, RetrievalKind,
+    RetrievalPort, RetrievalRequest, WebTool,
 };
 use plakous::tools::{CodingPresentation, ExecutionOperationControl, McpServerName};
 
@@ -352,6 +352,7 @@ pub(crate) struct ToolPlan {
     retrieval: Option<RetrievalBinding>,
     mcp_registrations: Vec<plakous::tools::ToolRegistration>,
     notices: Vec<String>,
+    fetch_url_limits: FetchUrlLimits,
 }
 
 impl fmt::Debug for ToolPlan {
@@ -361,6 +362,7 @@ impl fmt::Debug for ToolPlan {
             .field("tools", &self.tools)
             .field("retrieval", &self.retrieval)
             .field("notices", &self.notices)
+            .field("fetch_url_limits", &self.fetch_url_limits)
             .finish_non_exhaustive()
     }
 }
@@ -486,6 +488,7 @@ impl ToolPlan {
             retrieval: None,
             mcp_registrations: Vec::new(),
             notices: Vec::new(),
+            fetch_url_limits: FetchUrlLimits::default(),
         }
     }
 
@@ -521,6 +524,19 @@ impl ToolPlan {
     /// The port and vocabulary of the planned hosted-retrieval wrappers.
     pub(crate) const fn retrieval(&self) -> Option<&RetrievalBinding> {
         self.retrieval.as_ref()
+    }
+
+    /// The bounds a planned `fetch_url` runs under.
+    pub(crate) const fn fetch_url_limits(&self) -> FetchUrlLimits {
+        self.fetch_url_limits
+    }
+
+    /// This plan with `fetch_url` bound under `limits`, the node's frozen
+    /// `[tools.fetch_url]` table.
+    #[allow(dead_code, reason = "wired from the frozen tool tables at bind")]
+    pub(crate) const fn with_fetch_url_limits(mut self, limits: FetchUrlLimits) -> Self {
+        self.fetch_url_limits = limits;
+        self
     }
 }
 
@@ -609,9 +625,9 @@ impl ToolRoute {
 /// silently left out. A hosted retrieval tool binds its local wrapper only
 /// where the route's release-owned table qualifies it and the route has a
 /// retrieval port serving it; that port is a deferred slot the session's
-/// executor connects once it exists. Every Plak-run tool is refused as not
-/// built in. MCP entries pass through: `crate::mcp_binding::bind_mcp_tools`
-/// binds them.
+/// executor connects once it exists. `fetch_url` runs in Plak and binds on
+/// every route. `image_gen` is refused as not built in. MCP entries pass
+/// through: `crate::mcp_binding::bind_mcp_tools` binds them.
 ///
 /// # Errors
 ///
@@ -658,6 +674,7 @@ pub(crate) fn bind_tool_plan_with(
     let mut wrappers = false;
     for entry in selection.entries() {
         let served = match entry {
+            SelectedTool::Optional(OptionalTool::FetchUrl) => continue,
             SelectedTool::Optional(tool) => match (tool.hosted_retrieval(), tool.web_tool()) {
                 (Some(hosted), Some(web))
                     if table.support(hosted) == HostedRetrievalSupport::Supported =>
@@ -1133,9 +1150,9 @@ mod tests {
     }
 
     #[test]
-    fn plak_run_tools_are_refused_as_not_built_in() -> TestResult {
+    fn image_gen_is_refused_as_not_built_in() -> TestResult {
         for route in ToolRoute::ALL {
-            for tool in ["fetch_url", "image_gen"] {
+            for tool in ["image_gen"] {
                 assert_eq!(
                     refusal_text(&[tool], route)?,
                     format!(
@@ -1154,6 +1171,52 @@ mod tests {
             refusal(&SelectedTool::parse("web_search")?, qualified, "grok").to_string(),
             "web_search is not available in this build; remedy: remove web_search from \
              the template's tools"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn fetch_url_binds_on_every_route_and_registers_after_the_wrappers() -> TestResult {
+        let selection = TemplateToolSelection::parse(["fetch_url"])?;
+        for route in ToolRoute::ALL {
+            let plan = bind_tool_plan(&selection, route, route_label(route))
+                .map_err(|refusal| refusal.to_string())?;
+            assert_eq!(
+                plan.tools(),
+                [PlannedTool::Optional(OptionalTool::FetchUrl)],
+                "{route:?}"
+            );
+            assert!(plan.retrieval().is_none(), "{route:?}");
+            assert_eq!(plan.fetch_url_limits(), FetchUrlLimits::default());
+            let extensions = crate::tools::ProductToolExtensions::empty()
+                .with_plan(&plan)
+                .map_err(|error| error.to_string())?;
+            assert_eq!(
+                extensions.names().map(ToolName::as_str).collect::<Vec<_>>(),
+                ["fetch_url"],
+                "{route:?}"
+            );
+        }
+        let limits = FetchUrlLimits::new(1024, 5).ok_or("limits")?;
+        let plan = bind_tool_plan_with(
+            &TemplateToolSelection::parse(["fetch_url", "web_search"])?,
+            HostedRetrievalTable::new(
+                HostedRetrievalSupport::Supported,
+                HostedRetrievalSupport::Supported,
+                HostedRetrievalSupport::Supported,
+            ),
+            CodingPresentation::Claude,
+            "claude",
+            Some(search_and_fetch_port()),
+        )?
+        .with_fetch_url_limits(limits);
+        assert_eq!(plan.fetch_url_limits(), limits);
+        let extensions = crate::tools::ProductToolExtensions::empty()
+            .with_plan(&plan)
+            .map_err(|error| error.to_string())?;
+        assert_eq!(
+            extensions.names().map(ToolName::as_str).collect::<Vec<_>>(),
+            ["WebSearch", "fetch_url"]
         );
         Ok(())
     }

@@ -84,7 +84,8 @@ impl ProductToolExtensions {
     /// for every tool a template selects, in plan order.
     ///
     /// Hosted-retrieval wrappers register through their pack on the port the
-    /// plan bound; MCP tools append the registrations MCP binding froze, and
+    /// plan bound; `fetch_url` follows through its own pack under the plan's
+    /// limits; MCP tools append the registrations MCP binding froze, and
     /// the first one earns the untrusted-data paragraph. A planned tool
     /// without a registration refuses the bind. The empty plan leaves the
     /// extensions, and every surface and identity compiled from them,
@@ -92,8 +93,12 @@ impl ProductToolExtensions {
     pub(crate) fn with_plan(self, plan: &crate::tool_plan::ToolPlan) -> CliResult<Self> {
         let mut wrappers = Vec::new();
         let mut mcp = Vec::new();
+        let mut fetch_url = false;
         for tool in plan.tools() {
             match tool {
+                crate::tool_plan::PlannedTool::Optional(
+                    crate::tool_plan::OptionalTool::FetchUrl,
+                ) => fetch_url = true,
                 crate::tool_plan::PlannedTool::Optional(optional) => {
                     let wrapper = optional.web_tool().ok_or_else(|| {
                         CliFailure::new(format!(
@@ -110,7 +115,7 @@ impl ProductToolExtensions {
                 }
             }
         }
-        if wrappers.is_empty() && mcp.is_empty() {
+        if wrappers.is_empty() && mcp.is_empty() && !fetch_url {
             return Ok(self);
         }
         let mut appended = Vec::new();
@@ -130,6 +135,17 @@ impl ProductToolExtensions {
                 pack.registrations().map_err(|error| {
                     CliFailure::new(format!("hosted retrieval wrappers: {error}"))
                 })?,
+            );
+        }
+        if fetch_url {
+            let pack = plakous::tools::web::FetchUrlPack::new(
+                plan.fetch_url_limits(),
+                &format!("plak/{}", plakous::VERSION),
+            )
+            .map_err(|error| CliFailure::new(format!("fetch_url: {error}")))?;
+            appended.extend(
+                pack.registrations()
+                    .map_err(|error| CliFailure::new(format!("fetch_url: {error}")))?,
             );
         }
         let earning = mcp.first().map(|registration| registration.name().clone());

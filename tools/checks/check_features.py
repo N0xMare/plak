@@ -160,6 +160,13 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES = {
     ("plakous", "native-subscriptions", "plakous-openai/native-auth"),
     ("plakous", "native-subscriptions", "plakous-xai/native-auth"),
     ("plakous", "sessions-sqlite", "plakous-store/sqlite"),
+    # Every facade feature that links plakous-http builds the Plak-run
+    # `fetch_url`; composition-only closures stay HTTP-free.
+    ("plakous", "anthropic", "plakous-tool-web/fetch"),
+    ("plakous", "native-subscriptions", "plakous-tool-web/fetch"),
+    ("plakous", "openai", "plakous-tool-web/fetch"),
+    ("plakous", "openrouter", "plakous-tool-web/fetch"),
+    ("plakous", "xai", "plakous-tool-web/fetch"),
     ("plakous-anthropic", "native-auth", "plakous-auth/http-refresh"),
     ("plakous-openai", "native-auth", "plakous-auth/http-refresh"),
     ("plakous-xai", "native-auth", "plakous-auth/http-refresh"),
@@ -209,7 +216,7 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
 EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-py-worker": "a57158273317e3c1c0ebe404e30d6e81f3c7074a51c9b713ad946093bcee9bda",
     "plakous-js-runtime": "6c68fa7e92379b21f826b9a64729008865573b5cd9dd0439cea8d765ae10e99e",
-    "plakous": "777c2ed069952a69624f0343ccf304857dd25d5ad2a372a97663e6a74334f0d0",
+    "plakous": "d96bff7390682a856ffcb7b35d4cb5bda002e9e00f78a38a70ba0eb96185b98b",
     "plakous-agent": "bd86d54cede49bb93150a0461f2c803b79525872d1fe243715261f9f0d6ef8e8",
     "plakous-anthropic": "961f43653d38f0f9b3251cfd6933f814a289210cc87e98081af2aef3ab00189a",
     "plakous-attempt": "6fa8c59b329b4de7ae6eb497bf4b3e2d93f916551c682c2f1a803a506ee65992",
@@ -228,7 +235,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-tool-plan": "97d99c53c448bc26d4bfb53ef555578d2c2185a98579a6df934ea3ce7a245da4",
     "plakous-tool-process": "6fa78529b74a6ed25c559f877278b23022a2203cd66f0ac393a9c3d0d8b5d790",
     "plakous-tool-search": "e453f2e948e74d7821e2a7b78233456b3c7bb55826dccea8d2a5aaf2be507b64",
-    "plakous-tool-web": "428c2a655b5dda9af45b13f9ba31fd083f5fb7a45f8e4b5380e011126cca301c",
+    "plakous-tool-web": "7570d65e82c4b17933ff599b71d961789ce8c2519e02a8521bf608ce6c6a545f",
     "plakous-compose": "8ed7e3a1a5f408bad755197a1fee3b880b3ec6819660b9c916f09f88b5d34afc",
     "plakous-prompts": "aa45fde552eb9f54ab312678a0d812513ab2e3a5ff7407b56eb5b109c2d80bb9",
     "plakous-openrouter": "33b6e9c72fc590afb426dba9a6bacf36d352a16bb7729531ccc63eaccf04763a",
@@ -248,6 +255,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
 # pull in the Monty closure.
 EXCLUDED_CLOSURE_PACKAGES = {
     ("plakous", ("composition",)): (
+        "htmd",
         "monty-pool",
         "plakous-auth",
         "plakous-http",

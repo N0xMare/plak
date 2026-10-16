@@ -18,7 +18,9 @@ default = []
 # Provider protocol crates on the facade are provider internals (not TUI surface).
 # Enabling openai/xai/openrouter/anthropic re-exports those crates as plakous::*.
 # TUI/embedder-safe surface is always-on: agent (curated), model, tools, profiles.
-anthropic = ["dep:plakous-anthropic", "dep:plakous-http"]
+# Every feature that links plakous-http also builds the Plak-run `fetch_url`
+# tool (`plakous-tool-web/fetch`); composition-only closures stay HTTP-free.
+anthropic = ["dep:plakous-anthropic", "dep:plakous-http", "plakous-tool-web/fetch"]
 auth = [
     "dep:plakous-auth",
     "openai",
@@ -58,6 +60,7 @@ native-subscriptions = [
     "dep:plakous-auth",
     "plakous-auth/http-refresh",
     "dep:plakous-http",
+    "plakous-tool-web/fetch",
     "dep:rustix",
     "dep:plakous-openai",
     "plakous-openai/native-auth",
@@ -66,10 +69,10 @@ native-subscriptions = [
     "dep:plakous-anthropic",
     "plakous-anthropic/native-auth",
 ]
-openai = ["dep:plakous-openai", "dep:plakous-http"]
-openrouter = ["dep:plakous-http", "dep:plakous-openrouter"]
+openai = ["dep:plakous-openai", "dep:plakous-http", "plakous-tool-web/fetch"]
+openrouter = ["dep:plakous-http", "dep:plakous-openrouter", "plakous-tool-web/fetch"]
 sessions-sqlite = ["plakous-store/sqlite"]
-xai = ["dep:plakous-xai", "dep:plakous-http"]
+xai = ["dep:plakous-xai", "dep:plakous-http", "plakous-tool-web/fetch"]
 
 [dependencies]
 plakous-agent = { version = "0.1.0", path = "../core/agent" }

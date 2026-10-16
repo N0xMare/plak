@@ -8,7 +8,8 @@
 //!
 //! One module per tool family: `search` (`web_search`), `web_fetch`
 //! (hosted page fetch) and `x_search`. The Plak-run `fetch_url` is a
-//! separate tool and lives in its own module.
+//! separate tool with its own pack: Plak itself fetches the URL over a
+//! public-only HTTPS client (feature `fetch`).
 
 #![forbid(unsafe_code)]
 #![allow(
@@ -16,16 +17,25 @@
     reason = "doc comments name exact provider tool identifiers"
 )]
 
+#[cfg(feature = "fetch")]
+mod fetch;
 mod render;
 mod search;
 mod text;
 mod web_fetch;
 mod x_search;
 
+#[cfg(feature = "fetch")]
+pub use fetch::{
+    DEFAULT_FETCH_MAX_BYTES, DEFAULT_FETCH_TIMEOUT_SECONDS, FetchUrlLimits, FetchUrlPack,
+    MAX_FETCH_MAX_BYTES, MAX_FETCH_REDIRECTS, MAX_FETCH_TIMEOUT_SECONDS,
+    MAX_INLINE_FETCH_TEXT_BYTES,
+};
 pub use render::render_outcome;
 pub use text::{
     PLAKOUS_WEB_CLAUDE_FETCH_DESCRIPTION, PLAKOUS_WEB_CLAUDE_SEARCH_DESCRIPTION,
-    PLAKOUS_WEB_SEARCH_DESCRIPTION, PLAKOUS_WEB_X_SEARCH_DESCRIPTION,
+    PLAKOUS_WEB_FETCH_URL_DESCRIPTION, PLAKOUS_WEB_SEARCH_DESCRIPTION,
+    PLAKOUS_WEB_X_SEARCH_DESCRIPTION,
 };
 
 use std::sync::Arc;
@@ -51,8 +61,8 @@ pub const MAX_PROMPT_BYTES: usize = 2048;
 /// Most domains or handles one call may name.
 pub const MAX_DOMAINS: usize = 20;
 
-const SEMANTIC_VERSION: &str = "plakous.web.v1";
-const ISSUER: &[u8] = b"plakous-tool-web";
+pub(crate) const SEMANTIC_VERSION: &str = "plakous.web.v1";
+pub(crate) const ISSUER: &[u8] = b"plakous-tool-web";
 
 /// One hosted-retrieval wrapper, in plan order.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -117,7 +127,7 @@ pub(crate) struct Shape {
     schema: Value,
 }
 
-fn registration_error<E>(message: &'static str) -> impl FnOnce(E) -> ToolRuntimeError {
+pub(crate) fn registration_error<E>(message: &'static str) -> impl FnOnce(E) -> ToolRuntimeError {
     move |_| ToolRuntimeError::new(ToolRuntimeErrorKind::Registration, message)
 }
 
@@ -311,7 +321,7 @@ fn subject(request: &RetrievalRequest) -> String {
 }
 
 /// Every model-visible string the web pack owns.
-static WEB_PROMPT_PINS: &[PromptPin] = &[
+pub(crate) static WEB_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "web.claude.web_search",
         PLAKOUS_WEB_CLAUDE_SEARCH_DESCRIPTION,
@@ -331,6 +341,11 @@ static WEB_PROMPT_PINS: &[PromptPin] = &[
         "web.grok.x_search",
         PLAKOUS_WEB_X_SEARCH_DESCRIPTION,
         "130455172a0ca7b25c1bf7976cdba31df86b498f027143fad0a6cc578730872f",
+    ),
+    PromptPin::new(
+        "web.fetch_url",
+        PLAKOUS_WEB_FETCH_URL_DESCRIPTION,
+        "3bb6ae4a18a2aefec396db78f2990de4e9e740eeda8b270d5531260eb89db546",
     ),
     PromptPin::new(
         "web.untrusted_line",
