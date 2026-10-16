@@ -5,7 +5,7 @@
 //!
 //! | Input | Lowered |
 //! | --- | --- |
-//! | `$schema`, `$id`, `$comment`, `default`, `examples`, `format`, `readOnly`, `writeOnly`, `deprecated`, `pattern` | dropped |
+//! | `$schema`, `$id`, `$comment`, `default`, `examples`, `format`, `readOnly`, `writeOnly`, `deprecated`, `pattern`, and every `x-*` extension keyword | dropped |
 //! | local `$ref` into `#/$defs` or `#/definitions` | inlined; sibling `title`/`description` win |
 //! | `anyOf`/`oneOf` of exactly `[X, {"type":"null"}]`, `type: [X, "null"]` | `X`, and the property leaves `required` |
 //! | object without `additionalProperties: false` (absent, `true`, `{}`) | closed |
@@ -35,6 +35,13 @@ const DROPPED: &[&str] = &[
     "deprecated",
     "pattern",
 ];
+
+/// An annotation keyword with no validation meaning: a listed one, or an
+/// `x-*` vendor extension (GitHub's `x-mcp-header`), which JSON Schema
+/// treats as an unknown annotation.
+fn dropped(key: &str) -> bool {
+    DROPPED.contains(&key) || key.starts_with("x-")
+}
 
 const KEPT: &[&str] = &[
     "title",
@@ -202,7 +209,7 @@ impl Lowering<'_> {
         let mut nullable = false;
         for (key, value) in object {
             match key.as_str() {
-                key if DROPPED.contains(&key) => {}
+                key if dropped(key) => {}
                 key if KEPT.contains(&key) => {
                     lowered.insert(key.to_owned(), value.clone());
                 }
@@ -322,7 +329,7 @@ fn merge_annotations(
 ) -> Result<(), SchemaRefusal> {
     for (key, value) in object {
         match key.as_str() {
-            key if consumed.contains(&key) || DROPPED.contains(&key) => {}
+            key if consumed.contains(&key) || dropped(key) => {}
             "title" | "description" => {
                 lowered.insert(key.clone(), value.clone());
             }

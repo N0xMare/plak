@@ -4780,7 +4780,8 @@ the pack from persisted records over a later lease without listing again
 where drift surfaces. Lowering onto `PortableToolSchemaV2` applies only
 meaning-preserving or tightening rewrites: annotation keywords (`$schema`,
 `$id`, `$comment`, `default`, `examples`, `format`, `readOnly`, `writeOnly`,
-`deprecated`) and `pattern` are dropped, local non-recursive `$ref`s into
+`deprecated`), every `x-*` vendor extension keyword (such as GitHub's
+`x-mcp-header`) and `pattern` are dropped, local non-recursive `$ref`s into
 `$defs`/`definitions` are inlined, `anyOf`/`oneOf` of exactly one schema and
 `{"type":"null"}` and `type: [X, "null"]` become `X` and leave `required`,
 every object is closed, and a missing object `type`, `properties` or

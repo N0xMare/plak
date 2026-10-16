@@ -55,6 +55,9 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
         // the TUI it started so the startup row can tick its own elapsed seconds
         // instead of showing an unqualified "starting…" (spec 02 §5.4).
         let _ = events.send(HostEvent::SessionOpening);
+        // Creation freezes the root's tools; a wildcard MCP tool left out then
+        // is a pending notice the operator must see (spec 07 §3.5).
+        let freezing_tools = config.session.frozen_tools.is_none();
         let mut opened = executor
             .block_on(build_session_from_config(&mut config, &mut stderr_buf))
             .map_err(|_| CliFailure::new("application execution failed"))??;
@@ -381,6 +384,9 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             };
             config.state_roots.emit_product(observation);
         }
+        if freezing_tools {
+            announce_omitted_tools(&events, log.as_ref(), &config);
+        }
         emit_agent_plan_notes(&events, &config, &stderr_buf);
         send_binding(&events, &config);
         let _ = events.send(super::super::logging::project_session_snapshot(
@@ -590,6 +596,31 @@ pub(super) fn release_after_open_failure(
             failure.with_cleanup_failure(format!("canonical session release also failed: {error}"))
         }
         Err(error) => failure.with_cleanup_failure(error),
+    }
+}
+
+/// Sends each MCP tool the creation bind left out as a live row (the snapshot
+/// that follows already carries it for a transcript view; `plak run` and JSONL
+/// read only rows) and records it in the session log.
+fn announce_omitted_tools<P: plakous_host_protocol::ProtocolExtension>(
+    events: &Sender<P>,
+    log: Option<&SessionLog>,
+    config: &HostConfig<P>,
+) {
+    for row in config.session.transcript.pending_notices() {
+        let TranscriptRow::Notice(notice) = row else {
+            continue;
+        };
+        // `plakous-mcp` listing writes `mcp tool <server>/<tool>: ...; omitted`.
+        if !(notice.text.starts_with("mcp tool ") && notice.text.ends_with("; omitted")) {
+            continue;
+        }
+        log_ev(
+            log,
+            config,
+            SessionEvent::new("tool.omitted").str("text", &notice.text),
+        );
+        let _ = events.send(HostEvent::Row(row.clone()));
     }
 }
 

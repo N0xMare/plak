@@ -545,6 +545,7 @@ recent live lifecycle: open catch-up can publish usage without a live lifecycle.
 | Log record | Fields |
 | --- | --- |
 | `turn.usage` | authoritative `turn_id`; input, output, reasoning, cached-input and cache-write token counts; model-operation and reporting-operation counts; prepared-input peak when known |
+| `tool.omitted` | `text`: an MCP tool a wildcard `mcp:<id>` selection left out when the session was created (`mcp tool <server>/<tool>: input schema is not lowerable: <reason>; omitted`); the same line is a live settings notice, so `plak run` prints it on stderr |
 
 An abandoned turn appends `turn.abandoned` with its `claim`
 (`running_tool`, `model_request`, `compaction_not_applied`, `nothing_started` or

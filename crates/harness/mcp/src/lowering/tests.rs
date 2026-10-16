@@ -253,3 +253,34 @@ fn ref_siblings_other_than_annotations_are_refused() {
     });
     assert_eq!(refusal(&schema), "minimum beside $ref at /properties/p");
 }
+
+#[test]
+fn vendor_extension_keywords_are_dropped_like_annotations() -> TestResult {
+    // GitHub MCP's get_file_contents marks routed arguments this way.
+    let lowered = lower(&json!({
+        "type": "object",
+        "x-vendor-root": true,
+        "properties": {
+            "owner": {"type": "string", "description": "Repository owner", "x-mcp-header": "owner"},
+            "repo": {"type": "string", "x-mcp-header": "repo"}
+        },
+        "required": ["owner", "repo"]
+    }))?;
+    assert_eq!(
+        lowered,
+        json!({
+            "type": "object",
+            "properties": {
+                "owner": {"type": "string", "description": "Repository owner"},
+                "repo": {"type": "string"}
+            },
+            "required": ["owner", "repo"],
+            "additionalProperties": false
+        })
+    );
+    assert_eq!(
+        refusal(&json!({"type": "object", "properties": {"a": {"type": "string", "xmcp": 1}}})),
+        "xmcp at /properties/a"
+    );
+    Ok(())
+}
