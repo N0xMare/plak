@@ -497,6 +497,8 @@ pub struct ResolvedNativeModel {
     pub(crate) descriptor: ResolvedModelDescriptor,
     pub(crate) model: Arc<dyn LanguageModel>,
     pub(crate) evidence: SubscriptionResolutionEvidence,
+    /// The route's hosted-retrieval port on the same model and grant.
+    pub(crate) retrieval: Option<Arc<dyn plakous_tools::RetrievalPort>>,
 }
 
 /// One exact native provider resolution carrying both the executable model and
@@ -616,6 +618,13 @@ const fn require_exact_native_tool_mode(
 }
 
 impl ResolvedProvider {
+    /// The route's hosted-retrieval port bound to the same model, account
+    /// and credential, when the route has one.
+    #[must_use]
+    pub fn retrieval_port(&self) -> Option<Arc<dyn plakous_tools::RetrievalPort>> {
+        self.model.retrieval.clone()
+    }
+
     /// Returns the exact resolved model handle.
     #[must_use]
     pub fn model(&self) -> Arc<dyn LanguageModel> {
@@ -2483,9 +2492,24 @@ impl NativeSubscriptions {
                         NativeSubscriptionError::Internal,
                     )
                 })?;
-                let (model, authority, descriptor) = online
+                let session_id = plakous_model::SessionId::generate(
+                    &plakous_model::SystemClock,
+                    &plakous_model::SystemIdGenerator,
+                )
+                .map_err(|_| {
+                    NativeModelResolutionError::after_selection(
+                        selected_model.clone(),
+                        NativeSubscriptionError::Internal,
+                    )
+                })?;
+                let (model, authority, descriptor, retrieval) = online
                     .manager
-                    .resolve_model(selected_model.as_str(), client, lineage)
+                    .resolve_model_with_retrieval(
+                        selected_model.as_str(),
+                        client,
+                        lineage,
+                        session_id,
+                    )
                     .await
                     .map_err(|error| {
                         NativeModelResolutionError::after_selection(
@@ -2533,6 +2557,9 @@ impl NativeSubscriptions {
                     descriptor,
                     model,
                     evidence,
+                    retrieval: Some(Arc::new(crate::anthropic::AnthropicRetrievalPort::new(
+                        retrieval,
+                    ))),
                 };
                 let compile_authority = attach.then_some(authority);
                 Ok((resolved, compile_authority))
@@ -2664,6 +2691,7 @@ impl NativeSubscriptions {
                         descriptor,
                         model,
                         evidence,
+                        retrieval: None,
                     },
                     compile_authority,
                 ))
@@ -2743,6 +2771,7 @@ impl NativeSubscriptions {
                         descriptor,
                         model,
                         evidence,
+                        retrieval: None,
                     },
                     compile_authority,
                 ))

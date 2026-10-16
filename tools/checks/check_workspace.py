@@ -1178,7 +1178,14 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         "anthropic": {"ANTHROPIC_API_HOSTED_RETRIEVAL", "CLAUDE_OAUTH_HOSTED_RETRIEVAL"},
         "xai": {"SUPERGROK_HOSTED_RETRIEVAL", "XAI_API_HOSTED_RETRIEVAL"},
         "openrouter": {"OPENROUTER_HOSTED_RETRIEVAL"},
+        # The deferred port the session's executor connects to.
+        "tools": {
+            "ExecutionOperationControl", "RetrievalError", "RetrievalErrorKind",
+            "RetrievalFuture", "RetrievalKind", "RetrievalRequest",
+        },
     },
+    # The Anthropic API executor connects its side-request port.
+    ("plakous-hosted", "src/platform.rs"): {"anthropic": {"AnthropicRetrievalPort"}},
     # The compile-time check that the host release timeout covers the store deadline.
     ("plakous-hosted", "src/lib.rs"): {"agent": {"DEFAULT_STORE_OPERATION_TIMEOUT"}},
     ("plak", "src/commands/reload_rehearsal.rs"): {

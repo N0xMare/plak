@@ -26,6 +26,7 @@ use plakous::prompts::identity::ProductAgreementPack;
 pub struct ProductToolExtensions {
     registrations: Arc<[ToolRegistration]>,
     host_facts: plakous_host_protocol::PromptHostFacts,
+    retrieval: Option<Arc<crate::tool_plan::DeferredRetrievalPort>>,
 }
 
 impl ProductToolExtensions {
@@ -61,6 +62,7 @@ impl ProductToolExtensions {
         Ok(Self {
             registrations: registrations.into(),
             host_facts: plakous_host_protocol::PromptHostFacts::default(),
+            retrieval: None,
         })
     }
 
@@ -107,10 +109,28 @@ impl ProductToolExtensions {
             .registrations()
             .map_err(|error| CliFailure::new(format!("hosted retrieval wrappers: {error}")))?;
         let host_facts = self.host_facts;
-        Ok(
+        let mut extended =
             Self::from_nested_registrations(self.registrations.iter().cloned().chain(appended))?
-                .with_host_facts(host_facts),
-        )
+                .with_host_facts(host_facts);
+        extended.retrieval = binding.slot();
+        Ok(extended)
+    }
+
+    /// Connects the session's retrieval executor to the wrappers bound
+    /// before it existed. Without bound wrappers the port is dropped.
+    pub(crate) fn connect_retrieval(
+        &self,
+        port: Option<Arc<dyn plakous::tools::web::RetrievalPort>>,
+    ) -> CliResult<()> {
+        let Some(slot) = &self.retrieval else {
+            return Ok(());
+        };
+        let port = port.ok_or_else(|| {
+            CliFailure::new(
+                "hosted retrieval tools are bound but the route built no retrieval port",
+            )
+        })?;
+        slot.connect(port).map_err(CliFailure::new)
     }
 
     /// Registers this pack's executors through the pack seam.

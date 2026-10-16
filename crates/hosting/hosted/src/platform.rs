@@ -255,16 +255,21 @@ pub(crate) async fn construct_platform_runtime_with(
                 .anthropic
                 .as_ref()
                 .ok_or_else(|| CliFailure::new("Anthropic API model facts are unavailable"))?;
-            plakous::anthropic::AnthropicLanguageModel::configured_with_exchange_observer(
-                credentials.anthropic()?,
-                "plak/anthropic",
-                model,
-                &row.binding_evidence_for(provider, window),
-                behavior,
-                maximum,
-                observer.clone(),
-            )
-            .map_err(api_error)?
+            let (configured, retrieval) =
+                plakous::anthropic::AnthropicLanguageModel::configured_with_retrieval(
+                    credentials.anthropic()?,
+                    "plak/anthropic",
+                    model,
+                    &row.binding_evidence_for(provider, window),
+                    behavior,
+                    maximum,
+                    observer.clone(),
+                )
+                .map_err(api_error)?;
+            spec.topology_extensions.connect_retrieval(Some(Arc::new(
+                plakous::anthropic::AnthropicRetrievalPort::new(retrieval),
+            )))?;
+            configured
         }
         PlatformProvider::Xai => {
             let source = credentials.xai()?;

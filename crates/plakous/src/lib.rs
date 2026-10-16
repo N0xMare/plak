@@ -338,6 +338,8 @@ pub mod construction;
 /// leases, compare-and-swap operations, object graphs, and SQL remain private.
 pub mod sessions;
 
+#[cfg(feature = "anthropic")]
+mod anthropic_retrieval;
 #[cfg(test)]
 mod test_model;
 
@@ -351,6 +353,8 @@ pub mod subscriptions;
 /// inputs. Route qualification and admission remain separate from nameability.
 #[cfg(feature = "anthropic")]
 pub mod anthropic {
+    pub use crate::anthropic_retrieval::AnthropicRetrievalPort;
+    pub use plakous_anthropic::AnthropicRetrieval;
     pub use plakous_anthropic::{ANTHROPIC_API_HOSTED_RETRIEVAL, CLAUDE_OAUTH_HOSTED_RETRIEVAL};
     pub use plakous_anthropic::{
         ANTHROPIC_API_VERSION, ANTHROPIC_MESSAGES_PATH, ANTHROPIC_PLATFORM_ORIGIN, AnthropicApiKey,

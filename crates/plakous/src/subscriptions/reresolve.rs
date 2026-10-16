@@ -225,6 +225,7 @@ mod tests {
                     codex_exact: None,
                     xai_exact: None,
                 },
+                retrieval: None,
             },
             configured,
             native_tool_mode: Some(fixture.tool_mode),

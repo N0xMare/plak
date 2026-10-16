@@ -110,6 +110,11 @@ pub use oauth::{
 pub use plakous_messages::{
     MessagesProviderConfigurationError, compile_messages_oauth_configuration,
 };
+pub use plakous_messages::{
+    MessagesRetrievalError, MessagesRetrievalErrorKind, MessagesRetrievalLimits,
+    MessagesRetrievalOutcome, MessagesRetrievalQuery, MessagesRetrievalSource,
+    MessagesRetrievalUsage,
+};
 pub use request::{
     AnthropicMessagesOperationBinding, MessagesRequestTranslator, PreparedMessagesRequest,
     REDACTED_REPLAY_KIND, SIGNATURE_REPLAY_KIND, ToolOwnership,

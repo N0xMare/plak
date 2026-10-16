@@ -7,15 +7,18 @@
 
 use std::collections::BTreeSet;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use plakous::model::{
     HostedRetrievalSupport, HostedRetrievalTable, HostedRetrievalTool, HostedRetrievalUnsupported,
     ToolName,
 };
 use plakous::subscriptions::NativeProvider;
-use plakous::tools::web::{RetrievalPort, WebTool};
-use plakous::tools::{CodingPresentation, McpServerName};
+use plakous::tools::web::{
+    RetrievalError, RetrievalErrorKind, RetrievalFuture, RetrievalKind, RetrievalPort,
+    RetrievalRequest, WebTool,
+};
+use plakous::tools::{CodingPresentation, ExecutionOperationControl, McpServerName};
 
 use crate::binding::{ApiTarget, PlatformProvider};
 
@@ -329,9 +332,66 @@ pub(crate) struct ToolPlan {
 pub(crate) struct RetrievalBinding {
     presentation: CodingPresentation,
     port: Arc<dyn RetrievalPort>,
+    slot: Option<Arc<DeferredRetrievalPort>>,
+}
+
+/// A route's retrieval port known by its kinds at bind and connected once
+/// the session's executor exists: binding precedes model construction on
+/// the API routes. A call before the connection is an ordinary tool error.
+pub(crate) struct DeferredRetrievalPort {
+    kinds: Vec<RetrievalKind>,
+    port: OnceLock<Arc<dyn RetrievalPort>>,
+}
+
+impl DeferredRetrievalPort {
+    pub(crate) fn new(kinds: &[RetrievalKind]) -> Self {
+        Self {
+            kinds: kinds.to_vec(),
+            port: OnceLock::new(),
+        }
+    }
+
+    /// Connects the session's executor; it must serve every bound kind, and
+    /// a slot connects once.
+    pub(crate) fn connect(&self, port: Arc<dyn RetrievalPort>) -> Result<(), &'static str> {
+        if !self.kinds.iter().all(|kind| port.kinds().contains(kind)) {
+            return Err("the session's retrieval port does not serve the bound tools");
+        }
+        self.port
+            .set(port)
+            .map_err(|_| "the session's retrieval port is already connected")
+    }
+}
+
+impl RetrievalPort for DeferredRetrievalPort {
+    fn kinds(&self) -> &[RetrievalKind] {
+        &self.kinds
+    }
+
+    fn retrieve(
+        &self,
+        request: RetrievalRequest,
+        control: ExecutionOperationControl,
+    ) -> RetrievalFuture {
+        match self.port.get() {
+            Some(port) => port.retrieve(request, control),
+            None => Box::pin(async {
+                Err(RetrievalError::new(
+                    RetrievalErrorKind::Unavailable,
+                    "hosted retrieval is not connected to this session's route",
+                ))
+            }),
+        }
+    }
 }
 
 impl RetrievalBinding {
+    /// The deferred slot the session's executor connects to, when the port
+    /// was bound before the executor existed.
+    pub(crate) fn slot(&self) -> Option<Arc<DeferredRetrievalPort>> {
+        self.slot.clone()
+    }
+
     pub(crate) const fn presentation(&self) -> CodingPresentation {
         self.presentation
     }
@@ -443,6 +503,15 @@ impl ToolRoute {
         }
     }
 
+    /// The retrievals this build's port for the route serves; empty where
+    /// the route has no port.
+    pub(crate) const fn retrieval_kinds(self) -> &'static [RetrievalKind] {
+        match self {
+            Self::Claude | Self::Anthropic => &[RetrievalKind::WebSearch, RetrievalKind::PageFetch],
+            Self::Codex | Self::Grok | Self::OpenAi | Self::XaiApi | Self::OpenRouter => &[],
+        }
+    }
+
     /// The tool vocabulary the route's coding presentation uses.
     const fn presentation(self) -> CodingPresentation {
         match self {
@@ -471,9 +540,9 @@ impl ToolRoute {
 ///
 /// Every selected tool must be served, or binding refuses; nothing is
 /// silently left out. A hosted retrieval tool binds its local wrapper only
-/// where the route's release-owned table qualifies it and the route supplies
-/// a retrieval port serving it; this build supplies no port, so the table
-/// refuses it or it is refused as not built in. Every Plak-run and MCP tool
+/// where the route's release-owned table qualifies it and the route has a
+/// retrieval port serving it; that port is a deferred slot the session's
+/// executor connects once it exists. Every Plak-run and MCP tool
 /// is refused as not built in. Only the empty selection binds.
 ///
 /// # Errors
@@ -484,13 +553,30 @@ pub(crate) fn bind_tool_plan(
     route: ToolRoute,
     route_label: &str,
 ) -> Result<ToolPlan, ToolPlanRefusal> {
-    bind_tool_plan_with(
+    bind_tool_plan_on(selection, route, route.hosted_retrieval(), route_label)
+}
+
+/// [`bind_tool_plan`] over an explicit support table, with the route's
+/// deferred port.
+pub(crate) fn bind_tool_plan_on(
+    selection: &TemplateToolSelection,
+    route: ToolRoute,
+    table: HostedRetrievalTable,
+    route_label: &str,
+) -> Result<ToolPlan, ToolPlanRefusal> {
+    let kinds = route.retrieval_kinds();
+    let slot = (!kinds.is_empty()).then(|| Arc::new(DeferredRetrievalPort::new(kinds)));
+    let mut plan = bind_tool_plan_with(
         selection,
-        route.hosted_retrieval(),
+        table,
         route.presentation(),
         route_label,
-        None,
-    )
+        slot.clone().map(|slot| slot as Arc<dyn RetrievalPort>),
+    )?;
+    if let Some(binding) = plan.retrieval.as_mut() {
+        binding.slot = slot;
+    }
+    Ok(plan)
 }
 
 /// [`bind_tool_plan`] over an explicit support table and retrieval port.
@@ -524,7 +610,11 @@ pub(crate) fn bind_tool_plan_with(
     }
     let mut plan = ToolPlan::new(selection, []);
     if wrappers {
-        plan.retrieval = port.map(|port| RetrievalBinding { presentation, port });
+        plan.retrieval = port.map(|port| RetrievalBinding {
+            presentation,
+            port,
+            slot: None,
+        });
     }
     Ok(plan)
 }
@@ -1004,26 +1094,22 @@ mod tests {
         Ok(())
     }
 
-    struct FakePort(Vec<plakous::tools::web::RetrievalKind>);
+    struct FakePort(Vec<RetrievalKind>);
 
     impl RetrievalPort for FakePort {
-        fn kinds(&self) -> &[plakous::tools::web::RetrievalKind] {
+        fn kinds(&self) -> &[RetrievalKind] {
             &self.0
         }
 
-        fn retrieve(
-            &self,
-            _: plakous::tools::web::RetrievalRequest,
-            _: plakous::tools::ExecutionOperationControl,
-        ) -> plakous::tools::web::RetrievalFuture {
+        fn retrieve(&self, _: RetrievalRequest, _: ExecutionOperationControl) -> RetrievalFuture {
             Box::pin(async { Ok(plakous::tools::web::RetrievalOutcome::default()) })
         }
     }
 
     fn search_and_fetch_port() -> Arc<dyn RetrievalPort> {
         Arc::new(FakePort(vec![
-            plakous::tools::web::RetrievalKind::WebSearch,
-            plakous::tools::web::RetrievalKind::PageFetch,
+            RetrievalKind::WebSearch,
+            RetrievalKind::PageFetch,
         ]))
     }
 
@@ -1091,6 +1177,124 @@ mod tests {
              template's tools"
         );
         Ok(())
+    }
+
+    /// Records every request and answers each with its own query or URL.
+    #[derive(Default)]
+    struct RecordingPort(std::sync::Mutex<Vec<RetrievalRequest>>);
+
+    impl RetrievalPort for RecordingPort {
+        fn kinds(&self) -> &[RetrievalKind] {
+            &[RetrievalKind::WebSearch, RetrievalKind::PageFetch]
+        }
+
+        fn retrieve(
+            &self,
+            request: RetrievalRequest,
+            _: ExecutionOperationControl,
+        ) -> RetrievalFuture {
+            let text = match &request {
+                RetrievalRequest::WebSearch { query, .. } => query.clone(),
+                RetrievalRequest::PageFetch { url, .. } => url.clone(),
+                RetrievalRequest::PostSearch { .. } => String::new(),
+            };
+            if let Ok(mut requests) = self.0.lock() {
+                requests.push(request);
+            }
+            Box::pin(async move {
+                Ok(plakous::tools::web::RetrievalOutcome {
+                    text,
+                    ..plakous::tools::web::RetrievalOutcome::default()
+                })
+            })
+        }
+    }
+
+    fn control() -> ExecutionOperationControl {
+        ExecutionOperationControl::new(plakous::model::CancellationToken::new())
+    }
+
+    #[tokio::test]
+    async fn a_qualified_anthropic_or_claude_row_binds_a_deferred_port_the_executor_connects()
+    -> TestResult {
+        let qualified = HostedRetrievalTable::new(
+            HostedRetrievalSupport::Supported,
+            HostedRetrievalSupport::Supported,
+            HostedRetrievalSupport::Unsupported {
+                reason: HostedRetrievalUnsupported::NotOffered,
+            },
+        );
+        let selection = TemplateToolSelection::parse(["web_search", "web_fetch"])?;
+        for (route, label) in [
+            (ToolRoute::Anthropic, "anthropic"),
+            (ToolRoute::Claude, "claude"),
+        ] {
+            let plan = bind_tool_plan_on(&selection, route, qualified, label)?;
+            let extensions = crate::tools::ProductToolExtensions::empty()
+                .with_plan(&plan)
+                .map_err(|error| error.to_string())?;
+            assert_eq!(
+                extensions.names().map(ToolName::as_str).collect::<Vec<_>>(),
+                ["WebSearch", "WebFetch"],
+                "{label}"
+            );
+            let port = plan.retrieval().ok_or("no binding")?.port();
+            let early = port
+                .retrieve(
+                    RetrievalRequest::PageFetch {
+                        url: "https://example.com/".to_owned(),
+                        prompt: None,
+                    },
+                    control(),
+                )
+                .await
+                .err()
+                .ok_or("an unconnected port answered")?;
+            assert_eq!(early.kind(), RetrievalErrorKind::Unavailable);
+
+            let executor = Arc::new(RecordingPort::default());
+            extensions
+                .connect_retrieval(Some(Arc::clone(&executor) as Arc<dyn RetrievalPort>))
+                .map_err(|error| error.to_string())?;
+            let answered = port
+                .retrieve(
+                    RetrievalRequest::WebSearch {
+                        query: "rust".to_owned(),
+                        allowed_domains: Vec::new(),
+                        blocked_domains: Vec::new(),
+                    },
+                    control(),
+                )
+                .await?;
+            assert_eq!(answered.text, "rust");
+            assert_eq!(executor.0.lock().map_err(|_| "poisoned")?.len(), 1);
+            assert!(
+                extensions
+                    .connect_retrieval(Some(executor as Arc<dyn RetrievalPort>))
+                    .is_err(),
+                "a slot connects once"
+            );
+        }
+        // Routes without a port refuse a qualified row as not built in, and
+        // every shipped row still refuses.
+        let refused = bind_tool_plan_on(&selection, ToolRoute::OpenAi, qualified, "openai")
+            .err()
+            .ok_or("a portless route bound")?;
+        assert!(refused.to_string().contains("not available in this build"));
+        for route in [ToolRoute::Anthropic, ToolRoute::Claude] {
+            assert!(bind_tool_plan(&selection, route, "x").is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_connected_executor_must_serve_every_bound_kind() {
+        let slot =
+            DeferredRetrievalPort::new(&[RetrievalKind::WebSearch, RetrievalKind::PageFetch]);
+        assert!(
+            slot.connect(Arc::new(FakePort(vec![RetrievalKind::WebSearch])))
+                .is_err()
+        );
     }
 
     #[test]

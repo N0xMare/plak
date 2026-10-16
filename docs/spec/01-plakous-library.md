@@ -4740,8 +4740,14 @@ Anthropic API and Claude OAuth ports issue side requests with no client tools,
 `max_tokens` 4,096, `max_uses` 5 for search and 1 for fetch, and adaptive
 thinking at the lowest effort the model admits where the model requires
 thinking. A template binds a wrapper only where its route's release-owned
-table row is `Supported` and the route supplies a port serving it; every row
-ships unsupported, so binding refuses. Route-specific inline allowlists and
+table row is `Supported` and the route has a port serving it; every row
+ships unsupported, so binding refuses. The Anthropic API and Claude OAuth
+routes have one (`plakous::anthropic::AnthropicRetrievalPort` over
+`AnthropicRetrieval`): `AnthropicLanguageModel::configured_with_retrieval`
+and the Claude subscription resolution (`ResolvedProvider::retrieval_port`)
+build it from the session's own executor. Binding precedes model
+construction on API routes, so the plan binds a deferred port the executor
+connects once; a call before that connection is an ordinary tool error. Route-specific inline allowlists and
 class-specific unknown-outcome messages land with the first route whose
 parity requires inline retrieval.
 Exact outcome locators (OpenAI background resume, xAI deferred/stored) are a

@@ -1825,6 +1825,7 @@ async fn turn_scoped_prepare_without_root_does_not_start_inference() -> Result<(
                 codex_exact: None,
                 xai_exact: None,
             },
+            retrieval: None,
         },
         configured: unwrapped_configured,
         native_tool_mode: Some(NativeToolMode::CodeModeOnly),
