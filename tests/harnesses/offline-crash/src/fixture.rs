@@ -2932,7 +2932,9 @@ impl ScriptedOperation {
 /// Builds an exact twin of the scripted source binding for summary requests.
 ///
 /// Source tools, configuration identities and authority are preserved; only
-/// the model scenario and compaction generation limit change.
+/// the model scenario and compaction generation limit change. `extensions`
+/// are the source binding's root extensions; a topology twin carries
+/// `tree_tools` instead, as its source does.
 ///
 /// # Errors
 ///
@@ -2944,6 +2946,7 @@ pub fn scripted_compaction_runtime_binding(
     script: &Arc<ScriptPlan>,
     tree_tools: Option<Vec<ToolRegistration>>,
     sidecar: Option<&Path>,
+    extensions: Vec<ToolRegistration>,
 ) -> HarnessResult<SessionRuntimeBinding> {
     let runtime = if let Some(tree_tools) = tree_tools {
         scripted_topology_runtime_binding_inner(
@@ -2962,7 +2965,7 @@ pub fn scripted_compaction_runtime_binding(
             ScriptedOperation::Compact,
             sidecar.ok_or("scripted Code Mode compaction needs its source sidecar")?,
             None,
-            Vec::new(),
+            extensions,
         )?
     } else {
         scripted_runtime_binding_with_cursor_inner(
@@ -2970,7 +2973,7 @@ pub fn scripted_compaction_runtime_binding(
             controller,
             script,
             ScriptedOperation::Compact,
-            Vec::new(),
+            extensions,
         )?
     };
     Ok(runtime.with_compaction_output_limit()?)
@@ -4083,6 +4086,7 @@ mod tests {
                 &script,
                 None,
                 None,
+                Vec::new(),
             )
             .expect("compact");
             assert_eq!(source.target_binding(), compact.target_binding());
@@ -4101,6 +4105,7 @@ mod tests {
                 &script,
                 Some(Vec::new()),
                 None,
+                Vec::new(),
             )
             .expect("topology compact");
             assert_eq!(source.target_binding(), compact.target_binding());

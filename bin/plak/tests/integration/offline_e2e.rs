@@ -4519,6 +4519,60 @@ fn a_code_mode_cell_calls_a_template_mcp_tool_as_a_nested_call() {
     assert_eq!(std::fs::read_to_string(&log).expect("call log"), "echo\n");
 }
 
+/// An explicit compaction of a session whose history holds a template MCP
+/// call commits: the summary binding carries the root's MCP extension, so
+/// its tool surface is the source's, and the server sees the call once.
+#[test]
+fn a_compaction_over_a_template_mcp_call_commits_and_continues() {
+    let fixture = Fixture::new(&json!({
+        "version": 1,
+        "maximum_projected_input": 200_000,
+        "content_sensitive_projection": true,
+        "fold": "accept",
+        "steps": [
+            {"output": {"tool": {"name": "mcp__fake__echo", "arguments": {"text": "from-mcp"}}}, "finish": "tool_calls"},
+            {"output": {"text": "the first answer"}, "usage": {}},
+            {"output": {"text": "the second answer"}, "usage": {}},
+            {"output": {"text": "the compacted answer"}, "usage": {}}
+        ]
+    }));
+    write_private(
+        &fixture.home().join("config.toml"),
+        "[root]\nagent = \"lead\"\n\n[orchestration]\nsubagents = false\n\n[compaction]\nenabled = false\n",
+    );
+    let log = fixture.root.join("mcp-calls.log");
+    enable_fake_mcp(&fixture, &["--call-log", log.to_str().expect("log path")]);
+    let mut agent = AgentProcess::start(&fixture, &[]);
+    agent.wait_for("ready", |record| record["kind"] == "ready");
+    agent.send(&prompt_frame("call the server"));
+    agent.wait_for("the first answer", |record| {
+        record["kind"] == "assistant" && record["text"] == "the first answer"
+    });
+    agent.wait_for_completed_turns(1);
+    agent.send(&prompt_frame("answer the second intent"));
+    agent.wait_for("the second answer", |record| {
+        record["kind"] == "assistant" && record["text"] == "the second answer"
+    });
+    agent.wait_for_completed_turns(2);
+    agent.send(&compact_frame());
+    let compact = agent.wait_for("the compaction outcome", |record| {
+        record["kind"] == "tool"
+            && record["activity_kind"] == "compact"
+            && matches!(record["state"].as_str(), Some("done" | "failed"))
+    });
+    assert_eq!(compact["state"], "done", "the fold committed: {compact}");
+    agent.send(&prompt_frame("carry on after the compaction"));
+    agent.wait_for("the follow-up answer", |record| {
+        record["kind"] == "assistant" && record["text"] == "the compacted answer"
+    });
+    agent.wait_for_completed_turns(3);
+    agent.send(&quit_frame());
+    let outcome = agent.finish();
+    assert!(outcome.status.success(), "stderr:\n{}", outcome.stderr);
+    assert_compaction_did_not_fail(&outcome);
+    assert_eq!(std::fs::read_to_string(&log).expect("call log"), "echo\n");
+}
+
 /// §6 quit over a live nested process: Ctrl+Q while a real cell's
 /// `exec_command` is still inside its yield must restore the terminal, let
 /// the process group's TERM reach the child's trap, and keep the session

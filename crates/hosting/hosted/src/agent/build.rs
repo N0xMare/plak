@@ -1546,7 +1546,7 @@ pub fn injected_root_tool_registrations(
     session: &crate::sessions::SessionRecord,
     state_roots: &ProductStateRoots,
 ) -> Result<Vec<plakous::tools::ToolRegistration>, String> {
-    let tools = frozen.selection(session.account.as_deref(), session.model.as_deref());
+    let tools = frozen.selection();
     let plan = bind_node_tool_plan(
         &tools,
         crate::tool_plan::ToolRoute::native(NativeProvider::Codex),

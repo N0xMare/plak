@@ -910,6 +910,25 @@ impl ToolPlanRefusal {
     }
 }
 
+impl ToolPlanRefusal {
+    /// The line a rebind refuses with: the session keeps its tools across a
+    /// rebind, so the remedy is a new session rather than a template edit.
+    pub(crate) fn rebind_line(&self) -> String {
+        let tool = &self.tool;
+        let reason = match &self.reason {
+            RefusalReason::Unoffered { route } => format!("{tool} is not available on {route}"),
+            RefusalReason::Unqualified { route } => {
+                format!("{tool} is not yet qualified on {route}")
+            }
+            RefusalReason::Unbuilt => format!("{tool} is not available in this build"),
+        };
+        format!(
+            "this session keeps its tools across a model change, and {reason}; remedy: /clear, \
+             or start a new session on that model"
+        )
+    }
+}
+
 /// Where a tool the route does not offer can run instead.
 fn not_offered_remedy(tool: &SelectedTool) -> &'static str {
     match tool {

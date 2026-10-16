@@ -1,6 +1,6 @@
 //! `mcp-fake-server [--style initialize|discover]
 //! [--tools standard|hundred|unlowerable] [--expect-env NAME=VALUE]
-//! [--call-log PATH] [--http]`
+//! [--call-log PATH] [--list-log PATH] [--http]`
 //! serves the scripted MCP server over stdio; the `exit` tool exits with
 //! status 3 mid-call. `unlowerable` adds `tangled`, whose `allOf` schema no
 //! portable schema can carry. `--expect-env` exits with status 4 before
@@ -8,7 +8,8 @@
 //! serves streamable HTTP on a loopback port instead, prints
 //! `listening on <url>` on stdout, and requires
 //! `Authorization: Bearer $MCP_FAKE_BEARER` when that variable is set.
-//! `--call-log` appends each called tool's name to PATH before it runs.
+//! `--call-log` appends each called tool's name to PATH before it runs;
+//! `--list-log` appends one `list` line to PATH per `tools/list` request.
 
 #![forbid(unsafe_code)]
 
@@ -26,6 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut http = false;
     let mut unlowerable = false;
     let mut call_log = None;
+    let mut list_log = None;
     let mut arguments = std::env::args().skip(1);
     while let Some(argument) = arguments.next() {
         if argument == "--http" {
@@ -39,6 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ("--tools", Some("hundred")) => hundred = true,
             ("--tools", Some("unlowerable")) => unlowerable = true,
             ("--call-log", Some(path)) => call_log = Some(std::path::PathBuf::from(path)),
+            ("--list-log", Some(path)) => list_log = Some(std::path::PathBuf::from(path)),
             ("--expect-env", Some(expected)) => {
                 let (name, value) = expected
                     .split_once('=')
@@ -69,6 +72,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(path) = call_log {
         server = server.with_call_log(path);
+    }
+    if let Some(path) = list_log {
+        server = server.with_list_log(path);
     }
     if http {
         let gate = HttpGate {

@@ -79,6 +79,7 @@ pub struct FakeServer {
     observed: Arc<Observed>,
     on_exit: Arc<dyn Fn() + Send + Sync>,
     call_log: Option<std::path::PathBuf>,
+    list_log: Option<std::path::PathBuf>,
 }
 
 impl FakeServer {
@@ -91,6 +92,7 @@ impl FakeServer {
             observed: Arc::default(),
             on_exit,
             call_log: None,
+            list_log: None,
         }
     }
 
@@ -103,6 +105,18 @@ impl FakeServer {
     )]
     pub fn with_call_log(mut self, path: std::path::PathBuf) -> Self {
         self.call_log = Some(path);
+        self
+    }
+
+    /// Appends one `list` line to `path` per `tools/list` request, so a test
+    /// in another process can count listings.
+    #[must_use]
+    #[allow(
+        dead_code,
+        reason = "only the binary logs listings; plakous-mcp compiles this file in process"
+    )]
+    pub fn with_list_log(mut self, path: std::path::PathBuf) -> Self {
+        self.list_log = Some(path);
         self
     }
 
@@ -160,6 +174,17 @@ pub fn standard_tools() -> Vec<Tool> {
     ]
 }
 
+fn append_line(path: &std::path::Path, line: &str) {
+    use std::io::Write as _;
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = writeln!(file, "{line}");
+    }
+}
+
 fn text(value: impl Into<String>) -> CallToolResponse {
     CallToolResponse::Complete(CallToolResult::success(vec![ContentBlock::text(value)]))
 }
@@ -197,6 +222,9 @@ impl ServerHandler for FakeServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> + Send + '_ {
+        if let Some(path) = &self.list_log {
+            append_line(path, "list");
+        }
         std::future::ready(Ok(ListToolsResult::with_all_items(self.tools.clone())))
     }
 
@@ -211,14 +239,7 @@ impl ServerHandler for FakeServer {
             .unwrap_or_else(PoisonError::into_inner)
             .push(request.name.to_string());
         if let Some(path) = &self.call_log {
-            use std::io::Write as _;
-            if let Ok(mut file) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-            {
-                let _ = writeln!(file, "{}", request.name);
-            }
+            append_line(path, request.name.as_ref());
         }
         let arguments = request.arguments.unwrap_or_default();
         Ok(match request.name.as_ref() {

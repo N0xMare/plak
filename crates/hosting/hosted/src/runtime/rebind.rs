@@ -339,12 +339,7 @@ pub(super) fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExtension>
     let spec = ProductAgentSpec {
         prompt_host_facts: config.prompt_host_facts(),
         product_home: Some(config.product_home.clone()),
-        tool_selection: config
-            .session
-            .frozen_tools
-            .as_ref()
-            .map(|frozen| frozen.selection(Some(account), Some(model)))
-            .unwrap_or_default(),
+        tool_selection: super::startup::root_tool_selection(&config.session),
         provider,
         resolved: std::sync::Arc::clone(&resolved),
         effort: target_effort,
@@ -745,6 +740,33 @@ pub(super) fn complete_rebind<P: plakous_host_protocol::ProtocolExtension>(
     Ok(())
 }
 
+/// The refusal of a rebind whose target route cannot serve one of the
+/// session's frozen tools. A rebind keeps those tools, so canonical tool
+/// authority never changes across it; this refuses before any durable work.
+fn frozen_tools_rebind_refusal<P: plakous_host_protocol::ProtocolExtension>(
+    config: &HostConfig<P>,
+    account: &str,
+    target_selection: &TargetSelection,
+) -> Option<String> {
+    let tools = super::startup::root_tool_selection(&config.session);
+    if tools.selection.is_empty() {
+        return None;
+    }
+    let route = match target_selection.api_target() {
+        Some(target) => Some(crate::tool_plan::ToolRoute::api(target)),
+        None => oauth_provider_for_account(account).and_then(crate::tool_plan::ToolRoute::native),
+    };
+    let Some(route) = route else {
+        return Some(format!(
+            "this session keeps its tools across a model change, and {account} serves none of \
+             them; remedy: /clear, or start a new session on that model"
+        ));
+    };
+    crate::tool_plan::bind_tool_plan(&tools.selection, route, account)
+        .err()
+        .map(|refusal| refusal.rebind_line())
+}
+
 /// The transcript line a completed rebind prints.
 ///
 /// A profile whose root differs from the source only in effort still forks.
@@ -926,6 +948,9 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
     if same_binding && profile_cards_active(config, roster)? {
         return Ok(Rebound::Unchanged);
     }
+    if let Some(refusal) = frozen_tools_rebind_refusal(config, &account, &target_selection) {
+        return Err(CliFailure::new(refusal));
+    }
     let operation = format!("plak:rebind:{}", uuid::Uuid::new_v4());
     let target_product_id = sessions::projector::WorkflowRequest {
         operation_id: operation.clone(),
@@ -955,6 +980,7 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
         record.target_selection = target_selection.clone();
         record.source_product_session_id = Some(config.session.id.clone());
         record.source_workflow_operation_id = Some(operation.clone());
+        record.frozen_tools.clone_from(&config.session.frozen_tools);
         record.validate_for_store().map_err(CliFailure::new)?;
         ProfileTarget::Api(Box::new(record))
     } else {
@@ -1468,7 +1494,17 @@ mod tests {
         root: &std::path::Path,
         executor: &ApplicationExecutor,
     ) -> (HostConfig<TestExtension>, AttachedCodingSession) {
+        actual_api_topology_host_with(root, executor, None)
+    }
+
+    /// [`actual_api_topology_host`] whose root was created with `frozen`.
+    fn actual_api_topology_host_with(
+        root: &std::path::Path,
+        executor: &ApplicationExecutor,
+        frozen: Option<crate::frozen_tools::FrozenRootTools>,
+    ) -> (HostConfig<TestExtension>, AttachedCodingSession) {
         let (mut config, _) = fresh_injected_attached_host(root);
+        config.session.frozen_tools = frozen;
         config.test_injection = None;
         config.state_roots = config
             .state_roots
@@ -1500,6 +1536,8 @@ mod tests {
             crate::agent::NATIVE_RUN_MAX_MODEL_ROUNDS,
             true,
         );
+        let mut parent = parent;
+        parent.tool_selection = startup::root_tool_selection(&config.session);
         let opened = executor
             .block_on(crate::agent::build_api_root_coding_session(
                 parent,
@@ -2126,6 +2164,174 @@ mod tests {
         );
         executor.block_on(opened.release()).unwrap().unwrap();
         assert!(crate::topology_runtime::lookup(&target_id).is_none());
+    }
+
+    /// The root's tools belong to the session: a rebind onto another model
+    /// keeps the MCP records frozen at creation, so canonical tool authority
+    /// is unchanged, nothing is listed again, and the successor binds them.
+    #[test]
+    fn a_rebind_keeps_the_sessions_frozen_mcp_tools_without_listing_again() {
+        let server = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .and_then(std::path::Path::parent)
+            .unwrap()
+            .join("mcp-fake-server");
+        assert!(
+            server.is_file(),
+            "run the workspace tests so the fixture is built"
+        );
+        let root = tempfile::tempdir().unwrap();
+        let executor = ApplicationExecutor::new().unwrap();
+        let list_log = root.path().join("mcp-lists.log");
+        let template = crate::binding::RootTemplateFact {
+            name: "lead".to_owned(),
+            account: "openai".to_owned(),
+            model: "gpt-5.6-luna".to_owned(),
+            tools: crate::tool_plan::TemplateToolSelection::parse(["mcp:fake"]).unwrap(),
+            tool_sections: std::collections::BTreeMap::from([(
+                "mcp_servers.fake".to_owned(),
+                format!(
+                    "[mcp_servers.fake]\ntransport = \"stdio\"\ncommand = {:?}\n\
+                     args = [\"--list-log\", {:?}]\nenv = {{ }}\nsecret_env = {{ }}\n\
+                     startup_seconds = 20\ncall_seconds = 120\n",
+                    server.to_str().unwrap(),
+                    list_log.to_str().unwrap()
+                ),
+            )]),
+        };
+        let unlisted = crate::frozen_tools::FrozenRootTools::at_creation(
+            Some(template),
+            Some("openai"),
+            Some("gpt-5.6-luna"),
+        );
+        let tools = unlisted.selection();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let records = crate::mcp_binding::bind_mcp_tools(
+            &tools.selection,
+            &tools.tool_sections,
+            &workspace,
+            crate::agent::ProductStateRoots::with_doubles(
+                root.path().join("h"),
+                root.path().join("s"),
+            )
+            .named_secrets(),
+            None,
+        )
+        .unwrap()
+        .records;
+        let frozen = unlisted.with_mcp_tools(records);
+        let (mut config, mut opened) =
+            actual_api_topology_host_with(root.path(), &executor, Some(frozen.clone()));
+        assert_eq!(std::fs::read_to_string(&list_log).unwrap(), "list\n");
+
+        let (events, _notes) = host_event_sink();
+        let (_actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
+        let state = RefCell::new(InterruptWatchState::default());
+        let rebound = handle_rebind(
+            &executor,
+            InterruptWatch::new(&receiver, &state),
+            &mut config,
+            &mut opened,
+            &mut Vec::new(),
+            &events,
+            "openai",
+            "gpt-5.6-sol",
+            Some("medium"),
+            None,
+            Some(ProductComposition::Direct),
+            None,
+            &crate::orchestration::RosterInput::unpinned("gpt-5.6-sol"),
+        )
+        .unwrap();
+        assert_eq!(rebound, Rebound::Switched);
+        let successor = config.store.load(&config.session.id).unwrap();
+        assert_eq!(successor.model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(successor.frozen_tools.as_ref(), Some(&frozen));
+        let registrations = crate::agent::injected_root_tool_registrations(
+            &frozen,
+            &successor,
+            &config.state_roots,
+        )
+        .unwrap();
+        assert!(
+            registrations
+                .iter()
+                .any(|registration| registration.name().as_str() == "mcp__fake__echo"),
+            "the successor binds the frozen records"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&list_log).unwrap(),
+            "list\n",
+            "neither the rebind nor a later build lists again"
+        );
+        executor.block_on(opened.release()).unwrap().unwrap();
+    }
+
+    /// A rebind whose target route cannot serve one of the session's tools
+    /// refuses with one line naming the tool and the remedy, before any
+    /// durable work.
+    #[test]
+    fn a_rebind_to_a_route_without_a_frozen_tool_refuses_up_front() {
+        let root = tempfile::tempdir().unwrap();
+        let mut config = code_mode_source_with_a_prefix(root.path());
+        config.session.frozen_tools = Some(crate::frozen_tools::FrozenRootTools::new(Some(
+            crate::binding::RootTemplateFact {
+                name: "lead".to_owned(),
+                account: "claude".to_owned(),
+                model: "m".to_owned(),
+                tools: crate::tool_plan::TemplateToolSelection::parse(["web_fetch"]).unwrap(),
+                tool_sections: std::collections::BTreeMap::new(),
+            },
+        )));
+        let mut opened = memory_attached_stub();
+        config
+            .session
+            .bind_plakous_locator(opened.locator())
+            .unwrap();
+        let (events, _rx) = host_event_sink();
+        let (_actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
+        let state = RefCell::new(InterruptWatchState::default());
+        let error = handle_rebind(
+            &ApplicationExecutor::new().unwrap(),
+            InterruptWatch::new(&receiver, &state),
+            &mut config,
+            &mut opened,
+            &mut Vec::new(),
+            &events,
+            "codex",
+            "offline-loopback-v2",
+            Some("medium"),
+            None,
+            Some(crate::binding::CompositionSelection::Direct),
+            None,
+            &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.message(),
+            "this session keeps its tools across a model change, and web_fetch is not available \
+             on codex; remedy: /clear, or start a new session on that model"
+        );
+        assert!(
+            config
+                .test_injection
+                .as_ref()
+                .unwrap()
+                .rebind_builds
+                .lock()
+                .unwrap()
+                .is_empty(),
+            "no target runtime was built"
+        );
+        assert!(
+            !matches!(
+                config.store.load_intents(&config.session.id),
+                Ok(intents) if !intents.workflow_requests.is_empty()
+            ),
+            "no workflow request was written"
+        );
     }
 
     #[test]

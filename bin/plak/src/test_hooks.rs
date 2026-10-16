@@ -639,8 +639,10 @@ impl RootTools {
     ) -> Result<Self, String> {
         let frozen = match &session.frozen_tools {
             Some(frozen) => frozen.clone(),
-            None => plakous_hosted::frozen_tools::FrozenRootTools::new(
+            None => plakous_hosted::frozen_tools::FrozenRootTools::at_creation(
                 product_config::SessionPolicy::load(paths)?.root_template,
+                session.account.as_deref(),
+                session.model.as_deref(),
             ),
         };
         Ok(Self {
@@ -832,6 +834,11 @@ impl OfflineSelection {
                     &plan,
                     tree_tools,
                     sidecar.as_deref(),
+                    if runtime_tree.is_some() || plan.seal_family_artifacts {
+                        Vec::new()
+                    } else {
+                        root_tools.registrations()?
+                    },
                 )
             } else if let Some(prepared) = runtime_tree.as_ref() {
                 // The same driver every time, so a child spawned on one runtime

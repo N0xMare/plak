@@ -3,8 +3,9 @@
 //!
 //! Editing the `[root] agent` template, a `[tools.*]` table or an MCP server
 //! later never changes a session that already exists: reopen, clear and
-//! rebind read only this record. A new session takes the configuration as it
-//! is then.
+//! rebind read only this record, and a rebind onto another tuple keeps it, so
+//! canonical tool authority never changes across a rebind. A new session
+//! takes the configuration as it is then.
 
 use std::collections::BTreeMap;
 
@@ -14,25 +15,39 @@ use serde::{Deserialize, Serialize};
 use crate::binding::RootTemplateFact;
 use crate::tool_plan::{NodeToolSelection, TemplateToolSelection};
 
-/// The `[root] agent` template as configured when the session was created,
-/// and the MCP tools its selection reached then.
+/// The `[root] agent` template as configured when the session was created on
+/// its tuple, and the MCP tools its selection reached then. A session created
+/// off the template's tuple froze no template and has no optional tools.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct FrozenRootTools {
     template: Option<RootTemplateFact>,
-    /// `Some` once the selection's MCP servers were listed at creation;
-    /// `None` when the session's tuple did not run the template's tools then.
+    /// `Some` once the selection's MCP servers were listed at creation.
     mcp_tools: Option<Vec<McpToolRecord>>,
 }
 
 impl FrozenRootTools {
-    /// Freezes the configured `[root] agent` template; its MCP tools are
-    /// added by [`Self::with_mcp_tools`] once listed.
+    /// Freezes `template` as the root's tools; its MCP tools are added by
+    /// [`Self::with_mcp_tools`] once listed.
     #[must_use]
     pub fn new(template: Option<RootTemplateFact>) -> Self {
         Self {
             template,
             mcp_tools: None,
         }
+    }
+
+    /// The freeze a session created on (`account`, `model`) takes: the
+    /// configured template when that is exactly its tuple, and none
+    /// otherwise (spec 03 §3).
+    #[must_use]
+    pub fn at_creation(
+        configured: Option<RootTemplateFact>,
+        account: Option<&str>,
+        model: Option<&str>,
+    ) -> Self {
+        Self::new(configured.filter(|fact| {
+            account == Some(fact.account.as_str()) && model == Some(fact.model.as_str())
+        }))
     }
 
     /// The same freeze with the MCP tools listed at creation.
@@ -42,16 +57,19 @@ impl FrozenRootTools {
         self
     }
 
-    /// The root's tools for the tuple it runs: the frozen template's list
-    /// when the tuple is exactly the template's, and none otherwise
-    /// (spec 03 §3).
+    /// The root's tools, whatever tuple the session runs now: a rebind
+    /// never changes them (spec 03 §3).
     #[must_use]
-    pub fn selection(&self, account: Option<&str>, model: Option<&str>) -> NodeToolSelection {
-        let mut tools =
-            RootTemplateFact::root_tool_selection(self.template.as_ref(), account, model);
-        if !tools.selection.is_empty() {
-            tools.mcp_tools.clone_from(&self.mcp_tools);
-        }
+    pub fn selection(&self) -> NodeToolSelection {
+        let Some(template) = self.template.as_ref() else {
+            return NodeToolSelection::default();
+        };
+        let mut tools = RootTemplateFact::root_tool_selection(
+            Some(template),
+            Some(&template.account),
+            Some(&template.model),
+        );
+        tools.mcp_tools.clone_from(&self.mcp_tools);
         tools
     }
 
@@ -146,33 +164,34 @@ mod tests {
     }
 
     #[test]
-    fn a_freeze_round_trips_and_applies_only_on_the_templates_tuple() -> TestResult {
-        let frozen = FrozenRootTools::new(Some(fact(&["fetch_url", "mcp:github"])?))
-            .with_mcp_tools(Vec::new());
+    fn a_freeze_round_trips_and_applies_whatever_tuple_runs() -> TestResult {
+        let frozen = FrozenRootTools::at_creation(
+            Some(fact(&["fetch_url", "mcp:github"])?),
+            Some("codex"),
+            Some("m"),
+        )
+        .with_mcp_tools(Vec::new());
         let decoded = FrozenRootTools::decode(&frozen.encode()?)?;
         assert_eq!(decoded, frozen);
-        let on_template = decoded.selection(Some("codex"), Some("m"));
+        let tools = decoded.selection();
         assert_eq!(
-            on_template.selection,
+            tools.selection,
             TemplateToolSelection::parse(["fetch_url", "mcp:github"])?
         );
         assert_eq!(
-            on_template
+            tools
                 .tool_sections
                 .get("tools.fetch_url")
                 .map(String::as_str),
             Some("[tools.fetch_url]\nmax_bytes = 4096\n")
         );
-        assert_eq!(on_template.mcp_tools, Some(Vec::new()));
-        assert_eq!(
-            decoded.selection(Some("codex"), Some("other")),
-            NodeToolSelection::default()
-        );
+        assert_eq!(tools.mcp_tools, Some(Vec::new()));
+        let off_tuple =
+            FrozenRootTools::at_creation(Some(fact(&["fetch_url"])?), Some("codex"), Some("other"));
+        assert_eq!(off_tuple, FrozenRootTools::new(None));
+        assert_eq!(off_tuple.selection(), NodeToolSelection::default());
         let unconfigured = FrozenRootTools::decode(&FrozenRootTools::new(None).encode()?)?;
-        assert_eq!(
-            unconfigured.selection(Some("codex"), Some("m")),
-            NodeToolSelection::default()
-        );
+        assert_eq!(unconfigured.selection(), NodeToolSelection::default());
         Ok(())
     }
 

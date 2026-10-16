@@ -2100,7 +2100,12 @@ async fn a_pilot_feed_projects_identically_at_every_page_boundary() -> TestResul
         session.agent().prompt(prompt).await?.result().await?;
     }
     let compaction = plakous_offline_crash_harness::scripted_compaction_runtime_binding(
-        workspace, controller, &plan, None, None,
+        workspace,
+        controller,
+        &plan,
+        None,
+        None,
+        Vec::new(),
     )?;
     let CompactSessionOutcome::Compacted { .. } = sessions
         .compact(CompactSessionRequest::new(

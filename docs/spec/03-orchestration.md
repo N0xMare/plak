@@ -384,15 +384,21 @@ states the tier and workspace it actually has.
 A node's grant also includes its own template's optional `tools`, resolved
 against its route when it binds (chapter 01); a tool the route cannot serve
 refuses the bind rather than being silently omitted. A child binds its own
-frozen card's list, never its parent's. The root binds its `[root] agent`
-template's list only while it runs that template's exact account and model;
-a root bound by explicit `--account` / `--model` has none. The root's
-template (its account, model and list) and the `[tools.*]` / `[mcp_servers.*]`
-tables it reaches are frozen into the session record when its runtime is
-first created, with the MCP tools the list reached then; reopen, clear and
-rebind read only that record, and its clear, fork and rebind successors
-inherit it. Editing the template or a table changes new sessions only. A
-wildcard `mcp:<id>` tool omitted at creation leaves one Settings notice in the
+frozen card's list, never its parent's. The root's optional tools are a
+property of the session, decided once when its runtime is first created: a
+session created on its `[root] agent` template's exact account and model
+freezes that template (its account, model and list), the `[tools.*]` /
+`[mcp_servers.*]` tables it reaches and the MCP tools the list reached then
+into the session record; a session created on any other tuple (a root bound by
+explicit `--account` / `--model`) freezes none and has no optional tools for
+its life. Reopen, clear and rebind read only that record, and its clear, fork
+and rebind successors inherit it and bind the same selection, sections and MCP
+records whatever tuple they move to, so canonical tool authority never changes
+across a rebind (chapter 01 durable rebind). A rebind whose target route
+cannot serve one of the frozen tools refuses before any durable work with one
+line naming the tool and the remedy (`/clear`, or a new session on that
+model). Editing the template or a table changes new sessions only. A wildcard
+`mcp:<id>` tool omitted at creation leaves one Settings notice in the
 transcript.
 
 ### 3.1 A child gets at most its parent's tools

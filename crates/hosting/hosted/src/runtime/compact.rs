@@ -1675,6 +1675,7 @@ mod tests {
                         &script,
                         None,
                         None,
+                        Vec::new(),
                     )
                 } else {
                     plakous_offline_crash_harness::scripted_runtime_binding_with_cursor(
@@ -1950,6 +1951,7 @@ mod tests {
                     &script,
                     None,
                     None,
+                    Vec::new(),
                 )
                 .map_err(|error| error.to_string())
             } else {

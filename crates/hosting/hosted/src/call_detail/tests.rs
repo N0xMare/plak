@@ -458,7 +458,12 @@ async fn a_compacted_call_answers_from_its_row_and_a_childs_call_only_by_agent_i
     );
 
     let compaction = plakous_offline_crash_harness::scripted_compaction_runtime_binding(
-        workspace, controller, &plan, None, None,
+        workspace,
+        controller,
+        &plan,
+        None,
+        None,
+        Vec::new(),
     )?;
     let CompactSessionOutcome::Compacted { target, .. } = sessions
         .compact(CompactSessionRequest::new(

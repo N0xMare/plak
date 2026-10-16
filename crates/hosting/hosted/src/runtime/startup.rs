@@ -734,21 +734,21 @@ pub(super) fn api_parent_from_config<P: plakous_host_protocol::ProtocolExtension
     Ok(parent)
 }
 
-/// The root's optional tools: its frozen `[root] agent` template's list when
-/// this session runs that template's exact tuple, otherwise none. A record
-/// not yet frozen has none.
+/// The root's optional tools: the `[root] agent` template's list frozen when
+/// the session was created on that template's tuple, whatever tuple it runs
+/// now. A record not yet frozen has none.
 pub(super) fn root_tool_selection(session: &SessionRecord) -> crate::tool_plan::NodeToolSelection {
     session
         .frozen_tools
         .as_ref()
-        .map(|frozen| frozen.selection(session.account.as_deref(), session.model.as_deref()))
+        .map(crate::frozen_tools::FrozenRootTools::selection)
         .unwrap_or_default()
 }
 
 /// Freezes the root's optional tools into the record before its runtime is
-/// first created: the `[root] agent` template as configured now and, when
-/// the session runs its tuple, the MCP tools its selection reaches, listed
-/// once here. A wildcard's omitted tool becomes a transcript notice. A
+/// first created: when the session runs the `[root] agent` template's tuple,
+/// the template as configured now and the MCP tools its selection reaches,
+/// listed once here; off that tuple, none for the session's life. A wildcard's omitted tool becomes a transcript notice. A
 /// refusal fails the creation like any bind refusal.
 fn freeze_root_tools<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut HostConfig<P>,
@@ -756,11 +756,12 @@ fn freeze_root_tools<P: plakous_host_protocol::ProtocolExtension>(
     if config.session.frozen_tools.is_some() {
         return Ok(());
     }
-    let mut frozen = crate::frozen_tools::FrozenRootTools::new(config.root_template.clone());
-    let tools = frozen.selection(
+    let mut frozen = crate::frozen_tools::FrozenRootTools::at_creation(
+        config.root_template.clone(),
         config.session.account.as_deref(),
         config.session.model.as_deref(),
     );
+    let tools = frozen.selection();
     if tools.selection.mcp_servers().next().is_some() {
         let bound = crate::mcp_binding::bind_mcp_tools(
             &tools.selection,
@@ -1185,17 +1186,7 @@ mod tests {
             frozen.tool_sections["tools.fetch_url"],
             "[tools.fetch_url]\nmax_bytes = 1\n"
         );
-        let stored = reopened.frozen_tools.as_ref().unwrap();
-        assert!(
-            stored
-                .selection(Some("codex"), Some("other"))
-                .selection
-                .is_empty()
-        );
-        assert_eq!(
-            stored.selection(Some("codex"), Some("offline-loopback-v1")),
-            frozen
-        );
+        assert_eq!(reopened.frozen_tools.as_ref().unwrap().selection(), frozen);
 
         let mut fresh = SessionRecord::new(config.session.workspace_root.clone());
         fresh.account = config.session.account.clone();
@@ -1206,6 +1197,17 @@ mod tests {
         assert_eq!(
             root_tool_selection(&config.session).selection,
             crate::tool_plan::TemplateToolSelection::parse(["fetch_url", "image_gen"]).unwrap()
+        );
+
+        let mut off_tuple = SessionRecord::new(config.session.workspace_root.clone());
+        off_tuple.account = config.session.account.clone();
+        off_tuple.model = Some("other".into());
+        config.session = off_tuple;
+        freeze_root_tools(&mut config).unwrap();
+        assert_eq!(
+            config.session.frozen_tools,
+            Some(crate::frozen_tools::FrozenRootTools::new(None)),
+            "a session created off the template's tuple has no tools for life"
         );
     }
 

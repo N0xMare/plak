@@ -95,6 +95,7 @@ fn a_pruned_feed_reopen_consumes_historical_intents_without_withdrawing_clear() 
                     &script,
                     None,
                     None,
+                    Vec::new(),
                 )
                 .map_err(|error| error.to_string())
             } else {

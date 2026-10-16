@@ -1474,10 +1474,14 @@ tools reach them through the product's own binder: the session's frozen tools
 on reopen, or the `[root] agent` template a creation freezes. A template
 naming `mcp:<server>` therefore offers that server's tools Direct (plain
 scripts) or in the Code Mode / `js-ptc` nested catalog (`code_mode` scripts),
-each under its MCP owner. `plakous-mcp-fake-server --call-log PATH` appends
-each called tool's name to `PATH` before it runs, so a test in another process
-counts dispatches: one offline test calls `mcp__fake__echo` from a Code Mode
-cell, and the durability module kills the host after an MCP call's
+each under its MCP owner, and the scripted compaction twin carries the same
+extensions. `plakous-mcp-fake-server --call-log PATH` appends each called
+tool's name to `PATH` before it runs, and `--list-log PATH` one `list` line per
+`tools/list` request, so a test in another process counts dispatches and
+listings: one offline test calls `mcp__fake__echo` from a Code Mode cell,
+another compacts a session holding an MCP call, a hosted test checks that a
+rebind keeps the session's frozen MCP tools without listing again, and the
+durability module kills the host after an MCP call's
 write-ahead claim and checks that reopen settles it without a second
 dispatch.
 

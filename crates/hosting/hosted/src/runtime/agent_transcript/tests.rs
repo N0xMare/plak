@@ -515,7 +515,12 @@ async fn a_finished_sessions_history_reads_as_root_rows() -> TestResult {
     );
 
     let compaction = plakous_offline_crash_harness::scripted_compaction_runtime_binding(
-        workspace, controller, &plan, None, None,
+        workspace,
+        controller,
+        &plan,
+        None,
+        None,
+        Vec::new(),
     )?;
     let CompactSessionOutcome::Compacted { target, .. } = sessions
         .compact(CompactSessionRequest::new(

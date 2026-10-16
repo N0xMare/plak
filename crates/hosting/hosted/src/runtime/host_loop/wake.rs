@@ -1594,6 +1594,7 @@ mod tests {
                                 &script,
                                 None,
                                 None,
+                                Vec::new(),
                             )
                         } else {
                             plakous_offline_crash_harness::scripted_runtime_binding_with_cursor(
