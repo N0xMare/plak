@@ -56,13 +56,20 @@ pub fn canonical_local_tools(request: &ModelRequest) -> Vec<ResponsesCanonicalTo
             .definitions()
             .iter()
             .map(|entry| {
-                tool(
+                let tool = tool(
                     entry.exposed_name(),
                     matches!(
                         entry.presentation(),
                         plakous_model::ProjectedToolPresentationV2::CustomUtf8 { .. }
                     ),
-                )
+                );
+                // An exposure covering several operations resolves by its
+                // arguments at landing; the protocol cannot, so it records
+                // only an argument-free resolution.
+                match entry.covered_canonical_names() {
+                    [canonical] => tool.with_canonical_name(canonical.clone()),
+                    _ => tool,
+                }
             })
             .collect();
     }

@@ -3895,7 +3895,11 @@ artifact covers a different owner fails closed as an artifact mismatch. A
 protocol that can produce an artifact on a tool round therefore emits the
 registry's owner at parse time through its owner configuration (Messages
 `ToolOwnership`, Responses `ResponsesCanonicalToolOwner`), and landing is then
-a no-op. The registry's owner reaches the protocols through the request: a
+a no-op. The canonical name is serialized there too: Responses
+`canonical_local_tools` records the canonical name of every V2 exposure that
+covers exactly one canonical operation and decodes its calls under it, so a
+renamed Direct call lands unchanged; an exposure covering several operations
+resolves by its arguments only at landing. The registry's owner reaches the protocols through the request: a
 locally executed `ConfiguredTool` built with `with_mcp_owner(server)` names its
 MCP server, `ModelRequest::local_tool_owner(exposed)` answers the owner of a
 provider-visible name (through the V2 projection's canonical name when there is

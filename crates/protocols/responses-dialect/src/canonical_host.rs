@@ -79,6 +79,7 @@ pub struct ResponsesCanonicalTool {
     name: ToolName,
     kind: ResponsesCanonicalToolKind,
     owner: ResponsesCanonicalToolOwner,
+    canonical_name: Option<ToolName>,
 }
 
 impl ResponsesCanonicalTool {
@@ -89,7 +90,22 @@ impl ResponsesCanonicalTool {
         kind: ResponsesCanonicalToolKind,
         owner: ResponsesCanonicalToolOwner,
     ) -> Self {
-        Self { name, kind, owner }
+        Self {
+            name,
+            kind,
+            owner,
+            canonical_name: None,
+        }
+    }
+
+    /// Records the canonical executable name a call of this exposed name
+    /// resolves to without its arguments, so the call decodes with the name
+    /// landing would record and the covered projection a family artifact
+    /// binds matches canonical history.
+    #[must_use]
+    pub fn with_canonical_name(mut self, canonical_name: ToolName) -> Self {
+        self.canonical_name = (canonical_name != self.name).then_some(canonical_name);
+        self
     }
 
     /// A locally executed JSON function.
@@ -128,6 +144,12 @@ impl ResponsesCanonicalTool {
     #[must_use]
     pub const fn owner(&self) -> &ResponsesCanonicalToolOwner {
         &self.owner
+    }
+
+    /// The canonical executable name, when it differs from [`Self::name`].
+    #[must_use]
+    pub const fn canonical_name(&self) -> Option<&ToolName> {
+        self.canonical_name.as_ref()
     }
 
     fn execution_owner(&self) -> ToolExecutionOwner {

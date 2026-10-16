@@ -1144,8 +1144,10 @@ fn mixed_v2_projection_lowers_explicit_function_and_custom_presentations() -> Te
     assert_eq!(
         canonical_local_tools(&request),
         vec![
-            ResponsesCanonicalTool::local_custom(ToolName::new("exec")?),
-            ResponsesCanonicalTool::local_function(ToolName::new("wait")?),
+            ResponsesCanonicalTool::local_custom(ToolName::new("exec")?)
+                .with_canonical_name(ToolName::new("run_process")?),
+            ResponsesCanonicalTool::local_function(ToolName::new("wait")?)
+                .with_canonical_name(ToolName::new("poll_process")?),
         ]
     );
     assert_eq!(codex.body()["parallel_tool_calls"], false);

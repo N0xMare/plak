@@ -651,14 +651,23 @@ pub(super) fn terminal_tool_block(
     };
     budget.add_block(canonical_arguments.len())?;
     let correlation = ToolCorrelation::new(Some(remote_call_id.to_owned()), None, caller_lineage)?;
-    Ok(ContentBlock::ToolCall(ToolCallBlock::new(
+    let canonical_name = data
+        .tools
+        .get(&name)
+        .and_then(ResponsesCanonicalTool::canonical_name)
+        .cloned();
+    let call = ToolCallBlock::new(
         ids.call_id()?,
         name,
         owner,
         ToolCallState::Requested,
         correlation,
         canonical_arguments,
-    )?))
+    )?;
+    Ok(ContentBlock::ToolCall(match canonical_name {
+        Some(canonical_name) => call.with_canonical_name(canonical_name),
+        None => call,
+    }))
 }
 
 pub(super) fn local_or_advertised_tool(
