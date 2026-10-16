@@ -4983,8 +4983,10 @@ available on <route>; remedy: ...` where the provider has no such tool (`use
 fetch_url (Plak-run) or a claude/anthropic template` for `web_fetch`, `put
 x_search on a grok or xai-api template and spawn it` for `x_search`), and
 `<tool> is not yet qualified on <route>; remedy: remove <tool> from the
-template's tools until a release qualifies it there` where it has one. A tool
-with no implementation in this build (every Plak-run tool, and a hosted
+template's tools until a release qualifies it there` where it has one.
+`fetch_url` runs in Plak, needs no route support and binds on every route,
+under the node's frozen `[tools.fetch_url]` limits (chapter 01 section 8.5). A
+tool with no implementation in this build (`image_gen`, and a hosted
 retrieval tool on a qualified route until its wrapper ships) is refused
 `<tool> is not available in this build; remedy: remove <tool> from the
 template's tools`.
