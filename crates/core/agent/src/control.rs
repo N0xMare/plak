@@ -565,7 +565,7 @@ pub(crate) struct AgentContextStatusRequest {
     pub(crate) session_id: SessionId,
     pub(crate) branch_id: BranchId,
     pub(crate) checkpoint_id: CheckpointId,
-    pub(crate) pending_user_input: Option<String>,
+    pub(crate) pending_user_input: Option<UserInput>,
 }
 
 #[doc(hidden)]
@@ -582,7 +582,7 @@ pub struct AgentCompactSessionRequest {
     pub(crate) branch_id: BranchId,
     pub(crate) checkpoint_id: CheckpointId,
     pub(crate) reason: AgentCompactionReason,
-    pub(crate) pending_user_input: Option<String>,
+    pub(crate) pending_user_input: Option<UserInput>,
     pub(crate) runtime: Option<AgentBuilder>,
 }
 
@@ -618,7 +618,7 @@ impl AgentCompactSessionRequest {
         branch_id: BranchId,
         checkpoint_id: CheckpointId,
         reason: AgentCompactionReason,
-        pending_user_input: Option<String>,
+        pending_user_input: Option<UserInput>,
         runtime: AgentBuilder,
     ) -> Self {
         Self {
@@ -833,7 +833,7 @@ impl AgentSessionEndpoint {
         session_id: SessionId,
         branch_id: BranchId,
         checkpoint_id: CheckpointId,
-        pending_user_input: Option<String>,
+        pending_user_input: Option<UserInput>,
     ) -> Result<ContextStatus, AgentSessionEndpointError> {
         let (reply, receiver) = oneshot::channel();
         self.controls

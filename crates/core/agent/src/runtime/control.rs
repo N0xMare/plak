@@ -11,7 +11,7 @@ use crate::{
     ControlErrorKind, EffectDecisionChoice, EffectDecisionStatus, SessionStoreError,
     SteeringStatus, SubscriptionLimits, TurnCommand, UsageAggregationError, ViewError,
 };
-use plakous_model::{Digest, DigestDomain, ModelResponse, RunId, TextBlock, ValidatedRequestPlan};
+use plakous_model::{Digest, DigestDomain, ModelResponse, RunId, ValidatedRequestPlan};
 use plakous_tools::{
     EffectAuthorizationGrantSource, ExecutionEnvironment, ExecutionEnvironmentConfig,
     ExecutionEnvironmentScope, WorkspacePolicy,
@@ -112,17 +112,6 @@ pub(super) fn control_agent_error(error: ControlError) -> AgentError {
         | ControlErrorKind::AdmissionRejected => AgentErrorKind::Session,
     };
     AgentError::new(kind, error.message())
-}
-
-pub(super) fn validate_command_text(text: &str, label: &str) -> Result<(), ControlError> {
-    TextBlock::new(text.to_owned(), None)
-        .map(|_| ())
-        .map_err(|_| {
-            ControlError::new(
-                ControlErrorKind::InvalidInput,
-                format!("{label} text must be valid canonical text"),
-            )
-        })
 }
 
 pub(super) fn command_binding(command: &TurnCommand) -> Result<Digest, ControlError> {

@@ -197,7 +197,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                         &text,
                         images.iter().map(crate::sessions::draft_image_chip),
                     );
-                    if text.is_empty() {
+                    if text.is_empty() && images.is_empty() {
                         reject_draft(self.host.events, action);
                     } else {
                         match self.control.steer(input).await {

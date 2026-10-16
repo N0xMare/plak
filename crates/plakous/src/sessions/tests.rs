@@ -3375,7 +3375,7 @@ fn pending_context_debug_redacts_user_content() -> TestResult {
     let request = ContextStatusRequest::new(
         SessionOperationId::new("context:redaction")?,
         locator,
-        ContextQuery::WithPendingUserInput("sensitive prompt sentinel".to_owned()),
+        ContextQuery::WithPendingUserInput("sensitive prompt sentinel".to_owned().into()),
     );
     let debug = format!("{request:?}");
     assert!(debug.contains("<redacted>"));
@@ -3409,7 +3409,7 @@ fn compact_request_has_no_caller_summary_cut_or_count_authority()
         CompactReason::Scheduled,
         runtime,
     )
-    .with_pending_user_input("sensitive queued prompt".to_owned());
+    .with_pending_user_input("sensitive queued prompt".to_owned().into());
     assert!(matches!(
         request.qualification,
         ContextQuery::WithPendingUserInput(_)
@@ -3439,7 +3439,7 @@ async fn pending_compaction_qualification_requires_scheduled_reason()
                 CompactReason::Manual,
                 runtime,
             )
-            .with_pending_user_input("ephemeral pending input".to_owned()),
+            .with_pending_user_input("ephemeral pending input".to_owned().into()),
         )
         .await
         .expect_err("manual compaction accepted pending-input qualification");
@@ -4088,7 +4088,7 @@ async fn context_status_current_and_pending_are_exact_and_read_only() -> TestRes
         .context_status(ContextStatusRequest::new(
             SessionOperationId::new("status:pending")?,
             locator,
-            ContextQuery::WithPendingUserInput("ephemeral pending input".to_owned()),
+            ContextQuery::WithPendingUserInput("ephemeral pending input".to_owned().into()),
         ))
         .await?;
     let SessionContextStatusKind::Available(current) = current.kind() else {
@@ -4157,7 +4157,7 @@ async fn context_status_turn_scoped_inspect_is_available_without_operation_root(
         .context_status(ContextStatusRequest::new(
             SessionOperationId::new("status:turn-scoped-pending")?,
             locator,
-            ContextQuery::WithPendingUserInput("ephemeral pending input".to_owned()),
+            ContextQuery::WithPendingUserInput("ephemeral pending input".to_owned().into()),
         ))
         .await?;
     let SessionContextStatusKind::Available(current) = current.kind() else {

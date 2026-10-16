@@ -68,7 +68,9 @@ use plakous_agent::internal::{
     LoadedBranch, RecoveryAction, RecoveryObligation, RuntimeLifecycle, RuntimeWorkingRoot,
     SessionRef, SessionStore, WorkingRecoveryPhase,
 };
-use plakous_agent::{Agent, AgentBuilder, AgentError, AgentErrorKind, RecoveredTurnHandle};
+use plakous_agent::{
+    Agent, AgentBuilder, AgentError, AgentErrorKind, RecoveredTurnHandle, UserInput,
+};
 use plakous_model::{
     Actor, BranchId, CallId, CheckpointId, ContextStatus, Digest, EffectiveProviderConfigurationId,
     EntryId, ModelAdapterProfileId, ModelFamilyId, ModelId, OutputBoundDisposition, ProtocolId,
@@ -1413,7 +1415,7 @@ impl AgentSessions {
         let recovery = exact.recovery_report();
         let pending_user_input = match request.query {
             ContextQuery::Current => None,
-            ContextQuery::WithPendingUserInput(text) => Some(text),
+            ContextQuery::WithPendingUserInput(input) => Some(input),
         };
         let branch = SessionBranchKey::new(request.locator.session_id, request.locator.branch_id);
         let Some(endpoint) = self.drivers.endpoint(branch) else {
@@ -1893,7 +1895,7 @@ impl AgentSessions {
 fn compaction_pending_user_input(
     reason: CompactReason,
     qualification: ContextQuery,
-) -> Result<Option<String>, AgentSessionsError> {
+) -> Result<Option<UserInput>, AgentSessionsError> {
     match qualification {
         ContextQuery::Current => Ok(None),
         ContextQuery::WithPendingUserInput(input) if reason == CompactReason::Scheduled => {

@@ -112,12 +112,41 @@ async fn response_provenance_survives_tool_round_followup_and_exact_reopen() -> 
             agent.session_id(),
             agent.branch_id(),
             agent.checkpoint().id(),
-            Some("third human prompt".to_owned()),
+            Some("third human prompt".to_owned().into()),
         )
         .await;
     let measured = lock_mutex(&model.observed_provenance).clone();
     let (_, measured) = measured.last().ok_or("missing measurement preparation")?;
     assert_eq!(measured.turn_position(), TurnPosition::new(3, 3));
+    // A pending prompt is measured with its images, and images alone are one.
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+    png.extend_from_slice(&4_u32.to_be_bytes());
+    png.extend_from_slice(&3_u32.to_be_bytes());
+    png.resize(png.len() + 64, 0);
+    for parts in [
+        vec![
+            crate::UserPart::Text("what is this?".to_owned()),
+            crate::UserPart::Image {
+                media_type: "image/png".to_owned(),
+                bytes: png.clone(),
+            },
+        ],
+        vec![crate::UserPart::Image {
+            media_type: "image/png".to_owned(),
+            bytes: png.clone(),
+        }],
+    ] {
+        let status = agent
+            .session_endpoint()
+            .context_status(
+                agent.session_id(),
+                agent.branch_id(),
+                agent.checkpoint().id(),
+                Some(crate::UserInput::new(parts)),
+            )
+            .await;
+        assert!(status.is_ok(), "{:?}", status.err());
+    }
     let ledger = first.checkpoint().manifest().ledger();
     assert_eq!(
         previous_response_metadata(ledger, plan, context.authority())

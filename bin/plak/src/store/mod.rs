@@ -2752,6 +2752,15 @@ mod tests {
         assert_eq!(edited.pending_queue[0].text, "look again");
         assert_eq!(edited.pending_queue[0].images, with_images.images);
 
+        // Images alone are a queued message; text alone or nothing is not.
+        session.pending_queue[0].text = String::new();
+        session.pending_queue[0].revision = 3;
+        store.commit(&mut session).unwrap();
+        assert_eq!(store.load(&session.id).unwrap().pending_queue[0].text, "");
+        session.pending_queue[1].text = String::new();
+        assert!(store.commit(&mut session).is_err());
+        session.pending_queue[1].text = "text only".into();
+
         let attachments = |store: &ProductStore| -> i64 {
             store
                 .connection

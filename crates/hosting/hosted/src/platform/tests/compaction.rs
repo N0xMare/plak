@@ -961,7 +961,7 @@ async fn api_working_window_is_measured_in_provider_tokens() {
                 .context_status(ContextStatusRequest::new(
                     SessionOperationId::new("status").unwrap(),
                     session.locator(),
-                    ContextQuery::WithPendingUserInput("next".to_owned()),
+                    ContextQuery::WithPendingUserInput("next".to_owned().into()),
                 ))
                 .await
                 .unwrap();

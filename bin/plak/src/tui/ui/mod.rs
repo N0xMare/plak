@@ -1088,6 +1088,7 @@ mod agent_view_review_probes;
 mod agent_view_tests;
 mod agents_tab;
 mod call_detail;
+mod clipboard;
 mod composer;
 mod composer_chrome;
 #[cfg(test)]
@@ -1103,6 +1104,7 @@ mod destructive_confirm;
 )]
 mod destructive_path_tests;
 mod host_events;
+mod image_paths;
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,

@@ -104,7 +104,7 @@ impl OneShot {
         bounds: Option<RunBounds>,
         mut observe: impl FnMut(Option<&HostEvent<P>>, &UserActionSender<P>),
     ) -> CliResult<OneShotOutcome> {
-        if prompt.text.trim().is_empty() {
+        if prompt.text.trim().is_empty() && prompt.images.is_empty() {
             return Err(CliFailure::classified(
                 CliFailureKind::Usage,
                 "prompt is empty",

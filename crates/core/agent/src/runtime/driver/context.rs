@@ -35,7 +35,7 @@ impl Driver {
         if active.is_some() || !matches!(manifest.lifecycle(), RuntimeLifecycle::Quiescent) {
             return Err(AgentSessionEndpointError::Busy);
         }
-        let pending = request.pending_user_input.as_deref();
+        let pending = request.pending_user_input.as_ref();
         let notice = if pending.is_some() {
             self.process_notices()
                 .map_err(|_| AgentSessionEndpointError::Unavailable)?

@@ -2807,8 +2807,8 @@ does nothing else. `/compact now` starts no paid compaction and `/clear all`
 clears nothing. `/fork` and `/fork-then-compact` refuse with their own usage
 line. The argument-taking commands keep their grammar below.
 
-`/image <path>` attaches an image file to the draft (§5.9); bare `/image`
-answers `usage: /image <path>  —  attach a png, jpeg, gif or webp`.
+`/image <path>...` attaches image files to the draft (§5.9); bare `/image`
+answers `usage: /image <path>...  —  attach png, jpeg, gif or webp files`.
 
 `/tree resume` explicitly resumes a restored paused agent tree; on a tree that
 is not paused it changes nothing and says `agent tree is not paused; nothing to
@@ -3894,7 +3894,7 @@ a defect.
 
 `Ctrl+X` without a composer selection reopens the last-used tab; with a
 selection it cuts instead. Keybinds opens on **While typing**, a short page
-(at most 23 binding rows) generated from the global and composer registry
+(at most 24 binding rows) generated from the global and composer registry
 entries: the Cmd/Super chords fold into one `Cmd/Super` row, and readline extras
 (`Alt+D`, `Alt+B / Alt+F`) and legacy-terminal twins (`Alt+O`, `Ctrl+Shift+A`)
 appear only on the full sheet. `Enter` opens **All
@@ -4585,32 +4585,63 @@ and Persian shaping.
 
 ### 5.9 Image attachments
 
-A prompt can carry images: `/image <path>` (repeatable; the path is taken
-as typed, a relative one against the TUI's working directory) and a
-pasted single-line absolute path to an existing png, jpeg, gif or webp file
-(a terminal file drop; surrounding quotes and `\ ` escapes are undone) each
-attach one image to the draft instead of typing text. The type is sniffed
-from the bytes, never the extension. The bounds are the library's admission
-bounds (chapter 01): at most 8 images per message and 3.75 MiB raw per image;
-nothing is resized, so an oversize file is refused with a note naming it and
-asking to downscale. A refusal is a system note naming the file; the draft is
-unchanged. Clipboard bitmap paste and terminal image rendering do not exist.
+A prompt can carry images, attached to the draft three ways:
+
+- `/image <path>...` attaches each named file. The whole argument is first
+  tried as one path (so an unescaped path with spaces works); otherwise it is
+  split into words as a pasted path is.
+- A paste (a terminal file drop, or a path copied as text) attaches images
+  instead of typing text when every word of it names an existing png, jpeg,
+  gif or webp file; any other paste is typed as text. Each word may be
+  absolute, `~` or `~/...`, relative to the TUI's working directory,
+  backslash-escaped (`Screenshot\ 2026-10-16\ at\ 10.23.45 AM.png`), single-
+  or double-quoted, or a `file://` URL with `%XX` escapes; unquoted ASCII
+  whitespace separates several paths. The narrow no-break space macOS puts
+  before `AM`/`PM` in screenshot names is part of a word, and a path that
+  spells it as a plain space still finds the file. A whole single-line paste
+  that names an existing image is taken as one path first, so a terminal that
+  pastes a dropped path unescaped attaches it too.
+- `Ctrl+V` in the composer reads an image from the system clipboard (AppKit on
+  macOS, the X11 clipboard on Linux; Wayland sessions reach it through
+  XWayland), and so does an empty bracketed paste, which is what a terminal
+  sends for a clipboard that holds only an image. The pixels are encoded as
+  PNG, chip name `clipboard.png`; an image whose PNG exceeds 3.75 MiB is
+  halved (2x2 average) until it fits. A clipboard without an image, or no
+  clipboard, is a system note.
+
+The type of a file is sniffed from the bytes, never the extension. The bounds
+are the library's admission bounds (chapter 01): at most 8 images per message
+and 3.75 MiB raw per image; files are not resized, so an oversize file is
+refused with a note naming it and asking to downscale. A refusal is a system
+note naming the file; the draft is unchanged. Terminal image rendering does
+not exist.
 
 Attached images show as chips in the composer's bottom border,
 `[image: shot.png 1280x720 412 KB]`, collapsing to `[N images]` when they do
-not fit. `Backspace` in an empty composer removes the last chip. A message
-with images still needs text: `Enter` on an empty composer with chips sends
-nothing and says `type a message to send with the attached images`. Submit
-sends the text and the chips' images together as one draft (prompt, queued
-follow-up or steer); a refused draft returns its images to the composer.
+not fit. `Backspace` in an empty composer removes the last chip. Submit sends
+the text and the chips' images together as one draft (prompt, queued
+follow-up or steer); images alone are a message, so `Enter` on an empty
+composer with chips sends them without text (the queue panel's own `Enter`
+keeps its meaning while the panel is focused). A refused draft, and a prompt
+the host withholds at the context window, return their images to the
+composer with their text.
 
 A queued item keeps its images for its whole life: a queue edit replaces only
-the text, and the queue panel marks the item `[1 image]` / `[N images]`.
+the text, and may clear it when the item has images; the queue panel marks
+the item `[1 image]` / `[N images]`.
 Queued images live in the product store's `queue_attachments` table, written
 once with their item and removed with it (deleting, sending or dropping the
 item); all queued items of one session hold at most 64 MiB of images, and a
 draft over that is refused at queue admission. Delivery sends the item's
-text (with any child-mail batch) and then its images as one user message.
+text (with any child-mail batch), when there is text, and then its images as
+one user message; an image-only message has no text part.
+
+The pre-send context measurement (the composer meter, scheduled compaction
+and the send-or-park decision) measures the pending message with its images.
+Each image counts as its route's per-image token bound: Claude routes use
+Anthropic's documented rule (images are resized to at most 1568 px a side,
+about width x height / 750 tokens, so at most 3279 tokens), and every other
+route counts the conservative bound of 8192 tokens per image.
 
 The user row shows one chip line per image after the prompt text,
 `[image: png 1280x720 412 KB]`. The row is derived from committed history,
@@ -4620,9 +4651,11 @@ are identical. A route or model without image input refuses the prompt at
 runtime admission, naming the route and model; the item stays queued for an
 edit or delete.
 
-The `plak agent` JSONL `prompt` kind carries text only; images reach the host
-only from the TUI and `plak run --image`. The export document does not carry
-queued items' images (§2.5.1).
+The `plak agent` JSONL `prompt` kind takes an optional `images` array of file
+paths, read and bounded as `plak run --image` reads them (a relative path
+resolves against the agent's working directory); with images, `text` may be
+omitted or empty. `plak run --image <path>` likewise needs no prompt words.
+The export document does not carry queued items' images (§2.5.1).
 
 ## 6. What the model sees
 

@@ -1,21 +1,21 @@
 //! Context-status projection and stable request identities.
 
-use crate::runtime::control::validate_command_text;
+use crate::input::UserInput;
 use crate::{AgentSessionEndpointError, CheckpointId, RuntimeCheckpoint};
 use plakous_model::{
-    Actor, AttemptId, ContentBlock, ConversationItem, ConversationView, Digest, DigestDomain,
-    EntryId, HistorySegment, HistorySegmentKind, Provenance, TextBlock, TurnId,
+    Actor, AttemptId, ConversationItem, ConversationView, Digest, DigestDomain, EntryId,
+    HistorySegment, HistorySegmentKind, Provenance, TurnId,
 };
 pub(super) fn context_status_projection(
     checkpoint: &RuntimeCheckpoint,
-    pending_user_input: Option<&str>,
+    pending_user_input: Option<&UserInput>,
     notice: Option<HistorySegment>,
 ) -> Result<ConversationView, AgentSessionEndpointError> {
     let canonical = checkpoint.manifest().canonical();
-    let Some(text) = pending_user_input else {
+    let Some(input) = pending_user_input else {
         return Ok(canonical.projection());
     };
-    let segment = pending_user_segment(checkpoint, text)?;
+    let segment = pending_user_segment(checkpoint, input)?;
     let history = if let Some(notice) = notice {
         canonical
             .history()
@@ -33,26 +33,28 @@ pub(super) fn context_status_projection(
     ))
 }
 
-/// The recent-intent segment a pending user prompt would open on `checkpoint`.
+/// The recent-intent segment a pending user prompt would open on `checkpoint`:
+/// its text and images, so the measured request counts each image by the
+/// dialect's per-image bound.
 pub(super) fn pending_user_segment(
     checkpoint: &RuntimeCheckpoint,
-    text: &str,
+    input: &UserInput,
 ) -> Result<HistorySegment, AgentSessionEndpointError> {
-    validate_command_text(text, "pending user input")
+    input
+        .validate("pending user input")
         .map_err(|_| AgentSessionEndpointError::InvalidInput)?;
     let entry_id = EntryId::try_from(context_status_uuid(
         checkpoint.id(),
         b"pending-entry",
-        Some(text),
+        Some(input),
     )?)
     .map_err(|_| AgentSessionEndpointError::Unavailable)?;
     let item = ConversationItem::new(
         entry_id,
         Actor::User,
-        vec![ContentBlock::Text(
-            TextBlock::new(text.to_owned(), None)
-                .map_err(|_| AgentSessionEndpointError::InvalidInput)?,
-        )],
+        input
+            .content_blocks()
+            .map_err(|_| AgentSessionEndpointError::InvalidInput)?,
         Provenance::UserInput,
     )
     .map_err(|_| AgentSessionEndpointError::InvalidInput)?;
@@ -62,7 +64,7 @@ pub(super) fn pending_user_segment(
 
 pub(super) fn context_status_request_ids(
     checkpoint_id: CheckpointId,
-    pending_user_input: Option<&str>,
+    pending_user_input: Option<&UserInput>,
 ) -> Result<(TurnId, AttemptId), AgentSessionEndpointError> {
     let turn = context_status_uuid(checkpoint_id, b"turn", pending_user_input)?;
     let attempt = context_status_uuid(checkpoint_id, b"attempt", pending_user_input)?;
@@ -75,12 +77,21 @@ pub(super) fn context_status_request_ids(
 fn context_status_uuid(
     checkpoint_id: CheckpointId,
     purpose: &[u8],
-    pending_user_input: Option<&str>,
+    pending_user_input: Option<&UserInput>,
 ) -> Result<uuid::Uuid, AgentSessionEndpointError> {
-    let (query, text) = pending_user_input
-        .map_or((b"current".as_slice(), b"".as_slice()), |text| {
-            (b"with-pending-user-input".as_slice(), text.as_bytes())
-        });
+    let (query, input) = pending_user_input.map_or_else(
+        || (b"current".as_slice(), Vec::new()),
+        |input| {
+            let mut framed = Vec::new();
+            input.frame_into(&mut |part| {
+                framed.extend_from_slice(
+                    &u64::try_from(part.len()).unwrap_or(u64::MAX).to_be_bytes(),
+                );
+                framed.extend_from_slice(part);
+            });
+            (b"with-pending-user-input".as_slice(), framed)
+        },
+    );
     let digest = Digest::sha256(
         DigestDomain::RequestPlan,
         1,
@@ -89,7 +100,7 @@ fn context_status_uuid(
             checkpoint_id.as_uuid().as_bytes(),
             purpose,
             query,
-            text,
+            &input,
         ],
     )
     .map_err(|_| AgentSessionEndpointError::Unavailable)?;

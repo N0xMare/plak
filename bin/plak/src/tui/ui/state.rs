@@ -308,7 +308,7 @@ impl App {
     }
 
     pub(super) fn restore_draft_text(&mut self, text: String) {
-        if self.input == text {
+        if self.input == text || text.is_empty() {
             return;
         }
         if text

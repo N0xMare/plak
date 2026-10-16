@@ -249,7 +249,7 @@ plak run --account codex --model gpt-5.6-luna --effort low --image shot.png -- '
 | `--max-turns <n>` | Admitted turns including the first, 1..=100; default 25. |
 | `--timeout <seconds>` | Whole-run wall clock, including authentication/catalog preparation and idle waiting; default none. |
 | `--print-session-id` | Print `session_id=<uuid>` on stdout before the turn starts. |
-| `--image <path>` | Attach an image to the prompt; repeat for more (at most 8). png, jpeg, gif or webp, detected from the bytes, at most 3.75 MiB each; nothing is resized. A file that cannot be read, is not an image or is too large is refused (exit 2) naming the file. A model without image input refuses the run naming the route and model. |
+| `--image <path>` | Attach an image to the prompt; repeat for more (at most 8). png, jpeg, gif or webp, detected from the bytes, at most 3.75 MiB each; nothing is resized. With images, the prompt after `--` may be left out. A file that cannot be read, is not an image or is too large is refused (exit 2) naming the file. A model without image input refuses the run naming the route and model. |
 
 `plak run` needs a ready OAuth login or key; an API account with no key exits 3
 naming `plak key set <account>` and its environment variable, and a signed-out
@@ -299,6 +299,10 @@ printf '{"v":1,"kind":"prompt","id":"1","text":"hi"}\n' | plak agent --account g
 Stdin commands: `prompt`, `interrupt`, `compact`, `resume_queue`, `resume_tree`, `tree`,
 `interrupt_node`, `close_node`, `stop_all`, `clear`,
 `invoke_tool`, `fork`, `recover`, `background`, `quit`.
+A `prompt` may carry `"images": ["shot.png", "~/..."]`: paths to png, jpeg,
+gif or webp files (relative ones resolve against the agent's working
+directory; `~` is not expanded), read with the same limits as `plak run
+--image`. With images, `text` may be omitted.
 `quit` gives an active turn 300 ms to settle cancellation and another 100 ms
 to publish its result; a provider that ignores cancellation cannot hold the
 host open until its response arrives. Unfinished work is recovered on reopen.

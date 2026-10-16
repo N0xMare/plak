@@ -369,7 +369,7 @@ fn calibrate_ceiling(workspace: &Path, evidence: &Path, database: &Path) -> Test
     let pending = executor.block_on(sessions.context_status(ContextStatusRequest::new(
         SessionOperationId::new("compact-pty-calibration:pending-third")?,
         session.locator(),
-        ContextQuery::WithPendingUserInput(PROMPTS[2].to_owned()),
+        ContextQuery::WithPendingUserInput(PROMPTS[2].to_owned().into()),
     )))??;
     let SessionContextStatusKind::Available(pending) = pending.kind() else {
         return Err("calibration pending projection was unavailable".into());
@@ -563,7 +563,7 @@ fn real_pty_compacts_exact_overflow_reopens_and_continues() -> TestResult {
         .block_on(sessions.context_status(ContextStatusRequest::new(
             SessionOperationId::new("compact-pty:verify-pending-overflow")?,
             source,
-            ContextQuery::WithPendingUserInput(PROMPTS[2].to_owned()),
+            ContextQuery::WithPendingUserInput(PROMPTS[2].to_owned().into()),
         )))?
         .map_err(|error| format!("compaction PTY pending status failed for {source}: {error}"))?;
     assert!(matches!(

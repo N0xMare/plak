@@ -300,7 +300,7 @@ pub(super) fn queue_refusal<P: plakous_host_protocol::ProtocolExtension>(
     refusal: queue::Refusal,
 ) {
     let reason = match refusal {
-        queue::Refusal::Empty => "text is empty".to_owned(),
+        queue::Refusal::Empty => "the message has no text and no image".to_owned(),
         queue::Refusal::TooLarge => format!(
             "text exceeds the {} MiB product prompt bound",
             MAX_PROMPT_BYTES / (1024 * 1024)

@@ -137,9 +137,13 @@ impl QueueItem {
     }
 }
 
-/// One user message: the text part, then the images in attachment order.
+/// One user message: the text part when there is text, then the images in
+/// attachment order.
 pub(crate) fn user_input(text: &str, images: &[DraftImage]) -> plakous::agent::UserInput {
-    let mut parts = vec![plakous::agent::UserPart::Text(text.to_owned())];
+    let mut parts = Vec::with_capacity(1 + images.len());
+    if !text.is_empty() {
+        parts.push(plakous::agent::UserPart::Text(text.to_owned()));
+    }
     parts.extend(images.iter().map(|image| plakous::agent::UserPart::Image {
         media_type: image.media_type.clone(),
         bytes: image.bytes.clone(),
@@ -191,7 +195,7 @@ pub(crate) fn enqueue(
 ) -> Result<SessionQueueItem, Refusal> {
     let draft = draft.into();
     let t = draft.text.trim();
-    if t.is_empty() {
+    if t.is_empty() && draft.images.is_empty() {
         return Err(Refusal::Empty);
     }
     if t.len() > MAX_PROMPT_BYTES {
@@ -270,9 +274,6 @@ pub(crate) fn edit(
     text: &str,
 ) -> Result<(), Refusal> {
     let text = text.trim();
-    if text.is_empty() {
-        return Err(Refusal::Empty);
-    }
     if text.len() > MAX_PROMPT_BYTES {
         return Err(Refusal::TooLarge);
     }
@@ -282,6 +283,9 @@ pub(crate) fn edit(
     else {
         return Err(Refusal::Stale);
     };
+    if text.is_empty() && item.images.is_empty() {
+        return Err(Refusal::Empty);
+    }
     let Some(next_revision) = item.revision.checked_add(1) else {
         return Err(Refusal::Stale);
     };
@@ -442,7 +446,7 @@ mod tests {
             Refusal::NotAnImage
         );
         assert_eq!(
-            refused(Draft::new(" ".into(), vec![png(0)]), &mut pending),
+            refused(Draft::new(" ".into(), Vec::new()), &mut pending),
             Refusal::Empty
         );
 
@@ -461,6 +465,18 @@ mod tests {
                 <= MAX_PENDING_QUEUE_IMAGE_BYTES
         );
         assert_eq!(pending.len(), 1);
+
+        // Images alone are a message: no empty text part reaches the model,
+        // and an edit may clear the text of an item that keeps images.
+        let only = enqueue(&mut pending, Draft::new(" ".into(), vec![png(2)])).unwrap();
+        assert_eq!(only.text, "");
+        assert!(matches!(
+            only.user_input("").parts(),
+            [plakous::agent::UserPart::Image { .. }]
+        ));
+        let revision = pending[0].revision;
+        edit(&mut pending, &item.id, revision, " ").unwrap();
+        assert_eq!(pending[0].text, "");
     }
 
     #[test]

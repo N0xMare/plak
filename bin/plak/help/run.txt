@@ -31,7 +31,8 @@ OPTIONS:
   --timeout <seconds>  Hosted run wall clock (default none)
   --print-session-id   Print `session_id=<session>` on stdout before the turn
   --image <path>       Attach an image (png, jpeg, gif, webp; at most 3.75 MiB,
-                       8 per prompt). Repeatable. The model must accept images.
+                       8 per prompt). Repeatable; with images the prompt after
+                       `--` may be omitted. The model must accept images.
 
 NOTES:
   Subscription accounts require ready OAuth login (login + revalidate).

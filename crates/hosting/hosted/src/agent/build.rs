@@ -2089,7 +2089,7 @@ impl AttachedCodingSession {
         operation_id: SessionOperationId,
         source: SessionLocator,
         reason: CompactReason,
-        pending_user_input: Option<String>,
+        pending_user_input: Option<plakous::agent::UserInput>,
         runtime: SessionRuntimeBinding,
     ) -> Result<CompactSessionOutcome, AgentSessionsError> {
         self.sessions

@@ -1299,7 +1299,7 @@ async fn an_idle_compaction_note_opens_the_next_turn_once() -> TestResult {
             agent.session_id(),
             agent.branch_id(),
             agent.checkpoint().id(),
-            Some("first prompt after compaction".to_owned()),
+            Some("first prompt after compaction".to_owned().into()),
         )
         .await
         .map_err(|_| "reopened compaction status")?;

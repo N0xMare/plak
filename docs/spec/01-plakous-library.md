@@ -291,8 +291,11 @@ the route and model, and nothing is dropped silently. An admitted input
 becomes one `User` item whose blocks follow the parts in order, images as
 `ContentBlock::Image` with `MediaSource::Bytes`; steering is lowered the same
 way at its boundary. Context accounting counts each image at the image token
-default (§6.8). A pending prompt measured before admission compaction counts
-only its text parts.
+default (§6.8). A pending input — `ContextQuery::WithPendingUserInput` and
+`CompactSessionRequest::with_pending_user_input` take a `UserInput`, and the
+turn's own admission-compaction fit check uses the turn's input — is measured
+with all its parts, images included, so a pending image counts exactly as it
+will once admitted. An input with no text part (images only) is valid.
 
 The command's canonical input frames the verb tag (and target turn), then per
 part either `text` and the text, or `image`, the media type, and the SHA-256

@@ -25,7 +25,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("fork", "Fork this conversation"),
     ("fork-then-compact", "Fork, then compact the new session"),
     ("drop", "Drop the last queued message"),
-    ("image", "Attach an image file to the next message"),
+    ("image", "Attach image files to the next message"),
     (
         "reload",
         "Restart on the installed Plak and resume this session",
@@ -53,7 +53,7 @@ pub enum SlashEffect {
     Reload,
     /// Pure UI: append a system note; no host action.
     LocalNote(String),
-    /// Attach the image file at this path to the draft (`/image <path>`).
+    /// Attach the image files these paths name to the draft (`/image <path>...`).
     AttachImage(String),
     /// Open the Menu on Settings (`/settings`).
     OpenSettings,
@@ -243,7 +243,7 @@ pub fn resolve(parsed: &ParsedSlash, _ctx: &SlashContext) -> SlashEffect {
         "recover" => SlashEffect::Action(UserAction::Recover),
         "drop" => SlashEffect::Action(UserAction::DropQueued),
         "image" if parsed.args.is_empty() => SlashEffect::LocalNote(
-            "usage: /image <path>  —  attach a png, jpeg, gif or webp".to_owned(),
+            "usage: /image <path>...  —  attach png, jpeg, gif or webp files".to_owned(),
         ),
         "image" => SlashEffect::AttachImage(parsed.args.clone()),
         "reload" => SlashEffect::Reload,

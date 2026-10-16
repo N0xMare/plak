@@ -2,6 +2,7 @@
 
 use std::time::Instant;
 
+use plakous::agent::UserInput;
 use plakous::application::ApplicationExecutor;
 use plakous::sessions::{
     AgentSessionsErrorKind, CompactReason, CompactSessionOutcome, ContextQuery, SessionOperationId,
@@ -72,9 +73,9 @@ pub(super) enum ScheduledPrompt {
 
 /// Runs idle scheduled compact, then at most one new-op follow-on.
 ///
-/// Every pass qualifies, folds and remeasures on `command`, the exact text
-/// the host would admit (the prompt with any child-mail batch). `bare_text`
-/// is the prompt without a freshly selected batch: when the batch cannot be
+/// Every pass qualifies, folds and remeasures on `command`, the exact input
+/// the host would admit (the prompt with any child-mail batch, and its
+/// images). `bare` is the prompt without a freshly selected batch: when the batch cannot be
 /// made to fit, the send-or-park decision falls back to it and the batch is
 /// dropped, so a prompt that fits is never parked behind its own mail.
 /// Returns whether the prompt is sent or parked.
@@ -86,15 +87,15 @@ pub(super) fn run_scheduled_compaction_until_fits<P: plakous_host_protocol::Prot
     stderr_buf: &mut Vec<u8>,
     events: &Sender<P>,
     log: Option<&SessionLog>,
-    command: &str,
-    bare_text: Option<&str>,
+    command: &UserInput,
+    bare: Option<&UserInput>,
 ) -> CliResult<ScheduledPrompt> {
     run_scheduled_compaction_until_fits_with(
         watch,
         config,
         events,
         last_enrolled_source_bytes(opened),
-        bare_text.is_some(),
+        bare.is_some(),
         |config| {
             handle_compact(
                 executor,
@@ -108,12 +109,12 @@ pub(super) fn run_scheduled_compaction_until_fits<P: plakous_host_protocol::Prot
                 Some(command),
             )
         },
-        |bare| {
-            let text = bare_text.filter(|_| bare).unwrap_or(command);
+        |use_bare| {
+            let input = bare.filter(|_| use_bare).unwrap_or(command);
             query_context(
                 executor,
                 opened,
-                ContextQuery::WithPendingUserInput(text.to_owned()),
+                ContextQuery::WithPendingUserInput(input.clone()),
             )
         },
     )
@@ -354,7 +355,7 @@ pub(super) fn handle_compact<P: plakous_host_protocol::ProtocolExtension>(
     events: &Sender<P>,
     log: Option<&SessionLog>,
     reason: sessions::ProductCompactReason,
-    scheduled_command: Option<&str>,
+    scheduled_command: Option<&UserInput>,
 ) -> CliResult<CompactPass> {
     watch.begin();
     let _compact_span = tracing::info_span!(
@@ -381,7 +382,7 @@ pub(super) fn handle_compact<P: plakous_host_protocol::ProtocolExtension>(
     // will measure and admit, child mail included.
     let pending_user_input = scheduled_command
         .filter(|_| reason == sessions::ProductCompactReason::Scheduled)
-        .map(str::to_owned);
+        .cloned();
     let qualification = pending_user_input
         .as_ref()
         .map_or(ContextQuery::Current, |input| {
@@ -844,7 +845,7 @@ pub(super) fn exact_pending_context_fits(
     session: &SessionRecord,
 ) -> bool {
     let query = queue::next_drainable(session).map_or(ContextQuery::Current, |item| {
-        ContextQuery::WithPendingUserInput(item.text.clone())
+        ContextQuery::WithPendingUserInput(item.user_input(&item.text))
     });
     query_context(executor, opened, query)
         .is_ok_and(|projection| projection.disposition() == ContextDisposition::Fits)
@@ -1778,7 +1779,7 @@ mod tests {
                     &events,
                     None,
                     sessions::ProductCompactReason::Scheduled,
-                    Some(&user_text),
+                    Some(&UserInput::from(user_text.clone())),
                 )
             },
             |_| Ok(after),

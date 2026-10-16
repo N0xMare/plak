@@ -297,6 +297,10 @@ The
 presentation stack (`ratatui`, `crossterm`, `pulldown-cmark`, `syntect`) is an
 unconditional dependency of `bin/plak`. Its `tui` module is private to the
 product library. There is no separate presentation package or `ui` feature.
+Clipboard image paste (`Ctrl+V`) uses `arboard` (image data only: AppKit on
+macOS, the pure-Rust X11 client `x11rb` on Linux, no Wayland feature) and
+`png` for encoding; both are unconditional `bin/plak` dependencies and build
+for both supported targets, musl static included.
 `ratatui` does not appear anywhere in the `plakous-hosted` closure. The hosted
 crate depends on the tree store port through `plakous-recursive-subagents`;
 it has no dependency on the SQLite tree-store implementation package.

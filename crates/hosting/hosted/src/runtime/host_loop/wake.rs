@@ -376,10 +376,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
 
     pub(super) fn fit_child_wake(&mut self, command: &str) -> CliResult<bool> {
         self.refresh_native_authority_before_prompt()?;
+        let command = plakous::agent::UserInput::from(command.to_owned());
         let context = super::query_context(
             &self.executor,
             &self.opened,
-            super::ContextQuery::WithPendingUserInput(command.to_owned()),
+            super::ContextQuery::WithPendingUserInput(command.clone()),
         )?;
         if !super::prompt_requires_scheduled_compaction(context) {
             self.child_wake.prepared_context = Some(context);
@@ -404,7 +405,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             &mut self.stderr_buf,
             &self.events,
             self.log.as_ref(),
-            command,
+            &command,
             None,
         );
         super::observe_compact(&self.events, 0, false);
@@ -422,7 +423,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             self.child_wake.prepared_context = Some(super::query_context(
                 &self.executor,
                 &self.opened,
-                super::ContextQuery::WithPendingUserInput(command.to_owned()),
+                super::ContextQuery::WithPendingUserInput(command),
             )?);
         }
         Ok(sends)
@@ -1670,7 +1671,7 @@ mod tests {
             super::super::query_context(
                 &host.executor,
                 &host.opened,
-                super::super::ContextQuery::WithPendingUserInput(text.to_owned()),
+                super::super::ContextQuery::WithPendingUserInput(text.to_owned().into()),
             )
             .unwrap()
         };

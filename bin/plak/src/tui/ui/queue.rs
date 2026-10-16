@@ -42,7 +42,8 @@ impl App {
     pub(crate) fn submit_line(&mut self, steer: bool) -> Option<UserAction> {
         let line = self.input.trim().to_owned();
         // Empty Enter while busy + queue → send-now (plak: Steer top / FIFO head).
-        if line.is_empty() {
+        // Attached images alone are a message.
+        if line.is_empty() && (self.attachments.is_empty() || self.queue_focused) {
             if self.queue_focused {
                 return self.queue_activate_selected(steer || self.busy);
             }
@@ -54,12 +55,6 @@ impl App {
                 && (steer || self.key_typing.since_typed >= SEND_NOW_GAP)
             {
                 return self.queue_send_now_at(0); // FIFO head = oldest
-            }
-            if !self.attachments.is_empty() {
-                self.push_block(ScrollBlock::System(
-                    "type a message to send with the attached images".to_owned(),
-                ));
-                self.mark_dirty();
             }
             return None;
         }

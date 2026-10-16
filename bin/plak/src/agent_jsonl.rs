@@ -21,6 +21,7 @@ pub enum AgentCommand {
     Prompt {
         id: String,
         text: String,
+        images: Vec<plakous_host_protocol::DraftImage>,
         steer: bool,
     },
     Interrupt {
@@ -131,17 +132,23 @@ impl AgentCommand {
     #[must_use]
     pub fn into_user_action(self, busy: bool) -> Option<UserAction> {
         match self {
-            Self::Prompt { text, steer, .. } => {
+            Self::Prompt {
+                text,
+                images,
+                steer,
+                ..
+            } => {
+                let draft = plakous_host_protocol::Draft::new(text, images);
                 if steer {
                     if busy {
-                        Some(UserAction::Steer(text.into()))
+                        Some(UserAction::Steer(draft))
                     } else {
                         None
                     }
                 } else if busy {
-                    Some(UserAction::FollowUp(text.into()))
+                    Some(UserAction::FollowUp(draft))
                 } else {
-                    Some(UserAction::Prompt(text.into()))
+                    Some(UserAction::Prompt(draft))
                 }
             }
             Self::Interrupt { .. } => Some(UserAction::Interrupt),
@@ -289,13 +296,26 @@ mod background_tests {
 }
 
 fn parse_prompt(id: String, value: &Map<String, Value>) -> ParseOutcome {
-    let Some(text) = string_field(value, "text") else {
-        return ParseOutcome::Diagnostic {
-            id: Some(id),
-            message: "prompt requires text".to_owned(),
-        };
+    let images = match prompt_images(value.get("images")) {
+        Ok(images) => images,
+        Err(message) => {
+            return ParseOutcome::Diagnostic {
+                id: Some(id),
+                message,
+            };
+        }
     };
-    if text.trim().is_empty() {
+    let text = match value.get("text") {
+        Some(Value::String(text)) => text.clone(),
+        None if !images.is_empty() => String::new(),
+        _ => {
+            return ParseOutcome::Diagnostic {
+                id: Some(id),
+                message: "prompt requires text or images".to_owned(),
+            };
+        }
+    };
+    if text.trim().is_empty() && images.is_empty() {
         return ParseOutcome::Diagnostic {
             id: Some(id),
             message: "prompt text must be non-empty".to_owned(),
@@ -308,7 +328,41 @@ fn parse_prompt(id: String, value: &Map<String, Value>) -> ParseOutcome {
         };
     }
     let steer = matches!(value.get("steer"), Some(Value::Bool(true)));
-    ParseOutcome::Command(AgentCommand::Prompt { id, text, steer })
+    ParseOutcome::Command(AgentCommand::Prompt {
+        id,
+        text,
+        images,
+        steer,
+    })
+}
+
+/// The image files a prompt's optional `images` array of paths names, read
+/// and sniffed as `plak run --image` reads them; relative paths resolve
+/// against the agent's working directory.
+fn prompt_images(images: Option<&Value>) -> Result<Vec<plakous_host_protocol::DraftImage>, String> {
+    let Some(images) = images else {
+        return Ok(Vec::new());
+    };
+    let Some(paths) = images.as_array() else {
+        return Err("prompt images must be an array of file paths".to_owned());
+    };
+    if paths.len() > plakous_hosted::attachments::MAX_IMAGES {
+        return Err(format!(
+            "a prompt carries at most {} images",
+            plakous_hosted::attachments::MAX_IMAGES
+        ));
+    }
+    paths
+        .iter()
+        .map(|path| {
+            let path = path
+                .as_str()
+                .filter(|path| !path.is_empty())
+                .ok_or_else(|| "prompt images must be an array of file paths".to_owned())?;
+            plakous_hosted::attachments::read_image(std::path::Path::new(path))
+                .map_err(|error| error.to_string())
+        })
+        .collect()
 }
 
 fn parse_node_action(id: String, value: &Map<String, Value>, interrupt: bool) -> ParseOutcome {
@@ -516,6 +570,62 @@ mod tests {
             Some(UserAction::Steer("now".into()))
         );
         assert_eq!(steer.into_user_action(false), None);
+    }
+
+    #[test]
+    fn prompt_images_are_read_from_paths_and_may_stand_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let shot = dir.path().join("shot.png");
+        std::fs::write(&shot, plakous_hosted::attachments::png(4, 3, 10)).unwrap();
+        let line = |fields: Value| {
+            let mut object = serde_json::json!({"v": 1, "kind": "prompt", "id": "p"});
+            object
+                .as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            parse_command_line(&object.to_string())
+        };
+        let parsed = line(serde_json::json!({"text": "what is this?", "images": [shot]}));
+        let ParseOutcome::Command(command) = parsed else {
+            panic!("{parsed:?}");
+        };
+        let Some(UserAction::Prompt(draft)) = command.into_user_action(false) else {
+            panic!("expected a prompt");
+        };
+        assert_eq!(draft.text, "what is this?");
+        assert_eq!(draft.images.len(), 1);
+        assert_eq!(draft.images[0].media_type, "image/png");
+
+        let parsed = line(serde_json::json!({"images": [shot, shot]}));
+        let ParseOutcome::Command(command) = parsed else {
+            panic!("{parsed:?}");
+        };
+        let Some(UserAction::FollowUp(draft)) = command.into_user_action(true) else {
+            panic!("expected a follow-up");
+        };
+        assert_eq!((draft.text.as_str(), draft.images.len()), ("", 2));
+
+        for (fields, needle) in [
+            (serde_json::json!({"images": []}), "text or images"),
+            (
+                serde_json::json!({"images": "shot.png"}),
+                "array of file paths",
+            ),
+            (
+                serde_json::json!({"text": "x", "images": [1]}),
+                "array of file paths",
+            ),
+            (
+                serde_json::json!({"text": "x", "images": [dir.path().join("gone.png")]}),
+                "gone.png",
+            ),
+        ] {
+            let parsed = line(fields);
+            assert!(
+                matches!(&parsed, ParseOutcome::Diagnostic { message, .. } if message.contains(needle)),
+                "{parsed:?}"
+            );
+        }
     }
 
     #[test]

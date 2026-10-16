@@ -1049,7 +1049,7 @@ fn finish_continue_session(
         return Err("run --session requires an exact session uuid".to_owned());
     }
     let (prompt, images) = prompt.into_draft()?;
-    if prompt.trim().is_empty() {
+    if prompt.trim().is_empty() && images.is_empty() {
         return Err("run requires a non-empty prompt after `--`".to_owned());
     }
     if prompt.len() > NATIVE_RUN_MAX_PROMPT_BYTES {
@@ -1093,7 +1093,9 @@ fn finish_run(
             .transpose()?
             .unwrap_or(crate::product_config::ProductCompositionSelection::FollowCatalog);
         crate::platform_catalog::validate(provider, &model, effort, composition)?;
-        if prompt.trim().is_empty() || prompt.len() > NATIVE_RUN_MAX_PROMPT_BYTES {
+        if (prompt.trim().is_empty() && images.is_empty())
+            || prompt.len() > NATIVE_RUN_MAX_PROMPT_BYTES
+        {
             return Err("run requires a non-empty prompt within the supported size bound".into());
         }
         return Ok(Command::RunPlatform {
@@ -1127,7 +1129,7 @@ fn finish_run(
             .transpose()?
             .unwrap_or_default();
         let wire = crate::product_config::ProductWireBinding::resolve(selection);
-        if prompt.trim().is_empty() {
+        if prompt.trim().is_empty() && images.is_empty() {
             return Err("run requires a non-empty prompt after `--`".to_owned());
         }
         if prompt.len() > NATIVE_RUN_MAX_PROMPT_BYTES {
@@ -1155,7 +1157,7 @@ fn finish_run(
     let composition = composition
         .map(|value| crate::product_config::ProductCompositionSelection::parse(&value))
         .transpose()?;
-    if prompt.trim().is_empty() {
+    if prompt.trim().is_empty() && images.is_empty() {
         return Err("run requires a non-empty prompt after `--`".to_owned());
     }
     if prompt.len() > NATIVE_RUN_MAX_PROMPT_BYTES {
@@ -1368,6 +1370,22 @@ mod tests {
         let Command::RunOpenRouter { prompt, .. } = run(&[&shot], "openrouter").unwrap() else {
             panic!("expected openrouter run")
         };
+        assert_eq!(prompt.images.len(), 1);
+
+        // Images alone are a prompt.
+        let image_only = parse(vec![
+            OsString::from("run"),
+            "--account".into(),
+            "grok".into(),
+            "--model".into(),
+            "m".into(),
+            "--image".into(),
+            shot.as_os_str().to_owned(),
+        ]);
+        let Ok(Command::Run { prompt, .. }) = image_only else {
+            panic!("expected an image-only run, got {image_only:?}")
+        };
+        assert_eq!(prompt.text, "");
         assert_eq!(prompt.images.len(), 1);
 
         let error = run(&[&notes], "grok").unwrap_err();

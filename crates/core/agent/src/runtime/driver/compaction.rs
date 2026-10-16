@@ -2,6 +2,7 @@
 
 use super::commands::ordinary_capacity_refusal;
 use super::operations::transition_admission;
+use crate::input::UserInput;
 use crate::runtime::admission::validate_configuration_runtime_authority;
 use crate::runtime::compaction::fold::{
     build_compaction_success_fold, compact_diagnostic, nested_observation_token_upper_bound,
@@ -497,7 +498,7 @@ impl Driver {
             .run_turn_compaction(
                 command,
                 false,
-                Some(command.input.text()).filter(|text| !text.is_empty()),
+                Some(command.input.clone()).filter(|input| !input.parts().is_empty()),
             )
             .await?
             .committed()
@@ -524,7 +525,7 @@ impl Driver {
         &mut self,
         command: &PromptCommand,
         pressure_forced: bool,
-        pending_user_input: Option<String>,
+        pending_user_input: Option<UserInput>,
     ) -> Result<TurnCompactionOutcome, AgentError> {
         let checkpoint = self.authority.checkpoint();
         let canonical = checkpoint.manifest().canonical();
@@ -1227,8 +1228,8 @@ impl Driver {
             attempt
                 .request
                 .pending_user_input
-                .as_deref()
-                .map(|text| pending_user_segment(&measured.checkpoint, text))
+                .as_ref()
+                .map(|input| pending_user_segment(&measured.checkpoint, input))
                 .transpose()?
         } else {
             None
@@ -1947,7 +1948,7 @@ impl Driver {
         .map_err(compact_runtime_endpoint_rejected)?;
         let qualification_request = request
             .pending_user_input
-            .as_deref()
+            .as_ref()
             .map(|pending| {
                 let notice = self
                     .process_notices()

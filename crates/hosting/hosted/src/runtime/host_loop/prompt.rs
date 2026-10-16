@@ -150,6 +150,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         }
 
         let user_text = raw_text;
+        // The images the prompt carries are part of every pending-input
+        // measurement, so the estimate counts them by the dialect's bound.
+        let images = queued_delivery
+            .as_ref()
+            .map(|item| std::sync::Arc::clone(&item.images))
+            .unwrap_or_default();
+        let pending_input = |command: &str| queue::user_input(command, &images);
 
         if (!host_authored || transient_resume)
             && let Err(error) = self.refresh_native_authority_before_prompt()
@@ -244,7 +251,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             query_context(
                 &self.executor,
                 &self.opened,
-                ContextQuery::WithPendingUserInput(canonical_command.clone()),
+                ContextQuery::WithPendingUserInput(pending_input(&canonical_command)),
             )
         };
         let mut pending_context = match queried {
@@ -303,8 +310,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     &mut self.stderr_buf,
                     &self.events,
                     self.log.as_ref(),
-                    &canonical_command,
-                    selected_mail.is_some().then_some(user_text.as_str()),
+                    &pending_input(&canonical_command),
+                    selected_mail
+                        .is_some()
+                        .then(|| pending_input(&user_text))
+                        .as_ref(),
                 ) {
                     Ok(ScheduledPrompt::Send {
                         over_window,
@@ -367,6 +377,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     &mut canonical_command,
                     &mut selected_mail,
                     &user_text,
+                    &images,
                     &mut pending_context,
                 )
             {
@@ -480,9 +491,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 // the wake prompt is the host's, not the operator's draft.
                 self.config.session.child_wake_suppressed = true;
             } else {
-                let _ = self
-                    .events
-                    .send(HostEvent::DraftRestored(user_text.clone()));
+                let _ =
+                    self.events
+                        .send(HostEvent::DraftRestored(plakous_host_protocol::Draft::new(
+                            user_text.clone(),
+                            images.to_vec(),
+                        )));
             }
         } else if matches!(&drive, Ok(TurnHostOutcome::AdmissionRejected { .. })) {
             if queued_delivery.is_some() {
@@ -491,7 +505,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     "prompt remains queued; resume to retry, or edit a rejected item",
                 ));
             } else {
-                reject_draft(&self.events, super::UserAction::Prompt(user_text.into()));
+                reject_draft(
+                    &self.events,
+                    super::UserAction::Prompt(plakous_host_protocol::Draft::new(
+                        user_text,
+                        images.to_vec(),
+                    )),
+                );
             }
         }
         self.recovery_blocked |= host_outcome_blocks_continuation(&drive);
@@ -659,6 +679,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         canonical_command: &mut String,
         selected_mail: &mut Option<sessions::ResultMailBatch>,
         user_text: &str,
+        images: &[plakous_host_protocol::DraftImage],
         pending_context: &mut crate::context::ContextProjection,
     ) -> bool {
         if selected_mail.is_none() {
@@ -667,7 +688,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let Ok(bare) = query_context(
             &self.executor,
             &self.opened,
-            ContextQuery::WithPendingUserInput(user_text.to_owned()),
+            ContextQuery::WithPendingUserInput(queue::user_input(user_text, images)),
         ) else {
             return false;
         };

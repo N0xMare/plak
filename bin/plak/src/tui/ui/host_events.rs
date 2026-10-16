@@ -806,8 +806,8 @@ impl App {
                 }
                 self.mark_dirty();
             }
-            HostEvent::DraftRestored(text) => {
-                self.restore_draft_text(text);
+            HostEvent::DraftRestored(draft) => {
+                self.restore_draft(draft);
                 self.mark_dirty();
             }
             HostEvent::QueueEditApplied { id } => {

@@ -1263,11 +1263,18 @@ fn composer_image_chips_attach_by_slash_or_path_drop_and_ride_the_next_prompt() 
     ));
     assert_eq!(app.attachments.len(), 1);
 
-    // Enter with chips but no text sends nothing.
-    assert_eq!(
-        app.handle_key(super::test_support::key(crossterm::event::KeyCode::Enter)),
-        None
-    );
+    // Submit with chips but no text sends the images alone.
+    let sent = app.submit_line(false);
+    let Some(UserAction::Prompt(draft)) = sent else {
+        panic!("expected an image-only prompt, got {sent:?}")
+    };
+    assert_eq!(draft.text, "");
+    assert_eq!(draft.images.len(), 1);
+    assert_eq!(app.attachments.len(), 0);
+
+    // A prompt the host withholds comes back with its images.
+    app.apply_host_event(HostEvent::DraftRestored(draft));
+    assert_eq!(app.input, "");
     assert_eq!(app.attachments.len(), 1);
 
     app.set_input("what is this?".to_owned());

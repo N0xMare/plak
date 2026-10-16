@@ -44,18 +44,30 @@ Processes, even while the root is idle; only the count text is the button.
 
 ### Attaching images
 
-`/image <path>` attaches a png, jpeg, gif or webp file to the message you are
-writing; repeat it for more (at most 8 per message, 3.75 MiB each, nothing is
-resized). Dropping or pasting an absolute path to an image file attaches it
-too, instead of typing the path. Each attachment shows as a chip in the
-composer's bottom border, `[image: shot.png 1280x720 412 KB]`; `Backspace` in
-an empty composer removes the last one. Type a message and press `Enter` to
-send the text and its images together; a queued message keeps its images when
-you edit its text, and the queue panel marks it `[1 image]`. In the transcript
-the message shows one chip per image, such as `[image: png 1280x720 412 KB]`
-(history keeps the type, not the file name). A model without image input
-refuses the message, naming the route and model. Clipboard bitmaps cannot be
-pasted, and images are not drawn in the terminal.
+There are three ways to attach a png, jpeg, gif or webp image to the message
+you are writing (at most 8 per message, 3.75 MiB each):
+
+- Drop image files on the terminal, or paste their paths. Absolute, `~/...`
+  and relative paths, backslash-escaped spaces, quoted paths, `file://` URLs
+  and several paths at once all work, as do macOS screenshot names. A paste
+  that is not entirely paths to existing images is typed as text.
+- Press `Ctrl+V` to attach the image on the clipboard, for example a
+  screenshot taken with `Cmd+Ctrl+Shift+4` on macOS. It is attached as
+  `clipboard.png`; a very large one is scaled down to fit 3.75 MiB. On Linux
+  this reads the X11 clipboard.
+- `/image <path>...` attaches the named files.
+
+Each attachment shows as a chip in the composer's bottom border,
+`[image: shot.png 1280x720 412 KB]`; `Backspace` in an empty composer removes
+the last one. Press `Enter` to send the text and its images together, or the
+images alone with no text. A queued message keeps its images when you edit
+its text, and the queue panel marks it `[1 image]`. In the transcript the
+message shows one chip per image, such as `[image: png 1280x720 412 KB]`
+(history keeps the type, not the file name). The context meter counts each
+image before it is sent (up to about 3,300 tokens on Claude routes, a
+conservative 8,192 elsewhere). A model without image input refuses the
+message, naming the route and model. Files are not resized, and images are
+not drawn in the terminal.
 
 Every list follows one mouse rule: a click selects a row, a double-click does
 what `Enter` does. That holds for the slash menu, Settings and its choosers
@@ -219,7 +231,7 @@ nothing either; look, then press `Enter` again. There are 23 commands:
 | `/fork` | Fork this conversation |
 | `/fork-then-compact` | Fork, then compact the new session |
 | `/drop` | Drop the last queued message |
-| `/image <path>` | Attach an image file to the next message |
+| `/image <path>...` | Attach image files to the next message |
 | `/reload` | Restart on the installed Plak and resume this session |
 | `/quit` | Exit Plak |
 

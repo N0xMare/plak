@@ -351,7 +351,8 @@ impl SessionRecord {
     /// Records one durably accepted composer action. Adjacent repeats do not
     /// add another shelf row; oldest rows are evicted to both product bounds.
     pub fn record_prompt(&mut self, prompt: String) {
-        if self.prompt_history.last() == Some(&prompt) {
+        // An image-only message has no text to recall.
+        if prompt.is_empty() || self.prompt_history.last() == Some(&prompt) {
             return;
         }
         self.prompt_history.push(prompt);
@@ -492,7 +493,7 @@ fn validate_pending_queue(pending_queue: &[QueueItem]) -> Result<(), String> {
             .ok_or_else(|| "pending queue byte count overflowed".to_owned())?;
         if uuid::Uuid::parse_str(&item.id).is_err()
             || item.revision == 0
-            || item.text.is_empty()
+            || (item.text.is_empty() && item.images.is_empty())
             || item.text.len() > MAX_PROMPT_BYTES
             || aggregate_bytes > MAX_PENDING_QUEUE_BYTES
             || !queue_ids.insert(item.id.clone())

@@ -471,7 +471,7 @@ async fn scheduled_pending_compaction_refuses_unavailable_qualification_before_d
             source.branch_id,
             source.checkpoint_id,
             AgentCompactionReason::Scheduled,
-            Some("private pending sentinel".to_owned()),
+            Some("private pending sentinel".to_owned().into()),
             builder,
         ))
         .await;

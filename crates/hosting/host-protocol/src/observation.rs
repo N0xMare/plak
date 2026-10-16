@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::intent::{Core, ProtocolExtension, SessionIntent};
+use crate::intent::{Core, Draft, ProtocolExtension, SessionIntent};
 use crate::selection::{CompositionSelection, ProtocolSelection};
 use crate::views::transcript::TranscriptRow;
 use crate::views::{
@@ -121,8 +121,9 @@ pub enum SessionObservation<P: ProtocolExtension = Core> {
     DraftAccepted(SessionIntent<P>),
     /// One text action was refused before durable product admission.
     DraftRejected(SessionIntent<P>),
-    /// Restore a prompt after runtime admission without changing caller correlation.
-    DraftRestored(String),
+    /// Restore a prompt, its images included, after runtime admission without
+    /// changing caller correlation.
+    DraftRestored(Draft),
     /// A queued edit was durably applied; its submitted composer text may clear.
     QueueEditApplied {
         /// Stable queue item identity.

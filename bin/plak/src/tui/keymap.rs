@@ -224,6 +224,12 @@ pub const BINDINGS: &[Binding] = &[
         double_tap: None,
     },
     Binding {
+        chord: "Ctrl+V",
+        when: When::Composer,
+        effect: "attach the image on the system clipboard as a PNG",
+        double_tap: None,
+    },
+    Binding {
         chord: "Ctrl+A / Ctrl+E",
         when: When::Composer,
         effect: "move the caret to line start or line end",
@@ -960,7 +966,7 @@ mod tests {
             .lines()
             .filter(|line| line.len() > CHORD_WIDTH && !line.ends_with("All keybinds"))
             .collect();
-        assert!(rows.len() <= 23, "{} rows:\n{typing}", rows.len());
+        assert!(rows.len() <= 24, "{} rows:\n{typing}", rows.len());
         assert!(
             typing.contains("Cmd/Super               copy / cut / select all / undo / redo"),
             "{typing}"

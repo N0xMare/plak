@@ -269,8 +269,13 @@ impl App {
                 None
             }
             SlashEffect::Reload => self.request_reload(),
-            SlashEffect::AttachImage(path) => {
-                self.attach_image(std::path::Path::new(&path));
+            SlashEffect::AttachImage(argument) => {
+                let paths = super::image_paths::PathBase::current()
+                    .map(|base| base.named_files(&argument))
+                    .unwrap_or_default();
+                for path in paths {
+                    self.attach_image(&path);
+                }
                 None
             }
             SlashEffect::OpenSettings => self.open_control_tab(ControlTab::Settings),
@@ -431,10 +436,20 @@ impl App {
         self.typing.observe_paste(self.now());
         // The queue never takes typing: a paste leaves it for the composer.
         self.queue_focused = false;
-        // A dropped or pasted absolute path to an existing image file
-        // attaches the image instead of typing its path.
-        if let Some(path) = pasted_image_path(text) {
-            self.attach_image(&path);
+        // An empty paste is what a terminal sends for a clipboard that holds
+        // only an image.
+        if text.is_empty() {
+            self.paste_clipboard_image();
+            return None;
+        }
+        // Dropped or pasted paths that all name existing image files attach
+        // the images instead of typing the paths.
+        if let Some(paths) =
+            super::image_paths::PathBase::current().and_then(|base| base.dropped_images(text))
+        {
+            for path in paths {
+                self.attach_image(&path);
+            }
             return None;
         }
         self.insert_chars(text);
@@ -462,6 +477,20 @@ impl App {
     /// Attaches one image file to the draft; a refusal is a system note
     /// naming the file, and the draft is unchanged.
     pub(super) fn attach_image(&mut self, path: &std::path::Path) {
+        self.push_attachment(|| {
+            crate::config::image_attachments::read_image(path).map_err(|error| error.to_string())
+        });
+    }
+
+    /// Attaches the image on the system clipboard (Ctrl+V).
+    pub(super) fn paste_clipboard_image(&mut self) {
+        self.push_attachment(super::clipboard::read_image);
+    }
+
+    fn push_attachment(
+        &mut self,
+        read: impl FnOnce() -> Result<plakous_host_protocol::DraftImage, String>,
+    ) {
         self.mark_dirty();
         if self.attachments.len() >= crate::config::image_attachments::MAX_IMAGES {
             self.push_block(ScrollBlock::System(format!(
@@ -470,28 +499,9 @@ impl App {
             )));
             return;
         }
-        match crate::config::image_attachments::read_image(path) {
+        match read() {
             Ok(image) => self.attachments.push(image),
             Err(error) => self.push_block(ScrollBlock::System(format!("not attached: {error}"))),
         }
     }
-}
-
-/// The path a terminal pastes when a file is dropped on it, when it names an
-/// existing image file. Surrounding quotes and backslash-escaped spaces are
-/// undone.
-fn pasted_image_path(text: &str) -> Option<std::path::PathBuf> {
-    let text = text.trim();
-    if text.contains('\n') {
-        return None;
-    }
-    let unquoted = ['\'', '"']
-        .iter()
-        .find_map(|quote| {
-            text.strip_prefix(*quote)
-                .and_then(|rest| rest.strip_suffix(*quote))
-        })
-        .map_or_else(|| text.replace("\\ ", " "), str::to_owned);
-    let path = std::path::PathBuf::from(unquoted);
-    crate::config::image_attachments::is_image_file(&path).then_some(path)
 }

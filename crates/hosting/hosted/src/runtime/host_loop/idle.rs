@@ -178,8 +178,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     let (UserAction::Prompt(draft) | UserAction::FollowUp(draft)) = &action else {
                         unreachable!()
                     };
-                    let t = draft.text.trim().to_owned();
-                    if t.is_empty() {
+                    if draft.text.trim().is_empty() && draft.images.is_empty() {
                         reject_draft(&self.events, action);
                         None
                     } else {

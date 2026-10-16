@@ -9,6 +9,7 @@ use super::{
     SessionRef, SessionRuntimeBinding, Timestamp, ToolExecutorId, ToolName, ToolOutcome,
     WorkingRecoveryPhase, fmt,
 };
+use plakous_agent::UserInput;
 use plakous_agent::internal::FeedSeq;
 
 /// Caller-stable identity for one complete session workflow.
@@ -784,8 +785,9 @@ pub enum SessionHistoryPageOutcome {
 pub enum ContextQuery {
     /// Measure the current exact model-input projection.
     Current,
-    /// Measure the exact candidate projection with one uncommitted user input.
-    WithPendingUserInput(String),
+    /// Measure the exact candidate projection with one uncommitted user
+    /// message, its images included.
+    WithPendingUserInput(UserInput),
 }
 
 impl fmt::Debug for ContextQuery {
@@ -880,7 +882,7 @@ impl CompactSessionRequest {
     /// never added to the immutable source, compaction request, or recovery
     /// record.
     #[must_use]
-    pub fn with_pending_user_input(mut self, input: String) -> Self {
+    pub fn with_pending_user_input(mut self, input: UserInput) -> Self {
         self.qualification = ContextQuery::WithPendingUserInput(input);
         self
     }

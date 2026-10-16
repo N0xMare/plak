@@ -368,6 +368,7 @@ impl App {
                 self.after_composer_edit();
             }
             KeyCode::Char('d') => self.delete_forward(),
+            KeyCode::Char('v' | 'V') if !self.has_no_prompt() => self.paste_clipboard_image(),
             KeyCode::Char('z') if shift => self.composer_redo_step(),
             KeyCode::Char('Z' | 'y' | 'Y') => self.composer_redo_step(),
             KeyCode::Char('z') => self.composer_undo_step(),
