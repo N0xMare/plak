@@ -31,7 +31,7 @@ async fn ready_start_is_admitted_before_blocked_idle_retention() -> TestResult {
         .try_send(crate::ActorControl::Command {
             command: TurnCommand::Start {
                 command_id: CommandId::new("retention:ready-start")?,
-                text: "start before idle maintenance".into(),
+                input: "start before idle maintenance".into(),
             },
             reply,
         })?;

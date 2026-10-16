@@ -2997,6 +2997,22 @@ impl CodexCatalogSource {
                     ),
                 );
             }
+            // The live Codex catalog row's `input_modalities` is the evidence;
+            // Responses Lite rows keep a text-only wire.
+            if !model.use_responses_lite
+                && model
+                    .input_modalities
+                    .contains(&CatalogInputModality::Image)
+            {
+                features.insert(
+                    Capability::ImageInput,
+                    FeatureSupport::new(
+                        Support::Native,
+                        CapabilityConstraints::default(),
+                        provenance,
+                    ),
+                );
+            }
             if parallel_tools {
                 features.insert(
                     Capability::ParallelTools,

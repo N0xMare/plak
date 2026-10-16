@@ -258,7 +258,7 @@ async fn seed_mixed_debt(
                 format!("plak:mail:queued-{index}:follow-up")
             })?,
             target_turn_id: turn_id,
-            text: "queued mail".into(),
+            input: "queued mail".into(),
         };
         let component = runtime_component(
             RuntimeComponentKind::Command,
@@ -297,7 +297,7 @@ async fn seed_mixed_debt(
         let command = TurnCommand::Steer {
             command_id: CommandId::new("fixture:queued-steer")?,
             turn_id,
-            text: "pending steering during live cell".into(),
+            input: "pending steering during live cell".into(),
         };
         let component = runtime_component(
             RuntimeComponentKind::Command,

@@ -1301,6 +1301,11 @@ pub(crate) enum MessageBlock {
         #[serde(skip_serializing_if = "is_false")]
         is_error: bool,
     },
+    Image {
+        source: ImageSourceParam,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControlParam>,
+    },
 }
 impl PartialEq for MessageBlock {
     fn eq(&self, other: &Self) -> bool {
@@ -1323,6 +1328,48 @@ pub(crate) enum ToolResultContent {
         #[serde(skip_serializing_if = "Option::is_none")]
         cache_control: Option<CacheControlParam>,
     },
+    Image {
+        source: ImageSourceParam,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControlParam>,
+    },
+}
+
+/// Where a Messages image block reads its pixels from.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(crate) enum ImageSourceParam {
+    Base64 { media_type: String, data: String },
+    Url { url: String },
+}
+
+fn image_source(
+    image: &plakous_model::ImageBlock,
+) -> Result<ImageSourceParam, MessagesRequestError> {
+    use base64::Engine as _;
+    let source = image.source();
+    if let Some(bytes) = source.as_bytes() {
+        return Ok(ImageSourceParam::Base64 {
+            media_type: image.media_type().to_owned(),
+            data: base64::engine::general_purpose::STANDARD.encode(bytes),
+        });
+    }
+    if let Some(data_url) = source.as_data_url() {
+        let (media_type, data) = data_url
+            .strip_prefix("data:")
+            .and_then(|rest| rest.split_once(";base64,"))
+            .ok_or_else(|| unsupported("image data URL is not base64-encoded"))?;
+        return Ok(ImageSourceParam::Base64 {
+            media_type: media_type.to_owned(),
+            data: data.to_owned(),
+        });
+    }
+    source
+        .as_uri()
+        .map(|url| ImageSourceParam::Url {
+            url: url.to_owned(),
+        })
+        .ok_or_else(|| unsupported("image source is outside the Messages profile"))
 }
 #[allow(
     clippy::trivially_copy_pass_by_ref,
@@ -1568,12 +1615,16 @@ fn mark_last_message_cache_breakpoint(messages: &mut [MessageParam], cache: Cach
     for message in messages.iter_mut().rev() {
         for block in message.content.iter_mut().rev() {
             match block {
-                MessageBlock::Text { cache_control, .. } => {
+                MessageBlock::Text { cache_control, .. }
+                | MessageBlock::Image { cache_control, .. } => {
                     *cache_control = Some(cache);
                     return;
                 }
                 MessageBlock::ToolResult { content, .. } => {
-                    if let Some(ToolResultContent::Text { cache_control, .. }) = content.last_mut()
+                    if let Some(
+                        ToolResultContent::Text { cache_control, .. }
+                        | ToolResultContent::Image { cache_control, .. },
+                    ) = content.last_mut()
                     {
                         *cache_control = Some(cache);
                         return;
@@ -2026,6 +2077,10 @@ fn translate_user(blocks: &[ContentBlock]) -> Result<Vec<MessageBlock>, Messages
         .iter()
         .map(|block| match block {
             ContentBlock::Text(text) => Ok(text_block(text.text().to_owned())),
+            ContentBlock::Image(image) => Ok(MessageBlock::Image {
+                source: image_source(image)?,
+                cache_control: None,
+            }),
             _ => Err(unsupported(
                 "user content block is outside the Messages profile",
             )),
@@ -2081,10 +2136,10 @@ fn translate_tool_result(
                         ToolCallerLineage::Direct
                     ) =>
                 {
-                    Ok(tool_result_text(format!(
-                        "[image result: {}]",
-                        image.media_type()
-                    )))
+                    Ok(ToolResultContent::Image {
+                        source: image_source(image)?,
+                        cache_control: None,
+                    })
                 }
                 ToolResultPart::Audio(audio)
                     if matches!(
@@ -4407,8 +4462,78 @@ mod tests {
         let value = serde_json::to_value(block)?;
         assert_eq!(value["tool_use_id"], "remote-exec");
         assert_eq!(value["content"][0]["text"], "working");
-        assert_eq!(value["content"][1]["text"], "[image result: image/png]");
+        assert_eq!(
+            value["content"][1],
+            serde_json::json!({
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"}
+            })
+        );
         assert_eq!(value["content"][2]["text"], "[audio result: audio/wav]");
+        Ok(())
+    }
+
+    #[test]
+    fn inspect_image_bytes_reach_the_body_as_a_tool_result_image_block() -> TestResult {
+        let call_id = CallId::try_from(uuid::Uuid::from_u128(44))?;
+        let correlation = plakous_model::ToolCorrelation::new(
+            Some("remote-inspect".into()),
+            None,
+            ToolCallerLineage::Direct,
+        )?;
+        let result = plakous_model::ToolResultBlock::new(
+            call_id,
+            ToolExecutionOwner::Local,
+            ToolResultKind::Success,
+            vec![
+                ToolResultPart::Text(plakous_model::TextBlock::new("media_type=image/png", None)?),
+                ToolResultPart::Image(plakous_model::ImageBlock::new(
+                    "image/png",
+                    plakous_model::MediaSource::bytes(b"\x89PNG".to_vec())?,
+                )?),
+            ],
+            correlation.clone(),
+        )?;
+        let block = translate_tool_result(
+            &result,
+            &PendingTool {
+                call_id,
+                remote_id: "remote-inspect".into(),
+                owner: ToolExecutionOwner::Local,
+                correlation,
+            },
+            &[],
+        )?;
+        let value = serde_json::to_value(block)?;
+        assert_eq!(value["type"], "tool_result");
+        assert_eq!(
+            value["content"][1],
+            serde_json::json!({
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw=="}
+            })
+        );
+        assert!(!value.to_string().contains("[image result"));
+        Ok(())
+    }
+
+    #[test]
+    fn user_images_lower_to_base64_image_blocks_in_order() -> TestResult {
+        let blocks = vec![
+            ContentBlock::Text(plakous_model::TextBlock::new("what is this", None)?),
+            ContentBlock::Image(plakous_model::ImageBlock::new(
+                "image/png",
+                plakous_model::MediaSource::bytes(b"\x89PNG".to_vec())?,
+            )?),
+        ];
+        let value = serde_json::to_value(translate_user(&blocks)?)?;
+        assert_eq!(
+            value,
+            serde_json::json!([
+                {"type": "text", "text": "what is this"},
+                {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw=="}}
+            ])
+        );
         Ok(())
     }
 

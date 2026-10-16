@@ -224,11 +224,11 @@ impl OpenAiRouteConformance {
             | ResponsesFeature::FullOutputReplay
             | ResponsesFeature::PreviousResponseId
             | ResponsesFeature::IncompleteResponse
+            | ResponsesFeature::ImageInput
             | ResponsesFeature::HttpSse => ConformanceStatus::Supported,
             ResponsesFeature::HostedTools
             | ResponsesFeature::Approvals
             | ResponsesFeature::Compaction
-            | ResponsesFeature::ImageInput
             | ResponsesFeature::PromptCaching
             | ResponsesFeature::NativeOptions
             | ResponsesFeature::WebSocket
@@ -2023,6 +2023,7 @@ fn capability_feature(capability: Capability) -> Result<ResponsesFeature, Config
         Capability::Continuation => Ok(ResponsesFeature::PreviousResponseId),
         Capability::Caching => Ok(ResponsesFeature::PromptCaching),
         Capability::NativeOptions => Ok(ResponsesFeature::NativeOptions),
+        Capability::ImageInput => Ok(ResponsesFeature::ImageInput),
         Capability::HostedProgrammaticToolCalling => Ok(ResponsesFeature::ProgrammaticCallers),
         _ => Err(ConfigError::UnknownConformanceClaim),
     }

@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use plakous_agent::{
     Agent, AgentError, AgentEvent, ControlError, RUNTIME_EXECUTOR_STACK_BYTES, TurnResult,
-    TurnResultOutcome,
+    TurnResultOutcome, UserInput,
 };
 use tokio::runtime::{Builder, Handle, Runtime};
 
@@ -208,7 +208,7 @@ impl Error for TurnDriveError {
 )]
 pub async fn run_once_until_signal<F, S>(
     agent: Agent,
-    prompt: impl Into<String>,
+    prompt: impl Into<UserInput>,
     signal: S,
     mut present: F,
 ) -> Result<TurnDriveOutcome, TurnDriveError>

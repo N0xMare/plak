@@ -138,8 +138,8 @@ fn charset(content_type: &str) -> Option<String> {
 fn classify(essence: Option<&str>, body: &[u8]) -> Kind {
     let Some(essence) = essence else {
         // No declared type: an image by signature, text when it is UTF-8.
-        if let Ok(header) = plakous_tool_files::inspect_image_header(body)
-            && let Some(media_type) = still_image(header.media_type)
+        if let Ok(header) = plakous_tools::sniff_image(body)
+            && let Some(media_type) = still_image(header.media_type())
         {
             return Kind::Image(media_type);
         }
@@ -184,15 +184,15 @@ fn image(
             size(fetched)
         ));
     }
-    let header = match plakous_tool_files::inspect_image_header(&fetched.body) {
-        Ok(header) if header.media_type == declared => header,
+    let header = match plakous_tools::sniff_image(&fetched.body) {
+        Ok(header) if header.media_type() == declared => header,
         _ => {
             return ToolOutcome::failure_text(format!(
                 "fetch_url returned content declared {declared} that is not a valid {declared} image"
             ));
         }
     };
-    let dimensions = header.dimensions.map_or_else(
+    let dimensions = header.dimensions().map_or_else(
         || String::from("unknown"),
         |(width, height)| format!("{width}x{height}"),
     );

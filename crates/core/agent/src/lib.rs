@@ -70,6 +70,7 @@ mod error;
 mod event;
 mod facade_support;
 mod feed;
+mod input;
 mod lease;
 mod local_composition;
 mod manifest;
@@ -128,6 +129,7 @@ pub mod internal {
         MAX_FEED_BYTES_PER_SESSION, MAX_FEED_PAGE_BYTES, MAX_FEED_RECORD_BYTES,
         MAX_FEED_RECORDS_PER_SESSION, MAX_FEED_TRIM_BATCH,
     };
+    pub use crate::input::{MAX_USER_IMAGE_BYTES, MAX_USER_IMAGES, UserInput, UserPart};
     pub use crate::lease::{LeaseClock, LeaseDomain, LeaseInstant};
     pub use crate::local_composition::*;
     pub use crate::manifest::{
@@ -281,27 +283,28 @@ pub use internal::{
     HarnessCompilerInputs, HarnessProfileCompiler, HarnessProfileId, HarnessProfileProvenance,
     HarnessProfileSpec, HarnessProfileSpecBuilder, HttpStatusClass, IdGenerator,
     InstructionCompositionStrategy, JobHintSource, JobNoticeDelivery, JobPreemption, JobTool,
-    MAX_INSTRUCTION_BYTES, MIN_EVENT_DEBT_BYTES, ModelAdapterProfileId, ModelFamilyId, ModelId,
-    ModelReresolutionError, ModelReresolutionOperation, ModelReresolver, NamespaceId,
-    NormalizedModelEventKind, PendingEffectDecisionView, ProfileError, ProfileSemanticVersion,
-    ProtocolId, Provenance, RUNTIME_EXECUTOR_STACK_BYTES, ReasoningEffort, ReasoningPolicy,
-    ReasoningPreferenceStrategy, RecoveredTurnHandle, ReducerError, RegisteredContextSource,
-    ReplayEnvelope, ReplayKindId, ReplayScope, ReresolvedModel, ResolvedCachePlan,
-    ResolvedContextSourceFact, ResolvedContinuationPlan, ResolvedHarnessPlan,
-    ResolvedInstructionPlan, ResolvedReasoningPlan, ResolvedToolExposurePlan, ResumeOutcome, RunId,
-    SessionId, SteeringStatus, SubscriptionEnd, SubscriptionLimitError, SubscriptionLimits,
-    SystemClock, TelemetryContext, TelemetryEmitter, TelemetryObservation,
-    TelemetryObservationKind, TelemetrySink, TelemetrySinkError, TelemetryStatus,
-    TelemetryTerminalStatus, TextBlock, Timestamp, ToolActivityView, ToolAuditIdentity,
-    ToolCallAttemptIdentity, ToolCallBlock, ToolCallObservation, ToolCallState, ToolCallerClass,
-    ToolCallerLineageView, ToolCorrelation, ToolEffect, ToolExecutionOwner, ToolExposureOverride,
-    ToolExposureStrategy, ToolName, ToolProgressSummary, ToolResultBlock, ToolResultKind,
-    ToolResultObservation, ToolResultPart, Turn, TurnCommand, TurnContextCapacity, TurnControl,
-    TurnEventError, TurnEvents, TurnRecoveryOperationId, TurnResult, TurnResultHandle,
+    MAX_INSTRUCTION_BYTES, MAX_USER_IMAGE_BYTES, MAX_USER_IMAGES, MIN_EVENT_DEBT_BYTES,
+    ModelAdapterProfileId, ModelFamilyId, ModelId, ModelReresolutionError,
+    ModelReresolutionOperation, ModelReresolver, NamespaceId, NormalizedModelEventKind,
+    PendingEffectDecisionView, ProfileError, ProfileSemanticVersion, ProtocolId, Provenance,
+    RUNTIME_EXECUTOR_STACK_BYTES, ReasoningEffort, ReasoningPolicy, ReasoningPreferenceStrategy,
+    RecoveredTurnHandle, ReducerError, RegisteredContextSource, ReplayEnvelope, ReplayKindId,
+    ReplayScope, ReresolvedModel, ResolvedCachePlan, ResolvedContextSourceFact,
+    ResolvedContinuationPlan, ResolvedHarnessPlan, ResolvedInstructionPlan, ResolvedReasoningPlan,
+    ResolvedToolExposurePlan, ResumeOutcome, RunId, SessionId, SteeringStatus, SubscriptionEnd,
+    SubscriptionLimitError, SubscriptionLimits, SystemClock, TelemetryContext, TelemetryEmitter,
+    TelemetryObservation, TelemetryObservationKind, TelemetrySink, TelemetrySinkError,
+    TelemetryStatus, TelemetryTerminalStatus, TextBlock, Timestamp, ToolActivityView,
+    ToolAuditIdentity, ToolCallAttemptIdentity, ToolCallBlock, ToolCallObservation, ToolCallState,
+    ToolCallerClass, ToolCallerLineageView, ToolCorrelation, ToolEffect, ToolExecutionOwner,
+    ToolExposureOverride, ToolExposureStrategy, ToolName, ToolProgressSummary, ToolResultBlock,
+    ToolResultKind, ToolResultObservation, ToolResultPart, Turn, TurnCommand, TurnContextCapacity,
+    TurnControl, TurnEventError, TurnEvents, TurnRecoveryOperationId, TurnResult, TurnResultHandle,
     TurnResultOutcome, TurnSubmission, TurnUsage, TurnView, TurnViewState, Usage,
-    UsageAggregationError, UsageTotals, VerifiedContextSourceRef, ViewAttachment, ViewError,
-    ViewRequest, WeakAgent, compile_explicit_profile, compile_explicit_runtime_profile,
-    compiler_model_facts_from_model, recommended_neutral_coding_profile,
+    UsageAggregationError, UsageTotals, UserInput, UserPart, VerifiedContextSourceRef,
+    ViewAttachment, ViewError, ViewRequest, WeakAgent, compile_explicit_profile,
+    compile_explicit_runtime_profile, compiler_model_facts_from_model,
+    recommended_neutral_coding_profile,
 };
 
 /// Session-owned process observations and optional host registry.

@@ -494,7 +494,11 @@ impl Driver {
         // Seal against committed intent before the follow-up changes the cut.
         // The pending prompt participates in the retained-tail fit check only.
         if !self
-            .run_turn_compaction(command, false, Some(command.text.clone()))
+            .run_turn_compaction(
+                command,
+                false,
+                Some(command.input.text()).filter(|text| !text.is_empty()),
+            )
             .await?
             .committed()
             && self.turn_budgets.paid_fold_spent

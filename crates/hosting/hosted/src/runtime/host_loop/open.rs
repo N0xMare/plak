@@ -1091,7 +1091,7 @@ mod tests {
                     .block_on(reopened.opened.agent().unwrap().command(
                         plakous::agent::TurnCommand::Start {
                             command_id: CommandId::new(&intent.command_id).unwrap(),
-                            text: intent.canonical_command.clone(),
+                            input: intent.canonical_command.clone().into(),
                         },
                     ))
                     .unwrap()

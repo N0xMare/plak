@@ -273,6 +273,34 @@ and `StartInstruction` under one command id are one command; the feed's
 admitted input in history.
 No canonical item encoding or session export document changes.
 
+**User input.** `Agent::prompt`, `Agent::start`, `Agent::follow_up`,
+`follow_up_with_id`, `TurnControl::steer` and `steer_with_id` take
+`impl Into<UserInput>`: ordered `UserPart::Text(String)` and
+`UserPart::Image { media_type, bytes }` parts; a string converts to one text
+part. `Start`, `FollowUp` and `Steer` carry `input: UserInput`;
+`StartInstruction` stays text. Admission (provider-neutral, in
+`plakous-agent`) rejects as `InvalidInput`, recorded under the command id: an
+input with no parts, a text part that is not canonical text, more than
+`MAX_USER_IMAGES` (8) images, an image over `MAX_USER_IMAGE_BYTES` (3.75 MiB
+raw, so base64 stays within 5 MB; the message tells the user to downscale, and
+nothing is resized), bytes that `plakous_tools::sniff_image` does not
+recognize as PNG, JPEG, GIF or WebP, or a declared media type that differs
+from the sniffed one. An input with any image is also refused when the bound
+descriptor lacks a supported `Capability::ImageInput` fact; the refusal names
+the route and model, and nothing is dropped silently. An admitted input
+becomes one `User` item whose blocks follow the parts in order, images as
+`ContentBlock::Image` with `MediaSource::Bytes`; steering is lowered the same
+way at its boundary. Context accounting counts each image at the image token
+default (§6.8). A pending prompt measured before admission compaction counts
+only its text parts.
+
+The command's canonical input frames the verb tag (and target turn), then per
+part either `text` and the text, or `image`, the media type, and the SHA-256
+of the image bytes, so the receipt digest covers every part without storing
+image bytes in the command record. A restored continuation root carries no
+input (the input is already in history); queued steering in a continuation
+carries its canonical content blocks. Both are runtime-format-epoch encodings.
+
 Prompt admission is asynchronous. Success assigns a stable `TurnId` and fixes
 FIFO position; it does not claim model execution has begun. The queue is
 bounded, and saturation returns a typed backpressure error without appending
@@ -2441,6 +2469,25 @@ existing capability profile, and pricing thresholds and hosted-feature support
 come only from the provider crate's bundled reviewed table. A listed id with no
 family rule or no reviewed row is refused with its reason, never admitted on a
 pattern match alone.
+
+`Capability::ImageInput` is a per-model catalog fact for inline user images.
+It is set only where provider evidence says the model accepts images: every
+Anthropic Platform and Claude subscription row (Anthropic vision support
+covers all current Claude models), every reviewed OpenAI Platform row (GPT-5
+and later accept text and image input), and a Codex catalog row whose
+`input_modalities` lists `image` and that does not use Responses Lite. xAI
+Platform, SuperGrok and OpenRouter rows carry no such fact until per-model
+evidence is reviewed, so image prompts there are refused at admission.
+Lowering: Responses sends inline bytes as a `data:` URL `input_image` for user
+and tool-result images (the OpenAI Platform, Codex and xAI Platform request
+policies admit user `input_image`; Codex Lite, SuperGrok and OpenRouter
+Responses do not). Messages sends `{type: "image", source: {type: "base64",
+media_type, data}}` user blocks and the same blocks inside `tool_result`
+content for direct-lineage tool images. Chat sends user `image_url` parts with
+`data:` URLs; Chat tool messages stay text, and a round's tool-result images
+follow its tool messages as one synthetic `user` message whose parts are
+`image from tool call <id>:` then the image, derived deterministically during
+lowering and never stored as a turn.
 
 ### 6.3 URL/API profiles
 

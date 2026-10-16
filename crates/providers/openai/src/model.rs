@@ -1371,8 +1371,10 @@ fn codex_request_policy(
         .capabilities()
         .get(Capability::ParallelTools)
         .is_some_and(|fact| matches!(fact.support(), Support::Native | Support::Emulated));
+    // The route wire carries `input_image`; whether a model accepts one is
+    // the catalog's `ImageInput` fact, checked at admission.
     ResponsesRequestPolicy::openai_codex(
-        false,
+        true,
         parallel_tool_calls,
         crate::OPENAI_CODEX_ENCRYPTED_REASONING_INCLUDE,
     )
@@ -1380,9 +1382,10 @@ fn codex_request_policy(
 
 /// Returns the exact request-wire policy for an admitted Platform target.
 ///
-/// The target's explicit storage disposition selects `store`; reviewed Platform
-/// rows deliberately exclude image input and parallel function calls in this
-/// adapter revision.
+/// The target's explicit storage disposition selects `store`; the route wire
+/// carries `input_image` (the catalog's `ImageInput` fact gates each model at
+/// admission), and reviewed Platform rows exclude parallel function calls in
+/// this adapter revision.
 pub fn openai_platform_request_policy(
     authority: &OpenAiPlatformConfigurationAuthority,
 ) -> Result<ResponsesRequestPolicy, ResponsesProviderConfigurationError> {

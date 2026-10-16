@@ -106,7 +106,7 @@ async fn start_rejection(session: &OpenedSession, command: &str) -> TestResult<C
         .agent()
         .command(TurnCommand::Start {
             command_id: CommandId::new(command)?,
-            text: "begin more work".to_owned(),
+            input: "begin more work".to_owned().into(),
         })
         .await;
     Ok(match submission {

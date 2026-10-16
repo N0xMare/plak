@@ -517,7 +517,7 @@ fn nested_request(
 /// The text frame of a canonical steer command (tag, turn, text).
 fn steer_text(canonical: &[u8]) -> Result<String, AgentError> {
     let mut rest = canonical;
-    let mut frames = Vec::with_capacity(3);
+    let mut frames = Vec::with_capacity(4);
     while !rest.is_empty() {
         let (length, tail) = rest
             .split_first_chunk::<8>()
@@ -530,11 +530,29 @@ fn steer_text(canonical: &[u8]) -> Result<String, AgentError> {
         frames.push(frame);
         rest = tail;
     }
-    match frames.as_slice() {
-        [b"steer", _, text] => String::from_utf8(text.to_vec())
-            .map_err(|_| integrity("durable steer command text is not UTF-8")),
-        _ => Err(integrity("durable steer command is malformed")),
+    let [b"steer", _, parts @ ..] = frames.as_slice() else {
+        return Err(integrity("durable steer command is malformed"));
+    };
+    // Text parts are shown verbatim; an image part is named, never decoded.
+    let mut shown = Vec::new();
+    let mut rest = parts;
+    while let [kind, tail @ ..] = rest {
+        match (*kind, tail) {
+            (b"text", [text, tail @ ..]) => {
+                shown.push(
+                    String::from_utf8(text.to_vec())
+                        .map_err(|_| integrity("durable steer command text is not UTF-8"))?,
+                );
+                rest = tail;
+            }
+            (b"image", [media_type, _digest, tail @ ..]) => {
+                shown.push(format!("[image: {}]", String::from_utf8_lossy(media_type)));
+                rest = tail;
+            }
+            _ => return Err(integrity("durable steer command is malformed")),
+        }
     }
+    Ok(shown.join("\n\n"))
 }
 
 /// The committed terminal of `turn_id`'s root command at `checkpoint`, with

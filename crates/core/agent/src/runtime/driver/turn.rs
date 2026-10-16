@@ -408,7 +408,7 @@ impl Driver {
             .iter()
             .filter(|steering| pending_steering.contains(&steering.operation_id))
             .map(|steering| QueuedSteering {
-                text: steering.text.clone(),
+                content: steering.content.clone(),
                 operation_id: steering.operation_id,
             })
             .collect();
@@ -781,7 +781,6 @@ impl Driver {
         ContinuationRoot {
             command_id: command.command_id.as_str().to_owned(),
             turn_id: command.turn_id,
-            text: command.text.clone(),
             follow_up: command.follow_up,
             operation_id: command.operation_id,
             binding: command.binding,
@@ -1191,11 +1190,9 @@ impl Driver {
         let user_item = ConversationItem::new(
             prompt_entry,
             Actor::User,
-            vec![ContentBlock::Text(
-                TextBlock::new(command.text.clone(), None).map_err(|_| {
-                    AgentError::new(AgentErrorKind::InvalidInput, "prompt text is invalid")
-                })?,
-            )],
+            command.input.content_blocks().map_err(|_| {
+                AgentError::new(AgentErrorKind::InvalidInput, "prompt input is invalid")
+            })?,
             if command.instruction {
                 Provenance::Instruction
             } else {
@@ -1372,7 +1369,7 @@ impl Driver {
                         .steering
                         .iter()
                         .map(|queued| ContinuationSteering {
-                            text: queued.text.clone(),
+                            content: queued.content.clone(),
                             operation_id: queued.operation_id,
                         })
                         .collect(),
@@ -1504,7 +1501,7 @@ impl Driver {
                     .steering
                     .iter()
                     .map(|queued| ContinuationSteering {
-                        text: queued.text.clone(),
+                        content: queued.content.clone(),
                         operation_id: queued.operation_id,
                     })
                     .collect(),

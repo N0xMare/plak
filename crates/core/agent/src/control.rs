@@ -17,6 +17,7 @@ use tokio::sync::{mpsc, oneshot};
 const SESSION_ENDPOINT_REPLY_TIMEOUT: Duration = Duration::from_secs(30);
 
 use crate::feed::FeedSeq;
+use crate::input::UserInput;
 use crate::runtime::{AgentBuilder, Turn, TurnResultHandle, TurnShared};
 
 /// Caller-supplied idempotency identity for one state-changing agent command.
@@ -98,8 +99,8 @@ pub enum TurnCommand {
     Start {
         /// Stable caller idempotency identity.
         command_id: CommandId,
-        /// Canonical user text.
-        text: String,
+        /// Ordered user message parts.
+        input: UserInput,
     },
     /// Admit a later root turn behind the named active turn.
     FollowUp {
@@ -107,8 +108,8 @@ pub enum TurnCommand {
         command_id: CommandId,
         /// Exact active root targeted by the handoff.
         target_turn_id: TurnId,
-        /// Canonical user text.
-        text: String,
+        /// Ordered user message parts.
+        input: UserInput,
     },
     /// Queue steering for an exact active turn's next safe boundary.
     Steer {
@@ -116,8 +117,8 @@ pub enum TurnCommand {
         command_id: CommandId,
         /// Exact active root.
         turn_id: TurnId,
-        /// Canonical steering text.
-        text: String,
+        /// Ordered steering message parts.
+        input: UserInput,
     },
     /// Resolve one exact pending tool decision.
     ResolveEffectDecision {
@@ -1040,12 +1041,12 @@ impl TurnControl {
     /// # Errors
     ///
     /// Returns a typed ingress or actor classification failure.
-    pub async fn steer(&self, text: impl Into<String>) -> Result<SteeringStatus, ControlError> {
+    pub async fn steer(&self, input: impl Into<UserInput>) -> Result<SteeringStatus, ControlError> {
         let reply = self
             .submit(TurnCommand::Steer {
                 command_id: self.transient_id("steer")?,
                 turn_id: self.turn_id,
-                text: text.into(),
+                input: input.into(),
             })
             .await?;
         match reply.effect {
@@ -1091,12 +1092,12 @@ impl TurnControl {
     pub async fn steer_with_id(
         &self,
         command_id: CommandId,
-        text: impl Into<String>,
+        input: impl Into<UserInput>,
     ) -> Result<CommandAck, ControlError> {
         self.submit_exact(TurnCommand::Steer {
             command_id,
             turn_id: self.turn_id,
-            text: text.into(),
+            input: input.into(),
         })
         .await
     }
@@ -1219,7 +1220,7 @@ mod endpoint_tests {
             &controls,
             TurnCommand::Start {
                 command_id: CommandId::new("lost-reply")?,
-                text: "must reconcile".into(),
+                input: "must reconcile".into(),
             },
         )
         .await

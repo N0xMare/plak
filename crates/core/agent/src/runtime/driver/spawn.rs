@@ -1,5 +1,6 @@
 //! Consume prepared resources once and publish the owning actor.
 
+use crate::input::UserInput;
 use crate::runtime::composition::{CompositionOwner, CompositionSlot};
 use crate::runtime::driver::Driver;
 use crate::runtime::terminal::{actor_panic_error, insert_known_turn};
@@ -91,7 +92,7 @@ impl PreparedAgent {
                 max_model_rounds: restored.frame.root().max_model_rounds,
                 command_id: command_id.clone(),
                 turn_id: restored.frame.root().turn_id,
-                text: restored.frame.root().text.clone(),
+                input: UserInput::default(),
                 follow_up: restored.frame.root().follow_up,
                 operation_id: restored.frame.root().operation_id,
                 binding: restored.frame.root().binding,

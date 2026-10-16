@@ -326,7 +326,7 @@ async fn generate(
         }
         Err(error) => return ToolOutcome::failure_text(format!("image_gen failed: {error}")),
     };
-    let Ok(header) = plakous_tool_files::inspect_image_header(&bytes) else {
+    let Ok(header) = plakous_tools::sniff_image(&bytes) else {
         return ToolOutcome::failure_text(
             "image_gen failed: the provider returned bytes that are not a supported image",
         );
@@ -338,14 +338,14 @@ async fn generate(
             call.shown
         ));
     }
-    let dimensions = header.dimensions.map_or_else(
+    let dimensions = header.dimensions().map_or_else(
         || String::from("unknown"),
         |(width, height)| format!("{width}x{height}"),
     );
     let mut text = format!(
         "image_gen wrote {}: media_type={} dimensions={dimensions} bytes={}",
         call.shown,
-        header.media_type,
+        header.media_type(),
         bytes.len()
     );
     let inline = bytes.len() as u64 <= MAX_STANDARD_IMAGE_BYTES;
@@ -369,7 +369,7 @@ async fn generate(
     if inline {
         parts.push(ToolResultPart::Image(
             ImageBlock::new(
-                header.media_type,
+                header.media_type(),
                 MediaSource::bytes(bytes).map_err(unreturnable)?,
             )
             .map_err(unreturnable)?,
@@ -406,9 +406,9 @@ async fn read_input(context: &ToolContext, path: &Path) -> Result<ImageGenSource
             "the file exceeds {MAX_IMAGE_EDIT_INPUT_BYTES} bytes"
         ));
     }
-    match plakous_tool_files::inspect_image_header(&bytes) {
-        Ok(header) if header.media_type != "image/gif" => Ok(ImageGenSource {
-            media_type: header.media_type,
+    match plakous_tools::sniff_image(&bytes) {
+        Ok(header) if header.media_type() != "image/gif" => Ok(ImageGenSource {
+            media_type: header.media_type(),
             bytes,
         }),
         _ => Err("the file is not a PNG, JPEG or WebP image".to_owned()),

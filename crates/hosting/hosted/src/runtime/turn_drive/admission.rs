@@ -164,7 +164,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                                     .ok_or_else(|| "stored steer has no target turn".to_owned())?
                                     .parse()
                                     .map_err(|_| "stored steer target is invalid".to_owned())?,
-                                text: command.clone(),
+                                input: command.clone().into(),
                             }
                         } else if host_authored {
                             plakous::agent::TurnCommand::StartInstruction {
@@ -174,7 +174,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                         } else {
                             plakous::agent::TurnCommand::Start {
                                 command_id,
-                                text: command.clone(),
+                                input: command.clone().into(),
                             }
                         })
                         .await

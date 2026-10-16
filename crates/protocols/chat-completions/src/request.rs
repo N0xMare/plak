@@ -589,7 +589,7 @@ struct FunctionName {
 struct Message {
     role: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    content: Option<String>,
+    content: Option<MessageContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     reasoning: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -598,6 +598,69 @@ struct Message {
     tool_calls: Vec<ToolCallWire>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_call_id: Option<String>,
+}
+
+/// A plain string for text-only messages; ordered parts once an image is present.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum MessageContent {
+    Text(String),
+    Parts(Vec<ContentPart>),
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ContentPart {
+    Text { text: String },
+    ImageUrl { image_url: ImageUrlWire },
+}
+
+#[derive(Serialize)]
+struct ImageUrlWire {
+    url: String,
+}
+
+fn image_part(image: &plakous_model::ImageBlock) -> Result<ContentPart, ChatRequestError> {
+    use base64::Engine as _;
+    let source = image.source();
+    let url = if let Some(bytes) = source.as_bytes() {
+        format!(
+            "data:{};base64,{}",
+            image.media_type(),
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        )
+    } else {
+        source
+            .as_data_url()
+            .or_else(|| source.as_uri())
+            .ok_or_else(|| unsupported("image source is outside Chat V1"))?
+            .to_owned()
+    };
+    Ok(ContentPart::ImageUrl {
+        image_url: ImageUrlWire { url },
+    })
+}
+
+/// User content: the existing text-only string form, or ordered parts when
+/// any image is present.
+fn user_content(blocks: &[ContentBlock]) -> Result<MessageContent, ChatRequestError> {
+    if !blocks
+        .iter()
+        .any(|block| matches!(block, ContentBlock::Image(_)))
+    {
+        return only_text(blocks).map(MessageContent::Text);
+    }
+    blocks
+        .iter()
+        .map(|block| match block {
+            ContentBlock::Text(text) => Ok(ContentPart::Text {
+                text: text.text().to_owned(),
+            }),
+            ContentBlock::Image(image) => image_part(image),
+            _ => Err(unsupported("Chat user messages carry only text and images")),
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(MessageContent::Parts)
 }
 
 #[derive(Serialize)]
@@ -978,6 +1041,10 @@ const fn runtime_owned(owner: &ToolExecutionOwner) -> bool {
 }
 
 fn text_message(role: &'static str, content: String) -> Message {
+    content_message(role, MessageContent::Text(content))
+}
+
+fn content_message(role: &'static str, content: MessageContent) -> Message {
     Message {
         role,
         content: Some(content),
@@ -1009,6 +1076,9 @@ fn lower_history(
     let mut messages = Vec::new();
     let mut pending = VecDeque::<PendingTool>::new();
     let mut pending_updates = BTreeMap::<CallId, String>::new();
+    // Tool messages are text-only on Chat: a round's result images follow its
+    // tool messages as one synthetic user message, derived here and never stored.
+    let mut round_images = Vec::<ContentPart>::new();
     let mut call_ids = BTreeSet::new();
     let mut remote_ids = BTreeSet::new();
     for item in items {
@@ -1017,7 +1087,7 @@ fn lower_history(
                 if !pending.is_empty() {
                     return Err(invalid("user input intervened before all tool results"));
                 }
-                messages.push(text_message("user", only_text(item.blocks())?));
+                messages.push(content_message("user", user_content(item.blocks())?));
             }
             Actor::System | Actor::Developer | Actor::Harness => {
                 if !pending.is_empty() {
@@ -1224,7 +1294,7 @@ fn lower_history(
                 } else {
                     messages.push(Message {
                         role: "assistant",
-                        content: (!content.is_empty()).then_some(content),
+                        content: (!content.is_empty()).then_some(MessageContent::Text(content)),
                         reasoning: (!reasoning.is_empty()).then_some(reasoning),
                         reasoning_details,
                         tool_calls: calls,
@@ -1274,10 +1344,26 @@ fn lower_history(
                         .remove(&result.call_id())
                         .unwrap_or_default();
                     for part in result.parts() {
-                        let ToolResultPart::Text(value) = part else {
-                            return Err(unsupported("multimodal tool results are outside Chat V1"));
-                        };
-                        text.push_str(value.text());
+                        match part {
+                            ToolResultPart::Text(value) => text.push_str(value.text()),
+                            ToolResultPart::Image(image) => {
+                                round_images.push(ContentPart::Text {
+                                    text: format!(
+                                        "image from tool call {}:",
+                                        expected.remote.as_deref().map_or_else(
+                                            || expected.call_id.to_string(),
+                                            ToOwned::to_owned
+                                        )
+                                    ),
+                                });
+                                round_images.push(image_part(image)?);
+                            }
+                            _ => {
+                                return Err(unsupported(
+                                    "tool results other than text and images are outside Chat V1",
+                                ));
+                            }
+                        }
                     }
                     if result.kind() == ToolResultKind::Failure {
                         text = format!("error: {text}");
@@ -1289,12 +1375,18 @@ fn lower_history(
                     } else {
                         messages.push(Message {
                             role: "tool",
-                            content: Some(text),
+                            content: Some(MessageContent::Text(text)),
                             reasoning: None,
                             reasoning_details: Vec::new(),
                             tool_calls: Vec::new(),
                             tool_call_id: expected.remote,
                         });
+                    }
+                    if pending.is_empty() && !round_images.is_empty() {
+                        messages.push(content_message(
+                            "user",
+                            MessageContent::Parts(std::mem::take(&mut round_images)),
+                        ));
                     }
                 }
             }
@@ -2350,6 +2442,87 @@ mod tests {
         let messages = lower_history(&plan, &fixture.policy(&plan)?, &tools)?;
         assert_eq!(messages[0].tool_calls[0].function.name, "write");
         assert_eq!(messages[1].tool_call_id.as_deref(), Some("remote-write"));
+        Ok(())
+    }
+
+    fn png_image() -> TestResult<plakous_model::ImageBlock> {
+        Ok(plakous_model::ImageBlock::new(
+            "image/png",
+            plakous_model::MediaSource::bytes(b"\x89PNG".to_vec())?,
+        )?)
+    }
+
+    #[test]
+    fn user_images_lower_to_ordered_image_url_parts() -> TestResult {
+        let fixture = Fixture::new()?;
+        let plan = fixture.plan(vec![item(
+            15,
+            Actor::User,
+            vec![
+                ContentBlock::Text(TextBlock::new("what is this", None)?),
+                ContentBlock::Image(png_image()?),
+            ],
+        )?])?;
+        let tools = LoweredTools {
+            wire: Vec::new(),
+            exposed_names: BTreeMap::new(),
+            exposures: BTreeSet::new(),
+        };
+        let messages = lower_history(&plan, &fixture.policy(&plan)?, &tools)?;
+        assert_eq!(
+            serde_json::to_value(&messages[0])?,
+            serde_json::json!({"role": "user", "content": [
+                {"type": "text", "text": "what is this"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw=="}}
+            ]})
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn tool_result_images_follow_the_round_as_one_synthetic_user_message() -> TestResult {
+        let fixture = Fixture::new()?;
+        let (call_id, correlation, call) = call(15, "inspect_image", "remote-inspect")?;
+        let result = ContentBlock::ToolResult(ToolResultBlock::new(
+            call_id,
+            ToolExecutionOwner::Local,
+            ToolResultKind::Success,
+            vec![
+                ToolResultPart::Text(TextBlock::new("media_type=image/png", None)?),
+                ToolResultPart::Image(png_image()?),
+            ],
+            correlation,
+        )?);
+        let plan = fixture.plan(vec![
+            item(15, Actor::Assistant, vec![call])?,
+            item(16, Actor::Tool, vec![result])?,
+        ])?;
+        let tools = LoweredTools {
+            wire: Vec::new(),
+            exposed_names: BTreeMap::new(),
+            exposures: BTreeSet::from(["inspect_image".to_owned()]),
+        };
+        let lowered = |plan| -> TestResult<Value> {
+            Ok(serde_json::to_value(lower_history(
+                plan,
+                &fixture.policy(plan)?,
+                &tools,
+            )?)?)
+        };
+        let messages = lowered(&plan)?;
+        assert_eq!(
+            messages[1],
+            serde_json::json!({"role": "tool", "content": "media_type=image/png", "tool_call_id": "remote-inspect"})
+        );
+        assert_eq!(
+            messages[2],
+            serde_json::json!({"role": "user", "content": [
+                {"type": "text", "text": "image from tool call remote-inspect:"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw=="}}
+            ]})
+        );
+        assert_eq!(messages.as_array().map(Vec::len), Some(3));
+        assert_eq!(lowered(&plan)?, messages);
         Ok(())
     }
 

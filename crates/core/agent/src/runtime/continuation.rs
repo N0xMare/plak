@@ -1550,7 +1550,6 @@ pub(in crate::runtime) struct AwaitEffectDecisionV1 {
 pub(in crate::runtime) struct ContinuationRoot {
     pub(in crate::runtime) command_id: String,
     pub(in crate::runtime) turn_id: TurnId,
-    pub(in crate::runtime) text: String,
     pub(in crate::runtime) follow_up: bool,
     pub(in crate::runtime) operation_id: OperationId,
     pub(in crate::runtime) binding: Digest,
@@ -1561,7 +1560,7 @@ pub(in crate::runtime) struct ContinuationRoot {
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub(in crate::runtime) struct ContinuationSteering {
-    pub(in crate::runtime) text: String,
+    pub(in crate::runtime) content: Vec<plakous_model::ContentBlock>,
     pub(in crate::runtime) operation_id: OperationId,
 }
 

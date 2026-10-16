@@ -147,23 +147,23 @@ pub(super) fn command_canonical_bytes(command: &TurnCommand) -> Vec<u8> {
             frame(&mut canonical, b"start-instruction");
             frame(&mut canonical, text.as_bytes());
         }
-        TurnCommand::Start { text, .. } => {
+        TurnCommand::Start { input, .. } => {
             frame(&mut canonical, b"start");
-            frame(&mut canonical, text.as_bytes());
+            input.frame_into(&mut |value| frame(&mut canonical, value));
         }
         TurnCommand::FollowUp {
             target_turn_id,
-            text,
+            input,
             ..
         } => {
             frame(&mut canonical, b"follow-up");
             frame(&mut canonical, target_turn_id.as_uuid().as_bytes());
-            frame(&mut canonical, text.as_bytes());
+            input.frame_into(&mut |value| frame(&mut canonical, value));
         }
-        TurnCommand::Steer { turn_id, text, .. } => {
+        TurnCommand::Steer { turn_id, input, .. } => {
             frame(&mut canonical, b"steer");
             frame(&mut canonical, turn_id.as_uuid().as_bytes());
-            frame(&mut canonical, text.as_bytes());
+            input.frame_into(&mut |value| frame(&mut canonical, value));
         }
         TurnCommand::ResolveEffectDecision {
             reference,
@@ -397,7 +397,7 @@ impl PreparedPromptCommand {
             instruction: self.instruction,
             command_id: self.command_id,
             turn_id: self.turn_id,
-            text: self.text,
+            input: self.input,
             follow_up: self.follow_up,
             operation_id,
             binding,

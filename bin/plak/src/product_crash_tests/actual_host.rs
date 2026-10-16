@@ -446,7 +446,7 @@ fn reclaimed_delivery_after_another_face_advances(fixture: &Fixture) -> TestResu
             .agent()
             .command(plakous::agent::TurnCommand::Start {
                 command_id: command,
-                text: intent.canonical_command.clone(),
+                input: intent.canonical_command.clone().into(),
             })
             .await
             .map_err(|error| format!("pruned duplicate lookup: {error}"))?;

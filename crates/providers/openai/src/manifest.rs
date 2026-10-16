@@ -293,6 +293,20 @@ fn descriptor_for_row(
             ),
         ),
         (
+            Capability::ImageInput,
+            FeatureSupport::new(
+                Support::Native,
+                CapabilityConstraints::new(
+                    None,
+                    Some(
+                        "input_image data URLs; GPT-5 and later accept text and image input"
+                            .to_owned(),
+                    ),
+                ),
+                provenance,
+            ),
+        ),
+        (
             Capability::Reasoning,
             FeatureSupport::new(
                 Support::Native,

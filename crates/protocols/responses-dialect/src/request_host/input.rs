@@ -343,10 +343,10 @@ pub(super) fn lower_item(
                 if !config.policy.image_input {
                     return Err(ResponsesRequestContentError::ImageInputUnsupported.into());
                 }
-                let Some(uri) = image.source().as_uri() else {
-                    return Err(ResponsesRequestContentError::InlineImageBytes.into());
-                };
-                message_parts.push(json!({"type": "input_image", "image_url": uri}));
+                message_parts.push(json!({
+                    "type": "input_image",
+                    "image_url": image_url(image.media_type(), image.source())?,
+                }));
             }
             ContentBlock::Refusal(_) if item.actor() == Actor::Assistant => {
                 return Err(ResponsesRequestContentError::AssistantRefusalWithoutReplay.into());
@@ -665,7 +665,7 @@ pub(super) fn lower_tool_result(parts: &[ToolResultPart]) -> Result<Value, Respo
         match part {
             ToolResultPart::Text(text) => output.push(input_text_part(text.text())),
             ToolResultPart::Image(image) => {
-                let image_url = exact_media_url(image.source())?;
+                let image_url = image_url(image.media_type(), image.source())?;
                 let detail = image.detail().map(image_detail_wire).transpose()?;
                 let mut item = json!({"type": "input_image", "image_url": image_url});
                 if let Some(detail) = detail {
@@ -684,6 +684,18 @@ pub(super) fn lower_tool_result(parts: &[ToolResultPart]) -> Result<Value, Respo
         }
     }
     Ok(Value::Array(output))
+}
+
+/// The `image_url` of an `input_image`: inline bytes become a base64 `data:` URL.
+fn image_url(media_type: &str, source: &MediaSource) -> Result<String, ResponsesRequestError> {
+    use base64::Engine as _;
+    if let Some(bytes) = source.as_bytes() {
+        return Ok(format!(
+            "data:{media_type};base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        ));
+    }
+    exact_media_url(source).map(ToOwned::to_owned)
 }
 
 pub(super) fn exact_media_url(source: &MediaSource) -> Result<&str, ResponsesRequestError> {

@@ -868,7 +868,7 @@ async fn precommit_store_rejections_keep_admission_open_without_ack_recovery() -
         let submission = agent
             .command(TurnCommand::Start {
                 command_id: command_id.clone(),
-                text: "not admitted".into(),
+                input: "not admitted".into(),
             })
             .await?;
         assert_eq!(
@@ -970,7 +970,7 @@ async fn ambiguous_root_admission_closes_admission_and_same_id_cannot_run_twice(
         let first = agent
             .command(TurnCommand::Start {
                 command_id: command_id.clone(),
-                text: "exact ambiguous prompt".into(),
+                input: "exact ambiguous prompt".into(),
             })
             .await?;
         assert_eq!(
@@ -988,7 +988,7 @@ async fn ambiguous_root_admission_closes_admission_and_same_id_cannot_run_twice(
             let retry = agent
                 .command(TurnCommand::Start {
                     command_id: id,
-                    text: "exact ambiguous prompt".into(),
+                    input: "exact ambiguous prompt".into(),
                 })
                 .await?;
             assert!(!retry.acknowledgement().is_accepted());
@@ -1166,7 +1166,7 @@ async fn an_ordinary_refusal_at_any_tool_fence_fails_the_turn_definitely() -> Te
             let submission = agent
                 .command(TurnCommand::Start {
                     command_id: command_id.clone(),
-                    text: "use both probes".to_owned(),
+                    input: "use both probes".to_owned().into(),
                 })
                 .await?;
             if let Some(rejection) = submission.acknowledgement().rejection() {

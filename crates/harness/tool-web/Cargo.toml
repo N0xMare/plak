@@ -19,7 +19,6 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 htmd = { version = "0.5.6", optional = true }
 plakous-http = { version = "0.1.0", path = "../../common/http", optional = true }
-plakous-tool-files = { version = "0.1.0", path = "../tool-files", optional = true }
 tokio = { workspace = true, features = ["macros", "sync", "time"], optional = true }
 url = { workspace = true, optional = true }
 
@@ -27,10 +26,10 @@ url = { workspace = true, optional = true }
 # The Plak-run `fetch_url` tool: an HTTPS client, HTML-to-markdown
 # conversion and the image sniffer. Enabled by every facade feature that
 # already links `plakous-http`.
-fetch = ["dep:htmd", "dep:plakous-http", "dep:plakous-tool-files", "dep:tokio", "dep:url"]
-# The `image_gen` tool: workspace output and the image sniffer; the route's
-# port performs the request. Enabled beside `fetch`.
-image-gen = ["dep:plakous-tool-files"]
+fetch = ["dep:htmd", "dep:plakous-http", "dep:tokio", "dep:url"]
+# The `image_gen` tool: workspace output and the shared image sniffer; the
+# route's port performs the request. Enabled beside `fetch`.
+image-gen = []
 
 [dev-dependencies]
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }

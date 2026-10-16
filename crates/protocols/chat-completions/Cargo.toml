@@ -13,6 +13,7 @@ layer = "protocol"
 class = "published-internal"
 
 [dependencies]
+base64.workspace = true
 futures-channel = { workspace = true, features = ["sink"] }
 futures-util = { workspace = true, features = ["sink", "std"] }
 plakous-attempt = { version = "0.1.0", path = "../../common/attempt" }

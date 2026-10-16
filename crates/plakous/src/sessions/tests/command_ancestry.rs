@@ -80,7 +80,7 @@ async fn command_admission_sequences_follow_fork_ancestry_not_sibling_branches()
             .agent()
             .command(crate::agent::TurnCommand::Start {
                 command_id: rejected.clone(),
-                text: String::new(),
+                input: String::new().into(),
             })
             .await?;
         let rejected_seq = refusal.acknowledgement().feed_seq().ok_or("rejected seq")?;
@@ -123,7 +123,7 @@ async fn command_admission_sequences_follow_fork_ancestry_not_sibling_branches()
                 .agent()
                 .command(crate::agent::TurnCommand::Start {
                     command_id: id,
-                    text: text.to_owned(),
+                    input: text.to_owned().into(),
                 })
                 .await?;
             assert_eq!(
@@ -158,7 +158,7 @@ async fn resubmit(
         .agent()
         .command(crate::agent::TurnCommand::Start {
             command_id: command_id.clone(),
-            text: text.to_owned(),
+            input: text.to_owned().into(),
         })
         .await?;
     let ack = submitted.acknowledgement();

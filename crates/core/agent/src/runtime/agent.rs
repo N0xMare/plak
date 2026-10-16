@@ -1,5 +1,6 @@
 //! Public agent and turn handles over the private actor channels.
 
+use crate::input::UserInput;
 use crate::runtime::control::control_agent_error;
 use crate::runtime::terminal::wait_for_completion;
 use crate::runtime::{
@@ -365,11 +366,11 @@ impl Agent {
     /// # Errors
     ///
     /// Returns a typed validation, admission, identity, or shutdown failure.
-    pub async fn prompt(&self, text: impl Into<String>) -> Result<Turn, AgentError> {
+    pub async fn prompt(&self, input: impl Into<UserInput>) -> Result<Turn, AgentError> {
         let command_id = self
             .transient_command_id("start")
             .map_err(control_agent_error)?;
-        self.start(command_id, text)
+        self.start(command_id, input)
             .await?
             .into_turn()
             .ok_or_else(|| AgentError::new(AgentErrorKind::Internal, "transient start duplicated"))
@@ -378,7 +379,7 @@ impl Agent {
     /// Admits an exact caller-identified start command.
     ///
     /// A matching retry returns the original acknowledgement and no second
-    /// turn. Reusing the identity with different canonical text fails closed.
+    /// turn. Reusing the identity with different canonical input fails closed.
     ///
     /// # Errors
     ///
@@ -386,12 +387,12 @@ impl Agent {
     pub async fn start(
         &self,
         command_id: CommandId,
-        text: impl Into<String>,
+        input: impl Into<UserInput>,
     ) -> Result<TurnSubmission, AgentError> {
         let submission = self
             .command(TurnCommand::Start {
                 command_id,
-                text: text.into(),
+                input: input.into(),
             })
             .await
             .map_err(control_agent_error)?;
@@ -454,10 +455,10 @@ impl Agent {
     pub async fn follow_up(
         &self,
         active_turn_id: TurnId,
-        text: impl Into<String>,
+        input: impl Into<UserInput>,
     ) -> Result<Turn, ControlError> {
         let command_id = self.transient_command_id("follow-up")?;
-        self.follow_up_with_id(command_id, active_turn_id, text)
+        self.follow_up_with_id(command_id, active_turn_id, input)
             .await?
             .into_turn()
             .ok_or_else(|| {
@@ -477,13 +478,13 @@ impl Agent {
         &self,
         command_id: CommandId,
         active_turn_id: TurnId,
-        text: impl Into<String>,
+        input: impl Into<UserInput>,
     ) -> Result<TurnSubmission, ControlError> {
         let submission = self
             .command(TurnCommand::FollowUp {
                 command_id,
                 target_turn_id: active_turn_id,
-                text: text.into(),
+                input: input.into(),
             })
             .await?;
         submission.accepted()?;

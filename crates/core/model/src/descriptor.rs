@@ -40,6 +40,8 @@ pub enum Capability {
     Caching,
     /// Namespaced native options.
     NativeOptions,
+    /// Inline image parts in user messages.
+    ImageInput,
 }
 
 /// How a resolved model supplies a capability.

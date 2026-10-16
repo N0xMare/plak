@@ -831,11 +831,7 @@ mod tests {
             let accepted = sequence <= 2;
             let command = TurnCommand::Start {
                 command_id: CommandId::new(format!("retention:{sequence}"))?,
-                text: if accepted {
-                    "root".into()
-                } else {
-                    String::new()
-                },
+                input: if accepted { "root" } else { "" }.into(),
             };
             let envelope = DurableCommandEnvelope {
                 version: 1,

@@ -972,7 +972,7 @@ pub(super) async fn start_child_turn_owned_with_ack(
         } else {
             plakous::agent::TurnCommand::Start {
                 command_id,
-                text: result_context.prompt.clone(),
+                input: result_context.prompt.clone().into(),
             }
         };
         let submission = match agent.command(command).await {
@@ -6698,7 +6698,7 @@ mod retirement_tests {
             .agent()
             .command(plakous::agent::TurnCommand::Start {
                 command_id: command.clone(),
-                text: "work".to_owned(),
+                input: "work".to_owned().into(),
             })
             .await
             .unwrap_or_else(|error| panic!("reclaimed replay: {}", error.message()));

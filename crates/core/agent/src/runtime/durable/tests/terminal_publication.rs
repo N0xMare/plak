@@ -1527,7 +1527,7 @@ async fn failed_atomic_queued_cancel_preserves_queue_and_reports_uncommitted_res
     let blocked = agent
         .command(TurnCommand::Start {
             command_id: CommandId::new("atomic-failure:blocked")?,
-            text: "blocked".to_owned(),
+            input: "blocked".to_owned().into(),
         })
         .await?;
     assert_eq!(

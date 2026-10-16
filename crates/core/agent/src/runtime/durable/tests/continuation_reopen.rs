@@ -1688,7 +1688,7 @@ async fn durable_duplicate_reopens_exact_historical_terminal_without_redispatch(
     let conflict = opened
         .command(TurnCommand::Start {
             command_id,
-            text: "conflicting terminal result".to_owned(),
+            input: "conflicting terminal result".to_owned().into(),
         })
         .await?;
     assert!(conflict.acknowledgement().rejection().is_some());

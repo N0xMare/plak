@@ -878,7 +878,7 @@ mod tests {
                         Box::pin(session.agent().command(plakous::agent::TurnCommand::Start {
                             command_id:
                                 plakous::agent::CommandId::new(format!("ingress:{index}")).unwrap(),
-                            text: String::new(),
+                            input: String::new().into(),
                         }));
                     if let std::task::Poll::Ready(result) = dispatch.as_mut().poll(cx) {
                         let Err(error) = result else {
@@ -1998,7 +1998,7 @@ mod tests {
                 .block_on(host.opened.agent().unwrap().command(
                     plakous::agent::TurnCommand::Start {
                         command_id,
-                        text: item.text.clone(),
+                        input: item.text.clone().into(),
                     },
                 ))
                 .unwrap()

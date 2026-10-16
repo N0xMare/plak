@@ -375,7 +375,7 @@ impl ResponsesRequestPolicy {
     /// Stateless OpenAI Platform execution retains encrypted reasoning for exact local replay.
     #[must_use]
     pub const fn openai_platform_stateless() -> Self {
-        let mut policy = Self::openai_platform(ResponsesStoragePolicy::Stateless, false, false);
+        let mut policy = Self::openai_platform(ResponsesStoragePolicy::Stateless, true, false);
         policy.reasoning_include =
             ReasoningIncludePolicy::WhenEnabled("reasoning.encrypted_content");
         policy
@@ -476,7 +476,7 @@ impl ResponsesRequestPolicy {
             StoreFieldPolicy::Emit,
             PromptCachePolicy::Unsupported,
             StructuredOutputPolicy::Unsupported,
-            false,
+            true,
             false,
             ReasoningEffortPolicy::NoneThroughXHigh,
             ReasoningSummaryPolicy::Omit,
@@ -815,9 +815,6 @@ pub enum ResponsesRequestContentError {
     /// The admitted route/model does not support image input.
     #[error("image input excluded by admitted route/model facts")]
     ImageInputUnsupported,
-    /// Inline image bytes are not admitted by this host revision.
-    #[error("inline image bytes")]
-    InlineImageBytes,
     /// Assistant refusal requires exact provider output replay.
     #[error("assistant refusal without exact output-item replay")]
     AssistantRefusalWithoutReplay,

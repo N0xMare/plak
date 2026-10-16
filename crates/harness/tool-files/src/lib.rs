@@ -1106,21 +1106,21 @@ impl ToolExecutor for InspectImageTool {
                 return ToolOutcome::failure_text(PLAKOUS_TOOL_IMAGE_TOO_LARGE);
             }
             let info = inspect_image_header(result.bytes())?;
-            let dimensions = info.dimensions.map_or_else(
+            let dimensions = info.dimensions().map_or_else(
                 || String::from("unknown"),
                 |(width, height)| format!("{width}x{height}"),
             );
             let metadata = TextBlock::new(
                 format!(
                     "media_type={} bytes={} dimensions={dimensions}",
-                    info.media_type,
+                    info.media_type(),
                     result.bytes().len()
                 ),
                 None,
             )
             .map_err(content_runtime_error)?;
             let image = ImageBlock::new(
-                info.media_type,
+                info.media_type(),
                 MediaSource::bytes(result.bytes().as_ref().to_vec())
                     .map_err(content_runtime_error)?,
             )
@@ -1133,110 +1133,17 @@ impl ToolExecutor for InspectImageTool {
     }
 }
 
-/// What an image's signature and header say about it.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ImageHeader {
-    /// `image/png`, `image/gif`, `image/jpeg` or `image/webp`.
-    pub media_type: &'static str,
-    /// Width and height, when the header states them.
-    pub dimensions: Option<(u32, u32)>,
-}
-
-/// Identifies a PNG, GIF, JPEG or WebP image by its signature and reads its
-/// dimensions where the header states them.
-///
-/// # Errors
-///
-/// Refuses bytes that are no supported image, and dimensions that are zero or
-/// exceed 100,000,000 pixels.
-pub fn inspect_image_header(bytes: &[u8]) -> Result<ImageHeader, ToolRuntimeError> {
-    let info = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") && bytes.len() >= 24 {
-        ImageHeader {
-            media_type: "image/png",
-            dimensions: Some((
-                u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]),
-                u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]),
-            )),
-        }
-    } else if (bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a")) && bytes.len() >= 10 {
-        ImageHeader {
-            media_type: "image/gif",
-            dimensions: Some((
-                u32::from(u16::from_le_bytes([bytes[6], bytes[7]])),
-                u32::from(u16::from_le_bytes([bytes[8], bytes[9]])),
-            )),
-        }
-    } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
-        ImageHeader {
-            media_type: "image/jpeg",
-            dimensions: jpeg_dimensions(bytes),
-        }
-    } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
-        ImageHeader {
-            media_type: "image/webp",
-            dimensions: webp_dimensions(bytes),
-        }
-    } else {
-        return Err(ToolRuntimeError::new(
-            ToolRuntimeErrorKind::Execution,
-            "workspace file is not a supported image",
-        ));
-    };
-    if info.dimensions.is_some_and(|(width, height)| {
-        width == 0 || height == 0 || u64::from(width) * u64::from(height) > 100_000_000
-    }) {
-        return Err(ToolRuntimeError::new(
+fn inspect_image_header(bytes: &[u8]) -> Result<plakous_tools::ImageHeader, ToolRuntimeError> {
+    plakous_tools::sniff_image(bytes).map_err(|error| match error {
+        plakous_tools::ImageSniffError::Dimensions => ToolRuntimeError::new(
             ToolRuntimeErrorKind::ResourceLimit,
             "image dimensions exceed the configured limit",
-        ));
-    }
-    Ok(info)
-}
-
-fn jpeg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
-    let mut offset = 2_usize;
-    while offset.saturating_add(9) <= bytes.len() {
-        if bytes[offset] != 0xff {
-            offset = offset.saturating_add(1);
-            continue;
-        }
-        let marker = bytes[offset.saturating_add(1)];
-        offset = offset.saturating_add(2);
-        if matches!(marker, 0xd8 | 0xd9) {
-            continue;
-        }
-        if offset.saturating_add(2) > bytes.len() {
-            return None;
-        }
-        let length = usize::from(u16::from_be_bytes([bytes[offset], bytes[offset + 1]]));
-        if length < 2 || offset.saturating_add(length) > bytes.len() {
-            return None;
-        }
-        if matches!(marker, 0xc0..=0xc3 | 0xc5..=0xc7 | 0xc9..=0xcb | 0xcd..=0xcf) && length >= 7 {
-            return Some((
-                u32::from(u16::from_be_bytes([bytes[offset + 5], bytes[offset + 6]])),
-                u32::from(u16::from_be_bytes([bytes[offset + 3], bytes[offset + 4]])),
-            ));
-        }
-        offset = offset.saturating_add(length);
-    }
-    None
-}
-
-fn webp_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
-    if bytes.len() >= 30 && &bytes[12..16] == b"VP8X" {
-        let width = 1_u32
-            .saturating_add(u32::from(bytes[24]))
-            .saturating_add(u32::from(bytes[25]) << 8)
-            .saturating_add(u32::from(bytes[26]) << 16);
-        let height = 1_u32
-            .saturating_add(u32::from(bytes[27]))
-            .saturating_add(u32::from(bytes[28]) << 8)
-            .saturating_add(u32::from(bytes[29]) << 16);
-        Some((width, height))
-    } else {
-        None
-    }
+        ),
+        _ => ToolRuntimeError::new(
+            ToolRuntimeErrorKind::Execution,
+            "workspace file is not a supported image",
+        ),
+    })
 }
 
 #[cfg(test)]
@@ -1335,8 +1242,8 @@ mod tests {
         png.extend_from_slice(&2_u32.to_be_bytes());
         png.extend_from_slice(&3_u32.to_be_bytes());
         let info = inspect_image_header(&png)?;
-        assert_eq!(info.media_type, "image/png");
-        assert_eq!(info.dimensions, Some((2, 3)));
+        assert_eq!(info.media_type(), "image/png");
+        assert_eq!(info.dimensions(), Some((2, 3)));
         assert!(inspect_image_header(b"not-an-image").is_err());
         Ok(())
     }

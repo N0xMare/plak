@@ -307,7 +307,7 @@ async fn duplicates_replay_within_the_retained_window_and_are_reclaimed_past_it(
         .agent()
         .command(TurnCommand::Start {
             command_id: command(recent)?,
-            text: format!("round {recent}"),
+            input: format!("round {recent}").into(),
         })
         .await?;
     assert_eq!(
@@ -337,7 +337,7 @@ async fn duplicates_replay_within_the_retained_window_and_are_reclaimed_past_it(
         .agent()
         .command(TurnCommand::Start {
             command_id: command(reclaimed_round)?,
-            text: format!("round {reclaimed_round}"),
+            input: format!("round {reclaimed_round}").into(),
         })
         .await?;
     assert!(

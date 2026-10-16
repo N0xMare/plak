@@ -61,7 +61,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
             Ok(plakous::agent::TurnCommand::Steer {
                 command_id,
                 turn_id,
-                text: intent.canonical_command.clone(),
+                input: intent.canonical_command.clone().into(),
             })
         })();
         let command = match dispatch {

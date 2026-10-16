@@ -153,7 +153,7 @@ pub(super) mod tests {
         let command = TurnCommand::Steer {
             command_id: CommandId::new("controls:steer")?,
             turn_id,
-            text: "queued steering".into(),
+            input: "queued steering".into(),
         };
         let component = runtime_component(
             RuntimeComponentKind::Command,

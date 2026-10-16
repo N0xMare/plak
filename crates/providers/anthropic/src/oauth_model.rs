@@ -857,6 +857,7 @@ fn oauth_resolved_target(
     features.insert(Capability::Streaming, native("streaming"));
     features.insert(Capability::Tools, native("client-tools"));
     features.insert(Capability::ParallelTools, native("parallel-tools"));
+    features.insert(Capability::ImageInput, native("image-input"));
     features.insert(
         Capability::Caching,
         native(&format!("prompt-caching-scope:{REFERENCE_REVISION}")),

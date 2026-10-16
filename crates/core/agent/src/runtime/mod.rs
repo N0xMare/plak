@@ -1,5 +1,6 @@
 //! Shared private construction and turn storage for the single-owner runtime.
 
+use crate::input::UserInput;
 use crate::local_composition::LocalCompositionConstruction;
 use crate::manifest::InterpreterObservation;
 use crate::runtime::checkpoint::owner::{CheckpointReader, DurableBranchFacts, PreparedCheckpoint};
@@ -24,9 +25,10 @@ pub(crate) use observation::{
 };
 use plakous_model::{
     AgentId, BranchId, CancellationToken, CanonicalHistory, Clock, CompiledProviderConfiguration,
-    ContextCapacityFailure, ConversationView, Digest, IdGenerator, InstructionBlock, LanguageModel,
-    ModelErrorTarget, ModelResponse, RunId, RuntimeModelAuthority, SealedFamilyArtifactCandidate,
-    SessionId, StableRequestPrefix, ToolResultBlock, TurnId, ValidatedRequestPlan,
+    ContentBlock, ContextCapacityFailure, ConversationView, Digest, IdGenerator, InstructionBlock,
+    LanguageModel, ModelErrorTarget, ModelResponse, RunId, RuntimeModelAuthority,
+    SealedFamilyArtifactCandidate, SessionId, StableRequestPrefix, ToolResultBlock, TurnId,
+    ValidatedRequestPlan,
 };
 use plakous_tools::{
     FrozenToolRegistry, ProjectionCandidateAdmission, ToolExecutorBindings, ToolExposureMap,
@@ -543,7 +545,7 @@ struct PreparedPromptCommand {
     instruction: bool,
     command_id: CommandId,
     turn_id: TurnId,
-    text: String,
+    input: UserInput,
     follow_up: bool,
     admitted_at: tokio::time::Instant,
     cancellation: CancellationToken,
@@ -558,7 +560,8 @@ pub(crate) struct PromptCommand {
     max_model_rounds: usize,
     command_id: CommandId,
     turn_id: TurnId,
-    text: String,
+    /// Empty for a turn restored from a continuation, whose input is already in history.
+    input: UserInput,
     follow_up: bool,
     operation_id: OperationId,
     binding: Digest,
@@ -695,7 +698,7 @@ struct DurableCommandEnvelope {
 
 #[derive(Clone)]
 struct QueuedSteering {
-    text: String,
+    content: Vec<ContentBlock>,
     operation_id: OperationId,
 }
 

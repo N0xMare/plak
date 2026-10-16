@@ -1048,7 +1048,7 @@ async fn caller_command_identity_acknowledges_exact_duplicate_once() -> TestResu
     let conflict = agent
         .command(TurnCommand::Start {
             command_id: command_id.clone(),
-            text: "different canonical content".to_owned(),
+            input: "different canonical content".to_owned().into(),
         })
         .await?;
     assert_eq!(
@@ -2693,7 +2693,7 @@ async fn fifo_saturation_queued_cancel_and_shutdown_are_ghost_free() -> TestResu
     let refused = agent
         .command(TurnCommand::Start {
             command_id: retry_id.clone(),
-            text: "replacement".into(),
+            input: "replacement".into(),
         })
         .await?;
     assert_eq!(
@@ -2742,7 +2742,7 @@ async fn fifo_saturation_queued_cancel_and_shutdown_are_ghost_free() -> TestResu
     let duplicate = agent
         .command(TurnCommand::Start {
             command_id: retry_id,
-            text: "replacement".into(),
+            input: "replacement".into(),
         })
         .await?;
     assert!(duplicate.acknowledgement().is_accepted());
@@ -2799,7 +2799,7 @@ async fn duplicate_of_recorded_rejection_is_never_an_accepted_command() -> TestR
         let submission = agent
             .command(TurnCommand::Start {
                 command_id: id.clone(),
-                text: String::new(),
+                input: String::new().into(),
             })
             .await?;
         assert_eq!(submission.acknowledgement().disposition(), disposition);
@@ -2820,6 +2820,37 @@ async fn duplicate_of_recorded_rejection_is_never_an_accepted_command() -> TestR
 }
 
 #[tokio::test]
+async fn image_prompt_on_a_model_without_image_input_is_refused_naming_the_route() -> TestResult {
+    let agent = text_agent("unused")?;
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+    png.extend_from_slice(&2_u32.to_be_bytes());
+    png.extend_from_slice(&3_u32.to_be_bytes());
+    let input = plakous_agent::UserInput::new(vec![
+        plakous_agent::UserPart::Text("what is this".into()),
+        plakous_agent::UserPart::Image {
+            media_type: "image/png".into(),
+            bytes: png,
+        },
+    ]);
+    let submission = agent
+        .command(TurnCommand::Start {
+            command_id: CommandId::new("image-root")?,
+            input,
+        })
+        .await?;
+    let rejection = submission
+        .acknowledgement()
+        .rejection()
+        .ok_or("image prompt was admitted without ImageInput")?;
+    assert_eq!(rejection.kind(), ControlErrorKind::InvalidInput);
+    assert!(rejection.message().contains("does not accept image input"));
+    assert!(rejection.message().contains("route "));
+    assert!(submission.into_turn().is_none());
+    agent.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn settled_command_retention_crosses_the_ledger_bound_without_wedging() -> TestResult {
     let agent = text_agent("one root")?;
     let root_id = CommandId::new("retained-root")?;
@@ -2833,7 +2864,7 @@ async fn settled_command_retention_crosses_the_ledger_bound_without_wedging() ->
         let submission = agent
             .command(TurnCommand::Start {
                 command_id: CommandId::new(format!("settled-invalid:{index}"))?,
-                text: String::new(),
+                input: String::new().into(),
             })
             .await?;
         assert_eq!(
@@ -2848,7 +2879,7 @@ async fn settled_command_retention_crosses_the_ledger_bound_without_wedging() ->
     let recent = agent
         .command(TurnCommand::Start {
             command_id: CommandId::new("settled-invalid:4099")?,
-            text: String::new(),
+            input: String::new().into(),
         })
         .await?;
     assert_eq!(

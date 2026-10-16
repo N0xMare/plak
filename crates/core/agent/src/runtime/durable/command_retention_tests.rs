@@ -46,7 +46,7 @@ async fn full_settled_ledger_reclaims_capacity_after_durable_reopen() -> TestRes
     for index in 0..4_096 - commands.len() {
         let command = TurnCommand::Start {
             command_id: CommandId::new(format!("seeded-rejection:{index}"))?,
-            text: String::new(),
+            input: String::new().into(),
         };
         let envelope = DurableCommandEnvelope {
             version: 1,

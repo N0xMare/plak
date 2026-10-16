@@ -3161,6 +3161,50 @@ fn forked_branch_affinity_does_not_reuse_source_wire_keys() -> TestResult {
 }
 
 #[test]
+fn inline_image_bytes_lower_to_base64_data_urls_for_users_and_tool_results() -> TestResult {
+    let (protocol, family, model) = target_values()?;
+    let image =
+        plakous_model::ImageBlock::new("image/png", MediaSource::bytes(b"\x89PNG".to_vec())?)?;
+    let request = crate::test_support::model_request_builder(
+        ConversationView::from_items(vec![ConversationItem::new(
+            id::<EntryId>(21)?,
+            Actor::User,
+            vec![
+                ContentBlock::Text(TextBlock::new("what is this", None)?),
+                ContentBlock::Image(image.clone()),
+            ],
+            Provenance::UserInput,
+        )?])?,
+        metadata()?,
+    )
+    .build()?;
+    let lower = |policy| {
+        lower_responses_request(
+            &request,
+            ResponsesRequestConfig::new(&protocol, Some(&family), &model, policy, None),
+        )
+    };
+    let lowered = lower(ResponsesRequestPolicy::openai_codex(
+        true,
+        false,
+        "reasoning.encrypted_content",
+    ))?;
+    assert_eq!(
+        lowered.body()["input"][0]["content"],
+        json!([
+            {"type": "input_text", "text": "what is this"},
+            {"type": "input_image", "image_url": "data:image/png;base64,iVBORw=="}
+        ])
+    );
+    assert!(lower(ResponsesRequestPolicy::openrouter_stateless()).is_err());
+    assert_eq!(
+        lower_tool_result(&[ToolResultPart::Image(image)])?,
+        json!([{"type": "input_image", "image_url": "data:image/png;base64,iVBORw=="}])
+    );
+    Ok(())
+}
+
+#[test]
 fn multimodal_tool_result_lowers_exact_data_urls_and_detail() -> TestResult {
     let image_url = "data:image/png;base64,AAAA";
     let audio_url = "data:audio/wav;base64,BBBB";

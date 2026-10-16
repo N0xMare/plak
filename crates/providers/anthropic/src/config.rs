@@ -441,6 +441,8 @@ fn derived_capabilities(
     let mut features = BTreeMap::new();
     features.insert(Capability::Streaming, native(None, "streaming"));
     features.insert(Capability::Tools, native(None, "client-tools"));
+    // Every current Claude model accepts base64 image blocks (Anthropic vision docs).
+    features.insert(Capability::ImageInput, native(None, "image-input"));
     if profile == AnthropicPlatformCapabilityProfile::HostedProgrammaticTools {
         features.insert(
             Capability::HostedProgrammaticToolCalling,
@@ -574,7 +576,8 @@ mod tests {
         );
         let target = resolver.resolve(config()?)?;
         let features = target.descriptor().capabilities().features();
-        assert_eq!(features.len(), 3);
+        assert_eq!(features.len(), 4);
+        assert!(features.contains_key(&Capability::ImageInput));
         for support in features.values() {
             assert_eq!(support.support(), Support::Native);
             assert_eq!(support.provenance().source(), FactSource::BuiltIn);
@@ -613,7 +616,7 @@ mod tests {
     }
 
     #[test]
-    fn minimal_profile_advertises_only_reviewed_streaming_and_client_tools() -> TestResult {
+    fn minimal_profile_advertises_only_reviewed_streaming_client_tools_and_images() -> TestResult {
         let resolver = AnthropicPlatformModelResolver::with_runtime(
             AnthropicPlatformRoute::new(AnthropicApiKey::new("sk-ant-minimal-profile")?)?,
             Arc::new(FixedClock::new(Timestamp::new(
@@ -629,9 +632,10 @@ mod tests {
             AnthropicPlatformCapabilityProfile::TextAndClientTools,
         )?)?;
         let features = target.descriptor().capabilities().features();
-        assert_eq!(features.len(), 2);
+        assert_eq!(features.len(), 3);
         assert!(features.contains_key(&Capability::Streaming));
         assert!(features.contains_key(&Capability::Tools));
+        assert!(features.contains_key(&Capability::ImageInput));
         for capability in [
             Capability::Reasoning,
             Capability::ParallelTools,

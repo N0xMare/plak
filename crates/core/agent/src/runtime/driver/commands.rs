@@ -1,8 +1,9 @@
 //! Actor command admission, acknowledgement and steering order.
 
+use crate::input::UserInput;
 use crate::runtime::compaction::CompactOrigin;
 use crate::runtime::continuation::runtime_component;
-use crate::runtime::control::{command_binding, command_canonical_bytes, validate_command_text};
+use crate::runtime::control::{command_binding, command_canonical_bytes};
 use crate::runtime::driver::{Driver, EffectDecisionTombstone};
 use crate::runtime::terminal::{
     cancelled_error, insert_known_turn, queued_turn_machine, remove_known_turn,
@@ -20,8 +21,8 @@ use crate::{
     TurnControl, TurnUsage,
 };
 use plakous_model::{
-    Actor, CancellationToken, ContentBlock, ConversationItem, Digest, HistorySegment,
-    HistorySegmentKind, Provenance, TextBlock, TurnId,
+    Actor, CancellationToken, ConversationItem, Digest, HistorySegment, HistorySegmentKind,
+    Provenance, TurnId,
 };
 use std::sync::atomic::Ordering;
 #[cfg(test)]
@@ -275,7 +276,12 @@ impl Driver {
         }
 
         match command {
-            TurnCommand::Start { text, .. } | TurnCommand::StartInstruction { text, .. } => {
+            command @ (TurnCommand::Start { .. } | TurnCommand::StartInstruction { .. }) => {
+                let (input, instruction) = match command {
+                    TurnCommand::Start { input, .. } => (input, false),
+                    TurnCommand::StartInstruction { text, .. } => (UserInput::from(text), true),
+                    _ => unreachable!("matched as a root start"),
+                };
                 if !self.accepting.load(Ordering::Acquire) || self.shutdown.is_cancelled() {
                     return self
                         .record_rejection(
@@ -287,7 +293,7 @@ impl Driver {
                         )
                         .await;
                 }
-                if let Err(error) = validate_command_text(&text, "prompt") {
+                if let Err(error) = self.validate_user_input(&input, "prompt") {
                     return self
                         .record_rejection(command_id, binding, canonical_input, None, error)
                         .await;
@@ -304,12 +310,19 @@ impl Driver {
                         ),
                     );
                 }
-                self.admit_root(command_id, binding, canonical_input, text, false)
-                    .await
+                self.admit_root(
+                    command_id,
+                    binding,
+                    canonical_input,
+                    input,
+                    instruction,
+                    false,
+                )
+                .await
             }
             TurnCommand::FollowUp {
                 target_turn_id,
-                text,
+                input,
                 ..
             } => {
                 self.follow_up_command(
@@ -318,12 +331,12 @@ impl Driver {
                     binding,
                     canonical_input,
                     target_turn_id,
-                    text,
+                    input,
                 )
                 .await
             }
-            TurnCommand::Steer { turn_id, text, .. } => {
-                self.steer_command(active, command_id, binding, canonical_input, turn_id, text)
+            TurnCommand::Steer { turn_id, input, .. } => {
+                self.steer_command(active, command_id, binding, canonical_input, turn_id, input)
                     .await
             }
             TurnCommand::Cancel { turn_id, .. } => {
@@ -433,9 +446,9 @@ impl Driver {
         binding: Digest,
         canonical_input: Vec<u8>,
         target_turn_id: TurnId,
-        text: String,
+        input: UserInput,
     ) -> ActorCommandReply {
-        if let Err(error) = validate_command_text(&text, "follow-up") {
+        if let Err(error) = self.validate_user_input(&input, "follow-up") {
             return self
                 .record_rejection(
                     command_id,
@@ -485,7 +498,7 @@ impl Driver {
                 )
                 .await;
         }
-        self.admit_root(command_id, binding, canonical_input, text, true)
+        self.admit_root(command_id, binding, canonical_input, input, false, true)
             .await
     }
 
@@ -497,13 +510,19 @@ impl Driver {
         binding: Digest,
         canonical_input: Vec<u8>,
         turn_id: TurnId,
-        text: String,
+        input: UserInput,
     ) -> ActorCommandReply {
-        if let Err(error) = validate_command_text(&text, "steering") {
-            return self
-                .record_rejection(command_id, binding, canonical_input, Some(turn_id), error)
-                .await;
-        }
+        let content = match self
+            .validate_user_input(&input, "steering")
+            .and_then(|()| input.content_blocks())
+        {
+            Ok(content) => content,
+            Err(error) => {
+                return self
+                    .record_rejection(command_id, binding, canonical_input, Some(turn_id), error)
+                    .await;
+            }
+        };
         if active.is_none_or(|root| root.turn_id != turn_id) {
             return self
                 .record_rejection(
@@ -561,8 +580,10 @@ impl Driver {
         {
             return self.command_persistence_failure(command_id, Some(turn_id), &error);
         }
-        self.steering
-            .push_back(QueuedSteering { text, operation_id });
+        self.steering.push_back(QueuedSteering {
+            content,
+            operation_id,
+        });
         self.set_tool_preempt(plakous_tools::ToolPreempt::Steer);
         if let Some(root) = active {
             let _ = root.shared.events.publish(
@@ -814,10 +835,11 @@ impl Driver {
         command_id: CommandId,
         binding: Digest,
         canonical_input: Vec<u8>,
-        text: String,
+        input: UserInput,
+        instruction: bool,
         follow_up: bool,
     ) -> ActorCommandReply {
-        let (mut command, turn) = match self.prepare_root(command_id.clone(), text, follow_up) {
+        let (mut command, turn) = match self.prepare_root(command_id.clone(), input, follow_up) {
             Ok(prepared) => prepared,
             Err(error) => {
                 return self
@@ -825,11 +847,7 @@ impl Driver {
                     .await;
             }
         };
-        command.instruction = canonical_input
-            == command_canonical_bytes(&TurnCommand::StartInstruction {
-                command_id: command_id.clone(),
-                text: command.text.clone(),
-            });
+        command.instruction = instruction;
         let turn_id = command.turn_id;
         // A root begins new work: refuse it while any aggregate bound has no
         // ordinary headroom, so that the reserve stays with settlement and
@@ -944,10 +962,36 @@ impl Driver {
         }
     }
 
+    /// Applies the provider-neutral bounds, then refuses images the bound
+    /// model does not accept, naming the route instead of dropping them.
+    fn validate_user_input(&self, input: &UserInput, label: &str) -> Result<(), ControlError> {
+        input.validate(label)?;
+        if input.image_count() == 0 {
+            return Ok(());
+        }
+        let descriptor = self.provider_configuration.effective().descriptor();
+        if descriptor
+            .capabilities()
+            .get(plakous_model::Capability::ImageInput)
+            .is_some_and(|fact| fact.support() != plakous_model::Support::Unsupported)
+        {
+            return Ok(());
+        }
+        Err(ControlError::new(
+            ControlErrorKind::InvalidInput,
+            format!(
+                "route {} model {} does not accept image input; remove the images or switch \
+                 to a model that accepts them",
+                descriptor.route().as_str(),
+                descriptor.requested_model().as_str()
+            ),
+        ))
+    }
+
     fn prepare_root(
         &self,
         command_id: CommandId,
-        text: String,
+        input: UserInput,
         follow_up: bool,
     ) -> Result<(PreparedPromptCommand, Turn), ControlError> {
         let turn_id = TurnId::generate(self.clock.as_ref(), self.ids.as_ref()).map_err(|_| {
@@ -999,7 +1043,7 @@ impl Driver {
             instruction: false,
             command_id,
             turn_id,
-            text,
+            input,
             follow_up,
             admitted_at: tokio::time::Instant::now(),
             cancellation,
@@ -1250,14 +1294,7 @@ impl Driver {
                 ConversationItem::new(
                     self.entry_id()?,
                     Actor::User,
-                    vec![ContentBlock::Text(
-                        TextBlock::new(queued.text, None).map_err(|_| {
-                            AgentError::new(
-                                AgentErrorKind::InvalidInput,
-                                "steering text is invalid",
-                            )
-                        })?,
-                    )],
+                    queued.content,
                     Provenance::UserInput,
                 )
                 .map_err(|_| {

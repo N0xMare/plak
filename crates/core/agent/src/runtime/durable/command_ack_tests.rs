@@ -40,7 +40,7 @@ async fn killed_owner_ack(evidence: AdmissionEvidence) -> TestResult {
     let rejection = original
         .command(TurnCommand::Start {
             command_id: rejected.clone(),
-            text: String::new(),
+            input: String::new().into(),
         })
         .await?;
     let rejected_seq = rejection
@@ -103,7 +103,7 @@ async fn killed_owner_ack(evidence: AdmissionEvidence) -> TestResult {
         let duplicate = reopened
             .command(TurnCommand::Start {
                 command_id: command,
-                text: text.into(),
+                input: text.into(),
             })
             .await?;
         let ack = duplicate.acknowledgement();
@@ -131,7 +131,7 @@ async fn killed_owner_ack(evidence: AdmissionEvidence) -> TestResult {
     let conflict = reopened
         .command(TurnCommand::Start {
             command_id: root,
-            text: "different binding".into(),
+            input: "different binding".into(),
         })
         .await?;
     assert_eq!(
@@ -201,7 +201,7 @@ async fn live_and_reopened_duplicates_below_feed_retention_are_reclaimed() -> Te
     let live = agent
         .command(TurnCommand::Start {
             command_id: command.clone(),
-            text: "accepted".into(),
+            input: "accepted".into(),
         })
         .await?;
     assert_eq!(
@@ -228,7 +228,7 @@ async fn live_and_reopened_duplicates_below_feed_retention_are_reclaimed() -> Te
     let duplicate = reopened
         .command(TurnCommand::Start {
             command_id: command,
-            text: "accepted".into(),
+            input: "accepted".into(),
         })
         .await?;
     assert_eq!(
