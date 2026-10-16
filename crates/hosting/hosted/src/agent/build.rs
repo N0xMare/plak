@@ -3435,6 +3435,7 @@ pub(super) fn coding_session_runtime_binding_for(
     )?
     .with_plan(&tool_plan)?;
     product_extensions.connect_retrieval(resolved.retrieval_port())?;
+    product_extensions.connect_image_gen(resolved.image_gen_port())?;
     let frozen_tools = coding_tool_registry_with_extensions(
         &plan_state_authority,
         composition,

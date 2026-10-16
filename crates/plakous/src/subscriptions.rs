@@ -499,6 +499,8 @@ pub struct ResolvedNativeModel {
     pub(crate) evidence: SubscriptionResolutionEvidence,
     /// The route's hosted-retrieval port on the same model and grant.
     pub(crate) retrieval: Option<Arc<dyn plakous_tools::RetrievalPort>>,
+    /// The route's image generation port on the same model and grant.
+    pub(crate) image_gen: Option<Arc<dyn plakous_tool_web::ImageGenPort>>,
 }
 
 /// One exact native provider resolution carrying both the executable model and
@@ -623,6 +625,13 @@ impl ResolvedProvider {
     #[must_use]
     pub fn retrieval_port(&self) -> Option<Arc<dyn plakous_tools::RetrievalPort>> {
         self.model.retrieval.clone()
+    }
+
+    /// The route's image generation port bound to the same model, account
+    /// and credential, when the route has one.
+    #[must_use]
+    pub fn image_gen_port(&self) -> Option<Arc<dyn plakous_tool_web::ImageGenPort>> {
+        self.model.image_gen.clone()
     }
 
     /// Returns the exact resolved model handle.
@@ -2560,6 +2569,7 @@ impl NativeSubscriptions {
                     retrieval: Some(Arc::new(
                         crate::anthropic_retrieval::AnthropicRetrievalPort::new(retrieval),
                     )),
+                    image_gen: None,
                 };
                 let compile_authority = attach.then_some(authority);
                 Ok((resolved, compile_authority))
@@ -2694,6 +2704,7 @@ impl NativeSubscriptions {
                         retrieval: Some(Arc::new(
                             crate::responses_retrieval::CodexRetrievalPort::new(retrieval),
                         )),
+                        image_gen: None,
                     },
                     compile_authority,
                 ))
@@ -2776,6 +2787,7 @@ impl NativeSubscriptions {
                         retrieval: Some(Arc::new(
                             crate::responses_retrieval::XaiRetrievalPort::new(retrieval),
                         )),
+                        image_gen: None,
                     },
                     compile_authority,
                 ))

@@ -19,16 +19,15 @@ use plakous_attempt::{
     TerminalFacts,
 };
 use plakous_exchange::{cancellable, read_bounded_body};
-use plakous_http::{
-    CancellationToken as HttpCancellationToken, Client, ExchangeControl, Request as HttpRequest,
-};
+use plakous_http::{CancellationToken as HttpCancellationToken, Client, ExchangeControl};
 use plakous_model::CancellationToken;
 use serde_json::{Map, Value, json};
 use tokio::time::Instant;
 
 use crate::retrieval::{
-    MAX_ERROR_BODY_BYTES, ResponsesRetrievalError, ResponsesRetrievalErrorKind,
-    ResponsesRetrievalLimits, cancelled, status_error, transport_point, unavailable,
+    MAX_ERROR_BODY_BYTES, ResponsesRetrievalDispatch, ResponsesRetrievalError,
+    ResponsesRetrievalErrorKind, ResponsesRetrievalLimits, cancelled, status_error,
+    transport_point, unavailable,
 };
 
 /// Largest response body read, in bytes: a base64 image inside JSON.
@@ -200,8 +199,13 @@ pub enum ResponsesImageEndpoint {
 }
 
 /// The future [`ResponsesImageTransport::authorize`] returns.
-pub type ResponsesImageAuthorization<'a> =
-    Pin<Box<dyn Future<Output = Result<HttpRequest, ResponsesRetrievalError>> + Send + 'a>>;
+pub type ResponsesImageAuthorization<'a> = Pin<
+    Box<
+        dyn Future<Output = Result<ResponsesRetrievalDispatch, ResponsesRetrievalError>>
+            + Send
+            + 'a,
+    >,
+>;
 
 /// The route's half of an images request.
 pub trait ResponsesImageTransport: Send + Sync {
@@ -342,7 +346,8 @@ async fn exchange_once(
     cancellation: &CancellationToken,
     limits: ResponsesRetrievalLimits,
 ) -> Result<Attempted, ResponsesRetrievalError> {
-    let request = transport.authorize(endpoint, body).await?;
+    let ResponsesRetrievalDispatch { request, mut guard } =
+        transport.authorize(endpoint, body).await?;
     let http_cancellation = HttpCancellationToken::new();
     let started = Instant::now();
     let deadline = started
@@ -364,6 +369,9 @@ async fn exchange_once(
     let response = match exchanged.value {
         Ok(response) => response,
         Err(failure) => {
+            if let Some(guard) = guard.as_mut() {
+                guard.transport_failed(failure);
+            }
             let point = transport_point(failure);
             let error = unavailable(failure);
             // A request that may have reached the provider may have made
@@ -378,6 +386,7 @@ async fn exchange_once(
             });
         }
     };
+    drop(guard);
     let status = response.status().as_u16();
     let retry_after = response
         .headers()

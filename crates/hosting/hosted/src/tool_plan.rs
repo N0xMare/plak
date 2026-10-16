@@ -687,10 +687,11 @@ impl ToolRoute {
         }
     }
 
-    /// Whether this build has an image port for the route; the Codex and
-    /// SuperGrok subscription transports for images are not built.
+    /// Whether the route can carry an image port: the API routes' executors
+    /// and the subscription routes' resolved models. A route whose port is
+    /// not built yet connects none, so its row must stay unqualified.
     pub(crate) const fn has_image_port(self) -> bool {
-        matches!(self, Self::OpenAi | Self::XaiApi)
+        matches!(self, Self::Codex | Self::Grok | Self::OpenAi | Self::XaiApi)
     }
 
     /// The tool vocabulary the route's coding presentation uses.

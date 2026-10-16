@@ -88,6 +88,7 @@ impl ResponsesImageTransport for XaiImages {
             self.model
                 .side_request_to(path, "application/json", body)
                 .await
+                .map(Into::into)
                 .map_err(|message| {
                     ResponsesRetrievalError::new(
                         ResponsesRetrievalErrorKind::Unauthorized,

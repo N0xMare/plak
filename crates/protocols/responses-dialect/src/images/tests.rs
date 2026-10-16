@@ -231,6 +231,7 @@ impl ResponsesImageTransport for Fixed {
                 Bytes::copy_from_slice(body),
                 &Limits::default(),
             )
+            .map(Into::into)
             .map_err(|_| invalid_request("fixture request"))
         })
     }

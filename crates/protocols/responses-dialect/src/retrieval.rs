@@ -462,8 +462,8 @@ pub trait ResponsesRetrievalGuard: Send {
 /// One authorized physical side request and what the route retains until
 /// its response head.
 pub struct ResponsesRetrievalDispatch {
-    request: HttpRequest,
-    guard: Option<Box<dyn ResponsesRetrievalGuard>>,
+    pub(crate) request: HttpRequest,
+    pub(crate) guard: Option<Box<dyn ResponsesRetrievalGuard>>,
 }
 
 impl ResponsesRetrievalDispatch {

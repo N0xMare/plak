@@ -226,6 +226,7 @@ mod tests {
                     xai_exact: None,
                 },
                 retrieval: None,
+                image_gen: None,
             },
             configured,
             native_tool_mode: Some(fixture.tool_mode),
