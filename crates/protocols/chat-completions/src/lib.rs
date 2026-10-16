@@ -17,6 +17,7 @@
 mod attempt;
 mod http;
 mod request;
+mod retrieval;
 mod stream;
 
 pub use attempt::{
@@ -35,6 +36,13 @@ pub use request::{
     ChatReasoningDetailReplayV1, ChatReasoningReplay, ChatReplayTargetV1, ChatRequestError,
     ChatRequestErrorKind, ChatRequestPlugin, ChatRequestPolicy, ChatRouterPolicy,
     LoweredChatRequest, OPENROUTER_DISABLE_CONTEXT_COMPRESSION_PLUGINS, lower_request,
+};
+pub use retrieval::{
+    CHAT_RETRIEVAL_MAX_TOKENS, CHAT_WEB_PLUGIN_ID, CHAT_WEB_PLUGIN_MAX_RESULTS,
+    ChatRetrievalAuthorization, ChatRetrievalError, ChatRetrievalErrorKind, ChatRetrievalLimits,
+    ChatRetrievalOutcome, ChatRetrievalReasoning, ChatRetrievalRequest, ChatRetrievalRouting,
+    ChatRetrievalSource, ChatRetrievalTransport, ChatRetrievalUsage, classify_chat_retrieval_body,
+    run_chat_retrieval,
 };
 pub use stream::{
     ChatFinishReason, ChatStreamError, ChatStreamErrorKind, ChatStreamExtensions, ChatStreamLimits,

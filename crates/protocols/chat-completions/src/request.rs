@@ -3189,4 +3189,19 @@ mod tests {
         assert!(error.message().contains("managed cache"));
         Ok(())
     }
+
+    /// The main exchange classifies an enabled gateway plugin as a server
+    /// effect; only the hosted-retrieval side request has its own allowlist.
+    #[test]
+    fn main_classification_keeps_an_enabled_web_plugin_a_server_effect() -> TestResult {
+        let side = crate::ChatRetrievalRequest::new("model-literal", "rust").body()?;
+        assert_eq!(classify_replay_safety(&side), ReplaySafety::ServerEffect);
+        assert_eq!(
+            classify_replay_safety(
+                br#"{"model":"m","plugins":[{"id":"context-compression","enabled":false}]}"#
+            ),
+            ReplaySafety::CostOnly
+        );
+        Ok(())
+    }
 }

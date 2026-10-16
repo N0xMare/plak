@@ -12,7 +12,7 @@ use plakous::openrouter::{
     OpenRouterApiKey, OpenRouterApiKeyGenerationGrant, OpenRouterApiKeySource, OpenRouterAuthError,
     OpenRouterCatalogCredentialRequest, OpenRouterChatClient, OpenRouterChatCredentialRequest,
     OpenRouterCredentialBinding, OpenRouterCredentialRequest, OpenRouterMessagesCredentialRequest,
-    OpenRouterRetentionPolicy,
+    OpenRouterRetentionPolicy, OpenRouterRetrievalCredentialRequest,
 };
 
 use crate::home::paths::PlakPaths;
@@ -127,6 +127,13 @@ impl OpenRouterApiKeySource for ProductOpenRouterApiKeySource {
     fn resolve_catalog(
         &self,
         _: &OpenRouterCatalogCredentialRequest<'_>,
+    ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
+        self.current()
+    }
+
+    fn resolve_retrieval(
+        &self,
+        _: &OpenRouterRetrievalCredentialRequest<'_>,
     ) -> Result<OpenRouterApiKey, OpenRouterAuthError> {
         self.current()
     }

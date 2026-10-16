@@ -4772,7 +4772,25 @@ ships unsupported, so binding refuses. The Anthropic API and Claude OAuth
 routes have one (`plakous::anthropic::AnthropicRetrievalPort` over
 `AnthropicRetrieval`): `AnthropicLanguageModel::configured_with_retrieval`
 and the Claude subscription resolution (`ResolvedProvider::retrieval_port`)
-build it from the session's own executor. Binding precedes model
+build it from the session's own executor. The OpenRouter route has one
+for web search only (`plakous::openrouter::OpenRouterRetrievalPort` over
+`OpenRouterRetrieval`, built by `OpenRouterChatClient::retrieval` from the
+session's discovery evidence): whatever wire the session speaks, each call is
+one streamed `POST /api/v1/chat/completions` with the one user message,
+`max_tokens` 4,096, the route's `provider` restriction (`allow_fallbacks`
+false, `require_parameters` true, and the route's data-collection and ZDR
+policy), reasoning off where the model's reasoning is optional and on at its
+lowest attested effort where it is mandatory, and exactly one
+`{id:"web", max_results:5}` plugin with the requested domain filters as
+`include_domains`/`exclude_domains`. Before every physical request it
+revalidates the discovery evidence and requires the credential generation it
+was built under, then resolves the key through
+`OpenRouterApiKeySource::resolve_retrieval` with an
+`OpenRouterRetrievalCredentialRequest` naming the route and exact body. The
+Chat kernel's side-request grammar accepts text and `url_citation`
+annotations (streamed `delta` or non-streamed `message`) and refuses tool
+calls, other annotation types, a second choice and unknown message fields;
+main-exchange streams keep refusing annotations. Binding precedes model
 construction on API routes, so the plan binds a deferred port the executor
 connects once; a call before that connection is an ordinary tool error. Route-specific inline allowlists and
 class-specific unknown-outcome messages land with the first route whose
@@ -7118,8 +7136,11 @@ explicit cost-only allowlisting when that hosted tool goes live. A retrieval
 side request is classified by its own typed per-tool allowlist: on Messages,
 exactly one `web_search_20260318` or `web_fetch_20260318` tool with
 `allowed_callers:["direct"]` and only the fields the side-request builder
-emits is cost-only; any other body is a server effect and is refused before
-dispatch. Hosted fields in a main exchange, search included, remain
+emits is cost-only; on Chat, exactly one enabled `web` plugin with only
+`id`, `max_results`, `include_domains` and `exclude_domains`, no tools, and
+only the side-request builder's top-level fields is cost-only; any other body
+is a server effect and is refused before dispatch. A main-exchange Chat body
+with an enabled plugin remains a server effect. Hosted fields in a main exchange, search included, remain
 server-effect. A server-effect operation also declares that capability to the
 attempt ledger at admission.
 

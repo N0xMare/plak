@@ -58,6 +58,7 @@ mod hosted_support;
 mod key_usage;
 mod messages;
 mod model;
+mod retrieval;
 mod route;
 
 pub use chat::{
@@ -87,11 +88,16 @@ pub use model::{
     OPENROUTER_RESPONSES_PROFILE, OpenRouterResponsesBuildError, OpenRouterResponsesRoutingPolicy,
     OpenRouterResponsesTarget, compile_openrouter_responses_configuration,
 };
+pub use plakous_chat_completions::{
+    ChatRetrievalError, ChatRetrievalErrorKind, ChatRetrievalLimits, ChatRetrievalOutcome,
+    ChatRetrievalRequest, ChatRetrievalSource, ChatRetrievalUsage,
+};
+pub use retrieval::OpenRouterRetrieval;
 pub use route::{
     OpenRouterApiKey, OpenRouterApiKeyGenerationGrant, OpenRouterApiKeySource,
     OpenRouterAttribution, OpenRouterAuthError, OpenRouterCatalogCredentialRequest,
     OpenRouterChatCredentialRequest, OpenRouterChatRoute, OpenRouterChatRouteIdentity,
     OpenRouterCredentialBinding, OpenRouterCredentialRequest, OpenRouterMessagesCredentialRequest,
-    OpenRouterOrigin, OpenRouterRetentionPolicy, OpenRouterRouteError, OpenRouterRoutingPolicy,
-    StaticOpenRouterApiKeySource,
+    OpenRouterOrigin, OpenRouterRetentionPolicy, OpenRouterRetrievalCredentialRequest,
+    OpenRouterRouteError, OpenRouterRoutingPolicy, StaticOpenRouterApiKeySource,
 };

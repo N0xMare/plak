@@ -1853,6 +1853,26 @@ mod tests {
         );
     }
 
+    /// Hosted-retrieval citations are a side-request grammar only: a main
+    /// exchange never asked for a plugin, so an annotation means the gateway
+    /// did something unrequested.
+    #[test]
+    fn openrouter_main_stream_refuses_url_citation_annotations() {
+        let binding = binding(ChatStreamLimits::default())
+            .with_extensions(ChatStreamExtensions::OpenRouterV1);
+        let mut projector = projector_with_binding(binding);
+        push_json(&mut projector, role());
+        let cited = chunk(json!([{
+            "index": 0,
+            "delta": {"content": "answer", "annotations": [{
+                "type": "url_citation",
+                "url_citation": {"url": "https://example.com/", "title": "Example"}
+            }]},
+            "finish_reason": null
+        }]));
+        assert!(push_chunk(&mut projector, cited).is_err());
+    }
+
     #[test]
     fn openrouter_usage_cost_matrix() {
         let extensions = ChatStreamExtensions::OpenRouterV1;

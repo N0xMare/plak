@@ -573,7 +573,8 @@ impl ToolRoute {
     pub(crate) const fn retrieval_kinds(self) -> &'static [RetrievalKind] {
         match self {
             Self::Claude | Self::Anthropic => &[RetrievalKind::WebSearch, RetrievalKind::PageFetch],
-            Self::Codex | Self::Grok | Self::OpenAi | Self::XaiApi | Self::OpenRouter => &[],
+            Self::OpenRouter => &[RetrievalKind::WebSearch],
+            Self::Codex | Self::Grok | Self::OpenAi | Self::XaiApi => &[],
         }
     }
 
@@ -1346,6 +1347,53 @@ mod tests {
         for route in [ToolRoute::Anthropic, ToolRoute::Claude] {
             assert!(bind_tool_plan(&selection, route, "x").is_err());
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_qualified_openrouter_row_binds_web_search_only() -> TestResult {
+        let qualified = HostedRetrievalTable::new(
+            HostedRetrievalSupport::Supported,
+            HostedRetrievalSupport::Supported,
+            HostedRetrievalSupport::Supported,
+        );
+        let selection = TemplateToolSelection::parse(["web_search"])?;
+        let plan = bind_tool_plan_on(&selection, ToolRoute::OpenRouter, qualified, "openrouter")?;
+        let extensions = crate::tools::ProductToolExtensions::empty()
+            .with_plan(&plan)
+            .map_err(|error| error.to_string())?;
+        assert_eq!(
+            extensions.names().map(ToolName::as_str).collect::<Vec<_>>(),
+            ["web_search"]
+        );
+        let executor = Arc::new(RecordingPort::default());
+        extensions
+            .connect_retrieval(Some(Arc::clone(&executor) as Arc<dyn RetrievalPort>))
+            .map_err(|error| error.to_string())?;
+        let answered = plan
+            .retrieval()
+            .ok_or("no binding")?
+            .port()
+            .retrieve(
+                RetrievalRequest::WebSearch {
+                    query: "rust".to_owned(),
+                    allowed_domains: Vec::new(),
+                    blocked_domains: Vec::new(),
+                },
+                control(),
+            )
+            .await?;
+        assert_eq!(answered.text, "rust");
+        for unserved in [["web_fetch"], ["x_search"]] {
+            let refused = bind_tool_plan_on(
+                &TemplateToolSelection::parse(unserved)?,
+                ToolRoute::OpenRouter,
+                qualified,
+                "openrouter",
+            );
+            assert!(refused.is_err(), "{unserved:?} bound on openrouter");
+        }
+        assert!(bind_tool_plan(&selection, ToolRoute::OpenRouter, "openrouter").is_err());
         Ok(())
     }
 

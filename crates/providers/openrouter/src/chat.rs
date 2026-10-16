@@ -538,7 +538,7 @@ impl OpenRouterChatTarget {
 
 /// Bounds an authority by the reviewed Chat Completions pin: once the pin
 /// expires the route is refused, as an expired compiled profile is.
-fn reviewed_until(
+pub(crate) fn reviewed_until(
     evidence_expires_at: Timestamp,
     checked_at: Timestamp,
 ) -> Result<Timestamp, OpenRouterChatBuildError> {
@@ -1162,20 +1162,7 @@ impl ChatHttpHooks for OpenRouterChatHooks {
             HeaderName::from_static("x-openrouter-metadata"),
             HeaderValue::from_static("enabled"),
         );
-        if let Some(attribution) = self.target.route.identity().attribution() {
-            headers.insert(
-                HeaderName::from_static("http-referer"),
-                HeaderValue::from_static(attribution.referer()),
-            );
-            headers.insert(
-                HeaderName::from_static("x-openrouter-title"),
-                HeaderValue::from_static(attribution.title()),
-            );
-            headers.insert(
-                HeaderName::from_static("x-openrouter-categories"),
-                HeaderValue::from_static(crate::OpenRouterAttribution::CATEGORY),
-            );
-        }
+        insert_attribution(self.target.route.identity(), &mut headers);
         Request::new(
             dial_origin,
             Method::POST,
@@ -1303,6 +1290,27 @@ impl ChatHttpHooks for OpenRouterChatHooks {
 /// waiting. That is a definite end to this attempt, and saying so is what keeps
 /// a post-acceptance timeout from escalating as an unknown outcome. Every other
 /// transport failure leaves the question open and is deliberately unnamed here.
+/// The route's truthful attribution headers, when it has attribution.
+pub(crate) fn insert_attribution(
+    identity: &crate::OpenRouterChatRouteIdentity,
+    headers: &mut HeaderMap,
+) {
+    if let Some(attribution) = identity.attribution() {
+        headers.insert(
+            HeaderName::from_static("http-referer"),
+            HeaderValue::from_static(attribution.referer()),
+        );
+        headers.insert(
+            HeaderName::from_static("x-openrouter-title"),
+            HeaderValue::from_static(attribution.title()),
+        );
+        headers.insert(
+            HeaderName::from_static("x-openrouter-categories"),
+            HeaderValue::from_static(crate::OpenRouterAttribution::CATEGORY),
+        );
+    }
+}
+
 fn transport_refusal(failure: HttpFailure) -> Option<plakous_attempt::ProviderRefusal> {
     matches!(failure.kind(), plakous_http::ErrorKind::DeadlineExceeded)
         .then_some(plakous_attempt::ProviderRefusal::Deadline)

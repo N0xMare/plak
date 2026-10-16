@@ -2340,7 +2340,14 @@ server-effect refusal of any other tool shape), synthetic SSE fixtures for
 search and fetch results, citations, `pause_turn` continuation and its
 three-continuation bound, `max_uses_exceeded`, empty sources and refused
 blocks, and loopback retries (a connect failure and a 429 retried, a 400 not).
-The wrapper pack pins its descriptions, argument validation and result
+The Chat kernel pins the same for OpenRouter web search: exact body goldens
+with and without domain filters, reasoning and retention, the one-plugin
+cost-only allowlist, streamed and non-streamed `url_citation` fixtures (sources
+present, duplicated and empty), refused tool calls and foreign annotations,
+loopback retries, and that a main-exchange stream refuses annotations and a
+main body with an enabled plugin stays a server effect; the OpenRouter
+executor pins its headers, credential path and revalidation before each
+physical request. The wrapper pack pins its descriptions, argument validation and result
 rendering; binding pins that a `Supported` row with a port binds the pack and
 every shipped row refuses. The one paid probe per (route, tool) is opt-in and
 `#[ignore]`d (`live_retrieval_probe_*`), never in a gate tier.

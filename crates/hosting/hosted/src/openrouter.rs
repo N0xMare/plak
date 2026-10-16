@@ -90,6 +90,8 @@ struct PreparedOpenRouter {
     configured: ConfiguredLanguageModel,
     registry: plakous::tools::FrozenToolRegistry,
     evidence: OpenRouterChatModelEvidence,
+    /// Hosted web search on the same route, key and model, whatever the wire.
+    retrieval: plakous::openrouter::OpenRouterRetrieval,
     output_bound_rederived: Option<OutputBoundRederived>,
 }
 
@@ -156,6 +158,9 @@ pub(crate) async fn construct_openrouter_runtime_with_fence(
     fence: crate::agent::SessionToolFence,
 ) -> CliResult<ProductOpenRouterRuntime> {
     let prepared = prepare_openrouter(&spec).await?;
+    spec.topology_extensions.connect_retrieval(Some(Arc::new(
+        plakous::openrouter::OpenRouterRetrievalPort::new(prepared.retrieval),
+    )))?;
     let runtime = openrouter_runtime_binding(&spec, prepared.configured, prepared.registry, fence)?;
     let target = runtime.target_binding();
     Ok(ProductOpenRouterRuntime {
@@ -298,10 +303,14 @@ async fn prepare_openrouter(spec: &ProductOpenRouterSpec) -> CliResult<PreparedO
             })?,
     };
     let output_bound_rederived = route_moved_output_bound(spec.created_output_bound, derived_bound);
+    let retrieval = client.retrieval(evidence.clone()).map_err(|error| {
+        CliFailure::new(format!("OpenRouter web search is unavailable: {error}"))
+    })?;
     Ok(PreparedOpenRouter {
         configured,
         registry,
         evidence,
+        retrieval,
         output_bound_rederived,
     })
 }

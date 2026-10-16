@@ -632,6 +632,7 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "OpenRouterKeyUsageError",  # Host renders typed 401/403 refusals with safe source labels.
         "OpenRouterMessagesCredentialRequest",
         "OpenRouterRetentionPolicy",
+        "OpenRouterRetrievalCredentialRequest",
         "StaticOpenRouterApiKeySource",
     },
     "agent": {
@@ -1205,6 +1206,10 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     # The Anthropic API executor connects its side-request port.
     ("plakous-hosted", "src/platform.rs"): {"anthropic": {"AnthropicRetrievalPort"}},
+    # The OpenRouter executor connects its side-request port.
+    ("plakous-hosted", "src/openrouter.rs"): {
+        "openrouter": {"OpenRouterRetrieval", "OpenRouterRetrievalPort"},
+    },
     # The compile-time check that the host release timeout covers the store deadline.
     ("plakous-hosted", "src/lib.rs"): {"agent": {"DEFAULT_STORE_OPERATION_TIMEOUT"}},
     ("plak", "src/commands/reload_rehearsal.rs"): {

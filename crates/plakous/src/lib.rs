@@ -340,6 +340,8 @@ pub mod sessions;
 
 #[cfg(feature = "anthropic")]
 mod anthropic_retrieval;
+#[cfg(feature = "openrouter")]
+mod openrouter_retrieval;
 #[cfg(test)]
 mod test_model;
 
@@ -586,6 +588,7 @@ pub mod openrouter {
         RuntimeModelAuthority, SelectedProviderConfiguration, Timestamp,
     };
 
+    pub use crate::openrouter_retrieval::OpenRouterRetrievalPort;
     pub use plakous_openrouter::OPENROUTER_HOSTED_RETRIEVAL;
     pub use plakous_openrouter::{
         OPENROUTER_CHAT_PROTOCOL_ID, OPENROUTER_MESSAGES_PROTOCOL_ID,
@@ -600,6 +603,7 @@ pub mod openrouter {
         OpenRouterRouteError, OpenRouterToolChoiceModes, StaticOpenRouterApiKeySource,
         decode_openrouter_key_usage,
     };
+    pub use plakous_openrouter::{OpenRouterRetrieval, OpenRouterRetrievalCredentialRequest};
 
     /// A bounded OpenRouter Chat connection owning one exact route and HTTP client.
     ///
@@ -982,6 +986,20 @@ pub mod openrouter {
                 selected,
                 self.client.pooled(),
             )
+        }
+
+        /// Binds hosted web search side requests to this route and the
+        /// session's discovered model, on the same key and client.
+        ///
+        /// # Errors
+        ///
+        /// Returns a build error when the evidence is stale or foreign to this
+        /// route, or the credential has no current generation.
+        pub fn retrieval(
+            &self,
+            evidence: OpenRouterChatModelEvidence,
+        ) -> Result<OpenRouterRetrieval, OpenRouterChatBuildError> {
+            OpenRouterRetrieval::new(self.route.clone(), evidence, self.client.pooled())
         }
 
         /// Returns the immutable integration class of every model built by this lane.
