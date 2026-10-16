@@ -38,7 +38,7 @@ const VERSION_INDICES: [usize; 3] = [4, 7, 20];
 /// (and after `cc_is_subagent` on spawned children). Empty first-user-text is
 /// suffix `8a8`; `"hello"` is `05c` (the 2.1.295 native capture's suffix).
 #[must_use]
-fn billing_header_prefix(lineage: SessionLineage, first_user_text: &str) -> String {
+pub(crate) fn billing_header_prefix(lineage: SessionLineage, first_user_text: &str) -> String {
     let suffix = cc_version_suffix(first_user_text, CLAUDE_OAUTH_CC_VERSION);
     let mut header = format!(
         "x-anthropic-billing-header: cc_version={CLAUDE_OAUTH_CC_VERSION}.{suffix}; cc_entrypoint=cli; {CLAUDE_OAUTH_CCH_PLACEHOLDER};"

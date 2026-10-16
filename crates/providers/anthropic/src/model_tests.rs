@@ -207,7 +207,8 @@ fn configured(
         NonZeroU64::new(64_000).unwrap(),
         client,
         Some(origin),
-    )?)
+    )?
+    .0)
 }
 
 fn agent(
@@ -646,7 +647,8 @@ async fn production_api_tool_result_continues_without_redispatching_effect() -> 
         NonZeroU64::new(64_000).unwrap(),
         client,
         Some(origin),
-    )?;
+    )?
+    .0;
     let root = tempfile::tempdir()?;
     let agent = AgentBuilder::new(
         binding,
@@ -1481,5 +1483,82 @@ async fn production_api_workflow_connect_retry_revalidates_the_sealed_key() -> T
             assert_eq!(timeout(Duration::from_secs(5), peer).await???.len(), 1);
         }
     }
+    Ok(())
+}
+
+/// Opt-in paid probe, never in a gate tier: one web search and one page fetch
+/// side request on the Anthropic API with the operator's key. A pass is a
+/// non-empty answer with at least one source per tool. Run with
+/// `PLAK_LIVE_RETRIEVAL_PROBE=1 ANTHROPIC_API_KEY=... cargo nextest run -p
+/// plakous-anthropic --run-ignored only -E 'test(live_retrieval_probe)'`.
+#[tokio::test]
+#[ignore = "paid live probe"]
+async fn live_retrieval_probe_anthropic_api() -> TestResult {
+    if std::env::var("PLAK_LIVE_RETRIEVAL_PROBE").as_deref() != Ok("1") {
+        return Err("set PLAK_LIVE_RETRIEVAL_PROBE=1 to spend one probe per tool".into());
+    }
+    let key = std::env::var("ANTHROPIC_API_KEY")?;
+    let (_, retrieval) = AnthropicLanguageModel::configured_with_retrieval(
+        Arc::new(crate::AnthropicApiKey::new(key)?),
+        "live-probe",
+        &crate::AnthropicApiModel::bundled(crate::CLAUDE_SONNET_5_MODEL_ID)?,
+        b"",
+        behavior()?,
+        NonZeroU64::new(64_000).ok_or("window")?,
+        None,
+    )?;
+    let cancellation = CancellationToken::new();
+    for query in [
+        plakous_messages::MessagesRetrievalQuery::WebSearch {
+            query: "Rust programming language latest stable release".to_owned(),
+            allowed_domains: Vec::new(),
+            blocked_domains: Vec::new(),
+        },
+        plakous_messages::MessagesRetrievalQuery::PageFetch {
+            url: "https://www.rust-lang.org/".to_owned(),
+            prompt: Some("what is the page's main heading".to_owned()),
+        },
+    ] {
+        let tool = query.tool_name();
+        let outcome = retrieval.retrieve(query, &cancellation).await?;
+        eprintln!(
+            "{tool}: exchanges={} sources={} usage={:?}",
+            outcome.exchanges,
+            outcome.sources.len(),
+            outcome.usage
+        );
+        assert!(!outcome.text.trim().is_empty(), "{tool} answered nothing");
+        assert!(!outcome.sources.is_empty(), "{tool} reported no source");
+    }
+    Ok(())
+}
+
+#[test]
+fn api_side_request_uses_the_session_model_and_lowest_adaptive_effort() -> TestResult {
+    let (_, retrieval) = AnthropicLanguageModel::configured_with_retrieval(
+        Arc::new(crate::AnthropicApiKey::new("offline-only")?),
+        "fixture-account",
+        &crate::AnthropicApiModel::bundled(crate::CLAUDE_SONNET_5_MODEL_ID)?,
+        b"",
+        behavior()?,
+        NonZeroU64::new(64_000).ok_or("window")?,
+        None,
+    )?;
+    let body = retrieval
+        .request(plakous_messages::MessagesRetrievalQuery::WebSearch {
+            query: "q".to_owned(),
+            allowed_domains: Vec::new(),
+            blocked_domains: Vec::new(),
+        })
+        .body(&[])?;
+    let value: serde_json::Value = serde_json::from_slice(&body)?;
+    assert_eq!(value["model"], crate::CLAUDE_SONNET_5_MODEL_ID);
+    assert_eq!(value["thinking"], serde_json::json!({"type": "adaptive"}));
+    assert_eq!(value["output_config"], serde_json::json!({"effort": "low"}));
+    assert_eq!(value.get("system"), None);
+    assert_eq!(
+        plakous_messages::classify_messages_retrieval_body(&body),
+        plakous_messages::ReplaySafety::CostOnly
+    );
     Ok(())
 }

@@ -31,6 +31,7 @@ mod pack_support;
 mod policy;
 mod prompt_digest;
 mod registry;
+mod retrieval;
 mod schema;
 mod standard_identity;
 
@@ -51,6 +52,7 @@ pub use pack_support::*;
 pub use policy::*;
 pub use prompt_digest::*;
 pub use registry::*;
+pub use retrieval::*;
 pub use schema::*;
 pub use standard_identity::*;
 

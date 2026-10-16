@@ -138,6 +138,56 @@ pub(crate) fn oauth_request_translator(
         .with_session_id(session_id)
 }
 
+impl ClaudeOAuthLanguageModel {
+    /// Revalidates admission and authority exactly as before a model round,
+    /// reserves and authorizes one inference permit, and returns the current
+    /// access token with the identity it belongs to.
+    pub(crate) async fn side_request_credential(
+        self: &Arc<Self>,
+        input_bound: u64,
+    ) -> Result<(String, crate::ClaudeOAuthRequestIdentity), AnthropicError> {
+        let checked_at = SystemClock.now();
+        self.resolved
+            .ensure_current_admission(checked_at)
+            .map_err(|_| oauth_retry_error())?;
+        Arc::clone(self)
+            .revalidate_runtime_authority(checked_at)
+            .await
+            .map_err(|_| oauth_retry_error())?;
+        let mut permit = refresh_then_reserve_inference(&self.credentials, input_bound)
+            .await
+            .map_err(|_| oauth_retry_error())?;
+        let ((access_token, _, grant_binding), identity) = self
+            .credentials
+            .identity_credentials()
+            .map_err(|_| oauth_retry_error())?;
+        let account_binding = digest_binding(
+            b"claude-oauth-grant-lineage-account",
+            grant_binding.as_str().as_bytes(),
+        )
+        .map_err(|_| oauth_retry_error())?;
+        if identity != self.identity || account_binding != self.authority.account_binding() {
+            return Err(oauth_retry_error());
+        }
+        permit
+            .authorize_dispatch()
+            .map_err(|_| oauth_retry_error())?;
+        Ok((access_token, identity))
+    }
+
+    pub(crate) const fn resolved(&self) -> &ResolvedAnthropicMessages {
+        &self.resolved
+    }
+
+    pub(crate) const fn client(&self) -> &Client {
+        &self.client
+    }
+
+    pub(crate) const fn identity(&self) -> &crate::ClaudeOAuthRequestIdentity {
+        &self.identity
+    }
+}
+
 impl LanguageModel for ClaudeOAuthLanguageModel {
     fn reachability_probe(&self) -> Option<plakous_model::ReachabilityProbe> {
         let origin = Origin::parse(self.resolved.route().origin()).ok()?;
@@ -460,6 +510,55 @@ impl ClaudeNativeAuthManager {
     ) -> Result<
         (
             Arc<dyn LanguageModel>,
+            RuntimeModelAuthority,
+            ResolvedModelDescriptor,
+        ),
+        ClaudeNativeAuthError,
+    > {
+        let (model, authority, descriptor) = self
+            .resolve_oauth_model(requested_model, client, lineage)
+            .await?;
+        Ok((model, authority, descriptor))
+    }
+
+    /// Resolves the model as [`Self::resolve_model`] does, with the
+    /// hosted-retrieval side-request port on the same route, account,
+    /// credential and model, for the logical session `session_id`.
+    ///
+    /// # Errors
+    ///
+    /// Requires a Ready selected credential and an enrolled model id.
+    pub async fn resolve_model_with_retrieval(
+        &self,
+        requested_model: &str,
+        client: Client,
+        lineage: SessionLineage,
+        session_id: plakous_model::SessionId,
+    ) -> Result<
+        (
+            Arc<dyn LanguageModel>,
+            RuntimeModelAuthority,
+            ResolvedModelDescriptor,
+            crate::AnthropicRetrieval,
+        ),
+        ClaudeNativeAuthError,
+    > {
+        let (model, authority, descriptor) = self
+            .resolve_oauth_model(requested_model, client, lineage)
+            .await?;
+        let retrieval = crate::AnthropicRetrieval::claude_oauth(Arc::clone(&model), session_id)
+            .map_err(|_| ClaudeNativeAuthError::InvalidStoredCredential)?;
+        Ok((model, authority, descriptor, retrieval))
+    }
+
+    async fn resolve_oauth_model(
+        &self,
+        requested_model: &str,
+        client: Client,
+        lineage: SessionLineage,
+    ) -> Result<
+        (
+            Arc<ClaudeOAuthLanguageModel>,
             RuntimeModelAuthority,
             ResolvedModelDescriptor,
         ),

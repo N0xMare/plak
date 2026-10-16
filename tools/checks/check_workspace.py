@@ -1017,6 +1017,10 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "AlwaysAllowPolicy",
         # A template's `mcp:<id>` names parse through the facade's server id.
         "McpServerName",
+        # Hosted-retrieval wrappers bind through the facade's web module.
+        "web",
+        "RetrievalPort",
+        "WebTool",
         "ExecutionBackendError",
         "JobConfig",
         "JobHost",

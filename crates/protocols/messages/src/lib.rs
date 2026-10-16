@@ -19,6 +19,7 @@ mod attempt;
 mod configuration;
 mod http;
 mod request;
+mod retrieval;
 mod stream;
 mod stream_support;
 
@@ -53,6 +54,15 @@ pub use request::{
     MessagesThinkingDisplay, OPENROUTER_DISABLE_CONTEXT_COMPRESSION_PLUGINS, REDACTED_REPLAY_KIND,
     SIGNATURE_REPLAY_KIND, ToolOwnership, bind_replay_payload, lower_request,
     lower_request_with_active_artifact,
+};
+pub use retrieval::{
+    MAX_MESSAGES_RETRIEVAL_CONTINUATIONS, MESSAGES_RETRIEVAL_MAX_TOKENS,
+    MESSAGES_WEB_FETCH_MAX_CONTENT_TOKENS, MESSAGES_WEB_FETCH_TOOL_TYPE,
+    MESSAGES_WEB_SEARCH_MAX_USES, MESSAGES_WEB_SEARCH_TOOL_TYPE, MessagesRetrievalAuthorization,
+    MessagesRetrievalError, MessagesRetrievalErrorKind, MessagesRetrievalLimits,
+    MessagesRetrievalOutcome, MessagesRetrievalQuery, MessagesRetrievalRequest,
+    MessagesRetrievalSource, MessagesRetrievalTransport, MessagesRetrievalUsage,
+    classify_messages_retrieval_body, run_messages_retrieval,
 };
 pub use stream::{
     MessagesStopDetails, MessagesStopDetailsKind, MessagesStopOutcome, MessagesStopReason,

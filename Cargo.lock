@@ -3752,6 +3752,7 @@ dependencies = [
  "plakous-tool-plan",
  "plakous-tool-process",
  "plakous-tool-search",
+ "plakous-tool-web",
  "plakous-tools",
  "plakous-xai",
  "rusqlite",
@@ -4325,6 +4326,17 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "plakous-tool-web"
+version = "0.1.0"
+dependencies = [
+ "plakous-model",
+ "plakous-tools",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 

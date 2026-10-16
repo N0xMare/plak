@@ -809,6 +809,13 @@ live journal proves the pre-ledger crash window; an unjournaled older snapshot,
 a new descriptor under an old witness, or a reinitialization fails closed before
 any credential or network access.
 
+Hosted retrieval spends on the session's own route and credential and needs
+no separate authority: each wrapper call is one side request whose hosted
+work is bounded by the body it sends (`max_uses` 5 for web search, 1 for page
+fetch, `max_tokens` 4,096, at most three `pause_turn` continuations, and the
+turn retry budget per exchange). The wrappers are opt-in per template; no
+shipped preset enables them.
+
 That is a local defense against restoring the authority root alone. A malicious
 same-uid writer, and a coherent restore of the witness together with the whole
 XDG state home, home directory, filesystem, or VM, are **outside** the

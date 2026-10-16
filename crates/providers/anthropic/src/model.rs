@@ -92,6 +92,38 @@ impl AnthropicLanguageModel {
         )
     }
 
+    /// Builds the exact-origin executor and its hosted-retrieval side-request
+    /// port on the same route, key, model and client.
+    pub fn configured_with_retrieval(
+        source: Arc<dyn AnthropicApiKeySource>,
+        account: &str,
+        model: &crate::AnthropicApiModel,
+        admitted_facts: &[u8],
+        behavior: ProviderBehaviorConfiguration,
+        maximum_projected_input: NonZeroU64,
+        observer: Option<Arc<dyn plakous_http::ExchangeObserver>>,
+    ) -> Result<(ConfiguredLanguageModel, crate::AnthropicRetrieval), AnthropicError> {
+        let client = Client::new_http1(Limits::for_streaming_inference())
+            .map_err(configuration_error)?
+            .pooled()
+            .with_observer(observer);
+        let (configured, executor) = Self::build(
+            source,
+            account,
+            model,
+            admitted_facts,
+            behavior,
+            maximum_projected_input,
+            client,
+            None,
+        )?;
+        let effort = crate::retrieval::lowest_effort(model.efforts());
+        Ok((
+            configured,
+            crate::AnthropicRetrieval::api(executor, effort)?,
+        ))
+    }
+
     /// Builds the same exact-origin executor with an explicit transport client.
     pub fn configured_with_client(
         source: Arc<dyn AnthropicApiKeySource>,
@@ -112,6 +144,7 @@ impl AnthropicLanguageModel {
             client,
             None,
         )
+        .map(|(configured, _)| configured)
     }
 
     /// Runs the production executor through an explicitly trusted HTTPS loopback transport.
@@ -154,6 +187,7 @@ impl AnthropicLanguageModel {
             client,
             Some(dial_origin),
         )
+        .map(|(configured, _)| configured)
     }
 
     #[allow(
@@ -169,7 +203,7 @@ impl AnthropicLanguageModel {
         maximum_projected_input: NonZeroU64,
         client: Client,
         dial_origin: Option<Origin>,
-    ) -> Result<ConfiguredLanguageModel, AnthropicError> {
+    ) -> Result<(ConfiguredLanguageModel, Arc<Self>), AnthropicError> {
         if model.status() != &crate::AnthropicApiModelStatus::Usable {
             return Err(configuration_error("Anthropic API model is not admitted"));
         }
@@ -283,13 +317,14 @@ impl AnthropicLanguageModel {
             configuration: configuration.clone(),
             dial_origin,
         });
-        ConfiguredLanguageModel::new(
+        let configured = ConfiguredLanguageModel::new(
             &plakous_model::StandardIntegrationAuthority::release_owned(),
-            model,
+            Arc::clone(&model) as Arc<dyn LanguageModel>,
             configuration,
             authority,
         )
-        .map_err(configuration_error)
+        .map_err(configuration_error)?;
+        Ok((configured, model))
     }
 
     fn validate_preparation(
@@ -325,6 +360,33 @@ impl AnthropicLanguageModel {
     #[must_use]
     pub const fn resolved(&self) -> &ResolvedAnthropicMessages {
         &self.resolved
+    }
+}
+
+impl AnthropicLanguageModel {
+    /// Revalidates admission exactly as before a model round, then returns
+    /// the current key as its request header.
+    pub(crate) async fn side_request_credential(
+        self: &Arc<Self>,
+    ) -> Result<plakous_http::HeaderValue, AnthropicError> {
+        Arc::clone(self)
+            .revalidate_runtime_authority(SystemClock.now())
+            .await
+            .map_err(|_| configuration_error("Anthropic API admission is no longer current"))?;
+        self.resolved
+            .route()
+            .with_current_key(self.source.as_ref(), crate::http::anthropic_api_key_header)?
+    }
+
+    pub(crate) const fn client(&self) -> &Client {
+        &self.client
+    }
+
+    pub(crate) fn dial_origin(&self) -> Result<Origin, AnthropicError> {
+        match &self.dial_origin {
+            Some(origin) => Ok(origin.clone()),
+            None => Origin::parse(self.resolved.route().origin()).map_err(configuration_error),
+        }
     }
 }
 

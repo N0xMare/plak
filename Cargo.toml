@@ -40,6 +40,7 @@ members = [
     "crates/harness/tool-process",
     "crates/harness/tool-search",
     "crates/harness/mcp",
+    "crates/harness/tool-web",
     "tests/support/plakous-test-support",
     "crates/core/tools",
     "crates/orchestration/workspace",

@@ -53,7 +53,7 @@ Publication and Rust nameability confer accessibility, not support. A published
 package carries no direct-use compatibility, qualification, or support promise
 unless it is in the supported class.
 
-The workspace contains 38 packages: five supported, 30 published internal, and
+The workspace contains 39 packages: five supported, 31 published internal, and
 three repository-only. Nothing is published to a registry today; every package
 sets `publish = false`.
 
@@ -119,6 +119,7 @@ classes and directory policy.
 | `plakous-compose` | `crates/harness/compose` | `harness` | The js/py cell outer tools, the Codex Code Mode `exec`/`wait` compilers, nested catalogs, and the `SidecarLocator` port |
 | `plakous-tool-files` | `crates/harness/tool-files` | `harness` | Bounded reads, exact-content patching, image inspection, and the Codex patch envelope, behind `ToolPack` |
 | `plakous-tool-search` | `crates/harness/tool-search` | `harness` | Bounded deterministic repository search and directory listing, behind `ToolPack` |
+| `plakous-tool-web` | `crates/harness/tool-web` | `harness` | Local wrapper tools for provider-hosted web search, page fetch and X search over a `RetrievalPort`, behind `ToolPack` |
 | `plakous-tool-process` | `crates/harness/tool-process` | `harness` | Joined process sessions and the per-vocabulary shell tool, behind `ToolPack` |
 | `plakous-mcp` | `crates/harness/mcp` | `harness` | The MCP client: the process-wide stdio server pool over the service-process seam, frozen tool listings, input-schema lowering, `mcp__<server>__<tool>` naming, and the serial-mutating MCP tool pack |
 | `plakous-tool-plan` | `crates/harness/tool-plan` | `harness` | The `PlanState` port, `update_plan`, and the id-merge `todo_write` lowering, behind `ToolPack` |

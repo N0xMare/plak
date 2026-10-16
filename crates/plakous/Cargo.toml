@@ -80,6 +80,7 @@ plakous-tool-files = { version = "0.1.0", path = "../harness/tool-files" }
 plakous-tool-plan = { version = "0.1.0", path = "../harness/tool-plan" }
 plakous-tool-process = { version = "0.1.0", path = "../harness/tool-process" }
 plakous-tool-search = { version = "0.1.0", path = "../harness/tool-search" }
+plakous-tool-web = { version = "0.1.0", path = "../harness/tool-web" }
 plakous-prompts = { version = "0.1.0", path = "../harness/prompts" }
 plakous-openai = { version = "0.1.0", path = "../providers/openai", default-features = false, optional = true }
 plakous-openrouter = { version = "0.1.0", path = "../providers/openrouter", optional = true }

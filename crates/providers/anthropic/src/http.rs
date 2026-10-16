@@ -717,120 +717,36 @@ impl MessagesHttpHooks for AnthropicHttpHooks {
             )
             .map_err(|error| protocol_source(&error))?
             .map_err(|error| protocol_source(&error))?;
-        let mut headers = HeaderMap::new();
-        let path = if oauth {
-            headers.insert(AUTHORIZATION, credential);
-            let beta = self.prepared.dialect().beta_header().ok_or_else(|| {
+        let beta = if oauth {
+            Some(self.prepared.dialect().beta_header().ok_or_else(|| {
                 protocol_source(&invalid_configuration(
                     "Claude OAuth beta header was missing",
                 ))
-            })?;
-            headers.insert(
-                ANTHROPIC_BETA,
-                HeaderValue::from_str(&beta).map_err(|_| {
-                    protocol_source(&invalid_configuration(
-                        "Claude OAuth beta header was invalid",
-                    ))
-                })?,
-            );
-            headers.insert(
-                USER_AGENT,
-                HeaderValue::from_static(crate::CLAUDE_OAUTH_MESSAGES_USER_AGENT),
-            );
-            headers.insert(
-                HeaderName::from_static("anthropic-dangerous-direct-browser-access"),
-                HeaderValue::from_static("true"),
-            );
-            headers.insert(
-                HeaderName::from_static("x-app"),
-                HeaderValue::from_static("cli"),
-            );
-            insert_oauth_header(
-                &mut headers,
-                "x-stainless-arch",
-                crate::claude_oauth_stainless_arch(),
-            )?;
-            headers.insert(
-                HeaderName::from_static("x-stainless-lang"),
-                HeaderValue::from_static(crate::CLAUDE_OAUTH_STAINLESS_LANG),
-            );
-            insert_oauth_header(
-                &mut headers,
-                "x-stainless-os",
-                crate::claude_oauth_stainless_os(),
-            )?;
-            headers.insert(
-                HeaderName::from_static("x-stainless-package-version"),
-                HeaderValue::from_static(crate::CLAUDE_OAUTH_STAINLESS_PACKAGE_VERSION),
-            );
-            headers.insert(
-                HeaderName::from_static("x-stainless-retry-count"),
-                HeaderValue::from_static(crate::CLAUDE_OAUTH_STAINLESS_RETRY_COUNT),
-            );
-            headers.insert(
-                HeaderName::from_static("x-stainless-runtime"),
-                HeaderValue::from_static(crate::CLAUDE_OAUTH_STAINLESS_RUNTIME),
-            );
-            headers.insert(
-                HeaderName::from_static("x-stainless-runtime-version"),
-                HeaderValue::from_static(crate::CLAUDE_OAUTH_STAINLESS_RUNTIME_VERSION),
-            );
-            headers.insert(
-                HeaderName::from_static("x-stainless-timeout"),
-                HeaderValue::from_static(crate::CLAUDE_OAUTH_STAINLESS_TIMEOUT),
-            );
-            let attempt_id = attempt.binding().attempt_id().to_string();
-            let attempt_id = HeaderValue::from_str(&attempt_id).map_err(|_| {
-                protocol_source(&invalid_configuration(
-                    "Claude OAuth attempt identity was invalid",
-                ))
-            })?;
-            headers.insert(HeaderName::from_static("x-client-request-id"), attempt_id);
+            })?)
+        } else {
+            None
+        };
+        let oauth_identity = if oauth {
             let session_id = self.prepared.oauth_session_id().ok_or_else(|| {
                 protocol_source(&invalid_configuration(
                     "Claude OAuth request omitted its logical session identity",
                 ))
             })?;
-            let session_id = HeaderValue::from_str(&session_id.to_string()).map_err(|_| {
-                protocol_source(&invalid_configuration(
-                    "Claude OAuth logical session identity was invalid",
-                ))
-            })?;
-            headers.insert(
-                HeaderName::from_static("x-claude-code-session-id"),
-                session_id,
-            );
-            crate::oauth::CLAUDE_OAUTH_MESSAGES_PATH
+            Some((attempt.binding().attempt_id().to_string(), session_id))
         } else {
-            headers.insert(X_API_KEY, credential);
-            ANTHROPIC_MESSAGES_PATH
+            None
         };
-        headers.insert(
-            ANTHROPIC_VERSION,
-            HeaderValue::from_static(ANTHROPIC_API_VERSION),
-        );
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        headers.insert(
-            ACCEPT,
-            HeaderValue::from_static(if oauth {
-                "application/json"
-            } else {
-                "text/event-stream"
-            }),
-        );
-        let request = HttpRequest::new(
+        let request = messages_request(
+            client,
             dial_origin,
-            Method::POST,
-            path,
-            headers,
-            SensitiveBytes::new(operation.body().to_vec()).into_bytes(),
-            client.limits(),
+            credential,
+            beta.as_deref(),
+            oauth_identity
+                .as_ref()
+                .map(|(attempt_id, session_id)| (attempt_id.as_str(), *session_id)),
+            operation.body(),
         )
-        .map_err(|error| {
-            protocol_source(&invalid_configuration(format!(
-                "Anthropic HTTP request was invalid: {error}"
-            )))
-        })?;
+        .map_err(|error| protocol_source(&error))?;
         if let Some(authorize) = &self.dispatch_authorization {
             if attempt.context().cancellation().is_cancelled() {
                 return Err(self.cancellation_error());
@@ -987,7 +903,7 @@ fn require_loopback_origin(origin: &Origin) -> Result<(), AnthropicError> {
     Ok(())
 }
 
-fn anthropic_api_key_header(secret: &str) -> Result<HeaderValue, AnthropicError> {
+pub(crate) fn anthropic_api_key_header(secret: &str) -> Result<HeaderValue, AnthropicError> {
     sensitive_header_value(secret.as_bytes().to_vec()).map_err(|_| {
         invalid_configuration("Anthropic API key could not be represented as an HTTP header")
     })
@@ -1143,15 +1059,113 @@ fn insert_oauth_header(
     headers: &mut HeaderMap,
     name: &'static str,
     value: &str,
-) -> Result<(), MessagesAttemptProtocolError> {
-    let header_name = HeaderName::from_static(name);
-    let header_value = HeaderValue::from_str(value).map_err(|_| {
-        protocol_source(&invalid_configuration(
-            "Claude OAuth attribution header was invalid",
-        ))
-    })?;
-    headers.insert(header_name, header_value);
+) -> Result<(), AnthropicError> {
+    let header_value = HeaderValue::from_str(value)
+        .map_err(|_| invalid_configuration("Claude OAuth attribution header was invalid"))?;
+    headers.insert(HeaderName::from_static(name), header_value);
     Ok(())
+}
+
+/// The exact Messages request of one physical exchange, turn or side
+/// request: `beta` and `oauth` (request id, logical session) are present
+/// exactly on the Claude OAuth route, which wears the reference client's
+/// headers; the API-key route sends `x-api-key`.
+pub(crate) fn messages_request(
+    client: &Client,
+    dial_origin: Origin,
+    credential: HeaderValue,
+    beta: Option<&str>,
+    oauth: Option<(&str, plakous_model::SessionId)>,
+    body: &[u8],
+) -> Result<HttpRequest, AnthropicError> {
+    let mut headers = HeaderMap::new();
+    let path = if let (Some(beta), Some((request_id, session_id))) = (beta, oauth) {
+        headers.insert(AUTHORIZATION, credential);
+        headers.insert(
+            ANTHROPIC_BETA,
+            HeaderValue::from_str(beta)
+                .map_err(|_| invalid_configuration("Claude OAuth beta header was invalid"))?,
+        );
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_static(crate::CLAUDE_OAUTH_MESSAGES_USER_AGENT),
+        );
+        headers.insert(
+            HeaderName::from_static("anthropic-dangerous-direct-browser-access"),
+            HeaderValue::from_static("true"),
+        );
+        headers.insert(
+            HeaderName::from_static("x-app"),
+            HeaderValue::from_static("cli"),
+        );
+        insert_oauth_header(
+            &mut headers,
+            "x-stainless-arch",
+            crate::claude_oauth_stainless_arch(),
+        )?;
+        headers.insert(
+            HeaderName::from_static("x-stainless-lang"),
+            HeaderValue::from_static(crate::CLAUDE_OAUTH_STAINLESS_LANG),
+        );
+        insert_oauth_header(
+            &mut headers,
+            "x-stainless-os",
+            crate::claude_oauth_stainless_os(),
+        )?;
+        headers.insert(
+            HeaderName::from_static("x-stainless-package-version"),
+            HeaderValue::from_static(crate::CLAUDE_OAUTH_STAINLESS_PACKAGE_VERSION),
+        );
+        headers.insert(
+            HeaderName::from_static("x-stainless-retry-count"),
+            HeaderValue::from_static(crate::CLAUDE_OAUTH_STAINLESS_RETRY_COUNT),
+        );
+        headers.insert(
+            HeaderName::from_static("x-stainless-runtime"),
+            HeaderValue::from_static(crate::CLAUDE_OAUTH_STAINLESS_RUNTIME),
+        );
+        headers.insert(
+            HeaderName::from_static("x-stainless-runtime-version"),
+            HeaderValue::from_static(crate::CLAUDE_OAUTH_STAINLESS_RUNTIME_VERSION),
+        );
+        headers.insert(
+            HeaderName::from_static("x-stainless-timeout"),
+            HeaderValue::from_static(crate::CLAUDE_OAUTH_STAINLESS_TIMEOUT),
+        );
+        insert_oauth_header(&mut headers, "x-client-request-id", request_id)?;
+        insert_oauth_header(
+            &mut headers,
+            "x-claude-code-session-id",
+            &session_id.to_string(),
+        )?;
+        crate::oauth::CLAUDE_OAUTH_MESSAGES_PATH
+    } else {
+        headers.insert(X_API_KEY, credential);
+        ANTHROPIC_MESSAGES_PATH
+    };
+    let oauth = beta.is_some();
+    headers.insert(
+        ANTHROPIC_VERSION,
+        HeaderValue::from_static(ANTHROPIC_API_VERSION),
+    );
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    headers.insert(
+        ACCEPT,
+        HeaderValue::from_static(if oauth {
+            "application/json"
+        } else {
+            "text/event-stream"
+        }),
+    );
+    HttpRequest::new(
+        dial_origin,
+        Method::POST,
+        path,
+        headers,
+        SensitiveBytes::new(body.to_vec()).into_bytes(),
+        client.limits(),
+    )
+    .map_err(|error| invalid_configuration(format!("Anthropic HTTP request was invalid: {error}")))
 }
 
 fn protocol_source(error: &AnthropicError) -> MessagesAttemptProtocolError {

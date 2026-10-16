@@ -4777,6 +4777,13 @@ is which canonical tool each name binds to.
 | xAI API | the SuperGrok OAuth pack, with no costume |
 | Anthropic API | the Claude OAuth pack, with no costume |
 
+A template's hosted-retrieval tools append after the pack, in the order
+`web_search`, `web_fetch`, `x_search`, under the vocabulary's names: Claude
+and Anthropic API `WebSearch`, `WebFetch`; SuperGrok and xAI API
+`web_search`, `x_search`; Codex, OpenAI API and OpenRouter `web_search`.
+Their results begin with the untrusted-data line and end with the sources
+list; the row's presentation subject is the query, or the fetched host.
+
 Native Claude coding requests use 128,000 as the output ceiling and product
 bound for every enrolled row (`claude-sonnet-5`, `claude-sonnet-5-5`,
 `claude-haiku-5-5`, `claude-fable-5-1`, `claude-opus-5`, and

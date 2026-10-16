@@ -63,7 +63,7 @@ provider qualification, recovery certification, or source compatibility.
 | Published internal | A necessary dependency and deliberate advanced-use implementation surface, intended to release in the exact cohort, with no direct-use compatibility, qualification, or support promise |
 | Repository-only | Test, fixture, and crash-harness packages kept outside the production dependency closure entirely |
 
-The workspace holds 38 packages: five supported, 30 published internal, three
+The workspace holds 39 packages: five supported, 31 published internal, three
 repository-only.
 
 The root `[workspace].exclude` includes `.plak`, the local operator-state and
@@ -75,7 +75,7 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 
 `plakous`, `plakous-agent`, `plakous-model`, `plakous-tools`, `plak`.
 
-**Published internal (30)**
+**Published internal (31)**
 
 `plakous-host-protocol`, `plakous-workspace`, `plakous-recursive-subagents`,
 `plakous-recursive-subagents-store`, `plakous-hosted`,
@@ -85,7 +85,7 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 `plakous-openrouter`, `plakous-prompts`, `plakous-py-eval`,
 `plakous-responses`, `plakous-responses-dialect`, `plakous-store`,
 `plakous-tool-files`, `plakous-tool-plan`, `plakous-tool-process`,
-`plakous-tool-search`, `plakous-xai`.
+`plakous-tool-search`, `plakous-tool-web`, `plakous-xai`.
 
 **Repository-only (3)**
 

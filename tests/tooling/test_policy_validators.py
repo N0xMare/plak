@@ -802,7 +802,7 @@ class RepositoryPolicyTests(unittest.TestCase):
 
     def test_every_package_carries_layer_metadata_and_the_tree_is_clean(self) -> None:
         workspace = self.workspace
-        self.assertEqual(len(workspace.packages), 38)
+        self.assertEqual(len(workspace.packages), 39)
         for validator in (
             workspace_policy.validate_package_metadata,
             workspace_policy.validate_layout,
@@ -870,6 +870,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                 "plakous-tool-plan",
                 "plakous-tool-process",
                 "plakous-tool-search",
+                "plakous-tool-web",
                 "plakous-prompts",
                 "plakous-workspace",
                 "plakous-recursive-subagents",
@@ -902,7 +903,7 @@ class RepositoryPolicyTests(unittest.TestCase):
         }
         actual = workspace_policy.package_classifications(self.workspace)
         self.assertEqual(actual, expected)
-        self.assertEqual(sum(map(len, actual.values())), 38)
+        self.assertEqual(sum(map(len, actual.values())), 39)
 
     def test_layers_and_neutral_packages_are_as_designed(self) -> None:
         by_layer = {
@@ -932,6 +933,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                 "plakous-tool-plan",
                 "plakous-tool-process",
                 "plakous-tool-search",
+                "plakous-tool-web",
             },
         )
         self.assertEqual(
@@ -1904,6 +1906,7 @@ class FeaturePolicyTests(unittest.TestCase):
                 "plakous-tool-plan",
                 "plakous-tool-process",
                 "plakous-tool-search",
+                "plakous-tool-web",
                 "plakous-tools",
             },
         )
@@ -2041,6 +2044,7 @@ class FeaturePolicyTests(unittest.TestCase):
                 "plakous-tool-plan",
                 "plakous-tool-process",
                 "plakous-tool-search",
+                "plakous-tool-web",
                 "plakous-tools",
             },
         )

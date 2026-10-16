@@ -422,6 +422,17 @@ impl AnthropicPlatformRoute {
         Ok(())
     }
 
+    /// Runs `use_key` on the route's key after checking it is still the
+    /// source's current key: the one exposure path of an isolated side request.
+    pub(crate) fn with_current_key<T>(
+        &self,
+        source: &dyn AnthropicApiKeySource,
+        use_key: impl FnOnce(&str) -> T,
+    ) -> Result<T, AnthropicError> {
+        self.validate_current_key(source)?;
+        Ok(use_key(self.auth.key.expose()))
+    }
+
     /// Creates the official API-key route. Custom origins require a distinct
     /// route type and explicit credential binding; this type cannot be mutated.
     /// Cloning one [`AnthropicApiKey`] preserves its authority identity;

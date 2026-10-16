@@ -77,17 +77,40 @@ impl ProductToolExtensions {
     /// Appends a bound tool plan after these extensions: the one append path
     /// for every tool a template selects.
     ///
-    /// No planned tool has a registration in this build, and binding refuses
-    /// every selected tool before this point, so only the empty plan arrives;
-    /// it leaves the extensions, and every surface and identity compiled from
-    /// them, unchanged.
+    /// Hosted-retrieval wrappers register through their pack, in plan order,
+    /// on the port the plan bound. The empty plan leaves the extensions, and
+    /// every surface and identity compiled from them, unchanged.
     pub(crate) fn with_plan(self, plan: &crate::tool_plan::ToolPlan) -> CliResult<Self> {
-        match plan.tools().first() {
-            None => Ok(self),
-            Some(tool) => Err(CliFailure::new(format!(
-                "planned tool {tool:?} has no registration in this build"
-            ))),
+        let mut wrappers = Vec::new();
+        for tool in plan.tools() {
+            let wrapper = match tool {
+                crate::tool_plan::PlannedTool::Optional(optional) => optional.web_tool(),
+                crate::tool_plan::PlannedTool::Mcp { .. } => None,
+            };
+            let Some(wrapper) = wrapper else {
+                return Err(CliFailure::new(format!(
+                    "planned tool {tool:?} has no registration in this build"
+                )));
+            };
+            wrappers.push(wrapper);
         }
+        if wrappers.is_empty() {
+            return Ok(self);
+        }
+        let binding = plan
+            .retrieval()
+            .ok_or_else(|| CliFailure::new("planned hosted retrieval has no retrieval port"))?;
+        let pack =
+            plakous::tools::web::WebToolPack::new(binding.presentation(), wrappers, binding.port())
+                .map_err(|error| CliFailure::new(format!("hosted retrieval wrappers: {error}")))?;
+        let appended = pack
+            .registrations()
+            .map_err(|error| CliFailure::new(format!("hosted retrieval wrappers: {error}")))?;
+        let host_facts = self.host_facts;
+        Ok(
+            Self::from_nested_registrations(self.registrations.iter().cloned().chain(appended))?
+                .with_host_facts(host_facts),
+        )
     }
 
     /// Registers this pack's executors through the pack seam.

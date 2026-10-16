@@ -7,13 +7,15 @@
 
 use std::collections::BTreeSet;
 use std::fmt;
+use std::sync::Arc;
 
 use plakous::model::{
     HostedRetrievalSupport, HostedRetrievalTable, HostedRetrievalTool, HostedRetrievalUnsupported,
     ToolName,
 };
 use plakous::subscriptions::NativeProvider;
-use plakous::tools::McpServerName;
+use plakous::tools::web::{RetrievalPort, WebTool};
+use plakous::tools::{CodingPresentation, McpServerName};
 
 use crate::binding::{ApiTarget, PlatformProvider};
 
@@ -66,6 +68,17 @@ impl OptionalTool {
     #[must_use]
     pub const fn is_hosted_retrieval(self) -> bool {
         self.hosted_retrieval().is_some()
+    }
+
+    /// The local wrapper of the hosted retrieval, when this tool is one.
+    #[must_use]
+    pub const fn web_tool(self) -> Option<WebTool> {
+        match self {
+            Self::WebSearch => Some(WebTool::WebSearch),
+            Self::WebFetch => Some(WebTool::WebFetch),
+            Self::XSearch => Some(WebTool::XSearch),
+            Self::FetchUrl | Self::ImageGen => None,
+        }
     }
 
     /// The provider-hosted retrieval this tool wraps, when it wraps one.
@@ -307,7 +320,45 @@ pub(crate) enum PlannedTool {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct ToolPlan {
     tools: Vec<PlannedTool>,
+    retrieval: Option<RetrievalBinding>,
 }
+
+/// The vocabulary the hosted-retrieval wrappers wear and the route's port
+/// that serves their side requests.
+#[derive(Clone)]
+pub(crate) struct RetrievalBinding {
+    presentation: CodingPresentation,
+    port: Arc<dyn RetrievalPort>,
+}
+
+impl RetrievalBinding {
+    pub(crate) const fn presentation(&self) -> CodingPresentation {
+        self.presentation
+    }
+
+    pub(crate) fn port(&self) -> Arc<dyn RetrievalPort> {
+        Arc::clone(&self.port)
+    }
+}
+
+impl fmt::Debug for RetrievalBinding {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RetrievalBinding")
+            .field("presentation", &self.presentation)
+            .field("kinds", &self.port.kinds())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Two bindings are equal when they share one port.
+impl PartialEq for RetrievalBinding {
+    fn eq(&self, other: &Self) -> bool {
+        self.presentation == other.presentation && Arc::ptr_eq(&self.port, &other.port)
+    }
+}
+
+impl Eq for RetrievalBinding {}
 
 impl ToolPlan {
     /// Orders the selection's optional tools and the MCP tools binding
@@ -331,12 +382,20 @@ impl ToolPlan {
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
-        Self { tools }
+        Self {
+            tools,
+            retrieval: None,
+        }
     }
 
     /// The planned tools in plan order.
     pub(crate) fn tools(&self) -> &[PlannedTool] {
         &self.tools
+    }
+
+    /// The port and vocabulary of the planned hosted-retrieval wrappers.
+    pub(crate) const fn retrieval(&self) -> Option<&RetrievalBinding> {
+        self.retrieval.as_ref()
     }
 }
 
@@ -384,6 +443,16 @@ impl ToolRoute {
         }
     }
 
+    /// The tool vocabulary the route's coding presentation uses.
+    const fn presentation(self) -> CodingPresentation {
+        match self {
+            Self::Claude | Self::Anthropic => CodingPresentation::Claude,
+            Self::Codex | Self::OpenAi => CodingPresentation::Codex,
+            Self::Grok | Self::XaiApi => CodingPresentation::Grok,
+            Self::OpenRouter => CodingPresentation::Pi,
+        }
+    }
+
     /// The provider crate's release-owned table for this route.
     const fn hosted_retrieval(self) -> HostedRetrievalTable {
         match self {
@@ -401,11 +470,11 @@ impl ToolRoute {
 /// Resolves a template's selection on the route a session binds.
 ///
 /// Every selected tool must be served, or binding refuses; nothing is
-/// silently left out. In this build no optional tool has an implementation:
-/// a hosted retrieval tool is refused by its route's table, or, where the
-/// table qualifies it, because its wrapper is not built in, and every
-/// Plak-run and MCP tool is refused as not built in. Only the empty
-/// selection binds.
+/// silently left out. A hosted retrieval tool binds its local wrapper only
+/// where the route's release-owned table qualifies it and the route supplies
+/// a retrieval port serving it; this build supplies no port, so the table
+/// refuses it or it is refused as not built in. Every Plak-run and MCP tool
+/// is refused as not built in. Only the empty selection binds.
 ///
 /// # Errors
 ///
@@ -415,10 +484,49 @@ pub(crate) fn bind_tool_plan(
     route: ToolRoute,
     route_label: &str,
 ) -> Result<ToolPlan, ToolPlanRefusal> {
-    if let Some(entry) = selection.entries().first() {
-        return Err(refusal(entry, route.hosted_retrieval(), route_label));
+    bind_tool_plan_with(
+        selection,
+        route.hosted_retrieval(),
+        route.presentation(),
+        route_label,
+        None,
+    )
+}
+
+/// [`bind_tool_plan`] over an explicit support table and retrieval port.
+pub(crate) fn bind_tool_plan_with(
+    selection: &TemplateToolSelection,
+    table: HostedRetrievalTable,
+    presentation: CodingPresentation,
+    route_label: &str,
+    port: Option<Arc<dyn RetrievalPort>>,
+) -> Result<ToolPlan, ToolPlanRefusal> {
+    let mut wrappers = false;
+    for entry in selection.entries() {
+        let served = match entry {
+            SelectedTool::Optional(tool) => match (tool.hosted_retrieval(), tool.web_tool()) {
+                (Some(hosted), Some(web))
+                    if table.support(hosted) == HostedRetrievalSupport::Supported =>
+                {
+                    port.as_ref().is_some_and(|port| {
+                        port.kinds().contains(&web.kind())
+                            && web.presented_name(presentation).is_some()
+                    })
+                }
+                _ => false,
+            },
+            SelectedTool::McpServer(_) | SelectedTool::McpTool { .. } => false,
+        };
+        if !served {
+            return Err(refusal(entry, table, route_label));
+        }
+        wrappers = true;
     }
-    Ok(ToolPlan::new(selection, []))
+    let mut plan = ToolPlan::new(selection, []);
+    if wrappers {
+        plan.retrieval = port.map(|port| RetrievalBinding { presentation, port });
+    }
+    Ok(plan)
 }
 
 fn refusal(
@@ -439,8 +547,8 @@ fn refusal(
                 }) => RefusalReason::Unqualified {
                     route: route_label.to_owned(),
                 },
-                // A qualified route still needs the wrapper that issues the side
-                // request, and no wrapper is built in yet.
+                // A qualified route still needs a port that issues the side
+                // request in this vocabulary.
                 Some(HostedRetrievalSupport::Supported) | None => RefusalReason::Unbuilt,
             }
         }
@@ -893,6 +1001,113 @@ mod tests {
             "web_search is not available in this build; remedy: remove web_search from \
              the template's tools"
         );
+        Ok(())
+    }
+
+    struct FakePort(Vec<plakous::tools::web::RetrievalKind>);
+
+    impl RetrievalPort for FakePort {
+        fn kinds(&self) -> &[plakous::tools::web::RetrievalKind] {
+            &self.0
+        }
+
+        fn retrieve(
+            &self,
+            _: plakous::tools::web::RetrievalRequest,
+            _: plakous::tools::ExecutionOperationControl,
+        ) -> plakous::tools::web::RetrievalFuture {
+            Box::pin(async { Ok(plakous::tools::web::RetrievalOutcome::default()) })
+        }
+    }
+
+    fn search_and_fetch_port() -> Arc<dyn RetrievalPort> {
+        Arc::new(FakePort(vec![
+            plakous::tools::web::RetrievalKind::WebSearch,
+            plakous::tools::web::RetrievalKind::PageFetch,
+        ]))
+    }
+
+    #[test]
+    fn a_qualified_row_with_a_port_binds_the_wrapper_pack() -> TestResult {
+        let qualified = HostedRetrievalTable::new(
+            HostedRetrievalSupport::Supported,
+            HostedRetrievalSupport::Supported,
+            HostedRetrievalSupport::Unsupported {
+                reason: HostedRetrievalUnsupported::NotOffered,
+            },
+        );
+        let selection = TemplateToolSelection::parse(["web_fetch", "web_search"])?;
+        let port = search_and_fetch_port();
+        let plan = bind_tool_plan_with(
+            &selection,
+            qualified,
+            CodingPresentation::Claude,
+            "claude",
+            Some(Arc::clone(&port)),
+        )?;
+        assert_eq!(
+            plan.tools(),
+            [
+                PlannedTool::Optional(OptionalTool::WebSearch),
+                PlannedTool::Optional(OptionalTool::WebFetch)
+            ]
+        );
+        let extensions = crate::tools::ProductToolExtensions::empty()
+            .with_plan(&plan)
+            .map_err(|error| error.to_string())?;
+        assert_eq!(
+            extensions.names().map(ToolName::as_str).collect::<Vec<_>>(),
+            ["WebSearch", "WebFetch"]
+        );
+
+        // The same port on an unqualified row, or a qualified row without a
+        // port, refuses with the route text.
+        let unqualified = bind_tool_plan_with(
+            &TemplateToolSelection::parse(["x_search"])?,
+            qualified,
+            CodingPresentation::Grok,
+            "grok",
+            Some(port),
+        )
+        .err()
+        .ok_or("an unoffered tool bound")?;
+        assert_eq!(
+            unqualified.to_string(),
+            "x_search is not available on grok; remedy: put x_search on a grok or xai-api \
+             template and spawn it"
+        );
+        let portless = bind_tool_plan_with(
+            &selection,
+            qualified,
+            CodingPresentation::Claude,
+            "claude",
+            None,
+        )
+        .err()
+        .ok_or("a portless tool bound")?;
+        assert_eq!(
+            portless.to_string(),
+            "web_fetch is not available in this build; remedy: remove web_fetch from the \
+             template's tools"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_port_that_does_not_serve_the_kind_refuses() -> TestResult {
+        let qualified = HostedRetrievalTable::new(
+            HostedRetrievalSupport::Supported,
+            HostedRetrievalSupport::Supported,
+            HostedRetrievalSupport::Supported,
+        );
+        let refused = bind_tool_plan_with(
+            &TemplateToolSelection::parse(["x_search"])?,
+            qualified,
+            CodingPresentation::Grok,
+            "xai-api",
+            Some(search_and_fetch_port()),
+        );
+        assert!(refused.is_err());
         Ok(())
     }
 

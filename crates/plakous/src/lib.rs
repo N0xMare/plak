@@ -1075,6 +1075,19 @@ pub mod tools {
         PROCESS_PROJECTION_FAMILY, ProcessSessionTools, ProcessToolPack, ProcessToolProjectionKind,
     };
     pub use plakous_tool_search::SearchToolPack;
+
+    /// Hosted retrieval: the neutral port a route implements and the local
+    /// wrapper tools that call it, one isolated side request per call.
+    pub mod web {
+        pub use plakous_tool_web::{
+            MAX_DOMAINS, MAX_PROMPT_BYTES, MAX_QUERY_BYTES, MAX_URL_BYTES, WebTool, WebToolPack,
+            render_outcome,
+        };
+        pub use plakous_tools::{
+            RetrievalError, RetrievalErrorKind, RetrievalFuture, RetrievalKind, RetrievalOutcome,
+            RetrievalPort, RetrievalRequest, RetrievalSource, RetrievalUsage,
+        };
+    }
     /// Unsupported preview-minimization seam for official observation and hosting.
     #[doc(hidden)]
     pub use plakous_tools::internal::preview as preview_redaction;

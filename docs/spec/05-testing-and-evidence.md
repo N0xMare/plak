@@ -2331,6 +2331,17 @@ Agent-transcript regressions pin agent-id identity across durable and
 progress-only tree revisions. The protocol pins child-live omission from JSONL v1;
 child activity must never project as root narrative or usage.
 
+Hosted-retrieval side requests are pinned offline in the Messages kernel:
+exact request-body goldens with their cost-only classification (and the
+server-effect refusal of any other tool shape), synthetic SSE fixtures for
+search and fetch results, citations, `pause_turn` continuation and its
+three-continuation bound, `max_uses_exceeded`, empty sources and refused
+blocks, and loopback retries (a connect failure and a 429 retried, a 400 not).
+The wrapper pack pins its descriptions, argument validation and result
+rendering; binding pins that a `Supported` row with a port binds the pack and
+every shipped row refuses. The one paid probe per (route, tool) is opt-in and
+`#[ignore]`d (`live_retrieval_probe_*`), never in a gate tier.
+
 API-route contracts run offline against the production API binding, with
 fixture keys and no dispatch: the OpenAI and xAI API configured tool
 definitions (names, schemas, descriptions) equal the Codex and Grok OAuth

@@ -48,12 +48,14 @@ mod oauth_identity;
 #[cfg(feature = "native-auth")]
 mod oauth_model;
 mod request;
+mod retrieval;
 mod route;
 mod stream;
 mod subscription_usage;
 
 pub use hosted_support::{ANTHROPIC_API_HOSTED_RETRIEVAL, CLAUDE_OAUTH_HOSTED_RETRIEVAL};
 pub use oauth_identity::{ClaudeAccountUuid, ClaudeClientDeviceId, ClaudeOAuthRequestIdentity};
+pub use retrieval::AnthropicRetrieval;
 
 pub use api_models::{
     AnthropicApiModel, AnthropicApiModelStatus, AnthropicListedModel,
