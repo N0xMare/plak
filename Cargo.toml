@@ -39,11 +39,13 @@ members = [
     "crates/harness/tool-plan",
     "crates/harness/tool-process",
     "crates/harness/tool-search",
+    "crates/harness/mcp",
     "tests/support/plakous-test-support",
     "crates/core/tools",
     "crates/orchestration/workspace",
     "crates/providers/xai",
     "tests/harnesses/offline-crash",
+    "tests/fixtures/mcp-fake-server",
 ]
 resolver = "3"
 

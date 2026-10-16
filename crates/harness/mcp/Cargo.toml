@@ -1,0 +1,30 @@
+[package]
+name = "plakous-mcp"
+description = "Model Context Protocol client: a process-wide server pool, frozen tool listings, schema lowering, and the MCP tool pack"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[package.metadata.plakous]
+layer = "harness"
+class = "published-internal"
+
+[dependencies]
+plakous-model = { version = "0.1.0", path = "../../core/model" }
+plakous-tools = { version = "0.1.0", path = "../../core/tools" }
+rmcp = { version = "=3.5.1", default-features = false, features = ["client", "transport-async-rw"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tracing.workspace = true
+
+[dev-dependencies]
+rmcp = { version = "=3.5.1", default-features = false, features = ["client", "server", "transport-async-rw"] }
+tempfile.workspace = true
+tokio-util.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util", "time"] }
+
+[lints]
+workspace = true

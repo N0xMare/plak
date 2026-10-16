@@ -104,8 +104,10 @@ RESPONSIBILITY_RULES: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
     ("prompts", (("plakous-prompts", "src/"),)),
     # Composition presentations: the outer cell tools and their nested catalogs.
     ("compose", (("plakous-compose", "src/"),)),
-    # The four coding packs: executors, menus, and their own model-visible text.
+    # The four coding packs and the MCP client pack: executors, menus, and
+    # their own model-visible text.
     ("tool packs", (
+        ("plakous-mcp", "src/"),
         ("plakous-tool-files", "src/"),
         ("plakous-tool-plan", "src/"),
         ("plakous-tool-process", "src/"),

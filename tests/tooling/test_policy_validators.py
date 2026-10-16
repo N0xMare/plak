@@ -802,7 +802,7 @@ class RepositoryPolicyTests(unittest.TestCase):
 
     def test_every_package_carries_layer_metadata_and_the_tree_is_clean(self) -> None:
         workspace = self.workspace
-        self.assertEqual(len(workspace.packages), 36)
+        self.assertEqual(len(workspace.packages), 38)
         for validator in (
             workspace_policy.validate_package_metadata,
             workspace_policy.validate_layout,
@@ -882,6 +882,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                 "plakous-exchange",
                 "plakous-js-eval",
                 "plakous-js-runtime",
+                "plakous-mcp",
                 "plakous-py-eval",
                 "plakous-py-worker",
                 "plakous-http",
@@ -894,13 +895,14 @@ class RepositoryPolicyTests(unittest.TestCase):
                 "plakous-xai",
             },
             "repository-only": {
+                "plakous-mcp-fake-server",
                 "plakous-offline-crash-harness",
                 "plakous-test-support",
             },
         }
         actual = workspace_policy.package_classifications(self.workspace)
         self.assertEqual(actual, expected)
-        self.assertEqual(sum(map(len, actual.values())), 36)
+        self.assertEqual(sum(map(len, actual.values())), 38)
 
     def test_layers_and_neutral_packages_are_as_designed(self) -> None:
         by_layer = {
@@ -924,6 +926,7 @@ class RepositoryPolicyTests(unittest.TestCase):
             by_layer["harness"],
             {
                 "plakous-compose",
+                "plakous-mcp",
                 "plakous-prompts",
                 "plakous-tool-files",
                 "plakous-tool-plan",

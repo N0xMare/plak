@@ -53,8 +53,8 @@ Publication and Rust nameability confer accessibility, not support. A published
 package carries no direct-use compatibility, qualification, or support promise
 unless it is in the supported class.
 
-The workspace contains 36 packages: five supported, 29 published internal, and
-two repository-only. Nothing is published to a registry today; every package
+The workspace contains 38 packages: five supported, 30 published internal, and
+three repository-only. Nothing is published to a registry today; every package
 sets `publish = false`.
 
 - **Supported:** `plakous`, `plakous-agent`, `plakous-model`, `plakous-tools`,
@@ -62,8 +62,8 @@ sets `publish = false`.
   test, not by whatever happens to be `pub`.
 - **Published internal:** the common, engine, protocol, provider, store,
   harness, and host crates listed in the crate map below.
-- **Repository-only:** `plakous-test-support` and
-  `plakous-offline-crash-harness`.
+- **Repository-only:** `plakous-test-support`,
+  `plakous-offline-crash-harness`, and `plakous-mcp-fake-server`.
 
 Complete-workflow embedders depend on `plakous` alone. Narrow component
 embedders may use `plakous-agent`, `plakous-model` (Custom model integration),
@@ -120,6 +120,7 @@ classes and directory policy.
 | `plakous-tool-files` | `crates/harness/tool-files` | `harness` | Bounded reads, exact-content patching, image inspection, and the Codex patch envelope, behind `ToolPack` |
 | `plakous-tool-search` | `crates/harness/tool-search` | `harness` | Bounded deterministic repository search and directory listing, behind `ToolPack` |
 | `plakous-tool-process` | `crates/harness/tool-process` | `harness` | Joined process sessions and the per-vocabulary shell tool, behind `ToolPack` |
+| `plakous-mcp` | `crates/harness/mcp` | `harness` | The MCP client: the process-wide stdio server pool over the service-process seam, frozen tool listings, input-schema lowering, `mcp__<server>__<tool>` naming, and the serial-mutating MCP tool pack |
 | `plakous-tool-plan` | `crates/harness/tool-plan` | `harness` | The `PlanState` port, `update_plan`, and the id-merge `todo_write` lowering, behind `ToolPack` |
 | `plakous` | `crates/plakous` | `facade` | Public facade: curated re-exports, session workflows, feature closures. The only dependency a complete-workflow embedder needs, and the only L0 complete-workflow surface |
 | `plakous-host-protocol` | `crates/hosting/host-protocol` | `host` | Provider-neutral host wire types shared by the hosted session and the product: session intents and observations, their bounded channels, the typed views, the topology wire vocabulary, the presentation limits, and the JSONL projection |

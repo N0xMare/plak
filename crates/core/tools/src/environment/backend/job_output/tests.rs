@@ -218,6 +218,55 @@ async fn promoted_job_spools_window_and_later_output_to_private_exclusive_file()
 }
 
 #[tokio::test]
+async fn spilled_output_is_an_issued_consumed_file_that_reserves_its_job_number() -> TestResult {
+    let workspace = tempfile::tempdir()?;
+    let state = tempfile::tempdir()?;
+    let root = JobOutputRoot::open(&state.path().join("jobs"))?;
+    let environment = bound(workspace.path(), &root, SESSION)?;
+    let sessions = environment.joined_process_sessions()?;
+    let before = sessions.next_job_number();
+    let spilled = tokio::task::spawn_blocking({
+        let sessions = sessions.clone();
+        move || sessions.spill_output(b"complete text")
+    })
+    .await?
+    .ok_or("no spill file")?;
+    assert_eq!(sessions.next_job_number(), before + 1);
+    assert_eq!(
+        Path::new(&spilled.path)
+            .extension()
+            .and_then(|ext| ext.to_str()),
+        Some("log")
+    );
+    assert!(spilled.path.contains(&format!("{BRANCH}-p{before}-")));
+    let slice = read(&environment, &spilled.path)
+        .await
+        .ok_or("issued path refused")??;
+    assert_eq!(slice.bytes, b"complete text");
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while mode(&spilled.path)? != CONSUMED_MODE {
+        assert!(std::time::Instant::now() < deadline, "spill not consumed");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    // A job started afterwards takes the next number, never the spill's path.
+    let (number, path) = promoted_job(&environment)?;
+    assert_eq!(number, before + 1);
+    assert_ne!(path, spilled.path);
+    Ok(())
+}
+
+#[test]
+fn spilling_without_a_bound_jobs_root_issues_nothing() -> TestResult {
+    let workspace = tempfile::tempdir()?;
+    let environment = host_environment(workspace.path())?;
+    assert_eq!(
+        environment.joined_process_sessions()?.spill_output(b"x"),
+        None
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn only_the_exact_issued_path_of_this_service_is_admitted() -> TestResult {
     let workspace = tempfile::tempdir()?;
     let state = tempfile::tempdir()?;

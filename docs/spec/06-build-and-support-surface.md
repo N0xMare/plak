@@ -63,7 +63,7 @@ provider qualification, recovery certification, or source compatibility.
 | Published internal | A necessary dependency and deliberate advanced-use implementation surface, intended to release in the exact cohort, with no direct-use compatibility, qualification, or support promise |
 | Repository-only | Test, fixture, and crash-harness packages kept outside the production dependency closure entirely |
 
-The workspace holds 36 packages: five supported, 29 published internal, two
+The workspace holds 38 packages: five supported, 30 published internal, three
 repository-only.
 
 The root `[workspace].exclude` includes `.plak`, the local operator-state and
@@ -75,21 +75,22 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 
 `plakous`, `plakous-agent`, `plakous-model`, `plakous-tools`, `plak`.
 
-**Published internal (29)**
+**Published internal (30)**
 
 `plakous-host-protocol`, `plakous-workspace`, `plakous-recursive-subagents`,
 `plakous-recursive-subagents-store`, `plakous-hosted`,
 `plakous-anthropic`, `plakous-attempt`, `plakous-auth`,
 `plakous-chat-completions`, `plakous-code-mode`, `plakous-compose`, `plakous-exchange`,
-`plakous-http`, `plakous-js-eval`, `plakous-js-runtime`, `plakous-py-worker`, `plakous-messages`, `plakous-openai`,
+`plakous-http`, `plakous-js-eval`, `plakous-mcp`, `plakous-js-runtime`, `plakous-py-worker`, `plakous-messages`, `plakous-openai`,
 `plakous-openrouter`, `plakous-prompts`, `plakous-py-eval`,
 `plakous-responses`, `plakous-responses-dialect`, `plakous-store`,
 `plakous-tool-files`, `plakous-tool-plan`, `plakous-tool-process`,
 `plakous-tool-search`, `plakous-xai`.
 
-**Repository-only (2)**
+**Repository-only (3)**
 
-`plakous-test-support`, `plakous-offline-crash-harness`.
+`plakous-test-support`, `plakous-offline-crash-harness`,
+`plakous-mcp-fake-server`.
 
 Every one of these declares its `layer` and `class` in `[package.metadata.plakous]`,
 and `tools/checks/check_workspace.py` (via `tools/checks/plakous_policy.py`) checks each
@@ -870,6 +871,20 @@ installed external JJ 0.39 through 0.45 executables is covered by real
 repository tests;
 this is not a promise of compatibility with arbitrary custom backends or
 future repository formats.
+
+The MCP client (`plakous-mcp`) uses crates.io `rmcp =3.5.1` (Apache-2.0,
+upstream MSRV 1.88, edition 2024), the reference Rust SDK of the protocol, so
+protocol-revision negotiation, the `initialize` and no-initialize lifecycles,
+cancellation and progress correlation are not re-implemented. Default features
+(`base64`, `macros`, `server`) are off; the product graph enables only
+`client` and `transport-async-rw`, which add no crate beyond `rmcp` itself to
+the lock graph (`chrono`, `futures`, `indexmap`, `pin-project-lite`, `thiserror`,
+`tokio-stream`, `tokio-util` and `tracing` were already present). Not taken:
+`transport-child-process` (`process-wrap`; servers start through the execution
+backend's service-process seam), `which-command`, the `reqwest` HTTP clients,
+`auth`/`oauth2`, `macros` and `schemars`. The repository-only scripted server
+`plakous-mcp-fake-server` enables `server` and `transport-io`, which pull
+`schemars`, `pastey` and `dyn-clone` into the test graph only.
 
 ### 7.1 Rules
 

@@ -1109,6 +1109,39 @@ impl JoinedProcessSessions {
             .and_then(|outputs| outputs.file(number))
     }
 
+    /// Writes one finished tool result's complete text to a fresh issued
+    /// output file and returns it already consumed: readable through the read
+    /// exception like a promoted job's file, then retained and swept like a
+    /// consumed one. The file takes the next job number, so no later job
+    /// reuses its path. `None` when no jobs root is bound, its budget has no
+    /// room, or the file could not be created. It walks the jobs root, so
+    /// async callers run it on the blocking pool.
+    #[must_use]
+    pub fn spill_output(&self, bytes: &[u8]) -> Option<super::JobOutputFile> {
+        if !self.prepare_job_output() {
+            return None;
+        }
+        let number = {
+            let mut state = lock(&self.inner.state);
+            let number = u32::try_from(state.next).ok()?;
+            state.next = state
+                .next
+                .checked_add(1)
+                .filter(|next| u32::try_from(*next).is_ok())?;
+            number
+        };
+        let file = {
+            let mut outputs = lock(&self.inner.outputs);
+            let outputs = outputs.as_mut()?;
+            let mut writer = outputs.create(number).ok()?;
+            writer.append(bytes);
+            drop(writer);
+            outputs.file(number)?
+        };
+        self.release_job_outputs(vec![number]);
+        Some(file)
+    }
+
     /// Decides the read exception for `path`; `None` leaves it to containment.
     pub(super) fn admit_job_output(
         &self,
