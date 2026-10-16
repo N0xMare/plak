@@ -41,13 +41,20 @@ def capture_root_mismatch(binary: Path, root: Path = ROOT) -> str | None:
     `bin/plak` manifest directory is baked in), so a driver must run from that
     checkout. Otherwise every launch fails before anything is sent.
     """
-    manifest = str(root.resolve() / "bin" / "plak").encode()
+    manifest = root.resolve() / "bin" / "plak"
     try:
         data = binary.read_bytes()
     except OSError as error:
         return f"cannot read {binary}: {error}"
-    if manifest in data:
+    if str(manifest).encode() in data:
         return None
+    # A build through a symlinked path bakes in the unresolved spelling.
+    for candidate in set(re.findall(rb"/[\x21-\x7e]{1,512}?/bin/plak(?=[^\x21-\x7e]|$)", data)):
+        try:
+            if Path(os.fsdecode(candidate)).resolve() == manifest:
+                return None
+        except (OSError, ValueError):
+            continue
     return (f"{binary} was not built from this checkout ({root}); its capture root is "
             "another checkout's tests/provider-authority. Run the driver from the "
             "checkout that built the binary.")
@@ -1017,7 +1024,9 @@ class Env:
     @property
     def capture_root(self) -> Path:
         if self._capture_root is None:
-            root = ROOT / "tests/provider-authority"
+            # Resolve ancestors (a lane checkout may sit behind a symlink); the
+            # private-directory check below still refuses a symlinked leaf.
+            root = ROOT.resolve() / "tests/provider-authority"
             root.mkdir(mode=0o700, exist_ok=True)
             self._private_directory(root)
             self._capture_root = Path(tempfile.mkdtemp(prefix=f"{self.artifacts.name}-", dir=root))
@@ -1025,8 +1034,9 @@ class Env:
 
     @staticmethod
     def _private_directory(path: Path) -> None:
+        path = path.parent.resolve() / path.name
         metadata = path.lstat()
-        if (path.resolve() != path or not stat.S_ISDIR(metadata.st_mode)
+        if (stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode)
                 or metadata.st_uid != os.getuid()
                 or stat.S_IMODE(metadata.st_mode) != 0o700):
             raise ScenarioFailure(HARNESS, "capture directory must be owned, private and symlink-free")

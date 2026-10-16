@@ -151,6 +151,25 @@ class CaptureRootTests(unittest.TestCase):
             self.assertIsNone(live.capture_root_mismatch(ours, root))
             self.assertIn("not built from this checkout",
                           live.capture_root_mismatch(theirs, root))
+            alias = Path(tmp) / "alias"
+            alias.symlink_to(root)
+            via_link = Path(tmp) / "via-link"
+            via_link.write_bytes(b"\0" + str(alias / "bin" / "plak").encode() + b"\0")
+            self.assertIsNone(live.capture_root_mismatch(via_link, root))
+
+    def test_symlinked_ancestors_are_resolved_but_a_symlinked_leaf_is_refused(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            real = Path(tmp) / "real"
+            (real / "private").mkdir(parents=True, mode=0o700)
+            os.chmod(real / "private", 0o700)
+            alias = Path(tmp) / "alias"
+            alias.symlink_to(real)
+            live.Env._private_directory(alias / "private")
+            (real / "leaf").symlink_to(real / "private")
+            with self.assertRaises(live.ScenarioFailure):
+                live.Env._private_directory(real / "leaf")
 
 
 class MarkerTests(unittest.TestCase):
