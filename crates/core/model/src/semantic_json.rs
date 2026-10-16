@@ -697,6 +697,16 @@ fn validate_number_lexeme(token: &str) -> Result<(), SemanticJsonError> {
     Ok(())
 }
 
+/// The [`SemanticJsonV1`] canonical bytes of a value whose owning type
+/// bounds its own size: canonical conversation items carry media bytes far
+/// past the tool-schema node and byte bounds.
+pub(crate) fn canonicalize_normalized_prevalidated(
+    value: Value,
+    max_bytes: usize,
+) -> Result<Vec<u8>, SemanticJsonError> {
+    canonicalize_prevalidated(&normalize_numbers(value)?, max_bytes)
+}
+
 fn normalize_numbers(value: Value) -> Result<Value, SemanticJsonError> {
     match value {
         Value::Number(number) => portable_json_number(&number).map(Value::Number),

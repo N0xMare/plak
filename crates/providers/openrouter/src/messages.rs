@@ -113,7 +113,7 @@ impl OpenRouterMessagesTarget {
             None,
             Some(ModelFamilyId::new(MODEL_FAMILY)?),
             ModelAdapterProfileId::new(PROFILE)?,
-            messages_capabilities()?,
+            messages_capabilities(&evidence)?,
         )
         .with_context_contract(context_contract);
         let target_identity = Digest::sha256(
@@ -1052,9 +1052,11 @@ fn validate_evidence(
     Ok(())
 }
 
-fn messages_capabilities() -> Result<CapabilitySet, plakous_model::IdentityError> {
+fn messages_capabilities(
+    evidence: &OpenRouterChatModelEvidence,
+) -> Result<CapabilitySet, plakous_model::IdentityError> {
     let provenance = FactProvenance::new(FactSource::BuiltIn, Timestamp::new(0, 0)?, None);
-    let features = [Capability::Streaming, Capability::Tools]
+    let mut features: BTreeMap<_, _> = [Capability::Streaming, Capability::Tools]
         .into_iter()
         .map(|capability| {
             (
@@ -1070,6 +1072,9 @@ fn messages_capabilities() -> Result<CapabilitySet, plakous_model::IdentityError
             )
         })
         .collect();
+    if let Some(image) = crate::chat::image_input_fact(evidence) {
+        features.insert(Capability::ImageInput, image);
+    }
     Ok(CapabilitySet::new(features, BTreeMap::new()))
 }
 
@@ -1360,6 +1365,7 @@ mod tests {
             BTreeSet::from(["tools".to_owned(), "tool_choice".to_owned()]),
             None,
             8_192,
+            false,
             Timestamp::new(
                 now.seconds().saturating_sub(observed_offset),
                 now.nanoseconds(),

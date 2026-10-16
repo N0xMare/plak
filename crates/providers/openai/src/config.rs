@@ -204,6 +204,9 @@ impl OpenAiRouteConformance {
                 | ResponsesFeature::ParallelFunctionCalls
                 | ResponsesFeature::FullOutputReplay
                 | ResponsesFeature::IncompleteResponse
+                // User `input_image`; the catalog row's `ImageInput` fact
+                // gates each model.
+                | ResponsesFeature::ImageInput
                 // Codex OAuth remote compact is the exact
                 // `plakous.compaction` native-option namespace, not a blanket
                 // native-options bag. Platform API-key still excludes this.

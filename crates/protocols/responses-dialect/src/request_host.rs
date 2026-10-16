@@ -419,9 +419,12 @@ impl ResponsesRequestPolicy {
     }
 
     /// Codex Responses Lite keeps client tools and instructions in the replayed input prefix.
+    ///
+    /// Its wire carries user `input_image` as the Standard wire does; the
+    /// catalog's `ImageInput` fact gates each model at admission.
     #[must_use]
     pub const fn openai_codex_lite(encrypted_reasoning_include: &'static str) -> Self {
-        let mut policy = Self::openai_codex(false, false, encrypted_reasoning_include);
+        let mut policy = Self::openai_codex(true, false, encrypted_reasoning_include);
         policy.instruction_placement = InstructionPlacementPolicy::CodexResponsesLite;
         policy
     }

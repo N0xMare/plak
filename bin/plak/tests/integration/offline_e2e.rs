@@ -8546,7 +8546,9 @@ fn a_cli_image_prompt_reaches_a_model_that_accepts_images() {
         "steps": [{"output": "image_report"}]
     }));
     let first = png_file(&fixture, "first.png", 100);
-    let second = png_file(&fixture, "second.png", 4_000);
+    // A photo-sized image: canonical identities must not apply the tool
+    // schema bounds to media bytes.
+    let second = png_file(&fixture, "second.png", 300_000);
     let run = image_run(&fixture, &[&first, &second]);
     assert!(
         run.status.success(),
@@ -8556,7 +8558,7 @@ fn a_cli_image_prompt_reaches_a_model_that_accepts_images() {
     );
     assert!(
         run.stdout
-            .contains("images seen: [image/png 124 bytes, image/png 4024 bytes]"),
+            .contains("images seen: [image/png 124 bytes, image/png 300024 bytes]"),
         "the model did not receive both images in order: {}",
         run.stdout
     );

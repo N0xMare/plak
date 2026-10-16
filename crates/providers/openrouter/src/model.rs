@@ -413,6 +413,7 @@ mod tests {
                 BTreeSet::from(["tools".to_owned()]),
                 None,
                 4096,
+                false,
                 Timestamp::new(
                     now.seconds().saturating_sub(observed_offset),
                     now.nanoseconds(),

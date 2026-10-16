@@ -157,6 +157,7 @@ impl OpenRouterChatRoute {
             model_facts.supported_parameters,
             model_facts.reasoning,
             model_facts.context_length,
+            model_facts.image_input,
             observed_at,
             expires_at,
         )
@@ -392,6 +393,7 @@ struct ModelFacts {
     supported_parameters: BTreeSet<String>,
     reasoning: Option<OpenRouterReasoningFacts>,
     context_length: u64,
+    image_input: bool,
 }
 
 pub(crate) fn catalog_snapshot_identity(
@@ -400,15 +402,20 @@ pub(crate) fn catalog_snapshot_identity(
     context_length: u64,
     parameters: &BTreeSet<String>,
     reasoning: Option<&OpenRouterReasoningFacts>,
+    image_input: bool,
     candidates: &[OpenRouterChatEndpointCandidate],
 ) -> Result<Digest, OpenRouterChatDiscoveryError> {
     let mut candidates: Vec<_> = candidates.iter().collect();
     candidates.sort_by_key(|candidate| &candidate.endpoint);
-    let snapshot =
-        serde_json::to_vec(&(literal, context_length, parameters, reasoning, &candidates))
-            .map_err(|_| {
-                OpenRouterChatDiscoveryError::InvalidCatalogValue("catalog.identity".into())
-            })?;
+    let snapshot = serde_json::to_vec(&(
+        literal,
+        context_length,
+        parameters,
+        reasoning,
+        image_input,
+        &candidates,
+    ))
+    .map_err(|_| OpenRouterChatDiscoveryError::InvalidCatalogValue("catalog.identity".into()))?;
     Ok(Digest::sha256(
         DigestDomain::ProviderSemanticEvidence,
         1,
@@ -433,6 +440,7 @@ fn snapshot_from_facts(
         facts.context_length,
         &facts.supported_parameters,
         facts.reasoning.as_ref(),
+        facts.image_input,
         candidates,
     )
 }
@@ -807,10 +815,12 @@ fn validate_models_document(
             .ok_or_else(|| catalog_value("models.data[].context_length"))?;
         let supported_parameters = bounded_parameters(&row["supported_parameters"])?;
         let reasoning = parse_reasoning_facts(row.get("reasoning"))?;
+        let image_input = parse_image_input(row.get("architecture"))?;
         matched = Some(ModelFacts {
             supported_parameters,
             reasoning,
             context_length,
+            image_input,
         });
     }
     matched.ok_or(OpenRouterChatDiscoveryError::AmbiguousModel)
@@ -936,6 +946,19 @@ fn parse_tool_choice_modes(
                 )?,
             })
         }
+    }
+}
+
+/// Whether the model row's `architecture.input_modalities` lists `image`. A
+/// row without the field accepts no image input.
+fn parse_image_input(value: Option<&Value>) -> Result<bool, OpenRouterChatDiscoveryError> {
+    let Some(architecture) = value.filter(|value| !value.is_null()) else {
+        return Ok(false);
+    };
+    let architecture = catalog_object(architecture, "models.data[].architecture", &[])?;
+    match architecture.get("input_modalities") {
+        None | Some(Value::Null) => Ok(false),
+        Some(modalities) => Ok(bounded_parameters(modalities)?.contains("image")),
     }
 }
 
@@ -1470,6 +1493,47 @@ mod tests {
     }
 
     #[test]
+    fn models_read_image_input_from_catalog_architecture() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let model = |architecture: Option<Value>| {
+            let mut row = serde_json::json!({
+                "id": "qwen/qwen3.7-flash",
+                "canonical_slug": "qwen/qwen3.7-flash-20260727",
+                "context_length": 1_000_000,
+                "supported_parameters": ["tools", "max_tokens"]
+            });
+            if let Some(architecture) = architecture {
+                row["architecture"] = architecture;
+            }
+            serde_json::json!({"data": [row]})
+        };
+        // Shape of the live catalog row.
+        let vision = model(Some(serde_json::json!({
+            "modality": "text+image+video->text",
+            "input_modalities": ["text", "image", "video"],
+            "output_modalities": ["text"],
+            "tokenizer": "Qwen",
+            "instruct_type": null
+        })));
+        assert!(validate_models_document(&vision, "qwen/qwen3.7-flash")?.image_input);
+        let text_only = model(Some(serde_json::json!({
+            "modality": "text->text",
+            "input_modalities": ["text"],
+            "output_modalities": ["text"]
+        })));
+        assert!(!validate_models_document(&text_only, "qwen/qwen3.7-flash")?.image_input);
+        assert!(!validate_models_document(&model(None), "qwen/qwen3.7-flash")?.image_input);
+        assert!(
+            validate_models_document(
+                &model(Some(serde_json::json!({"input_modalities": "image"}))),
+                "qwen/qwen3.7-flash"
+            )
+            .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
     fn models_parse_reasoning_capability_object() -> Result<(), Box<dyn std::error::Error>> {
         let model = |reasoning: Option<Value>| {
             let mut row = serde_json::json!({
@@ -1746,6 +1810,7 @@ mod tests {
             supported_parameters: BTreeSet::from(["tools".to_owned()]),
             reasoning: None,
             context_length: 8192,
+            image_input: false,
         };
         let admitted_without_conflict = validate_endpoints_document(
             &document(vec![other.clone(), kept.clone(), kept_repeat.clone()]),
@@ -2014,6 +2079,7 @@ mod tests {
             BTreeSet::from(["tools", "max_tokens", "tool_choice"].map(str::to_owned)),
             None,
             4096,
+            false,
             now,
             Timestamp::new(now.seconds() + 3600, now.nanoseconds())?,
         )?;
@@ -2068,6 +2134,7 @@ mod tests {
             parameters.clone(),
             None,
             4096,
+            false,
             first_observed,
             first_expiry,
         )?;
@@ -2078,6 +2145,7 @@ mod tests {
             parameters,
             None,
             4096,
+            false,
             second_observed,
             second_expiry,
         )?;
@@ -2141,6 +2209,7 @@ mod tests {
             supported_parameters: BTreeSet::from(["tools".to_owned(), "max_tokens".to_owned()]),
             reasoning: None,
             context_length: 4096,
+            image_input: false,
         };
         let now = SystemClock.now();
         let mut identities = Vec::new();
@@ -2161,6 +2230,7 @@ mod tests {
                 facts.supported_parameters.clone(),
                 None,
                 4096,
+                false,
                 now,
                 Timestamp::new(now.seconds() + 3600, now.nanoseconds())?,
             )?;
@@ -2199,6 +2269,7 @@ mod tests {
             BTreeSet::new(),
             None,
             4096,
+            false,
             Timestamp::new(now.seconds().saturating_sub(1), now.nanoseconds())?,
             Timestamp::new(now.seconds() + 3600, now.nanoseconds())?,
         )?;
@@ -2240,6 +2311,7 @@ mod tests {
             BTreeSet::new(),
             None,
             4096,
+            false,
             Timestamp::new(now.seconds().saturating_sub(20), now.nanoseconds())?,
             Timestamp::new(now.seconds().saturating_sub(10), now.nanoseconds())?,
         )?;
@@ -2256,6 +2328,7 @@ mod tests {
             BTreeSet::new(),
             None,
             4096,
+            false,
             Timestamp::new(now.seconds().saturating_sub(1), now.nanoseconds())?,
             expiry,
         )?;

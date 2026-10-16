@@ -11,11 +11,8 @@ use serde::ser::SerializeSeq;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
-use crate::semantic_json::canonicalize_prevalidated;
-use crate::{
-    Actor, ContentBlock, ConversationItem, Digest, DigestDomain, DigestError, EntryId,
-    SemanticJsonV1,
-};
+use crate::semantic_json::{canonicalize_normalized_prevalidated, canonicalize_prevalidated};
+use crate::{Actor, ContentBlock, ConversationItem, Digest, DigestDomain, DigestError, EntryId};
 
 const MAX_SEGMENT_ITEMS: usize = 4_096;
 const MAX_SEGMENT_BYTES: usize = 64 * 1024 * 1024;
@@ -1455,10 +1452,8 @@ fn fold_canonical_item_prefix(prefix: Digest, item: Digest) -> Result<Digest, Di
 fn projection_item_identity(item: &ConversationItem) -> Result<Digest, HistoryError> {
     let value = serde_json::to_value(item)
         .map_err(|error| HistoryError::Serialization(error.to_string()))?;
-    let bytes = SemanticJsonV1::from_value(value)
-        .map_err(|error| HistoryError::Serialization(error.to_string()))?
-        .canonical_bytes()
-        .to_vec();
+    let bytes = canonicalize_normalized_prevalidated(value, MAX_SEGMENT_BYTES)
+        .map_err(|error| HistoryError::Serialization(error.to_string()))?;
     Ok(Digest::sha256(
         DigestDomain::HistoryProjection,
         4,
@@ -3165,6 +3160,33 @@ mod tests {
             assert_eq!(group.identity().domain(), DigestDomain::ContextPlan);
             assert_eq!(group.identity().version(), 1);
         }
+    }
+
+    #[test]
+    fn a_photo_sized_user_image_appends_to_canonical_history() {
+        let mut bytes = vec![0x5a; 280_000];
+        bytes[..3].copy_from_slice(&[0xff, 0xd8, 0xff]);
+        let image = crate::ImageBlock::new(
+            "image/jpeg",
+            crate::MediaSource::bytes(bytes).expect("bytes"),
+        )
+        .expect("image");
+        let item = ConversationItem::new(
+            EntryId::try_from(Uuid::from_u128(1)).expect("entry ID"),
+            Actor::User,
+            vec![
+                ContentBlock::Text(TextBlock::new("what animal?", None).expect("text")),
+                ContentBlock::Image(image),
+            ],
+            Provenance::UserInput,
+        )
+        .expect("item");
+        let segment = HistorySegment::new(HistorySegmentKind::RecentIntent, vec![item])
+            .expect("image segment");
+        CanonicalHistory::new(Vec::new())
+            .expect("history")
+            .append(segment)
+            .expect("append");
     }
 
     #[test]

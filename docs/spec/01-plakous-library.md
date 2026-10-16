@@ -2474,14 +2474,18 @@ pattern match alone.
 It is set only where provider evidence says the model accepts images: every
 Anthropic Platform and Claude subscription row (Anthropic vision support
 covers all current Claude models), every reviewed OpenAI Platform row (GPT-5
-and later accept text and image input), and a Codex catalog row whose
-`input_modalities` lists `image` and that does not use Responses Lite. xAI
-Platform, SuperGrok and OpenRouter rows carry no such fact until per-model
-evidence is reviewed, so image prompts there are refused at admission.
-Lowering: Responses sends inline bytes as a `data:` URL `input_image` for user
-and tool-result images (the OpenAI Platform, Codex and xAI Platform request
-policies admit user `input_image`; Codex Lite, SuperGrok and OpenRouter
-Responses do not). Messages sends `{type: "image", source: {type: "base64",
+and later accept text and image input), a Codex catalog row whose
+`input_modalities` lists `image` (Standard and Responses Lite rows alike; the
+official client sends the same user `input_image` on both wires), and an
+OpenRouter Chat or Messages target whose authenticated `/api/v1/models` row
+lists `image` in `architecture.input_modalities` (a row without the field has
+no image input; the flag is part of the catalog snapshot identity). xAI
+Platform and SuperGrok rows and OpenRouter Responses targets carry no such fact
+until per-model evidence is reviewed, so image prompts there are refused at
+admission. Lowering: Responses sends inline bytes as a `data:` URL
+`input_image` for user and tool-result images (the OpenAI Platform, Codex,
+Codex Lite and xAI Platform request policies admit user `input_image`;
+SuperGrok and OpenRouter Responses do not). Messages sends `{type: "image", source: {type: "base64",
 media_type, data}}` user blocks and the same blocks inside `tool_result`
 content for direct-lineage tool images. Chat sends user `image_url` parts with
 `data:` URLs; Chat tool messages stay text, and a round's tool-result images

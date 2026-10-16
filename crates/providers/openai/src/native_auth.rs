@@ -2997,12 +2997,11 @@ impl CodexCatalogSource {
                     ),
                 );
             }
-            // The live Codex catalog row's `input_modalities` is the evidence;
-            // Responses Lite rows keep a text-only wire.
-            if !model.use_responses_lite
-                && model
-                    .input_modalities
-                    .contains(&CatalogInputModality::Image)
+            // The live Codex catalog row's `input_modalities` is the evidence,
+            // on Standard and Responses Lite rows alike.
+            if model
+                .input_modalities
+                .contains(&CatalogInputModality::Image)
             {
                 features.insert(
                     Capability::ImageInput,

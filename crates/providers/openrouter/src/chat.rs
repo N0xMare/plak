@@ -263,6 +263,7 @@ pub struct OpenRouterChatModelEvidence {
     model_supported_parameters: BTreeSet<String>,
     reasoning: Option<OpenRouterReasoningFacts>,
     context_length: u64,
+    image_input: bool,
     observed_at: Timestamp,
     expires_at: Timestamp,
 }
@@ -275,6 +276,7 @@ impl OpenRouterChatModelEvidence {
         model_supported_parameters: BTreeSet<String>,
         reasoning: Option<OpenRouterReasoningFacts>,
         context_length: u64,
+        image_input: bool,
         observed_at: Timestamp,
         expires_at: Timestamp,
     ) -> Result<Self, OpenRouterChatBuildError> {
@@ -291,6 +293,7 @@ impl OpenRouterChatModelEvidence {
             context_length,
             &model_supported_parameters,
             reasoning.as_ref(),
+            image_input,
             &endpoints,
         )
         .map_err(|_| OpenRouterChatBuildError::Identity)?;
@@ -304,6 +307,7 @@ impl OpenRouterChatModelEvidence {
             model_supported_parameters,
             reasoning,
             context_length,
+            image_input,
             observed_at,
             expires_at,
         })
@@ -339,6 +343,12 @@ impl OpenRouterChatModelEvidence {
         &self.model_supported_parameters
     }
 
+    /// Whether the catalog row's `architecture.input_modalities` lists `image`.
+    #[must_use]
+    pub const fn image_input(&self) -> bool {
+        self.image_input
+    }
+
     /// Returns attested model-level reasoning facts when the gateway reports them.
     #[must_use]
     pub fn reasoning(&self) -> Option<&OpenRouterReasoningFacts> {
@@ -359,6 +369,7 @@ impl OpenRouterChatModelEvidence {
                 self.context_length,
                 &self.model_supported_parameters,
                 self.reasoning.as_ref(),
+                self.image_input,
                 &self.endpoints,
             )
             .is_ok_and(|snapshot| snapshot == self.catalog_snapshot_identity)
@@ -450,7 +461,7 @@ impl OpenRouterChatTarget {
             profile,
             // The reviewed dialect supplies protocol semantics. Dynamic
             // discovery remains only an exact endpoint prerequisite.
-            openrouter_chat_dialect_capabilities()?,
+            openrouter_chat_dialect_capabilities(&evidence)?,
         )
         .with_context_contract(context_contract);
         let route_binding = route.identity().fingerprint();
@@ -550,12 +561,18 @@ pub(crate) fn reviewed_until(
     Ok(evidence_expires_at.min(review_expires_at))
 }
 
-fn openrouter_chat_dialect_capabilities() -> Result<CapabilitySet, OpenRouterChatBuildError> {
+fn openrouter_chat_dialect_capabilities(
+    evidence: &OpenRouterChatModelEvidence,
+) -> Result<CapabilitySet, OpenRouterChatBuildError> {
     let provenance = FactProvenance::new(
         FactSource::BuiltIn,
         Timestamp::new(OPENROUTER_CHAT_REVIEWED_AT, 0)?,
         Some(Timestamp::new(OPENROUTER_CHAT_REVIEW_EXPIRES_AT, 0)?),
     );
+    let mut features = BTreeMap::new();
+    if let Some(image) = image_input_fact(evidence) {
+        features.insert(Capability::ImageInput, image);
+    }
     let constraints = CapabilityConstraints::new(
         None,
         Some(
@@ -563,23 +580,40 @@ fn openrouter_chat_dialect_capabilities() -> Result<CapabilitySet, OpenRouterCha
                 .to_owned(),
         ),
     );
-    Ok(CapabilitySet::new(
-        BTreeMap::from([
-            (
-                Capability::Streaming,
-                FeatureSupport::new(Support::Native, constraints.clone(), provenance),
+    features.extend([
+        (
+            Capability::Streaming,
+            FeatureSupport::new(Support::Native, constraints.clone(), provenance),
+        ),
+        (
+            Capability::Tools,
+            FeatureSupport::new(Support::Native, constraints.clone(), provenance),
+        ),
+        (
+            Capability::Reasoning,
+            FeatureSupport::new(Support::Native, constraints, provenance),
+        ),
+    ]);
+    Ok(CapabilitySet::new(features, BTreeMap::new()))
+}
+
+/// The `ImageInput` fact a discovered model row attests, shared by every
+/// OpenRouter dialect that lowers inline user images.
+pub(crate) fn image_input_fact(evidence: &OpenRouterChatModelEvidence) -> Option<FeatureSupport> {
+    evidence.image_input.then(|| {
+        FeatureSupport::new(
+            Support::Native,
+            CapabilityConstraints::new(
+                None,
+                Some("catalog architecture.input_modalities lists image".to_owned()),
             ),
-            (
-                Capability::Tools,
-                FeatureSupport::new(Support::Native, constraints.clone(), provenance),
+            FactProvenance::new(
+                FactSource::Discovery,
+                evidence.observed_at,
+                Some(evidence.expires_at),
             ),
-            (
-                Capability::Reasoning,
-                FeatureSupport::new(Support::Native, constraints, provenance),
-            ),
-        ]),
-        BTreeMap::new(),
-    ))
+        )
+    })
 }
 
 impl fmt::Debug for OpenRouterChatTarget {
@@ -1903,6 +1937,7 @@ mod tests {
                 mandatory: false,
             }),
             131_072,
+            false,
             now,
             Timestamp::new(now.seconds() + 3600, now.nanoseconds())?,
         )?)
@@ -1941,6 +1976,7 @@ mod tests {
                     base.context_length(),
                     base.supported_parameters(),
                     base.reasoning(),
+                    base.image_input(),
                     base.endpoints()
                 )?,
                 catalog_snapshot_identity(
@@ -1949,6 +1985,7 @@ mod tests {
                     added.context_length(),
                     added.supported_parameters(),
                     added.reasoning(),
+                    added.image_input(),
                     added.endpoints()
                 )?
             );
@@ -2776,6 +2813,7 @@ mod tests {
             model_supported_parameters: BTreeSet::default(),
             reasoning: Some(default_on),
             context_length: 1,
+            image_input: false,
             observed_at: Timestamp::new(1, 0)?,
             expires_at: Timestamp::new(2, 0)?,
         };
