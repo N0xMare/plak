@@ -118,9 +118,19 @@ def image_magic(data: bytes) -> str | None:
 
 
 def json_strings(value: object):
-    """Every string inside a decoded JSON value, depth first."""
+    """Every string inside a decoded JSON value, depth first.
+
+    A string that is itself a JSON document (a Claude-vocabulary tool result
+    is `{"result": "..."}` text) also yields the strings inside it.
+    """
     if isinstance(value, str):
         yield value
+        if value[:1] in ("{", "["):
+            try:
+                inner = json.loads(value)
+            except ValueError:
+                return
+            yield from json_strings(inner)
     elif isinstance(value, dict):
         for item in value.values():
             yield from json_strings(item)
@@ -683,10 +693,14 @@ class Features:
                            session: str, require_sources: bool = True) -> list[str]:
         if not tool_calls(records, RETRIEVAL_NAMES[tool]):
             raise ScenarioFailure(MODEL, f"session {session}: no {tool} call in the session log")
-        texts = [str(r.get("detail", "")) for r in records if r.get("kind") == "tool.completed"]
-        texts += [text for body in capture_requests(segments) for text in json_strings(body)
-                  if "Sources:" in text]
-        urls = source_urls("\n".join(texts))
+        # The completed record's detail is a bounded preview that may cut the
+        # `Sources:` heading; the sent request carries the whole result.
+        details = [str(r.get("detail", "")) for r in records if r.get("kind") == "tool.completed"]
+        urls = source_urls("\n".join(details))
+        if not urls:
+            urls = source_urls("\n".join(
+                text for body in capture_requests(segments) for text in json_strings(body)
+                if "Sources:" in text))
         if require_sources and not urls:
             raise ScenarioFailure(MODEL, f"session {session}: {tool} result lists no sources")
         return urls

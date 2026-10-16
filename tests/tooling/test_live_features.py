@@ -1,6 +1,7 @@
 """Offline checks for the live feature scenarios' oracle logic."""
 
 import base64
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -141,6 +142,15 @@ class RetrievalOracleTests(unittest.TestCase):
     def test_json_strings_reach_nested_tool_results(self):
         body = {"input": [{"type": "function_call_output", "output": self.RESULT}]}
         self.assertIn(self.RESULT, list(features.json_strings(body)))
+
+    def test_json_strings_decode_a_json_encoded_tool_result(self):
+        content = json.dumps({"result": self.RESULT})
+        body = {"messages": [{"content": [{"type": "tool_result",
+                                           "content": [{"type": "text", "text": content}]}]}]}
+        strings = list(features.json_strings(body))
+        self.assertIn(self.RESULT, strings)
+        self.assertEqual(features.source_urls("\n".join(strings))[0],
+                         "https://blog.rust-lang.org/2026/x.html")
 
 
 class CaptureRootTests(unittest.TestCase):
