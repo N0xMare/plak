@@ -67,8 +67,8 @@ GITHUB_READ_TOOLS = ("get_file_contents", "list_commits", "search_repositories")
 # Plak's own bind/admission refusals. A tool row or image row that does not
 # serve the route is the product's statement, reported as `refused`.
 ROW_REFUSALS = (
-    re.compile(r"\b(\S+) is not yet qualified on (\S+)"),
-    re.compile(r"\b(\S+) is not available on (\S+)"),
+    re.compile(r"\b(\S+) is not yet qualified on ([^\s;]+)"),
+    re.compile(r"\b(\S+) is not available on ([^\s;]+)"),
     re.compile(r"route \S+ model \S+ does not accept image input"),
 )
 
@@ -261,12 +261,6 @@ def capture_requests(segments: list[Path]) -> list[object]:
             except (OSError, ValueError):
                 continue
     return bodies
-
-
-def capture_responses(segments: list[Path]) -> str:
-    import smoke
-    return "\n".join(smoke.streamed_text(path.read_text(errors="replace"))
-                     for segment in segments for path in sorted(segment.glob("*.body")))
 
 
 def session_log(env: live.Env, home: Path, repo: Path, session: str) -> list[dict]:
@@ -512,17 +506,12 @@ class Features:
             if server is not None:
                 server.terminate()
                 server.wait(10)
-        sums = tool_calls(records, "get-sum")
-        envs = tool_calls(records, "get-env")
-        answer = answer_text(out, records)
+        requests = capture_requests(segments)
         detail = f"session {session}"
-        nested = code_mode(self.route) and _called_in_cell(segments, "get")
-        if not sums or not envs:
-            if code_mode(self.route) and nested:
-                detail += "; calls only inside the cell (log has no nested rows)"
-            else:
-                raise ScenarioFailure(MODEL, f"{detail}: session log lacks the get-sum/get-env "
-                                             "calls")
+        require_offered(requests, "everything", tools, session)
+        answer = answer_text(out, records)
+        if not tool_calls(records, "get-sum") or not tool_calls(records, "get-env"):
+            raise ScenarioFailure(MODEL, f"{detail}: session log lacks the get-sum/get-env calls")
         if str(a + b) not in answer:
             raise ScenarioFailure(MODEL, f"{detail}: answer lacks the sum {a + b}")
         if token not in answer:
@@ -538,8 +527,8 @@ class Features:
             posts = (base / "server.log").read_text().count("Received MCP POST request")
             detail += f"; server saw {posts} POSTs and returned its own token"
         if code_mode(self.route):
-            if not nested:
-                raise ScenarioFailure(MODEL, f"{detail}: no MCP call from a Code Mode cell")
+            if not any("mcp__everything__get-sum" in source for source in cell_sources(requests)):
+                raise ScenarioFailure(MODEL, f"{detail}: no Code Mode cell called get-sum")
             detail += "; called from a Code Mode cell"
         return detail
 
@@ -575,13 +564,10 @@ class Features:
                   "value only.")
         out, records, segments, _, session = self.run(
             name, prompt, ["mcp:github"], config=config, before=self._github_secret)
-        calls = tool_calls(records, "get_file_contents")
         detail = f"session {session}"
-        if not calls:
-            if not (code_mode(self.route) and _called_in_cell(segments, "get_file_contents")):
-                raise ScenarioFailure(MODEL, f"{detail}: session log has no get_file_contents "
-                                             "call")
-            detail += "; call only inside the cell"
+        require_offered(capture_requests(segments), "github", ["get_file_contents"], session)
+        if not tool_calls(records, "get_file_contents"):
+            raise ScenarioFailure(MODEL, f"{detail}: session log has no get_file_contents call")
         if marker not in answer_text(out, records):
             raise ScenarioFailure(MODEL, f"{detail}: answer lacks the file's SHA-256")
         return f"{detail}: get_file_contents at {rev[:12]}; marker in the answer"
@@ -742,10 +728,28 @@ def _jsonrpc_tool_calls(path: Path) -> list[dict]:
     return calls
 
 
-def _called_in_cell(segments: list[Path], needle: str) -> bool:
-    """A Code Mode `exec` cell whose source names an MCP tool."""
-    text = capture_responses(segments)
-    return "exec" in text and bool(re.search(r"mcp__\w+__" + re.escape(needle), text))
+def mcp_offered(requests: list[object], server: str, tool: str) -> bool:
+    """The model's first request names `mcp__<server>__<tool>` (direct tool or cell catalog)."""
+    return bool(requests) and f"mcp__{server}__{tool}" in json.dumps(requests[0])
+
+
+def cell_sources(requests: list[object]) -> list[str]:
+    """Code Mode `exec` cell sources the model sent, from the last request's input."""
+    if not requests or not isinstance(requests[-1], dict):
+        return []
+    items = requests[-1].get("input")
+    return [item["input"] for item in items if isinstance(items, list)
+            and isinstance(item, dict) and item.get("type") == "custom_tool_call"
+            and isinstance(item.get("input"), str)] if isinstance(items, list) else []
+
+
+def require_offered(requests: list[object], server: str, tools, session: str) -> None:
+    """A configured, allowlisted MCP tool Plak left out of the catalog is Plak's failure."""
+    missing = [tool for tool in tools if not mcp_offered(requests, server, tool)]
+    if missing:
+        raise ScenarioFailure(HARNESS, f"session {session}: Plak did not offer "
+                                       f"{', '.join(f'mcp__{server}__{t}' for t in missing)} "
+                                       "to the model")
 
 
 def _fact_on_pages(fact: str, urls: list[str]) -> str | None:

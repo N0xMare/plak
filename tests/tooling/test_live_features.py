@@ -29,6 +29,7 @@ class RefusalTests(unittest.TestCase):
             verdict = features.row_refusal(line)
             self.assertIsNotNone(verdict, line)
             self.assertTrue(verdict.startswith("refused: route row unsupported ("), verdict)
+            self.assertNotIn(";", verdict)
 
     def test_other_failures_are_not_refusals(self):
         self.assertIsNone(features.row_refusal("HTTP 429 rate limited"))
@@ -89,6 +90,27 @@ class ToolLogTests(unittest.TestCase):
         self.assertIn("answer", text)
         self.assertIn("from the log", text)
         self.assertNotIn("abc", text)
+
+
+class McpOracleTests(unittest.TestCase):
+    def test_offered_tools_come_from_the_first_request(self):
+        first = {"tools": [{"name": "mcp__github__search_repositories"}]}
+        later = {"input": "mcp__github__get_file_contents"}
+        self.assertTrue(features.mcp_offered([first, later], "github", "search_repositories"))
+        self.assertFalse(features.mcp_offered([first, later], "github", "get_file_contents"))
+        with self.assertRaises(live.ScenarioFailure) as raised:
+            features.require_offered([first], "github", ["get_file_contents"], "s1")
+        self.assertEqual(raised.exception.outcome, live.HARNESS)
+
+    def test_cell_sources_are_exec_inputs_of_the_last_request(self):
+        last = {"input": [
+            {"type": "message", "content": "tools.mcp__everything__get-sum"},
+            {"type": "custom_tool_call", "name": "exec",
+             "input": 'await tools["mcp__everything__get-sum"]({a: 1, b: 2})'},
+            {"type": "custom_tool_call_output", "output": "ok"}]}
+        self.assertEqual(features.cell_sources([{}, last]),
+                         ['await tools["mcp__everything__get-sum"]({a: 1, b: 2})'])
+        self.assertEqual(features.cell_sources([]), [])
 
 
 class RetrievalOracleTests(unittest.TestCase):
