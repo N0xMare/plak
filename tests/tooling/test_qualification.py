@@ -135,7 +135,8 @@ class QualificationTests(unittest.TestCase):
                 patch("smoke.selected_scenarios", return_value=(("compaction", "jsonl"),)), \
                 patch("smoke.run_named", side_effect=scenario), \
                 patch("smoke.capture_complete", return_value=True), \
-                patch("live.write_home"), patch("live.binary_sha256", return_value="build"):
+                patch("live.write_home"), patch("live.binary_sha256", return_value="build"), \
+                patch("live.capture_root_mismatch", return_value=None):
             binary = Path(directory) / "plak"
             result = qualification.run_cell(Path(directory) / "cell", lambda path:
                 qualification.execute("smoke", "codex", binary, ["--only", "compaction"], 17, path))
@@ -431,7 +432,8 @@ class QualificationReviewTests(unittest.TestCase):
                     self.assertEqual(env.fixture_seed, 123)
                     raise Observed
 
-                with patch("live.write_home"), patch.object(driver, entry, side_effect=observe):
+                with patch("live.write_home"), patch.object(driver, entry, side_effect=observe), \
+                        patch("live.capture_root_mismatch", return_value=None):
                     argv = ["codex", "--binary", str(binary), "--artifacts", directory,
                             "--fixture-seed", "123", *options]
                     if driver is long_session:
