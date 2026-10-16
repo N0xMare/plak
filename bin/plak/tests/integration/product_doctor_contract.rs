@@ -8,6 +8,7 @@
 
 use std::fs;
 
+use plak::presentation::{CliStatus, CompatibilityState, CredentialState};
 use plak::product_doctor;
 use plak::product_doctor::{
     CheckKind, CompositionHostStatus, ConfigStatus, DatabaseStatus, DoctorInputs, DoctorPaths,
@@ -29,6 +30,13 @@ fn private_directory(path: &std::path::Path) {
 #[cfg(not(unix))]
 fn private_directory(path: &std::path::Path) {
     fs::create_dir(path).unwrap();
+}
+
+fn signed_out() -> CliStatus {
+    CliStatus {
+        compatibility: CompatibilityState::Current,
+        credential: CredentialState::SignedOut,
+    }
 }
 
 fn input(temp: &TempDir) -> DoctorInputs {
@@ -66,16 +74,19 @@ fn input(temp: &TempDir) -> DoctorInputs {
         oauth: OauthCredentialProbes {
             codex: OauthCredentialProbe {
                 provider: "codex",
+                credential: Ok(signed_out()),
                 record: OauthRecordStatus::Missing,
                 last_refresh: OauthRefreshLookup::None,
             },
             xai: OauthCredentialProbe {
                 provider: "xai",
+                credential: Ok(signed_out()),
                 record: OauthRecordStatus::Missing,
                 last_refresh: OauthRefreshLookup::None,
             },
             claude: OauthCredentialProbe {
                 provider: "claude",
+                credential: Ok(signed_out()),
                 record: OauthRecordStatus::Missing,
                 last_refresh: OauthRefreshLookup::None,
             },
@@ -171,7 +182,7 @@ fn javascript_host_unavailable_fix_names_js_host_not_python() {
     let report = diagnose(values);
     let host = check(&report, CheckKind::CompositionHost);
     assert_eq!(host.severity, Severity::Error);
-    let fix = host.remediation.unwrap();
+    let fix = host.remediation.as_deref().unwrap();
     assert!(fix.contains("PLAK_JS_HOST"));
     assert!(!fix.contains("PLAK_MONTY_WORKER"));
 }
@@ -187,7 +198,7 @@ fn python_host_unavailable_fix_names_python_host() {
     let report = diagnose(values);
     let host = check(&report, CheckKind::CompositionHost);
     assert_eq!(host.severity, Severity::Error);
-    let fix = host.remediation.unwrap();
+    let fix = host.remediation.as_deref().unwrap();
     assert!(fix.contains("PLAK_MONTY_WORKER"));
 }
 
@@ -235,7 +246,7 @@ fn openrouter_catalog_key_present_no_model_is_warning() {
     let catalog = check(&report, CheckKind::OpenRouterCatalog);
     assert_eq!(catalog.severity, Severity::Warning);
     assert_eq!(catalog.result, "key present");
-    let remediation = catalog.remediation.unwrap();
+    let remediation = catalog.remediation.as_deref().unwrap();
     assert!(
         remediation.contains("plak config set root.agent"),
         "remediation must name a current config key: {remediation}"
@@ -269,7 +280,7 @@ fn openrouter_catalog_failed_missing_field_is_error_with_remediation() {
     assert_eq!(catalog.severity, Severity::Error);
     assert_eq!(catalog.result, "catalog invalid");
     assert!(catalog.detail.contains(path));
-    let fix = catalog.remediation.unwrap();
+    let fix = catalog.remediation.as_deref().unwrap();
     assert!(fix.contains("fail closed"));
 }
 
@@ -284,7 +295,7 @@ fn openrouter_catalog_failed_json_class_names_transport_not_pin() {
     let catalog = check(&report, CheckKind::OpenRouterCatalog);
     assert_eq!(catalog.severity, Severity::Error);
     assert!(catalog.detail.contains("catalog JSON"));
-    let fix = catalog.remediation.unwrap();
+    let fix = catalog.remediation.as_deref().unwrap();
     assert!(fix.contains("named class"));
     assert!(!fix.contains("missing"));
 }
@@ -352,6 +363,10 @@ fn oauth_doctor_prints_record_metadata_and_last_refresh_without_payload() {
     }
     values.oauth.xai = OauthCredentialProbe {
         provider: "xai",
+        credential: Ok(CliStatus {
+            compatibility: CompatibilityState::Current,
+            credential: CredentialState::Quarantined,
+        }),
         record: inspected,
         last_refresh: OauthRefreshLookup::Row(OauthRefreshTelemetry {
             phase: "outcome_unknown".to_owned(),
@@ -372,7 +387,10 @@ fn oauth_doctor_prints_record_metadata_and_last_refresh_without_payload() {
     );
     assert!(grok.detail.contains("2m ago"));
     assert!(grok.detail.contains("transport=resolution"));
-    assert_eq!(grok.remediation, Some("plak login grok"));
+    assert_eq!(
+        grok.remediation.as_deref(),
+        Some("run plak refresh grok; run plak login grok if that fails")
+    );
     assert!(!grok.detail.contains("payload"));
     assert!(!grok.detail.contains("Zml4dHVyZQ"));
     assert!(!grok.result.contains("Zml4dHVyZQ"));
@@ -440,4 +458,83 @@ fn runtime_store_usage_reports_thresholds_file_size_and_prune_failure() {
         "{}",
         row.detail
     );
+}
+
+/// Doctor reads the one credential classification, so it cannot call a
+/// record `plak status` and model runs refuse healthy.
+#[test]
+fn oauth_doctor_reports_the_same_verdict_as_status() {
+    let temp = TempDir::new().unwrap();
+    let record = temp.path().join("credential.json");
+    fs::write(
+        &record,
+        r#"{"format_version":2,"profile_id":"xai.supergrok.compat.2026-01-01.r1","slot_id":"primary","account_binding":"fixture","generation":3,"status":"ready","payload":"e30="}"#,
+    )
+    .unwrap();
+    for (credential, compatibility, result, severity, fix) in [
+        (
+            CredentialState::ProfileChanged,
+            CompatibilityState::Current,
+            "profile_changed",
+            Severity::Error,
+            Some("run plak login grok"),
+        ),
+        (
+            CredentialState::LoginRequired,
+            CompatibilityState::Current,
+            "retired_format",
+            Severity::Error,
+            Some("run plak login grok"),
+        ),
+        (
+            CredentialState::WrittenByNewerBuild,
+            CompatibilityState::Current,
+            "written_by_newer_build",
+            Severity::Error,
+            Some(
+                "use the newer plak build that wrote it, or run plak login grok to replace it (that build must then log in again)",
+            ),
+        ),
+        (
+            CredentialState::Ready,
+            CompatibilityState::Required,
+            "acceptance_required",
+            Severity::Warning,
+            Some("run plak login grok to review and accept the notice"),
+        ),
+        (
+            CredentialState::Ready,
+            CompatibilityState::Current,
+            "ready",
+            Severity::Ok,
+            None,
+        ),
+    ] {
+        let home = TempDir::new().unwrap();
+        let mut values = input(&home);
+        values.oauth.xai = OauthCredentialProbe {
+            provider: "xai",
+            credential: Ok(CliStatus {
+                compatibility,
+                credential,
+            }),
+            record: inspect_oauth_record(&record),
+            last_refresh: OauthRefreshLookup::None,
+        };
+        let report = diagnose(values);
+        let grok = check(&report, CheckKind::OauthXai);
+        assert_eq!(grok.result, result, "{credential:?}");
+        assert_eq!(grok.severity, severity, "{credential:?}");
+        assert_eq!(grok.remediation.as_deref(), fix, "{credential:?}");
+        assert!(grok.detail.contains("record ready"), "{}", grok.detail);
+    }
+
+    let home = TempDir::new().unwrap();
+    let mut values = input(&home);
+    values.oauth.xai.credential = Err("Unsafe storage · run plak status grok".to_owned());
+    let report = diagnose(values);
+    let grok = check(&report, CheckKind::OauthXai);
+    assert_eq!(grok.result, "unreadable");
+    assert_eq!(grok.severity, Severity::Error);
+    assert!(grok.detail.contains("Unsafe storage"), "{}", grok.detail);
 }

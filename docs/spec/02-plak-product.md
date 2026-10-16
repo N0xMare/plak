@@ -5666,6 +5666,15 @@ zero bytes; unreadable entries produce `size unavailable: <error>` warning rows
 and count as warnings, never blocking the remaining report. Removal is explicit
 through `plak state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]`, never automatic (§2.5).
 
+The OAuth rows read the same offline credential classification as `plak status`
+and model runs, so doctor never calls a record they refuse healthy. RESULT is
+`signed_out`, `ready`, `acceptance_required`, `refresh_required`,
+`refresh_outcome_unknown`, `revoked`, `retired_format`, `profile_changed`,
+`written_by_newer_build`, `profile_inactive`, `unsupported`, or `unreadable`
+when the read itself fails; a record a run would refuse is a failure, and FIX is
+that classification's remedy. DETAIL keeps the record's raw status, generation
+and age and the last refresh telemetry.
+
 The report ends with a count of passes, warnings, and failures, and a pointer
 to `plak status` for provider credentials — doctor is not the credential
 authority. Warnings alone exit 0; one or more failures exit 5.
@@ -5930,16 +5939,20 @@ prints the same two facts for one account on one line.
 
 An OAuth account whose offline read fails is still a row, under Setup needed.
 Its PROFILE is `—` and its CREDENTIAL names the state and the repair from the
-same classification as other native-subscription failures: `Profile changed ·
-run plak login <account>` when the stored record is foreign or retired (login
-replaces it and says so), `Unsafe storage · …` with the path and the mode repair the
+same classification as other native-subscription failures: `Unsafe storage · …`
+with the path and the mode repair the
 store inspection names, and that classification's repair text otherwise. When
 that unsafe-storage repair would exceed the 512-character cell cap, the cell is
 `Unsafe storage · run plak status <account> for the fix` instead of a path cut
 mid-remedy; `plak status <account>` prints the repair in full. A
 credential this build can read but not use stays a normal row; login-required
 (an earlier build's Codex login, or a payload this build cannot parse) reads
-`Login required · plak login <account>`. A record a newer build wrote reads
+`Login required · plak login <account>`. A Grok or Claude record written under
+another compatibility profile, or by an older build whose format reads as one,
+reads `Profile changed · run plak login <account>` with its compatibility
+acceptance read on its own, and `plak status <account>` prints
+`credential=profile-changed` and exits 0; `plak login <account>` replaces it and
+says so. A record a newer build wrote reads
 `Written by a newer plak build · use that build, or plak login <account> to
 replace it`, and `plak status <account>` prints `credential=written-by-newer-build`. The other OAuth accounts and the
 API-key rows are printed either way, and one API-key read that fails is an

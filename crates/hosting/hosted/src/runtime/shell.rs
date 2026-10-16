@@ -545,10 +545,15 @@ pub(super) fn refuse_not_ready<P: plakous_host_protocol::ProtocolExtension>(
         &config.session.id,
         SessionEvent::new("turn.refused").str("reason", "not_ready"),
     );
-    let _ = events.notice(TranscriptRow::info(NoticeScope::Session,
-        "not ready — choose a profile with /agents and the agent attaches automatically. Or /attach."
-            ,
-    ));
+    // A stored login the product refused names its own repair.
+    let notice = config.reason.strip_prefix("credential_unusable: ").map_or_else(
+        || {
+            "not ready — choose a profile with /agents and the agent attaches automatically. Or /attach."
+                .to_owned()
+        },
+        |refusal| format!("not ready — {refusal}; or choose another profile with /agents"),
+    );
+    let _ = events.notice(TranscriptRow::info(NoticeScope::Session, notice));
     let _ = events.send(HostEvent::Status {
         phase: "not_ready".into(),
         queue_len: 0,

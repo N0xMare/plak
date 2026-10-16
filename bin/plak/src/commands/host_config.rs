@@ -97,18 +97,47 @@ pub fn tui_attach_eligibility(
     }
 }
 
+/// The shell reason a TUI attach that was not attempted reports. A native
+/// account whose stored login cannot run is named by `credential_refusal`,
+/// the CLI's words for it, rather than as a model missing from the catalog.
 pub fn deferred_attach_refusal_reason(
     eligibility: TuiAttachEligibility,
     product_needs_setup: bool,
+    credential_refusal: Option<String>,
 ) -> String {
     match eligibility {
         TuiAttachEligibility::Ready => "canonical attach was not attempted".to_owned(),
         TuiAttachEligibility::EffortRequired => "effort_required".to_owned(),
         TuiAttachEligibility::Unavailable if product_needs_setup => "missing_defaults".to_owned(),
-        TuiAttachEligibility::Unavailable => {
-            "resolve_failed: selected model is absent from the discovered Ready catalog".to_owned()
-        }
+        TuiAttachEligibility::Unavailable => credential_refusal.map_or_else(
+            || {
+                "resolve_failed: selected model is absent from the discovered Ready catalog"
+                    .to_owned()
+            },
+            |refusal| credential_unusable_reason(&refusal),
+        ),
     }
+}
+
+/// Shell reason for a stored login a model run would refuse.
+pub fn credential_unusable_reason(refusal: &str) -> String {
+    format!("credential_unusable: {}", refusal.replace('`', ""))
+}
+
+/// The CLI's refusal for the selected native account's stored login, read
+/// offline; `None` for other accounts or a login that can run.
+pub fn native_credential_refusal(account: Option<&str>) -> Option<String> {
+    let provider = plakous_hosted::binding::oauth_provider_for_account(account?)?;
+    let state_home = crate::home::paths::application_state_home().ok()?;
+    let mut accounts = PlakousApplication::for_accounts(state_home).ok()?;
+    let status = super::application::AccountOps::offline_status(&mut accounts, provider);
+    let refusal = super::support::credential_refusal(provider, status)?;
+    tracing::warn!(
+        account = provider.as_str(),
+        reason = %refusal,
+        "TUI attach refused: stored subscription login cannot run"
+    );
+    Some(refusal)
 }
 
 /// Attempt to resolve a gated native model and spawn the multi-turn host worker.

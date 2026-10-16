@@ -316,6 +316,33 @@ pub const fn credential_state(status: FacadeAuthStatus) -> CredentialState {
     }
 }
 
+/// One offline read of a stored subscription login. A record this build
+/// refuses as another profile (or as an older build's format that reads as
+/// one) is a state, read beside its compatibility acceptance, not a failure.
+pub(crate) async fn offline_subscription_status(
+    subscriptions: &plakous::subscriptions::NativeSubscriptions,
+    provider: NativeProvider,
+) -> Result<crate::presentation::CliStatus, NativeSubscriptionError> {
+    match subscriptions.status(provider).await {
+        Ok(status) => Ok(crate::presentation::CliStatus {
+            compatibility: compatibility_state(status.compatibility()),
+            credential: credential_state(status.credential()),
+        }),
+        Err(NativeSubscriptionError::CredentialProfileChanged) => {
+            let compatibility = match subscriptions.compatibility_status(provider).await {
+                Ok(compatibility) => compatibility_state(compatibility),
+                Err(NativeSubscriptionError::InvalidReceipt) => CompatibilityState::Required,
+                Err(error) => return Err(error),
+            };
+            Ok(crate::presentation::CliStatus {
+                compatibility,
+                credential: CredentialState::ProfileChanged,
+            })
+        }
+        Err(error) => Err(error),
+    }
+}
+
 pub const fn compatibility_status_name(status: CompatibilityState) -> &'static str {
     match status {
         CompatibilityState::Required => "acceptance-required",
@@ -342,6 +369,7 @@ pub const fn credential_display_label(status: CredentialState) -> &'static str {
         CredentialState::Quarantined => "Unavailable",
         CredentialState::Revoked => "Revoked",
         CredentialState::LoginRequired => "Login required",
+        CredentialState::ProfileChanged => "Profile changed",
         CredentialState::WrittenByNewerBuild => "Written by a newer plak build",
         CredentialState::Unsupported => "Unsupported",
     }
@@ -357,6 +385,10 @@ pub(crate) fn status_credential_cell(provider: NativeProvider, status: Credentia
                 cli_provider_name(provider)
             )
         }
+        CredentialState::ProfileChanged => format!(
+            "Profile changed · run plak login {}",
+            cli_provider_name(provider)
+        ),
         CredentialState::WrittenByNewerBuild => format!(
             "Written by a newer plak build · use that build, or plak login {} to replace it",
             cli_provider_name(provider)
@@ -387,6 +419,7 @@ pub const fn credential_status_name(status: CredentialState) -> &'static str {
         CredentialState::Quarantined => "quarantined",
         CredentialState::Revoked => "revoked",
         CredentialState::LoginRequired => "login-required",
+        CredentialState::ProfileChanged => "profile-changed",
         CredentialState::WrittenByNewerBuild => "written-by-newer-build",
         CredentialState::Unsupported => "unsupported",
     }
@@ -456,12 +489,46 @@ fn credential_not_ready(provider: NativeProvider, status: CredentialState) -> Cl
         CredentialState::LoginRequired => format!(
             "{account} login was made by an earlier plak build and cannot be used; run `plak login {account}`"
         ),
+        CredentialState::ProfileChanged => format!(
+            "the stored {account} login was written by an older build or another profile; run `plak login {account}`, which replaces it"
+        ),
         CredentialState::WrittenByNewerBuild => newer_build_message(account),
         CredentialState::Unsupported => format!(
             "{account} credential state is not supported by this build; run `plak login {account}`"
         ),
     };
     CliFailure::classified(CliFailureKind::Auth, message)
+}
+
+/// Why a model run cannot use this account's stored login, in the words the
+/// CLI refuses it with; `None` when the offline read says it can run.
+pub(crate) fn credential_refusal(
+    provider: NativeProvider,
+    status: CliResult<crate::presentation::CliStatus>,
+) -> Option<String> {
+    let failure = match status {
+        Err(failure) => failure,
+        Ok(status) if status.credential != CredentialState::Ready => {
+            credential_not_ready(provider, status.credential)
+        }
+        // The state home is read only for unsafe storage, which is not one
+        // of these.
+        Ok(status) => match status.compatibility {
+            CompatibilityState::Current => return None,
+            CompatibilityState::Required => native_subscription_failure(
+                NativeSubscriptionError::AcceptanceRequired,
+                Some(provider),
+                Path::new(""),
+            ),
+            CompatibilityState::Inactive => profile_inactive_failure(Some(provider)),
+            CompatibilityState::Unsupported => native_subscription_failure(
+                NativeSubscriptionError::UnsupportedPlatform,
+                Some(provider),
+                Path::new(""),
+            ),
+        },
+    };
+    Some(failure.message().to_owned())
 }
 
 /// `CredentialUnavailable` from a credential operation, named by the state
@@ -620,14 +687,9 @@ pub(crate) fn oauth_status_failure_cell(
     use NativeSubscriptionError as E;
     let name = cli_provider_name(provider);
     match error {
-        E::CredentialProfileChanged => format!(
-            "Profile changed · {}",
-            super::application::CredentialVerdict::NeedsLogin(
-                super::application::LoginReason::ProfileChanged
-            )
-            .remedy(provider, super::application::AccountCommand::Status)
-            .unwrap_or_default()
-        ),
+        E::CredentialProfileChanged => {
+            status_credential_cell(provider, CredentialState::ProfileChanged)
+        }
         E::CredentialUnavailable => {
             status_credential_cell(provider, CredentialState::LoginRequired)
         }

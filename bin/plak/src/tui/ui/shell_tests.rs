@@ -350,6 +350,35 @@ fn submit_refused_when_hosted_not_ready() {
     assert_eq!(app.pending_prompt.as_deref(), Some("hello"));
 }
 
+/// A host that settled without an agent refuses prompts itself and names
+/// why; the TUI must not hold them as `queued until agent is ready` forever.
+#[test]
+fn a_prompt_after_a_not_ready_settle_goes_to_the_host_not_the_local_hold() {
+    let mut launch = launch_basic();
+    launch.agent_enabled = false;
+    let mut app = App::new(launch, true);
+    let (tx, rx) = user_action_channel();
+    app.input = "held".into();
+    assert_eq!(app.handle_key(key(KeyCode::Enter)), None);
+    assert_eq!(app.pending_prompt.as_deref(), Some("held"));
+
+    app.apply_host_event(HostEvent::AgentAttached(false));
+    app.maybe_flush_pending_prompt_after_attach(Some(&tx));
+    assert_eq!(app.pending_prompt, None);
+    assert!(
+        matches!(rx.try_recv().map(|delivery| delivery.into_parts().0), Ok(UserAction::Prompt(draft)) if draft.text == "held"),
+        "the held prompt goes to the not-ready host, which refuses it with the reason"
+    );
+
+    app.input = "next".into();
+    let action = app.handle_key(key(KeyCode::Enter));
+    assert!(
+        matches!(&action, Some(UserAction::Prompt(draft)) if draft.text == "next"),
+        "{action:?}"
+    );
+    assert_eq!(app.pending_prompt, None);
+}
+
 #[test]
 fn terminal_handoffs_remain_typed_and_quit_the_shell() {
     for handoff in [

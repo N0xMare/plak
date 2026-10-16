@@ -165,8 +165,11 @@ Setup needed heading, and when none are there is no Ready heading.
 
 A provider whose local credential cannot be read is still listed, under Setup
 needed, and bare `plak status` still exits 0. CREDENTIAL then names the state
-and the repair, for example `Profile changed · run plak login claude`, `Login required · plak login codex` for an earlier-build
-Codex login, or `Unsafe storage · …` with the chmod to run. A repair too long
+and the repair, for example `Unsafe storage · …` with the chmod to run. A
+login this build cannot use is a normal row naming its repair:
+`Profile changed · run plak login claude` for a Grok or Claude login from an
+older build or another profile, `Login required · plak login codex` for an
+earlier-build Codex login. A repair too long
 for the column is `Unsafe storage · run plak status <account> for the fix`;
 that command prints the full path and chmod. The other accounts,
 including API keys, still print. `plak status <account>` still exits 3 when

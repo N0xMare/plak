@@ -558,9 +558,13 @@ the provider, so the old grant may remain active), and authorizes a fresh one.
 `plak logout <account>` also retires it without logging in again. The rest of
 the home is untouched. Bare `plak status` puts that repair on the account's
 Setup needed row (`Profile changed · run plak login <account>`) and still lists
-every other account, exiting 0.
-`plak status <account>` and the other credential commands still print the
-repair on stderr and exit 3.
+every other account, exiting 0; `plak status <account>` prints
+`credential=profile-changed; run plak login <account>`, and `plak doctor`
+reports the account as `profile_changed`. Model runs, usage and refresh print
+the repair on stderr and exit 3. In the TUI the header reads
+`not ready · credential_unusable: …` with the same words, and a prompt sent
+then is refused with that repair and returned to the input instead of being
+held.
 
 ## `the stored <account> login was written by a newer plak build …`
 

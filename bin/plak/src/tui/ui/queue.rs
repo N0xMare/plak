@@ -68,8 +68,12 @@ impl App {
             return Some(action);
         }
         let parsed = parse_slash(&line);
+        // Hold a prompt only while the agent is still preparing. Once the host
+        // settled without one, it refuses the prompt with the reason and
+        // returns the draft, rather than holding it here forever.
         if self.hosted
             && !self.agent_enabled
+            && self.startup_pending
             && !is_quit_command(&line)
             && !is_drop_command(&line)
             && parsed.is_none()

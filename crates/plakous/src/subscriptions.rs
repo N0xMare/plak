@@ -1505,6 +1505,30 @@ impl NativeSubscriptions {
         Ok(status)
     }
 
+    /// Returns the compatibility acceptance state alone, without reading the
+    /// credential record, so a caller can tell whether a login over a record
+    /// [`Self::status`] refused as another profile needs the notice first.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed for unsafe, foreign, or malformed explicit storage.
+    pub async fn compatibility_status(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<CompatibilityStatus, NativeSubscriptionError> {
+        let paths = self.state.clone();
+        if !run_blocking(move || paths.layout_exists()).await?? {
+            return Ok(SubscriptionState::absent_compatibility(
+                Self::notice(provider),
+                unix_now()?,
+            ));
+        }
+        let lock = self.acquire_compatibility_lock(provider).await?;
+        let compatibility = self.compatibility_status_unlocked(provider).await?;
+        lock.verify()?;
+        Ok(compatibility)
+    }
+
     /// Performs one explicit, observational subscription allowance read.
     ///
     /// Codex, Grok, and Claude each use their reviewed provider-owned

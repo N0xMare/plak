@@ -179,12 +179,14 @@ impl App {
         }
     }
 
-    /// After attach, send a prompt that was queued while the agent was preparing.
+    /// Once startup settles, send a prompt held while the agent was preparing:
+    /// to the attached agent, or to the not-ready host, which refuses it with
+    /// the reason and returns the draft.
     pub(crate) fn maybe_flush_pending_prompt_after_attach(
         &mut self,
         actions: Option<&crate::tui::UserActionSender>,
     ) {
-        if !self.agent_enabled {
+        if !self.agent_enabled && self.startup_pending {
             return;
         }
         let Some(text) = self.pending_prompt.take() else {

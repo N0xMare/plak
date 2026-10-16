@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use plakous::agent::ReasoningEffort;
 use plakous::application::ApplicationExecutor;
 use plakous::subscriptions::{
-    CompatibilityStatus as FacadeCompatibilityStatus, NativeAuthStatus as FacadeAuthStatus,
     NativeModelVisibility, NativeProvider, NativeSubscriptions, NativeToolMode, SubscriptionPaths,
 };
 pub use plakous_hosted::runtime::TuiNativeModelFact;
@@ -47,6 +46,9 @@ pub enum CredentialState {
     Revoked,
     /// A stored login this build cannot use; a new login is required.
     LoginRequired,
+    /// A stored login written under another compatibility profile, or by an
+    /// older build whose format reads as one; a new login replaces it.
+    ProfileChanged,
     /// A newer build wrote the stored login; this build leaves it untouched.
     WrittenByNewerBuild,
     /// Credential state is unsupported.
@@ -158,17 +160,13 @@ impl NativePresentationBackend {
 
 impl PresentationBackend for NativePresentationBackend {
     fn offline_status(&mut self, provider: NativeProvider) -> CliResult<CliStatus> {
-        let status = self
-            .executor
-            .block_on(self.subscriptions.status(provider))
+        self.executor
+            .block_on(crate::commands::support::offline_subscription_status(
+                &self.subscriptions,
+                provider,
+            ))
             .map_err(application_execution_failure)?
-            .map_err(|error| {
-                native_subscription_failure(error, Some(provider), &self.state_home)
-            })?;
-        Ok(CliStatus {
-            compatibility: compatibility_state(status.compatibility()),
-            credential: credential_state(status.credential()),
-        })
+            .map_err(|error| native_subscription_failure(error, Some(provider), &self.state_home))
     }
 
     fn models(&mut self, provider: NativeProvider) -> CliResult<Vec<CliModelSummary>> {
@@ -356,6 +354,11 @@ pub fn tui_presentation_bundle_with_backend_and_composition(
                 CredentialState::LoginRequired => (
                     plakous_host_protocol::views::ProviderState::Expired,
                     "login made by an earlier build; log in again".to_owned(),
+                    false,
+                ),
+                CredentialState::ProfileChanged => (
+                    plakous_host_protocol::views::ProviderState::Expired,
+                    "login from an older build or another profile; log in again".to_owned(),
                     false,
                 ),
                 CredentialState::WrittenByNewerBuild => (
@@ -602,28 +605,6 @@ const fn native_tool_mode_label(mode: NativeToolMode) -> &'static str {
         NativeToolMode::Direct => "direct",
         NativeToolMode::CodeMode => "code_mode",
         NativeToolMode::CodeModeOnly => "code_mode_only",
-    }
-}
-
-const fn compatibility_state(status: FacadeCompatibilityStatus) -> CompatibilityState {
-    match status {
-        FacadeCompatibilityStatus::Required => CompatibilityState::Required,
-        FacadeCompatibilityStatus::Current => CompatibilityState::Current,
-        FacadeCompatibilityStatus::Inactive => CompatibilityState::Inactive,
-        _ => CompatibilityState::Unsupported,
-    }
-}
-
-const fn credential_state(status: FacadeAuthStatus) -> CredentialState {
-    match status {
-        FacadeAuthStatus::SignedOut => CredentialState::SignedOut,
-        FacadeAuthStatus::Ready => CredentialState::Ready,
-        FacadeAuthStatus::RefreshRequired => CredentialState::RefreshRequired,
-        FacadeAuthStatus::Quarantined => CredentialState::Quarantined,
-        FacadeAuthStatus::Revoked => CredentialState::Revoked,
-        FacadeAuthStatus::LoginRequired => CredentialState::LoginRequired,
-        FacadeAuthStatus::WrittenByNewerBuild => CredentialState::WrittenByNewerBuild,
-        _ => CredentialState::Unsupported,
     }
 }
 

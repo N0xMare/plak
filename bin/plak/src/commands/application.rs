@@ -16,9 +16,8 @@ use plakous::subscriptions::{
 };
 
 use super::support::{
-    application_execution_failure, compatibility_state, credential_state,
-    credential_unavailable_failure, native_subscription_failure, oauth_status_failure_cell,
-    product_state_roots_from,
+    application_execution_failure, credential_state, credential_unavailable_failure,
+    native_subscription_failure, oauth_status_failure_cell, product_state_roots_from,
 };
 use crate::home::paths as product_paths;
 use crate::presentation::{
@@ -134,6 +133,7 @@ impl CredentialVerdict {
             CredentialState::RefreshRequired => Self::NeedsRefresh(status.compatibility),
             CredentialState::Quarantined => Self::Quarantined,
             CredentialState::LoginRequired => Self::NeedsLogin(LoginReason::RetiredFormat),
+            CredentialState::ProfileChanged => Self::NeedsLogin(LoginReason::ProfileChanged),
             CredentialState::WrittenByNewerBuild => Self::WrittenByNewerBuild,
             CredentialState::Unsupported => Self::Unsupported,
         }
@@ -477,11 +477,13 @@ fn revocation_from(
 
 impl PlakousApplication {
     fn read_offline(&mut self, provider: NativeProvider) -> Result<CliStatus, OfflineReadError> {
-        match self.executor.block_on(self.subscriptions.status(provider)) {
-            Ok(Ok(status)) => Ok(CliStatus {
-                compatibility: compatibility_state(status.compatibility()),
-                credential: credential_state(status.credential()),
-            }),
+        match self
+            .executor
+            .block_on(super::support::offline_subscription_status(
+                &self.subscriptions,
+                provider,
+            )) {
+            Ok(Ok(status)) => Ok(status),
             Ok(Err(error)) => Err(OfflineReadError::Subscription(error)),
             Err(_) => Err(OfflineReadError::Execution),
         }
@@ -786,6 +788,10 @@ mod tests {
             (
                 "unsupported platform",
                 read_of(K::Current, CredentialState::Unsupported),
+            ),
+            (
+                "previous-build grok/claude format or foreign profile, read offline",
+                read_of(K::Required, CredentialState::ProfileChanged),
             ),
             (
                 "previous-build grok/claude format or foreign profile",

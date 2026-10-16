@@ -2139,6 +2139,12 @@ fn run_doctor(services: &Services, stdout: &mut dyn io::Write) -> CliResult<Proc
         },
     };
     let state_home = services.home().state()?.to_path_buf();
+    // The same offline classification `plak status` and model runs read.
+    let mut accounts = PlakousApplication::for_accounts(state_home.clone());
+    let mut credential = |provider| match accounts.as_mut() {
+        Ok(accounts) => accounts.offline_status_row(provider),
+        Err(failure) => Err(failure.message().to_owned()),
+    };
     let report = product_doctor::diagnose(product_doctor::DoctorInputs {
         version: plakous::VERSION.to_owned(),
         paths: doctor_paths,
@@ -2169,18 +2175,21 @@ fn run_doctor(services: &Services, stdout: &mut dyn io::Write) -> CliResult<Proc
         oauth: product_doctor::OauthCredentialProbes {
             codex: product_doctor::probe_oauth_credential(
                 "codex",
+                credential(NativeProvider::Codex),
                 &state_home.join("plak/subscriptions/codex/credential.json"),
                 telemetry_store::TelemetryStore::latest_credential_refresh(paths, "codex")
                     .map_err(|error| error.to_string()),
             ),
             xai: product_doctor::probe_oauth_credential(
                 "xai",
+                credential(NativeProvider::Xai),
                 &state_home.join("plak/subscriptions/xai/credential.json"),
                 telemetry_store::TelemetryStore::latest_credential_refresh(paths, "xai")
                     .map_err(|error| error.to_string()),
             ),
             claude: product_doctor::probe_oauth_credential(
                 "claude",
+                credential(NativeProvider::Claude),
                 &state_home.join("plak/subscriptions/claude/credential.json"),
                 telemetry_store::TelemetryStore::latest_credential_refresh(paths, "claude")
                     .map_err(|error| error.to_string()),
@@ -2202,7 +2211,7 @@ fn run_doctor(services: &Services, stdout: &mut dyn io::Write) -> CliResult<Proc
                 },
                 check.severity.label().to_ascii_uppercase(),
                 format!("{} · {}", check.result, check.detail),
-                check.remediation.unwrap_or("—").to_owned(),
+                check.remediation.as_deref().unwrap_or("—").to_owned(),
             ])
             .map_err(CliFailure::new)?;
     }
@@ -2897,7 +2906,12 @@ fn launch_tui_with_attacher(
         } else if model_needs_explicit_effort {
             Err("effort_required".to_owned())
         } else {
-            Err("selected model is absent from the discovered Ready catalog".to_owned())
+            Err(
+                commands::host_config::native_credential_refusal(account.as_deref()).map_or_else(
+                    || "selected model is absent from the discovered Ready catalog".to_owned(),
+                    |refusal| commands::host_config::credential_unusable_reason(&refusal),
+                ),
+            )
         };
 
         let clear_publication = Arc::new(std::sync::Mutex::new(None::<String>));
@@ -3040,6 +3054,14 @@ fn launch_tui_with_attacher(
                                 reason: deferred_attach_refusal_reason(
                                     eligibility,
                                     prep_needs_setup,
+                                    (eligibility == TuiAttachEligibility::Unavailable
+                                        && !prep_needs_setup)
+                                        .then(|| {
+                                            commands::host_config::native_credential_refusal(
+                                                prep_account.as_deref(),
+                                            )
+                                        })
+                                        .flatten(),
                                 ),
                                 ready_catalog: sections.clone(),
                             })
@@ -3140,6 +3162,8 @@ fn launch_tui_with_attacher(
                         "missing_defaults".to_owned()
                     } else if attach_err == "effort_required" {
                         "effort_required".to_owned()
+                    } else if attach_err.starts_with("credential_unusable: ") {
+                        attach_err.clone()
                     } else {
                         // Keep short reason tag for logs; detail is in attach_err for TUI.
                         format!("resolve_failed: {attach_err}")
@@ -4096,6 +4120,62 @@ mod tests {
         );
     }
 
+    /// A record refused as another profile is a state of the one offline
+    /// classification, read beside its compatibility acceptance: status,
+    /// login and doctor see it alike instead of a read failure.
+    #[cfg(unix)]
+    #[test]
+    fn a_profile_changed_record_reads_as_a_state_beside_its_acceptance() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let root = tempfile::tempdir().unwrap();
+        let state = std::fs::canonicalize(root.path()).unwrap().join("state");
+        let subscriptions = state.join("plak/subscriptions");
+        for name in ["codex", "xai", "claude", "catalog", "compatibility"] {
+            std::fs::create_dir_all(subscriptions.join(name)).unwrap();
+        }
+        for dir in [state.clone(), state.join("plak"), subscriptions.clone()]
+            .into_iter()
+            .chain(
+                ["codex", "xai", "claude", "catalog", "compatibility"]
+                    .map(|name| subscriptions.join(name)),
+            )
+        {
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let record = subscriptions.join("claude/credential.json");
+        let bytes: &[u8] = br#"{"format_version":2,"profile_id":"anthropic.claude.oauth.compat.2026-01-01.r1","slot_id":"primary","account_binding":"old-claude-grant","generation":1,"status":"ready","payload":"e30="}"#;
+        std::fs::write(&record, bytes).unwrap();
+        std::fs::set_permissions(&record, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        let mut app = PlakousApplication::for_accounts(state).unwrap();
+        let status = AccountOps::offline_status(&mut app, NativeProvider::Claude).unwrap();
+        assert_eq!(
+            status,
+            CliStatus {
+                compatibility: CompatibilityState::Required,
+                credential: CredentialState::ProfileChanged,
+            }
+        );
+        assert_eq!(
+            commands::application::CredentialVerdict::from_status(status),
+            commands::application::CredentialVerdict::NeedsLogin(
+                commands::application::LoginReason::ProfileChanged
+            )
+        );
+        let mut stdout = Vec::new();
+        auth_status(&mut app, NativeProvider::Claude, None, &mut stdout).unwrap();
+        assert_eq!(
+            String::from_utf8(stdout).unwrap(),
+            "claude: compatibility=acceptance-required, credential=profile-changed; run plak login claude\n"
+        );
+        assert_eq!(
+            std::fs::read(&record).unwrap(),
+            bytes,
+            "reads leave it untouched"
+        );
+    }
+
     /// One unreadable OAuth account is a Setup needed row. The other OAuth
     /// accounts, including a login-required payload and an unsafe file, and
     /// the API-key rows, still print. The table is the report, so the exit
@@ -4529,7 +4609,10 @@ mod tests {
                 .to_owned(),
                 completion,
                 device_code,
-                replaced_unusable: self.credential == CredentialState::LoginRequired,
+                replaced_unusable: matches!(
+                    self.credential,
+                    CredentialState::LoginRequired | CredentialState::ProfileChanged
+                ),
             })
         }
 
@@ -5170,7 +5253,65 @@ mod tests {
             true,
         );
         assert_eq!(eligibility, TuiAttachEligibility::Unavailable);
-        assert!(deferred_attach_refusal_reason(eligibility, false).starts_with("resolve_failed:"));
+        assert!(
+            deferred_attach_refusal_reason(eligibility, false, None).starts_with("resolve_failed:")
+        );
+    }
+
+    /// An unusable stored login is named in the CLI's words, not as a model
+    /// missing from the catalog, and the shell reason drops CLI backticks.
+    #[test]
+    fn unusable_stored_login_names_the_credential_not_a_missing_model() {
+        let refusal = commands::support::credential_refusal(
+            NativeProvider::Xai,
+            Ok(CliStatus {
+                compatibility: CompatibilityState::Current,
+                credential: CredentialState::ProfileChanged,
+            }),
+        );
+        let reason =
+            deferred_attach_refusal_reason(TuiAttachEligibility::Unavailable, false, refusal);
+        assert_eq!(
+            reason,
+            "credential_unusable: the stored grok login was written by an older build or another profile; run plak login grok, which replaces it"
+        );
+        for (credential, words) in [
+            (
+                CredentialState::LoginRequired,
+                "made by an earlier plak build",
+            ),
+            (CredentialState::WrittenByNewerBuild, "newer plak build"),
+            (CredentialState::SignedOut, "signed out"),
+        ] {
+            let refusal = commands::support::credential_refusal(
+                NativeProvider::Claude,
+                Ok(CliStatus {
+                    compatibility: CompatibilityState::Current,
+                    credential,
+                }),
+            )
+            .unwrap_or_default();
+            assert!(refusal.contains(words), "{refusal}");
+        }
+        assert_eq!(
+            commands::support::credential_refusal(
+                NativeProvider::Codex,
+                Ok(CliStatus {
+                    compatibility: CompatibilityState::Current,
+                    credential: CredentialState::Ready,
+                }),
+            ),
+            None
+        );
+        // Missing defaults still win: there is no selected account to name.
+        assert_eq!(
+            deferred_attach_refusal_reason(
+                TuiAttachEligibility::Unavailable,
+                true,
+                Some("x".to_owned())
+            ),
+            "missing_defaults"
+        );
     }
 
     #[test]
@@ -6744,26 +6885,39 @@ mod tests {
 
     #[test]
     fn login_over_an_unusable_record_replaces_it_and_says_so_once() {
-        let mut backend = FakeBackend::new(CompatibilityState::Required, CredentialState::Ready);
-        backend.credential = CredentialState::LoginRequired;
-        let (result, _, stderr) = invoke(
-            Command::AuthLogin {
-                provider: NativeProvider::Xai,
-                mode: NativeLoginMode::Remote,
-            },
-            &mut backend,
-            b"exact-review\r\nsynthetic-code\r\n",
-        );
-        assert_eq!(result, Ok(ProcessOutcome::Success));
-        let stderr = String::from_utf8_lossy(&stderr);
-        assert_eq!(
-            stderr
-                .matches("replacing the stored login this build cannot use")
-                .count(),
-            1,
-            "{stderr}"
-        );
-        assert!(!stderr.contains("plak logout"), "{stderr}");
+        for (provider, unusable) in [
+            (NativeProvider::Xai, CredentialState::LoginRequired),
+            (NativeProvider::Xai, CredentialState::ProfileChanged),
+            (NativeProvider::Claude, CredentialState::ProfileChanged),
+        ] {
+            let mut backend =
+                FakeBackend::new(CompatibilityState::Required, CredentialState::Ready);
+            backend.credential = unusable;
+            let (result, _, stderr) = invoke(
+                Command::AuthLogin {
+                    provider,
+                    mode: NativeLoginMode::Remote,
+                },
+                &mut backend,
+                b"exact-review\r\nsynthetic-code\r\n",
+            );
+            assert_eq!(result, Ok(ProcessOutcome::Success), "{unusable:?}");
+            assert!(
+                backend
+                    .calls
+                    .contains(&Call::Login(provider, NativeLoginMode::Remote)),
+                "{unusable:?}: login must reach the provider flow"
+            );
+            let stderr = String::from_utf8_lossy(&stderr);
+            assert_eq!(
+                stderr
+                    .matches("replacing the stored login this build cannot use")
+                    .count(),
+                1,
+                "{stderr}"
+            );
+            assert!(!stderr.contains("plak logout"), "{stderr}");
+        }
 
         let mut healthy = FakeBackend::new(CompatibilityState::Required, CredentialState::Ready);
         healthy.credential = CredentialState::Ready;

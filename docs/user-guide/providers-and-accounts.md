@@ -200,11 +200,12 @@ table with no rows is omitted.
 **CREDENTIAL**, for an OAuth account: `Ready`, `Missing` (signed out),
 `Refresh required`, `Unavailable`, `Revoked`, `Login required · plak login <account>`
 (an earlier-build login, or a payload this build cannot parse),
+`Profile changed · run plak login <account>` (a Grok or Claude login from an
+older build or another profile),
 `Written by a newer plak build · use that build, or plak login <account> to replace it`,
 `Unsupported`.
 When the local read itself fails, the cell is the state and the repair instead,
-for example `Profile changed · plak logout claude, then plak login claude`
-or `Unsafe storage · …` with the path and chmod. A repair too long for the
+for example `Unsafe storage · …` with the path and chmod. A repair too long for the
 column is `Unsafe storage · run plak status <account> for the fix`; that
 command prints the full path and chmod. The other rows still print, and
 bare `plak status` exits 0. For an API-key account: `Environment`, `Key file`,

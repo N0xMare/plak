@@ -9,7 +9,10 @@ use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::commands::application::{AccountCommand, CredentialVerdict};
+use crate::presentation::{CliStatus, CompatibilityState, CredentialState};
 use crate::{telemetry_sink::TelemetryHealth, telemetry_store::CredentialRefreshRow};
+use plakous::subscriptions::NativeProvider;
 use serde::Deserialize;
 
 /// Stable identity of a doctor check, independent of its presentation.
@@ -90,7 +93,7 @@ pub struct DoctorCheck {
     pub severity: Severity,
     pub result: String,
     pub detail: String,
-    pub remediation: Option<&'static str>,
+    pub remediation: Option<String>,
 }
 
 impl DoctorCheck {
@@ -108,7 +111,7 @@ impl DoctorCheck {
             severity,
             result: result.into(),
             detail: detail.into(),
-            remediation,
+            remediation: remediation.map(str::to_owned),
         }
     }
 }
@@ -293,10 +296,14 @@ pub struct OauthCredentialProbes {
     pub claude: OauthCredentialProbe,
 }
 
-/// One provider's durable record metadata plus last-refresh lookup.
+/// One provider's credential verdict, durable record metadata and
+/// last-refresh lookup.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OauthCredentialProbe {
     pub provider: &'static str,
+    /// The one offline classification `plak status` and model runs use; a
+    /// read failure carries the status table's cell for it.
+    pub credential: Result<CliStatus, String>,
     pub record: OauthRecordStatus,
     pub last_refresh: OauthRefreshLookup,
 }
@@ -490,14 +497,17 @@ pub fn inspect_oauth_record(path: &Path) -> OauthRecordStatus {
     }
 }
 
-/// Join one on-disk OAuth record with the latest telemetry row for doctor.
+/// Join one account's credential verdict and on-disk OAuth record with the
+/// latest telemetry row for doctor.
 pub fn probe_oauth_credential(
     provider: &'static str,
+    credential: Result<CliStatus, String>,
     record_path: &Path,
     last_refresh: Result<Option<CredentialRefreshRow>, String>,
 ) -> OauthCredentialProbe {
     OauthCredentialProbe {
         provider,
+        credential,
         record: inspect_oauth_record(record_path),
         last_refresh: match last_refresh {
             Ok(Some(row)) => OauthRefreshLookup::Row(OauthRefreshTelemetry::from_store_row(row)),
@@ -524,15 +534,6 @@ fn format_age_secs(secs: u64) -> String {
         format!("{}h", secs / 3600)
     } else {
         format!("{}d", secs / 86_400)
-    }
-}
-
-fn login_command(provider: &str) -> &'static str {
-    match provider {
-        "xai" => "plak login grok",
-        "codex" => "plak login codex",
-        "claude" => "plak login claude",
-        _ => "plak login",
     }
 }
 
@@ -786,8 +787,9 @@ fn telemetry_check(kind: CheckKind, path: &Path, health: TelemetryHealth) -> Doc
         ));
         check.severity = check.severity.max(Severity::Warning);
         if check.remediation.is_none() {
-            check.remediation =
-                Some("old telemetry files are not migrated or pruned; removal is explicit");
+            check.remediation = Some(
+                "old telemetry files are not migrated or pruned; removal is explicit".to_owned(),
+            );
         }
     }
     if !newer_files.is_empty() {
@@ -1291,43 +1293,85 @@ fn oauth_check(kind: CheckKind, probe: OauthCredentialProbe) -> DoctorCheck {
             format!("refresh telemetry unavailable: {detail}")
         }
     };
-    match probe.record {
-        OauthRecordStatus::Missing => DoctorCheck::new(
-            kind,
-            "oauth",
-            Severity::Ok,
-            "signed_out",
-            refresh_detail,
-            None,
-        ),
-        OauthRecordStatus::Unreadable(reason) => DoctorCheck::new(
-            kind,
-            "oauth",
-            Severity::Error,
-            "unreadable",
-            reason,
-            Some("restore the credential file or run `plak login`"),
-        ),
+    let record_detail = match &probe.record {
+        OauthRecordStatus::Missing => "no record".to_owned(),
+        OauthRecordStatus::Unreadable(reason) => format!("record unreadable: {reason}"),
         OauthRecordStatus::Present {
             status,
             generation,
             mtime_age_secs,
-        } => {
-            let detail = format!(
-                "generation {generation} · record {} old · {refresh_detail}",
-                format_age_secs(mtime_age_secs)
+        } => format!(
+            "record {status} · generation {generation} · {} old",
+            format_age_secs(*mtime_age_secs)
+        ),
+    };
+    let status = match probe.credential {
+        Ok(status) => status,
+        Err(cell) => {
+            return DoctorCheck::new(
+                kind,
+                "oauth",
+                Severity::Error,
+                "unreadable",
+                format!("{cell} · {record_detail} · {refresh_detail}"),
+                None,
             );
-            let quarantined = status == "refresh_outcome_unknown";
-            let (severity, remediation) = if quarantined {
-                (Severity::Warning, Some(login_command(probe.provider)))
-            } else if status == "refresh_required" {
-                (Severity::Warning, None)
-            } else {
-                (Severity::Ok, None)
-            };
-            DoctorCheck::new(kind, "oauth", severity, status, detail, remediation)
         }
-    }
+    };
+    let verdict = CredentialVerdict::from_status(status);
+    let severity = match verdict {
+        CredentialVerdict::SignedOut | CredentialVerdict::Usable(CompatibilityState::Current) => {
+            Severity::Ok
+        }
+        CredentialVerdict::Usable(_)
+        | CredentialVerdict::NeedsRefresh(_)
+        | CredentialVerdict::Quarantined
+        | CredentialVerdict::Unsupported => Severity::Warning,
+        CredentialVerdict::NeedsLogin(_)
+        | CredentialVerdict::WrittenByNewerBuild
+        | CredentialVerdict::ProfileInactive => Severity::Error,
+    };
+    let result = match (verdict, status.credential) {
+        (CredentialVerdict::ProfileInactive, _) => "profile_inactive",
+        (CredentialVerdict::Usable(CompatibilityState::Required), _) => "acceptance_required",
+        (_, CredentialState::SignedOut) => "signed_out",
+        (_, CredentialState::Ready) => "ready",
+        (_, CredentialState::RefreshRequired) => "refresh_required",
+        (_, CredentialState::Quarantined) => "refresh_outcome_unknown",
+        (_, CredentialState::Revoked) => "revoked",
+        (_, CredentialState::LoginRequired) => "retired_format",
+        (_, CredentialState::ProfileChanged) => "profile_changed",
+        (_, CredentialState::WrittenByNewerBuild) => "written_by_newer_build",
+        (_, CredentialState::Unsupported) => "unsupported",
+    };
+    let remediation = match (verdict, native_provider(probe.provider)) {
+        (CredentialVerdict::SignedOut, _) | (_, None) => None,
+        (CredentialVerdict::Usable(CompatibilityState::Required), Some(provider)) => Some(format!(
+            "run plak login {} to review and accept the notice",
+            crate::commands::support::cli_provider_name(provider)
+        )),
+        (verdict, Some(provider)) => verdict.remedy(provider, AccountCommand::Status),
+    };
+    let mut check = DoctorCheck::new(
+        kind,
+        "oauth",
+        severity,
+        result,
+        format!("{record_detail} · {refresh_detail}"),
+        None,
+    );
+    check.remediation = remediation;
+    check
+}
+
+fn native_provider(provider: &str) -> Option<NativeProvider> {
+    [
+        NativeProvider::Codex,
+        NativeProvider::Xai,
+        NativeProvider::Claude,
+    ]
+    .into_iter()
+    .find(|candidate| candidate.as_str() == provider)
 }
 
 fn composition_checks(
@@ -1429,7 +1473,7 @@ mod tests {
             );
             assert_eq!(check.severity, Severity::Error);
             assert_eq!(
-                check.remediation,
+                check.remediation.as_deref(),
                 Some("restore telemetry storage or explicitly remove the reported file to rebuild")
             );
             assert!(check.detail.starts_with(reason));
