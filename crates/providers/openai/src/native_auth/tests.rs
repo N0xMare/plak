@@ -5795,7 +5795,9 @@ async fn offline_admin_survives_expiry_and_kill_without_network() -> TestResult 
 #[tokio::test]
 async fn offline_admin_rejects_foreign_profile_and_unsafe_path() -> TestResult {
     let (_directory, slot_path) = private_slot()?;
-    let foreign_profile = AuthProfileId::new("foreign.profile")?;
+    // An older revision of this profile; an id this build cannot place in
+    // its revision order would read as written by a newer build instead.
+    let foreign_profile = AuthProfileId::new("openai.codex.compat.2026-01-01.r1")?;
     let foreign = PrivateCredentialStore::open_slot(
         &slot_path,
         foreign_profile.clone(),

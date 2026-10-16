@@ -64,8 +64,8 @@ use plakous_auth::{
     AccountBinding, CallbackBinding, ClaimedHttpDisposition, ClaimedHttpError, ClaimedHttpResponse,
     CredentialFence, CredentialGeneration, CredentialRecord, CredentialSlotId, CredentialStatus,
     OfflineCredentialLifecycle, PkceS256, PrivateCredentialStore, PrivateStoreError,
-    ReadyCredentialLease, RefreshClaim, SecretBytes, SecretString, generate_login_selection_epoch,
-    valid_login_selection_epoch,
+    ReadyCredentialLease, RecordAge, RefreshClaim, SecretBytes, SecretString,
+    generate_login_selection_epoch, valid_login_selection_epoch,
 };
 use plakous_exchange::network_failure;
 use plakous_http::{
@@ -529,10 +529,19 @@ impl XaiOfflineSelectedSlot {
     /// Ready record whose payload format is retired exactly as the online
     /// manager does, so offline status never reads it as usable.
     pub fn status(&self) -> Result<XaiOfflineCredentialStatus, XaiNativeAuthError> {
-        if let Some(fence) = self.store.load()? {
-            refuse_retired_payload(&self.store, &fence)?;
+        let status = (|| {
+            if let Some(fence) = self.store.load()? {
+                refuse_retired_payload(&self.store, &fence)?;
+            }
+            offline_status(self.store.status()?)
+        })();
+        match status {
+            Err(
+                XaiNativeAuthError::StoredCredentialWrittenByNewerBuild
+                | XaiNativeAuthError::Store(PrivateStoreError::WrittenByNewerBuild),
+            ) => Ok(OfflineCredentialLifecycle::WrittenByNewerBuild),
+            status => status,
         }
-        offline_status(self.store.status()?)
     }
 
     /// Writes an always-available local revoked tombstone without network I/O.
@@ -983,6 +992,11 @@ impl XaiNativeAuthManager {
             Err(XaiNativeAuthError::StoredCredentialFormatRetired) => {
                 return unavailable(SubscriptionUsageUnavailable::CredentialState(
                     SubscriptionUsageCredentialState::LoginRequired,
+                ));
+            }
+            Err(XaiNativeAuthError::StoredCredentialWrittenByNewerBuild) => {
+                return unavailable(SubscriptionUsageUnavailable::CredentialState(
+                    SubscriptionUsageCredentialState::WrittenByNewerBuild,
                 ));
             }
             Err(_) => return unavailable(SubscriptionUsageUnavailable::AccountChanged),
@@ -2590,6 +2604,10 @@ pub enum XaiNativeAuthError {
     /// The stored credential was written in a format this build no longer reads.
     #[error("the stored xAI credential format is retired; log in again")]
     StoredCredentialFormatRetired,
+    /// A newer build wrote the stored credential; this build neither uses
+    /// nor rewrites it.
+    #[error("the stored xAI credential was written by a newer build")]
+    StoredCredentialWrittenByNewerBuild,
     /// The fresh account-scoped model catalog did not admit the exact pinned model.
     #[error("the exact xAI subscription model is not available in a fresh catalog")]
     CatalogUnavailable,
@@ -2873,8 +2891,12 @@ struct StoredTokens {
 
 impl StoredTokens {
     fn validate(&self, account: &AccountBinding) -> Result<(), XaiNativeAuthError> {
-        if self.version < STORED_TOKENS_VERSION {
-            return Err(XaiNativeAuthError::StoredCredentialFormatRetired);
+        match RecordAge::of_version(self.version.into(), STORED_TOKENS_VERSION.into()) {
+            RecordAge::Older => return Err(XaiNativeAuthError::StoredCredentialFormatRetired),
+            RecordAge::Newer => {
+                return Err(XaiNativeAuthError::StoredCredentialWrittenByNewerBuild);
+            }
+            RecordAge::Current => {}
         }
         if self.version != STORED_TOKENS_VERSION
             || self.issuer != XAI_ISSUER
@@ -3021,12 +3043,28 @@ fn route_credential_authority_id(store: &PrivateCredentialStore) -> String {
     encoded
 }
 
-/// Refuses a Ready record whose payload predates [`STORED_TOKENS_VERSION`].
+/// Only the version of a stored payload.
+#[derive(Deserialize)]
+struct StoredTokensVersion {
+    version: u32,
+}
+
+/// Refuses a record in any lifecycle state whose payload a newer build wrote,
+/// then a Ready record whose payload predates [`STORED_TOKENS_VERSION`].
 /// A lease held elsewhere is not waited for; the next read names it.
 fn refuse_retired_payload(
     store: &PrivateCredentialStore,
     fence: &CredentialFence,
 ) -> Result<(), XaiNativeAuthError> {
+    let newer = store.inspect_payload(|payload| {
+        serde_json::from_slice::<StoredTokensVersion>(payload.expose_secret()).is_ok_and(|stored| {
+            RecordAge::of_version(stored.version.into(), STORED_TOKENS_VERSION.into())
+                == RecordAge::Newer
+        })
+    })?;
+    if newer == Some(true) {
+        return Err(XaiNativeAuthError::StoredCredentialWrittenByNewerBuild);
+    }
     if fence.status() != CredentialStatus::Ready {
         return Ok(());
     }

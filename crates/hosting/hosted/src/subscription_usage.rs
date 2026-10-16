@@ -924,6 +924,9 @@ pub fn unavailable_reason(reason: SubscriptionUsageUnavailable, account: &str) -
             SubscriptionUsageCredentialState::LoginRequired => format!(
                 "the stored login was made by an earlier build and cannot be used; run `plak login {account}`"
             ),
+            SubscriptionUsageCredentialState::WrittenByNewerBuild => format!(
+                "the stored login was written by a newer plak build; use that build, or replace it with `plak login {account}` (that build must then log in again)"
+            ),
         },
         SubscriptionUsageUnavailable::Busy => USAGE_BUSY_REASON.to_owned(),
         SubscriptionUsageUnavailable::LocalState => {

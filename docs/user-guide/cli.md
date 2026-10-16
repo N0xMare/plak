@@ -108,6 +108,11 @@ If a stored login was written by an older build or under another native
 profile, `plak status` says so and names `plak login <account>`. That login
 replaces the old record itself, says so in one line, and authorizes a fresh
 grant (the old grant may remain active at the provider).
+If a newer plak build wrote the stored login, this build does not use or
+change it. `plak login <account>` first asks
+`This login was written by a newer plak build; replacing it means that build must log in again. Continue? [y/N]`;
+anything but `y` leaves it untouched, and without a terminal the command
+refuses without asking. Prefer running the newer build.
 
 ### `plak refresh <codex|grok|claude>`
 

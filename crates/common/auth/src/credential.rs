@@ -45,6 +45,93 @@ impl SubscriptionIntegrationProfileId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Orders this stored profile against the one compiled into this build.
+    ///
+    /// Compatibility profiles are `<vendor>.<product>.compat.<YYYY-MM-DD>.r<N>`.
+    /// For the same `<vendor>.<product>` the date, then the revision, decide.
+    /// An id this build cannot place (another prefix or another grammar) is
+    /// [`RecordAge::Newer`]: only a newer build can have minted it, and
+    /// replacing it would cost that build its login.
+    #[must_use]
+    pub fn age_against(&self, current: &Self) -> RecordAge {
+        if self == current {
+            return RecordAge::Current;
+        }
+        let Some(current) = CompatibilityRevision::parse(current.as_str()) else {
+            return RecordAge::Older;
+        };
+        match CompatibilityRevision::parse(self.as_str()) {
+            Some(stored) if stored.prefix == current.prefix => {
+                if (stored.date, stored.revision) > (current.date, current.revision) {
+                    RecordAge::Newer
+                } else {
+                    RecordAge::Older
+                }
+            }
+            _ => RecordAge::Newer,
+        }
+    }
+}
+
+/// How a stored versioned record relates to the version this build writes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RecordAge {
+    /// Written by an earlier build in a format this build retired.
+    Older,
+    /// Written in exactly the format this build writes.
+    Current,
+    /// Written by a newer build; this build must neither use nor replace it
+    /// without the operator's explicit confirmation.
+    Newer,
+}
+
+impl RecordAge {
+    /// Orders a stored integer format version against this build's.
+    #[must_use]
+    pub const fn of_version(stored: u64, current: u64) -> Self {
+        if stored < current {
+            Self::Older
+        } else if stored == current {
+            Self::Current
+        } else {
+            Self::Newer
+        }
+    }
+}
+
+/// The ordered parts of a `<prefix>.compat.<YYYY-MM-DD>.r<N>` profile id.
+struct CompatibilityRevision<'a> {
+    prefix: &'a str,
+    date: (u16, u8, u8),
+    revision: u32,
+}
+
+impl<'a> CompatibilityRevision<'a> {
+    fn parse(id: &'a str) -> Option<Self> {
+        let (prefix, rest) = id.rsplit_once(".compat.")?;
+        let (date, revision) = rest.split_once(".r")?;
+        if prefix.is_empty() || date.len() != 10 || !digits(revision) {
+            return None;
+        }
+        let mut parts = date.split('-');
+        let (year, month, day) = (parts.next()?, parts.next()?, parts.next()?);
+        if parts.next().is_some() || year.len() != 4 || month.len() != 2 || day.len() != 2 {
+            return None;
+        }
+        if ![year, month, day].iter().all(|part| digits(part)) {
+            return None;
+        }
+        Some(Self {
+            prefix,
+            date: (year.parse().ok()?, month.parse().ok()?, day.parse().ok()?),
+            revision: revision.parse().ok()?,
+        })
+    }
+}
+
+fn digits(value: &str) -> bool {
+    !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 impl fmt::Debug for SubscriptionIntegrationProfileId {
@@ -233,6 +320,9 @@ pub enum OfflineCredentialLifecycle {
     /// A record exists that this build cannot use (for example a login made
     /// by an earlier build); a new login is required.
     LoginRequired,
+    /// A record a newer build wrote. This build neither uses nor rewrites
+    /// it; only an explicit confirmed replacement or local retirement may.
+    WrittenByNewerBuild,
 }
 
 impl OfflineCredentialLifecycle {
@@ -469,6 +559,37 @@ fn valid_opaque_token(value: &str, maximum: usize) -> bool {
 )]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stored_profile_ids_order_by_date_then_revision_and_unplaceable_ids_are_newer()
+    -> Result<(), CredentialValueError> {
+        let id = SubscriptionIntegrationProfileId::new;
+        let current = id("openai.codex.compat.2026-07-31.r1")?;
+        for (stored, age) in [
+            ("openai.codex.compat.2026-07-31.r1", RecordAge::Current),
+            ("openai.codex.compat.2026-07-31.r0", RecordAge::Older),
+            ("openai.codex.compat.2026-06-30.r9", RecordAge::Older),
+            ("openai.codex.compat.2025-12-31.r12", RecordAge::Older),
+            ("openai.codex.compat.2026-07-31.r2", RecordAge::Newer),
+            ("openai.codex.compat.2026-08-01.r0", RecordAge::Newer),
+            ("openai.codex.compat.2027-01-01.r1", RecordAge::Newer),
+            ("openai.codex.v2.compat.2026-07-31.r1", RecordAge::Newer),
+            ("xai.grok.compat.2026-07-31.r1", RecordAge::Newer),
+            ("openai.codex.compat.2026-7-31.r1", RecordAge::Newer),
+            ("openai.codex.compat.2026-07-31.rx", RecordAge::Newer),
+            ("openai.codex.profile.3", RecordAge::Newer),
+            ("previous-profile", RecordAge::Newer),
+        ] {
+            assert_eq!(id(stored)?.age_against(&current), age, "{stored}");
+        }
+        // A build whose own id is outside the grammar keeps refusing other
+        // ids as another profile.
+        assert_eq!(id("work")?.age_against(&id("home")?), RecordAge::Older);
+        assert_eq!(RecordAge::of_version(2, 3), RecordAge::Older);
+        assert_eq!(RecordAge::of_version(3, 3), RecordAge::Current);
+        assert_eq!(RecordAge::of_version(4, 3), RecordAge::Newer);
+        Ok(())
+    }
 
     #[test]
     fn values_are_bounded_and_debug_safe() -> Result<(), CredentialValueError> {

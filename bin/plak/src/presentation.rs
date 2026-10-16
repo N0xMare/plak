@@ -47,6 +47,8 @@ pub enum CredentialState {
     Revoked,
     /// A stored login this build cannot use; a new login is required.
     LoginRequired,
+    /// A newer build wrote the stored login; this build leaves it untouched.
+    WrittenByNewerBuild,
     /// Credential state is unsupported.
     Unsupported,
 }
@@ -356,6 +358,11 @@ pub fn tui_presentation_bundle_with_backend_and_composition(
                     "login made by an earlier build; log in again".to_owned(),
                     false,
                 ),
+                CredentialState::WrittenByNewerBuild => (
+                    plakous_host_protocol::views::ProviderState::Unavailable,
+                    "written by a newer plak build".to_owned(),
+                    false,
+                ),
                 CredentialState::Ready | CredentialState::Unsupported => (
                     plakous_host_protocol::views::ProviderState::Unavailable,
                     "unsupported credential state".to_owned(),
@@ -615,6 +622,7 @@ const fn credential_state(status: FacadeAuthStatus) -> CredentialState {
         FacadeAuthStatus::Quarantined => CredentialState::Quarantined,
         FacadeAuthStatus::Revoked => CredentialState::Revoked,
         FacadeAuthStatus::LoginRequired => CredentialState::LoginRequired,
+        FacadeAuthStatus::WrittenByNewerBuild => CredentialState::WrittenByNewerBuild,
         _ => CredentialState::Unsupported,
     }
 }

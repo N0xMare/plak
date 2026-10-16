@@ -562,6 +562,17 @@ every other account, exiting 0.
 `plak status <account>` and the other credential commands still print the
 repair on stderr and exit 3.
 
+## `the stored <account> login was written by a newer plak build …`
+
+A newer plak build logged in to this account, and this (older) build reads
+its record, receipt or recovery state as newer than it understands. It sends
+nothing, and status, usage, refresh and runs leave the files exactly as they
+are. Use the newer build. To use this build anyway, run
+`plak login <account>` in a terminal and answer `y`: the newer build's login
+is retired here and that build must then log in again. Without a terminal, or
+with any other answer, nothing changes. `plak logout <account> --local`
+retires it without the prompt.
+
 ## `plak: … legacy state entries … remain in …`
 
 `plak doctor` lists non-current state paths with their sizes, or a size-unavailable

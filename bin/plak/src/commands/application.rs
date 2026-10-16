@@ -91,6 +91,9 @@ pub enum CredentialVerdict {
     Quarantined,
     /// A record this build cannot use; a new login replaces it.
     NeedsLogin(LoginReason),
+    /// A newer build wrote the stored login; this build neither uses nor
+    /// rewrites it unless the operator confirms replacing it.
+    WrittenByNewerBuild,
     /// The compiled compatibility profile is no longer admissible.
     ProfileInactive,
     /// Native subscription storage is unavailable on this platform.
@@ -131,6 +134,7 @@ impl CredentialVerdict {
             CredentialState::RefreshRequired => Self::NeedsRefresh(status.compatibility),
             CredentialState::Quarantined => Self::Quarantined,
             CredentialState::LoginRequired => Self::NeedsLogin(LoginReason::RetiredFormat),
+            CredentialState::WrittenByNewerBuild => Self::WrittenByNewerBuild,
             CredentialState::Unsupported => Self::Unsupported,
         }
     }
@@ -143,6 +147,9 @@ impl CredentialVerdict {
             Err(OfflineReadError::Subscription(
                 plakous::subscriptions::NativeSubscriptionError::CredentialProfileChanged,
             )) => Ok(Self::NeedsLogin(LoginReason::ProfileChanged)),
+            Err(OfflineReadError::Subscription(
+                plakous::subscriptions::NativeSubscriptionError::CredentialWrittenByNewerBuild,
+            )) => Ok(Self::WrittenByNewerBuild),
             Err(error) => Err(error),
         }
     }
@@ -153,9 +160,11 @@ impl CredentialVerdict {
             Self::Usable(compatibility) | Self::NeedsRefresh(compatibility) => {
                 StoredCredential::Usable(compatibility)
             }
-            Self::Quarantined | Self::NeedsLogin(_) | Self::ProfileInactive | Self::Unsupported => {
-                StoredCredential::Unusable
-            }
+            Self::Quarantined
+            | Self::NeedsLogin(_)
+            | Self::WrittenByNewerBuild
+            | Self::ProfileInactive
+            | Self::Unsupported => StoredCredential::Unusable,
         }
     }
 
@@ -173,6 +182,12 @@ impl CredentialVerdict {
             }
             Self::SignedOut | Self::NeedsLogin(_) | Self::Quarantined => login.clone(),
             Self::NeedsRefresh(_) => refresh.clone(),
+            Self::WrittenByNewerBuild if after == AccountCommand::Login => {
+                return Some("use the newer plak build that wrote it".to_owned());
+            }
+            Self::WrittenByNewerBuild => format!(
+                "use the newer plak build that wrote it, or {login} to replace it (that build must then log in again)"
+            ),
             Self::ProfileInactive => "use a newer plak build".to_owned(),
             Self::Unsupported => "use an API-key account (plak key set <account>)".to_owned(),
         };
@@ -255,6 +270,9 @@ pub trait AccountOps {
     fn revoke(&mut self, provider: NativeProvider) -> CliResult<Revocation>;
 
     fn logout_local(&mut self, provider: NativeProvider) -> CliResult<CredentialState>;
+
+    /// Retires a newer build's login state after the operator confirmed it.
+    fn replace_newer_build(&mut self, provider: NativeProvider) -> CliResult<CredentialState>;
 
     fn models(&mut self, provider: NativeProvider) -> CliResult<Vec<CliModelSummary>>;
 
@@ -449,9 +467,10 @@ fn revocation_from(
 ) -> Result<Revocation, plakous::subscriptions::NativeSubscriptionError> {
     match result {
         Ok(status) => Ok(Revocation::Revoked(credential_state(status))),
-        Err(plakous::subscriptions::NativeSubscriptionError::CredentialProfileChanged) => {
-            Ok(Revocation::Unusable)
-        }
+        Err(
+            plakous::subscriptions::NativeSubscriptionError::CredentialProfileChanged
+            | plakous::subscriptions::NativeSubscriptionError::CredentialWrittenByNewerBuild,
+        ) => Ok(Revocation::Unusable),
         Err(error) => Err(error),
     }
 }
@@ -648,6 +667,14 @@ impl AccountOps for PlakousApplication {
             .map_err(|error| self.subscription_failure(error, Some(provider)))
     }
 
+    fn replace_newer_build(&mut self, provider: NativeProvider) -> CliResult<CredentialState> {
+        self.executor
+            .block_on(self.subscriptions.replace_newer_build_state(provider))
+            .map_err(application_execution_failure)?
+            .map(credential_state)
+            .map_err(|error| self.subscription_failure(error, Some(provider)))
+    }
+
     fn openrouter_models(&mut self) -> CliResult<Vec<String>> {
         let paths = self.product_paths()?;
         self.executor
@@ -766,6 +793,23 @@ mod tests {
                     NativeSubscriptionError::CredentialProfileChanged,
                 )),
             ),
+            // A newer envelope, payload version (Codex `version: 2`), newer
+            // or unplaceable profile id, receipt or recovery marker all read
+            // as this one status offline and this one refusal online.
+            (
+                "newer-build record",
+                read_of(K::Current, CredentialState::WrittenByNewerBuild),
+            ),
+            (
+                "newer-build receipt",
+                read_of(K::Required, CredentialState::WrittenByNewerBuild),
+            ),
+            (
+                "newer-build record refused online",
+                Err(OfflineReadError::Subscription(
+                    NativeSubscriptionError::CredentialWrittenByNewerBuild,
+                )),
+            ),
         ];
         let commands = [
             C::Status,
@@ -793,9 +837,10 @@ mod tests {
             for (label, fixture) in &states {
                 let read = match fixture {
                     Ok(state) => Ok(*state),
-                    Err(_) => Err(OfflineReadError::Subscription(
-                        NativeSubscriptionError::CredentialProfileChanged,
-                    )),
+                    Err(OfflineReadError::Subscription(error)) => {
+                        Err(OfflineReadError::Subscription(*error))
+                    }
+                    Err(OfflineReadError::Execution) => Err(OfflineReadError::Execution),
                 };
                 let verdict = V::classify(read).unwrap_or_else(|_| panic!("{label}"));
                 // Logout's view is the same verdict.
@@ -806,6 +851,13 @@ mod tests {
                     }
                     V::SignedOut => assert_eq!(stored, StoredCredential::Absent, "{label}"),
                     _ => assert_eq!(stored, StoredCredential::Unusable, "{label}"),
+                }
+                if label.starts_with("newer-build") {
+                    assert_eq!(verdict, V::WrittenByNewerBuild, "{label}");
+                    for after in commands {
+                        let remedy = verdict.remedy(provider, after).unwrap_or_default();
+                        assert!(remedy.contains("newer plak build"), "{label}: {remedy}");
+                    }
                 }
                 if matches!(verdict, V::NeedsLogin(_)) {
                     assert!(matches!(
@@ -874,6 +926,7 @@ mod tests {
         for error in [
             E::UnsafeStorage,
             E::CredentialProfileChanged,
+            E::CredentialWrittenByNewerBuild,
             E::UnsupportedPlatform,
             E::AcceptanceRequired,
             E::ProfileInactive,

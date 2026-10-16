@@ -5939,7 +5939,9 @@ that unsafe-storage repair would exceed the 512-character cell cap, the cell is
 mid-remedy; `plak status <account>` prints the repair in full. A
 credential this build can read but not use stays a normal row; login-required
 (an earlier build's Codex login, or a payload this build cannot parse) reads
-`Login required · plak login <account>`. The other OAuth accounts and the
+`Login required · plak login <account>`. A record a newer build wrote reads
+`Written by a newer plak build · use that build, or plak login <account> to
+replace it`, and `plak status <account>` prints `credential=written-by-newer-build`. The other OAuth accounts and the
 API-key rows are printed either way, and one API-key read that fails is an
 `Unreadable` cell rather than an aborted table. The command stays offline and
 exits 0. `plak status <account>` still exits 3 when that one account cannot be

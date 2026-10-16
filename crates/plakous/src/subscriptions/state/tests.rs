@@ -596,8 +596,9 @@ async fn claude_foreign_profile_is_retired_by_logout_or_replaced_by_login()
     let root = unique_test_root("claude-foreign-profile-local-retirement")?;
     let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
     paths.prepare()?;
-    let old_profile =
-        plakous_auth::SubscriptionIntegrationProfileId::new("previous-claude-profile")?;
+    let old_profile = plakous_auth::SubscriptionIntegrationProfileId::new(
+        "anthropic.claude.oauth.compat.2026-01-01.r1",
+    )?;
     let old_store = plakous_auth::PrivateCredentialStore::open_slot(
         paths.provider_record(NativeProvider::Claude),
         old_profile.clone(),
@@ -725,6 +726,271 @@ async fn xai_retired_payload_reads_as_profile_changed_and_local_logout_repairs_i
     assert!(!again.replaced_unusable_record());
     drop(again);
     fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+/// The ways a newer build's state reaches this build: a newer envelope, a
+/// newer payload version (Codex: a present `version` above 1), a newer or
+/// unplaceable compatibility profile, a newer receipt and a newer recovery
+/// marker.
+#[derive(Clone, Copy, Debug)]
+enum NewerState {
+    Envelope,
+    Payload,
+    Profile,
+    UnplaceableProfile,
+    Receipt,
+    RecoveryMarker,
+}
+
+/// Each seeded file and the exact bytes it must keep.
+type SeededFiles = Vec<(PathBuf, Vec<u8>)>;
+
+fn seed_newer_state(
+    paths: &SubscriptionPaths,
+    provider: NativeProvider,
+    shape: NewerState,
+) -> Result<SeededFiles, Box<dyn Error>> {
+    use std::os::unix::fs::PermissionsExt as _;
+    let notice = NativeSubscriptions::notice(provider);
+    let now = unix_now()?;
+    store_acceptance(paths, notice, now)?;
+    let current = notice.profile_id();
+    let (prefix, _) = current.rsplit_once(".compat.").ok_or("profile grammar")?;
+    let newer_profile = format!("{prefix}.compat.2099-01-01.r1");
+    let payload_version = if provider == NativeProvider::Codex {
+        2
+    } else {
+        99
+    };
+    let (format_version, profile, payload) = match shape {
+        NewerState::Envelope => (3, current.to_owned(), serde_json::json!({})),
+        NewerState::Payload => (
+            2,
+            current.to_owned(),
+            serde_json::json!({ "version": payload_version, "future": true }),
+        ),
+        NewerState::Profile => (2, newer_profile.clone(), serde_json::json!({})),
+        NewerState::UnplaceableProfile => {
+            (2, "renamed-newer-profile".to_owned(), serde_json::json!({}))
+        }
+        NewerState::Receipt | NewerState::RecoveryMarker => {
+            (2, current.to_owned(), serde_json::json!({ "version": 0 }))
+        }
+    };
+    let record = serde_json::json!({
+        "format_version": format_version,
+        "profile_id": profile,
+        "slot_id": PRIMARY_SLOT,
+        "account_binding": "newer-account",
+        "generation": 7,
+        "status": "ready",
+        "payload": base64_encode(&serde_json::to_vec(&payload)?),
+    });
+    // Receipt and marker shapes leave the slot signed out, so only that file
+    // is newer.
+    let mut files = Vec::new();
+    if !matches!(shape, NewerState::Receipt | NewerState::RecoveryMarker) {
+        files.push((
+            paths.provider_record(provider),
+            serde_json::to_vec(&record)?,
+        ));
+    }
+    match shape {
+        NewerState::Receipt => files.push((
+            paths.receipt_path(provider),
+            serde_json::to_vec(&serde_json::json!({
+                "schema": 3,
+                "profile_id": newer_profile,
+                "future": true,
+            }))?,
+        )),
+        NewerState::RecoveryMarker => files.push((
+            paths.login_recovery_path(provider),
+            serde_json::to_vec(&serde_json::json!({
+                "schema": "plak.native-login-recovery",
+                "version": 3,
+                "future": true,
+            }))?,
+        )),
+        _ => {}
+    }
+    for (path, bytes) in &files {
+        fs::write(path, bytes)?;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(files)
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut encoded = String::new();
+    for chunk in bytes.chunks(3) {
+        let value = chunk
+            .iter()
+            .enumerate()
+            .fold(0_u32, |value, (index, byte)| {
+                value | (u32::from(*byte) << (16 - 8 * index))
+            });
+        for index in 0..4 {
+            if index <= chunk.len() {
+                encoded.push(char::from(
+                    ALPHABET[((value >> (18 - 6 * index)) & 63) as usize],
+                ));
+            } else {
+                encoded.push('=');
+            }
+        }
+    }
+    encoded
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn newer_build_state_is_refused_untouched_until_a_confirmed_replacement()
+-> Result<(), Box<dyn Error>> {
+    for provider in [
+        NativeProvider::Codex,
+        NativeProvider::Xai,
+        NativeProvider::Claude,
+    ] {
+        for shape in [
+            NewerState::Envelope,
+            NewerState::Payload,
+            NewerState::Profile,
+            NewerState::UnplaceableProfile,
+            NewerState::Receipt,
+            NewerState::RecoveryMarker,
+        ] {
+            let label = format!("{provider:?} {shape:?}");
+            let root = unique_test_root(&format!("newer-{}", label.replace(' ', "-")))?;
+            let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
+            paths.prepare()?;
+            let files = seed_newer_state(&paths, provider, shape)?;
+            let subscriptions = NativeSubscriptions::new(paths.clone());
+            let untouched = || -> Result<(), Box<dyn Error>> {
+                for (path, bytes) in &files {
+                    assert_eq!(&fs::read(path)?, bytes, "{label}: {}", path.display());
+                }
+                Ok(())
+            };
+            assert_eq!(
+                subscriptions.status(provider).await?.credential(),
+                NativeAuthStatus::WrittenByNewerBuild,
+                "{label}"
+            );
+            untouched()?;
+            assert_eq!(
+                subscriptions.refresh(provider).await,
+                Err(NativeSubscriptionError::CredentialWrittenByNewerBuild),
+                "{label}"
+            );
+            assert!(
+                subscriptions.refresh_now(provider).await.is_err(),
+                "{label}"
+            );
+            untouched()?;
+            assert!(
+                matches!(
+                    subscriptions.subscription_usage(provider).await,
+                    SubscriptionUsageRead::Unavailable {
+                        reason: SubscriptionUsageUnavailable::CredentialState(
+                            SubscriptionUsageCredentialState::WrittenByNewerBuild
+                        ),
+                        ..
+                    }
+                ),
+                "{label}"
+            );
+            untouched()?;
+            assert_eq!(
+                subscriptions.revoke(provider).await,
+                Err(NativeSubscriptionError::CredentialWrittenByNewerBuild),
+                "{label}"
+            );
+            assert!(
+                matches!(
+                    subscriptions
+                        .begin_login(provider, NativeLoginMode::Remote)
+                        .await,
+                    Err(NativeSubscriptionError::CredentialWrittenByNewerBuild)
+                ),
+                "{label}"
+            );
+            untouched()?;
+            let notice = NativeSubscriptions::notice(provider);
+            if matches!(shape, NewerState::Receipt) {
+                assert_eq!(
+                    subscriptions
+                        .acknowledge_exact(provider, notice.notice_revision())
+                        .await,
+                    Err(NativeSubscriptionError::CredentialWrittenByNewerBuild),
+                    "{label}"
+                );
+                untouched()?;
+            }
+
+            // The operator's confirmed replacement retires it; login then opens.
+            let replaced = subscriptions.replace_newer_build_state(provider).await?;
+            assert!(
+                matches!(
+                    replaced,
+                    NativeAuthStatus::Revoked | NativeAuthStatus::SignedOut
+                ) || matches!(shape, NewerState::Receipt | NewerState::RecoveryMarker),
+                "{label}: {replaced:?}"
+            );
+            assert_ne!(
+                subscriptions.status(provider).await?.credential(),
+                NativeAuthStatus::WrittenByNewerBuild,
+                "{label}"
+            );
+            assert!(!paths.login_recovery_path(provider).exists(), "{label}");
+            if matches!(shape, NewerState::Receipt) {
+                assert!(!paths.receipt_path(provider).exists(), "{label}");
+                subscriptions
+                    .acknowledge_exact(provider, notice.notice_revision())
+                    .await?;
+            }
+            fs::remove_dir_all(root)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn local_logout_retires_a_newer_build_record_without_a_prompt() -> Result<(), Box<dyn Error>>
+{
+    for provider in [
+        NativeProvider::Codex,
+        NativeProvider::Xai,
+        NativeProvider::Claude,
+    ] {
+        for shape in [
+            NewerState::Envelope,
+            NewerState::Payload,
+            NewerState::Profile,
+        ] {
+            let root = unique_test_root(&format!("newer-logout-{provider:?}-{shape:?}"))?;
+            let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
+            paths.prepare()?;
+            seed_newer_state(&paths, provider, shape)?;
+            let subscriptions = NativeSubscriptions::new(paths.clone());
+            let status = subscriptions.logout_local(provider).await?;
+            assert!(
+                matches!(
+                    status,
+                    NativeAuthStatus::Revoked | NativeAuthStatus::SignedOut
+                ),
+                "{provider:?} {shape:?}: {status:?}"
+            );
+            assert!(matches!(
+                subscriptions.status(provider).await?.credential(),
+                NativeAuthStatus::Revoked | NativeAuthStatus::SignedOut
+            ));
+            fs::remove_dir_all(root)?;
+        }
+    }
     Ok(())
 }
 

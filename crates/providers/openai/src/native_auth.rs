@@ -73,7 +73,7 @@ use plakous_auth::{
     AccountBinding, AuthSingleFlight, AuthSingleFlightGuard, ClaimedHttpDisposition,
     ClaimedHttpError, ClaimedHttpResponse, CredentialFence, CredentialGeneration, CredentialRecord,
     CredentialSlotId, CredentialStatus, OfflineCredentialLifecycle, PrivateCredentialStore,
-    PrivateStoreError, ReadyCredentialLease, RefreshClaim, SecretBytes,
+    PrivateStoreError, ReadyCredentialLease, RecordAge, RefreshClaim, SecretBytes,
     SecretString as AuthSecretString, SubscriptionIntegrationProfileId as AuthProfileId,
     generate_login_selection_epoch, generate_oauth_correlation_token, valid_login_selection_epoch,
 };
@@ -357,6 +357,10 @@ pub enum NativeCodexAuthError {
     /// made by an earlier build without a login selection epoch); log in again.
     #[error("native Codex login must be renewed with a new login")]
     LoginRequired,
+    /// A newer build wrote the stored login; this build neither uses nor
+    /// rewrites it.
+    #[error("native Codex login was written by a newer build")]
+    WrittenByNewerBuild,
     /// The selected login changed (a new login) under an admitted receipt.
     #[error("native Codex login selection changed")]
     SelectionChanged,
@@ -443,7 +447,12 @@ impl CodexSubscriptionLocalAdmin {
                 PrivateCredentialStore::open_slot(&slot_path, profile, slot)
                     .map_err(|_| NativeCodexAuthError::Store)?,
             );
-            let _validated = store.load().map_err(|_| NativeCodexAuthError::Store)?;
+            // A newer build's record is opened so status can name it and
+            // local logout can retire it.
+            match store.load() {
+                Ok(_) | Err(PrivateStoreError::WrittenByNewerBuild) => {}
+                Err(_) => return Err(NativeCodexAuthError::Store),
+            }
             Ok(store)
         })
         .await?;
@@ -565,7 +574,10 @@ impl CodexSubscriptionCredentialManager {
             PrivateCredentialStore::open_slot(slot_path, auth_profile, slot)
                 .map_err(|_| NativeCodexAuthError::Store)?,
         );
-        let existing = store.load().map_err(|_| NativeCodexAuthError::Store)?;
+        let existing = store.load().map_err(|error| match error {
+            PrivateStoreError::WrittenByNewerBuild => NativeCodexAuthError::WrittenByNewerBuild,
+            _ => NativeCodexAuthError::Store,
+        })?;
         let selected = SelectedAccount {
             binding: existing
                 .as_ref()
@@ -724,6 +736,11 @@ impl CodexSubscriptionCredentialManager {
         };
         let credential = match parse_stored(lease.payload()) {
             Ok(credential) => credential,
+            Err(NativeCodexAuthError::WrittenByNewerBuild) => {
+                return unavailable(SubscriptionUsageUnavailable::CredentialState(
+                    SubscriptionUsageCredentialState::WrittenByNewerBuild,
+                ));
+            }
             Err(_) => {
                 return unavailable(SubscriptionUsageUnavailable::CredentialState(
                     SubscriptionUsageCredentialState::LoginRequired,
@@ -1000,7 +1017,21 @@ fn map_oauth_workflow_error(error: OAuthWorkflowError) -> NativeCodexAuthError {
 fn local_credential_status(
     store: &PrivateCredentialStore,
 ) -> Result<CodexCredentialStatus, NativeCodexAuthError> {
-    let fence = store.load().map_err(|_| NativeCodexAuthError::Store)?;
+    let fence = match store.load() {
+        Ok(fence) => fence,
+        Err(PrivateStoreError::WrittenByNewerBuild) => {
+            return Ok(OfflineCredentialLifecycle::WrittenByNewerBuild);
+        }
+        Err(_) => return Err(NativeCodexAuthError::Store),
+    };
+    if fence.is_some()
+        && store
+            .inspect_payload(|payload| payload_age(payload) == RecordAge::Newer)
+            .map_err(|_| NativeCodexAuthError::Store)?
+            == Some(true)
+    {
+        return Ok(OfflineCredentialLifecycle::WrittenByNewerBuild);
+    }
     if let Some(fence) = fence
         .as_ref()
         .filter(|fence| fence.status() == CredentialStatus::Ready)
@@ -1231,13 +1262,39 @@ impl Drop for StoredCredential {
     }
 }
 
+/// The payload version this build writes. Its shape carries no `version`
+/// field; the next build that changes it writes `"version": 2`.
+const STORED_CREDENTIAL_VERSION: u64 = 1;
+
+/// Only the optional top-level version, read before the strict parse.
+#[derive(Deserialize)]
+struct StoredVersionProbe {
+    #[serde(default)]
+    version: Option<u64>,
+}
+
+/// An absent version is this build's own shape. A present version greater
+/// than this build's is a newer build's; any other present version is
+/// malformed (no build writes it) and fails the strict parse as before.
+fn payload_age(payload: &SecretBytes) -> RecordAge {
+    match serde_json::from_slice::<StoredVersionProbe>(payload.expose_secret()) {
+        Ok(StoredVersionProbe {
+            version: Some(version),
+        }) if version > STORED_CREDENTIAL_VERSION => RecordAge::Newer,
+        _ => RecordAge::Current,
+    }
+}
+
 /// Every payload this build cannot parse, whether a login stored by an
 /// earlier build without a selection epoch or a corrupt record, is
 /// `LoginRequired`: it needs a new login, and nothing is synthesized or
-/// parsed in an older shape.
+/// parsed in an older shape. A newer build's payload is never parsed.
 fn parse_stored(payload: &SecretBytes) -> Result<StoredCredential, NativeCodexAuthError> {
     if payload.is_empty() || payload.len() > MAX_AUTH_BODY_BYTES {
         return Err(NativeCodexAuthError::Validation);
+    }
+    if payload_age(payload) == RecordAge::Newer {
+        return Err(NativeCodexAuthError::WrittenByNewerBuild);
     }
     let credential: StoredCredential = serde_json::from_slice(payload.expose_secret())
         .map_err(|_| NativeCodexAuthError::LoginRequired)?;
@@ -2387,7 +2444,8 @@ fn renewal_error(error: NativeCodexAuthError) -> RuntimeModelAuthorityError {
     match error {
         NativeCodexAuthError::AccountChanged
         | NativeCodexAuthError::SelectionChanged
-        | NativeCodexAuthError::LoginRequired => RuntimeModelAuthorityError::ForeignAuthority,
+        | NativeCodexAuthError::LoginRequired
+        | NativeCodexAuthError::WrittenByNewerBuild => RuntimeModelAuthorityError::ForeignAuthority,
         NativeCodexAuthError::Unavailable => RuntimeModelAuthorityError::Unavailable,
         _ => RuntimeModelAuthorityError::Stale,
     }

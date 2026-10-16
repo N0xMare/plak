@@ -4139,7 +4139,7 @@ mod tests {
         );
         write(
             &subscriptions.join("claude/credential.json"),
-            br#"{"format_version":2,"profile_id":"previous-claude-profile","slot_id":"primary","account_binding":"old-claude-grant","generation":1,"status":"ready","payload":"e30="}"#,
+            br#"{"format_version":2,"profile_id":"anthropic.claude.oauth.compat.2026-01-01.r1","slot_id":"primary","account_binding":"old-claude-grant","generation":1,"status":"ready","payload":"e30="}"#,
             0o600,
         );
         write(
@@ -4380,6 +4380,7 @@ mod tests {
         RefreshNow(NativeProvider),
         Revoke(NativeProvider),
         LogoutLocal(NativeProvider),
+        ReplaceNewerBuild(NativeProvider),
         Models(NativeProvider),
         OpenRouterModels,
     }
@@ -4582,6 +4583,12 @@ mod tests {
         fn logout_local(&mut self, provider: NativeProvider) -> CliResult<CredentialState> {
             self.calls.push(Call::LogoutLocal(provider));
             Ok(self.terminal)
+        }
+
+        fn replace_newer_build(&mut self, provider: NativeProvider) -> CliResult<CredentialState> {
+            self.calls.push(Call::ReplaceNewerBuild(provider));
+            self.credential = CredentialState::Revoked;
+            Ok(self.credential)
         }
 
         fn openrouter_models(&mut self) -> CliResult<Vec<String>> {
@@ -6713,6 +6720,7 @@ mod tests {
                 | Call::Usage(_)
                 | Call::Acknowledge(_, _)
                 | Call::LogoutLocal(_)
+                | Call::ReplaceNewerBuild(_)
                 | Call::Models(_)
                 | Call::OpenRouterModels => {
                     panic!("test case must end in a network action")
@@ -7059,6 +7067,72 @@ exact-model-b\tvisibility=hide\ttool_mode=direct\tstreaming=true\ttools=false\tr
         assert_eq!(output, [] as [u8; 0]);
         assert!(!paths.product_database().exists());
         assert!(!paths.runtime_database().exists());
+    }
+
+    #[test]
+    fn login_over_a_newer_build_record_replaces_it_only_after_a_yes() {
+        let newer = || {
+            let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
+            backend.credential = CredentialState::WrittenByNewerBuild;
+            backend
+        };
+        let replaced = |backend: &FakeBackend| {
+            backend
+                .calls
+                .iter()
+                .any(|call| matches!(call, Call::ReplaceNewerBuild(_)))
+        };
+        let prompt = "This login was written by a newer plak build; replacing it means that build must log in again. Continue? [y/N] ";
+        for (input, yes) in [
+            (&b"y\n"[..], true),
+            (b"YES\n", true),
+            (b"n\n", false),
+            (b"\n", false),
+            (b"", false),
+            (b"\xff\n", false),
+        ] {
+            let mut backend = newer();
+            let mut stderr = Vec::new();
+            let result = commands::login::confirm_newer_build_replacement(
+                &mut backend,
+                NativeProvider::Xai,
+                true,
+                &mut Cursor::new(input),
+                &mut stderr,
+            );
+            assert_eq!(result.is_ok(), yes, "{input:?}");
+            assert_eq!(replaced(&backend), yes, "{input:?}");
+            assert!(String::from_utf8(stderr).unwrap().starts_with(prompt));
+            if let Err(failure) = result {
+                assert_eq!(
+                    failure.message(),
+                    "the stored grok login was written by a newer plak build; it was kept and nothing was changed; use the newer build"
+                );
+            }
+        }
+
+        // Without a terminal nothing is asked, read or replaced.
+        let mut backend = newer();
+        let mut input = Cursor::new(b"y\n");
+        let mut ui = commands::login_flow::TestLoginUi::default();
+        let mut stderr = Vec::new();
+        let failure = auth_login(
+            &mut backend,
+            NativeProvider::Codex,
+            NativeLoginMode::Browser,
+            &mut input,
+            &mut stderr,
+            &mut ui,
+        )
+        .unwrap_err();
+        assert_eq!(
+            failure.message(),
+            "the stored codex login was written by a newer plak build; replacing it needs a confirmation, so nothing was changed; confirm it from a terminal, or use the newer build"
+        );
+        assert_eq!(input.position(), 0);
+        assert_eq!(stderr, Vec::<u8>::new());
+        assert!(!replaced(&backend));
+        assert_eq!(backend.completed_login_modes, []);
     }
 
     #[test]

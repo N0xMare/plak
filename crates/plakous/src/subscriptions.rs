@@ -224,6 +224,10 @@ pub enum NativeAuthStatus {
     /// A stored login this build cannot use (made by an earlier build); a new
     /// login is required.
     LoginRequired,
+    /// A newer build wrote the stored login, its receipt or its recovery
+    /// state. This build neither uses nor rewrites it; see
+    /// [`NativeSubscriptions::replace_newer_build_state`].
+    WrittenByNewerBuild,
 }
 
 /// Credential-free compatibility acceptance state.
@@ -1459,6 +1463,9 @@ impl NativeSubscriptions {
         let paths = self.state.clone();
         run_blocking(move || {
             lock.verify()?;
+            if paths.receipt_written_by_newer_build(notice)? {
+                return Err(NativeSubscriptionError::CredentialWrittenByNewerBuild);
+            }
             let now = unix_now()?;
             let previous = paths.stored_acceptance_generation(provider)?;
             let next = paths.store_acceptance(notice, now)?;
@@ -1533,6 +1540,11 @@ impl NativeSubscriptions {
                         SubscriptionUsageCredentialState::LoginRequired,
                     ));
                 }
+                Err(NativeSubscriptionError::CredentialWrittenByNewerBuild) => {
+                    return unavailable(SubscriptionUsageUnavailable::CredentialState(
+                        SubscriptionUsageCredentialState::WrittenByNewerBuild,
+                    ));
+                }
                 Err(_) => return unavailable(SubscriptionUsageUnavailable::LocalState),
             },
             NativeProvider::Xai => match self.xai_online().await {
@@ -1546,6 +1558,11 @@ impl NativeSubscriptions {
                         SubscriptionUsageCredentialState::LoginRequired,
                     ));
                 }
+                Err(NativeSubscriptionError::CredentialWrittenByNewerBuild) => {
+                    return unavailable(SubscriptionUsageUnavailable::CredentialState(
+                        SubscriptionUsageCredentialState::WrittenByNewerBuild,
+                    ));
+                }
                 Err(_) => return unavailable(SubscriptionUsageUnavailable::LocalState),
             },
             NativeProvider::Claude => match self.claude_online().await {
@@ -1557,6 +1574,11 @@ impl NativeSubscriptions {
                 Err(NativeSubscriptionError::CredentialProfileChanged) => {
                     return unavailable(SubscriptionUsageUnavailable::CredentialState(
                         SubscriptionUsageCredentialState::LoginRequired,
+                    ));
+                }
+                Err(NativeSubscriptionError::CredentialWrittenByNewerBuild) => {
+                    return unavailable(SubscriptionUsageUnavailable::CredentialState(
+                        SubscriptionUsageCredentialState::WrittenByNewerBuild,
                     ));
                 }
                 Err(_) => return unavailable(SubscriptionUsageUnavailable::LocalState),
@@ -1650,6 +1672,11 @@ impl NativeSubscriptions {
             Ok(NativeAuthStatus::LoginRequired) => SubscriptionUsageUnavailable::CredentialState(
                 SubscriptionUsageCredentialState::LoginRequired,
             ),
+            Ok(NativeAuthStatus::WrittenByNewerBuild) => {
+                SubscriptionUsageUnavailable::CredentialState(
+                    SubscriptionUsageCredentialState::WrittenByNewerBuild,
+                )
+            }
             Ok(NativeAuthStatus::Ready) | Err(_) => SubscriptionUsageUnavailable::LocalState,
         }
     }
@@ -1658,9 +1685,50 @@ impl NativeSubscriptions {
         &self,
         provider: NativeProvider,
     ) -> Result<NativeSubscriptionStatus, NativeSubscriptionError> {
+        let credential = self.offline_credential_unlocked(provider).await?;
+        if credential == NativeAuthStatus::WrittenByNewerBuild
+            || self.compatibility_written_by_newer_build(provider).await?
+        {
+            // Nothing below runs: the recovery gate may re-pin or quarantine.
+            let compatibility = match self.compatibility_status_unlocked(provider).await {
+                Err(NativeSubscriptionError::InvalidReceipt) => CompatibilityStatus::Required,
+                compatibility => compatibility?,
+            };
+            return Ok(NativeSubscriptionStatus {
+                compatibility,
+                credential: NativeAuthStatus::WrittenByNewerBuild,
+            });
+        }
+        self.status_after_credential(provider, credential).await
+    }
+
+    async fn compatibility_written_by_newer_build(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<bool, NativeSubscriptionError> {
+        let paths = self.state.clone();
+        let notice = Self::notice(provider);
+        run_blocking(move || paths.compatibility_written_by_newer_build(notice)).await?
+    }
+
+    /// Whether any of this provider's stored login state was written by a
+    /// newer build. Reads only; never claims, leases or writes.
+    async fn written_by_newer_build_unlocked(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<bool, NativeSubscriptionError> {
+        Ok(self.offline_credential_unlocked(provider).await?
+            == NativeAuthStatus::WrittenByNewerBuild
+            || self.compatibility_written_by_newer_build(provider).await?)
+    }
+
+    async fn offline_credential_unlocked(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<NativeAuthStatus, NativeSubscriptionError> {
         let paths = self.state.clone();
         run_blocking(move || paths.prepare()).await??;
-        let credential = match provider {
+        Ok(match provider {
             NativeProvider::Codex => plakous_openai::CodexSubscriptionLocalAdmin::open(
                 self.state.provider_record(provider),
             )
@@ -1699,7 +1767,14 @@ impl NativeSubscriptions {
                 })
                 .await??
             }
-        };
+        })
+    }
+
+    async fn status_after_credential(
+        &self,
+        provider: NativeProvider,
+        credential: NativeAuthStatus,
+    ) -> Result<NativeSubscriptionStatus, NativeSubscriptionError> {
         let notice = Self::notice(provider);
         let paths = self.state.clone();
         let consent_generation = run_blocking(move || {
@@ -1756,6 +1831,10 @@ impl NativeSubscriptions {
         // place until the new login commits.
         let retire = match self.status_unlocked(provider).await {
             Ok(status) => match status.credential() {
+                // Only the operator's confirmed replacement may retire it.
+                NativeAuthStatus::WrittenByNewerBuild => {
+                    return Err(NativeSubscriptionError::CredentialWrittenByNewerBuild);
+                }
                 NativeAuthStatus::Quarantined => Some(false),
                 NativeAuthStatus::LoginRequired => Some(true),
                 _ => None,
@@ -2103,6 +2182,43 @@ impl NativeSubscriptions {
             let paths = self.state.clone();
             run_blocking(move || paths.retire_login_recovery(provider)).await??;
         }
+        lock.verify()?;
+        Ok(status)
+    }
+
+    /// Replaces a newer build's login state after the operator explicitly
+    /// confirmed it: the stored login is retired locally (that build must log
+    /// in again), its recovery state is cleared and a newer receipt removed.
+    /// A receipt this build wrote is kept.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed for unsafe or stale selected-slot state.
+    pub async fn replace_newer_build_state(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<NativeAuthStatus, NativeSubscriptionError> {
+        let lock = self.acquire_compatibility_lock(provider).await?;
+        if !self.written_by_newer_build_unlocked(provider).await? {
+            let status = self.status_unlocked(provider).await?.credential();
+            lock.verify()?;
+            return Ok(status);
+        }
+        let status = if self.offline_credential_unlocked(provider).await?
+            == NativeAuthStatus::WrittenByNewerBuild
+        {
+            self.logout_local_unlocked(provider).await?
+        } else {
+            self.offline_credential_unlocked(provider).await?
+        };
+        lock.verify()?;
+        let paths = self.state.clone();
+        let notice = Self::notice(provider);
+        run_blocking(move || {
+            paths.retire_login_recovery(provider)?;
+            paths.retire_newer_receipt(notice)
+        })
+        .await??;
         lock.verify()?;
         Ok(status)
     }
@@ -3217,6 +3333,14 @@ impl NativeSubscriptions {
         let notice = Self::notice(NativeProvider::Codex);
         let now = unix_now()?;
         run_blocking(move || paths.prepare()).await??;
+        // Checked before anything else is read or claimed, so no online path
+        // writes over a newer build's state.
+        if self
+            .written_by_newer_build_unlocked(NativeProvider::Codex)
+            .await?
+        {
+            return Err(NativeSubscriptionError::CredentialWrittenByNewerBuild);
+        }
         let loaded_acceptance = {
             let paths = self.state.clone();
             run_blocking(move || paths.load_acceptance_exact(notice, now)).await??
@@ -3303,6 +3427,14 @@ impl NativeSubscriptions {
         let notice = Self::notice(NativeProvider::Xai);
         let now = unix_now()?;
         run_blocking(move || paths.prepare()).await??;
+        // Checked before anything else is read or claimed, so no online path
+        // writes over a newer build's state.
+        if self
+            .written_by_newer_build_unlocked(NativeProvider::Xai)
+            .await?
+        {
+            return Err(NativeSubscriptionError::CredentialWrittenByNewerBuild);
+        }
         let loaded_acceptance = {
             let paths = self.state.clone();
             run_blocking(move || paths.load_acceptance_exact(notice, now)).await??
@@ -3399,6 +3531,14 @@ impl NativeSubscriptions {
         let notice = Self::notice(NativeProvider::Claude);
         let now = unix_now()?;
         run_blocking(move || paths.prepare()).await??;
+        // Checked before anything else is read or claimed, so no online path
+        // writes over a newer build's state.
+        if self
+            .written_by_newer_build_unlocked(NativeProvider::Claude)
+            .await?
+        {
+            return Err(NativeSubscriptionError::CredentialWrittenByNewerBuild);
+        }
         let loaded_acceptance = {
             let paths = self.state.clone();
             run_blocking(move || paths.load_acceptance_exact(notice, now)).await??

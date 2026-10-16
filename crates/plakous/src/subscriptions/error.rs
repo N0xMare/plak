@@ -11,6 +11,9 @@ pub enum NativeSubscriptionError {
     UnsafeStorage,
     /// A structurally valid selected-slot record belongs to another profile revision.
     CredentialProfileChanged,
+    /// A newer build wrote the stored login or its compatibility state; this
+    /// build neither uses nor rewrites it.
+    CredentialWrittenByNewerBuild,
     /// This platform cannot enforce the required private storage contract.
     UnsupportedPlatform,
     /// Compatibility consent is missing or no longer matches exactly.
@@ -104,6 +107,9 @@ impl fmt::Display for NativeSubscriptionError {
             Self::CredentialProfileChanged => {
                 "stored native login was written by an older build or another profile; run `plak login <account>`, which replaces it"
             }
+            Self::CredentialWrittenByNewerBuild => {
+                "stored native login was written by a newer plak build; use that build, or replace it with `plak login <account>` (that build must then log in again)"
+            }
             Self::UnsupportedPlatform => "native subscription storage is unsupported",
             Self::AcceptanceRequired => "exact native compatibility acceptance is required",
             Self::ProfileInactive => "native compatibility profile is inactive",
@@ -192,6 +198,9 @@ pub(super) fn map_codex_status(status: plakous_openai::CodexCredentialStatus) ->
         plakous_openai::CodexCredentialStatus::Quarantined => NativeAuthStatus::Quarantined,
         plakous_openai::CodexCredentialStatus::Revoked => NativeAuthStatus::Revoked,
         plakous_openai::CodexCredentialStatus::LoginRequired => NativeAuthStatus::LoginRequired,
+        plakous_openai::CodexCredentialStatus::WrittenByNewerBuild => {
+            NativeAuthStatus::WrittenByNewerBuild
+        }
         _ => NativeAuthStatus::Quarantined,
     }
 }
@@ -225,6 +234,9 @@ pub(super) fn map_xai_offline_status(
         }
         plakous_xai::XaiOfflineCredentialStatus::Quarantined => NativeAuthStatus::Quarantined,
         plakous_xai::XaiOfflineCredentialStatus::Revoked => NativeAuthStatus::Revoked,
+        plakous_xai::XaiOfflineCredentialStatus::WrittenByNewerBuild => {
+            NativeAuthStatus::WrittenByNewerBuild
+        }
         _ => NativeAuthStatus::Quarantined,
     }
 }
@@ -244,6 +256,9 @@ pub(super) fn map_codex_error(
             NativeSubscriptionError::ProfileInactive
         }
         plakous_openai::NativeCodexAuthError::Store => NativeSubscriptionError::UnsafeStorage,
+        plakous_openai::NativeCodexAuthError::WrittenByNewerBuild => {
+            NativeSubscriptionError::CredentialWrittenByNewerBuild
+        }
         // A login stored by an earlier build (no selection epoch) needs a new login.
         plakous_openai::NativeCodexAuthError::Unavailable
         | plakous_openai::NativeCodexAuthError::LoginRequired => {
@@ -333,6 +348,12 @@ pub(super) fn map_xai_error(error: plakous_xai::XaiNativeAuthError) -> NativeSub
         | plakous_xai::XaiNativeAuthError::StoredCredentialFormatRetired => {
             NativeSubscriptionError::CredentialProfileChanged
         }
+        plakous_xai::XaiNativeAuthError::Store(
+            plakous_auth::PrivateStoreError::WrittenByNewerBuild,
+        )
+        | plakous_xai::XaiNativeAuthError::StoredCredentialWrittenByNewerBuild => {
+            NativeSubscriptionError::CredentialWrittenByNewerBuild
+        }
         plakous_xai::XaiNativeAuthError::Store(_) => NativeSubscriptionError::UnsafeStorage,
         plakous_xai::XaiNativeAuthError::NotLoggedIn
         | plakous_xai::XaiNativeAuthError::NotReady
@@ -409,6 +430,12 @@ pub(super) fn map_claude_error(
         | plakous_anthropic::ClaudeNativeAuthError::StoredCredentialFormatRetired => {
             NativeSubscriptionError::CredentialProfileChanged
         }
+        plakous_anthropic::ClaudeNativeAuthError::Store(
+            plakous_auth::PrivateStoreError::WrittenByNewerBuild,
+        )
+        | plakous_anthropic::ClaudeNativeAuthError::StoredCredentialWrittenByNewerBuild => {
+            NativeSubscriptionError::CredentialWrittenByNewerBuild
+        }
         plakous_anthropic::ClaudeNativeAuthError::Store(_) => {
             NativeSubscriptionError::UnsafeStorage
         }
@@ -465,6 +492,9 @@ pub(super) fn map_claude_offline_status(
         plakous_auth::OfflineCredentialLifecycle::Quarantined => NativeAuthStatus::Quarantined,
         plakous_auth::OfflineCredentialLifecycle::Revoked => NativeAuthStatus::Revoked,
         plakous_auth::OfflineCredentialLifecycle::LoginRequired => NativeAuthStatus::LoginRequired,
+        plakous_auth::OfflineCredentialLifecycle::WrittenByNewerBuild => {
+            NativeAuthStatus::WrittenByNewerBuild
+        }
         _ => NativeAuthStatus::Quarantined,
     }
 }

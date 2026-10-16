@@ -199,7 +199,9 @@ table with no rows is omitted.
 
 **CREDENTIAL**, for an OAuth account: `Ready`, `Missing` (signed out),
 `Refresh required`, `Unavailable`, `Revoked`, `Login required · plak login <account>`
-(an earlier-build login, or a payload this build cannot parse), `Unsupported`.
+(an earlier-build login, or a payload this build cannot parse),
+`Written by a newer plak build · use that build, or plak login <account> to replace it`,
+`Unsupported`.
 When the local read itself fails, the cell is the state and the repair instead,
 for example `Profile changed · plak logout claude, then plak login claude`
 or `Unsafe storage · …` with the path and chmod. A repair too long for the
@@ -232,6 +234,10 @@ A Codex login made by an earlier Plak build must be redone once: run
 `Login required · plak login codex` and Codex commands refuse it. This build cannot
 remotely revoke such a login: to revoke it at the provider, run
 `plak logout codex` with the earlier build first.
+
+The reverse also holds: a login a newer Plak build wrote is never used or
+rewritten by an older build. Use the newer build; `plak login <account>` in the
+older build asks before replacing it (the newer build then logs in again).
 
 When a refresh comes back with a result Plak cannot interpret unambiguously, the
 credential is **quarantined** rather than used — Plak fails closed instead of

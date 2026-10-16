@@ -23,8 +23,8 @@ use plakous_auth::subscription_limit::{
 use plakous_auth::{
     AccountBinding, ClaimedHttpDisposition, ClaimedHttpError, ClaimedHttpResponse, CredentialFence,
     CredentialGeneration, CredentialRecord, CredentialSlotId, CredentialStatus,
-    OfflineCredentialLifecycle, PkceS256, PrivateCredentialStore, PrivateStoreError, RefreshClaim,
-    SecretBytes, SubscriptionIntegrationProfileId,
+    OfflineCredentialLifecycle, PkceS256, PrivateCredentialStore, PrivateStoreError, RecordAge,
+    RefreshClaim, SecretBytes, SubscriptionIntegrationProfileId,
 };
 use plakous_http::{
     Bytes, Client, ExchangeControl, HeaderMap, HeaderName, HeaderValue, Method, Origin, Request,
@@ -290,8 +290,15 @@ impl ClaudeOfflineSelectedSlot {
     ///
     /// Fails closed on unsafe or malformed explicit storage.
     pub fn status(&self) -> Result<OfflineCredentialLifecycle, ClaudeNativeAuthError> {
-        validate_current_ready_record(&self.store)?;
-        Ok(OfflineCredentialLifecycle::classify(self.store.status()?))
+        let status = validate_current_ready_record(&self.store)
+            .and_then(|()| Ok(OfflineCredentialLifecycle::classify(self.store.status()?)));
+        match status {
+            Err(
+                ClaudeNativeAuthError::StoredCredentialWrittenByNewerBuild
+                | ClaudeNativeAuthError::Store(PrivateStoreError::WrittenByNewerBuild),
+            ) => Ok(OfflineCredentialLifecycle::WrittenByNewerBuild),
+            status => status,
+        }
     }
 
     /// Writes a local revoked tombstone without network I/O.
@@ -445,8 +452,17 @@ impl ClaudeNativeAuthManager {
         let Some(_lifecycle) = self.core.refresh_flight.try_lock() else {
             return unavailable(SubscriptionUsageUnavailable::Busy);
         };
-        if validate_current_ready_record(&self.core.store).is_err() {
-            return unavailable(SubscriptionUsageUnavailable::LocalState);
+        match validate_current_ready_record(&self.core.store) {
+            Ok(()) => {}
+            Err(
+                ClaudeNativeAuthError::StoredCredentialWrittenByNewerBuild
+                | ClaudeNativeAuthError::Store(PrivateStoreError::WrittenByNewerBuild),
+            ) => {
+                return unavailable(SubscriptionUsageUnavailable::CredentialState(
+                    SubscriptionUsageCredentialState::WrittenByNewerBuild,
+                ));
+            }
+            Err(_) => return unavailable(SubscriptionUsageUnavailable::LocalState),
         }
         let fence = match self.core.store.load() {
             Ok(Some(fence)) => fence,
@@ -1398,9 +1414,19 @@ fn credential_record(
     )?)
 }
 
+/// Refuses a record in any lifecycle state whose payload a newer build
+/// wrote, then validates a Ready record's payload in this build's format.
 fn validate_current_ready_record(
     store: &PrivateCredentialStore,
 ) -> Result<(), ClaudeNativeAuthError> {
+    let newer = store.inspect_payload(|payload| {
+        serde_json::from_slice::<StoredVersion>(payload.expose_secret()).is_ok_and(|stored| {
+            RecordAge::of_version(stored.version.into(), STORED_VERSION.into()) == RecordAge::Newer
+        })
+    })?;
+    if newer == Some(true) {
+        return Err(ClaudeNativeAuthError::StoredCredentialWrittenByNewerBuild);
+    }
     let Some(fence) = store.load()? else {
         return Ok(());
     };
@@ -1562,6 +1588,10 @@ pub enum ClaudeNativeAuthError {
     /// The stored credential was written in a format this build no longer reads.
     #[error("the stored Claude OAuth credential format is retired; log in again")]
     StoredCredentialFormatRetired,
+    /// A newer build wrote the stored credential; this build neither uses
+    /// nor rewrites it.
+    #[error("the stored Claude OAuth credential was written by a newer build")]
+    StoredCredentialWrittenByNewerBuild,
     /// Refresh entered durable Unknown and cannot be retried automatically.
     #[error("the Claude OAuth refresh outcome is quarantined")]
     RefreshQuarantined,

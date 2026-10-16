@@ -311,6 +311,7 @@ pub const fn credential_state(status: FacadeAuthStatus) -> CredentialState {
         FacadeAuthStatus::Quarantined => CredentialState::Quarantined,
         FacadeAuthStatus::Revoked => CredentialState::Revoked,
         FacadeAuthStatus::LoginRequired => CredentialState::LoginRequired,
+        FacadeAuthStatus::WrittenByNewerBuild => CredentialState::WrittenByNewerBuild,
         _ => CredentialState::Unsupported,
     }
 }
@@ -341,6 +342,7 @@ pub const fn credential_display_label(status: CredentialState) -> &'static str {
         CredentialState::Quarantined => "Unavailable",
         CredentialState::Revoked => "Revoked",
         CredentialState::LoginRequired => "Login required",
+        CredentialState::WrittenByNewerBuild => "Written by a newer plak build",
         CredentialState::Unsupported => "Unsupported",
     }
 }
@@ -355,6 +357,10 @@ pub(crate) fn status_credential_cell(provider: NativeProvider, status: Credentia
                 cli_provider_name(provider)
             )
         }
+        CredentialState::WrittenByNewerBuild => format!(
+            "Written by a newer plak build · use that build, or plak login {} to replace it",
+            cli_provider_name(provider)
+        ),
         other => credential_display_label(other).to_owned(),
     }
 }
@@ -381,6 +387,7 @@ pub const fn credential_status_name(status: CredentialState) -> &'static str {
         CredentialState::Quarantined => "quarantined",
         CredentialState::Revoked => "revoked",
         CredentialState::LoginRequired => "login-required",
+        CredentialState::WrittenByNewerBuild => "written-by-newer-build",
         CredentialState::Unsupported => "unsupported",
     }
 }
@@ -422,6 +429,13 @@ pub(crate) fn profile_inactive_failure(account: Option<NativeProvider>) -> CliFa
     )
 }
 
+/// A login a newer build wrote: this build refuses it and names both repairs.
+fn newer_build_message(account: &str) -> String {
+    format!(
+        "the stored {account} login was written by a newer plak build; use that build, or replace it here with `plak login {account}` (that build must then log in again)"
+    )
+}
+
 /// A credential state that is not `Ready`, with the command that repairs it.
 fn credential_not_ready(provider: NativeProvider, status: CredentialState) -> CliFailure {
     let account = cli_provider_name(provider);
@@ -442,6 +456,7 @@ fn credential_not_ready(provider: NativeProvider, status: CredentialState) -> Cl
         CredentialState::LoginRequired => format!(
             "{account} login was made by an earlier plak build and cannot be used; run `plak login {account}`"
         ),
+        CredentialState::WrittenByNewerBuild => newer_build_message(account),
         CredentialState::Unsupported => format!(
             "{account} credential state is not supported by this build; run `plak login {account}`"
         ),
@@ -503,6 +518,7 @@ pub fn native_subscription_failure(
         E::CredentialProfileChanged => auth(format!(
             "the stored {name} login was written by an older build or another profile; {login}, which replaces it"
         )),
+        E::CredentialWrittenByNewerBuild => auth(newer_build_message(name)),
         E::CredentialUnavailable => auth(format!(
             "no ready {name} credential (signed out, quarantined or revoked); {login}"
         )),
@@ -614,6 +630,9 @@ pub(crate) fn oauth_status_failure_cell(
         ),
         E::CredentialUnavailable => {
             status_credential_cell(provider, CredentialState::LoginRequired)
+        }
+        E::CredentialWrittenByNewerBuild => {
+            status_credential_cell(provider, CredentialState::WrittenByNewerBuild)
         }
         E::UnsafeStorage => {
             unsafe_storage_status_cell(&detail_for_unsafe_storage(state_home, provider), name)

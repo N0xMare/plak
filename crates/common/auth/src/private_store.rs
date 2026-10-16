@@ -21,7 +21,8 @@ use plakous_http::{
 
 use crate::{
     AccountBinding, CredentialFence, CredentialGeneration, CredentialRecord, CredentialSlotId,
-    CredentialStatus, CredentialValueError, SecretBytes, SubscriptionIntegrationProfileId,
+    CredentialStatus, CredentialValueError, RecordAge, SecretBytes,
+    SubscriptionIntegrationProfileId,
 };
 
 const FORMAT_VERSION: u32 = 2;
@@ -544,6 +545,22 @@ impl PrivateCredentialStore {
     /// Returns the same errors as [`Self::load`].
     pub fn status(&self) -> Result<Option<CredentialStatus>, PrivateStoreError> {
         self.load().map(|fence| fence.map(|value| value.status()))
+    }
+
+    /// Reads the current payload in any lifecycle state under the shared
+    /// lock, without a lease, claim or write, so a provider can tell its own
+    /// payload format version apart before any operation that writes.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::load`].
+    pub fn inspect_payload<T>(
+        &self,
+        inspect: impl FnOnce(&SecretBytes) -> T,
+    ) -> Result<Option<T>, PrivateStoreError> {
+        self.with_shared_lock(|store| {
+            Ok(platform::load_record(store)?.map(|record| inspect(record.payload())))
+        })
     }
 
     /// Seeds an absent store with a record in any lifecycle state.
@@ -1304,8 +1321,16 @@ impl PrivateCredentialStore {
     /// Stale writers, malformed records, or unsafe storage.
     pub fn logout_local(&self) -> Result<crate::OfflineCredentialLifecycle, PrivateStoreError> {
         self.with_lock(|store| {
-            let Some(current) = platform::load_record_for_local_retirement(store)? else {
-                return Ok(crate::OfflineCredentialLifecycle::SignedOut);
+            let current = match platform::load_record_for_local_retirement(store) {
+                Ok(Some(current)) => current,
+                Ok(None) => return Ok(crate::OfflineCredentialLifecycle::SignedOut),
+                // A newer envelope has no account or generation this build can
+                // read to tombstone; retiring it removes it.
+                Err(PrivateStoreError::WrittenByNewerBuild) => {
+                    platform::remove_record(store)?;
+                    return Ok(crate::OfflineCredentialLifecycle::SignedOut);
+                }
+                Err(error) => return Err(error),
             };
             if current.status() == CredentialStatus::Revoked
                 && current.profile_id() == &store.profile_id
@@ -1587,9 +1612,14 @@ pub enum PrivateStoreError {
     /// The on-disk document is syntactically or structurally malformed.
     #[error("malformed credential record")]
     MalformedRecord,
-    /// The on-disk format version is not exactly supported.
+    /// The on-disk format version is older than this build reads.
     #[error("unsupported credential record version")]
     UnsupportedVersion,
+    /// A newer build wrote the record (a newer envelope format or a newer
+    /// compatibility profile). This build reads nothing else from it and
+    /// writes nothing over it except an explicit local retirement.
+    #[error("credential record was written by a newer build")]
+    WrittenByNewerBuild,
     /// The encoded record exceeds its fixed input bound.
     #[error("credential record exceeds the storage bound")]
     RecordTooLarge,
@@ -1758,8 +1788,10 @@ fn decode_record(
 ) -> Result<CredentialRecord, PrivateStoreError> {
     let probe: VersionProbe =
         serde_json::from_slice(bytes).map_err(|_| PrivateStoreError::MalformedRecord)?;
-    if probe.format_version != FORMAT_VERSION {
-        return Err(PrivateStoreError::UnsupportedVersion);
+    match RecordAge::of_version(probe.format_version.into(), FORMAT_VERSION.into()) {
+        RecordAge::Older => return Err(PrivateStoreError::UnsupportedVersion),
+        RecordAge::Newer => return Err(PrivateStoreError::WrittenByNewerBuild),
+        RecordAge::Current => {}
     }
     let mut document: StoredDocument =
         serde_json::from_slice(bytes).map_err(|_| PrivateStoreError::MalformedRecord)?;
@@ -2289,13 +2321,19 @@ mod platform {
         store: &PrivateCredentialStore,
     ) -> Result<Option<CredentialRecord>, PrivateStoreError> {
         let record = load_record_for_local_retirement(store)?;
-        if record
-            .as_ref()
-            .is_some_and(|value| value.profile_id() != &store.profile_id)
-        {
-            return Err(PrivateStoreError::ForeignProfile);
+        match record.as_ref().map(|value| {
+            (
+                value.profile_id().age_against(&store.profile_id),
+                value.status(),
+            )
+        }) {
+            None | Some((RecordAge::Current, _)) => Ok(record),
+            // A newer build's tombstone carries no login to lose.
+            Some((RecordAge::Older, _) | (RecordAge::Newer, CredentialStatus::Revoked)) => {
+                Err(PrivateStoreError::ForeignProfile)
+            }
+            Some((RecordAge::Newer, _)) => Err(PrivateStoreError::WrittenByNewerBuild),
         }
-        Ok(record)
     }
 
     pub(super) fn load_record_for_local_retirement(
@@ -2339,6 +2377,17 @@ mod platform {
         }
         let record = decode_record(store, &bytes)?;
         Ok(Some(record))
+    }
+
+    /// Durably removes the record; local retirement of a record whose
+    /// envelope this build cannot decode.
+    pub(super) fn remove_record(store: &PrivateCredentialStore) -> Result<(), PrivateStoreError> {
+        rustix::fs::unlinkat(&store.directory, &store.record_name, AtFlags::empty())
+            .map_err(|_| PrivateStoreError::Io)?;
+        store
+            .directory
+            .sync_all()
+            .map_err(|_| PrivateStoreError::Io)
     }
 
     pub(super) fn write_record(
@@ -2568,6 +2617,10 @@ mod platform {
     pub(super) fn load_record_for_local_retirement(
         _store: &PrivateCredentialStore,
     ) -> Result<Option<CredentialRecord>, PrivateStoreError> {
+        Err(PrivateStoreError::UnsupportedPlatform)
+    }
+
+    pub(super) fn remove_record(_store: &PrivateCredentialStore) -> Result<(), PrivateStoreError> {
         Err(PrivateStoreError::UnsupportedPlatform)
     }
 
@@ -3731,7 +3784,7 @@ mod tests {
             }),
         ];
         let expected = [
-            PrivateStoreError::UnsupportedVersion,
+            PrivateStoreError::WrittenByNewerBuild,
             PrivateStoreError::UnsupportedVersion,
             PrivateStoreError::MalformedRecord,
             PrivateStoreError::ForeignProfile,
@@ -3750,6 +3803,106 @@ mod tests {
             store.load(),
             Err(PrivateStoreError::RecordTooLarge)
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn newer_envelopes_and_profiles_are_refused_untouched_and_retire_only_locally()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let fixture = Fixture::new()?;
+        let current = SubscriptionIntegrationProfileId::new("vendor.product.compat.2026-07-31.r1")?;
+        let store = PrivateCredentialStore::open_slot(
+            &fixture.path,
+            current.clone(),
+            fixture.slot.clone(),
+        )?;
+        let document = |format_version: u32, profile: &str, status: &str| {
+            json!({
+                "format_version": format_version,
+                "profile_id": profile,
+                "slot_id": "primary",
+                "account_binding": "opaque-account",
+                "generation": 4,
+                "status": status,
+                "payload": if status == "revoked" { "" } else { "eA==" }
+            })
+        };
+        let cases = [
+            (
+                document(1, current.as_str(), "ready"),
+                Some(PrivateStoreError::UnsupportedVersion),
+            ),
+            (document(2, current.as_str(), "ready"), None),
+            (
+                document(3, current.as_str(), "ready"),
+                Some(PrivateStoreError::WrittenByNewerBuild),
+            ),
+            (
+                document(2, "vendor.product.compat.2026-07-31.r0", "ready"),
+                Some(PrivateStoreError::ForeignProfile),
+            ),
+            (
+                document(2, "vendor.product.compat.2026-07-31.r2", "refresh_required"),
+                Some(PrivateStoreError::WrittenByNewerBuild),
+            ),
+            (
+                document(
+                    2,
+                    "vendor.product.compat.2026-08-01.r1",
+                    "refresh_outcome_unknown",
+                ),
+                Some(PrivateStoreError::WrittenByNewerBuild),
+            ),
+            (
+                document(2, "vendor-renamed-profile", "ready"),
+                Some(PrivateStoreError::WrittenByNewerBuild),
+            ),
+            // A newer build's tombstone holds no login, so it is not guarded.
+            (
+                document(2, "vendor.product.compat.2026-08-01.r1", "revoked"),
+                Some(PrivateStoreError::ForeignProfile),
+            ),
+        ];
+        for (document, expected) in cases {
+            let bytes = serde_json::to_vec(&document)?;
+            fs::write(&fixture.path, &bytes)?;
+            fs::set_permissions(&fixture.path, fs::Permissions::from_mode(0o600))?;
+            assert_eq!(store.load().err(), expected, "{document}");
+            assert_eq!(store.status().err(), expected);
+            assert_eq!(store.inspect_payload(SecretBytes::len).err(), expected);
+            if expected == Some(PrivateStoreError::WrittenByNewerBuild) {
+                let fence = CredentialFence::new(
+                    current.clone(),
+                    AccountBinding::new("opaque-account")?,
+                    CredentialGeneration::new(4)?,
+                    CredentialStatus::Ready,
+                );
+                assert!(store.begin_refresh(&fence).is_err());
+                assert!(store.try_acquire_ready(&fence).is_err());
+                assert_eq!(fs::read(&fixture.path)?, bytes, "{document}");
+            }
+        }
+
+        // Explicit local retirement still works: a newer profile becomes a
+        // tombstone, and a newer envelope it cannot decode is removed.
+        let newer_profile =
+            serde_json::to_vec(&document(2, "vendor.product.compat.2026-08-01.r1", "ready"))?;
+        fs::write(&fixture.path, &newer_profile)?;
+        assert_eq!(
+            store.logout_local()?,
+            crate::OfflineCredentialLifecycle::Revoked
+        );
+        assert_eq!(store.status()?, Some(CredentialStatus::Revoked));
+        fs::write(
+            &fixture.path,
+            serde_json::to_vec(&document(3, current.as_str(), "ready"))?,
+        )?;
+        assert_eq!(
+            store.logout_local()?,
+            crate::OfflineCredentialLifecycle::SignedOut
+        );
+        assert!(!fixture.path.exists());
+        assert_eq!(store.status()?, None);
         Ok(())
     }
 

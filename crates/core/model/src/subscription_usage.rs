@@ -408,6 +408,8 @@ pub enum SubscriptionUsageCredentialState {
     Revoked,
     /// The stored login cannot be used by this build; a new login is required.
     LoginRequired,
+    /// A newer build wrote the stored login; this build leaves it untouched.
+    WrittenByNewerBuild,
 }
 
 /// Typed reason an explicit read produced no trustworthy snapshot.

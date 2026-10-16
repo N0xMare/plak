@@ -54,8 +54,26 @@ pub(crate) fn auth_login(
     stderr: &mut dyn io::Write,
     ui: &mut impl super::login_flow::LoginUi,
 ) -> CliResult<ProcessOutcome> {
-    accept_compatibility(backend, provider, Asker::Login, stdin, stderr)
-        .map_err(|failure| failure.or_kind(CliFailureKind::Auth))?;
+    let mut status = backend.offline_status(provider)?;
+    if status.credential == CredentialState::WrittenByNewerBuild {
+        confirm_newer_build_replacement(
+            backend,
+            provider,
+            io::stdin().is_terminal(),
+            stdin,
+            stderr,
+        )?;
+        status = backend.offline_status(provider)?;
+    }
+    accept_compatibility_status(
+        backend,
+        provider,
+        Asker::Login,
+        status.compatibility,
+        stdin,
+        stderr,
+    )
+    .map_err(|failure| failure.or_kind(CliFailureKind::Auth))?;
     let status = super::login_flow::perform_login(backend, provider, mode, stdin, stderr, ui)?;
     require_ready(provider, status)?;
     writeln!(stderr)
@@ -68,6 +86,49 @@ pub(crate) fn auth_login(
         })
         .map_err(|_| CliFailure::new("stderr failed"))?;
     Ok(ProcessOutcome::Success)
+}
+
+/// Asks before replacing a login a newer build wrote, since that build must
+/// then log in again. Nothing is written unless the answer is yes; without a
+/// terminal it refuses without asking.
+pub(crate) fn confirm_newer_build_replacement(
+    backend: &mut impl AccountOps,
+    provider: NativeProvider,
+    interactive: bool,
+    stdin: &mut dyn io::BufRead,
+    stderr: &mut dyn io::Write,
+) -> CliResult<()> {
+    let account = cli_provider_name(provider);
+    let refusal = |detail: &str| {
+        CliFailure::classified(
+            CliFailureKind::Auth,
+            format!("the stored {account} login was written by a newer plak build; {detail}"),
+        )
+    };
+    if !interactive {
+        return Err(refusal(
+            "replacing it needs a confirmation, so nothing was changed; confirm it from a terminal, or use the newer build",
+        ));
+    }
+    write!(
+        stderr,
+        "This login was written by a newer plak build; replacing it means that build must log in again. Continue? [y/N] "
+    )
+    .and_then(|()| stderr.flush())
+    .map_err(|_| CliFailure::new("stderr failed"))?;
+    let mut response = String::new();
+    let read = stdin.read_line(&mut response);
+    if !response.ends_with('\n') {
+        writeln!(stderr).map_err(|_| CliFailure::new("stderr failed"))?;
+    }
+    let answer = response.trim_end_matches(['\n', '\r']);
+    if read.is_err() || !(answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes")) {
+        return Err(refusal(
+            "it was kept and nothing was changed; use the newer build",
+        ));
+    }
+    backend.replace_newer_build(provider)?;
+    Ok(())
 }
 
 /// `plak refresh <provider>`.

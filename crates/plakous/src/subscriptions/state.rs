@@ -15,6 +15,8 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
+use plakous_auth::RecordAge;
+
 use super::{
     CompatibilityNotice, CompatibilityStatus, NativeAuthStatus, NativeModelCatalog,
     NativeModelSummary, NativeProvider, NativeSubscriptionError, catalog, fmt, run_blocking,
@@ -351,6 +353,90 @@ fn load_acceptance_exact(
     })
 }
 
+/// The version fields of a receipt, read without its strict shape.
+#[derive(Deserialize)]
+struct ReceiptVersionProbe {
+    schema: u32,
+    profile_id: String,
+}
+
+/// The version fields of a login-recovery marker or epoch.
+#[derive(Deserialize)]
+struct LoginRecoveryVersionProbe {
+    schema: String,
+    version: u32,
+}
+
+/// Whether a newer build wrote this provider's compatibility receipt: a
+/// newer receipt schema, or this schema under a newer compatibility profile.
+/// An absent or unparseable receipt is not newer; its readers judge it.
+fn receipt_written_by_newer_build(
+    paths: &SubscriptionPaths,
+    notice: CompatibilityNotice,
+) -> Result<bool, NativeSubscriptionError> {
+    let bytes = match read_private_bounded(&paths.receipt_path(notice.provider)) {
+        Ok(bytes) => bytes,
+        Err(NativeSubscriptionError::AcceptanceRequired) => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    let Ok(probe) = serde_json::from_slice::<ReceiptVersionProbe>(&bytes) else {
+        return Ok(false);
+    };
+    Ok(
+        match RecordAge::of_version(probe.schema.into(), RECEIPT_SCHEMA.into()) {
+            RecordAge::Newer => true,
+            RecordAge::Older => false,
+            RecordAge::Current => {
+                match (
+                    plakous_auth::SubscriptionIntegrationProfileId::new(probe.profile_id),
+                    plakous_auth::SubscriptionIntegrationProfileId::new(notice.profile_id),
+                ) {
+                    (Ok(stored), Ok(current)) => stored.age_against(&current) == RecordAge::Newer,
+                    _ => false,
+                }
+            }
+        },
+    )
+}
+
+/// Whether a newer build wrote this provider's login-recovery marker or
+/// its epoch (this schema at a newer version).
+fn login_recovery_written_by_newer_build(
+    paths: &SubscriptionPaths,
+    provider: NativeProvider,
+) -> Result<bool, NativeSubscriptionError> {
+    for path in [
+        paths.login_recovery_path(provider),
+        paths.login_recovery_epoch_path(provider),
+    ] {
+        let bytes = match read_private_bounded(&path) {
+            Ok(bytes) => bytes,
+            Err(NativeSubscriptionError::AcceptanceRequired) => continue,
+            Err(error) => return Err(error),
+        };
+        if serde_json::from_slice::<LoginRecoveryVersionProbe>(&bytes).is_ok_and(|probe| {
+            probe.schema == LOGIN_RECOVERY_SCHEMA
+                && RecordAge::of_version(probe.version.into(), LOGIN_RECOVERY_VERSION.into())
+                    == RecordAge::Newer
+        }) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Removes a newer build's receipt; only after the operator confirmed
+/// replacing that build's login state.
+fn retire_newer_receipt(
+    paths: &SubscriptionPaths,
+    notice: CompatibilityNotice,
+) -> Result<(), NativeSubscriptionError> {
+    if receipt_written_by_newer_build(paths, notice)? {
+        remove_private_file_durable(&paths.receipt_path(notice.provider))?;
+    }
+    Ok(())
+}
+
 fn valid_nonce(value: &str) -> bool {
     value.len() == LOGIN_RECOVERY_NONCE_BYTES * 2
         && value
@@ -498,6 +584,26 @@ impl SubscriptionState {
         provider: NativeProvider,
     ) -> Result<(), NativeSubscriptionError> {
         retire_login_recovery(&self.paths, provider)
+    }
+    /// Whether a newer build wrote this provider's receipt or recovery state.
+    pub(super) fn compatibility_written_by_newer_build(
+        &self,
+        notice: CompatibilityNotice,
+    ) -> Result<bool, NativeSubscriptionError> {
+        Ok(receipt_written_by_newer_build(&self.paths, notice)?
+            || login_recovery_written_by_newer_build(&self.paths, notice.provider)?)
+    }
+    pub(super) fn receipt_written_by_newer_build(
+        &self,
+        notice: CompatibilityNotice,
+    ) -> Result<bool, NativeSubscriptionError> {
+        receipt_written_by_newer_build(&self.paths, notice)
+    }
+    pub(super) fn retire_newer_receipt(
+        &self,
+        notice: CompatibilityNotice,
+    ) -> Result<(), NativeSubscriptionError> {
+        retire_newer_receipt(&self.paths, notice)
     }
     pub(super) fn current_credential_generation(
         &self,

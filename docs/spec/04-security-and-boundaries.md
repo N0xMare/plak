@@ -568,11 +568,35 @@ are retired format); the Codex payload is identified by its exact shape
 (a payload without the current login selection reads as login-required); the
 compatibility receipt carries schema 2 and the login-recovery marker version 2
 (an older one is not accepted and requires a fresh acceptance or login). A
-refused record never authorizes a request. One classification of a stored
-credential (signed out, usable, needs refresh, quarantined, needs login with
-its reason, profile inactive, unsupported) drives `plak status`, login,
-logout, refresh, the usage read and model runs, and its repair never names the
-command that produced it.
+refused record never authorizes a request.
+
+Every reader also tells an older record from a newer one, so two installed
+builds never replace each other's login silently. Against what this build
+writes, a record is older, current or newer: the credential envelope by its
+`format_version` (2), the SuperGrok and Claude payloads by `version` (3), the
+Codex payload by an optional top-level `version` (its current shape has none
+and counts as 1; the next build that changes the Codex payload writes
+`"version": 2`, and a present version of 1 or less is malformed), the
+compatibility profile id `<vendor>.<product>.compat.<YYYY-MM-DD>.r<N>` by date
+then revision for the same `<vendor>.<product>` (an id this build cannot place
+in that order is newer), the receipt by its schema and profile id, and the
+recovery marker and epoch by version. A newer one is *written by a newer
+build*: status, the usage read, refresh, model runs and remote logout refuse it
+before any lease, claim, quarantine, tombstone or receipt write, leaving every
+file byte-identical, and name the repair (use that build, or replace it here
+with `plak login <account>`, after which that build must log in again). A newer
+build's revoked tombstone holds no login and is replaced like an older record.
+`plak login` over newer state asks `Continue? [y/N]` before anything is
+written; any answer but yes, or no terminal at all, leaves it untouched. Only
+that confirmed replacement removes a newer receipt or recovery marker;
+`plak logout --local` (and logout of an unusable record) still retires a newer
+record, removing an envelope it cannot decode. Nothing is converted and no
+stored format changes.
+
+One classification of a stored credential (signed out, usable, needs refresh,
+quarantined, needs login with its reason, written by a newer build, profile
+inactive, unsupported) drives `plak status`, login, logout, refresh, the usage
+read and model runs, and its repair never names the command that produced it.
 
 Login recovery is armed only around the provider exchange. A completion
 dropped before the exchange settles (Ctrl-C or the CLI timeout while a browser
