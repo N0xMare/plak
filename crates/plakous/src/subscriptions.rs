@@ -2644,7 +2644,7 @@ impl NativeSubscriptions {
                         })?
                     }
                 };
-                let (model, resolution, retrieval) = resolver
+                let (model, resolution, retrieval, images) = resolver
                     .resolve_with_retrieval(selected_model.as_str())
                     .map_err(|error| {
                         let error = match error {
@@ -2704,7 +2704,9 @@ impl NativeSubscriptions {
                         retrieval: Some(Arc::new(
                             crate::responses_retrieval::CodexRetrievalPort::new(retrieval),
                         )),
-                        image_gen: None,
+                        image_gen: Some(Arc::new(crate::responses_images::CodexImagePort::new(
+                            images,
+                        ))),
                     },
                     compile_authority,
                 ))

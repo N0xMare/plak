@@ -311,7 +311,7 @@ impl ResponsesRetrievalTransport for CodexSideRequest<'_> {
             let (request, guard) = self
                 .retrieval
                 .model
-                .codex_side_request(body, deadline, &self.cancellation)
+                .codex_side_request(CODEX_SEARCH_PATH, body, deadline, &self.cancellation)
                 .await
                 .map_err(|message| {
                     ResponsesRetrievalError::new(

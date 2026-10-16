@@ -2589,8 +2589,8 @@ impl CodexModelResolver {
     }
 
     /// Resolves the model as [`Self::resolve_with_evidence`] does, with the
-    /// hosted web search side-request executor on the same route, login,
-    /// model and client.
+    /// hosted web search side-request executor and the image generation
+    /// executor on the same route, login, model and client.
     ///
     /// # Errors
     ///
@@ -2603,13 +2603,15 @@ impl CodexModelResolver {
             Arc<dyn LanguageModel>,
             CodexModelResolutionEvidence,
             crate::CodexRetrieval,
+            crate::CodexImages,
         ),
         NativeCodexAuthError,
     > {
         let (model, evidence) = self.resolve_exact(model_id)?;
         let retrieval = model.codex_retrieval();
+        let images = model.codex_images();
         let model: Arc<dyn LanguageModel> = model;
-        Ok((model, evidence, retrieval))
+        Ok((model, evidence, retrieval, images))
     }
 
     fn resolve_exact(

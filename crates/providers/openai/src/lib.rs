@@ -73,6 +73,8 @@ pub use config::{
 };
 pub use error::{ErrorPhase, MAX_PROVIDER_REQUEST_ID_BYTES, OpenAiError, RetryClass};
 pub use hosted_support::{CODEX_HOSTED_RETRIEVAL, OPENAI_API_HOSTED_RETRIEVAL};
+#[cfg(feature = "native-auth")]
+pub use images::CodexImages;
 pub use images::{
     CODEX_IMAGE_EDITS_PATH, CODEX_IMAGE_GENERATIONS_PATH, CODEX_IMAGE_MODEL,
     OPENAI_IMAGE_EDITS_PATH, OPENAI_IMAGE_GENERATIONS_PATH, OPENAI_IMAGE_MODEL, OpenAiImages,

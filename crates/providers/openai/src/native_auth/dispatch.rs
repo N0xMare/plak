@@ -270,6 +270,7 @@ pub(crate) fn codex_responses_preflight<'a>(
 pub(crate) async fn codex_side_request(
     target: &OpenAiTarget,
     client: &Client,
+    path: &'static str,
     body: &[u8],
     deadline: Instant,
     cancellation: &plakous_model::CancellationToken,
@@ -337,7 +338,7 @@ pub(crate) async fn codex_side_request(
     let wire = Request::new(
         origin,
         Method::POST,
-        crate::CODEX_SEARCH_PATH,
+        path,
         headers,
         SensitiveBytes::new(body.to_vec()).into_bytes(),
         client.limits(),

@@ -774,6 +774,13 @@ impl OpenAiLanguageModel {
         crate::CodexRetrieval::new(Arc::clone(self))
     }
 
+    /// The session's image generation executor on this exact route, login
+    /// and client.
+    #[must_use]
+    pub fn codex_images(self: &Arc<Self>) -> crate::CodexImages {
+        crate::CodexImages::new(Arc::clone(self))
+    }
+
     pub(crate) const fn client(&self) -> &plakous_http::Client {
         &self.client
     }
@@ -787,6 +794,7 @@ impl OpenAiLanguageModel {
     /// request carrying `body` on the current receipt.
     pub(crate) async fn codex_side_request(
         self: &Arc<Self>,
+        path: &'static str,
         body: &[u8],
         deadline: Instant,
         cancellation: &plakous_model::CancellationToken,
@@ -801,6 +809,7 @@ impl OpenAiLanguageModel {
         crate::native_auth::codex_side_request(
             &current.target,
             &self.client,
+            path,
             body,
             deadline,
             cancellation,

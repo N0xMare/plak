@@ -437,9 +437,6 @@ impl RetrievalPort for DeferredRetrievalPort {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ImageGenRow {
     Supported,
-    /// The provider has an images endpoint; no release has qualified it on
-    /// this route.
-    NotQualified,
     /// The route's provider has no images endpoint.
     NotOffered,
 }
@@ -681,8 +678,7 @@ impl ToolRoute {
     /// Whether the route serves `image_gen`.
     pub(crate) const fn image_gen(self) -> ImageGenRow {
         match self {
-            Self::XaiApi | Self::Grok => ImageGenRow::Supported,
-            Self::Codex | Self::OpenAi => ImageGenRow::NotQualified,
+            Self::Codex | Self::Grok | Self::OpenAi | Self::XaiApi => ImageGenRow::Supported,
             Self::Claude | Self::Anthropic | Self::OpenRouter => ImageGenRow::NotOffered,
         }
     }
@@ -809,9 +805,6 @@ pub(crate) fn bind_tool_plan_with(
                         continue;
                     }
                     (ImageGenRow::Supported, None) => RefusalReason::Unbuilt,
-                    (ImageGenRow::NotQualified, _) => RefusalReason::Unqualified {
-                        route: route_label.to_owned(),
-                    },
                     (ImageGenRow::NotOffered, _) => RefusalReason::Unoffered {
                         route: route_label.to_owned(),
                     },
@@ -937,7 +930,7 @@ fn not_offered_remedy(tool: &SelectedTool) -> &'static str {
             "put x_search on a grok or xai-api template and spawn it"
         }
         SelectedTool::Optional(OptionalTool::ImageGen) => {
-            "put image_gen on a grok or xai-api template and spawn it"
+            "put image_gen on a codex, grok, openai or xai-api template and spawn it"
         }
         _ => "put it on a template whose route offers it and spawn it",
     }
@@ -1300,20 +1293,20 @@ mod tests {
     }
 
     #[test]
-    fn image_gen_refusal_text_on_the_unqualified_and_unoffered_routes() -> TestResult {
+    fn image_gen_binds_where_qualified_and_names_the_route_elsewhere() -> TestResult {
         for route in ToolRoute::ALL {
             let label = route_label(route);
             let expected = match route {
-                ToolRoute::Grok | ToolRoute::XaiApi => continue,
-                ToolRoute::Codex | ToolRoute::OpenAi => {
-                    format!(
-                        "image_gen is not yet qualified on {label}; remedy: remove image_gen \
-                         from the template's tools until a release qualifies it there"
-                    )
+                ToolRoute::Codex | ToolRoute::Grok | ToolRoute::OpenAi | ToolRoute::XaiApi => {
+                    let selection = TemplateToolSelection::parse(["image_gen"])?;
+                    let plan = bind_tool_plan(&selection, route, label)
+                        .map_err(|refusal| refusal.to_string())?;
+                    assert!(plan.image_gen().is_some(), "{route:?}");
+                    continue;
                 }
                 ToolRoute::Claude | ToolRoute::Anthropic | ToolRoute::OpenRouter => format!(
-                    "image_gen is not available on {label}; remedy: put image_gen on a grok \
-                     or xai-api template and spawn it"
+                    "image_gen is not available on {label}; remedy: put image_gen on a codex, \
+                     grok, openai or xai-api template and spawn it"
                 ),
             };
             assert_eq!(refusal_text(&["image_gen"], route)?, expected, "{route:?}");
@@ -1856,8 +1849,8 @@ mod tests {
     fn binding_refuses_the_first_optional_entry_and_passes_mcp_entries() -> TestResult {
         let refused = bind_tool_plan(
             &TemplateToolSelection::parse(["mcp:github", "fetch_url", "image_gen", "web_search"])?,
-            ToolRoute::Codex,
-            "codex",
+            ToolRoute::Claude,
+            "claude",
         )
         .err()
         .ok_or("an optional tool bound")?;

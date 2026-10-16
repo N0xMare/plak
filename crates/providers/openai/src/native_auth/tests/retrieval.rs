@@ -57,7 +57,7 @@ async fn codex_search_posts_the_search_body_under_the_codex_costume_and_one_perm
     let resolver =
         CodexModelResolver::new_for_test(manager, client, StandardOpenAiHttpConfig::default())?;
     resolver.refresh_catalog().await?;
-    let (_, _, retrieval) = resolver.resolve_with_retrieval(MODEL)?;
+    let (_, _, retrieval, _) = resolver.resolve_with_retrieval(MODEL)?;
     let outcome = retrieval
         .retrieve(
             search("rust 1.99"),
@@ -126,7 +126,7 @@ async fn a_changed_login_refuses_the_codex_search_before_the_socket() -> TestRes
         StandardOpenAiHttpConfig::default(),
     )?;
     resolver.refresh_catalog().await?;
-    let (_, _, retrieval) = resolver.resolve_with_retrieval(MODEL)?;
+    let (_, _, retrieval, _) = resolver.resolve_with_retrieval(MODEL)?;
     manager.install_selected_account(AccountBinding::new("changed-after-catalog")?)?;
     let error = retrieval
         .retrieve(

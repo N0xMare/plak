@@ -4113,13 +4113,19 @@ session executor's key, project and client. The SuperGrok port (the same
 `ResolvedProvider::image_gen_port`) sends the same body to `/v1/images/generations`
 and `/v1/images/edits` on the subscription origin under the session's OAuth
 grant and inference permit, revalidated before each physical request and held
-until the response head. The Codex paths and model are recorded in
-`plakous-openai`, but no Codex images transport is built. `plakous-hosted` binds `image_gen` only where the route's release-owned
-row is `Supported` and the route has a port, on a deferred port the
-executor connects once. The xAI API and SuperGrok rows are `Supported`; the
-Codex and OpenAI API rows are unqualified and the Claude, Anthropic API and
-OpenRouter rows unoffered, so binding refuses there until a live receipt
-qualifies a row.
+until the response head. The Codex port (`CodexImagePort` over `CodexImages`,
+from the resolved Codex model, model `gpt-image-2`, also exposed as
+`ResolvedProvider::image_gen_port`) posts the same body to
+`/backend-api/codex/images/generations` (or `/edits`) on the ChatGPT origin
+under the session's own subscription login, as the official Codex client's
+image extension does: each physical request revalidates admission, runs the
+credential preflight and takes an inference permit exactly like the Codex
+`alpha/search` side request, and holds both until the response head.
+`plakous-hosted` binds `image_gen` only where the route's release-owned row is
+`Supported` and the route has a port, on a deferred port the executor connects
+once. The Codex, OpenAI API, xAI API and SuperGrok rows are `Supported` on
+live receipts (generate, save, and read back as image input on a vision
+route); the Claude, Anthropic API and OpenRouter rows are unoffered.
 
 A repository query walks a live tree, so it surveys rather than transacts. Every
 directory child is opened relative to its parent descriptor with `O_NOFOLLOW`:
