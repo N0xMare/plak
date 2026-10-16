@@ -69,3 +69,15 @@ allow = ["BlueOak-1.0.0"]
 name = "ar_archive_writer"
 version = "=0.5.3"
 allow = ["Apache-2.0 WITH LLVM-exception"]
+
+# arboard's Windows clipboard backend, present only in the all-target audit;
+# no supported platform builds it.
+[[licenses.exceptions]]
+name = "clipboard-win"
+version = "=5.4.1"
+allow = ["BSL-1.0"]
+
+[[licenses.exceptions]]
+name = "error-code"
+version = "=3.4.0"
+allow = ["BSL-1.0"]
