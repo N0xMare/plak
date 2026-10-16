@@ -2365,6 +2365,7 @@ pub fn scripted_artifact_runtime_binding(
         controller,
         script,
         ScriptedOperation::ArtifactTurn(Arc::new(AtomicU64::new(1))),
+        Vec::new(),
     )
 }
 
@@ -2387,11 +2388,35 @@ pub fn scripted_runtime_binding_with_cursor(
     script: Arc<ScriptPlan>,
     cursor: Arc<AtomicU64>,
 ) -> HarnessResult<SessionRuntimeBinding> {
+    scripted_runtime_binding_with_extensions(workspace, controller, script, cursor, Vec::new())
+}
+
+/// [`scripted_runtime_binding_with_cursor`] whose registry also holds a host's
+/// bound tool `extensions` (a template's MCP tools), each offered Direct
+/// under its registration's owner.
+///
+/// # Errors
+///
+/// Returns an error when the scripted model, a tool, or the workspace fixture
+/// is invalid, an extension collides with a scripted tool, or the script
+/// asks for the process tools, which take no extensions.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the caller hands the script's ownership to the binding it builds"
+)]
+pub fn scripted_runtime_binding_with_extensions(
+    workspace: &Path,
+    controller: BoundaryController,
+    script: Arc<ScriptPlan>,
+    cursor: Arc<AtomicU64>,
+    extensions: Vec<ToolRegistration>,
+) -> HarnessResult<SessionRuntimeBinding> {
     scripted_runtime_binding_with_cursor_inner(
         workspace,
         controller,
         &script,
         ScriptedOperation::Turn(cursor),
+        extensions,
     )
 }
 
@@ -2400,6 +2425,7 @@ fn scripted_runtime_binding_with_cursor_inner(
     controller: BoundaryController,
     script: &Arc<ScriptPlan>,
     operation: ScriptedOperation,
+    extensions: Vec<ToolRegistration>,
 ) -> HarnessResult<SessionRuntimeBinding> {
     let account = b"offline-loopback-account";
     let descriptor = if matches!(&operation, ScriptedOperation::ArtifactTurn(_)) {
@@ -2409,6 +2435,9 @@ fn scripted_runtime_binding_with_cursor_inner(
     };
     let model = operation.model(controller.clone(), account, descriptor.clone(), script)?;
     if script.process_tools {
+        if !extensions.is_empty() {
+            return Err("scripted process tools take no host tool extensions".into());
+        }
         return scripted_process_runtime_binding(workspace, model, &descriptor, account, script);
     }
     let definition = ToolDefinition::new(
@@ -2426,13 +2455,6 @@ fn scripted_runtime_binding_with_cursor_inner(
         ToolConcurrency::Serial,
         ToolEffect::Mutating,
     )?;
-    let configured = configured_model(
-        Arc::clone(&model),
-        &descriptor,
-        definition.clone(),
-        account,
-        None,
-    )?;
     let mut registry = ToolRegistryBuilder::default();
     registry.register(ToolRegistration::new(
         RegisteredToolId::new("offline.loopback.effect")?,
@@ -2445,8 +2467,20 @@ fn scripted_runtime_binding_with_cursor_inner(
             body_bytes: script.tool_result_bytes,
         }),
     ))?;
+    for extension in extensions {
+        registry.register(extension)?;
+    }
+    let registry = registry.freeze();
+    let configured = configured_model_with_configured_tools(
+        Arc::clone(&model),
+        &descriptor,
+        direct_configured_tools(&registry)?,
+        account,
+        None,
+        plakous::model::ToolPresentationMode::Direct,
+    )?;
     let workspace = Arc::new(WorkspacePolicy::host(workspace, ".")?);
-    let builder = AgentBuilder::new(configured, registry.freeze(), workspace)
+    let builder = AgentBuilder::new(configured, registry, workspace)
         .config(scripted_agent_config(script))
         .tool_policy(scripted_tool_policy(script))
         .identity_sources(
@@ -2600,6 +2634,39 @@ pub fn scripted_code_mode_runtime_binding(
     sidecar: &Path,
     telemetry: Option<Arc<plakous::agent::TelemetryEmitter>>,
 ) -> HarnessResult<SessionRuntimeBinding> {
+    scripted_code_mode_runtime_binding_with_extensions(
+        workspace,
+        controller,
+        script,
+        cursor,
+        sidecar,
+        telemetry,
+        Vec::new(),
+    )
+}
+
+/// [`scripted_code_mode_runtime_binding`] whose nested catalog also lists a
+/// host's bound nested-eligible tool `extensions` (a template's MCP tools),
+/// in order after the core tools, as the product's Code Mode catalogs do.
+///
+/// # Errors
+///
+/// Returns an error when the registry, projection target, profile, sidecar
+/// artifact or workspace fixture is invalid, or an extension is not
+/// nested-eligible or collides with a core tool.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the caller hands the script's ownership to the binding it builds"
+)]
+pub fn scripted_code_mode_runtime_binding_with_extensions(
+    workspace: &Path,
+    controller: BoundaryController,
+    script: Arc<ScriptPlan>,
+    cursor: Arc<AtomicU64>,
+    sidecar: &Path,
+    telemetry: Option<Arc<plakous::agent::TelemetryEmitter>>,
+    extensions: Vec<ToolRegistration>,
+) -> HarnessResult<SessionRuntimeBinding> {
     scripted_code_mode_runtime_binding_inner(
         workspace,
         controller,
@@ -2607,6 +2674,7 @@ pub fn scripted_code_mode_runtime_binding(
         ScriptedOperation::Turn(cursor),
         sidecar,
         telemetry,
+        extensions,
     )
 }
 
@@ -2617,6 +2685,7 @@ fn scripted_code_mode_runtime_binding_inner(
     operation: ScriptedOperation,
     sidecar: &Path,
     telemetry: Option<Arc<plakous::agent::TelemetryEmitter>>,
+    extensions: Vec<ToolRegistration>,
 ) -> HarnessResult<SessionRuntimeBinding> {
     let account = b"offline-scripted-code-mode-account";
     let descriptor = scripted_code_mode_descriptor(account, script.maximum_projected_input)?;
@@ -2646,6 +2715,13 @@ fn scripted_code_mode_runtime_binding_inner(
         ),
         &mut registry,
     )?;
+    let extension_names = extensions
+        .iter()
+        .map(|extension| extension.name().clone())
+        .collect::<Vec<_>>();
+    for extension in extensions {
+        registry.register(extension)?;
+    }
     if script.js_ptc {
         plakous::tools::ProductJavaScriptCompositionV1::register_markers_into(&mut registry)?;
     } else {
@@ -2686,8 +2762,13 @@ fn scripted_code_mode_runtime_binding_inner(
         None,
         plakous::model::ToolPresentationMode::LocalCompositionOnly,
     )?;
-    let attachment =
-        scripted_local_composition_attachment(sidecar, script.js_ptc, &registry, &configured)?;
+    let attachment = scripted_local_composition_attachment(
+        sidecar,
+        script.js_ptc,
+        &registry,
+        &configured,
+        &extension_names,
+    )?;
 
     let workspace = Arc::new(WorkspacePolicy::host(workspace, ".")?);
     // A composition deployment exposes its nested catalog through the
@@ -2731,6 +2812,7 @@ fn scripted_local_composition_attachment(
     js_ptc: bool,
     registry: &plakous::tools::FrozenToolRegistry,
     configured: &ConfiguredLanguageModel,
+    extensions: &[ToolName],
 ) -> HarnessResult<plakous::agent::LocalCompositionAttachment> {
     let effective = configured.configuration().effective();
     let model_facts = effective.descriptor();
@@ -2760,7 +2842,9 @@ fn scripted_local_composition_attachment(
             [
                 ToolName::new("exec_command")?,
                 ToolName::new("write_stdin")?,
-            ],
+            ]
+            .into_iter()
+            .chain(extensions.iter().cloned()),
         )?;
         assert!(compiled.outer_projection().is_for_registry(registry));
         let profile = plakous::agent::LocalCompositionProfile::product_javascript_v1(&compiled)?;
@@ -2787,10 +2871,11 @@ fn scripted_local_composition_attachment(
             .coding_presentation_kind(plakous::tools::CodingPresentation::Codex)
             .build()?
     } else {
-        let compiled = plakous::tools::CodexMinimalLocalCodeModeV1::compile(
+        let compiled = plakous::tools::CodexMinimalLocalCodeModeV1::compile_with_extensions(
             plakous::tools::JobConfig::default(),
             registry.clone(),
             target,
+            extensions,
         )?;
         assert!(compiled.outer_projection().is_for_registry(registry));
         let profile =
@@ -2877,6 +2962,7 @@ pub fn scripted_compaction_runtime_binding(
             ScriptedOperation::Compact,
             sidecar.ok_or("scripted Code Mode compaction needs its source sidecar")?,
             None,
+            Vec::new(),
         )?
     } else {
         scripted_runtime_binding_with_cursor_inner(
@@ -2884,6 +2970,7 @@ pub fn scripted_compaction_runtime_binding(
             controller,
             script,
             ScriptedOperation::Compact,
+            Vec::new(),
         )?
     };
     Ok(runtime.with_compaction_output_limit()?)
@@ -3258,14 +3345,70 @@ fn configured_model(
     )
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "complete crash-evidence fixture construction"
-)]
 fn configured_model_with_tools(
     model: Arc<dyn LanguageModel>,
     descriptor: &ResolvedModelDescriptor,
     tools: Vec<ToolDefinition>,
+    account: &[u8],
+    output_bound: Option<NonZeroU32>,
+    tool_mode: plakous::model::ToolPresentationMode,
+) -> HarnessResult<ConfiguredLanguageModel> {
+    let tools = tools
+        .into_iter()
+        .map(|tool| {
+            ConfiguredTool::new(
+                tool,
+                ToolExecutionDisposition::Local,
+                plakous::model::ToolCallerDisposition::DirectOnly,
+            )
+        })
+        .collect();
+    configured_model_with_configured_tools(
+        model,
+        descriptor,
+        tools,
+        account,
+        output_bound,
+        tool_mode,
+    )
+}
+
+/// Direct configured tools for every definition in `registry`, in registry
+/// order, each carrying its registration's owner as the product's Direct
+/// extensions do.
+fn direct_configured_tools(
+    registry: &plakous::tools::FrozenToolRegistry,
+) -> HarnessResult<Vec<ConfiguredTool>> {
+    registry
+        .definitions()
+        .iter()
+        .map(|definition| {
+            let tool = ConfiguredTool::new(
+                definition.clone(),
+                ToolExecutionDisposition::Local,
+                plakous::model::ToolCallerDisposition::DirectOnly,
+            );
+            match registry
+                .identity(definition.name())
+                .map(plakous::tools::RegisteredToolIdentity::owner)
+            {
+                Some(plakous::tools::ToolOwnerClass::Mcp(server)) => {
+                    Ok(tool.with_mcp_owner(server.canonical().clone())?)
+                }
+                _ => Ok(tool),
+            }
+        })
+        .collect()
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "complete crash-evidence fixture construction"
+)]
+fn configured_model_with_configured_tools(
+    model: Arc<dyn LanguageModel>,
+    descriptor: &ResolvedModelDescriptor,
+    tools: Vec<ConfiguredTool>,
     account: &[u8],
     output_bound: Option<NonZeroU32>,
     tool_mode: plakous::model::ToolPresentationMode,
@@ -3291,15 +3434,6 @@ fn configured_model_with_tools(
             Vec::new()
         } else {
             tools
-                .into_iter()
-                .map(|tool| {
-                    ConfiguredTool::new(
-                        tool,
-                        ToolExecutionDisposition::Local,
-                        plakous::model::ToolCallerDisposition::DirectOnly,
-                    )
-                })
-                .collect()
         },
         hosted_tools: Vec::new(),
         tool_choice: if output_bound.is_some() {

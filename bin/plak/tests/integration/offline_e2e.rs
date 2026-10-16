@@ -20,6 +20,7 @@
 )]
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::os::unix::fs::PermissionsExt as _;
@@ -4453,6 +4454,71 @@ fn a_code_mode_cell_runs_two_nested_calls_on_the_cli_face() {
     );
 }
 
+/// The repository-only MCP fixture server. Workspace test runs build every
+/// workspace binary into the directory above the test binary's `deps`.
+fn fake_mcp_server() -> PathBuf {
+    let executable = std::env::current_exe().expect("test binary");
+    let server = executable
+        .parent()
+        .and_then(Path::parent)
+        .expect("target directory")
+        .join("mcp-fake-server");
+    assert!(
+        server.is_file(),
+        "{} is missing; run the workspace tests so the fixture binary is built",
+        server.display()
+    );
+    server
+}
+
+/// Points the fixture's `[root] agent` template at `mcp:fake`, served by the
+/// fixture server with `args`.
+fn enable_fake_mcp(fixture: &Fixture, args: &[&str]) {
+    let config = fixture.home().join("config.toml");
+    let mut body = std::fs::read_to_string(&config).expect("config");
+    write!(
+        body,
+        "\n[mcp_servers.fake]\ntransport = \"stdio\"\ncommand = {:?}\nargs = {:?}\n",
+        fake_mcp_server().to_str().expect("fixture path"),
+        args
+    )
+    .expect("config body");
+    write_private(&config, &body);
+    let lead = fixture.home().join("agents").join("lead.toml");
+    let mut body = std::fs::read_to_string(&lead).expect("lead template");
+    body.push_str("tools = [\"mcp:fake\"]\n");
+    write_private(&lead, &body);
+}
+
+/// A Code Mode cell reaches a template's MCP tool as a nested call: the
+/// product catalog admits it, and the cell gets the server's answer.
+#[test]
+fn a_code_mode_cell_calls_a_template_mcp_tool_as_a_nested_call() {
+    let fixture = Fixture::new(&code_mode_script(&json!([
+        {"output": {"cell": "const echoed = await tools.mcp__fake__echo({ text: \"from-mcp\" }); text(echoed);"}, "finish": "tool_calls"},
+        {"output": {"text": "the composed answer"}}
+    ])));
+    let log = fixture.root.join("mcp-calls.log");
+    enable_fake_mcp(&fixture, &["--call-log", log.to_str().expect("log path")]);
+    let mut agent = AgentProcess::start(&fixture, &[]);
+    agent.wait_for("ready", |record| record["kind"] == "ready");
+    agent.send(&prompt_frame("run a cell"));
+    agent.wait_for("assistant_done", |record| {
+        record["kind"] == "assistant_done"
+    });
+    agent.send(&quit_frame());
+    let outcome = agent.finish();
+    assert!(outcome.status.success(), "stderr:\n{}", outcome.stderr);
+    let nested = nested_call_names(&outcome, &outer_call_id(&outcome, "exec"));
+    assert_eq!(
+        nested,
+        ["mcp__fake__echo"],
+        "stream:\n{}",
+        outcome.lines.join("\n")
+    );
+    assert_eq!(std::fs::read_to_string(&log).expect("call log"), "echo\n");
+}
+
 /// §6 quit over a live nested process: Ctrl+Q while a real cell's
 /// `exec_command` is still inside its yield must restore the terminal, let
 /// the process group's TERM reach the child's trap, and keep the session
@@ -8119,6 +8185,52 @@ mod durability {
             );
             std::thread::sleep(Duration::from_millis(25));
         }
+    }
+
+    /// A host killed after an MCP call's write-ahead claim reopens with the
+    /// call settled as outcome-unknown: the recovery note names the running
+    /// tool, and the server never sees the call again.
+    #[test]
+    fn durability_mcp_call_killed_after_its_claim_is_never_redispatched() {
+        let fixture = Fixture::new(&json!({
+            "version": 1,
+            "steps": [tool_step("mcp__fake__hang", &json!({}))]
+        }));
+        let log = fixture.root.join("mcp-calls.log");
+        enable_fake_mcp(&fixture, &["--call-log", log.to_str().expect("log path")]);
+        let mut agent = AgentProcess::start(&fixture, &[]);
+        let hello = agent.wait_for("hello", |record| record["kind"] == "hello");
+        let session = hello["session_id"].as_str().expect("session id").to_owned();
+        agent.send(&prompt_frame("call the server"));
+        wait_for_fixture_file(&log);
+        signal(agent.id(), SIGKILL);
+        agent.close_stdin();
+        let _ = agent.finish();
+
+        fixture.write_script(&recovery_answer_script());
+        let mut reopened = reopen_until_the_lease_clears(&fixture, &session);
+        let note = reopened.wait_for("the recovery note", |record| {
+            record["kind"] == "status"
+                && record["detail"]
+                    .as_str()
+                    .is_some_and(|detail| detail.contains(RECOVERY_NOTE))
+        });
+        let detail = note["detail"].as_str().expect("a note detail");
+        for expected in RUNNING_TOOL_ONLY {
+            assert!(detail.contains(expected), "note was:\n{detail}");
+        }
+        reopened.send(&prompt_frame("carry on after the recovery"));
+        reopened.wait_for("assistant_done", |record| {
+            record["kind"] == "assistant_done"
+        });
+        reopened.send(&quit_frame());
+        let outcome = reopened.finish();
+        assert!(outcome.status.success(), "stderr:\n{}", outcome.stderr);
+        assert_eq!(
+            std::fs::read_to_string(&log).expect("call log"),
+            "hang\n",
+            "the claimed call was dispatched again"
+        );
     }
 
     /// D: one nested call finished, one still running, then interrupt.

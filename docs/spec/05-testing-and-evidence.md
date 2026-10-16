@@ -1469,6 +1469,18 @@ what drops the compaction ladder onto its offline placeholder rung. This is the 
 controller the Rust loopback builders use; only the round-by-round shape comes
 from data.
 
+The scripted runtimes compile their own registries, so the root's optional
+tools reach them through the product's own binder: the session's frozen tools
+on reopen, or the `[root] agent` template a creation freezes. A template
+naming `mcp:<server>` therefore offers that server's tools Direct (plain
+scripts) or in the Code Mode / `js-ptc` nested catalog (`code_mode` scripts),
+each under its MCP owner. `plakous-mcp-fake-server --call-log PATH` appends
+each called tool's name to `PATH` before it runs, so a test in another process
+counts dispatches: one offline test calls `mcp__fake__echo` from a Code Mode
+cell, and the durability module kills the host after an MCP call's
+write-ahead claim and checks that reopen settles it without a second
+dispatch.
+
 `bin/plak/tests/integration/offline_e2e.rs` module `durability` chains those gestures in one
 spawned session. Its tool/cancel/compact/resume chain uses an accepted bounded
 summary: when retained tool output clips the next turn, it checks that turn

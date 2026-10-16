@@ -79,8 +79,6 @@ mod product_gate_tests;
 #[cfg(test)]
 mod tests;
 
-#[cfg(any(test, feature = "test-support"))]
-pub use build::build_or_open_injected_session;
 pub use build::direct_composition_capable;
 pub use build::{
     ApiTopologyParent, AttachedCodingSession, AttachedReleaseError, CodingSessionOpenFailure,
@@ -105,6 +103,8 @@ pub(crate) use build::{
     projection_target, session_tool_policy, stamped_workspace_policy, subagent_catalog_profile_id,
     vocabulary_for_presentation,
 };
+#[cfg(any(test, feature = "test-support"))]
+pub use build::{build_or_open_injected_session, injected_root_tool_registrations};
 use build::{
     coding_session_runtime_binding_for, require_reconstructed_coding_projection,
     spawn_child_composition, spawn_parent_tree_id, spawn_roster_composition,

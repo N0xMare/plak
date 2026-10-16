@@ -32,9 +32,9 @@ use plakous::subscriptions::NativeProvider;
 use plakous_offline_crash_harness::protocol::CrashBoundary;
 use plakous_offline_crash_harness::script::ScriptPlan;
 use plakous_offline_crash_harness::{
-    BoundaryController, scripted_artifact_runtime_binding, scripted_code_mode_runtime_binding,
-    scripted_compaction_runtime_binding, scripted_runtime_binding_with_cursor,
-    scripted_topology_runtime_binding,
+    BoundaryController, scripted_artifact_runtime_binding,
+    scripted_code_mode_runtime_binding_with_extensions, scripted_compaction_runtime_binding,
+    scripted_runtime_binding_with_extensions, scripted_topology_runtime_binding,
 };
 
 use crate::{product_agent, product_config, product_host, product_paths, product_sessions};
@@ -616,6 +616,54 @@ async fn bind_process_child(
     })
 }
 
+/// The root's optional tools as the offline runtime binds them.
+///
+/// The scripted runtimes compile their own registries, so the product's
+/// native construction, which binds the root's tool plan, never runs. This
+/// binds the same plan through the product's own binder: from the session's
+/// frozen tools on reopen, or from the `[root] agent` template a creation
+/// freezes. It binds once, on first use, so a session without optional tools
+/// starts no server and a session's runtimes share one binding.
+struct RootTools {
+    frozen: plakous_hosted::frozen_tools::FrozenRootTools,
+    session: product_sessions::SessionRecord,
+    state_roots: product_agent::ProductStateRoots,
+    bound: std::sync::OnceLock<Result<Vec<plakous::tools::ToolRegistration>, String>>,
+}
+
+impl RootTools {
+    fn new(
+        paths: &product_paths::PlakPaths,
+        state_roots: &product_agent::ProductStateRoots,
+        session: &product_sessions::SessionRecord,
+    ) -> Result<Self, String> {
+        let frozen = match &session.frozen_tools {
+            Some(frozen) => frozen.clone(),
+            None => plakous_hosted::frozen_tools::FrozenRootTools::new(
+                product_config::SessionPolicy::load(paths)?.root_template,
+            ),
+        };
+        Ok(Self {
+            frozen,
+            session: session.clone(),
+            state_roots: state_roots.clone(),
+            bound: std::sync::OnceLock::new(),
+        })
+    }
+
+    fn registrations(&self) -> Result<Vec<plakous::tools::ToolRegistration>, String> {
+        self.bound
+            .get_or_init(|| {
+                plakous_hosted::agent::injected_root_tool_registrations(
+                    &self.frozen,
+                    &self.session,
+                    &self.state_roots,
+                )
+            })
+            .clone()
+    }
+}
+
 /// One selected offline script and the evidence log its boundaries append to.
 pub(crate) struct OfflineSelection {
     plan: Arc<ScriptPlan>,
@@ -702,6 +750,7 @@ impl OfflineSelection {
         .map_err(|error| format!("offline evidence log: {error}"))?;
         let workspace = cwd.to_path_buf();
         let plan = Arc::clone(&self.plan);
+        let root_tools = Arc::new(RootTools::new(paths, state_roots, &session)?);
         // One session, one script position. The host may build more than one
         // runtime for a session, and a per-binding cursor would restart the
         // script at step one each time, which is silent and would look like the
@@ -737,22 +786,24 @@ impl OfflineSelection {
             let sidecar = crate::sidecars::js_host::locate().map_err(|reason| {
                 format!("offline Code Mode needs the JavaScript sidecar: {reason}")
             })?;
-            scripted_code_mode_runtime_binding(
+            scripted_code_mode_runtime_binding_with_extensions(
                 cwd,
                 controller.clone(),
                 Arc::clone(&plan),
                 Arc::clone(&cursor),
                 &sidecar,
                 None,
+                root_tools.registrations()?,
             )
         } else if plan.seal_family_artifacts {
             scripted_artifact_runtime_binding(cwd, controller.clone(), &plan)
         } else {
-            scripted_runtime_binding_with_cursor(
+            scripted_runtime_binding_with_extensions(
                 cwd,
                 controller.clone(),
                 Arc::clone(&plan),
                 Arc::clone(&cursor),
+                root_tools.registrations()?,
             )
         }
         .map_err(|error| error.to_string())?
@@ -796,13 +847,14 @@ impl OfflineSelection {
                 // The product's own sidecar discovery, so the test binds what
                 // the product would bind rather than a path of its own.
                 match crate::sidecars::js_host::locate() {
-                    Ok(sidecar) => scripted_code_mode_runtime_binding(
+                    Ok(sidecar) => scripted_code_mode_runtime_binding_with_extensions(
                         &workspace,
                         runtime_controller.clone(),
                         Arc::clone(&plan),
                         Arc::clone(&cursor),
                         &sidecar,
                         telemetry.clone(),
+                        root_tools.registrations()?,
                     ),
                     Err(reason) => {
                         return Err(format!(
@@ -813,11 +865,12 @@ impl OfflineSelection {
             } else if plan.seal_family_artifacts {
                 scripted_artifact_runtime_binding(&workspace, runtime_controller.clone(), &plan)
             } else {
-                scripted_runtime_binding_with_cursor(
+                scripted_runtime_binding_with_extensions(
                     &workspace,
                     runtime_controller.clone(),
                     Arc::clone(&plan),
                     Arc::clone(&cursor),
+                    root_tools.registrations()?,
                 )
             }
             .map_err(|error| error.to_string())

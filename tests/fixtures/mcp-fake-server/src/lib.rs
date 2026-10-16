@@ -78,6 +78,7 @@ pub struct FakeServer {
     tools: Vec<Tool>,
     observed: Arc<Observed>,
     on_exit: Arc<dyn Fn() + Send + Sync>,
+    call_log: Option<std::path::PathBuf>,
 }
 
 impl FakeServer {
@@ -89,7 +90,20 @@ impl FakeServer {
             tools: standard_tools(),
             observed: Arc::default(),
             on_exit,
+            call_log: None,
         }
+    }
+
+    /// Appends each called tool's name as one line to `path` before the call
+    /// runs, so a test in another process can count dispatches.
+    #[must_use]
+    #[allow(
+        dead_code,
+        reason = "only the binary logs calls; plakous-mcp compiles this file in process"
+    )]
+    pub fn with_call_log(mut self, path: std::path::PathBuf) -> Self {
+        self.call_log = Some(path);
+        self
     }
 
     /// Replaces the listed tools.
@@ -196,6 +210,16 @@ impl ServerHandler for FakeServer {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(request.name.to_string());
+        if let Some(path) = &self.call_log {
+            use std::io::Write as _;
+            if let Ok(mut file) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+            {
+                let _ = writeln!(file, "{}", request.name);
+            }
+        }
         let arguments = request.arguments.unwrap_or_default();
         Ok(match request.name.as_ref() {
             "echo" => text(

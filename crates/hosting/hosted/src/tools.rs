@@ -82,6 +82,11 @@ impl ProductToolExtensions {
         self.registrations.is_empty()
     }
 
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn registrations(&self) -> &[ToolRegistration] {
+        &self.registrations
+    }
+
     /// Appends a bound tool plan after these extensions: the one append path
     /// for every tool a template selects, in plan order.
     ///

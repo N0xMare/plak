@@ -1532,6 +1532,37 @@ pub(super) fn bind_node_tool_plan(
     Ok(plan.with_mcp(selection, mcp))
 }
 
+/// The registrations a root session's frozen optional tools bind to, for an
+/// injected offline runtime that compiles its own registry over them: the
+/// same plan a native Codex runtime binds, MCP tools rebuilt from their
+/// frozen records when the record has them.
+///
+/// # Errors
+///
+/// Returns the bind refusal's one line.
+#[cfg(any(test, feature = "test-support"))]
+pub fn injected_root_tool_registrations(
+    frozen: &crate::frozen_tools::FrozenRootTools,
+    session: &crate::sessions::SessionRecord,
+    state_roots: &ProductStateRoots,
+) -> Result<Vec<plakous::tools::ToolRegistration>, String> {
+    let tools = frozen.selection(session.account.as_deref(), session.model.as_deref());
+    let plan = bind_node_tool_plan(
+        &tools,
+        crate::tool_plan::ToolRoute::native(NativeProvider::Codex),
+        state_roots
+            .roster_source()
+            .account_name(NativeProvider::Codex),
+        &session.workspace_root,
+        state_roots,
+    )
+    .map_err(|failure| failure.message().to_owned())?;
+    let extensions = ProductToolExtensions::empty()
+        .with_plan(&plan)
+        .map_err(|failure| failure.message().to_owned())?;
+    Ok(extensions.registrations().to_vec())
+}
+
 /// One Direct extension as the provider configuration states it. A tool an
 /// MCP server executes names that server, so every protocol decodes its calls
 /// with that owner before the driver lands them.
