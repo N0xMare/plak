@@ -74,6 +74,22 @@ impl ProductToolExtensions {
         self.registrations.is_empty()
     }
 
+    /// Appends a bound tool plan after these extensions: the one append path
+    /// for every tool a template selects.
+    ///
+    /// No planned tool has a registration in this build, and binding refuses
+    /// every selected tool before this point, so only the empty plan arrives;
+    /// it leaves the extensions, and every surface and identity compiled from
+    /// them, unchanged.
+    pub(crate) fn with_plan(self, plan: &crate::tool_plan::ToolPlan) -> CliResult<Self> {
+        match plan.tools().first() {
+            None => Ok(self),
+            Some(tool) => Err(CliFailure::new(format!(
+                "planned tool {tool:?} has no registration in this build"
+            ))),
+        }
+    }
+
     /// Registers this pack's executors through the pack seam.
     pub fn register_into(&self, builder: &mut ToolRegistryBuilder) -> CliResult<()> {
         register_packs(&[Arc::new(self.clone()) as Arc<dyn ToolPack>], builder).map_err(|error| {
@@ -407,6 +423,62 @@ mod tests {
                 &extensions,
             )
             .is_ok()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_empty_plan_leaves_extensions_registry_and_surface_unchanged() -> TestResult {
+        use crate::tool_plan::{TemplateToolSelection, ToolPlan};
+
+        let compile = |extensions: &ProductToolExtensions, presentation| {
+            let registry = cli(crate::agent::coding_tool_registry_with_extensions(
+                "empty-plan",
+                crate::binding::CompositionSelection::Direct,
+                false,
+                extensions,
+            ))?;
+            cli(product_surface(
+                plakous::tools::JobConfig::default(),
+                presentation,
+                registry,
+                crate::agent::rendered_prompts::suite::synthetic_target(b"empty-plan"),
+                extensions,
+            ))
+        };
+        for presentation in [
+            CodingPresentation::Codex,
+            CodingPresentation::Claude,
+            CodingPresentation::Grok,
+            CodingPresentation::Pi,
+        ] {
+            for names in [&[][..], &["submit_result", "custom_tool"][..]] {
+                let base = extensions(names);
+                let planned = cli(base.clone().with_plan(&ToolPlan::default()))?;
+                assert_eq!(
+                    planned.names().collect::<Vec<_>>(),
+                    base.names().collect::<Vec<_>>()
+                );
+                let (before, after) = (
+                    compile(&base, presentation)?,
+                    compile(&planned, presentation)?,
+                );
+                assert_eq!(after.exposed_names(), before.exposed_names());
+                assert_eq!(
+                    after.projection().registry_digest(),
+                    before.projection().registry_digest()
+                );
+                assert_eq!(
+                    after.registry().definitions(),
+                    before.registry().definitions()
+                );
+            }
+        }
+        let selection = TemplateToolSelection::parse(["web_search"])?;
+        assert!(
+            extensions(&[])
+                .with_plan(&ToolPlan::new(&selection, []))
+                .is_err()
         );
         Ok(())
     }

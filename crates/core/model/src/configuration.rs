@@ -9,11 +9,11 @@ use thiserror::Error;
 
 use crate::{
     CachePolicy, Capability, ContextAdmissionRequirement, CredentialSelectionId, Digest,
-    DigestDomain, LanguageModel, ModelAdapterProfileId, ModelFamilyId, ModelId, NamespaceId,
-    OutputFormat, OutputPolicy, ProtocolId, ProviderAuthorityClassId, ProviderProfileRevisionId,
-    ProviderServiceTierId, ReasoningEffort, ReasoningPolicy, ResolvedModelDescriptor, RouteId,
-    RuntimeModelAuthority, StandardIntegrationAuthority, Support, Timestamp, ToolChoice,
-    ToolDefinition, ToolExecutionOwner,
+    DigestDomain, LanguageModel, McpServerId, ModelAdapterProfileId, ModelFamilyId, ModelId,
+    NamespaceId, OutputFormat, OutputPolicy, ProtocolId, ProviderAuthorityClassId,
+    ProviderProfileRevisionId, ProviderServiceTierId, ReasoningEffort, ReasoningPolicy,
+    ResolvedModelDescriptor, RouteId, RuntimeModelAuthority, StandardIntegrationAuthority, Support,
+    Timestamp, ToolChoice, ToolDefinition, ToolExecutionOwner,
 };
 
 /// Selected-configuration schema revision.
@@ -604,6 +604,10 @@ pub struct ConfiguredTool {
     definition: ToolDefinition,
     execution: ToolExecutionDisposition,
     caller: ToolCallerDisposition,
+    /// The MCP server that executes a locally dispatched tool. Absent for
+    /// every other tool, so their encoding and identity omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mcp_server: Option<McpServerId>,
 }
 
 impl ConfiguredTool {
@@ -618,6 +622,36 @@ impl ConfiguredTool {
             definition,
             execution,
             caller,
+            mcp_server: None,
+        }
+    }
+
+    /// Marks a locally dispatched tool as executed by one MCP server, so
+    /// protocols decode its calls with that owner from the first parse.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a provider-hosted tool, whose owner is the provider family.
+    pub fn with_mcp_owner(mut self, server: McpServerId) -> Result<Self, ToolOwnerProjectionError> {
+        if self.execution != ToolExecutionDisposition::Local {
+            return Err(ToolOwnerProjectionError::OwnerMismatch);
+        }
+        self.mcp_server = Some(server);
+        Ok(self)
+    }
+
+    /// Returns the runtime owner of a locally dispatched tool: its MCP
+    /// server, or the local runtime. `None` for a provider-hosted tool.
+    #[must_use]
+    pub fn local_owner(&self) -> Option<ToolExecutionOwner> {
+        match self.execution {
+            ToolExecutionDisposition::Local => Some(match &self.mcp_server {
+                Some(server) => ToolExecutionOwner::Mcp {
+                    server: server.clone(),
+                },
+                None => ToolExecutionOwner::Local,
+            }),
+            ToolExecutionDisposition::ProviderHosted => None,
         }
     }
 
@@ -643,7 +677,8 @@ impl ConfiguredTool {
     ///
     /// Caller lineage is independent of execution ownership: both direct and
     /// provider-programmatic calls may retain a Plak-local or Plak MCP owner,
-    /// while provider-hosted operations must retain family ownership.
+    /// while provider-hosted operations must retain family ownership. A tool
+    /// configured with an MCP owner admits only that server.
     ///
     /// # Errors
     ///
@@ -662,6 +697,11 @@ impl ConfiguredTool {
                 ToolExecutionOwner::ProviderHosted { .. },
             )
         ) {
+            return Err(ToolOwnerProjectionError::OwnerMismatch);
+        }
+        if let Some(configured) = &self.mcp_server
+            && !matches!(owner, ToolExecutionOwner::Mcp { server } if server == configured)
+        {
             return Err(ToolOwnerProjectionError::OwnerMismatch);
         }
         Ok(())
@@ -3001,7 +3041,7 @@ mod tests {
             ToolCallerDisposition::DirectAndProviderProgrammatic,
         );
         let mcp = ToolExecutionOwner::Mcp {
-            server: crate::McpServerId::new("plak-mcp")?,
+            server: McpServerId::new("plak-mcp")?,
         };
         assert_eq!(direct.validate_owner_projection(&mcp), Ok(()));
         assert_eq!(
@@ -3026,6 +3066,64 @@ mod tests {
         assert_eq!(
             direct.validate_owner_projection(&family_owner),
             Err(ToolOwnerProjectionError::OwnerMismatch)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_mcp_owner_is_absent_from_every_other_tool_and_exact_when_present() -> TestResult {
+        let local = configured_tool("lookup", ToolExecutionDisposition::Local)?;
+        let encoded = serde_json::to_value(&local)?;
+        let keys = encoded
+            .as_object()
+            .map(|object| object.keys().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        assert_eq!(keys, ["caller", "definition", "execution"]);
+        assert_eq!(local.local_owner(), Some(ToolExecutionOwner::Local));
+
+        let mut plain_behavior = behavior()?;
+        plain_behavior.tools = vec![local.clone()];
+        let plain = compiled(plain_behavior.clone(), b"policy-one")?;
+        let plain_bytes = serde_json::to_vec(&plain)?;
+        assert!(!String::from_utf8(plain_bytes.clone())?.contains("mcp_server"));
+        let decoded: CompiledProviderConfiguration = serde_json::from_slice(&plain_bytes)?;
+        assert_eq!(serde_json::to_vec(&decoded)?, plain_bytes);
+        assert_eq!(decoded.effective().identity(), plain.effective().identity());
+
+        let server = McpServerId::new("github")?;
+        let owned = local.clone().with_mcp_owner(server.clone())?;
+        let mcp_owner = ToolExecutionOwner::Mcp {
+            server: server.clone(),
+        };
+        assert_eq!(owned.local_owner(), Some(mcp_owner.clone()));
+        assert_eq!(owned.validate_owner_projection(&mcp_owner), Ok(()));
+        for wrong in [
+            ToolExecutionOwner::Local,
+            ToolExecutionOwner::Mcp {
+                server: McpServerId::new("linear")?,
+            },
+        ] {
+            assert_eq!(
+                owned.validate_owner_projection(&wrong),
+                Err(ToolOwnerProjectionError::OwnerMismatch)
+            );
+        }
+
+        let mut owned_behavior = plain_behavior;
+        owned_behavior.tools = vec![owned];
+        let mcp = compiled(owned_behavior, b"policy-one")?;
+        assert_ne!(mcp.selected().identity(), plain.selected().identity());
+        assert_ne!(mcp.effective().identity(), plain.effective().identity());
+        let mcp_bytes = serde_json::to_vec(&mcp)?;
+        assert!(String::from_utf8(mcp_bytes.clone())?.contains("\"mcp_server\":\"github\""));
+        let decoded: CompiledProviderConfiguration = serde_json::from_slice(&mcp_bytes)?;
+        assert_eq!(decoded, mcp);
+
+        let hosted = configured_tool("lookup", ToolExecutionDisposition::ProviderHosted)?;
+        assert_eq!(hosted.local_owner(), None);
+        assert_eq!(
+            hosted.with_mcp_owner(server).err(),
+            Some(ToolOwnerProjectionError::OwnerMismatch)
         );
         Ok(())
     }

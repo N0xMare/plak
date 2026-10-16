@@ -51,6 +51,7 @@ fn openrouter_test_parent() -> ApiTopologyParent {
         created_output_bound: None,
         prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),
         product_home: None,
+        tool_selection: plakous_hosted::tool_plan::TemplateToolSelection::default(),
         workspace_root: PathBuf::from("/tmp/or-root"),
         cwd: PathBuf::from("/tmp/or-root"),
         plan_state_authority: "tree-or".into(),

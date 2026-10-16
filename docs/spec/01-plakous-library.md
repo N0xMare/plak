@@ -3824,7 +3824,17 @@ artifact covers a different owner fails closed as an artifact mismatch. A
 protocol that can produce an artifact on a tool round therefore emits the
 registry's owner at parse time through its owner configuration (Messages
 `ToolOwnership`, Responses `ResponsesCanonicalToolOwner`), and landing is then
-a no-op. A result takes its owner from the invoked
+a no-op. The registry's owner reaches the protocols through the request: a
+locally executed `ConfiguredTool` built with `with_mcp_owner(server)` names its
+MCP server, `ModelRequest::local_tool_owner(exposed)` answers the owner of a
+provider-visible name (through the V2 projection's canonical name when there is
+one), and Messages defaults an advertised tool's `ToolOwnership` entry and
+responses-dialect `canonical_local_tools` its `ResponsesCanonicalToolOwner`
+from it. Plak sets it on every Direct tool from the frozen registry's owner. A
+configured MCP owner is part of the provider configuration: it is serialized
+only when present (the field is absent for every other tool, so their encoding
+and selected and effective identities are unchanged) and is identity-bearing
+when present, and `validate_owner_projection` then admits only that server. A result takes its owner from the invoked
 registration (`ToolOutcome::to_model_result`), and a result the runtime
 synthesizes (rejection, interruption, supersession, recovery) copies its
 call's owner, so a call and its result always agree. The owner class is
@@ -4622,6 +4632,23 @@ xAI has no native PTC. Its minimum-optimal and default presentation is Direct.
 The xAI hosted `code_interpreter` is a distinct optional product extension —
 not PTC, not a Plakous default, and not a fallback — and the current witness is
 an offline codec only.
+
+**Hosted retrieval route support.** Hosted retrieval tools
+(`HostedRetrievalTool`: web search, web page fetch, X search) run inside an
+isolated side request a local wrapper issues; whether a route serves one is a
+release-owned fact, never a runtime probe. Each provider crate states one
+`HostedRetrievalTable` per route it owns (`CODEX_HOSTED_RETRIEVAL`,
+`OPENAI_API_HOSTED_RETRIEVAL`, `SUPERGROK_HOSTED_RETRIEVAL`,
+`XAI_API_HOSTED_RETRIEVAL`, `CLAUDE_OAUTH_HOSTED_RETRIEVAL`,
+`ANTHROPIC_API_HOSTED_RETRIEVAL`, `OPENROUTER_HOSTED_RETRIEVAL`, re-exported
+from the provider facade modules) with one `HostedRetrievalSupport` row per
+tool: `Supported`, or `Unsupported` with reason `NotOffered` (the provider has
+no such tool) or `NotQualified` (it has one, but no live qualification on this
+route is recorded). A row moves to `Supported` only with a reviewed live
+qualification. Every row of this build is `Unsupported`: web search is
+`NotQualified` on every route; web fetch on Claude and the Anthropic API and X
+search on SuperGrok and the xAI API are `NotQualified`; every other row is
+`NotOffered`. The tables do not key on the model: no row differs per model.
 
 ## 9. Code Mode and local programmatic composition
 

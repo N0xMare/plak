@@ -7,6 +7,7 @@ use super::{
     ResponsesRequestOptionError, ResponsesRequestPolicy, ToolCallerDisposition, ToolChoice,
     ToolDefinition, ToolInputContract, ToolName, Value, json,
 };
+use crate::{ResponsesCanonicalToolKind, ResponsesCanonicalToolOwner};
 
 /// Reports whether a definition explicitly declares free-form UTF-8 input.
 #[must_use]
@@ -31,35 +32,51 @@ pub fn is_unprojected_string_custom_tool_definition(
 }
 
 /// Builds the exact provider-visible local-tool table used by canonical
-/// Responses decoding after an optional V2 projection.
+/// Responses decoding after an optional V2 projection. Each tool carries the
+/// owner its configured tool names, so a call decodes with it from the first
+/// parse.
 #[must_use]
 pub fn canonical_local_tools(request: &ModelRequest) -> Vec<ResponsesCanonicalTool> {
+    let tool = |name: &ToolName, custom: bool| {
+        let owner = match request.local_tool_owner(name) {
+            plakous_model::ToolExecutionOwner::Mcp { server } => {
+                ResponsesCanonicalToolOwner::Mcp(server)
+            }
+            _ => ResponsesCanonicalToolOwner::Local,
+        };
+        let kind = if custom {
+            ResponsesCanonicalToolKind::Custom
+        } else {
+            ResponsesCanonicalToolKind::Function
+        };
+        ResponsesCanonicalTool::new(name.clone(), kind, owner)
+    };
     if let Some(projection) = request.tool_projection() {
         return projection
             .definitions()
             .iter()
             .map(|entry| {
-                if matches!(
-                    entry.presentation(),
-                    plakous_model::ProjectedToolPresentationV2::CustomUtf8 { .. }
-                ) {
-                    ResponsesCanonicalTool::local_custom(entry.exposed_name().clone())
-                } else {
-                    ResponsesCanonicalTool::local_function(entry.exposed_name().clone())
-                }
+                tool(
+                    entry.exposed_name(),
+                    matches!(
+                        entry.presentation(),
+                        plakous_model::ProjectedToolPresentationV2::CustomUtf8 { .. }
+                    ),
+                )
             })
             .collect();
     }
-    let mut tools = Vec::new();
-    for configured in request.tools() {
-        let canonical = configured.definition();
-        tools.push(if is_string_custom_tool_definition(canonical) {
-            ResponsesCanonicalTool::local_custom(canonical.name().clone())
-        } else {
-            ResponsesCanonicalTool::local_function(canonical.name().clone())
-        });
-    }
-    tools
+    request
+        .tools()
+        .iter()
+        .map(|configured| {
+            let canonical = configured.definition();
+            tool(
+                canonical.name(),
+                is_string_custom_tool_definition(canonical),
+            )
+        })
+        .collect()
 }
 
 pub(super) fn lower_hosted_tool(hosted: HostedTool) -> Value {

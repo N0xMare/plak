@@ -38,6 +38,7 @@ mod cch;
 mod config;
 mod dialect;
 mod error;
+mod hosted_support;
 mod http;
 mod model;
 #[cfg(feature = "native-auth")]
@@ -51,6 +52,7 @@ mod route;
 mod stream;
 mod subscription_usage;
 
+pub use hosted_support::{ANTHROPIC_API_HOSTED_RETRIEVAL, CLAUDE_OAUTH_HOSTED_RETRIEVAL};
 pub use oauth_identity::{ClaudeAccountUuid, ClaudeClientDeviceId, ClaudeOAuthRequestIdentity};
 
 pub use api_models::{

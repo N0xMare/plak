@@ -934,6 +934,32 @@ fn tool_with_concurrency(
 }
 
 #[test]
+fn canonical_tools_carry_the_configured_mcp_owner() -> TestResult {
+    let server = plakous_model::McpServerId::new("github")?;
+    let request = crate::test_support::model_request_builder(
+        ConversationView::from_items(vec![user(10, "Use the appropriate tool.")?])?,
+        metadata()?,
+    )
+    .tools(vec![
+        tool("lookup", false)?,
+        tool("mcp__github__create_issue", false)?.with_mcp_owner(server.clone())?,
+    ])
+    .build()?;
+    assert_eq!(
+        canonical_local_tools(&request),
+        vec![
+            ResponsesCanonicalTool::local_function(ToolName::new("lookup")?),
+            ResponsesCanonicalTool::new(
+                ToolName::new("mcp__github__create_issue")?,
+                crate::ResponsesCanonicalToolKind::Function,
+                crate::ResponsesCanonicalToolOwner::Mcp(server),
+            ),
+        ]
+    );
+    Ok(())
+}
+
+#[test]
 fn provider_parallel_permission_is_independent_of_local_tool_scheduling() -> TestResult {
     let (protocol, family, model) = target_values()?;
     let request = crate::test_support::model_request_builder(

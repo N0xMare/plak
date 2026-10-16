@@ -349,6 +349,7 @@ pub mod subscriptions;
 /// inputs. Route qualification and admission remain separate from nameability.
 #[cfg(feature = "anthropic")]
 pub mod anthropic {
+    pub use plakous_anthropic::{ANTHROPIC_API_HOSTED_RETRIEVAL, CLAUDE_OAUTH_HOSTED_RETRIEVAL};
     pub use plakous_anthropic::{
         ANTHROPIC_API_VERSION, ANTHROPIC_MESSAGES_PATH, ANTHROPIC_PLATFORM_ORIGIN, AnthropicApiKey,
         AnthropicApiKeySource, AnthropicApiModel, AnthropicApiModelStatus, AnthropicBetaFeature,
@@ -433,14 +434,16 @@ pub mod model {
         EffectiveProviderConfigurationId, EntryId, EventId, EvidenceFreshness, FactProvenance,
         FactSource, FamilyArtifactError, FamilyPolicyEnvelope, FeatureSupport, FinishDetails,
         FinishReason, FixedClock, GenerationLimits, HistoryError, HistoryPlanningError,
-        HistorySegment, HistorySegmentKind, HostedTool, IdGenerator, IdentityError, ImageBlock,
-        InstructionBlock, InstructionSource, IntegrationClass, LanguageModel, LimitOverflow,
-        LocalDurabilityDisposition, MAX_CONTEXT_PLANNER_SEGMENTS, MAX_FAMILY_ARTIFACT_BYTES,
-        MAX_FAMILY_POLICY_BYTES, MAX_MODEL_PAID_RECOVERY_BYTES, MAX_MODEL_PROVIDER_CODE_BYTES,
-        MAX_MODEL_PROVIDER_REQUEST_ID_BYTES, MAX_PREPARED_CALL_RECORD_BYTES,
-        MAX_PREPARED_WIRE_BYTES, MAX_PROVIDER_CALL_RECOVERY_LOCATOR_BYTES,
-        MAX_PROVIDER_SEMANTIC_EVIDENCE_BYTES, MAX_RUNTIME_ADMISSION_WITNESS_BYTES,
-        MAX_SAFE_DIAGNOSTIC_BYTES, MODEL_CALL_RECOVERY_EVIDENCE_SEMANTIC_REVISION,
+        HistorySegment, HistorySegmentKind, HostedRetrievalSupport, HostedRetrievalTable,
+        HostedRetrievalTool, HostedRetrievalUnsupported, HostedTool, IdGenerator, IdentityError,
+        ImageBlock, InstructionBlock, InstructionSource, IntegrationClass, LanguageModel,
+        LimitOverflow, LocalDurabilityDisposition, MAX_CONTEXT_PLANNER_SEGMENTS,
+        MAX_FAMILY_ARTIFACT_BYTES, MAX_FAMILY_POLICY_BYTES, MAX_MODEL_PAID_RECOVERY_BYTES,
+        MAX_MODEL_PROVIDER_CODE_BYTES, MAX_MODEL_PROVIDER_REQUEST_ID_BYTES,
+        MAX_PREPARED_CALL_RECORD_BYTES, MAX_PREPARED_WIRE_BYTES,
+        MAX_PROVIDER_CALL_RECOVERY_LOCATOR_BYTES, MAX_PROVIDER_SEMANTIC_EVIDENCE_BYTES,
+        MAX_RUNTIME_ADMISSION_WITNESS_BYTES, MAX_SAFE_DIAGNOSTIC_BYTES,
+        MODEL_CALL_RECOVERY_EVIDENCE_SEMANTIC_REVISION,
         MODEL_CALL_RECOVERY_REQUEST_SEMANTIC_REVISION,
         MODEL_CALL_RECOVERY_RESULT_SEMANTIC_REVISION, McpServerId, MeasurementCertificate,
         MediaSource, ModelAdapterProfileId, ModelCacheAffinity, ModelCacheAffinityError,
@@ -517,6 +520,7 @@ pub mod openai {
         StaticPlatformCredentialSource, accept_openai_listed_models, list_openai_api_models,
         openai_api_bundled_listing, openai_api_key_fingerprint, openai_api_models,
     };
+    pub use plakous_openai::{CODEX_HOSTED_RETRIEVAL, OPENAI_API_HOSTED_RETRIEVAL};
 
     #[cfg(feature = "native-subscriptions")]
     pub use plakous_openai::OpenAiLanguageModel;
@@ -562,6 +566,7 @@ pub mod openrouter {
         RuntimeModelAuthority, SelectedProviderConfiguration, Timestamp,
     };
 
+    pub use plakous_openrouter::OPENROUTER_HOSTED_RETRIEVAL;
     pub use plakous_openrouter::{
         OPENROUTER_CHAT_PROTOCOL_ID, OPENROUTER_MESSAGES_PROTOCOL_ID,
         OPENROUTER_RESPONSES_PROTOCOL_ID, OpenRouterApiKey, OpenRouterApiKeyGenerationGrant,
@@ -1131,6 +1136,7 @@ pub mod xai {
         xai_api_bundled_listing, xai_api_key_fingerprint, xai_api_models, xai_platform_selection,
         xai_platform_selection_for,
     };
+    pub use plakous_xai::{SUPERGROK_HOSTED_RETRIEVAL, XAI_API_HOSTED_RETRIEVAL};
 
     #[cfg(feature = "native-subscriptions")]
     pub use plakous_xai::{

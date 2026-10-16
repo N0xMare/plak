@@ -96,6 +96,7 @@ pub(super) fn openrouter_test_parent() -> ApiTopologyParent {
         created_output_bound: None,
         prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),
         product_home: None,
+        tool_selection: crate::tool_plan::TemplateToolSelection::default(),
         workspace_root: PathBuf::from("/tmp/or-root"),
         cwd: PathBuf::from("/tmp/or-root"),
         plan_state_authority: "tree-or".into(),
@@ -4116,5 +4117,43 @@ async fn supergrok_hub_creates_and_reopens_on_every_fence() -> Result<(), Box<dy
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
+    Ok(())
+}
+
+/// A selected tool the route cannot serve fails API session creation with its
+/// one-line refusal, before any topology attach or network.
+#[tokio::test]
+async fn a_selected_tool_the_route_cannot_serve_refuses_api_session_creation()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    for (target, selection, expected) in [
+        (
+            crate::binding::ApiTarget::OpenRouter {
+                wire: ResolvedProtocol::Chat,
+            },
+            "x_search",
+            "x_search is not available on openrouter; \
+             remedy: put x_search on a grok or xai-api template and spawn it",
+        ),
+        (
+            crate::binding::ApiTarget::Platform {
+                provider: crate::binding::PlatformProvider::Anthropic,
+            },
+            "mcp:github",
+            "mcp:github is not available in this build; \
+             remedy: remove mcp:github from the template's tools",
+        ),
+    ] {
+        let mut parent = openrouter_test_parent();
+        parent.workspace_root = directory.path().to_path_buf();
+        parent.cwd = directory.path().to_path_buf();
+        parent.target = target;
+        parent.tool_selection = crate::tool_plan::TemplateToolSelection::parse([selection])?;
+        let refused = api_session_runtime_binding(&parent, false, SessionToolFence::Full, None)
+            .await
+            .err()
+            .ok_or("a selection the route cannot serve bound")?;
+        assert_eq!(refused.message(), expected);
+    }
     Ok(())
 }

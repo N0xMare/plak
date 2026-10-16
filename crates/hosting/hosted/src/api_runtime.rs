@@ -10,10 +10,7 @@ use plakous::agent::{
     ReasoningEffort, ReasoningPolicy, ReasoningPreferenceStrategy, ToolExposureStrategy,
     compile_explicit_runtime_profile,
 };
-use plakous::model::{
-    ConfiguredLanguageModel, ConfiguredTool, ContextAdmissionRequirement, ToolCallerDisposition,
-    ToolExecutionDisposition,
-};
+use plakous::model::{ConfiguredLanguageModel, ConfiguredTool, ContextAdmissionRequirement};
 use plakous::sessions::SessionRuntimeBinding;
 use plakous::tools::CodingPresentationExt as _;
 use plakous::tools::{
@@ -453,15 +450,16 @@ pub(crate) fn configured_tools(
         .definitions()
         .iter()
         .filter(|definition| selected_names.contains(&definition.name().as_str()))
-        .cloned()
         .map(|definition| {
-            ConfiguredTool::new(
-                definition,
-                ToolExecutionDisposition::Local,
-                ToolCallerDisposition::DirectOnly,
-            )
+            let owner = registry
+                .identity(definition.name())
+                .map(plakous::tools::RegisteredToolIdentity::owner)
+                .ok_or_else(|| {
+                    CliFailure::new("API coding capability is not registered exactly")
+                })?;
+            crate::agent::direct_extension_tool(definition.clone(), owner)
         })
-        .collect::<Vec<_>>();
+        .collect::<CliResult<Vec<_>>>()?;
     if tools.len() != selected_names.len() {
         return Err(CliFailure::new(
             "API coding capability is not registered exactly",
@@ -473,6 +471,52 @@ pub(crate) fn configured_tools(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An MCP-owned extension reaches the provider configuration of a
+    /// Messages (artifact-producing) route with its server, so the protocol
+    /// decodes its calls with that owner and landing restamps nothing.
+    #[test]
+    fn an_mcp_owned_extension_names_its_server_in_the_configured_tools()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let server = plakous::tools::McpServerName::new("weather")?;
+        let extensions = crate::tools::ProductToolExtensions::from_nested_registrations([
+            crate::tools::test_support::registration("mcp__weather__lookup", true)?
+                .with_owner(plakous::tools::ToolOwnerClass::Mcp(server.clone())),
+            crate::tools::test_support::registration("submit_result", true)?,
+        ])
+        .map_err(|error| error.message().to_owned())?;
+        let registry = crate::agent::coding_tool_registry_with_extensions(
+            "mcp-owner",
+            CompositionSelection::Direct,
+            false,
+            &extensions,
+        )
+        .map_err(|error| error.message().to_owned())?;
+        let tools = configured_tools(
+            CodingPresentation::Claude,
+            CompositionSelection::Direct,
+            ResolvedProtocol::Messages,
+            &registry,
+            &["mcp__weather__lookup", "submit_result"],
+        )
+        .map_err(|error| error.message().to_owned())?;
+        for tool in &tools {
+            let expected = if tool.definition().name().as_str() == "mcp__weather__lookup" {
+                plakous::model::ToolExecutionOwner::Mcp {
+                    server: server.canonical().clone(),
+                }
+            } else {
+                plakous::model::ToolExecutionOwner::Local
+            };
+            assert_eq!(tool.local_owner(), Some(expected), "{tool:?}");
+        }
+        assert!(
+            tools
+                .iter()
+                .any(|tool| tool.definition().name().as_str() == "mcp__weather__lookup")
+        );
+        Ok(())
+    }
 
     /// `native-ptc` is refused before any non-Codex pack's base is chosen:
     /// the Anthropic and xAI APIs and OpenRouter never fall through to their

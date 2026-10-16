@@ -86,8 +86,11 @@ Spawn by template name only. Do not name accounts, models, or effort. Templates 
 The capability line is host-computed and is exactly
 `tier ≤ <max_tier> · spawns <menu> · adopts <yes|no>`, where `<menu>` is the
 card's own `spawns` list minus itself, comma-separated, or `none`; plus
-` · cost tier <n>` when `cost_tier` is set and ` · model <tuple>` only when
-`show_model` is true. There is **no depth-remaining term** and nothing on the
+` · cost tier <n>` when `cost_tier` is set, ` · model <tuple>` only when
+`show_model` is true, and ` · tools <names>` when the template's `tools` list is
+non-empty: the selected tool names in the template's order, comma-separated,
+exactly as written (`tools web_search, x_search, mcp:github`), so a spawner can
+route by capability. An empty list adds nothing. There is **no depth-remaining term** and nothing on the
 card is telemetry: observed duration is deliberately absent. When no template
 is spawnable the block reads
 `- (none; spawn_agent fails closed until [roster] working_set names another template)`.

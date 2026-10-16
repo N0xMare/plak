@@ -15,7 +15,7 @@ use crate::{
     DigestError, EffectiveProviderConfigurationId, HistoryError, HostedTool, ModelOperationRoot,
     NamespaceId, PortableToolSchemaV1, PortableToolSchemaV2, ProcessingTierDisposition, RunId,
     SelectedProviderConfigurationId, SemanticJsonError, SemanticJsonV1, SessionWorkflowRootId,
-    Timestamp, ToolCallerDisposition, ToolName, ToolResourceKey, TurnId,
+    Timestamp, ToolCallerDisposition, ToolExecutionOwner, ToolName, ToolResourceKey, TurnId,
 };
 
 /// An error constructing a canonical request value.
@@ -2371,6 +2371,27 @@ impl ModelRequest {
     #[must_use]
     pub fn tool_projection(&self) -> Option<&CompiledToolProjectionV2> {
         self.prefix.tool_projection()
+    }
+
+    /// The runtime owner a protocol decodes a call to the provider-visible
+    /// `exposed` tool with: the MCP server its configured tool names, or the
+    /// local runtime for every other locally dispatched name.
+    #[must_use]
+    pub fn local_tool_owner(&self, exposed: &ToolName) -> ToolExecutionOwner {
+        let canonical = self
+            .tool_projection()
+            .and_then(|projection| {
+                projection
+                    .definitions()
+                    .iter()
+                    .find(|entry| entry.exposed_name() == exposed)
+            })
+            .map_or(exposed, ProjectedToolDefinitionV2::canonical_name);
+        self.tools()
+            .iter()
+            .find(|tool| tool.definition().name() == canonical)
+            .and_then(ConfiguredTool::local_owner)
+            .unwrap_or(ToolExecutionOwner::Local)
     }
 
     /// Returns output intent.

@@ -450,7 +450,8 @@ pub struct ToolOwnership {
 }
 
 impl ToolOwnership {
-    /// Creates an exact mapping. Absent tools default to local ownership.
+    /// Creates an exact mapping. An absent tool takes the owner its
+    /// configured tool names: its MCP server, or local ownership.
     pub fn new(owners: BTreeMap<ToolName, ToolExecutionOwner>) -> Self {
         Self {
             owners,
@@ -730,7 +731,7 @@ pub fn lower_request_with_active_artifact(
         ownership
             .owners
             .entry(name.clone())
-            .or_insert(ToolExecutionOwner::Local);
+            .or_insert_with(|| request.local_tool_owner(&name));
         let caller = request
             .tools()
             .iter()

@@ -54,6 +54,7 @@ mod chat;
 mod dialect;
 mod discovery;
 mod execution;
+mod hosted_support;
 mod key_usage;
 mod messages;
 mod model;
@@ -75,6 +76,7 @@ pub use execution::{
     OpenRouterResponsesHttpConfig, OpenRouterResponsesLanguageModel,
     OpenRouterResponsesLanguageModelConfigError,
 };
+pub use hosted_support::OPENROUTER_HOSTED_RETRIEVAL;
 pub use key_usage::{OpenRouterKeyUsage, OpenRouterKeyUsageError, decode_openrouter_key_usage};
 pub use messages::{
     MESSAGES_FAMILY_ID, OPENROUTER_MESSAGES_PATH, OPENROUTER_MESSAGES_PROTOCOL_ID,

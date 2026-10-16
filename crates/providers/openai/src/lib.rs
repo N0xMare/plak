@@ -34,6 +34,7 @@
 mod api_models;
 mod config;
 mod error;
+mod hosted_support;
 mod manifest;
 mod model;
 #[cfg(feature = "native-auth")]
@@ -63,6 +64,7 @@ pub use config::{
     ResponsesFeature, Routability, SecretString, StaticPlatformCredentialSource, StorageMode,
 };
 pub use error::{ErrorPhase, MAX_PROVIDER_REQUEST_ID_BYTES, OpenAiError, RetryClass};
+pub use hosted_support::{CODEX_HOSTED_RETRIEVAL, OPENAI_API_HOSTED_RETRIEVAL};
 pub use manifest::OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS;
 #[cfg(feature = "native-auth")]
 pub use model::{OpenAiLanguageModel, compile_codex_subscription_configuration};

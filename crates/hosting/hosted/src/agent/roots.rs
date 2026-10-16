@@ -625,6 +625,7 @@ mod tests {
             max_model_rounds: 8,
             topology_enabled: true,
             product_home: Some(home.path().to_path_buf()),
+            tool_selection: crate::tool_plan::TemplateToolSelection::default(),
         });
         let result = crate::agent::build::topology_extensions_if_enabled(
             &parent,

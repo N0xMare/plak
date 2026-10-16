@@ -5,19 +5,17 @@
 //! Binding resolves it against the route and the MCP listings into a
 //! [`ToolPlan`], or refuses it with a [`ToolPlanRefusal`].
 
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the plan and its refusal are built by the session-bind step"
-    )
-)]
-
 use std::collections::BTreeSet;
 use std::fmt;
 
-use plakous::model::ToolName;
+use plakous::model::{
+    HostedRetrievalSupport, HostedRetrievalTable, HostedRetrievalTool, HostedRetrievalUnsupported,
+    ToolName,
+};
+use plakous::subscriptions::NativeProvider;
 use plakous::tools::McpServerName;
+
+use crate::binding::{ApiTarget, PlatformProvider};
 
 /// Maximum byte length of the MCP tool part of `mcp:<id>/<tool>`.
 pub const MAX_MCP_TOOL_NAME_BYTES: usize = 128;
@@ -67,7 +65,18 @@ impl OptionalTool {
     /// request a local wrapper issues) rather than Plak itself.
     #[must_use]
     pub const fn is_hosted_retrieval(self) -> bool {
-        matches!(self, Self::WebSearch | Self::WebFetch | Self::XSearch)
+        self.hosted_retrieval().is_some()
+    }
+
+    /// The provider-hosted retrieval this tool wraps, when it wraps one.
+    #[must_use]
+    pub const fn hosted_retrieval(self) -> Option<HostedRetrievalTool> {
+        match self {
+            Self::WebSearch => Some(HostedRetrievalTool::WebSearch),
+            Self::WebFetch => Some(HostedRetrievalTool::WebFetch),
+            Self::XSearch => Some(HostedRetrievalTool::XSearch),
+            Self::FetchUrl | Self::ImageGen => None,
+        }
     }
 
     fn parse(name: &str) -> Option<Self> {
@@ -331,41 +340,176 @@ impl ToolPlan {
     }
 }
 
-/// A selected tool the bound route cannot serve; it fails session creation.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ToolPlanRefusal {
-    tool: SelectedTool,
-    route: String,
-    remedy: String,
+/// The route a session binds, as far as the tool plan asks about it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ToolRoute {
+    Codex,
+    Grok,
+    Claude,
+    OpenAi,
+    Anthropic,
+    XaiApi,
+    OpenRouter,
 }
 
-impl ToolPlanRefusal {
-    /// `route` is the route's display label and `remedy` one concrete fix;
-    /// both are one line.
-    pub(crate) fn unavailable_on_route(
-        tool: SelectedTool,
-        route: impl Into<String>,
-        remedy: impl Into<String>,
-    ) -> Self {
-        Self {
-            tool,
-            route: route.into(),
-            remedy: remedy.into(),
+impl ToolRoute {
+    #[cfg(test)]
+    pub(crate) const ALL: [Self; 7] = [
+        Self::Codex,
+        Self::Grok,
+        Self::Claude,
+        Self::OpenAi,
+        Self::Anthropic,
+        Self::XaiApi,
+        Self::OpenRouter,
+    ];
+
+    pub(crate) fn native(provider: NativeProvider) -> Option<Self> {
+        match provider {
+            NativeProvider::Codex => Some(Self::Codex),
+            NativeProvider::Xai => Some(Self::Grok),
+            NativeProvider::Claude => Some(Self::Claude),
+            _ => None,
         }
     }
 
+    pub(crate) const fn api(target: ApiTarget) -> Self {
+        match target {
+            ApiTarget::OpenRouter { .. } => Self::OpenRouter,
+            ApiTarget::Platform { provider } => match provider {
+                PlatformProvider::OpenAi => Self::OpenAi,
+                PlatformProvider::Anthropic => Self::Anthropic,
+                PlatformProvider::Xai => Self::XaiApi,
+            },
+        }
+    }
+
+    /// The provider crate's release-owned table for this route.
+    const fn hosted_retrieval(self) -> HostedRetrievalTable {
+        match self {
+            Self::Codex => plakous::openai::CODEX_HOSTED_RETRIEVAL,
+            Self::OpenAi => plakous::openai::OPENAI_API_HOSTED_RETRIEVAL,
+            Self::Grok => plakous::xai::SUPERGROK_HOSTED_RETRIEVAL,
+            Self::XaiApi => plakous::xai::XAI_API_HOSTED_RETRIEVAL,
+            Self::Claude => plakous::anthropic::CLAUDE_OAUTH_HOSTED_RETRIEVAL,
+            Self::Anthropic => plakous::anthropic::ANTHROPIC_API_HOSTED_RETRIEVAL,
+            Self::OpenRouter => plakous::openrouter::OPENROUTER_HOSTED_RETRIEVAL,
+        }
+    }
+}
+
+/// Resolves a template's selection on the route a session binds.
+///
+/// Every selected tool must be served, or binding refuses; nothing is
+/// silently left out. In this build no optional tool has an implementation:
+/// a hosted retrieval tool is refused by its route's table, or, where the
+/// table qualifies it, because its wrapper is not built in, and every
+/// Plak-run and MCP tool is refused as not built in. Only the empty
+/// selection binds.
+///
+/// # Errors
+///
+/// Refuses the first selected tool, in list order, the route cannot serve.
+pub(crate) fn bind_tool_plan(
+    selection: &TemplateToolSelection,
+    route: ToolRoute,
+    route_label: &str,
+) -> Result<ToolPlan, ToolPlanRefusal> {
+    if let Some(entry) = selection.entries().first() {
+        return Err(refusal(entry, route.hosted_retrieval(), route_label));
+    }
+    Ok(ToolPlan::new(selection, []))
+}
+
+fn refusal(
+    entry: &SelectedTool,
+    table: HostedRetrievalTable,
+    route_label: &str,
+) -> ToolPlanRefusal {
+    let reason = match entry {
+        SelectedTool::Optional(tool) => {
+            match tool.hosted_retrieval().map(|tool| table.support(tool)) {
+                Some(HostedRetrievalSupport::Unsupported {
+                    reason: HostedRetrievalUnsupported::NotOffered,
+                }) => RefusalReason::Unoffered {
+                    route: route_label.to_owned(),
+                },
+                Some(HostedRetrievalSupport::Unsupported {
+                    reason: HostedRetrievalUnsupported::NotQualified,
+                }) => RefusalReason::Unqualified {
+                    route: route_label.to_owned(),
+                },
+                // A qualified route still needs the wrapper that issues the side
+                // request, and no wrapper is built in yet.
+                Some(HostedRetrievalSupport::Supported) | None => RefusalReason::Unbuilt,
+            }
+        }
+        SelectedTool::McpServer(_) | SelectedTool::McpTool { .. } => RefusalReason::Unbuilt,
+    };
+    ToolPlanRefusal {
+        tool: entry.clone(),
+        reason,
+    }
+}
+
+/// A selected tool the bound route cannot serve; it fails session creation
+/// and the spawn of that template.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ToolPlanRefusal {
+    tool: SelectedTool,
+    reason: RefusalReason,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum RefusalReason {
+    /// The route's provider offers no such tool.
+    Unoffered { route: String },
+    /// The provider offers it; no release has qualified it on this route.
+    Unqualified { route: String },
+    /// This build has no implementation of the tool.
+    Unbuilt,
+}
+
+#[cfg(test)]
+impl ToolPlanRefusal {
     pub(crate) const fn tool(&self) -> &SelectedTool {
         &self.tool
     }
 }
 
+/// Where a tool the route does not offer can run instead.
+fn not_offered_remedy(tool: &SelectedTool) -> &'static str {
+    match tool {
+        SelectedTool::Optional(OptionalTool::WebFetch) => {
+            "use fetch_url (Plak-run) or a claude/anthropic template"
+        }
+        SelectedTool::Optional(OptionalTool::XSearch) => {
+            "put x_search on a grok or xai-api template and spawn it"
+        }
+        _ => "put it on a template whose route offers it and spawn it",
+    }
+}
+
 impl fmt::Display for ToolPlanRefusal {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "{} is not available on {}; remedy: {}",
-            self.tool, self.route, self.remedy
-        )
+        let tool = &self.tool;
+        match &self.reason {
+            RefusalReason::Unoffered { route } => write!(
+                formatter,
+                "{tool} is not available on {route}; remedy: {}",
+                not_offered_remedy(tool)
+            ),
+            RefusalReason::Unqualified { route } => write!(
+                formatter,
+                "{tool} is not yet qualified on {route}; remedy: remove {tool} from the \
+                 template's tools until a release qualifies it there"
+            ),
+            RefusalReason::Unbuilt => write!(
+                formatter,
+                "{tool} is not available in this build; remedy: remove {tool} from the \
+                 template's tools"
+            ),
+        }
     }
 }
 
@@ -604,32 +748,198 @@ mod tests {
         Ok(())
     }
 
+    fn route_label(route: ToolRoute) -> &'static str {
+        match route {
+            ToolRoute::Codex => "codex",
+            ToolRoute::Grok => "grok",
+            ToolRoute::Claude => "claude",
+            ToolRoute::OpenAi => "openai",
+            ToolRoute::Anthropic => "anthropic",
+            ToolRoute::XaiApi => "xai-api",
+            ToolRoute::OpenRouter => "openrouter",
+        }
+    }
+
+    fn refusal_text(selection: &[&str], route: ToolRoute) -> TestResult<String> {
+        let selection = TemplateToolSelection::parse(selection)?;
+        match bind_tool_plan(&selection, route, route_label(route)) {
+            Ok(plan) => Err(format!("{route:?} bound {plan:?}").into()),
+            Err(refusal) => Ok(refusal.to_string()),
+        }
+    }
+
     #[test]
-    fn refusal_text_pins() -> TestResult {
-        let x_search = ToolPlanRefusal::unavailable_on_route(
-            SelectedTool::parse("x_search")?,
-            "codex (ChatGPT subscription)",
-            "put x_search on a grok or xai-api template and spawn it",
-        );
-        assert_eq!(
-            x_search.tool(),
-            &SelectedTool::Optional(OptionalTool::XSearch)
-        );
-        assert_eq!(
-            x_search.to_string(),
-            "x_search is not available on codex (ChatGPT subscription); \
-             remedy: put x_search on a grok or xai-api template and spawn it"
-        );
-        assert_eq!(
-            ToolPlanRefusal::unavailable_on_route(
-                SelectedTool::parse("web_fetch")?,
-                "openrouter",
-                "use fetch_url (Plak-run) or a claude/anthropic template",
+    fn every_hosted_retrieval_row_starts_unsupported() {
+        for route in ToolRoute::ALL {
+            for tool in OptionalTool::ALL
+                .iter()
+                .filter_map(|tool| tool.hosted_retrieval())
+            {
+                assert_ne!(
+                    route.hosted_retrieval().support(tool),
+                    HostedRetrievalSupport::Supported,
+                    "{route:?} {tool:?} moves to Supported only with a live qualification"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn hosted_retrieval_refusal_text_per_route() -> TestResult {
+        let offered = |tool: &str, route: &str| {
+            format!(
+                "{tool} is not yet qualified on {route}; remedy: remove {tool} from the \
+                 template's tools until a release qualifies it there"
             )
-            .to_string(),
-            "web_fetch is not available on openrouter; \
-             remedy: use fetch_url (Plak-run) or a claude/anthropic template"
+        };
+        let web_fetch_elsewhere = |route: &str| {
+            format!(
+                "web_fetch is not available on {route}; \
+                 remedy: use fetch_url (Plak-run) or a claude/anthropic template"
+            )
+        };
+        let x_search_elsewhere = |route: &str| {
+            format!(
+                "x_search is not available on {route}; \
+                 remedy: put x_search on a grok or xai-api template and spawn it"
+            )
+        };
+        let expected = [
+            (ToolRoute::Codex, "web_fetch", web_fetch_elsewhere("codex")),
+            (ToolRoute::Codex, "x_search", x_search_elsewhere("codex")),
+            (ToolRoute::Grok, "web_fetch", web_fetch_elsewhere("grok")),
+            (ToolRoute::Grok, "x_search", offered("x_search", "grok")),
+            (
+                ToolRoute::Claude,
+                "web_fetch",
+                offered("web_fetch", "claude"),
+            ),
+            (ToolRoute::Claude, "x_search", x_search_elsewhere("claude")),
+            (
+                ToolRoute::OpenAi,
+                "web_fetch",
+                web_fetch_elsewhere("openai"),
+            ),
+            (ToolRoute::OpenAi, "x_search", x_search_elsewhere("openai")),
+            (
+                ToolRoute::Anthropic,
+                "web_fetch",
+                offered("web_fetch", "anthropic"),
+            ),
+            (
+                ToolRoute::Anthropic,
+                "x_search",
+                x_search_elsewhere("anthropic"),
+            ),
+            (
+                ToolRoute::XaiApi,
+                "web_fetch",
+                web_fetch_elsewhere("xai-api"),
+            ),
+            (
+                ToolRoute::XaiApi,
+                "x_search",
+                offered("x_search", "xai-api"),
+            ),
+            (
+                ToolRoute::OpenRouter,
+                "web_fetch",
+                web_fetch_elsewhere("openrouter"),
+            ),
+            (
+                ToolRoute::OpenRouter,
+                "x_search",
+                x_search_elsewhere("openrouter"),
+            ),
+        ];
+        for route in ToolRoute::ALL {
+            assert_eq!(
+                refusal_text(&["web_search"], route)?,
+                offered("web_search", route_label(route)),
+                "{route:?}"
+            );
+        }
+        for (route, tool, text) in expected {
+            assert_eq!(refusal_text(&[tool], route)?, text, "{route:?} {tool}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn plak_run_and_mcp_tools_are_refused_as_not_built_in() -> TestResult {
+        for route in ToolRoute::ALL {
+            for tool in [
+                "fetch_url",
+                "image_gen",
+                "mcp:github",
+                "mcp:linear/list_issues",
+            ] {
+                assert_eq!(
+                    refusal_text(&[tool], route)?,
+                    format!(
+                        "{tool} is not available in this build; remedy: remove {tool} from \
+                         the template's tools"
+                    )
+                );
+            }
+        }
+        let qualified = HostedRetrievalTable::new(
+            HostedRetrievalSupport::Supported,
+            HostedRetrievalSupport::Supported,
+            HostedRetrievalSupport::Supported,
+        );
+        assert_eq!(
+            refusal(&SelectedTool::parse("web_search")?, qualified, "grok").to_string(),
+            "web_search is not available in this build; remedy: remove web_search from \
+             the template's tools"
         );
         Ok(())
+    }
+
+    #[test]
+    fn binding_refuses_the_first_entry_and_binds_only_the_empty_selection() -> TestResult {
+        let refused = bind_tool_plan(
+            &TemplateToolSelection::parse(["mcp:github", "web_search"])?,
+            ToolRoute::Codex,
+            "codex",
+        )
+        .err()
+        .ok_or("a non-empty selection bound")?;
+        assert_eq!(refused.tool(), &SelectedTool::McpServer(server("github")?));
+        for route in ToolRoute::ALL {
+            let plan = bind_tool_plan(&TemplateToolSelection::default(), route, "any")?;
+            assert!(plan.tools().is_empty(), "{route:?}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn routes_map_from_every_native_provider_and_api_target() {
+        use crate::binding::ResolvedProtocol;
+        assert_eq!(
+            ToolRoute::native(NativeProvider::Codex),
+            Some(ToolRoute::Codex)
+        );
+        assert_eq!(
+            ToolRoute::native(NativeProvider::Xai),
+            Some(ToolRoute::Grok)
+        );
+        assert_eq!(
+            ToolRoute::native(NativeProvider::Claude),
+            Some(ToolRoute::Claude)
+        );
+        assert_eq!(
+            ToolRoute::api(ApiTarget::OpenRouter {
+                wire: ResolvedProtocol::Chat
+            }),
+            ToolRoute::OpenRouter
+        );
+        for (provider, route) in [
+            (PlatformProvider::OpenAi, ToolRoute::OpenAi),
+            (PlatformProvider::Anthropic, ToolRoute::Anthropic),
+            (PlatformProvider::Xai, ToolRoute::XaiApi),
+        ] {
+            assert_eq!(ToolRoute::api(ApiTarget::Platform { provider }), route);
+        }
     }
 }

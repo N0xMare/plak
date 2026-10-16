@@ -187,6 +187,21 @@ pub const PLAK_TEMPLATE_CARDS_HEADER: &str = "Spawn by template name only. Do no
 pub const PLAK_TEMPLATE_CARDS_NONE: &str =
     "- (none; spawn_agent fails closed until [roster] working_set names another template)";
 
+/// The capability-line segment naming the optional tools a template selects,
+/// in the template's order, so a parent can route by capability. `None` when
+/// the template selects none, which leaves the card unchanged.
+pub fn template_card_tools<I>(names: I) -> Option<String>
+where
+    I: IntoIterator,
+    I::Item: AsRef<str>,
+{
+    let names = names
+        .into_iter()
+        .map(|name| name.as_ref().to_owned())
+        .collect::<Vec<_>>();
+    (!names.is_empty()).then(|| format!("tools {}", names.join(", ")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,6 +268,19 @@ mod tests {
 
     /// each `delegation` value renders its own sentence, and
     /// exactly one of them.
+    #[test]
+    fn a_card_names_selected_tools_in_template_order_and_nothing_when_none() {
+        assert_eq!(
+            template_card_tools(["web_search", "x_search", "mcp:github"]).as_deref(),
+            Some("tools web_search, x_search, mcp:github")
+        );
+        assert_eq!(
+            template_card_tools(["mcp:linear/list_issues"]).as_deref(),
+            Some("tools mcp:linear/list_issues")
+        );
+        assert_eq!(template_card_tools(Vec::<String>::new()), None);
+    }
+
     #[test]
     fn each_delegation_value_renders_exactly_one_sentence() {
         for (delegation, expected) in [

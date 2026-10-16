@@ -131,6 +131,15 @@ fn tool_prepared(
     programmatic: bool,
     ownership: ToolOwnership,
 ) -> TestResult<plakous_anthropic::PreparedMessagesRequest> {
+    tool_prepared_with_owner(caller, programmatic, ownership, None)
+}
+
+fn tool_prepared_with_owner(
+    caller: ToolCallerDisposition,
+    programmatic: bool,
+    ownership: ToolOwnership,
+    mcp_owner: Option<plakous_model::McpServerId>,
+) -> TestResult<plakous_anthropic::PreparedMessagesRequest> {
     let resolved = hosted_resolved()?;
     let selected: SelectedProviderConfigurationId =
         serde_json::from_value(serde_json::to_value(Digest::sha256(
@@ -158,6 +167,10 @@ fn tool_prepared(
         ToolExecutionDisposition::Local,
         caller,
     );
+    let tool = match mcp_owner {
+        Some(server) => tool.with_mcp_owner(server)?,
+        None => tool,
+    };
     let request = ModelRequest::builder(
         selected,
         effective,
@@ -453,6 +466,66 @@ fn programmatic_customer_call_retains_mcp_owner_and_lineage() -> TestResult {
         lineage.provider_programmatic_execution_id(),
         Some("srv_mcp")
     );
+    Ok(())
+}
+
+#[test]
+fn a_configured_mcp_owner_reaches_the_parse_of_an_artifact_round() -> TestResult {
+    let server = plakous_model::McpServerId::new("weather")?;
+    let mcp = ToolExecutionOwner::Mcp {
+        server: server.clone(),
+    };
+    let prepared = tool_prepared_with_owner(
+        ToolCallerDisposition::DirectAndProviderProgrammatic,
+        true,
+        ToolOwnership::default(),
+        Some(server),
+    )?;
+    assert_eq!(
+        prepared.tool_ownership().owner(&ToolName::new("weather")?),
+        mcp
+    );
+    let local = hosted_prepared()?;
+    assert_eq!(
+        local.tool_ownership().owner(&ToolName::new("weather")?),
+        ToolExecutionOwner::Local
+    );
+    assert_ne!(local.operation_digest(), prepared.operation_digest());
+    let mut decoder = AnthropicMessagesStreamDecoder::new(
+        prepared,
+        std::sync::Arc::new(SystemClock),
+        std::sync::Arc::new(SystemIdGenerator),
+    )?;
+    let events = decoder.push(concat!(
+        "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_cfg_mcp\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-5\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n",
+        "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"server_tool_use\",\"id\":\"srv_cfg\",\"name\":\"code_execution\",\"input\":{\"code\":\"weather(city='Paris')\"}}}\n\n",
+        "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+        "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tool_cfg\",\"name\":\"weather\",\"input\":{\"city\":\"Paris\"},\"caller\":{\"type\":\"code_execution_20260120\",\"tool_id\":\"srv_cfg\"}}}\n\n",
+        "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n",
+        "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"container\":{\"id\":\"container_cfg\",\"expires_at\":\"2026-08-23T12:00:00Z\"},\"stop_reason\":\"tool_use\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":4}}\n\n",
+        "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+    ).as_bytes())?;
+    let owner = events
+        .iter()
+        .find_map(|event| match event {
+            ModelEvent::BlockStarted(start) => match start.block() {
+                BlockStart::ToolCall { tool, owner, .. } if tool.as_str() == "weather" => {
+                    Some(owner)
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .ok_or("configured MCP weather call")?;
+    assert_eq!(owner, &mcp);
+    let response = events
+        .iter()
+        .find_map(|event| match event {
+            ModelEvent::ResponseCompleted(response) => Some(response),
+            _ => None,
+        })
+        .ok_or("completed response")?;
+    assert!(response.family_artifact_candidate().is_some());
     Ok(())
 }
 

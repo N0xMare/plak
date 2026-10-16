@@ -514,6 +514,9 @@ pub struct ProductAgentSpec {
     /// `agent/**` reads the environment for it. The topology, the product instruction tail and the
     /// OpenRouter binding are the three things that ask.
     pub product_home: Option<PathBuf>,
+    /// The optional tools this node's template selects. Binding resolves them
+    /// on this session's route or refuses session creation.
+    pub tool_selection: crate::tool_plan::TemplateToolSelection,
 }
 
 /// Product topology parent for an API-key hub root.
@@ -548,6 +551,8 @@ pub struct ApiTopologyParent {
     /// The product home this hub root belongs to, when it has one; see
     /// [`ProductAgentSpec::product_home`].
     pub product_home: Option<PathBuf>,
+    /// See [`ProductAgentSpec::tool_selection`].
+    pub tool_selection: crate::tool_plan::TemplateToolSelection,
 }
 
 /// Spawn/mail/rejoin parent: OAuth native spec or API-key hub root.
@@ -1461,15 +1466,17 @@ pub(super) fn compiled_configuration_with_direct_extensions(
                 "product Direct catalog contains a duplicate tool",
             ));
         }
-        let definition = registry
-            .definition(name)
-            .cloned()
-            .ok_or_else(|| CliFailure::new("product Direct extension is not registered"))?;
-        behavior.tools.push(ConfiguredTool::new(
-            definition,
-            ToolExecutionDisposition::Local,
-            plakous::model::ToolCallerDisposition::DirectOnly,
-        ));
+        let (Some(definition), Some(registered)) =
+            (registry.definition(name), registry.identity(name))
+        else {
+            return Err(CliFailure::new(
+                "product Direct extension is not registered",
+            ));
+        };
+        behavior.tools.push(direct_extension_tool(
+            definition.clone(),
+            registered.owner(),
+        )?);
     }
     behavior
         .tools
@@ -1488,6 +1495,41 @@ pub(super) fn compiled_configuration_with_direct_extensions(
     .map_err(|_| CliFailure::new("extended Direct provider configuration could not be compiled"))?;
     CompiledProviderConfiguration::new(selected, effective)
         .map_err(|_| CliFailure::new("extended Direct provider configuration is invalid"))
+}
+
+/// The tool plan of one node, bound before anything attaches or compiles;
+/// a refusal fails the session's creation, or the spawn, with its one line.
+fn bind_node_tool_plan(
+    selection: &crate::tool_plan::TemplateToolSelection,
+    route: Option<crate::tool_plan::ToolRoute>,
+    route_label: &str,
+) -> CliResult<crate::tool_plan::ToolPlan> {
+    if selection.is_empty() {
+        return Ok(crate::tool_plan::ToolPlan::default());
+    }
+    let route = route.ok_or_else(|| CliFailure::new("native provider is unsupported"))?;
+    crate::tool_plan::bind_tool_plan(selection, route, route_label)
+        .map_err(|refusal| CliFailure::new(refusal.to_string()))
+}
+
+/// One Direct extension as the provider configuration states it. A tool an
+/// MCP server executes names that server, so every protocol decodes its calls
+/// with that owner before the driver lands them.
+pub(crate) fn direct_extension_tool(
+    definition: plakous::model::ToolDefinition,
+    owner: &plakous::tools::ToolOwnerClass,
+) -> CliResult<ConfiguredTool> {
+    let tool = ConfiguredTool::new(
+        definition,
+        ToolExecutionDisposition::Local,
+        plakous::model::ToolCallerDisposition::DirectOnly,
+    );
+    match owner {
+        plakous::tools::ToolOwnerClass::PlakLocal => Ok(tool),
+        plakous::tools::ToolOwnerClass::Mcp(server) => tool
+            .with_mcp_owner(server.canonical().clone())
+            .map_err(|_| CliFailure::new("product Direct extension owner is invalid")),
+    }
 }
 
 /// `pub(crate)` so rendered prompt/wire goldens can compile the same harness
@@ -2554,6 +2596,7 @@ pub fn api_topology_parent(
         // than letting the binder rediscover it.
         prompt_host_facts: plakous_host_protocol::PromptHostFacts::default(),
         product_home: Some(product_home),
+        tool_selection: crate::tool_plan::TemplateToolSelection::default(),
         workspace_root: record.workspace_root.clone(),
         cwd,
         plan_state_authority,
@@ -2624,6 +2667,11 @@ async fn api_session_runtime_binding_with_owner(
     acquired_owner: &mut Option<String>,
 ) -> CliResult<PreparedApiRuntime> {
     install_occupancy_fence(&parent.cwd)?;
+    let tool_plan = bind_node_tool_plan(
+        &parent.tool_selection,
+        Some(crate::tool_plan::ToolRoute::api(parent.target)),
+        parent.target.account(),
+    )?;
     let spawn_parent = SpawnParent::Api(parent.clone());
     let topology_extensions = topology_extensions_if_enabled_with_owner(
         &spawn_parent,
@@ -2631,7 +2679,8 @@ async fn api_session_runtime_binding_with_owner(
         topology_attach,
         opening_durable_session,
         acquired_owner,
-    )?;
+    )?
+    .with_plan(&tool_plan)?;
     match parent.target {
         crate::binding::ApiTarget::OpenRouter { wire } => {
             let prepared = Box::pin(crate::openrouter::construct_openrouter_runtime_with_fence(
@@ -3230,6 +3279,7 @@ pub(super) fn coding_session_runtime_binding_for(
         scheduled_compaction,
         max_model_rounds,
         topology_enabled: _,
+        tool_selection,
     } = spec;
     let _binding_span = tracing::info_span!(
         "session_runtime_binding",
@@ -3316,13 +3366,19 @@ pub(super) fn coding_session_runtime_binding_for(
         }
     }
 
+    let tool_plan = bind_node_tool_plan(
+        &tool_selection,
+        crate::tool_plan::ToolRoute::native(provider),
+        state_roots.roster_source().account_name(provider),
+    )?;
     let product_extensions = topology_extensions_if_enabled(
         &SpawnParent::from_native(topology_spec.clone()),
         resolved.selected_model().as_str(),
         topology_attach,
         opening_durable_session,
         attached_tree,
-    )?;
+    )?
+    .with_plan(&tool_plan)?;
     let frozen_tools = coding_tool_registry_with_extensions(
         &plan_state_authority,
         composition,

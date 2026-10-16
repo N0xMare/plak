@@ -1155,7 +1155,23 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
     "plakous-recursive-subagents-store": _SHARED_PLAKOUS_SYMBOLS,
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
-    ("plakous-hosted", "src/agent/build.rs"): {"sessions": {"internal"}},
+    ("plakous-hosted", "src/agent/build.rs"): {
+        "sessions": {"internal"},
+        # A Direct extension's registry owner names its MCP server.
+        "tools": {"ToolOwnerClass"},
+    },
+    ("plakous-hosted", "src/api_runtime.rs"): {"tools": {"RegisteredToolIdentity"}},
+    # Binding reads each route's release-owned hosted retrieval table.
+    ("plakous-hosted", "src/tool_plan.rs"): {
+        "model": {
+            "HostedRetrievalSupport", "HostedRetrievalTable", "HostedRetrievalTool",
+            "HostedRetrievalUnsupported",
+        },
+        "openai": {"CODEX_HOSTED_RETRIEVAL", "OPENAI_API_HOSTED_RETRIEVAL"},
+        "anthropic": {"ANTHROPIC_API_HOSTED_RETRIEVAL", "CLAUDE_OAUTH_HOSTED_RETRIEVAL"},
+        "xai": {"SUPERGROK_HOSTED_RETRIEVAL", "XAI_API_HOSTED_RETRIEVAL"},
+        "openrouter": {"OPENROUTER_HOSTED_RETRIEVAL"},
+    },
     # The compile-time check that the host release timeout covers the store deadline.
     ("plakous-hosted", "src/lib.rs"): {"agent": {"DEFAULT_STORE_OPERATION_TIMEOUT"}},
     ("plak", "src/commands/reload_rehearsal.rs"): {

@@ -1446,6 +1446,7 @@ pub(super) async fn openrouter_child_runtime_binding(
         // The tree host wakes every child on its tracked work (spec 03 §5.2).
         prompt_host_facts: plakous_host_protocol::PromptHostFacts { host_wakes: true },
         product_home: parent.product_home().map(Path::to_path_buf),
+        tool_selection: crate::tool_plan::TemplateToolSelection::default(),
         workspace_root,
         cwd: child_path,
         plan_state_authority: child_plan_state_authority(tree_id, agent_id)?,
@@ -1675,6 +1676,7 @@ pub async fn spawned_child_spec(
         // The tree host wakes every child on its tracked work (spec 03 §5.2).
         prompt_host_facts: plakous_host_protocol::PromptHostFacts { host_wakes: true },
         product_home: parent.product_home().map(Path::to_path_buf),
+        tool_selection: crate::tool_plan::TemplateToolSelection::default(),
         provider: target_provider,
         resolved,
         effort: effort_explicit.then_some(target_effort),

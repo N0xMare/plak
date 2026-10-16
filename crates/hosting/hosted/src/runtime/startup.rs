@@ -558,6 +558,7 @@ fn native_spec<P: plakous_host_protocol::ProtocolExtension>(
     Ok(ProductAgentSpec {
         prompt_host_facts: config.prompt_host_facts(),
         product_home: Some(config.product_home.clone()),
+        tool_selection: crate::tool_plan::TemplateToolSelection::default(),
         provider: config
             .target
             .native_provider()
@@ -908,6 +909,7 @@ pub(super) fn host_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
     let spec = ProductAgentSpec {
         prompt_host_facts: config.prompt_host_facts(),
         product_home: Some(config.product_home.clone()),
+        tool_selection: crate::tool_plan::TemplateToolSelection::default(),
         provider: config
             .target
             .native_provider()
@@ -991,6 +993,7 @@ pub(super) async fn open_session_for_host<P: plakous_host_protocol::ProtocolExte
     let spec = ProductAgentSpec {
         prompt_host_facts: config.prompt_host_facts(),
         product_home: Some(config.product_home.clone()),
+        tool_selection: crate::tool_plan::TemplateToolSelection::default(),
         provider: config
             .target
             .native_provider()

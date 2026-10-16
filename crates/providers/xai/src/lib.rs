@@ -20,6 +20,7 @@ mod api_models;
 #[cfg(feature = "native-auth")]
 mod context;
 mod dialect;
+mod hosted_support;
 mod model;
 #[cfg(feature = "native-auth")]
 mod native_auth;
@@ -38,6 +39,7 @@ pub use api_models::{
 };
 pub(crate) use api_models::{xai_platform_capacity_admitted, xai_platform_effort_admitted};
 pub use dialect::{XaiAccessMode, XaiDialect, XaiRouteKind, XaiTerminalConvention};
+pub use hosted_support::{SUPERGROK_HOSTED_RETRIEVAL, XAI_API_HOSTED_RETRIEVAL};
 pub use model::{
     GrokCodingProfile, XaiModel, XaiModelError, XaiResolvedModel, dialect_matches_route,
 };

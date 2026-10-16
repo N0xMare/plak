@@ -4938,6 +4938,30 @@ clearly). pi's documentation section is dropped. The identity tail, the
 working agreements, the earned paragraphs and the enrolled `AGENTS.md` follow
 as on every route.
 
+**Optional tools at bind.** A node's template may select optional tools
+(chapter 07: hosted retrieval `web_search`, `web_fetch`, `x_search`; Plak-run
+`fetch_url`, `image_gen`; MCP `mcp:<id>` and `mcp:<id>/<tool>`).
+`plakous-hosted` resolves the selection when it binds the node's session, on
+the native and the API path alike, before any topology attach or surface
+compile: a tool the route cannot serve fails the session's creation, or the
+spawn of that template, with one line naming the tool, the route and a remedy.
+Nothing selected is silently left out. A hosted retrieval tool is judged by
+its route's release-owned table (chapter 01 section 8.6): `<tool> is not
+available on <route>; remedy: ...` where the provider has no such tool (`use
+fetch_url (Plak-run) or a claude/anthropic template` for `web_fetch`, `put
+x_search on a grok or xai-api template and spawn it` for `x_search`), and
+`<tool> is not yet qualified on <route>; remedy: remove <tool> from the
+template's tools until a release qualifies it there` where it has one. A tool
+with no implementation in this build (every Plak-run and MCP tool, and a
+hosted retrieval tool on a qualified route until its wrapper ships) is refused
+`<tool> is not available in this build; remedy: remove <tool> from the
+template's tools`. In this build every selected tool is therefore refused and
+only the empty selection binds. A bound plan appends after the topology tools
+through the one product extension seam, in plan order (hosted retrieval
+`web_search, web_fetch, x_search`, then `fetch_url, image_gen`, then MCP tools
+by server id and exposed name); the empty plan leaves every surface, projection
+identity and prompt render unchanged.
+
 ### 6.4 Costumes and the truthfulness law
 
 A **costume** is a compatibility shape sent to a provider edge that expects its
@@ -5038,7 +5062,10 @@ Spawn by template name only. Do not name accounts, models, or effort. Templates 
 ```
 
 The model routes on the template's description and ceiling, never on an account
-or an effort, and the model id appears only where the template asked for it.
+or an effort, and the model id appears only where the template asked for it. A
+template that selects optional tools ends its capability line with
+` · tools <names>` in the template's order (`tools web_search, x_search,
+mcp:github`); one that selects none renders exactly as above.
 The delegation sentence is chosen by the spawner's **own** template policy, so
 a hub renders its own sentence rather than the root's. The tool description
 also states the ceilings — nodes, depth, direct children, running set, message
