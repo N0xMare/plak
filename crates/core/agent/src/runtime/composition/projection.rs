@@ -14,6 +14,60 @@ use plakous_model::{
 };
 use plakous_tools::{ToolOwnerClass, ToolProjectionMap, ToolRuntimeError, ToolRuntimeErrorKind};
 use std::time::Duration;
+/// A nested call of a name the cell's catalog lacks: names the tool and the
+/// closest catalog name, so a model that guessed a spelling can correct it.
+fn absent_nested_tool(projection: &ToolProjectionMap, name: &str) -> AgentError {
+    let names = projection
+        .entries()
+        .iter()
+        .map(|entry| entry.exposed_name().as_str());
+    let message = match closest_tool_name(name, names) {
+        Some(closest) => format!(
+            "nested tool {name} is not in this cell's catalog; the closest is tools[{closest:?}]"
+        ),
+        None => format!("nested tool {name} is not in this cell's catalog; ALL_TOOLS lists it"),
+    };
+    AgentError::new(AgentErrorKind::InvalidInput, message)
+}
+
+/// The catalog name nearest `wanted`: compared case-insensitively with every
+/// byte outside `[A-Za-z0-9]` read as `_`, by edit distance, ties to catalog
+/// order.
+fn closest_tool_name<'a>(wanted: &str, names: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    fn key(name: &str) -> Vec<u8> {
+        name.bytes()
+            .map(|byte| {
+                if byte.is_ascii_alphanumeric() {
+                    byte.to_ascii_lowercase()
+                } else {
+                    b'_'
+                }
+            })
+            .collect()
+    }
+    fn distance(left: &[u8], right: &[u8]) -> usize {
+        let mut previous: Vec<usize> = (0..=right.len()).collect();
+        for (row, left_byte) in left.iter().enumerate() {
+            let mut current = vec![row + 1];
+            for (column, right_byte) in right.iter().enumerate() {
+                let substitution = previous[column] + usize::from(left_byte != right_byte);
+                current.push(
+                    substitution
+                        .min(previous[column + 1] + 1)
+                        .min(current[column] + 1),
+                );
+            }
+            previous = current;
+        }
+        previous[right.len()]
+    }
+    let wanted = key(wanted);
+    names
+        .map(|name| (distance(&wanted, &key(name)), name))
+        .min_by_key(|(cost, _)| *cost)
+        .map(|(_, name)| name)
+}
+
 pub(in crate::runtime) fn local_composition_exec_registry_arguments<'a>(
     call: &'a ToolCallBlock,
     contract: &plakous_model::ToolInputContract,
@@ -47,12 +101,9 @@ pub(in crate::runtime) fn local_composition_nested_call_arguments(
     name: &plakous_model::ToolName,
     input: Option<&serde_json::Value>,
 ) -> Result<String, AgentError> {
-    let exposure = projection.by_exposed(name).ok_or_else(|| {
-        AgentError::new(
-            AgentErrorKind::InvalidInput,
-            "nested local composition tool is absent from the exact nested projection",
-        )
-    })?;
+    let exposure = projection
+        .by_exposed(name)
+        .ok_or_else(|| absent_nested_tool(projection, name.as_str()))?;
     match exposure.presentation() {
         ProjectedToolPresentationV2::CustomUtf8 {
             input: contract, ..
@@ -448,12 +499,9 @@ pub(in crate::runtime) fn local_composition_nested_execution_owner(
     projection: &ToolProjectionMap,
     name: &plakous_model::ToolName,
 ) -> Result<ToolExecutionOwner, AgentError> {
-    let exposure = projection.by_exposed(name).ok_or_else(|| {
-        AgentError::new(
-            AgentErrorKind::InvalidInput,
-            "nested local composition tool is absent from the exact nested projection",
-        )
-    })?;
+    let exposure = projection
+        .by_exposed(name)
+        .ok_or_else(|| absent_nested_tool(projection, name.as_str()))?;
     if !exposure
         .canonical_operations()
         .values()
@@ -527,5 +575,32 @@ mod python_tests {
         assert_eq!(text.text().len(), max - 1);
         assert!(text.text().ends_with("a\n"));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod nested_name_tests {
+    use super::closest_tool_name;
+
+    #[test]
+    fn closest_tool_name_reads_separators_and_case_alike() {
+        let names = [
+            "exec_command",
+            "mcp__everything__get-env",
+            "mcp__everything__get-sum",
+        ];
+        assert_eq!(
+            closest_tool_name("mcp__everything__get_sum", names.into_iter()),
+            Some("mcp__everything__get-sum")
+        );
+        assert_eq!(
+            closest_tool_name("MCP__everything__getsum", names.into_iter()),
+            Some("mcp__everything__get-sum")
+        );
+        assert_eq!(
+            closest_tool_name("exec", names.into_iter()),
+            Some("exec_command")
+        );
+        assert_eq!(closest_tool_name("anything", std::iter::empty()), None);
     }
 }

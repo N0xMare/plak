@@ -5183,7 +5183,13 @@ ordered explicit extensions, nested-eligible, under the existing product bounds
 (`MAX_PRODUCT_CATALOG_TOOLS`, `MAX_CATALOG_BYTES`); overflow or a normalized
 identifier collision refuses the bind. Hosted-retrieval wrappers stay
 direct-only. A nested MCP call is a child call with `LocalProgrammatic` lineage
-and the `PlakMcp` owner and follows the nested failure rules. For admitted `CodeModeOnly` targets the default
+and the `PlakMcp` owner and follows the nested failure rules. Inside a cell a
+nested tool is declared on `tools` under its normalized JavaScript identifier,
+Codex's rule (every character outside `[A-Za-z0-9_$]`, and a leading digit,
+becomes `_`: `tools.mcp__srv__get_sum` for `mcp__srv__get-sum`), unless that
+identifier is another tool's name or alias, when the tool keeps its exact
+name; `tools["<exact name>"]` always dispatches too. A call of a name the
+cell's catalog lacks fails naming the tool and the closest catalog name. For admitted `CodeModeOnly` targets the default
 instead selects a separately identified minimum-optimal native profile
 containing `exec_command`, `write_stdin`, `apply_patch`, and `update_plan` on a
 full surface. An occupancy grant may omit `apply_patch`; the process and plan

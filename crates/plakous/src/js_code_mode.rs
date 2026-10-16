@@ -272,6 +272,32 @@ pub(crate) fn session_bundle_from_engine(host: Arc<SidecarHost>) -> LocalComposi
     }
 }
 
+/// The `tools.<key>` each nested tool is declared under, in catalog order:
+/// its normalized JavaScript identifier, as Codex Code Mode exposes it, unless
+/// that identifier is another tool's name or alias, in which case the tool
+/// keeps its exact name. The cell's `tools` proxy also dispatches the exact
+/// name (`tools["mcp__srv__get-sum"]`), so the canonical name always works.
+fn javascript_globals<'a>(names: impl Iterator<Item = &'a str> + Clone) -> Vec<String> {
+    let mut claims: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for name in names.clone() {
+        *claims.entry(name.to_owned()).or_default() += 1;
+        let alias = plakous_compose::normalize_javascript_identifier(name);
+        if alias != name {
+            *claims.entry(alias).or_default() += 1;
+        }
+    }
+    names
+        .map(|name| {
+            let alias = plakous_compose::normalize_javascript_identifier(name);
+            if claims.get(&alias) == Some(&1) {
+                alias
+            } else {
+                name.to_owned()
+            }
+        })
+        .collect()
+}
+
 impl LocalCompositionEventReceiver for RquickjsEvents {
     fn receive(&mut self) -> LocalCompositionSessionFuture<'_, Option<LocalCompositionEvent>> {
         Box::pin(async move { Ok(self.rx.lock().await.recv().await) })
@@ -296,12 +322,15 @@ impl LocalCompositionSession for RquickjsSession {
                 let _ = task.await;
             }
             let cell_id = self.next_cell.fetch_add(1, Ordering::Relaxed);
+            let globals =
+                javascript_globals(request.enabled_tools.iter().map(|tool| tool.name.as_str()));
             let tools = request
                 .enabled_tools
                 .iter()
-                .map(|tool| {
+                .zip(globals)
+                .map(|(tool, global)| {
                     serde_json::json!({
-                        "name": tool.name,
+                        "name": global,
                         "tool_name": tool.name,
                         "kind": "function",
                         "description": tool.description,
@@ -980,5 +1009,34 @@ mod ownership_tests {
             LocalCompositionShutdownResult::Lost(_)
         ));
         std::fs::remove_dir_all(dir).expect("remove directory");
+    }
+}
+
+#[cfg(test)]
+mod global_name_tests {
+    use super::javascript_globals;
+
+    #[test]
+    fn non_identifier_names_get_codex_aliases_unless_they_collide() {
+        let names = ["exec_command", "mcp__everything__get-sum", "mcp__a__x.y"];
+        assert_eq!(
+            javascript_globals(names.into_iter()),
+            ["exec_command", "mcp__everything__get_sum", "mcp__a__x_y"]
+        );
+        let colliding = [
+            "mcp__s__get-sum",
+            "mcp__s__get_sum",
+            "mcp__s__a-b",
+            "mcp__s__a.b",
+        ];
+        assert_eq!(
+            javascript_globals(colliding.into_iter()),
+            [
+                "mcp__s__get-sum",
+                "mcp__s__get_sum",
+                "mcp__s__a-b",
+                "mcp__s__a.b"
+            ]
+        );
     }
 }

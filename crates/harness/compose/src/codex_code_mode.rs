@@ -1194,7 +1194,11 @@ fn validate_nested_catalog(
     Ok(())
 }
 
-pub(crate) fn normalize_javascript_identifier(name: &str) -> String {
+/// The JavaScript identifier a nested tool is reachable as on `tools`:
+/// Codex Code Mode's rule, every character outside `[A-Za-z0-9_$]` (and a
+/// leading digit) mapped to `_` (`mcp__srv__get-sum` -> `mcp__srv__get_sum`).
+#[must_use]
+pub fn normalize_javascript_identifier(name: &str) -> String {
     let mut normalized = String::with_capacity(name.len());
     for (index, character) in name.chars().enumerate() {
         let valid = if index == 0 {
