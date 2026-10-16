@@ -79,7 +79,7 @@ raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
         for option, value in (('--platform', 'linux/amd64'), ('--pull', 'never'),
                               ('--network', 'none')):
             self.assertEqual(args[args.index(option) + 1], value)
-        self.assertIn('plak-qual-base:5720ae3e', args)
+        self.assertIn('plak-qual-base:6b7eb083', args)
         command = args[args.index('-c') + 1]
         self.assertIn('CARGO_BUILD_TARGET=x86_64-unknown-linux-musl', command)
         self.assertIn('CARGO_NET_OFFLINE=true', command)

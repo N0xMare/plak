@@ -31,7 +31,7 @@ build, run on Linux
 and a strict crash sweep, plus `just platform` on macOS and `just musl-native`
 on Linux. `just full` and the full strict crash sweep run at publication
 boundaries. `just musl-check` is a maintainer-only container gate: it needs the
-preloaded offline image `plak-qual-base:5720ae3e`, which is not published
+preloaded offline image `plak-qual-base:6b7eb083`, which is not published
 (spec 06).
 
 Use `just changed [BASE]` for change-scoped verification: it prints the rules
