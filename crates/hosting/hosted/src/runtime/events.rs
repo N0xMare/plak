@@ -847,6 +847,12 @@ pub(crate) fn compose_counts_subject(count: usize, failed: usize, gap_observed: 
     label
 }
 
+/// Whether a row's subject is the host's own (web, image and MCP rows), so
+/// the runtime's generic subject must not replace it.
+pub(crate) fn host_owns_subject(canonical: &str, exposed: &str) -> bool {
+    super::tools::is_web_or_mcp_row(canonical) || super::tools::is_web_or_mcp_row(exposed)
+}
+
 pub(crate) fn projected_tool_subject(name: &str, arguments: Option<&str>) -> Option<String> {
     let arguments = serde_json::from_str(arguments?).ok()?;
     super::tools::tool_subject_from_args(name, &arguments)

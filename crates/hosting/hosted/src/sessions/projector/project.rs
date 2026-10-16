@@ -24,8 +24,8 @@ use super::views::{
 };
 use crate::runtime::events::{
     abandoned_turn_operator_detail, compact_terminal_subject, completed_tool_detail,
-    completed_tool_state, compose_counts_subject, humanize_turn_error, projected_tool_subject,
-    wait_settled, wait_started,
+    completed_tool_state, compose_counts_subject, host_owns_subject, humanize_turn_error,
+    projected_tool_subject, wait_settled, wait_started,
 };
 use crate::sessions::{
     MAX_TRANSCRIPT_BYTES, MAX_TRANSCRIPT_LINES, NoticeScope, ProductCompactReason, ThinkingRow,
@@ -736,7 +736,9 @@ impl Applier<'_> {
                         let mut tool = tool_row(call_id, canonical, exposed, arguments.as_deref());
                         tool.parent_call_id.clone_from(parent_call_id);
                         tool.cell_id.clone_from(cell_id);
-                        if subject.is_some() {
+                        if subject.is_some()
+                            && !(tool.subject.is_some() && host_owns_subject(canonical, exposed))
+                        {
                             tool.subject.clone_from(subject);
                         }
                         self.call_key(call_id, turn_id.clone(), || tool);
@@ -994,7 +996,9 @@ impl Applier<'_> {
         tool.name.clone_from(&canonical);
         tool.kind = crate::activity::tool_activity_kind(&canonical);
         tool.exposed_name = (exposed != canonical).then(|| exposed.to_owned());
-        if let Some(subject) = subject {
+        if let Some(subject) = subject
+            && !(tool.subject.is_some() && host_owns_subject(&canonical, exposed))
+        {
             tool.subject = Some(subject.to_owned());
         }
         if owning_parent.is_some() {

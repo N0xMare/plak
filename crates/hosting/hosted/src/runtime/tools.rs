@@ -532,7 +532,7 @@ pub(super) fn tool_subject_from_args(name: &str, args: &serde_json::Value) -> Op
 /// Web search, fetch, image generation and MCP rows carry the host's own
 /// subject: the runtime's generic one would be a raw query, a whole URL or
 /// one argument.
-fn is_web_or_mcp_row(name: &str) -> bool {
+pub(super) fn is_web_or_mcp_row(name: &str) -> bool {
     matches!(
         name,
         "web_fetch"

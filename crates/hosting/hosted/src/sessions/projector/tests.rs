@@ -2415,3 +2415,56 @@ fn child_mail_riding_a_prompt_projects_as_rows_attributed_to_each_child() {
         ]
     );
 }
+
+/// A web call's projected row keeps the host's own subject (the quoted
+/// query, the fetched host) over the runtime's raw argument, as the live row
+/// does.
+#[test]
+fn a_web_call_row_keeps_the_host_subject_over_the_runtime_subject() {
+    let mut feed = Feed::new();
+    let turn_id: TurnId = id(feed.fresh());
+    let search: CallId = id(feed.fresh());
+    let fetch: CallId = id(feed.fresh());
+    let (response, items) = feed.history(
+        Some(turn_id),
+        HistorySegmentKind::Conversation,
+        vec![ReadItem {
+            actor: ReadActor::Assistant,
+            harness_authored: false,
+            parts: vec![
+                call_part(search, "web_search", Some("plak")),
+                ReadPart::Call {
+                    call_id: fetch.to_string(),
+                    canonical: "web_fetch".to_owned(),
+                    exposed: "WebFetch".to_owned(),
+                    arguments: Some(r#"{"url":"https://a.test/x?q=1"}"#.to_owned()),
+                    parent_call_id: None,
+                    cell_id: None,
+                    subject: Some("https://a.test/x?q=1".to_owned()),
+                },
+            ],
+        }],
+        Vec::new(),
+    );
+    feed.advance(
+        vec![response],
+        Reads {
+            items: vec![(0, items)],
+            ..Reads::default()
+        },
+    );
+    let views = project_all(&feed).views;
+    let subjects: BTreeSet<_> = views
+        .rows
+        .values()
+        .filter_map(TranscriptRow::as_tool)
+        .map(|tool| (tool.name.clone(), tool.subject.clone()))
+        .collect();
+    assert_eq!(
+        subjects,
+        BTreeSet::from([
+            ("web_fetch".to_owned(), Some("a.test".to_owned())),
+            ("web_search".to_owned(), Some("\"plak\"".to_owned())),
+        ])
+    );
+}
