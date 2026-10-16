@@ -4590,11 +4590,12 @@ values, and counts live services in its drain status.
 
 **MCP client.** `plakous-mcp` (harness layer; no facade feature yet) is the
 local MCP client over `rmcp` (chapter 06 §7). An `McpServerSpec` is a frozen
-stdio definition: program and arguments, declared environment, secret
-environment names with a resolver called at every spawn (values are never
-retained by the pool or in its digest), a startup bound (30 s default) over
-spawn, handshake and the first `tools/list`, a per-call bound (300 s default),
-and an optional allowlist of MCP tool names. One `McpPool` per process keys
+definition of a stdio server (program and arguments, declared environment,
+secret environment names with a resolver called at every spawn) or of a
+streamable HTTP server (below); secret values are never retained by the pool
+or in its digest. Either carries a startup bound (30 s default) over spawn or
+connection, handshake and the first `tools/list`, a per-call bound (300 s
+default), and an optional allowlist of MCP tool names. One `McpPool` per process keys
 entries by (server id, definition digest, workspace root): an edited
 definition is a new entry, never a mutation of a live one. An entry starts at
 its first lease through `spawn_service`, negotiates the newest protocol
@@ -4609,6 +4610,32 @@ and terminates its process group through `ServiceHandle::terminate`. The
 client advertises exactly one root, the workspace root as a `file://` URI with
 `listChanged: false`, and ignores `notifications/tools/list_changed` (logged
 only).
+
+**MCP over HTTP.** An `McpHttpEndpoint` is an `https://` URL, or `http://` to
+exactly `127.0.0.1` or `[::1]` (`Origin::loopback_http`), with no credentials
+or fragment; literal headers; and secret header slots (`Bearer` sends
+`Authorization: Bearer <secret>`, `Header(name)` sends the secret as that
+header) with a resolver called at every start. `Authorization` is never a
+literal header, a header is literal or secret but not both, and the transport
+owns `Accept`, `Content-Type`, `Host`, `Mcp-Session-Id`,
+`MCP-Protocol-Version` and `Last-Event-Id`. The digest covers the URL, literal
+headers and slots, never secret values. rmcp's streamable HTTP client runs over
+`plakous-http` (no reqwest): one TLS policy, no proxy, no redirect, a pooled
+connection per entry, and the pool's transport client (`McpPool::with_http_client`,
+default WebPKI), so a `fault-injection` build's `PLAK_TEST_FAULTS` plan covers MCP
+traffic (chapter 05 §2.8). Secret headers live only in that client, marked
+sensitive and zeroized with their last clone; rmcp never sees them. Server-sent
+events are framed by `plakous_http::sse` within 4 MiB per event; event ids and
+retry hints are not surfaced, so a broken request stream fails its call
+instead of resuming or re-sending. The session id a legacy server issues is
+sent on every later request and deleted when the client closes; a 404 on it
+re-initializes the session and re-sends only the requests the server
+answered 404 (rmcp's recovery). HTTP failures do not count as crashes: 401 or
+403 is a tool failure naming the credentials remedy (at start, a startup
+error with the same text); a failure before any request byte could reach the
+server, an `AddressRefused` included, is a tool failure "the call was not
+sent"; any other HTTP failure during a call is `OutcomeUnknown`. A transport
+that closed is restarted under the crash policy at the next call.
 
 At bind a lease freezes the template's selection: the listing is paged within
 512 tools and 4 MiB, filtered by the allowlist, then either every allowed tool

@@ -13,18 +13,21 @@ use plakous_tools::{
     SERVICE_PROCESS_TERMINATE_GRACE, ServiceHandle,
 };
 use rmcp::model::{PaginatedRequestParams, ProtocolVersion, Tool};
-use rmcp::service::RunningService;
+use rmcp::service::{ClientInitializeError, RunningService};
+use rmcp::transport::StreamableHttpClientTransport;
+use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::{ClientLifecycleMode, ClientServiceExt, Peer, RoleClient};
 use tokio::sync::Semaphore;
 use tokio::time::Instant;
 
 use crate::client::{Handler, HandlerState};
 use crate::error::{McpError, McpErrorKind};
+use crate::http::{self, HttpRefusal, MAX_SSE_EVENT_BYTES, McpHttpEndpoint};
 use crate::listing::{
     FrozenMcpListing, MAX_LISTED_TOOLS, MAX_LISTING_BYTES, McpToolSelection, freeze_listing,
     listed_tool_digest,
 };
-use crate::spec::McpServerSpec;
+use crate::spec::{McpServerSpec, StdioServer, Transport};
 
 /// Concurrent calls one pool entry dispatches; later calls queue.
 pub const MAX_IN_FLIGHT_CALLS: usize = 16;
@@ -47,6 +50,9 @@ pub struct McpPool {
 struct PoolInner {
     entries: Mutex<HashMap<EntryKey, Arc<Entry>>>,
     closed: std::sync::atomic::AtomicBool,
+    /// The transport client HTTP servers derive theirs from; a default
+    /// `WebPKI` client when the host supplied none.
+    http: Option<plakous_http::Client>,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -70,6 +76,19 @@ impl McpPool {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates an empty pool whose HTTP servers use `client`'s TLS
+    /// configuration, observer and fault plan. Limits, pooling and the
+    /// absence of an address policy are the pool's.
+    #[must_use]
+    pub fn with_http_client(client: plakous_http::Client) -> Self {
+        Self {
+            inner: Arc::new(PoolInner {
+                http: Some(client),
+                ..PoolInner::default()
+            }),
+        }
     }
 
     /// Leases the entry for `spec` in `environment`'s workspace, starting its
@@ -101,6 +120,7 @@ impl McpPool {
                         key,
                         spec,
                         environment,
+                        http: self.inner.http.clone(),
                         pool: Arc::downgrade(&self.inner),
                         state: tokio::sync::Mutex::new(EntryState::Stopped),
                         leases: Mutex::new(Leases::default()),
@@ -276,6 +296,7 @@ pub(crate) struct Entry {
     key: EntryKey,
     spec: McpServerSpec,
     environment: Arc<ExecutionEnvironment>,
+    http: Option<plakous_http::Client>,
     pool: Weak<PoolInner>,
     state: tokio::sync::Mutex<EntryState>,
     leases: Mutex<Leases>,
@@ -317,8 +338,16 @@ impl Entry {
             EntryState::Closed => return Err(closed()),
             EntryState::Stopped | EntryState::Failed { .. } => {}
         }
-        let connection =
-            Arc::new(Connection::start(&self.spec, &self.environment, &self.key.root).await?);
+        let connection = Arc::new(match self.spec.transport() {
+            Transport::Stdio(stdio) => {
+                Connection::start_stdio(&self.spec, stdio, &self.environment, &self.key.root)
+                    .await?
+            }
+            Transport::Http(endpoint) => {
+                Connection::start_http(&self.spec, endpoint, self.http.as_ref(), &self.key.root)
+                    .await?
+            }
+        });
         *state = EntryState::Running(Arc::clone(&connection));
         Ok(connection)
     }
@@ -399,15 +428,15 @@ pub(crate) struct Connection {
 }
 
 impl Connection {
-    async fn start(
+    async fn start_stdio(
         spec: &McpServerSpec,
+        stdio: &StdioServer,
         environment: &ExecutionEnvironment,
         root: &std::path::Path,
     ) -> Result<Self, McpError> {
         let server = spec.name();
-        let request = spec.service_request()?;
-        let startup = spec.startup_timeout();
-        let started = tokio::time::timeout(startup, async {
+        let request = stdio.service_request(server)?;
+        let started = within_startup(spec, async {
             let process = environment
                 .spawn_service(
                     request,
@@ -423,20 +452,8 @@ impl Connection {
                 })?;
             let handle = process.handle;
             let handler = HandlerState::new(server.clone(), root);
-            let lifecycle = ClientLifecycleMode::Auto {
-                // Newest first: a server that rejects the newest revision
-                // names what it supports, and discovery retries with that.
-                preferred_versions: vec![
-                    ProtocolVersion::V_2026_07_28,
-                    ProtocolVersion::V_2025_11_25,
-                    ProtocolVersion::V_2025_06_18,
-                    ProtocolVersion::V_2025_03_26,
-                    ProtocolVersion::V_2024_11_05,
-                ],
-                legacy_version: Some(ProtocolVersion::LATEST_WITH_INITIALIZE),
-            };
             let client = match Handler(Arc::clone(&handler))
-                .serve_with_lifecycle((process.stdout, process.stdin), lifecycle)
+                .serve_with_lifecycle((process.stdout, process.stdin), lifecycle())
                 .await
             {
                 Ok(client) => client,
@@ -444,11 +461,7 @@ impl Connection {
                     let tail = handle.stderr_tail();
                     let _ = handle.terminate(SERVICE_PROCESS_TERMINATE_GRACE).await;
                     tracing::warn!(server = %server, stderr_tail = %tail, "mcp handshake failed");
-                    return Err(McpError::with_source(
-                        McpErrorKind::Startup,
-                        format!("mcp server {server} handshake failed"),
-                        error,
-                    ));
+                    return Err(handshake_failed(server, error));
                 }
             };
             let listing = match list_tools(client.peer(), server).await {
@@ -458,18 +471,54 @@ impl Connection {
                     return Err(error);
                 }
             };
-            Ok((client, handler, handle, listing))
+            Ok((client, handler, Some(handle), listing))
         })
-        .await
-        .map_err(|_| {
-            McpError::new(
-                McpErrorKind::Startup,
-                format!(
-                    "mcp server {server} did not start and list its tools within {} s",
-                    startup.as_secs()
-                ),
-            )
-        })??;
+        .await?;
+        Self::new(server, started)
+    }
+
+    async fn start_http(
+        spec: &McpServerSpec,
+        endpoint: &McpHttpEndpoint,
+        base: Option<&plakous_http::Client>,
+        root: &std::path::Path,
+    ) -> Result<Self, McpError> {
+        let server = spec.name();
+        let base = match base {
+            Some(base) => base.clone(),
+            None => {
+                plakous_http::Client::new(plakous_http::Limits::default()).map_err(|error| {
+                    McpError::with_source(
+                        McpErrorKind::Startup,
+                        format!("mcp server {server} transport could not be built"),
+                        error,
+                    )
+                })?
+            }
+        };
+        let client = endpoint.client(
+            server,
+            &base,
+            spec.call_timeout().max(spec.startup_timeout()),
+        )?;
+        let config = StreamableHttpClientTransportConfig::with_uri(endpoint.url())
+            .max_concurrent_requests(MAX_IN_FLIGHT_CALLS)
+            .max_sse_event_size(MAX_SSE_EVENT_BYTES);
+        let transport = StreamableHttpClientTransport::with_client(client, config);
+        let started = within_startup(spec, async {
+            let handler = HandlerState::new(server.clone(), root);
+            let client = Handler(Arc::clone(&handler))
+                .serve_with_lifecycle(transport, lifecycle())
+                .await
+                .map_err(|error| handshake_failed(server, error))?;
+            let listing = list_tools(client.peer(), server).await?;
+            Ok((client, handler, None, listing))
+        })
+        .await?;
+        Self::new(server, started)
+    }
+
+    fn new(server: &McpServerName, started: Started) -> Result<Self, McpError> {
         let (client, handler, handle, listing) = started;
         let digests = listing
             .iter()
@@ -479,7 +528,7 @@ impl Connection {
             peer: client.peer().clone(),
             client: tokio::sync::Mutex::new(Some(client)),
             handler,
-            process: Mutex::new(Some(handle)),
+            process: Mutex::new(handle),
             stderr: Mutex::new(String::new()),
             listing: listing.into(),
             digests,
@@ -511,6 +560,54 @@ impl Connection {
             }
         }
     }
+}
+
+type Started = (
+    RunningService<RoleClient, Handler>,
+    Arc<HandlerState>,
+    Option<ServiceHandle>,
+    Vec<Tool>,
+);
+
+/// Newest first: a server that rejects the newest revision names what it
+/// supports, and discovery retries with that.
+fn lifecycle() -> ClientLifecycleMode {
+    ClientLifecycleMode::Auto {
+        preferred_versions: vec![
+            ProtocolVersion::V_2026_07_28,
+            ProtocolVersion::V_2025_11_25,
+            ProtocolVersion::V_2025_06_18,
+            ProtocolVersion::V_2025_03_26,
+            ProtocolVersion::V_2024_11_05,
+        ],
+        legacy_version: Some(ProtocolVersion::LATEST_WITH_INITIALIZE),
+    }
+}
+
+/// Bounds spawn, handshake and the first listing by the startup timeout.
+async fn within_startup(
+    spec: &McpServerSpec,
+    start: impl Future<Output = Result<Started, McpError>>,
+) -> Result<Started, McpError> {
+    let startup = spec.startup_timeout();
+    tokio::time::timeout(startup, start).await.map_err(|_| {
+        McpError::new(
+            McpErrorKind::Startup,
+            format!(
+                "mcp server {} did not start and list its tools within {} s",
+                spec.name(),
+                startup.as_secs()
+            ),
+        )
+    })?
+}
+
+fn handshake_failed(server: &McpServerName, error: ClientInitializeError) -> McpError {
+    let message = match http::classify(&error) {
+        Some(HttpRefusal::Credentials(status)) => http::credentials_text(server, status),
+        _ => format!("mcp server {server} handshake failed"),
+    };
+    McpError::with_source(McpErrorKind::Startup, message, error)
 }
 
 /// Pages through `tools/list` within [`MAX_LISTED_TOOLS`] and

@@ -2234,7 +2234,10 @@ through a real turn and compares it with the loopback gateway answering the
 same way, and proves that `reset`, `eof` and `stall` after the first stream
 event are replayed and the turn completes with the replay's output alone;
 `local_transport.rs` in `plakous-anthropic` does the same for `529` and retries
-a `write-reset` before acceptance.
+a `write-reset` before acceptance. MCP servers reached over streamable HTTP
+use the same transport (chapter 01 §8.5), so a plan covers their traffic too;
+`tests/http.rs` in `plakous-mcp-fake-server` injects `connect` into one
+`tools/call` and proves it settles as a tool failure the server never saw.
 Injected statuses, `connect` and `write-reset` never reach a connection, so
 their responses and failures name no `ConnectionUse`; stream faults ride a real
 connection, name it, and never return it to a pool.

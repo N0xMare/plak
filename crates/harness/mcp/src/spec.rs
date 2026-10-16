@@ -12,6 +12,7 @@ use plakous_tools::{
 };
 
 use crate::error::{McpError, McpErrorKind};
+use crate::http::McpHttpEndpoint;
 
 /// Default bound on spawn, handshake and the first `tools/list`.
 pub const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
@@ -30,7 +31,8 @@ pub type McpSecretResolver = Arc<
         + Sync,
 >;
 
-/// One frozen stdio MCP server definition.
+/// One frozen MCP server definition: a stdio process or a streamable HTTP
+/// endpoint.
 ///
 /// Built by the embedding host from its configuration; nothing a model
 /// supplies reaches it. Two definitions with the same digest share one pool
@@ -38,14 +40,26 @@ pub type McpSecretResolver = Arc<
 #[derive(Clone)]
 pub struct McpServerSpec {
     name: McpServerName,
+    transport: Transport,
+    startup_timeout: Duration,
+    call_timeout: Duration,
+    allowlist: Option<Vec<String>>,
+}
+
+/// How a server is reached.
+#[derive(Clone)]
+pub(crate) enum Transport {
+    Stdio(StdioServer),
+    Http(McpHttpEndpoint),
+}
+
+#[derive(Clone)]
+pub(crate) struct StdioServer {
     program: Arc<str>,
     arguments: Vec<String>,
     environment: Vec<(EnvironmentVariableName, String)>,
     secret_names: Vec<EnvironmentVariableName>,
     secrets: Option<McpSecretResolver>,
-    startup_timeout: Duration,
-    call_timeout: Duration,
-    allowlist: Option<Vec<String>>,
 }
 
 impl McpServerSpec {
@@ -58,30 +72,49 @@ impl McpServerSpec {
         program: impl Into<Arc<str>>,
         arguments: impl IntoIterator<Item = String>,
     ) -> Self {
+        Self::new(
+            name,
+            Transport::Stdio(StdioServer {
+                program: program.into(),
+                arguments: arguments.into_iter().collect(),
+                environment: Vec::new(),
+                secret_names: Vec::new(),
+                secrets: None,
+            }),
+        )
+    }
+
+    /// A streamable HTTP server at `endpoint`.
+    #[must_use]
+    pub fn http(name: McpServerName, endpoint: McpHttpEndpoint) -> Self {
+        Self::new(name, Transport::Http(endpoint))
+    }
+
+    const fn new(name: McpServerName, transport: Transport) -> Self {
         Self {
             name,
-            program: program.into(),
-            arguments: arguments.into_iter().collect(),
-            environment: Vec::new(),
-            secret_names: Vec::new(),
-            secrets: None,
+            transport,
             startup_timeout: DEFAULT_STARTUP_TIMEOUT,
             call_timeout: DEFAULT_CALL_TIMEOUT,
             allowlist: None,
         }
     }
 
-    /// Declares literal environment values for the server process.
+    /// Declares literal environment values for a stdio server process; an
+    /// HTTP definition has no process and ignores them.
     #[must_use]
     pub fn with_environment(
         mut self,
         environment: impl IntoIterator<Item = (EnvironmentVariableName, String)>,
     ) -> Self {
-        self.environment = environment.into_iter().collect();
+        if let Transport::Stdio(stdio) = &mut self.transport {
+            stdio.environment = environment.into_iter().collect();
+        }
         self
     }
 
-    /// Declares the secret environment names and how to resolve their values.
+    /// Declares a stdio server's secret environment names and how to resolve
+    /// their values; an HTTP definition ignores them.
     ///
     /// The names are part of the definition digest; the values are not.
     #[must_use]
@@ -90,8 +123,10 @@ impl McpServerSpec {
         names: impl IntoIterator<Item = EnvironmentVariableName>,
         resolver: McpSecretResolver,
     ) -> Self {
-        self.secret_names = names.into_iter().collect();
-        self.secrets = Some(resolver);
+        if let Transport::Stdio(stdio) = &mut self.transport {
+            stdio.secret_names = names.into_iter().collect();
+            stdio.secrets = Some(resolver);
+        }
         self
     }
 
@@ -134,6 +169,10 @@ impl McpServerSpec {
         self.startup_timeout
     }
 
+    pub(crate) const fn transport(&self) -> &Transport {
+        &self.transport
+    }
+
     pub(crate) fn allows(&self, mcp_name: &str) -> bool {
         self.allowlist
             .as_ref()
@@ -146,39 +185,42 @@ impl McpServerSpec {
     ///
     /// Returns a definition error when the digest cannot be framed.
     pub fn definition_digest(&self) -> Result<Digest, McpError> {
-        let startup = self.startup_timeout.as_millis().to_be_bytes();
-        let call = self.call_timeout.as_millis().to_be_bytes();
-        let mut parts: Vec<&[u8]> = vec![
-            b"plakous-mcp/server-definition",
-            b"stdio",
-            self.name.as_str().as_bytes(),
-            self.program.as_bytes(),
-            &startup,
-            &call,
-        ];
-        let argument_count = self.arguments.len().to_be_bytes();
-        parts.push(&argument_count);
-        parts.extend(self.arguments.iter().map(String::as_bytes));
-        let environment_count = self.environment.len().to_be_bytes();
-        parts.push(&environment_count);
-        for (name, value) in &self.environment {
-            parts.push(name.as_str().as_bytes());
-            parts.push(value.as_bytes());
+        let startup = self.startup_timeout.as_millis().to_be_bytes().to_vec();
+        let call = self.call_timeout.as_millis().to_be_bytes().to_vec();
+        let mut parts = vec![b"plakous-mcp/server-definition".to_vec()];
+        match &self.transport {
+            Transport::Stdio(stdio) => {
+                parts.extend([
+                    b"stdio".to_vec(),
+                    self.name.as_str().as_bytes().to_vec(),
+                    stdio.program.as_bytes().to_vec(),
+                    startup,
+                    call,
+                ]);
+                stdio.digest_parts(&mut parts);
+            }
+            Transport::Http(endpoint) => {
+                parts.extend([
+                    b"http".to_vec(),
+                    self.name.as_str().as_bytes().to_vec(),
+                    startup,
+                    call,
+                ]);
+                endpoint.digest_parts(&mut parts);
+            }
         }
-        let secret_count = self.secret_names.len().to_be_bytes();
-        parts.push(&secret_count);
-        parts.extend(
-            self.secret_names
-                .iter()
-                .map(|name| name.as_str().as_bytes()),
-        );
         let allowlist_count = self
             .allowlist
             .as_ref()
-            .map_or(u64::MAX, |names| names.len() as u64)
-            .to_be_bytes();
-        parts.push(&allowlist_count);
-        parts.extend(self.allowlist.iter().flatten().map(String::as_bytes));
+            .map_or(u64::MAX, |names| names.len() as u64);
+        parts.push(allowlist_count.to_be_bytes().to_vec());
+        parts.extend(
+            self.allowlist
+                .iter()
+                .flatten()
+                .map(|name| name.as_bytes().to_vec()),
+        );
+        let parts = parts.iter().map(Vec::as_slice).collect::<Vec<_>>();
         Digest::sha256(DigestDomain::ToolDefinition, 1, &parts).map_err(|error| {
             McpError::with_source(
                 McpErrorKind::Definition,
@@ -187,17 +229,39 @@ impl McpServerSpec {
             )
         })
     }
+}
+
+impl StdioServer {
+    fn digest_parts(&self, parts: &mut Vec<Vec<u8>>) {
+        parts.push(self.arguments.len().to_be_bytes().to_vec());
+        parts.extend(
+            self.arguments
+                .iter()
+                .map(|argument| argument.as_bytes().to_vec()),
+        );
+        parts.push(self.environment.len().to_be_bytes().to_vec());
+        for (name, value) in &self.environment {
+            parts.push(name.as_str().as_bytes().to_vec());
+            parts.push(value.as_bytes().to_vec());
+        }
+        parts.push(self.secret_names.len().to_be_bytes().to_vec());
+        parts.extend(
+            self.secret_names
+                .iter()
+                .map(|name| name.as_str().as_bytes().to_vec()),
+        );
+    }
 
     /// Builds one spawn request, resolving secrets now.
-    pub(crate) fn service_request(&self) -> Result<ServiceProcessRequest, McpError> {
+    pub(crate) fn service_request(
+        &self,
+        server: &McpServerName,
+    ) -> Result<ServiceProcessRequest, McpError> {
         let secrets = match &self.secrets {
             Some(resolve) => resolve().map_err(|error| {
                 McpError::new(
                     McpErrorKind::Definition,
-                    format!(
-                        "mcp server {} secrets could not be resolved: {error}",
-                        self.name
-                    ),
+                    format!("mcp server {server} secrets could not be resolved: {error}"),
                 )
             })?,
             None => Vec::new(),
@@ -212,8 +276,7 @@ impl McpServerSpec {
             return Err(McpError::new(
                 McpErrorKind::Definition,
                 format!(
-                    "mcp server {} secret resolution did not return exactly its declared names",
-                    self.name
+                    "mcp server {server} secret resolution did not return exactly its declared names"
                 ),
             ));
         }
@@ -227,7 +290,7 @@ impl McpServerSpec {
         .map_err(|error| {
             McpError::with_source(
                 McpErrorKind::Definition,
-                format!("mcp server {} process definition is invalid", self.name),
+                format!("mcp server {server} process definition is invalid"),
                 error,
             )
         })
@@ -239,13 +302,25 @@ impl fmt::Debug for McpServerSpec {
         formatter
             .debug_struct("McpServerSpec")
             .field("name", &self.name)
-            .field("argument_count", &self.arguments.len())
-            .field("environment_count", &self.environment.len())
-            .field("secret_names", &self.secret_names)
+            .field("transport", &self.transport)
             .field("startup_timeout", &self.startup_timeout)
             .field("call_timeout", &self.call_timeout)
             .field("allowlist", &self.allowlist)
             .finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for Transport {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Stdio(stdio) => formatter
+                .debug_struct("Stdio")
+                .field("argument_count", &stdio.arguments.len())
+                .field("environment_count", &stdio.environment.len())
+                .field("secret_names", &stdio.secret_names)
+                .finish_non_exhaustive(),
+            Self::Http(endpoint) => endpoint.fmt(formatter),
+        }
     }
 }
 
@@ -296,8 +371,14 @@ mod tests {
                 [EnvironmentVariableName::new("GITHUB_TOKEN")?],
                 Arc::new(|| Ok(Vec::new())),
             );
+        let Transport::Stdio(stdio) = spec.transport() else {
+            return Err("not a stdio definition".into());
+        };
         assert_eq!(
-            spec.service_request().err().map(|error| error.kind()),
+            stdio
+                .service_request(spec.name())
+                .err()
+                .map(|error| error.kind()),
             Some(McpErrorKind::Definition)
         );
         Ok(())

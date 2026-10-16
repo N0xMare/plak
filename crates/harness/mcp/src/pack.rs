@@ -17,6 +17,7 @@ use rmcp::model::{CallToolRequest, CallToolRequestParams, ClientRequest, ServerR
 use rmcp::service::PeerRequestOptions;
 use serde_json::Value;
 
+use crate::http::{self, HttpRefusal};
 use crate::listing::{FrozenMcpListing, McpToolRecord};
 use crate::pool::{Connection, Entry, McpLease};
 use crate::result::map_call_result;
@@ -241,7 +242,7 @@ pub(crate) async fn call(
     {
         Ok(handle) => handle,
         Err(error) => {
-            return Ok(settle_transport_error(entry, &connection, server, tool, &error).await);
+            return settle_transport_error(entry, &connection, server, tool, &error).await;
         }
     };
     let request_id = handle.id.clone();
@@ -282,7 +283,7 @@ pub(crate) async fn call(
             "mcp call {server}/{tool} did not finish within {} s and was cancelled; it may have acted; nothing was retried",
             timeout.as_secs()
         )),
-        Err(error) => Ok(settle_transport_error(entry, &connection, server, tool, &error).await),
+        Err(error) => settle_transport_error(entry, &connection, server, tool, &error).await,
     }
 }
 
@@ -292,15 +293,38 @@ async fn settle_transport_error(
     server: &plakous_tools::McpServerName,
     tool: &str,
     error: &ServiceError,
-) -> CallResult {
+) -> Result<CallResult, ToolRuntimeError> {
     tracing::warn!(%server, %tool, %error, "mcp call transport failed");
-    entry.crashed(connection).await;
-    match ToolOutcome::outcome_unknown_text(format!(
-        "mcp server {server} exited during the call; it may have acted; nothing was retried"
-    )) {
-        Ok(outcome) => CallResult::Outcome(outcome),
-        Err(_) => CallResult::Outcome(plakous_tools::internal::runtime_outcome_unknown()),
+    // An HTTP failure leaves the transport running; a dead transport is
+    // found and restarted at the next call.
+    match http::classify(error) {
+        Some(HttpRefusal::Credentials(status)) => {
+            return failure(format!(
+                "{}; the call did not run",
+                http::credentials_text(server, status)
+            ));
+        }
+        Some(HttpRefusal::NotSent) => {
+            return failure(format!(
+                "mcp server {server} could not be reached ({error}); the call was not sent"
+            ));
+        }
+        Some(HttpRefusal::Unknown) => {
+            return unknown(format!(
+                "mcp call {server}/{tool} failed over HTTP ({error}); it may have acted; nothing was retried"
+            ));
+        }
+        None => {}
     }
+    entry.crashed(connection).await;
+    Ok(
+        match ToolOutcome::outcome_unknown_text(format!(
+            "mcp server {server} exited during the call; it may have acted; nothing was retried"
+        )) {
+            Ok(outcome) => CallResult::Outcome(outcome),
+            Err(_) => CallResult::Outcome(plakous_tools::internal::runtime_outcome_unknown()),
+        },
+    )
 }
 
 fn failure(text: String) -> Result<CallResult, ToolRuntimeError> {

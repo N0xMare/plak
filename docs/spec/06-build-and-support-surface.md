@@ -879,12 +879,24 @@ cancellation and progress correlation are not re-implemented. Default features
 (`base64`, `macros`, `server`) are off; the product graph enables only
 `client` and `transport-async-rw`, which add no crate beyond `rmcp` itself to
 the lock graph (`chrono`, `futures`, `indexmap`, `pin-project-lite`, `thiserror`,
-`tokio-stream`, `tokio-util` and `tracing` were already present). Not taken:
+`tokio-stream`, `tokio-util` and `tracing` were already present). The
+streamable HTTP client runs over `plakous-http` through rmcp's
+`transport-streamable-http-client` feature (`client-side-sse` and
+`transport-worker`), never `transport-streamable-http-client-reqwest`: reqwest
+would add a second TLS and proxy stack (it reads system proxy variables) to the
+product graph for one client. That feature adds `sse-stream` 0.2 (MIT OR
+Apache-2.0; `plakous-mcp` names it only for rmcp's event type and frames bytes
+with `plakous_http::sse`), plus `base64` 0.23, `http` and `bytes`. `base64` 0.23
+was already locked beside the workspace's 0.22 (through `hyper-util` and
+`reqwest`); rmcp requires 0.23 and the workspace's own users stay on 0.22, so
+the duplicate is accepted under `multiple-versions = "warn"`. Not taken:
 `transport-child-process` (`process-wrap`; servers start through the execution
 backend's service-process seam), `which-command`, the `reqwest` HTTP clients,
 `auth`/`oauth2`, `macros` and `schemars`. The repository-only scripted server
-`plakous-mcp-fake-server` enables `server` and `transport-io`, which pull
-`schemars`, `pastey` and `dyn-clone` into the test graph only.
+`plakous-mcp-fake-server` enables `server`, `transport-io` and
+`transport-streamable-http-server` (serving through `hyper` directly), which
+pull `schemars`, `pastey`, `dyn-clone`, `async-trait`, `rand`, `tower-service`
+and `uuid` into the test graph only.
 
 ### 7.1 Rules
 

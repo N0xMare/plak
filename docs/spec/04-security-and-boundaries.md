@@ -146,6 +146,16 @@ model-visible result. The client advertises exactly one root, the session's
 workspace root as a `file://` URI; that is a hint to a cooperative server, not
 a containment boundary.
 
+An HTTP MCP server is reached at the URL its frozen definition names: an
+`https://` origin, or plain HTTP only to the loopback literals `127.0.0.1` and
+`[::1]`, through `plakous-http` with no proxy and no redirect. The URL is
+operator configuration, never model input, so no destination
+`AddressPolicy` applies to it (that policy guards model-chosen URLs); a URL to
+a private or metadata address is the operator's choice. Secret header values
+are resolved at each server start, held only as sensitive header values in
+that server's transport client, and never enter rmcp, the definition digest,
+`Debug` output, errors, events or logs.
+
 A terminal provider refusal can revoke provisional streamed output before any
 local effect is admitted. Messages discards the refused response's client-tool
 proposals, text, and reasoning from canonical output; it never executes those

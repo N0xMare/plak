@@ -1,7 +1,8 @@
 //! Model Context Protocol client for Plakous.
 //!
-//! A process-wide [`McpPool`] starts each configured stdio server lazily
-//! through the execution environment's service-process seam, shares it among
+//! A process-wide [`McpPool`] starts each configured server lazily (a stdio
+//! server through the execution environment's service-process seam, a
+//! streamable HTTP server ([`McpHttpEndpoint`]) over `plakous-http`), shares it among
 //! every session bound to the same definition and workspace root, and stops
 //! it after an idle period. At bind a [`McpLease`] freezes the template's
 //! selection of the server's tools ([`FrozenMcpListing`]): each input schema
@@ -18,6 +19,7 @@
 
 mod client;
 mod error;
+mod http;
 mod listing;
 mod lowering;
 mod naming;
@@ -27,6 +29,7 @@ mod result;
 mod spec;
 
 pub use error::{McpError, McpErrorKind};
+pub use http::{MAX_SSE_EVENT_BYTES, McpHttpEndpoint, McpHttpSecret, McpHttpSecretResolver};
 pub use listing::{
     FrozenMcpListing, MAX_DESCRIPTION_BYTES, MAX_LISTED_TOOLS, MAX_LISTING_BYTES, McpToolRecord,
     McpToolSelection,
@@ -34,6 +37,7 @@ pub use listing::{
 pub use lowering::{SchemaRefusal, lower_input_schema};
 pub use naming::{MAX_EXPOSED_NAME_BYTES, exposed_tool_name};
 pub use pack::McpToolPack;
+pub use plakous_http::{HeaderName, HeaderValue, SensitiveBytes};
 pub use pool::{
     CRASH_WINDOW, IDLE_STOP, MAX_IN_FLIGHT_CALLS, McpLease, McpPool, McpServerState,
     McpServerStatus,

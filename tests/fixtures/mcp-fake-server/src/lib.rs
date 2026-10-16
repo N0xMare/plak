@@ -2,10 +2,16 @@
 //!
 //! One handler serves both lifecycle styles: the `initialize` handshake
 //! (protocol 2025-11-25) and the no-initialize discovery lifecycle
-//! (2026-07-28). The binary serves it over stdio; tests may also serve it
-//! in process over any byte stream.
+//! (2026-07-28). The binary serves it over stdio or streamable HTTP; tests
+//! may also serve it in process over any byte stream or, through [`http`],
+//! on a loopback HTTP port behind a credential gate.
 
 #![forbid(unsafe_code)]
+
+// `plakous-mcp`'s unit tests include this file by path, without the HTTP
+// server dependencies; they never compile the HTTP fixture.
+#[cfg(not(test))]
+pub mod http;
 
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicUsize, Ordering};
