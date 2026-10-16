@@ -92,8 +92,19 @@ fn unix_program(candidates: &'static [&'static str]) -> Result<&'static str, Tes
         .ok_or_else(|| "required Unix test program is unavailable".into())
 }
 
+/// How long a wait for an eventual child-process event may take. The waits
+/// return as soon as the event happens; the deadline only bounds a hang, so it
+/// is sized for a loaded gate host rather than an idle one, while staying well
+/// below the 30 second lifetime of the fixtures whose exit it observes.
+const EVENT_DEADLINE: Duration = Duration::from_secs(10);
+
+fn before_event_deadline(started: Instant) -> bool {
+    started.elapsed() < EVENT_DEADLINE
+}
+
 async fn wait_for_file(path: &Path) -> Result<(), TestError> {
-    for _ in 0..200 {
+    let started = Instant::now();
+    while before_event_deadline(started) {
         if path.is_file() {
             return Ok(());
         }
@@ -103,7 +114,8 @@ async fn wait_for_file(path: &Path) -> Result<(), TestError> {
 }
 
 async fn wait_for_pid_file(path: &Path) -> Result<rustix::process::Pid, TestError> {
-    for _ in 0..200 {
+    let started = Instant::now();
+    while before_event_deadline(started) {
         if let Ok(contents) = fs::read_to_string(path)
             && let Ok(raw_pid) = contents.trim().parse::<i32>()
             && let Some(pid) = rustix::process::Pid::from_raw(raw_pid)
@@ -116,7 +128,8 @@ async fn wait_for_pid_file(path: &Path) -> Result<rustix::process::Pid, TestErro
 }
 
 async fn wait_for_process_exit(pid: rustix::process::Pid) -> bool {
-    for _ in 0..200 {
+    let started = Instant::now();
+    while before_event_deadline(started) {
         if rustix::process::test_kill_process(pid).is_err() {
             return true;
         }
@@ -130,7 +143,8 @@ async fn collect_joined_output(
     id: plakous_tools::JoinedProcessSessionId,
 ) -> Result<(Vec<u8>, JoinedProcessStatus), TestError> {
     let mut output = Vec::new();
-    for _ in 0..400 {
+    let started = Instant::now();
+    while before_event_deadline(started) {
         let polled = sessions.poll(id, 8 * 1024, 256)?;
         for record in polled.records() {
             output.extend_from_slice(record.bytes());
@@ -901,7 +915,8 @@ async fn joined_process_pty_supports_initial_size_input_eof_and_contained_cwd()
     sessions.write_stdin(id, b"hello\n", JoinedProcessInputDisposition::Close)?;
     let mut output = Vec::new();
     let mut terminal = JoinedProcessStatus::Running;
-    for _ in 0..400 {
+    let started = Instant::now();
+    while before_event_deadline(started) {
         let polled = sessions.poll(id, 8192, 256)?;
         assert!(
             polled
@@ -1034,7 +1049,8 @@ async fn joined_process_pty_output_limit_keeps_the_tail_and_joins_the_group()
         control(),
     )?;
     let mut status = JoinedProcessStatus::Running;
-    for _ in 0..400 {
+    let started = Instant::now();
+    while before_event_deadline(started) {
         let polled = sessions.poll(id, 8, 4)?;
         status = polled.status();
         if status.is_terminal() && !polled.more_output() {
@@ -1149,7 +1165,8 @@ async fn joined_process_sessions_keep_the_newest_output_window() -> Result<(), T
         control(),
     )?;
     let mut polled = sessions.poll_from(id, JoinedProcessOutputCursor::new(0), 8, 16)?;
-    for _ in 0..200 {
+    let started = Instant::now();
+    while before_event_deadline(started) {
         if polled.status().is_terminal() {
             break;
         }
@@ -2541,7 +2558,7 @@ async fn host_future_drop_is_bounded_with_a_detached_continuous_writer() -> Resu
          temporary=${pid_file}.tmp; printf \"%s\\n\" \"$$\" > \"$temporary\"; \
          mv \"$temporary\" \"$pid_file\"; waits=0; \
          while [ ! -f \"$activate_file\" ]; do waits=$((waits + 1)); \
-         [ \"$waits\" -lt 100 ] || exit 70; sleep 0.01; done; \
+         [ \"$waits\" -lt 1000 ] || exit 70; sleep 0.01; done; \
          printf started > \"$started_file\"; writes=0; \
          while [ ! -f \"$stop_file\" ]; do printf 0123456789abcdef 2>/dev/null || :; \
          writes=$((writes + 1)); [ \"$writes\" -lt 1000 ] || exit 71; sleep 0.01; done' \
