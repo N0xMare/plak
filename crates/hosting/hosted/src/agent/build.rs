@@ -1526,6 +1526,7 @@ pub(super) fn bind_node_tool_plan(
         &tools.tool_sections,
         workspace_root,
         state_roots.named_secrets(),
+        tools.mcp_tools.as_deref(),
     )
     .map_err(CliFailure::new)?;
     Ok(plan.with_mcp(selection, mcp))

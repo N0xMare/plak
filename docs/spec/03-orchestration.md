@@ -386,9 +386,14 @@ against its route when it binds (chapter 01); a tool the route cannot serve
 refuses the bind rather than being silently omitted. A child binds its own
 frozen card's list, never its parent's. The root binds its `[root] agent`
 template's list only while it runs that template's exact account and model;
-a root bound by explicit `--account` / `--model` has none. Unlike a child's
-card, the root's list is read from the live configuration when the session is
-created, reopened, cleared or rebound.
+a root bound by explicit `--account` / `--model` has none. The root's
+template (its account, model and list) and the `[tools.*]` / `[mcp_servers.*]`
+tables it reaches are frozen into the session record when its runtime is
+first created, with the MCP tools the list reached then; reopen, clear and
+rebind read only that record, and its clear, fork and rebind successors
+inherit it. Editing the template or a table changes new sessions only. A
+wildcard `mcp:<id>` tool omitted at creation leaves one Settings notice in the
+transcript.
 
 ### 3.1 A child gets at most its parent's tools
 

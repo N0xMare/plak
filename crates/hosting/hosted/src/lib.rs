@@ -80,6 +80,8 @@ pub use plakous_recursive_subagents::{
 };
 pub mod coding_routes;
 pub mod error;
+/// The root's optional tools frozen into its session record at creation.
+pub mod frozen_tools;
 pub(crate) use plakous_workspace::git_redirect_fence;
 #[cfg(any(test, feature = "test-support"))]
 pub use plakous_workspace::occupancy_vcs;

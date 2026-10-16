@@ -465,7 +465,7 @@ impl ProductStore {
 fn load_record(connection: &Connection, id: &str) -> Result<SessionRecord, String> {
     let mut session = connection
             .query_row(
-                "SELECT revision, create_operation_id, workspace_root, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection FROM sessions WHERE id = ?1",
+                "SELECT revision, create_operation_id, workspace_root, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools FROM sessions WHERE id = ?1",
                 [id],
                 |row| {
                     let locator: Option<String> = row.get(11)?;
@@ -481,6 +481,7 @@ fn load_record(connection: &Connection, id: &str) -> Result<SessionRecord, Strin
                         target_selection: serde_json::from_str(&row.get::<_, String>(13)?).map_err(|_| rusqlite::Error::InvalidQuery)?,
                         source_product_session_id: row.get(9)?, source_workflow_operation_id: row.get(10)?,
                         plakous_locator: locator.map(|value| value.parse::<SessionLocator>().map_err(|_| rusqlite::Error::InvalidQuery)).transpose()?,
+                        frozen_tools: row.get::<_, Option<String>>(14)?.map(|value| plakous_hosted::frozen_tools::FrozenRootTools::decode(&value).map_err(|_| rusqlite::Error::InvalidQuery)).transpose()?,
                         transcript: sessions::ProductTranscript::default(), first_prompt: None, prompt_history: Vec::new(), pending_queue: Vec::new(), queue_commands: sessions::QueueCommands::default(), queue_projection_debt: false,
                         queue_drain_state: QueueDrainState::LiveAutoDrain,
                         root_turn_count: 0,
@@ -708,6 +709,7 @@ impl ProductStore {
                     plakous_locator: locator
                         .map(|value| value.parse().map_err(|_| rusqlite::Error::InvalidQuery))
                         .transpose()?,
+                    frozen_tools: None,
                     transcript: sessions::ProductTranscript::default(),
                     first_prompt: None,
                     prompt_history: Vec::new(),
@@ -835,8 +837,8 @@ fn insert_session(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), String>
         .into_owned();
     let locator = s.plakous_locator.map(|value| value.to_string());
     let changed = tx.execute(
-        "INSERT INTO sessions(id, revision, create_operation_id, workspace_root, workspace_identity, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection) VALUES (?1,1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
-        params![s.id, s.create_operation_id, workspace, workspace_identity, to_i64(s.created_at_unix)?, to_i64(s.updated_at_unix)?, s.account, s.model, s.effort, s.title, s.source_product_session_id, s.source_workflow_operation_id, locator, s.composition.as_str(), serde_json::to_string(&s.target_selection).map_err(|_|"target selection is not serializable")?],
+        "INSERT INTO sessions(id, revision, create_operation_id, workspace_root, workspace_identity, created_at, updated_at, account, model, effort, title, source_session_id, source_operation_id, locator, composition, target_selection, frozen_tools) VALUES (?1,1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+        params![s.id, s.create_operation_id, workspace, workspace_identity, to_i64(s.created_at_unix)?, to_i64(s.updated_at_unix)?, s.account, s.model, s.effort, s.title, s.source_product_session_id, s.source_workflow_operation_id, locator, s.composition.as_str(), serde_json::to_string(&s.target_selection).map_err(|_|"target selection is not serializable")?, encoded_frozen_tools(s)?],
     ).map_err(|_| "product session identity already exists or is invalid".to_owned())?;
     if changed != 1 {
         return Err("product session insert was not exact".to_owned());
@@ -895,9 +897,18 @@ fn update_session(
 ) -> Result<usize, String> {
     // A loaded record carries the view head, not a replacement genesis binding.
     tx.execute(
-        "UPDATE sessions SET revision=?2, workspace_root=?4, workspace_identity=?5, updated_at=?7, account=?8, model=?9, effort=?10, title=?11, source_session_id=?12, source_operation_id=?13, locator=COALESCE(locator,?14), composition=?15, target_selection=?17 WHERE id=?1 AND revision=?3 AND create_operation_id=?16 AND created_at=?6",
-        params![s.id, to_i64(next)?, to_i64(expected)?, s.workspace_root.to_string_lossy(), sessions::workspace_identity(&s.workspace_root).to_string_lossy(), to_i64(s.created_at_unix)?, to_i64(s.updated_at_unix)?, s.account, s.model, s.effort, s.title, s.source_product_session_id, s.source_workflow_operation_id, s.plakous_locator.map(|v| v.to_string()), s.composition.as_str(), s.create_operation_id, serde_json::to_string(&s.target_selection).map_err(|_|"target selection is not serializable")?],
+        "UPDATE sessions SET revision=?2, workspace_root=?4, workspace_identity=?5, updated_at=?7, account=?8, model=?9, effort=?10, title=?11, source_session_id=?12, source_operation_id=?13, locator=COALESCE(locator,?14), composition=?15, target_selection=?17, frozen_tools=COALESCE(frozen_tools,?18) WHERE id=?1 AND revision=?3 AND create_operation_id=?16 AND created_at=?6",
+        params![s.id, to_i64(next)?, to_i64(expected)?, s.workspace_root.to_string_lossy(), sessions::workspace_identity(&s.workspace_root).to_string_lossy(), to_i64(s.created_at_unix)?, to_i64(s.updated_at_unix)?, s.account, s.model, s.effort, s.title, s.source_product_session_id, s.source_workflow_operation_id, s.plakous_locator.map(|v| v.to_string()), s.composition.as_str(), s.create_operation_id, serde_json::to_string(&s.target_selection).map_err(|_|"target selection is not serializable")?, encoded_frozen_tools(s)?],
     ).map_err(|_| "could not update product session".to_owned())
+}
+
+/// The root's frozen tools are written once, with the first runtime
+/// creation; a later save never replaces them.
+fn encoded_frozen_tools(s: &SessionRecord) -> Result<Option<String>, String> {
+    s.frozen_tools
+        .as_ref()
+        .map(plakous_hosted::frozen_tools::FrozenRootTools::encode)
+        .transpose()
 }
 
 fn sync_queue(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), String> {
@@ -1158,7 +1169,7 @@ const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     ),
     (
         "sessions",
-        "CREATE TABLE sessions(id TEXT PRIMARY KEY,revision INTEGER NOT NULL CHECK(revision>0),create_operation_id TEXT NOT NULL UNIQUE,workspace_root TEXT NOT NULL,workspace_identity TEXT NOT NULL,created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=0),account TEXT,model TEXT,effort TEXT,title TEXT,source_session_id TEXT,source_operation_id TEXT,locator TEXT, composition TEXT NOT NULL DEFAULT 'plakous-default' CHECK(composition IN('direct','plakous-default','native-ptc','js-ptc','py-ptc')), target_selection TEXT NOT NULL DEFAULT '\"native\"')",
+        "CREATE TABLE sessions(id TEXT PRIMARY KEY,revision INTEGER NOT NULL CHECK(revision>0),create_operation_id TEXT NOT NULL UNIQUE,workspace_root TEXT NOT NULL,workspace_identity TEXT NOT NULL,created_at INTEGER NOT NULL CHECK(created_at>=0),updated_at INTEGER NOT NULL CHECK(updated_at>=0),account TEXT,model TEXT,effort TEXT,title TEXT,source_session_id TEXT,source_operation_id TEXT,locator TEXT, composition TEXT NOT NULL DEFAULT 'plakous-default' CHECK(composition IN('direct','plakous-default','native-ptc','js-ptc','py-ptc')), target_selection TEXT NOT NULL DEFAULT '\"native\"', frozen_tools TEXT CHECK(frozen_tools IS NULL OR json_valid(frozen_tools)))",
     ),
     (
         "sessions_workspace_updated",
@@ -1870,6 +1881,45 @@ mod tests {
                 .target_selection,
             session.target_selection
         );
+    }
+
+    /// The root's frozen tools are written once: a save without them, or
+    /// with others, keeps what the first creation froze.
+    #[test]
+    fn frozen_root_tools_round_trip_and_are_written_once() {
+        use plakous_hosted::binding::RootTemplateFact;
+        use plakous_hosted::frozen_tools::FrozenRootTools;
+        use plakous_hosted::tool_plan::TemplateToolSelection;
+
+        let fact = |tools: &[&str]| RootTemplateFact {
+            name: "root-agent".into(),
+            account: "codex".into(),
+            model: "m".into(),
+            tools: TemplateToolSelection::parse(tools).unwrap(),
+            tool_sections: std::collections::BTreeMap::from([(
+                "tools.fetch_url".to_owned(),
+                "[tools.fetch_url]\nmax_bytes = 4096\n".to_owned(),
+            )]),
+        };
+        let root = tempdir().unwrap();
+        let paths = PlakPaths::explicit(root.path().join("p"));
+        let mut store = ProductStore::open(&paths).unwrap();
+        let mut session = SessionRecord::new(root.path().join("workspace"));
+        let id = session.id.clone();
+        store.commit(&mut session).unwrap();
+        assert_eq!(store.load(&id).unwrap().frozen_tools, None);
+
+        let frozen = FrozenRootTools::new(Some(fact(&["fetch_url"]))).with_mcp_tools(Vec::new());
+        session.frozen_tools = Some(frozen.clone());
+        store.commit(&mut session).unwrap();
+        session.frozen_tools = Some(FrozenRootTools::new(Some(fact(&["image_gen"]))));
+        store.commit(&mut session).unwrap();
+        session.frozen_tools = None;
+        store.commit(&mut session).unwrap();
+        drop(store);
+
+        let mut reopened = ProductStore::open(&paths).unwrap();
+        assert_eq!(reopened.load(&id).unwrap().frozen_tools, Some(frozen));
     }
 
     /// The resume picker's summary is the session's *opening* prompt, and its

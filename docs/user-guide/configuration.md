@@ -266,10 +266,13 @@ plak secret rm github
 
 A stdio MCP server starts when the first session that names it binds, is
 shared by every session in the same workspace, and stops five minutes after
-the last one ends. Its tool list is frozen when the session binds; a server
-that later changes a tool answers that tool with an error telling you to start
-a new session. A tool listed through `mcp:<id>` whose input schema Plak cannot
-represent is left out with a logged notice; naming it as `mcp:<id>/<tool>`
+the last one ends. Its tool list is frozen when the session is created; a
+server that later changes a tool answers that tool with an error telling you to
+start a new session. The root's tools are frozen the same way: editing the
+`[root] agent` template's `tools`, a `[tools.*]` table or an `[mcp_servers.*]`
+table changes new sessions only, never one you resume, clear or switch models
+in. A tool listed through `mcp:<id>` whose input schema Plak cannot represent
+is left out with a notice in the transcript; naming it as `mcp:<id>/<tool>`
 refuses the session instead. MCP results reach the model marked as untrusted
 data. An `http` server is reached at its `url` (HTTPS, or plain HTTP only to
 `127.0.0.1` or `[::1]`); `bearer_secret` and `secret_headers` name stored

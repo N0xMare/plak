@@ -327,6 +327,9 @@ pub struct NodeToolSelection {
     pub selection: TemplateToolSelection,
     /// Canonical tables keyed `tools.<name>` / `mcp_servers.<id>`.
     pub tool_sections: BTreeMap<String, String>,
+    /// The MCP tools frozen with the selection, rebuilt without listing the
+    /// server again; `None` lists each server at bind.
+    pub mcp_tools: Option<Vec<plakous::mcp::McpToolRecord>>,
 }
 
 impl NodeToolSelection {
@@ -336,6 +339,7 @@ impl NodeToolSelection {
         Self {
             selection,
             tool_sections: BTreeMap::new(),
+            mcp_tools: None,
         }
     }
 }
@@ -1894,6 +1898,7 @@ mod tests {
                 names: vec![(server("fake")?, ToolName::new("mcp__fake__echo")?)],
                 registrations: Vec::new(),
                 notices: vec!["omitted".to_owned()],
+                records: Vec::new(),
             },
         );
         assert!(plan.retrieval().is_some());

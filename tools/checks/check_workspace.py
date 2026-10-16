@@ -1176,7 +1176,8 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         "mcp": {
             "HeaderName", "HeaderValue", "McpError", "McpHttpEndpoint", "McpHttpSecret",
             "McpHttpSecretResolver", "McpPool", "McpSecretResolver", "McpServerSpec",
-            "McpToolPack", "McpToolSelection", "SensitiveBytes", "ServiceSecretValue",
+            "McpToolPack", "McpToolRecord", "McpToolSelection", "SensitiveBytes",
+            "ServiceSecretValue",
         },
         "model": {"RunId"},
         "tools": {
@@ -1184,6 +1185,8 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "ExecutionEnvironmentScope",
         },
     },
+    # The MCP records the root's frozen tools keep in its session record.
+    ("plakous-hosted", "src/frozen_tools.rs"): {"mcp": {"McpToolRecord"}},
     # The untrusted-data paragraph an MCP tool earns.
     ("plakous-hosted", "src/tools.rs"): {
         "prompts": {"UNTRUSTED_TOOL_DATA_AGREEMENTS", "UNTRUSTED_TOOL_DATA_CONTRIBUTION_ID"},
@@ -1198,6 +1201,8 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         "anthropic": {"ANTHROPIC_API_HOSTED_RETRIEVAL", "CLAUDE_OAUTH_HOSTED_RETRIEVAL"},
         "xai": {"SUPERGROK_HOSTED_RETRIEVAL", "XAI_API_HOSTED_RETRIEVAL"},
         "openrouter": {"OPENROUTER_HOSTED_RETRIEVAL"},
+        # The MCP records a root's frozen selection carries to its bind.
+        "mcp": {"McpToolRecord"},
         # The deferred ports the session's executor connects to, and the
         # bounds a planned fetch_url runs under.
         "tools": {

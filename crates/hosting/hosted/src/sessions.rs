@@ -124,6 +124,10 @@ pub struct SessionRecord {
     pub source_workflow_operation_id: Option<String>,
     /// Exact immutable Plakous checkpoint currently bound to this product session.
     pub plakous_locator: Option<SessionLocator>,
+    /// The root's optional tools, frozen when the runtime is first created
+    /// and written once with the locator; successors keep the source's.
+    /// `None` before that creation. A workspace listing leaves it `None`.
+    pub frozen_tools: Option<crate::frozen_tools::FrozenRootTools>,
     /// Bounded transcript lines (user/assistant/tool summaries) and the row
     /// writes the store has yet to commit.
     pub transcript: ProductTranscript,
@@ -207,6 +211,7 @@ impl SessionRecord {
             source_product_session_id: None,
             source_workflow_operation_id: None,
             plakous_locator: None,
+            frozen_tools: None,
             transcript: ProductTranscript::default(),
             first_prompt: None,
             prompt_history: Vec::new(),

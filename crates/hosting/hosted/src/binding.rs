@@ -95,6 +95,7 @@ impl RootTemplateFact {
             .map(|fact| crate::tool_plan::NodeToolSelection {
                 selection: fact.tools.clone(),
                 tool_sections: fact.tool_sections.clone(),
+                mcp_tools: None,
             })
             .unwrap_or_default()
     }

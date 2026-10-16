@@ -339,11 +339,12 @@ pub(super) fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExtension>
     let spec = ProductAgentSpec {
         prompt_host_facts: config.prompt_host_facts(),
         product_home: Some(config.product_home.clone()),
-        tool_selection: crate::binding::RootTemplateFact::root_tool_selection(
-            config.root_template.as_ref(),
-            Some(account),
-            Some(model),
-        ),
+        tool_selection: config
+            .session
+            .frozen_tools
+            .as_ref()
+            .map(|frozen| frozen.selection(Some(account), Some(model)))
+            .unwrap_or_default(),
         provider,
         resolved: std::sync::Arc::clone(&resolved),
         effort: target_effort,

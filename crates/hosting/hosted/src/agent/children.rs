@@ -1503,6 +1503,7 @@ pub(super) fn frozen_child_tool_selection(
             Ok(crate::tool_plan::NodeToolSelection {
                 selection,
                 tool_sections: tree.snapshot.tool_sections.clone(),
+                mcp_tools: None,
             })
         })
         .map_err(|error| error.message)?

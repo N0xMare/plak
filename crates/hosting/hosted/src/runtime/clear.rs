@@ -249,7 +249,7 @@ pub(super) fn build_clear_candidate<P: plakous_host_protocol::ProtocolExtension>
         ProductAgentSpec {
             prompt_host_facts: config.prompt_host_facts(),
             product_home: Some(config.product_home.clone()),
-            tool_selection: super::startup::root_tool_selection(config, &config.session),
+            tool_selection: super::startup::root_tool_selection(&config.session),
             provider: config
                 .target
                 .native_provider()

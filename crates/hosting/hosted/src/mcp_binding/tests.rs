@@ -169,6 +169,7 @@ fn an_unconfigured_server_refuses_with_its_remedy() -> TestResult {
         &BTreeMap::new(),
         workspace.path(),
         secrets(&[]),
+        None,
     )
     .err();
     assert_eq!(
@@ -200,6 +201,7 @@ fn a_template_naming_mcp_fake_binds_into_every_presentation_and_nested_catalog()
         )),
         workspace.path(),
         secrets(&[]),
+        None,
     )?;
     assert_eq!(bound.notices, Vec::<String>::new());
     let plan = ToolPlan::new(&selection, []).with_mcp(&selection, bound);
@@ -289,6 +291,7 @@ fn a_secret_reaches_the_server_environment_and_no_refusal_text() -> TestResult {
         &table,
         workspace.path(),
         secrets(&[("tok", SECRET_VALUE)]),
+        None,
     )?;
     assert_eq!(bound.names.len(), 1);
     let plan = ToolPlan::new(&selection, []).with_mcp(&selection, bound);
@@ -302,6 +305,7 @@ fn a_secret_reaches_the_server_environment_and_no_refusal_text() -> TestResult {
         &table,
         other_workspace.path(),
         secrets(&[("tok", "a-different-value")]),
+        None,
     )
     .err()
     .ok_or("a server that exited at startup bound")?;
@@ -328,6 +332,7 @@ fn a_wildcard_omits_an_unlowerable_tool_with_a_notice_and_an_explicit_name_refus
         &table,
         workspace.path(),
         secrets(&[]),
+        None,
     )?;
     assert!(
         bound
@@ -349,6 +354,7 @@ fn a_wildcard_omits_an_unlowerable_tool_with_a_notice_and_an_explicit_name_refus
         &table,
         workspace.path(),
         secrets(&[]),
+        None,
     )
     .err()
     .ok_or("an unlowerable tool named explicitly bound")?;
@@ -397,6 +403,7 @@ fn an_http_server_binds_with_its_bearer_secret() -> TestResult {
         &table,
         workspace.path(),
         secrets(&[("tok", SECRET_VALUE)]),
+        None,
     )?;
     assert_eq!(
         bound
@@ -412,10 +419,65 @@ fn an_http_server_binds_with_its_bearer_secret() -> TestResult {
         &table,
         other_workspace.path(),
         secrets(&[("tok", "a-different-value")]),
+        None,
     )
     .err()
     .ok_or("a wrong bearer bound")?;
     assert!(refused.starts_with("mcp server fake"), "{refused}");
     assert!(!refused.contains(SECRET_VALUE) && !refused.contains("a-different-value"));
+    Ok(())
+}
+
+/// Records frozen at a session's creation rebuild the same tools on a later
+/// bind without listing again: the omission notice was the creation's, and
+/// the names and order are the frozen ones.
+#[test]
+fn frozen_records_rebuild_the_same_tools_without_a_new_listing() -> TestResult {
+    let workspace = tempfile::tempdir()?;
+    let server = fixture()?;
+    let selection = TemplateToolSelection::parse(["mcp:fake"])?;
+    let table = sections(rendered(
+        server.to_str().ok_or("fixture path")?,
+        &["--tools", "unlowerable"],
+        &[],
+        None,
+    ));
+    let created = bind_mcp_tools(&selection, &table, workspace.path(), secrets(&[]), None)?;
+    assert_eq!(created.notices.len(), 1, "{:?}", created.notices);
+    assert_eq!(created.records.len(), created.names.len());
+    let reopened = bind_mcp_tools(
+        &selection,
+        &table,
+        workspace.path(),
+        secrets(&[]),
+        Some(&created.records),
+    )?;
+    assert_eq!(reopened.names, created.names);
+    assert_eq!(reopened.records, created.records);
+    assert!(reopened.notices.is_empty(), "{:?}", reopened.notices);
+
+    // Frozen records of one tool keep exactly that tool, whatever the
+    // server lists now.
+    let echo = created
+        .records
+        .iter()
+        .filter(|record| record.mcp_name() == "echo")
+        .cloned()
+        .collect::<Vec<_>>();
+    let narrowed = bind_mcp_tools(
+        &selection,
+        &table,
+        workspace.path(),
+        secrets(&[]),
+        Some(&echo),
+    )?;
+    assert_eq!(
+        narrowed
+            .names
+            .iter()
+            .map(|(_, name)| name.as_str())
+            .collect::<Vec<_>>(),
+        ["mcp__fake__echo"]
+    );
     Ok(())
 }

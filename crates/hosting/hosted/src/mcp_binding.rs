@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use plakous::mcp::{
     HeaderName, HeaderValue, McpHttpEndpoint, McpHttpSecret, McpHttpSecretResolver, McpPool,
-    McpSecretResolver, McpServerSpec, McpToolPack, McpToolSelection, SensitiveBytes,
+    McpSecretResolver, McpServerSpec, McpToolPack, McpToolRecord, McpToolSelection, SensitiveBytes,
     ServiceSecretValue,
 };
 use plakous::model::ToolName;
@@ -77,6 +77,8 @@ pub(crate) struct BoundMcpTools {
     pub(crate) registrations: Vec<ToolRegistration>,
     /// One line per tool a wildcard selection omitted.
     pub(crate) notices: Vec<String>,
+    /// The frozen records, for a session record to keep.
+    pub(crate) records: Vec<McpToolRecord>,
 }
 
 /// The process's MCP pool and the executor its servers run on. Sessions bind
@@ -103,29 +105,42 @@ fn pool() -> Result<(&'static McpPool, &'static tokio::runtime::Runtime), String
 /// server's startup budget) while the pool's executor does the work.
 ///
 /// `tool_sections` holds the canonical tables the node's template reaches,
-/// keyed `mcp_servers.<id>`.
+/// keyed `mcp_servers.<id>`. With `frozen` records the tools are rebuilt
+/// from them after the lease, without a new listing; a tool whose live
+/// definition drifted fails its first call, not the bind.
 pub(crate) fn bind_mcp_tools(
     selection: &TemplateToolSelection,
     tool_sections: &BTreeMap<String, String>,
     workspace_root: &std::path::Path,
     secrets: Arc<dyn NamedSecrets>,
+    frozen: Option<&[McpToolRecord]>,
 ) -> Result<BoundMcpTools, String> {
     if selection.mcp_servers().next().is_none() {
         return Ok(BoundMcpTools {
             names: Vec::new(),
             registrations: Vec::new(),
             notices: Vec::new(),
+            records: Vec::new(),
         });
     }
     let (pool, runtime) = pool()?;
-    let (selection, tool_sections, workspace_root) = (
+    let (selection, tool_sections, workspace_root, frozen) = (
         selection.clone(),
         tool_sections.clone(),
         workspace_root.to_path_buf(),
+        frozen.map(<[McpToolRecord]>::to_vec),
     );
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
     runtime.spawn(async move {
-        let bound = bind_on_pool(pool, &selection, &tool_sections, &workspace_root, secrets).await;
+        let bound = bind_on_pool(
+            pool,
+            &selection,
+            &tool_sections,
+            &workspace_root,
+            secrets,
+            frozen.as_deref(),
+        )
+        .await;
         let _ = sender.send(bound);
     });
     receiver
@@ -139,11 +154,13 @@ async fn bind_on_pool(
     tool_sections: &BTreeMap<String, String>,
     workspace_root: &std::path::Path,
     secrets: Arc<dyn NamedSecrets>,
+    frozen: Option<&[McpToolRecord]>,
 ) -> Result<BoundMcpTools, String> {
     let mut bound = BoundMcpTools {
         names: Vec::new(),
         registrations: Vec::new(),
         notices: Vec::new(),
+        records: Vec::new(),
     };
     let servers = selection.mcp_servers().cloned().collect::<Vec<_>>();
     let environment = Arc::new(service_environment(workspace_root)?);
@@ -163,21 +180,35 @@ async fn bind_on_pool(
             .lease(spec, Arc::clone(&environment))
             .await
             .map_err(|error| format!("{error}; {remedy}"))?;
-        let listing = lease
-            .freeze(&server_selection(selection, &server))
-            .await
-            .map_err(|error| format!("{error}; {remedy}"))?;
-        for notice in listing.notices() {
-            tracing::warn!(%server, notice = %notice, "mcp tool omitted at bind");
-        }
-        bound.notices.extend(listing.notices().iter().cloned());
+        let (records, pack) = if let Some(frozen) = frozen {
+            let records = frozen
+                .iter()
+                .filter(|record| record.server() == &server)
+                .cloned()
+                .collect::<Vec<_>>();
+            let pack = McpToolPack::from_records(lease, records.clone())
+                .map_err(|error| format!("{error}; {remedy}"))?;
+            (records, pack)
+        } else {
+            let listing = lease
+                .freeze(&server_selection(selection, &server))
+                .await
+                .map_err(|error| format!("{error}; {remedy}"))?;
+            for notice in listing.notices() {
+                tracing::warn!(%server, notice = %notice, "mcp tool omitted at bind");
+            }
+            bound.notices.extend(listing.notices().iter().cloned());
+            (
+                listing.records().to_vec(),
+                McpToolPack::new(lease, &listing),
+            )
+        };
         bound.names.extend(
-            listing
-                .records()
+            records
                 .iter()
                 .map(|record| (server.clone(), record.exposed_name().clone())),
         );
-        let pack = McpToolPack::new(lease, &listing);
+        bound.records.extend(records);
         bound.registrations.extend(
             pack.registrations()
                 .map_err(|error| {

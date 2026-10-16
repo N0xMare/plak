@@ -513,6 +513,7 @@ async fn create_session<P: plakous_host_protocol::ProtocolExtension>(
     seed: Option<plakous::sessions::PortableSessionHistory>,
     stderr_buf: &mut Vec<u8>,
 ) -> CliResult<AttachedCodingSession> {
+    freeze_root_tools(config)?;
     #[cfg(any(test, feature = "test-support"))]
     if let Some(runtime) = injected_runtime(config, injected_role(config)) {
         let operation = SessionOperationId::new(config.session.create_operation_id.clone())
@@ -558,7 +559,7 @@ fn native_spec<P: plakous_host_protocol::ProtocolExtension>(
     Ok(ProductAgentSpec {
         prompt_host_facts: config.prompt_host_facts(),
         product_home: Some(config.product_home.clone()),
-        tool_selection: root_tool_selection(config, &config.session),
+        tool_selection: root_tool_selection(&config.session),
         provider: config
             .target
             .native_provider()
@@ -729,21 +730,55 @@ pub(super) fn api_parent_from_config<P: plakous_host_protocol::ProtocolExtension
         config.topology_enabled,
     );
     parent.prompt_host_facts = config.prompt_host_facts();
-    parent.tool_selection = root_tool_selection(config, session);
+    parent.tool_selection = root_tool_selection(session);
     Ok(parent)
 }
 
-/// The root's optional tools: its `[root] agent` template's list when this
-/// session runs that template's exact tuple, otherwise none.
-pub(super) fn root_tool_selection<P: plakous_host_protocol::ProtocolExtension>(
-    config: &HostConfig<P>,
-    session: &SessionRecord,
-) -> crate::tool_plan::NodeToolSelection {
-    crate::binding::RootTemplateFact::root_tool_selection(
-        config.root_template.as_ref(),
-        session.account.as_deref(),
-        session.model.as_deref(),
-    )
+/// The root's optional tools: its frozen `[root] agent` template's list when
+/// this session runs that template's exact tuple, otherwise none. A record
+/// not yet frozen has none.
+pub(super) fn root_tool_selection(session: &SessionRecord) -> crate::tool_plan::NodeToolSelection {
+    session
+        .frozen_tools
+        .as_ref()
+        .map(|frozen| frozen.selection(session.account.as_deref(), session.model.as_deref()))
+        .unwrap_or_default()
+}
+
+/// Freezes the root's optional tools into the record before its runtime is
+/// first created: the `[root] agent` template as configured now and, when
+/// the session runs its tuple, the MCP tools its selection reaches, listed
+/// once here. A wildcard's omitted tool becomes a transcript notice. A
+/// refusal fails the creation like any bind refusal.
+fn freeze_root_tools<P: plakous_host_protocol::ProtocolExtension>(
+    config: &mut HostConfig<P>,
+) -> CliResult<()> {
+    if config.session.frozen_tools.is_some() {
+        return Ok(());
+    }
+    let mut frozen = crate::frozen_tools::FrozenRootTools::new(config.root_template.clone());
+    let tools = frozen.selection(
+        config.session.account.as_deref(),
+        config.session.model.as_deref(),
+    );
+    if tools.selection.mcp_servers().next().is_some() {
+        let bound = crate::mcp_binding::bind_mcp_tools(
+            &tools.selection,
+            &tools.tool_sections,
+            &config.session.workspace_root,
+            config.state_roots.named_secrets(),
+            None,
+        )
+        .map_err(CliFailure::new)?;
+        for notice in bound.notices {
+            config
+                .session
+                .record_notice(TranscriptRow::warning(NoticeScope::Settings, notice));
+        }
+        frozen = frozen.with_mcp_tools(bound.records);
+    }
+    config.session.frozen_tools = Some(frozen);
+    Ok(())
 }
 
 pub(super) fn openrouter_cached_evidence<P: plakous_host_protocol::ProtocolExtension>(
@@ -835,7 +870,7 @@ pub(super) fn api_compaction_runtime_binding<P: plakous_host_protocol::ProtocolE
         config.max_model_rounds,
         config.topology_enabled,
     );
-    parent.tool_selection = root_tool_selection(config, &config.session);
+    parent.tool_selection = root_tool_selection(&config.session);
     ApplicationExecutor::new()
         .map_err(|_| CliFailure::new("application executor unavailable"))?
         .block_on(async {
@@ -883,7 +918,7 @@ pub(super) async fn cached_api_runtime_for_record<P: plakous_host_protocol::Prot
         config.max_model_rounds,
         config.topology_enabled,
     );
-    parent.tool_selection = root_tool_selection(config, record);
+    parent.tool_selection = root_tool_selection(record);
     let prepared = Box::pin(api_session_runtime_binding(
         &parent,
         opening_durable_session,
@@ -925,7 +960,7 @@ pub(super) fn host_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
     let spec = ProductAgentSpec {
         prompt_host_facts: config.prompt_host_facts(),
         product_home: Some(config.product_home.clone()),
-        tool_selection: root_tool_selection(config, &config.session),
+        tool_selection: root_tool_selection(&config.session),
         provider: config
             .target
             .native_provider()
@@ -1009,7 +1044,7 @@ pub(super) async fn open_session_for_host<P: plakous_host_protocol::ProtocolExte
     let spec = ProductAgentSpec {
         prompt_host_facts: config.prompt_host_facts(),
         product_home: Some(config.product_home.clone()),
-        tool_selection: root_tool_selection(config, session),
+        tool_selection: root_tool_selection(session),
         provider: config
             .target
             .native_provider()
@@ -1059,6 +1094,120 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::thread;
     use std::time::{Duration, Instant};
+
+    fn root_template(tools: &[&str]) -> crate::binding::RootTemplateFact {
+        crate::binding::RootTemplateFact {
+            name: "root-agent".to_owned(),
+            account: "codex".to_owned(),
+            model: "offline-loopback-v1".to_owned(),
+            tools: crate::tool_plan::TemplateToolSelection::parse(tools).unwrap(),
+            tool_sections: std::collections::BTreeMap::from([(
+                "tools.fetch_url".to_owned(),
+                format!("[tools.fetch_url]\nmax_bytes = {}\n", tools.len()),
+            )]),
+        }
+    }
+
+    /// A wildcard's unlowerable tool is omitted at creation with one
+    /// Settings notice in the transcript, and the listed tools are frozen
+    /// into the record for every later bind.
+    #[test]
+    fn creation_freezes_listed_mcp_tools_and_records_the_omission_notice() {
+        let executable = std::env::current_exe().unwrap();
+        let server = executable
+            .parent()
+            .and_then(std::path::Path::parent)
+            .unwrap()
+            .join("mcp-fake-server");
+        assert!(
+            server.is_file(),
+            "run the workspace tests so the fixture is built"
+        );
+        let root = tempfile::tempdir().unwrap();
+        let (mut config, _) = test_support::fresh_injected_attached_host(root.path());
+        let mut template = root_template(&["mcp:fake"]);
+        template.tool_sections = std::collections::BTreeMap::from([(
+            "mcp_servers.fake".to_owned(),
+            format!(
+                "[mcp_servers.fake]\ntransport = \"stdio\"\ncommand = {:?}\n\
+                 args = [\"--tools\", \"unlowerable\"]\nenv = {{ }}\nsecret_env = {{ }}\n\
+                 startup_seconds = 20\ncall_seconds = 120\n",
+                server.to_str().unwrap()
+            ),
+        )]);
+        config.root_template = Some(template);
+        freeze_root_tools(&mut config).unwrap();
+
+        let notices = config.session.transcript.pending_notices();
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        let TranscriptRow::Notice(notice) = &notices[0] else {
+            panic!("not a notice: {notices:?}");
+        };
+        assert_eq!(notice.scope, NoticeScope::Settings);
+        assert!(notice.text.contains("fake/tangled"), "{}", notice.text);
+        let frozen = root_tool_selection(&config.session).mcp_tools.unwrap();
+        let names = frozen
+            .iter()
+            .map(|record| record.mcp_name().to_owned())
+            .collect::<Vec<_>>();
+        assert!(names.contains(&"echo".to_owned()), "{names:?}");
+        assert!(!names.contains(&"tangled".to_owned()), "{names:?}");
+    }
+
+    /// The root's tools are frozen at creation: editing the `[root] agent`
+    /// template afterwards changes neither the reopened record nor its
+    /// rebinds, and a new session takes the edit.
+    #[test]
+    fn root_tools_are_frozen_at_creation_and_an_edit_changes_new_sessions_only() {
+        let root = tempfile::tempdir().unwrap();
+        let executor = ApplicationExecutor::new().unwrap();
+        let (mut config, _) = test_support::fresh_injected_attached_host(root.path());
+        config.root_template = Some(root_template(&["web_search"]));
+        let opened = executor
+            .block_on(build_session_from_config(&mut config, &mut Vec::new()))
+            .unwrap()
+            .unwrap();
+        config
+            .session
+            .bind_plakous_locator(opened.locator())
+            .unwrap();
+        config.store.save(&mut config.session).unwrap();
+        executor.block_on(opened.release()).unwrap().unwrap();
+
+        config.root_template = Some(root_template(&["fetch_url", "image_gen"]));
+        let reopened = config.store.load(&config.session.id).unwrap();
+        let frozen = root_tool_selection(&reopened);
+        assert_eq!(
+            frozen.selection,
+            crate::tool_plan::TemplateToolSelection::parse(["web_search"]).unwrap()
+        );
+        assert_eq!(
+            frozen.tool_sections["tools.fetch_url"],
+            "[tools.fetch_url]\nmax_bytes = 1\n"
+        );
+        let stored = reopened.frozen_tools.as_ref().unwrap();
+        assert!(
+            stored
+                .selection(Some("codex"), Some("other"))
+                .selection
+                .is_empty()
+        );
+        assert_eq!(
+            stored.selection(Some("codex"), Some("offline-loopback-v1")),
+            frozen
+        );
+
+        let mut fresh = SessionRecord::new(config.session.workspace_root.clone());
+        fresh.account = config.session.account.clone();
+        fresh.model = config.session.model.clone();
+        assert!(root_tool_selection(&fresh).selection.is_empty());
+        config.session = fresh;
+        freeze_root_tools(&mut config).unwrap();
+        assert_eq!(
+            root_tool_selection(&config.session).selection,
+            crate::tool_plan::TemplateToolSelection::parse(["fetch_url", "image_gen"]).unwrap()
+        );
+    }
 
     #[test]
     fn exact_native_refresh_preserves_semantics_and_account_with_monotonic_generation() {
