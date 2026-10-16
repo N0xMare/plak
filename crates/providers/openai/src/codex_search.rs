@@ -43,6 +43,7 @@ pub struct CodexSearchRequest {
     id: String,
     model: String,
     query: String,
+    domains: Vec<String>,
 }
 
 impl CodexSearchRequest {
@@ -54,16 +55,29 @@ impl CodexSearchRequest {
             id: id.into(),
             model: model.into(),
             query: query.into(),
+            domains: Vec::new(),
         }
     }
 
+    /// Restricts the search to `domains`, carried on the query as the
+    /// reference client does.
+    #[must_use]
+    pub fn with_domains(mut self, domains: Vec<String>) -> Self {
+        self.domains = domains;
+        self
+    }
+
     /// The exact body: the query as the one user message and as the one
-    /// `search_query` command.
+    /// `search_query` command, with its `domains` when any are set.
     ///
     /// # Errors
     ///
     /// Fails only when serialization fails.
     pub fn body(&self) -> Result<Vec<u8>, ResponsesRetrievalError> {
+        let mut command = json!({"q": self.query});
+        if !self.domains.is_empty() {
+            command["domains"] = json!(self.domains);
+        }
         serde_json::to_vec(&json!({
             "id": self.id,
             "model": self.model,
@@ -72,7 +86,7 @@ impl CodexSearchRequest {
                 "role": "user",
                 "content": [{"type": "input_text", "text": self.query}],
             }],
-            "commands": {"search_query": [{"q": self.query}]},
+            "commands": {"search_query": [command]},
             "max_output_tokens": RESPONSES_RETRIEVAL_MAX_OUTPUT_TOKENS,
         }))
         .map_err(|_| {
@@ -85,8 +99,8 @@ impl CodexSearchRequest {
 }
 
 /// Classifies a Codex search body: only the known fields, and commands that
-/// are exactly one or more `search_query` entries carrying only `q`, are
-/// [`ReplaySafety::CostOnly`].
+/// are exactly one or more `search_query` entries carrying only `q` and
+/// optionally `domains`, are [`ReplaySafety::CostOnly`].
 #[must_use]
 pub fn classify_codex_search_body(body: &[u8]) -> ReplaySafety {
     const FIELDS: [&str; 6] = [
@@ -114,7 +128,14 @@ pub fn classify_codex_search_body(body: &[u8]) -> ReplaySafety {
                 !queries.is_empty()
                     && queries.iter().all(|query| {
                         query.as_object().is_some_and(|query| {
-                            query.len() == 1 && query.get("q").is_some_and(Value::is_string)
+                            query.get("q").is_some_and(Value::is_string)
+                                && query.iter().all(|(key, value)| match key.as_str() {
+                                    "q" => true,
+                                    "domains" => value.as_array().is_some_and(|domains| {
+                                        domains.iter().all(Value::is_string)
+                                    }),
+                                    _ => false,
+                                })
                         })
                     })
             });
@@ -216,7 +237,7 @@ impl CodexRetrieval {
     /// # Errors
     ///
     /// Refuses a query the search command cannot express: post search and
-    /// domain filters.
+    /// excluded domains.
     pub fn request(
         &self,
         id: impl Into<String>,
@@ -225,13 +246,20 @@ impl CodexRetrieval {
         if let Some(refused) = refuse_unexpressible(&query) {
             return Err(refused);
         }
-        let (ResponsesRetrievalQuery::WebSearch { query, .. }
-        | ResponsesRetrievalQuery::PostSearch { query, .. }) = query;
+        let (query, domains) = match query {
+            ResponsesRetrievalQuery::WebSearch {
+                query,
+                allowed_domains,
+                ..
+            } => (query, allowed_domains),
+            ResponsesRetrievalQuery::PostSearch { query, .. } => (query, Vec::new()),
+        };
         Ok(CodexSearchRequest::new(
             id,
             self.model.descriptor().requested_model().as_str(),
             query,
-        ))
+        )
+        .with_domains(domains))
     }
 
     /// Runs one side request.
@@ -272,20 +300,18 @@ impl CodexRetrieval {
     }
 }
 
-/// Refuses what the search command cannot express: post search and domain
-/// filters.
+/// Refuses what the search command cannot express: post search and
+/// excluded domains.
 #[cfg(feature = "native-auth")]
 pub(crate) fn refuse_unexpressible(
     query: &ResponsesRetrievalQuery,
 ) -> Option<ResponsesRetrievalError> {
     let refused = match query {
         ResponsesRetrievalQuery::WebSearch {
-            allowed_domains,
-            blocked_domains,
-            ..
-        } if allowed_domains.is_empty() && blocked_domains.is_empty() => return None,
+            blocked_domains, ..
+        } if blocked_domains.is_empty() => return None,
         ResponsesRetrievalQuery::WebSearch { .. } => {
-            "this route's web search cannot filter domains"
+            "this route's web search cannot exclude domains"
         }
         ResponsesRetrievalQuery::PostSearch { .. } => "this route does not search posts",
     };
@@ -352,9 +378,17 @@ mod tests {
             )
         );
         assert_eq!(classify_codex_search_body(&body), ReplaySafety::CostOnly);
+        let filtered = CodexSearchRequest::new("req-1", "gpt-5.5-codex", "rust")
+            .with_domains(vec!["rust-lang.org".to_owned()])
+            .body()?;
+        assert_eq!(
+            classify_codex_search_body(&filtered),
+            ReplaySafety::CostOnly
+        );
         for changed in [
             r#"{"id":"r","model":"m","input":[],"commands":{"open":[{"ref_id":"x"}]}}"#,
             r#"{"id":"r","model":"m","input":[],"commands":{"search_query":[{"q":"x","recency":1}]}}"#,
+            r#"{"id":"r","model":"m","input":[],"commands":{"search_query":[{"q":"x","domains":"a.test"}]}}"#,
             r#"{"id":"r","model":"m","input":[],"commands":{"search_query":[]}}"#,
             r#"{"id":"r","model":"m","input":[],"commands":{"search_query":[{"q":"x"}]},"tools":[]}"#,
         ] {

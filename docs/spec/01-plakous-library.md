@@ -4986,10 +4986,11 @@ inference permit, the grant, dispatch authorization, grant revalidation) and
 sends `POST /responses` on the SuperGrok origin with the bearer grant and the
 subscription inference headers, without `x-grok-conv-id`. The Codex port
 (`plakous::openai::CodexRetrievalPort` over `CodexRetrieval`, from
-`OpenAiLanguageModel::codex_retrieval`) serves web search without domain
-filters: each call is one `POST /backend-api/codex/alpha/search`
-(`CodexSearchRequest`) with a fresh request id, the session's model, the query
-as the one user message and as the one `search_query` command. Before every
+`OpenAiLanguageModel::codex_retrieval`) serves web search with allowed
+domains and refuses excluded domains: each call is one `POST
+/backend-api/codex/alpha/search` (`CodexSearchRequest`) with a fresh request
+id, the session's model, the query as the one user message and as the one
+`search_query` command, which carries the allowed domains as `domains`. Before every
 physical request it revalidates runtime authority as before a model round,
 binds a Codex credential preflight to a fresh side-request physical binding
 (`ResponsesOperationBinding::retrieval_side_request`), reserves one inference
@@ -7375,7 +7376,8 @@ exactly one `web_search` tool (with only
 `excluded_domains`) or `x_search` tool (with only `allowed_x_handles`,
 `from_date`, `to_date`), `tool_choice:"required"`, `store:false`, and at most
 the web search sources include is cost-only; a Codex `alpha/search` body is
-cost-only only when its commands are `search_query` entries carrying only `q`.
+cost-only only when its commands are `search_query` entries carrying only `q`
+and optionally `domains`.
 Any other body is a server effect and is refused before dispatch. A
 main-exchange Chat body with an enabled plugin remains a server effect. Hosted fields in a main exchange, search included, remain
 server-effect. A server-effect operation also declares that capability to the

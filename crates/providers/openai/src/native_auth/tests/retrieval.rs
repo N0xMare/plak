@@ -147,7 +147,7 @@ async fn a_changed_login_refuses_the_codex_search_before_the_socket() -> TestRes
 }
 
 #[test]
-fn codex_search_refuses_post_search_and_domain_filters() {
+fn codex_search_refuses_post_search_and_excluded_domains() {
     for query in [
         ResponsesRetrievalQuery::PostSearch {
             query: "rust".to_owned(),
@@ -157,8 +157,8 @@ fn codex_search_refuses_post_search_and_domain_filters() {
         },
         ResponsesRetrievalQuery::WebSearch {
             query: "rust".to_owned(),
-            allowed_domains: vec!["rust-lang.org".to_owned()],
-            blocked_domains: Vec::new(),
+            allowed_domains: Vec::new(),
+            blocked_domains: vec!["example.com".to_owned()],
         },
     ] {
         assert_eq!(
@@ -167,4 +167,10 @@ fn codex_search_refuses_post_search_and_domain_filters() {
         );
     }
     assert!(crate::codex_search::refuse_unexpressible(&search("rust")).is_none());
+    let allowed = ResponsesRetrievalQuery::WebSearch {
+        query: "rust".to_owned(),
+        allowed_domains: vec!["rust-lang.org".to_owned()],
+        blocked_domains: Vec::new(),
+    };
+    assert!(crate::codex_search::refuse_unexpressible(&allowed).is_none());
 }
