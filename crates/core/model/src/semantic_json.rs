@@ -83,29 +83,44 @@ impl SemanticJsonV1 {
     ///
     /// Returns a content-free error for malformed, non-I-JSON, or over-bound input.
     pub fn parse(raw: &str) -> Result<Self, SemanticJsonError> {
-        if raw.len() > MAX_BYTES {
-            return Err(SemanticJsonError::ResourceLimit);
-        }
-        validate_number_lexemes(raw)?;
-        let state = Rc::new(RefCell::new(ParseState {
-            nodes: 0,
-            error: None,
-        }));
-        let mut deserializer = serde_json::Deserializer::from_str(raw);
-        let value = StrictSeed {
-            state: Rc::clone(&state),
-            depth: 0,
-        }
-        .deserialize(&mut deserializer)
-        .map_err(|_| {
-            state
-                .borrow()
-                .error
-                .clone()
-                .unwrap_or(SemanticJsonError::Invalid)
-        })?;
-        deserializer.end().map_err(|_| SemanticJsonError::Invalid)?;
-        Self::from_value(value)
+        Self::from_value(strict_parse(raw, MAX_BYTES, SCHEMA_LIMITS)?)
+    }
+
+    /// Strictly parses one JSON document whose owner bounds it by bytes
+    /// alone: the same duplicate-key, number and UTF-8 rules as
+    /// [`Self::parse`], without the tool-schema node and string limits, which
+    /// model output such as a tool call writing a large file legitimately
+    /// exceeds.
+    ///
+    /// # Errors
+    ///
+    /// Returns a content-free error for malformed, non-I-JSON, or over-bound input.
+    pub fn parse_document(raw: &str, max_bytes: usize) -> Result<Value, SemanticJsonError> {
+        normalize_numbers(strict_parse(
+            raw,
+            max_bytes,
+            ParseLimits {
+                depth: MAX_DOCUMENT_DEPTH,
+                nodes: usize::MAX,
+                string_bytes: max_bytes,
+            },
+        )?)
+    }
+
+    /// The canonical bytes [`Self::from_value`] would produce for a document
+    /// whose owner bounds it by bytes alone (a request prefix carrying a
+    /// whole tool catalog, a conversation item carrying an image). Valid
+    /// [`SemanticJsonV1`] input yields identical bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a content-free error for non-I-JSON numbers or more than
+    /// `max_bytes` canonical bytes.
+    pub fn canonical_document_bytes(
+        value: Value,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, SemanticJsonError> {
+        canonicalize_normalized_prevalidated(value, max_bytes)
     }
 
     /// Constructs semantic JSON from an already parsed value.
@@ -612,6 +627,37 @@ fn validate_value_bounds(
     Ok(())
 }
 
+fn strict_parse(
+    raw: &str,
+    max_bytes: usize,
+    limits: ParseLimits,
+) -> Result<Value, SemanticJsonError> {
+    if raw.len() > max_bytes {
+        return Err(SemanticJsonError::ResourceLimit);
+    }
+    validate_number_lexemes(raw)?;
+    let state = Rc::new(RefCell::new(ParseState {
+        nodes: 0,
+        limits,
+        error: None,
+    }));
+    let mut deserializer = serde_json::Deserializer::from_str(raw);
+    let value = StrictSeed {
+        state: Rc::clone(&state),
+        depth: 0,
+    }
+    .deserialize(&mut deserializer)
+    .map_err(|_| {
+        state
+            .borrow()
+            .error
+            .clone()
+            .unwrap_or(SemanticJsonError::Invalid)
+    })?;
+    deserializer.end().map_err(|_| SemanticJsonError::Invalid)?;
+    Ok(value)
+}
+
 fn canonicalize(value: &Value) -> Result<Vec<u8>, SemanticJsonError> {
     canonicalize_prevalidated(value, MAX_BYTES)
 }
@@ -752,8 +798,27 @@ fn portable_json_number(
 
 struct ParseState {
     nodes: usize,
+    limits: ParseLimits,
     error: Option<SemanticJsonError>,
 }
+
+/// Structural limits of one strict parse.
+#[derive(Clone, Copy)]
+struct ParseLimits {
+    depth: usize,
+    nodes: usize,
+    string_bytes: usize,
+}
+
+/// The tool-schema limits [`SemanticJsonV1`] enforces.
+const SCHEMA_LIMITS: ParseLimits = ParseLimits {
+    depth: MAX_DEPTH,
+    nodes: MAX_NODES,
+    string_bytes: MAX_STRING_BYTES,
+};
+
+/// Below `serde_json`'s own recursion limit.
+const MAX_DOCUMENT_DEPTH: usize = 126;
 struct StrictSeed {
     state: Rc<RefCell<ParseState>>,
     depth: usize,
@@ -767,7 +832,7 @@ impl<'de> DeserializeSeed<'de> for StrictSeed {
         {
             let mut s = self.state.borrow_mut();
             s.nodes += 1;
-            if s.nodes > MAX_NODES || self.depth > MAX_DEPTH {
+            if s.nodes > s.limits.nodes || self.depth > s.limits.depth {
                 s.error = Some(SemanticJsonError::ResourceLimit);
                 return Err(D::Error::custom("limit"));
             }
@@ -816,7 +881,8 @@ impl<'de> Visitor<'de> for StrictVisitor {
         self.visit_string(v.to_owned())
     }
     fn visit_string<E: serde::de::Error>(self, v: String) -> Result<Value, E> {
-        if v.len() > MAX_STRING_BYTES {
+        let limit = self.state.borrow().limits.string_bytes;
+        if v.len() > limit {
             self.state.borrow_mut().error = Some(SemanticJsonError::ResourceLimit);
             return Err(E::custom("limit"));
         }
@@ -835,8 +901,9 @@ impl<'de> Visitor<'de> for StrictVisitor {
     fn visit_map<A: MapAccess<'de>>(self, mut a: A) -> Result<Value, A::Error> {
         let mut out = Map::new();
         let mut seen = HashSet::new();
+        let limit = self.state.borrow().limits.string_bytes;
         while let Some(k) = a.next_key::<String>()? {
-            if k.len() > MAX_STRING_BYTES {
+            if k.len() > limit {
                 self.state.borrow_mut().error = Some(SemanticJsonError::ResourceLimit);
                 return Err(A::Error::custom("limit"));
             }
@@ -858,6 +925,35 @@ impl<'de> Visitor<'de> for StrictVisitor {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn documents_are_bounded_by_bytes_alone_under_the_same_strict_rules()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let long = format!(r#"{{"content":"{}"}}"#, "x".repeat(MAX_STRING_BYTES + 1));
+        assert!(SemanticJsonV1::parse(&long).is_err());
+        assert!(SemanticJsonV1::parse_document(&long, 1 << 20)?.is_object());
+        let wide = format!("[{}0]", "0,".repeat(MAX_NODES));
+        assert!(SemanticJsonV1::parse_document(&wide, 1 << 20)?.is_array());
+        assert_eq!(
+            SemanticJsonV1::parse_document(r#"{"a":1,"a":2}"#, 1 << 20),
+            Err(SemanticJsonError::DuplicateKey)
+        );
+        assert_eq!(
+            SemanticJsonV1::parse_document(&long, 1024),
+            Err(SemanticJsonError::ResourceLimit)
+        );
+        let value = json!({"b": [1.0, 2, "\u{e000}"], "a": {"minItems": 1.0}});
+        assert_eq!(
+            SemanticJsonV1::canonical_document_bytes(value.clone(), usize::MAX)?,
+            SemanticJsonV1::from_value(value)?
+                .canonical_bytes()
+                .to_vec()
+        );
+        let many = Value::Array(vec![Value::from(1); MAX_NODES + 1]);
+        assert!(SemanticJsonV1::from_value(many.clone()).is_err());
+        assert!(SemanticJsonV1::canonical_document_bytes(many, usize::MAX).is_ok());
+        Ok(())
+    }
 
     #[expect(
         clippy::needless_pass_by_value,

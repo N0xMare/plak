@@ -1416,8 +1416,15 @@ fn replay_alias_matches(
     }) && !matches!(bound, crate::stream::ReasoningAliasPolicy::EitherBindFirst)
 }
 
+/// A recorded call's arguments are bounded by the canonical tool-call block
+/// (16 MiB), not the tool-schema limits, so replay never refuses a call the
+/// stream accepted.
+const MAX_CHAT_TOOL_ARGUMENT_BYTES: usize = 16 * 1024 * 1024;
+
 fn lower_chat_tool_arguments(raw_arguments: &str) -> Result<String, ChatRequestError> {
-    if SemanticJsonV1::parse(raw_arguments).is_ok_and(|value| value.value().is_object()) {
+    if SemanticJsonV1::parse_document(raw_arguments, MAX_CHAT_TOOL_ARGUMENT_BYTES)
+        .is_ok_and(|value| value.is_object())
+    {
         return Ok(raw_arguments.to_owned());
     }
     Err(invalid(

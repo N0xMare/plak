@@ -3724,6 +3724,14 @@ authority. Its parser rejects duplicate decoded keys and structural or resource
 violations before meaning becomes identity-bearing. Semantic bytes are durable
 neutral meaning and are never a provider request encoding: semantic RFC 8785
 bytes and provider wire bytes are different domains.
+Its depth, node and string limits are tool-schema and tool-input limits. An
+identity document whose owner bounds it by bytes (a stable request prefix
+carrying the instructions and the whole tool catalog, a canonical conversation
+item carrying an image or a large tool call, recorded Chat tool-call arguments)
+is canonicalized and strictly parsed under the same rules with only its
+owner's byte bound (`SemanticJsonV1::canonical_document_bytes`,
+`SemanticJsonV1::parse_document`); content valid under the default limits keeps
+its exact bytes and identity.
 
 `PortableToolSchemaV2` is the structured tool-input authority: a Draft 2020-12
 object root, closed objects, a duplicate-free required-property subset,

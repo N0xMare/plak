@@ -10,12 +10,13 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::semantic_json::canonicalize_normalized_prevalidated;
 use crate::{
     AttemptId, ConfiguredTool, ContextAdmissionRequirement, ConversationView, Digest, DigestDomain,
     DigestError, EffectiveProviderConfigurationId, HistoryError, HostedTool, ModelOperationRoot,
     NamespaceId, PortableToolSchemaV1, PortableToolSchemaV2, ProcessingTierDisposition, RunId,
-    SelectedProviderConfigurationId, SemanticJsonError, SemanticJsonV1, SessionWorkflowRootId,
-    Timestamp, ToolCallerDisposition, ToolExecutionOwner, ToolName, ToolResourceKey, TurnId,
+    SelectedProviderConfigurationId, SemanticJsonError, SessionWorkflowRootId, Timestamp,
+    ToolCallerDisposition, ToolExecutionOwner, ToolName, ToolResourceKey, TurnId,
 };
 
 /// An error constructing a canonical request value.
@@ -2619,11 +2620,7 @@ fn validate_stable_prefix(
         return Err(RequestError::TooManyNativeOptions);
     }
     for value in native.entries.values() {
-        if SemanticJsonV1::from_value(value.clone())?
-            .canonical_bytes()
-            .len()
-            > 1024 * 1024
-        {
+        if canonicalize_normalized_prevalidated(value.clone(), usize::MAX)?.len() > 1024 * 1024 {
             return Err(RequestError::TooLong {
                 field: "native option",
                 maximum: 1024 * 1024,
@@ -2659,14 +2656,23 @@ fn validate_stable_prefix(
     }
 }
 
+/// Canonical bytes of an identity document. The document is bounded by its
+/// owner (tool count, description and schema caps, instruction parts), not by
+/// the tool-schema limits: a wildcard MCP catalog alone exceeds their node
+/// count. Content valid under [`crate::SemanticJsonV1`] keeps its bytes.
 fn canonical_serialize(value: &impl Serialize) -> Result<Vec<u8>, RequestError> {
     let value = serde_json::to_value(value).map_err(|error| RequestError::CanonicalJson {
         reason: error.to_string(),
     })?;
-    Ok(SemanticJsonV1::from_value(value)?
-        .canonical_bytes()
-        .to_vec())
+    Ok(canonicalize_normalized_prevalidated(
+        value,
+        MAX_IDENTITY_DOCUMENT_BYTES,
+    )?)
 }
+
+/// Memory guard for one canonical identity document; its owner's own caps
+/// bind it far below this.
+const MAX_IDENTITY_DOCUMENT_BYTES: usize = 256 * 1024 * 1024;
 
 fn ensure_nonempty(value: &str, field: &'static str) -> Result<(), RequestError> {
     if value.is_empty() {
@@ -2688,7 +2694,8 @@ mod tests {
     use super::*;
     use crate::{
         Actor, AttemptId, ContentBlock, ConversationItem, EntryId, HistorySegment,
-        HistorySegmentKind, Provenance, RunId, TextBlock, Timestamp, TurnId, WorkingProjection,
+        HistorySegmentKind, Provenance, RunId, SemanticJsonV1, TextBlock, Timestamp, TurnId,
+        WorkingProjection,
     };
     use uuid::Uuid;
 
@@ -3255,6 +3262,48 @@ mod tests {
         assert!(next.input().shares_history_with(&history));
         assert_eq!(next.input().items().len(), 2);
         assert_ne!(request.input().identity(), next.input().identity());
+        Ok(())
+    }
+
+    #[test]
+    fn a_prefix_past_the_tool_schema_bounds_seals_with_valid_bytes_unchanged()
+    -> Result<(), Box<dyn std::error::Error>> {
+        // Twenty 60 KiB instruction blocks: over SemanticJsonV1's 1 MiB
+        // document bound, within the prefix's own caps.
+        let instructions = (0..20)
+            .map(|index| {
+                InstructionBlock::new(
+                    InstructionSource::System,
+                    format!("{index}{}", "x".repeat(60_000)),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let large = request_builder(
+            ConversationView::from_items(vec![user_item(10, "large prefix")?])?,
+            metadata()?,
+        )
+        .instructions(instructions)
+        .tools(vec![configured_tool()?])
+        .build()?;
+        assert!(large.stable_prefix().canonical_bytes().len() > 1_048_576);
+
+        let small = request_builder(
+            ConversationView::from_items(vec![user_item(10, "small prefix")?])?,
+            metadata()?,
+        )
+        .instructions(vec![InstructionBlock::new(
+            InstructionSource::System,
+            "small",
+        )?])
+        .tools(vec![configured_tool()?])
+        .build()?;
+        let bounded = SemanticJsonV1::parse(std::str::from_utf8(
+            small.stable_prefix().canonical_bytes(),
+        )?)?;
+        assert_eq!(
+            bounded.canonical_bytes().as_ref(),
+            small.stable_prefix().canonical_bytes()
+        );
         Ok(())
     }
 

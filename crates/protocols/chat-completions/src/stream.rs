@@ -1159,13 +1159,20 @@ impl ChatStreamProjector {
                     "tool-call slot never bound id and name",
                 );
             };
-            let arguments = SemanticJsonV1::parse(&call.arguments).map_err(|_| {
+            // Bounded by the binding's argument cap, not the tool-schema node
+            // and string limits: an oversized write is the tool runtime's
+            // recoverable input error, as on Messages and Responses.
+            let arguments = SemanticJsonV1::parse_document(
+                &call.arguments,
+                self.binding.limits.arguments.get(),
+            )
+            .map_err(|_| {
                 err(
                     ChatStreamErrorKind::InvalidResponse,
                     "tool arguments are malformed or ambiguous",
                 )
             })?;
-            if !arguments.value().is_object() {
+            if !arguments.is_object() {
                 return self.fail(
                     ChatStreamErrorKind::InvalidResponse,
                     "tool arguments must be one JSON object",
