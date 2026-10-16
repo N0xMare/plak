@@ -3,7 +3,7 @@
 //!
 //! A template's `tools` list is parsed once into a [`TemplateToolSelection`].
 //! Binding resolves it against the route and the MCP listings into a
-//! [`ToolPlan`], or refuses it with a [`ToolPlanRefusal`].
+//! crate-private `ToolPlan`, or refuses it with a `ToolPlanRefusal`.
 
 use std::collections::BTreeSet;
 use std::fmt;
