@@ -4930,9 +4930,15 @@ kernel's side-request grammar accepts exactly the server-tool use and result
 blocks its body offered (and thinking only when it requested adaptive
 thinking); main-exchange streams keep refusing every hosted block. The
 Anthropic API and Claude OAuth ports issue side requests with no client tools,
-`max_tokens` 4,096, `max_uses` 5 for search and 1 for fetch, and adaptive
-thinking at the lowest effort the model admits where the model requires
-thinking. A template binds a wrapper only where its route's release-owned
+`max_tokens` 4,096, the request's `max_uses` for search and 1 for fetch, and
+adaptive thinking at the lowest effort the model admits where the model
+requires thinking. A `RetrievalRequest::WebSearch` carries the call's
+`max_uses`; `WebToolPack::with_options` fixes a node's frozen
+`[tools.web_search]` and `[tools.x_search]` tables (`RetrievalOptions`) on
+every call: a set domain or handle list replaces the one the model passed,
+and the search count is always the table's. `plakous-hosted` refuses at bind
+an option the route's provider has no parameter for (chapter 07 §3.4). A
+template binds a wrapper only where its route's release-owned
 table row is `Supported` and the route has a port serving it; elsewhere
 binding refuses. The Anthropic API and Claude OAuth
 routes have one (`plakous::anthropic::AnthropicRetrievalPort` over

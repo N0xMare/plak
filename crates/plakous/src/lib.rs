@@ -1162,12 +1162,13 @@ pub mod tools {
             MAX_IMAGE_EDIT_INPUT_BYTES, MAX_IMAGE_EDIT_INPUTS, MAX_IMAGE_PROMPT_BYTES,
         };
         pub use plakous_tool_web::{
-            MAX_DOMAINS, MAX_PROMPT_BYTES, MAX_QUERY_BYTES, MAX_URL_BYTES, WebTool, WebToolPack,
-            render_outcome,
+            MAX_DOMAINS, MAX_PROMPT_BYTES, MAX_QUERY_BYTES, MAX_URL_BYTES, RetrievalOptions,
+            WebTool, WebToolPack, render_outcome,
         };
         pub use plakous_tools::{
-            RetrievalError, RetrievalErrorKind, RetrievalFuture, RetrievalKind, RetrievalOutcome,
-            RetrievalPort, RetrievalRequest, RetrievalSource, RetrievalUsage,
+            DEFAULT_WEB_SEARCH_MAX_USES, RetrievalError, RetrievalErrorKind, RetrievalFuture,
+            RetrievalKind, RetrievalOutcome, RetrievalPort, RetrievalRequest, RetrievalSource,
+            RetrievalUsage,
         };
     }
     /// Unsupported preview-minimization seam for official observation and hosting.

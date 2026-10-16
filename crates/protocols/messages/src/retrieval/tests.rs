@@ -23,6 +23,7 @@ fn search() -> MessagesRetrievalRequest {
             query: "rust 1.99".to_owned(),
             allowed_domains: vec!["rust-lang.org".to_owned()],
             blocked_domains: Vec::new(),
+            max_uses: 5,
         },
     )
 }

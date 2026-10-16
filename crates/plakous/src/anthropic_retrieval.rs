@@ -54,10 +54,12 @@ fn query(request: RetrievalRequest) -> Result<MessagesRetrievalQuery, RetrievalE
             query,
             allowed_domains,
             blocked_domains,
+            max_uses,
         } => Ok(MessagesRetrievalQuery::WebSearch {
             query,
             allowed_domains,
             blocked_domains,
+            max_uses,
         }),
         RetrievalRequest::PageFetch { url, prompt } => {
             Ok(MessagesRetrievalQuery::PageFetch { url, prompt })

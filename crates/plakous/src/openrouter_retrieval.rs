@@ -39,6 +39,7 @@ impl RetrievalPort for OpenRouterRetrievalPort {
                 query,
                 allowed_domains,
                 blocked_domains,
+                ..
             } = request
             else {
                 return Err(RetrievalError::new(

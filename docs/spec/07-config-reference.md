@@ -243,6 +243,25 @@ other name is an unknown section.
 | `tools.web_search.blocked_domains` | array of string | `[]` | at most 10 domain names, none twice; exclusive with allowed_domains | Never search these domains. |
 | `tools.x_search.allowed_x_handles` | array of string | `[]` | at most 20 handles of 1 to 15 letters, digits or `_`, without `@` | Search only posts from these X handles; empty is every handle. |
 
+A set `allowed_domains`, `blocked_domains` or `allowed_x_handles` replaces
+the list the model passes on a call. Each option travels in the route
+provider's own parameter, and a bind on a route whose provider has none
+refuses with `[tools.web_search] <option> is not available on <route>;
+remedy: ...`:
+
+| route | `allowed_domains` | `blocked_domains` | `max_uses` other than 5 |
+| --- | --- | --- | --- |
+| claude, anthropic | web search tool `allowed_domains` | `blocked_domains` | tool `max_uses` |
+| codex | `search_query` `domains` | refused | honored: one search per call |
+| openai | `filters.allowed_domains` | refused | refused |
+| grok, xai-api | `allowed_domains` | `excluded_domains` | refused |
+| openrouter | `web` plugin `include_domains` | `exclude_domains` | honored: one search per call |
+
+`allowed_x_handles` is the `x_search` tool's `allowed_x_handles` on grok and
+xai-api, the only routes that serve X search.
+On openai, grok and xai-api the provider has no search count limit, so the
+default `max_uses` bounds nothing there; only an unset (default) value binds.
+
 ### 3.5 `[mcp_servers.<id>]`
 
 One MCP server a template may name as `mcp:<id>` or `mcp:<id>/<tool>`. `<id>`

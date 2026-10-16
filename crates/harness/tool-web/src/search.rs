@@ -3,7 +3,10 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use plakous_tools::{CodingPresentation, RetrievalRequest, ToolRuntimeError, object_schema};
+use plakous_tools::{
+    CodingPresentation, DEFAULT_WEB_SEARCH_MAX_USES, RetrievalRequest, ToolRuntimeError,
+    object_schema,
+};
 
 use crate::text::{PLAKOUS_WEB_CLAUDE_SEARCH_DESCRIPTION, PLAKOUS_WEB_SEARCH_DESCRIPTION};
 use crate::{MAX_DOMAINS, MAX_QUERY_BYTES, Shape, invalid, require_text};
@@ -64,6 +67,7 @@ pub(crate) fn request(arguments: Value) -> Result<RetrievalRequest, ToolRuntimeE
         query,
         allowed_domains: domains(arguments.allowed_domains)?,
         blocked_domains: domains(arguments.blocked_domains)?,
+        max_uses: DEFAULT_WEB_SEARCH_MAX_USES,
     })
 }
 

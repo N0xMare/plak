@@ -762,7 +762,14 @@ fn frozen_tools_rebind_refusal<P: plakous_host_protocol::ProtocolExtension>(
              them; remedy: /clear, or start a new session on that model"
         ));
     };
+    let options = match crate::frozen_tables::retrieval_options(&tools.tool_sections) {
+        Ok(options) => options,
+        Err(error) => return Some(error),
+    };
     crate::tool_plan::bind_tool_plan(&tools.selection, route, account)
+        .and_then(|_| {
+            crate::tool_plan::check_retrieval_options(&tools.selection, route, account, &options)
+        })
         .err()
         .map(|refusal| refusal.rebind_line())
 }

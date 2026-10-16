@@ -874,7 +874,8 @@ any credential or network access.
 
 Hosted retrieval spends on the session's own route and credential and needs
 no separate authority: each wrapper call is one side request whose hosted
-work is bounded by the body it sends (`max_uses` 5 for web search, 1 for page
+work is bounded by the body it sends (the node's `[tools.web_search] max_uses`,
+default 5, for web search on the Messages routes, 1 for page
 fetch, `max_tokens` 4,096, at most three `pause_turn` continuations, and the
 turn retry budget per exchange; on OpenRouter, one `web` plugin with
 `max_results` 5 and no continuation). On the Codex and SuperGrok

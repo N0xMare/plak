@@ -1513,6 +1513,7 @@ async fn live_retrieval_probe_anthropic_api() -> TestResult {
             query: "Rust programming language latest stable release".to_owned(),
             allowed_domains: Vec::new(),
             blocked_domains: Vec::new(),
+            max_uses: 5,
         },
         plakous_messages::MessagesRetrievalQuery::PageFetch {
             url: "https://www.rust-lang.org/".to_owned(),
@@ -1549,6 +1550,7 @@ fn api_side_request_uses_the_session_model_and_lowest_adaptive_effort() -> TestR
             query: "q".to_owned(),
             allowed_domains: Vec::new(),
             blocked_domains: Vec::new(),
+            max_uses: 5,
         })
         .body(&[])?;
     let value: serde_json::Value = serde_json::from_slice(&body)?;

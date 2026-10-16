@@ -141,7 +141,8 @@ impl ProductToolExtensions {
                 wrappers,
                 binding.port(),
             )
-            .map_err(|error| CliFailure::new(format!("hosted retrieval wrappers: {error}")))?;
+            .map_err(|error| CliFailure::new(format!("hosted retrieval wrappers: {error}")))?
+            .with_options(plan.retrieval_options().clone());
             appended.extend(
                 pack.registrations().map_err(|error| {
                     CliFailure::new(format!("hosted retrieval wrappers: {error}"))

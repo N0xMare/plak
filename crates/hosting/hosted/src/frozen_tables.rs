@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use plakous::tools::web::FetchUrlLimits;
+use plakous::tools::web::{FetchUrlLimits, RetrievalOptions};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
@@ -19,6 +19,20 @@ pub(crate) fn parse<T: DeserializeOwned>(rendered: &str) -> Option<T> {
 struct RenderedFetchUrl {
     max_bytes: u32,
     timeout_seconds: u16,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RenderedWebSearch {
+    max_uses: u8,
+    allowed_domains: Vec<String>,
+    blocked_domains: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RenderedXSearch {
+    allowed_x_handles: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -50,12 +64,85 @@ pub(crate) fn fetch_url_limits(
         .ok_or_else(|| String::from("fetch_url has an invalid frozen [tools.fetch_url] table"))
 }
 
+/// The one table `name` renders, or `None` when the node reaches none.
+fn tool_table<T: DeserializeOwned>(
+    sections: &BTreeMap<String, String>,
+    name: &str,
+) -> Result<Option<T>, String> {
+    let Some(rendered) = sections.get(&format!("tools.{name}")) else {
+        return Ok(None);
+    };
+    parse::<RenderedToolTable<T>>(rendered)
+        .and_then(|mut table| table.tools.remove(name).filter(|_| table.tools.is_empty()))
+        .map(Some)
+        .ok_or_else(|| format!("{name} has an invalid frozen [tools.{name}] table"))
+}
+
+/// The options the node's hosted retrieval wrappers fix on every call: its
+/// frozen `[tools.web_search]` and `[tools.x_search]` tables, or the
+/// defaults for a table it reaches none of.
+///
+/// # Errors
+///
+/// Refuses a table that does not parse.
+pub(crate) fn retrieval_options(
+    sections: &BTreeMap<String, String>,
+) -> Result<RetrievalOptions, String> {
+    let mut options = RetrievalOptions::default();
+    if let Some(search) = tool_table::<RenderedWebSearch>(sections, "web_search")? {
+        options.web_search_max_uses = search.max_uses;
+        options.allowed_domains = search.allowed_domains;
+        options.blocked_domains = search.blocked_domains;
+    }
+    if let Some(x_search) = tool_table::<RenderedXSearch>(sections, "x_search")? {
+        options.allowed_x_handles = x_search.allowed_x_handles;
+    }
+    Ok(options)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn sections(rendered: &str) -> BTreeMap<String, String> {
         BTreeMap::from([("tools.fetch_url".to_owned(), rendered.to_owned())])
+    }
+
+    #[test]
+    fn retrieval_options_come_from_the_frozen_tables_or_the_defaults() {
+        assert_eq!(
+            retrieval_options(&BTreeMap::new()),
+            Ok(RetrievalOptions::default())
+        );
+        let frozen = BTreeMap::from([
+            (
+                "tools.web_search".to_owned(),
+                "[tools.web_search]\nmax_uses = 2\nallowed_domains = [\"rust-lang.org\"]\n\
+                 blocked_domains = []\n"
+                    .to_owned(),
+            ),
+            (
+                "tools.x_search".to_owned(),
+                "[tools.x_search]\nallowed_x_handles = [\"rustlang\"]\n".to_owned(),
+            ),
+        ]);
+        assert_eq!(
+            retrieval_options(&frozen),
+            Ok(RetrievalOptions {
+                web_search_max_uses: 2,
+                allowed_domains: vec!["rust-lang.org".to_owned()],
+                blocked_domains: Vec::new(),
+                allowed_x_handles: vec!["rustlang".to_owned()],
+            })
+        );
+        let invalid = BTreeMap::from([(
+            "tools.web_search".to_owned(),
+            "[tools.web_search]\nmax_uses = 2\n".to_owned(),
+        )]);
+        assert_eq!(
+            retrieval_options(&invalid),
+            Err("web_search has an invalid frozen [tools.web_search] table".to_owned())
+        );
     }
 
     #[test]

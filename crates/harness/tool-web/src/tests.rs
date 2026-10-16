@@ -130,6 +130,7 @@ fn arguments_lower_to_requests() -> TestResult {
             query: "rust 1.99 release".to_owned(),
             allowed_domains: vec!["blog.rust-lang.org".to_owned()],
             blocked_domains: Vec::new(),
+            max_uses: 5,
         }
     );
     assert_eq!(
@@ -266,6 +267,7 @@ fn presentation_subject_is_the_query_or_the_host() {
             query: "rust".to_owned(),
             allowed_domains: Vec::new(),
             blocked_domains: Vec::new(),
+            max_uses: 5,
         }),
         "\"rust\""
     );
@@ -275,5 +277,47 @@ fn presentation_subject_is_the_query_or_the_host() {
             prompt: None,
         }),
         "docs.rs:443"
+    );
+}
+
+/// A frozen domain or handle list replaces the model's; the search count is
+/// always the operator's.
+#[test]
+fn options_replace_the_model_lists_and_set_the_search_count() {
+    let options = RetrievalOptions {
+        web_search_max_uses: 2,
+        allowed_domains: Vec::new(),
+        blocked_domains: vec!["example.com".to_owned()],
+        allowed_x_handles: vec!["rustlang".to_owned()],
+    };
+    let search = |allowed: &[&str]| RetrievalRequest::WebSearch {
+        query: "rust".to_owned(),
+        allowed_domains: allowed.iter().map(|domain| (*domain).to_owned()).collect(),
+        blocked_domains: Vec::new(),
+        max_uses: 5,
+    };
+    assert_eq!(
+        options.apply(search(&["docs.rs"])),
+        RetrievalRequest::WebSearch {
+            query: "rust".to_owned(),
+            allowed_domains: Vec::new(),
+            blocked_domains: vec!["example.com".to_owned()],
+            max_uses: 2,
+        }
+    );
+    assert_eq!(
+        RetrievalOptions::default().apply(search(&["docs.rs"])),
+        search(&["docs.rs"])
+    );
+    let posts = |handles: &[&str]| RetrievalRequest::PostSearch {
+        query: "plak".to_owned(),
+        handles: handles.iter().map(|handle| (*handle).to_owned()).collect(),
+        from_date: None,
+        to_date: None,
+    };
+    assert_eq!(options.apply(posts(&["xai"])), posts(&["rustlang"]));
+    assert_eq!(
+        RetrievalOptions::default().apply(posts(&["xai"])),
+        posts(&["xai"])
     );
 }

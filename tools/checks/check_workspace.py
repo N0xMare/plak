@@ -1227,12 +1227,14 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         "openrouter": {"OPENROUTER_HOSTED_RETRIEVAL"},
         # The MCP records a root's frozen selection carries to its bind.
         "mcp": {"McpToolRecord"},
-        # The deferred ports the session's executor connects to, and the
-        # bounds a planned fetch_url runs under.
+        # The deferred ports the session's executor connects to, the bounds
+        # a planned fetch_url runs under, and the retrieval options a route
+        # must serve.
         "tools": {
-            "ExecutionOperationControl", "FetchUrlLimits", "ImageGenFuture", "ImageGenPort",
-            "ImageGenRequest", "RetrievalError", "RetrievalErrorKind", "RetrievalFuture",
-            "RetrievalKind", "RetrievalRequest",
+            "DEFAULT_WEB_SEARCH_MAX_USES", "ExecutionOperationControl", "FetchUrlLimits",
+            "ImageGenFuture", "ImageGenPort", "ImageGenRequest", "RetrievalError",
+            "RetrievalErrorKind", "RetrievalFuture", "RetrievalKind", "RetrievalOptions",
+            "RetrievalRequest",
         },
     },
     # The Anthropic, OpenAI and xAI API executors connect their side-request
@@ -1246,8 +1248,11 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     ("plakous-hosted", "src/openrouter.rs"): {
         "openrouter": {"OpenRouterRetrieval", "OpenRouterRetrievalPort"},
     },
-    # The frozen [tools.fetch_url] table read into the tool's bounds.
-    ("plakous-hosted", "src/frozen_tables.rs"): {"tools": {"FetchUrlLimits"}},
+    # The frozen [tools.fetch_url], [tools.web_search] and [tools.x_search]
+    # tables read into the tools' bounds and options.
+    ("plakous-hosted", "src/frozen_tables.rs"): {
+        "tools": {"FetchUrlLimits", "RetrievalOptions"},
+    },
     # The compile-time check that the host release timeout covers the store deadline.
     ("plakous-hosted", "src/lib.rs"): {"agent": {"DEFAULT_STORE_OPERATION_TIMEOUT"}},
     ("plak", "src/commands/reload_rehearsal.rs"): {

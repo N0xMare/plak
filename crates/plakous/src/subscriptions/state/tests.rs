@@ -88,6 +88,7 @@ async fn live_retrieval_probe_subscriptions() -> Result<(), Box<dyn Error>> {
         query: "Rust programming language latest stable release".to_owned(),
         allowed_domains: Vec::new(),
         blocked_domains: Vec::new(),
+        max_uses: 5,
     };
     let x_search = RetrievalRequest::PostSearch {
         query: "Rust programming language release".to_owned(),

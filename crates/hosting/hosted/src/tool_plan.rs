@@ -15,8 +15,9 @@ use plakous::model::{
 };
 use plakous::subscriptions::NativeProvider;
 use plakous::tools::web::{
-    FetchUrlLimits, ImageGenFuture, ImageGenPort, ImageGenRequest, RetrievalError,
-    RetrievalErrorKind, RetrievalFuture, RetrievalKind, RetrievalPort, RetrievalRequest, WebTool,
+    DEFAULT_WEB_SEARCH_MAX_USES, FetchUrlLimits, ImageGenFuture, ImageGenPort, ImageGenRequest,
+    RetrievalError, RetrievalErrorKind, RetrievalFuture, RetrievalKind, RetrievalOptions,
+    RetrievalPort, RetrievalRequest, WebTool,
 };
 use plakous::tools::{CodingPresentation, ExecutionOperationControl, McpServerName};
 
@@ -358,6 +359,7 @@ pub(crate) struct ToolPlan {
     mcp_registrations: Vec<plakous::tools::ToolRegistration>,
     notices: Vec<String>,
     fetch_url_limits: FetchUrlLimits,
+    retrieval_options: RetrievalOptions,
 }
 
 impl fmt::Debug for ToolPlan {
@@ -369,6 +371,7 @@ impl fmt::Debug for ToolPlan {
             .field("image_gen", &self.image_gen.is_some())
             .field("notices", &self.notices)
             .field("fetch_url_limits", &self.fetch_url_limits)
+            .field("retrieval_options", &self.retrieval_options)
             .finish_non_exhaustive()
     }
 }
@@ -566,6 +569,7 @@ impl ToolPlan {
             mcp_registrations: Vec::new(),
             notices: Vec::new(),
             fetch_url_limits: FetchUrlLimits::default(),
+            retrieval_options: RetrievalOptions::default(),
         }
     }
 
@@ -580,6 +584,8 @@ impl ToolPlan {
             image_gen: self.image_gen,
             mcp_registrations: mcp.registrations,
             notices: mcp.notices,
+            fetch_url_limits: self.fetch_url_limits,
+            retrieval_options: self.retrieval_options,
             ..Self::new(selection, mcp.names)
         }
     }
@@ -619,6 +625,70 @@ impl ToolPlan {
     pub(crate) fn with_fetch_url_limits(mut self, limits: FetchUrlLimits) -> Self {
         self.fetch_url_limits = limits;
         self
+    }
+
+    /// The options the planned retrieval wrappers fix on every call.
+    pub(crate) const fn retrieval_options(&self) -> &RetrievalOptions {
+        &self.retrieval_options
+    }
+
+    /// This plan with its retrieval wrappers under `options`, the node's
+    /// frozen `[tools.web_search]` and `[tools.x_search]` tables.
+    ///
+    /// # Errors
+    ///
+    /// Refuses an option a bound wrapper's route has no provider parameter
+    /// for, as [`check_retrieval_options`] does.
+    pub(crate) fn with_retrieval_options(
+        mut self,
+        selection: &TemplateToolSelection,
+        route: ToolRoute,
+        route_label: &str,
+        options: RetrievalOptions,
+    ) -> Result<Self, ToolPlanRefusal> {
+        check_retrieval_options(selection, route, route_label, &options)?;
+        self.retrieval_options = options;
+        Ok(self)
+    }
+}
+
+/// Refuses a `[tools.web_search]` option the route's provider has no
+/// parameter for, rather than dropping it. Every route filters allowed
+/// domains; excluded domains need the provider's own exclusion list; a
+/// search count other than the default needs the provider's own limit, or a
+/// side request that runs exactly one search (Codex, OpenRouter).
+pub(crate) fn check_retrieval_options(
+    selection: &TemplateToolSelection,
+    route: ToolRoute,
+    route_label: &str,
+    options: &RetrievalOptions,
+) -> Result<(), ToolPlanRefusal> {
+    let tool = SelectedTool::Optional(OptionalTool::WebSearch);
+    if !selection.entries().contains(&tool) {
+        return Ok(());
+    }
+    let unserved = match route {
+        ToolRoute::Codex | ToolRoute::OpenAi if !options.blocked_domains.is_empty() => Some((
+            "blocked_domains",
+            "use allowed_domains instead of blocked_domains in [tools.web_search]",
+        )),
+        ToolRoute::OpenAi | ToolRoute::Grok | ToolRoute::XaiApi
+            if options.web_search_max_uses != DEFAULT_WEB_SEARCH_MAX_USES =>
+        {
+            Some(("max_uses", "remove max_uses from [tools.web_search]"))
+        }
+        _ => None,
+    };
+    match unserved {
+        Some((option, remedy)) => Err(ToolPlanRefusal {
+            tool,
+            reason: RefusalReason::Option {
+                route: route_label.to_owned(),
+                option,
+                remedy,
+            },
+        }),
+        None => Ok(()),
     }
 }
 
@@ -892,6 +962,12 @@ enum RefusalReason {
     Unqualified { route: String },
     /// This build has no implementation of the tool.
     Unbuilt,
+    /// The route's provider has no parameter for one frozen option.
+    Option {
+        route: String,
+        option: &'static str,
+        remedy: &'static str,
+    },
 }
 
 #[cfg(test)]
@@ -912,6 +988,9 @@ impl ToolPlanRefusal {
                 format!("{tool} is not yet qualified on {route}")
             }
             RefusalReason::Unbuilt => format!("{tool} is not available in this build"),
+            RefusalReason::Option { route, option, .. } => {
+                format!("[tools.{tool}] {option} is not available on {route}")
+            }
         };
         format!(
             "this session keeps its tools across a model change, and {reason}; remedy: /clear, \
@@ -954,6 +1033,15 @@ impl fmt::Display for ToolPlanRefusal {
                 formatter,
                 "{tool} is not available in this build; remedy: remove {tool} from the \
                  template's tools"
+            ),
+            RefusalReason::Option {
+                route,
+                option,
+                remedy,
+            } => write!(
+                formatter,
+                "[tools.{tool}] {option} is not available on {route}; remedy: {remedy}, or put \
+                 {tool} on a template whose route serves it"
             ),
         }
     }
@@ -1212,6 +1300,53 @@ mod tests {
             Ok(plan) => Err(format!("{route:?} bound {plan:?}").into()),
             Err(refusal) => Ok(refusal.to_string()),
         }
+    }
+
+    /// An option the route's provider has no parameter for refuses the
+    /// bind with its remedy; every other route takes it.
+    #[test]
+    fn retrieval_options_without_a_provider_parameter_refuse_per_route() -> TestResult {
+        let selection = TemplateToolSelection::parse(["web_search"])?;
+        let blocked = RetrievalOptions {
+            blocked_domains: vec!["example.com".to_owned()],
+            ..RetrievalOptions::default()
+        };
+        let counted = RetrievalOptions {
+            web_search_max_uses: 2,
+            ..RetrievalOptions::default()
+        };
+        for route in ToolRoute::ALL {
+            let label = route_label(route);
+            for (options, option, refused) in [
+                (
+                    &blocked,
+                    "blocked_domains",
+                    matches!(route, ToolRoute::Codex | ToolRoute::OpenAi),
+                ),
+                (
+                    &counted,
+                    "max_uses",
+                    matches!(
+                        route,
+                        ToolRoute::OpenAi | ToolRoute::Grok | ToolRoute::XaiApi
+                    ),
+                ),
+            ] {
+                let checked = check_retrieval_options(&selection, route, label, options);
+                assert_eq!(checked.is_err(), refused, "{route:?} {option}");
+                if let Err(refusal) = checked {
+                    assert!(
+                        refusal.to_string().starts_with(&format!(
+                            "[tools.web_search] {option} is not available on {label}; remedy: "
+                        )),
+                        "{refusal}"
+                    );
+                }
+            }
+            let other = TemplateToolSelection::parse(["fetch_url"])?;
+            assert!(check_retrieval_options(&other, route, label, &blocked).is_ok());
+        }
+        Ok(())
     }
 
     #[test]
@@ -1611,6 +1746,7 @@ mod tests {
                         query: "rust".to_owned(),
                         allowed_domains: Vec::new(),
                         blocked_domains: Vec::new(),
+                        max_uses: 5,
                     },
                     control(),
                 )
@@ -1674,6 +1810,7 @@ mod tests {
                     query: "rust".to_owned(),
                     allowed_domains: Vec::new(),
                     blocked_domains: Vec::new(),
+                    max_uses: 5,
                 },
                 control(),
             )
@@ -1749,6 +1886,7 @@ mod tests {
                         query: "rust".to_owned(),
                         allowed_domains: Vec::new(),
                         blocked_domains: Vec::new(),
+                        max_uses: 5,
                     },
                     control(),
                 )

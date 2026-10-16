@@ -165,6 +165,74 @@ pub(crate) fn require_text(
     Ok(value)
 }
 
+/// What a node's `[tools.web_search]` and `[tools.x_search]` tables fix for
+/// every call. A set domain or handle list replaces the one the model passed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RetrievalOptions {
+    /// Searches one web search call may run.
+    pub web_search_max_uses: u8,
+    /// Web search only these domains.
+    pub allowed_domains: Vec<String>,
+    /// Web search never these domains.
+    pub blocked_domains: Vec<String>,
+    /// X search only posts by these handles.
+    pub allowed_x_handles: Vec<String>,
+}
+
+impl Default for RetrievalOptions {
+    fn default() -> Self {
+        Self {
+            web_search_max_uses: plakous_tools::DEFAULT_WEB_SEARCH_MAX_USES,
+            allowed_domains: Vec::new(),
+            blocked_domains: Vec::new(),
+            allowed_x_handles: Vec::new(),
+        }
+    }
+}
+
+impl RetrievalOptions {
+    fn apply(&self, request: RetrievalRequest) -> RetrievalRequest {
+        match request {
+            RetrievalRequest::WebSearch {
+                query,
+                allowed_domains,
+                blocked_domains,
+                ..
+            } => {
+                let configured =
+                    !self.allowed_domains.is_empty() || !self.blocked_domains.is_empty();
+                let (allowed_domains, blocked_domains) = if configured {
+                    (self.allowed_domains.clone(), self.blocked_domains.clone())
+                } else {
+                    (allowed_domains, blocked_domains)
+                };
+                RetrievalRequest::WebSearch {
+                    query,
+                    allowed_domains,
+                    blocked_domains,
+                    max_uses: self.web_search_max_uses,
+                }
+            }
+            RetrievalRequest::PostSearch {
+                query,
+                handles,
+                from_date,
+                to_date,
+            } => RetrievalRequest::PostSearch {
+                query,
+                handles: if self.allowed_x_handles.is_empty() {
+                    handles
+                } else {
+                    self.allowed_x_handles.clone()
+                },
+                from_date,
+                to_date,
+            },
+            fetch @ RetrievalRequest::PageFetch { .. } => fetch,
+        }
+    }
+}
+
 /// The wrappers one session binds, presented in one vocabulary and served by
 /// one route's port.
 #[derive(Clone)]
@@ -172,6 +240,7 @@ pub struct WebToolPack {
     presentation: CodingPresentation,
     tools: Vec<WebTool>,
     port: Arc<dyn RetrievalPort>,
+    options: RetrievalOptions,
 }
 
 impl WebToolPack {
@@ -204,7 +273,15 @@ impl WebToolPack {
             presentation,
             tools,
             port,
+            options: RetrievalOptions::default(),
         })
+    }
+
+    /// Fixes `options` on every call the wrappers make.
+    #[must_use]
+    pub fn with_options(mut self, options: RetrievalOptions) -> Self {
+        self.options = options;
+        self
     }
 
     /// The bound wrappers in plan order.
@@ -244,6 +321,7 @@ impl WebToolPack {
                 tool,
                 presented: shape.name,
                 port: Arc::clone(&self.port),
+                options: self.options.clone(),
             }),
         )
         .nested_eligible())
@@ -282,15 +360,17 @@ struct RetrievalTool {
     tool: WebTool,
     presented: &'static str,
     port: Arc<dyn RetrievalPort>,
+    options: RetrievalOptions,
 }
 
 impl ToolExecutor for RetrievalTool {
     fn execute(self: Arc<Self>, invocation: ToolInvocation, context: ToolContext) -> ToolFuture {
         Box::pin(async move {
             context.check_cancelled()?;
-            let request = self
-                .tool
-                .request(invocation.arguments().value().as_ref().clone())?;
+            let request = self.options.apply(
+                self.tool
+                    .request(invocation.arguments().value().as_ref().clone())?,
+            );
             let subject = subject(&request);
             let _ = context.progress().report(&subject, None, None);
             let outcome = self

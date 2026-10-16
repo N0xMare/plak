@@ -24,6 +24,9 @@ pub enum RetrievalKind {
     PostSearch,
 }
 
+/// Searches one web search call may run unless an operator sets fewer or more.
+pub const DEFAULT_WEB_SEARCH_MAX_USES: u8 = 5;
+
 /// One retrieval, as the wrapper's validated arguments state it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RetrievalRequest {
@@ -35,6 +38,8 @@ pub enum RetrievalRequest {
         allowed_domains: Vec<String>,
         /// No results from these domains.
         blocked_domains: Vec<String>,
+        /// Searches the provider may run for this one call.
+        max_uses: u8,
     },
     /// Fetch one page and answer about it.
     PageFetch {

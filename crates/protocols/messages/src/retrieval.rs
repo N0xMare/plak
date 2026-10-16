@@ -35,8 +35,6 @@ pub const MESSAGES_WEB_SEARCH_TOOL_TYPE: &str = "web_search_20260318";
 pub const MESSAGES_WEB_FETCH_TOOL_TYPE: &str = "web_fetch_20260318";
 /// Output cap of one side request.
 pub const MESSAGES_RETRIEVAL_MAX_TOKENS: u32 = 4096;
-/// Searches one web search side request may run.
-pub const MESSAGES_WEB_SEARCH_MAX_USES: u32 = 5;
 /// Content tokens one fetched page may contribute.
 pub const MESSAGES_WEB_FETCH_MAX_CONTENT_TOKENS: u32 = 20_000;
 /// `pause_turn` continuations one side request may send.
@@ -62,6 +60,8 @@ pub enum MessagesRetrievalQuery {
         allowed_domains: Vec<String>,
         /// No results from these domains.
         blocked_domains: Vec<String>,
+        /// Searches the side request may run.
+        max_uses: u8,
     },
     /// Hosted fetch of one page; the URL travels in the user message,
     /// because the provider fetches only URLs present in the conversation.
@@ -105,13 +105,14 @@ impl MessagesRetrievalQuery {
             Self::WebSearch {
                 allowed_domains,
                 blocked_domains,
+                max_uses,
                 ..
             } => {
                 let mut tool = json!({
                     "type": MESSAGES_WEB_SEARCH_TOOL_TYPE,
                     "name": "web_search",
                     "allowed_callers": ALLOWED_CALLERS,
-                    "max_uses": MESSAGES_WEB_SEARCH_MAX_USES,
+                    "max_uses": max_uses,
                 });
                 if !allowed_domains.is_empty() {
                     tool["allowed_domains"] = json!(allowed_domains);

@@ -142,6 +142,7 @@ fn query(request: RetrievalRequest) -> Result<ResponsesRetrievalQuery, Retrieval
             query,
             allowed_domains,
             blocked_domains,
+            ..
         } => Ok(ResponsesRetrievalQuery::WebSearch {
             query,
             allowed_domains,
