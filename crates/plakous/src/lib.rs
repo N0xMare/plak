@@ -342,6 +342,8 @@ pub mod sessions;
 mod anthropic_retrieval;
 #[cfg(feature = "openrouter")]
 mod openrouter_retrieval;
+#[cfg(any(feature = "openai", feature = "xai"))]
+mod responses_images;
 #[cfg(any(feature = "openai", feature = "xai", feature = "native-subscriptions"))]
 mod responses_retrieval;
 #[cfg(test)]
@@ -532,6 +534,7 @@ pub mod mcp {
 /// Exact-origin OpenAI API-key execution and the separate Codex subscription integration.
 #[cfg(feature = "openai")]
 pub mod openai {
+    pub use crate::responses_images::OpenAiImagePort;
     #[cfg(feature = "native-subscriptions")]
     pub use crate::responses_retrieval::CodexRetrievalPort;
     pub use crate::responses_retrieval::OpenAiRetrievalPort;
@@ -548,6 +551,10 @@ pub mod openai {
         openai_api_bundled_listing, openai_api_key_fingerprint, openai_api_models,
     };
     pub use plakous_openai::{CODEX_HOSTED_RETRIEVAL, OPENAI_API_HOSTED_RETRIEVAL};
+    pub use plakous_openai::{
+        CODEX_IMAGE_EDITS_PATH, CODEX_IMAGE_GENERATIONS_PATH, CODEX_IMAGE_MODEL,
+        OPENAI_IMAGE_MODEL, OpenAiImages,
+    };
     pub use plakous_openai::{OpenAiRetrieval, lowest_responses_effort};
 
     #[cfg(feature = "native-subscriptions")]
@@ -1136,6 +1143,20 @@ pub mod tools {
             MAX_FETCH_MAX_BYTES, MAX_FETCH_REDIRECTS, MAX_FETCH_TIMEOUT_SECONDS,
             MAX_INLINE_FETCH_TEXT_BYTES,
         };
+        /// The `image_gen` tool and the port a route implements for it,
+        /// built whenever the facade links an HTTP stack.
+        #[cfg(any(
+            feature = "anthropic",
+            feature = "mcp",
+            feature = "native-subscriptions",
+            feature = "openai",
+            feature = "openrouter",
+            feature = "xai"
+        ))]
+        pub use plakous_tool_web::{
+            ImageGenFuture, ImageGenPack, ImageGenPort, ImageGenRequest, ImageGenSource,
+            MAX_IMAGE_EDIT_INPUT_BYTES, MAX_IMAGE_EDIT_INPUTS, MAX_IMAGE_PROMPT_BYTES,
+        };
         pub use plakous_tool_web::{
             MAX_DOMAINS, MAX_PROMPT_BYTES, MAX_QUERY_BYTES, MAX_URL_BYTES, WebTool, WebToolPack,
             render_outcome,
@@ -1197,6 +1218,7 @@ pub mod tools {
 /// Exact-origin xAI API-key execution and the separate SuperGrok subscription integration.
 #[cfg(feature = "xai")]
 pub mod xai {
+    pub use crate::responses_images::XaiImagePort;
     pub use crate::responses_retrieval::XaiRetrievalPort;
     pub use plakous_xai::XaiRetrieval;
     pub use plakous_xai::{
@@ -1211,6 +1233,7 @@ pub mod xai {
         xai_platform_selection_for,
     };
     pub use plakous_xai::{SUPERGROK_HOSTED_RETRIEVAL, XAI_API_HOSTED_RETRIEVAL};
+    pub use plakous_xai::{XAI_IMAGE_MODEL, XaiImages};
 
     #[cfg(feature = "native-subscriptions")]
     pub use plakous_xai::{

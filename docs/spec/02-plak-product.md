@@ -4984,10 +4984,15 @@ fetch_url (Plak-run) or a claude/anthropic template` for `web_fetch`, `put
 x_search on a grok or xai-api template and spawn it` for `x_search`), and
 `<tool> is not yet qualified on <route>; remedy: remove <tool> from the
 template's tools until a release qualifies it there` where it has one.
+`image_gen` is judged the same way by its own release-owned row: not
+available on claude, anthropic and openrouter (`put image_gen on a codex,
+openai or xai-api template and spawn it`), not yet qualified on codex, grok,
+openai and xai-api; a qualified row binds only where the route has an image
+port (the OpenAI and xAI API routes).
 `fetch_url` runs in Plak, needs no route support and binds on every route,
 under the node's frozen `[tools.fetch_url]` limits (chapter 01 section 8.5). A
-tool with no implementation in this build (`image_gen`, and a hosted
-retrieval tool on a qualified route until its wrapper ships) is refused
+tool with no implementation in this build (a hosted retrieval tool or
+`image_gen` on a qualified route until its port ships) is refused
 `<tool> is not available in this build; remedy: remove <tool> from the
 template's tools`.
 

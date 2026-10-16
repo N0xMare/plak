@@ -28,10 +28,14 @@ url = { workspace = true, optional = true }
 # conversion and the image sniffer. Enabled by every facade feature that
 # already links `plakous-http`.
 fetch = ["dep:htmd", "dep:plakous-http", "dep:plakous-tool-files", "dep:tokio", "dep:url"]
+# The `image_gen` tool: workspace output and the image sniffer; the route's
+# port performs the request. Enabled beside `fetch`.
+image-gen = ["dep:plakous-tool-files"]
 
 [dev-dependencies]
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
+tempfile.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }
 tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
 

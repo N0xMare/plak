@@ -9,7 +9,9 @@
 //! One module per tool family: `search` (`web_search`), `web_fetch`
 //! (hosted page fetch) and `x_search`. The Plak-run `fetch_url` is a
 //! separate tool with its own pack: Plak itself fetches the URL over a
-//! public-only HTTPS client (feature `fetch`).
+//! public-only HTTPS client (feature `fetch`). `image_gen` (feature
+//! `image-gen`) generates or edits one image through the session's route
+//! and writes it into the workspace.
 
 #![forbid(unsafe_code)]
 #![allow(
@@ -19,6 +21,8 @@
 
 #[cfg(feature = "fetch")]
 mod fetch;
+#[cfg(feature = "image-gen")]
+mod image_gen;
 mod render;
 mod search;
 mod text;
@@ -31,11 +35,16 @@ pub use fetch::{
     MAX_FETCH_MAX_BYTES, MAX_FETCH_REDIRECTS, MAX_FETCH_TIMEOUT_SECONDS,
     MAX_INLINE_FETCH_TEXT_BYTES,
 };
+#[cfg(feature = "image-gen")]
+pub use image_gen::{
+    ImageGenFuture, ImageGenPack, ImageGenPort, ImageGenRequest, ImageGenSource,
+    MAX_IMAGE_EDIT_INPUT_BYTES, MAX_IMAGE_EDIT_INPUTS, MAX_IMAGE_PROMPT_BYTES,
+};
 pub use render::render_outcome;
 pub use text::{
     PLAKOUS_WEB_CLAUDE_FETCH_DESCRIPTION, PLAKOUS_WEB_CLAUDE_SEARCH_DESCRIPTION,
-    PLAKOUS_WEB_FETCH_URL_DESCRIPTION, PLAKOUS_WEB_SEARCH_DESCRIPTION,
-    PLAKOUS_WEB_X_SEARCH_DESCRIPTION,
+    PLAKOUS_WEB_FETCH_URL_DESCRIPTION, PLAKOUS_WEB_IMAGE_GEN_DESCRIPTION,
+    PLAKOUS_WEB_SEARCH_DESCRIPTION, PLAKOUS_WEB_X_SEARCH_DESCRIPTION,
 };
 
 use std::sync::Arc;
@@ -346,6 +355,11 @@ pub(crate) static WEB_PROMPT_PINS: &[PromptPin] = &[
         "web.fetch_url",
         PLAKOUS_WEB_FETCH_URL_DESCRIPTION,
         "3bb6ae4a18a2aefec396db78f2990de4e9e740eeda8b270d5531260eb89db546",
+    ),
+    PromptPin::new(
+        "web.image_gen",
+        PLAKOUS_WEB_IMAGE_GEN_DESCRIPTION,
+        "1cd7959d769c942eb28d0822e85b0fb1fd45d72bd30cba4c7ff4074e8c0ec82d",
     ),
     PromptPin::new(
         "web.untrusted_line",

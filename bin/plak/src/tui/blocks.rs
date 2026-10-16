@@ -363,6 +363,8 @@ pub enum ToolVerb {
     WebSearch,
     /// `Searched X "{query}"`: the hosted X search tool.
     XSearch,
+    /// `Generated image {path} ({size})`: `image_gen`.
+    GenerateImage,
     /// `mcp:{server} {tool} {arguments}`: a tool exposed as
     /// `mcp__<server>__<tool>`.
     Mcp,
@@ -416,6 +418,7 @@ impl ToolVerb {
             Self::Fetch => Some("Fetch"),
             Self::WebSearch => Some("Web search"),
             Self::XSearch => Some("X search"),
+            Self::GenerateImage => Some("Generate image"),
             Self::List => Some("List"),
             Self::Plan => Some("Plan"),
             Self::Compose => Some("Compose"),
@@ -511,6 +514,7 @@ pub fn tool_verb(name: &str, kind: ActivityKind) -> ToolVerb {
         }
         "web_search" | "WebSearch" => ToolVerb::WebSearch,
         "x_search" => ToolVerb::XSearch,
+        "image_gen" => ToolVerb::GenerateImage,
         "list_dir" | "list_directory" | "ls" => ToolVerb::List,
         "update_plan" | "todo_write" | "merge_plan" => ToolVerb::Plan,
         name if McpCall::parse(name).is_some() => ToolVerb::Mcp,
@@ -6995,6 +6999,12 @@ mod tests {
                 "docs.rs",
                 "Fetching docs.rs",
                 "Fetched docs.rs",
+            ),
+            (
+                "image_gen",
+                "art/fox.png (1024x1024)",
+                "Generating image art/fox.png (1024x1024)",
+                "Generated image art/fox.png (1024x1024)",
             ),
             (
                 "mcp__docs__search",

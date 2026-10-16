@@ -4339,6 +4339,7 @@ dependencies = [
 name = "plakous-responses-dialect"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "futures-core",
  "plakous-attempt",
  "plakous-exchange",
@@ -4458,6 +4459,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tokio-rustls",
  "url",

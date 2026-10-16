@@ -36,6 +36,7 @@ mod codex_search;
 mod config;
 mod error;
 mod hosted_support;
+mod images;
 mod manifest;
 mod model;
 #[cfg(feature = "native-auth")]
@@ -72,6 +73,10 @@ pub use config::{
 };
 pub use error::{ErrorPhase, MAX_PROVIDER_REQUEST_ID_BYTES, OpenAiError, RetryClass};
 pub use hosted_support::{CODEX_HOSTED_RETRIEVAL, OPENAI_API_HOSTED_RETRIEVAL};
+pub use images::{
+    CODEX_IMAGE_EDITS_PATH, CODEX_IMAGE_GENERATIONS_PATH, CODEX_IMAGE_MODEL,
+    OPENAI_IMAGE_EDITS_PATH, OPENAI_IMAGE_GENERATIONS_PATH, OPENAI_IMAGE_MODEL, OpenAiImages,
+};
 pub use manifest::OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS;
 #[cfg(feature = "native-auth")]
 pub use model::{OpenAiLanguageModel, compile_codex_subscription_configuration};
@@ -92,6 +97,9 @@ pub use native_auth::{
     release_enrolled_codex_tool_mode,
 };
 pub use plakous_responses_dialect::ResponsesProviderConfigurationError;
+pub use plakous_responses_dialect::{
+    ResponsesImageFlavor, ResponsesImageRequest, ResponsesImageSource,
+};
 pub use plakous_responses_dialect::{
     ResponsesRetrievalError, ResponsesRetrievalErrorKind, ResponsesRetrievalLimits,
     ResponsesRetrievalOutcome, ResponsesRetrievalQuery, ResponsesRetrievalSource,

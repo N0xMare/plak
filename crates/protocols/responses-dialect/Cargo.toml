@@ -13,6 +13,7 @@ layer = "protocol"
 class = "published-internal"
 
 [dependencies]
+base64.workspace = true
 futures-core.workspace = true
 plakous-attempt = { version = "0.1.0", path = "../../common/attempt" }
 plakous-exchange = { version = "0.1.0", path = "../exchange" }

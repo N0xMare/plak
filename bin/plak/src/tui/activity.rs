@@ -551,6 +551,7 @@ fn summary(blocks: &[ScrollBlock], counted: &dyn Fn(usize) -> bool) -> Summary {
             ToolVerb::Plan => counts.plan_updates += 1,
             ToolVerb::WebSearch => counts.record_other("web search".to_owned()),
             ToolVerb::XSearch => counts.record_other("X search".to_owned()),
+            ToolVerb::GenerateImage => counts.record_other("image generation".to_owned()),
             ToolVerb::Mcp => counts.record_other(display_tool_title_for(name, *kind)),
             ToolVerb::Compact | ToolVerb::Generic => counts.record_other(humanize_tool(name)),
         }
@@ -1216,6 +1217,8 @@ pub(super) fn item_label_raw(
             ToolVerb::WebSearch => format!("Searched the web {subject}"),
             ToolVerb::XSearch if running => format!("Searching X {subject}"),
             ToolVerb::XSearch => format!("Searched X {subject}"),
+            ToolVerb::GenerateImage if running => format!("Generating image {subject}"),
+            ToolVerb::GenerateImage => format!("Generated image {subject}"),
             ToolVerb::Plan if subject.is_empty() => "Updated plan".to_owned(),
             ToolVerb::Plan => format!("Updated plan · {subject}"),
             ToolVerb::MessageAgent => format!("Messaged {subject}"),

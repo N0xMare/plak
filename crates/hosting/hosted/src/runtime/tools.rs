@@ -422,6 +422,13 @@ pub(super) fn tool_subject_from_args(name: &str, args: &serde_json::Value) -> Op
             first_str(&["url"]).map(|url| url_host(&url).to_owned())
         }
         "web__run" => first_str(&["url", "query", "prompt"]),
+        "image_gen" => {
+            let path = first_str(&["path"])?;
+            Some(match first_str(&["size"]) {
+                Some(size) => format!("{path} ({size})"),
+                None => path,
+            })
+        }
         "web_search" | "WebSearch" | "x_search" => {
             first_str(&["query"]).map(|query| format!("\"{query}\""))
         }
@@ -522,8 +529,9 @@ pub(super) fn tool_subject_from_args(name: &str, args: &serde_json::Value) -> Op
     }
 }
 
-/// Web search, fetch and MCP rows carry the host's own subject: the
-/// runtime's generic one would be a raw query, a whole URL or one argument.
+/// Web search, fetch, image generation and MCP rows carry the host's own
+/// subject: the runtime's generic one would be a raw query, a whole URL or
+/// one argument.
 fn is_web_or_mcp_row(name: &str) -> bool {
     matches!(
         name,
@@ -535,6 +543,7 @@ fn is_web_or_mcp_row(name: &str) -> bool {
             | "web_search"
             | "WebSearch"
             | "x_search"
+            | "image_gen"
     ) || plakous_host_protocol::views::presentation::McpCall::parse(name).is_some()
 }
 
@@ -1349,6 +1358,22 @@ mod tests {
     #[test]
     fn web_and_mcp_rows_carry_host_subjects() {
         let subject = |name: &str, args: serde_json::Value| tool_subject_from_args(name, &args);
+        assert_eq!(
+            subject(
+                "image_gen",
+                serde_json::json!({"prompt": "a fox", "path": "art/fox.png", "size": "1024x1024"})
+            )
+            .as_deref(),
+            Some("art/fox.png (1024x1024)")
+        );
+        assert_eq!(
+            subject(
+                "image_gen",
+                serde_json::json!({"prompt": "a fox", "path": "fox.png"})
+            )
+            .as_deref(),
+            Some("fox.png")
+        );
         for name in ["web_search", "WebSearch", "x_search"] {
             assert_eq!(
                 subject(name, serde_json::json!({ "query": "rust 1.99" })).as_deref(),

@@ -21,6 +21,7 @@ mod api_models;
 mod context;
 mod dialect;
 mod hosted_support;
+mod images;
 mod model;
 #[cfg(feature = "native-auth")]
 mod native_auth;
@@ -41,6 +42,7 @@ pub use api_models::{
 pub(crate) use api_models::{xai_platform_capacity_admitted, xai_platform_effort_admitted};
 pub use dialect::{XaiAccessMode, XaiDialect, XaiRouteKind, XaiTerminalConvention};
 pub use hosted_support::{SUPERGROK_HOSTED_RETRIEVAL, XAI_API_HOSTED_RETRIEVAL};
+pub use images::{XAI_IMAGE_EDITS_PATH, XAI_IMAGE_GENERATIONS_PATH, XAI_IMAGE_MODEL, XaiImages};
 pub use model::{
     GrokCodingProfile, XaiModel, XaiModelError, XaiResolvedModel, dialect_matches_route,
 };
@@ -57,6 +59,9 @@ pub use native_auth::{
     XaiSubscriptionStatus, grok_max_output_tokens, is_subscription_coding_model_id,
     subscription_coding_model_ids, subscription_model_reasoning_effort_options,
     subscription_model_supports_reasoning,
+};
+pub use plakous_responses_dialect::{
+    ResponsesImageFlavor, ResponsesImageRequest, ResponsesImageSource,
 };
 pub use plakous_responses_dialect::{
     ResponsesRetrievalError, ResponsesRetrievalErrorKind, ResponsesRetrievalLimits,

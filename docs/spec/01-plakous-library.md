@@ -4017,6 +4017,43 @@ error carrying the status and the first 8 KiB of the body. The registration
 identity names no limit. There is no `robots.txt` check: a call is one
 user-directed fetch, never a crawl.
 
+`image_gen` (`plakous::tools::web::ImageGenPack`, built beside `fetch_url`)
+generates one image, or edits workspace images, through the session's own
+route and writes the result into the workspace. It is `PlakLocal`,
+`ToolEffect::Mutating`, `ToolConcurrency::Serial` and nested-eligible; its
+arguments are `{prompt, path, size?, edit_from?}`. A call refuses an output
+path that exists or leaves the workspace and an edit input that is missing,
+outside the workspace, larger than 4 MiB or not PNG, JPEG or WebP, before
+any request is sent. It hands one neutral `ImageGenRequest` to the session's
+`ImageGenPort`; the route's port revalidates admission before every physical
+request, as before a model round, and never falls back to another route or
+account. The returned bytes must sniff as an image; they are published by
+one workspace mutation that expects the path missing, so an existing file is
+never overwritten. The result is `image_gen wrote <path>: media_type=<type>
+dimensions=<w>x<h> bytes=<n>` and an image part when the file is at most
+196,608 bytes. Under the local write-ahead claim a crash after the claim
+settles `OutcomeUnknown` and is never replayed, so recovery never pays for a
+second image. The Responses kernel (`plakous-responses-dialect`,
+`run_responses_image`) sends one JSON body to `images/generations`, or
+`images/edits` when inputs are named: `{model, prompt, n:1, size?}` with
+`images[].image_url` data URLs on OpenAI and Codex (at most 16 and 5 inputs),
+and `response_format:"b64_json"` with one `image` data URL and no size on
+xAI. It decodes the one `data[].b64_json` image (or a `data:` URL) of at most
+16 MiB and refuses a remote image URL. It retries only a request that was
+never transmitted and a `429`; any response or possible transmission is
+final, so a generation is never sent twice. The OpenAI API port
+(`plakous::openai::OpenAiImagePort` over `OpenAiImages`, from
+`OpenAiPlatformModel::images`, model `gpt-image-2`) and the xAI API port
+(`plakous::xai::XaiImagePort` over `XaiImages`, from
+`XaiPlatformModel::images`, model `grok-imagine-image-2.0`) reuse the
+session executor's key, project and client. The Codex paths and model are
+recorded in `plakous-openai`, but no Codex or SuperGrok images transport is
+built. `plakous-hosted` binds `image_gen` only where the route's release-owned
+row is `Supported` and the route has a port, on a deferred port the
+executor connects once; every row ships unqualified (Codex, SuperGrok,
+OpenAI API, xAI API) or unoffered (Claude, Anthropic API, OpenRouter), so
+binding refuses until a live receipt qualifies a row.
+
 A repository query walks a live tree, so it surveys rather than transacts. Every
 directory child is opened relative to its parent descriptor with `O_NOFOLLOW`:
 symbolic links are refused and never followed, and the walk stays beneath the
@@ -6951,8 +6988,10 @@ does not change transfer shutdown's job disposition.
 Every feature that links `plakous-http` (`anthropic`, `openai`, `xai`,
 `openrouter`, `native-subscriptions` and `mcp`, and through them `auth` and
 `full`) also builds `plakous-tool-web/fetch`, the Plak-run `fetch_url` tool
-and its HTML-to-Markdown converter, so `plakous::tools::web::FetchUrlPack`
-exists exactly when an HTTP stack is linked. It adds no facade feature;
+and its HTML-to-Markdown converter, and `plakous-tool-web/image-gen`, the
+`image_gen` tool, so `plakous::tools::web::FetchUrlPack` and
+`plakous::tools::web::ImageGenPack` exist exactly when an HTTP stack is
+linked. It adds no facade feature;
 composition-only closures reach neither `plakous-http` nor `htmd`.
 
 Evaluator deployment, subscription authentication, and durability are therefore

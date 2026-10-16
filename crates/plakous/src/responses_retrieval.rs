@@ -184,7 +184,7 @@ fn outcome(outcome: ResponsesRetrievalOutcome) -> RetrievalOutcome {
     }
 }
 
-fn error_of(error: &ResponsesRetrievalError) -> RetrievalError {
+pub(crate) fn error_of(error: &ResponsesRetrievalError) -> RetrievalError {
     let kind = match error.kind() {
         ResponsesRetrievalErrorKind::InvalidRequest => RetrievalErrorKind::InvalidRequest,
         ResponsesRetrievalErrorKind::Unauthorized => RetrievalErrorKind::Unauthorized,

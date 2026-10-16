@@ -1198,18 +1198,20 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         "anthropic": {"ANTHROPIC_API_HOSTED_RETRIEVAL", "CLAUDE_OAUTH_HOSTED_RETRIEVAL"},
         "xai": {"SUPERGROK_HOSTED_RETRIEVAL", "XAI_API_HOSTED_RETRIEVAL"},
         "openrouter": {"OPENROUTER_HOSTED_RETRIEVAL"},
-        # The deferred port the session's executor connects to, and the
+        # The deferred ports the session's executor connects to, and the
         # bounds a planned fetch_url runs under.
         "tools": {
-            "ExecutionOperationControl", "FetchUrlLimits", "RetrievalError",
-            "RetrievalErrorKind", "RetrievalFuture", "RetrievalKind", "RetrievalRequest",
+            "ExecutionOperationControl", "FetchUrlLimits", "ImageGenFuture", "ImageGenPort",
+            "ImageGenRequest", "RetrievalError", "RetrievalErrorKind", "RetrievalFuture",
+            "RetrievalKind", "RetrievalRequest",
         },
     },
-    # The Anthropic, OpenAI and xAI API executors connect their side-request ports.
+    # The Anthropic, OpenAI and xAI API executors connect their side-request
+    # and image ports.
     ("plakous-hosted", "src/platform.rs"): {
         "anthropic": {"AnthropicRetrievalPort"},
-        "openai": {"OpenAiRetrievalPort", "lowest_responses_effort"},
-        "xai": {"XaiRetrievalPort"},
+        "openai": {"OpenAiImagePort", "OpenAiRetrievalPort", "lowest_responses_effort"},
+        "xai": {"XaiImagePort", "XaiRetrievalPort"},
     },
     # The OpenRouter executor connects its side-request port.
     ("plakous-hosted", "src/openrouter.rs"): {

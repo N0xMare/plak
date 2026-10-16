@@ -15,8 +15,8 @@ use plakous::model::{
 };
 use plakous::subscriptions::NativeProvider;
 use plakous::tools::web::{
-    FetchUrlLimits, RetrievalError, RetrievalErrorKind, RetrievalFuture, RetrievalKind,
-    RetrievalPort, RetrievalRequest, WebTool,
+    FetchUrlLimits, ImageGenFuture, ImageGenPort, ImageGenRequest, RetrievalError,
+    RetrievalErrorKind, RetrievalFuture, RetrievalKind, RetrievalPort, RetrievalRequest, WebTool,
 };
 use plakous::tools::{CodingPresentation, ExecutionOperationControl, McpServerName};
 
@@ -350,6 +350,7 @@ impl NodeToolSelection {
 pub(crate) struct ToolPlan {
     tools: Vec<PlannedTool>,
     retrieval: Option<RetrievalBinding>,
+    image_gen: Option<ImageGenBinding>,
     mcp_registrations: Vec<plakous::tools::ToolRegistration>,
     notices: Vec<String>,
     fetch_url_limits: FetchUrlLimits,
@@ -361,6 +362,7 @@ impl fmt::Debug for ToolPlan {
             .debug_struct("ToolPlan")
             .field("tools", &self.tools)
             .field("retrieval", &self.retrieval)
+            .field("image_gen", &self.image_gen.is_some())
             .field("notices", &self.notices)
             .field("fetch_url_limits", &self.fetch_url_limits)
             .finish_non_exhaustive()
@@ -420,6 +422,83 @@ impl RetrievalPort for DeferredRetrievalPort {
                 Err(RetrievalError::new(
                     RetrievalErrorKind::Unavailable,
                     "hosted retrieval is not connected to this session's route",
+                ))
+            }),
+        }
+    }
+}
+
+/// Whether a route serves `image_gen`. Rows are release-owned and move to
+/// [`ImageGenRow::Supported`] only with a live receipt.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ImageGenRow {
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "every row ships unqualified until a live receipt")
+    )]
+    Supported,
+    /// The provider has an images endpoint; no release has qualified it on
+    /// this route.
+    NotQualified,
+    /// The route's provider has no images endpoint.
+    NotOffered,
+}
+
+/// The port `image_gen` calls and, when it was bound before the session's
+/// executor existed, the deferred slot that executor connects.
+#[derive(Clone)]
+pub(crate) struct ImageGenBinding {
+    port: Arc<dyn ImageGenPort>,
+    slot: Option<Arc<DeferredImagePort>>,
+}
+
+impl ImageGenBinding {
+    pub(crate) fn port(&self) -> Arc<dyn ImageGenPort> {
+        Arc::clone(&self.port)
+    }
+
+    pub(crate) fn slot(&self) -> Option<Arc<DeferredImagePort>> {
+        self.slot.clone()
+    }
+}
+
+/// A route's image port bound at plan time and connected once the
+/// session's executor exists. A call before the connection is an ordinary
+/// tool error.
+#[derive(Default)]
+pub(crate) struct DeferredImagePort {
+    port: OnceLock<Arc<dyn ImageGenPort>>,
+}
+
+impl DeferredImagePort {
+    /// Connects the session's executor; a slot connects once.
+    pub(crate) fn connect(&self, port: Arc<dyn ImageGenPort>) -> Result<(), &'static str> {
+        self.port
+            .set(port)
+            .map_err(|_| "the session's image port is already connected")
+    }
+}
+
+impl ImageGenPort for DeferredImagePort {
+    fn max_edit_images(&self) -> usize {
+        self.port.get().map_or(0, |port| port.max_edit_images())
+    }
+
+    fn takes_size(&self) -> bool {
+        self.port.get().is_some_and(|port| port.takes_size())
+    }
+
+    fn generate(
+        &self,
+        request: ImageGenRequest,
+        control: ExecutionOperationControl,
+    ) -> ImageGenFuture {
+        match self.port.get() {
+            Some(port) => port.generate(request, control),
+            None => Box::pin(async {
+                Err(RetrievalError::new(
+                    RetrievalErrorKind::Unavailable,
+                    "image generation is not connected to this session's route",
                 ))
             }),
         }
@@ -486,6 +565,7 @@ impl ToolPlan {
         Self {
             tools,
             retrieval: None,
+            image_gen: None,
             mcp_registrations: Vec::new(),
             notices: Vec::new(),
             fetch_url_limits: FetchUrlLimits::default(),
@@ -500,6 +580,7 @@ impl ToolPlan {
     ) -> Self {
         Self {
             retrieval: self.retrieval,
+            image_gen: self.image_gen,
             mcp_registrations: mcp.registrations,
             notices: mcp.notices,
             ..Self::new(selection, mcp.names)
@@ -524,6 +605,11 @@ impl ToolPlan {
     /// The port and vocabulary of the planned hosted-retrieval wrappers.
     pub(crate) const fn retrieval(&self) -> Option<&RetrievalBinding> {
         self.retrieval.as_ref()
+    }
+
+    /// The port a planned `image_gen` calls.
+    pub(crate) const fn image_gen(&self) -> Option<&ImageGenBinding> {
+        self.image_gen.as_ref()
     }
 
     /// The bounds a planned `fetch_url` runs under.
@@ -592,6 +678,20 @@ impl ToolRoute {
         }
     }
 
+    /// Whether the route serves `image_gen`.
+    pub(crate) const fn image_gen(self) -> ImageGenRow {
+        match self {
+            Self::Codex | Self::Grok | Self::OpenAi | Self::XaiApi => ImageGenRow::NotQualified,
+            Self::Claude | Self::Anthropic | Self::OpenRouter => ImageGenRow::NotOffered,
+        }
+    }
+
+    /// Whether this build has an image port for the route; the Codex and
+    /// SuperGrok subscription transports for images are not built.
+    pub(crate) const fn has_image_port(self) -> bool {
+        matches!(self, Self::OpenAi | Self::XaiApi)
+    }
+
     /// The tool vocabulary the route's coding presentation uses.
     const fn presentation(self) -> CodingPresentation {
         match self {
@@ -623,8 +723,9 @@ impl ToolRoute {
 /// where the route's release-owned table qualifies it and the route has a
 /// retrieval port serving it; that port is a deferred slot the session's
 /// executor connects once it exists. `fetch_url` runs in Plak and binds on
-/// every route. `image_gen` is refused as not built in. MCP entries pass
-/// through: `crate::mcp_binding::bind_mcp_tools` binds them.
+/// every route. `image_gen` binds where the route's row qualifies it and
+/// the route has an image port, on a deferred slot as well. MCP entries
+/// pass through: `crate::mcp_binding::bind_mcp_tools` binds them.
 ///
 /// # Errors
 ///
@@ -634,7 +735,13 @@ pub(crate) fn bind_tool_plan(
     route: ToolRoute,
     route_label: &str,
 ) -> Result<ToolPlan, ToolPlanRefusal> {
-    bind_tool_plan_on(selection, route, route.hosted_retrieval(), route_label)
+    bind_tool_plan_on(
+        selection,
+        route,
+        route.hosted_retrieval(),
+        route.image_gen(),
+        route_label,
+    )
 }
 
 /// [`bind_tool_plan`] over an explicit support table, with the route's
@@ -643,22 +750,38 @@ pub(crate) fn bind_tool_plan_on(
     selection: &TemplateToolSelection,
     route: ToolRoute,
     table: HostedRetrievalTable,
+    image_gen: ImageGenRow,
     route_label: &str,
 ) -> Result<ToolPlan, ToolPlanRefusal> {
     let kinds = route.retrieval_kinds();
     let slot = (!kinds.is_empty()).then(|| Arc::new(DeferredRetrievalPort::new(kinds)));
+    let image_slot = route
+        .has_image_port()
+        .then(|| Arc::new(DeferredImagePort::default()));
     let mut plan = bind_tool_plan_with(
         selection,
         table,
         route.presentation(),
         route_label,
         slot.clone().map(|slot| slot as Arc<dyn RetrievalPort>),
+        (
+            image_gen,
+            image_slot.clone().map(|slot| slot as Arc<dyn ImageGenPort>),
+        ),
     )?;
     if let Some(binding) = plan.retrieval.as_mut() {
         binding.slot = slot;
     }
+    if let Some(binding) = plan.image_gen.as_mut() {
+        binding.slot = image_slot;
+    }
     Ok(plan)
 }
+
+/// A route without `image_gen`, for binds that only ask about other tools.
+#[cfg(test)]
+pub(crate) const NO_IMAGE_GEN: (ImageGenRow, Option<Arc<dyn ImageGenPort>>) =
+    (ImageGenRow::NotOffered, None);
 
 /// [`bind_tool_plan`] over an explicit support table and retrieval port.
 pub(crate) fn bind_tool_plan_with(
@@ -667,11 +790,35 @@ pub(crate) fn bind_tool_plan_with(
     presentation: CodingPresentation,
     route_label: &str,
     port: Option<Arc<dyn RetrievalPort>>,
+    (image_row, image_port): (ImageGenRow, Option<Arc<dyn ImageGenPort>>),
 ) -> Result<ToolPlan, ToolPlanRefusal> {
     let mut wrappers = false;
+    let mut image_gen = None;
     for entry in selection.entries() {
         let served = match entry {
             SelectedTool::Optional(OptionalTool::FetchUrl) => continue,
+            SelectedTool::Optional(OptionalTool::ImageGen) => {
+                let reason = match (image_row, &image_port) {
+                    (ImageGenRow::Supported, Some(port)) => {
+                        image_gen = Some(ImageGenBinding {
+                            port: Arc::clone(port),
+                            slot: None,
+                        });
+                        continue;
+                    }
+                    (ImageGenRow::Supported, None) => RefusalReason::Unbuilt,
+                    (ImageGenRow::NotQualified, _) => RefusalReason::Unqualified {
+                        route: route_label.to_owned(),
+                    },
+                    (ImageGenRow::NotOffered, _) => RefusalReason::Unoffered {
+                        route: route_label.to_owned(),
+                    },
+                };
+                return Err(ToolPlanRefusal {
+                    tool: entry.clone(),
+                    reason,
+                });
+            }
             SelectedTool::Optional(tool) => match (tool.hosted_retrieval(), tool.web_tool()) {
                 (Some(hosted), Some(web))
                     if table.support(hosted) == HostedRetrievalSupport::Supported =>
@@ -692,6 +839,7 @@ pub(crate) fn bind_tool_plan_with(
         wrappers = true;
     }
     let mut plan = ToolPlan::new(selection, []);
+    plan.image_gen = image_gen;
     if wrappers {
         plan.retrieval = port.map(|port| RetrievalBinding {
             presentation,
@@ -766,6 +914,9 @@ fn not_offered_remedy(tool: &SelectedTool) -> &'static str {
         }
         SelectedTool::Optional(OptionalTool::XSearch) => {
             "put x_search on a grok or xai-api template and spawn it"
+        }
+        SelectedTool::Optional(OptionalTool::ImageGen) => {
+            "put image_gen on a codex, openai or xai-api template and spawn it"
         }
         _ => "put it on a template whose route offers it and spawn it",
     }
@@ -1147,13 +1298,22 @@ mod tests {
     }
 
     #[test]
-    fn image_gen_is_refused_as_not_built_in() -> TestResult {
+    fn image_gen_starts_unqualified_or_unoffered_on_every_route() -> TestResult {
         for route in ToolRoute::ALL {
-            assert_eq!(
-                refusal_text(&["image_gen"], route)?,
-                "image_gen is not available in this build; remedy: remove image_gen from the \
-                 template's tools"
-            );
+            let label = route_label(route);
+            let expected = match route {
+                ToolRoute::Codex | ToolRoute::Grok | ToolRoute::OpenAi | ToolRoute::XaiApi => {
+                    format!(
+                        "image_gen is not yet qualified on {label}; remedy: remove image_gen \
+                         from the template's tools until a release qualifies it there"
+                    )
+                }
+                ToolRoute::Claude | ToolRoute::Anthropic | ToolRoute::OpenRouter => format!(
+                    "image_gen is not available on {label}; remedy: put image_gen on a codex, \
+                     openai or xai-api template and spawn it"
+                ),
+            };
+            assert_eq!(refusal_text(&["image_gen"], route)?, expected, "{route:?}");
         }
         let qualified = HostedRetrievalTable::new(
             HostedRetrievalSupport::Supported,
@@ -1166,6 +1326,100 @@ mod tests {
              the template's tools"
         );
         Ok(())
+    }
+
+    /// A qualified row binds `image_gen` on a deferred slot where the route
+    /// has an image port; a route without one refuses it as not built.
+    #[test]
+    fn a_qualified_image_gen_row_binds_on_the_routes_with_an_image_port() -> TestResult {
+        let selection = TemplateToolSelection::parse(["image_gen", "fetch_url"])?;
+        let unsupported = HostedRetrievalTable::new(
+            HostedRetrievalSupport::Unsupported {
+                reason: HostedRetrievalUnsupported::NotQualified,
+            },
+            HostedRetrievalSupport::Unsupported {
+                reason: HostedRetrievalUnsupported::NotQualified,
+            },
+            HostedRetrievalSupport::Unsupported {
+                reason: HostedRetrievalUnsupported::NotQualified,
+            },
+        );
+        for route in ToolRoute::ALL {
+            let label = route_label(route);
+            let bound = bind_tool_plan_on(
+                &selection,
+                route,
+                unsupported,
+                ImageGenRow::Supported,
+                label,
+            );
+            if !route.has_image_port() {
+                assert_eq!(
+                    bound.err().map(|refusal| refusal.to_string()),
+                    Some(
+                        "image_gen is not available in this build; remedy: remove image_gen \
+                         from the template's tools"
+                            .to_owned()
+                    ),
+                    "{route:?}"
+                );
+                continue;
+            }
+            let plan = bound.map_err(|refusal| refusal.to_string())?;
+            assert_eq!(
+                plan.tools(),
+                [
+                    PlannedTool::Optional(OptionalTool::FetchUrl),
+                    PlannedTool::Optional(OptionalTool::ImageGen)
+                ]
+            );
+            let binding = plan.image_gen().ok_or("no image binding")?;
+            let slot = binding.slot().ok_or("no deferred slot")?;
+            let extensions = crate::tools::ProductToolExtensions::empty()
+                .with_plan(&plan)
+                .map_err(|error| error.to_string())?;
+            assert_eq!(
+                extensions.names().map(ToolName::as_str).collect::<Vec<_>>(),
+                ["fetch_url", "image_gen"],
+                "{route:?}"
+            );
+            assert_eq!(slot.max_edit_images(), 0);
+            extensions
+                .connect_image_gen(Some(Arc::new(FixedImagePort)))
+                .map_err(|error| error.to_string())?;
+            assert_eq!(slot.max_edit_images(), 3);
+            assert!(
+                extensions
+                    .connect_image_gen(Some(Arc::new(FixedImagePort)))
+                    .is_err()
+            );
+        }
+        assert!(
+            crate::tools::ProductToolExtensions::empty()
+                .connect_image_gen(None)
+                .is_ok()
+        );
+        Ok(())
+    }
+
+    struct FixedImagePort;
+
+    impl ImageGenPort for FixedImagePort {
+        fn max_edit_images(&self) -> usize {
+            3
+        }
+
+        fn takes_size(&self) -> bool {
+            true
+        }
+
+        fn generate(
+            &self,
+            _request: ImageGenRequest,
+            _control: ExecutionOperationControl,
+        ) -> ImageGenFuture {
+            Box::pin(async { Ok(Vec::new()) })
+        }
     }
 
     #[test]
@@ -1201,6 +1455,7 @@ mod tests {
             CodingPresentation::Claude,
             "claude",
             Some(search_and_fetch_port()),
+            NO_IMAGE_GEN,
         )?
         .with_fetch_url_limits(limits);
         assert_eq!(plan.fetch_url_limits(), limits);
@@ -1250,6 +1505,7 @@ mod tests {
             CodingPresentation::Claude,
             "claude",
             Some(Arc::clone(&port)),
+            NO_IMAGE_GEN,
         )?;
         assert_eq!(
             plan.tools(),
@@ -1274,6 +1530,7 @@ mod tests {
             CodingPresentation::Grok,
             "grok",
             Some(port),
+            NO_IMAGE_GEN,
         )
         .err()
         .ok_or("an unoffered tool bound")?;
@@ -1288,6 +1545,7 @@ mod tests {
             CodingPresentation::Claude,
             "claude",
             None,
+            NO_IMAGE_GEN,
         )
         .err()
         .ok_or("a portless tool bound")?;
@@ -1349,7 +1607,8 @@ mod tests {
             (ToolRoute::Anthropic, "anthropic"),
             (ToolRoute::Claude, "claude"),
         ] {
-            let plan = bind_tool_plan_on(&selection, route, qualified, label)?;
+            let plan =
+                bind_tool_plan_on(&selection, route, qualified, ImageGenRow::NotOffered, label)?;
             let extensions = crate::tools::ProductToolExtensions::empty()
                 .with_plan(&plan)
                 .map_err(|error| error.to_string())?;
@@ -1397,9 +1656,15 @@ mod tests {
         }
         // A route whose port does not serve a kind refuses a qualified row
         // as not built in, and every shipped row still refuses.
-        let refused = bind_tool_plan_on(&selection, ToolRoute::Codex, qualified, "codex")
-            .err()
-            .ok_or("an unserved kind bound")?;
+        let refused = bind_tool_plan_on(
+            &selection,
+            ToolRoute::Codex,
+            qualified,
+            ImageGenRow::NotOffered,
+            "codex",
+        )
+        .err()
+        .ok_or("an unserved kind bound")?;
         assert!(refused.to_string().contains("not available in this build"));
         for route in [ToolRoute::Anthropic, ToolRoute::Claude] {
             assert!(bind_tool_plan(&selection, route, "x").is_err());
@@ -1415,7 +1680,13 @@ mod tests {
             HostedRetrievalSupport::Supported,
         );
         let selection = TemplateToolSelection::parse(["web_search"])?;
-        let plan = bind_tool_plan_on(&selection, ToolRoute::OpenRouter, qualified, "openrouter")?;
+        let plan = bind_tool_plan_on(
+            &selection,
+            ToolRoute::OpenRouter,
+            qualified,
+            ImageGenRow::NotOffered,
+            "openrouter",
+        )?;
         let extensions = crate::tools::ProductToolExtensions::empty()
             .with_plan(&plan)
             .map_err(|error| error.to_string())?;
@@ -1446,6 +1717,7 @@ mod tests {
                 &TemplateToolSelection::parse(unserved)?,
                 ToolRoute::OpenRouter,
                 qualified,
+                ImageGenRow::NotOffered,
                 "openrouter",
             );
             assert!(refused.is_err(), "{unserved:?} bound on openrouter");
@@ -1489,7 +1761,8 @@ mod tests {
             ),
         ] {
             let selection = TemplateToolSelection::parse(tools.iter().copied())?;
-            let plan = bind_tool_plan_on(&selection, route, qualified, label)?;
+            let plan =
+                bind_tool_plan_on(&selection, route, qualified, ImageGenRow::NotOffered, label)?;
             let extensions = crate::tools::ProductToolExtensions::empty()
                 .with_plan(&plan)
                 .map_err(|error| error.to_string())?;
@@ -1520,8 +1793,26 @@ mod tests {
         }
         // The OpenAI API and Codex ports serve no X search.
         let x_search = TemplateToolSelection::parse(["x_search"])?;
-        assert!(bind_tool_plan_on(&x_search, ToolRoute::OpenAi, qualified, "openai").is_err());
-        assert!(bind_tool_plan_on(&x_search, ToolRoute::Codex, qualified, "codex").is_err());
+        assert!(
+            bind_tool_plan_on(
+                &x_search,
+                ToolRoute::OpenAi,
+                qualified,
+                ImageGenRow::NotOffered,
+                "openai"
+            )
+            .is_err()
+        );
+        assert!(
+            bind_tool_plan_on(
+                &x_search,
+                ToolRoute::Codex,
+                qualified,
+                ImageGenRow::NotOffered,
+                "codex"
+            )
+            .is_err()
+        );
         Ok(())
     }
 
@@ -1548,6 +1839,7 @@ mod tests {
             CodingPresentation::Grok,
             "xai-api",
             Some(search_and_fetch_port()),
+            NO_IMAGE_GEN,
         );
         assert!(refused.is_err());
         Ok(())
@@ -1594,6 +1886,7 @@ mod tests {
             CodingPresentation::Claude,
             "claude",
             Some(search_and_fetch_port()),
+            NO_IMAGE_GEN,
         )?
         .with_mcp(
             &selection,

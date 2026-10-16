@@ -251,6 +251,9 @@ pub(crate) async fn construct_platform_runtime_with(
                     model.retrieval(plakous::openai::lowest_responses_effort(&row.efforts)),
                 ),
             )))?;
+            spec.topology_extensions.connect_image_gen(Some(Arc::new(
+                plakous::openai::OpenAiImagePort::new(model.images()),
+            )))?;
             model.configured().await.map_err(api_error)?
         }
         PlatformProvider::Anthropic => {
@@ -306,6 +309,9 @@ pub(crate) async fn construct_platform_runtime_with(
                 plakous::xai::XaiRetrievalPort::new(
                     model.retrieval(plakous::openai::lowest_responses_effort(&row.efforts)),
                 ),
+            )))?;
+            spec.topology_extensions.connect_image_gen(Some(Arc::new(
+                plakous::xai::XaiImagePort::new(model.images()),
             )))?;
             model.configured().await.map_err(api_error)?
         }

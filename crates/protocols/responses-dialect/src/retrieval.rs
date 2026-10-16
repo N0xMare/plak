@@ -37,7 +37,7 @@ pub const RESPONSES_WEB_SEARCH_SOURCES_INCLUDE: &str = "web_search_call.action.s
 /// Output cap of one side request.
 pub const RESPONSES_RETRIEVAL_MAX_OUTPUT_TOKENS: u32 = 4096;
 
-const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
 const MAX_DOCUMENT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_OUTPUT_ITEMS: usize = 256;
 const SSE_LIMITS: SseLimits = SseLimits {
@@ -395,8 +395,8 @@ pub enum ResponsesRetrievalErrorKind {
 pub struct ResponsesRetrievalError {
     kind: ResponsesRetrievalErrorKind,
     message: String,
-    status: Option<u16>,
-    physical_requests: u32,
+    pub(crate) status: Option<u16>,
+    pub(crate) physical_requests: u32,
 }
 
 impl ResponsesRetrievalError {
@@ -668,7 +668,7 @@ async fn exchange_with_retry(
     }
 }
 
-fn cancelled() -> ResponsesRetrievalError {
+pub(crate) fn cancelled() -> ResponsesRetrievalError {
     ResponsesRetrievalError::new(
         ResponsesRetrievalErrorKind::Cancelled,
         "the side request was cancelled",
@@ -832,7 +832,7 @@ async fn read_stream(
     }
 }
 
-fn transport_point(failure: HttpFailure) -> FailurePoint {
+pub(crate) fn transport_point(failure: HttpFailure) -> FailurePoint {
     match failure.transmission() {
         TransmissionFact::NotStarted
             if matches!(
@@ -847,7 +847,7 @@ fn transport_point(failure: HttpFailure) -> FailurePoint {
     }
 }
 
-fn unavailable(failure: HttpFailure) -> ResponsesRetrievalError {
+pub(crate) fn unavailable(failure: HttpFailure) -> ResponsesRetrievalError {
     let phase = match failure.phase() {
         Phase::Resolution => "DNS resolution",
         Phase::Connect => "connect",
@@ -865,7 +865,7 @@ fn unavailable(failure: HttpFailure) -> ResponsesRetrievalError {
 /// One bounded line from a provider error body, never the raw body: the
 /// OpenAI shape `error.{type|code}: error.message` or the xAI shape
 /// `code: error`.
-fn status_error(status: u16, body: &[u8]) -> ResponsesRetrievalError {
+pub(crate) fn status_error(status: u16, body: &[u8]) -> ResponsesRetrievalError {
     let detail = serde_json::from_slice::<Value>(body)
         .ok()
         .and_then(|value| match value.get("error")? {

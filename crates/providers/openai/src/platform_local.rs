@@ -281,6 +281,13 @@ impl OpenAiPlatformModel {
         crate::OpenAiRetrieval::new(Arc::clone(self), effort)
     }
 
+    /// The session's image generation executor on this exact route, key
+    /// and client.
+    #[must_use]
+    pub fn images(self: &Arc<Self>) -> crate::OpenAiImages {
+        crate::OpenAiImages::new(Arc::clone(self))
+    }
+
     pub(crate) const fn client(&self) -> &Client {
         &self.client
     }
@@ -295,6 +302,17 @@ impl OpenAiPlatformModel {
         self: &Arc<Self>,
         body: &[u8],
     ) -> Result<Request, &'static str> {
+        self.side_request_to(OPENAI_PLATFORM_RESPONSES_PATH, "text/event-stream", body)
+            .await
+    }
+
+    /// [`Self::side_request`] to another `path` of the same origin.
+    pub(crate) async fn side_request_to(
+        self: &Arc<Self>,
+        path: &'static str,
+        accept: &'static str,
+        body: &[u8],
+    ) -> Result<Request, &'static str> {
         Arc::clone(self)
             .revalidate_runtime_authority(self.clock.now())
             .await
@@ -304,7 +322,7 @@ impl OpenAiPlatformModel {
             .platform_bearer_header(self.generation)
             .map_err(|_| "OpenAI API key generation is no longer current")?;
         let mut headers = HeaderMap::new();
-        headers.insert(HEADER_ACCEPT, HeaderValue::from_static("text/event-stream"));
+        headers.insert(HEADER_ACCEPT, HeaderValue::from_static(accept));
         headers.insert(
             HEADER_CONTENT_TYPE,
             HeaderValue::from_static("application/json"),
@@ -319,7 +337,7 @@ impl OpenAiPlatformModel {
         Request::new(
             self.dial_origin.clone(),
             Method::POST,
-            OPENAI_PLATFORM_RESPONSES_PATH,
+            path,
             headers,
             SensitiveBytes::new(body.to_vec()).into_bytes(),
             self.client.limits(),

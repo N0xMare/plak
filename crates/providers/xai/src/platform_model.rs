@@ -312,6 +312,13 @@ impl XaiPlatformModel {
     pub fn retrieval(self: &Arc<Self>, effort: Option<&'static str>) -> crate::XaiRetrieval {
         crate::XaiRetrieval::new(Arc::clone(self), effort)
     }
+    /// The session's image generation executor on this exact route, key
+    /// and client.
+    #[must_use]
+    pub fn images(self: &Arc<Self>) -> crate::XaiImages {
+        crate::XaiImages::new(Arc::clone(self))
+    }
+
     pub(crate) fn client(&self) -> &Client {
         &self.execution.client
     }
@@ -322,6 +329,17 @@ impl XaiPlatformModel {
     /// the authorized request carrying `body` with the grant's current key.
     pub(crate) async fn side_request(
         self: &Arc<Self>,
+        body: &[u8],
+    ) -> Result<Request, &'static str> {
+        self.side_request_to(XAI_PLATFORM_RESPONSES_PATH, "text/event-stream", body)
+            .await
+    }
+
+    /// [`Self::side_request`] to another `path` of the same origin.
+    pub(crate) async fn side_request_to(
+        self: &Arc<Self>,
+        path: &'static str,
+        accept: &'static str,
         body: &[u8],
     ) -> Result<Request, &'static str> {
         let execution = &self.execution;
@@ -338,7 +356,7 @@ impl XaiPlatformModel {
             return Err("xAI API key does not match the session's grant");
         }
         let mut headers = HeaderMap::new();
-        headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
+        headers.insert(ACCEPT, HeaderValue::from_static(accept));
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert(
             AUTHORIZATION,
@@ -348,7 +366,7 @@ impl XaiPlatformModel {
         Request::new(
             execution.origin.clone(),
             Method::POST,
-            XAI_PLATFORM_RESPONSES_PATH,
+            path,
             headers,
             SensitiveBytes::new(body.to_vec()).into_bytes(),
             execution.client.limits(),

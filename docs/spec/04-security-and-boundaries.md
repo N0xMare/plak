@@ -859,6 +859,10 @@ permit of the session's subscription request gate, reserved and authorized as
 for a model round. The OpenRouter plugin is charged per
 request even on a free model, so a free OpenRouter model is not free search.
 The wrappers are opt-in per template; no shipped preset enables them.
+`image_gen` spends the same way: one images request per call on the
+session's route and key, never resent once it may have reached the provider,
+and never replayed after a crash; it is opt-in per template and no shipped
+preset enables it.
 
 That is a local defense against restoring the authority root alone. A malicious
 same-uid writer, and a coherent restore of the witness together with the whole

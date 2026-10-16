@@ -29,6 +29,7 @@ pub struct ProductToolExtensions {
     registrations: Arc<[ToolRegistration]>,
     host_facts: plakous_host_protocol::PromptHostFacts,
     retrieval: Option<Arc<crate::tool_plan::DeferredRetrievalPort>>,
+    image_gen: Option<Arc<crate::tool_plan::DeferredImagePort>>,
     contributions: Arc<[PromptContribution]>,
 }
 
@@ -66,6 +67,7 @@ impl ProductToolExtensions {
             registrations: registrations.into(),
             host_facts: plakous_host_protocol::PromptHostFacts::default(),
             retrieval: None,
+            image_gen: None,
             contributions: Arc::new([]),
         })
     }
@@ -85,7 +87,7 @@ impl ProductToolExtensions {
     ///
     /// Hosted-retrieval wrappers register through their pack on the port the
     /// plan bound; `fetch_url` follows through its own pack under the plan's
-    /// limits; MCP tools append the registrations MCP binding froze, and
+    /// limits, then `image_gen` on the plan's image port; MCP tools append the registrations MCP binding froze, and
     /// the first one earns the untrusted-data paragraph. A planned tool
     /// without a registration refuses the bind. The empty plan leaves the
     /// extensions, and every surface and identity compiled from them,
@@ -94,11 +96,15 @@ impl ProductToolExtensions {
         let mut wrappers = Vec::new();
         let mut mcp = Vec::new();
         let mut fetch_url = false;
+        let mut image_gen = false;
         for tool in plan.tools() {
             match tool {
                 crate::tool_plan::PlannedTool::Optional(
                     crate::tool_plan::OptionalTool::FetchUrl,
                 ) => fetch_url = true,
+                crate::tool_plan::PlannedTool::Optional(
+                    crate::tool_plan::OptionalTool::ImageGen,
+                ) => image_gen = true,
                 crate::tool_plan::PlannedTool::Optional(optional) => {
                     let wrapper = optional.web_tool().ok_or_else(|| {
                         CliFailure::new(format!(
@@ -115,7 +121,7 @@ impl ProductToolExtensions {
                 }
             }
         }
-        if wrappers.is_empty() && mcp.is_empty() && !fetch_url {
+        if wrappers.is_empty() && mcp.is_empty() && !fetch_url && !image_gen {
             return Ok(self);
         }
         let mut appended = Vec::new();
@@ -148,6 +154,18 @@ impl ProductToolExtensions {
                     .map_err(|error| CliFailure::new(format!("fetch_url: {error}")))?,
             );
         }
+        let mut image_slot = None;
+        if image_gen {
+            let binding = plan
+                .image_gen()
+                .ok_or_else(|| CliFailure::new("planned image_gen has no image port"))?;
+            image_slot = binding.slot();
+            appended.extend(
+                plakous::tools::web::ImageGenPack::new(binding.port())
+                    .registrations()
+                    .map_err(|error| CliFailure::new(format!("image_gen: {error}")))?,
+            );
+        }
         let earning = mcp.first().map(|registration| registration.name().clone());
         appended.extend(mcp);
         let host_facts = self.host_facts;
@@ -155,6 +173,7 @@ impl ProductToolExtensions {
             Self::from_nested_registrations(self.registrations.iter().cloned().chain(appended))?
                 .with_host_facts(host_facts);
         extended.retrieval = slot;
+        extended.image_gen = image_slot;
         if let Some(earning) = earning {
             extended.contributions = vec![PromptContribution::new(
                 UNTRUSTED_TOOL_DATA_CONTRIBUTION_ID,
@@ -179,6 +198,21 @@ impl ProductToolExtensions {
             CliFailure::new(
                 "hosted retrieval tools are bound but the route built no retrieval port",
             )
+        })?;
+        slot.connect(port).map_err(CliFailure::new)
+    }
+
+    /// Connects the session's image executor to the `image_gen` bound
+    /// before it existed. Without a bound `image_gen` the port is dropped.
+    pub(crate) fn connect_image_gen(
+        &self,
+        port: Option<Arc<dyn plakous::tools::web::ImageGenPort>>,
+    ) -> CliResult<()> {
+        let Some(slot) = &self.image_gen else {
+            return Ok(());
+        };
+        let port = port.ok_or_else(|| {
+            CliFailure::new("image_gen is bound but the route built no image port")
         })?;
         slot.connect(port).map_err(CliFailure::new)
     }

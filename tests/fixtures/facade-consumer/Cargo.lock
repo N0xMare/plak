@@ -1650,6 +1650,7 @@ dependencies = [
 name = "plakous-responses-dialect"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "futures-core",
  "plakous-attempt",
  "plakous-exchange",

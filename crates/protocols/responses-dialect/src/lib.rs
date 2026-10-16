@@ -33,6 +33,7 @@
 mod attempt_host;
 mod canonical_host;
 mod credential;
+mod images;
 mod model_host;
 mod project_host;
 mod request_host;
@@ -205,6 +206,12 @@ pub use canonical_host::{
 };
 pub use credential::{
     CredentialGenerationFingerprint, CredentialGenerationFingerprintError, CredentialProviderTag,
+};
+pub use images::{
+    RESPONSES_IMAGE_EXCHANGE_TIMEOUT, RESPONSES_IMAGE_MAX_IMAGE_BYTES,
+    RESPONSES_IMAGE_MAX_RESPONSE_BYTES, ResponsesImageAuthorization, ResponsesImageEndpoint,
+    ResponsesImageFlavor, ResponsesImageRequest, ResponsesImageSource, ResponsesImageTransport,
+    decode_responses_image, run_responses_image,
 };
 pub use model_host::{
     PreparedResponsesModelExecution, ResponsesModelBuildError, ResponsesModelErrorHook,

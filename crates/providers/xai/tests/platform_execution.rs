@@ -1185,3 +1185,34 @@ async fn live_retrieval_probe_xai_api() -> TestResult {
     }
     Ok(())
 }
+
+/// Opt-in paid probe, never in a gate tier: one image generation on the xAI
+/// API with the operator's key. A pass is image bytes with a PNG, JPEG or
+/// WebP signature. Run with `PLAK_LIVE_IMAGE_PROBE=1 XAI_API_KEY=... cargo
+/// nextest run -p plakous-xai --run-ignored only -E 'test(live_image_probe)'`.
+#[tokio::test]
+#[ignore = "paid live probe"]
+async fn live_image_probe_xai_api() -> TestResult {
+    if std::env::var("PLAK_LIVE_IMAGE_PROBE").as_deref() != Ok("1") {
+        return Err("set PLAK_LIVE_IMAGE_PROBE=1 to spend one probe".into());
+    }
+    let key = std::env::var("XAI_API_KEY")?;
+    let model = Arc::new(XaiPlatformModel::new(
+        authority(),
+        Arc::new(LiveSource(key)),
+        NonZeroU64::new(65_536).unwrap(),
+        selected(ReasoningEffort::Low)?,
+        Arc::new(SystemClock),
+    )?);
+    let images = model.images();
+    let request = images.request("A small red fox sitting in snow, flat illustration");
+    let bytes = images.generate(&request, &CancellationToken::new()).await?;
+    eprintln!("image_gen: bytes={}", bytes.len());
+    assert!(
+        bytes.starts_with(b"\x89PNG")
+            || bytes.starts_with(&[0xff, 0xd8, 0xff])
+            || bytes.starts_with(b"RIFF"),
+        "image_gen returned no image"
+    );
+    Ok(())
+}
