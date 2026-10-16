@@ -1070,3 +1070,24 @@ fn process_activity_hud_uses_the_projected_operation() {
         assert_eq!(app.turn_status_label().as_deref(), Some(expected), "{name}");
     }
 }
+
+/// The HUD names a web search, a fetch and an MCP call by what it is doing.
+#[test]
+fn hud_labels_web_and_mcp_calls() {
+    for (name, label) in [
+        ("web_search", "searching"),
+        ("WebSearch", "searching"),
+        ("x_search", "searching"),
+        ("web_fetch", "reading"),
+        ("WebFetch", "reading"),
+        ("fetch_url", "reading"),
+        ("web__run", "reading"),
+        ("mcp__docs__search", "calling mcp:docs"),
+    ] {
+        assert_eq!(
+            super::composer_chrome::activity_label(name, ActivityKind::Tool, None),
+            label,
+            "{name}"
+        );
+    }
+}

@@ -241,9 +241,11 @@ impl App {
                 ..
             } = block
         {
-            return Some(
-                super::composer_chrome::activity_label(name, *kind, subject.as_deref()).to_owned(),
-            );
+            return Some(super::composer_chrome::activity_label(
+                name,
+                *kind,
+                subject.as_deref(),
+            ));
         }
         if self
             .root_pane()

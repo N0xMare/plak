@@ -30,12 +30,14 @@ impl Default for ComposerChrome {
     }
 }
 
-pub(super) fn activity_label(
-    name: &str,
-    kind: ActivityKind,
-    subject: Option<&str>,
-) -> &'static str {
-    crate::tui::activity::hud_verb(name, kind, subject)
+pub(super) fn activity_label(name: &str, kind: ActivityKind, subject: Option<&str>) -> String {
+    if crate::tui::blocks::subject_tool_verb(name, kind, subject)
+        == crate::tui::blocks::ToolVerb::Mcp
+        && let Some(call) = crate::tui::presentation::McpCall::parse(name)
+    {
+        return format!("calling mcp:{}", call.server);
+    }
+    crate::tui::activity::hud_verb(name, kind, subject).to_owned()
 }
 
 pub(super) fn clip_text(text: &str, width: usize) -> String {

@@ -542,6 +542,7 @@ fn item_detail_in_the_agent_view_asks_with_its_agent_id_and_takes_the_answer() {
                 input_truncated: false,
                 output_truncated: false,
                 source: CallDetailSource::Canonical,
+                sources: Vec::new(),
             },
         })
     };

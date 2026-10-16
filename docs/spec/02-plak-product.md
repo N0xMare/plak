@@ -2454,8 +2454,10 @@ asks the host for one tool call's full input and result of the product session
 the surface has attached. The host answers with at most one
 `SessionObservation::CallDetail { call_id, agent_id, session_id, outcome }`
 whose `session_id` is the attached session it resolved against. The outcome is
-either `Detail { input, output, input_truncated, output_truncated, source }` or
-`Unavailable { reason }`.
+either `Detail { input, output, input_truncated, output_truncated, source,
+sources }` or `Unavailable { reason }`. `sources` holds the `{ title, url }`
+links the host parsed from the output's trailing `Sources:` block (§5.4 Item
+detail), empty for any other output.
 
 Without an `agent_id` the attached session answers. The host reads its
 committed canonical history through `AgentSessions::call_detail` (spec 01 §12),
@@ -3492,9 +3494,22 @@ outcome never drops); `▸` always stays. A summary's or merged
 row's failure count (`(1 failed)`, `(1 interrupted)`) is never cut: the label
 before it gives way. Verbs: `$ <command>`,
 `Read <path>`, `Searched <subject>`, `Edited <path> +a −b`, `Wrote <path>`,
-`Listed <path>`, `Fetched <url>`, `Messaged <agent> · <first line>`,
+`Listed <path>`, `Fetched <host>`, `Messaged <agent> · <first line>`,
 `Listed agents`, `Updated plan · <progress>`; other tools use their humanized
-name. Commands are coloured with syntect's bash grammar: `$` muted, the
+name. Web rows read as one action each, in the progressive form while the call
+runs: `Searching the web "<query>"` / `Searched the web "<query>"`
+(`web_search`, `WebSearch`), `Searching X "<query>"` / `Searched X "<query>"`
+(`x_search`), and `Fetching <host>` / `Fetched <host>` (`web_fetch`,
+`WebFetch`, `fetch_url`, `fetch`, `open_url`). A fetch subject is the URL's
+host (and port) only, never its scheme, credentials, path or query; the
+detail keeps the whole URL. A row stored with an older subject renders that
+subject. A tool exposed as `mcp__<server>__<tool>` reads
+`mcp:<server> <tool> <arguments>`, where the arguments are a `key=value`
+summary of the call's scalar arguments in key order (strings quoted and cut at
+40 characters, nested values `…`), bounded to 120 bytes. The classification is
+presentation only: the canonical call's owner stays the execution authority.
+Group summaries count web searches as `web search ×N` and `X search ×N`,
+fetches among reads, and MCP calls by their `mcp:<server> <tool>` label. Commands are coloured with syntect's bash grammar: `$` muted, the
 program name in the accent, arguments in body text and quoted strings in the
 string colour, through four theme tokens every built-in theme defines. Inside
 an open or ungrouped group, consecutive reads and searches merge into one
@@ -3561,7 +3576,14 @@ and first 20 lines; any other tool as indented `key: value` arguments, nested
 values indented further, never raw JSON. After a `┄` row comes the output
 exactly as the model saw it, in the muted output colour, windowed to its first
 20 and last 10 lines around a `… N lines hidden ▸` row that shows the rest
-when clicked. Every detail row carries the item's rail continued and a `│`
+when clicked. A `full output: <path>` line in the hidden middle stays visible
+below that row, so a spilled result always names its file. An open web search
+or fetch row lists its sources between the input and the `┄` row: a muted
+`sources` label, then one `<title>  <url>` row per source. The host parses
+them from the result's trailing block, a `Sources:` line followed only by
+`- <title> <url>` lines with `http(s)` URLs (at most 64), and carries them on
+the call-detail answer; prose that is not such a final block yields none, and
+nothing about them is persisted. Every detail row carries the item's rail continued and a `│`
 under its label; wrapped rows hang two cells further. The text comes from the
 call-detail read (§4.3, `source = canonical`); until it answers, and for a
 call still running, the row's retained preview renders (a running row's
@@ -3716,7 +3738,7 @@ bottom border is a plain line. HUD vocabulary, highest priority first:
 | Stop in progress | `cancelling…` |
 | Compaction | spinner + `compacting` + elapsed |
 | Provider retry | spinner + `retrying Xs (n/N)`; cause in the transcript |
-| Running tool | spinner + `running command`, `editing`, `reading`, `searching`, `waiting`, or `waiting on agents`, plus elapsed |
+| Running tool | spinner + `running command`, `editing`, `reading` (also web fetches), `searching` (also web and X searches), `waiting`, `waiting on agents`, or `calling mcp:<server>` for a tool exposed as `mcp__<server>__<tool>`, plus elapsed |
 | Code cell computing without a live nested action | spinner + `working` + elapsed |
 | Unsealed reasoning | spinner + `thinking` + elapsed |
 | Answer streaming | spinner + `responding` |

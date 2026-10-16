@@ -10,6 +10,8 @@
     reason = "internal cross-package presentation DTO; module-level authority and invariants are documented"
 )]
 
+use std::borrow::Cow;
+
 use super::transcript::TranscriptRow;
 
 /// Shared current-activity vocabulary for the root HUD and live child rows.
@@ -17,8 +19,20 @@ use super::transcript::TranscriptRow;
 /// `name` is a canonical tool identity, never an exposed spelling: `wait`,
 /// `wait_js` and `wait_py` here are the composition cell-wait markers, and
 /// every process await (pi's `wait` included) arrives as `process_session_poll`.
+///
+/// A call to a tool exposed as `mcp__<server>__<tool>` reads
+/// `calling mcp:<server>`.
 #[must_use]
-pub fn activity_label(name: &str, kind: ActivityKind) -> &'static str {
+pub fn activity_label(name: &str, kind: ActivityKind) -> Cow<'static, str> {
+    if kind == ActivityKind::Tool
+        && let Some(call) = McpCall::parse(name)
+    {
+        return Cow::Owned(format!("calling mcp:{}", call.server));
+    }
+    Cow::Borrowed(builtin_activity_label(name, kind))
+}
+
+fn builtin_activity_label(name: &str, kind: ActivityKind) -> &'static str {
     if matches!(
         name,
         "wait" | "wait_js" | "wait_py" | "process_session_poll" | "write_stdin"
@@ -53,12 +67,40 @@ pub fn activity_label(name: &str, kind: ActivityKind) -> &'static str {
         | "process_session_write"
         | "process_session_terminate" => "running command",
         "read_file" | "view_file" | "view_image" | "inspect_image" | "Read" | "web_fetch"
-        | "fetch" | "web__run" | "open_url" | "list_dir" | "list_directory" | "ls" => "reading",
+        | "WebFetch" | "fetch" | "fetch_url" | "web__run" | "open_url" | "list_dir"
+        | "list_directory" | "ls" => "reading",
         "search_repository" | "grep" | "Grep" | "glob" | "Glob" | "codebase_search"
-        | "file_search" => "searching",
+        | "file_search" | "web_search" | "WebSearch" | "x_search" => "searching",
         "apply_patch" | "search_replace" | "edit_file" | "write_file" | "create_file" | "Edit"
         | "Write" | "write" => "editing",
         _ => "working",
+    }
+}
+
+/// A call presented as an MCP tool: the server and tool parts of an
+/// exposed `mcp__<server>__<tool>` name.
+///
+/// The server-id grammar admits no `__`, so the split is unambiguous. This is
+/// presentation only; execution ownership stays with the canonical call.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct McpCall<'a> {
+    pub server: &'a str,
+    pub tool: &'a str,
+}
+
+impl<'a> McpCall<'a> {
+    /// Splits an exposed MCP tool name; `None` for any other name.
+    #[must_use]
+    pub fn parse(name: &'a str) -> Option<Self> {
+        let (server, tool) = name.strip_prefix("mcp__")?.split_once("__")?;
+        let server_valid = server
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_lowercase())
+            && server
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_');
+        (server_valid && !tool.is_empty()).then_some(Self { server, tool })
     }
 }
 
@@ -741,6 +783,43 @@ mod tests {
             switched.transition,
             Some(BindingTransition::ModelSwitched { .. })
         ));
+    }
+
+    #[test]
+    fn activity_labels_name_web_and_mcp_calls() {
+        for (name, label) in [
+            ("web_search", "searching"),
+            ("WebSearch", "searching"),
+            ("x_search", "searching"),
+            ("web_fetch", "reading"),
+            ("WebFetch", "reading"),
+            ("fetch", "reading"),
+            ("fetch_url", "reading"),
+            ("web__run", "reading"),
+            ("mcp__docs__search", "calling mcp:docs"),
+            ("mcp__git_hub__list_issues", "calling mcp:git_hub"),
+            ("mcp__", "working"),
+            ("mcp__Docs__x", "working"),
+            ("mcp__docs__", "working"),
+        ] {
+            assert_eq!(activity_label(name, ActivityKind::Tool), label, "{name}");
+        }
+        assert_eq!(
+            activity_label("mcp__docs__search", ActivityKind::Compose),
+            "working"
+        );
+    }
+
+    #[test]
+    fn mcp_calls_split_their_exposed_name() {
+        assert_eq!(
+            McpCall::parse("mcp__git_hub__list__issues"),
+            Some(McpCall {
+                server: "git_hub",
+                tool: "list__issues"
+            })
+        );
+        assert_eq!(McpCall::parse("search_repository"), None);
     }
 
     #[test]

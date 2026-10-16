@@ -10,7 +10,7 @@ use std::time::Duration;
 use unicode_segmentation::UnicodeSegmentation as _;
 use unicode_width::UnicodeWidthStr as _;
 
-use crate::tui::presentation::{ActivityKind, ActivityState};
+use crate::tui::presentation::{ActivityKind, ActivityState, McpCall};
 use plakous_host_protocol::views::CallDetailOutcome;
 use plakous_host_protocol::views::transcript::{
     AgentMilestone, MilestoneEvent, NoticePlacement, NoticeTone, ProcessNotice, ProcessOutcome,
@@ -325,6 +325,9 @@ pub struct ItemView {
     pub members_open: bool,
 }
 
+/// The line a spilled tool result keeps naming the file holding all of it.
+pub(crate) const FULL_OUTPUT_PREFIX: &str = "full output: ";
+
 /// Humanize a canonical tool name (`run_process` → `run process`).
 #[must_use]
 pub fn humanize_tool(name: &str) -> String {
@@ -354,8 +357,15 @@ pub enum ToolVerb {
     Edit,
     /// `Wrote {path}`: a whole-file write.
     Write,
-    /// `Fetch {url}`.
+    /// `Fetch {host}`: native web fetch and `fetch_url`.
     Fetch,
+    /// `Searched the web "{query}"`: the hosted web search tool.
+    WebSearch,
+    /// `Searched X "{query}"`: the hosted X search tool.
+    XSearch,
+    /// `mcp:{server} {tool} {arguments}`: a tool exposed as
+    /// `mcp__<server>__<tool>`.
+    Mcp,
     /// `List {path} ({n} entries)`.
     List,
     /// `Plan` — `update_plan` / `todo_write` / `merge_plan`, collapsed by default.
@@ -404,6 +414,8 @@ impl ToolVerb {
             Self::Edit => Some("Edit"),
             Self::Write => Some("Write"),
             Self::Fetch => Some("Fetch"),
+            Self::WebSearch => Some("Web search"),
+            Self::XSearch => Some("X search"),
             Self::List => Some("List"),
             Self::Plan => Some("Plan"),
             Self::Compose => Some("Compose"),
@@ -420,7 +432,7 @@ impl ToolVerb {
             Self::StopAll => Some("Stop all agents"),
             Self::SubmitResult => Some("Submit result"),
             Self::Compact => Some("Compact"),
-            Self::Generic => None,
+            Self::Mcp | Self::Generic => None,
         }
     }
 
@@ -494,9 +506,14 @@ pub fn tool_verb(name: &str, kind: ActivityKind) -> ToolVerb {
         | "file_search" => ToolVerb::Search,
         "apply_patch" | "search_replace" | "edit_file" | "Edit" => ToolVerb::Edit,
         "write_file" | "create_file" | "Write" | "write" => ToolVerb::Write,
-        "web_fetch" | "fetch" | "web__run" | "open_url" => ToolVerb::Fetch,
+        "web_fetch" | "WebFetch" | "fetch" | "fetch_url" | "web__run" | "open_url" => {
+            ToolVerb::Fetch
+        }
+        "web_search" | "WebSearch" => ToolVerb::WebSearch,
+        "x_search" => ToolVerb::XSearch,
         "list_dir" | "list_directory" | "ls" => ToolVerb::List,
         "update_plan" | "todo_write" | "merge_plan" => ToolVerb::Plan,
+        name if McpCall::parse(name).is_some() => ToolVerb::Mcp,
         _ => ToolVerb::Generic,
     }
 }
@@ -548,6 +565,11 @@ pub fn display_tool_title(name: &str) -> String {
 /// Display title for a tool row with its host-classified kind.
 #[must_use]
 pub fn display_tool_title_for(name: &str, kind: ActivityKind) -> String {
+    if tool_verb(name, kind) == ToolVerb::Mcp
+        && let Some(call) = McpCall::parse(name)
+    {
+        return format!("mcp:{} {}", call.server, call.tool);
+    }
     tool_verb(name, kind)
         .label()
         .map_or_else(|| capitalize(&humanize_tool(name)), str::to_owned)
@@ -4850,6 +4872,8 @@ mod render {
         input_truncated: bool,
         output_truncated: bool,
         preview: bool,
+        /// Host-parsed sources of a web search or fetch result.
+        sources: &'a [plakous_host_protocol::views::SourceLink],
     }
 
     fn detail_text<'a>(item: &'a ItemFacts<'a>) -> DetailText<'a> {
@@ -4861,6 +4885,7 @@ mod render {
                 input_truncated,
                 output_truncated,
                 source,
+                sources,
             } = fetched
         {
             let preview = *source == CallDetailSource::Preview;
@@ -4870,6 +4895,7 @@ mod render {
                 input_truncated: *input_truncated && !preview,
                 output_truncated: *output_truncated && !preview,
                 preview,
+                sources,
             };
         }
         // The host's own preview rule: a running row's detail is its
@@ -4897,6 +4923,7 @@ mod render {
             input_truncated: false,
             output_truncated: false,
             preview,
+            sources: &[],
         }
     }
 
@@ -4943,6 +4970,24 @@ mod render {
                 );
             }
         }
+        if matches!(
+            verb,
+            super::ToolVerb::WebSearch | super::ToolVerb::XSearch | super::ToolVerb::Fetch
+        ) && !text.sources.is_empty()
+        {
+            push(
+                logical,
+                Line::from(Span::styled("sources", theme.chrome_dim)),
+            );
+            for source in text.sources {
+                let mut spans = Vec::new();
+                if !source.title.is_empty() {
+                    spans.push(Span::styled(format!("{}  ", source.title), theme.tool));
+                }
+                spans.push(Span::styled(source.url.clone(), theme.chrome_dim));
+                push(logical, Line::from(spans));
+            }
+        }
         let output = text.output.trim_end_matches('\n');
         if output.trim().is_empty() {
             return;
@@ -4959,17 +5004,31 @@ mod render {
             for line in &lines[..super::TOOL_DETAIL_HEAD_LINES] {
                 push(logical, Line::from(Span::styled((*line).to_owned(), style)));
             }
-            push(
-                logical,
-                Line::from(Span::styled(
-                    super::hidden_lines_label(lines.len() - kept),
-                    theme.tool_label,
-                )),
-            );
-            if let Some(row) = logical.last_mut() {
-                super::mark_hidden_lines(row);
+            let tail_start = lines.len() - super::TOOL_DETAIL_TAIL_LINES;
+            // A spill line names where the whole result went; folding the
+            // window must never hide it.
+            let spills: Vec<&str> = lines[super::TOOL_DETAIL_HEAD_LINES..tail_start]
+                .iter()
+                .copied()
+                .filter(|line| line.trim_start().starts_with(super::FULL_OUTPUT_PREFIX))
+                .collect();
+            let hidden = lines.len() - kept - spills.len();
+            if hidden > 0 {
+                push(
+                    logical,
+                    Line::from(Span::styled(
+                        super::hidden_lines_label(hidden),
+                        theme.tool_label,
+                    )),
+                );
+                if let Some(row) = logical.last_mut() {
+                    super::mark_hidden_lines(row);
+                }
             }
-            for line in &lines[lines.len() - super::TOOL_DETAIL_TAIL_LINES..] {
+            for line in spills {
+                push(logical, Line::from(Span::styled(line.to_owned(), style)));
+            }
+            for line in &lines[tail_start..] {
                 push(logical, Line::from(Span::styled((*line).to_owned(), style)));
             }
         }
@@ -5429,6 +5488,7 @@ pub(super) use render::{LeadRow, TranscriptChange, TranscriptRenderCache, lead_r
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
     use super::*;
+    use plakous_host_protocol::views::SourceLink;
     use plakous_host_protocol::views::transcript::AutoContinue;
 
     #[test]
@@ -6456,6 +6516,7 @@ mod tests {
                 input_truncated: false,
                 output_truncated: true,
                 source: plakous_host_protocol::views::CallDetailSource::Canonical,
+                sources: Vec::new(),
             }));
         }
         let mut estimates = Vec::new();
@@ -6576,6 +6637,7 @@ mod tests {
                 input_truncated: false,
                 output_truncated: false,
                 source: plakous_host_protocol::views::CallDetailSource::Canonical,
+                sources: Vec::new(),
             }));
         }
         let rows = layout_blocks(&[head, compose_child("exec_command", "done", "pwd")], 100).plain;
@@ -6879,6 +6941,7 @@ mod tests {
                     input_truncated: false,
                     output_truncated: false,
                     source: plakous_host_protocol::views::CallDetailSource::Canonical,
+                    sources: Vec::new(),
                 }));
             }
             let rows = layout_blocks(&[block], 80).plain;
@@ -6895,6 +6958,204 @@ mod tests {
                 count == 100
             );
         }
+    }
+
+    /// Web search, X search, fetch and MCP calls each read as one action
+    /// row, gerund while running and past tense once done, at every width.
+    #[test]
+    fn web_and_mcp_rows_read_as_their_actions() {
+        let cases = [
+            (
+                "web_search",
+                "\"rust 1.99\"",
+                "Searching the web \"rust 1.99\"",
+                "Searched the web \"rust 1.99\"",
+            ),
+            (
+                "WebSearch",
+                "\"rust 1.99\"",
+                "Searching the web \"rust 1.99\"",
+                "Searched the web \"rust 1.99\"",
+            ),
+            (
+                "x_search",
+                "\"plak\"",
+                "Searching X \"plak\"",
+                "Searched X \"plak\"",
+            ),
+            (
+                "web_fetch",
+                "docs.rs",
+                "Fetching docs.rs",
+                "Fetched docs.rs",
+            ),
+            ("WebFetch", "docs.rs", "Fetching docs.rs", "Fetched docs.rs"),
+            (
+                "fetch_url",
+                "docs.rs",
+                "Fetching docs.rs",
+                "Fetched docs.rs",
+            ),
+            (
+                "mcp__docs__search",
+                "query=\"install\"",
+                "mcp:docs search query=\"install\"",
+                "mcp:docs search query=\"install\"",
+            ),
+        ];
+        for (name, subject, running, done) in cases {
+            for (state, label) in [("running", running), ("done:1.2s", done)] {
+                let wide = lines(&tool(name, state, subject), 100, RenderPrefs::default());
+                assert!(wide[0].contains(label), "{name} {state}: {:?}", wide[0]);
+                let narrow = lines(&tool(name, state, subject), 30, RenderPrefs::default());
+                assert!(narrow[0].width() <= 30, "{name} {state}: {:?}", narrow[0]);
+                assert!(
+                    narrow[0].trim_end().ends_with('▸'),
+                    "{name}: {:?}",
+                    narrow[0]
+                );
+                let head: String = label.chars().take(8).collect();
+                assert!(narrow[0].contains(&head), "{name} {state}: {:?}", narrow[0]);
+            }
+        }
+        assert_eq!(
+            display_tool_title_for("mcp__git_hub__list_issues", ActivityKind::Tool),
+            "mcp:git_hub list_issues"
+        );
+        // A name outside the exposed MCP grammar stays a generic tool.
+        assert_eq!(
+            tool_verb("mcp__Docs__x", ActivityKind::Tool),
+            ToolVerb::Generic
+        );
+    }
+
+    /// Rows stored before the web rows existed render exactly as they did: a
+    /// stored fetch keeps its stored whole-URL subject, and a stored MCP row
+    /// (labelled by its exposed name) reads as an MCP call.
+    #[test]
+    fn stored_web_and_mcp_rows_render_from_their_stored_subjects() {
+        let row = |name: &str, subject: &str| {
+            ScrollBlock::from_row(TranscriptRow::Tool(ToolItem {
+                call_id: format!("{name}-1"),
+                name: name.to_owned(),
+                exposed_name: None,
+                kind: ActivityKind::Tool,
+                state: "done".to_owned(),
+                subject: Some(subject.to_owned()),
+                detail: None,
+                started_at_ms: Some(1_000),
+                finished_at_ms: Some(2_200),
+                parent_call_id: None,
+                cell_id: None,
+                wait: None,
+            }))
+            .unwrap()
+        };
+        let fetched = lines(
+            &row("web_fetch", "https://a.test/x?q=1"),
+            100,
+            RenderPrefs::default(),
+        );
+        assert!(
+            fetched[0].contains("✓ Fetched https://a.test/x?q=1"),
+            "{:?}",
+            fetched[0]
+        );
+        let mcp = lines(
+            &row("mcp__docs__search", "query=\"install\""),
+            100,
+            RenderPrefs::default(),
+        );
+        assert!(
+            mcp[0].contains("✓ mcp:docs search query=\"install\""),
+            "{:?}",
+            mcp[0]
+        );
+    }
+
+    fn expanded_with(name: &str, output: String, sources: Vec<SourceLink>) -> ScrollBlock {
+        let mut block = tool(name, "done", "\"rust\"");
+        if let ScrollBlock::Tool { mode, view, .. } = &mut block {
+            *mode = DisplayMode::Expanded;
+            view.fetched = Some(std::sync::Arc::new(CallDetailOutcome::Detail {
+                input: "{\"query\":\"rust\"}".to_owned(),
+                output,
+                input_truncated: false,
+                output_truncated: false,
+                source: plakous_host_protocol::views::CallDetailSource::Canonical,
+                sources,
+            }));
+        }
+        block
+    }
+
+    /// An open search or fetch row lists the host-parsed sources, title then
+    /// URL, above the result; other tools never show a sources list.
+    #[test]
+    fn expanded_web_rows_list_their_sources() {
+        let sources = vec![
+            SourceLink {
+                title: "Rust Blog".to_owned(),
+                url: "https://blog.rust-lang.org/a".to_owned(),
+            },
+            SourceLink {
+                title: String::new(),
+                url: "https://example.org/n".to_owned(),
+            },
+        ];
+        for name in [
+            "web_search",
+            "WebSearch",
+            "x_search",
+            "web_fetch",
+            "fetch_url",
+        ] {
+            let rows = layout_blocks(
+                &[expanded_with(name, "answer".to_owned(), sources.clone())],
+                100,
+            )
+            .plain;
+            let at = |needle: &str| rows.iter().position(|row| row.contains(needle));
+            let header = at("sources").unwrap_or_else(|| panic!("{name}: {rows:?}"));
+            let first = at("Rust Blog  https://blog.rust-lang.org/a").expect("titled source");
+            let second = at("https://example.org/n").expect("untitled source");
+            let answer = at("answer").expect("result");
+            assert!(
+                header < first && first < second && second < answer,
+                "{rows:?}"
+            );
+        }
+        let rows = layout_blocks(&[expanded_with("read_file", "x".to_owned(), sources)], 100).plain;
+        assert!(
+            !rows.iter().any(|row| row.contains("Rust Blog")),
+            "{rows:?}"
+        );
+    }
+
+    /// A folded output window keeps a `full output:` spill line visible even
+    /// when it sits in the hidden middle.
+    #[test]
+    fn a_folded_output_keeps_its_spill_line_visible() {
+        let mut lines_out: Vec<String> = (1..=100).map(|i| format!("line {i}")).collect();
+        lines_out[49] = "full output: /state/jobs/s/mcp-c1.txt".to_owned();
+        let rows = layout_blocks(
+            &[expanded_with(
+                "mcp__docs__search",
+                lines_out.join("\n"),
+                Vec::new(),
+            )],
+            100,
+        )
+        .plain;
+        assert!(
+            rows.iter()
+                .any(|row| row.contains("full output: /state/jobs/s/mcp-c1.txt")),
+            "{rows:?}"
+        );
+        assert!(
+            rows.iter().any(|row| row.contains("… 69 lines hidden ▸")),
+            "{rows:?}"
+        );
     }
 
     /// `0ms` printed for `Read 3 files`, `Edit src/lib.rs +1/-1`,

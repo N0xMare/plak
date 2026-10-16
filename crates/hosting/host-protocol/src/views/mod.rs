@@ -16,7 +16,10 @@ mod templates;
 mod tree;
 
 pub use agent_transcript::AgentTranscript;
-pub use call_detail::{CallDetail, CallDetailOutcome, CallDetailSource};
+pub use call_detail::{
+    CallDetail, CallDetailOutcome, CallDetailSource, MAX_SOURCE_LINKS, SourceLink,
+    parse_source_links,
+};
 pub use catalog::{
     AuthKind, ExtraState, ModelEntry, ProviderDef, ProviderSection, ProviderState, ReadyCatalog,
 };

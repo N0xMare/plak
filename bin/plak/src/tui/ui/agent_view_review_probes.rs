@@ -241,6 +241,7 @@ fn an_agent_preview_answer_in_the_commit_race_is_asked_again() {
             input_truncated: false,
             output_truncated: false,
             source: CallDetailSource::Preview,
+            sources: Vec::new(),
         },
     }));
     assert_eq!(

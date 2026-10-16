@@ -20,7 +20,9 @@ use plakous::model::CallId;
 use plakous::sessions::{
     AgentSessions, AgentSessionsErrorKind, SessionCallDetailOutcome, SessionLocator,
 };
-use plakous_host_protocol::views::{CallDetail, CallDetailOutcome, CallDetailSource};
+use plakous_host_protocol::views::{
+    CallDetail, CallDetailOutcome, CallDetailSource, parse_source_links,
+};
 use tokio::sync::Semaphore;
 
 use crate::runtime::{HostEvent, Sender, TopologyRows};
@@ -330,6 +332,7 @@ fn resolve(canonical: CanonicalRead, preview: Option<ToolItem>) -> CallDetailOut
             },
             _,
         ) => CallDetailOutcome::Detail {
+            sources: parse_source_links(&output),
             input,
             output,
             input_truncated,
@@ -365,9 +368,11 @@ fn preview_detail(preview: ToolItem) -> CallDetailOutcome {
     } else {
         (subject, detail)
     };
+    let output = bounded_preview(&output);
     CallDetailOutcome::Detail {
         input: bounded_preview(&input),
-        output: bounded_preview(&output),
+        sources: parse_source_links(&output),
+        output,
         input_truncated: true,
         output_truncated: true,
         source: CallDetailSource::Preview,

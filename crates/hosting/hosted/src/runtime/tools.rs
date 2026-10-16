@@ -418,7 +418,16 @@ pub(super) fn tool_subject_from_args(name: &str, args: &serde_json::Value) -> Op
         "list_dir" | "list_directory" | "ls" => {
             first_str(&["path", "dir", "directory", "target_directory"])
         }
-        "web_fetch" | "fetch" | "open_url" | "web__run" => first_str(&["url", "query", "prompt"]),
+        "web_fetch" | "WebFetch" | "fetch" | "fetch_url" | "open_url" => {
+            first_str(&["url"]).map(|url| url_host(&url).to_owned())
+        }
+        "web__run" => first_str(&["url", "query", "prompt"]),
+        "web_search" | "WebSearch" | "x_search" => {
+            first_str(&["query"]).map(|query| format!("\"{query}\""))
+        }
+        name if plakous_host_protocol::views::presentation::McpCall::parse(name).is_some() => {
+            mcp_arguments_subject(obj)
+        }
         "search_replace" | "edit_file" | "write_file" | "create_file" | "Edit" | "Write"
         | "write" => {
             let path = first_str(&["file_path", "path", "target_file"])?;
@@ -513,6 +522,70 @@ pub(super) fn tool_subject_from_args(name: &str, args: &serde_json::Value) -> Op
     }
 }
 
+/// Web search, fetch and MCP rows carry the host's own subject: the
+/// runtime's generic one would be a raw query, a whole URL or one argument.
+fn is_web_or_mcp_row(name: &str) -> bool {
+    matches!(
+        name,
+        "web_fetch"
+            | "WebFetch"
+            | "fetch"
+            | "fetch_url"
+            | "open_url"
+            | "web_search"
+            | "WebSearch"
+            | "x_search"
+    ) || plakous_host_protocol::views::presentation::McpCall::parse(name).is_some()
+}
+
+/// The host a fetch row names: never the scheme, credentials, path, query
+/// or fragment of the URL, which the expanded detail still shows.
+fn url_host(url: &str) -> &str {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    if host.is_empty() { url } else { host }
+}
+
+/// Most bytes of an MCP call's argument summary.
+const MCP_ARGUMENTS_SUBJECT_BYTES: usize = 120;
+
+/// A bounded `key=value` summary of an MCP call's scalar arguments, in key
+/// order; nested values show as `key=…`.
+fn mcp_arguments_subject(args: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+    let mut summary = String::new();
+    for (key, value) in args {
+        let value = match value {
+            serde_json::Value::String(text) => {
+                let text = plakous::tools::preview_redaction::text(text.trim());
+                let mut cut: String = text.chars().take(40).collect();
+                if cut.len() < text.len() {
+                    cut.push('…');
+                }
+                format!("\"{cut}\"")
+            }
+            serde_json::Value::Array(_) | serde_json::Value::Object(_) => "…".to_owned(),
+            scalar => scalar.to_string(),
+        };
+        if !summary.is_empty() {
+            summary.push(' ');
+        }
+        summary.push_str(&format!("{key}={value}"));
+        if summary.len() > MCP_ARGUMENTS_SUBJECT_BYTES {
+            let mut end = MCP_ARGUMENTS_SUBJECT_BYTES;
+            while !summary.is_char_boundary(end) {
+                end -= 1;
+            }
+            summary.truncate(end);
+            summary.push('…');
+            break;
+        }
+    }
+    (!summary.is_empty()).then_some(summary)
+}
+
 /// `30s` / `1.5s` / `250ms` for a `wait*` yield bound.
 pub(super) fn format_wait_bound(ms: u64) -> String {
     if ms < 1000 {
@@ -581,6 +654,10 @@ pub(super) fn started_tool_subject(
             | "Write"
             | "write"
     ) || matches!(exposed_name, Some("Edit" | "Write" | "apply_patch"))
+        || [Some(canonical_name), exposed_name]
+            .into_iter()
+            .flatten()
+            .any(is_web_or_mcp_row)
     {
         return host_subject()
             .or_else(|| observation.and_then(|item| item.subject().map(str::to_owned)));
@@ -1270,6 +1347,77 @@ mod tests {
     }
 
     #[test]
+    fn web_and_mcp_rows_carry_host_subjects() {
+        let subject = |name: &str, args: serde_json::Value| tool_subject_from_args(name, &args);
+        for name in ["web_search", "WebSearch", "x_search"] {
+            assert_eq!(
+                subject(name, serde_json::json!({ "query": "rust 1.99" })).as_deref(),
+                Some("\"rust 1.99\""),
+                "{name}"
+            );
+        }
+        for name in ["web_fetch", "WebFetch", "fetch_url", "fetch", "open_url"] {
+            assert_eq!(
+                subject(
+                    name,
+                    serde_json::json!({
+                        "url": "https://user:pw@docs.example.org:8443/a/b?token=x#frag",
+                        "prompt": "summarize"
+                    })
+                )
+                .as_deref(),
+                Some("docs.example.org:8443"),
+                "{name}"
+            );
+        }
+        assert_eq!(
+            subject(
+                "mcp__docs__search",
+                serde_json::json!({ "query": "install", "limit": 5, "filters": { "a": 1 } })
+            )
+            .as_deref(),
+            Some("filters=… limit=5 query=\"install\"")
+        );
+        let long = subject(
+            "mcp__docs__search",
+            serde_json::json!({ "a": "x".repeat(60), "b": "y".repeat(60), "c": "z".repeat(60) }),
+        )
+        .unwrap();
+        assert!(
+            long.len() <= MCP_ARGUMENTS_SUBJECT_BYTES + '…'.len_utf8(),
+            "{long}"
+        );
+        assert!(long.ends_with('…'), "{long}");
+        assert_eq!(subject("mcp__docs__ping", serde_json::json!({})), None);
+    }
+
+    /// The runtime's generic subject (a raw query, a whole URL) never wins
+    /// over the host's own for web and MCP rows.
+    #[test]
+    fn web_and_mcp_host_subjects_win_over_the_core_subject() {
+        let observation: plakous::agent::ToolCallObservation = serde_json::from_value(
+            serde_json::json!({
+                "subject": "https://docs.example.org/a?token=x",
+                "arguments_preview": "{\"url\":\"https://docs.example.org/a?token=x\",\"prompt\":\"p\"}"
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            started_tool_subject("web_fetch", Some("WebFetch"), Some(&observation), None)
+                .as_deref(),
+            Some("docs.example.org")
+        );
+        let observation: plakous::agent::ToolCallObservation = serde_json::from_value(
+            serde_json::json!({ "subject": "install", "arguments_preview": "{\"query\":\"install\"}" }),
+        )
+        .unwrap();
+        assert_eq!(
+            started_tool_subject("mcp__docs__search", None, Some(&observation), None).as_deref(),
+            Some("query=\"install\"")
+        );
+    }
+
+    #[test]
     fn host_diffstat_wins_over_the_bare_core_subject() {
         let observation: plakous::agent::ToolCallObservation = serde_json::from_value(serde_json::json!({"subject":"file.rs", "arguments_preview": "{\"file_path\":\"file.rs\",\"old_string\":\"old\",\"new_string\":\"new\\nline\"}"})).unwrap();
         assert_eq!(
@@ -1453,7 +1601,7 @@ mod tests {
         );
         assert_eq!(
             subject("web_fetch", serde_json::json!({ "url": "https://a.test" })).as_deref(),
-            Some("https://a.test")
+            Some("a.test")
         );
         assert_eq!(
             subject(

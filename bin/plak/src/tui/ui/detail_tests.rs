@@ -55,6 +55,7 @@ fn canonical(call_id: &str, input: &str, output: &str) -> HostEvent {
             input_truncated: false,
             output_truncated: false,
             source: CallDetailSource::Canonical,
+            sources: Vec::new(),
         },
     })
 }
@@ -217,6 +218,7 @@ fn a_preview_answer_and_an_unavailable_call_are_labelled_preview() {
             input_truncated: true,
             output_truncated: true,
             source: CallDetailSource::Preview,
+            sources: Vec::new(),
         },
         CallDetailOutcome::Unavailable {
             reason: "not in history".into(),
@@ -890,6 +892,7 @@ fn an_answer_for_another_session_is_dropped() {
             input_truncated: false,
             output_truncated: false,
             source: CallDetailSource::Canonical,
+            sources: Vec::new(),
         },
     }));
     paint(&mut app, 120);
@@ -1039,6 +1042,7 @@ fn preview(call_id: &str) -> HostEvent {
             input_truncated: true,
             output_truncated: true,
             source: CallDetailSource::Preview,
+            sources: Vec::new(),
         },
     })
 }
