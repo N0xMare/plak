@@ -1545,7 +1545,7 @@ mod tests {
     #[test]
     fn binding_refuses_the_first_optional_entry_and_passes_mcp_entries() -> TestResult {
         let refused = bind_tool_plan(
-            &TemplateToolSelection::parse(["mcp:github", "fetch_url", "web_search"])?,
+            &TemplateToolSelection::parse(["mcp:github", "fetch_url", "image_gen", "web_search"])?,
             ToolRoute::Codex,
             "codex",
         )
@@ -1553,7 +1553,7 @@ mod tests {
         .ok_or("an optional tool bound")?;
         assert_eq!(
             refused.tool(),
-            &SelectedTool::Optional(OptionalTool::FetchUrl)
+            &SelectedTool::Optional(OptionalTool::ImageGen)
         );
         let mcp_only = TemplateToolSelection::parse(["mcp:github", "mcp:linear/list_issues"])?;
         for route in ToolRoute::ALL {
