@@ -178,10 +178,13 @@ pub(crate) fn descriptor(
         let observed = timestamp(REVIEWED)?;
         let expires = timestamp(EXPIRES)?;
         let provenance = FactProvenance::new(FactSource::BuiltIn, observed, Some(expires));
+        // Every usable reviewed row lists `image` among its input modalities
+        // in `GET /v1/language-models`.
         let features = [
             Capability::Streaming,
             Capability::Tools,
             Capability::Reasoning,
+            Capability::ImageInput,
         ]
         .into_iter()
         .map(|capability| {
