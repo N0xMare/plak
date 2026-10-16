@@ -387,6 +387,10 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[SourceKey, list[tuple[str, tuple[tuple[
         ("var", (("string", "HOME"),)),
         ("var_os", (("string", "EMAIL"),)),
     ],
+    # A pasted `~/` image path resolves against the operator's home.
+    ("plak", "src/tui/ui/image_paths.rs"): [
+        ("var_os", (("string", "HOME"),)),
+    ],
     ("plak", "src/home/paths.rs"): [
         ("var_os", (("string", "PLAK_HOME"),)),
         ("var_os", (("string", "HOME"),)),
@@ -1176,7 +1180,12 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     ("plakous-hosted", "src/sessions/transcript.rs"): {"tools": {"sniff_image"}},
     ("plakous-hosted", "src/runtime/admission.rs"): {"agent": {"MAX_USER_IMAGES"}},
+    # Pending-input context queries measure the message with its images.
+    ("plakous-hosted", "src/runtime/compact.rs"): {"agent": {"UserInput"}},
+    ("plakous-hosted", "src/runtime/host_loop/wake.rs"): {"agent": {"UserInput"}},
     ("plakous-hosted", "src/agent/build.rs"): {
+        # A scheduled compaction qualifies on the pending message, images included.
+        "agent": {"UserInput"},
         "sessions": {"internal"},
         # A Direct extension's registry owner names its MCP server.
         "tools": {"ToolOwnerClass"},

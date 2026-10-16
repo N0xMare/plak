@@ -1,8 +1,9 @@
 //! An image on the system clipboard (Ctrl+V, or the empty paste a terminal
 //! sends for an image-only clipboard) as a PNG attachment.
 
-use plakous::agent::MAX_USER_IMAGE_BYTES;
 use plakous_host_protocol::DraftImage;
+
+use crate::config::image_attachments::MAX_IMAGE_BYTES;
 
 /// Name the chip shows for a pasted clipboard image.
 const CLIPBOARD_IMAGE_NAME: &str = "clipboard.png";
@@ -33,7 +34,7 @@ pub(super) fn encode_png(
     }
     loop {
         let bytes = png_bytes(width, height, &rgba)?;
-        if bytes.len() <= MAX_USER_IMAGE_BYTES {
+        if bytes.len() <= MAX_IMAGE_BYTES {
             return Ok(DraftImage {
                 name: CLIPBOARD_IMAGE_NAME.to_owned(),
                 media_type: "image/png".to_owned(),
@@ -86,19 +87,15 @@ fn halve(width: usize, height: usize, rgba: &[u8]) -> (usize, usize, Vec<u8>) {
 mod tests {
     use super::*;
 
-    fn dimensions(image: &DraftImage) -> (u32, u32) {
-        plakous::tools::sniff_image(&image.bytes)
-            .unwrap()
-            .dimensions()
-            .unwrap()
-    }
-
     #[test]
     fn clipboard_pixels_become_a_png_attachment_that_fits_the_bound() {
         let image = encode_png(3, 2, vec![200; 3 * 2 * 4]).unwrap();
         assert_eq!(image.media_type, "image/png");
         assert_eq!(image.name, "clipboard.png");
-        assert_eq!(dimensions(&image), (3, 2));
+        assert!(
+            crate::config::image_attachments::chip(&image)
+                .starts_with("[image: clipboard.png 3x2 ")
+        );
 
         // Incompressible pixels over the bound are halved until they fit.
         let (width, height) = (1100, 900);
@@ -112,8 +109,11 @@ mod tests {
             })
             .collect();
         let image = encode_png(width, height, noise).unwrap();
-        assert!(image.bytes.len() <= MAX_USER_IMAGE_BYTES);
-        assert_eq!(dimensions(&image), (550, 450));
+        assert!(image.bytes.len() <= MAX_IMAGE_BYTES);
+        assert!(
+            crate::config::image_attachments::chip(&image)
+                .starts_with("[image: clipboard.png 550x450 ")
+        );
 
         assert!(encode_png(2, 2, vec![0; 3]).is_err());
         assert!(encode_png(0, 0, Vec::new()).is_err());

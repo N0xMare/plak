@@ -188,6 +188,7 @@ test = ["repository-only"]
 
 [workspace.metadata.plakous.production-dependencies]
 plak = [
+    "arboard",
     "base64",
     "clap",
     "crossterm",
@@ -205,6 +206,7 @@ plak = [
     "plakous-offline-crash-harness",
     "plakous-recursive-subagents",
     "plakous-recursive-subagents-store",
+    "png",
     "pulldown-cmark",
     "ratatui",
     "rusqlite",

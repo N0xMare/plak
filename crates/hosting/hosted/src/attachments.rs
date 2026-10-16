@@ -11,6 +11,9 @@ use plakous_host_protocol::DraftImage;
 /// Most images one message carries.
 pub const MAX_IMAGES: usize = plakous::agent::MAX_USER_IMAGES;
 
+/// Largest raw image one message part carries (3.75 MiB).
+pub const MAX_IMAGE_BYTES: usize = MAX_USER_IMAGE_BYTES;
+
 /// Why an image file could not be attached. Every message names the file.
 #[derive(Debug)]
 #[non_exhaustive]
