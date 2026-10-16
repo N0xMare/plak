@@ -121,8 +121,11 @@ pub(crate) fn count_observation(
     if grok_enrollment(model).is_none() {
         return Err(GrokContextEstimateError::UnenrolledModel);
     }
+    // An image's data URL is not text the model reads; its token cost is the
+    // per-image margin instead of its serialized bytes.
     let mut upper_bound = wire_bytes
-        .checked_add(FIXED_MARGIN)
+        .checked_sub(counts.image_url_bytes())
+        .and_then(|bytes| bytes.checked_add(FIXED_MARGIN))
         .ok_or(GrokContextEstimateError::ArithmeticOverflow)?;
     for occurrence in ResponsesWireOccurrence::ALL {
         let count = u64::from(counts.count(occurrence));
@@ -165,6 +168,7 @@ const fn occurrence_margin(occurrence: ResponsesWireOccurrence) -> u64 {
         ResponsesWireOccurrence::SchemaNode => 16,
         ResponsesWireOccurrence::ReasoningReplay => 128,
         ResponsesWireOccurrence::OpaqueReplay => 256,
+        ResponsesWireOccurrence::InputImage => plakous_model::CONSERVATIVE_IMAGE_MAX_TOKENS,
     }
 }
 

@@ -234,7 +234,7 @@ fn route_capabilities(
         let supports_reasoning =
             crate::native_auth::subscription_model_supports_reasoning(model.remote_id().as_str());
         let evidence_note = format!(
-            "{}; exact reviewed model {}; application-local function tools only; fixed profile {}; pinned OpenCode source {}; {} {}; non-normative mutable documentation locators: function calling {}, model page {}; adapter {}; authenticated exact-ID catalog receipt; no aliases, hosted tools, media, structured output, continuation, or catalog-derived context authority; reasoning={}",
+            "{}; exact reviewed model {}; application-local function tools only; fixed profile {}; pinned OpenCode source {}; {} {}; non-normative mutable documentation locators: function calling {}, model page {}; adapter {}; authenticated exact-ID catalog receipt; user image input; no aliases, hosted tools, other media, structured output, continuation, or catalog-derived context authority; reasoning={}",
             crate::responses_dialect::SUPERGROK_FEATURE_REVISION,
             model.remote_id().as_str(),
             crate::native_auth::XAI_GROK_COMPATIBILITY_PROFILE,
@@ -271,6 +271,14 @@ fn route_capabilities(
         );
         features.insert(
             Capability::Tools,
+            FeatureSupport::new(
+                Support::Native,
+                CapabilityConstraints::new(None, Some(evidence_note.clone())),
+                provenance,
+            ),
+        );
+        features.insert(
+            Capability::ImageInput,
             FeatureSupport::new(
                 Support::Native,
                 CapabilityConstraints::new(None, Some(evidence_note.clone())),

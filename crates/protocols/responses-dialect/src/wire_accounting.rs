@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 
 use serde_json::{Map, Value};
 
-const OCCURRENCE_KINDS: usize = 11;
+const OCCURRENCE_KINDS: usize = 12;
 const MAX_TOTAL_OCCURRENCES: u32 = 1_048_576;
 const MAX_SCHEMA_DEPTH: usize = 64;
 
@@ -38,6 +38,9 @@ pub enum ResponsesWireOccurrence {
     ReasoningSummary,
     /// One structurally bounded, otherwise opaque replay item.
     OpaqueReplay,
+    /// An `input_image` user message content part. Its `image_url` bytes are
+    /// reported separately by [`ResponsesWireOccurrenceCounts::image_url_bytes`].
+    InputImage,
 }
 
 impl ResponsesWireOccurrence {
@@ -54,6 +57,7 @@ impl ResponsesWireOccurrence {
         Self::ReasoningReplay,
         Self::ReasoningSummary,
         Self::OpaqueReplay,
+        Self::InputImage,
     ];
 
     const fn index(self) -> usize {
@@ -69,6 +73,7 @@ impl ResponsesWireOccurrence {
             Self::ReasoningReplay => 8,
             Self::ReasoningSummary => 9,
             Self::OpaqueReplay => 10,
+            Self::InputImage => 11,
         }
     }
 }
@@ -82,6 +87,7 @@ impl ResponsesWireOccurrence {
 pub struct ResponsesWireOccurrenceCounts {
     counts: [u32; OCCURRENCE_KINDS],
     total: u32,
+    image_url_bytes: u64,
 }
 
 impl ResponsesWireOccurrenceCounts {
@@ -89,6 +95,7 @@ impl ResponsesWireOccurrenceCounts {
         Self {
             counts: [0; OCCURRENCE_KINDS],
             total: 0,
+            image_url_bytes: 0,
         }
     }
 
@@ -102,6 +109,13 @@ impl ResponsesWireOccurrenceCounts {
     #[must_use]
     pub const fn total(self) -> u32 {
         self.total
+    }
+
+    /// Returns the serialized bytes of every `input_image` `image_url`
+    /// string, which a per-image token bound accounts for instead.
+    #[must_use]
+    pub const fn image_url_bytes(self) -> u64 {
+        self.image_url_bytes
     }
 
     fn increment(
@@ -236,13 +250,14 @@ fn inspect_message(
         .and_then(Value::as_array)
         .ok_or(WireAccountingError::Malformed)?;
     for part in parts {
-        inspect_message_part(part, counts)?;
+        inspect_message_part(part, role, counts)?;
     }
     Ok(())
 }
 
 fn inspect_message_part(
     part: &Value,
+    role: &str,
     counts: &mut ResponsesWireOccurrenceCounts,
 ) -> Result<(), WireAccountingError> {
     let object = part.as_object().ok_or(WireAccountingError::Malformed)?;
@@ -272,6 +287,16 @@ fn inspect_message_part(
             validate_members(object, &["type", "refusal"], &[])?;
             required_string(object, "refusal")?;
             counts.increment(ResponsesWireOccurrence::Refusal)
+        }
+        "input_image" if role == "user" => {
+            validate_members(object, &["type", "image_url"], &[])?;
+            let url = required_nonempty_string(object, "image_url")?;
+            let bytes = u64::try_from(url.len()).map_err(|_| WireAccountingError::ResourceLimit)?;
+            counts.image_url_bytes = counts
+                .image_url_bytes
+                .checked_add(bytes)
+                .ok_or(WireAccountingError::ResourceLimit)?;
+            counts.increment(ResponsesWireOccurrence::InputImage)
         }
         _ => Err(WireAccountingError::Unsupported),
     }
@@ -630,7 +655,7 @@ mod tests {
         unknown_top["unknown"] = json!(true);
         cases.push(unknown_top);
         let mut image = base.clone();
-        image["input"] = json!([{"type":"message","role":"user","content":[
+        image["input"] = json!([{"type":"message","role":"assistant","content":[
             {"type":"input_image","image_url":"https://example.test/image"}
         ]}]);
         cases.push(image);

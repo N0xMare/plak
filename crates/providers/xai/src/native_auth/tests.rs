@@ -3687,10 +3687,11 @@ async fn catalog_rejects_alias_selection_and_admits_only_exact_conservative_tupl
         now_timestamp()?,
     )?;
     let capabilities = exact.descriptor().capabilities();
-    assert_eq!(capabilities.features().len(), 3);
+    assert_eq!(capabilities.features().len(), 4);
     for capability in [
         plakous_model::Capability::Streaming,
         plakous_model::Capability::Tools,
+        plakous_model::Capability::ImageInput,
         plakous_model::Capability::Reasoning,
     ] {
         let support = required(capabilities.get(capability), "admitted capability")?;

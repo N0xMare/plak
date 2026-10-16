@@ -450,7 +450,7 @@ impl ResponsesRequestPolicy {
             StoreFieldPolicy::Emit,
             PromptCachePolicy::Unsupported,
             StructuredOutputPolicy::Unsupported,
-            false,
+            true,
             false,
             ReasoningEffortPolicy::AllNamed,
             ReasoningSummaryPolicy::Concise,
@@ -580,7 +580,6 @@ impl ResponsesRequestPolicy {
             && matches!(self.store_field, StoreFieldPolicy::Emit)
             && matches!(self.prompt_cache, PromptCachePolicy::Unsupported)
             && matches!(self.structured_output, StructuredOutputPolicy::Unsupported)
-            && !self.image_input
             && !self.parallel_tool_calls
             && matches!(
                 self.parallel_tool_calls_field,

@@ -2482,13 +2482,17 @@ and later accept text and image input), a Codex catalog row whose
 official client sends the same user `input_image` on both wires), and an
 OpenRouter Chat or Messages target whose authenticated `/api/v1/models` row
 lists `image` in `architecture.input_modalities` (a row without the field has
-no image input; the flag is part of the catalog snapshot identity). xAI
-Platform and SuperGrok rows and OpenRouter Responses targets carry no such fact
-until per-model evidence is reviewed, so image prompts there are refused at
+no image input; the flag is part of the catalog snapshot identity), every
+usable xAI Platform row (each lists `image` in `GET /v1/language-models`
+`input_modalities`) and every admitted SuperGrok coding row (live-qualified on
+the subscription proxy). OpenRouter Responses targets carry no such fact until
+per-model evidence is reviewed, so image prompts there are refused at
 admission. Lowering: Responses sends inline bytes as a `data:` URL
 `input_image` for user and tool-result images (the OpenAI Platform, Codex,
-Codex Lite and xAI Platform request policies admit user `input_image`;
-SuperGrok and OpenRouter Responses do not). Messages sends `{type: "image", source: {type: "base64",
+Codex Lite, xAI Platform and SuperGrok request policies admit user
+`input_image`; OpenRouter Responses does not). The SuperGrok context upper
+bound counts each user `input_image` at the conservative per-image token bound
+instead of its data-URL bytes. Messages sends `{type: "image", source: {type: "base64",
 media_type, data}}` user blocks and the same blocks inside `tool_result`
 content for direct-lineage tool images. Chat sends user `image_url` parts with
 `data:` URLs; Chat tool messages stay text, and a round's tool-result images
