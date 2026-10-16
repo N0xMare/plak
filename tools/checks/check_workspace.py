@@ -1164,6 +1164,18 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
     "plakous-recursive-subagents-store": _SHARED_PLAKOUS_SYMBOLS,
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
+    # Prompt images: the library's admission bounds and its one sniffer,
+    # checked before a draft is queued and to render chips.
+    ("plakous-hosted", "src/attachments.rs"): {
+        "agent": {"MAX_USER_IMAGES", "MAX_USER_IMAGE_BYTES"},
+        "tools": {"ImageSniffError", "sniff_image"},
+    },
+    ("plakous-hosted", "src/sessions/queue.rs"): {
+        "agent": {"MAX_USER_IMAGES", "MAX_USER_IMAGE_BYTES", "UserInput", "UserPart"},
+        "tools": {"sniff_image"},
+    },
+    ("plakous-hosted", "src/sessions/transcript.rs"): {"tools": {"sniff_image"}},
+    ("plakous-hosted", "src/runtime/admission.rs"): {"agent": {"MAX_USER_IMAGES"}},
     ("plakous-hosted", "src/agent/build.rs"): {
         "sessions": {"internal"},
         # A Direct extension's registry owner names its MCP server.

@@ -1228,7 +1228,11 @@ mod sidecar {
 fn composer_image_chips_attach_by_slash_or_path_drop_and_ride_the_next_prompt() {
     let dir = tempfile::tempdir().unwrap();
     let shot = dir.path().join("shot one.png");
-    std::fs::write(&shot, crate::attachments::png(1280, 720, 2048)).unwrap();
+    std::fs::write(
+        &shot,
+        crate::config::image_attachments::png(1280, 720, 2048),
+    )
+    .unwrap();
     let notes = dir.path().join("notes.txt");
     std::fs::write(&notes, "not an image").unwrap();
     let mut app = App::new(launch_basic(), true);

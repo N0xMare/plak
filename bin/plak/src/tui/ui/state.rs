@@ -302,7 +302,7 @@ impl App {
     pub(super) fn restore_draft(&mut self, draft: plakous_host_protocol::Draft) {
         let mut images = draft.images;
         images.append(&mut self.attachments);
-        images.truncate(plakous::agent::MAX_USER_IMAGES);
+        images.truncate(crate::config::image_attachments::MAX_IMAGES);
         self.attachments = images;
         self.restore_draft_text(draft.text);
     }

@@ -52,6 +52,8 @@
 
 /// How the host classifies and renders one tool call's activity.
 pub mod activity;
+/// Image files attached to a prompt: reading, sniffing, bounds and chips.
+pub mod attachments;
 /// The session-binding vocabulary: composition, wire, target, and the
 /// `[root] agent` fact a session compares its bound tuple against.
 pub mod binding;

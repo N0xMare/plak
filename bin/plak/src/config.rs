@@ -10,6 +10,8 @@ pub(crate) use crate::surface_protocol::{
 };
 #[cfg(test)]
 pub(crate) use crate::surface_protocol::{host_event_channel, user_action_channel};
+/// Reading, sniffing and chips of the image files a draft attaches.
+pub(crate) use plakous_hosted::attachments as image_attachments;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "unit tests")]

@@ -475,7 +475,7 @@ impl App {
         let full = self
             .attachments
             .iter()
-            .map(crate::attachments::chip)
+            .map(crate::config::image_attachments::chip)
             .collect::<Vec<_>>()
             .join(" ");
         let count = format!(

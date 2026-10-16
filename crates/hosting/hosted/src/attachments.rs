@@ -1,4 +1,5 @@
-//! Image files an operator attaches to a prompt (`plak run --image`, TUI `/image`).
+//! Image files an operator attaches to a prompt (`plak run --image`, the
+//! TUI's `/image` and a dropped path): reading, sniffing and the bounds.
 
 use std::fmt;
 use std::io;
@@ -7,9 +8,13 @@ use std::path::{Path, PathBuf};
 use plakous::agent::MAX_USER_IMAGE_BYTES;
 use plakous_host_protocol::DraftImage;
 
+/// Most images one message carries.
+pub const MAX_IMAGES: usize = plakous::agent::MAX_USER_IMAGES;
+
 /// Why an image file could not be attached. Every message names the file.
 #[derive(Debug)]
-pub(crate) enum ImageFileError {
+#[non_exhaustive]
+pub enum ImageFileError {
     Unreadable {
         path: PathBuf,
         source: io::Error,
@@ -63,7 +68,12 @@ impl std::error::Error for ImageFileError {
 
 /// Reads one image file within the admission bound and sniffs its type from
 /// its bytes; the extension is never trusted.
-pub(crate) fn read_image(path: &Path) -> Result<DraftImage, ImageFileError> {
+///
+/// # Errors
+///
+/// Returns [`ImageFileError`] naming the file when it cannot be read, is not
+/// a file, exceeds the bound, or is not an image.
+pub fn read_image(path: &Path) -> Result<DraftImage, ImageFileError> {
     let unreadable = |source| ImageFileError::Unreadable {
         path: path.to_owned(),
         source,
@@ -100,13 +110,36 @@ pub(crate) fn read_image(path: &Path) -> Result<DraftImage, ImageFileError> {
     })
 }
 
-/// The composer chip of an attached image: `[image: shot.png 1280x720 412 KB]`.
-pub(crate) fn chip(image: &DraftImage) -> String {
-    plakous_hosted::sessions::named_image_chip(image)
+/// Whether `path` is an absolute path to an existing file whose leading
+/// bytes are a png, jpeg, gif or webp header: what a terminal pastes when an
+/// image file is dropped on it.
+#[must_use]
+pub fn is_image_file(path: &Path) -> bool {
+    use std::io::Read as _;
+    if !path.is_absolute() || !path.is_file() {
+        return false;
+    }
+    let mut head = Vec::new();
+    let read = std::fs::File::open(path).and_then(|file| file.take(4096).read_to_end(&mut head));
+    // A header too short to state dimensions still names the type.
+    read.is_ok()
+        && matches!(
+            plakous::tools::sniff_image(&head),
+            Ok(_) | Err(plakous::tools::ImageSniffError::Dimensions)
+        )
 }
 
-#[cfg(test)]
-pub(crate) fn png(width: u32, height: u32, extra: usize) -> Vec<u8> {
+/// The chip of an attached image under its file name:
+/// `[image: shot.png 1280x720 412 KB]`.
+#[must_use]
+pub fn chip(image: &DraftImage) -> String {
+    crate::sessions::named_image_chip(image)
+}
+
+#[cfg(any(test, feature = "test-support"))]
+#[doc(hidden)]
+#[must_use]
+pub fn png(width: u32, height: u32, extra: usize) -> Vec<u8> {
     let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
     png.extend_from_slice(&[0, 0, 0, 13]);
     png.extend_from_slice(b"IHDR");

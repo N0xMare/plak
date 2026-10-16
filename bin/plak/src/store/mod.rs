@@ -2731,7 +2731,7 @@ mod tests {
         let image = |name: &str, width| plakous_host_protocol::DraftImage {
             name: name.to_owned(),
             media_type: "image/png".to_owned(),
-            bytes: crate::attachments::png(width, 3, 100),
+            bytes: plakous_hosted::attachments::png(width, 3, 100),
         };
         let mut with_images = QueueItem::new("look at these");
         with_images.images = vec![image("a.png", 2), image("b.png", 5)].into();

@@ -44,7 +44,6 @@ pub mod agent_jsonl;
 pub mod agent_stdio;
 #[doc(hidden)]
 pub mod agents_projection;
-mod attachments;
 mod build_identity;
 mod carry;
 mod cli;

@@ -4585,8 +4585,8 @@ and Persian shaping.
 
 ### 5.9 Image attachments
 
-A prompt can carry images: `/image <path>` (repeatable; `~/` expands to
-`HOME`, a relative path resolves against the TUI's working directory) and a
+A prompt can carry images: `/image <path>` (repeatable; the path is taken
+as typed, a relative one against the TUI's working directory) and a
 pasted single-line absolute path to an existing png, jpeg, gif or webp file
 (a terminal file drop; surrounding quotes and `\ ` escapes are undone) each
 attach one image to the draft instead of typing text. The type is sniffed

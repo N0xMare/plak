@@ -270,7 +270,7 @@ impl App {
             }
             SlashEffect::Reload => self.request_reload(),
             SlashEffect::AttachImage(path) => {
-                self.attach_image(&expand_home(&path));
+                self.attach_image(std::path::Path::new(&path));
                 None
             }
             SlashEffect::OpenSettings => self.open_control_tab(ControlTab::Settings),
@@ -463,33 +463,24 @@ impl App {
     /// naming the file, and the draft is unchanged.
     pub(super) fn attach_image(&mut self, path: &std::path::Path) {
         self.mark_dirty();
-        if self.attachments.len() >= plakous::agent::MAX_USER_IMAGES {
+        if self.attachments.len() >= crate::config::image_attachments::MAX_IMAGES {
             self.push_block(ScrollBlock::System(format!(
                 "image not attached: a message carries at most {} images",
-                plakous::agent::MAX_USER_IMAGES
+                crate::config::image_attachments::MAX_IMAGES
             )));
             return;
         }
-        match crate::attachments::read_image(path) {
+        match crate::config::image_attachments::read_image(path) {
             Ok(image) => self.attachments.push(image),
             Err(error) => self.push_block(ScrollBlock::System(format!("not attached: {error}"))),
         }
     }
 }
 
-/// `~/x` relative to `HOME`; anything else as typed.
-fn expand_home(path: &str) -> std::path::PathBuf {
-    match (path.strip_prefix("~/"), std::env::var_os("HOME")) {
-        (Some(rest), Some(home)) => std::path::Path::new(&home).join(rest),
-        _ => std::path::PathBuf::from(path),
-    }
-}
-
-/// The path a terminal pastes when a file is dropped on it, when that path
-/// is absolute and names an existing png, jpeg, gif or webp file. Surrounding
-/// quotes and backslash-escaped spaces are undone.
+/// The path a terminal pastes when a file is dropped on it, when it names an
+/// existing image file. Surrounding quotes and backslash-escaped spaces are
+/// undone.
 fn pasted_image_path(text: &str) -> Option<std::path::PathBuf> {
-    use std::io::Read as _;
     let text = text.trim();
     if text.contains('\n') {
         return None;
@@ -502,20 +493,5 @@ fn pasted_image_path(text: &str) -> Option<std::path::PathBuf> {
         })
         .map_or_else(|| text.replace("\\ ", " "), str::to_owned);
     let path = std::path::PathBuf::from(unquoted);
-    if !path.is_absolute() || !path.is_file() {
-        return None;
-    }
-    let mut head = Vec::new();
-    std::fs::File::open(&path)
-        .ok()?
-        .take(4096)
-        .read_to_end(&mut head)
-        .ok()?;
-    let sniffed = plakous::tools::sniff_image(&head);
-    // A header too short to state dimensions still names the type.
-    matches!(
-        sniffed,
-        Ok(_) | Err(plakous::tools::ImageSniffError::Dimensions)
-    )
-    .then_some(path)
+    crate::config::image_attachments::is_image_file(&path).then_some(path)
 }

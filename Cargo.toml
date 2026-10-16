@@ -291,6 +291,7 @@ may-use = [
     "crate::config::UserActionSendError",
     "crate::config::UserActionSender",
     "crate::config::effort",
+    "crate::config::image_attachments",
     "crate::config::host_event_channel",
     "crate::config::product_recommended_effort",
     "crate::config::user_action_channel",

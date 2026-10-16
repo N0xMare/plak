@@ -1021,16 +1021,18 @@ struct RunPrompt {
 impl RunPrompt {
     /// Joins the words and reads every image; a refusal names the file.
     fn into_draft(self) -> Result<(String, Vec<plakous_host_protocol::DraftImage>), String> {
-        if self.images.len() > plakous::agent::MAX_USER_IMAGES {
+        if self.images.len() > plakous_hosted::attachments::MAX_IMAGES {
             return Err(format!(
                 "run accepts at most {} --image files",
-                plakous::agent::MAX_USER_IMAGES
+                plakous_hosted::attachments::MAX_IMAGES
             ));
         }
         let images = self
             .images
             .iter()
-            .map(|path| crate::attachments::read_image(path).map_err(|error| error.to_string()))
+            .map(|path| {
+                plakous_hosted::attachments::read_image(path).map_err(|error| error.to_string())
+            })
             .collect::<Result<Vec<_>, _>>()?;
         Ok((self.words.join(" "), images))
     }
@@ -1337,7 +1339,7 @@ mod tests {
     fn run_image_flags_attach_sniffed_files_and_name_the_refused_file() {
         let dir = tempfile::tempdir().unwrap();
         let shot = dir.path().join("shot.png");
-        std::fs::write(&shot, crate::attachments::png(4, 3, 10)).unwrap();
+        std::fs::write(&shot, plakous_hosted::attachments::png(4, 3, 10)).unwrap();
         let notes = dir.path().join("notes.png");
         std::fs::write(&notes, "plain text").unwrap();
         let run = |images: &[&std::path::Path], account: &str| {
