@@ -457,6 +457,7 @@ dependencies = [
  "plakous-tool-plan",
  "plakous-tool-process",
  "plakous-tool-search",
+ "plakous-tool-web",
  "plakous-tools",
  "serde",
  "serde_json",
@@ -598,6 +599,16 @@ dependencies = [
 
 [[package]]
 name = "plakous-tool-search"
+version = "0.1.0"
+dependencies = [
+ "plakous-model",
+ "plakous-tools",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "plakous-tool-web"
 version = "0.1.0"
 dependencies = [
  "plakous-model",
