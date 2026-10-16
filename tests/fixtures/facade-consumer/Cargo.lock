@@ -1451,6 +1451,7 @@ dependencies = [
 name = "plakous-chat-completions"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "futures-channel",
  "futures-util",
  "plakous-attempt",
@@ -1543,6 +1544,7 @@ dependencies = [
 name = "plakous-messages"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "futures-channel",
  "futures-util",
  "plakous-attempt",
@@ -1729,7 +1731,6 @@ dependencies = [
  "htmd",
  "plakous-http",
  "plakous-model",
- "plakous-tool-files",
  "plakous-tools",
  "serde",
  "serde_json",
