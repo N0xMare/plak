@@ -215,7 +215,7 @@ plak
 A new session in the current directory; it needs an interactive terminal. Type a
 prompt and press `Enter`. From there:
 
-- `/` opens the slash palette (22 commands, including `/ps`).
+- `/` opens the slash palette (23 commands, including `/ps`).
 - `Ctrl+X` reopens Menu; `?` opens While typing; `Enter` opens All keybinds. `/help` also prints the full sheet.
 - `/agents` opens the Agents tab, where you choose a profile. On a fresh home,
   pick one and **Use now**; the agent attaches in the same session. An

@@ -335,7 +335,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         }
         let mut candidate = self.config.session.clone();
         let item = candidate
-            .enqueue_live(WAKE_PROMPT.to_owned())
+            .enqueue_live(WAKE_PROMPT)
             .map_err(|_| CliFailure::new("child wake queue admission was refused"))?;
         // Queue identity and the exact instruction batch publish atomically;
         // an unresolved wake cannot be edited or exported as a user prompt.
@@ -3521,7 +3521,7 @@ mod tests {
                     let item = host
                         .config
                         .session
-                        .enqueue_live("next user prompt".into())
+                        .enqueue_live("next user prompt")
                         .unwrap();
                     host.config.store.save(&mut host.config.session).unwrap();
                     host.run_prompt(item.text.clone(), Some(item), false, None)
@@ -3609,7 +3609,7 @@ mod tests {
             let item = host
                 .config
                 .session
-                .enqueue_live("queued user prompt".into())
+                .enqueue_live("queued user prompt")
                 .unwrap();
             host.config.store.save(&mut host.config.session).unwrap();
             host.pending_start = Some(item);

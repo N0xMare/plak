@@ -95,7 +95,8 @@ pub use channel::{
     ObservationReceiver, ObservationSender, ObservationSink, intent_channel, observation_channel,
 };
 pub use intent::{
-    ApprovalChoice, Core, Never, ObservationExtension, ProtocolExtension, SessionIntent,
+    ApprovalChoice, Core, Draft, DraftImage, Never, ObservationExtension, ProtocolExtension,
+    SessionIntent,
 };
 pub use observation::{
     ContextCapacityRecovery, ModelRetryNotice, PendingContinuation, QueueDrainState, QueueItem,

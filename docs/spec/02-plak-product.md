@@ -865,7 +865,9 @@ a leading truncation marker) and derives everything after them from the new feed
 The first product commit stores these keyed imported-row intents atomically with
 the new session; it writes no transcript view rows. Import then runs the ordinary
 projector against the seeded session's feed. The carried queue remains paused
-`queue_items`, not already-submitted commands, and the source workflow ledger
+`queue_items`, not already-submitted commands; queued items' attached images
+are not carried (the export document stays version 7), so a carried item
+arrives text-only. The source workflow ledger
 remains inert reference text, not executable workflow requests. A version 7 tool row
 carries `exposed_name`, the name the model called, beside `name`, the
 canonical name its activity kind derives from; the field is omitted when the
@@ -2789,21 +2791,24 @@ requests. Pending terminal notices alone do not refuse a transition.
 Same-branch recovery and authority refresh transfer the process service instead;
 compaction preserves that branch's jobs.
 
-The catalog is **closed**. Twenty-two commands ship, and a command that does
+The catalog is **closed**. Twenty-three commands ship, and a command that does
 nothing but announce a deferred capability is not one of them:
 
 `/help`, `/keybinds`, `/status`, `/settings`, `/agents`, `/providers`,
 `/usage`, `/context`, `/attach`, `/recover`, `/clear`, `/compact`,
 `/config`, `/resume`, `/tree`, `/ps`, `/stop-all`, `/fork`, `/fork-then-compact`,
-`/drop`, `/reload`, `/quit`. Two spellings are accepted aliases rather than extra rows:
+`/drop`, `/image`, `/reload`, `/quit`. Two spellings are accepted aliases rather than extra rows:
 `/stop_all` for `/stop-all` and `/exit` for `/quit`.
 
-A command whose grammar is the bare word — every row except `/agents` and
-`/resume` — refuses trailing
+A command whose grammar is the bare word — every row except `/agents`,
+`/resume`, `/tree` and `/image` — refuses trailing
 text with a one-line system note, `usage: /<name>  —  takes no arguments`, and
 does nothing else. `/compact now` starts no paid compaction and `/clear all`
 clears nothing. `/fork` and `/fork-then-compact` refuse with their own usage
 line. The argument-taking commands keep their grammar below.
+
+`/image <path>` attaches an image file to the draft (§5.9); bare `/image`
+answers `usage: /image <path>  —  attach a png, jpeg, gif or webp`.
 
 `/tree resume` explicitly resumes a restored paused agent tree; on a tree that
 is not paused it changes nothing and says `agent tree is not paused; nothing to
@@ -4577,6 +4582,47 @@ the line and paragraph separators. The `Cf` category is **not** rejected
 wholesale: zero-width joiners and non-joiners, variation selectors, and emoji
 tag characters are load-bearing in family emoji, subdivision flags, and Indic
 and Persian shaping.
+
+### 5.9 Image attachments
+
+A prompt can carry images: `/image <path>` (repeatable; `~/` expands to
+`HOME`, a relative path resolves against the TUI's working directory) and a
+pasted single-line absolute path to an existing png, jpeg, gif or webp file
+(a terminal file drop; surrounding quotes and `\ ` escapes are undone) each
+attach one image to the draft instead of typing text. The type is sniffed
+from the bytes, never the extension. The bounds are the library's admission
+bounds (chapter 01): at most 8 images per message and 3.75 MiB raw per image;
+nothing is resized, so an oversize file is refused with a note naming it and
+asking to downscale. A refusal is a system note naming the file; the draft is
+unchanged. Clipboard bitmap paste and terminal image rendering do not exist.
+
+Attached images show as chips in the composer's bottom border,
+`[image: shot.png 1280x720 412 KB]`, collapsing to `[N images]` when they do
+not fit. `Backspace` in an empty composer removes the last chip. A message
+with images still needs text: `Enter` on an empty composer with chips sends
+nothing and says `type a message to send with the attached images`. Submit
+sends the text and the chips' images together as one draft (prompt, queued
+follow-up or steer); a refused draft returns its images to the composer.
+
+A queued item keeps its images for its whole life: a queue edit replaces only
+the text, and the queue panel marks the item `[1 image]` / `[N images]`.
+Queued images live in the product store's `queue_attachments` table, written
+once with their item and removed with it (deleting, sending or dropping the
+item); all queued items of one session hold at most 64 MiB of images, and a
+draft over that is refused at queue admission. Delivery sends the item's
+text (with any child-mail batch) and then its images as one user message.
+
+The user row shows one chip line per image after the prompt text,
+`[image: png 1280x720 412 KB]`. The row is derived from committed history,
+which keeps the media type and bytes but no file name, so the transcript chip
+names the type where the composer chip names the file; live and rebuilt rows
+are identical. A route or model without image input refuses the prompt at
+runtime admission, naming the route and model; the item stays queued for an
+edit or delete.
+
+The `plak agent` JSONL `prompt` kind carries text only; images reach the host
+only from the TUI and `plak run --image`. The export document does not carry
+queued items' images (§2.5.1).
 
 ## 6. What the model sees
 

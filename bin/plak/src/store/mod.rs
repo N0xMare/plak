@@ -968,6 +968,23 @@ fn sync_queue(tx: &Transaction<'_>, s: &SessionRecord) -> Result<(), String> {
         if changed != 1 {
             return Err("queue identity contradicts durable product state".to_owned());
         }
+        // Attachments are immutable per item: written once with the item,
+        // removed with it by the foreign-key cascade.
+        if !existing.iter().any(|(id, _, _)| id == &item.id) {
+            for (ordinal, image) in item.images.iter().enumerate() {
+                tx.execute(
+                    "INSERT INTO queue_attachments(item_id,ordinal,name,media_type,bytes) VALUES(?1,?2,?3,?4,?5)",
+                    params![
+                        item.id,
+                        i64::try_from(ordinal).map_err(|_| "attachment ordinal is invalid")?,
+                        image.name,
+                        image.media_type,
+                        image.bytes
+                    ],
+                )
+                .map_err(|_| "could not commit product queue attachments".to_owned())?;
+            }
+        }
     }
     Ok(())
 }
@@ -1094,9 +1111,28 @@ fn load_queue(c: &Connection, id: &str) -> Result<Vec<QueueItem>, String> {
                 revision: from_i64(row.get(1)?)?,
                 text: row.get(2)?,
                 submitted_at_ms: from_i64(row.get(3)?)?,
+                images: std::sync::Arc::default(),
             })
         },
-    )
+    )?
+    .into_iter()
+    .map(|mut item| {
+        item.images = query_collect(
+            c,
+            "SELECT name,media_type,bytes FROM queue_attachments WHERE item_id=?1 ORDER BY ordinal",
+            &item.id,
+            |row| {
+                Ok(plakous_host_protocol::DraftImage {
+                    name: row.get(0)?,
+                    media_type: row.get(1)?,
+                    bytes: row.get(2)?,
+                })
+            },
+        )?
+        .into();
+        Ok(item)
+    })
+    .collect()
 }
 
 fn redundant_exposed_name(tool: &plakous_host_protocol::views::transcript::ToolItem) -> bool {
@@ -1182,6 +1218,10 @@ const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     (
         "queue_items",
         "CREATE TABLE queue_items(session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,item_id TEXT PRIMARY KEY,revision INTEGER NOT NULL CHECK(revision>0),position INTEGER NOT NULL CHECK(position>=0),text TEXT NOT NULL,submitted_at INTEGER NOT NULL CHECK(submitted_at>=0),UNIQUE(session_id,position))",
+    ),
+    (
+        "queue_attachments",
+        "CREATE TABLE queue_attachments(item_id TEXT NOT NULL REFERENCES queue_items(item_id) ON DELETE CASCADE,ordinal INTEGER NOT NULL CHECK(ordinal>=0),name TEXT NOT NULL,media_type TEXT NOT NULL,bytes BLOB NOT NULL,PRIMARY KEY(item_id,ordinal))",
     ),
     (
         "workflows",
@@ -2680,6 +2720,51 @@ mod tests {
             store.load(&session.id).unwrap().pending_queue[0].text,
             "rewrite"
         );
+    }
+
+    #[test]
+    fn queued_attachments_round_trip_survive_edit_and_leave_with_their_item() {
+        let root = tempdir().unwrap();
+        let paths = PlakPaths::explicit(root.path().join("p"));
+        let mut store = ProductStore::open(&paths).unwrap();
+        let mut session = SessionRecord::new(root.path().to_path_buf());
+        let image = |name: &str, width| plakous_host_protocol::DraftImage {
+            name: name.to_owned(),
+            media_type: "image/png".to_owned(),
+            bytes: crate::attachments::png(width, 3, 100),
+        };
+        let mut with_images = QueueItem::new("look at these");
+        with_images.images = vec![image("a.png", 2), image("b.png", 5)].into();
+        session.pending_queue.push(with_images.clone());
+        session.pending_queue.push(QueueItem::new("text only"));
+        store.commit(&mut session).unwrap();
+        let loaded = store.load(&session.id).unwrap();
+        assert_eq!(loaded.pending_queue, session.pending_queue);
+        assert_eq!(loaded.pending_queue[0].images.len(), 2);
+        assert_eq!(loaded.pending_queue[0].images[1].name, "b.png");
+        assert!(loaded.pending_queue[1].images.is_empty());
+
+        // An edit replaces the text; the images stay with the item.
+        session.pending_queue[0].text = "look again".into();
+        session.pending_queue[0].revision = 2;
+        store.commit(&mut session).unwrap();
+        let edited = store.load(&session.id).unwrap();
+        assert_eq!(edited.pending_queue[0].text, "look again");
+        assert_eq!(edited.pending_queue[0].images, with_images.images);
+
+        let attachments = |store: &ProductStore| -> i64 {
+            store
+                .connection
+                .query_row("SELECT COUNT(*) FROM queue_attachments", [], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+        };
+        assert_eq!(attachments(&store), 2);
+        session.pending_queue.remove(0);
+        store.commit(&mut session).unwrap();
+        assert_eq!(attachments(&store), 0);
+        assert_eq!(store.load(&session.id).unwrap().pending_queue.len(), 1);
     }
 
     #[test]

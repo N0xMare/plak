@@ -286,13 +286,17 @@ pub mod control {
     /// - Busy + steer → [`UserAction::Steer`]
     /// - Idle + steer → [`UserAction::Prompt`] (steer is a no-op distinction when idle)
     #[must_use]
-    pub fn route_submit(busy: bool, steer: bool, text: String) -> UserAction {
+    pub fn route_submit(
+        busy: bool,
+        steer: bool,
+        draft: plakous_host_protocol::Draft,
+    ) -> UserAction {
         if steer && busy {
-            UserAction::Steer(text)
+            UserAction::Steer(draft)
         } else if busy {
-            UserAction::FollowUp(text)
+            UserAction::FollowUp(draft)
         } else {
-            UserAction::Prompt(text)
+            UserAction::Prompt(draft)
         }
     }
 
@@ -334,9 +338,9 @@ pub mod control {
             return None;
         }
         match action {
-            UserAction::Prompt(text) => Some(text.clone()),
-            UserAction::FollowUp(text) => Some(format!("[queue] {text}")),
-            UserAction::Steer(text) => Some(format!("[steer] {text}")),
+            UserAction::Prompt(draft) => Some(draft.text.clone()),
+            UserAction::FollowUp(draft) => Some(format!("[queue] {}", draft.text)),
+            UserAction::Steer(draft) => Some(format!("[steer] {}", draft.text)),
             UserAction::Interrupt
             | UserAction::Background
             | UserAction::StopProcesses { .. }
@@ -499,6 +503,7 @@ mod tests {
                 id: "q1".into(),
                 revision: 2,
                 text: "same".into(),
+                images: Vec::new(),
             }],
             drain: QueueDrainState::RestoredPaused,
         };
@@ -574,11 +579,11 @@ mod prop_tests {
 
         #[test]
         fn route_submit_props(busy in any::<bool>(), steer in any::<bool>(), s in ".{1,40}") {
-            let action = route_submit(busy, steer, s.clone());
+            let action = route_submit(busy, steer, s.clone().into());
             match (busy, steer) {
-                (true, true) => assert_eq!(action, UserAction::Steer(s)),
-                (true, false) => assert_eq!(action, UserAction::FollowUp(s)),
-                (false, _) => assert_eq!(action, UserAction::Prompt(s)),
+                (true, true) => assert_eq!(action, UserAction::Steer(s.into())),
+                (true, false) => assert_eq!(action, UserAction::FollowUp(s.into())),
+                (false, _) => assert_eq!(action, UserAction::Prompt(s.into())),
             }
         }
 

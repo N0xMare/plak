@@ -443,6 +443,19 @@ impl App {
             usize::from(area.width.saturating_sub(3)),
         );
         let width = u16::try_from(text.width()).unwrap_or(0);
+        // Attachment chips lead the border from the left; the workspace
+        // facts keep their right-aligned place.
+        let chips = self.attachment_chips(usize::from(
+            area.width.saturating_sub(4 + width.saturating_add(1)),
+        ));
+        if !chips.is_empty() {
+            let chips_width = u16::try_from(chips.width()).unwrap_or(0);
+            frame.render_widget(
+                Paragraph::new(Span::styled(chips, self.theme.user_label))
+                    .style(Style::default().bg(self.theme.app_bg)),
+                Rect::new(area.x + 2, area.bottom() - 1, chips_width, 1),
+            );
+        }
         if width == 0 {
             return;
         }
@@ -451,6 +464,29 @@ impl App {
                 .style(Style::default().bg(self.theme.app_bg)),
             Rect::new(area.right() - 1 - width, area.bottom() - 1, width, 1),
         );
+    }
+
+    /// The composer's attachment chips within `budget` cells: every chip
+    /// when they fit, else a count.
+    pub(super) fn attachment_chips(&self, budget: usize) -> String {
+        if self.attachments.is_empty() {
+            return String::new();
+        }
+        let full = self
+            .attachments
+            .iter()
+            .map(crate::attachments::chip)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let count = format!(
+            "[{} image{}]",
+            self.attachments.len(),
+            if self.attachments.len() == 1 { "" } else { "s" }
+        );
+        [full, count]
+            .into_iter()
+            .find(|text| text.width() <= budget)
+            .unwrap_or_default()
     }
 
     /// Seeds the idle clock from the host's stored time of the last prompt

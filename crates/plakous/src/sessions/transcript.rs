@@ -112,6 +112,7 @@ impl SessionTranscriptItem {
                     .saturating_add(observation.preview().len())
                     .saturating_add(observation.subject().map_or(0, str::len)),
                 SessionTranscriptPart::Compaction => 64,
+                SessionTranscriptPart::Image { media_type, .. } => 64 + media_type.len(),
             })
         })
     }
@@ -128,8 +129,9 @@ impl fmt::Debug for SessionTranscriptItem {
     }
 }
 
-/// One presentation part of a committed item. Image, document, audio,
-/// citation and opaque blocks have no part.
+/// One presentation part of a committed item. Inline images become
+/// [`SessionTranscriptPart::Image`] metadata; referenced images, documents,
+/// audio, citation and opaque blocks have no part.
 #[derive(Clone, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum SessionTranscriptPart {
@@ -168,6 +170,16 @@ pub enum SessionTranscriptPart {
     },
     /// A committed compaction marker.
     Compaction,
+    /// An inline image a user message carried: its media type, raw size and,
+    /// when its header states them, its dimensions. The bytes stay in history.
+    Image {
+        /// Declared media type, such as `image/png`.
+        media_type: String,
+        /// Raw encoded size in bytes.
+        byte_len: usize,
+        /// Width and height in pixels from the image header.
+        dimensions: Option<(u32, u32)>,
+    },
 }
 
 impl fmt::Debug for SessionTranscriptPart {
@@ -194,6 +206,16 @@ impl fmt::Debug for SessionTranscriptPart {
                 .field("call_id", call_id)
                 .finish_non_exhaustive(),
             Self::Compaction => formatter.write_str("Compaction"),
+            Self::Image {
+                media_type,
+                byte_len,
+                dimensions,
+            } => formatter
+                .debug_struct("Image")
+                .field("media_type", media_type)
+                .field("byte_len", byte_len)
+                .field("dimensions", dimensions)
+                .finish(),
         }
     }
 }
@@ -237,6 +259,18 @@ fn project_item(
                 ),
             }),
             ContentBlock::Compaction(_) => Some(SessionTranscriptPart::Compaction),
+            ContentBlock::Image(image) => {
+                image
+                    .source()
+                    .as_bytes()
+                    .map(|bytes| SessionTranscriptPart::Image {
+                        media_type: image.media_type().to_owned(),
+                        byte_len: bytes.len(),
+                        dimensions: plakous_tools::sniff_image(bytes)
+                            .ok()
+                            .and_then(|header| header.dimensions()),
+                    })
+            }
             _ => None,
         })
         .collect();

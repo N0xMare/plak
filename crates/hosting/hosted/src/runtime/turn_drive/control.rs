@@ -131,8 +131,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                     }
                 }
                 Ok(action @ (UserAction::FollowUp(_) | UserAction::Prompt(_))) => {
-                    let text = match &action {
-                        UserAction::FollowUp(text) | UserAction::Prompt(text) => text.clone(),
+                    let draft = match &action {
+                        UserAction::FollowUp(draft) | UserAction::Prompt(draft) => draft.clone(),
                         _ => unreachable!(),
                     };
                     let mut refusal = None;
@@ -140,7 +140,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                         self.host.store,
                         self.host.home,
                         self.host.session,
-                        |candidate| match candidate.enqueue_live(text) {
+                        |candidate| match candidate.enqueue_live(draft) {
                             Ok(item) => {
                                 candidate.record_prompt(item.text);
                                 true
@@ -156,14 +156,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                             emit_prompt_history(self.host.events, self.host.session);
                             accept_draft(self.host.events, action);
                             if let Some(item) = self.host.session.pending_queue.last() {
-                                let _ = self.host.events.send(HostEvent::PromptAdmitted(
-                                    plakous_host_protocol::QueueItem {
-                                        rejected: false,
-                                        id: item.id.clone(),
-                                        revision: item.revision,
-                                        text: item.text.clone(),
-                                    },
-                                ));
+                                let _ = self
+                                    .host
+                                    .events
+                                    .send(HostEvent::PromptAdmitted(item.protocol(false)));
                             }
                             let _ = self.host.events.send(HostEvent::Status {
                                 phase: "running".into(),
@@ -192,20 +188,25 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                     }
                 }
                 Ok(action @ UserAction::Steer(_)) => {
-                    let text = match &action {
-                        UserAction::Steer(text) => text.trim().to_owned(),
+                    let (text, images) = match &action {
+                        UserAction::Steer(draft) => (draft.text.trim().to_owned(), &draft.images),
                         _ => unreachable!(),
                     };
+                    let input = queue::user_input(&text, images);
+                    let row_text = crate::sessions::with_image_chips(
+                        &text,
+                        images.iter().map(crate::sessions::draft_image_chip),
+                    );
                     if text.is_empty() {
                         reject_draft(self.host.events, action);
                     } else {
-                        match self.control.steer(text.clone()).await {
+                        match self.control.steer(input).await {
                             Ok(_) => {
                                 accept_draft(self.host.events, action);
                                 // Live only: the projector derives the
                                 // stored steer row from its acceptance fact.
                                 let row = TranscriptRow::Steer {
-                                    text: text.clone(),
+                                    text: row_text,
                                     sent_at_ms: Some(plakous::model::now_unix_millis()),
                                 };
                                 self.host.session.append_transcript(row.clone());

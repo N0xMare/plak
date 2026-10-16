@@ -14,6 +14,71 @@ use super::{
 /// Text that replaces the dropped head of a single oversized row.
 pub const TRANSCRIPT_TRUNCATION_MARKER: &str = "[older product transcript projection omitted]";
 
+/// The transcript chip of one image, from canonical facts alone (history
+/// keeps no file name): `[image: png 1280x720 412 KB]`.
+pub(crate) fn image_chip(
+    media_type: &str,
+    byte_len: usize,
+    dimensions: Option<(u32, u32)>,
+) -> String {
+    labelled_chip(
+        media_type.strip_prefix("image/").unwrap_or(media_type),
+        byte_len,
+        dimensions,
+    )
+}
+
+fn labelled_chip(label: &str, byte_len: usize, dimensions: Option<(u32, u32)>) -> String {
+    let size = if byte_len < 1024 * 1024 {
+        format!("{} KB", byte_len.div_ceil(1024))
+    } else {
+        let tenths = (byte_len * 10).div_ceil(1024 * 1024);
+        format!("{}.{} MB", tenths / 10, tenths % 10)
+    };
+    match dimensions {
+        Some((width, height)) => format!("[image: {label} {width}x{height} {size}]"),
+        None => format!("[image: {label} {size}]"),
+    }
+}
+
+/// [`image_chip`] of attached image bytes, as history will show it.
+pub(crate) fn draft_image_chip(image: &plakous_host_protocol::DraftImage) -> String {
+    image_chip(
+        &image.media_type,
+        image.bytes.len(),
+        sniffed_dimensions(&image.bytes),
+    )
+}
+
+/// The chip of an attached image under its file name, for surfaces that
+/// still hold the attachment: `[image: shot.png 1280x720 412 KB]`.
+#[must_use]
+pub fn named_image_chip(image: &plakous_host_protocol::DraftImage) -> String {
+    labelled_chip(
+        &image.name,
+        image.bytes.len(),
+        sniffed_dimensions(&image.bytes),
+    )
+}
+
+fn sniffed_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    plakous::tools::sniff_image(bytes)
+        .ok()
+        .and_then(|header| header.dimensions())
+}
+
+/// A user or steer row's text: the prompt, then one chip line per image.
+pub(crate) fn with_image_chips(text: &str, chips: impl IntoIterator<Item = String>) -> String {
+    let mut row = text.to_owned();
+    for chip in chips {
+        if !row.is_empty() {
+            row.push('\n');
+        }
+        row.push_str(&chip);
+    }
+    row
+}
+
 /// The product transcript: bounded typed rows, their tool-row identities, and
 /// separately authored notice intents.
 ///

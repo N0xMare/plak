@@ -764,10 +764,17 @@ pub(super) fn send_user_action(
                 }
             };
             match error.into_action() {
-                UserAction::Prompt(text)
-                | UserAction::FollowUp(text)
-                | UserAction::Steer(text)
-                | UserAction::EditQueued { text, .. } => {
+                UserAction::Prompt(draft)
+                | UserAction::FollowUp(draft)
+                | UserAction::Steer(draft) => {
+                    let mut images = draft.images;
+                    images.append(&mut app.attachments);
+                    app.attachments = images;
+                    app.set_input(draft.text);
+                    app.slash_open = false;
+                    app.history_browse = None;
+                }
+                UserAction::EditQueued { text, .. } => {
                     app.set_input(text);
                     app.slash_open = false;
                     app.history_browse = None;

@@ -74,7 +74,10 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
     // leaves no transcript row. The row's send time is the queue item's
     // submit time.
     let user_line = (!host_authored).then(|| TranscriptRow::User {
-        text: prompt.clone(),
+        text: sessions::with_image_chips(
+            &prompt,
+            item.images.iter().map(sessions::draft_image_chip),
+        ),
         sent_at_ms: Some(item.submitted_at_ms),
     });
     let (command, result_batch) = if let Some(intent) = &existing_submission {
@@ -164,7 +167,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                                     .ok_or_else(|| "stored steer has no target turn".to_owned())?
                                     .parse()
                                     .map_err(|_| "stored steer target is invalid".to_owned())?,
-                                input: command.clone().into(),
+                                input: item.user_input(&command),
                             }
                         } else if host_authored {
                             plakous::agent::TurnCommand::StartInstruction {
@@ -174,7 +177,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                         } else {
                             plakous::agent::TurnCommand::Start {
                                 command_id,
-                                input: command.clone().into(),
+                                input: item.user_input(&command),
                             }
                         })
                         .await

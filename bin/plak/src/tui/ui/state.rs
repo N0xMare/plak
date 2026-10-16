@@ -297,6 +297,16 @@ impl App {
         self.mark_transcript_structural();
     }
 
+    /// Restores a refused draft: its text, and its images ahead of any
+    /// attached since, within the per-message image bound.
+    pub(super) fn restore_draft(&mut self, draft: plakous_host_protocol::Draft) {
+        let mut images = draft.images;
+        images.append(&mut self.attachments);
+        images.truncate(plakous::agent::MAX_USER_IMAGES);
+        self.attachments = images;
+        self.restore_draft_text(draft.text);
+    }
+
     pub(super) fn restore_draft_text(&mut self, text: String) {
         if self.input == text {
             return;
@@ -340,10 +350,11 @@ impl App {
 
     pub(super) fn restore_pending_drafts(&mut self) {
         while let Some(action) = self.pending_drafts.pop_front() {
-            if let UserAction::Prompt(text) | UserAction::FollowUp(text) | UserAction::Steer(text) =
-                action
+            if let UserAction::Prompt(draft)
+            | UserAction::FollowUp(draft)
+            | UserAction::Steer(draft) = action
             {
-                self.restore_draft_text(text);
+                self.restore_draft(draft);
             }
         }
         self.pending_queue_edit = None;

@@ -78,6 +78,8 @@ pub enum ReadActor {
 pub enum ReadPart {
     /// Prose.
     Text(String),
+    /// The transcript chip of an inline image.
+    Image(String),
     /// Reasoning with operator-visible display text.
     Reasoning(String),
     /// A tool call block.
@@ -620,6 +622,15 @@ fn read_part(part: &SessionTranscriptPart) -> Option<ReadPart> {
             },
         }),
         SessionTranscriptPart::Compaction => Some(ReadPart::Compaction),
+        SessionTranscriptPart::Image {
+            media_type,
+            byte_len,
+            dimensions,
+        } => Some(ReadPart::Image(crate::sessions::image_chip(
+            media_type,
+            *byte_len,
+            *dimensions,
+        ))),
         _ => None,
     }
 }

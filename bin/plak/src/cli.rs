@@ -338,6 +338,9 @@ enum TopCommand {
         timeout: Option<u64>,
         #[arg(long = "resume-tree", action = ArgAction::SetTrue)]
         resume_tree: bool,
+        /// Attach an image file (png, jpeg, gif, webp; at most 3.75 MiB). Repeatable.
+        #[arg(long = "image", value_name = "PATH")]
+        image: Vec<std::path::PathBuf>,
         #[arg(last = true, allow_hyphen_values = true)]
         prompt: Vec<String>,
     },
@@ -503,6 +506,7 @@ impl TopCommand {
                 max_turns,
                 timeout,
                 resume_tree,
+                image,
                 prompt,
             } => {
                 let limits = plakous_hosted::runtime::RunBounds {
@@ -527,6 +531,7 @@ impl TopCommand {
                     && !resume_tree
                     && max_turns == 25
                     && timeout.is_none()
+                    && image.is_empty()
                     && prompt.is_empty()
                 {
                     return Ok(Command::CommandHelp {
@@ -548,7 +553,10 @@ impl TopCommand {
                     }
                     return finish_continue_session(
                         session_id,
-                        prompt,
+                        RunPrompt {
+                            words: prompt,
+                            images: image,
+                        },
                         print_session_id,
                         resume_tree,
                         limits,
@@ -567,7 +575,10 @@ impl TopCommand {
                     effort,
                     composition,
                     protocol,
-                    prompt,
+                    RunPrompt {
+                        words: prompt,
+                        images: image,
+                    },
                     print_session_id,
                     limits,
                 )
@@ -1001,9 +1012,33 @@ impl SessionAction {
     }
 }
 
+/// The prompt words after `--` and the `--image` paths of one `plak run`.
+struct RunPrompt {
+    words: Vec<String>,
+    images: Vec<std::path::PathBuf>,
+}
+
+impl RunPrompt {
+    /// Joins the words and reads every image; a refusal names the file.
+    fn into_draft(self) -> Result<(String, Vec<plakous_host_protocol::DraftImage>), String> {
+        if self.images.len() > plakous::agent::MAX_USER_IMAGES {
+            return Err(format!(
+                "run accepts at most {} --image files",
+                plakous::agent::MAX_USER_IMAGES
+            ));
+        }
+        let images = self
+            .images
+            .iter()
+            .map(|path| crate::attachments::read_image(path).map_err(|error| error.to_string()))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((self.words.join(" "), images))
+    }
+}
+
 fn finish_continue_session(
     session_id: String,
-    prompt: Vec<String>,
+    prompt: RunPrompt,
     print_session_id: bool,
     resume_tree: bool,
     limits: plakous_hosted::runtime::RunBounds,
@@ -1011,7 +1046,7 @@ fn finish_continue_session(
     if session_id.trim().is_empty() {
         return Err("run --session requires an exact session uuid".to_owned());
     }
-    let prompt = prompt.join(" ");
+    let (prompt, images) = prompt.into_draft()?;
     if prompt.trim().is_empty() {
         return Err("run requires a non-empty prompt after `--`".to_owned());
     }
@@ -1021,7 +1056,7 @@ fn finish_continue_session(
     Ok(Command::ContinueSession {
         limits,
         session_id,
-        prompt,
+        prompt: plakous_host_protocol::Draft::new(prompt, images),
         print_session_id,
         resume_tree,
     })
@@ -1033,13 +1068,14 @@ fn finish_run(
     effort: Option<String>,
     composition: Option<String>,
     protocol: Option<String>,
-    prompt: Vec<String>,
+    prompt: RunPrompt,
     print_session_id: bool,
     limits: plakous_hosted::runtime::RunBounds,
 ) -> Result<Command, String> {
     if model.is_empty() {
         return Err("run requires --model".to_owned());
     }
+    let (prompt, images) = prompt.into_draft()?;
     if let Some(provider) = plakous_hosted::binding::PlatformProvider::for_account(&account) {
         if protocol.is_some() {
             return Err("--protocol is available only with --account openrouter".into());
@@ -1055,7 +1091,6 @@ fn finish_run(
             .transpose()?
             .unwrap_or(crate::product_config::ProductCompositionSelection::FollowCatalog);
         crate::platform_catalog::validate(provider, &model, effort, composition)?;
-        let prompt = prompt.join(" ");
         if prompt.trim().is_empty() || prompt.len() > NATIVE_RUN_MAX_PROMPT_BYTES {
             return Err("run requires a non-empty prompt within the supported size bound".into());
         }
@@ -1065,7 +1100,7 @@ fn finish_run(
             model,
             effort: effort.ok_or_else(crate::run_effort_usage)?,
             composition,
-            prompt,
+            prompt: plakous_host_protocol::Draft::new(prompt, images),
             print_session_id,
         });
     }
@@ -1090,7 +1125,6 @@ fn finish_run(
             .transpose()?
             .unwrap_or_default();
         let wire = crate::product_config::ProductWireBinding::resolve(selection);
-        let prompt = prompt.join(" ");
         if prompt.trim().is_empty() {
             return Err("run requires a non-empty prompt after `--`".to_owned());
         }
@@ -1103,7 +1137,7 @@ fn finish_run(
             effort,
             composition,
             wire,
-            prompt,
+            prompt: plakous_host_protocol::Draft::new(prompt, images),
             print_session_id,
         });
     }
@@ -1116,7 +1150,6 @@ fn finish_run(
     let effort = effort
         .map(|value| RunEffort::parse(&value).ok_or_else(crate::run_effort_usage))
         .transpose()?;
-    let prompt = prompt.join(" ");
     let composition = composition
         .map(|value| crate::product_config::ProductCompositionSelection::parse(&value))
         .transpose()?;
@@ -1132,7 +1165,7 @@ fn finish_run(
         model,
         effort: effort.map(RunEffort::as_reasoning_effort),
         composition,
-        prompt,
+        prompt: plakous_host_protocol::Draft::new(prompt, images),
         print_session_id,
     })
 }
@@ -1300,6 +1333,57 @@ fn parse_oauth_account(value: &str) -> Result<NativeProvider, String> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
+    #[test]
+    fn run_image_flags_attach_sniffed_files_and_name_the_refused_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let shot = dir.path().join("shot.png");
+        std::fs::write(&shot, crate::attachments::png(4, 3, 10)).unwrap();
+        let notes = dir.path().join("notes.png");
+        std::fs::write(&notes, "plain text").unwrap();
+        let run = |images: &[&std::path::Path], account: &str| {
+            let mut arguments = vec![
+                OsString::from("run"),
+                "--account".into(),
+                account.into(),
+                "--model".into(),
+                "m".into(),
+            ];
+            for image in images {
+                arguments.push("--image".into());
+                arguments.push(image.as_os_str().to_owned());
+            }
+            arguments.extend(["--".into(), "what is this?".into()]);
+            parse(arguments)
+        };
+        let command = run(&[&shot, &shot], "grok").unwrap();
+        let Command::Run { prompt, .. } = command else {
+            panic!("expected run")
+        };
+        assert_eq!(prompt.text, "what is this?");
+        assert_eq!(prompt.images.len(), 2);
+        assert_eq!(prompt.images[0].media_type, "image/png");
+        assert_eq!(prompt.images[0].name, "shot.png");
+        let Command::RunOpenRouter { prompt, .. } = run(&[&shot], "openrouter").unwrap() else {
+            panic!("expected openrouter run")
+        };
+        assert_eq!(prompt.images.len(), 1);
+
+        let error = run(&[&notes], "grok").unwrap_err();
+        assert!(
+            error.contains("notes.png") && error.contains("not a supported image"),
+            "{error}"
+        );
+        let missing = dir.path().join("missing.png");
+        let error = run(&[&missing], "grok").unwrap_err();
+        assert!(
+            error.contains("missing.png") && error.contains("cannot be read"),
+            "{error}"
+        );
+        let nine = vec![shot.as_path(); 9];
+        let error = run(&nine, "grok").unwrap_err();
+        assert!(error.contains("at most 8"), "{error}");
+    }
+
     #[test]
     fn publication_help_after_separator_is_prompt_text() {
         let command = parse(

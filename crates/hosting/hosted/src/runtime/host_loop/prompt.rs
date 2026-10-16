@@ -141,16 +141,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             self.child_wake = super::wake::ChildWake::default();
         }
         if !user_echoed && !host_authored {
-            let _ = self
-                .events
-                .send(HostEvent::PromptStarted(queued_delivery.as_ref().map(
-                    |item| plakous_host_protocol::QueueItem {
-                        rejected: false,
-                        id: item.id.clone(),
-                        revision: item.revision,
-                        text: item.text.clone(),
-                    },
-                )));
+            let _ = self.events.send(HostEvent::PromptStarted(
+                queued_delivery.as_ref().map(|item| item.protocol(false)),
+            ));
         }
         if self.log.is_none() && self.config.session.store_revision != 0 {
             self.log = SessionLog::open(&self.config.home, &self.config.session.id).ok();
@@ -498,7 +491,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     "prompt remains queued; resume to retry, or edit a rejected item",
                 ));
             } else {
-                reject_draft(&self.events, super::UserAction::Prompt(user_text));
+                reject_draft(&self.events, super::UserAction::Prompt(user_text.into()));
             }
         }
         self.recovery_blocked |= host_outcome_blocks_continuation(&drive);
@@ -1052,7 +1045,9 @@ mod tests {
         });
         for index in 0..4 {
             let text = format!("unrelated queued follow-up {index}");
-            actions.send(UserAction::FollowUp(text.clone())).unwrap();
+            actions
+                .send(UserAction::FollowUp(text.clone().into()))
+                .unwrap();
             next(&|event| {
                 matches!(event, HostEvent::QueueSnapshot { items, .. }
                 if items.iter().any(|item| item.text == text))
@@ -1587,7 +1582,7 @@ mod tests {
                 panic!("prompt");
             };
             let item = queued_delivery.as_ref().unwrap();
-            queue::enqueue(&mut host.config.session.pending_queue, "next item".into()).unwrap();
+            queue::enqueue(&mut host.config.session.pending_queue, "next item").unwrap();
             host.config.store.save(&mut host.config.session).unwrap();
             crate::runtime::turn_drive::stub_start_refusal(
                 format!("plak:deliver:{}:{}", item.id, item.revision),
@@ -1932,7 +1927,7 @@ mod tests {
         };
         queue::enqueue(
             &mut host.config.session.pending_queue,
-            "second under pressure".into(),
+            "second under pressure",
         )
         .unwrap();
         host.config.store.save(&mut host.config.session).unwrap();
@@ -1985,8 +1980,8 @@ mod tests {
                 HostLoop::open(config, &rx, crate::runtime::Sender::over(tx), None).unwrap();
             let store = host.config.store.clone();
             let id = host.config.session.id.clone();
-            let item = queue::enqueue(&mut host.config.session.pending_queue, "queued item".into())
-                .unwrap();
+            let item =
+                queue::enqueue(&mut host.config.session.pending_queue, "queued item").unwrap();
             store.save(&mut host.config.session).unwrap();
             let source = host.opened.locator();
             host.opened.close_admission();

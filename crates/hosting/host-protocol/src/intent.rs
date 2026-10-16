@@ -62,11 +62,11 @@ impl ProtocolExtension for Core {
 #[derive(Clone, Eq, PartialEq)]
 pub enum SessionIntent<P: ProtocolExtension = Core> {
     /// Idle submit — start a new turn.
-    Prompt(String),
+    Prompt(Draft),
     /// Busy submit — queue for delivery on turn complete.
-    FollowUp(String),
+    FollowUp(Draft),
     /// Busy "send now" — after current tool; cancel remaining tools in compose.
-    Steer(String),
+    Steer(Draft),
     /// Promote only top-level process calls already in flight; otherwise no-op.
     Background,
     /// Full interrupt while busy (session stays open).
@@ -271,6 +271,78 @@ impl<P: ProtocolExtension> fmt::Debug for SessionIntent<P> {
             Self::RequestCallDetail { .. } => "RequestCallDetail(..)",
             Self::Extension(extension) => return write!(formatter, "Extension({extension:?})"),
         })
+    }
+}
+
+/// One operator message: its text and the images attached to it.
+///
+/// A string converts to a text-only draft. The host validates the images
+/// again at admission; the protocol only carries them.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Draft {
+    /// Prompt text as the operator wrote it.
+    pub text: String,
+    /// Attached images in the order the operator added them.
+    pub images: Vec<DraftImage>,
+}
+
+impl Draft {
+    /// A draft with text and images.
+    #[must_use]
+    pub const fn new(text: String, images: Vec<DraftImage>) -> Self {
+        Self { text, images }
+    }
+}
+
+/// A text-only draft equals its text; a draft with images equals no string.
+impl PartialEq<str> for Draft {
+    fn eq(&self, other: &str) -> bool {
+        self.images.is_empty() && self.text == other
+    }
+}
+
+impl PartialEq<&str> for Draft {
+    fn eq(&self, other: &&str) -> bool {
+        self == *other
+    }
+}
+
+impl PartialEq<String> for Draft {
+    fn eq(&self, other: &String) -> bool {
+        self == other.as_str()
+    }
+}
+
+impl From<String> for Draft {
+    fn from(text: String) -> Self {
+        Self::new(text, Vec::new())
+    }
+}
+
+impl From<&str> for Draft {
+    fn from(text: &str) -> Self {
+        Self::from(text.to_owned())
+    }
+}
+
+/// One image attached to a [`Draft`].
+#[derive(Clone, Eq, PartialEq)]
+pub struct DraftImage {
+    /// File name the operator attached, for display only; never sent to the model.
+    pub name: String,
+    /// `image/png`, `image/jpeg`, `image/gif` or `image/webp`.
+    pub media_type: String,
+    /// The unmodified encoded image.
+    pub bytes: Vec<u8>,
+}
+
+impl fmt::Debug for DraftImage {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DraftImage")
+            .field("media_type", &self.media_type)
+            .field("bytes", &self.bytes.len())
+            .finish_non_exhaustive()
     }
 }
 

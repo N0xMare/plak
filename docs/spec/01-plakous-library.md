@@ -6760,7 +6760,9 @@ reasoning that carries display text together with its declared visibility, a
 tool call (call id, canonical and exposed names from the call's
 `ToolCallBlock` (§8.2), and the `ToolCallObservation` a live `ToolStarted`
 carries), a tool result (call id and the `ToolResultObservation`
-a live `ToolCompleted` carries), or a compaction marker. Tool calls and results
+a live `ToolCompleted` carries), a compaction marker, or an inline image's
+metadata (declared media type, raw byte length, and the dimensions its header
+states; the bytes stay in history). Other media blocks have no part. Tool calls and results
 also carry the redaction-safe `ToolCallerLineageView`: caller class, cell or
 provider execution identity, local nested ordinal and depth. For local nested
 calls, its parent requires a retained `CompositionChild` binding for that exact

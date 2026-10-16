@@ -134,14 +134,14 @@ impl AgentCommand {
             Self::Prompt { text, steer, .. } => {
                 if steer {
                     if busy {
-                        Some(UserAction::Steer(text))
+                        Some(UserAction::Steer(text.into()))
                     } else {
                         None
                     }
                 } else if busy {
-                    Some(UserAction::FollowUp(text))
+                    Some(UserAction::FollowUp(text.into()))
                 } else {
-                    Some(UserAction::Prompt(text))
+                    Some(UserAction::Prompt(text.into()))
                 }
             }
             Self::Interrupt { .. } => Some(UserAction::Interrupt),
@@ -1239,6 +1239,7 @@ mod tests {
                     id: "q1".into(),
                     revision: 4,
                     text: "follow up".into(),
+                    images: Vec::new(),
                 }],
                 drain: QueueDrainState::RestoredPaused,
             },

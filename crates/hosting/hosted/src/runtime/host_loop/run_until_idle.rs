@@ -223,7 +223,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 let item = self
                     .config
                     .session
-                    .enqueue_live(super::wake::WAKE_PROMPT.into())
+                    .enqueue_live(super::wake::WAKE_PROMPT)
                     .map_err(|_| CliFailure::new("run continuation queue admission was refused"))?;
                 self.config.session = super::super::result_mail::prepare_instruction(
                     &self.config.topology_rows(),

@@ -97,7 +97,7 @@ fn every_projected_terminal_is_presented_once_before_idle() {
     let root = tempfile::tempdir().unwrap();
     let (config, _) = fresh_injected_attached_host(root.path());
     let (actions, events, worker) = crate::runtime::startup::spawn_host_worker(config).unwrap();
-    send_attached_action(&actions, UserAction::Prompt("usage root".to_owned()));
+    send_attached_action(&actions, UserAction::Prompt("usage root".to_owned().into()));
     let mut observed = Vec::new();
     let mut started = false;
     loop {

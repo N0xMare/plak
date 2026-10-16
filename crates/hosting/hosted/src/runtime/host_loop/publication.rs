@@ -520,7 +520,7 @@ mod tests {
             host.config.session.queue_drain_state = SessionQueueDrainState::LiveAutoDrain;
             crate::sessions::queue::enqueue(
                 &mut host.config.session.pending_queue,
-                "queued follow-up".into(),
+                "queued follow-up",
             )
             .unwrap();
             host.config.store.save(&mut host.config.session).unwrap();
@@ -682,9 +682,8 @@ mod tests {
         let mut host = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
         let store = host.config.store.clone();
         let id = host.config.session.id.clone();
-        let item =
-            crate::sessions::queue::enqueue(&mut host.config.session.pending_queue, "root".into())
-                .unwrap();
+        let item = crate::sessions::queue::enqueue(&mut host.config.session.pending_queue, "root")
+            .unwrap();
         store.save(&mut host.config.session).unwrap();
         let command = format!("plak.queue.{}.{}", item.id, item.revision);
         store
@@ -1004,11 +1003,9 @@ mod wait_settlement_tests {
             let message_id = runtime
                 .read(|tree| tree.messages().keys().next().cloned().unwrap())
                 .unwrap();
-            let item = crate::sessions::queue::enqueue(
-                &mut host.config.session.pending_queue,
-                "next".into(),
-            )
-            .unwrap();
+            let item =
+                crate::sessions::queue::enqueue(&mut host.config.session.pending_queue, "next")
+                    .unwrap();
             host.config.session.record_prompt(item.text.clone());
             host.config.store.save(&mut host.config.session).unwrap();
             host.run_prompt(item.text.clone(), Some(item), false, None)

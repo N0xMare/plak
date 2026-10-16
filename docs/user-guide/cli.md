@@ -234,6 +234,7 @@ plak run --account codex --model gpt-5.6-luna --effort low -- 'summarise src/'
 plak run --account grok --model grok-4.6 --effort low -- 'run the tests'
 plak run --account claude --model claude-sonnet-5 --effort low --composition js-ptc -- 'fix the lint'
 plak run --session 0f2c… -- 'and now update the changelog'
+plak run --account codex --model gpt-5.6-luna --effort low --image shot.png -- 'what is wrong here?'
 ```
 
 | Flag | Meaning |
@@ -248,6 +249,7 @@ plak run --session 0f2c… -- 'and now update the changelog'
 | `--max-turns <n>` | Admitted turns including the first, 1..=100; default 25. |
 | `--timeout <seconds>` | Whole-run wall clock, including authentication/catalog preparation and idle waiting; default none. |
 | `--print-session-id` | Print `session_id=<uuid>` on stdout before the turn starts. |
+| `--image <path>` | Attach an image to the prompt; repeat for more (at most 8). png, jpeg, gif or webp, detected from the bytes, at most 3.75 MiB each; nothing is resized. A file that cannot be read, is not an image or is too large is refused (exit 2) naming the file. A model without image input refuses the run naming the route and model. |
 
 `plak run` needs a ready OAuth login or key; an API account with no key exits 3
 naming `plak key set <account>` and its environment variable, and a signed-out

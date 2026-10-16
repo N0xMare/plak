@@ -687,9 +687,8 @@ mod tests {
         let mut host = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
         let store = host.config.store.clone();
         let id = host.config.session.id.clone();
-        let item =
-            sessions::queue::enqueue(&mut host.config.session.pending_queue, "unpublished".into())
-                .unwrap();
+        let item = sessions::queue::enqueue(&mut host.config.session.pending_queue, "unpublished")
+            .unwrap();
         store.save(&mut host.config.session).unwrap();
         let command = format!("plak.queue.{}.{}", item.id, item.revision);
         let intent = sessions::projector::Submission {
@@ -942,7 +941,7 @@ mod tests {
         let id = host.config.session.id.clone();
         let item = sessions::queue::enqueue(
             &mut host.config.session.pending_queue,
-            super::super::wake::WAKE_PROMPT.into(),
+            super::super::wake::WAKE_PROMPT,
         )
         .unwrap();
         let submission = sessions::projector::Submission {
@@ -1012,11 +1011,9 @@ mod tests {
                     id
                 })
                 .unwrap();
-            let item = sessions::queue::enqueue(
-                &mut host.config.session.pending_queue,
-                "operator text".into(),
-            )
-            .unwrap();
+            let item =
+                sessions::queue::enqueue(&mut host.config.session.pending_queue, "operator text")
+                    .unwrap();
             let intent = Submission {
                 command_id: "custom-stored-command".into(),
                 kind: if steer {
@@ -1122,9 +1119,8 @@ mod tests {
         let mut host = HostLoop::open(config, &action_rx, Sender::over(event_tx), None).unwrap();
         let store = host.config.store.clone();
         let id = host.config.session.id.clone();
-        let item =
-            sessions::queue::enqueue(&mut host.config.session.pending_queue, "already ran".into())
-                .unwrap();
+        let item = sessions::queue::enqueue(&mut host.config.session.pending_queue, "already ran")
+            .unwrap();
         let intent = sessions::projector::Submission {
             command_id: "below-retention-root".into(),
             kind: SubmissionKind::RootStart,

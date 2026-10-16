@@ -745,6 +745,7 @@ pub(super) fn queue_item(id: &str, revision: u64, text: &str) -> QueueItem {
         id: id.to_owned(),
         revision,
         text: text.to_owned(),
+        images: Vec::new(),
     }
 }
 

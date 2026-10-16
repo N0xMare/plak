@@ -771,7 +771,7 @@ impl PromptOrigins {
         if !self.disabled
             && let UserAction::Prompt(text) | UserAction::FollowUp(text) = action
         {
-            self.pending.push_back((text.trim().to_owned(), id));
+            self.pending.push_back((text.text.trim().to_owned(), id));
         }
     }
 
@@ -844,7 +844,7 @@ impl PromptOrigins {
             }
             HostEvent::DraftRejected(UserAction::Prompt(text) | UserAction::FollowUp(text)) => {
                 if let Some(index) = self.pending.iter().position(|(pending, id)| {
-                    pending == text.trim() && self.current_intent.as_ref() == Some(id)
+                    pending == text.text.trim() && self.current_intent.as_ref() == Some(id)
                 }) {
                     self.pending.remove(index);
                 }
@@ -2139,6 +2139,7 @@ mod tests {
             id: "q1".into(),
             revision: 1,
             text: "same".into(),
+            images: Vec::new(),
         };
         origins.observe(&HostEvent::PromptAdmitted(item.clone()), &mut active);
         origins.observe(&HostEvent::PromptStarted(Some(item)), &mut active);
@@ -2161,6 +2162,7 @@ mod tests {
                 id: "queue1".into(),
                 revision: 1,
                 text: "same".into(),
+                images: Vec::new(),
             };
             origins.submitted(&action, "p1".into());
             if retirement == "reject" {
@@ -2202,6 +2204,7 @@ mod tests {
             id: id.into(),
             revision: 1,
             text: "same".into(),
+            images: Vec::new(),
         };
         for id in ["p1", "p2"] {
             origins.submitted(&UserAction::FollowUp("same".into()), id.into());
@@ -2248,6 +2251,7 @@ mod tests {
             id: "old".into(),
             revision: 1,
             text: "same".into(),
+            images: Vec::new(),
         };
         origins.observe(&HostEvent::PromptAdmitted(row.clone()), &mut active);
         origins.observe(&HostEvent::PromptStarted(Some(row)), &mut active);

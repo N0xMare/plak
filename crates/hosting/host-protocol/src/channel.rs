@@ -1149,6 +1149,7 @@ mod tests {
                 id: "q".into(),
                 revision: 1,
                 text: "same".into(),
+                images: Vec::new(),
             }),
             SessionObservation::PromptStarted(None),
             SessionObservation::ToolInvocationOrigin {
@@ -1203,7 +1204,7 @@ mod tests {
         let (sender, receiver) = intent_channel::<Core>();
         for index in 0..INTENT_QUEUE_CAPACITY {
             sender
-                .send(SessionIntent::Prompt(index.to_string()))
+                .send(SessionIntent::Prompt(index.to_string().into()))
                 .unwrap();
         }
         sender.send(SessionIntent::Interrupt).unwrap();
@@ -1224,7 +1225,7 @@ mod tests {
         let (sender, _receiver) = intent_channel::<Core>();
         for index in 0..INTENT_QUEUE_CAPACITY {
             sender
-                .send(SessionIntent::Prompt(index.to_string()))
+                .send(SessionIntent::Prompt(index.to_string().into()))
                 .unwrap();
         }
         for action in [
@@ -1384,7 +1385,7 @@ mod tests {
         let (sender, receiver) = intent_channel::<Core>();
         for index in 0..INTENT_QUEUE_CAPACITY - 1 {
             sender
-                .send(SessionIntent::Prompt(index.to_string()))
+                .send(SessionIntent::Prompt(index.to_string().into()))
                 .unwrap();
         }
         sender.send(SessionIntent::Quit).unwrap();
@@ -1566,6 +1567,7 @@ mod tests {
                     id: "q-final".into(),
                     revision: 1,
                     text: "pending".into(),
+                    images: Vec::new(),
                 }],
                 drain: QueueDrainState::RestoredPaused,
             })
@@ -1610,6 +1612,7 @@ mod tests {
                     id: "q-recovery".into(),
                     revision: 1,
                     text: "pending".into(),
+                    images: Vec::new(),
                 }],
                 drain: QueueDrainState::RestoredPaused,
             })

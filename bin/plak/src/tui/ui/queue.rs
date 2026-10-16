@@ -55,6 +55,12 @@ impl App {
             {
                 return self.queue_send_now_at(0); // FIFO head = oldest
             }
+            if !self.attachments.is_empty() {
+                self.push_block(ScrollBlock::System(
+                    "type a message to send with the attached images".to_owned(),
+                ));
+                self.mark_dirty();
+            }
             return None;
         }
         if let Some(edit) = &self.queue_editing {
@@ -102,7 +108,12 @@ impl App {
         }
 
         self.last_prompt_at = Some(self.now());
-        Some(route_submit(self.busy, steer, line))
+        let images = std::mem::take(&mut self.attachments);
+        Some(route_submit(
+            self.busy,
+            steer,
+            plakous_host_protocol::Draft::new(line, images),
+        ))
     }
 
     /// Send-now the queue item at FIFO index (0 = oldest).

@@ -798,11 +798,11 @@ impl App {
             }
             HostEvent::DraftRejected(action) => {
                 let action = self.remove_pending_draft(&action).unwrap_or(action);
-                if let UserAction::Prompt(text)
-                | UserAction::FollowUp(text)
-                | UserAction::Steer(text) = action
+                if let UserAction::Prompt(draft)
+                | UserAction::FollowUp(draft)
+                | UserAction::Steer(draft) = action
                 {
-                    self.restore_draft_text(text);
+                    self.restore_draft(draft);
                 }
                 self.mark_dirty();
             }

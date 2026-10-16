@@ -137,7 +137,7 @@ pub fn run_actual_host(
         .into_iter()
         .map(|action| match action {
             ActualHostAction::Prompt(text) | ActualHostAction::PromptOnce(text) => {
-                crate::surface_protocol::UserAction::Prompt(text)
+                crate::surface_protocol::UserAction::Prompt(text.into())
             }
             ActualHostAction::SendQueuedNow { id, revision } => {
                 crate::surface_protocol::UserAction::SendQueuedNow { id, revision }

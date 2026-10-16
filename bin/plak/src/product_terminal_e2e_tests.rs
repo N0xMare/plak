@@ -1859,7 +1859,7 @@ fn recovery_required_restart_child() -> Result<(), Box<dyn Error + Send + Sync>>
     send_action(
         &actions,
         crate::surface_protocol::UserAction::Prompt(
-            "persist a working recovery checkpoint".to_owned(),
+            "persist a working recovery checkpoint".to_owned().into(),
         ),
     )?;
     worker
@@ -2083,7 +2083,9 @@ fn restarted_recovery_required_clear_preserves_source_and_attaches_fresh_root()
     let mut fresh_observed = Vec::new();
     send_action(
         &actions,
-        crate::surface_protocol::UserAction::Prompt("fresh prompt after recovery clear".to_owned()),
+        crate::surface_protocol::UserAction::Prompt(
+            "fresh prompt after recovery clear".to_owned().into(),
+        ),
     )?;
     wait_for_event(&events, &mut fresh_observed, |event| {
         matches!(event, crate::surface_protocol::HostEvent::AssistantDone)
@@ -2167,14 +2169,16 @@ fn injected_dual_profile_fork_continues_history_queue_and_reverse_switch()
     let mut observed = Vec::new();
     send_action(
         &actions,
-        crate::surface_protocol::UserAction::Prompt("binding A first turn".to_owned()),
+        crate::surface_protocol::UserAction::Prompt("binding A first turn".to_owned().into()),
     )?;
     wait_for_event(&events, &mut observed, |event| {
         matches!(event, crate::surface_protocol::HostEvent::SetBusy(true))
     })?;
     send_action(
         &actions,
-        crate::surface_protocol::UserAction::FollowUp("queued while binding A is busy".to_owned()),
+        crate::surface_protocol::UserAction::FollowUp(
+            "queued while binding A is busy".to_owned().into(),
+        ),
     )?;
     wait_for_event(&events, &mut observed, |event| {
         matches!(event, crate::surface_protocol::HostEvent::AssistantDone)
@@ -2193,7 +2197,7 @@ fn injected_dual_profile_fork_continues_history_queue_and_reverse_switch()
     );
     send_action(
         &actions,
-        crate::surface_protocol::UserAction::Prompt("binding B continued turn".to_owned()),
+        crate::surface_protocol::UserAction::Prompt("binding B continued turn".to_owned().into()),
     )?;
     wait_for_event(&events, &mut observed, |event| {
         matches!(event, crate::surface_protocol::HostEvent::AssistantDone)
@@ -2255,7 +2259,7 @@ fn injected_dual_profile_fork_continues_history_queue_and_reverse_switch()
             ),
             (
                 crate::surface_protocol::UserAction::Prompt(
-                    "binding A resumed after reverse switch".to_owned(),
+                    "binding A resumed after reverse switch".to_owned().into(),
                 ),
                 Box::new(|event| {
                     matches!(event, crate::surface_protocol::HostEvent::AssistantDone)
@@ -2350,7 +2354,7 @@ fn profile_fork_maps_the_fast_lane_on_and_off() -> Result<(), Box<dyn Error + Se
     let mut observed = Vec::new();
     send_action(
         &actions,
-        crate::surface_protocol::UserAction::Prompt("fast source turn".to_owned()),
+        crate::surface_protocol::UserAction::Prompt("fast source turn".to_owned().into()),
     )?;
     wait_for_event(&events, &mut observed, |event| {
         matches!(event, crate::surface_protocol::HostEvent::AssistantDone)
@@ -2463,7 +2467,7 @@ fn profile_fork_from_native_ptc_onto_direct_commits_a_turn()
     let mut observed = Vec::new();
     send_action(
         &actions,
-        crate::surface_protocol::UserAction::Prompt("code mode prefix".to_owned()),
+        crate::surface_protocol::UserAction::Prompt("code mode prefix".to_owned().into()),
     )?;
     wait_for_event(&events, &mut observed, |event| {
         matches!(event, crate::surface_protocol::HostEvent::AssistantDone)
@@ -2487,7 +2491,7 @@ fn profile_fork_from_native_ptc_onto_direct_commits_a_turn()
     );
     send_action(
         &actions,
-        crate::surface_protocol::UserAction::Prompt("direct turn".to_owned()),
+        crate::surface_protocol::UserAction::Prompt("direct turn".to_owned().into()),
     )?;
     wait_for_event(&events, &mut observed, |event| {
         matches!(event, crate::surface_protocol::HostEvent::AssistantDone)
@@ -3576,7 +3580,7 @@ fn profile_fork_now_branches_onto_its_own_tree_and_saves_after_it_lands()
     let mut observed = Vec::new();
     send_action(
         &actions,
-        crate::surface_protocol::UserAction::Prompt("source turn".to_owned()),
+        crate::surface_protocol::UserAction::Prompt("source turn".to_owned().into()),
     )?;
     wait_for_event(&events, &mut observed, |event| {
         matches!(event, crate::surface_protocol::HostEvent::AssistantDone)
@@ -3670,7 +3674,7 @@ fn profile_fork_now_branches_onto_its_own_tree_and_saves_after_it_lands()
     let mut observed = Vec::new();
     send_action(
         &actions,
-        crate::surface_protocol::UserAction::Prompt("source again".to_owned()),
+        crate::surface_protocol::UserAction::Prompt("source again".to_owned().into()),
     )?;
     wait_for_event(&events, &mut observed, |event| {
         matches!(event, crate::surface_protocol::HostEvent::AssistantDone)
@@ -3806,7 +3810,7 @@ fn same_profile_fork(with_tree: bool) -> Result<(), Box<dyn Error + Send + Sync>
     let mut observed = Vec::new();
     send_action(
         &actions,
-        crate::surface_protocol::UserAction::Prompt("profile turn".to_owned()),
+        crate::surface_protocol::UserAction::Prompt("profile turn".to_owned().into()),
     )?;
     wait_for_event(&events, &mut observed, |event| {
         matches!(event, crate::surface_protocol::HostEvent::AssistantDone)
@@ -3897,14 +3901,14 @@ fn a_live_follow_up_drains_after_a_resume_with_a_stale_pause()
     let mut observed = Vec::new();
     send_action(
         &actions,
-        crate::surface_protocol::UserAction::Prompt("first".to_owned()),
+        crate::surface_protocol::UserAction::Prompt("first".to_owned().into()),
     )?;
     wait_for_event(&events, &mut observed, |event| {
         matches!(event, crate::surface_protocol::HostEvent::SetBusy(true))
     })?;
     send_action(
         &actions,
-        crate::surface_protocol::UserAction::FollowUp("typed while busy".to_owned()),
+        crate::surface_protocol::UserAction::FollowUp("typed while busy".to_owned().into()),
     )?;
     wait_for_event(&events, &mut observed, |event| {
         matches!(event, crate::surface_protocol::HostEvent::AssistantDone)

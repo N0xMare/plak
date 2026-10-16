@@ -112,6 +112,10 @@ pub struct ScriptPlan {
     /// turn takes the ordinary direct path.
     #[serde(default)]
     pub code_mode: bool,
+    /// Declare image input support on the scripted model, so an image prompt
+    /// is admitted; without it the runtime refuses one naming the route.
+    #[serde(default)]
+    pub image_input: bool,
     /// Select the product JavaScript markers for the real sidecar fixture.
     #[serde(default)]
     pub js_ptc: bool,
@@ -312,6 +316,10 @@ pub enum ScriptOutput {
     ReasoningOnly,
     /// No output items at all.
     Empty,
+    /// Assistant text naming each inline image the request's newest user
+    /// item carries (`image/png 1234 bytes`), so a test sees what reached the
+    /// model.
+    ImageReport,
 }
 
 /// One scripted tool call.

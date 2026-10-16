@@ -21,12 +21,7 @@ pub(super) fn emit_queue_snapshot<P: plakous_host_protocol::ProtocolExtension>(
     let items = session
         .pending_queue
         .iter()
-        .map(|item| plakous_host_protocol::QueueItem {
-            rejected: session.queue_commands.is_rejected(item),
-            id: item.id.clone(),
-            revision: item.revision,
-            text: item.text.clone(),
-        })
+        .map(|item| item.protocol(session.queue_commands.is_rejected(item)))
         .collect();
     let drain = match session.queue_drain_state {
         SessionQueueDrainState::LiveAutoDrain => {
@@ -131,16 +126,14 @@ pub(super) fn admit_idle_immediate_prompt<P: plakous_host_protocol::ProtocolExte
     }
     emit_prompt_history(events, session);
     accept_draft(events, action);
-    let identity = plakous_host_protocol::QueueItem {
-        rejected: false,
-        id: item.id.clone(),
-        revision: item.revision,
-        text: item.text.clone(),
-    };
+    let identity = item.protocol(false);
     let _ = events.send(HostEvent::PromptAdmitted(identity.clone()));
     let _ = events.send(HostEvent::PromptStarted(Some(identity)));
     let _ = events.send(HostEvent::UserMessage {
-        text: item.text.clone(),
+        text: crate::sessions::with_image_chips(
+            &item.text,
+            item.images.iter().map(crate::sessions::draft_image_chip),
+        ),
         sent_at_ms: Some(item.submitted_at_ms),
     });
     (item.text.clone(), Some(item), true)
@@ -316,6 +309,20 @@ pub(super) fn queue_refusal<P: plakous_host_protocol::ProtocolExtension>(
             format!("queue already has {MAX_PENDING_PROMPTS} editable prompts")
         }
         queue::Refusal::Stale => "queue item identity/revision is stale or locked".to_owned(),
+        queue::Refusal::TooManyImages => format!(
+            "a prompt carries at most {} images",
+            plakous::agent::MAX_USER_IMAGES
+        ),
+        queue::Refusal::ImageTooLarge => {
+            "an image exceeds 3.75 MiB; downscale it and attach it again".to_owned()
+        }
+        queue::Refusal::NotAnImage => {
+            "an attachment is not a png, jpeg, gif or webp image".to_owned()
+        }
+        queue::Refusal::ImagesFull => format!(
+            "queued prompts already hold {} MiB of images",
+            crate::sessions::MAX_PENDING_QUEUE_IMAGE_BYTES / (1024 * 1024)
+        ),
     };
     let _ = events.notice(TranscriptRow::error(
         NoticeScope::Queue,
@@ -486,7 +493,7 @@ mod tests {
             .map(|index| SessionQueueItem::new(format!("prompt {index}")))
             .collect::<Vec<_>>();
         assert_eq!(
-            queue::enqueue(&mut queue, "overflow".into()),
+            queue::enqueue(&mut queue, "overflow"),
             Err(queue::Refusal::Full)
         );
         assert_eq!(queue.len(), MAX_PENDING_PROMPTS);
@@ -528,7 +535,7 @@ mod tests {
     fn idle_immediate_prompt_emits_user_message_without_one_item_queue_chip() {
         let dir = tempfile::tempdir().unwrap();
         let mut session = SessionRecord::new(dir.path().to_path_buf());
-        let item = queue::enqueue(&mut session.pending_queue, "hello world".into()).unwrap();
+        let item = queue::enqueue(&mut session.pending_queue, "hello world").unwrap();
         let submitted_at_ms = item.submitted_at_ms;
         assert!(
             submitted_at_ms > 0,
@@ -565,8 +572,8 @@ mod tests {
     fn idle_prompt_with_existing_queue_projects_remaining_chip() {
         let dir = tempfile::tempdir().unwrap();
         let mut session = SessionRecord::new(dir.path().to_path_buf());
-        let _first = queue::enqueue(&mut session.pending_queue, "older".into()).unwrap();
-        let item = queue::enqueue(&mut session.pending_queue, "newer".into()).unwrap();
+        let _first = queue::enqueue(&mut session.pending_queue, "older").unwrap();
+        let item = queue::enqueue(&mut session.pending_queue, "newer").unwrap();
         session.record_prompt(item.text.clone());
         let (tx, rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
         let events = Sender::over(tx);
@@ -594,12 +601,9 @@ mod tests {
     #[test]
     fn queue_fifo_and_drop_last() {
         let mut q = Vec::new();
-        let _ = queue::enqueue(&mut q, "a".into());
-        let _ = queue::enqueue(&mut q, "b".into());
-        assert_eq!(
-            queue::enqueue(&mut q, "  ".into()),
-            Err(queue::Refusal::Empty)
-        );
+        let _ = queue::enqueue(&mut q, "a");
+        let _ = queue::enqueue(&mut q, "b");
+        assert_eq!(queue::enqueue(&mut q, "  "), Err(queue::Refusal::Empty));
         assert_eq!(
             queue::take_next(&mut q).map(|item| item.text),
             Some("a".into())
@@ -665,9 +669,9 @@ mod tests {
     #[test]
     fn queue_mutation_targets_stable_identity_with_duplicate_safe_text() {
         let mut q = Vec::new();
-        let _ = queue::enqueue(&mut q, "first".into());
-        let _ = queue::enqueue(&mut q, "second".into());
-        let _ = queue::enqueue(&mut q, "second".into());
+        let _ = queue::enqueue(&mut q, "first");
+        let _ = queue::enqueue(&mut q, "second");
+        let _ = queue::enqueue(&mut q, "second");
         let target = q[1].clone();
         assert_eq!(
             queue::remove(&mut q, &target.id, target.revision).map(|item| item.text),

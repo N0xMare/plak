@@ -207,7 +207,7 @@ fn a_pruned_feed_reopen_consumes_historical_intents_without_withdrawing_clear() 
 fn run_prompts(config: crate::runtime::HostConfig<TestExtension>, prompts: &[&str]) {
     let (actions, events, worker) = crate::runtime::startup::spawn_host_worker(config).unwrap();
     for prompt in prompts {
-        send_attached_action(&actions, UserAction::Prompt((*prompt).to_owned()));
+        send_attached_action(&actions, UserAction::Prompt((*prompt).to_owned().into()));
         loop {
             let event = events
                 .recv_timeout(Duration::from_secs(30))

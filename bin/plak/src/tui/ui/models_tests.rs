@@ -150,7 +150,9 @@ fn saturated_dispatch_restores_prompt_and_edit() {
     fn saturated_sender() -> crate::tui::UserActionSender {
         let (sender, _receiver) = user_action_channel();
         for index in 0..plakous_host_protocol::limits::INTENT_QUEUE_CAPACITY {
-            sender.send(UserAction::Prompt(index.to_string())).unwrap();
+            sender
+                .send(UserAction::Prompt(index.to_string().into()))
+                .unwrap();
         }
         sender
     }

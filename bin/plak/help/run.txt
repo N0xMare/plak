@@ -9,6 +9,7 @@ EXAMPLES:
   plak run --account grok --model grok-4.6 --effort low -- 'run the tests'
   plak run --account claude --model claude-sonnet-5 --effort low --composition js-ptc -- 'fix the lint'
   plak run --session 0f2c… -- 'and now update the changelog'
+  plak run --account codex --model gpt-5.6-luna --effort low --image shot.png -- 'what is wrong here?'
 
 OPTIONS:
   --account <id>       codex | grok | claude | openrouter | openai | anthropic | xai-api
@@ -29,6 +30,8 @@ OPTIONS:
   --max-turns <n>      Admitted turns including the first, 1..=100 (default 25)
   --timeout <seconds>  Hosted run wall clock (default none)
   --print-session-id   Print `session_id=<session>` on stdout before the turn
+  --image <path>       Attach an image (png, jpeg, gif, webp; at most 3.75 MiB,
+                       8 per prompt). Repeatable. The model must accept images.
 
 NOTES:
   Subscription accounts require ready OAuth login (login + revalidate).

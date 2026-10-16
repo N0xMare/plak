@@ -29,7 +29,9 @@ pub use plakous_host_protocol::views::transcript::{
 };
 pub use queue::{QueueCommands, QueueDrainState, QueueItem};
 pub(crate) use transcript::bound_row;
+pub use transcript::named_image_chip;
 pub use transcript::{ProductTranscript, TRANSCRIPT_TRUNCATION_MARKER};
+pub(crate) use transcript::{draft_image_chip, image_chip, with_image_chips};
 
 /// Product transcript is a bounded UI/read-model projection, never canonical
 /// conversation or recovery authority.
@@ -42,6 +44,8 @@ pub const MAX_PROMPT_HISTORY: usize = 500;
 /// valid 1 MiB prompts to retain 500 MiB in every session.
 pub const MAX_PROMPT_HISTORY_BYTES: usize = 4 * 1024 * 1024;
 pub const MAX_PENDING_QUEUE_BYTES: usize = 16 * 1024 * 1024;
+/// Raw image bytes all queued items of one session may hold together.
+pub const MAX_PENDING_QUEUE_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_TOOL_ACTIVITY_DETAIL_BYTES: usize = 2 * 1024;
 /// Same ceiling as the host's pending-reasoning buffer: one operator-visible
 /// thought block, never model-facing history.
@@ -233,11 +237,14 @@ impl SessionRecord {
     /// more, so a new live prompt starts a live batch that drains. Without
     /// this a pause left behind by a finished workflow or a restore trapped
     /// every later follow-up until the operator resumed it by hand.
-    pub(crate) fn enqueue_live(&mut self, text: String) -> Result<QueueItem, queue::Refusal> {
+    pub(crate) fn enqueue_live(
+        &mut self,
+        draft: impl Into<plakous_host_protocol::Draft>,
+    ) -> Result<QueueItem, queue::Refusal> {
         if self.pending_queue.is_empty() {
             self.queue_drain_state = QueueDrainState::LiveAutoDrain;
         }
-        queue::enqueue(&mut self.pending_queue, text)
+        queue::enqueue(&mut self.pending_queue, draft)
     }
 
     /// Project a loaded record for recovery without changing its durable
@@ -468,7 +475,18 @@ fn validate_pending_queue(pending_queue: &[QueueItem]) -> Result<(), String> {
     }
     let mut queue_ids = HashSet::new();
     let mut aggregate_bytes = 0usize;
+    if pending_queue
+        .iter()
+        .map(|item| queue::image_bytes(&item.images))
+        .sum::<usize>()
+        > MAX_PENDING_QUEUE_IMAGE_BYTES
+    {
+        return Err("pending queue exceeds the product image bound".to_owned());
+    }
     for item in pending_queue {
+        if queue::validate_images(&item.images).is_err() {
+            return Err("session has invalid pending queue images".to_owned());
+        }
         aggregate_bytes = aggregate_bytes
             .checked_add(item.text.len())
             .ok_or_else(|| "pending queue byte count overflowed".to_owned())?;

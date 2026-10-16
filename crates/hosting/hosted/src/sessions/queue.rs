@@ -1,6 +1,13 @@
 //! Bounded queue edits and delivery locks belonging to a session record.
 
-use super::{MAX_PENDING_PROMPTS, MAX_PROMPT_BYTES, SessionRecord, new_uuid_v4_string};
+use std::sync::Arc;
+
+use plakous_host_protocol::{Draft, DraftImage};
+
+use super::{
+    MAX_PENDING_PROMPTS, MAX_PENDING_QUEUE_IMAGE_BYTES, MAX_PROMPT_BYTES, SessionRecord,
+    new_uuid_v4_string,
+};
 use QueueItem as SessionQueueItem;
 
 /// Process-local join of immutable submissions and projected command facts.
@@ -94,6 +101,9 @@ pub struct QueueItem {
     /// milliseconds. Edits and moves keep it; the prompt's transcript row
     /// shows it as its send time.
     pub submitted_at_ms: u64,
+    /// Images attached at submission. Immutable for the item's life: an
+    /// edit replaces only the text, and a delete drops them with the item.
+    pub images: Arc<[DraftImage]>,
 }
 
 impl QueueItem {
@@ -103,8 +113,38 @@ impl QueueItem {
             revision: 1,
             text: text.into(),
             submitted_at_ms: plakous::model::now_unix_millis(),
+            images: Arc::default(),
         }
     }
+
+    /// The surface view of this item.
+    #[must_use]
+    pub fn protocol(&self, rejected: bool) -> plakous_host_protocol::QueueItem {
+        plakous_host_protocol::QueueItem {
+            rejected,
+            id: self.id.clone(),
+            revision: self.revision,
+            text: self.text.clone(),
+            images: self.images.iter().map(super::named_image_chip).collect(),
+        }
+    }
+
+    /// The model input this item delivers with `text` as its (possibly
+    /// mail-extended) canonical command text: the text, then the images.
+    #[must_use]
+    pub fn user_input(&self, text: &str) -> plakous::agent::UserInput {
+        user_input(text, &self.images)
+    }
+}
+
+/// One user message: the text part, then the images in attachment order.
+pub(crate) fn user_input(text: &str, images: &[DraftImage]) -> plakous::agent::UserInput {
+    let mut parts = vec![plakous::agent::UserPart::Text(text.to_owned())];
+    parts.extend(images.iter().map(|image| plakous::agent::UserPart::Image {
+        media_type: image.media_type.clone(),
+        bytes: image.bytes.clone(),
+    }));
+    plakous::agent::UserInput::new(parts)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -138,14 +178,19 @@ pub(crate) enum Refusal {
     TooLarge,
     Full,
     Stale,
+    TooManyImages,
+    ImageTooLarge,
+    NotAnImage,
+    ImagesFull,
 }
 
-/// Append a follow-up / queued prompt.
+/// Append a follow-up / queued prompt with its attached images.
 pub(crate) fn enqueue(
     pending: &mut Vec<SessionQueueItem>,
-    text: String,
+    draft: impl Into<Draft>,
 ) -> Result<SessionQueueItem, Refusal> {
-    let t = text.trim();
+    let draft = draft.into();
+    let t = draft.text.trim();
     if t.is_empty() {
         return Err(Refusal::Empty);
     }
@@ -155,9 +200,39 @@ pub(crate) fn enqueue(
     if pending.len() >= MAX_PENDING_PROMPTS {
         return Err(Refusal::Full);
     }
-    let item = SessionQueueItem::new(t);
+    validate_images(&draft.images)?;
+    let queued: usize = pending.iter().map(|item| image_bytes(&item.images)).sum();
+    if queued.saturating_add(image_bytes(&draft.images)) > MAX_PENDING_QUEUE_IMAGE_BYTES {
+        return Err(Refusal::ImagesFull);
+    }
+    let mut item = SessionQueueItem::new(t);
+    item.images = draft.images.into();
     pending.push(item.clone());
     Ok(item)
+}
+
+pub(crate) fn image_bytes(images: &[DraftImage]) -> usize {
+    images.iter().map(|image| image.bytes.len()).sum()
+}
+
+/// The provider-neutral admission bounds, checked early so a refused image
+/// never reaches the queue: count, raw size, and a declared type equal to
+/// the sniffed one.
+pub(crate) fn validate_images(images: &[DraftImage]) -> Result<(), Refusal> {
+    if images.len() > plakous::agent::MAX_USER_IMAGES {
+        return Err(Refusal::TooManyImages);
+    }
+    for image in images {
+        if image.bytes.len() > plakous::agent::MAX_USER_IMAGE_BYTES {
+            return Err(Refusal::ImageTooLarge);
+        }
+        if plakous::tools::sniff_image(&image.bytes)
+            .map_or(true, |header| header.media_type() != image.media_type)
+        {
+            return Err(Refusal::NotAnImage);
+        }
+    }
+    Ok(())
 }
 
 /// Drop the last queued item (LIFO delete — "delete queued").
@@ -307,6 +382,87 @@ mod tests {
         Delivery, ProductIntents, SessionViews, Submission, SubmissionKind,
     };
 
+    fn png(extra: usize) -> DraftImage {
+        let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+        bytes.extend_from_slice(&[0, 0, 0, 13]);
+        bytes.extend_from_slice(b"IHDR");
+        bytes.extend_from_slice(&4_u32.to_be_bytes());
+        bytes.extend_from_slice(&3_u32.to_be_bytes());
+        bytes.resize(bytes.len() + extra, 0);
+        DraftImage {
+            name: "shot.png".into(),
+            media_type: "image/png".into(),
+            bytes,
+        }
+    }
+
+    #[test]
+    fn enqueue_bounds_images_and_an_edit_keeps_them() {
+        let mut pending = Vec::new();
+        let item = enqueue(
+            &mut pending,
+            Draft::new("look".into(), vec![png(0), png(1)]),
+        )
+        .unwrap();
+        assert_eq!(item.images.len(), 2);
+        assert_eq!(
+            item.user_input("look").parts().len(),
+            3,
+            "text then both images"
+        );
+        edit(&mut pending, &item.id, item.revision, "look again").unwrap();
+        assert_eq!(pending[0].text, "look again");
+        assert_eq!(pending[0].images, item.images);
+        assert_eq!(
+            pending[0].protocol(false).images,
+            ["[image: shot.png 4x3 1 KB]", "[image: shot.png 4x3 1 KB]"]
+        );
+
+        let refused = |draft: Draft, pending: &mut Vec<SessionQueueItem>| {
+            enqueue(pending, draft).unwrap_err()
+        };
+        let nine = (0..=plakous::agent::MAX_USER_IMAGES)
+            .map(|_| png(0))
+            .collect();
+        assert_eq!(
+            refused(Draft::new("x".into(), nine), &mut pending),
+            Refusal::TooManyImages
+        );
+        assert_eq!(
+            refused(
+                Draft::new("x".into(), vec![png(plakous::agent::MAX_USER_IMAGE_BYTES)]),
+                &mut pending
+            ),
+            Refusal::ImageTooLarge
+        );
+        let mut mislabeled = png(0);
+        mislabeled.media_type = "image/jpeg".into();
+        assert_eq!(
+            refused(Draft::new("x".into(), vec![mislabeled]), &mut pending),
+            Refusal::NotAnImage
+        );
+        assert_eq!(
+            refused(Draft::new(" ".into(), vec![png(0)]), &mut pending),
+            Refusal::Empty
+        );
+
+        // The session's queued images share one aggregate bound.
+        let large = || png(plakous::agent::MAX_USER_IMAGE_BYTES - 64);
+        let mut full = Vec::new();
+        while enqueue(&mut full, Draft::new("x".into(), vec![large(); 8])).is_ok() {}
+        assert_eq!(
+            refused(Draft::new("x".into(), vec![large(); 8]), &mut full),
+            Refusal::ImagesFull
+        );
+        assert!(
+            full.iter()
+                .map(|item| image_bytes(&item.images))
+                .sum::<usize>()
+                <= MAX_PENDING_QUEUE_IMAGE_BYTES
+        );
+        assert_eq!(pending.len(), 1);
+    }
+
     #[test]
     fn queue_decisions_join_submissions_and_command_facts_by_exact_revision() {
         let mut session = SessionRecord::new("/work".into());
@@ -370,8 +526,8 @@ mod tests {
     #[test]
     fn edits_and_moves_keep_the_operator_submit_time() {
         let mut pending = Vec::new();
-        let first = enqueue(&mut pending, "first".into()).unwrap();
-        let second = enqueue(&mut pending, "second".into()).unwrap();
+        let first = enqueue(&mut pending, "first").unwrap();
+        let second = enqueue(&mut pending, "second").unwrap();
         assert!(first.submitted_at_ms > 0);
         pending[0].submitted_at_ms = 11;
         pending[1].submitted_at_ms = 22;

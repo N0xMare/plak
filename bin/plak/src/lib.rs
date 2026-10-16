@@ -44,6 +44,7 @@ pub mod agent_jsonl;
 pub mod agent_stdio;
 #[doc(hidden)]
 pub mod agents_projection;
+mod attachments;
 mod build_identity;
 mod carry;
 mod cli;
@@ -354,7 +355,7 @@ pub(crate) enum Command {
         /// silent default.
         effort: Option<ReasoningEffort>,
         composition: Option<product_config::ProductCompositionSelection>,
-        prompt: String,
+        prompt: plakous_host_protocol::Draft,
         print_session_id: bool,
         limits: plakous_hosted::runtime::RunBounds,
     },
@@ -363,7 +364,7 @@ pub(crate) enum Command {
         effort: Option<ReasoningEffort>,
         composition: product_config::ProductCompositionSelection,
         wire: product_config::ProductWireBinding,
-        prompt: String,
+        prompt: plakous_host_protocol::Draft,
         print_session_id: bool,
         limits: plakous_hosted::runtime::RunBounds,
     },
@@ -372,13 +373,13 @@ pub(crate) enum Command {
         model: String,
         effort: ReasoningEffort,
         composition: product_config::ProductCompositionSelection,
-        prompt: String,
+        prompt: plakous_host_protocol::Draft,
         print_session_id: bool,
         limits: plakous_hosted::runtime::RunBounds,
     },
     ContinueSession {
         session_id: String,
-        prompt: String,
+        prompt: plakous_host_protocol::Draft,
         print_session_id: bool,
         limits: plakous_hosted::runtime::RunBounds,
         resume_tree: bool,
@@ -6366,7 +6367,7 @@ mod tests {
                 effort: None,
                 composition: None,
                 print_session_id: false,
-                prompt: "hello world".to_owned(),
+                prompt: "hello world".into(),
             })
         );
         assert_eq!(
@@ -6387,7 +6388,7 @@ mod tests {
                 effort: None,
                 composition: None,
                 print_session_id: false,
-                prompt: "hello world".to_owned(),
+                prompt: "hello world".into(),
             })
         );
         assert_eq!(
@@ -6409,7 +6410,7 @@ mod tests {
                 effort: Some(ReasoningEffort::High),
                 composition: None,
                 print_session_id: false,
-                prompt: "research me".to_owned(),
+                prompt: "research me".into(),
             })
         );
         assert_eq!(
@@ -6431,7 +6432,7 @@ mod tests {
                 effort: Some(ReasoningEffort::XHigh),
                 composition: None,
                 print_session_id: false,
-                prompt: "spark me".to_owned(),
+                prompt: "spark me".into(),
             })
         );
         assert_eq!(
@@ -6453,7 +6454,7 @@ mod tests {
                 effort: Some(ReasoningEffort::Medium),
                 composition: None,
                 print_session_id: false,
-                prompt: "patch me".to_owned(),
+                prompt: "patch me".into(),
             })
         );
     }

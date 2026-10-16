@@ -269,6 +269,10 @@ impl App {
                 None
             }
             SlashEffect::Reload => self.request_reload(),
+            SlashEffect::AttachImage(path) => {
+                self.attach_image(&expand_home(&path));
+                None
+            }
             SlashEffect::OpenSettings => self.open_control_tab(ControlTab::Settings),
             SlashEffect::OpenProviders => self.open_control_tab(ControlTab::Providers),
             SlashEffect::OpenUsage => self.open_control_tab(ControlTab::Usage),
@@ -427,6 +431,12 @@ impl App {
         self.typing.observe_paste(self.now());
         // The queue never takes typing: a paste leaves it for the composer.
         self.queue_focused = false;
+        // A dropped or pasted absolute path to an existing image file
+        // attaches the image instead of typing its path.
+        if let Some(path) = pasted_image_path(text) {
+            self.attach_image(&path);
+            return None;
+        }
         self.insert_chars(text);
         self.after_composer_edit();
         None
@@ -446,4 +456,66 @@ impl App {
             self.mark_dirty();
         }
     }
+}
+
+impl App {
+    /// Attaches one image file to the draft; a refusal is a system note
+    /// naming the file, and the draft is unchanged.
+    pub(super) fn attach_image(&mut self, path: &std::path::Path) {
+        self.mark_dirty();
+        if self.attachments.len() >= plakous::agent::MAX_USER_IMAGES {
+            self.push_block(ScrollBlock::System(format!(
+                "image not attached: a message carries at most {} images",
+                plakous::agent::MAX_USER_IMAGES
+            )));
+            return;
+        }
+        match crate::attachments::read_image(path) {
+            Ok(image) => self.attachments.push(image),
+            Err(error) => self.push_block(ScrollBlock::System(format!("not attached: {error}"))),
+        }
+    }
+}
+
+/// `~/x` relative to `HOME`; anything else as typed.
+fn expand_home(path: &str) -> std::path::PathBuf {
+    match (path.strip_prefix("~/"), std::env::var_os("HOME")) {
+        (Some(rest), Some(home)) => std::path::Path::new(&home).join(rest),
+        _ => std::path::PathBuf::from(path),
+    }
+}
+
+/// The path a terminal pastes when a file is dropped on it, when that path
+/// is absolute and names an existing png, jpeg, gif or webp file. Surrounding
+/// quotes and backslash-escaped spaces are undone.
+fn pasted_image_path(text: &str) -> Option<std::path::PathBuf> {
+    use std::io::Read as _;
+    let text = text.trim();
+    if text.contains('\n') {
+        return None;
+    }
+    let unquoted = ['\'', '"']
+        .iter()
+        .find_map(|quote| {
+            text.strip_prefix(*quote)
+                .and_then(|rest| rest.strip_suffix(*quote))
+        })
+        .map_or_else(|| text.replace("\\ ", " "), str::to_owned);
+    let path = std::path::PathBuf::from(unquoted);
+    if !path.is_absolute() || !path.is_file() {
+        return None;
+    }
+    let mut head = Vec::new();
+    std::fs::File::open(&path)
+        .ok()?
+        .take(4096)
+        .read_to_end(&mut head)
+        .ok()?;
+    let sniffed = plakous::tools::sniff_image(&head);
+    // A header too short to state dimensions still names the type.
+    matches!(
+        sniffed,
+        Ok(_) | Err(plakous::tools::ImageSniffError::Dimensions)
+    )
+    .then_some(path)
 }

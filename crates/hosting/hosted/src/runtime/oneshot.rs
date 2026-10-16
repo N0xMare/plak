@@ -68,7 +68,7 @@ impl OneShot {
         prompt: String,
         observe: impl FnMut(Option<&HostEvent<P>>, &UserActionSender<P>),
     ) -> CliResult<OneShotOutcome> {
-        Self::drive(config, prompt, false, None, observe)
+        Self::drive(config, prompt.into(), false, None, observe)
     }
 
     /// Explicitly resume the attached tree after canonical opening, then drive one prompt.
@@ -77,13 +77,13 @@ impl OneShot {
         prompt: String,
         observe: impl FnMut(Option<&HostEvent<P>>, &UserActionSender<P>),
     ) -> CliResult<OneShotOutcome> {
-        Self::drive(config, prompt, true, None, observe)
+        Self::drive(config, prompt.into(), true, None, observe)
     }
 
     /// Admit distinct continuation turns until no processes or children remain.
     pub fn run_until_idle<P: plakous_host_protocol::ProtocolExtension>(
         config: HostConfig<P>,
-        prompt: String,
+        prompt: plakous_host_protocol::Draft,
         resume_tree: bool,
         bounds: RunBounds,
         observe: impl FnMut(Option<&HostEvent<P>>, &UserActionSender<P>),
@@ -99,18 +99,18 @@ impl OneShot {
 
     fn drive<P: plakous_host_protocol::ProtocolExtension>(
         mut config: HostConfig<P>,
-        prompt: String,
+        prompt: plakous_host_protocol::Draft,
         resume_tree: bool,
         bounds: Option<RunBounds>,
         mut observe: impl FnMut(Option<&HostEvent<P>>, &UserActionSender<P>),
     ) -> CliResult<OneShotOutcome> {
-        if prompt.trim().is_empty() {
+        if prompt.text.trim().is_empty() {
             return Err(CliFailure::classified(
                 CliFailureKind::Usage,
                 "prompt is empty",
             ));
         }
-        if prompt.len() > super::MAX_PROMPT_BYTES {
+        if prompt.text.len() > super::MAX_PROMPT_BYTES {
             return Err(CliFailure::classified(
                 CliFailureKind::Usage,
                 "prompt exceeds the hosted input bound",

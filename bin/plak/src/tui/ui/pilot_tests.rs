@@ -435,6 +435,7 @@ fn typed_settings_story_toggles_persists_and_restores_composer_owner() {
                 "editing_queue_item": false,
                 "pending_prompt": false,
                 "pending_draft_count": 0,
+                "attachment_count": 0,
                 "cancel_pending": false,
                 "host_disconnected": false
             },
@@ -521,7 +522,9 @@ fn composer_slash_busy_and_queue_actions_use_the_real_input_routes() {
         .unwrap();
     assert_eq!(
         sent,
-        Some(UserAction::Prompt("inspect the workspace".to_owned()))
+        Some(UserAction::Prompt(
+            "inspect the workspace".to_owned().into()
+        ))
     );
 
     let mut busy = App::new(launch_basic(), true);
@@ -533,7 +536,7 @@ fn composer_slash_busy_and_queue_actions_use_the_real_input_routes() {
         .unwrap();
     assert_eq!(
         steered,
-        Some(UserAction::Steer("use the new facts".to_owned()))
+        Some(UserAction::Steer("use the new facts".to_owned().into()))
     );
 
     let mut slash = App::new(launch_basic(), true);
@@ -844,7 +847,7 @@ fn deterministic_long_session_projection_remains_bounded_and_omits_composer_text
         let sent = app
             .dispatch_pilot_action(PilotAction::Invoke("send".to_owned()))
             .unwrap();
-        assert_eq!(sent, Some(UserAction::Prompt(prompt)));
+        assert_eq!(sent, Some(UserAction::Prompt(prompt.into())));
         app.apply_host_event(HostEvent::SetBusy(true));
         app.apply_host_event(HostEvent::AssistantDelta(format!(
             "PRIVATE_TRANSCRIPT_{turn}"
@@ -1219,4 +1222,66 @@ mod sidecar {
         assert!(stale.action.is_none());
         assert_eq!(app.input, "AB");
     }
+}
+
+#[test]
+fn composer_image_chips_attach_by_slash_or_path_drop_and_ride_the_next_prompt() {
+    let dir = tempfile::tempdir().unwrap();
+    let shot = dir.path().join("shot one.png");
+    std::fs::write(&shot, crate::attachments::png(1280, 720, 2048)).unwrap();
+    let notes = dir.path().join("notes.txt");
+    std::fs::write(&notes, "not an image").unwrap();
+    let mut app = App::new(launch_basic(), true);
+
+    // `/image <path>` attaches without sending anything.
+    app.set_input(format!("/image {}", shot.display()));
+    assert_eq!(app.submit_line(false), None);
+    assert_eq!(app.input, "");
+    assert_eq!(app.semantic_snapshot().composer.attachment_count, 1);
+    assert_eq!(
+        app.attachment_chips(200),
+        "[image: shot one.png 1280x720 3 KB]"
+    );
+    assert_eq!(app.attachment_chips(20), "[1 image]");
+
+    // A dropped path (escaped space) attaches; a dropped non-image types.
+    app.handle_paste(&shot.display().to_string().replace(' ', "\\ "));
+    assert_eq!(app.attachments.len(), 2);
+    assert_eq!(app.input, "");
+    app.handle_paste(&notes.display().to_string());
+    assert_eq!(app.attachments.len(), 2);
+    assert_eq!(app.input, notes.display().to_string());
+    app.set_input(String::new());
+
+    // Backspace on an empty composer removes the last chip.
+    app.handle_key(super::test_support::key(
+        crossterm::event::KeyCode::Backspace,
+    ));
+    assert_eq!(app.attachments.len(), 1);
+
+    // Enter with chips but no text sends nothing.
+    assert_eq!(
+        app.handle_key(super::test_support::key(crossterm::event::KeyCode::Enter)),
+        None
+    );
+    assert_eq!(app.attachments.len(), 1);
+
+    app.set_input("what is this?".to_owned());
+    let sent = app.submit_line(false);
+    let Some(UserAction::Prompt(draft)) = sent else {
+        panic!("expected a prompt, got {sent:?}")
+    };
+    assert_eq!(draft.text, "what is this?");
+    assert_eq!(draft.images.len(), 1);
+    assert_eq!(draft.images[0].name, "shot one.png");
+    assert_eq!(app.attachments.len(), 0);
+
+    // A refused draft returns its images to the composer.
+    app.apply_host_event(HostEvent::DraftRejected(UserAction::Prompt(draft)));
+    assert_eq!(app.attachments.len(), 1);
+    assert_eq!(app.input, "what is this?");
+
+    // A missing file is a note naming it; nothing attaches.
+    app.attach_image(&dir.path().join("gone.png"));
+    assert_eq!(app.attachments.len(), 1);
 }

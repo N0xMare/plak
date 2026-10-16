@@ -460,6 +460,9 @@ pub struct QueueItem {
     pub revision: u64,
     /// Product-visible prompt text.
     pub text: String,
+    /// Display chips of the images attached to the item, in order:
+    /// `[image: shot.png 1280x720 412 KB]`. An edit keeps them.
+    pub images: Vec<String>,
 }
 
 /// Host-owned automatic queue delivery state.

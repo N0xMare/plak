@@ -1493,6 +1493,7 @@ mod tests {
                     revision: 1,
                     text: "old item".into(),
                     submitted_at_ms: 42,
+                    images: std::sync::Arc::default(),
                 }
             ));
         }

@@ -223,9 +223,9 @@ fn bare_quit_words_are_ordinary_prompts() {
             app.busy = busy;
             app.set_input(word.to_owned());
             let expected = if busy {
-                UserAction::FollowUp(word.to_owned())
+                UserAction::FollowUp(word.to_owned().into())
             } else {
-                UserAction::Prompt(word.to_owned())
+                UserAction::Prompt(word.to_owned().into())
             };
             assert_eq!(app.submit_line(false), Some(expected), "{word} busy={busy}");
             assert!(!app.should_quit, "{word} busy={busy} must not quit");

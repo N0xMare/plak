@@ -72,6 +72,7 @@ pub(super) struct ComposerSnapshot {
     pub editing_queue_item: bool,
     pub pending_prompt: bool,
     pub pending_draft_count: usize,
+    pub attachment_count: usize,
     pub cancel_pending: bool,
     pub host_disconnected: bool,
 }
@@ -235,6 +236,7 @@ impl App {
                 editing_queue_item: self.queue_editing.is_some(),
                 pending_prompt: self.pending_prompt.is_some(),
                 pending_draft_count: self.pending_drafts.len(),
+                attachment_count: self.attachments.len(),
                 cancel_pending: self.cancel_pending,
                 host_disconnected: self.host_disconnected,
             },

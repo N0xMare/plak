@@ -42,6 +42,21 @@ stored history (empty only when none of your prompts is left in it). A live `N a
 or `N processes` count highlights on hover and opens the Agents list or
 Processes, even while the root is idle; only the count text is the button.
 
+### Attaching images
+
+`/image <path>` attaches a png, jpeg, gif or webp file to the message you are
+writing; repeat it for more (at most 8 per message, 3.75 MiB each, nothing is
+resized). Dropping or pasting an absolute path to an image file attaches it
+too, instead of typing the path. Each attachment shows as a chip in the
+composer's bottom border, `[image: shot.png 1280x720 412 KB]`; `Backspace` in
+an empty composer removes the last one. Type a message and press `Enter` to
+send the text and its images together; a queued message keeps its images when
+you edit its text, and the queue panel marks it `[1 image]`. In the transcript
+the message shows one chip per image, such as `[image: png 1280x720 412 KB]`
+(history keeps the type, not the file name). A model without image input
+refuses the message, naming the route and model. Clipboard bitmaps cannot be
+pasted, and images are not drawn in the terminal.
+
 Every list follows one mouse rule: a click selects a row, a double-click does
 what `Enter` does. That holds for the slash menu, Settings and its choosers
 (double-click a theme to apply it), Agents profiles, the resume picker,
@@ -180,7 +195,7 @@ commands that act for good, `/clear`, `/compact`, `/fork-then-compact`,
 `/fork`, `/drop` and `/recover`, run from `Enter` only when you typed the
 full name: `Enter` on a shorter word (`/co`) completes it, as `Tab` does, and
 runs nothing, and an `Enter` within about 600 ms of that completion runs
-nothing either; look, then press `Enter` again. There are 22 commands:
+nothing either; look, then press `Enter` again. There are 23 commands:
 
 | Command | Effect |
 | --- | --- |
@@ -204,6 +219,7 @@ nothing either; look, then press `Enter` again. There are 22 commands:
 | `/fork` | Fork this conversation |
 | `/fork-then-compact` | Fork, then compact the new session |
 | `/drop` | Drop the last queued message |
+| `/image <path>` | Attach an image file to the next message |
 | `/reload` | Restart on the installed Plak and resume this session |
 | `/quit` | Exit Plak |
 

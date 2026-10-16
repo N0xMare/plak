@@ -8499,3 +8499,92 @@ mod durability {
 
 #[path = "offline_e2e/tui_view_parity.rs"]
 mod tui_view_parity;
+
+// ---------------------------------------------------------------------------
+// Image prompts (`plak run --image`)
+// ---------------------------------------------------------------------------
+
+/// A minimal PNG header the image sniffer accepts, padded to `extra` bytes.
+fn png_file(fixture: &Fixture, name: &str, extra: usize) -> PathBuf {
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.extend_from_slice(&[0, 0, 0, 13]);
+    png.extend_from_slice(b"IHDR");
+    png.extend_from_slice(&64_u32.to_be_bytes());
+    png.extend_from_slice(&48_u32.to_be_bytes());
+    png.resize(png.len() + extra, 0);
+    let path = fixture.root.join(name);
+    std::fs::write(&path, png).unwrap();
+    path
+}
+
+fn image_run(fixture: &Fixture, images: &[&Path]) -> CliRun {
+    let mut arguments = vec![
+        "run",
+        "--account",
+        "codex",
+        "--model",
+        "offline-loopback-v1",
+        "--effort",
+        "medium",
+    ];
+    let images = images
+        .iter()
+        .map(|path| path.to_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    for image in &images {
+        arguments.extend(["--image", image.as_str()]);
+    }
+    arguments.extend(["--", "what is in these?"]);
+    run_cli(fixture, &arguments)
+}
+
+#[test]
+fn a_cli_image_prompt_reaches_a_model_that_accepts_images() {
+    let fixture = Fixture::new(&json!({
+        "version": 1,
+        "image_input": true,
+        "steps": [{"output": "image_report"}]
+    }));
+    let first = png_file(&fixture, "first.png", 100);
+    let second = png_file(&fixture, "second.png", 4_000);
+    let run = image_run(&fixture, &[&first, &second]);
+    assert!(
+        run.status.success(),
+        "run failed: {}\n{}",
+        run.stdout,
+        run.stderr
+    );
+    assert!(
+        run.stdout
+            .contains("images seen: [image/png 124 bytes, image/png 4024 bytes]"),
+        "the model did not receive both images in order: {}",
+        run.stdout
+    );
+}
+
+#[test]
+fn a_cli_image_prompt_on_a_model_without_image_input_is_refused_naming_the_route() {
+    let fixture = Fixture::new(&json!({
+        "version": 1,
+        "steps": [{"output": "image_report"}]
+    }));
+    let image = png_file(&fixture, "shot.png", 10);
+    let run = image_run(&fixture, &[&image]);
+    assert!(
+        !run.status.success(),
+        "an image prompt was admitted: {}",
+        run.stdout
+    );
+    assert!(
+        run.stderr.contains("does not accept image input")
+            && run.stderr.contains("offline-loopback-v1"),
+        "refusal did not name the route and model: {}",
+        run.stderr
+    );
+    assert!(!run.stdout.contains("images seen"), "{}", run.stdout);
+
+    let missing = fixture.root.join("missing.png");
+    let run = image_run(&fixture, &[&missing]);
+    assert_eq!(run.status.code(), Some(2), "{}", run.stderr);
+    assert!(run.stderr.contains("missing.png"), "{}", run.stderr);
+}

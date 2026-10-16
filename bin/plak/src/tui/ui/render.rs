@@ -570,7 +570,12 @@ impl App {
             };
             let mark = if selected { "❯" } else { " " };
             let state = if item.rejected { "rejected: " } else { "" };
-            let left = format!("{mark}#{} {state}{preview}", abs_i + 1);
+            let images = match item.images.len() {
+                0 => String::new(),
+                1 => " [1 image]".to_owned(),
+                n => format!(" [{n} images]"),
+            };
+            let left = format!("{mark}#{} {state}{preview}{images}", abs_i + 1);
             // Hit targets follow the painted chips, not the panel's right edge.
             let row_y = inner.y.saturating_add(u16::try_from(disp_i).unwrap_or(0));
             let left_w = u16::try_from(UnicodeWidthStr::width(left.as_str())).unwrap_or(0);

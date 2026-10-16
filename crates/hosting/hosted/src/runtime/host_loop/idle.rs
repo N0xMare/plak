@@ -175,10 +175,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     if let Some(state) = one_shot.as_deref_mut() {
                         state.attempted = true;
                     }
-                    let (UserAction::Prompt(text) | UserAction::FollowUp(text)) = &action else {
+                    let (UserAction::Prompt(draft) | UserAction::FollowUp(draft)) = &action else {
                         unreachable!()
                     };
-                    let t = text.trim().to_owned();
+                    let t = draft.text.trim().to_owned();
                     if t.is_empty() {
                         reject_draft(&self.events, action);
                         None
@@ -189,7 +189,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             &*self.config.store,
                             &self.config.home,
                             &mut self.config.session,
-                            |candidate| match candidate.enqueue_live(t.clone()) {
+                            |candidate| match candidate.enqueue_live(draft.clone()) {
                                 Ok(item) => {
                                     candidate.record_prompt(item.text.clone());
                                     queued = Some(item);
@@ -854,10 +854,7 @@ mod tests {
     fn queue_save_failure_logs_safe_classification_and_preserves_queue_and_draft() {
         let root = tempfile::tempdir().unwrap();
         let (mut config, _) = fresh_injected_attached_host(root.path());
-        config
-            .session
-            .enqueue_live("private older prompt".into())
-            .unwrap();
+        config.session.enqueue_live("private older prompt").unwrap();
         config.store.save(&mut config.session).unwrap();
         let durable_store = Arc::clone(&config.store);
         let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
@@ -897,7 +894,7 @@ mod tests {
             )));
             assert!(observed.iter().any(|event| matches!(
                 event,
-                HostEvent::DraftRejected(UserAction::Prompt(text)) if text == draft
+                HostEvent::DraftRejected(UserAction::Prompt(text)) if *text == draft
             )));
             assert!(!observed.iter().any(|event| matches!(
                 event,

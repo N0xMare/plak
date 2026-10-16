@@ -13,8 +13,8 @@
 {"kind":"template_readiness","payload":"TemplateReadiness([])"}
 {"kind":"usage","payload":"Usage(ContextUsage { breakdown: Some(ContextBreakdownView { used_tokens: <n>, total_tokens: <n>, categories: [ContextCategoryView { label: \"Messages (est.)\", tokens: <n> }, ContextCategoryView { label: \"Used (unattributed)\", tokens: <n> }], informational: [], auto_compact_trigger_tokens: Some(<n>), occupancy_anchored: false, turns: Some(0), tool_calls: Some(0), compactions: Some(0) }), prepared_input: Some(UpperBound(<n>)), total_window: Some(10000000), admitted_ceiling: Some(AdmittedContextCeiling { tokens: <n>, basis: \"envelope\" }), gauge_percent: Some(<n>), display_percent: Some(<n>), ceiling_excess: None, evidence: \"custom-envelope\", non_guarantee: Some(\"custom caller operating envelope; not provider capacity evidence\"), status: \"fits\" })"}
 {"kind":"draft_accepted","payload":"DraftAccepted(Prompt(..))"}
-{"kind":"prompt_admitted","payload":"PromptAdmitted(QueueItem { rejected: false, id: \"<uuid>\", revision: 1, text: \"run the loopback\" })"}
-{"kind":"prompt_started","payload":"PromptStarted(Some(QueueItem { rejected: false, id: \"<uuid>\", revision: 1, text: \"run the loopback\" }))"}
+{"kind":"prompt_admitted","payload":"PromptAdmitted(QueueItem { rejected: false, id: \"<uuid>\", revision: 1, text: \"run the loopback\", images: [] })"}
+{"kind":"prompt_started","payload":"PromptStarted(Some(QueueItem { rejected: false, id: \"<uuid>\", revision: 1, text: \"run the loopback\", images: [] }))"}
 {"kind":"user_message","payload":"UserMessage { text: \"run the loopback\", sent_at_ms: Some(<n>) }"}
 {"kind":"prompt_history","payload":"PromptHistorySnapshot([\"run the loopback\"])"}
 {"kind":"status","payload":"Status { phase: \"running\", queue_len: 1 }"}
@@ -33,8 +33,8 @@
 {"kind":"turn","payload":"TurnUsage { input_tokens: <n>, output_tokens: <n>, reasoning_tokens: <n>, cached_input_tokens: <n>, cache_write_tokens: <n>, model_operations: Some(1), reporting_model_operations: Some(0), peak_prepared_input_tokens: None, terminal: true }"}
 {"kind":"usage","payload":"Usage(ContextUsage { breakdown: Some(ContextBreakdownView { used_tokens: <n>, total_tokens: <n>, categories: [ContextCategoryView { label: \"Messages (est.)\", tokens: <n> }, ContextCategoryView { label: \"Used (unattributed)\", tokens: <n> }], informational: [], auto_compact_trigger_tokens: Some(<n>), occupancy_anchored: false, turns: Some(1), tool_calls: Some(0), compactions: Some(0) }), prepared_input: Some(UpperBound(<n>)), total_window: Some(10000000), admitted_ceiling: Some(AdmittedContextCeiling { tokens: <n>, basis: \"envelope\" }), gauge_percent: Some(<n>), display_percent: Some(<n>), ceiling_excess: None, evidence: \"custom-envelope\", non_guarantee: Some(\"custom caller operating envelope; not provider capacity evidence\"), status: \"fits\" })"}
 {"kind":"draft_accepted","payload":"DraftAccepted(Prompt(..))"}
-{"kind":"prompt_admitted","payload":"PromptAdmitted(QueueItem { rejected: false, id: \"<uuid>\", revision: 1, text: \"run it again\" })"}
-{"kind":"prompt_started","payload":"PromptStarted(Some(QueueItem { rejected: false, id: \"<uuid>\", revision: 1, text: \"run it again\" }))"}
+{"kind":"prompt_admitted","payload":"PromptAdmitted(QueueItem { rejected: false, id: \"<uuid>\", revision: 1, text: \"run it again\", images: [] })"}
+{"kind":"prompt_started","payload":"PromptStarted(Some(QueueItem { rejected: false, id: \"<uuid>\", revision: 1, text: \"run it again\", images: [] }))"}
 {"kind":"user_message","payload":"UserMessage { text: \"run it again\", sent_at_ms: Some(<n>) }"}
 {"kind":"prompt_history","payload":"PromptHistorySnapshot([\"run the loopback\", \"run it again\"])"}
 {"kind":"status","payload":"Status { phase: \"running\", queue_len: 1 }"}
@@ -53,8 +53,8 @@
 {"kind":"turn","payload":"TurnUsage { input_tokens: <n>, output_tokens: <n>, reasoning_tokens: <n>, cached_input_tokens: <n>, cache_write_tokens: <n>, model_operations: Some(1), reporting_model_operations: Some(0), peak_prepared_input_tokens: None, terminal: true }"}
 {"kind":"usage","payload":"Usage(ContextUsage { breakdown: Some(ContextBreakdownView { used_tokens: <n>, total_tokens: <n>, categories: [ContextCategoryView { label: \"Messages (est.)\", tokens: <n> }, ContextCategoryView { label: \"Used (unattributed)\", tokens: <n> }], informational: [], auto_compact_trigger_tokens: Some(<n>), occupancy_anchored: false, turns: Some(2), tool_calls: Some(0), compactions: Some(0) }), prepared_input: Some(UpperBound(<n>)), total_window: Some(10000000), admitted_ceiling: Some(AdmittedContextCeiling { tokens: <n>, basis: \"envelope\" }), gauge_percent: Some(<n>), display_percent: Some(<n>), ceiling_excess: None, evidence: \"custom-envelope\", non_guarantee: Some(\"custom caller operating envelope; not provider capacity evidence\"), status: \"fits\" })"}
 {"kind":"draft_accepted","payload":"DraftAccepted(Prompt(..))"}
-{"kind":"prompt_admitted","payload":"PromptAdmitted(QueueItem { rejected: false, id: \"<uuid>\", revision: 1, text: \"and once more\" })"}
-{"kind":"prompt_started","payload":"PromptStarted(Some(QueueItem { rejected: false, id: \"<uuid>\", revision: 1, text: \"and once more\" }))"}
+{"kind":"prompt_admitted","payload":"PromptAdmitted(QueueItem { rejected: false, id: \"<uuid>\", revision: 1, text: \"and once more\", images: [] })"}
+{"kind":"prompt_started","payload":"PromptStarted(Some(QueueItem { rejected: false, id: \"<uuid>\", revision: 1, text: \"and once more\", images: [] }))"}
 {"kind":"user_message","payload":"UserMessage { text: \"and once more\", sent_at_ms: Some(<n>) }"}
 {"kind":"prompt_history","payload":"PromptHistorySnapshot([\"run the loopback\", \"run it again\", \"and once more\"])"}
 {"kind":"status","payload":"Status { phase: \"running\", queue_len: 1 }"}

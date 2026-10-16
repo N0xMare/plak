@@ -12,6 +12,7 @@ const NON_VIEWS: &[&str] = &[
     "operator_notices",
     "product_schema",
     "prompt_history",
+    "queue_attachments",
     "queue_items",
     "sessions",
     "submissions",

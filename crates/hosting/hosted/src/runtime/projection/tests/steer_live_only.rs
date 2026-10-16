@@ -22,7 +22,10 @@ fn an_accepted_steer_commits_no_revision_and_rebuilds_from_its_acceptance() {
     config.store = store.clone();
     let id = config.session.id.clone();
     let (actions, events, worker) = crate::runtime::startup::spawn_host_worker(config).unwrap();
-    send_attached_action(&actions, UserAction::Prompt("start the turn".to_owned()));
+    send_attached_action(
+        &actions,
+        UserAction::Prompt("start the turn".to_owned().into()),
+    );
     let mut seen = Vec::new();
     let mut next = |what: &str, matches: &dyn Fn(&HostEvent) -> bool| loop {
         let event = events
@@ -39,7 +42,7 @@ fn an_accepted_steer_commits_no_revision_and_rebuilds_from_its_acceptance() {
             if lifecycle.phase == plakous_host_protocol::TurnPhase::Admitted)
     });
     let before = store.load(&id).unwrap().store_revision;
-    send_attached_action(&actions, UserAction::Steer(STEER.to_owned()));
+    send_attached_action(&actions, UserAction::Steer(STEER.to_owned().into()));
     next(
         "the live steer row",
         &|event| matches!(event, HostEvent::Row(TranscriptRow::Steer { text, .. }) if text == STEER),

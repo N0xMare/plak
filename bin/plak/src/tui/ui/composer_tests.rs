@@ -1251,7 +1251,7 @@ fn over_limit_queue_refusal_keeps_unrecorded_text_on_the_local_history_shelf() {
     app.set_input(newer.clone());
     let refused = "queue refused draft".to_owned();
     app.apply_host_event(HostEvent::DraftRejected(UserAction::Prompt(
-        refused.clone(),
+        refused.clone().into(),
     )));
     assert_eq!(app.input, newer);
     assert!(app.prompt_history.contains(&refused));

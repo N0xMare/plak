@@ -1409,7 +1409,7 @@ fn item_rows(item: &ReadItem, ordinal: u64, sent_at_ms: Option<u64>) -> Vec<Deri
     };
     for (block, part) in item.parts.iter().enumerate() {
         match part {
-            ReadPart::Text(value) => {
+            ReadPart::Text(value) | ReadPart::Image(value) => {
                 if !text.is_empty() {
                     text.push('\n');
                 }
@@ -1599,4 +1599,42 @@ fn session_wide(error: &str) -> bool {
         error,
         "storage_pressure" | "ledger_full" | "shutdown" | "internal" | "reclaimed"
     )
+}
+
+#[cfg(test)]
+mod image_row_tests {
+    use super::*;
+
+    #[test]
+    fn a_user_item_with_images_is_one_row_with_a_chip_line_per_image() {
+        let item = ReadItem {
+            actor: ReadActor::User,
+            harness_authored: false,
+            parts: vec![
+                ReadPart::Text("what is this?".to_owned()),
+                ReadPart::Image(crate::sessions::image_chip(
+                    "image/png",
+                    412 * 1024,
+                    Some((1280, 720)),
+                )),
+                ReadPart::Image(crate::sessions::image_chip(
+                    "image/webp",
+                    2 * 1024 * 1024,
+                    None,
+                )),
+            ],
+        };
+        let rows = item_rows(&item, 0, Some(7));
+        let [Derived::Row(row)] = rows.as_slice() else {
+            panic!("one user row")
+        };
+        assert_eq!(
+            **row,
+            TranscriptRow::User {
+                text: "what is this?\n[image: png 1280x720 412 KB]\n[image: webp 2.0 MB]"
+                    .to_owned(),
+                sent_at_ms: Some(7),
+            }
+        );
+    }
 }

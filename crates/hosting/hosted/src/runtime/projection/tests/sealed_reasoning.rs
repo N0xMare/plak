@@ -188,7 +188,7 @@ fn live_reasoning(events: &[HostEvent]) -> String {
 fn run_prompt(config: crate::runtime::HostConfig<TestExtension>, prompt: &str) -> Vec<HostEvent> {
     let (actions, events, worker) = crate::runtime::startup::spawn_host_worker(config).unwrap();
     let mut seen = Vec::new();
-    send_attached_action(&actions, UserAction::Prompt(prompt.to_owned()));
+    send_attached_action(&actions, UserAction::Prompt(prompt.to_owned().into()));
     loop {
         let event = events
             .recv_timeout(Duration::from_secs(30))

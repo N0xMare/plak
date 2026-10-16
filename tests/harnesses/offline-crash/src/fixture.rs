@@ -1240,6 +1240,36 @@ fn scripted_response(
     let entry_identity = call_identity.saturating_add(1);
     let mut blocks = match &step.output {
         ScriptOutput::Empty => Vec::new(),
+        ScriptOutput::ImageReport => {
+            let images = plan
+                .request()
+                .input()
+                .items()
+                .iter()
+                .filter(|item| item.actor() == Actor::User)
+                .last()
+                .map(|item| {
+                    item.blocks()
+                        .iter()
+                        .filter_map(|block| match block {
+                            ContentBlock::Image(image) => Some(format!(
+                                "{} {} bytes",
+                                image.media_type(),
+                                image.source().as_bytes().map_or(0, <[u8]>::len)
+                            )),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            vec![ContentBlock::Text(
+                TextBlock::new(
+                    format!("images seen: [{}]", images.join(", ")),
+                    Some(TextPhase::Final),
+                )
+                .map_err(invalid_model_fixture)?,
+            )]
+        }
         ScriptOutput::FinalText => vec![ContentBlock::Text(
             TextBlock::new(FINAL_TEXT, Some(TextPhase::Final)).map_err(invalid_model_fixture)?,
         )],
@@ -1691,7 +1721,21 @@ pub(super) fn descriptor_with_projected_input(
     account: &[u8],
     maximum_projected_input: u64,
 ) -> HarnessResult<ResolvedModelDescriptor> {
-    descriptor_over_protocol(account, maximum_projected_input, LOOPBACK_PROTOCOL)
+    descriptor_over_protocol(account, maximum_projected_input, LOOPBACK_PROTOCOL, false)
+}
+
+/// The loopback descriptor a script declares: its projected-input bound and,
+/// when [`ScriptPlan::image_input`] is set, native image input.
+fn script_descriptor(
+    account: &[u8],
+    script: &ScriptPlan,
+) -> HarnessResult<ResolvedModelDescriptor> {
+    descriptor_over_protocol(
+        account,
+        script.maximum_projected_input,
+        LOOPBACK_PROTOCOL,
+        script.image_input,
+    )
 }
 
 /// The loopback protocol family every ordinary scripted binding speaks.
@@ -1708,9 +1752,10 @@ fn descriptor_over_protocol(
     account: &[u8],
     maximum_projected_input: u64,
     protocol: &str,
+    image_input: bool,
 ) -> HarnessResult<ResolvedModelDescriptor> {
     let provenance = FactProvenance::new(FactSource::TestFixture, fixture_time()?, None);
-    let features = BTreeMap::from([
+    let mut features = BTreeMap::from([
         (
             Capability::Streaming,
             FeatureSupport::new(
@@ -1728,6 +1773,16 @@ fn descriptor_over_protocol(
             ),
         ),
     ]);
+    if image_input {
+        features.insert(
+            Capability::ImageInput,
+            FeatureSupport::new(
+                Support::Native,
+                CapabilityConstraints::default(),
+                provenance,
+            ),
+        );
+    }
     let freshness = EvidenceFreshness::new(fixture_time()?, None)?;
     let (account_binding, credential_binding) = authority_bindings(account)?;
     let authority_binding =
@@ -1795,6 +1850,7 @@ fn scripted_code_mode_descriptor(
         account,
         maximum_projected_input,
         "offline.scripted.code-mode.responses",
+        false,
     )?;
     Ok(ResolvedModelDescriptor::new_custom(
         ProtocolId::new("offline.scripted.code-mode.responses")?,
@@ -2093,7 +2149,7 @@ fn scripted_topology_runtime_binding_inner(
     clock: Arc<dyn plakous::model::Clock>,
 ) -> HarnessResult<SessionRuntimeBinding> {
     let account = b"offline-loopback-topology-account";
-    let descriptor = descriptor_with_projected_input(account, script.maximum_projected_input)?;
+    let descriptor = script_descriptor(account, script)?;
     let model = operation.model(controller, account, descriptor.clone(), script)?;
     let mut registry = ToolRegistryBuilder::default();
     for registration in tree_tools {
@@ -2431,7 +2487,7 @@ fn scripted_runtime_binding_with_cursor_inner(
     let descriptor = if matches!(&operation, ScriptedOperation::ArtifactTurn(_)) {
         artifact_fixture_descriptor(account, script.maximum_projected_input)?
     } else {
-        descriptor_with_projected_input(account, script.maximum_projected_input)?
+        script_descriptor(account, script)?
     };
     let model = operation.model(controller.clone(), account, descriptor.clone(), script)?;
     if script.process_tools {
@@ -3192,7 +3248,7 @@ pub fn scripted_pi_runtime_binding(
     script: &Arc<ScriptPlan>,
 ) -> HarnessResult<SessionRuntimeBinding> {
     let account = b"offline-loopback-account";
-    let descriptor = descriptor_with_projected_input(account, script.maximum_projected_input)?;
+    let descriptor = script_descriptor(account, script)?;
     let model = ScriptedOperation::Turn(Arc::new(AtomicU64::new(1))).model(
         controller,
         account,
