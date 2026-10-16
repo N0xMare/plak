@@ -1156,8 +1156,13 @@ them relaxes an assertion to buy parallelism.
 **Test groups** cap concurrency across the whole workspace:
 
 - `native-auth-serial` (`max-threads = 1`) covers every `native_auth::` test and
-  the `local_transport` binary. OAuth loopback and native subscription auth tests
-  bind fixed ports and share process-local fixtures.
+  the `local_transport` binary. Native subscription auth tests share
+  process-local fixtures. No test binds a pinned OAuth callback port (Codex
+  1455/1457, xAI 56121): browser logins in tests bind an ephemeral port through
+  the managers' loopback seam, a `cfg(test)` assertion refuses the pinned ports
+  in both managers, the facade's unit tests switch Codex to the seam through
+  `plakous-openai/test-support`, and `tests/tooling/test_pinned_callback_ports.py`
+  refuses a pinned-port bind or an unguarded browser login anywhere in the tree.
 - `cli-contract-serial` (`max-threads = 1`) covers `cli_contract::` in Plak's
   `integration` binary, selected by package, binary and anchored module name,
   not the other modules sharing that binary.
@@ -2873,7 +2878,7 @@ the environmental assumption, never to weaken the assertion.
 | Class | Cause | Fix in force |
 | --- | --- | --- |
 | Symlinked temporary root | macOS `/tmp` and `/var` are symlinks; SQLite opens with `SQLITE_OPEN_NOFOLLOW` and the credential walk refuses symlinked parents | A physical per-checkout `TMPDIR` outside `HOME` (`/private/tmp/plak-test-*` on macOS) from `scripts/test-tmpdir.sh`, set by `dev-check.sh` and the test recipes, and required for hand-run nextest |
-| Fixed-port OAuth loopback | Native auth tests bind fixed ports and share process-local fixtures | The `native-auth-serial` group, covering `native_auth::` and the `local_transport` binary |
+| Fixed-port OAuth loopback | Login tests bound the pinned callback ports, which collide across parallel runs and with a live login | Tests bind an ephemeral port through the managers' loopback seam; the pinned ports are refused in tests (§2.3). The `native-auth-serial` group still serializes the shared process-local fixtures |
 | CLI contract interference | Process-level binary contracts collide when run in parallel | The `cli-contract-serial` group |
 | Child-start deadline under load | Crash matrices relaunch the current test binary and wait for durable cut markers; CPU and SQLite contention can exceed a bounded start deadline | The durability lane (§2.3): platform and full run these alone with `--test-threads=1`, under a 240-second slow timeout. `just check` does not run them |
 | Wall-clock budgets read as contention | Interactive PTY budgets, the 250 ms yield floor, lease and cancellation windows are measurements on an idle machine | The same serial budget lane, assertions unchanged |

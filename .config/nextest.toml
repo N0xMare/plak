@@ -6,8 +6,8 @@
 [store]
 dir = "target/nextest"
 
-# OAuth loopback / native subscription auth tests bind fixed ports and share
-# process-local fixtures; run them serially across the workspace.
+# Native subscription auth tests share process-local fixtures; run them
+# serially across the workspace. No test binds a pinned callback port.
 [test-groups]
 native-auth-serial = { max-threads = 1 }
 cli-contract-serial = { max-threads = 1 }
@@ -16,7 +16,7 @@ cli-contract-serial = { max-threads = 1 }
 # Crash matrices and the sqlite SIGKILL commit campaign run in the durability
 # lane: `just check` skips it; platform and full run it serially. The host
 # PTY/parity module predicates include every test in those families.
-# Fixed-port auth serialization alone does not protect callback deadlines.
+# Auth-group serialization alone does not protect callback deadlines.
 #
 # dev-check.sh and `just test` derive the lanes from these overrides through
 # tools/checks/budget_filterset.py; its tests check membership and names.

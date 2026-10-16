@@ -6,11 +6,10 @@ use super::{
     LoopbackCallbackPage, LoopbackConnectionEvent, MAX_AUTH_BODY_BYTES, MAX_CALLBACK_BYTES,
     MAX_DEVICE_INTERVAL_SECONDS, MAX_LOOPBACK_CONNECTIONS, MAX_TOKEN_BYTES, ManagerCore,
     OAuthCallbackOutcome, OAuthErrorResponse, PkceS256, SecretString, TcpListener, TokenResponse,
-    XAI_LOOPBACK_REDIRECT, XAI_OAUTH, XAI_OAUTH_SCOPE, XAI_PUBLIC_CLIENT_ID, XaiNativeAuthError,
-    XaiSubscriptionStatus, Zeroizing, decode_json, fmt, is_http_token_byte,
-    map_oauth_workflow_error, parse_absolute_redirect_query, parse_http11_get_request,
-    parse_remote_authorization_input, run_browser_loopback_session, until_flow_deadline,
-    urlencoded_form,
+    XAI_OAUTH_SCOPE, XAI_PUBLIC_CLIENT_ID, XaiNativeAuthError, XaiSubscriptionStatus, Zeroizing,
+    decode_json, fmt, is_http_token_byte, loopback_redirect_authority, map_oauth_workflow_error,
+    parse_http11_get_request, parse_loopback_callback_target, parse_remote_authorization_input,
+    run_browser_loopback_session, until_flow_deadline, urlencoded_form,
 };
 
 /// Non-cloneable redacted browser-login capability.
@@ -29,6 +28,8 @@ pub struct XaiBrowserLogin {
 pub(super) struct BrowserLoginFlow {
     pub(super) core: Arc<ManagerCore>,
     pub(super) baseline: Option<CredentialFence>,
+    /// The redirect this attempt sent; callbacks and the code exchange use it.
+    pub(super) redirect_uri: String,
     pub(super) pkce: PkceS256,
     pub(super) binding: CallbackBinding,
     pub(super) authorization_url: Zeroizing<String>,
@@ -54,6 +55,7 @@ impl XaiBrowserLogin {
         flow.ensure_active()?;
         let mut hooks = XaiBrowserLoopbackHooks {
             deadline: flow.deadline,
+            redirect_uri: flow.redirect_uri.clone(),
             flow: Some(flow),
         };
         run_browser_loopback_session(listener, &mut hooks).await
@@ -92,6 +94,7 @@ impl BrowserLoginFlow {
             self.deadline,
             self.core.exchange_code(
                 code,
+                &self.redirect_uri,
                 &self.pkce,
                 Some(self.binding.expose_nonce()),
                 self.baseline.as_ref(),
@@ -154,7 +157,7 @@ impl XaiRemoteBrowserLogin {
         let callback = parse_remote_authorization_input(
             authorization_input,
             self.flow.binding.expose_state(),
-            XAI_LOOPBACK_REDIRECT,
+            &self.flow.redirect_uri,
             xai_callback_policy(),
         )
         .map(oauth_callback_to_browser)
@@ -293,6 +296,8 @@ pub(super) const XAI_CALLBACK_PAGE: LoopbackCallbackPage<'static> = LoopbackCall
 pub(super) struct XaiBrowserLoopbackHooks {
     /// Session deadline retained after the flow is consumed by complete.
     pub(super) deadline: Instant,
+    /// The flow's redirect URI; every request's Host and path derive from it.
+    pub(super) redirect_uri: String,
     pub(super) flow: Option<BrowserLoginFlow>,
 }
 
@@ -332,7 +337,7 @@ impl BrowserLoopbackHooks for XaiBrowserLoopbackHooks {
         _local_port: u16,
     ) -> Result<LoopbackConnectionEvent<Self::Callback, Self::Preflight>, Self::Error> {
         let text = std::str::from_utf8(request).map_err(|_| XaiNativeAuthError::InvalidCallback)?;
-        match parse_loopback_request(text)? {
+        match parse_loopback_request(text, &self.redirect_uri)? {
             LoopbackRequest::Callback(callback) => Ok(LoopbackConnectionEvent::Callback(callback)),
             LoopbackRequest::Preflight { origin } => Ok(LoopbackConnectionEvent::Preflight(origin)),
         }
@@ -391,16 +396,20 @@ pub(super) enum BrowserCallback {
     },
 }
 
-pub(super) fn parse_loopback_request(request: &str) -> Result<LoopbackRequest, XaiNativeAuthError> {
+pub(super) fn parse_loopback_request(
+    request: &str,
+    redirect_uri: &str,
+) -> Result<LoopbackRequest, XaiNativeAuthError> {
     if request.starts_with("OPTIONS ") {
-        return parse_preflight_request(request)
+        return parse_preflight_request(request, redirect_uri)
             .map(|origin| LoopbackRequest::Preflight { origin });
     }
-    parse_callback_request(request).map(LoopbackRequest::Callback)
+    parse_callback_request(request, redirect_uri).map(LoopbackRequest::Callback)
 }
 
 pub(super) fn parse_preflight_request(
     request: &str,
+    redirect_uri: &str,
 ) -> Result<AllowedBrowserOrigin, XaiNativeAuthError> {
     let head = request
         .strip_suffix("\r\n\r\n")
@@ -441,7 +450,7 @@ pub(super) fn parse_preflight_request(
             return Err(XaiNativeAuthError::InvalidCallback);
         }
     }
-    if host.is_none_or(|value| !XAI_OAUTH.loopback_host_matches(value, None))
+    if host.is_none_or(|value| loopback_redirect_authority(redirect_uri) != Some(value))
         || requested_method != Some("GET")
     {
         return Err(XaiNativeAuthError::InvalidCallback);
@@ -466,25 +475,16 @@ pub(super) fn oauth_callback_to_browser(outcome: OAuthCallbackOutcome) -> Browse
     }
 }
 
-pub(super) fn parse_callback_request(request: &str) -> Result<BrowserCallback, XaiNativeAuthError> {
+pub(super) fn parse_callback_request(
+    request: &str,
+    redirect_uri: &str,
+) -> Result<BrowserCallback, XaiNativeAuthError> {
     let parsed =
         parse_http11_get_request(request).map_err(|_| XaiNativeAuthError::InvalidCallback)?;
-    if !XAI_OAUTH.loopback_host_matches(parsed.host, None) {
-        return Err(XaiNativeAuthError::InvalidCallback);
-    }
-    let full_redirect_url = Zeroizing::new(format!(
-        "http://{}{}",
-        XAI_OAUTH.loopback_authority, parsed.target
-    ));
-    parse_callback_url(&full_redirect_url)
-}
-
-pub(super) fn parse_callback_url(
-    full_redirect_url: &str,
-) -> Result<BrowserCallback, XaiNativeAuthError> {
-    parse_absolute_redirect_query(
-        full_redirect_url,
-        XAI_LOOPBACK_REDIRECT,
+    parse_loopback_callback_target(
+        parsed.host,
+        parsed.target,
+        redirect_uri,
         xai_callback_policy(),
     )
     .map(oauth_callback_to_browser)

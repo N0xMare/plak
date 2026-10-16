@@ -14,7 +14,7 @@ use super::{
     Zeroizing, authorization_code_token_form, bind_loopback_listener, build_authorization_url,
     capped_login_deadline, constant_time_value_eq, endpoint_url, execute_bounded, fmt, form_body,
     form_headers, generate_oauth_correlation_token, json_headers, map_oauth_workflow_error,
-    now_unix_secs, parse_http11_get_request, parse_oauth_callback_query, parse_strict_json,
+    now_unix_secs, parse_http11_get_request, parse_loopback_callback_target, parse_strict_json,
     remaining_login_time, require_json_media_type, require_status, run_blocking,
     run_browser_loopback_session, stored_record, validate_oauth_value, validate_profile_at,
     validate_user_code,
@@ -156,12 +156,11 @@ impl CodexSubscriptionCredentialManager {
     /// failure to create strong state and PKCE material.
     pub async fn begin_browser_login(&self) -> Result<CodexBrowserLogin, NativeCodexAuthError> {
         self.validate_profile_admission()?;
-        let (listener, port) = bind_loopback_listener(CODEX_OAUTH.loopback_ports)
+        #[cfg(test)]
+        refuse_pinned_test_loopback(self.endpoints.loopback_ports);
+        let (listener, port) = bind_loopback_listener(self.endpoints.loopback_ports)
             .await
             .map_err(|_| NativeCodexAuthError::Binding)?;
-        if !CODEX_OAUTH.allows_loopback_port(port) {
-            return Err(NativeCodexAuthError::Binding);
-        }
         let redirect_uri = format!("http://localhost:{port}{BROWSER_CALLBACK_PATH}");
         Ok(CodexBrowserLogin {
             listener,
@@ -184,6 +183,7 @@ impl CodexSubscriptionCredentialManager {
         let mut hooks = CodexBrowserLoopbackHooks {
             manager: self,
             deadline: login.attempt.deadline,
+            redirect_uri: login.attempt.redirect_uri.clone(),
             attempt: Some(login.attempt),
         };
         run_browser_loopback_session(login.listener, &mut hooks).await
@@ -568,27 +568,32 @@ impl Drop for DeviceCodeResponse {
     }
 }
 
+/// Tests never bind the pinned Codex callback ports.
+#[cfg(test)]
+fn refuse_pinned_test_loopback(ports: &[u16]) {
+    assert_ne!(
+        ports, CODEX_OAUTH.loopback_ports,
+        "tests never bind the pinned Codex callback ports"
+    );
+}
+
 fn codex_callback_policy() -> CallbackQueryPolicy {
     CallbackQueryPolicy::codex(OPENAI_CODEX_OAUTH_SCOPES)
 }
 
 pub(super) fn parse_browser_callback(
     request: &[u8],
-    expected_port: u16,
+    redirect_uri: &str,
 ) -> Result<OAuthCallbackOutcome, NativeCodexAuthError> {
     let text = std::str::from_utf8(request).map_err(|_| NativeCodexAuthError::Callback)?;
     let parsed = parse_http11_get_request(text).map_err(|_| NativeCodexAuthError::Callback)?;
-    if !CODEX_OAUTH.loopback_host_matches(parsed.host, Some(expected_port)) {
-        return Err(NativeCodexAuthError::Callback);
-    }
-    let (path, query) = parsed
-        .target
-        .split_once('?')
-        .ok_or(NativeCodexAuthError::Callback)?;
-    if path != BROWSER_CALLBACK_PATH || query.is_empty() {
-        return Err(NativeCodexAuthError::Callback);
-    }
-    parse_oauth_callback_query(query, codex_callback_policy()).map_err(map_oauth_workflow_error)
+    parse_loopback_callback_target(
+        parsed.host,
+        parsed.target,
+        redirect_uri,
+        codex_callback_policy(),
+    )
+    .map_err(map_oauth_workflow_error)
 }
 
 pub(super) const CODEX_CALLBACK_PAGE: LoopbackCallbackPage<'static> = LoopbackCallbackPage {
@@ -602,6 +607,8 @@ pub(super) struct CodexBrowserLoopbackHooks<'a> {
     pub(super) manager: &'a CodexSubscriptionCredentialManager,
     /// Session deadline retained after the attempt is consumed by complete.
     pub(super) deadline: Instant,
+    /// The attempt's redirect URI; every callback's Host and path derive from it.
+    pub(super) redirect_uri: String,
     pub(super) attempt: Option<BrowserLoginAttempt>,
 }
 
@@ -634,9 +641,9 @@ impl BrowserLoopbackHooks for CodexBrowserLoopbackHooks<'_> {
     fn parse_request(
         &mut self,
         request: &[u8],
-        local_port: u16,
+        _local_port: u16,
     ) -> Result<LoopbackConnectionEvent<Self::Callback, Self::Preflight>, Self::Error> {
-        parse_browser_callback(request, local_port).map(LoopbackConnectionEvent::Callback)
+        parse_browser_callback(request, &self.redirect_uri).map(LoopbackConnectionEvent::Callback)
     }
 
     fn preflight_response_bytes(&self, _preflight: &Self::Preflight) -> Vec<u8> {

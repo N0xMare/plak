@@ -20,8 +20,9 @@ mod http11_response;
 
 pub use authorize::{AuthorizeUrlRequest, build_authorization_url};
 pub use callback::{
-    CallbackQueryPolicy, OAuthCallbackOutcome, parse_absolute_redirect_query,
-    parse_oauth_callback_query, parse_remote_authorization_input,
+    CallbackQueryPolicy, OAuthCallbackOutcome, loopback_redirect_authority,
+    parse_absolute_redirect_query, parse_loopback_callback_target, parse_oauth_callback_query,
+    parse_remote_authorization_input,
 };
 pub use device_poll::DevicePollSchedule;
 pub use error::OAuthWorkflowError;

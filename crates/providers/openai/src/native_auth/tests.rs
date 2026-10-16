@@ -392,7 +392,9 @@ impl futures_core::Stream for TerminalOnlyModelStream {
 }
 
 const TEST_KID: &str = "plak-test-rs256";
-static BROWSER_TEST_LOCK: AsyncMutex<()> = AsyncMutex::const_new(());
+/// Browser logins in tests bind an ephemeral port, never the pinned ones.
+const TEST_LOOPBACK_PORTS: &[u16] = &[0];
+const PINNED_REDIRECT: &str = "http://localhost:1455/auth/callback";
 const TEST_MODULUS: &str = "gJwvgsbhK0fe9NrzNs59X-Cl5aTdccTUPBCWSzTPh3IFfTkP6mUewoAtNett_my68PC_8raMua60QcQRSINvj47OIKvIF5VFnPiXt7KICtYMkxAqQ7RqrVcDmp6zFT6WbQY3Uq_Htp3zRndiwbuR4b5LezMmqputb8Vgj9Va210TCUFrmrHCEncAbtr4z0i4DO09BtCJg-x8j-OrxVi5aKs1ObbGWKTX2Mjtc-A6bAQ00em5NWi5ugsP_1RWw_CeFHXtMeoULlLWAxGfDtv8DUrQuN4nkZSFtxHy7kOj2L-soMZUPMoHYGxDT1aydPUe_7sVnMZFhWeUWpsqFd-9rw";
 // The PEM armor is split so secret scanners do not flag this synthetic key.
 const TEST_PRIVATE_KEY: &[u8] = concat!(
@@ -778,7 +780,6 @@ fn deadline_test_credential() -> Result<StoredCredential, NativeCodexAuthError> 
 }
 
 async fn assert_browser_login_stall_expires(phase: LoginStallPhase) -> TestResult {
-    let _browser_test = BROWSER_TEST_LOCK.lock().await;
     let endpoint = test_endpoint().await?;
     let (_directory, slot) = private_slot()?;
     let manager = manager_for_endpoint(&slot, &endpoint)?;
@@ -939,6 +940,7 @@ fn manager_for_endpoint(
             ProfileEndpoints {
                 auth_origin: endpoint.origin.clone(),
                 chatgpt_origin: endpoint.origin.clone(),
+                loopback_ports: TEST_LOOPBACK_PORTS,
             },
         )?,
     ))
@@ -957,6 +959,7 @@ fn manager_for_endpoint_with_gate(
             ProfileEndpoints {
                 auth_origin: endpoint.origin.clone(),
                 chatgpt_origin: endpoint.origin.clone(),
+                loopback_ports: TEST_LOOPBACK_PORTS,
             },
         )?
         .with_subscription_request_gate(gate),
@@ -4844,7 +4847,6 @@ fn device_deadline_bounds_token_jwks_and_userinfo_stalls_without_commit() -> Tes
 
 #[tokio::test]
 async fn browser_and_device_deadlines_bound_near_expiry_lifecycle_waits() -> TestResult {
-    let _browser_test = BROWSER_TEST_LOCK.lock().await;
     let browser_endpoint = test_endpoint().await?;
     let (_browser_directory, browser_slot) = private_slot()?;
     let browser_manager = manager_for_endpoint(&browser_slot, &browser_endpoint)?;
@@ -5229,7 +5231,6 @@ async fn device_login_cannot_resurrect_a_concurrent_logout() -> TestResult {
 
 #[tokio::test]
 async fn local_browser_login_rejects_concurrent_credential_rotation() -> TestResult {
-    let _browser_test = BROWSER_TEST_LOCK.lock().await;
     let endpoint = test_endpoint().await?;
     let (_directory, slot) = private_slot()?;
     seed_ready_credential(
@@ -5283,7 +5284,6 @@ async fn local_browser_login_rejects_concurrent_credential_rotation() -> TestRes
 
 #[tokio::test]
 async fn malformed_browser_callback_gets_explicit_rejection_without_network() -> TestResult {
-    let _browser_test = BROWSER_TEST_LOCK.lock().await;
     let endpoint = test_endpoint().await?;
     let (_directory, slot) = private_slot()?;
     let manager = manager_for_endpoint(&slot, &endpoint)?;
@@ -5336,7 +5336,6 @@ async fn malformed_browser_callback_gets_explicit_rejection_without_network() ->
     reason = "one lifecycle fixture proves browser binding, refresh commit/quarantine, and local cleanup"
 )]
 async fn browser_callback_is_exact_state_bound_and_one_use() -> TestResult {
-    let _browser_test = BROWSER_TEST_LOCK.lock().await;
     let endpoint = test_endpoint().await?;
     let (_directory, slot) = private_slot()?;
     let manager = manager_for_endpoint(&slot, &endpoint)?;
@@ -5749,6 +5748,7 @@ async fn offline_admin_survives_expiry_and_kill_without_network() -> TestResult 
     let endpoints = ProfileEndpoints {
         auth_origin: endpoint.origin.clone(),
         chatgpt_origin: endpoint.origin.clone(),
+        loopback_ports: TEST_LOOPBACK_PORTS,
     };
     assert!(matches!(
         CodexSubscriptionCredentialManager::new_with_endpoints_and_policy(
@@ -6277,6 +6277,30 @@ fn public_constants_are_backed_by_shared_oauth_pin_tables() {
     assert_eq!(PROFILE_KILLED, CODEX_PROFILE.killed);
     assert_eq!(CODEX_OAUTH.loopback_ports, &[1455, 1457]);
     assert_eq!(CODEX_OAUTH.primary_loopback_port(), 1455);
+    assert_eq!(ProfileEndpoints::production().loopback_ports, &[1455, 1457]);
+}
+
+#[tokio::test]
+async fn browser_login_redirect_and_host_follow_the_bound_test_port() -> TestResult {
+    let endpoint = test_endpoint().await?;
+    let (_directory, slot) = private_slot()?;
+    let manager = manager_for_endpoint(&slot, &endpoint)?;
+    let login = manager.begin_browser_login().await?;
+    let port = login.listener.local_addr()?.port();
+    assert!(!CODEX_OAUTH.loopback_ports.contains(&port));
+    let redirect = format!("http://localhost:{port}/auth/callback");
+    assert_eq!(login.attempt.redirect_uri, redirect);
+    let authorization = Url::parse(login.authorization_url())?;
+    assert_eq!(
+        authorization_query_value(&authorization, "redirect_uri")?,
+        redirect
+    );
+    let target = "/auth/callback?code=x&state=01234567890123456789012345678901";
+    let bound = format!("GET {target} HTTP/1.1\r\nHost: localhost:{port}\r\n\r\n");
+    assert!(parse_browser_callback(bound.as_bytes(), &redirect).is_ok());
+    let pinned = format!("GET {target} HTTP/1.1\r\nHost: localhost:1455\r\n\r\n");
+    assert!(parse_browser_callback(pinned.as_bytes(), &redirect).is_err());
+    Ok(())
 }
 
 #[test]
@@ -6425,30 +6449,30 @@ fn strict_parsers_accept_exact_callback_scopes_and_reject_drift() -> TestResult 
         .finish();
     let callback =
         format!("GET /auth/callback?{callback_query} HTTP/1.1\r\nHost: localhost:1455\r\n\r\n");
-    assert!(parse_browser_callback(callback.as_bytes(), 1455).is_ok());
+    assert!(parse_browser_callback(callback.as_bytes(), PINNED_REDIRECT).is_ok());
     let omitted_scope = b"GET /auth/callback?code=x&state=01234567890123456789012345678901 HTTP/1.1\r\nHost: localhost:1455\r\n\r\n";
-    assert!(parse_browser_callback(omitted_scope, 1455).is_ok());
+    assert!(parse_browser_callback(omitted_scope, PINNED_REDIRECT).is_ok());
     let literal_ip_host = b"GET /auth/callback?code=x&state=01234567890123456789012345678901 HTTP/1.1\r\nHost: 127.0.0.1:1455\r\n\r\n";
-    assert!(parse_browser_callback(literal_ip_host, 1455).is_err());
+    assert!(parse_browser_callback(literal_ip_host, PINNED_REDIRECT).is_err());
     let request = b"GET /other?code=x&state=01234567890123456789012345678901 HTTP/1.1\r\nHost: localhost:1455\r\n\r\n";
-    assert!(parse_browser_callback(request, 1455).is_err());
+    assert!(parse_browser_callback(request, PINNED_REDIRECT).is_err());
     let duplicate = b"GET /auth/callback?code=x&code=y&state=01234567890123456789012345678901 HTTP/1.1\r\nHost: localhost:1455\r\n\r\n";
-    assert!(parse_browser_callback(duplicate, 1455).is_err());
+    assert!(parse_browser_callback(duplicate, PINNED_REDIRECT).is_err());
     let empty_code = b"GET /auth/callback?code=&state=01234567890123456789012345678901 HTTP/1.1\r\nHost: localhost:1455\r\n\r\n";
-    assert!(parse_browser_callback(empty_code, 1455).is_err());
+    assert!(parse_browser_callback(empty_code, PINNED_REDIRECT).is_err());
     let wrong_scope = b"GET /auth/callback?code=x&scope=openid&state=01234567890123456789012345678901 HTTP/1.1\r\nHost: localhost:1455\r\n\r\n";
-    assert!(parse_browser_callback(wrong_scope, 1455).is_err());
+    assert!(parse_browser_callback(wrong_scope, PINNED_REDIRECT).is_err());
     let duplicate_scope = b"GET /auth/callback?code=x&scope=openid&scope=profile&state=01234567890123456789012345678901 HTTP/1.1\r\nHost: localhost:1455\r\n\r\n";
-    assert!(parse_browser_callback(duplicate_scope, 1455).is_err());
+    assert!(parse_browser_callback(duplicate_scope, PINNED_REDIRECT).is_err());
     let mixed_success_error = b"GET /auth/callback?code=x&error=denied&state=01234567890123456789012345678901 HTTP/1.1\r\nHost: localhost:1455\r\n\r\n";
-    assert!(parse_browser_callback(mixed_success_error, 1455).is_err());
+    assert!(parse_browser_callback(mixed_success_error, PINNED_REDIRECT).is_err());
     let orphaned_error_description = b"GET /auth/callback?code=x&error_description=denied&state=01234567890123456789012345678901 HTTP/1.1\r\nHost: localhost:1455\r\n\r\n";
-    assert!(parse_browser_callback(orphaned_error_description, 1455).is_err());
+    assert!(parse_browser_callback(orphaned_error_description, PINNED_REDIRECT).is_err());
     let scoped_error = b"GET /auth/callback?error=denied&scope=openid&state=01234567890123456789012345678901 HTTP/1.1\r\nHost: localhost:1455\r\n\r\n";
-    assert!(parse_browser_callback(scoped_error, 1455).is_err());
+    assert!(parse_browser_callback(scoped_error, PINNED_REDIRECT).is_err());
     let provider_error = b"GET /auth/callback?error=access_denied&error_description=cancelled&state=01234567890123456789012345678901 HTTP/1.1\r\nHost: localhost:1455\r\n\r\n";
     assert!(matches!(
-        parse_browser_callback(provider_error, 1455),
+        parse_browser_callback(provider_error, PINNED_REDIRECT),
         Ok(OAuthCallbackOutcome::ProviderError { .. })
     ));
     Ok(())

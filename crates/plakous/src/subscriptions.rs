@@ -3002,6 +3002,11 @@ impl NativeSubscriptions {
             if let Some(observer) = credential_refresh_observer(NativeProvider::Codex) {
                 manager = manager.with_credential_refresh_observer(observer);
             }
+            // Unit tests never bind the pinned Codex callback ports.
+            #[cfg(test)]
+            {
+                manager = manager.with_ephemeral_loopback_for_tests();
+            }
             Ok(CodexOnline {
                 manager: Arc::new(manager),
                 client,

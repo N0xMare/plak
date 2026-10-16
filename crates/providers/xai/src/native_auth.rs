@@ -13,8 +13,7 @@ pub use catalog::{XaiCatalogDiagnosticFacts, XaiNativeCatalogEntry, XaiNativeCat
 use login::BrowserLoginFlow;
 #[cfg(test)]
 use login::{
-    BrowserCallback, oauth_callback_to_browser, parse_callback_request, parse_callback_url,
-    xai_callback_policy,
+    BrowserCallback, oauth_callback_to_browser, parse_callback_request, xai_callback_policy,
 };
 pub use login::{XaiBrowserLogin, XaiDeviceLogin, XaiRemoteBrowserLogin};
 #[cfg(test)]
@@ -53,9 +52,9 @@ use plakous_auth::oauth_workflow::{
     AuthorizeUrlRequest, CallbackQueryPolicy, DevicePollSchedule, LoopbackCallbackOutcome,
     LoopbackCallbackPage, OAuthCallbackOutcome, OAuthWorkflowError, access_needs_refresh,
     authorization_code_token_form, build_authorization_url, decode_json_bounded,
-    is_http_token_byte, parse_absolute_redirect_query, parse_http11_get_request,
-    parse_remote_authorization_input, refresh_token_form, remaining_until,
-    unsigned_access_token_exp, urlencoded_form,
+    is_http_token_byte, loopback_redirect_authority, parse_http11_get_request,
+    parse_loopback_callback_target, parse_remote_authorization_input, refresh_token_form,
+    remaining_until, unsigned_access_token_exp, urlencoded_form,
 };
 use plakous_auth::subscription_limit::{
     SubscriptionRequestClass, SubscriptionRequestGate, SubscriptionRequestPermit,
@@ -1085,13 +1084,16 @@ impl XaiNativeAuthManager {
     /// Fails if the compatibility profile is inactive, randomness is
     /// unavailable, or the fixed loopback socket cannot be exclusively bound.
     pub async fn begin_browser_login(&self) -> Result<XaiBrowserLogin, XaiNativeAuthError> {
-        let flow = self.begin_browser_login_flow()?;
-        let (listener, port) = bind_loopback_listener(&[XAI_OAUTH.primary_loopback_port()])
+        self.core.ensure_active()?;
+        #[cfg(test)]
+        refuse_pinned_test_loopback(self.core.endpoints.loopback_ports);
+        let (listener, port) = bind_loopback_listener(self.core.endpoints.loopback_ports)
             .await
             .map_err(|_| XaiNativeAuthError::LoopbackUnavailable)?;
-        if !XAI_OAUTH.allows_loopback_port(port) {
-            return Err(XaiNativeAuthError::LoopbackUnavailable);
-        }
+        let flow = self.begin_browser_login_flow(format!(
+            "http://127.0.0.1:{port}{}",
+            XAI_OAUTH.browser_callback_path
+        ))?;
         flow.ensure_active()?;
         Ok(XaiBrowserLogin { flow, listener })
     }
@@ -1110,7 +1112,7 @@ impl XaiNativeAuthManager {
     /// unavailable, or the selected-slot baseline cannot be read safely.
     pub fn begin_remote_browser_login(&self) -> Result<XaiRemoteBrowserLogin, XaiNativeAuthError> {
         Ok(XaiRemoteBrowserLogin {
-            flow: self.begin_browser_login_flow()?,
+            flow: self.begin_browser_login_flow(XAI_LOOPBACK_REDIRECT.to_owned())?,
         })
     }
 
@@ -1347,17 +1349,22 @@ impl XaiNativeAuthManager {
         self.core.revoke().await
     }
 
-    fn begin_browser_login_flow(&self) -> Result<BrowserLoginFlow, XaiNativeAuthError> {
+    fn begin_browser_login_flow(
+        &self,
+        redirect_uri: String,
+    ) -> Result<BrowserLoginFlow, XaiNativeAuthError> {
         self.core.ensure_active()?;
         let deadline = self.core.flow_deadline(LOGIN_TIMEOUT)?;
         let baseline = self.core.store.load()?;
         let pkce = PkceS256::generate()?;
         let binding = CallbackBinding::generate()?;
-        let authorization_url = authorization_url(&self.core.endpoints, &pkce, &binding)?;
+        let authorization_url =
+            authorization_url(&self.core.endpoints, &redirect_uri, &pkce, &binding)?;
         self.core.ensure_flow_active(deadline)?;
         Ok(BrowserLoginFlow {
             core: Arc::clone(&self.core),
             baseline,
+            redirect_uri,
             pkce,
             binding,
             authorization_url,
@@ -1478,6 +1485,7 @@ impl ManagerCore {
     async fn exchange_code(
         &self,
         code: Zeroizing<String>,
+        redirect_uri: &str,
         pkce: &PkceS256,
         nonce: Option<&str>,
         baseline: Option<&CredentialFence>,
@@ -1486,7 +1494,7 @@ impl ManagerCore {
         self.ensure_flow_active(deadline)?;
         let form = urlencoded_form(&authorization_code_token_form(
             code.as_str(),
-            XAI_LOOPBACK_REDIRECT,
+            redirect_uri,
             XAI_PUBLIC_CLIENT_ID,
             pkce.verifier().expose_secret(),
         ));
@@ -2617,6 +2625,9 @@ struct AuthEndpoints {
     jwks: Endpoint,
     catalog: Endpoint,
     usage: Endpoint,
+    /// Browser callback listener candidates. Production binds exactly the
+    /// pinned redirect port; tests bind an ephemeral port (`[0]`).
+    loopback_ports: &'static [u16],
 }
 
 impl AuthEndpoints {
@@ -2640,6 +2651,7 @@ impl AuthEndpoints {
                 origin: crate::SUPERGROK_RESPONSES_ORIGIN.to_owned(),
                 path: crate::subscription_usage::GROK_SUBSCRIPTION_USAGE_PATH.to_owned(),
             },
+            loopback_ports: XAI_OAUTH.loopback_ports,
         }
     }
 
@@ -2658,6 +2670,7 @@ impl AuthEndpoints {
             jwks: endpoint(JWKS_PATH),
             catalog: endpoint(CATALOG_PATH),
             usage: endpoint(crate::subscription_usage::GROK_SUBSCRIPTION_USAGE_PATH),
+            loopback_ports: &[0],
         }
     }
 
@@ -2857,8 +2870,18 @@ struct OAuthErrorResponse {
 #[serde(deny_unknown_fields)]
 struct RevokeResponse {}
 
+/// Tests never bind the pinned xAI callback port.
+#[cfg(test)]
+fn refuse_pinned_test_loopback(ports: &[u16]) {
+    assert_ne!(
+        ports, XAI_OAUTH.loopback_ports,
+        "tests never bind the pinned xAI callback port"
+    );
+}
+
 fn authorization_url(
     endpoints: &AuthEndpoints,
+    redirect_uri: &str,
     pkce: &PkceS256,
     binding: &CallbackBinding,
 ) -> Result<Zeroizing<String>, XaiNativeAuthError> {
@@ -2867,7 +2890,7 @@ fn authorization_url(
     build_authorization_url(AuthorizeUrlRequest {
         pins: XAI_OAUTH,
         auth_origin: Some(endpoints.authorize().origin.as_str()),
-        redirect_uri: XAI_LOOPBACK_REDIRECT,
+        redirect_uri,
         code_challenge: pkce.challenge().as_str(),
         state: binding.expose_state(),
         nonce: Some(binding.expose_nonce()),

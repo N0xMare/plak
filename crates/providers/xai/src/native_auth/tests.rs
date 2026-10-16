@@ -42,6 +42,7 @@ use tokio::sync::{Mutex, Notify, mpsc, oneshot};
 use tokio_rustls::TlsAcceptor;
 
 use super::*;
+use plakous_auth::oauth_workflow::parse_absolute_redirect_query;
 
 #[test]
 fn supergrok_dispatch_generation_binds_rotation_and_login_selection() {
@@ -417,6 +418,22 @@ fn manager(temp: &TempDir, peer: &MockPeer) -> TestResult<XaiNativeAuthManager> 
     )?)
 }
 
+/// A manager whose browser login must bind the port `occupied` already holds,
+/// so any bind attempt fails and a flow that succeeds provably never bound.
+fn manager_with_occupied_loopback(
+    temp: &TempDir,
+    peer: &MockPeer,
+    occupied: &TcpListener,
+) -> TestResult<XaiNativeAuthManager> {
+    let mut manager = manager(temp, peer)?;
+    let port: &'static [u16] = Box::leak(Box::new([occupied.local_addr()?.port()]));
+    Arc::get_mut(&mut manager.core)
+        .ok_or("fresh manager core is unshared")?
+        .endpoints
+        .loopback_ports = port;
+    Ok(manager)
+}
+
 #[derive(Serialize)]
 struct TestClaims<'a> {
     iss: &'a str,
@@ -567,6 +584,15 @@ fn public_constants_are_backed_by_shared_oauth_pin_tables() {
     assert_eq!(XAI_OAUTH_SCOPE, XAI_OAUTH.scopes);
     assert_eq!(XAI_LOOPBACK_REDIRECT, XAI_OAUTH.loopback_redirect_uri);
     assert_eq!(XAI_OAUTH.primary_loopback_port(), 56121);
+    assert_eq!(AuthEndpoints::production().loopback_ports, &[56121]);
+    assert_eq!(
+        format!(
+            "http://127.0.0.1:{}{}",
+            XAI_OAUTH.primary_loopback_port(),
+            XAI_OAUTH.browser_callback_path
+        ),
+        XAI_LOOPBACK_REDIRECT
+    );
     assert_eq!(XAI_GROK_COMPATIBILITY_PROFILE, XAI_PROFILE.profile_id);
     assert_eq!(XAI_OPENCODE_SOURCE_REVISION, XAI_PROFILE.source_revision);
     assert_eq!(XAI_OPENCODE_SOURCE, XAI_PROFILE.source_locator.unwrap());
@@ -652,7 +678,12 @@ fn profile_is_exact_expiring_and_truthfully_attributed() -> TestResult {
     ));
     let pkce = PkceS256::generate()?;
     let callback = CallbackBinding::generate()?;
-    let url = authorization_url(&AuthEndpoints::production(), &pkce, &callback)?;
+    let url = authorization_url(
+        &AuthEndpoints::production(),
+        XAI_LOOPBACK_REDIRECT,
+        &pkce,
+        &callback,
+    )?;
     assert!(url.starts_with("https://auth.x.ai/oauth2/authorize?"));
     let parsed = Url::parse(&url)?;
     let pairs = parsed.query_pairs().collect::<BTreeMap<_, _>>();
@@ -1041,6 +1072,16 @@ fn browser_callback_url_parser_accepts_only_exact_success_or_provider_error_gram
     ));
 }
 
+fn parse_callback_url(full_redirect_url: &str) -> Result<BrowserCallback, XaiNativeAuthError> {
+    parse_absolute_redirect_query(
+        full_redirect_url,
+        XAI_LOOPBACK_REDIRECT,
+        xai_callback_policy(),
+    )
+    .map(oauth_callback_to_browser)
+    .map_err(|_| XaiNativeAuthError::InvalidCallback)
+}
+
 #[test]
 fn remote_authorization_input_accepts_callback_url_or_bare_code_with_attempt_state() {
     let parse_remote = |input: &str| {
@@ -1091,7 +1132,8 @@ fn remote_authorization_input_accepts_callback_url_or_bare_code_with_attempt_sta
 fn browser_callback_request_parser_requires_exact_http11_host_and_origin_form() {
     assert!(matches!(
         parse_callback_request(
-            "GET /callback?code=c&state=s HTTP/1.1\r\nHost: 127.0.0.1:56121\r\nConnection: close\r\n\r\n"
+            "GET /callback?code=c&state=s HTTP/1.1\r\nHost: 127.0.0.1:56121\r\nConnection: close\r\n\r\n",
+            XAI_LOOPBACK_REDIRECT,
         ),
         Ok(BrowserCallback::AuthorizationCode { code, state })
             if code.as_str() == "c" && state.as_str() == "s"
@@ -1107,7 +1149,7 @@ fn browser_callback_request_parser_requires_exact_http11_host_and_origin_form() 
         "GET /callback?code=c&state=s HTTP/1.1\nHost: 127.0.0.1:56121\n\n",
     ] {
         assert!(matches!(
-            parse_callback_request(request),
+            parse_callback_request(request, XAI_LOOPBACK_REDIRECT),
             Err(XaiNativeAuthError::InvalidCallback)
         ));
     }
@@ -1534,8 +1576,15 @@ async fn browser_login_correlates_pkce_state_and_signed_nonce() -> TestResult {
     let peer = mock_peer().await?;
     let manager = manager(&temp, &peer)?;
     let login = manager.begin_browser_login().await?;
+    let port = login.listener.local_addr()?.port();
+    assert_ne!(port, XAI_OAUTH.primary_loopback_port());
+    let redirect = format!("http://127.0.0.1:{port}/callback");
     let parsed = Url::parse(login.authorization_url())?;
     let pairs = parsed.query_pairs().collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        pairs.get("redirect_uri").map(AsRef::as_ref),
+        Some(redirect.as_str())
+    );
     let state = required(pairs.get("state"), "browser state")?.to_string();
     let nonce = required(pairs.get("nonce"), "browser nonce")?.to_string();
     enqueue_login_validation(
@@ -1549,10 +1598,11 @@ async fn browser_login_correlates_pkce_state_and_signed_nonce() -> TestResult {
     )
     .await?;
     let completion = tokio::spawn(async move { login.complete().await });
-    let mut preflight = tokio::net::TcpStream::connect(("127.0.0.1", 56_121)).await?;
+    let mut preflight = tokio::net::TcpStream::connect(("127.0.0.1", port)).await?;
     preflight
         .write_all(
-            b"OPTIONS /callback HTTP/1.1\r\nHost: 127.0.0.1:56121\r\nOrigin: https://accounts.x.ai\r\nAccess-Control-Request-Method: GET\r\nAccess-Control-Request-Private-Network: true\r\nConnection: close\r\n\r\n",
+            format!("OPTIONS /callback HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: https://accounts.x.ai\r\nAccess-Control-Request-Method: GET\r\nAccess-Control-Request-Private-Network: true\r\nConnection: close\r\n\r\n")
+            .as_bytes(),
         )
         .await?;
     let mut preflight_response = Vec::new();
@@ -1561,9 +1611,9 @@ async fn browser_login_correlates_pkce_state_and_signed_nonce() -> TestResult {
     assert!(preflight_response.starts_with("HTTP/1.1 204 No Content"));
     assert!(preflight_response.contains("Access-Control-Allow-Origin: https://accounts.x.ai\r\n"));
     assert!(preflight_response.contains("Access-Control-Allow-Private-Network: true\r\n"));
-    let mut callback = tokio::net::TcpStream::connect(("127.0.0.1", 56_121)).await?;
+    let mut callback = tokio::net::TcpStream::connect(("127.0.0.1", port)).await?;
     let request = format!(
-        "GET /callback?code=browser-code&state={state} HTTP/1.1\r\nHost: 127.0.0.1:56121\r\nConnection: close\r\n\r\n"
+        "GET /callback?code=browser-code&state={state} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
     );
     for fragment in request.as_bytes().chunks(3) {
         callback.write_all(fragment).await?;
@@ -1582,7 +1632,9 @@ async fn browser_login_correlates_pkce_state_and_signed_nonce() -> TestResult {
     let token = String::from_utf8_lossy(&requests[0]);
     assert!(token.starts_with("POST /oauth2/token HTTP/1.1"));
     assert!(token.contains("grant_type=authorization_code"));
-    assert!(token.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A56121%2Fcallback"));
+    assert!(token.contains(&format!(
+        "redirect_uri=http%3A%2F%2F127.0.0.1%3A{port}%2Fcallback"
+    )));
     assert!(token.contains("code_verifier="));
     drop(requests);
     peer.shutdown().await?;
@@ -1592,10 +1644,14 @@ async fn browser_login_correlates_pkce_state_and_signed_nonce() -> TestResult {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn remote_browser_login_never_binds_and_uses_shared_complete_lifecycle() -> TestResult {
     let _serial = AUTH_TEST_GATE.lock().await;
-    let occupied = TcpListener::bind(("127.0.0.1", 56_121)).await?;
+    let occupied = TcpListener::bind(("127.0.0.1", 0)).await?;
     let temp = tempdir()?;
     let peer = mock_peer().await?;
-    let manager = manager(&temp, &peer)?;
+    let manager = manager_with_occupied_loopback(&temp, &peer, &occupied)?;
+    assert!(matches!(
+        manager.begin_browser_login().await,
+        Err(XaiNativeAuthError::LoopbackUnavailable)
+    ));
     let bare = manager.begin_remote_browser_login()?;
     assert_eq!(
         format!("{bare:?}"),
@@ -1650,10 +1706,10 @@ async fn remote_browser_login_never_binds_and_uses_shared_complete_lifecycle() -
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn remote_browser_provider_error_is_correlated_and_never_dispatches() -> TestResult {
     let _serial = AUTH_TEST_GATE.lock().await;
-    let occupied = TcpListener::bind(("127.0.0.1", 56_121)).await?;
+    let occupied = TcpListener::bind(("127.0.0.1", 0)).await?;
     let temp = tempdir()?;
     let peer = mock_peer().await?;
-    let manager = manager(&temp, &peer)?;
+    let manager = manager_with_occupied_loopback(&temp, &peer, &occupied)?;
     let login = manager.begin_remote_browser_login()?;
     let parsed = Url::parse(login.authorization_url())?;
     let pairs = parsed.query_pairs().collect::<BTreeMap<_, _>>();
@@ -1677,10 +1733,10 @@ async fn remote_browser_provider_error_is_correlated_and_never_dispatches() -> T
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn remote_browser_wrong_state_is_invalid_callback_without_dispatch() -> TestResult {
     let _serial = AUTH_TEST_GATE.lock().await;
-    let occupied = TcpListener::bind(("127.0.0.1", 56_121)).await?;
+    let occupied = TcpListener::bind(("127.0.0.1", 0)).await?;
     let temp = tempdir()?;
     let peer = mock_peer().await?;
-    let manager = manager(&temp, &peer)?;
+    let manager = manager_with_occupied_loopback(&temp, &peer, &occupied)?;
     let login = manager.begin_remote_browser_login()?;
     let result = login
         .complete("http://127.0.0.1:56121/callback?code=must-not-dispatch&state=wrong-state")
@@ -1700,15 +1756,16 @@ async fn local_browser_rejects_wrong_host_without_dispatch_and_returns_no_store(
     let peer = mock_peer().await?;
     let manager = manager(&temp, &peer)?;
     let login = manager.begin_browser_login().await?;
+    let port = login.listener.local_addr()?.port();
     let parsed = Url::parse(login.authorization_url())?;
     let pairs = parsed.query_pairs().collect::<BTreeMap<_, _>>();
     let state = required(pairs.get("state"), "wrong-host state")?;
     let completion = tokio::spawn(async move { login.complete().await });
-    let mut callback = tokio::net::TcpStream::connect(("127.0.0.1", 56_121)).await?;
+    let mut callback = tokio::net::TcpStream::connect(("127.0.0.1", port)).await?;
     callback
         .write_all(
             format!(
-                "GET /callback?code=must-not-dispatch&state={state} HTTP/1.1\r\nHost: localhost:56121\r\nConnection: close\r\n\r\n"
+                "GET /callback?code=must-not-dispatch&state={state} HTTP/1.1\r\nHost: localhost:{port}\r\nConnection: close\r\n\r\n"
             )
             .as_bytes(),
         )
@@ -1734,9 +1791,10 @@ async fn browser_callback_silent_after_fragment_is_bounded_by_one_deadline() -> 
     let peer = mock_peer().await?;
     let manager = manager(&temp, &peer)?;
     let mut login = manager.begin_browser_login().await?;
+    let port = login.listener.local_addr()?.port();
     login.flow.deadline = Instant::now() + Duration::from_millis(100);
     let completion = tokio::spawn(async move { login.complete().await });
-    let mut callback = tokio::net::TcpStream::connect(("127.0.0.1", 56_121)).await?;
+    let mut callback = tokio::net::TcpStream::connect(("127.0.0.1", port)).await?;
     callback
         .write_all(b"GET /callback?code=partial HTTP/1.1\r\nHost:")
         .await?;
@@ -1756,6 +1814,7 @@ async fn browser_completion_rechecks_profile_after_userinfo_before_persistence()
     let peer = mock_peer().await?;
     let manager = Arc::new(manager(&temp, &peer)?);
     let login = manager.begin_browser_login().await?;
+    let port = login.listener.local_addr()?.port();
     let parsed = Url::parse(login.authorization_url())?;
     let pairs = parsed.query_pairs().collect::<BTreeMap<_, _>>();
     let state = required(pairs.get("state"), "browser state")?.to_string();
@@ -1772,11 +1831,11 @@ async fn browser_completion_rechecks_profile_after_userinfo_before_persistence()
     peer.responses.send(userinfo).await?;
 
     let completion = tokio::spawn(async move { login.complete().await });
-    let mut callback = tokio::net::TcpStream::connect(("127.0.0.1", 56_121)).await?;
+    let mut callback = tokio::net::TcpStream::connect(("127.0.0.1", port)).await?;
     callback
         .write_all(
             format!(
-                "GET /callback?code=browser-expiry-code&state={state} HTTP/1.1\r\nHost: 127.0.0.1:56121\r\nConnection: close\r\n\r\n"
+                "GET /callback?code=browser-expiry-code&state={state} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
             )
             .as_bytes(),
         )

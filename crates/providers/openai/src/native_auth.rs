@@ -61,7 +61,7 @@ use plakous_auth::oauth_workflow::{
     AuthorizeUrlRequest, CallbackQueryPolicy, DevicePollSchedule, LoopbackCallbackOutcome,
     LoopbackCallbackPage, OAuthCallbackOutcome, OAuthWorkflowError, access_needs_refresh,
     authorization_code_token_form, build_authorization_url, capped_deadline, decode_json_bounded,
-    parse_http11_get_request, parse_oauth_callback_query, remaining_until,
+    parse_http11_get_request, parse_loopback_callback_target, remaining_until,
     unsigned_access_token_exp, urlencoded_form_bytes,
 };
 use plakous_auth::subscription_limit::{
@@ -386,6 +386,9 @@ pub enum NativeCodexAuthError {
 struct ProfileEndpoints {
     auth_origin: EndpointOrigin,
     chatgpt_origin: EndpointOrigin,
+    /// Browser callback listener candidates. Production binds exactly the
+    /// pinned redirect ports; tests bind an ephemeral port (`[0]`).
+    loopback_ports: &'static [u16],
 }
 
 impl ProfileEndpoints {
@@ -395,6 +398,7 @@ impl ProfileEndpoints {
                 .unwrap_or_else(|error| unreachable!("static auth origin is valid: {error}")),
             chatgpt_origin: EndpointOrigin::parse(OPENAI_CHATGPT_ORIGIN)
                 .unwrap_or_else(|error| unreachable!("static ChatGPT origin is valid: {error}")),
+            loopback_ports: CODEX_OAUTH.loopback_ports,
         }
     }
 }
@@ -589,6 +593,16 @@ impl CodexSubscriptionCredentialManager {
             request_gate: None,
             refresh_observer: None,
         })
+    }
+
+    /// Binds browser-login callbacks on an ephemeral loopback port instead of
+    /// the pinned redirect ports, so parallel tests never contend for them.
+    #[cfg(feature = "test-support")]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_ephemeral_loopback_for_tests(mut self) -> Self {
+        self.endpoints.loopback_ports = &[0];
+        self
     }
 
     /// Attaches the classified physical-request gate required for inference.

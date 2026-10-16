@@ -597,7 +597,12 @@ paste-completed even locally, because their pages do not call back to
 localhost. The CLI **refuses** a local login when it detects an SSH session
 rather than silently switching modes. Callback input validates the exact
 redirect origin, port, path, and query grammar, and compares state in constant
-time. Pasted authorization input disables terminal `ECHO` and `ECHONL`,
+time. A loopback callback is checked against the redirect URI its attempt
+actually sent: the `Host` header must equal that redirect's authority exactly,
+and `http://<Host><request-target>` must then match the redirect's path and
+query grammar. Production listeners bind only the pinned redirect ports, so
+that authority is always a pinned one; tests bind an ephemeral port through the
+managers' loopback seam and never a pinned port. Pasted authorization input disables terminal `ECHO` and `ECHONL`,
 preserves cooked `ICANON` and `ISIG`, and uses bounded zeroizing storage. Its
 raw byte bound includes whitespace before trimming; a refusal never drains an
 unbounded stream. A restoration guard restores terminal and file flags on

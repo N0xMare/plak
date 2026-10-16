@@ -51,36 +51,6 @@ impl SubscriptionOAuthPins {
     pub const fn primary_loopback_port(self) -> u16 {
         self.loopback_ports[0]
     }
-
-    /// Returns whether `port` is one of the dialect's pinned loopback ports.
-    #[must_use]
-    pub fn allows_loopback_port(self, port: u16) -> bool {
-        self.loopback_ports.contains(&port)
-    }
-
-    /// Loopback `Host` for a bound port (`host` from [`Self::loopback_authority`]).
-    #[must_use]
-    pub fn loopback_host_for_port(self, port: u16) -> Option<String> {
-        if !self.allows_loopback_port(port) {
-            return None;
-        }
-        let host = self
-            .loopback_authority
-            .split_once(':')
-            .map_or(self.loopback_authority, |(host, _)| host);
-        (!host.is_empty()).then(|| format!("{host}:{port}"))
-    }
-
-    /// Exact loopback Host match; `bound_port` selects dynamic vs primary authority.
-    #[must_use]
-    pub fn loopback_host_matches(self, host: &str, bound_port: Option<u16>) -> bool {
-        match bound_port {
-            Some(port) => self
-                .loopback_host_for_port(port)
-                .is_some_and(|expected| expected == host),
-            None => host == self.loopback_authority,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -247,17 +217,9 @@ mod tests {
     }
 
     #[test]
-    fn loopback_validation_is_closed_to_pinned_ports_and_authority() {
+    fn primary_loopback_port_is_the_first_pinned_port() {
         let pins = oauth_pins();
         assert_eq!(pins.primary_loopback_port(), 1455);
-        assert!(pins.allows_loopback_port(1457));
-        assert!(!pins.allows_loopback_port(56121));
-        assert_eq!(
-            pins.loopback_host_for_port(1457).as_deref(),
-            Some("localhost:1457")
-        );
-        assert!(pins.loopback_host_matches("localhost:1455", None));
-        assert!(!pins.loopback_host_matches("127.0.0.1:1455", Some(1455)));
     }
 
     #[test]

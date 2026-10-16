@@ -254,6 +254,40 @@ pub fn parse_absolute_redirect_query(
     parse_oauth_callback_query(query, policy)
 }
 
+/// Returns the `host:port` authority of a plain-HTTP loopback redirect URI.
+///
+/// `None` unless `redirect_uri` is `http://<authority>/<path>` with a
+/// non-empty authority.
+#[must_use]
+pub fn loopback_redirect_authority(redirect_uri: &str) -> Option<&str> {
+    let (authority, _path) = redirect_uri.strip_prefix("http://")?.split_once('/')?;
+    (!authority.is_empty()).then_some(authority)
+}
+
+/// Parses one loopback callback request against the attempt's redirect URI.
+///
+/// The `Host` header must equal the redirect's authority exactly, and
+/// `http://<host><target>` must then pass [`parse_absolute_redirect_query`]
+/// against that same redirect, so host, port, path and query all derive from
+/// the redirect the attempt actually sent.
+///
+/// # Errors
+///
+/// Returns [`OAuthWorkflowError::Callback`] for a mismatched host or a
+/// rejected redirect.
+pub fn parse_loopback_callback_target(
+    host: &str,
+    target: &str,
+    expected_redirect_uri: &str,
+    policy: CallbackQueryPolicy,
+) -> Result<OAuthCallbackOutcome, OAuthWorkflowError> {
+    if loopback_redirect_authority(expected_redirect_uri) != Some(host) {
+        return Err(OAuthWorkflowError::Callback);
+    }
+    let full_url = Zeroizing::new(format!("http://{host}{target}"));
+    parse_absolute_redirect_query(&full_url, expected_redirect_uri, policy)
+}
+
 /// Parses an exact pasted redirect or binds a bare code to the live attempt.
 ///
 /// # Errors
@@ -297,8 +331,9 @@ fn valid_callback_value(value: &str, maximum: usize) -> bool {
 )]
 mod tests {
     use super::{
-        CallbackQueryPolicy, OAuthCallbackOutcome, parse_absolute_redirect_query,
-        parse_oauth_callback_query, parse_remote_authorization_input,
+        CallbackQueryPolicy, OAuthCallbackOutcome, loopback_redirect_authority,
+        parse_absolute_redirect_query, parse_loopback_callback_target, parse_oauth_callback_query,
+        parse_remote_authorization_input,
     };
     use crate::oauth_pins::{browser_test_pins, oidc_test_pins};
     use crate::oauth_workflow::OAuthWorkflowError;
@@ -416,6 +451,38 @@ mod tests {
         )
         .expect_err("invalid input");
         assert!(!format!("{error:?}").contains(secret));
+    }
+
+    #[test]
+    fn loopback_callback_host_and_path_derive_from_the_redirect_used() {
+        let policy = CallbackQueryPolicy::codex("openid");
+        let redirect = "http://localhost:49152/auth/callback";
+        assert_eq!(
+            loopback_redirect_authority(redirect),
+            Some("localhost:49152")
+        );
+        for rejected in ["https://localhost:1/cb", "http:///cb", "http://localhost:1"] {
+            assert_eq!(loopback_redirect_authority(rejected), None, "{rejected}");
+        }
+        let target = "/auth/callback?code=c&state=s";
+        assert!(matches!(
+            parse_loopback_callback_target("localhost:49152", target, redirect, policy),
+            Ok(OAuthCallbackOutcome::AuthorizationCode { .. })
+        ));
+        for (host, target) in [
+            ("localhost:1455", target),
+            ("127.0.0.1:49152", target),
+            ("localhost:49153", target),
+            ("localhost:49152", "/other?code=c&state=s"),
+            ("localhost:49152", "/auth/callback"),
+            ("localhost:49152", "/auth/callback?"),
+        ] {
+            assert_eq!(
+                parse_loopback_callback_target(host, target, redirect, policy),
+                Err(OAuthWorkflowError::Callback),
+                "{host}{target}"
+            );
+        }
     }
 
     fn urlencoding_scope(scope: &str) -> String {

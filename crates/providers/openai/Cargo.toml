@@ -23,6 +23,9 @@ native-auth = [
     "tokio/io-util",
     "tokio/net",
 ]
+# Test-only: lets a dependent's tests bind native browser-login callbacks on an
+# ephemeral port. A dev-dependency of `plakous`, never a production edge.
+test-support = ["native-auth"]
 [dependencies]
 base64 = { workspace = true, optional = true }
 jsonwebtoken = { workspace = true, features = ["aws_lc_rs"], optional = true }

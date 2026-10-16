@@ -96,6 +96,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 [dev-dependencies]
 futures-core.workspace = true
 futures-util.workspace = true
+plakous-openai = { version = "0.1.0", path = "../providers/openai", default-features = false, features = ["test-support"] }
 plakous-test-support = { version = "0.1.0", path = "../../tests/support/plakous-test-support" }
 rusqlite.workspace = true
 rustix = { workspace = true, features = ["pty", "termios"] }

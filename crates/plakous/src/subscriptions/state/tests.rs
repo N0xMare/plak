@@ -637,9 +637,8 @@ async fn xai_retired_payload_reads_as_profile_changed_and_local_logout_repairs_i
 }
 
 /// Begins and drops one login without provider traffic. Codex remote login
-/// requests a device code, so Codex begins its loopback browser login; its
-/// pinned ports may be held by another process, which still proves admission
-/// ran (the binding refusal comes after it).
+/// requests a device code, so Codex begins its loopback browser login, which
+/// unit tests bind on an ephemeral port.
 async fn begin_offline_login(
     subscriptions: &NativeSubscriptions,
     provider: NativeProvider,
@@ -651,11 +650,13 @@ async fn begin_offline_login(
             NativeLoginCompletion::AuthorizationCodeOrRedirectUrl,
         ),
     };
-    match subscriptions.begin_login(provider, mode).await {
-        Ok(pending) => assert_eq!(pending.instructions().completion(), completion),
-        Err(NativeSubscriptionError::AuthenticationBinding)
-            if provider == NativeProvider::Codex => {}
-        Err(error) => return Err(error.into()),
+    let pending = subscriptions.begin_login(provider, mode).await?;
+    assert_eq!(pending.instructions().completion(), completion);
+    if provider == NativeProvider::Codex {
+        let instructions = pending.instructions();
+        let url = instructions.verification_uri();
+        assert!(url.contains("redirect_uri=http%3A%2F%2Flocalhost%3A"));
+        assert!(!url.contains("localhost%3A1455%2F") && !url.contains("localhost%3A1457%2F"));
     }
     Ok(())
 }

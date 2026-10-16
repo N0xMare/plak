@@ -209,7 +209,7 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
 EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-py-worker": "a57158273317e3c1c0ebe404e30d6e81f3c7074a51c9b713ad946093bcee9bda",
     "plakous-js-runtime": "6c68fa7e92379b21f826b9a64729008865573b5cd9dd0439cea8d765ae10e99e",
-    "plakous": "3ca4416a5973c6ac4199be83139d851d051b3d8059c660e7391020d8fd2a4ec6",
+    "plakous": "f776cd974f884f241d8848132b466245205c9f37c7357827a2cfbbe653204934",
     "plakous-agent": "bd86d54cede49bb93150a0461f2c803b79525872d1fe243715261f9f0d6ef8e8",
     "plakous-anthropic": "961f43653d38f0f9b3251cfd6933f814a289210cc87e98081af2aef3ab00189a",
     "plakous-attempt": "6fa8c59b329b4de7ae6eb497bf4b3e2d93f916551c682c2f1a803a506ee65992",
@@ -222,7 +222,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-py-eval": "9762b4ca38230836eaee81639f677cba2bf7f7af708d8a9c6aaf9cddd43beed2",
     "plakous-messages": "f366cb5a0ce430a3f2eb2cba32cd70d8b358f6e45a3441e8a61385a4474e979d",
     "plakous-model": "ad51d57d372a8bceb2696f96a4e87f7ac31071c9690f074c41559cb2677ad78d",
-    "plakous-openai": "a336a69fffbe47cc2c12cad3686d41d5c2acca7d0eeb8df3426a434304306d21",
+    "plakous-openai": "aef3a24707b0e4300ab292d142475be6eb564105b36bdc75ca064f270e63063e",
     "plakous-tool-files": "032d5367ef52db60dd8a5f798aecb2517aa5464787cb962d743b18d48f2dc9b0",
     "plakous-tool-plan": "97d99c53c448bc26d4bfb53ef555578d2c2185a98579a6df934ea3ce7a245da4",
     "plakous-tool-process": "6fa78529b74a6ed25c559f877278b23022a2203cd66f0ac393a9c3d0d8b5d790",
