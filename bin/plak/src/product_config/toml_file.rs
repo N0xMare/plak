@@ -26,13 +26,17 @@ use serde::Deserialize;
 use toml::Spanned;
 use toml_edit::{DocumentMut, Item, Table, TableLike, Value};
 
+use plakous_hosted::tool_plan::TemplateToolSelection;
+
+use super::tool_sections::{self, McpServerSection, ToolsSection};
 use super::{
     AgentTemplate, CONFIG_KEYS, ConfigKey, Delegation, FieldValue, ProductCompositionSelection,
     ProductConfig, ProductProtocolSelection, TemplateName, Tier, removed_or_unknown_section,
     unknown_key,
 };
 
-/// `config.toml`: nine sections, each optional, nothing else.
+/// `config.toml`: eleven sections, each optional, nothing else. `[tools]` and
+/// `[mcp_servers]` hold one named table per entry.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ConfigFile {
@@ -45,12 +49,14 @@ struct ConfigFile {
     tui: Option<TuiSection>,
     compaction: Option<CompactionSection>,
     telemetry: Option<TelemetrySection>,
+    tools: Option<ToolsSection>,
+    mcp_servers: Option<BTreeMap<String, McpServerSection>>,
 }
 
 /// Every key is read as a spanned TOML value rather than a Rust type so the
 /// type complaint is the product's own sentence, at the value's own location,
 /// instead of serde's.
-type Entry = Option<Spanned<toml::Value>>;
+pub(super) type Entry = Option<Spanned<toml::Value>>;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -135,6 +141,7 @@ struct TemplateFile {
     composition: Entry,
     protocol: Entry,
     description: Entry,
+    access: Entry,
     tools: Entry,
     spawns: Entry,
     may_adopt: Entry,
@@ -225,6 +232,8 @@ pub(super) fn parse_config(text: &str) -> Result<ProductConfig, String> {
         assign("telemetry.max_bytes", &section.max_bytes)?;
         assign("telemetry.max_age_days", &section.max_age_days)?;
     }
+    config.tool_sections =
+        tool_sections::parse(text, file.tools.as_ref(), file.mcp_servers.as_ref())?;
     Ok(config)
 }
 
@@ -293,13 +302,45 @@ pub(super) fn parse_template(text: &str, name: &str) -> Result<AgentTemplate, St
     if let Some(description) = string("description", &file.description)? {
         template.description = description;
     }
-    template.max_tier = match string("tools", &file.tools)?.as_deref() {
+    template.max_tier = match string("access", &file.access)?.as_deref() {
         None | Some("full") => Tier::Mutate,
         Some("read-execute") => Tier::Execute,
         Some(_) => {
-            return Err(format!("template {name}: tools must be full|read-execute"));
+            let span = file.access.as_ref().map_or(0..0, Spanned::span);
+            return Err(located(
+                text,
+                span,
+                &format!("template {name}: access must be full|read-execute"),
+            ));
         }
     };
+    if let Some(spanned) = &file.tools {
+        let refuse = |message: String| located(text, spanned.span(), &message);
+        let items = match spanned.as_ref() {
+            toml::Value::Array(items) => items,
+            toml::Value::String(_) => {
+                return Err(refuse(format!(
+                    "template {name}: tools is now a list of tool names; the edit ceiling moved to access"
+                )));
+            }
+            _ => {
+                return Err(refuse(format!(
+                    "template {name}: tools must be an array of tool names"
+                )));
+            }
+        };
+        let mut names = Vec::with_capacity(items.len());
+        for item in items {
+            let toml::Value::String(tool) = item else {
+                return Err(refuse(format!(
+                    "template {name}: tools must be an array of tool names"
+                )));
+            };
+            names.push(tool.as_str());
+        }
+        template.tools = TemplateToolSelection::parse(names)
+            .map_err(|error| refuse(format!("template {name}: tools: {error}")))?;
+    }
     if let Some(spanned) = &file.spawns {
         let not_names = || {
             located(
@@ -514,7 +555,7 @@ fn same_value(current: &Value, desired: &Value) -> bool {
 }
 
 /// A message with the place in the file it belongs to.
-fn located(text: &str, span: Range<usize>, message: &str) -> String {
+pub(super) fn located(text: &str, span: Range<usize>, message: &str) -> String {
     let (line, column) = line_column(text, span.start);
     format!("{message} (line {line}, column {column})")
 }
@@ -609,7 +650,7 @@ fn site(text: &str, span: Option<Range<usize>>) -> Site {
 }
 
 /// The dotted name of a `[header]` line, or `None` when the line is not one.
-fn table_header(line: &str) -> Option<String> {
+pub(super) fn table_header(line: &str) -> Option<String> {
     let trimmed = line.trim();
     let inner = trimmed.strip_prefix('[')?;
     let inner = inner.strip_prefix('[').unwrap_or(inner);

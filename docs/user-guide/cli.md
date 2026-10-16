@@ -175,6 +175,15 @@ the file; `status` reports presence without printing the key. Environment
 variables override files, `plak key clear` cannot unset a process environment
 variable, and Plak never loads a `.env` file. Key entry is CLI-only.
 
+### `plak secret set|rm <name>`, `plak secret list`
+
+Named secrets that `config.toml` refers to by name — an MCP server's
+`secret_env`, `bearer_secret` or `secret_headers`. `set` prompts with hidden
+input (the value is never an argument) and writes
+`<PLAK_HOME>/secrets/named/<name>.secret`, mode 0600; `rm` removes it; `list`
+prints names only. A name matches `[a-z][a-z0-9-]{0,31}`. There is no
+environment override.
+
 ---
 
 ### Subscription compatibility review deadlines

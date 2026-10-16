@@ -125,7 +125,7 @@ account = "codex"
 model = "gpt-5.6-sol"
 effort = "high"
 description = "Root operator: drives the session and delegates bounded work."
-tools = "full"
+access = "full"
 ```
 
 ```toml
@@ -179,10 +179,15 @@ The fields worth deciding on:
 
 - `description` — the spawn card. Required for anything in the working set or
   in a `spawns` list.
-- `tools` — `full` or `read-execute`. A reviewer or explorer can use
+- `access` — `full` or `read-execute`. A reviewer or explorer can use
   `read-execute` to omit dedicated file-edit tools while retaining shell
   diagnostics. Shell commands still run with host authority; this is not an OS
-  write prohibition. A request for more is clipped, not refused.
+  write prohibition. A request for more is clipped, not refused. (This field
+  was called `tools`; a template that still says `tools = "full"` is refused
+  with a hint to rename it.)
+- `tools` — optional tools beyond the core set, by name:
+  `tools = ["web_search", "fetch_url", "mcp:github"]`. See *Optional tools and
+  MCP servers* below.
 - `spawns` / `may_adopt` — which templates this agent may spawn when it runs
   as a child (`spawns = ["worker", "reviewer"]`; omitted means a leaf), and
   whether it may pull a finished child's work into its own checkout.
@@ -198,6 +203,56 @@ The fields worth deciding on:
 
 `configs/reference/agents/` has all four of these written out with every field
 documented in place, including the ones most templates leave alone.
+
+## Optional tools and MCP servers
+
+Every template gets its provider's core coding tools. A template's `tools`
+list adds more, by name:
+
+| Name | What it is |
+| --- | --- |
+| `web_search`, `web_fetch`, `x_search` | Search and fetch run by the provider of the route the agent binds. A route that cannot serve one refuses the session or spawn with a remedy (for example, put `x_search` on a grok template and spawn it). |
+| `fetch_url` | A plain HTTP fetch Plak runs itself. |
+| `image_gen` | Image generation. |
+| `mcp:<id>` | Every tool an MCP server allows. |
+| `mcp:<id>/<tool>` | One tool of an MCP server. |
+
+None is on by default and no shipped profile turns one on. Options live in
+`config.toml`; a table there enables nothing by itself:
+
+```toml
+[tools.web_search]
+max_uses = 5
+allowed_domains = ["docs.rs"]
+
+[mcp_servers.github]
+transport = "stdio"
+command = "github-mcp-server"
+args = ["stdio"]
+secret_env = { GITHUB_PERSONAL_ACCESS_TOKEN = "github" }
+tools = ["get_file_contents", "create_issue"]
+
+[mcp_servers.linear]
+transport = "http"
+url = "https://mcp.linear.app/mcp"
+bearer_secret = "linear"
+```
+
+Secrets are never written in `config.toml`. Store one under a name and refer
+to the name:
+
+```sh
+plak secret set github     # prompts; the value is never echoed or taken from argv
+plak secret list           # names only
+plak secret rm github
+```
+
+A child gets at most its parent's tools: a working-set template may not list
+`fetch_url`, `image_gen` or an MCP tool its root template lacks, and the same
+holds for every `spawns` entry. `web_search`, `web_fetch` and `x_search` are
+exempt, so a root can hand X search to a Grok child it could not run itself.
+The check runs when the configuration loads and names the edge and the extra
+tools. The full key reference is in spec 07 §3.4 and §3.5.
 
 ### Rust build caches
 

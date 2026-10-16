@@ -3452,6 +3452,7 @@ async fn api_child_pin_follows_the_api_table_for_its_node_model() {
         templates_digest: String::new(),
         // The pin, not the hint, is the fence under test.
         bind_hints: BindHints::from_names(&["openai", "xai-api", "anthropic"], &[]),
+        tool_sections: std::collections::BTreeMap::new(),
     });
     let tree_id = crate::topology_runtime::test_support::unique_tree_id();
     let mut tree = ProductAgentTree::bootstrap_root(

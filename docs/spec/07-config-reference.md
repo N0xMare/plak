@@ -19,6 +19,7 @@ $PLAK_HOME/            # default ~/.plak
   config.toml          # preferences; never secrets
   agents/<name>.toml   # one template per file
   secrets/             # credentials; never in config.toml
+    named/<name>.secret  # `plak secret set`; config names these, never holds them
 ```
 
 `PLAK_HOME` MUST be absolute when set; otherwise the home is `$HOME/.plak`
@@ -123,8 +124,12 @@ never in it.
 
 ## 3. `config.toml`
 
-Nine sections, in render order: `[root] [roster] [orchestration] [turn] [jobs]
-[api] [tui] [compaction] [telemetry]`. Any other section is an error.
+Nine key sections, in render order: `[root] [roster] [orchestration] [turn]
+[jobs] [api] [tui] [compaction] [telemetry]`, plus two families of named
+tables, `[tools.<name>]` (§3.4) and `[mcp_servers.<id>]` (§3.5), eleven in
+all. Any other section is an error. The two families are not `plak config set`
+keys: they are authored in the file, a save leaves them exactly as written, and
+`plak config show` prints their canonical rendering after the keys.
 
 | key | type | default | constraint | meaning |
 | --- | --- | --- | --- | --- |
@@ -222,6 +227,52 @@ turn resumed after a restart.
 `theme = "dark"` is rewritten as `theme = "default-dark"` the next time
 anything persists the config. The four Catppuccin values have no aliases.
 
+### 3.4 `[tools.<name>]`
+
+Options for an optional tool a template lists. A table enables nothing: only a
+template's `tools` list does, and a listed tool whose table is absent runs on
+the defaults below. `<name>` is one of the three tools that take options; any
+other name is an unknown section.
+
+| key | type | default | constraint | meaning |
+| --- | --- | --- | --- | --- |
+| `tools.fetch_url.max_bytes` | integer | `2097152` | 1..=8388608 | Response body cap before conversion, in bytes. |
+| `tools.fetch_url.timeout_seconds` | integer | `30` | 1..=120 | Whole fetch including redirects, in seconds. |
+| `tools.web_search.max_uses` | integer | `5` | 1..=20 | Searches one call may run. |
+| `tools.web_search.allowed_domains` | array of string | `[]` | at most 10 domain names, none twice; exclusive with blocked_domains | Search only these domains. |
+| `tools.web_search.blocked_domains` | array of string | `[]` | at most 10 domain names, none twice; exclusive with allowed_domains | Never search these domains. |
+| `tools.x_search.allowed_x_handles` | array of string | `[]` | at most 20 handles of 1 to 15 letters, digits or `_`, without `@` | Search only posts from these X handles; empty is every handle. |
+
+### 3.5 `[mcp_servers.<id>]`
+
+One MCP server a template may name as `mcp:<id>` or `mcp:<id>/<tool>`. `<id>`
+matches `[a-z][a-z0-9]{0,15}(_[a-z0-9]+)*` within 32 bytes, so the exposed
+`mcp__<id>__<tool>` name splits back unambiguously. A table configures how to
+reach the server; it starts nothing until a template that lists it binds.
+
+| key | type | default | constraint | meaning |
+| --- | --- | --- | --- | --- |
+| `transport` | string | `(required)` | stdio\|http | How the server is reached. |
+| `command` | string | `(required for stdio)` | non-empty; stdio only | argv[0], resolved on the captured PATH at spawn. |
+| `args` | array of string | `[]` | stdio only | The rest of argv. |
+| `env` | table of string | `{}` | keys `[A-Za-z_][A-Za-z0-9_]*`; stdio only | Literal, non-secret environment. |
+| `secret_env` | table of string | `{}` | keys as `env`, none also in `env`; values are secret names; stdio only | Environment variables whose values are named secrets. |
+| `url` | string | `(required for http)` | `https://`, or `http://` only to `127.0.0.1` or `[::1]`; no credentials or fragment; http only | The streamable HTTP endpoint. |
+| `bearer_secret` | string | `(unset)` | a secret name; http only | Sent as `Authorization: Bearer <secret>`. |
+| `headers` | table of string | `{}` | header names; never `Authorization`; no control characters; http only | Literal, non-secret headers. |
+| `secret_headers` | table of string | `{}` | header names, none also in `headers` (case-insensitive), no `Authorization` beside `bearer_secret`; values are secret names; http only | Headers whose values are named secrets. |
+| `tools` | array of string | `(every listed tool)` | MCP tool names, 1 to 128 bytes without whitespace, none twice | Server-level allowlist; `mcp:<id>` means exactly these. |
+| `startup_seconds` | integer | `20` | 1..=120 | Budget to start the server and list its tools. |
+| `call_seconds` | integer | `120` | 1..=3600 | Hard per-call ceiling; progress does not extend it. |
+
+A key of the other transport is a load error. Secrets are never values in
+TOML: a secret name matches `[a-z][a-z0-9-]{0,31}` and resolves from the home
+(spec 04 §3.1) when the server is started; whether it exists is a bind check,
+not a load check. A trusted project may add an `[mcp_servers.<id>]` or
+`[tools.<name>]` table or replace one of the home's by name, whole (a stdio
+server is a host-authority command, like `on_mint`); its secrets still resolve
+only from the home.
+
 ## 4. `agents/<name>.toml`
 
 One flat object plus an optional `[env]` table. The file stem is the name.
@@ -235,7 +286,8 @@ One flat object plus an optional `[env]` table. The file stem is the name.
 | `composition` | enum | `"plakous-default"` | direct\|plakous-default\|native-ptc\|js-ptc\|py-ptc; native-ptc is refused for openrouter, anthropic and xai-api, and on openai is valid only for a model enrolled as CodeModeOnly | How the model composes the product tools: direct calls one at a time, or a programmatic tool calling (PTC) cell. native-ptc is the provider's own PTC system (today only Codex Code Mode is enrolled); js-ptc and py-ptc are harness PTC on every account. plakous-default uses the versioned Plakous-recommended tool presentation for this provider/model; the resolved presentation is pinned for the session and does not select or substitute a model. |
 | `protocol` | enum | `"auto"` | auto\|chat\|responses\|messages; anything but auto is OpenRouter-only | Wire protocol pin for an OpenRouter model whose family the gateway reports wrongly. |
 | `description` | string | `""` | required and non-blank for a template named in [roster] working_set or in a spawns list | The spawn card a parent routes on: what this agent is for, in the parent's words. |
-| `tools` | enum | `"full"` | full\|read-execute | Tool presentation: full includes file-edit tools; read-execute omits dedicated file-edit tools but permits shell commands. Neither is an OS sandbox. A spawn request above the ceiling is clipped, not refused. |
+| `access` | enum | `"full"` | full\|read-execute | Edit ceiling: full includes file-edit tools; read-execute omits dedicated file-edit tools but permits shell commands. Neither is an OS sandbox. A spawn request above the ceiling is clipped, not refused. |
+| `tools` | array of string | `[]` | web_search\|web_fetch\|x_search\|fetch_url\|image_gen\|mcp:<id>\|mcp:<id>/<tool>, none twice; each mcp:<id> names a [mcp_servers.<id>] table; a child lists no fetch_url, image_gen or mcp tool its parent lacks | Optional tools enabled by name after the core tools; options come from config.toml [tools.<name>] and [mcp_servers.<id>]. Each is resolved against the route when a session or child binds, and a tool the route cannot serve refuses the bind. |
 | `spawns` | array of string | `[]` | 0..=5 names, no duplicates, each a template file with a description | The templates a copy of this template may spawn; its own name is never on its menu. Empty is a leaf with no spawn_agent. The root spawns [roster] working_set instead; this list applies where the template runs as a child. |
 | `may_adopt` | bool | `false` | requires spawns naming another template | Whether a copy may adopt a sealed candidate out of its own subtree. |
 | `delegation` | enum | `"explicit"` | explicit\|proactive | Whether the model is told to delegate unprompted or only when asked. |
@@ -274,6 +326,17 @@ Cross-field rules, all checked at load and again before any save:
 - `composition = "native-ptc"` selects the vertical's own programmatic tool calling system (spec 02 §6.5); today only Codex Code Mode is enrolled, on Codex `CodeModeOnly` rows and OpenAI API models enrolled as `CodeModeOnly`, and other verticals have none enrolled. It is refused for `openrouter`, `anthropic` and `xai-api`; on `openai` it is valid only for a model the API enrollment table marks `CodeModeOnly` (spec 02 §3.1), checked at load. On a subscription account it is checked at bind.
 - Direct API accounts require an enrolled model and an explicit effort on that model's published ladder (`plak models <account>`); the provider route fixes their wire protocol.
 - `max_turns` must be 1 or more.
+- `tools` entries are parsed in order: a name outside the closed set, a
+  malformed `mcp:` name, a duplicate, or an `mcp:<id>/<tool>` beside the
+  `mcp:<id>` that already includes it is refused at its location. Every
+  `mcp:<id>` MUST name an `[mcp_servers.<id>]` table in the effective
+  config.toml, and an `mcp:<id>/<tool>` MUST name a tool that table's `tools`
+  allowlist admits (a table without one admits any name).
+- The child subset rule (chapter 03 §3.1): on every spawn edge — the root's
+  `[root] agent` template to each working-set member, and each template to
+  each template its `spawns` names — the child's `fetch_url`, `image_gen` and
+  MCP tools MUST be a subset of the parent's, with `mcp:<id>` expanded to the
+  server allowlist. `web_search`, `web_fetch` and `x_search` are exempt.
 - A template named in `[roster] working_set` MUST carry a non-blank
   `description`.
 
@@ -303,6 +366,24 @@ and a template message is prefixed `template <name>: `.
 | template `spawns` that is not an array of strings | `template <name>: spawns must be an array of template names` |
 | template `spawns` with an invalid name | `template <name>: spawns: <name grammar error>` |
 | unknown template key | `template <name>: unknown key <key>` |
+| template `tools` written as the old string ceiling | `template <name>: tools is now a list of tool names; the edit ceiling moved to access` |
+| template `access` outside its set | `template <name>: access must be full\|read-execute` |
+| template `tools` that is not an array of strings | `template <name>: tools must be an array of tool names` |
+| template `tools` entry refused by the grammar | `template <name>: tools: ` followed by `unknown tool "<x>"; expected one of …`, `tool "<x>" is listed twice`, `tool "<x>" is already included by mcp:<id>; list one or the other`, or the invalid server-id / tool-name sentence |
+| `mcp:<id>` with no table | `template <name>: tools names mcp:<id>, and config.toml has no [mcp_servers.<id>]` |
+| `mcp:<id>/<tool>` outside the allowlist | `template <name>: tools names mcp:<id>/<tool>, which [mcp_servers.<id>] tools does not allow` |
+| subset rule, root edge | `[roster] working_set template <child> lists tools its root template <root> lacks: <tools>; a child gets at most its parent's fetch_url, image_gen and mcp tools (web_search, web_fetch and x_search are exempt)`; with no `[root] agent`, `its root template <root>` reads `the root (no [root] agent, so no optional tools)` |
+| subset rule, spawns edge | `template <parent> spawns <child>, which lists tools <parent> lacks: <tools>; ` and the same rule sentence |
+| `[tools.<x>]` for another name | `unknown config section [tools.<x>]; [tools.<name>] takes fetch_url, web_search or x_search` |
+| a `[tools.*]` or `[mcp_servers.*]` value out of range or of the wrong shape | `[<table>] <key> must be an integer in <a>..=<b>` / `must be an array of at most <n> <what>` / `must be a string` / `must be a table of strings` / `must be an array of strings` |
+| both domain lists set | `[tools.web_search] allowed_domains and blocked_domains cannot both be set; list one or the other` |
+| invalid server id | `[mcp_servers.<id>] is not a valid MCP server id; an id matches [a-z][a-z0-9]{0,15}(_[a-z0-9]+)* within 32 bytes` |
+| missing or unknown transport | `[mcp_servers.<id>] needs transport = "stdio" or "http"` / `[mcp_servers.<id>] transport must be "stdio" or "http"` |
+| missing command or url | `[mcp_servers.<id>] needs command for transport = "stdio"` / `needs url for transport = "http"` |
+| a key of the other transport | `[mcp_servers.<id>] <key> does not apply to transport = "<transport>"` |
+| a url outside the rule | `[mcp_servers.<id>] url must be https://, or http:// to a loopback literal (127.0.0.1 or [::1])`; with userinfo, `url cannot carry credentials; name a secret with bearer_secret` |
+| a secret reference that is not a name | `[mcp_servers.<id>] <key> names a secret: secret name "<x>" must match [a-z][a-z0-9-]{0,31}` |
+| a literal `Authorization` header | `[mcp_servers.<id>] headers cannot carry Authorization; name a secret with bearer_secret or secret_headers` |
 | a template field of the wrong type | `template <name>: <key> must be a string` / `a boolean` / `an integer` |
 | direct API template whose model is not a usable listed row, or whose effort is missing or off the model's published ladder | `template <name>: ` followed by the API admission refusal: the model is not listed (with up to three closest ids), is listed but not usable (with its status and reason), or `requires --effort <ladder>` |
 | a template `[env]` value that is not a string | `template <name>: env <key> must be a string` |
@@ -388,11 +469,20 @@ writer mode, the four clamped tree bounds, the epoch rules, the roster (one
 reachable from it through `spawns`), and a `templates_digest` over the
 canonical rendering of every closure template plus the root template's body,
 in name order. The root template has a card only when the closure reaches it.
-The snapshot's own `digest` covers all of it.
+Each card carries its template's `tools` list. The snapshot also freezes
+`tool_sections`: the canonical rendering of every `[tools.<name>]` and
+`[mcp_servers.<id>]` table a closure template's list, or the bound root
+template's list, reaches — a listed tool with options and no table renders its
+defaults, so spelling a default out changes nothing. The same renderings follow
+the templates in the `templates_digest` body. The snapshot's own `digest`
+covers all of it; an epoch that reaches no table carries no `tool_sections`
+field and digests exactly as before the field existed.
 
 Because the digest covers the resolved template **contents**, editing a
 template file mid-epoch changes nothing: the running tree keeps binding what
-was frozen. The edit takes effect when a successor epoch installs — a new
+was frozen. The same holds for a referenced tool table: editing an MCP server's
+command mid-epoch changes nothing a running tree binds. Editing a table no
+frozen list reaches changes no digest at all. The edit takes effect when a successor epoch installs — a new
 session at genesis, or a roster apply against a quiescent tree. A profile's
 Fork now does not touch the running tree at all: the new session opens a tree
 of its own whose genesis freezes the profile's roster (spec 03 §1.2). Two
@@ -476,6 +566,11 @@ Two keys take a value spelling the file grammar cannot:
 | `configs/reference/` | Every key and every template field, each with its meaning, type, default and constraint as a comment. It is the approved Codex provider preset annotated by the product's own renderer — regenerated by a test (`PLAK_REGENERATE_REFERENCE_CONFIGS=1 cargo test -p plak reference`), so it cannot describe a key the loader does not have or carry values the preset does not approve. It is a working home: `root-agent` bound as root, `worker`, `reviewer` and `explorer` in the working set. |
 | `configs/providers/` | The same four roles, one home per provider: `codex`, `claude`, `grok`. The Agents tab embeds these three as `codex-default`, `claude-default`, and `grok-default`. The fourth role in each is `scout`. |
 | `configs/scenarios/` | Complete scenario homes — single-agent, mixed-account trees, direct and PTC compositions, OpenRouter-only. |
+
+No shipped preset or scenario lists an optional tool or carries a `[tools.*]`
+or `[mcp_servers.*]` table: the built-in profiles keep their core tool sets,
+and optional tools are opt-in per template. The reference `config.toml` ends
+with a fully commented example of both table families.
 
 Every preset under `configs/` is loadable as a `PLAK_HOME`, and
 `bin/plak/tests/integration/product_config_fixtures.rs` loads them

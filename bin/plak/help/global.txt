@@ -13,6 +13,7 @@ COMMANDS:
   status      Credential readiness (no secrets)
   refresh     Refresh OAuth credential
   key         API key set/clear/status (openai, xai-api, anthropic, openrouter)
+  secret      Named secrets config.toml refers to (set/rm/list; values never printed)
   run         Non-interactive one-shot agent run
   agent       Long-lived JSONL host client (stdio; same host as TUI)
   resume      Resume session (cwd picker or UUID)

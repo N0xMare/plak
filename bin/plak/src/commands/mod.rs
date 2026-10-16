@@ -14,6 +14,7 @@ pub(crate) mod login_flow;
 #[cfg(feature = "maintainer")]
 pub(crate) mod reload_rehearsal;
 pub(crate) mod run;
+pub mod secret;
 pub mod session;
 pub mod support;
 pub mod usage;

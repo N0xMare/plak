@@ -41,7 +41,8 @@ Templates MUST NOT be authored through `plak config set`, which refuses
 | `composition` | catalog selection for this node (`direct`, `plakous-default`, `native-ptc`, `js-ptc`, `py-ptc`) |
 | `protocol` | OpenRouter-only wire selection |
 | `description` | **required** for a template named in the working set or in any `spawns` list: the card text the spawner routes on |
-| `tools` | tool presentation ceiling, default `full`; `read-execute` omits file-edit tools; a higher ask is clipped, not refused |
+| `access` | edit ceiling, default `full`; `read-execute` omits file-edit tools; a higher ask is clipped, not refused |
+| `tools` | optional tools enabled by name (`web_search`, `web_fetch`, `x_search`, `fetch_url`, `image_gen`, `mcp:<id>`, `mcp:<id>/<tool>`); default `[]`; subject to the child subset rule (§3.1) |
 | `spawns` | array of template names this node may spawn, at most 5, no duplicates; omitted or `[]` is a leaf that compiles no `spawn_agent` |
 | `may_adopt` | this node compiles `adopt_candidate`; requires `spawns` naming another template |
 | `delegation` | `explicit` (default) or `proactive`: which single policy sentence renders |
@@ -122,7 +123,12 @@ line come from its own card. The tree-epoch digest covers the working set,
 every closure card, and the resolved template file **bodies** of the closure,
 and additionally the root template's body, not just the main config, so a
 mid-epoch template edit is ignored until a successor epoch installs through
-the apply gate.
+the apply gate. Each card freezes its template's `tools` list, and the
+snapshot freezes the canonical rendering of every `[tools.<name>]` and
+`[mcp_servers.<id>]` table those lists and the bound root template's list
+reach (`tool_sections`), inside the digest; a child binds the frozen tables,
+never the live file. A table no frozen list reaches is not epoch state, so
+editing it changes no digest (chapter 07 §6).
 All `[orchestration]` controls come from the operator home, including in a
 trusted project. Project overrides are ignored with a warning and project
 writes to these controls are refused (chapter 07).
@@ -374,6 +380,33 @@ The **instructions follow the same grant**. A node earns the topology paragraph
 only when `spawn_agent` is compiled for it, and the assignment sentence only
 when `submit_result` is, so a leaf carries neither. Each child's Start prompt
 states the tier and workspace it actually has.
+
+A node's grant also includes its own template's optional `tools`, resolved
+against its route when it binds (chapter 01); a tool the route cannot serve
+refuses the bind rather than being silently omitted.
+
+### 3.1 A child gets at most its parent's tools
+
+The rule is checked **statically when the configuration loads** (and again
+before any save, so `plak config set roster.working_set` refuses too), on
+every edge an epoch can spawn: the root to each `[roster] working_set` member,
+and each template to each template its `spawns` list names (a template naming
+itself is not an edge). The root's tools are its `[root] agent` template's
+list; with no `[root] agent` the root has none.
+
+- `fetch_url`, `image_gen` and MCP tools carry local authority (local network,
+  local processes, user secrets): a child's set MUST be a subset of its
+  parent's. `mcp:<id>` expands to the server's `tools` allowlist for the
+  comparison; a server with no allowlist is "every tool it lists", which
+  covers any `mcp:<id>/<tool>` of that server but is covered only by
+  `mcp:<id>` itself.
+- `web_search`, `web_fetch` and `x_search` (hosted retrieval) are **exempt**:
+  they grant no local authority and spend on the child's own route, which the
+  capacity and usage budgets already bound. This is what lets a parent whose
+  route lacks `x_search` delegate it to a template on a route that has it.
+
+A violation is a load error naming the edge and the extra tools, never a
+spawn-time clip. The edit ceiling (`access`) keeps its clip-not-refuse rule.
 
 ## 4. The ten tools
 

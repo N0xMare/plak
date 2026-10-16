@@ -257,6 +257,13 @@ pub(crate) enum Command {
     KeyStatus {
         account: Option<String>,
     },
+    SecretSet {
+        name: String,
+    },
+    SecretRm {
+        name: String,
+    },
+    SecretList,
     Usage {
         account: Option<String>,
         session_id: Option<String>,
@@ -463,6 +470,7 @@ impl Command {
             | Self::ConfigTrust
             | Self::ConfigUntrust => "config",
             Self::KeySet { .. } | Self::KeyClear { .. } | Self::KeyStatus { .. } => "key",
+            Self::SecretSet { .. } | Self::SecretRm { .. } | Self::SecretList => "secret",
             Self::Usage { .. } => "usage",
             Self::SessionList
             | Self::SessionShow { .. }
@@ -1023,6 +1031,7 @@ fn command_is_read_only(command: &Command) -> bool {
             | Command::AuthStatus(_)
             | Command::Doctor
             | Command::KeyStatus { .. }
+            | Command::SecretList
             | Command::ConfigShow
             | Command::SessionShow { .. }
             | Command::SessionLog { .. }
@@ -1323,6 +1332,9 @@ fn execute_command(
         Command::KeySet { account } => key_set(&account, stdin, stderr),
         Command::KeyClear { account } => key_clear(&account, stdout),
         Command::KeyStatus { account } => key_status(account, stdout),
+        Command::SecretSet { name } => commands::secret::secret_set(&name, stdin, stderr),
+        Command::SecretRm { name } => commands::secret::secret_rm(&name, stdout),
+        Command::SecretList => commands::secret::secret_list(stdout),
         Command::StatusAll => {
             struct StatusRow {
                 ready: bool,

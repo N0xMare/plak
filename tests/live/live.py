@@ -764,7 +764,7 @@ def write_home(home: Path, route: Route, source_home: Path | None = None) -> Non
         (home / "agents" / f"{name}.toml").write_text(
             f'account = "{route.account}"\nmodel = "{route.model}"\n{effort}{protocol}'
             f'composition = "{DEFAULT_COMPOSITION}"\ndescription = "{description}"\n'
-            'tools = "full"\ndelegation = "explicit"\n'
+            'access = "full"\ndelegation = "explicit"\n'
         )
 
 

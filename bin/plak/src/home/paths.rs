@@ -200,6 +200,58 @@ impl PlakPaths {
         self.secrets_dir().join(format!("{account}.key"))
     }
 
+    /// `secrets/named/`: the operator's named secrets (`plak secret set`).
+    #[must_use]
+    pub fn named_secrets_dir(&self) -> PathBuf {
+        self.secrets_dir().join("named")
+    }
+
+    /// One named secret's file. The caller has validated `name`.
+    #[must_use]
+    pub fn named_secret_file(&self, name: &str) -> PathBuf {
+        self.named_secrets_dir().join(format!("{name}.secret"))
+    }
+
+    /// Creates `secrets/named/` 0700 under the private layout, and refuses
+    /// one that exists but is not private, exactly as the layout refuses the
+    /// secrets directory itself.
+    pub fn ensure_named_secrets_dir(&self) -> Result<(), String> {
+        self.ensure_layout()?;
+        let dir = self.named_secrets_dir();
+        match fs::symlink_metadata(&dir) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                create_private_directory(&dir)
+                    .or_else(|error| {
+                        if error.kind() == std::io::ErrorKind::AlreadyExists {
+                            Ok(())
+                        } else {
+                            Err(error)
+                        }
+                    })
+                    .map_err(|_| {
+                        "could not create the private named secrets directory".to_owned()
+                    })?;
+            }
+            Err(_) => return Err("could not inspect the named secrets directory".to_owned()),
+        }
+        require_private_directory(&dir, "Plak named secrets directory")
+    }
+
+    /// Whether `secrets/named/` exists, verified private along with the
+    /// secrets directory above it. Creates nothing.
+    pub fn verify_named_secrets_dir(&self) -> Result<bool, String> {
+        let dir = self.named_secrets_dir();
+        match fs::symlink_metadata(&dir) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(_) => return Err("could not inspect the named secrets directory".to_owned()),
+        }
+        require_private_directory(&self.secrets_dir(), "Plak secrets directory")?;
+        require_private_directory(&dir, "Plak named secrets directory")?;
+        Ok(true)
+    }
+
     /// Parent of every build's state directory.
     #[must_use]
     pub fn state_root(&self) -> PathBuf {

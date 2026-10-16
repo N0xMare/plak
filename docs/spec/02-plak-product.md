@@ -1589,6 +1589,7 @@ version. There is no top-level prompt positional.
 | `status [<account>]` | credential readiness; bare form reports every vertical |
 | `refresh [<account>]` | rotate one refreshable credential |
 | `key set\|clear <openai\|xai-api\|anthropic\|openrouter>`, `key status [<account>]` | `set` and `clear` refuse an account that is not an API-key account |
+| `secret set\|rm <name>`, `secret list` | named secrets config.toml refers to by name (spec 04 §3.1); `set` prompts with masked input, `list` prints names only |
 | `run [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>] [--resume-tree] [--print-session-id] [--max-turns <1..100>] [--timeout <seconds>] -- <prompt…>` | runs until idle, including continuation turns, bounded by `--max-turns` (default 25); each turn can be billable |
 | `agent [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>] [--resume-tree]` | the long-lived JSONL host client |
 | `resume [<session>]` | the TUI picker, or an exact id |
@@ -1757,10 +1758,11 @@ prompt text. Every visible clap long flag is listed on its verb's rendered page.
 
 **A bare command group prints its own help rather than a parse error.** That is
 the rule for `login`, `logout`, `refresh`, `key`, `key set`, `key clear`,
+`secret`, `secret set`, `secret rm`,
 `run`, `config`, `config set` without a key, `session`, `session show`,
 `session log`, `session recover`, `session export`, `session import`, `session reference`, `session delete`, `session gc`, `telemetry`, `telemetry sql`, and `models`. The exceptions are
 the bare forms that are themselves complete commands — `status` (every
-vertical), `key status`, `usage`, `resume`, `session list`, `doctor`, and
+vertical), `key status`, `secret list`, `usage`, `resume`, `session list`, `doctor`, and
 `agent` — and `telemetry prune`, which refuses (§3.4).
 
 Global help closes with the warning that agents use full coding tools by
@@ -1895,7 +1897,8 @@ and its parents are directories they own and can write.
   `CodeModeOnly`.
 - **`plak key set` never takes the key on argv.** It prompts with masked
   input, and it refuses an OAuth account, as `plak login` refuses an API-key
-  account.
+  account. `plak secret set` likewise reads its value only from a masked
+  prompt.
 
 ### 3.5 Output modes
 

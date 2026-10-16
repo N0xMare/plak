@@ -9,6 +9,13 @@ use toml_edit::Value;
 use crate::home::paths::PlakPaths;
 
 mod toml_file;
+mod tool_sections;
+
+pub use tool_sections::{
+    DEFAULT_FETCH_URL_MAX_BYTES, DEFAULT_FETCH_URL_TIMEOUT_SECONDS, DEFAULT_MCP_CALL_SECONDS,
+    DEFAULT_MCP_STARTUP_SECONDS, DEFAULT_WEB_SEARCH_MAX_USES, FetchUrlOptions, McpServerConfig,
+    McpTransport, ToolSections, WebSearchOptions, XSearchOptions,
+};
 
 /// Per-repository trust for `.plak/config.toml` and `.plak/agents/`.
 pub mod project_trust;
@@ -18,7 +25,8 @@ use plakous_hosted::agent_tree_protocol::{
     Delegation, MAX_DIRECT_CHILDREN, MAX_TREE_ATTEMPTS, MAX_TREE_DEPTH, MAX_TREE_NODES,
     MAX_WORKING_SET, TemplateName, Tier, WorkingSet, WriterMode,
 };
-use std::collections::BTreeMap;
+use plakous_hosted::tool_plan::{OptionalTool, SelectedTool, TemplateToolSelection};
+use std::collections::{BTreeMap, BTreeSet};
 
 // Session-binding vocabulary lives in `plakous_hosted::binding`; these names stay for
 // the readers that spell them the configuration way.
@@ -203,6 +211,78 @@ pub fn validate_template_name(name: &str) -> Result<(), String> {
     TemplateName::parse(name).map(|_| ())
 }
 
+/// The commented `[tools.*]` / `[mcp_servers.*]` example the annotated
+/// config ends with. Every line is a comment: a table enables nothing, so the
+/// reference pins none.
+const TOOL_SECTIONS_REFERENCE: &str = "
+# Optional-tool options. A table enables nothing: a template enables a tool by
+# listing it in tools = [...]. A trusted project may add or replace entries by
+# name. Secrets are never values here; name one stored with `plak secret set`.
+#
+# [tools.fetch_url]
+# max_bytes = 2097152                 # 1..=8388608, body cap before conversion
+# timeout_seconds = 30                # 1..=120, whole fetch with redirects
+#
+# [tools.web_search]
+# max_uses = 5                        # 1..=20 searches per call
+# allowed_domains = []                # at most 10; exclusive with blocked_domains
+# blocked_domains = []                # at most 10
+#
+# [tools.x_search]
+# allowed_x_handles = []              # at most 20 handles, without the @
+#
+# [mcp_servers.github]
+# transport = \"stdio\"
+# command = \"github-mcp-server\"       # resolved on PATH at spawn
+# args = [\"stdio\"]
+# env = { GITHUB_TOOLSETS = \"repos,issues\" }
+# secret_env = { GITHUB_PERSONAL_ACCESS_TOKEN = \"github\" }
+# tools = [\"get_file_contents\", \"create_issue\"]   # omit for every listed tool
+# startup_seconds = 20                # 1..=120
+# call_seconds = 120                  # 1..=3600 per call
+#
+# [mcp_servers.linear]
+# transport = \"http\"
+# url = \"https://mcp.linear.app/mcp\"  # https, or http to 127.0.0.1 or [::1]
+# bearer_secret = \"linear\"            # Authorization: Bearer <secret>
+# headers = { X-Client = \"plak\" }
+# secret_headers = { X-Workspace = \"linear-ws\" }
+";
+
+/// The rule a subset refusal ends with.
+const SUBSET_RULE: &str = "a child gets at most its parent's fetch_url, image_gen and mcp tools (web_search, web_fetch and x_search are exempt)";
+
+/// One local-authority tool grant, for the child subset rule.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum ToolGrant {
+    /// `fetch_url` or `image_gen`.
+    Local(OptionalTool),
+    /// `mcp:<id>` on a server with no allowlist: every tool it lists.
+    McpServer(String),
+    /// One MCP tool of one server.
+    McpTool(String, String),
+}
+
+/// The child's grants its parent does not cover, as template list names.
+fn extra_grants(parent: &BTreeSet<ToolGrant>, child: &BTreeSet<ToolGrant>) -> Vec<String> {
+    child
+        .iter()
+        .filter(|grant| {
+            !parent.contains(*grant)
+                && !matches!(grant, ToolGrant::McpTool(server, _)
+                    if parent.contains(&ToolGrant::McpServer(server.clone())))
+        })
+        .map(|grant| match grant {
+            ToolGrant::Local(tool) => tool.name().to_owned(),
+            ToolGrant::McpServer(server) => format!("mcp:{server}"),
+            ToolGrant::McpTool(server, tool) => format!("mcp:{server}/{tool}"),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tool_sections_tests;
+
 /// One complete, named Plakous construction plus its spawn authority.
 /// Authored as one flat file,
 /// `~/.plak/agents/<name>.toml` or `<project>/.plak/agents/<name>.toml`.
@@ -217,8 +297,10 @@ pub struct AgentTemplate {
     pub protocol: Option<ProductProtocolSelection>,
     /// The card text a spawning model routes on.
     pub description: String,
-    /// Spawn tier ceiling; a spawn asking above it is clipped.
+    /// `access`: spawn tier ceiling; a spawn asking above it is clipped.
     pub max_tier: Tier,
+    /// `tools`: the optional tools this template enables by name.
+    pub tools: TemplateToolSelection,
     /// The templates a copy of this one may spawn. Empty is a leaf.
     pub spawns: Vec<TemplateName>,
     pub may_adopt: bool,
@@ -245,6 +327,7 @@ impl Default for AgentTemplate {
             protocol: None,
             description: String::new(),
             max_tier: Tier::Mutate,
+            tools: TemplateToolSelection::default(),
             spawns: Vec::new(),
             may_adopt: false,
             delegation: Delegation::Explicit,
@@ -606,7 +689,7 @@ pub struct ProductConfig {
     pub warnings: Vec<String>,
     /// Keys the just-parsed file carried explicitly. Provenance bookkeeping
     /// only; `load` translates it into `origins`.
-    present: std::collections::BTreeSet<ConfigField>,
+    present: BTreeSet<ConfigField>,
     /// `[root] agent`: the template new sessions bind at genesis.
     pub root_agent: Option<String>,
     /// `[roster] working_set = [...]`: the templates spawnable this epoch.
@@ -663,6 +746,9 @@ pub struct ProductConfig {
     pub compaction_enabled: bool,
     pub telemetry_max_bytes: u64,
     pub telemetry_max_age_days: u64,
+    /// `[tools.<name>]` and `[mcp_servers.<id>]`: options for the optional
+    /// tools templates list. A trusted project replaces entries by name.
+    pub tool_sections: ToolSections,
 }
 
 /// Effective-configuration equality: every persisted field, none of the
@@ -713,6 +799,7 @@ impl PartialEq for ProductConfig {
             && self.compaction_enabled == other.compaction_enabled
             && self.telemetry_max_bytes == other.telemetry_max_bytes
             && self.telemetry_max_age_days == other.telemetry_max_age_days
+            && self.tool_sections == other.tool_sections
     }
 }
 
@@ -928,6 +1015,7 @@ impl ProductConfig {
                 self.assign_overlay_field(field, &overlay);
                 self.origins.insert(field, ConfigValueOrigin::Project);
             }
+            self.tool_sections.overlay(&overlay.tool_sections);
         }
         if has_agents {
             let (templates, origins) = load_templates_dir(&agents_dir, ConfigValueOrigin::Project)?;
@@ -1072,7 +1160,7 @@ impl ProductConfig {
             origins: BTreeMap::new(),
             project: None,
             warnings: Vec::new(),
-            present: std::collections::BTreeSet::new(),
+            present: BTreeSet::new(),
             root_agent: None,
             working_set: WorkingSet::default(),
             subagents: true,
@@ -1102,6 +1190,7 @@ impl ProductConfig {
             compaction_enabled: true,
             telemetry_max_bytes: crate::telemetry_store::DEFAULT_TELEMETRY_MAX_BYTES,
             telemetry_max_age_days: crate::telemetry_store::DEFAULT_TELEMETRY_MAX_AGE_DAYS,
+            tool_sections: ToolSections::default(),
         }
     }
 
@@ -1304,6 +1393,9 @@ impl ProductConfig {
                     None => {}
                 }
             }
+        }
+        if annotated {
+            out.push_str(TOOL_SECTIONS_REFERENCE);
         }
         out
     }
@@ -1636,7 +1728,120 @@ impl ProductConfig {
                 ));
             }
         }
+        self.validate_tool_references()?;
+        self.validate_tool_subsets()
+    }
+
+    /// Every `mcp:<id>` a template lists names an `[mcp_servers.<id>]`
+    /// table, and an `mcp:<id>/<tool>` names a tool that table allows.
+    fn validate_tool_references(&self) -> Result<(), String> {
+        for (name, template) in &self.templates {
+            for entry in template.tools.entries() {
+                let (server, tool) = match entry {
+                    SelectedTool::Optional(_) => continue,
+                    SelectedTool::McpServer(server) => (server.as_str(), None),
+                    SelectedTool::McpTool { server, tool } => (server.as_str(), Some(tool)),
+                };
+                let Some(config) = self.tool_sections.mcp_servers.get(server) else {
+                    return Err(format!(
+                        "template {name}: tools names {entry}, and config.toml has no [mcp_servers.{server}]"
+                    ));
+                };
+                if let (Some(tool), Some(allowed)) = (tool, &config.tools)
+                    && !allowed.contains(tool)
+                {
+                    return Err(format!(
+                        "template {name}: tools names {entry}, which [mcp_servers.{server}] tools does not allow"
+                    ));
+                }
+            }
+        }
         Ok(())
+    }
+
+    /// A child gets at most its parent's local-authority tools, on every
+    /// edge an epoch can spawn: the root to each working-set member, and each
+    /// template to each template its `spawns` list names. Hosted retrieval
+    /// (`web_search`, `web_fetch`, `x_search`) is exempt: it grants no local
+    /// authority and spends on the child's own route.
+    fn validate_tool_subsets(&self) -> Result<(), String> {
+        let root = self
+            .root_template()
+            .map(|template| self.tool_grants(&template.tools))
+            .unwrap_or_default();
+        for child in self.working_set.names() {
+            let Some(template) = self.templates.get(child.as_str()) else {
+                continue;
+            };
+            let extra = extra_grants(&root, &self.tool_grants(&template.tools));
+            if extra.is_empty() {
+                continue;
+            }
+            let parent = match &self.root_agent {
+                Some(root) => format!("its root template {root}"),
+                None => "the root (no [root] agent, so no optional tools)".to_owned(),
+            };
+            return Err(format!(
+                "[roster] working_set template {child} lists tools {parent} lacks: {}; {SUBSET_RULE}",
+                extra.join(", ")
+            ));
+        }
+        for (name, template) in &self.templates {
+            let parent = self.tool_grants(&template.tools);
+            for child in &template.spawns {
+                if child.as_str() == name {
+                    continue;
+                }
+                let Some(record) = self.templates.get(child.as_str()) else {
+                    continue;
+                };
+                let extra = extra_grants(&parent, &self.tool_grants(&record.tools));
+                if !extra.is_empty() {
+                    return Err(format!(
+                        "template {name} spawns {child}, which lists tools {name} lacks: {}; {SUBSET_RULE}",
+                        extra.join(", ")
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The local-authority grants a tool list resolves to: `fetch_url`,
+    /// `image_gen`, and MCP tools with `mcp:<id>` expanded to the server's
+    /// allowlist (or kept whole when the server allows every listed tool).
+    fn tool_grants(&self, selection: &TemplateToolSelection) -> BTreeSet<ToolGrant> {
+        let mut grants = BTreeSet::new();
+        for entry in selection.entries() {
+            match entry {
+                SelectedTool::Optional(tool) if tool.is_hosted_retrieval() => {}
+                SelectedTool::Optional(tool) => {
+                    grants.insert(ToolGrant::Local(*tool));
+                }
+                SelectedTool::McpServer(server) => {
+                    let server = server.as_str().to_owned();
+                    match self
+                        .tool_sections
+                        .mcp_servers
+                        .get(&server)
+                        .and_then(|config| config.tools.as_ref())
+                    {
+                        Some(allowed) => {
+                            for tool in allowed {
+                                grants.insert(ToolGrant::McpTool(server.clone(), tool.clone()));
+                            }
+                        }
+                        None => {
+                            grants.insert(ToolGrant::McpServer(server));
+                        }
+                    }
+                }
+                SelectedTool::McpTool { server, tool } => {
+                    grants.insert(ToolGrant::McpTool(server.as_str().to_owned(), tool.clone()));
+                }
+            }
+        }
+        grants
     }
 
     /// Preflight every existing body before creating any file. Existing files
@@ -1841,6 +2046,7 @@ impl ProductConfig {
             out.push_str(&format!("warning={warning}\n"));
         }
         out.push_str(&self.render());
+        out.push_str(&self.tool_sections.render());
         out.push_str("\n# value origins (which file decided each key)\n");
         for row in CONFIG_KEYS {
             out.push_str(&format!(
@@ -2046,6 +2252,11 @@ fn removed_or_unknown_section(section: &str) -> String {
     if section.starts_with("roster.") {
         return format!(
             "unknown config section [{section}]; [roster] holds only working_set = [\"<template>\", ...]"
+        );
+    }
+    if section == "tools" || section.starts_with("tools.") {
+        return format!(
+            "unknown config section [{section}]; [tools.<name>] takes fetch_url, web_search or x_search"
         );
     }
     format!("unknown config section [{section}]")
@@ -2578,12 +2789,20 @@ pub const TEMPLATE_FIELD_DOCS: &[TemplateFieldDoc] = &[
         example: "\"implements a scoped change and reports the diff\"",
     },
     TemplateFieldDoc {
-        key: "tools",
+        key: "access",
         value_type: "enum",
         default: "\"full\"",
         constraint: "full|read-execute",
-        meaning: "Tool presentation: full includes file-edit tools; read-execute omits dedicated file-edit tools but permits shell commands. Neither is an OS sandbox. A spawn request above the ceiling is clipped, not refused.",
+        meaning: "Edit ceiling: full includes file-edit tools; read-execute omits dedicated file-edit tools but permits shell commands. Neither is an OS sandbox. A spawn request above the ceiling is clipped, not refused.",
         example: "\"read-execute\"",
+    },
+    TemplateFieldDoc {
+        key: "tools",
+        value_type: "array of string",
+        default: "[]",
+        constraint: "web_search|web_fetch|x_search|fetch_url|image_gen|mcp:<id>|mcp:<id>/<tool>, none twice; each mcp:<id> names a [mcp_servers.<id>] table; a child lists no fetch_url, image_gen or mcp tool its parent lacks",
+        meaning: "Optional tools enabled by name after the core tools; options come from config.toml [tools.<name>] and [mcp_servers.<id>]. Each is resolved against the route when a session or child binds, and a tool the route cannot serve refuses the bind.",
+        example: "[\"web_search\", \"mcp:github\"]",
     },
     TemplateFieldDoc {
         key: "spawns",
@@ -2717,12 +2936,21 @@ pub(crate) fn render_template(template: &AgentTemplate) -> String {
     text(&mut out, "description", &template.description);
     text(
         &mut out,
-        "tools",
+        "access",
         match template.max_tier {
             Tier::Mutate => "full",
             Tier::ReadOnly | Tier::Execute => "read-execute",
         },
     );
+    if !template.tools.is_empty() {
+        let tools: Vec<String> = template
+            .tools
+            .entries()
+            .iter()
+            .map(|tool| toml_text(&tool.to_string()))
+            .collect();
+        out.push_str(&format!("tools = [{}]\n", tools.join(", ")));
+    }
     let spawns: Vec<String> = template
         .spawns
         .iter()
@@ -3539,7 +3767,7 @@ mod tests {
                 &template_body(
                     "codex",
                     "gpt-5.6-luna",
-                    "effort = \"low\"\nfast_mode = true\ncomposition = \"native-ptc\"\ntools = \"full\"\ncost_tier = 3\n[env]\nCARGO_TARGET_DIR = \"/tmp/t\"\n",
+                    "effort = \"low\"\nfast_mode = true\ncomposition = \"native-ptc\"\naccess = \"full\"\ncost_tier = 3\n[env]\nCARGO_TARGET_DIR = \"/tmp/t\"\n",
                 ),
             ),
             (
@@ -3599,7 +3827,7 @@ mod tests {
         fs::create_dir_all(project.join(".plak/agents")).unwrap();
         fs::write(
             project.join(".plak/agents/critic.toml"),
-            template_body("grok", "grok-4.6", "tools = \"read-execute\"\n"),
+            template_body("grok", "grok-4.6", "access = \"read-execute\"\n"),
         )
         .unwrap();
         let paths = paths.with_project_root(project.clone());
@@ -3933,11 +4161,11 @@ mod tests {
         );
         assert!(
             parse_template(
-                "account = \"codex\"\nmodel = \"m\"\ntools = \"root\"\n",
+                "account = \"codex\"\nmodel = \"m\"\naccess = \"root\"\n",
                 "t"
             )
             .unwrap_err()
-            .contains("tools must be full|read-execute")
+            .contains("access must be full|read-execute")
         );
         assert!(
             parse_template(
@@ -4433,7 +4661,7 @@ mod tests {
                 row.doc.to_owned(),
             ));
         }
-        let mut once = std::collections::BTreeSet::new();
+        let mut once = BTreeSet::new();
         for row in &documented {
             assert!(once.insert(row.0.clone()), "{} is documented twice", row.0);
         }
@@ -4561,6 +4789,7 @@ mod tests {
             protocol: Some(ProductProtocolSelection::Auto),
             description: "does one thing".to_owned(),
             max_tier: Tier::Mutate,
+            tools: TemplateToolSelection::parse(["web_search", "mcp:github/create_issue"]).unwrap(),
             spawns: Vec::new(),
             may_adopt: false,
             delegation: Delegation::Proactive,
@@ -4571,7 +4800,7 @@ mod tests {
             env: BTreeMap::from([("KEY".to_owned(), "value".to_owned())]),
         };
         let rendered = render_template(&populated);
-        let mut documented = std::collections::BTreeSet::new();
+        let mut documented = BTreeSet::new();
         for doc in TEMPLATE_FIELD_DOCS {
             assert!(
                 documented.insert(doc.key),

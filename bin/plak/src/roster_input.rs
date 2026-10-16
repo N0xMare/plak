@@ -39,6 +39,12 @@ pub fn roster_binding_from_template(
         processing_tier: template.processing_tier(),
         description: template.description.clone(),
         max_tier: template.max_tier,
+        tools: template
+            .tools
+            .entries()
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
         spawns: template.spawns.clone(),
         may_adopt: template.may_adopt,
         delegation: template.delegation,
@@ -97,10 +103,16 @@ pub fn roster_input_from_config(
             template.account == root_account && template.model == root_tuple
         })
     });
+    let tool_sections = reached_tool_sections(
+        config,
+        templates.keys().map(TemplateName::as_str),
+        root_template.as_deref(),
+    );
     let templates_digest = templates_digest(
         config,
         templates.keys().map(TemplateName::as_str),
         root_template.as_deref(),
+        &tool_sections,
     );
     RosterInput {
         workspace_idle_seconds: config.workspace_idle_seconds,
@@ -130,7 +142,25 @@ pub fn roster_input_from_config(
         templates,
         templates_digest,
         bind_hints: product_bind_hints(),
+        tool_sections,
     }
+}
+
+/// The canonical `[tools.*]` / `[mcp_servers.*]` tables the closure and the
+/// root template reach. An unreferenced table is not frozen, so editing it
+/// leaves the epoch alone.
+fn reached_tool_sections<'a>(
+    config: &ProductConfig,
+    closure: impl Iterator<Item = &'a str>,
+    root_template: Option<&'a str>,
+) -> BTreeMap<String, String> {
+    let mut reached = BTreeMap::new();
+    for name in closure.chain(root_template) {
+        if let Some(template) = config.templates.get(name) {
+            reached.extend(config.tool_sections.reached(&template.tools));
+        }
+    }
+    reached
 }
 
 /// The product's account roster as the two membership sets the tree checks.
@@ -232,6 +262,7 @@ fn templates_digest<'a>(
     config: &ProductConfig,
     closure: impl Iterator<Item = &'a str>,
     root_template: Option<&'a str>,
+    tool_sections: &BTreeMap<String, String>,
 ) -> String {
     let mut names: Vec<&str> = closure.collect();
     if let Some(root) = root_template
@@ -248,6 +279,14 @@ fn templates_digest<'a>(
             body.push_str(&crate::product_config::render_template(template));
             body.push('\n');
         }
+    }
+    // The tool tables those templates reach, so editing a referenced
+    // `[mcp_servers.*]` entry rolls the digest a successor epoch compares.
+    for (key, rendered) in tool_sections {
+        body.push_str(key);
+        body.push('\n');
+        body.push_str(rendered);
+        body.push('\n');
     }
     sha256_hex(&[body.as_bytes()])
 }
@@ -344,6 +383,94 @@ mod tests {
 
     fn name(value: &str) -> TemplateName {
         TemplateName::parse(value).unwrap()
+    }
+
+    /// The epoch freezes each closure card's tool list and the tables those
+    /// lists (and the root template's) reach; an unreferenced table is not
+    /// epoch state, and spelling a default out changes nothing.
+    #[test]
+    fn the_epoch_freezes_reached_tool_tables_and_ignores_the_rest() {
+        use plakous_hosted::tool_plan::TemplateToolSelection;
+        let mut config = ProductConfig::parse(concat!(
+            "[mcp_servers.github]\ntransport = \"stdio\"\ncommand = \"gh\"\n",
+            "[mcp_servers.linear]\ntransport = \"stdio\"\ncommand = \"lin\"\n",
+            "[mcp_servers.jira]\ntransport = \"stdio\"\ncommand = \"jira\"\n",
+        ))
+        .unwrap();
+        let mut worker = template("codex", "gpt");
+        worker.tools = TemplateToolSelection::parse(["web_search", "mcp:github"]).unwrap();
+        config.templates.insert("worker".to_owned(), worker);
+        let mut lead = template("codex", "gpt");
+        lead.tools = TemplateToolSelection::parse(["mcp:linear"]).unwrap();
+        config.templates.insert("lead".to_owned(), lead);
+        config.root_agent = Some("lead".to_owned());
+        config.working_set = WorkingSet::parse(vec!["worker".to_owned()]).unwrap();
+
+        let snapshot = snapshot_from_config(&config, "codex", "gpt", None);
+        assert_eq!(
+            snapshot.roster[&name("worker")].tools,
+            ["web_search", "mcp:github"]
+        );
+        assert_eq!(
+            snapshot.tool_sections.keys().collect::<Vec<_>>(),
+            [
+                "mcp_servers.github",
+                "mcp_servers.linear",
+                "tools.web_search"
+            ]
+        );
+        assert_eq!(
+            snapshot.tool_sections["tools.web_search"],
+            "[tools.web_search]\nmax_uses = 5\nallowed_domains = []\nblocked_domains = []\n"
+        );
+        assert!(snapshot.digest_matches());
+
+        // An unreferenced table is not epoch state.
+        let mut unreferenced = config.clone();
+        unreferenced
+            .tool_sections
+            .mcp_servers
+            .get_mut("jira")
+            .unwrap()
+            .call_seconds = 7;
+        let same = snapshot_from_config(&unreferenced, "codex", "gpt", None);
+        assert_eq!(same.digest, snapshot.digest);
+        assert_eq!(same.templates_digest, snapshot.templates_digest);
+
+        // Spelling the defaults out is the same epoch.
+        let mut explicit = config.clone();
+        explicit.tool_sections.web_search =
+            Some(crate::product_config::WebSearchOptions::default());
+        assert_eq!(
+            snapshot_from_config(&explicit, "codex", "gpt", None).digest,
+            snapshot.digest
+        );
+
+        // A referenced table (the closure's or the root's) rolls both digests.
+        for server in ["github", "linear"] {
+            let mut edited = config.clone();
+            edited
+                .tool_sections
+                .mcp_servers
+                .get_mut(server)
+                .unwrap()
+                .call_seconds = 7;
+            let rolled = snapshot_from_config(&edited, "codex", "gpt", None);
+            assert_ne!(rolled.digest, snapshot.digest, "{server}");
+            assert_ne!(
+                rolled.templates_digest, snapshot.templates_digest,
+                "{server}"
+            );
+        }
+
+        // An explicit --account/--model root binds no template, so the root
+        // template's tables are not reached.
+        let explicit_root = snapshot_from_config(&config, "claude", "opus", None);
+        assert!(
+            !explicit_root
+                .tool_sections
+                .contains_key("mcp_servers.linear")
+        );
     }
 
     /// `max_agents_per_cell` is stored as written and clamped

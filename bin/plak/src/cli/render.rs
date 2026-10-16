@@ -30,6 +30,7 @@ const COMMAND_PAGES: &[(&str, &str)] = &[
     ("status", include_str!("../../help/status.txt")),
     ("refresh", include_str!("../../help/refresh.txt")),
     ("key", include_str!("../../help/key.txt")),
+    ("secret", include_str!("../../help/secret.txt")),
     ("run", include_str!("../../help/run.txt")),
     ("agent", include_str!("../../help/agent.txt")),
     ("resume", include_str!("../../help/resume.txt")),
@@ -105,6 +106,7 @@ mod tests {
     fn command_groups_have_complete_local_help() {
         for (command, expected) in [
             ("key", "plak key status [account]"),
+            ("secret", "plak secret list"),
             ("config", "plak config init"),
             ("session", "plak session log <session>"),
         ] {

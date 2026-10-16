@@ -412,6 +412,21 @@ eight hex characters of the digest — or the name of the environment variable
 that won. OAuth credentials expose no offline identity, so their rows carry no
 label.
 
+**Named secrets** are the values configuration refers to by name: an
+`[mcp_servers.<id>]` table's `secret_env`, `bearer_secret` and
+`secret_headers` (chapter 07 §3.4) name a secret and never carry one.
+`plak secret set <name>` prompts with masked input (never argv) and stores
+`<plak home>/secrets/named/<name>.secret`, mode `0600`, through an exclusive
+`0600` temporary file renamed into the `0700` `secrets/named/` directory;
+`plak secret rm <name>` removes it and `plak secret list` prints names only.
+`<name>` matches `[a-z][a-z0-9-]{0,31}`. There is no environment override.
+A read verifies the `secrets/` and `secrets/named/` directories (`0700`,
+owned by the effective uid) and the file (regular, one link, owned by the
+effective uid, no group or other permission bits) and refuses rather than
+uses a file that fails; the value is held in a zeroizing type that is neither
+cloned nor serialized and whose `Debug` is redacted. A trusted project may
+name secrets but never supplies one: secrets resolve only from the home.
+
 The same API-key label rule applies to Usage account lines and rejection
 messages. A provider-reported key label, even a masked prefix or suffix, is
 not a display label; the OpenRouter allowance decoder never decodes it. OpenRouter rejection messages name the winning source

@@ -688,6 +688,7 @@ pub(crate) mod suite {
             templates,
             templates_digest: String::new(),
             bind_hints: golden_bind_hints(),
+            tool_sections: BTreeMap::new(),
         })
     }
 

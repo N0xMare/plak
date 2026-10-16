@@ -300,6 +300,11 @@ enum TopCommand {
         #[command(subcommand)]
         action: Option<KeyAction>,
     },
+    /// Named secrets that config.toml refers to by name.
+    Secret {
+        #[command(subcommand)]
+        action: Option<SecretAction>,
+    },
     #[cfg(feature = "maintainer")]
     Compatibility {
         /// Account id. Omit to print usage.
@@ -456,6 +461,12 @@ impl TopCommand {
                 command: "key".to_owned(),
             }),
             Self::Key {
+                action: Some(action),
+            } => action.into_command(),
+            Self::Secret { action: None } => Ok(Command::CommandHelp {
+                command: "secret".to_owned(),
+            }),
+            Self::Secret {
                 action: Some(action),
             } => action.into_command(),
             #[cfg(feature = "maintainer")]
@@ -706,6 +717,33 @@ impl KeyAction {
                 }
                 Ok(Command::KeyStatus { account })
             }
+        }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum SecretAction {
+    Set { name: Option<String> },
+    Rm { name: Option<String> },
+    List,
+}
+
+impl SecretAction {
+    fn into_command(self) -> Result<Command, String> {
+        match self {
+            // A bare leaf routes to the parent group's help.
+            Self::Set { name: None } | Self::Rm { name: None } => Ok(Command::CommandHelp {
+                command: "secret".to_owned(),
+            }),
+            Self::Set { name: Some(name) } => {
+                crate::product_secrets::validate_secret_name(&name)?;
+                Ok(Command::SecretSet { name })
+            }
+            Self::Rm { name: Some(name) } => {
+                crate::product_secrets::validate_secret_name(&name)?;
+                Ok(Command::SecretRm { name })
+            }
+            Self::List => Ok(Command::SecretList),
         }
     }
 }
@@ -2069,6 +2107,23 @@ mod tests {
                 &["key", "set", "xai-api"],
                 |c| matches!(c, Command::KeySet { account } if account == "xai-api"),
             ),
+            (
+                &["secret", "set", "github"],
+                |c| matches!(c, Command::SecretSet { name } if name == "github"),
+            ),
+            (
+                &["secret", "rm", "linear-ws"],
+                |c| matches!(c, Command::SecretRm { name } if name == "linear-ws"),
+            ),
+            (&["secret", "list"], |c| matches!(c, Command::SecretList)),
+            (
+                &["secret"],
+                |c| matches!(c, Command::CommandHelp { command } if command == "secret"),
+            ),
+            (
+                &["secret", "set"],
+                |c| matches!(c, Command::CommandHelp { command } if command == "secret"),
+            ),
             (&["resume"], |c| {
                 matches!(c, Command::Resume { session_id: None })
             }),
@@ -2208,6 +2263,18 @@ mod tests {
             parse(args(&["config", "show"])),
             Ok(Command::ConfigShow)
         ));
+    }
+
+    #[test]
+    fn secret_values_never_come_from_argv_and_names_follow_the_grammar() {
+        for argv in [
+            &["secret", "set", "github", "ghp-value"][..],
+            &["secret", "set", "Bad"][..],
+            &["secret", "rm", "../x"][..],
+            &["secret", "list", "github"][..],
+        ] {
+            assert!(parse(args(argv)).is_err(), "must reject {argv:?}");
+        }
     }
 
     #[test]

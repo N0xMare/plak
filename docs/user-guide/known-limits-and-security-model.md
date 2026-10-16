@@ -24,7 +24,7 @@ VM.
 
 By default nothing pauses a model-requested tool call for your confirmation.
 Coordination-effect decisions are the only approvals. Agent tiers and
-`tools = "read-execute"` narrow which tools are offered; neither is a security
+`access = "read-execute"` narrow which tools are offered; neither is a security
 boundary, because a shell can still do anything you can.
 
 ## Credentials are plaintext files

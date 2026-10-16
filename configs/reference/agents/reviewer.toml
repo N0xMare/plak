@@ -32,9 +32,13 @@ composition = "plakous-default"
 # type: string · default: "" · required and non-blank for a template named in [roster] working_set or in a spawns list
 description = "Review changes and run relevant diagnostics; report concrete findings. Dedicated file-edit tools are unavailable; shell commands still have host authority."
 
-# Tool presentation: full includes file-edit tools; read-execute omits dedicated file-edit tools but permits shell commands. Neither is an OS sandbox. A spawn request above the ceiling is clipped, not refused.
+# Edit ceiling: full includes file-edit tools; read-execute omits dedicated file-edit tools but permits shell commands. Neither is an OS sandbox. A spawn request above the ceiling is clipped, not refused.
 # type: enum · default: "full" · full|read-execute
-tools = "read-execute"
+access = "read-execute"
+
+# Optional tools enabled by name after the core tools; options come from config.toml [tools.<name>] and [mcp_servers.<id>]. Each is resolved against the route when a session or child binds, and a tool the route cannot serve refuses the bind.
+# type: array of string · default: [] · web_search|web_fetch|x_search|fetch_url|image_gen|mcp:<id>|mcp:<id>/<tool>, none twice; each mcp:<id> names a [mcp_servers.<id>] table; a child lists no fetch_url, image_gen or mcp tool its parent lacks
+# tools = ["web_search", "mcp:github"]
 
 # The templates a copy of this template may spawn; its own name is never on its menu. Empty is a leaf with no spawn_agent. The root spawns [roster] working_set instead; this list applies where the template runs as a child.
 # type: array of string · default: [] · 0..=5 names, no duplicates, each a template file with a description

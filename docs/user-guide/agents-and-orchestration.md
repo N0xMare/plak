@@ -22,7 +22,7 @@ model = "claude-sonnet-5"
 effort = "low"
 composition = "direct"
 description = "Claude reviewer that reads and reports"
-tools = "read-execute"
+access = "read-execute"
 ```
 
 A template names an account and a model, never a credential. The fields you will
@@ -33,7 +33,8 @@ reach for first:
 | `account`, `model` | The binding. Required. |
 | `effort`, `composition`, `protocol`, `fast_mode` | Model options and tool composition. `composition = "native-ptc"` is the vertical's own programmatic tool calling, enrolled today only for Codex Code Mode; a card on another vertical is refused, so use `js-ptc` or `py-ptc` there (see [Providers and accounts](providers-and-accounts.md)). `fast_mode` is a template setting; its provider-native processing tier is resolved at bind. |
 | `description` | The card the spawning model reads. Required for anything in the working set or in a `spawns` list. |
-| `tools` | `full` or `read-execute`. Default `full`. `read-execute` omits dedicated file-edit tools but still permits shell commands. |
+| `access` | `full` or `read-execute`. Default `full`. `read-execute` omits dedicated file-edit tools but still permits shell commands. |
+| `tools` | Optional tools by name (`web_search`, `fetch_url`, `mcp:github`, ...). Default `[]`. A child may not list `fetch_url`, `image_gen` or an MCP tool its parent lacks; see [Configuration](configuration.md#optional-tools-and-mcp-servers). |
 | `spawns` | The templates this agent may spawn when it runs as a child, e.g. `["worker", "reviewer"]`. Default `[]`: a leaf with no `spawn_agent`. |
 | `may_adopt` | May it adopt a child's work? Default `false`, and requires `spawns` naming another template. |
 | `delegation` | `explicit` (default) or `proactive`. |

@@ -50,6 +50,11 @@ pub struct RosterBinding {
     pub description: String,
     /// Tier ceiling: a spawn asking above this is clipped, never refused.
     pub max_tier: Tier,
+    /// The optional tools the card enables, as the template lists them
+    /// (`web_search`, `mcp:github`, `mcp:github/create_issue`). The product
+    /// validated the list at load; the tree freezes it and spells none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<String>,
     /// The templates a node on this card may spawn, in the card's order.
     /// Empty is a leaf: such a node compiles no `spawn_agent`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -92,6 +97,7 @@ impl RosterBinding {
             processing_tier: ProcessingTierDisposition::Standard,
             description: String::new(),
             max_tier: Tier::Mutate,
+            tools: Vec::new(),
             spawns: Vec::new(),
             may_adopt: false,
             delegation: Delegation::Explicit,
@@ -281,6 +287,14 @@ pub struct OrchestrationSnapshot {
     /// membership.
     #[serde(default, skip_serializing_if = "BindHints::is_empty")]
     pub bind_hints: BindHints,
+    /// The canonical rendering of every `[tools.<name>]` and
+    /// `[mcp_servers.<id>]` table the closure and the root template reach,
+    /// keyed `tools.<name>` / `mcp_servers.<id>`. A child binds these, never
+    /// the live file, so editing an MCP command mid-epoch changes nothing in
+    /// a running tree. Inside the digest only when non-empty, so an epoch
+    /// without optional tools keeps the encoding and digest it always had.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tool_sections: BTreeMap<String, String>,
 }
 
 const fn default_max_attempts() -> u8 {
@@ -403,6 +417,10 @@ pub struct RosterInput {
     /// The product's account roster, so the tree spells no
     /// account name of its own.
     pub bind_hints: BindHints,
+    /// The canonical rendering of every tool table the closure and the root
+    /// template reach, keyed `tools.<name>` / `mcp_servers.<id>`; see
+    /// [`OrchestrationSnapshot::tool_sections`].
+    pub tool_sections: BTreeMap<String, String>,
 }
 
 impl RosterInput {
@@ -424,6 +442,7 @@ impl RosterInput {
             templates: BTreeMap::new(),
             templates_digest: String::new(),
             bind_hints: BindHints::default(),
+            tool_sections: BTreeMap::new(),
         }
     }
 
@@ -491,6 +510,7 @@ impl OrchestrationSnapshot {
             templates,
             templates_digest,
             bind_hints,
+            tool_sections,
         } = input;
         let mut snapshot = Self {
             digest: String::new(),
@@ -517,6 +537,7 @@ impl OrchestrationSnapshot {
             roster: templates,
             templates_digest,
             bind_hints,
+            tool_sections,
         };
         snapshot.digest = snapshot.compute_digest();
         snapshot
@@ -529,7 +550,7 @@ impl OrchestrationSnapshot {
     /// admitted belongs in the digest with the other four.
     #[must_use]
     pub fn compute_digest(&self) -> String {
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "root_template": self.root_template,
             "root_account": self.root_account,
             "root_tuple": self.root_tuple,
@@ -552,6 +573,14 @@ impl OrchestrationSnapshot {
             "root_delegation": self.root_delegation,
             "bind_hints": self.bind_hints,
         });
+        if !self.tool_sections.is_empty()
+            && let Some(fields) = body.as_object_mut()
+        {
+            fields.insert(
+                "tool_sections".to_owned(),
+                serde_json::json!(self.tool_sections),
+            );
+        }
         let canonical = serde_json::to_vec(&body).unwrap_or_default();
         sha256_hex(&[&canonical])
     }
@@ -661,6 +690,63 @@ fn clamp_bound(configured: u16, ceiling: u8) -> u8 {
 mod tests {
     use super::*;
     use crate::tree::text::PLAK_DELEGATION_EXPLICIT;
+
+    /// An epoch whose templates list no optional tools serializes and
+    /// digests exactly as it did before cards could carry tools: the fixture
+    /// hashes were taken from the encoder that predates the two fields.
+    #[test]
+    fn an_epoch_without_tools_keeps_its_pre_tool_encoding_and_digest() {
+        const PRE_TOOL_JSON_SHA256: &str =
+            "9c08a5f8a5cae045d5ad9e3654bdd16e9734ea8cf739f1d57877dcd6a6287110";
+        const PRE_TOOL_DIGEST: &str =
+            "af96b17cbebc7f36cdd4c5388742ef90b1400e6c8bbe32d53ade5a65eb94ebf3";
+        let snapshot =
+            OrchestrationSnapshot::freeze(RosterInput::test_working_set("fixture-tuple"));
+        let json = serde_json::to_string(&snapshot).unwrap();
+        assert_eq!(sha256_hex(&[json.as_bytes()]), PRE_TOOL_JSON_SHA256);
+        assert_eq!(snapshot.digest, PRE_TOOL_DIGEST);
+        assert!(!json.contains("\"tools\""));
+        assert!(!json.contains("tool_sections"));
+    }
+
+    /// A card's tool list and the frozen tool tables are bind authority:
+    /// both roll the digest, both round-trip through the stored JSON.
+    #[test]
+    fn frozen_tools_and_tool_tables_are_inside_the_digest() {
+        let base = RosterInput::test_working_set("fixture-tuple");
+        let plain = OrchestrationSnapshot::freeze(base.clone());
+
+        let mut with_card_tools = base.clone();
+        let review = TemplateName::parse("review").unwrap();
+        with_card_tools.templates.get_mut(&review).unwrap().tools =
+            vec!["web_search".to_owned(), "mcp:github".to_owned()];
+        let carded = OrchestrationSnapshot::freeze(with_card_tools);
+        assert_ne!(carded.digest, plain.digest);
+        assert!(carded.digest_matches());
+
+        let mut with_tables = base;
+        with_tables.tool_sections = BTreeMap::from([(
+            "mcp_servers.github".to_owned(),
+            "[mcp_servers.github]\ntransport = \"stdio\"\n".to_owned(),
+        )]);
+        let tabled = OrchestrationSnapshot::freeze(with_tables.clone());
+        assert_ne!(tabled.digest, plain.digest);
+        with_tables.tool_sections.insert(
+            "mcp_servers.github".to_owned(),
+            "[mcp_servers.github]\ntransport = \"http\"\n".to_owned(),
+        );
+        assert_ne!(
+            OrchestrationSnapshot::freeze(with_tables).digest,
+            tabled.digest
+        );
+
+        for snapshot in [carded, tabled] {
+            let json = serde_json::to_string(&snapshot).unwrap();
+            let reread: OrchestrationSnapshot = serde_json::from_str(&json).unwrap();
+            assert_eq!(reread, snapshot);
+            assert!(reread.digest_matches());
+        }
+    }
 
     #[test]
     fn unpinned_has_an_empty_menu_and_a_stable_digest() {
