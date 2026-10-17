@@ -4652,7 +4652,9 @@ not sent: a system note says so and the draft stays.
 
 The composer's bottom border lists the draft's attachments in token order,
 `[image #1: shot.png 1280x720 412 KB]` (`[image #1: reading…]` while
-pending), collapsing to `[N images]` when they do not fit. A downscaled
+pending); they take the border ahead of the workspace facts, which shorten,
+and drop the file name (`[image #1: png 1280x720 412 KB]`) and then collapse
+to `[N images]` when they still do not fit. A downscaled
 image's chip and the live transcript line of the message that sends it name
 the attached dimensions:
 `[image #1: shot.png 2048x1324 1.9 MB, downscaled from 3456x2234]` and

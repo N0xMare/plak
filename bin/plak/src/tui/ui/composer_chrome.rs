@@ -437,17 +437,20 @@ impl App {
         if area.width < 3 || area.height < 2 {
             return;
         }
+        // Attachment chips lead the border from the left and take the room
+        // they need first: they say what the next message sends. The
+        // workspace facts keep their right-aligned place in what is left.
+        let chips = self.attachment_chips(usize::from(area.width.saturating_sub(6)));
+        let chips_room = match chips.width() {
+            0 => 0,
+            chips_width => chips_width.saturating_add(1),
+        };
         // One border cell stays visible after the corner.
         let text = workspace_border_text(
             &self.workspace_chrome,
-            usize::from(area.width.saturating_sub(3)),
+            usize::from(area.width.saturating_sub(3)).saturating_sub(chips_room),
         );
         let width = u16::try_from(text.width()).unwrap_or(0);
-        // Attachment chips lead the border from the left; the workspace
-        // facts keep their right-aligned place.
-        let chips = self.attachment_chips(usize::from(
-            area.width.saturating_sub(4 + width.saturating_add(1)),
-        ));
         if !chips.is_empty() {
             let chips_width = u16::try_from(chips.width()).unwrap_or(0);
             frame.render_widget(
