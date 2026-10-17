@@ -16,6 +16,7 @@ plain follow-up also fails. Artifacts land in target/live/soak-<route>-<stamp>/.
 from __future__ import annotations
 
 import argparse
+import ast
 import dataclasses
 import hashlib
 import json
@@ -26,6 +27,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -36,11 +38,12 @@ REPO_URL = "https://github.com/more-itertools/more-itertools.git"
 REPO_COMMIT = "4998a257373f36e91edef7324572ed8df10f39d1"  # v10.5.0
 REBUILD = ["cargo", "build", "--release", "--locked", "--features", "plak/test-hooks", "-p", "plak"]
 
-# Bugs the driver plants before asking for a fix: (file, correct text, broken text).
+# Bugs the driver plants before asking for a fix: (file, function, correct
+# text, broken text). The correct text is in the pinned commit's function.
 BUGS = {
-    "ilen": ("more_itertools/more.py", "return sum(compress(repeat(1), zip(iterable)))",
+    "ilen": ("more_itertools/more.py", "ilen", "return sum(compress(repeat(1), zip(iterable)))",
              "return sum(compress(repeat(2), zip(iterable)))"),
-    "quantify": ("more_itertools/recipes.py", "return sum(map(pred, iterable))",
+    "quantify": ("more_itertools/recipes.py", "quantify", "return sum(map(pred, iterable))",
                  "return sum(map(bool, iterable))"),
 }
 
@@ -130,12 +133,42 @@ def prepare_repo(cache: Path, work: Path) -> Path:
     return work
 
 
+def function_span(text: str, name: str) -> tuple[int, int] | None:
+    """0-based [start, end) lines of the module-level function `name`, decorators included."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return None
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            start = min([node.lineno, *(item.lineno for item in node.decorator_list)]) - 1
+            return start, node.end_lineno
+    return None
+
+
 def plant(repo: Path, bug: str) -> None:
-    path, good, bad = BUGS[bug]
-    text = (repo / path).read_text()
-    if good not in text:
-        raise ScenarioFailure(live.HARNESS, f"cannot plant {bug}: the code moved")
-    (repo / path).write_text(text.replace(good, bad, 1))
+    """Replace the function with the pinned commit's version, broken.
+
+    An earlier cycle's fix may restore the function correctly but in other
+    words, and later tasks add code to the same file, so neither a text match
+    nor restoring the whole file works. Only the function is reset.
+    """
+    path, name, good, bad = BUGS[bug]
+    pinned = subprocess.run(["git", "show", f"{REPO_COMMIT}:{path}"], cwd=repo,
+                            capture_output=True, text=True, check=True).stdout
+    pinned_span = function_span(pinned, name)
+    if pinned_span is None:
+        raise ScenarioFailure(live.HARNESS, f"cannot plant {bug}: {name} is not in {REPO_COMMIT}")
+    original = pinned.splitlines(keepends=True)[pinned_span[0]:pinned_span[1]]
+    broken = "".join(original)
+    if good not in broken:
+        raise ScenarioFailure(live.HARNESS, f"cannot plant {bug}: the pinned {name} moved")
+    lines = (repo / path).read_text().splitlines(keepends=True)
+    span = function_span("".join(lines), name)
+    if span is None:
+        raise ScenarioFailure(live.HARNESS, f"cannot plant {bug}: {path} has no parseable {name}")
+    lines[span[0]:span[1]] = [broken.replace(good, bad, 1)]
+    (repo / path).write_text("".join(lines))
 
 
 def check(repo: Path, task: Task, answer: str = "") -> bool:
@@ -174,8 +207,6 @@ class Soak:
         segment_before = self.segment
         diagnostics = self.env.home / "logs/plak.log"
         diagnostic_offset = diagnostics.stat().st_size if diagnostics.is_file() else 0
-        if task.bug:
-            plant(self.repo, task.bug)
         before = live.committed_compactions(live.session_records(self.env.home, self.session)) \
             if self.session else 0
         agent = None
@@ -194,6 +225,8 @@ class Soak:
 
         started = time.monotonic()
         try:
+            if task.bug:
+                plant(self.repo, task.bug)
             agent = self.open(faults)
             record.process_id = agent.proc.pid
             turn = agent.prompt(task.prompt, timeout=900, on_event=observe)
@@ -247,8 +280,9 @@ class Soak:
                     and record.evidence_status != "diagnostics_missing"):
                 record.evidence_status = "unexplained_no_response"
         record.seconds = time.monotonic() - started
-        record.compactions = live.committed_compactions(
-            live.session_records(self.env.home, self.session)) - before
+        if self.session:
+            record.compactions = live.committed_compactions(
+                live.session_records(self.env.home, self.session)) - before
         return record
 
     def _note_peak(self, event: dict) -> None:
@@ -356,38 +390,44 @@ def main(argv: list[str]) -> int:
     binary_rebuilt = None
     cycle, index = 0, 0
     failed = False
-    while time.monotonic() < deadline:
-        cycle += 1
-        for task in tasks(cycle):
-            if time.monotonic() >= deadline:
-                break
-            record = soak.run_task(task, cycle, plans[index % len(plans)], sleep=index % 4 == 2)
-            index += 1
-            records.append(record)
-            print(f"{record.outcome:28} c{cycle} {task.name:13} {record.seconds:5.0f}s "
-                  f"ctx={record.peak_context} comp={record.compactions}"
-                  f"{' slept' if record.slept else ''}{' faults' if record.faults else ''}"
-                  f"{' dead-end' if record.dead_end else ''}", flush=True)
-            # A provider refusal is recorded and stops the hour. It is not a
-            # harness failure and it is not retried.
-            if record.outcome in ("harness", "provider") or record.dead_end:
-                failed = True
-                break
-            if index % 3 == 0:
-                try:
-                    soak.compact()
-                except ScenarioFailure as error:
-                    records.append(Record("compact", cycle, None, outcome=error.outcome,
-                                          errors=[str(error)]))
+    crash = None
+    try:
+        while time.monotonic() < deadline:
+            cycle += 1
+            for task in tasks(cycle):
+                if time.monotonic() >= deadline:
+                    break
+                record = soak.run_task(task, cycle, plans[index % len(plans)], sleep=index % 4 == 2)
+                index += 1
+                records.append(record)
+                print(f"{record.outcome:28} c{cycle} {task.name:13} {record.seconds:5.0f}s "
+                      f"ctx={record.peak_context} comp={record.compactions}"
+                      f"{' slept' if record.slept else ''}{' faults' if record.faults else ''}"
+                      f"{' dead-end' if record.dead_end else ''}", flush=True)
+                # A provider refusal is recorded and stops the hour. It is not a
+                # harness failure and it is not retried.
+                if record.outcome in ("harness", "provider") or record.dead_end:
                     failed = True
                     break
-            if not rebuilt and time.monotonic() > started + args.hours * 1800:
-                rebuilt = True
-                rebuild_ok = rebuild(env.binary, artifacts / "rebuild.log")
-                binary_rebuilt = live.binary_sha256(env.binary)
-                print(f"rebuild: {'ok' if rebuild_ok else 'FAILED (see rebuild.log)'}", flush=True)
-        if failed:
-            break
+                if index % 3 == 0:
+                    try:
+                        soak.compact()
+                    except ScenarioFailure as error:
+                        records.append(Record("compact", cycle, None, outcome=error.outcome,
+                                              errors=[str(error)]))
+                        failed = True
+                        break
+                if not rebuilt and time.monotonic() > started + args.hours * 1800:
+                    rebuilt = True
+                    rebuild_ok = rebuild(env.binary, artifacts / "rebuild.log")
+                    binary_rebuilt = live.binary_sha256(env.binary)
+                    print(f"rebuild: {'ok' if rebuild_ok else 'FAILED (see rebuild.log)'}", flush=True)
+            if failed:
+                break
+    except Exception:
+        # The report below still records every task that ran.
+        crash = traceback.format_exc()
+        print(crash, file=sys.stderr, flush=True)
     summary = {
         **live.route_report(route), "task_repo_commit": REPO_COMMIT,
         "binary_sha256_start": binary_start,
@@ -410,6 +450,7 @@ def main(argv: list[str]) -> int:
         "peak_context": max((r.peak_context for r in records), default=0),
         "rebuild": "skipped" if args.no_rebuild else ("changed" if rebuild_ok else "failed"),
         "rebuild_attempted": rebuilt and not args.no_rebuild,
+        "crash": crash,
     }
     bodies = list(capture_root.glob("segment-*/*.body"))
     info = list(capture_root.glob("segment-*/*.info"))
@@ -424,7 +465,7 @@ def main(argv: list[str]) -> int:
     (artifacts / "report.json").write_text(json.dumps(
         {"summary": summary, "records": [dataclasses.asdict(r) for r in records]}, indent=2) + "\n")
     print(json.dumps(summary, indent=2) + f"\nartifacts: {artifacts}")
-    return 0 if (summary["harness_failures"] == 0 and summary["provider_failures"] == 0
+    return 0 if (crash is None and summary["harness_failures"] == 0 and summary["provider_failures"] == 0
                  and summary["dead_ends"] == 0
                  and rebuild_ok and summary["capture_complete"]
                  and summary["binary_sha256_end"] == (binary_start if args.no_rebuild else binary_rebuilt)

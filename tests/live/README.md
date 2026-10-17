@@ -259,6 +259,11 @@ compactions, errors and dead ends. The exploration turn checks both the named
 module and test file in the answer; coding turns check the repository test suite
 and task-specific file/function outcomes. Reports made before this answer check
 prove that exploration turns completed, not that their answers were correct.
+Planting a bug resets only that function to the pinned commit's text and then
+breaks it, so a later cycle plants again after an earlier fix that was correct
+but worded differently, and functions earlier tasks added stay. A plant that
+cannot run is that task's `harness` result; a driver exception still writes
+`report.json`, with the traceback in `summary.crash` and every task that ran.
 
 **TUI soak** (`tui_soak.py`) keeps one logical session on the real TUI for the
 requested duration. It repeatedly adds a function and tests across two files,

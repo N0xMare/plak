@@ -430,6 +430,39 @@ class LiveOracleTests(unittest.TestCase):
             self.assertEqual(record.outcome, "harness")
             self.assertIn("reopen refused", record.errors)
 
+    def test_plant_resets_a_differently_fixed_function_and_keeps_later_code(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory) / "repo"
+            _path, name, good, bad = soak.BUGS["ilen"]
+            live.git_repo(repo, {"more.py":
+                                 f"def first():\n    return 1\n\n\ndef ilen(iterable):\n    {good}\n"})
+            source = repo / "more.py"
+            pinned = soak.subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True,
+                                         capture_output=True, text=True).stdout.strip()
+            # An earlier cycle fixed ilen in other words and added a function.
+            source.write_text("def first():\n    return 1\n\n\n@staticmethod\ndef ilen(iterable):\n"
+                              "    return sum(1 for _ in iterable)\n\n\n"
+                              "def every_nth_1(iterable, n):\n    return iterable[::n]\n")
+            with patch.object(soak, "REPO_COMMIT", pinned), \
+                    patch.dict(soak.BUGS, {"ilen": ("more.py", name, good, bad)}):
+                soak.plant(repo, "ilen")
+                text = source.read_text()
+                self.assertIn(bad, text)
+                self.assertNotIn("sum(1 for _", text)
+                self.assertNotIn("@staticmethod", text)
+                self.assertIn("def every_nth_1(iterable, n):", text)
+                self.assertIn("def first():", text)
+
+                # A plant that cannot run is that task's harness result, not a crash.
+                source.write_text("def ilen(:\n")
+                env = live.Env(repo / "plak", repo / "home", Path(directory))
+                runner = soak.Soak(live.ROUTES["grok"], env, repo)
+                runner.open = Mock(side_effect=AssertionError("must not open"))
+                record = runner.run_task(soak.Task("fix_ilen", "fix", bug="ilen"), 2, None, False)
+            self.assertEqual(record.outcome, "harness")
+            self.assertEqual(record.evidence_status, "not_started")
+            self.assertIn("no parseable ilen", record.errors[0])
+
     def test_capture_segment_distinguishes_authority_refusal_from_missing_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
