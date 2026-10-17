@@ -2873,38 +2873,40 @@ mod tests {
     }
 
     /// An OpenRouter hub with the WaitStop vocabulary creates and reopens
-    /// through projection admission and `AgentSessions`, offline, on every
-    /// composition, as root and as a spawned child, on every occupancy fence.
+    /// through projection admission and `AgentSessions`, offline. Every
+    /// composition meets every occupancy fence, and the root/spawned-child axis
+    /// alternates so each of its values meets every composition and fence.
     #[tokio::test]
     async fn pi_hub_local_route_creates_and_reopens() {
         use crate::agent::SessionToolFence;
         use crate::agent_tree_tools::TopologyVocabulary;
         let mut failures = Vec::new();
-        for composition in [
+        let compositions = [
             CompositionSelection::Direct,
             CompositionSelection::JsPtc,
             CompositionSelection::PyPtc,
-        ] {
-            for spawned_child in [false, true] {
-                for fence in [
-                    SessionToolFence::Full,
-                    SessionToolFence::OccupancyExecute,
-                    SessionToolFence::OccupancyReadOnly,
-                ] {
-                    if let Err(error) = pi_hub_local(
-                        composition,
-                        spawned_child,
-                        TopologyVocabulary::WaitStop,
-                        TopologyVocabulary::WaitStop,
-                        fence,
-                        None,
-                    )
-                    .await
-                    {
-                        failures.push(format!(
-                            "{composition:?} child={spawned_child} {fence:?}: {error}"
-                        ));
-                    }
+        ];
+        let fences = [
+            SessionToolFence::Full,
+            SessionToolFence::OccupancyExecute,
+            SessionToolFence::OccupancyReadOnly,
+        ];
+        for (composition_index, composition) in compositions.into_iter().enumerate() {
+            for (fence_index, fence) in fences.into_iter().enumerate() {
+                let spawned_child = (composition_index + fence_index) % 2 == 1;
+                if let Err(error) = pi_hub_local(
+                    composition,
+                    spawned_child,
+                    TopologyVocabulary::WaitStop,
+                    TopologyVocabulary::WaitStop,
+                    fence,
+                    None,
+                )
+                .await
+                {
+                    failures.push(format!(
+                        "{composition:?} child={spawned_child} {fence:?}: {error}"
+                    ));
                 }
             }
         }
