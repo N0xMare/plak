@@ -30,7 +30,8 @@ const TURN_CONTINUATION_NOTE_BODY: &str = "The earlier part of this turn is now 
 /// turn's next round follows. Trailing steering (the plan restoration note)
 /// does not change that shape.
 ///
-/// A successor ending anywhere else (a fold before a new prompt) is returned
+/// A native successor ends in its compaction item, so native folds never get a
+/// note. A successor ending anywhere else (a fold before a new prompt) is returned
 /// unchanged, and so is one whose current turn already carries a note. The
 /// compaction provenance pins the successor prefix, so a fold may only append,
 /// and steering is never folded inside its own turn: an earlier fold's note

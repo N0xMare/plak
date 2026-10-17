@@ -6012,7 +6012,9 @@ folded inside its own turn, so the first mid-turn fold's note stays, and a
 later fold in the same turn whose successor already holds it after the latest
 user intent appends nothing; that note then sits just before the current
 round's batch. A later turn folds it whole with its intent group. A fold before a new prompt (fence (a)), an
-endpoint compaction and a recovery-published fold append no continuation note.
+endpoint compaction and a recovery-published fold append no continuation note,
+and neither does a native compaction: its successor ends in the native
+compaction item, not a tool exchange.
 The note is part of the published successor, like the plan note, and failure to
 build it fails the publication.
 
