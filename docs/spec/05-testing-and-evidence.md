@@ -2384,8 +2384,9 @@ side request (a rate limit retried, an unclassified body refused before
 dispatch, an oversized document refused).
 The wrapper pack pins its descriptions, argument validation and result
 rendering; binding pins that a `Supported` row with a port binds the pack and
-every shipped row refuses. The one paid probe per (route, tool) is opt-in and
-`#[ignore]`d (`live_retrieval_probe_*`), never in a gate tier.
+every shipped row refuses. Live evidence for each (route, tool) is the
+`web_search`, `web_fetch` and `x_search` feature scenarios (§3.2), and for `image_gen` the `image_gen_roundtrip`
+scenario; no crate carries a paid probe.
 
 API-route contracts run offline against the production API binding, with
 fixture keys and no dispatch: the OpenAI and xAI API configured tool

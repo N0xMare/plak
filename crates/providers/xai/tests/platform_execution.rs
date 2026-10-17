@@ -352,6 +352,7 @@ async fn configured(
     .configured()
     .await?)
 }
+
 /// Every effort the reviewed ladder publishes reaches the wire as
 /// `reasoning.effort`, including `xhigh` and grok-4.3's explicit `none`.
 #[tokio::test]
@@ -420,6 +421,7 @@ async fn reviewed_efforts_use_production_bearer_path_and_complete() -> TestResul
     }
     Ok(())
 }
+
 #[tokio::test]
 async fn http_rejection_and_incomplete_or_wrong_model_stream_never_complete() -> TestResult {
     for (index, wire_response) in [
@@ -506,6 +508,7 @@ async fn http_rejection_and_incomplete_or_wrong_model_stream_never_complete() ->
     }
     Ok(())
 }
+
 #[tokio::test]
 async fn changed_or_revoked_key_is_refused_before_secret_resolution_and_socket() -> TestResult {
     for changed in [Some("changed-synthetic-key".to_owned()), None] {
@@ -1126,93 +1129,5 @@ async fn a_revoked_key_refuses_the_side_request_before_the_socket() -> TestResul
     assert_eq!(error.physical_requests(), 1);
     assert_eq!(source.resolves.load(Ordering::SeqCst), 0);
     peer.abort();
-    Ok(())
-}
-
-struct LiveSource(String);
-
-impl XaiPlatformApiKeySource for LiveSource {
-    fn grant(&self) -> Result<XaiPlatformCredentialGrant, XaiPlatformBuildError> {
-        XaiPlatformApiKey::new(self.0.clone())?.grant(authority())
-    }
-    fn api_key(
-        &self,
-        _: &XaiPlatformCredentialGrant,
-    ) -> Result<XaiPlatformApiKey, XaiPlatformBuildError> {
-        XaiPlatformApiKey::new(self.0.clone())
-    }
-}
-
-/// Opt-in paid probe, never in a gate tier: one web search and one X search
-/// side request on the xAI API with the operator's key. A pass is a non-empty
-/// answer with at least one source per tool. Run with
-/// `PLAK_LIVE_RETRIEVAL_PROBE=1 XAI_API_KEY=... cargo nextest run -p
-/// plakous-xai --run-ignored only -E 'test(live_retrieval_probe)'`.
-#[tokio::test]
-#[ignore = "paid live probe"]
-async fn live_retrieval_probe_xai_api() -> TestResult {
-    if std::env::var("PLAK_LIVE_RETRIEVAL_PROBE").as_deref() != Ok("1") {
-        return Err("set PLAK_LIVE_RETRIEVAL_PROBE=1 to spend one probe per tool".into());
-    }
-    let key = std::env::var("XAI_API_KEY")?;
-    let model = Arc::new(XaiPlatformModel::new(
-        authority(),
-        Arc::new(LiveSource(key)),
-        NonZeroU64::new(65_536).unwrap(),
-        selected(ReasoningEffort::Low)?,
-        Arc::new(SystemClock),
-    )?);
-    let retrieval = model.retrieval(None);
-    for query in [
-        ResponsesRetrievalQuery::WebSearch {
-            query: "Rust programming language latest stable release".to_owned(),
-            allowed_domains: Vec::new(),
-            blocked_domains: Vec::new(),
-        },
-        x_search_query(),
-    ] {
-        let outcome = retrieval.retrieve(query, &CancellationToken::new()).await?;
-        eprintln!(
-            "sources={} usage={:?}",
-            outcome.sources.len(),
-            outcome.usage
-        );
-        assert!(
-            !outcome.text.trim().is_empty(),
-            "the search answered nothing"
-        );
-        assert!(!outcome.sources.is_empty(), "the search reported no source");
-    }
-    Ok(())
-}
-
-/// Opt-in paid probe, never in a gate tier: one image generation on the xAI
-/// API with the operator's key. A pass is image bytes with a PNG, JPEG or
-/// WebP signature. Run with `PLAK_LIVE_IMAGE_PROBE=1 XAI_API_KEY=... cargo
-/// nextest run -p plakous-xai --run-ignored only -E 'test(live_image_probe)'`.
-#[tokio::test]
-#[ignore = "paid live probe"]
-async fn live_image_probe_xai_api() -> TestResult {
-    if std::env::var("PLAK_LIVE_IMAGE_PROBE").as_deref() != Ok("1") {
-        return Err("set PLAK_LIVE_IMAGE_PROBE=1 to spend one probe".into());
-    }
-    let key = std::env::var("XAI_API_KEY")?;
-    let model = Arc::new(XaiPlatformModel::new(
-        authority(),
-        Arc::new(LiveSource(key)),
-        NonZeroU64::new(65_536).unwrap(),
-        selected(ReasoningEffort::Low)?,
-        Arc::new(SystemClock),
-    )?);
-    let images = model.images();
-    let request = images.request("A small red fox sitting in snow, flat illustration");
-    let bytes = images.generate(&request, &CancellationToken::new()).await?;
-    eprintln!("image_gen: bytes={}", bytes.len());
-    assert!(
-        bytes.starts_with(b"\x89PNG")
-            || bytes.starts_with(&[0xff, 0xd8, 0xff])
-            || bytes.starts_with(b"RIFF"),
-        "image_gen returned no image"
-    );
     Ok(())
 }

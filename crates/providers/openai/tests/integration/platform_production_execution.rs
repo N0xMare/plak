@@ -457,6 +457,7 @@ async fn documented_low_medium_corpus_uses_real_platform_credentials_and_encrypt
     }
     Ok(())
 }
+
 #[tokio::test]
 async fn production_http_rejection_never_becomes_completion() -> TestResult {
     // A 429 is retried under the kernel policy; see the Responses host tests.
@@ -553,6 +554,7 @@ fn terminal(model: &str, output: serde_json::Value) -> serde_json::Value {
     terminal["response"]["output"] = output;
     terminal
 }
+
 #[tokio::test(start_paused = true)]
 async fn accepted_truncation_wrong_model_and_stream_error_never_complete() -> TestResult {
     // Only observed retry waits advance time; real loopback I/O keeps its head budget.
@@ -691,6 +693,7 @@ fn tool_request(
     )?)
     .build()?)
 }
+
 #[tokio::test]
 #[allow(
     clippy::too_many_lines,
@@ -913,6 +916,7 @@ impl plakous_openai::PlatformCredentialSource for RotatingSource {
         .map_err(|_| plakous_openai::AuthError::SourceFailure)
     }
 }
+
 #[tokio::test]
 async fn generation_rotation_and_cancellation_reject_before_secret_or_connection() -> TestResult {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -1403,99 +1407,5 @@ async fn web_search_side_request_uses_the_session_key_project_and_model() -> Tes
         serde_json::json!([{"type": "web_search", "search_context_size": "medium"}])
     );
     assert_eq!(body["store"], false);
-    Ok(())
-}
-
-/// Opt-in paid probe, never in a gate tier: one web search side request on
-/// the Platform API with the operator's key. A pass is a non-empty answer with
-/// at least one source. Run with `PLAK_LIVE_RETRIEVAL_PROBE=1
-/// OPENAI_API_KEY=... cargo nextest run -p plakous-openai --run-ignored only
-/// -E 'test(live_retrieval_probe)'`.
-#[tokio::test]
-#[ignore = "paid live probe"]
-async fn live_retrieval_probe_openai_api() -> TestResult {
-    if std::env::var("PLAK_LIVE_RETRIEVAL_PROBE").as_deref() != Ok("1") {
-        return Err("set PLAK_LIVE_RETRIEVAL_PROBE=1 to spend one probe".into());
-    }
-    let key = std::env::var("OPENAI_API_KEY")?;
-    let facts = OpenAiPlatformModelFacts::Gpt56Luna;
-    let reference = CredentialReference::application("live-probe")?;
-    let source = Arc::new(StaticPlatformCredentialSource::new(
-        SecretString::new(key)?,
-        reference.clone(),
-        CredentialAuthorityId::new("live-probe")?,
-    ));
-    let authority = OpenAiPlatformModelBuilder::new(
-        reference,
-        source,
-        facts,
-        PlatformStoragePolicy::Stateless,
-        PlatformProjectPolicy::DefaultProject,
-    )
-    .context_envelope(std::num::NonZeroU64::new(65536).ok_or("nonzero")?)
-    .seal()?;
-    let selected = selected_configuration(&authority, ReasoningEffort::Low)?;
-    let model = Arc::new(OpenAiPlatformModel::new(authority, selected)?);
-    let outcome = model
-        .retrieval(Some("low"))
-        .retrieve(web_search_query(), &plakous_model::CancellationToken::new())
-        .await?;
-    eprintln!(
-        "web_search: sources={} usage={:?}",
-        outcome.sources.len(),
-        outcome.usage
-    );
-    assert!(
-        !outcome.text.trim().is_empty(),
-        "web_search answered nothing"
-    );
-    assert!(!outcome.sources.is_empty(), "web_search reported no source");
-    Ok(())
-}
-
-/// Opt-in paid probe, never in a gate tier: one image generation on the
-/// Platform API with the operator's key. A pass is image bytes with a PNG,
-/// JPEG or WebP signature. Run with `PLAK_LIVE_IMAGE_PROBE=1
-/// OPENAI_API_KEY=... cargo nextest run -p plakous-openai --run-ignored only
-/// -E 'test(live_image_probe)'`.
-#[tokio::test]
-#[ignore = "paid live probe"]
-async fn live_image_probe_openai_api() -> TestResult {
-    if std::env::var("PLAK_LIVE_IMAGE_PROBE").as_deref() != Ok("1") {
-        return Err("set PLAK_LIVE_IMAGE_PROBE=1 to spend one probe".into());
-    }
-    let key = std::env::var("OPENAI_API_KEY")?;
-    let facts = OpenAiPlatformModelFacts::Gpt56Luna;
-    let reference = CredentialReference::application("live-probe")?;
-    let source = Arc::new(StaticPlatformCredentialSource::new(
-        SecretString::new(key)?,
-        reference.clone(),
-        CredentialAuthorityId::new("live-probe")?,
-    ));
-    let authority = OpenAiPlatformModelBuilder::new(
-        reference,
-        source,
-        facts,
-        PlatformStoragePolicy::Stateless,
-        PlatformProjectPolicy::DefaultProject,
-    )
-    .context_envelope(std::num::NonZeroU64::new(65536).ok_or("nonzero")?)
-    .seal()?;
-    let selected = selected_configuration(&authority, ReasoningEffort::Low)?;
-    let model = Arc::new(OpenAiPlatformModel::new(authority, selected)?);
-    let images = model.images();
-    let request = images
-        .request("A small red fox sitting in snow, flat illustration")
-        .with_size(Some("1024x1024".to_owned()));
-    let bytes = images
-        .generate(&request, &plakous_model::CancellationToken::new())
-        .await?;
-    eprintln!("image_gen: bytes={}", bytes.len());
-    assert!(
-        bytes.starts_with(b"\x89PNG")
-            || bytes.starts_with(&[0xff, 0xd8, 0xff])
-            || bytes.starts_with(b"RIFF"),
-        "image_gen returned no image"
-    );
     Ok(())
 }
