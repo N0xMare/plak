@@ -1350,7 +1350,13 @@ class Agent:
             self.send("quit")
             self.proc.stdin.close()
         except (BrokenPipeError, OSError):
-            pass
+            # The process is gone (a scenario may have killed it). Close the
+            # pipe now, discarding the unsent line, so garbage collection does
+            # not retry the flush and print an ignored BrokenPipeError.
+            try:
+                self.proc.stdin.close()
+            except OSError:
+                pass
         try:
             return self.proc.wait(timeout)
         except subprocess.TimeoutExpired:
