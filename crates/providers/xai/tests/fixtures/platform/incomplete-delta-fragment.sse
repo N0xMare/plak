@@ -1,6 +1,0 @@
-data: {"type":"response.output_text.delta","delta":"hello"}
-
-data: {"type":"response.reasoning_text.delta","delta":"opaque"}
-
-data: {"type":"response.reasoning_summary_text.delta","delta":"summary"}
-

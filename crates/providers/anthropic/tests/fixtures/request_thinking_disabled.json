@@ -1,1 +1,0 @@
-{"model":"claude-disabled","max_tokens":8192,"messages":[{"role":"user","content":[{"type":"text","text":"base"}]}],"thinking":{"type":"disabled"},"stream":true}
