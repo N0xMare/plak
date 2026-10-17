@@ -163,10 +163,10 @@ NON_READER_TEMPLATES = {
     ("crates/core/tools/src/environment/backend/job_output/tests.rs",
      "{}/jobs/{SESSION}/{BRANCH}-p{number}-"):
         "Private job spool path under a test's temporary state home.",
-    ("crates/orchestration/recursive-subagents-store/tests/view_deletion.rs",
+    ("crates/orchestration/recursive-subagents-store/tests/tree_store/view_deletion.rs",
      "{}/00000000-0000-4000-8000-00000000000b/00000000-0000-4000-8000-000000003001"):
         "Runtime session/branch/turn locator, not a filesystem path.",
-    ("crates/orchestration/recursive-subagents-store/tests/view_deletion.rs",
+    ("crates/orchestration/recursive-subagents-store/tests/tree_store/view_deletion.rs",
      "{SESSION}/00000000-0000-4000-8000-00000000000b/00000000-0000-4000-8000-000000003001"):
         "Runtime session/branch/turn locator, not a filesystem path (two occurrences).",
     ("crates/providers/openrouter/src/discovery.rs", "{ENDPOINTS_PREFIX}/{}/{}/endpoints"):

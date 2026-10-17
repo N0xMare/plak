@@ -798,7 +798,11 @@ fn tree_matrix_child() {
 fn run_child(root: &Path, cut: Option<u64>) -> std::process::Output {
     let mut command = Command::new(std::env::current_exe().unwrap());
     command
-        .args(["--exact", "tree_matrix_child", "--nocapture"])
+        .args([
+            "--exact",
+            "commit_cut_matrix::tree_matrix_child",
+            "--nocapture",
+        ])
         .env(CHILD_ENV, root)
         .env(
             plakous_store::commit_trace::TRACE_ENV,
