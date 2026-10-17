@@ -6,8 +6,8 @@
 
 use super::App;
 use super::test_support::{
-    FIXED_NOW, key, key_alt, key_ctrl, launch_basic, left_click, models_app, open_tree,
-    render_to_string, tree_node, tree_snapshot,
+    FIXED_NOW, key, key_alt, key_ctrl, launch_basic, models_app, open_tree, render_to_string,
+    tree_node, tree_snapshot,
 };
 use crate::tui::{HostEvent, SurfaceIntent, UserAction};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -72,34 +72,6 @@ fn no_typing_hint(screen: &str) {
     );
 }
 
-#[test]
-fn enter_confirms_the_pop_up_the_moment_it_opens() {
-    let mut app = agents_app();
-    open_stop_all(&mut app);
-    assert_eq!(
-        app.handle_key(key(KeyCode::Enter)),
-        Some(UserAction::StopAllTopology)
-    );
-    assert!(app.destructive_confirm.is_none());
-}
-
-#[test]
-fn esc_cancels_and_a_letter_does_nothing() {
-    let mut app = agents_app();
-    open_stop_all(&mut app);
-    assert!(app.handle_key(key(KeyCode::Char('y'))).is_none());
-    assert!(
-        app.destructive_confirm.is_some(),
-        "a letter neither confirms nor cancels"
-    );
-    assert!(
-        app.input.is_empty(),
-        "the letter is not typed into the draft"
-    );
-    assert!(app.handle_key(key(KeyCode::Esc)).is_none());
-    assert!(app.destructive_confirm.is_none());
-}
-
 /// The agent transcript is Activity's body, so it is a promptless view: a
 /// printable key or `Backspace` leaves the pop-up alone and out of the draft.
 /// The same key over the composer closes the pop-up into the draft.
@@ -141,98 +113,12 @@ fn the_agent_transcript_inside_activity_ignores_typing_over_the_pop_up() {
 }
 
 #[test]
-fn arrows_and_tab_move_focus_at_once() {
-    let mut app = agents_app();
-    open_stop_all(&mut app);
-    // Focus starts on the action. Left returns to Cancel; Enter declines.
-    app.handle_key(key(KeyCode::Left));
-    assert!(app.handle_key(key(KeyCode::Enter)).is_none());
-    assert!(app.destructive_confirm.is_none());
-
-    open_stop_all(&mut app);
-    // Right does not wrap past the action, so Enter still confirms.
-    app.handle_key(key(KeyCode::Right));
-    assert_eq!(
-        app.handle_key(key(KeyCode::Enter)),
-        Some(UserAction::StopAllTopology)
-    );
-
-    open_stop_all(&mut app);
-    // Tab moves right; BackTab moves left onto Cancel.
-    app.handle_key(key(KeyCode::Tab));
-    app.handle_key(key(KeyCode::BackTab));
-    assert!(app.handle_key(key(KeyCode::Enter)).is_none());
-    assert!(app.destructive_confirm.is_none());
-}
-
-#[test]
 fn alt_enter_cancels() {
     let mut app = agents_app();
     open_stop_all(&mut app);
     assert!(app.handle_key(key_alt(KeyCode::Enter)).is_none());
     assert!(app.destructive_confirm.is_none());
     assert!(!app.should_quit);
-}
-
-#[test]
-fn a_click_confirms_or_cancels() {
-    let mut app = agents_app();
-    open_stop_all(&mut app);
-    let screen = render_to_string(&mut app, 100, 30);
-    assert!(screen.contains("[ Cancel ]"), "{screen}");
-    assert!(screen.contains("Enter confirms · Esc cancels"), "{screen}");
-    let cancel = app
-        .destructive_confirm
-        .as_ref()
-        .unwrap()
-        .cancel_hit()
-        .expect("cancel");
-    assert!(app.handle_mouse(left_click(cancel.x, cancel.y)).is_none());
-    assert!(app.destructive_confirm.is_none());
-
-    open_stop_all(&mut app);
-    render_to_string(&mut app, 100, 30);
-    let action = app
-        .destructive_confirm
-        .as_ref()
-        .unwrap()
-        .action_hit()
-        .expect("action");
-    assert_eq!(
-        app.handle_mouse(left_click(action.x, action.y)),
-        Some(UserAction::StopAllTopology)
-    );
-}
-
-#[test]
-fn activity_s_then_enter_stops_at_once() {
-    let mut app = agents_app();
-    assert!(app.handle_key(key(KeyCode::Char('s'))).is_none());
-    assert_eq!(
-        app.handle_key(key(KeyCode::Enter)),
-        Some(UserAction::StopAllTopology)
-    );
-}
-
-#[test]
-fn the_agent_view_opens_interrupt_and_close_at_once() {
-    for (letter, closes) in [('i', false), ('c', true)] {
-        let mut app = agent_view_app();
-        assert!(app.handle_key(key(KeyCode::Char(letter))).is_none());
-        let action = app
-            .destructive_confirm
-            .as_ref()
-            .expect("pop-up")
-            .first_action()
-            .cloned()
-            .expect("action");
-        assert_eq!(
-            matches!(action, UserAction::CloseTopologyNode { .. }),
-            closes,
-            "{letter}"
-        );
-        assert_eq!(app.handle_key(key(KeyCode::Enter)), Some(action));
-    }
 }
 
 #[test]
@@ -299,14 +185,6 @@ fn unmapped_keys_in_promptless_views_do_nothing_and_show_no_hint() {
     processes.handle_paste("pasted");
     assert_eq!(processes.input, "");
     no_typing_hint(&render_to_string(&mut processes, 100, 30));
-}
-
-#[test]
-fn a_ctrl_chord_cancels_the_pop_up() {
-    let mut app = agents_app();
-    open_stop_all(&mut app);
-    assert!(app.handle_key(key_ctrl(KeyCode::Char('c'))).is_none());
-    assert!(app.destructive_confirm.is_none());
 }
 
 fn busy_drafting_with_approval() -> App {

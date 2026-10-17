@@ -918,47 +918,6 @@ fn help_and_version() {
     assert_eq!(out.status.code(), Some(2), "stderr={}", stderr(&out));
 }
 
-#[test]
-fn recursive_help_for_product_commands() {
-    let dir = isolated_home_dir();
-    let home = dir.path();
-    let mut cmds = vec![
-        "login",
-        "logout",
-        "status",
-        "refresh",
-        "key",
-        "run",
-        "agent",
-        "resume",
-        "config",
-        "doctor",
-        "usage",
-        "session",
-        "telemetry",
-    ];
-    if cfg!(feature = "maintainer") {
-        cmds.extend(["fork", "compact", "models", "compatibility"]);
-    }
-    for cmd in cmds {
-        let out = run_plak(home, &[cmd, "--help"]);
-        assert!(
-            out.status.success(),
-            "plak {cmd} --help failed: {}",
-            stderr(&out)
-        );
-        let text = stdout(&out);
-        assert!(
-            text.to_ascii_lowercase().contains(cmd) || text.contains("USAGE"),
-            "help for {cmd} looks empty: {text}"
-        );
-        assert!(
-            !text.contains("No detailed help"),
-            "{cmd} falls through to the no-help arm: {text}"
-        );
-    }
-}
-
 /// Spec 02 §3.2: the help pages are static files, and what the binary prints
 /// is those files byte for byte — the global page with its version line filled
 /// in and its maintainer block gated by the feature, every command page

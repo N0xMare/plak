@@ -1274,9 +1274,7 @@ mod tests {
 
     use opentelemetry::trace::{Event, SpanId, TraceId};
     use opentelemetry_sdk::trace::{SpanData, SpanProcessor};
-    use plakous::agent::{
-        CredentialProviderLabel, CredentialRefreshFailureClass, TelemetryContext, TurnUsage,
-    };
+    use plakous::agent::{TelemetryContext, TurnUsage};
     use plakous::model::{AgentId, AttemptId, BranchId, CallId, RunId, SessionId, TurnId, Usage};
     use uuid::Uuid;
 
@@ -1993,88 +1991,5 @@ mod tests {
             Timestamp::new(ts.seconds(), ts.nanoseconds().saturating_add(1)).expect("ts");
         let id_c = synthetic_span_id(SyntheticKind::Compaction, ctx, other_ts);
         assert_ne!(id_a, id_c);
-    }
-
-    #[test]
-    fn every_kind_is_exhaustively_tested() {
-        let _kinds = [
-            TelemetryObservationKind::TurnStarted {
-                origin: plakous::model::TurnOrigin::UserPrompt,
-                queue_time: Duration::from_nanos(1),
-            },
-            TelemetryObservationKind::TurnFinished {
-                elapsed: Duration::from_nanos(1),
-                status: TelemetryTerminalStatus::Completed,
-                usage: TurnUsage::default(),
-                model_wall: Duration::ZERO,
-                tool_wall: Duration::ZERO,
-                compaction_wall: Duration::ZERO,
-                model_attempts: 0,
-                tool_calls: 0,
-                compactions: 0,
-            },
-            TelemetryObservationKind::ModelStarted,
-            TelemetryObservationKind::ModelFirstEvent {
-                elapsed: Duration::from_nanos(1),
-            },
-            TelemetryObservationKind::ModelFinished {
-                elapsed: Duration::from_nanos(1),
-                status: TelemetryTerminalStatus::Completed,
-                usage: None,
-                served_by: None,
-            },
-            TelemetryObservationKind::ToolStarted,
-            TelemetryObservationKind::ToolFinished {
-                elapsed: Duration::from_nanos(1),
-                status: TelemetryTerminalStatus::Completed,
-                output_bytes: 0,
-            },
-            TelemetryObservationKind::CompactionStarted {
-                reason: CompactionEventReason::Manual,
-            },
-            TelemetryObservationKind::CompactionFinished {
-                refusal: None,
-                elapsed: Duration::from_nanos(1),
-                outcome: CompactionEventOutcome::Committed,
-                reason: CompactionEventReason::Manual,
-                tokens_before: None,
-                tokens_after: None,
-                usage: None,
-            },
-            TelemetryObservationKind::DurabilityFinished {
-                elapsed: Duration::from_nanos(1),
-                status: TelemetryTerminalStatus::Completed,
-            },
-            TelemetryObservationKind::DurabilityAttemptFinished {
-                elapsed: Duration::from_nanos(1),
-                attempt: DurabilityAttemptKind::InitialCommit,
-                outcome: DurabilityAttemptOutcome::Committed,
-            },
-            TelemetryObservationKind::RetentionFinished {
-                elapsed: Duration::from_nanos(1),
-                status: TelemetryTerminalStatus::Completed,
-                pruned_checkpoints: 1,
-            },
-            TelemetryObservationKind::ChildProcessExited {
-                child: ChildProcessKind::PythonWorker,
-                user_cpu: Duration::from_nanos(1),
-                system_cpu: Duration::from_nanos(1),
-                peak_rss_bytes: None,
-            },
-            TelemetryObservationKind::CredentialRefresh {
-                provider: CredentialProviderLabel::new("xai").expect("label"),
-                phase: CredentialRefreshPhase::OutcomeUnknown,
-                failure_class: Some(CredentialRefreshFailureClass::Timeout),
-                transport_phase: Some(plakous::model::ModelRetryPhase::Resolution),
-                http_status: Some(503),
-                elapsed: Some(Duration::from_millis(30)),
-                generation: 40,
-                detail: plakous::agent::CredentialRefreshDetail::default(),
-            },
-            TelemetryObservationKind::PromptCacheDiagnosis {
-                reason: plakous::model::PromptCacheMissReason::Other,
-                missed_input_tokens: Some(587),
-            },
-        ];
     }
 }

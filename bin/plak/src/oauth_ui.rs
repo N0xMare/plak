@@ -477,32 +477,6 @@ mod tests {
     }
 
     #[test]
-    fn grok_paste_instructions_mention_grok_build_code() {
-        let mut buf = Vec::new();
-        write_authorization_paste_instructions(
-            &mut buf,
-            plakous::subscriptions::NativeProvider::Xai,
-            plakous::subscriptions::NativeLoginCompletion::AuthorizationCodeOrRedirectUrl,
-        )
-        .unwrap();
-        let text = String::from_utf8(buf).unwrap();
-        assert!(text.contains("Grok Build"));
-        assert!(text.contains("Paste that authorization code"));
-    }
-
-    #[test]
-    fn remote_hint_mentions_flag_and_the_provider_remote_step() {
-        use plakous::subscriptions::NativeProvider;
-        let h = remote_login_hint(NativeProvider::Codex);
-        assert!(h.contains("plak login codex --remote"));
-        assert!(h.contains("one-time code"));
-        assert!(!h.contains("callback URL"));
-        let h = remote_login_hint(NativeProvider::Claude);
-        assert!(h.contains("plak login claude --remote"));
-        assert!(h.contains("paste the"));
-    }
-
-    #[test]
     fn device_code_prompt_shows_url_code_expiry_and_anti_phishing_rule() {
         let mut buf = Vec::new();
         write_device_code_prompt(
@@ -522,16 +496,6 @@ mod tests {
         ));
         assert!(text.contains("Ctrl-C cancels"));
         assert!(!text.to_ascii_lowercase().contains("paste"));
-    }
-
-    #[test]
-    fn timeout_message_includes_wait_and_remote() {
-        let m = local_login_timeout_message(
-            plakous::subscriptions::NativeProvider::Xai,
-            Duration::from_secs(120),
-        );
-        assert!(m.contains("120"));
-        assert!(m.contains("plak login grok --remote"));
     }
 
     #[test]

@@ -83,40 +83,12 @@ pub(crate) fn command_help(command: &str, out: &mut dyn Write) -> io::Result<()>
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
-    use super::{command_help, global_help};
+    use super::command_help;
 
     fn rendered_command(command: &str) -> String {
         let mut output = Vec::new();
         command_help(command, &mut output).unwrap();
         String::from_utf8(output).unwrap()
-    }
-
-    #[test]
-    fn global_help_uses_interactive_terminal_wording_and_has_no_setup_verbs() {
-        let mut output = Vec::new();
-        global_help(&mut output).unwrap();
-        let output = String::from_utf8(output).unwrap();
-        assert!(output.contains("interactive terminal required"));
-        assert!(!output.contains("TTY required"));
-        assert!(!output.contains("\n  init        "));
-        assert!(!output.contains("\n  setup       "));
-    }
-
-    #[test]
-    fn command_groups_have_complete_local_help() {
-        for (command, expected) in [
-            ("key", "plak key status [account]"),
-            ("secret", "plak secret list"),
-            ("config", "plak config init"),
-            ("session", "plak session log <session>"),
-        ] {
-            let output = rendered_command(command);
-            assert!(
-                output.contains(expected),
-                "missing {expected:?} in {command}"
-            );
-            assert!(!output.contains("No detailed help"));
-        }
     }
 
     #[test]

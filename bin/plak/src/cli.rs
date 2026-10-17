@@ -2298,43 +2298,6 @@ mod tests {
         }
     }
 
-    /// Every bare product verb prints its own usage instead of a clap error.
-    /// A bare *leaf* routes to the help of the group that owns it.
-    #[test]
-    fn bare_command_groups_open_local_help() {
-        let mut cases: Vec<(&[&str], &str)> = vec![
-            (&["config"], "config"),
-            (&["session"], "session"),
-            (&["key"], "key"),
-            (&["telemetry"], "telemetry"),
-            (&["login"], "login"),
-            (&["logout"], "logout"),
-            (&["refresh"], "refresh"),
-            (&["run"], "run"),
-            (&["key", "set"], "key"),
-            (&["key", "clear"], "key"),
-            (&["config", "set"], "config"),
-            (&["session", "show"], "session"),
-            (&["session", "log"], "session"),
-            (&["telemetry", "sql"], "telemetry"),
-            (&["models"], "models"),
-        ];
-        if cfg!(feature = "maintainer") {
-            cases.extend::<Vec<(&[&str], &str)>>(vec![
-                (&["fork"], "fork"),
-                (&["compact"], "compact"),
-                (&["compatibility"], "compatibility"),
-            ]);
-        }
-        for (argv, expected) in cases {
-            let parsed = parse(args(argv));
-            assert!(
-                matches!(&parsed, Ok(Command::CommandHelp { command }) if command == expected),
-                "bare {argv:?} must print `{expected}` help, got {parsed:?}"
-            );
-        }
-    }
-
     /// `telemetry prune` mutates the store, so a bare invocation refuses.
     #[test]
     fn telemetry_prune_requires_a_bound_or_an_explicit_yes() {

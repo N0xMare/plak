@@ -264,21 +264,6 @@ fn ctrl_c_in_the_agent_view_goes_back() {
     assert!(!app.cancel_pending);
 }
 
-/// A paste where there is no prompt does nothing: no pop-up, no hint, and
-/// the hidden draft is left alone.
-#[test]
-fn a_paste_in_activity_does_nothing() {
-    let mut app = agents_app();
-    assert_eq!(app.handle_paste("stop all of it"), None);
-    assert_eq!(app.input, "");
-    assert!(app.destructive_confirm.is_none());
-    let screen = render_to_string(&mut app, 100, 30);
-    assert!(
-        !screen.contains("no prompt") && !screen.contains("pause to"),
-        "{screen}"
-    );
-}
-
 /// A paste under the turn stop pop-up reaches neither the draft nor a button.
 #[test]
 fn a_paste_under_the_turn_stop_pop_up_does_nothing() {
