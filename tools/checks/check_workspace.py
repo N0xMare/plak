@@ -506,6 +506,9 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plak", "src/commands/exchange_capture.rs"): {"env", "warn"},
     # A published export whose directory sync failed is kept and logged.
     ("plak", "src/carry.rs"): {"warn"},
+    # A TUI attach refused over an unusable stored login logs the CLI's
+    # remedy text, which names no secret.
+    ("plak", "src/commands/host_config.rs"): {"warn"},
     ("plakous-hosted", "src/mcp_binding.rs"): {"warn"},
     # `test-hooks` only: scripted offline model plans for child fixtures.
     ("plak", "src/test_hooks.rs"): {"json"},
