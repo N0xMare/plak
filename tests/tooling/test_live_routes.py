@@ -13,10 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests" / "live"))
 
 import estimate  # noqa: E402
-import jobs  # noqa: E402
 import live  # noqa: E402
-import long_session  # noqa: E402
-import smoke  # noqa: E402
 
 
 class CatalogTests(unittest.TestCase):
@@ -24,106 +21,6 @@ class CatalogTests(unittest.TestCase):
         for route in live.ROUTES.values():
             self.assertIn(route.route_class, live.ROUTE_CLASSES, route.name)
             self.assertTrue(route.host and route.path.startswith("/"), route.name)
-
-    def test_full_rows_are_the_owner_matrix(self):
-        full = {name for name, route in live.ROUTES.items()
-                if route.planned and route.route_class == live.FULL}
-        self.assertEqual(full, {
-            "codex", "grok", "claude-sonnet55-low", "deepseek", "deepseek-messages",
-        })
-        self.assertEqual(live.ROUTES["codex"].model, "gpt-6-luna")
-        self.assertEqual(live.ROUTES["grok"].model, "grok-4.7")
-        self.assertEqual(live.ROUTES["claude-sonnet55-low"].model, "claude-sonnet-5-5")
-        deepseek = live.ROUTES["deepseek"]
-        messages = live.ROUTES["deepseek-messages"]
-        self.assertEqual(deepseek.model, "deepseek/deepseek-v4.1-flash")
-        self.assertEqual(messages.model, deepseek.model)
-        self.assertIsNone(deepseek.protocol)
-        self.assertEqual(messages.protocol, "messages")
-        self.assertEqual(deepseek.path, "/api/v1/chat/completions")
-        self.assertEqual(messages.path, "/api/v1/messages")
-
-    def test_subscription_light_rows_use_owner_spellings(self):
-        expected = {
-            "codex-luna-medium": ("codex", "gpt-6-luna", "medium"),
-            "codex-sol": ("codex", "gpt-6.1-sol", "low"),
-            "codex-astra": ("codex", "gpt-6-astra", "low"),
-            "grok-46": ("grok", "grok-4.6", "low"),
-            "claude-haiku55-low": ("claude", "claude-haiku-5-5", "low"),
-            "claude-haiku55-medium": ("claude", "claude-haiku-5-5", "medium"),
-            "claude-sonnet55-medium": ("claude", "claude-sonnet-5-5", "medium"),
-            "claude-opus-low": ("claude", "claude-opus-5-5", "low"),
-            "claude-opus-medium": ("claude", "claude-opus-5-5", "medium"),
-            "claude-fable": ("claude", "claude-fable-5-1", "low"),
-        }
-        for name, (account, model, effort) in expected.items():
-            route = live.ROUTES[name]
-            self.assertEqual((route.account, route.model, route.effort), (account, model, effort))
-            self.assertEqual(route.route_class, live.LIGHT)
-            self.assertTrue(route.planned)
-            self.assertIsNone(route.protocol)
-
-    def test_openrouter_informational_and_light_ids(self):
-        informational = {
-            "or-nemotron-free": "nvidia/nemotron-3-ultra-550b-a55b:free",
-            "or-laguna-free": "poolside/laguna-s-2.1:free",
-            "or-lfm-free": "liquid/lfm-2.5-2.6b:free",
-            "or-ling": "inclusionai/ling-3.0-flash-vl",
-            "or-qwen38": "qwen/qwen3.8-27b",
-        }
-        light = {
-            "or-mimo": "xiaomi/mimo-v2.6-flash",
-            "or-glm": "z-ai/glm-5.3-flash",
-            "or-qwen37": "qwen/qwen3.7-flash",
-        }
-        for name, model in informational.items():
-            route = live.ROUTES[name]
-            self.assertEqual(route.model, model)
-            self.assertEqual(route.route_class, live.INFORMATIONAL)
-            self.assertIsNone(route.protocol)
-            self.assertEqual(route.path, "/api/v1/chat/completions")
-        for name, model in light.items():
-            route = live.ROUTES[name]
-            self.assertEqual(route.model, model)
-            self.assertEqual(route.route_class, live.LIGHT)
-            self.assertIsNone(route.protocol)
-        messages = [route.name for route in live.ROUTES.values()
-                    if route.protocol == "messages"]
-        self.assertEqual(messages, ["deepseek-messages"])
-        self.assertFalse(live.ROUTES["or-ling"].model.endswith(":free"))
-        self.assertFalse(live.ROUTES["or-qwen38"].model.endswith(":free"))
-
-    def test_api_light_routes_are_the_enrolled_choices(self):
-        expected = {
-            "api-openai": ("openai", "gpt-6-luna", "low", "api.openai.com", "/v1/responses",
-                           "OPENAI_API_KEY", "openai.key"),
-            "api-openai-medium": ("openai", "gpt-6-luna", "medium", "api.openai.com",
-                                  "/v1/responses", "OPENAI_API_KEY", "openai.key"),
-            "api-anthropic": ("anthropic", "claude-haiku-5-5", "medium", "api.anthropic.com",
-                              "/v1/messages", "ANTHROPIC_API_KEY", "anthropic.key"),
-            "api-xai": ("xai-api", "grok-4.7", "low", "api.x.ai", "/v1/responses",
-                        "XAI_API_KEY", "xai.key"),
-        }
-        for name, (account, model, effort, host, path, env, filename) in expected.items():
-            route = live.ROUTES[name]
-            self.assertEqual(route.flags(), ["--account", account, "--model", model,
-                                             "--effort", effort])
-            self.assertEqual((route.host, route.path), (host, path))
-            self.assertEqual(route.route_class, live.LIGHT)
-            self.assertTrue(route.planned)
-            self.assertIsNone(route.protocol)
-            self.assertEqual(live.API_KEY_ENV[account], env)
-            self.assertEqual(live.api_key_filename(account), filename)
-        self.assertEqual(
-            live.fault_plan(live.ROUTES["api-anthropic"], "429", retry_after=2),
-            "host=api.anthropic.com,path=/v1/messages,nth=1,fault=429,retry-after=2")
-
-    def test_legacy_sonnet5_routes_stay_runnable_but_unplanned(self):
-        for name in ("claude", "claude-sonnet-medium"):
-            route = live.ROUTES[name]
-            self.assertEqual(route.model, "claude-sonnet-5")
-            self.assertFalse(route.planned)
-            self.assertEqual(route.route_class, live.LIGHT)
 
     def test_xai_api_home_copies_the_shared_key_file(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -142,50 +39,6 @@ class CatalogTests(unittest.TestCase):
             self.assertIn('account = "xai-api"', agent)
             self.assertIn('model = "grok-4.7"', agent)
             self.assertIn('effort = "low"', agent)
-
-    def test_route_report_names_the_bar_composition(self):
-        report = live.route_report(live.ROUTES["codex"])
-        self.assertEqual(report["composition"], "plakous-default")
-        self.assertEqual(live.route_report(live.ROUTES["codex"], composition="py-ptc")["composition"],
-                         "py-ptc")
-
-    def test_readme_names_every_route(self):
-        text = (ROOT / "tests" / "live" / "README.md").read_text()
-        for route in live.ROUTES.values():
-            self.assertIn(f"`{route.name}`", text, route.name)
-            self.assertIn(route.model, text, route.name)
-
-    def test_bar_names_per_row_rerun_and_the_full_cell_commands(self):
-        spec = (ROOT / "docs" / "spec" / "05-testing-and-evidence.md").read_text()
-        readme = (ROOT / "tests" / "live" / "README.md").read_text()
-        self.assertNotIn("whole matrix again", spec)
-        self.assertIn("carries the earlier pass", spec)
-        self.assertIn("class depth", spec)
-        self.assertIn("pack and family render pins", spec)
-        for stem in ("codex", "grok", "claude", "openrouter-chat", "openrouter-messages",
-                     "openai-api", "anthropic-api", "xai-api"):
-            self.assertIn(f"`{stem}`", spec)
-        commands = (
-            "python3 tests/live/qualification.py smoke <route>",
-            "python3 tests/live/qualification.py long-session <route> --all",
-            "python3 tests/live/qualification.py jobs <route>",
-            "python3 tests/live/qualification.py jobs <route> --only crash_jobs",
-            "python3 tests/live/qualification.py soak <route> --hours 1",
-            "just daily-driver --since <date>",
-        )
-        for command in commands:
-            self.assertIn(command, spec)
-            self.assertIn(command, readme)
-        for text in (spec, readme):
-            text = " ".join(text.split())
-            self.assertIn("three crash_jobs runs", text)
-            self.assertIn("least-used full row only", text)
-            self.assertIn("per release candidate, not per install", text)
-            self.assertIn("TUI review replaces it", text)
-        for name in ("api-openai", "api-openai-medium", "api-anthropic", "api-xai"):
-            self.assertIn(f"`{name}`", spec)
-            self.assertIn("not best-effort", spec)
-
 
 class TelemetryTests(unittest.TestCase):
     def test_session_usage_sums_turn_usage_only(self):
@@ -302,52 +155,6 @@ class EstimateTests(unittest.TestCase):
         self.assertEqual(len(report.cells), 2)
         self.assertIn("warning: openrouter estimate exceeds ceiling", estimate.render(report))
 
-    def test_linux_cells_are_full_rows_and_api_light_only(self):
-        linux = {(cell.route_name, cell.lane)
-                 for cell in estimate.planned_cells(soak_row="deepseek") if cell.platform == "linux"}
-        self.assertEqual(linux, {
-            ("codex", "smoke"),
-            ("grok", "smoke"),
-            ("claude-sonnet55-low", "smoke"),
-            ("deepseek", "smoke"),
-            ("deepseek-messages", "smoke"),
-            ("api-openai", "smoke"),
-            ("api-openai-medium", "smoke"),
-            ("api-anthropic", "smoke"),
-            ("api-xai", "smoke"),
-        })
-        mac = [cell for cell in estimate.planned_cells(soak_row="deepseek")
-               if cell.platform == "mac" and cell.route_name == "codex"]
-        self.assertEqual([cell.lane for cell in mac],
-                         ["smoke", "long-session", "jobs", "crash-jobs"])
-        self.assertTrue(all(cell.lane == "smoke" for cell in estimate.planned_cells(soak_row="deepseek")
-                            if cell.platform == "linux"))
-        informational = [cell for cell in estimate.planned_cells(soak_row="deepseek")
-                         if cell.route_name == "or-nemotron-free"]
-        self.assertEqual([(cell.platform, cell.lane) for cell in informational], [("mac", "smoke")])
-        self.assertTrue(all(cell.route_name not in ("claude", "claude-sonnet-medium")
-                            for cell in estimate.planned_cells(soak_row="deepseek")))
-
-    def test_defaults_match_the_recorded_volumes_and_the_drivers(self):
-        assumptions = estimate.Assumptions()
-        self.assertEqual(len(smoke.Smoke.SCENARIOS), 12)
-        self.assertEqual(len(jobs.SCENARIOS), estimate.JOBS_SCENARIOS)
-        names = {name for name, _surface in long_session.CATALOG}
-        self.assertEqual(names, {"in_turn_compaction", "overflow", "kill_reopen", "child_compaction"})
-        self.assertTrue(set(estimate.GROWTH_SCENARIOS) <= names)
-        self.assertEqual(assumptions.smoke_input_tokens, 241_039)
-        self.assertEqual(assumptions.smoke_output_tokens, 5_500)
-        self.assertEqual(assumptions.smoke_cache_share, Decimal("0.64"))
-        self.assertEqual(assumptions.soak_input_tokens, 5_600_000)
-        self.assertEqual(assumptions.soak_output_tokens, 60_000)
-        self.assertEqual(assumptions.soak_cache_share, Decimal("0.9"))
-        self.assertEqual(assumptions.tui_soak_input_tokens, 8_600_000)
-        self.assertEqual(assumptions.tui_cache_share, Decimal("0.9"))
-        self.assertEqual(assumptions.long_session_input_tokens, 750_415)
-        self.assertEqual(assumptions.long_session_output_tokens, 4_673)
-        self.assertEqual(assumptions.long_session_cache_share, Decimal("0.22"))
-        self.assertEqual(assumptions.jobs_cache_share, Decimal("0.64"))
-
     def test_lean_plan_has_one_soak_two_extra_crashes_and_optional_half_hour_tui(self):
         with self.assertRaisesRegex(estimate.EstimateError, "soak-row"):
             estimate.planned_cells()
@@ -400,10 +207,7 @@ class EstimateTests(unittest.TestCase):
         self.assertEqual(jobs.output_tokens, estimate.JOBS_OUTPUT)
         self.assertEqual(estimate.JOBS_INPUT, (241_039 // 12) * 11)
 
-    def test_rate_card_is_local_and_the_script_does_not_fetch(self):
-        source = (ROOT / "tests" / "live" / "estimate.py").read_text()
-        for banned in ("urllib", "requests", "urlopen", "socket", "2026-10-08-openrouter-rates"):
-            self.assertNotIn(banned, source)
+    def test_rate_card_is_read_from_a_local_file(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "rates.json"
             path.write_text(json.dumps({

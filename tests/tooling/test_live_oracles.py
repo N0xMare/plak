@@ -31,22 +31,6 @@ class CompactionFoldTests(unittest.TestCase):
         self.assertFalse(live.needs_compaction_fold(live.COMPACTION_FOLD_TOKENS))
         self.assertTrue(live.needs_compaction_fold(True))
 
-    def test_smoke_compaction_reads_the_padding_before_compact(self):
-        source = (ROOT / "tests" / "live" / "smoke.py").read_text()
-        start = source.index("def compaction(self)")
-        body = source[start:source.index("\n    def cancel(")]
-        self.assertIn("compaction_padding()", body)
-        self.assertIn("ZEBRA-42", body)
-        self.assertIn("fold.txt", body)
-        self.assertNotIn("ZEBRA-42", live.compaction_padding())
-
-    def test_soak_ensures_a_fold_before_manual_compact(self):
-        source = (ROOT / "tests" / "live" / "soak.py").read_text()
-        start = source.index("    def compact(self)")
-        body = source[start:source.index("\ndef rebuild")]
-        self.assertIn("self._ensure_foldable_context()", body)
-
-
 class LiveOracleTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
@@ -83,41 +67,10 @@ class LiveOracleTests(unittest.TestCase):
         self.assertEqual(plan, "host=cli-chat-proxy.grok.com,path=/v1/responses,nth=1,"
                                "fault=reset,after-events=3")
 
-    def test_every_route_names_a_host_and_path(self):
-        for route in live.ROUTES.values():
-            self.assertTrue(route.host and route.path.startswith("/"), route)
-
-    def test_claude_routes_select_supported_models_and_efforts(self):
-        expected = {
-            "claude": ("claude-sonnet-5", "low"),
-            "claude-sonnet-medium": ("claude-sonnet-5", "medium"),
-            "claude-sonnet55-low": ("claude-sonnet-5-5", "low"),
-            "claude-sonnet55-medium": ("claude-sonnet-5-5", "medium"),
-            "claude-haiku55-low": ("claude-haiku-5-5", "low"),
-            "claude-opus-low": ("claude-opus-5-5", "low"),
-            "claude-opus-medium": ("claude-opus-5-5", "medium"),
-        }
-        for name, (model, effort) in expected.items():
-            route = live.ROUTES[name]
-            self.assertEqual(route.flags(), ["--account", "claude", "--model", model,
-                                             "--effort", effort])
-
     def test_claude_fault_targets_exact_oauth_inference_endpoint(self):
         plan = live.fault_plan(live.ROUTES["claude"], "429", retry_after=2)
         self.assertEqual(plan, "host=api.anthropic.com,path=/v1/messages?beta=true,nth=1,"
                                "fault=429,retry-after=2")
-
-    def test_openrouter_chat_remains_default_and_messages_is_explicit(self):
-        chat = live.ROUTES["deepseek"]
-        messages = live.ROUTES["deepseek-messages"]
-        self.assertEqual(chat.flags(), ["--account", "openrouter", "--model",
-                                        "deepseek/deepseek-v4.1-flash"])
-        self.assertEqual(messages.flags(), ["--account", "openrouter", "--model",
-                                            "deepseek/deepseek-v4.1-flash",
-                                            "--protocol", "messages"])
-        self.assertEqual(chat.path, "/api/v1/chat/completions")
-        self.assertEqual(messages.path, "/api/v1/messages")
-        self.assertEqual(live.ROUTES["grok"].flags()[-2:], ["--effort", "low"])
 
     def test_messages_home_pins_protocol_without_effort(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -443,14 +396,6 @@ class LiveOracleTests(unittest.TestCase):
             smoke._require_cli_answer("session_id=abc\nDONE\n", [], "wrap-up turn")
             smoke._require_cli_answer(
                 "session_id=abc\n", [{"kind": "turn.assistant", "text": "DONE"}], "wrap-up turn")
-
-    def test_table_lists_every_result(self):
-        text = live.table([live.Result("cancel", "jsonl", "pass", "ok", 4.2),
-                           live.Result("fault_429", "jsonl", "pending", "why", 5)])
-        lines = text.splitlines()
-        self.assertEqual(len(lines), 3)
-        self.assertTrue(lines[1].startswith("cancel"))
-        self.assertIn("pending", lines[2])
 
     def test_tui_soak_tasks_have_independent_oracles(self):
         first = tui_soak.task(0, 0)

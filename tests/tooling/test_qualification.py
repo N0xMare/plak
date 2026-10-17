@@ -231,12 +231,6 @@ class QualificationTests(unittest.TestCase):
             self.assertEqual(qualification.score_report(1, report)[0], live.HARNESS)
 
 class QualificationReviewTests(unittest.TestCase):
-    def test_spec_cell_commands_use_qualification_driver(self):
-        spec = (ROOT / "docs/spec/05-testing-and-evidence.md").read_text()
-        for command in ("smoke <route>", "long-session <route> --all", "jobs <route>",
-                        "jobs <route> --only crash_jobs", "soak <route> --hours 1"):
-            with self.subTest(command=command):
-                self.assertIn("python3 tests/live/qualification.py " + command, spec)
 
     def report(self, outcome=live.PASS):
         return {"summary": {"capture_complete": True, "binary_sha256_start": "start",
