@@ -1006,7 +1006,7 @@ class Features:
         if not repo.exists():
             files = {"README.md": "wide_fanout scenario workspace\n"}
             for name, source in dirs:
-                files[f"{name}/Cargo.toml"] = source.read_text(errors="replace")
+                files[f"{name}.Cargo.toml"] = source.read_text(errors="replace")
             live.git_repo(repo, files)
 
         def wide(home: Path) -> None:
@@ -1022,9 +1022,9 @@ class Features:
         names = ", ".join(name for name, _ in dirs)
         out, records, segments, _, session = self.run(
             "wide_fanout",
-            f"Spawn {width} workers in one batch, one per directory ({names}): call spawn_agent "
+            f"Spawn {width} workers in one batch, one per manifest ({names}): call spawn_agent "
             f"{width} times in a single response, template worker, tier mutate, workspace "
-            "inherit. Tell each worker: read <dir>/Cargo.toml, do not change it, and write "
+            "inherit. Tell each worker: read <dir>.Cargo.toml, do not change it, and write "
             "findings/<dir>.md with one line naming the package and its dependency count; then "
             "submit_result with that line. Then call wait_agent until no_pending_children, and "
             "reply with the number of workers that submitted.",
