@@ -2559,7 +2559,10 @@ of that `plak` at the start of the run and at the end, and the SHA-256 of the
 `plakous-js-host` and `monty` workers from the same build. It names the
 account, whether the account is a subscription login or an API key, and the
 exact model, effort, protocol and composition. The composition for this bar
-is `plakous-default`. It names every scenario in the cell. A dirty tree, a
+is `plakous-default`; the report names it as `composition_requested` and names
+`composition_bound`, every composition the run's `plak agent` hellos reported,
+because a pack may bind the request to its own composition (Codex binds
+`plakous-default` as `native-ptc`). It names every scenario in the cell. A dirty tree, a
 digest that changes mid-run, or any other tuple is diagnostic only. The
 headless soak's intentional rebuild to a byte-distinct `plak` is part of that
 scenario: both digests are recorded, and any other digest change is not a

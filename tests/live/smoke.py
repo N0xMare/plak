@@ -611,7 +611,7 @@ def main(argv: list[str]) -> int:
     evidence_complete = (not scored or capture_complete(scored_segments)) and all(
         evidence[name]["capture_complete"] for name in scored)
     (artifacts / "report.json").write_text(json.dumps(
-        {**live.route_report(route), "binary": str(env.binary),
+        {**live.route_report(route, bound=env.bound_compositions), "binary": str(env.binary),
          "binary_sha256_start": binary_start,
          "binary_sha256_end": binary_end,
          "token_telemetry": live.sum_usage(

@@ -429,7 +429,7 @@ def main(argv: list[str]) -> int:
         crash = traceback.format_exc()
         print(crash, file=sys.stderr, flush=True)
     summary = {
-        **live.route_report(route), "task_repo_commit": REPO_COMMIT,
+        **live.route_report(route, bound=env.bound_compositions), "task_repo_commit": REPO_COMMIT,
         "binary_sha256_start": binary_start,
         "binary_sha256_rebuilt": binary_rebuilt,
         "binary_sha256_end": live.binary_sha256(env.binary),

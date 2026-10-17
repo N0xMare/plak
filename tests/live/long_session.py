@@ -1355,8 +1355,7 @@ def main(argv: list[str]) -> int:
         print(f"{result.outcome:8} {name}: {detail}", flush=True)
     binary_end = live.binary_sha256(env.binary)
     evidence_complete = all(item["capture_complete"] for item in evidence.values())
-    header = live.route_report(route)
-    header.setdefault("composition", "plakous-default")
+    header = live.route_report(route, bound=env.bound_compositions)
     (artifacts / "report.json").write_text(json.dumps(
         {**header, "binary": str(env.binary),
          "binary_sha256_start": binary_start, "binary_sha256_end": binary_end,

@@ -230,9 +230,10 @@ the window), so a fold leaves room below the trigger. `PLAK_LIVE_GROWTH_PAGES`
 (1..=28) overrides that. 28 pages are 7 MiB, under the 8 MiB capture cap.
 The pre-compaction token lives only in `token.txt`. A pass does not accept
 the model's own claim that it compacted or remembered. Reports name
-`route_report` (class, account, effort, protocol, and composition when that
-report field exists, otherwise `plakous-default`, which the private home pins)
-plus `token_telemetry` from the shared home and the scenario private home.
+`route_report` (class, account, effort, protocol, `composition_requested`, which
+the private home pins as `plakous-default`, and `composition_bound`, the
+compositions the run's `plak agent` hellos reported) plus `token_telemetry` from
+the shared home and the scenario private home.
 
 | Scenario | Surface | Passes when |
 | --- | --- | --- |
@@ -515,8 +516,11 @@ follow-up gets the delta across that wait; the report total is the whole
 session log, which can include a turn that never became a task row. Headless
 soak keeps summing the JSONL `turn` usage event per task, and now also keeps
 cached input and reasoning from that event. A missing field is zero. Reports
-also name `route_class`, account, effort, protocol and composition
-(`plakous-default` unless the scenario passed another).
+also name `route_class`, account, effort, protocol, `composition_requested`
+(`plakous-default` unless the scenario passed another) and, for smoke, soak,
+jobs and long-session runs, `composition_bound`: the sorted compositions the
+run's `plak agent` hellos reported (Codex binds `plakous-default` as
+`native-ptc`). The TUI soak has no JSONL hello and names only the request.
 
 ## Dry-run estimate
 

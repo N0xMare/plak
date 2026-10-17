@@ -440,6 +440,8 @@ class LongSessionOracleTests(unittest.TestCase):
                 (private / "s.events.jsonl").write_text(
                     json.dumps({"kind": "turn.usage", "input_tokens": 9, "output_tokens": 3,
                                 "cached_input_tokens": 1, "reasoning_tokens": 2}) + "\n")
+                # What a Codex `plak agent` hello reports for plakous-default.
+                env.bound_compositions.add("native-ptc")
                 return "synthetic pass"
 
             with patch.object(live, "ROOT", root), \
@@ -455,7 +457,8 @@ class LongSessionOracleTests(unittest.TestCase):
         self.assertEqual(report["account"], route.account)
         self.assertEqual(report["effort"], route.effort)
         self.assertIsNone(report["protocol"])
-        self.assertEqual(report["composition"], "plakous-default")
+        self.assertEqual(report["composition_requested"], "plakous-default")
+        self.assertEqual(report["composition_bound"], ["native-ptc"])
         self.assertEqual(report["growth_pages"], 6)
         self.assertEqual(report["token_telemetry"]["input_tokens"], 9)
         self.assertEqual(report["token_telemetry"]["reasoning_tokens"], 2)

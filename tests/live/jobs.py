@@ -2235,7 +2235,7 @@ def main(argv: list[str]) -> int:
     binary_end = live.binary_sha256(env.binary)
     evidence_complete = all(item["capture_complete"] for item in evidence.values())
     (artifacts / "report.json").write_text(json.dumps({
-        **live.route_report(route),
+        **live.route_report(route, bound=env.bound_compositions),
         "binary": str(env.binary),
         "binary_sha256_start": binary_start,
         "binary_sha256_end": binary_end,

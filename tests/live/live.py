@@ -708,17 +708,27 @@ def api_key_filename(account: str) -> str:
 DEFAULT_COMPOSITION = "plakous-default"
 
 
-def route_report(route: Route, composition: str = DEFAULT_COMPOSITION) -> dict[str, str | None]:
-    """The evidence tuple a live report should name for this route."""
-    return {
+def route_report(route: Route, composition: str = DEFAULT_COMPOSITION,
+                 bound: set[str] | None = None) -> dict[str, object]:
+    """The evidence tuple a live report should name for this route.
+
+    `composition_requested` is what the home pins. A pack may bind it to
+    another composition (Codex binds `plakous-default` as `native-ptc`), so a
+    run report also names `composition_bound`: every composition the
+    `plak agent` hellos of that run reported, sorted, empty when none did.
+    """
+    report: dict[str, object] = {
         "route": route.name,
         "route_class": route.route_class,
         "account": route.account,
         "model": route.model,
         "effort": route.effort,
         "protocol": route.protocol,
-        "composition": composition,
+        "composition_requested": composition,
     }
+    if bound is not None:
+        report["composition_bound"] = sorted(bound)
+    return report
 
 
 def capture_integrity(segments: list[Path]) -> bool:
@@ -1023,6 +1033,8 @@ class Env:
         self.fixture_seed: int | None = None
         self._capture_root: Path | None = None
         self.capture_segments: list[Path] = []
+        # Compositions the `plak agent` hellos of this run reported.
+        self.bound_compositions: set[str] = set()
 
     @property
     def capture_root(self) -> Path:
@@ -1182,6 +1194,7 @@ class Agent:
         self.events: queue.Queue = queue.Queue()
         threading.Thread(target=self._read, daemon=True).start()
         self.session_id = None
+        self.composition: str | None = None
         self.children: set[str] = set()
         self.recovered: list[dict] = []
         self.next_id = 0
@@ -1193,6 +1206,8 @@ class Agent:
         hello = self.wait_for(lambda event: event.get("kind") in ("ready", "bye"), 60)
         if hello.get("kind") != "ready" or not self.session_id:
             raise ScenarioFailure(HARNESS, f"plak agent did not become ready: {hello}")
+        if self.composition:
+            env.bound_compositions.add(self.composition)
 
     def _read(self) -> None:
         for line in self.proc.stdout:
@@ -1241,6 +1256,9 @@ class Agent:
     def _observe(self, event: dict) -> None:
         if event.get("kind") == "hello":
             self.session_id = event.get("session_id")
+            composition = event.get("composition")
+            if isinstance(composition, str) and composition:
+                self.composition = composition
         if event.get("kind") == "recovered":
             # Attach can emit this before `ready`, which `__init__` consumes.
             # A partial Agent built by a unit test has no list yet.
