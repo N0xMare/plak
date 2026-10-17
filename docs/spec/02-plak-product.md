@@ -587,9 +587,13 @@ therefore never merged with telemetry, which carries none, and it is never
 resume authority.
 
 Independent appenders coordinate through an exclusive advisory lock on the
-session log file. Sequence allocation, appending and count-index publication
-share that lock; a retained writer catches up with peer appends before writing
-or flushing. A stale writer cannot reuse a sequence or replace a newer count.
+session log file. Sequence allocation and appending share that lock; a
+retained writer catches up with peer appends before writing or flushing. A
+stale writer cannot reuse a sequence. The count index is computed under the
+lock and published (written, fsynced, renamed) after it is released, so a slow
+disk or a writer stopped mid-publication never holds up a peer. A late
+publication may replace a newer index; every reader checks the index against
+the log's length and last sequence, so a stale one only costs a rebuild.
 A truncated log is rejected while attached. The count index is derived data;
 obsolete index revisions are rebuilt from the log, without changing session
 recovery authority.

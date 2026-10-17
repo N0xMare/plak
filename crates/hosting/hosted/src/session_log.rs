@@ -180,7 +180,7 @@ impl SessionLog {
             let _ = flush_writer(&self.home, &mut state);
             *state = open_state(&self.home, session_id)?;
         }
-        let _lock = LogFileLock::acquire(&state.file)?;
+        let lock = LogFileLock::acquire(&state.file)?;
         refresh_writer_state(&mut state)?;
         let seq = state
             .next_seq
@@ -212,7 +212,11 @@ impl SessionLog {
         state.log_bytes = state.log_bytes.saturating_add(appended_bytes);
         state.index_dirty = true;
         if state.last_index_write.elapsed() >= SESSION_LOG_INDEX_INTERVAL {
-            let _ = flush_event_count_index(&self.home, &mut state);
+            let pending = pending_event_count_index(&state);
+            drop(lock);
+            if let Ok(Some(index)) = pending {
+                let _ = publish_event_count_index(&self.home, &mut state, &index);
+            }
         }
         Ok(())
     }
@@ -268,10 +272,20 @@ impl Drop for LogFileLock {
     }
 }
 
+/// The sidecar is computed under the log lock and written after it is
+/// released: its `sync_all` and rename never hold up another appender. A
+/// sidecar published late is still exact for the prefix it names, and a
+/// reader that finds the log longer rebuilds it.
 fn flush_writer(home: &SessionHome, state: &mut WriterState) -> Result<(), String> {
-    let _lock = LogFileLock::acquire(&state.file)?;
-    refresh_writer_state(state)?;
-    flush_event_count_index(home, state)
+    let pending = {
+        let _lock = LogFileLock::acquire(&state.file)?;
+        refresh_writer_state(state)?;
+        pending_event_count_index(state)?
+    };
+    match pending {
+        Some(index) => publish_event_count_index(home, state, &index),
+        None => Ok(()),
+    }
 }
 
 fn refresh_writer_state(state: &mut WriterState) -> Result<(), String> {
@@ -306,28 +320,36 @@ fn refresh_writer_state(state: &mut WriterState) -> Result<(), String> {
     Ok(())
 }
 
-/// Write the in-memory count against the log's current byte length. The length
+/// The in-memory count against the log's current byte length, taken under
+/// the log lock; `None` when nothing changed since the last write. The length
 /// is read here rather than tracked per append so a partially written record
 /// can never leave a plausible-but-wrong sidecar behind.
-fn flush_event_count_index(home: &SessionHome, state: &mut WriterState) -> Result<(), String> {
+fn pending_event_count_index(state: &WriterState) -> Result<Option<EventCountIndex>, String> {
     if !state.index_dirty {
-        return Ok(());
+        return Ok(None);
     }
     let log_bytes = state
         .file
         .metadata()
         .map(|metadata| metadata.len())
         .map_err(|_| "could not inspect session event log".to_owned())?;
-    write_event_count_index(
-        home,
-        &state.session_id,
-        &EventCountIndex {
-            format_revision: EVENT_COUNT_FORMAT_REVISION,
-            log_bytes,
-            event_count: state.event_count,
-            last_sequence: state.next_seq,
-        },
-    )?;
+    Ok(Some(EventCountIndex {
+        format_revision: EVENT_COUNT_FORMAT_REVISION,
+        log_bytes,
+        event_count: state.event_count,
+        last_sequence: state.next_seq,
+    }))
+}
+
+/// Writes a [`pending_event_count_index`] outside the log lock. The writer's
+/// state is borrowed exclusively from the snapshot to here, so no append of
+/// this writer falls between them.
+fn publish_event_count_index(
+    home: &SessionHome,
+    state: &mut WriterState,
+    index: &EventCountIndex,
+) -> Result<(), String> {
+    write_event_count_index(home, &state.session_id, index)?;
     state.index_dirty = false;
     state.last_index_write = Instant::now();
     Ok(())
@@ -342,14 +364,18 @@ fn open_state(home: &SessionHome, session_id: &str) -> Result<WriterState, Strin
         .append(true)
         .open(&path)
         .map_err(|_| "could not open session event log".to_owned())?;
-    let _lock = LogFileLock::acquire(&file)?;
+    let lock = LogFileLock::acquire(&file)?;
     let next_seq = recover_last_sequence(&mut file)?;
-    let event_count = count_events_locked(home, session_id)?;
+    let (event_count, rebuilt) = count_events_locked(home, session_id)?;
     let log_bytes = file
         .metadata()
         .map_err(|_| "could not inspect session event log".to_owned())?
         .len();
     let needs_line_separator = needs_line_separator(&mut file, log_bytes)?;
+    drop(lock);
+    if let Some(index) = rebuilt {
+        let _ = write_event_count_index(home, session_id, &index);
+    }
     Ok(WriterState {
         session_id: session_id.to_owned(),
         file,
@@ -427,8 +453,14 @@ pub fn count_events(home: &SessionHome, session_id: &str) -> Result<u64, String>
         return Ok(0);
     }
     let file = File::open(&path).map_err(|_| "could not read session event log".to_owned())?;
-    let _lock = LogFileLock::acquire(&file)?;
-    count_events_locked(home, session_id)
+    let (count, rebuilt) = {
+        let _lock = LogFileLock::acquire(&file)?;
+        count_events_locked(home, session_id)?
+    };
+    if let Some(index) = rebuilt {
+        let _ = write_event_count_index(home, session_id, &index);
+    }
+    Ok(count)
 }
 
 /// Counts valid event records without creating or refreshing the rebuildable
@@ -444,7 +476,12 @@ pub fn count_events_read_only(home: &SessionHome, session_id: &str) -> Result<u6
     count_valid_records(&mut BufReader::new(file))
 }
 
-fn count_events_locked(home: &SessionHome, session_id: &str) -> Result<u64, String> {
+/// The event count under the log lock, and the rebuilt sidecar the caller
+/// writes after releasing it when the stored one was missing or stale.
+fn count_events_locked(
+    home: &SessionHome,
+    session_id: &str,
+) -> Result<(u64, Option<EventCountIndex>), String> {
     let path = home.session_events_file(session_id);
     let log_bytes = path
         .metadata()
@@ -458,22 +495,18 @@ fn count_events_locked(home: &SessionHome, session_id: &str) -> Result<u64, Stri
         // log's last record is stale even when the byte length matches.
         && last_recorded_sequence(&path)? == index.last_sequence
     {
-        return Ok(index.event_count);
+        return Ok((index.event_count, None));
     }
     let file = File::open(&path).map_err(|_| "could not read session event log".to_owned())?;
     let mut reader = BufReader::new(file);
     let count = count_valid_records(&mut reader)?;
-    let _ = write_event_count_index(
-        home,
-        session_id,
-        &EventCountIndex {
-            format_revision: EVENT_COUNT_FORMAT_REVISION,
-            log_bytes,
-            event_count: count,
-            last_sequence: last_recorded_sequence(&path)?,
-        },
-    );
-    Ok(count)
+    let index = EventCountIndex {
+        format_revision: EVENT_COUNT_FORMAT_REVISION,
+        log_bytes,
+        event_count: count,
+        last_sequence: last_recorded_sequence(&path)?,
+    };
+    Ok((count, Some(index)))
 }
 
 fn count_valid_records(reader: &mut impl BufRead) -> Result<u64, String> {
@@ -568,6 +601,11 @@ fn write_event_count_index(
     EVENT_COUNT_TEST_INDEX_WRITES.with(|writes| {
         writes.set(writes.get().saturating_add(1));
     });
+    #[cfg(test)]
+    if File::open(home.session_events_file(session_id)).is_ok_and(|probe| probe.try_lock().is_err())
+    {
+        EVENT_COUNT_TEST_LOCKED_WRITES.with(|writes| writes.set(writes.get().saturating_add(1)));
+    }
     let result = (|| {
         let mut file = options.open(&temp)?;
         file.write_all(&encoded)?;
@@ -880,6 +918,9 @@ thread_local! {
     /// Every `sync_all` in this module happens inside `write_event_count_index`,
     /// so counting index writes counts session-log fsyncs exactly.
     static EVENT_COUNT_TEST_INDEX_WRITES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+
+    /// Index writes that ran while the session log's lock was held.
+    static EVENT_COUNT_TEST_LOCKED_WRITES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -1292,6 +1333,31 @@ mod tests {
             0,
             "the close flush must leave an exact sidecar behind"
         );
+    }
+
+    /// The sidecar's `sync_all` and rename run after the log lock is released,
+    /// on every path that writes it: interval and close flushes, and a rebuild
+    /// on open or count. A slow disk never holds up a peer appender.
+    #[test]
+    fn the_count_sidecar_is_written_outside_the_log_lock() {
+        let (_dir, home) = paths();
+        let id = "55555555-6666-7777-8888-999999999999";
+        EVENT_COUNT_TEST_INDEX_WRITES.with(|writes| writes.set(0));
+        EVENT_COUNT_TEST_LOCKED_WRITES.with(|writes| writes.set(0));
+        let log = SessionLog::open(&home, id).unwrap();
+        log.append(SessionEvent::new("one")).unwrap();
+        std::thread::sleep(SESSION_LOG_INDEX_INTERVAL);
+        log.append(SessionEvent::new("two")).unwrap();
+        log.append(SessionEvent::new("three")).unwrap();
+        log.flush().unwrap();
+        drop(log);
+        std::fs::remove_file(event_count_index_path(&home, id)).unwrap();
+        assert_eq!(count_events(&home, id).unwrap(), 3);
+        std::fs::remove_file(event_count_index_path(&home, id)).unwrap();
+        drop(SessionLog::open(&home, id).unwrap());
+        assert!(event_count_index_path(&home, id).is_file());
+        assert!(EVENT_COUNT_TEST_INDEX_WRITES.with(std::cell::Cell::get) >= 4);
+        assert_eq!(EVENT_COUNT_TEST_LOCKED_WRITES.with(std::cell::Cell::get), 0);
     }
 
     #[test]
