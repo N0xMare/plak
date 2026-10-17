@@ -9,6 +9,9 @@
 //! Identity sources are fixed so the scripted request matches the agent request;
 //! test support binds the runtime-owned harness-plan identity at preparation.
 //!
+//! The same binary carries the Codex Code Mode enrollment refusal for a Custom
+//! descriptor, so the facade's offline checks share one link.
+//!
 //! Run:
 //! ```text
 //! cargo nextest run -p plakous -E test(scripted_quickstart_completes_and_shuts_down)
@@ -379,4 +382,68 @@ fn text_complete_scenario(
 #[test]
 fn scripted_quickstart_completes_and_shuts_down() {
     run_scripted_quickstart();
+}
+
+#[cfg(feature = "composition")]
+#[path = "../examples/common/scripted.rs"]
+mod scripted;
+
+/// A Custom adapter cannot borrow the Codex enrollment vocabulary.
+#[cfg(feature = "composition")]
+mod custom_code_mode_enrollment {
+    use super::scripted;
+    use plakous::construction::provider_model_projection_identity;
+    use plakous::model::{LocalDurabilityDisposition, ToolPresentationMode};
+    use plakous::tools::{
+        CodexMinimalLocalCodeModeV1, JobConfig, ToolRegistryBuilder, register_packs,
+        standard_coding_packs_in_memory,
+    };
+
+    #[test]
+    fn custom_descriptor_cannot_borrow_codex_code_mode_enrollment() -> scripted::Fallible<()> {
+        let model = scripted::ScriptedModel::new(
+            &scripted::Vocabulary {
+                protocol: plakous_compose::CODEX_PROJECTION_PROTOCOL,
+                route: plakous_compose::CODEX_PROJECTION_ROUTE,
+                profile: plakous_compose::CODEX_PROJECTION_PROFILE,
+                family: "responses-family",
+                model: "gpt-5.6-luna",
+            },
+            Vec::new(),
+        )?;
+        let mut registry = ToolRegistryBuilder::default();
+        register_packs(&standard_coding_packs_in_memory()?, &mut registry)?;
+        CodexMinimalLocalCodeModeV1::register_markers_into(&mut registry)?;
+        let registry = registry.freeze();
+        let outer = registry
+            .definitions()
+            .iter()
+            .filter(|tool| matches!(tool.name().as_str(), "exec" | "wait"))
+            .cloned()
+            .collect::<Vec<_>>();
+        let configuration = model.provider_configuration(
+            ToolPresentationMode::LocalCompositionOnly,
+            LocalDurabilityDisposition::DurableRequired,
+            &outer,
+        )?;
+        let descriptor = CodexMinimalLocalCodeModeV1::compile(
+            JobConfig::default(),
+            registry.clone(),
+            provider_model_projection_identity(&configuration)?,
+        )?;
+        let error = plakous_compose::validate_codex_minimal_local_code_mode_candidate_v1(
+            &descriptor,
+            descriptor.outer_projection(),
+            registry,
+            &configuration,
+        )
+        .err()
+        .ok_or("Custom descriptor incorrectly borrowed Codex enrollment")?;
+        assert!(
+            error
+                .to_string()
+                .contains("not an enrolled exact Codex Code Mode target")
+        );
+        Ok(())
+    }
 }
