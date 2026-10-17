@@ -86,7 +86,7 @@ def reply(command_id, events):
 
 
 def token():
-    path = repo / "token.txt"
+    path = repo / "codeword.txt"
     return path.read_text().strip() if path.is_file() else ""
 
 
@@ -181,10 +181,10 @@ for line in sys.stdin:
         log({"kind": "turn.lifecycle", "phase": "completed", "turn_id": "grow"})
         reply(command_id, [lifecycle("grow", "admitted"), lifecycle("grow", "completed")])
         continue
-    if "acknowledged.txt" in text and "token.txt" in text:
+    if "acknowledged.txt" in text and "codeword.txt" in text:
         (repo / "acknowledged.txt").write_text(token() + "\n")
         log({"kind": "turn.lifecycle", "phase": "admitted", "turn_id": "plant"})
-        log({"kind": "tool.started", "name": "read_file", "subject": "token.txt"})
+        log({"kind": "tool.started", "name": "read_file", "subject": "codeword.txt"})
         log({"kind": "turn.lifecycle", "phase": "completed", "turn_id": "plant"})
         reply(command_id, [lifecycle("plant", "admitted"), lifecycle("plant", "completed")])
         continue
@@ -293,7 +293,7 @@ class LongSessionOracleTests(unittest.TestCase):
     def test_any_tool_that_names_a_fact_file_is_a_reread(self):
         records = [
             {"kind": "turn.lifecycle", "phase": "admitted"},
-            {"kind": "tool.started", "name": "grep", "subject": "token.txt"},
+            {"kind": "tool.started", "name": "grep", "subject": "codeword.txt"},
             {"kind": "compact.finished", "outcome": "committed"},
             {"kind": "tool.started", "name": "run_terminal_command",
              "subject": "cat acknowledged.txt"},
@@ -360,16 +360,16 @@ class LongSessionOracleTests(unittest.TestCase):
         self.assertEqual(raised.exception.outcome, live.HARNESS)
         records = [
             {"kind": "turn.lifecycle", "phase": "admitted"},
-            {"kind": "tool.started", "name": "read_file", "subject": "token.txt"},
+            {"kind": "tool.started", "name": "read_file", "subject": "codeword.txt"},
             {"kind": "compact.finished", "outcome": "committed"},
-            {"kind": "tool.started", "name": "read_file", "subject": "token.txt"},
+            {"kind": "tool.started", "name": "read_file", "subject": "codeword.txt"},
             {"kind": "turn.lifecycle", "phase": "completed"},
         ]
-        self.assertEqual(long_session.reread_after_commit(records, 0, 5)[0]["subject"], "token.txt")
+        self.assertEqual(long_session.reread_after_commit(records, 0, 5)[0]["subject"], "codeword.txt")
         self.assertEqual(long_session.reread_after_commit(records, 0, 2), [])
 
     def test_prompts_do_not_carry_the_fact_token(self):
-        token = "plak-fact-abcdef12"
+        token = "ZEBRA-123456"
         for prompt in (long_session.growth_prompt(10), long_session.follow_prompt(),
                        long_session.overflow_prompt(20, [[1, 21], [41, 61]]), long_session.child_prompt(10),
                        long_session.plant_prompt()):
@@ -629,11 +629,16 @@ class LongSessionOracleTests(unittest.TestCase):
             per_token = long_session.bulk_bytes_per_token(pack)
             self.assertGreater(len(batches) * batch_bytes / per_token,
                                long_session.compaction_trigger(window, route.model), name)
+            call_lines = long_session.growth_call_lines(pack, window)
+            reads = long_session.growth_reads(window, pack, call_lines, line_count, route.model)
+            self.assertLessEqual(reads * call_lines, line_count, name)
+            self.assertGreater(reads * call_lines * long_session.LINE_BYTES / per_token,
+                               long_session.compaction_trigger(window, route.model), name)
         self.assertEqual(long_session.round_cap_bytes(1_000_000), 262_144)
         self.assertEqual(long_session.round_cap_bytes(65_536), 32_768)
         self.assertEqual(long_session.round_cap_bytes(272_000), 87_040)
         prompt = long_session.overflow_prompt(21, [[1, 22], [43, 64]], "codex")
-        self.assertIn("Print the first 84 lines in 2 execs", prompt)
+        self.assertIn("in exactly 4 sequential calls of 21 lines each", prompt)
         self.assertIn("exec_command", prompt)
         self.assertIn("Round 2: offsets 41, 61.",
                       long_session.overflow_prompt(20, [[1, 21], [41, 61]], "grok"))

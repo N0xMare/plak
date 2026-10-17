@@ -391,8 +391,9 @@ class QualificationFixTests(unittest.TestCase):
                 long_session.write_bulk(bulk, 1, "codex")
             self.assertEqual(set(bulk.read_text()), set("12345 67890\n"))
         plant = long_session.plant_prompt("codex")
-        self.assertNotIn("Do not print", plant)
-        self.assertIn("Do not print", long_session.plant_prompt("claude"))
+        for pack in ("codex", "claude", "grok"):
+            self.assertNotIn("Do not print", long_session.plant_prompt(pack))
+            self.assertNotIn("token", long_session.plant_prompt(pack))
         prompt = long_session.child_prompt(40, "codex", 5)
         child = json.loads(prompt.split("Give the child exactly this prompt: ", 1)[1]
                            .split("\nWait for the child", 1)[0])

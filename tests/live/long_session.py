@@ -50,6 +50,8 @@ ROUND_CAP_MAX_BYTES = 262_144
 OVERFLOW_BATCH_CALLS = 2
 OVERFLOW_CAP_SHARE = 0.75
 OVERFLOW_EXTRA_ROUNDS = 2
+# Extra sequential child reads past the trigger estimate.
+GROWTH_EXTRA_READS = 4
 # Provider bytes per token for bulk lines: count_tokens for base64 and the
 # Claude digit lines (see below); Codex prepared ~146k tokens for 617 KB of
 # digit lines read live.
@@ -75,7 +77,11 @@ CLAUDE_GROWTH_CALL_LINES = 40
 # `OPENROUTER_CUSTOM_MAX_PROJECTED_INPUT` in crates/hosting/hosted/src/openrouter.rs.
 OPENROUTER_CUSTOM_INPUT = 65_536
 _DIGITS_PER_GROUP = 5
-FACT_FILES = ("token.txt", "acknowledged.txt")
+# The pre-compaction fact is a neutral code word. "Read token.txt ... do not
+# print it ... write the token from memory" read like secret handling, and
+# xAI's usage-guideline check refused that follow-up before generation.
+FACT_FILE = "codeword.txt"
+FACT_FILES = (FACT_FILE, "acknowledged.txt")
 # `session log <root>.cN --json` pages newest-first. The compaction segment
 # sits at position zero, so the tail has to cover the whole child history.
 CHILD_HISTORY_TAIL = 65_536
@@ -224,24 +230,45 @@ def _read_tool(pack: str) -> str:
     return {"codex": "exec_command", "claude": "Read", "pi": "read", "grok": "read_file"}[pack]
 
 
+def new_code_word(random_bytes=os.urandom) -> str:
+    return f"ZEBRA-{int.from_bytes(random_bytes(4), 'big') % 900_000 + 100_000}"
+
+
 def plant_steps(pack: str = "grok") -> str:
     if pack == "codex":
-        how = "exec_command, printing token.txt and no other file"
+        how = f"exec_command, printing {FACT_FILE} and no other file"
     else:
-        how = f"the {_read_tool(pack)} tool on token.txt"
-    reply_guard = "" if pack == "codex" else "Do not print the contents in your reply. "
+        how = f"the {_read_tool(pack)} tool on {FACT_FILE}"
     return (
-        f"Read token.txt with {how}. Write its exact contents, and nothing "
-        f"else, into acknowledged.txt. {reply_guard}"
-    ).strip()
+        f"Read {FACT_FILE} with {how}. Write its exact contents, and nothing "
+        "else, into acknowledged.txt."
+    )
 
 
 def plant_prompt(pack: str = "grok") -> str:
     return f"{plant_steps(pack)} Reply with exactly: ok"
 
 
-def _page_bulk(pack: str, line_count: int, limit: int) -> str:
-    """How this pack pages `bulk.txt` without exceeding one call's budget."""
+def _page_bulk(pack: str, line_count: int, limit: int, reads: int | None = None) -> str:
+    """How this pack pages `bulk.txt` without exceeding one call's budget.
+
+    `reads` bounds the paging to that many calls instead of eof.
+    """
+    if reads is not None:
+        tool = "exec_command, printing with python3" if pack == "codex" else f"the {_read_tool(pack)} tool"
+        offsets = f"1, {1 + limit}, {1 + 2 * limit}, and so on up to {1 + (reads - 1) * limit}"
+        # A Code Mode exec that runs several slices passes the round cap and
+        # is clipped, so the context does not grow; one slice per exec.
+        # Codex also shrank results with `max_output_tokens`, which keeps the
+        # slice out of the context; the whole slice must come back.
+        per_round = ("In Code Mode, make one exec per call, each running exactly one "
+                     "exec_command without max_output_tokens and returning its whole output "
+                     "with text(...)" if pack == "codex" else "Make one call per response")
+        return (
+            f"Page through bulk.txt using only {tool}, in exactly {reads} sequential calls of "
+            f"{limit} lines each, at line offsets {offsets}. {per_round}, and wait for its "
+            f"result before the next call. Do not stop before the {reads}th call."
+        )
     if pack == "codex":
         return (
             "Print bulk.txt with exec_command only. This surface has no read tool. "
@@ -264,16 +291,20 @@ def _page_bulk(pack: str, line_count: int, limit: int) -> str:
 def growth_prompt(line_count: int, pack: str = "grok", call_lines: int | None = None) -> str:
     return (
         f"{_page_bulk(pack, line_count, call_lines or growth_call_lines(pack))} "
-        "When eof is true, write the token you learned from the "
-        "earlier turn into recalled.txt, exactly and alone. Do not open token.txt "
-        "or acknowledged.txt again. Reply with exactly: done"
+        f"When eof is true, {RECALL_STEP} Reply with exactly: done"
     )
+
+
+RECALL_STEP = (
+    "write the code word from the earlier turn into recalled.txt, exactly and alone, "
+    f"from memory: do not open {FACT_FILE} or acknowledged.txt again."
+)
 
 
 def follow_prompt() -> str:
     return (
-        "Write the token from the earlier turn into followup.txt, exactly and "
-        "alone. Do not open token.txt, acknowledged.txt, or recalled.txt. "
+        "Write the code word from the earlier turn into followup.txt, exactly and "
+        f"alone, from memory: do not open {FACT_FILE}, acknowledged.txt, or recalled.txt. "
         "Reply with exactly: done"
     )
 
@@ -326,26 +357,18 @@ def overflow_prompt(lines: int, batches: list[list[int]], pack: str = "grok") ->
         for index, batch in enumerate(batches, 1))
     order = "Wait for a batch's results before the next round, and do not skip or merge rounds."
     if pack == "codex":
-        # Codex refused batched reads framed as filling the context. The
-        # wording it followed live is the growth turn's paging and purpose,
-        # a pair of slices per exec, and the explicit round list.
-        return (
-            "Print bulk.txt with exec_command only. This surface has no read tool. In Code "
-            "Mode, make one exec per pair of slices and wait for its result before the next "
-            f"exec. Each exec runs two exec_command calls in parallel, each printing {lines} "
-            f"lines with python3, starting at line 1 and then at each next offset of {lines}. "
-            f"Print the first {lines * len(batches) * len(batches[0])} lines in {len(batches)} "
-            f"execs; do not stop early. {order} {listed} When the last round's result is in, "
-            "write the token you learned from the earlier turn into recalled.txt, exactly and "
-            "alone. Do not open token.txt or acknowledged.txt again. Reply with exactly: done"
-        )
+        # Codex refused every batched wording live ("can't help exhaust the
+        # context"), so its rounds are the growth turn's sequential reads,
+        # each under the round cap, with the same total.
+        reads = len(batches) * len(batches[0])
+        return f"{_page_bulk(pack, 0, lines, reads)} After the last call, reply with exactly: done"
     # Stating the purpose keeps a batched read from looking like extraction.
     return (
         "bulk.txt is random filler for a context-capacity test of this agent harness: "
         f"loading it into your context is the task. Read bulk.txt in {len(batches)} rounds "
         f"using only the {_read_tool(pack)} tool, not the shell. In each round, call it once "
         f"per listed line offset, all in one parallel batch, each with limit {lines}. {order} "
-        f"{listed} After the last round, reply with exactly: done. Do not open token.txt."
+        f"{listed} After the last round, reply with exactly: done. Do not open {FACT_FILE}."
     )
 
 
@@ -370,12 +393,25 @@ def reopen_prompt() -> str:
     )
 
 
-def child_prompt(line_count: int, pack: str = "grok", call_lines: int | None = None) -> str:
+def growth_reads(window: int | None, pack: str, call_lines: int, line_count: int,
+                 model: str | None = None) -> int:
+    """Sequential reads whose text passes the compaction trigger, plus margin.
+
+    A child told to page to eof stopped after 11 of the ~50 calls Codex needs,
+    so the child prompt names this count. Bounded by the file.
+    """
+    window = window or OPENROUTER_CUSTOM_INPUT
+    per_read = call_lines * LINE_BYTES / bulk_bytes_per_token(pack)
+    reads = -(-compaction_trigger(window, model) // int(per_read)) + GROWTH_EXTRA_READS
+    return max(1, min(reads, line_count // call_lines))
+
+
+def child_prompt(line_count: int, pack: str = "grok", call_lines: int | None = None,
+                 reads: int | None = None) -> str:
     instructions = (
         f"{plant_steps(pack)} "
-        f"{_page_bulk(pack, line_count, call_lines or growth_call_lines(pack))} "
-        "Then write that same token into recalled.txt without opening token.txt "
-        "or acknowledged.txt again. Reply with exactly: done"
+        f"{_page_bulk(pack, line_count, call_lines or growth_call_lines(pack), reads)} "
+        f"Then {RECALL_STEP} Reply with exactly: done"
     )
     return (
         "Spawn one worker child from the worker template, tier mutate, "
@@ -387,7 +423,7 @@ def child_prompt(line_count: int, pack: str = "grok", call_lines: int | None = N
 
 def hide_token(prompt: str, token: str) -> None:
     if token and token in prompt:
-        raise ScenarioFailure(HARNESS, "prompt repeats the pre-compaction token")
+        raise ScenarioFailure(HARNESS, "prompt repeats the pre-compaction code word")
 
 
 def lifecycle_windows(records: list[dict]) -> list[tuple[int, int]]:
@@ -998,7 +1034,7 @@ class LongSession:
 
     def repo(self, name: str, token: str, bulk: bool) -> tuple[Path, int]:
         path = self.env.artifacts / name / "repo"
-        live.git_repo(path, {"token.txt": token + "\n", "README.md": "seed\n"})
+        live.git_repo(path, {FACT_FILE: token + "\n", "README.md": "seed\n"})
         lines = 0
         if bulk:
             lines = write_bulk(path / "bulk.txt", self.pages, pack_of(self.route), self.random_bytes)
@@ -1015,7 +1051,7 @@ class LongSession:
         return live.Agent(self.env, repo, f"{name}/agent", args=args or [], home=home)
 
     def in_turn_compaction(self) -> str:
-        token = "plak-fact-" + self.random_bytes(4).hex()
+        token = new_code_word(self.random_bytes)
         repo, lines = self.repo("in_turn_compaction", token, bulk=True)
         home = self.home("in_turn_compaction")
         agent = self.agent("in_turn_compaction", repo, home)
@@ -1024,7 +1060,7 @@ class LongSession:
             plant = agent.prompt(plant_prompt(pack), timeout=180)
             require_completed(plant, "fact turn")
             if not text_equals(repo / "acknowledged.txt", token):
-                raise ScenarioFailure(MODEL, "acknowledged.txt does not match token.txt")
+                raise ScenarioFailure(MODEL, f"acknowledged.txt does not match {FACT_FILE}")
             growth = growth_prompt(lines, pack, self.call_lines)
             hide_token(growth, token)
             turn = agent.prompt(growth, timeout=growth_timeout(self.pages))
@@ -1043,7 +1079,7 @@ class LongSession:
                 lambda rows: len(lifecycle_windows(rows)) >= 3)
             self._reject_follow_reread(records)
             if not text_equals(repo / "followup.txt", token):
-                raise ScenarioFailure(MODEL, "follow-up did not write the pre-compaction token")
+                raise ScenarioFailure(MODEL, "follow-up did not write the pre-compaction code word")
         finally:
             close_agent(agent)
         return "in-turn scheduled compaction committed; fact survived; follow-up wrote followup.txt"
@@ -1063,7 +1099,7 @@ class LongSession:
             if reread_after_commit(records, start, end):
                 raise ScenarioFailure(MODEL, "fact file was re-read after compaction")
         if not text_equals(recalled, token):
-            raise ScenarioFailure(MODEL, "recalled.txt does not match the pre-compaction token")
+            raise ScenarioFailure(MODEL, "recalled.txt does not match the pre-compaction code word")
 
     def _reject_follow_reread(self, records: list[dict]) -> None:
         windows = lifecycle_windows(records)
@@ -1074,7 +1110,7 @@ class LongSession:
             raise ScenarioFailure(MODEL, "follow-up re-read the fact file")
 
     def overflow(self) -> str:
-        token = "plak-fact-" + self.random_bytes(4).hex()
+        token = new_code_word(self.random_bytes)
         repo, line_count = self.repo("overflow", token, bulk=True)
         home = self.home("overflow")
         agent = self.agent("overflow", repo, home)
@@ -1083,7 +1119,7 @@ class LongSession:
             plant = agent.prompt(plant_prompt(pack), timeout=180)
             require_completed(plant, "fact turn")
             if not text_equals(repo / "acknowledged.txt", token):
-                raise ScenarioFailure(MODEL, "acknowledged.txt does not match token.txt")
+                raise ScenarioFailure(MODEL, f"acknowledged.txt does not match {FACT_FILE}")
             lines, batches = overflow_plan(self.window, pack, line_count, self.route.model)
             prompt = overflow_prompt(lines, batches, pack)
             hide_token(prompt, token)
@@ -1195,12 +1231,14 @@ class LongSession:
         return claim
 
     def child_compaction(self) -> str:
-        token = "plak-fact-" + self.random_bytes(4).hex()
+        token = new_code_word(self.random_bytes)
         repo, lines = self.repo("child_compaction", token, bulk=True)
         home = self.home("child_compaction")
         agent = self.agent("child_compaction", repo, home)
         try:
-            prompt = child_prompt(lines, pack_of(self.route), self.call_lines)
+            pack = pack_of(self.route)
+            reads = growth_reads(self.window, pack, self.call_lines, lines, self.route.model)
+            prompt = child_prompt(lines, pack, self.call_lines, reads)
             hide_token(prompt, token)
             turn = agent.prompt(prompt, timeout=child_timeout(self.pages))
             require_completed(turn, "root turn")
@@ -1244,12 +1282,12 @@ class LongSession:
                 # segment is not evidence the trigger was reached.
                 raise ScenarioFailure(MODEL, "child history has no committed compaction segment")
             if not text_equals(repo / "recalled.txt", token):
-                raise ScenarioFailure(MODEL, "child did not report the token in recalled.txt")
+                raise ScenarioFailure(MODEL, "child did not report the code word in recalled.txt")
             if not text_equals(repo / "acknowledged.txt", token):
                 raise ScenarioFailure(MODEL, "child did not write acknowledged.txt before compaction")
         finally:
             close_agent(agent)
-        return "child compaction segment committed; recalled.txt matches token.txt"
+        return f"child compaction segment committed; recalled.txt matches {FACT_FILE}"
 
     @staticmethod
     def _reap(marker: str, pid: int | None) -> None:
