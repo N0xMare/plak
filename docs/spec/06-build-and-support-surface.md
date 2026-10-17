@@ -737,9 +737,7 @@ There is no Codex patch table. `plakous-code-mode` depends on the
 reviewed vendor snapshot `vendor/codex-code-mode-protocol` by path; its
 `PROVENANCE.md` records the upstream repository, revision
 `b1a547b1f73ce86205d9222ac19cff334b3b7a2e`, version `0.153.3`, Apache-2.0
-license, and the exact files and line ranges copied. The model-visible `exec`
-and `wait` wording is unchanged and is pinned byte for byte by
-`crates/runtimes/code-mode/tests/pinned_descriptions.rs`.
+license, and the exact files and line ranges copied.
 
 #### Runnable external examples
 
