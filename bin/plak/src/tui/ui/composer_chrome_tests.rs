@@ -257,21 +257,20 @@ fn hud_counters_are_separated_and_use_singular_agent_and_leave_the_queue_to_its_
 
 #[test]
 fn composer_hint_is_below_a_plain_body_colour_border_at_every_width() {
-    for theme in [SettingsTheme::DefaultDark, SettingsTheme::DefaultLight] {
-        for width in [20, 32, 48, 64, 80, 120, 160] {
-            let mut app = App::new(launch_basic(), true);
-            app.theme = theme_for(theme);
-            app.apply_host_event(HostEvent::SetBusy(true));
-            let text = render_to_string(&mut app, width, 24);
-            let rows = text.lines().collect::<Vec<_>>();
-            let bottom = usize::from(app.composer_inner.unwrap().bottom());
-            assert!(rows[bottom].contains('─'));
-            assert!(!rows[bottom].contains("commands"));
-            assert!(rows[bottom + 1].contains("Esc stop"), "{width}: {text}");
-            assert!(!text.contains("[stop]"));
-            if width >= 80 {
-                assert!(rows[bottom + 1].contains("/ commands · Ctrl+X menu · ? keybinds"));
-            }
+    let theme = SettingsTheme::DefaultDark;
+    for width in [20, 32, 48, 64, 80, 120, 160] {
+        let mut app = App::new(launch_basic(), true);
+        app.theme = theme_for(theme);
+        app.apply_host_event(HostEvent::SetBusy(true));
+        let text = render_to_string(&mut app, width, 24);
+        let rows = text.lines().collect::<Vec<_>>();
+        let bottom = usize::from(app.composer_inner.unwrap().bottom());
+        assert!(rows[bottom].contains('─'));
+        assert!(!rows[bottom].contains("commands"));
+        assert!(rows[bottom + 1].contains("Esc stop"), "{width}: {text}");
+        assert!(!text.contains("[stop]"));
+        if width >= 80 {
+            assert!(rows[bottom + 1].contains("/ commands · Ctrl+X menu · ? keybinds"));
         }
     }
 }
@@ -653,51 +652,47 @@ fn a_workspace_without_a_branch_keeps_its_path_tail_until_it_drops() {
 /// click target are the count text, never its separator or motion glyph.
 #[test]
 fn hud_counter_buttons_cover_only_their_count_text() {
-    for (name, theme) in [
-        ("dark", SettingsTheme::DefaultDark),
-        ("light", SettingsTheme::DefaultLight),
-    ] {
-        let mut app = App::new(launch_basic(), true);
-        app.theme = theme_for(theme);
-        app.render_prefs.reduced_motion = true;
-        app.tree_live_descendants = 2;
-        app.background_processes = 3;
-        let mut terminal = Terminal::new(TestBackend::new(120, 12)).unwrap();
+    let (name, theme) = ("dark", SettingsTheme::DefaultDark);
+    let mut app = App::new(launch_basic(), true);
+    app.theme = theme_for(theme);
+    app.render_prefs.reduced_motion = true;
+    app.tree_live_descendants = 2;
+    app.background_processes = 3;
+    let mut terminal = Terminal::new(TestBackend::new(120, 12)).unwrap();
+    terminal.draw(|frame| app.draw(frame)).unwrap();
+    let agents = app.status_agents_hit.unwrap();
+    let processes = app.status_processes_hit.unwrap();
+    for (hit, text, glyph) in [(agents, "2 agents", "⠿"), (processes, "3 processes", "⠴")] {
+        let buffer = terminal.backend().buffer();
+        let painted = (hit.x..hit.right())
+            .map(|x| buffer[(x, hit.y)].symbol())
+            .collect::<String>();
+        assert_eq!(painted, text, "{name}");
+        let glyph_x = hit.x - 2;
+        assert_eq!(buffer[(glyph_x, hit.y)].symbol(), glyph, "{name}");
+        let resting = buffer[(glyph_x, hit.y)].style();
+        app.handle_mouse(left_mouse(MouseEventKind::Moved, glyph_x, hit.y));
         terminal.draw(|frame| app.draw(frame)).unwrap();
-        let agents = app.status_agents_hit.unwrap();
-        let processes = app.status_processes_hit.unwrap();
-        for (hit, text, glyph) in [(agents, "2 agents", "⠿"), (processes, "3 processes", "⠴")] {
-            let buffer = terminal.backend().buffer();
-            let painted = (hit.x..hit.right())
-                .map(|x| buffer[(x, hit.y)].symbol())
-                .collect::<String>();
-            assert_eq!(painted, text, "{name}");
-            let glyph_x = hit.x - 2;
-            assert_eq!(buffer[(glyph_x, hit.y)].symbol(), glyph, "{name}");
-            let resting = buffer[(glyph_x, hit.y)].style();
-            app.handle_mouse(left_mouse(MouseEventKind::Moved, glyph_x, hit.y));
-            terminal.draw(|frame| app.draw(frame)).unwrap();
-            assert_eq!(
-                terminal.backend().buffer()[(glyph_x, hit.y)].style(),
-                resting,
-                "{name}: the glyph never highlights"
-            );
-            assert_eq!(app.handle_mouse(left_click(glyph_x, hit.y)), None);
-            assert!(app.activity_tab.is_none() && app.tree_navigator.is_none());
-        }
-        app.handle_mouse(left_mouse(MouseEventKind::Moved, agents.x, agents.y));
-        terminal.draw(|frame| app.draw(frame)).unwrap();
-        let actual = super::test_support::serialize_frame(terminal.backend().buffer());
-        let path = format!("tests/goldens/hud-counter-hover-{name}-120x12.frame");
-        if std::env::var_os("PLAK_UPDATE_GOLDENS").is_some() {
-            std::fs::write(&path, actual).unwrap();
-        } else {
-            assert_eq!(
-                actual,
-                std::fs::read_to_string(&path).expect("hud hover golden"),
-                "{path}"
-            );
-        }
+        assert_eq!(
+            terminal.backend().buffer()[(glyph_x, hit.y)].style(),
+            resting,
+            "{name}: the glyph never highlights"
+        );
+        assert_eq!(app.handle_mouse(left_click(glyph_x, hit.y)), None);
+        assert!(app.activity_tab.is_none() && app.tree_navigator.is_none());
+    }
+    app.handle_mouse(left_mouse(MouseEventKind::Moved, agents.x, agents.y));
+    terminal.draw(|frame| app.draw(frame)).unwrap();
+    let actual = super::test_support::serialize_frame(terminal.backend().buffer());
+    let path = format!("tests/goldens/hud-counter-hover-{name}-120x12.frame");
+    if std::env::var_os("PLAK_UPDATE_GOLDENS").is_some() {
+        std::fs::write(&path, actual).unwrap();
+    } else {
+        assert_eq!(
+            actual,
+            std::fs::read_to_string(&path).expect("hud hover golden"),
+            "{path}"
+        );
     }
 }
 

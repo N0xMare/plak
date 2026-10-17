@@ -428,413 +428,399 @@ fn the_one_line_activity_summary_is_clickable() {
 
 #[test]
 fn restored_activity_groups_match_live_collapsed_and_expanded_frames() {
-    for theme in [crate::tui::Theme::dark(), crate::tui::Theme::light()] {
+    let theme = crate::tui::Theme::dark();
+    for width in [40, 120] {
+        let mut live = transcript_fixture();
+        live.theme = theme.clone();
+        live.apply_host_event(HostEvent::UserMessage {
+            text: "Inspect.".into(),
+            sent_at_ms: None,
+        });
+        live.apply_host_event(tool_line(
+            "read",
+            None,
+            None,
+            ActivityKind::Tool,
+            "read_file",
+            "done",
+            Some("a.rs"),
+        ));
+        live.apply_host_event(tool_line(
+            "run",
+            None,
+            None,
+            ActivityKind::Process,
+            "exec_command",
+            "failed:exit 7",
+            Some("cargo test"),
+        ));
+        say(&mut live, "Finished.");
+        let item = |id: &str, name: &str, subject: &str, state: &str| {
+            TranscriptRow::Tool(ToolItem {
+                subject: Some(subject.into()),
+                detail: Some("RAW RESULT".into()),
+                state: state.into(),
+                ..tool_item(id, name)
+            })
+        };
+        let mut restored = transcript_fixture();
+        restored.theme = theme.clone();
+        restored.apply_host_event(restore_snapshot(
+            1,
+            vec![
+                TranscriptRow::user("Inspect."),
+                item("read", "read_file", "a.rs", "done"),
+                item("run", "exec_command", "cargo test", "failed:exit 7"),
+                TranscriptRow::assistant("Finished."),
+            ],
+        ));
+        // The host sets one activity kind per tool for both paths; a live
+        // `exec_command` is a process row exactly like its restore.
+        let kinds = |app: &App| {
+            app.pane
+                .blocks
+                .iter()
+                .filter_map(|block| match block {
+                    ScrollBlock::Tool { name, kind, .. } => Some((name.clone(), *kind)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(kinds(&live), kinds(&restored));
+        assert!(kinds(&live).contains(&("exec_command".to_owned(), ActivityKind::Process)));
+        for expanded in [false, true] {
+            if expanded {
+                live.toggle_tool_expand_at(1);
+                restored.toggle_tool_expand_at(1);
+            }
+            let paint = |app: &mut App| {
+                let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
+                terminal.draw(|frame| app.draw(frame)).unwrap();
+                serialize_frame(terminal.backend().buffer())
+            };
+            assert_eq!(
+                paint(&mut live),
+                paint(&mut restored),
+                "width {width}, expanded {expanded}"
+            );
+        }
+    }
+}
+
+#[test]
+fn process_activity_stories_match_live_and_restored() {
+    let (theme_name, theme) = ("dark", crate::tui::Theme::dark());
+    for width in [40, 120] {
+        let mut live = transcript_fixture();
+        live.theme = theme.clone();
+        let rows = [
+            ("start", "Shell", "cargo test", ActivityState::Succeeded),
+            (
+                "wait",
+                "process_session_poll",
+                "Waiting on process 7 · cargo test",
+                ActivityState::Running,
+            ),
+            (
+                "exited",
+                "process_session_poll",
+                "Waited on process 8 · cargo check · exited 0",
+                ActivityState::Succeeded,
+            ),
+            (
+                "poll",
+                "process_session_write",
+                "Waited on process 9 · sleep 60 · still running",
+                ActivityState::Succeeded,
+            ),
+            (
+                "read",
+                "process_session_poll",
+                "Read output of process 9 · sleep 60",
+                ActivityState::Succeeded,
+            ),
+            (
+                "input",
+                "process_session_write",
+                "Sent input to process 10 · 4 bytes",
+                ActivityState::Succeeded,
+            ),
+            (
+                "interrupt",
+                "process_session_write",
+                "Sent interrupt to process 10 · cargo test",
+                ActivityState::Succeeded,
+            ),
+            (
+                "stop",
+                "process_session_terminate",
+                "Stopped process 9 · sleep 60",
+                ActivityState::Succeeded,
+            ),
+            (
+                "unknown",
+                "process_session_poll",
+                "Waiting on process 11",
+                ActivityState::Running,
+            ),
+        ];
+        let mut activity = Vec::new();
+        for (id, name, subject, state) in rows {
+            let kind = if name == "Shell" {
+                ActivityKind::Process
+            } else {
+                ActivityKind::Tool
+            };
+            live.apply_host_event(tool_line(
+                id,
+                None,
+                None,
+                kind,
+                name,
+                if state == ActivityState::Running {
+                    "running"
+                } else {
+                    "done"
+                },
+                Some(subject),
+            ));
+            activity.push(TranscriptRow::Tool(ToolItem {
+                subject: Some(subject.into()),
+                state: if state == ActivityState::Running {
+                    "running"
+                } else {
+                    "done"
+                }
+                .into(),
+                ..tool_item(id, name)
+            }));
+        }
+        let mut restored = transcript_fixture();
+        restored.theme = theme.clone();
+        restored.apply_host_event(restore_snapshot(1, activity));
+        let paint = |app: &mut App| {
+            let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
+            terminal.draw(|frame| app.draw(frame)).unwrap();
+            serialize_frame(terminal.backend().buffer())
+        };
+        assert_eq!(paint(&mut live), paint(&mut restored));
+        activity_frame(&mut live, theme_name, width, "process-operations");
+        say(&mut live, "Finished.");
+        say(&mut restored, "Finished.");
+        assert_eq!(paint(&mut live), paint(&mut restored));
+        live.toggle_tool_expand_at(0);
+        restored.toggle_tool_expand_at(0);
+        assert_eq!(paint(&mut live), paint(&mut restored));
+        let plain = live.pane.transcript_cache.plain().join("\n");
+        for label in [
+            "Waiting on process",
+            "Waited on process",
+            "Read output of process",
+            "Sent input to process",
+            "Sent interrupt to process",
+            "Stopped process",
+        ] {
+            assert!(plain.contains(label), "{label}: {plain}");
+        }
+    }
+}
+
+#[test]
+fn interrupted_activity_stories_match_live_and_restored() {
+    let (theme_name, theme) = ("dark", crate::tui::Theme::dark());
+    for state in ["interrupted", "cancelled"] {
         for width in [40, 120] {
             let mut live = transcript_fixture();
             live.theme = theme.clone();
-            live.apply_host_event(HostEvent::UserMessage {
-                text: "Inspect.".into(),
-                sent_at_ms: None,
-            });
-            live.apply_host_event(tool_line(
-                "read",
-                None,
-                None,
-                ActivityKind::Tool,
-                "read_file",
-                "done",
-                Some("a.rs"),
-            ));
             live.apply_host_event(tool_line(
                 "run",
                 None,
                 None,
                 ActivityKind::Process,
                 "exec_command",
-                "failed:exit 7",
-                Some("cargo test"),
+                state,
+                Some("sleep 60"),
             ));
-            say(&mut live, "Finished.");
-            let item = |id: &str, name: &str, subject: &str, state: &str| {
-                TranscriptRow::Tool(ToolItem {
-                    subject: Some(subject.into()),
-                    detail: Some("RAW RESULT".into()),
-                    state: state.into(),
-                    ..tool_item(id, name)
-                })
-            };
+            live.apply_host_event(HostEvent::Row(TranscriptRow::Interrupted));
             let mut restored = transcript_fixture();
             restored.theme = theme.clone();
             restored.apply_host_event(restore_snapshot(
                 1,
                 vec![
-                    TranscriptRow::user("Inspect."),
-                    item("read", "read_file", "a.rs", "done"),
-                    item("run", "exec_command", "cargo test", "failed:exit 7"),
-                    TranscriptRow::assistant("Finished."),
+                    TranscriptRow::Tool(ToolItem {
+                        subject: Some("sleep 60".into()),
+                        state: "cancelled".into(),
+                        ..tool_item("run", "exec_command")
+                    }),
+                    TranscriptRow::Interrupted,
                 ],
             ));
-            // The host sets one activity kind per tool for both paths; a live
-            // `exec_command` is a process row exactly like its restore.
-            let kinds = |app: &App| {
-                app.pane
-                    .blocks
-                    .iter()
-                    .filter_map(|block| match block {
-                        ScrollBlock::Tool { name, kind, .. } => Some((name.clone(), *kind)),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-            };
-            assert_eq!(kinds(&live), kinds(&restored));
-            assert!(kinds(&live).contains(&("exec_command".to_owned(), ActivityKind::Process)));
-            for expanded in [false, true] {
-                if expanded {
-                    live.toggle_tool_expand_at(1);
-                    restored.toggle_tool_expand_at(1);
+            for stage in ["live", "collapsed", "expanded"] {
+                if stage == "collapsed" {
+                    say(&mut live, "Next answer.");
+                    say(&mut restored, "Next answer.");
+                } else if stage == "expanded" {
+                    live.toggle_tool_expand_at(0);
+                    restored.toggle_tool_expand_at(0);
                 }
                 let paint = |app: &mut App| {
                     let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
                     terminal.draw(|frame| app.draw(frame)).unwrap();
                     serialize_frame(terminal.backend().buffer())
                 };
-                assert_eq!(
-                    paint(&mut live),
-                    paint(&mut restored),
-                    "width {width}, expanded {expanded}"
-                );
+                assert_eq!(paint(&mut live), paint(&mut restored), "{state}, {stage}");
+                let plain = live.pane.transcript_cache.plain().join("\n");
+                assert!(plain.contains("⊘ interrupted"), "{plain}");
+                assert!(plain.contains('✗'), "{plain}");
+                assert!(!plain.contains('✓'), "{plain}");
+                activity_frame(&mut live, theme_name, width, &format!("{state}-{stage}"));
             }
         }
     }
 }
 
 #[test]
-fn process_activity_stories_match_live_and_restored_in_both_themes() {
-    for (theme_name, theme) in [
-        ("dark", crate::tui::Theme::dark()),
-        ("light", crate::tui::Theme::light()),
-    ] {
-        for width in [40, 120] {
-            let mut live = transcript_fixture();
-            live.theme = theme.clone();
-            let rows = [
-                ("start", "Shell", "cargo test", ActivityState::Succeeded),
-                (
-                    "wait",
-                    "process_session_poll",
-                    "Waiting on process 7 · cargo test",
-                    ActivityState::Running,
-                ),
-                (
-                    "exited",
-                    "process_session_poll",
-                    "Waited on process 8 · cargo check · exited 0",
-                    ActivityState::Succeeded,
-                ),
-                (
-                    "poll",
-                    "process_session_write",
-                    "Waited on process 9 · sleep 60 · still running",
-                    ActivityState::Succeeded,
-                ),
-                (
-                    "read",
-                    "process_session_poll",
-                    "Read output of process 9 · sleep 60",
-                    ActivityState::Succeeded,
-                ),
-                (
-                    "input",
-                    "process_session_write",
-                    "Sent input to process 10 · 4 bytes",
-                    ActivityState::Succeeded,
-                ),
-                (
-                    "interrupt",
-                    "process_session_write",
-                    "Sent interrupt to process 10 · cargo test",
-                    ActivityState::Succeeded,
-                ),
-                (
-                    "stop",
-                    "process_session_terminate",
-                    "Stopped process 9 · sleep 60",
-                    ActivityState::Succeeded,
-                ),
-                (
-                    "unknown",
-                    "process_session_poll",
-                    "Waiting on process 11",
-                    ActivityState::Running,
-                ),
-            ];
-            let mut activity = Vec::new();
-            for (id, name, subject, state) in rows {
-                let kind = if name == "Shell" {
-                    ActivityKind::Process
-                } else {
-                    ActivityKind::Tool
-                };
-                live.apply_host_event(tool_line(
-                    id,
-                    None,
-                    None,
-                    kind,
-                    name,
-                    if state == ActivityState::Running {
-                        "running"
-                    } else {
-                        "done"
-                    },
-                    Some(subject),
-                ));
-                activity.push(TranscriptRow::Tool(ToolItem {
-                    subject: Some(subject.into()),
-                    state: if state == ActivityState::Running {
-                        "running"
-                    } else {
-                        "done"
-                    }
-                    .into(),
-                    ..tool_item(id, name)
-                }));
-            }
-            let mut restored = transcript_fixture();
-            restored.theme = theme.clone();
-            restored.apply_host_event(restore_snapshot(1, activity));
-            let paint = |app: &mut App| {
-                let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
-                terminal.draw(|frame| app.draw(frame)).unwrap();
-                serialize_frame(terminal.backend().buffer())
-            };
-            assert_eq!(paint(&mut live), paint(&mut restored));
-            activity_frame(&mut live, theme_name, width, "process-operations");
-            say(&mut live, "Finished.");
-            say(&mut restored, "Finished.");
-            assert_eq!(paint(&mut live), paint(&mut restored));
-            live.toggle_tool_expand_at(0);
-            restored.toggle_tool_expand_at(0);
-            assert_eq!(paint(&mut live), paint(&mut restored));
-            let plain = live.pane.transcript_cache.plain().join("\n");
-            for label in [
-                "Waiting on process",
-                "Waited on process",
-                "Read output of process",
-                "Sent input to process",
-                "Sent interrupt to process",
-                "Stopped process",
-            ] {
-                assert!(plain.contains(label), "{label}: {plain}");
-            }
-        }
-    }
-}
-
-#[test]
-fn interrupted_activity_stories_match_live_and_restored_in_both_themes() {
-    for (theme_name, theme) in [
-        ("dark", crate::tui::Theme::dark()),
-        ("light", crate::tui::Theme::light()),
-    ] {
-        for state in ["interrupted", "cancelled"] {
-            for width in [40, 120] {
-                let mut live = transcript_fixture();
-                live.theme = theme.clone();
-                live.apply_host_event(tool_line(
-                    "run",
-                    None,
-                    None,
-                    ActivityKind::Process,
-                    "exec_command",
-                    state,
-                    Some("sleep 60"),
-                ));
-                live.apply_host_event(HostEvent::Row(TranscriptRow::Interrupted));
-                let mut restored = transcript_fixture();
-                restored.theme = theme.clone();
-                restored.apply_host_event(restore_snapshot(
-                    1,
-                    vec![
-                        TranscriptRow::Tool(ToolItem {
-                            subject: Some("sleep 60".into()),
-                            state: "cancelled".into(),
-                            ..tool_item("run", "exec_command")
-                        }),
-                        TranscriptRow::Interrupted,
-                    ],
-                ));
-                for stage in ["live", "collapsed", "expanded"] {
-                    if stage == "collapsed" {
-                        say(&mut live, "Next answer.");
-                        say(&mut restored, "Next answer.");
-                    } else if stage == "expanded" {
-                        live.toggle_tool_expand_at(0);
-                        restored.toggle_tool_expand_at(0);
-                    }
-                    let paint = |app: &mut App| {
-                        let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
-                        terminal.draw(|frame| app.draw(frame)).unwrap();
-                        serialize_frame(terminal.backend().buffer())
-                    };
-                    assert_eq!(paint(&mut live), paint(&mut restored), "{state}, {stage}");
-                    let plain = live.pane.transcript_cache.plain().join("\n");
-                    assert!(plain.contains("⊘ interrupted"), "{plain}");
-                    assert!(plain.contains('✗'), "{plain}");
-                    assert!(!plain.contains('✓'), "{plain}");
-                    activity_frame(&mut live, theme_name, width, &format!("{state}-{stage}"));
-                }
-            }
-        }
-    }
-}
-
-#[test]
-fn activity_group_story_goldens_cover_both_themes_and_widths() {
-    for (theme_name, theme) in [
-        ("dark", crate::tui::Theme::dark()),
-        ("light", crate::tui::Theme::light()),
-    ] {
-        for width in [120, 40] {
-            let mut app = transcript_fixture();
-            app.theme = theme.clone();
-            app.render_prefs.reduced_motion = true;
-            for (id, name, state, subject) in [
-                ("read", "read_file", "done", "a.rs"),
-                ("search", "grep", "done", "query"),
-                ("edit", "apply_patch", "done", "a.rs +12/-3"),
-                ("run", "exec_command", "running", "cargo test"),
-            ] {
-                app.apply_host_event(tool_line(
-                    id,
-                    None,
-                    None,
-                    ActivityKind::Tool,
-                    name,
-                    state,
-                    Some(subject),
-                ));
-            }
-            activity_frame(&mut app, theme_name, width, "live");
-            // The host stamps no duration here; a wall-clock measurement would
-            // make the frame depend on the test machine.
-            app.pane.tool_started.clear();
+fn activity_group_story_goldens_cover_every_width() {
+    let (theme_name, theme) = ("dark", crate::tui::Theme::dark());
+    for width in [120, 40] {
+        let mut app = transcript_fixture();
+        app.theme = theme.clone();
+        app.render_prefs.reduced_motion = true;
+        for (id, name, state, subject) in [
+            ("read", "read_file", "done", "a.rs"),
+            ("search", "grep", "done", "query"),
+            ("edit", "apply_patch", "done", "a.rs +12/-3"),
+            ("run", "exec_command", "running", "cargo test"),
+        ] {
             app.apply_host_event(tool_line(
-                "run",
+                id,
                 None,
                 None,
-                ActivityKind::Process,
-                "exec_command",
-                "done",
-                Some("cargo test"),
+                ActivityKind::Tool,
+                name,
+                state,
+                Some(subject),
             ));
-            say(&mut app, "Finished.");
-            activity_frame(&mut app, theme_name, width, "collapsed");
-            app.pane.focused_block = Some(0);
-            app.handle_key(key(KeyCode::Enter));
-            activity_frame(&mut app, theme_name, width, "expanded");
-            app.handle_key(key(KeyCode::Enter));
-            app.apply_host_event(tool_line(
-                "run",
-                None,
-                None,
-                ActivityKind::Process,
-                "exec_command",
-                "failed:exit 7",
-                Some("cargo test"),
-            ));
-            activity_frame(&mut app, theme_name, width, "failure");
-            let (_, y) = app.tool_hit_rows[0];
-            app.handle_mouse(left_mouse(MouseEventKind::Moved, 3, y));
-            activity_frame(&mut app, theme_name, width, "hover");
-
-            let mut cell = transcript_fixture();
-            cell.theme = theme.clone();
-            super::test_support::compose_cell(
-                &mut cell,
-                "cell",
-                "exec_js",
-                "done",
-                "2 tools",
-                "const answer = 42;\ntext(answer);",
-                &[
-                    ("exec_command", "done", "pwd", "RAW OUTPUT"),
-                    ("read_file", "done", "a.rs", "RAW FILE CONTENT"),
-                ],
-            );
-            activity_frame(&mut cell, theme_name, width, "script-collapsed");
-            cell.toggle_tool_expand_at(0);
-            activity_frame(&mut cell, theme_name, width, "script-expanded");
-            let plain = cell.pane.transcript_cache.plain().join("\n");
-            assert!(plain.contains("const answer"));
-            assert!(plain.contains("$ pwd"));
-            assert!(!plain.contains("RAW"));
         }
+        activity_frame(&mut app, theme_name, width, "live");
+        // The host stamps no duration here; a wall-clock measurement would
+        // make the frame depend on the test machine.
+        app.pane.tool_started.clear();
+        app.apply_host_event(tool_line(
+            "run",
+            None,
+            None,
+            ActivityKind::Process,
+            "exec_command",
+            "done",
+            Some("cargo test"),
+        ));
+        say(&mut app, "Finished.");
+        activity_frame(&mut app, theme_name, width, "collapsed");
+        app.pane.focused_block = Some(0);
+        app.handle_key(key(KeyCode::Enter));
+        activity_frame(&mut app, theme_name, width, "expanded");
+        app.handle_key(key(KeyCode::Enter));
+        app.apply_host_event(tool_line(
+            "run",
+            None,
+            None,
+            ActivityKind::Process,
+            "exec_command",
+            "failed:exit 7",
+            Some("cargo test"),
+        ));
+        activity_frame(&mut app, theme_name, width, "failure");
+        let (_, y) = app.tool_hit_rows[0];
+        app.handle_mouse(left_mouse(MouseEventKind::Moved, 3, y));
+        activity_frame(&mut app, theme_name, width, "hover");
+
+        let mut cell = transcript_fixture();
+        cell.theme = theme.clone();
+        super::test_support::compose_cell(
+            &mut cell,
+            "cell",
+            "exec_js",
+            "done",
+            "2 tools",
+            "const answer = 42;\ntext(answer);",
+            &[
+                ("exec_command", "done", "pwd", "RAW OUTPUT"),
+                ("read_file", "done", "a.rs", "RAW FILE CONTENT"),
+            ],
+        );
+        activity_frame(&mut cell, theme_name, width, "script-collapsed");
+        cell.toggle_tool_expand_at(0);
+        activity_frame(&mut cell, theme_name, width, "script-expanded");
+        let plain = cell.pane.transcript_cache.plain().join("\n");
+        assert!(plain.contains("const answer"));
+        assert!(plain.contains("$ pwd"));
+        assert!(!plain.contains("RAW"));
     }
 }
 
 #[test]
 fn activity_group_live_collapsed_expanded_and_failure_frames() {
-    for theme in [crate::tui::Theme::dark(), crate::tui::Theme::light()] {
-        for width in [120, 40] {
-            let mut app = transcript_fixture();
-            app.theme = theme.clone();
-            for (id, name, state, subject) in [
-                ("read", "read_file", "done", "a.rs"),
-                ("search", "grep", "done", "needle"),
-                ("edit", "apply_patch", "done", "a.rs +12/-3"),
-                ("run", "exec_command", "running", "cargo test"),
-            ] {
-                let mut event = tool_line(
-                    id,
-                    None,
-                    None,
-                    ActivityKind::Tool,
-                    name,
-                    state,
-                    Some(subject),
-                );
-                if let HostEvent::ToolLine { detail, .. } = &mut event {
-                    *detail = Some("RAW PAYLOAD MUST NEVER APPEAR".into());
-                }
-                app.apply_host_event(event);
-            }
-            let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
-            terminal.draw(|frame| app.draw(frame)).unwrap();
-            let live = serialize_frame(terminal.backend().buffer()).replace('·', " ");
-            assert!(live.contains("✓ Read 1 file, ran 1 search"), "{live}");
-            assert!(!live.contains("needle"), "finished calls fold: {live}");
-            assert!(live.contains("$ cargo test"), "{live}");
-            assert!(!live.contains("RAW PAYLOAD"), "{live}");
-            app.apply_host_event(tool_line(
-                "run",
+    let theme = crate::tui::Theme::dark();
+    for width in [120, 40] {
+        let mut app = transcript_fixture();
+        app.theme = theme.clone();
+        for (id, name, state, subject) in [
+            ("read", "read_file", "done", "a.rs"),
+            ("search", "grep", "done", "needle"),
+            ("edit", "apply_patch", "done", "a.rs +12/-3"),
+            ("run", "exec_command", "running", "cargo test"),
+        ] {
+            let mut event = tool_line(
+                id,
                 None,
                 None,
-                ActivityKind::Process,
-                "exec_command",
-                "failed:exit 7",
-                Some("cargo test"),
-            ));
-            say(&mut app, "Finished.");
-            terminal.draw(|frame| app.draw(frame)).unwrap();
-            let collapsed = serialize_frame(terminal.backend().buffer()).replace('·', " ");
-            assert!(!collapsed.contains("$ cargo test"), "{collapsed}");
-            assert!(collapsed.contains("exit 7"), "{collapsed}");
-            app.pane.focused_block = Some(0);
-            app.handle_key(key(KeyCode::Enter));
-            terminal.draw(|frame| app.draw(frame)).unwrap();
-            let expanded = serialize_frame(terminal.backend().buffer()).replace('·', " ");
-            assert!(expanded.contains("$ cargo test"), "{expanded}");
-            assert!(!expanded.contains("RAW PAYLOAD"), "{expanded}");
-            let (_, y) = app.tool_hit_rows[0];
-            app.handle_mouse(left_click(3, y));
-            app.handle_mouse(left_mouse(MouseEventKind::Up(MouseButton::Left), 3, y));
-            terminal.draw(|frame| app.draw(frame)).unwrap();
-            assert!(
-                !serialize_frame(terminal.backend().buffer())
-                    .replace('·', " ")
-                    .contains("$ cargo test")
+                ActivityKind::Tool,
+                name,
+                state,
+                Some(subject),
             );
+            if let HostEvent::ToolLine { detail, .. } = &mut event {
+                *detail = Some("RAW PAYLOAD MUST NEVER APPEAR".into());
+            }
+            app.apply_host_event(event);
         }
+        let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let live = serialize_frame(terminal.backend().buffer()).replace('·', " ");
+        assert!(live.contains("✓ Read 1 file, ran 1 search"), "{live}");
+        assert!(!live.contains("needle"), "finished calls fold: {live}");
+        assert!(live.contains("$ cargo test"), "{live}");
+        assert!(!live.contains("RAW PAYLOAD"), "{live}");
+        app.apply_host_event(tool_line(
+            "run",
+            None,
+            None,
+            ActivityKind::Process,
+            "exec_command",
+            "failed:exit 7",
+            Some("cargo test"),
+        ));
+        say(&mut app, "Finished.");
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let collapsed = serialize_frame(terminal.backend().buffer()).replace('·', " ");
+        assert!(!collapsed.contains("$ cargo test"), "{collapsed}");
+        assert!(collapsed.contains("exit 7"), "{collapsed}");
+        app.pane.focused_block = Some(0);
+        app.handle_key(key(KeyCode::Enter));
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let expanded = serialize_frame(terminal.backend().buffer()).replace('·', " ");
+        assert!(expanded.contains("$ cargo test"), "{expanded}");
+        assert!(!expanded.contains("RAW PAYLOAD"), "{expanded}");
+        let (_, y) = app.tool_hit_rows[0];
+        app.handle_mouse(left_click(3, y));
+        app.handle_mouse(left_mouse(MouseEventKind::Up(MouseButton::Left), 3, y));
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        assert!(
+            !serialize_frame(terminal.backend().buffer())
+                .replace('·', " ")
+                .contains("$ cargo test")
+        );
     }
 }
 
@@ -3060,150 +3046,144 @@ fn a_stored_auto_continue_row_renders_nothing() {
 /// summary plus a tip per call in flight (two parallel commands and a code
 /// cell naming its nested call). Live and restored paint the same frame.
 #[test]
-fn live_tips_and_thinking_match_restored_in_both_themes_and_widths() {
+fn live_tips_and_thinking_match_restored_at_every_width() {
     let tool = |id: &str, name: &str, kind: ActivityKind, state: &str, subject: &str| {
         tool_line(id, None, None, kind, name, state, Some(subject))
     };
-    for (theme_name, theme) in [
-        ("dark", crate::tui::Theme::dark()),
-        ("light", crate::tui::Theme::light()),
-    ] {
-        for width in [120, 40] {
-            let mut live = transcript_fixture();
-            live.theme = theme.clone();
-            live.render_prefs.reduced_motion = true;
-            live.render_prefs.show_thinking = true;
-            live.apply_host_event(HostEvent::UserMessage {
-                text: "Ship it.".into(),
-                sent_at_ms: None,
-            });
-            live.apply_host_event(HostEvent::ReasoningDelta {
-                location_key: "r".into(),
-                text: "check the build first".into(),
-            });
-            live.apply_host_event(HostEvent::ReasoningSealed {
-                location_key: "r".into(),
-            });
-            if let ScrollBlock::Thinking { elapsed_ms, .. } = &mut live.pane.blocks[1] {
-                *elapsed_ms = Some(2_100);
-            }
-            live.apply_host_event(tool(
-                "read",
-                "read_file",
-                ActivityKind::Tool,
-                "done",
-                "src/lib.rs",
-            ));
-            live.apply_host_event(tool("grep", "grep", ActivityKind::Tool, "done", "needle"));
-            live.apply_host_event(tool(
-                "test",
-                "exec_command",
-                ActivityKind::Process,
-                "running",
-                "cargo test --workspace",
-            ));
-            live.apply_host_event(tool(
-                "build",
-                "exec_command",
-                ActivityKind::Process,
-                "running",
-                "cargo build --release && echo \"built ok\"",
-            ));
-            super::test_support::compose_cell(
-                &mut live,
-                "cell",
-                "exec_js",
-                "running",
-                "1 tools",
-                "await tools.exec_command({cmd: 'pwd'});",
-                &[("exec_command", "running", "pwd", "RAW OUTPUT")],
-            );
-            let running = |id: &str, name: &str, subject: &str| {
-                TranscriptRow::Tool(ToolItem {
-                    subject: Some(subject.into()),
-                    state: "running".into(),
-                    ..tool_item(id, name)
-                })
-            };
-            let mut restored = transcript_fixture();
-            restored.theme = theme.clone();
-            restored.render_prefs = live.render_prefs;
-            restored.apply_host_event(restore_snapshot(
-                1,
-                vec![
-                    TranscriptRow::user("Ship it."),
-                    TranscriptRow::Thinking(
-                        plakous_host_protocol::views::transcript::ThinkingRow {
-                            location_key: "r".into(),
-                            text: "check the build first".into(),
-                            elapsed_ms: Some(2_100),
-                        },
-                    ),
-                    TranscriptRow::Tool(ToolItem {
-                        subject: Some("src/lib.rs".into()),
-                        ..tool_item("read", "read_file")
-                    }),
-                    TranscriptRow::Tool(ToolItem {
-                        subject: Some("needle".into()),
-                        ..tool_item("grep", "grep")
-                    }),
-                    running("test", "exec_command", "cargo test --workspace"),
-                    running(
-                        "build",
-                        "exec_command",
-                        "cargo build --release && echo \"built ok\"",
-                    ),
-                    TranscriptRow::Tool(ToolItem {
-                        subject: Some("1 tools".into()),
-                        detail: Some("await tools.exec_command({cmd: 'pwd'});".into()),
-                        state: "running".into(),
-                        cell_id: Some("cell".into()),
-                        ..tool_item("cell", "exec_js")
-                    }),
-                    TranscriptRow::Tool(ToolItem {
-                        subject: Some("pwd".into()),
-                        state: "running".into(),
-                        parent_call_id: Some("cell".into()),
-                        cell_id: Some("cell".into()),
-                        ..tool_item("cell-child-0", "exec_command")
-                    }),
-                ],
-            ));
-            let paint = |app: &mut App| {
-                let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
-                terminal.draw(|frame| app.draw(frame)).unwrap();
-                serialize_frame(terminal.backend().buffer())
-            };
-            assert_eq!(
-                paint(&mut live),
-                paint(&mut restored),
-                "{theme_name} {width}"
-            );
-            let plain = live.pane.transcript_cache.plain().join("\n");
-            assert!(
-                live.pane
-                    .transcript_cache
-                    .row_plans()
-                    .iter()
-                    .any(|plan| plan
-                        .activity_summary
-                        .as_deref()
-                        .is_some_and(|s| s.contains("1 thought"))),
-                "{plain}"
-            );
-            assert!(plain.contains("✓ Read 1 file, ran 1 search"), "{plain}");
-            assert!(plain.contains("$ cargo test"), "{plain}");
-            assert!(
-                plain.contains("CodeMode · 1 call") && plain.contains("$ pwd"),
-                "{plain}"
-            );
-            assert!(!plain.contains("needle"), "{plain}");
-            assert!(!plain.contains("RAW"), "{plain}");
-            for row in live.pane.transcript_cache.plain() {
-                assert!(row.width() <= usize::from(width), "{row}");
-            }
-            activity_frame(&mut live, theme_name, width, "tips");
+    let (theme_name, theme) = ("dark", crate::tui::Theme::dark());
+    for width in [120, 40] {
+        let mut live = transcript_fixture();
+        live.theme = theme.clone();
+        live.render_prefs.reduced_motion = true;
+        live.render_prefs.show_thinking = true;
+        live.apply_host_event(HostEvent::UserMessage {
+            text: "Ship it.".into(),
+            sent_at_ms: None,
+        });
+        live.apply_host_event(HostEvent::ReasoningDelta {
+            location_key: "r".into(),
+            text: "check the build first".into(),
+        });
+        live.apply_host_event(HostEvent::ReasoningSealed {
+            location_key: "r".into(),
+        });
+        if let ScrollBlock::Thinking { elapsed_ms, .. } = &mut live.pane.blocks[1] {
+            *elapsed_ms = Some(2_100);
         }
+        live.apply_host_event(tool(
+            "read",
+            "read_file",
+            ActivityKind::Tool,
+            "done",
+            "src/lib.rs",
+        ));
+        live.apply_host_event(tool("grep", "grep", ActivityKind::Tool, "done", "needle"));
+        live.apply_host_event(tool(
+            "test",
+            "exec_command",
+            ActivityKind::Process,
+            "running",
+            "cargo test --workspace",
+        ));
+        live.apply_host_event(tool(
+            "build",
+            "exec_command",
+            ActivityKind::Process,
+            "running",
+            "cargo build --release && echo \"built ok\"",
+        ));
+        super::test_support::compose_cell(
+            &mut live,
+            "cell",
+            "exec_js",
+            "running",
+            "1 tools",
+            "await tools.exec_command({cmd: 'pwd'});",
+            &[("exec_command", "running", "pwd", "RAW OUTPUT")],
+        );
+        let running = |id: &str, name: &str, subject: &str| {
+            TranscriptRow::Tool(ToolItem {
+                subject: Some(subject.into()),
+                state: "running".into(),
+                ..tool_item(id, name)
+            })
+        };
+        let mut restored = transcript_fixture();
+        restored.theme = theme.clone();
+        restored.render_prefs = live.render_prefs;
+        restored.apply_host_event(restore_snapshot(
+            1,
+            vec![
+                TranscriptRow::user("Ship it."),
+                TranscriptRow::Thinking(plakous_host_protocol::views::transcript::ThinkingRow {
+                    location_key: "r".into(),
+                    text: "check the build first".into(),
+                    elapsed_ms: Some(2_100),
+                }),
+                TranscriptRow::Tool(ToolItem {
+                    subject: Some("src/lib.rs".into()),
+                    ..tool_item("read", "read_file")
+                }),
+                TranscriptRow::Tool(ToolItem {
+                    subject: Some("needle".into()),
+                    ..tool_item("grep", "grep")
+                }),
+                running("test", "exec_command", "cargo test --workspace"),
+                running(
+                    "build",
+                    "exec_command",
+                    "cargo build --release && echo \"built ok\"",
+                ),
+                TranscriptRow::Tool(ToolItem {
+                    subject: Some("1 tools".into()),
+                    detail: Some("await tools.exec_command({cmd: 'pwd'});".into()),
+                    state: "running".into(),
+                    cell_id: Some("cell".into()),
+                    ..tool_item("cell", "exec_js")
+                }),
+                TranscriptRow::Tool(ToolItem {
+                    subject: Some("pwd".into()),
+                    state: "running".into(),
+                    parent_call_id: Some("cell".into()),
+                    cell_id: Some("cell".into()),
+                    ..tool_item("cell-child-0", "exec_command")
+                }),
+            ],
+        ));
+        let paint = |app: &mut App| {
+            let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
+            terminal.draw(|frame| app.draw(frame)).unwrap();
+            serialize_frame(terminal.backend().buffer())
+        };
+        assert_eq!(
+            paint(&mut live),
+            paint(&mut restored),
+            "{theme_name} {width}"
+        );
+        let plain = live.pane.transcript_cache.plain().join("\n");
+        assert!(
+            live.pane
+                .transcript_cache
+                .row_plans()
+                .iter()
+                .any(|plan| plan
+                    .activity_summary
+                    .as_deref()
+                    .is_some_and(|s| s.contains("1 thought"))),
+            "{plain}"
+        );
+        assert!(plain.contains("✓ Read 1 file, ran 1 search"), "{plain}");
+        assert!(plain.contains("$ cargo test"), "{plain}");
+        assert!(
+            plain.contains("CodeMode · 1 call") && plain.contains("$ pwd"),
+            "{plain}"
+        );
+        assert!(!plain.contains("needle"), "{plain}");
+        assert!(!plain.contains("RAW"), "{plain}");
+        for row in live.pane.transcript_cache.plain() {
+            assert!(row.width() <= usize::from(width), "{row}");
+        }
+        activity_frame(&mut live, theme_name, width, "tips");
     }
 }
 

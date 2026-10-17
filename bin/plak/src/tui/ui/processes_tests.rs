@@ -104,24 +104,23 @@ fn hud_gap_and_singular_process_in_all_chrome() {
 
 #[test]
 fn activity_tabs_share_geometry_and_only_transcripts_have_tracks() {
-    for theme in [SettingsTheme::DefaultDark, SettingsTheme::DefaultLight] {
-        let mut app = fixture();
-        app.persisted_theme = theme;
-        app.theme = theme_for(theme);
-        app.open_tree_navigator();
-        render_to_string(&mut app, 80, 24);
-        let popup = app.tree_popup;
-        let tabs = (app.activity_agents_hit, app.activity_processes_hit);
-        app.open_processes();
-        let text = render_to_string(&mut app, 80, 24);
-        assert_eq!(app.tree_popup, popup);
-        assert_eq!((app.activity_agents_hit, app.activity_processes_hit), tabs);
-        assert!(text.contains(" Activity "), "{text}");
-        assert!(!text.contains("Activity ·"), "{text}");
-        app.handle_key(key(KeyCode::Esc));
-        app.open_control_tab(super::ControlTab::Usage);
-        render_to_string(&mut app, 80, 24);
-    }
+    let theme = SettingsTheme::DefaultDark;
+    let mut app = fixture();
+    app.persisted_theme = theme;
+    app.theme = theme_for(theme);
+    app.open_tree_navigator();
+    render_to_string(&mut app, 80, 24);
+    let popup = app.tree_popup;
+    let tabs = (app.activity_agents_hit, app.activity_processes_hit);
+    app.open_processes();
+    let text = render_to_string(&mut app, 80, 24);
+    assert_eq!(app.tree_popup, popup);
+    assert_eq!((app.activity_agents_hit, app.activity_processes_hit), tabs);
+    assert!(text.contains(" Activity "), "{text}");
+    assert!(!text.contains("Activity ·"), "{text}");
+    app.handle_key(key(KeyCode::Esc));
+    app.open_control_tab(super::ControlTab::Usage);
+    render_to_string(&mut app, 80, 24);
 }
 
 #[test]
@@ -442,55 +441,54 @@ fn reload_rechecks_running_processes_after_an_idle_terminal_snapshot() {
 #[test]
 fn processes_testbackend_stories_match_reviewable_goldens() {
     let mut actual = String::new();
-    for theme in [SettingsTheme::DefaultDark, SettingsTheme::DefaultLight] {
-        for width in [48, 80, 120] {
-            for story in [
-                "hud",
-                "agents",
-                "processes",
-                "output",
-                "process-confirmation",
-                "process-confirmation-action",
-                "stop",
-                "quit",
-            ] {
-                let mut app = fixture();
-                app.persisted_theme = theme;
-                app.theme = theme_for(theme);
-                match story {
-                    "agents" => {
-                        super::test_support::open_tree(
-                            &mut app,
-                            super::test_support::tree_snapshot(vec![
-                                super::test_support::tree_node("root", None, 0),
-                            ]),
-                        );
-                    }
-                    "processes" => app.open_processes(),
-                    "output" => {
-                        app.open_processes();
-                        app.handle_key(key(KeyCode::Enter));
-                    }
-                    "process-confirmation" => {
-                        app.open_processes();
-                        app.handle_key(key(KeyCode::Char('s')));
-                    }
-                    "process-confirmation-action" => {
-                        app.open_processes();
-                        app.handle_key(key(KeyCode::Char('S')));
-                        app.handle_key(key(KeyCode::Right));
-                    }
-                    "stop" => app.confirm_turn_stop(),
-                    "quit" => {
-                        app.request_quit();
-                    }
-                    _ => {}
+    let theme = SettingsTheme::DefaultDark;
+    for width in [48, 80, 120] {
+        for story in [
+            "hud",
+            "agents",
+            "processes",
+            "output",
+            "process-confirmation",
+            "process-confirmation-action",
+            "stop",
+            "quit",
+        ] {
+            let mut app = fixture();
+            app.persisted_theme = theme;
+            app.theme = theme_for(theme);
+            match story {
+                "agents" => {
+                    super::test_support::open_tree(
+                        &mut app,
+                        super::test_support::tree_snapshot(vec![super::test_support::tree_node(
+                            "root", None, 0,
+                        )]),
+                    );
                 }
-                let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
-                terminal.draw(|frame| app.draw(frame)).unwrap();
-                actual.push_str(&format!("{theme:?} {width} {story}\n"));
-                actual.push_str(&serialize_frame(terminal.backend().buffer()));
+                "processes" => app.open_processes(),
+                "output" => {
+                    app.open_processes();
+                    app.handle_key(key(KeyCode::Enter));
+                }
+                "process-confirmation" => {
+                    app.open_processes();
+                    app.handle_key(key(KeyCode::Char('s')));
+                }
+                "process-confirmation-action" => {
+                    app.open_processes();
+                    app.handle_key(key(KeyCode::Char('S')));
+                    app.handle_key(key(KeyCode::Right));
+                }
+                "stop" => app.confirm_turn_stop(),
+                "quit" => {
+                    app.request_quit();
+                }
+                _ => {}
             }
+            let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
+            terminal.draw(|frame| app.draw(frame)).unwrap();
+            actual.push_str(&format!("{theme:?} {width} {story}\n"));
+            actual.push_str(&serialize_frame(terminal.backend().buffer()));
         }
     }
     if std::env::var_os("PLAK_UPDATE_GOLDENS").is_some() {

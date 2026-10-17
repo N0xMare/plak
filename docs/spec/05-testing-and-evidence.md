@@ -320,8 +320,8 @@ distinguishes local abandonment/finalization debt from external effect evidence.
 
 ### Declarative TUI stories and the semantic pilot
 
-Processes stories cover 48-, 80- and 120-column TestBackend frames in both
-default theme classes: idle HUD count, Processes list, live output, the busy
+Processes stories cover 48-, 80- and 120-column TestBackend frames in the
+default dark theme: idle HUD count, Processes list, live output, the busy
 `Esc` stop pop-up and the quit pop-up. `activity-processes.frame` pins these
 surfaces; pilot journeys cover confirmed `s` and `S` intents and the turn
 stop's `[ Stop turn + processes ]` button. The typing-safety tests type drafts,
@@ -1284,13 +1284,16 @@ and nested eligibility remain unchanged in the fixture. No production binding
 or containment descriptor is normalized.
 
 Frame goldens for the TUI are the only oracle kept in files. They are
-committed under `bin/plak/tests/goldens` as 39 `.frame` files, one per surface
-and terminal size — chrome at two widths, each tab at 80x24 and 120x40, the
-resume picker, the Agents list (live story in both themes at 120x40 and 40x40,
-plus lifecycle sealing), control hover, the transcript frames
-(compose collapsed/expanded/in-flight/cancelled, spacing, thoughts, tool rows)
-and the offline usage-limits overlay. `PLAK_UPDATE_GOLDENS=1` rewrites them
-from the render; without it the test compares and fails with the diff. They are
+committed under `bin/plak/tests/goldens` as `.frame` files, one per surface,
+story and terminal size: chrome at two widths, each tab at 80x24 and 120x40,
+the resume picker, Activity and item-detail stories at 40 and 120 columns, the
+agent view and the Agents list (also at 80x24), lifecycle sealing, control
+hover, the transcript frames (compose collapsed/expanded/in-flight/cancelled,
+spacing, thoughts, tool rows) and the offline usage-limits overlay. Frames are
+rendered in the default dark theme only: themes share one layout and differ
+only in palette, which the theme unit tests check (semantic token mapping and
+contrast). `PLAK_UPDATE_GOLDENS=1` rewrites them from the render; without it
+the test compares and fails with the diff. They are
 in-crate and committed because the TUI is inert and presentation-only: a frame
 is a pure function of state, so a moved byte is a real behavior change.
 

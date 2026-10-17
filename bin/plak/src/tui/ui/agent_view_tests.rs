@@ -560,27 +560,23 @@ fn item_detail_in_the_agent_view_asks_with_its_agent_id_and_takes_the_answer() {
     assert!(rx.try_recv().is_err(), "the cache answers");
 }
 
-/// The agent view at both widths and in both themes: breadcrumb on the
+/// The agent view at every width: breadcrumb on the
 /// transcript's top row, the agent's rows through the root's renderer.
 #[test]
-fn the_agent_view_goldens_cover_both_themes_and_widths() {
-    for (theme_name, theme) in [
-        ("dark", crate::tui::Theme::dark()),
-        ("light", crate::tui::Theme::light()),
-    ] {
-        for (width, height) in [(80u16, 24u16), (120, 40), (40, 40)] {
-            let mut app = root_app();
-            app.theme = theme.clone();
-            app.apply_host_event(HostEvent::TopologyNavigatorSnapshot(family()));
-            open_agent(&mut app);
-            let actual = paint(&mut app, width, height);
-            let path = format!("tests/goldens/agent-view-{theme_name}-{width}x{height}.frame");
-            if std::env::var_os("PLAK_UPDATE_GOLDENS").is_some() {
-                std::fs::write(&path, &actual).expect("write reviewed frame golden");
-            } else {
-                let expected = std::fs::read_to_string(&path).expect("golden frame");
-                assert_eq!(actual, expected, "{path}");
-            }
+fn the_agent_view_goldens_cover_every_width() {
+    let (theme_name, theme) = ("dark", crate::tui::Theme::dark());
+    for (width, height) in [(80u16, 24u16), (120, 40), (40, 40)] {
+        let mut app = root_app();
+        app.theme = theme.clone();
+        app.apply_host_event(HostEvent::TopologyNavigatorSnapshot(family()));
+        open_agent(&mut app);
+        let actual = paint(&mut app, width, height);
+        let path = format!("tests/goldens/agent-view-{theme_name}-{width}x{height}.frame");
+        if std::env::var_os("PLAK_UPDATE_GOLDENS").is_some() {
+            std::fs::write(&path, &actual).expect("write reviewed frame golden");
+        } else {
+            let expected = std::fs::read_to_string(&path).expect("golden frame");
+            assert_eq!(actual, expected, "{path}");
         }
     }
 }

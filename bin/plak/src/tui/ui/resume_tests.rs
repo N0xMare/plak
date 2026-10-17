@@ -996,7 +996,7 @@ fn a_refused_restore_reports_its_bound_without_erasing_the_visible_transcript() 
 }
 
 /// Every transcript row type paints the same live and after a restore, in
-/// both themes at the owner's two review widths. Live, the host emits each row
+/// the two review widths. Live, the host emits each row
 /// the way it does in a session (prompt, streamed prose and reasoning, tool
 /// lines with their wait facts, `Row` for the rest); restored, the same rows
 /// arrive as one presentation snapshot.
@@ -1124,67 +1124,66 @@ fn every_row_type_paints_the_same_live_and_restored() {
             line("done", item.duration_ms(), item.wait.clone()),
         ]
     };
-    for theme in [crate::tui::Theme::dark(), crate::tui::Theme::light()] {
-        for width in [120, 40] {
-            let mut live = App::new(launch_basic(), true);
-            live.theme = theme.clone();
-            live.apply_host_event(restore_snapshot(1, vec![header.clone()]));
-            for row in &rows_after_header {
-                match row {
-                    TranscriptRow::User { text, sent_at_ms } => {
-                        live.apply_host_event(HostEvent::UserMessage {
-                            text: text.clone(),
-                            sent_at_ms: *sent_at_ms,
-                        });
-                    }
-                    TranscriptRow::Assistant { text } => {
-                        live.apply_host_event(HostEvent::AssistantDelta(text.clone()));
-                        live.apply_host_event(HostEvent::AssistantDone);
-                    }
-                    TranscriptRow::Thinking(thinking) => {
-                        live.apply_host_event(HostEvent::ReasoningDelta {
-                            location_key: thinking.location_key.clone(),
-                            text: thinking.text.clone(),
-                        });
-                        live.apply_host_event(HostEvent::ReasoningSealed {
-                            location_key: thinking.location_key.clone(),
-                        });
-                    }
-                    TranscriptRow::Tool(item) => {
-                        for line in tool_lines(item) {
-                            live.apply_host_event(line);
-                        }
-                    }
-                    row => live.apply_host_event(HostEvent::Row(row.clone())),
+    let theme = crate::tui::Theme::dark();
+    for width in [120, 40] {
+        let mut live = App::new(launch_basic(), true);
+        live.theme = theme.clone();
+        live.apply_host_event(restore_snapshot(1, vec![header.clone()]));
+        for row in &rows_after_header {
+            match row {
+                TranscriptRow::User { text, sent_at_ms } => {
+                    live.apply_host_event(HostEvent::UserMessage {
+                        text: text.clone(),
+                        sent_at_ms: *sent_at_ms,
+                    });
                 }
+                TranscriptRow::Assistant { text } => {
+                    live.apply_host_event(HostEvent::AssistantDelta(text.clone()));
+                    live.apply_host_event(HostEvent::AssistantDone);
+                }
+                TranscriptRow::Thinking(thinking) => {
+                    live.apply_host_event(HostEvent::ReasoningDelta {
+                        location_key: thinking.location_key.clone(),
+                        text: thinking.text.clone(),
+                    });
+                    live.apply_host_event(HostEvent::ReasoningSealed {
+                        location_key: thinking.location_key.clone(),
+                    });
+                }
+                TranscriptRow::Tool(item) => {
+                    for line in tool_lines(item) {
+                        live.apply_host_event(line);
+                    }
+                }
+                row => live.apply_host_event(HostEvent::Row(row.clone())),
             }
-            let mut restored = App::new(launch_basic(), true);
-            restored.theme = theme.clone();
-            let mut rows = vec![header.clone()];
-            rows.extend(rows_after_header.iter().cloned());
-            restored.apply_host_event(restore_snapshot(1, rows));
-            let paint = |app: &mut App| {
-                let mut terminal = Terminal::new(TestBackend::new(width, 120)).unwrap();
-                terminal.draw(|frame| app.draw(frame)).unwrap();
-                serialize_frame(terminal.backend().buffer())
-            };
-            let live_frame = paint(&mut live);
-            assert_eq!(live_frame, paint(&mut restored), "width {width}");
-            // The frame encodes a space as `·`. The process rows sit inside
-            // the folded group; their text is pinned where rows map to blocks.
-            if width == 120 {
-                // Send times follow the process zone, so the painted label is
-                // not a fixed UTC clock.
-                let clock =
-                    crate::tui::blocks::PromptClock::in_zone(live.time_zone, live.unix_now_ms());
-                let user = clock.label(1_735_828_320_000).unwrap().replace(' ', "·");
-                let steer = clock.label(1_735_828_380_000).unwrap().replace(' ', "·");
-                assert!(live_frame.contains(&user), "{user} missing:\n{live_frame}");
-                assert!(
-                    live_frame.contains(&format!("steer·{steer}")),
-                    "{steer} missing:\n{live_frame}"
-                );
-            }
+        }
+        let mut restored = App::new(launch_basic(), true);
+        restored.theme = theme.clone();
+        let mut rows = vec![header.clone()];
+        rows.extend(rows_after_header.iter().cloned());
+        restored.apply_host_event(restore_snapshot(1, rows));
+        let paint = |app: &mut App| {
+            let mut terminal = Terminal::new(TestBackend::new(width, 120)).unwrap();
+            terminal.draw(|frame| app.draw(frame)).unwrap();
+            serialize_frame(terminal.backend().buffer())
+        };
+        let live_frame = paint(&mut live);
+        assert_eq!(live_frame, paint(&mut restored), "width {width}");
+        // The frame encodes a space as `·`. The process rows sit inside
+        // the folded group; their text is pinned where rows map to blocks.
+        if width == 120 {
+            // Send times follow the process zone, so the painted label is
+            // not a fixed UTC clock.
+            let clock =
+                crate::tui::blocks::PromptClock::in_zone(live.time_zone, live.unix_now_ms());
+            let user = clock.label(1_735_828_320_000).unwrap().replace(' ', "·");
+            let steer = clock.label(1_735_828_380_000).unwrap().replace(' ', "·");
+            assert!(live_frame.contains(&user), "{user} missing:\n{live_frame}");
+            assert!(
+                live_frame.contains(&format!("steer·{steer}")),
+                "{steer} missing:\n{live_frame}"
+            );
         }
     }
 }

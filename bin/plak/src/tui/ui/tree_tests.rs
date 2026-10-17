@@ -515,55 +515,51 @@ const AGENTS_NOW: u64 = 1_700_000_000;
 
 /// Spec §5.7 Agents body: the live working set with header counts, rails,
 /// one-line rows, the attention mark, the inspector and the hidden-agents
-/// footer, at both widths and in both themes.
+/// footer, at every width.
 #[test]
-fn the_agents_list_goldens_cover_both_themes_and_widths() {
-    for (theme_name, theme) in [
-        ("dark", crate::tui::Theme::dark()),
-        ("light", crate::tui::Theme::light()),
-    ] {
-        for (width, height) in [(120u16, 40u16), (40, 40), (80, 24)] {
-            let mut app = App::new(launch_basic(), true);
-            app.theme = theme.clone();
-            app.agents_clock = Some(AGENTS_NOW);
-            app.processes = std::sync::Arc::new(vec![plakous_host_protocol::views::ProcessView {
-                id: "p1".into(),
-                command: "cargo test".into(),
-                owner: "agent-102".into(),
-                started_at: AGENTS_NOW - 1,
-                elapsed_ms: 1_000,
-                status: plakous_host_protocol::views::ProcessStatus::Running,
-                output: String::new(),
-            }]);
-            open_tree(&mut app, agents_story(AGENTS_NOW));
-            if let Some(nav) = app.tree_navigator.as_mut() {
-                nav.focus_on("agent-107");
-            }
-            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-            terminal.draw(|frame| app.draw(frame)).unwrap();
-            let actual = serialize_frame(terminal.backend().buffer());
-            let counts: &[&str] = if width >= 80 {
-                &["1·active", "3·completed", "2·attention"]
-            } else {
-                &["●·1", "✓·3", "⚠·2"]
-            };
-            for fragment in counts.iter().chain(&["#107"]) {
-                assert!(
-                    actual.contains(fragment),
-                    "`{fragment}` is missing at {width}"
-                );
-            }
+fn the_agents_list_goldens_cover_every_width() {
+    let (theme_name, theme) = ("dark", crate::tui::Theme::dark());
+    for (width, height) in [(120u16, 40u16), (40, 40), (80, 24)] {
+        let mut app = App::new(launch_basic(), true);
+        app.theme = theme.clone();
+        app.agents_clock = Some(AGENTS_NOW);
+        app.processes = std::sync::Arc::new(vec![plakous_host_protocol::views::ProcessView {
+            id: "p1".into(),
+            command: "cargo test".into(),
+            owner: "agent-102".into(),
+            started_at: AGENTS_NOW - 1,
+            elapsed_ms: 1_000,
+            status: plakous_host_protocol::views::ProcessStatus::Running,
+            output: String::new(),
+        }]);
+        open_tree(&mut app, agents_story(AGENTS_NOW));
+        if let Some(nav) = app.tree_navigator.as_mut() {
+            nav.focus_on("agent-107");
+        }
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let actual = serialize_frame(terminal.backend().buffer());
+        let counts: &[&str] = if width >= 80 {
+            &["1·active", "3·completed", "2·attention"]
+        } else {
+            &["●·1", "✓·3", "⚠·2"]
+        };
+        for fragment in counts.iter().chain(&["#107"]) {
             assert!(
-                !actual.contains("#90"),
-                "an agent finished an hour ago is history"
+                actual.contains(fragment),
+                "`{fragment}` is missing at {width}"
             );
-            let path = format!("tests/goldens/agents-live-{theme_name}-{width}x{height}.frame");
-            if std::env::var_os("PLAK_UPDATE_GOLDENS").is_some() {
-                std::fs::write(&path, &actual).expect("write reviewed frame golden");
-            } else {
-                let expected = std::fs::read_to_string(&path).expect("golden frame");
-                assert_eq!(actual, expected, "{path}");
-            }
+        }
+        assert!(
+            !actual.contains("#90"),
+            "an agent finished an hour ago is history"
+        );
+        let path = format!("tests/goldens/agents-live-{theme_name}-{width}x{height}.frame");
+        if std::env::var_os("PLAK_UPDATE_GOLDENS").is_some() {
+            std::fs::write(&path, &actual).expect("write reviewed frame golden");
+        } else {
+            let expected = std::fs::read_to_string(&path).expect("golden frame");
+            assert_eq!(actual, expected, "{path}");
         }
     }
 }

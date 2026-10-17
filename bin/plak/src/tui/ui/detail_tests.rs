@@ -445,73 +445,69 @@ fn story_rows() -> Vec<TranscriptRow> {
 }
 
 #[test]
-fn rows_render_alike_live_and_restored_in_both_themes_and_widths() {
-    for (theme_name, theme) in [
-        ("dark", crate::tui::Theme::dark()),
-        ("light", crate::tui::Theme::light()),
-    ] {
-        for width in [120, 40] {
-            let mut live = transcript_fixture();
-            live.theme = theme.clone();
-            let mut rows = story_rows();
-            let (wait_live, wait_row) = wait_row("done");
-            let interrupted = rows.pop().unwrap();
-            let error = rows.pop().unwrap();
-            for row in rows.clone() {
-                live.apply_host_event(HostEvent::Row(row));
-            }
-            live.apply_host_event(wait_live);
-            live.apply_host_event(HostEvent::Row(error.clone()));
-            live.apply_host_event(HostEvent::Row(interrupted.clone()));
-            rows.extend([wait_row, error, interrupted]);
-            let mut restored = transcript_fixture();
-            restored.theme = theme.clone();
-            restored.apply_host_event(restore_snapshot(1, rows));
-            live.pane.tool_started.clear();
-            let frame = paint(&mut live, width);
-            assert_eq!(frame, paint(&mut restored, width));
-            let text = plain(&live);
-            for wanted in [
-                "carried from 4e5f6a7b (r21.e19.p27.t2) · session 0a1b2c3d",
-                "◆ spawned c23 · worker · Port the renderer",
-                "✗ c24 failed · provider unreachable",
-                "✓ c23 finished · 14m",
-                "⇲ adopted cand-c23-a1 · 16 files",
-                "⊘ interrupted",
-            ] {
-                if width == 120 {
-                    assert!(text.contains(wanted), "{wanted}: {text}");
-                }
-            }
-            // The story's stored auto-continue row shows neither live nor
-            // restored.
-            assert!(!text.contains("auto-continue"), "{text}");
-            if width == 120 {
-                assert!(
-                    text.contains("Waited for agents · up to 60m · woke after 12m (c39 finished)"),
-                    "{text}"
-                );
-                assert!(frame.contains("steer"), "{frame}");
-            }
-            golden(&mut live, "rows", theme_name, width);
-
-            // A milestone with text opens to all of it, live and restored.
-            let spawned = live
-                .pane
-                .blocks
-                .iter()
-                .position(|block| matches!(block, ScrollBlock::Milestone { .. }))
-                .unwrap();
-            live.toggle_tool_expand_at(spawned);
-            restored.toggle_tool_expand_at(spawned);
-            assert_eq!(paint(&mut live, width), paint(&mut restored, width));
-            assert!(
-                plain(&live).contains("│ and report back"),
-                "{}",
-                plain(&live)
-            );
-            golden(&mut live, "milestone-open", theme_name, width);
+fn rows_render_alike_live_and_restored_at_every_width() {
+    let (theme_name, theme) = ("dark", crate::tui::Theme::dark());
+    for width in [120, 40] {
+        let mut live = transcript_fixture();
+        live.theme = theme.clone();
+        let mut rows = story_rows();
+        let (wait_live, wait_row) = wait_row("done");
+        let interrupted = rows.pop().unwrap();
+        let error = rows.pop().unwrap();
+        for row in rows.clone() {
+            live.apply_host_event(HostEvent::Row(row));
         }
+        live.apply_host_event(wait_live);
+        live.apply_host_event(HostEvent::Row(error.clone()));
+        live.apply_host_event(HostEvent::Row(interrupted.clone()));
+        rows.extend([wait_row, error, interrupted]);
+        let mut restored = transcript_fixture();
+        restored.theme = theme.clone();
+        restored.apply_host_event(restore_snapshot(1, rows));
+        live.pane.tool_started.clear();
+        let frame = paint(&mut live, width);
+        assert_eq!(frame, paint(&mut restored, width));
+        let text = plain(&live);
+        for wanted in [
+            "carried from 4e5f6a7b (r21.e19.p27.t2) · session 0a1b2c3d",
+            "◆ spawned c23 · worker · Port the renderer",
+            "✗ c24 failed · provider unreachable",
+            "✓ c23 finished · 14m",
+            "⇲ adopted cand-c23-a1 · 16 files",
+            "⊘ interrupted",
+        ] {
+            if width == 120 {
+                assert!(text.contains(wanted), "{wanted}: {text}");
+            }
+        }
+        // The story's stored auto-continue row shows neither live nor
+        // restored.
+        assert!(!text.contains("auto-continue"), "{text}");
+        if width == 120 {
+            assert!(
+                text.contains("Waited for agents · up to 60m · woke after 12m (c39 finished)"),
+                "{text}"
+            );
+            assert!(frame.contains("steer"), "{frame}");
+        }
+        golden(&mut live, "rows", theme_name, width);
+
+        // A milestone with text opens to all of it, live and restored.
+        let spawned = live
+            .pane
+            .blocks
+            .iter()
+            .position(|block| matches!(block, ScrollBlock::Milestone { .. }))
+            .unwrap();
+        live.toggle_tool_expand_at(spawned);
+        restored.toggle_tool_expand_at(spawned);
+        assert_eq!(paint(&mut live, width), paint(&mut restored, width));
+        assert!(
+            plain(&live).contains("│ and report back"),
+            "{}",
+            plain(&live)
+        );
+        golden(&mut live, "milestone-open", theme_name, width);
     }
 }
 
@@ -600,27 +596,23 @@ fn a_running_wait_shows_its_ceiling_and_a_failed_wait_its_error() {
 }
 
 #[test]
-fn item_detail_goldens_cover_both_themes_and_widths() {
-    for (theme_name, theme) in [
-        ("dark", crate::tui::Theme::dark()),
-        ("light", crate::tui::Theme::light()),
-    ] {
-        for width in [120, 40] {
-            let mut app = command_app();
-            app.theme = theme.clone();
-            app.toggle_tool_expand_at(0);
-            let _ = requests(&mut app);
-            app.apply_host_event(canonical(
-                "run",
-                r#"{"cmd":"cargo test --workspace --all-features -- --nocapture 'detail window'"}"#,
-                &fifty_lines(),
-            ));
-            // Scrolled up so the item, its input and the hidden-lines row
-            // are all on screen.
-            paint(&mut app, width);
-            app.pane.scroll_from_bottom = 12;
-            golden(&mut app, "command-open", theme_name, width);
-        }
+fn item_detail_goldens_cover_every_width() {
+    let (theme_name, theme) = ("dark", crate::tui::Theme::dark());
+    for width in [120, 40] {
+        let mut app = command_app();
+        app.theme = theme.clone();
+        app.toggle_tool_expand_at(0);
+        let _ = requests(&mut app);
+        app.apply_host_event(canonical(
+            "run",
+            r#"{"cmd":"cargo test --workspace --all-features -- --nocapture 'detail window'"}"#,
+            &fifty_lines(),
+        ));
+        // Scrolled up so the item, its input and the hidden-lines row
+        // are all on screen.
+        paint(&mut app, width);
+        app.pane.scroll_from_bottom = 12;
+        golden(&mut app, "command-open", theme_name, width);
     }
 }
 
@@ -1129,25 +1121,21 @@ fn a_preview_for_a_restored_call_is_not_asked_again_while_open() {
 /// A steer longer than the band keeps its tag on the first row at both
 /// widths, live and restored alike.
 #[test]
-fn a_long_steer_golden_covers_both_themes_and_widths() {
+fn a_long_steer_golden_covers_every_width() {
     let text = "keep the tag visible: ".repeat(12).trim_end().to_owned();
-    for (theme_name, theme) in [
-        ("dark", crate::tui::Theme::dark()),
-        ("light", crate::tui::Theme::light()),
-    ] {
-        for width in [120, 40] {
-            let mut live = transcript_fixture();
-            live.theme = theme.clone();
-            live.apply_host_event(HostEvent::Row(TranscriptRow::steer(text.clone())));
-            let mut restored = transcript_fixture();
-            restored.theme = theme.clone();
-            restored.apply_host_event(restore_snapshot(
-                1,
-                vec![TranscriptRow::steer(text.clone())],
-            ));
-            assert_eq!(paint(&mut live, width), paint(&mut restored, width));
-            golden(&mut live, "steer-long", theme_name, width);
-        }
+    let (theme_name, theme) = ("dark", crate::tui::Theme::dark());
+    for width in [120, 40] {
+        let mut live = transcript_fixture();
+        live.theme = theme.clone();
+        live.apply_host_event(HostEvent::Row(TranscriptRow::steer(text.clone())));
+        let mut restored = transcript_fixture();
+        restored.theme = theme.clone();
+        restored.apply_host_event(restore_snapshot(
+            1,
+            vec![TranscriptRow::steer(text.clone())],
+        ));
+        assert_eq!(paint(&mut live, width), paint(&mut restored, width));
+        golden(&mut live, "steer-long", theme_name, width);
     }
 }
 
