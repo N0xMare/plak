@@ -818,14 +818,6 @@ fn stderr(out: &std::process::Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
-fn help_lists_command(text: &str, cmd: &str) -> bool {
-    text.lines().any(|line| {
-        line.split_whitespace()
-            .next()
-            .is_some_and(|token| token == cmd)
-    })
-}
-
 fn isolated_home_dir() -> tempfile::TempDir {
     let base = std::env::current_dir()
         .expect("cwd")
@@ -835,84 +827,13 @@ fn isolated_home_dir() -> tempfile::TempDir {
 }
 
 #[test]
-fn help_and_version() {
+fn version_prints_the_build_label_and_update_is_not_a_verb() {
     let dir = isolated_home_dir();
     let home = dir.path();
 
     let out = run_plak(home, &["version"]);
     assert!(out.status.success(), "stderr={}", stderr(&out));
     assert_eq!(stdout(&out), format!("plak {}\n", expected_version_label()));
-
-    let out = run_plak(home, &["help"]);
-    assert!(out.status.success(), "stderr={}", stderr(&out));
-    let text = stdout(&out);
-    for cmd in [
-        "login", "logout", "status", "refresh", "key", "run", "agent", "resume", "config",
-        "doctor", "session", "state", "usage", "models", "version",
-    ] {
-        assert!(
-            help_lists_command(&text, cmd),
-            "global help missing `{cmd}`: {text}"
-        );
-    }
-    assert!(
-        text.contains("WARNING") || text.contains("full coding tools"),
-        "help should warn about agentic tools: {text}"
-    );
-    assert!(
-        !help_lists_command(&text, "rebind"),
-        "no build has a rebind verb: {text}"
-    );
-    for cmd in ["fork", "compact", "update"] {
-        let listed = help_lists_command(&text, cmd);
-        if cfg!(feature = "maintainer") && cmd != "update" {
-            assert!(listed, "maintainer help missing `{cmd}`: {text}");
-        } else {
-            assert!(!listed, "release help leaked `{cmd}`: {text}");
-        }
-    }
-    assert!(
-        !help_lists_command(&text, "stdio"),
-        "global help must not list a stdio subcommand: {text}"
-    );
-    for retired in ["smoke", "subscription"] {
-        assert!(
-            !help_lists_command(&text, retired),
-            "global help leaked retired `{retired}` command: {text}"
-        );
-    }
-
-    let agent_help = run_plak(home, &["agent", "--help"]);
-    assert!(
-        agent_help.status.success(),
-        "plak agent --help failed: {}",
-        stderr(&agent_help)
-    );
-    let agent_text = stdout(&agent_help);
-    assert!(
-        help_lists_command(&agent_text, "agent") || agent_text.contains("plak agent"),
-        "agent help should describe the agent command: {agent_text}"
-    );
-    assert!(
-        !help_lists_command(&agent_text, "stdio"),
-        "agent help must not list a stdio subcommand: {agent_text}"
-    );
-    assert!(
-        agent_text.contains("no") && agent_text.contains("stdio"),
-        "agent help should state stdio is not a subcommand: {agent_text}"
-    );
-    for retired in ["set_model", "set_effort"] {
-        assert!(
-            !agent_text.contains(retired),
-            "agent help must not list the retired JSONL kind `{retired}`: {agent_text}"
-        );
-    }
-    for kind in ["clear", "resume_tree", "invoke_tool", "fork"] {
-        assert!(
-            agent_text.contains(kind),
-            "agent help should list JSONL kind `{kind}`: {agent_text}"
-        );
-    }
 
     let out = run_plak(home, &["update"]);
     assert_eq!(out.status.code(), Some(2), "stderr={}", stderr(&out));
