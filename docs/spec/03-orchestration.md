@@ -1067,7 +1067,7 @@ comparison. Requested tier remains outside this identity; the existing receipt
 reports the effective tier. A missing admitted identity is recovery-required,
 never permission to reconstruct it from current state or spawn again.
 
-The tree store is schema **6**, retaining this admitted identity and the nested `spawns` roster. Another schema lives
+The tree store is schema **7**, retaining this admitted identity, the nested `spawns` roster, and grant bounds up to the 64-child and 65-node ceilings. Another schema lives
 in another build's state directory (chapter 02 §2.5) and is never read; no
 migration or guessed identity is performed.
 

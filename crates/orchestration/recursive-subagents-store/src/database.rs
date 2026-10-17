@@ -18,7 +18,7 @@ use crate::rows::load_agent_tree;
 /// `subagents.sqlite3` starts at schema version 1. It is not the
 /// product schema's number and never follows it; both name the state
 /// directory.
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;
 
 const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -40,7 +40,7 @@ pub const SCHEMA_OBJECTS: &[(&str, &str)] = &[
     ),
     (
         "agent_grants",
-        "CREATE TABLE agent_grants(tree_id TEXT NOT NULL,agent_id TEXT NOT NULL,may_spawn INTEGER NOT NULL CHECK(may_spawn IN(0,1)),may_adopt INTEGER NOT NULL CHECK(may_adopt IN(0,1)),max_depth INTEGER NOT NULL CHECK(max_depth>=0 AND max_depth<=4),max_nodes INTEGER NOT NULL CHECK(max_nodes>=1 AND max_nodes<=32),max_children INTEGER NOT NULL CHECK(max_children>=1 AND max_children<=8),visible_ids TEXT NOT NULL,message_peers TEXT NOT NULL,managed_ids TEXT NOT NULL,interrupt_ids TEXT NOT NULL,close_ids TEXT NOT NULL,PRIMARY KEY(tree_id,agent_id),FOREIGN KEY(tree_id,agent_id) REFERENCES agent_nodes(tree_id,agent_id))",
+        "CREATE TABLE agent_grants(tree_id TEXT NOT NULL,agent_id TEXT NOT NULL,may_spawn INTEGER NOT NULL CHECK(may_spawn IN(0,1)),may_adopt INTEGER NOT NULL CHECK(may_adopt IN(0,1)),max_depth INTEGER NOT NULL CHECK(max_depth>=0 AND max_depth<=4),max_nodes INTEGER NOT NULL CHECK(max_nodes>=1 AND max_nodes<=65),max_children INTEGER NOT NULL CHECK(max_children>=1 AND max_children<=64),visible_ids TEXT NOT NULL,message_peers TEXT NOT NULL,managed_ids TEXT NOT NULL,interrupt_ids TEXT NOT NULL,close_ids TEXT NOT NULL,PRIMARY KEY(tree_id,agent_id),FOREIGN KEY(tree_id,agent_id) REFERENCES agent_nodes(tree_id,agent_id))",
     ),
     (
         "agent_operations",
@@ -429,13 +429,13 @@ fn new_instance_id() -> String {
 mod tests {
     use super::{SCHEMA_OBJECTS, SCHEMA_VERSION, SubagentsDatabase, expected_schema_fingerprint};
 
-    /// Identity golden for the unreleased t6 cohort's durable format.
+    /// Identity golden for the unreleased t7 cohort's durable format.
     #[test]
     fn the_tree_schema_fingerprint_is_pinned() {
-        assert_eq!(SCHEMA_VERSION, 6);
+        assert_eq!(SCHEMA_VERSION, 7);
         assert_eq!(
             expected_schema_fingerprint(),
-            "af8b8aa28497ec940b8a44916612776249ff66d5769801a7e8532c4f766a5c70"
+            "1c356c82ae91952bd72d6ae9a15f970ee57cfbf23d6fd96ede103f93f41d67a2"
         );
     }
 
