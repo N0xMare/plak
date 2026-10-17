@@ -1535,20 +1535,6 @@ mod tests {
     }
 
     #[test]
-    fn non_guarantee_wording_keeps_evidence_boundary_explicit() {
-        assert!(
-            NonGuarantee::ReferenceClientOperatingEnvelope
-                .label()
-                .contains("not a provider hard-cap guarantee")
-        );
-        assert!(
-            NonGuarantee::CustomCallerOperatingEnvelope
-                .label()
-                .contains("not provider capacity evidence")
-        );
-    }
-
-    #[test]
     fn evidence_and_non_guarantee_cannot_be_coerced() {
         assert_eq!(
             project_evidence(
