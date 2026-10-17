@@ -13,7 +13,7 @@
 //! | `host=<host>` | Only requests to this origin host (any host when absent) |
 //! | `path=<prefix>` | Only requests whose path and query start with this |
 //! | `nth=<n>` | Only the n-th matching request, counting from 1 (every one when absent) |
-//! | `fault=<kind>` | `429`, `500`, `502`, `503`, `529`, `connect`, `write-reset`, `record-rejected`, `reset`, `eof` or `stall` |
+//! | `fault=<kind>` | `401`, `429`, `500`, `502`, `503`, `529`, `connect`, `write-reset`, `record-rejected`, `reset`, `eof` or `stall` |
 //! | `retry-after=<secs>` | Status faults: send this `Retry-After` |
 //! | `after-events=<n>` / `after-bytes=<n>` | Stream faults: deliver this much of the body first |
 //! | `seconds=<secs>` | `stall`: how long the body goes silent |
@@ -242,7 +242,7 @@ fn parse_rule(rule: &str) -> Result<Rule, String> {
     }
     let kind = kind.ok_or("`fault` is required")?;
     let fault = match kind {
-        "429" | "500" | "502" | "503" | "529" => Fault::Status {
+        "401" | "429" | "500" | "502" | "503" | "529" => Fault::Status {
             status: kind.parse().map_err(|_| "status")?,
             retry_after,
         },
@@ -416,6 +416,7 @@ pub(super) async fn injected_status(
 
 fn status_reply(status: u16, retry_after: Option<u64>) -> Vec<u8> {
     let (reason, error_type) = match status {
+        401 => ("Unauthorized", "authentication_error"),
         429 => ("Too Many Requests", "rate_limit_error"),
         500 => ("Internal Server Error", "api_error"),
         502 => ("Bad Gateway", "api_error"),

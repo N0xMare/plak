@@ -509,12 +509,37 @@ pub type ResponsesRetrievalAuthorization<'a> = Pin<
     >,
 >;
 
+/// The future [`ResponsesRetrievalTransport::credential_rejected`] returns:
+/// whether a claimed refresh renewed the credential.
+pub type ResponsesCredentialRefresh<'a> = Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
+
 /// The route's half of a side request.
 pub trait ResponsesRetrievalTransport: Send + Sync {
     /// Revalidates admission and the credential, then builds the exact
     /// authorized request carrying `body`. Called before every physical
     /// request, retries included.
     fn authorize<'a>(&'a self, body: &'a [u8]) -> ResponsesRetrievalAuthorization<'a>;
+
+    /// After an HTTP 401 head, forces one claimed refresh of the login the
+    /// request carried, as a model round does; `true` sends the side request
+    /// once more under the renewed grant. The default, for a credential
+    /// nothing can renew, keeps the 401.
+    fn credential_rejected(&self) -> ResponsesCredentialRefresh<'_> {
+        Box::pin(std::future::ready(false))
+    }
+}
+
+/// The one claimed refresh and re-dispatch a side request gets after a 401,
+/// shared by every side-request loop.
+pub(crate) async fn refreshed_after_rejection(
+    refreshed: &mut bool,
+    refresh: ResponsesCredentialRefresh<'_>,
+) -> bool {
+    if *refreshed {
+        return false;
+    }
+    *refreshed = true;
+    refresh.await
 }
 
 /// Exchange bounds of one side request.
@@ -616,6 +641,8 @@ enum Attempted {
         retry_after: Option<Duration>,
         error: ResponsesRetrievalError,
     },
+    /// HTTP 401: the credential was rejected.
+    Rejected(ResponsesRetrievalError),
 }
 
 async fn exchange_with_retry(
@@ -628,6 +655,7 @@ async fn exchange_with_retry(
 ) -> Result<Received, ResponsesRetrievalError> {
     let mut physical = 0_u32;
     let mut waited = Duration::ZERO;
+    let mut refreshed = false;
     loop {
         if cancellation.is_cancelled() {
             return Err(cancelled());
@@ -636,6 +664,15 @@ async fn exchange_with_retry(
         let (point, retry_after, mut error) =
             match exchange_once(client, transport, body, reply, cancellation, limits).await {
                 Ok(Attempted::Done(terminal)) => return Ok(terminal),
+                Ok(Attempted::Rejected(mut error)) => {
+                    if refreshed_after_rejection(&mut refreshed, transport.credential_rejected())
+                        .await
+                    {
+                        continue;
+                    }
+                    error.physical_requests = physical;
+                    return Err(error);
+                }
                 Ok(Attempted::Retry {
                     point,
                     retry_after,
@@ -740,6 +777,9 @@ async fn exchange_once(
             });
         }
         error.status = Some(status);
+        if status == 401 {
+            return Ok(Attempted::Rejected(error));
+        }
         return Err(error);
     }
     let body = response.into_body();

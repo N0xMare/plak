@@ -25,9 +25,9 @@ use serde_json::{Map, Value, json};
 use tokio::time::Instant;
 
 use crate::retrieval::{
-    MAX_ERROR_BODY_BYTES, ResponsesRetrievalDispatch, ResponsesRetrievalError,
-    ResponsesRetrievalErrorKind, ResponsesRetrievalLimits, cancelled, status_error,
-    transport_point, unavailable,
+    MAX_ERROR_BODY_BYTES, ResponsesCredentialRefresh, ResponsesRetrievalDispatch,
+    ResponsesRetrievalError, ResponsesRetrievalErrorKind, ResponsesRetrievalLimits, cancelled,
+    refreshed_after_rejection, status_error, transport_point, unavailable,
 };
 
 /// Largest response body read, in bytes: a base64 image inside JSON.
@@ -217,6 +217,12 @@ pub trait ResponsesImageTransport: Send + Sync {
         endpoint: ResponsesImageEndpoint,
         body: &'a [u8],
     ) -> ResponsesImageAuthorization<'a>;
+
+    /// See [`crate::ResponsesRetrievalTransport::credential_rejected`]: one
+    /// claimed refresh after a 401, then one more request.
+    fn credential_rejected(&self) -> ResponsesCredentialRefresh<'_> {
+        Box::pin(std::future::ready(false))
+    }
 }
 
 /// The image bytes of a successful images response.
@@ -289,6 +295,7 @@ pub async fn run_responses_image(
     };
     let mut physical = 0_u32;
     let mut waited = Duration::ZERO;
+    let mut refreshed = false;
     loop {
         if cancellation.is_cancelled() {
             return Err(cancelled());
@@ -297,6 +304,17 @@ pub async fn run_responses_image(
         let (point, retry_after, mut error) =
             match exchange_once(client, transport, endpoint, &body, cancellation, limits).await {
                 Ok(Attempted::Done(response)) => return decode_responses_image(&response),
+                // A 401 head means the request was refused, so no image was
+                // made and sending it again under a renewed grant is safe.
+                Ok(Attempted::Rejected(mut error)) => {
+                    if refreshed_after_rejection(&mut refreshed, transport.credential_rejected())
+                        .await
+                    {
+                        continue;
+                    }
+                    error.physical_requests = physical;
+                    return Err(error);
+                }
                 Ok(Attempted::Retry {
                     point,
                     retry_after,
@@ -336,6 +354,8 @@ enum Attempted {
         retry_after: Option<Duration>,
         error: ResponsesRetrievalError,
     },
+    /// HTTP 401: the credential was rejected.
+    Rejected(ResponsesRetrievalError),
 }
 
 async fn exchange_once(
@@ -425,6 +445,9 @@ async fn exchange_once(
             });
         }
         error.status = Some(status);
+        if status == 401 {
+            return Ok(Attempted::Rejected(error));
+        }
         return Err(error);
     }
     if bytes.len() > limit {

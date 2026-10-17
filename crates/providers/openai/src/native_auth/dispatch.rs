@@ -62,6 +62,19 @@ pub(crate) fn codex_credential_rejected(
     })
 }
 
+/// The same claimed refresh after a side request's 401, for the login the
+/// session's current target selects; `true` when the credential was renewed.
+pub(crate) async fn codex_side_request_rejected(target: &OpenAiTarget) -> bool {
+    let Some((rejected, selection_epoch)) = target.native_codex_credential_selection() else {
+        return false;
+    };
+    target
+        .route()
+        .native_codex_refresh_after_rejection(rejected, selection_epoch)
+        .await
+        .is_ok()
+}
+
 pub(crate) fn codex_responses_preflight<'a>(
     dialect: &'a CodexResponsesDialect,
     request: ResponsesPreflightRequest<'a>,

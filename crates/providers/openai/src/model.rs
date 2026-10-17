@@ -817,6 +817,15 @@ impl OpenAiLanguageModel {
         .await
     }
 
+    /// One claimed refresh of the session's login after a side request's
+    /// HTTP 401, as a model round gets; `true` when the grant was renewed.
+    pub(crate) async fn codex_side_request_rejected(&self) -> bool {
+        let Ok(current) = self.current_target() else {
+            return false;
+        };
+        crate::native_auth::codex_side_request_rejected(&current.target).await
+    }
+
     fn current_target(&self) -> Result<Arc<CodexDispatchTarget>, RuntimeModelAuthorityError> {
         self.target
             .lock()

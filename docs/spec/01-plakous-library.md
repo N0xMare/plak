@@ -4136,7 +4136,9 @@ from the resolved Codex model, model `gpt-image-2`, also exposed as
 under the session's own subscription login, as the official Codex client's
 image extension does: each physical request revalidates admission, runs the
 credential preflight and takes an inference permit exactly like the Codex
-`alpha/search` side request, and holds both until the response head.
+`alpha/search` side request, and holds both until the response head. A 401 on
+the Codex or SuperGrok images request gets the same single claimed refresh and
+one more request as a retrieval side request; a 401 head made no image.
 `plakous-hosted` binds `image_gen` only where the route's release-owned row is
 `Supported` and the route has a port, on a deferred port the executor connects
 once. The Codex, OpenAI API, xAI API and SuperGrok rows are `Supported` on
@@ -4921,7 +4923,9 @@ instruction]`, the side model's answer, then `Sources:` with one
 retrieval side request: its own logical operation on the session's exact
 route, account, credential and model, with admission revalidated before every
 physical request as before a model round, the kernel's `RetryPolicy::TURN`
-inside each exchange, and at most three `pause_turn` continuations that send
+inside each exchange, on a subscription route (Codex, SuperGrok) the model
+round's answer to an HTTP 401 — one claimed refresh of the session's login,
+then one more physical request under the renewed grant — and at most three `pause_turn` continuations that send
 the paused assistant content back unchanged inside the same side request. The
 side request emits no model event, never streams into the transcript and
 never enters canonical history; only the wrapper's tool result does, and a

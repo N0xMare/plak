@@ -1069,13 +1069,14 @@ class Env:
 
 
 def run_cli(env: Env, repo: Path, args: list[str], log: Path,
-            timeout: float = 300, home: Path | None = None) -> tuple[int, str]:
+            timeout: float = 300, home: Path | None = None,
+            faults: str | None = None) -> tuple[int, str]:
     """`plak run …`; returns the exit status and stdout, keeping both streams.
 
     `home` overrides `PLAK_HOME` for this process only. Capture still belongs
     to `env`.
     """
-    child = env.environ()
+    child = env.environ(faults=faults)
     if home is not None:
         child["PLAK_HOME"] = str(home)
     try:

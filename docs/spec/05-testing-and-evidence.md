@@ -2090,7 +2090,7 @@ rule whose ordinal it is wins.
 
 | `fault=` | Effect | What a classifier sees |
 | --- | --- | --- |
-| `429`, `500`, `502`, `503`, `529` | An in-memory HTTP/1.1 peer answers; nothing is resolved, connected or sent upstream. `retry-after=<s>` adds that header | That status, `content-type: application/json`, `x-plak-injected-fault`, and a body both error dialects read: `{"type":"error","error":{"type":…,"code":…,"message":…}}`, with `overloaded_error` for `529` and `rate_limit_error` for `429` |
+| `401`, `429`, `500`, `502`, `503`, `529` | An in-memory HTTP/1.1 peer answers; nothing is resolved, connected or sent upstream. `retry-after=<s>` adds that header | That status, `content-type: application/json`, `x-plak-injected-fault`, and a body both error dialects read: `{"type":"error","error":{"type":…,"code":…,"message":…}}`, with `overloaded_error` for `529`, `rate_limit_error` for `429` and `authentication_error` for `401` |
 | `connect` | The exchange fails before resolution | `Failure(Connect, NotStarted, Io)`, as for a refused connection |
 | `write-reset` | The exchange fails before resolution | `Failure(RequestWriteOrResponseHead, RequestIncomplete, Protocol)`, as for a peer that resets the connection while the request body is being written |
 | `record-rejected` | The exchange fails before resolution, with no upstream traffic | `Failure(RequestWriteOrResponseHead, RequestIncomplete, Protocol)`, cause `peer_rejected_record`, TLS `AlertReceived(20)`, HTTP/1.1; all kernels label it as corruption in transit and resend immediately on a fresh connection after the first physical failure |

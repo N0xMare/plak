@@ -29,7 +29,8 @@ use verify::{rsa_components_are_acceptable, validate_jose_header};
 
 pub(crate) use dispatch::{
     CodexDispatchGuard, CodexResponsesDialect, codex_credential_rejected,
-    codex_responses_preflight, codex_side_request, revalidate_codex_responses,
+    codex_responses_preflight, codex_side_request, codex_side_request_rejected,
+    revalidate_codex_responses,
 };
 #[cfg(test)]
 use dispatch::{

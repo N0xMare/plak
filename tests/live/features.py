@@ -51,7 +51,20 @@ CATALOG = (
     ("x_search", "cli"),
     ("image_gen_roundtrip", "cli"),
     ("frozen_child_tools", "cli"),
+    ("web_search_401", "cli"),
+    ("image_gen_401", "cli"),
 )
+
+# One injected 401 on the first subscription side request of each kind. On
+# SuperGrok search shares the model's path, so its second request is the
+# side request (the first is the round that calls web_search).
+SIDE_REQUEST_401 = {
+    ("codex", "web_search"): "host=chatgpt.com,path=/backend-api/codex/alpha/search,nth=1,fault=401",
+    ("codex", "image_gen"): "host=chatgpt.com,path=/backend-api/codex/images/,nth=1,fault=401",
+    ("grok", "web_search"): "host=cli-chat-proxy.grok.com,path=/v1/responses,nth=2,fault=401",
+    ("grok", "image_gen"): "host=cli-chat-proxy.grok.com,path=/v1/images/,nth=1,fault=401",
+}
+_GENERATION = re.compile(r"generation (\d+)")
 
 BROWSER_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/141.0 Safari/537.36")
@@ -408,7 +421,7 @@ class Features:
     def run(self, name: str, prompt: str, tools: list[str], *, config: str = "",
             images: list[Path] = (), route: live.Route | None = None,
             stage: str = "turn", timeout: float = 600, composition: str | None = None,
-            before=None) -> tuple[str, list[dict], list[Path], Path, str]:
+            faults: str | None = None, before=None) -> tuple[str, list[dict], list[Path], Path, str]:
         route = route or self.route
         base = self.env.artifacts / name
         repo = base / "repo"
@@ -432,7 +445,7 @@ class Features:
         for image in images:
             args += ["--image", str(image)]
         code, out = live.run_cli(self.env, repo, [*args, "--", prompt], log,
-                                 timeout=timeout, home=home)
+                                 timeout=timeout, home=home, faults=faults)
         segments = self.env.capture_segments[segment_start:]
         stderr = log.read_text(errors="replace").split("--- stderr\n", 1)[-1]
         session = next((line.split("=", 1)[1] for line in out.splitlines()
@@ -759,6 +772,59 @@ class Features:
         return (f"session {session}: {images[0].name} generated; vision session {session2} "
                 f"({vision.name}, {sent}) names the cat")
 
+
+    # --- a 401 on a subscription side request ------------------------------------------
+
+    def credential_generation(self) -> int:
+        """The stored login's generation, from `plak doctor`; a refresh bumps it."""
+        child = {key: value for key, value in os.environ.items()
+                 if key not in ("PLAK_TEST_EXCHANGE_CAPTURE_DIR", "PLAK_TEST_FAULTS")}
+        doctor_home = self.env.artifacts / "doctor-home"
+        doctor_home.mkdir(mode=0o700, exist_ok=True)
+        child["PLAK_HOME"] = str(doctor_home)
+        result = subprocess.run([str(self.env.binary), "doctor"], env=child,
+                                capture_output=True, text=True, timeout=120)
+        for line in (result.stdout + result.stderr).splitlines():
+            match = _GENERATION.search(line)
+            if match and self.route.account in line.lower():
+                return int(match.group(1))
+        raise ScenarioFailure(HARNESS, f"plak doctor shows no {self.route.account} generation")
+
+    def _side_request_401(self, tool: str) -> tuple[str, list[dict], list[Path], Path, str, str]:
+        plan = SIDE_REQUEST_401.get((self.route.account, tool))
+        if not plan:
+            raise ScenarioFailure(REFUSED, f"no subscription side request for {tool} here")
+        before = self.credential_generation()
+        prompt = ("Use web search to find the date Rust 1.80.0 was released as stable. "
+                  "Reply with only that date as YYYY-MM-DD." if tool == "web_search" else
+                  "Use the image_gen tool to generate a photo of a cat and save it in this "
+                  "workspace. Reply with the saved file name only.")
+        out, records, segments, repo, session = self.run(f"{tool}_401", prompt, [tool],
+                                                         faults=plan)
+        after = self.credential_generation()
+        if after <= before:
+            raise ScenarioFailure(HARNESS, f"session {session}: login generation stayed "
+                                           f"{before}; the 401 forced no refresh")
+        return out, records, segments, repo, session, f"generation {before} -> {after}"
+
+    def web_search_401(self) -> str:
+        """An injected 401 on the search side request: one claimed refresh,
+        one more request, and the search succeeds."""
+        _, records, segments, _, session, refreshed = self._side_request_401("web_search")
+        urls = self._retrieval_sources("web_search", records, segments, session)
+        return f"session {session}: 401 then {refreshed}; web_search returned {len(urls)} sources"
+
+    def image_gen_401(self) -> str:
+        """An injected 401 on the images request: refresh, resend, image saved."""
+        _, records, _, repo, session, refreshed = self._side_request_401("image_gen")
+        failed = [r for r in records if r.get("kind") in ("tool.failed", "tool.rejected")]
+        images = [path for path in sorted(repo.rglob("*"))
+                  if path.is_file() and ".git" not in path.parts
+                  and image_magic(path.read_bytes()[:16]) in ("png", "jpeg")]
+        if not tool_calls(records, "image_gen") or not images:
+            raise ScenarioFailure(HARNESS, f"session {session}: no image after the 401 "
+                                           f"({len(failed)} failed tool records)")
+        return f"session {session}: 401 then {refreshed}; {images[0].name} saved"
 
     # --- the child-tool bound after a root template edit ----------------------------
 

@@ -254,13 +254,13 @@ pub use response_host::{
 };
 pub use retrieval::{
     RESPONSES_RETRIEVAL_MAX_OUTPUT_TOKENS, RESPONSES_WEB_SEARCH_SOURCES_INCLUDE,
-    RESPONSES_WEB_SEARCH_TOOL_TYPE, RESPONSES_X_SEARCH_TOOL_TYPE, ResponsesRetrievalAuthorization,
-    ResponsesRetrievalDispatch, ResponsesRetrievalError, ResponsesRetrievalErrorKind,
-    ResponsesRetrievalFlavor, ResponsesRetrievalGuard, ResponsesRetrievalLimits,
-    ResponsesRetrievalOutcome, ResponsesRetrievalQuery, ResponsesRetrievalRequest,
-    ResponsesRetrievalSource, ResponsesRetrievalTransport, ResponsesRetrievalUsage,
-    classify_responses_retrieval_body, lowest_responses_effort, run_responses_json_side_request,
-    run_responses_retrieval,
+    RESPONSES_WEB_SEARCH_TOOL_TYPE, RESPONSES_X_SEARCH_TOOL_TYPE, ResponsesCredentialRefresh,
+    ResponsesRetrievalAuthorization, ResponsesRetrievalDispatch, ResponsesRetrievalError,
+    ResponsesRetrievalErrorKind, ResponsesRetrievalFlavor, ResponsesRetrievalGuard,
+    ResponsesRetrievalLimits, ResponsesRetrievalOutcome, ResponsesRetrievalQuery,
+    ResponsesRetrievalRequest, ResponsesRetrievalSource, ResponsesRetrievalTransport,
+    ResponsesRetrievalUsage, classify_responses_retrieval_body, lowest_responses_effort,
+    run_responses_json_side_request, run_responses_retrieval,
 };
 pub use stream_host::{
     ResponsesEventPolicy, ResponsesFamilySseDecoder, ResponsesFamilyStreamError,

@@ -197,6 +197,10 @@ impl ResponsesImageTransport for CodexImageRequest<'_> {
             Ok(ResponsesRetrievalDispatch::new(request).with_guard(guard))
         })
     }
+
+    fn credential_rejected(&self) -> plakous_responses_dialect::ResponsesCredentialRefresh<'_> {
+        Box::pin(self.images.model.codex_side_request_rejected())
+    }
 }
 
 #[cfg(feature = "native-auth")]

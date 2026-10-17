@@ -126,6 +126,14 @@ impl ResponsesImageTransport for XaiImages {
             })
         })
     }
+
+    fn credential_rejected(&self) -> plakous_responses_dialect::ResponsesCredentialRefresh<'_> {
+        match &self.executor {
+            Executor::Api(_) => Box::pin(std::future::ready(false)),
+            #[cfg(feature = "native-auth")]
+            Executor::SuperGrok(model) => Box::pin(model.side_request_rejected()),
+        }
+    }
 }
 
 impl fmt::Debug for XaiImages {

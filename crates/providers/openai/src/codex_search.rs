@@ -24,8 +24,9 @@ use plakous_responses_dialect::{
 };
 #[cfg(feature = "native-auth")]
 use plakous_responses_dialect::{
-    ResponsesRetrievalAuthorization, ResponsesRetrievalDispatch, ResponsesRetrievalLimits,
-    ResponsesRetrievalQuery, ResponsesRetrievalTransport, run_responses_json_side_request,
+    ResponsesCredentialRefresh, ResponsesRetrievalAuthorization, ResponsesRetrievalDispatch,
+    ResponsesRetrievalLimits, ResponsesRetrievalQuery, ResponsesRetrievalTransport,
+    run_responses_json_side_request,
 };
 use serde_json::{Value, json};
 
@@ -347,6 +348,10 @@ impl ResponsesRetrievalTransport for CodexSideRequest<'_> {
                 })?;
             Ok(ResponsesRetrievalDispatch::new(request).with_guard(guard))
         })
+    }
+
+    fn credential_rejected(&self) -> ResponsesCredentialRefresh<'_> {
+        Box::pin(self.retrieval.model.codex_side_request_rejected())
     }
 }
 

@@ -781,6 +781,18 @@ mod shared_host_model {
             crate::native_auth::supergrok_side_request(&target.execution, path, accept, body).await
         }
 
+        /// One claimed refresh of the session's login after a side
+        /// request's HTTP 401, as a model round gets; `true` when the grant
+        /// was renewed.
+        pub(crate) async fn side_request_rejected(&self) -> bool {
+            let Ok(target) = self.current_target() else {
+                return false;
+            };
+            supergrok_credential_rejected(&target.execution)
+                .await
+                .is_ok()
+        }
+
         fn current_target(
             &self,
         ) -> Result<Arc<SuperGrokDispatchTarget>, RuntimeModelAuthorityError> {
