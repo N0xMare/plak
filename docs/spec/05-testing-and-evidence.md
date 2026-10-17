@@ -439,216 +439,103 @@ require the release procedure, not a debug gate.
 
 ## 1. Gate layers
 
-The authoritative gate is `scripts/dev-check.sh`, in four tiers plus explicit
-step-group and change-scoped modes. It is Cargo tooling plus tests plus thin
-structure checks. Process paperwork -- requirement digests, provenance ledgers,
-documentation link matrices -- is not part of it.
+The authoritative gate is `scripts/dev-check.sh`, in four tiers plus an
+explicit step-group mode. It is Cargo tooling plus tests plus thin structure
+checks. Process paperwork -- requirement digests, provenance ledgers,
+documentation link matrices, timing ledgers, source-size reports -- is not part
+of it.
 
 ```text
-scripts/dev-check.sh --fast [PKG...]   # just fast: iteration, no serial budgets
-scripts/dev-check.sh                   # just check: unconditional pre-commit gate
+scripts/dev-check.sh --fast [PKG...]   # just fast: iteration, no serial lanes
+scripts/dev-check.sh                   # just check: pre-commit gate (Linux)
 scripts/dev-check.sh --platform        # just platform: per-install platform evidence
-scripts/dev-check.sh --full            # just full: all groups, gate changes and publication
-scripts/dev-check.sh --steps GROUP,... # just steps GROUP,...: independent group lanes
-scripts/dev-check.sh --changed [BASE]  # just changed [BASE]: conservative plan from a checked tree
+scripts/dev-check.sh --full            # just full: every group; gate changes, installs, publication
+scripts/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these groups (independent lanes)
 ```
-
-| Tier | Groups |
-| --- | --- |
-| `--fast` | `static`; `tests-parallel` scoped to package reverse dependencies, if any |
-| default | `static`, `builds`, `tests-parallel`, `tests-serial`, `contracts`, `tooling` |
-| `--platform` | `static` (fmt/clippy only), `builds`, `tests-parallel`, `tests-serial`, `tests-durability` |
-| `--full` | All groups in the canonical order below |
-
-`static` runs fmt, workspace structure, static feature checks, then workspace
-clippy. Check, full and explicit static groups run both Python
-checkers unconditionally, immediately after fmt. Platform runs only fmt and
-cfg-specific clippy in static, without either structure checker. Fast and changed select them
-by their actual inputs, and print the reason for each skipped checker:
-
-| Checker | Inputs in fast/changed |
-| --- | --- |
-| `check_workspace.py` | Any Rust source, Cargo.toml/Cargo.lock, tests/fixtures/** (including inventory and .cargo/config.toml), gate inputs; unknown paths or unresolved readers widen to it |
-| `check_features.py` (static) | Any Rust source, Cargo.toml, Cargo.lock, .cargo/**, rust-toolchain*, deny.toml, gate inputs; unknown paths or unresolved readers widen to it |
-
-Absent unresolved readers, docs-only and ordinary tooling-only diffs skip both.
-Rust-only, manifest, gate-input and unknown diffs run both. Fmt and
-workspace clippy remain mandatory regardless of diff size. Public compile contracts are cheap warm and run
-in check and full, never platform; changed selects them when the rules require them.
-Contracts isolate fixture feature graphs from workspace artifacts in a persistent
-`.public-contracts/<target-dir-name>/<target-triple>` directory beside
-`CARGO_TARGET_DIR`, defaulting to the checkout's `target` as the base.
-The triple is `CARGO_BUILD_TARGET`, or rustc's host triple when unset.
-The sibling placement avoids workspace artifact sweeps (which also descend
-into nested target directories); the gitignore rule preserves it across lane
-checkout cleanup. Switching workspace target triples does not evict another
-triple's contracts. No diagnostic pin is relaxed to keep builds warm.
-`PLAK_PUBLIC_CONTRACTS_DIR` overrides the cache root (the triple is still appended).
-The pinned musl container sets it to `/qual/target/public-contracts-<image-tag>`
-under the persistent target mount, not an ephemeral container sibling, so each
-image/triple pair remains warm across container runs.
-
-The canonical `GROUPS` list in `tools/checks/gate_plan.py` drives full and explicit
-groups. Ordered `PLATFORM_GROUPS` and `CHECK_GROUPS` derive from it. These tiers
-are not nested: check is the Linux pre-commit gate, with structure checkers,
-feature builds, the parallel and serial budget lanes, contracts and tooling, but no
-durability lane; platform is the per-install, per-platform gate, with
-fmt/clippy, feature builds, both budget lanes and the durability lane, but no
-platform-independent checks. Full is their integrated union plus the remaining
-full groups. Tooling tests assert that platform and check are subsets of full,
-platform excludes both checkers and contracts and includes the durability lane,
-check includes both checkers, feature builds, the parallel and serial lanes
-and contracts and tooling and excludes the durability lane, and full equals the selection of every group, with
-identical invocations and order. `--steps` runs exactly its named groups, in
-canonical order, rejects unknown/empty groups, and does not imply static or
-other groups. Independent runners must use separate checkout/target/temp
-roots; test groups retain their real Monty-worker prerequisite.
 
 | Group (canonical order) | Coverage |
 | --- | --- |
-| `static` | fmt, workspace structure, static feature closures/security hashes, workspace clippy |
+| `static` | fmt, then `check_workspace.py` and `check_features.py` (not in platform), then workspace clippy |
 | `builds` | Workspace default-feature build; Plak maintainer-feature build. Both deny rustc warnings |
 | `rustdoc` | Workspace all-features rustdoc, denied warnings |
-| `tests-parallel` | Parallel offline lane, excluding the budget and durability lanes |
-| `tests-serial` | Serial offline budget lane, one test thread |
-| `tests-durability` | Serial crash-matrix and sqlite SIGKILL campaign lane, one test thread. Platform and full only; not check |
+| `tests-parallel` | nextest profile `offline`: everything but the serial and durability lanes |
+| `tests-serial` | nextest profile `serial`: wall-clock budgets, one test thread |
+| `tests-durability` | nextest profile `durability`: crash matrices and the sqlite SIGKILL campaign, one test thread |
 | `contracts` | Positive/negative public compile contracts |
-| `tooling` | Checker unit tests, including dev-check and gate-plan self-tests |
-| `perf` | Offline performance smoke, informational |
-| `loc` | Source-size report, informational |
+| `tooling` | Python tooling self-tests |
 
-Each group prints elapsed wall-clock seconds and appends one JSON object to
-`.gate-times.jsonl` beside `CARGO_TARGET_DIR` (the checkout root when that
-directory is `target/`). The file is gitignored and sits outside the workspace
-artifact sweep, the same placement idea as the public-contracts cache. A line
-records the git commit, the tier (`check`, `platform`, `full`, `fast`,
-`changed` or `steps`), the group, elapsed seconds, the group's exit status,
-the platform triple (`CARGO_BUILD_TARGET`, otherwise rustc's host triple; never
-a machine name), and `warm` or `cold` according to whether the target directory
-existed before the run. After the run, each successful group is compared with
-the median of its last 10 successful samples for that same triple. Fewer than
-3 successful samples, or a median of zero, produces no comparison. A group
-that took more than twice that median prints a warning, for example
-`WARNING: contracts 277 s vs median 5 s: cold cache or regression`. The warning
-is informational and never fails the gate.
+| Tier | Groups |
+| --- | --- |
+| `--fast` | `static`; `tests-parallel` scoped to the touched packages' reverse dependencies, if any |
+| default (check) | `static`, `builds`, `tests-parallel`, `tests-serial`, `contracts`, `tooling` |
+| `--platform` | `static` (fmt/clippy only), `builds`, `tests-parallel`, `tests-serial`, `tests-durability` |
+| `--full` | Every group |
 
-After valid planning and prerequisite checks, every selected group runs even
-if an earlier group fails. The static group also runs every selected step
-(fmt, each enabled structure checker, clippy), retaining and summarizing all
-failures. Other groups may stop internally on a failed prerequisite or command;
-later groups still run. Timing rows retain each group's exit status. The final
-summary names all failed groups, exits with the first failed group's status,
-and never reports success when any group failed. Invalid plans and missing
-gate prerequisites still stop before group execution.
+The tiers are not nested. Check is the Linux pre-commit gate: structure
+checkers, feature builds, the parallel and serial lanes, contracts and tooling,
+but no durability lane. Platform is the per-install, per-platform gate:
+fmt/clippy, feature builds and all three lanes, without the
+platform-independent structure checkers and contracts. Full is their union
+plus rustdoc. `--steps` runs exactly its named groups, in canonical order,
+rejects unknown or empty groups, and implies no other group; test groups still
+prepare their real Monty-worker prerequisite. Independent runners must use
+separate checkout, target and temporary roots. Each group prints a
+`== group: <name> ==` banner and a `== time: <name> <seconds> s ==` line.
 
-Moving structure checks earlier
-does not remove any full-tier coverage; builds, rustdoc, the test lanes,
-contracts, tooling, perf and LOC keep their relative order.
+After argument validation and the prerequisite check, every selected group runs
+even if an earlier group fails. The static group also runs every step (fmt,
+each structure checker, clippy) and summarizes all failures. Other groups may
+stop internally on a failed command; later groups still run. The final summary
+names all failed groups, exits with the first failed group's status, and never
+reports success when any group failed.
 
 `--fast` maps tracked working-tree changes against HEAD plus untracked,
-non-ignored files to their longest-prefix package owner. Named packages replace
-the diff. Root Cargo inputs select every package. Its parallel lane uses
-`rdeps(=<pkg>)`; an empty selection passes. Fast deliberately leaves serial
-budgets to changed/check, and is not complete pre-commit evidence.
+non-ignored files (and ignored `**/proptest-regressions/**` seeds) to their
+longest-prefix package owner with `tools/checks/changed_packages.py`. Named
+packages replace the diff. A root Cargo input (manifest, lockfile, toolchain,
+lint, format or nextest config, `.cargo/`) selects every package. Its parallel
+lane passes `-E 'rdeps(=<pkg>) | ...'`, which nextest intersects with the
+profile's own filter; an empty selection passes, and no touched package runs
+only static. Fast leaves the serial lanes to check and is not pre-commit
+evidence.
 
-`--changed [BASE]` uses the same diff source against BASE,
-including staged, unstaged, deleted and untracked non-ignored paths.
-Gitignored files present under `**/proptest-regressions/**` are also inputs of
-their owning packages. Untracked `.rs` files are covered through the diff,
-even though the reader scan inventories tracked sources only. It prints
-the BASE used. BASE must already have passed `just check` on this toolchain;
-change-scoped verification cannot establish the correctness of that baseline.
-The default is `git merge-base HEAD main`, using HEAD~ when on branch main
-itself. Missing main or a merge-base equal to HEAD on another branch/detached
-checkout fails with a request for an explicit BASE, as does branch main when
-HEAD~ does not exist (a single-commit history). Forked runs pass an explicit
-BASE (for example their checked fork point), rather than relying on the host's
-main. An empty diff prints a loud warning without failing. It prints
-the groups, package filter and the rule/path behind every selected group,
-then runs them. All matching rules union. The static group (fmt/clippy plus input-selected checkers) is mandatory even
-for an empty diff; a non-empty diff never yields an empty plan. When unsure, run
-more, never less: every unmatched path widens to the entire check tier and
-is named in the printed reason. Invalid diffs/planner failures stop the gate.
-
-| Input rule | Required coverage beyond static |
-| --- | --- |
-| Any Rust source or Cargo manifest | Public compile contracts over the whole facade closure |
-| Package Rust source (including test-only source) | Default-feature and maintainer-feature builds; both lanes filtered to that package and its reverse dependencies |
-| Any file in a durability-owning package (`plak`, `plakous`, `plakous-store`, `plakous-offline-crash-harness`) | `tests-durability` as well, with that package and its reverse dependencies. A package that does not own one of those tests does not select the group, including when an artifact consumer does |
-| Any non-Rust file inside a package | That package and reverse dependencies in both lanes; API coverage is purely additive |
-| Root Cargo.toml/Cargo.lock, any crate Cargo.toml, .cargo/, rust-toolchain*, .config/nextest.toml, deny.toml, lint/format config | Whole workspace in both lanes, plus builds |
-| Facade, supported core API crates, tests/fixtures/**, public compile checker | Contracts and rustdoc; package Rust rules also apply |
-| Gate inputs: scripts/dev-check.sh, scripts/dev-tools.sh, Justfile, .config/nextest.toml; tools/checks/{gate_plan,changed_packages,budget_filterset,check_workspace,check_features,plakous_policy,check_public_compile}.py | Whole check tier (including tooling) and both structure checkers; planner self-edits cannot rely on weakened package rules |
-| Other scripts/**, tools/**, tests/tooling/** | Tooling |
-| docs/**, configs/** and other referenced inputs | Discover readers at plan time; their packages and reverse dependencies in both lanes; no-reader docs select only static if discovery has no unresolved inputs |
-| crates/harness/prompts/** (sources or pins) | Default-feature and maintainer-feature builds; owning package and reverse dependencies in both lanes |
-| Any planned package in the Python worker / JavaScript runtime workspace dependency closure | Also select artifact consumers: Python evaluator, hosted and Plak / JavaScript evaluator and Plak, respectively, with their reverse dependencies; closure includes optional, target-specific and dev dependencies from Cargo metadata |
-| Anything unmatched | Whole check tier, both structure checkers, with unmatched path in the reason |
-
-The planner scans tracked Rust files for `include_str!`, `include_bytes!`,
-`#[path]` and string literals resolving to files or directories outside their
-own package (including docs/configs and indirect path helpers), excluding
-sources under package benches/ and examples/ (nextest does not run them;
-workspace clippy still compiles them). Char and byte-char literals are masked
-without hiding subsequent embedded inputs. Non-embedded literals resolving only
-to the repository root (`.` or `alias/..`) are not repository readers; embedded
-root targets remain unresolved. Interpolated prose (whitespace or sentence
-punctuation in the literal portions), URLs and serialized data are not path
-templates. A template with a literal leading directory records that directory
-when it exists in the checkout or is under docs/configs (including deleted
-inputs). A nonexistent prefix outside docs/configs is a runtime path, not a
-repository reader. A dynamic root with literal path segments, or a template
-prefix resolving to the checkout root, remains unresolved. The planner carries
-an exact `(source file, literal)` inventory of reviewed non-reader runtime IDs,
-URLs and private-home paths, with a rationale for each; tests reject stale
-entries and prevent the exemptions from applying to embedded inputs or other
-sources/literals. The current tracked-source unresolved residue is empty and
-ordinary package diffs stay scoped. All remaining uncertainty and unsupported/
-unresolved embedded targets widen to the whole check tier and both checkers; Cargo-generated
-OUT_DIR targets use their tracked build inputs. This intentionally favors
-false positives over missed inputs and can widen otherwise no-reader docs.
-Completeness tests independently inventory existing quoted docs/config paths
-in tracked non-bench/non-example Rust sources, plus known executable-discovery
-markers and their consumers for every package in each artifact's metadata
-dependency closure. Scratch-source tests cover parsing escapes, root-only
-literals, prose, directory templates, exact exemptions and uncertainty; real-tree
-regressions pin the unresolved inventory and package/core/doc-only scopes;
-these are not a proof of arbitrary dynamic Rust reader discovery.
-The feature checker reads workspace manifests and package Rust sources,
-including test targets, to require locally declared UUID generation features.
-Rust-source changes therefore select both structure checkers. Fixture
-inventories and fixture .cargo/config.toml are not feature-checker inputs;
-fixture manifests still conservatively select it.
-A scoped serial lane
-may be empty and passes; an unscoped serial lane still must contain tests.
-The durability lane follows the same empty-scope rule.
+Public compile contracts isolate fixture feature graphs from workspace
+artifacts in a persistent `.public-contracts/<target-dir-name>/<target-triple>`
+directory beside `CARGO_TARGET_DIR`, defaulting to the checkout's `target` as
+the base. The triple is `CARGO_BUILD_TARGET`, or rustc's host triple when
+unset. The sibling placement avoids workspace artifact sweeps (which also
+descend into nested target directories); the gitignore rule preserves it across
+lane checkout cleanup. No diagnostic pin is relaxed to keep builds warm.
+`PLAK_PUBLIC_CONTRACTS_DIR` overrides the cache root (the triple is still
+appended). The pinned musl container sets it to
+`/qual/target/public-contracts-<image-tag>` under the persistent target mount,
+so each image/triple pair remains warm across container runs.
 
 Every tier's main compilation and lint use `--workspace --all-features`:
 Cargo resolves features per selected package set, so a `-p` subset would build
 a second copy of the dependency graph, while the whole workspace rebuilds only
-the touched packages and their dependents. The package/rdeps plan narrows both
-test lanes, not Cargo feature resolution. The check/platform/full tiers and cargo
-input, Rust and prompt plans additionally build the workspace's default features and Plak's
-maintainer feature set; an all-features build cannot prove those smaller
-closures compile and link, so a feature-gated slip fails the per-change gate.
-Those two builds deny rustc warnings. `-D warnings` is appended to the rustflags
-Cargo will actually pass (`CARGO_TARGET_<triple>_RUSTFLAGS` when that variable
-is set, otherwise `RUSTFLAGS`) and is not exported to later steps, so the
-all-features test artifacts are not rebuilt. Registry dependencies stay
-`--cap-lints allow`. A warning that exists only in a default or maintainer
-closure, and is hidden from `--all-features` clippy, fails this group.
+the touched packages and their dependents. The fast scope narrows the parallel
+lane, not Cargo feature resolution. The `builds` group additionally builds the
+workspace's default features and Plak's maintainer feature set; an
+all-features build cannot prove those smaller closures compile and link, so a
+feature-gated slip fails the gate. Those two builds deny rustc warnings.
+`-D warnings` is appended to the rustflags Cargo will actually pass
+(`CARGO_TARGET_<triple>_RUSTFLAGS` when that variable is set, otherwise
+`RUSTFLAGS`) and is not exported to later steps, so the all-features test
+artifacts are not rebuilt. Registry dependencies stay `--cap-lints allow`. A
+warning that exists only in a default or maintainer closure, and is hidden from
+`--all-features` clippy, fails this group.
 
-Use changed for minimal sufficient change verification, check for
-unconditional whole-workspace evidence, and full when changing the gate itself
-or at batch/publication boundaries. Platform-independent structure checks and
-public contracts and Python tooling run once on Linux in check/full; rustdoc
-runs once on Linux in full. Each install additionally
-requires `just platform` on Apple Silicon macOS and `just musl-native` on Linux
-x86_64. The native musl lane defaults to `--platform`; `just musl-check` runs
-the full tier in the pinned offline musl container before publication (chapter 06 §6.1). Both musl scripts set `CARGO_BUILD_TARGET` to
-`x86_64-unknown-linux-musl`; the gate passes an explicit `--target` to every
-compile and nextest invocation, and subprocess Cargo checks inherit that
-target. A GNU-host gate does not qualify the supported musl platform.
+Platform-independent structure checks, public contracts and Python tooling run
+once on Linux in check/full; rustdoc runs once on Linux in full. Each install
+additionally requires `just platform` on Apple Silicon macOS and
+`just musl-native` on Linux x86_64. The native musl lane defaults to
+`--platform`; `just musl-check` runs the full tier in the pinned offline musl
+container before publication (chapter 06 §6.1). Both musl scripts set
+`CARGO_BUILD_TARGET` to `x86_64-unknown-linux-musl`; the gate passes an
+explicit `--target` to every compile and nextest invocation, and subprocess
+Cargo checks inherit that target. A GNU-host gate does not qualify the
+supported musl platform.
 
 Every test entry point (`dev-check.sh`, `just test`, `just coverage`,
 `perf-smoke.sh` and `crash-sweep.py`) exports `TMPDIR` from one selector,
@@ -688,13 +575,11 @@ export it to an absolute scratch directory first, the same way as `TMPDIR`.
 | Lints | `cargo clippy --locked --workspace --all-features --all-targets -- -D warnings` | Every target of every package, all features on, no warnings. The workspace lint table denies `missing_docs`, `unwrap_used`, `expect_used`, `dbg_macro`, `todo`, `unimplemented`, and broken intra-doc links, and forbids `unsafe_code` |
 | Default feature builds | `cargo build --locked --workspace --lib --bins` and `cargo build --locked -p plak --features maintainer --bins`, each with `-D warnings` on the rustflags Cargo passes | Check, platform and full tiers, after clippy: default-feature libraries and binaries compile and link, as does the maintainer installer's Plak feature set, without test hooks or all-features unification hiding missing dependencies. Rustc warnings in those closures are errors; clippy remains the `--all-features` lint |
 | Docs | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked` | Rustdoc builds every package's documentation with its own lints denied: broken intra-doc links, links from public documentation into private items, and bare URLs are errors. Runs after clippy and before the tests |
-| Offline tests | `cargo nextest run --locked --workspace --all-features --profile offline` | The whole workspace's deterministic behavior, with no network and no credentials |
+| Offline tests | `cargo nextest run --locked --workspace --all-features --profile offline`, then `--profile serial` and `--profile durability` with `--test-threads=1` | The whole workspace's deterministic behavior, with no network and no credentials |
 | Public compile contracts | `python3 tools/checks/check_public_compile.py` | Supported inventories still compile from outside, and withheld authority still fails to compile |
 | Workspace structure | `python3 tools/checks/check_workspace.py` | Every package at the path its `[package.metadata.plakous] layer` prescribes, its support class legal for that layer, every dependency edge admitted by the layer matrix or an explicit exception, neutral packages separate from providers, the facade as the only Plakous surface of host/bin sources, the CLI ambient surface, the `plak`/`plakous-js-host` build split, and tracked-file hygiene: no tracked or untracked unignored text file carries an absolute home path outside a short list of generic placeholder users, or a private host or maintainer tool name listed one per line in the optional untracked `docs/local/hygiene-private-names.txt` (absent, that name check is skipped; the tree carries neither the names nor their digests); no per-file exemptions |
 | Feature closures | `python3 tools/checks/check_features.py` | Per-package feature closures (2^n subsets of each package's own public features, never a cross-product; 1026 for the facade), statically, then `cargo check --lib` of the facade with no features and with each public feature alone, warnings denied (spec 06), plus reviewed manifest-surface digests, locally declared UUID generation features, and test-only dependency features (transport fault injection) absent from a default `plak` and present under `test-hooks` |
-| Checker unit tests | `python3 tools/checks/run_tooling_tests.py` | Offline tests over the checker, build, and performance helpers, one `python3 -m unittest` process per `tests/tooling` module, four at a time |
-| Performance smoke | `bash scripts/perf-smoke.sh --check` | Six offline measurements of the real binary against this machine's seed row (§2.7). Informational |
-| Source size | `python3 tools/checks/check_prod_loc.py` | Reports per-scope LOC (L0, below-facade, host, product, test). Informational |
+| Tooling tests | `python3 tools/checks/run_tooling_tests.py` | Offline tests over the gate runner, checkers, build, live-driver and measurement helpers, one `python3 -m unittest` process per `tests/tooling` module, four at a time |
 
 Nested-failure regressions cover exact successful string delivery, caught and
 uncaught JavaScript rejection, `Promise.allSettled`, retained earlier output,
@@ -988,6 +873,7 @@ correctness.
 | `cargo deny check advisories bans licenses sources` (`just deny`) | Dependencies change. It needs advisory acquisition, so it is not offline |
 | `cargo check --workspace --all-features --all-targets --locked` as an MSRV probe | The MSRV is the toolchain pin, so the ordinary build already is the MSRV build |
 | `python3 tools/checks/check_prod_loc.py` (`just density`) | A density question is live. It always exits 0 |
+| `bash scripts/perf-smoke.sh --check` (`just perf-smoke`) | A performance question is live. Six offline measurements of the real binary against this machine's seed row (§2.7); informational |
 | `cargo bench` for `perf_core`, `perf_project`, `perf_store`, and `tools/perf/perf_build.py` | A performance claim needs numbers. There is no portable numeric baseline; every claim carries its emitted host, feature, and toolchain metadata |
 | `cargo nextest run -p plakous-offline-crash-harness` | Process-crash matrices are wanted on demand. Unix only |
 | `just native-compare-prompts` | Comparing Plak's prompts against installed vendor CLIs using isolated synthetic credentials and local mock responses |
@@ -1000,8 +886,8 @@ Local verification is the authoritative gate for every layer above; chapter 06
 
 ### 1.3 Source-size reporting
 
-`just density` and the daily gate run `tools/checks/check_prod_loc.py` as an
-informational source-size report. There is no historical growth baseline,
+`just density` runs `tools/checks/check_prod_loc.py` as an informational
+source-size report outside every gate tier. There is no historical growth baseline,
 strict density mode, or justification-file requirement.
 
 `check_prod_loc.py` derives its scopes from each package's `layer`: `l0` is
@@ -1018,12 +904,6 @@ still counts. Registered external test sources and test-file conventions are
 excluded separately. Other conditional code (including platform branches,
 `test-support`, and test-only instrumentation outside these modules) remains
 conservatively counted. This is a source-size metric, not compiled reachability.
-`python3 tools/checks/inventory_large_rust.py` emits a planning inventory of tracked
-Rust sources under `crates/` and `bin/`: physical/test/candidate counts,
-responsibility totals, remaining conditional sites, source/data inclusions,
-declaration locations, and recent file touches. It does not expand generated
-build output or resolve imports into a dependency graph. Accounting corrections
-must be reported separately from production-code reductions.
 
 ## 2. Offline test conventions
 
@@ -1105,26 +985,29 @@ evidence.
 
 ### 2.2 nextest profiles
 
-`.config/nextest.toml` defines the store directory, two test groups, and the
-profiles. There is exactly one profile beyond `default`: `offline`.
+`.config/nextest.toml` defines the store directory, two test groups, and four
+profiles. Nextest layers every named profile over `default`, so the three lane
+profiles inherit its settings, test groups and overrides and add only their
+membership (`default-filter`), thread count and slow timeout.
 
 | Profile | Membership | Use |
 | --- | --- | --- |
-| `default` | Everything nextest selects | Ad-hoc single-package runs |
-| `offline` | Everything nextest selects, with a 60-second slow timeout | The development bar. `just test`, `scripts/dev-check.sh` |
+| `default` | Everything nextest selects | Ad-hoc runs |
+| `offline` | Everything except the `serial` and `durability` members | The parallel lane: `tests-parallel`, `just fast`, `just test` |
+| `serial` | Wall-clock budget tests (§2.3) | The serial lane: `tests-serial`, `just test` |
+| `durability` | Crash matrices and the sqlite SIGKILL campaign (§2.3) | The durability lane: `tests-durability`, `just test` |
 
-`offline` is hermetic: no test in the workspace reaches a network or reads a
-credential. The gate and `just test` pass `-E` with the lane split of
-§2.3. `just check` runs the parallel lane, the serial budget lane and the
-Python tooling self-tests (including the gate planner and lane inventory); `just test`, platform and full also run the durability lane.
-
-`default` and `offline` carry identical overrides, so a test behaves the same
-whichever one selects it. `fail-fast` is off in both. The workspace slow timeout
-is 60 seconds with termination after the second period; the budget lane raises
-its own to 240 seconds (§2.3).
+Every profile is hermetic: no test in the workspace reaches a network or reads a
+credential. `just check` runs `offline` and `serial`; `just test`, platform and
+full also run `durability`. A `-E` filterset on the command line narrows a
+profile's membership (nextest intersects them), so
+`--profile offline -E 'rdeps(=<pkg>)'` runs a package's parallel-lane tests and
+never its serial ones. `fail-fast` is off. The workspace slow timeout is 60
+seconds with termination after the second period; `serial` and `durability`
+raise theirs to 240 seconds.
 
 The `default` profile sets `leak-timeout = { period = "5s", result = "fail" }`;
-`offline` inherits it, as do ad-hoc nextest runs using `default`.
+the lane profiles inherit it.
 After a test process exits, nextest waits up to five seconds to observe EOF on
 its captured stdout and stderr, and fails if EOF has not been observed. A
 shorter window false-failed in-process tests whenever the runner stalled under
@@ -1167,11 +1050,13 @@ them relaxes an assertion to buy parallelism.
   `integration` binary, selected by package, binary and anchored module name,
   not the other modules sharing that binary.
 
-**The serial budget lane** is one override block, repeated byte-identically in
-`default` and `offline`, named BUDGET LANE in `.config/nextest.toml`. It carries
-`threads-required = "num-test-threads"` and a 240-second slow timeout with
-termination after the second period. Its members are the tests whose subject is
-a wall-clock measurement rather than a scheduler outcome:
+**The serial lane** is the `serial` profile: one test thread and a 240-second
+slow timeout with termination after the second period. Its `default-filter`
+lists the tests whose subject is a wall-clock measurement rather than a scheduler
+outcome. The tables below group the members by kind; `.config/nextest.toml` is
+the exact list.
+
+
 
 | Kind | Predicates |
 | --- | --- |
@@ -1209,63 +1094,45 @@ on the login completion, and `??` turns an elapsed timeout into a failure. The
 fixed callback port is already serialized by the test's own gate and by
 `native-auth-serial`, so the port is not the race — the two seconds are.
 
-Reserving the pool is not enough on a loaded machine: a reservation stops other
-*tests* from running alongside, but nothing stops the reservations from
-interleaving with each other, and each of these is then measured against
-whatever the machine was doing. So the gate splits the suite instead.
+Reserving the whole test pool inside one parallel run is not enough on a loaded
+machine: it stops other tests from running alongside, but each reservation is
+then measured against whatever the machine was doing, and reservations
+interleave with each other. So the gate runs these members in their own lane.
 
-**The durability lane** is a second override block, also repeated byte-identically
-in `default` and `offline`, named DURABILITY LANE. It carries the same
-`threads-required = "num-test-threads"` and 240-second slow timeout. Its members
-are crash matrices and the sqlite SIGKILL commit campaign. They are slow because
-they relaunch a process and fsync through a crash cut, and they depend on OS
-signal and fsync behavior, so they run per platform (`just platform` and
-`just full`), not in `just check`. `just changed` selects `tests-durability` when
-a changed path is in a package that owns one of these tests (`plak`, `plakous`,
-`plakous-store`, `plakous-offline-crash-harness`), scoped to that package and
-its reverse dependencies.
+**The durability lane** is the `durability` profile, with the same one thread
+and 240-second slow timeout. Its members are crash matrices and the sqlite
+SIGKILL commit campaign. They are slow because they relaunch a process and
+fsync through a crash cut, and they depend on OS signal and fsync behavior, so
+they run per platform (`just platform` and `just full`), not in `just check`.
 
 | Kind | Predicates |
 | --- | --- |
 | Indexed crash-point sweep | `crash_sweep::durability_subset` — `final_only`, `direct_tool_then_final`, `promoted_background_job`, and `sealed_family_artifacts`, every indexed commit, sixteen workers |
 | Real SIGKILL relaunch | `actual_host_sigkill_relaunch_matrix_uses_real_handlers_and_reconcilers` |
-| GC after a compaction cut | `gc_after_a_compaction_cut_before_projection_skips_the_pending_workflow` |
-| Product projection SIGKILL matrix | `plak_product_projection_sigkill_matrix_converges_from_the_feed` |
-| Harness direct-route SIGKILL matrix | `direct_route_cuts_have_one_deterministic_reopen_contract_each` |
+| GC after a compaction cut | `gc_after_a_compaction_cut_before_projection_prunes_at_the_compacted_head`, `sigkill_gc_cuts_preserve_queue_counters_and_oracle` |
+| Runtime commit cuts | `every_runtime_commit_cut_reopens_without_redispatch` |
 | Crash-matrix completion control | `complete_run_is_one_exact_new_state_and_probe_is_inert` — the same harness child and evidence probe, without SIGKILL; the bounded child lifetime is the load sensitivity |
 | SQLite paid-compaction SIGKILL | `sqlite_paid_compaction_sigkill_reopens_exactly_once`, `sqlite_no_locator_paid_compaction_sigkill_is_never_redispatched` |
 | SQLite SIGKILL commit campaign | `bounded_async_sigkill_campaign_accepts_only_exact_old_or_new_commit` |
 
-`durability::` stays in the budget lane, as that lane's table says.
+`durability::` stays in the serial lane, as that lane's table says.
 `unsupported_runtime_schemas_refuse_without_changing_files` and
 `real_binary_refuses_unsupported_runtime_without_moving_state` are not members
 of either lane; they run in the parallel lane.
 
-**Three filtersets.** `scripts/dev-check.sh` and `just test` never restate the
-lists. `tools/checks/budget_filterset.py` reads both overrides (`--durability`
-is the durability filter, `--exclude` is `not (<BUDGET> | <DURABILITY>)`,
-`--names` is the budget names).
-
-1. Parallel: `-E 'not (<BUDGET> | <DURABILITY>)'` at normal parallelism.
-   `--fast` runs only this invocation, narrowed as §1 describes.
-2. Budget: `-E '<BUDGET>'` with `--test-threads=1`. Check, coverage, platform and full run it.
-3. Durability: `-E '<DURABILITY>'` with `--test-threads=1`. `just test`, platform and full run it. Check and coverage do not.
-
-The three expressions partition the suite, so a run that includes all three
-executes every test once. Check deliberately skips the durability expression.
-Both overrides keep `threads-required = "num-test-threads"`, so an ad-hoc
-`cargo nextest run` that does not split the suite still reserves the pool for
-either family.
-
-`tests/tooling/test_budget_filterset.py`, part of the structure checks, proves
-that the three invocations partition the suite, that the budget lane union the
-durability lane equals the pinned serial inventory (the previous serial set
-plus enrolled tests such as `crash_sweep::durability_subset`), that neither lane is restated
-inline, that `default` and `offline` carry both lanes, that the PTY module
-predicate stays in the budget lane, and that every predicate resolves to a
-definition under `crates/`, `bin/` or `tests/` — an `fn <name>` for a bare name,
-a `mod <name>` for a `<module>::` predicate, or the named source module's
-`fn <name>` for a qualified `<module>::<name>` predicate.
+**One partition.** The `offline` profile's filter is
+`not (<serial members> | <durability members>)`, so the three profiles
+partition the suite and a run of all three executes every test once. A new
+serial test goes into the `serial` or `durability` filter and into the `offline`
+exclusion. `tests/tooling/test_nextest_lanes.py` proves that the exclusion lists
+exactly the two lanes' predicates in order, that the lanes are disjoint, that
+both lane profiles are single-threaded with the 240-second timeout, that no
+profile carries `retries`, and that every predicate resolves to a definition
+under `crates/`, `bin/` or `tests/` -- an `fn <name>` for a bare name, a
+`mod <name>` for a `<module>::` predicate, or the named source module's
+`fn <name>` for a qualified `<module>::<name>` predicate. The gate passes
+`--test-threads=1` on the command line as well, because `NEXTEST_TEST_THREADS`
+in the environment would otherwise override the profile.
 
 The lane makes
 `completed_terminal_outcome_remains_authoritative_when_exit_was_requested` quiet,
@@ -2160,7 +2027,7 @@ successfully on an idle host, so a seed never records a contended number as the
 thing to beat.
 
 The recipe takes `plak` from `cargo test --no-run --workspace --all-features`,
-the gate's own test build, so it reuses that build, and copies the executable aside before measuring, because
+the gate's test build, so it reuses that build, and copies the executable aside before measuring, because
 the configured Cargo target's `debug/plak` is shared and a concurrent build
 without `test-hooks` would otherwise replace the binary under measurement.
 
@@ -2170,12 +2037,10 @@ BSD `time -l` reports bytes, GNU `time -f %M` reports kilobytes, and some images
 carry neither, so the recipe probes for a usable one. Assuming BSD made a Linux
 run abort and the gate call it a slowdown.
 
-`just full` runs the whole recipe informationally and never fails on it. A
-measurement on a shared machine is evidence, not a gate: the same rule §2.3's
-budget lane follows, and the reason the named render benchmark asserts nothing
-itself. The restricted comparison applies the same caution inside the recipe, so
-a checker run outside `just full` also refuses to call a swing in either noisy
-metric a regression.
+The smoke is in no gate tier; `just perf-smoke` runs it on demand. A
+measurement on a shared machine is evidence, not a gate, which is also why the
+named render benchmark asserts nothing itself. The restricted comparison refuses
+to call a swing in either noisy metric a regression.
 
 **Benchmark workloads.** Three deterministic offline `cargo bench` executables
 are outside every gate (§1.2). `perf_core` (`-p plakous`) times
@@ -2963,6 +2828,16 @@ the environmental assumption, never to weaken the assertion.
 | TERM trap deferred behind a foreground child | The Processes journey's shell repeatedly spawns a sleep as long as its TERM allowance | The fixture blocks in a builtin read over a separate FIFO, surviving the stop's stdin close without a foreground sleep; the TERM marker and stop oracles remain unchanged |
 | Retries masking a race | A rerun hides a load-dependent interleaving instead of removing it | No nextest profile carries `retries`; a load failure is fixed with a gate, barrier or notification, never a retry or a wider window |
 | Live transient provider failures | HTTP 429 rejection, post-acceptance SSE rate limits, and ambiguous 502 responses are provider outcomes | Live scenarios run zero inference retries; a transient failure is recorded as such and the scenario is re-run deliberately |
+
+A failure in the serial or durability lane, or in any test that spawns real
+binaries, pseudoterminals or process groups, is read in four steps. First rule
+out the machine: a load average near or above the core count comes first.
+Second, run the family alone; these pass in isolation when the tree is sound.
+Third, compare failing names across runs: a regression fails the same test
+every time, while load fails whichever test lost the race. Fourth, if it still
+looks real, revert the change on a scratch copy and rerun under the same load.
+This is not permission to ignore a failure: a family that fails in isolation,
+or fails the same test twice, is a defect.
 
 ## 6. Review focus
 

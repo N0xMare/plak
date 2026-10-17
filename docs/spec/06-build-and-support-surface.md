@@ -519,7 +519,6 @@ mounted read-only, and test scratch uses an executable 16 GiB `/dev/shm`.
 The container runs with the caller's UID/GID, so exported source and target
 artifacts remain caller-owned.
 Cargo artifacts use `/qual/target/artifacts` inside the writable target mount,
-so the timing ledger remains beside them at `/qual/target/.gate-times.jsonl`,
 not under the root-owned `/qual` directory. Cargo-tree structure checks fail
 closed and report the failed command, exit status and Cargo stderr, including
 offline registry resolution errors.
