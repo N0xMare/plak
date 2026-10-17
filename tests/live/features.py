@@ -446,8 +446,9 @@ class Features:
             before(home)
         segment_start = len(self.env.capture_segments)
         log = base / f"{stage}.log"
-        # A profile's root binds its own root template.
-        args = ["--print-session-id"] if profile else [*route.flags(), "--print-session-id"]
+        # A profile's root runs on its own root template's exact tuple.
+        flags = profile_root_flags(profile) if profile else route.flags()
+        args = [*flags, "--print-session-id"]
         if composition:
             args += ["--composition", composition]
         for image in images:
@@ -1017,6 +1018,13 @@ def write_profile_home(home: Path, profile: str) -> None:
     config = re.sub(r"^working_set = .*$", "working_set = " + toml_array(
         f"{profile}-{role}" for role, _ in PROFILE_ROLES[1:]), config, count=1, flags=re.M)
     (home / "config.toml").write_text(config)
+
+
+def profile_root_flags(profile: str) -> list[str]:
+    path = live.ROOT / "configs/providers" / PROFILE_DIRS[profile] / "agents/root-agent.toml"
+    root = tomllib.loads(path.read_text())
+    flags = ["--account", root["account"], "--model", root["model"]]
+    return flags + (["--effort", root["effort"]] if root.get("effort") else [])
 
 
 def profile_model(profile: str, role: str) -> str:
