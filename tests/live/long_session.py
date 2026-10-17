@@ -246,7 +246,8 @@ def _page_bulk(pack: str, line_count: int, limit: int) -> str:
     return (
         f"Read bulk.txt from the first line through eof using only the {tool} tool, "
         f"not the shell. Each call must use limit {limit} and the next offset from "
-        f"the previous result, starting at offset 1. The file is {line_count} lines; "
+        f"the previous result, starting at offset 1. Make one call per response and "
+        f"wait for its result before the next call. The file is {line_count} lines; "
         "do not stop early."
     )
 
