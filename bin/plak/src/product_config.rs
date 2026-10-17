@@ -25,7 +25,7 @@ use plakous_hosted::agent_tree_protocol::{
     Delegation, MAX_DIRECT_CHILDREN, MAX_TREE_ATTEMPTS, MAX_TREE_DEPTH, MAX_TREE_NODES,
     MAX_WORKING_SET, TemplateName, Tier, WorkingSet, WriterMode,
 };
-use plakous_hosted::tool_plan::{OptionalTool, SelectedTool, TemplateToolSelection};
+use plakous_hosted::tool_plan::{NodeToolSelection, SelectedTool, TemplateToolSelection};
 use std::collections::{BTreeMap, BTreeSet};
 
 // Session-binding vocabulary lives in `plakous_hosted::binding`; these names stay for
@@ -251,34 +251,6 @@ const TOOL_SECTIONS_REFERENCE: &str = "
 
 /// The rule a subset refusal ends with.
 const SUBSET_RULE: &str = "a child gets at most its parent's fetch_url, image_gen and mcp tools (web_search, web_fetch and x_search are exempt)";
-
-/// One local-authority tool grant, for the child subset rule.
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum ToolGrant {
-    /// `fetch_url` or `image_gen`.
-    Local(OptionalTool),
-    /// `mcp:<id>` on a server with no allowlist: every tool it lists.
-    McpServer(String),
-    /// One MCP tool of one server.
-    McpTool(String, String),
-}
-
-/// The child's grants its parent does not cover, as template list names.
-fn extra_grants(parent: &BTreeSet<ToolGrant>, child: &BTreeSet<ToolGrant>) -> Vec<String> {
-    child
-        .iter()
-        .filter(|grant| {
-            !parent.contains(*grant)
-                && !matches!(grant, ToolGrant::McpTool(server, _)
-                    if parent.contains(&ToolGrant::McpServer(server.clone())))
-        })
-        .map(|grant| match grant {
-            ToolGrant::Local(tool) => tool.name().to_owned(),
-            ToolGrant::McpServer(server) => format!("mcp:{server}"),
-            ToolGrant::McpTool(server, tool) => format!("mcp:{server}/{tool}"),
-        })
-        .collect()
-}
 
 #[cfg(test)]
 mod tool_sections_tests;
@@ -1769,13 +1741,13 @@ impl ProductConfig {
     fn validate_tool_subsets(&self) -> Result<(), String> {
         let root = self
             .root_template()
-            .map(|template| self.tool_grants(&template.tools))
+            .map(|template| self.node_tools(&template.tools))
             .unwrap_or_default();
         for child in self.working_set.names() {
             let Some(template) = self.templates.get(child.as_str()) else {
                 continue;
             };
-            let extra = extra_grants(&root, &self.tool_grants(&template.tools));
+            let extra = root.tools_beyond(&self.node_tools(&template.tools))?;
             if extra.is_empty() {
                 continue;
             }
@@ -1789,7 +1761,7 @@ impl ProductConfig {
             ));
         }
         for (name, template) in &self.templates {
-            let parent = self.tool_grants(&template.tools);
+            let parent = self.node_tools(&template.tools);
             for child in &template.spawns {
                 if child.as_str() == name {
                     continue;
@@ -1797,7 +1769,7 @@ impl ProductConfig {
                 let Some(record) = self.templates.get(child.as_str()) else {
                     continue;
                 };
-                let extra = extra_grants(&parent, &self.tool_grants(&record.tools));
+                let extra = parent.tools_beyond(&self.node_tools(&record.tools))?;
                 if !extra.is_empty() {
                     return Err(format!(
                         "template {name} spawns {child}, which lists tools {name} lacks: {}; {SUBSET_RULE}",
@@ -1809,41 +1781,15 @@ impl ProductConfig {
         Ok(())
     }
 
-    /// The local-authority grants a tool list resolves to: `fetch_url`,
-    /// `image_gen`, and MCP tools with `mcp:<id>` expanded to the server's
-    /// allowlist (or kept whole when the server allows every listed tool).
-    fn tool_grants(&self, selection: &TemplateToolSelection) -> BTreeSet<ToolGrant> {
-        let mut grants = BTreeSet::new();
-        for entry in selection.entries() {
-            match entry {
-                SelectedTool::Optional(tool) if tool.is_hosted_retrieval() => {}
-                SelectedTool::Optional(tool) => {
-                    grants.insert(ToolGrant::Local(*tool));
-                }
-                SelectedTool::McpServer(server) => {
-                    let server = server.as_str().to_owned();
-                    match self
-                        .tool_sections
-                        .mcp_servers
-                        .get(&server)
-                        .and_then(|config| config.tools.as_ref())
-                    {
-                        Some(allowed) => {
-                            for tool in allowed {
-                                grants.insert(ToolGrant::McpTool(server.clone(), tool.clone()));
-                            }
-                        }
-                        None => {
-                            grants.insert(ToolGrant::McpServer(server));
-                        }
-                    }
-                }
-                SelectedTool::McpTool { server, tool } => {
-                    grants.insert(ToolGrant::McpTool(server.as_str().to_owned(), tool.clone()));
-                }
-            }
+    /// A template's list with the canonical tables it reaches, as an epoch
+    /// would freeze it, so the load-time rule and the spawn-time check are
+    /// one comparison ([`NodeToolSelection::tools_beyond`]).
+    fn node_tools(&self, selection: &TemplateToolSelection) -> NodeToolSelection {
+        NodeToolSelection {
+            selection: selection.clone(),
+            tool_sections: self.tool_sections.reached(selection),
+            mcp_tools: None,
         }
-        grants
     }
 
     /// Preflight every existing body before creating any file. Existing files

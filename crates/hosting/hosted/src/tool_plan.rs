@@ -353,7 +353,7 @@ impl NodeToolSelection {
     ///
     /// Returns a one-line reason when a reached MCP table is missing or
     /// invalid.
-    pub(crate) fn tools_beyond(&self, child: &Self) -> Result<Vec<String>, String> {
+    pub fn tools_beyond(&self, child: &Self) -> Result<Vec<String>, String> {
         let parent = self.grants()?;
         Ok(child
             .grants()?
