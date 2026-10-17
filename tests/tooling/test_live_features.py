@@ -127,13 +127,12 @@ class RetrievalOracleTests(unittest.TestCase):
             "https://github.com/rust-lang/rust/releases"])
         self.assertEqual(features.source_urls("Sources: none"), [])
 
-    def test_rust_version_and_x_posts(self):
-        self.assertEqual(features.rust_version("It is 1.99.0."), "1.99.0")
-        self.assertIsNone(features.rust_version("latest"))
-        manifest = (b'[pkg.cargo]\nversion = "0.100.0 (5f94df478 2026-08-27)"\n'
-                    b'[pkg.rust]\nversion = "1.99.1 (58cf8f9c3 2026-10-13)"\n')
-        self.assertEqual(features.channel_rust_version(manifest), "1.99.1")
-        self.assertIsNone(features.channel_rust_version(b"[pkg.cargo]\nversion = \"0.1\"\n"))
+    def test_release_date_and_x_posts(self):
+        manifest = b'date = "2026-04-16"\n[pkg.rust]\nversion = "1.95.0 (59807616e 2026-04-14)"\n'
+        self.assertEqual(features.channel_release_date(manifest), "2026-04-16")
+        self.assertIsNone(features.channel_release_date(b'date = "April"\n'))
+        self.assertEqual(features.date_forms("2026-04-16"), [
+            "2026-04-16", "April 16, 2026", "16 April 2026", "Apr 16, 2026"])
         self.assertEqual(features.x_status_ids([
             "https://x.com/rustlang/status/1234567890",
             "https://twitter.com/rustlang/statuses/42",

@@ -251,22 +251,26 @@ def x_status_ids(urls: list[str]) -> set[str]:
             if match}
 
 
-RUST_VERSION = re.compile(r"\b1\.(\d{2,3})\.(\d+)\b")
+# An older release whose date every index has had for months: the scenario
+# tests retrieval, not how fresh a provider's index is.
+RUST_DATED_RELEASE = "1.95.0"
+RUST_RELEASE_CHANNEL = f"https://static.rust-lang.org/dist/channel-rust-{RUST_DATED_RELEASE}.toml"
+ISO_DATE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August",
+          "September", "October", "November", "December")
 
 
-def rust_version(answer: str) -> str | None:
-    match = RUST_VERSION.search(answer)
-    return match.group(0) if match else None
+def channel_release_date(manifest: bytes) -> str | None:
+    """The `YYYY-MM-DD` date a release channel manifest was published on."""
+    date = tomllib.loads(manifest.decode("utf-8")).get("date")
+    return date if isinstance(date, str) and ISO_DATE.fullmatch(date) else None
 
 
-RUST_STABLE_CHANNEL = "https://static.rust-lang.org/dist/channel-rust-stable.toml"
-
-
-def channel_rust_version(manifest: bytes) -> str | None:
-    """The `rust` package version a release channel manifest names."""
-    packages = tomllib.loads(manifest.decode("utf-8")).get("pkg", {})
-    version = packages.get("rust", {}).get("version")
-    return rust_version(version) if isinstance(version, str) else None
+def date_forms(iso: str) -> list[str]:
+    """The spellings a page may give one date in: ISO, `April 16, 2026`, `16 April 2026`."""
+    year, month, day = (int(part) for part in iso.split("-"))
+    name = MONTHS[month - 1]
+    return [iso, f"{name} {day}, {year}", f"{day} {name} {year}", f"{name[:3]} {day}, {year}"]
 
 
 # --- environment helpers -----------------------------------------------------
@@ -643,26 +647,28 @@ class Features:
     def web_search(self) -> str:
         out, records, segments, _, session = self.run(
             "web_search",
-            "Use web search to find the latest stable release of the Rust programming "
-            "language. Reply with only its version number (like 1.NN.N).", ["web_search"])
+            f"Use web search to find the date Rust {RUST_DATED_RELEASE} was released as "
+            "stable. Reply with only that date as YYYY-MM-DD.", ["web_search"])
         urls = self._retrieval_sources("web_search", records, segments, session)
-        version = rust_version(answer_text(out, records))
-        if not version:
-            raise ScenarioFailure(MODEL, f"session {session}: answer has no Rust version")
+        answered = ISO_DATE.search(answer_text(out, records))
+        if not answered:
+            raise ScenarioFailure(MODEL, f"session {session}: answer has no YYYY-MM-DD date")
         try:
-            stable = channel_rust_version(http_get(RUST_STABLE_CHANNEL, timeout=30))
+            released = channel_release_date(http_get(RUST_RELEASE_CHANNEL, timeout=30))
         except (OSError, urllib.error.URLError, ValueError) as error:
-            raise ScenarioFailure(HARNESS, f"stable channel manifest unreadable: {error}")
-        if not stable:
-            raise ScenarioFailure(HARNESS, "stable channel manifest names no rust version")
-        if version != stable:
-            raise ScenarioFailure(MODEL, f"session {session}: answered {version}; the stable "
-                                         f"channel is {stable}")
-        page = _fact_on_pages(version, urls)
+            raise ScenarioFailure(HARNESS, f"release channel manifest unreadable: {error}")
+        if not released:
+            raise ScenarioFailure(HARNESS, "release channel manifest names no date")
+        if answered.group(0) != released:
+            raise ScenarioFailure(MODEL, f"session {session}: answered {answered.group(0)}; "
+                                         f"Rust {RUST_DATED_RELEASE} shipped {released}")
+        page = next((page for form in date_forms(released)
+                     for page in [_fact_on_pages(form, urls)] if page), None)
         if not page:
-            raise ScenarioFailure(MODEL, f"session {session}: {version} is on no readable "
+            raise ScenarioFailure(MODEL, f"session {session}: {released} is on no readable "
                                          f"cited page ({len(urls)} sources)")
-        return f"session {session}: web_search, {len(urls)} sources; {version} on {page}"
+        return (f"session {session}: web_search, {len(urls)} sources; Rust "
+                f"{RUST_DATED_RELEASE} {released} on {page}")
 
     def web_fetch(self) -> str:
         rev, marker = _marker()
