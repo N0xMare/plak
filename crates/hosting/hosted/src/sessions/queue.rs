@@ -397,6 +397,7 @@ mod tests {
             name: "shot.png".into(),
             media_type: "image/png".into(),
             bytes,
+            source_dimensions: None,
         }
     }
 

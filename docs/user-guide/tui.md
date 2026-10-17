@@ -45,16 +45,16 @@ Processes, even while the root is idle; only the count text is the button.
 ### Attaching images
 
 There are three ways to attach a png, jpeg, gif or webp image to the message
-you are writing (at most 8 per message, 3.75 MiB each):
+you are writing (at most 8 per message):
 
 - Drop image files on the terminal, or paste their paths. Absolute, `~/...`
   and relative paths, backslash-escaped spaces, quoted paths, `file://` URLs
   and several paths at once all work, as do macOS screenshot names. A paste
   that is not entirely paths to existing images is typed as text.
-- Press `Ctrl+V` to attach the image on the clipboard, for example a
-  screenshot taken with `Cmd+Ctrl+Shift+4` on macOS. It is attached as
-  `clipboard.png`; a very large one is scaled down to fit 3.75 MiB. On Linux
-  this reads the X11 clipboard.
+- Press `Ctrl+V` (not `Cmd+V`: terminals send nothing for `Cmd+V` when the
+  clipboard holds only an image) to attach the image on the clipboard, for
+  example a screenshot taken with `Cmd+Ctrl+Shift+4` on macOS. It is attached
+  as `clipboard.png`. On Linux this reads the X11 clipboard.
 - `/image <path>...` attaches the named files.
 
 Each attachment shows as a chip in the composer's bottom border,
@@ -66,8 +66,14 @@ message shows one chip per image, such as `[image: png 1280x720 412 KB]`
 (history keeps the type, not the file name). The context meter counts each
 image before it is sent (up to about 3,300 tokens on Claude routes, a
 conservative 8,192 elsewhere). A model without image input refuses the
-message, naming the route and model. Files are not resized, and images are
-not drawn in the terminal.
+message, naming the route and model. Images are not drawn in the terminal.
+
+An image larger than 2048 px on its long edge or 3.75 MiB is downscaled when
+you attach it, so a full-resolution Retina screenshot attaches as is: it is
+resized to at most 2048 px (kept as PNG when that fits, otherwise JPEG) and
+the chip says so, `[image: shot.png 2048x1324 1.9 MB, downscaled from
+3456x2234]`, as does the message's line in the transcript while the session
+runs. Smaller images are sent unchanged.
 
 Every list follows one mouse rule: a click selects a row, a double-click does
 what `Enter` does. That holds for the slash menu, Settings and its choosers

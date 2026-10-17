@@ -2813,7 +2813,8 @@ clears nothing. `/fork` and `/fork-then-compact` refuse with their own usage
 line. The argument-taking commands keep their grammar below.
 
 `/image <path>...` attaches image files to the draft (§5.9); bare `/image`
-answers `usage: /image <path>...  —  attach png, jpeg, gif or webp files`.
+answers `usage: /image <path>...  —  attach png, jpeg, gif or webp files; Ctrl+V
+(not Cmd+V) attaches a clipboard image`.
 
 `/tree resume` explicitly resumes a restored paused agent tree; on a tree that
 is not paused it changes nothing and says `agent tree is not paused; nothing to
@@ -4609,21 +4610,42 @@ A prompt can carry images, attached to the draft three ways:
 - `Ctrl+V` in the composer reads an image from the system clipboard (AppKit on
   macOS, the X11 clipboard on Linux; Wayland sessions reach it through
   XWayland), and so does an empty bracketed paste, which is what a terminal
-  sends for a clipboard that holds only an image. The pixels are encoded as
-  PNG, chip name `clipboard.png`; an image whose PNG exceeds 3.75 MiB is
-  halved (2x2 average) until it fits. A clipboard without an image, or no
-  clipboard, is a system note.
+  sends for a clipboard that holds only an image. Chip name `clipboard.png`.
+  It is `Ctrl+V`, not `Cmd+V`: a terminal sends nothing for `Cmd+V` while the
+  clipboard holds only an image, so the Keybinds sheet and the bare `/image`
+  note say so. A clipboard without an image, or no clipboard, is a system
+  note.
 
 The type of a file is sniffed from the bytes, never the extension. The bounds
 are the library's admission bounds (chapter 01): at most 8 images per message
-and 3.75 MiB raw per image; files are not resized, so an oversize file is
-refused with a note naming it and asking to downscale. A refusal is a system
-note naming the file; the draft is unchanged. Terminal image rendering does
-not exist.
+and 3.75 MiB raw per image. Every attached image (a dropped or pasted path,
+`/image`, `Ctrl+V`, `plak run --image` and the JSONL `prompt.images`) passes
+one normalizer in `plakous-hosted`:
+
+- An image whose long edge is at most 2048 px and whose bytes fit 3.75 MiB is
+  sent byte-identical.
+- Any other is decoded (png, jpeg, gif first frame, webp; the stored EXIF
+  orientation applied), resized with a Lanczos3 filter so its long edge is at
+  most 2048 px, aspect ratio kept, and re-encoded: PNG for a png or gif source
+  (and clipboard pixels) when the PNG fits, otherwise JPEG at quality 90 with
+  transparency composed over white. While the encoding is still over 3.75 MiB
+  the long edge shrinks by a quarter and it is encoded again; a JPEG that does
+  not fit at 64 px is refused.
+- A file over 64 MiB is refused unread, and decoding is bounded at 16384 px
+  per edge and 256 MiB of allocation.
+
+A refusal is a system note naming the file; the draft is unchanged. Terminal
+image rendering does not exist.
 
 Attached images show as chips in the composer's bottom border,
 `[image: shot.png 1280x720 412 KB]`, collapsing to `[N images]` when they do
-not fit. `Backspace` in an empty composer removes the last chip. Submit sends
+not fit. A downscaled image's chip and the live transcript line of the message
+that sends it name the attached dimensions:
+`[image: shot.png 2048x1324 1.9 MB, downscaled from 3456x2234]` and
+`[image: png 2048x1324 1.9 MB, downscaled from 3456x2234]`; `plak run --image`
+prints the chip on stderr as `plak: attached [image: ...]`. The note is
+presentation only: history, the queue store and a reopened transcript keep
+the sent image's facts alone. `Backspace` in an empty composer removes the last chip. Submit sends
 the text and the chips' images together as one draft (prompt, queued
 follow-up or steer); images alone are a message, so `Enter` on an empty
 composer with chips sends them without text (the queue panel's own `Enter`
@@ -4657,7 +4679,7 @@ runtime admission, naming the route and model; the item stays queued for an
 edit or delete.
 
 The `plak agent` JSONL `prompt` kind takes an optional `images` array of file
-paths, read and bounded as `plak run --image` reads them (a relative path
+paths, read and normalized as `plak run --image` reads them (a relative path
 resolves against the agent's working directory); with images, `text` may be
 omitted or empty. `plak run --image <path>` likewise needs no prompt words.
 The export document does not carry queued items' images (§2.5.1).

@@ -206,7 +206,6 @@ plak = [
     "plakous-offline-crash-harness",
     "plakous-recursive-subagents",
     "plakous-recursive-subagents-store",
-    "png",
     "pulldown-cmark",
     "ratatui",
     "rusqlite",
@@ -252,6 +251,7 @@ plakous-recursive-subagents-store = [
     "uuid",
 ]
 plakous-hosted = [
+    "image",
     "nix",
     "tempfile",
     "toml",

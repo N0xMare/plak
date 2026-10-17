@@ -226,7 +226,7 @@ pub const BINDINGS: &[Binding] = &[
     Binding {
         chord: "Ctrl+V",
         when: When::Composer,
-        effect: "attach the image on the system clipboard as a PNG",
+        effect: "attach the clipboard image (Ctrl, not Cmd: Cmd+V pastes text only)",
         double_tap: None,
     },
     Binding {

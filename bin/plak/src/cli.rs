@@ -1034,6 +1034,15 @@ impl RunPrompt {
                 plakous_hosted::attachments::read_image(path).map_err(|error| error.to_string())
             })
             .collect::<Result<Vec<_>, _>>()?;
+        for image in images
+            .iter()
+            .filter(|image| image.source_dimensions.is_some())
+        {
+            eprintln!(
+                "plak: attached {}",
+                plakous_hosted::attachments::chip(image)
+            );
+        }
         Ok((self.words.join(" "), images))
     }
 }

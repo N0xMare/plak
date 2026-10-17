@@ -1,5 +1,6 @@
-//! Image files an operator attaches to a prompt (`plak run --image`, the
-//! TUI's `/image` and a dropped path): reading, sniffing and the bounds.
+//! Image files an operator attaches to a prompt (`plak run --image`, JSONL
+//! `prompt.images`, the TUI's `/image` and a dropped path) and clipboard
+//! pixels: reading, sniffing, and normalizing into the bounds.
 
 use std::fmt;
 use std::io;
@@ -13,6 +14,13 @@ pub const MAX_IMAGES: usize = plakous::agent::MAX_USER_IMAGES;
 
 /// Largest raw image one message part carries (3.75 MiB).
 pub const MAX_IMAGE_BYTES: usize = MAX_USER_IMAGE_BYTES;
+
+/// Largest image file read for normalizing (64 MiB).
+pub const MAX_SOURCE_BYTES: u64 = 64 * 1024 * 1024;
+
+mod normalize;
+
+pub use normalize::{MAX_IMAGE_EDGE, NormalizeError, normalize, normalize_rgba};
 
 /// Why an image file could not be attached. Every message names the file.
 #[derive(Debug)]
@@ -29,9 +37,9 @@ pub enum ImageFileError {
         path: PathBuf,
         bytes: u64,
     },
-    NotAnImage {
+    Unusable {
         path: PathBuf,
-        source: plakous::tools::ImageSniffError,
+        source: NormalizeError,
     },
 }
 
@@ -48,11 +56,11 @@ impl fmt::Display for ImageFileError {
             Self::NotAFile { path } => write!(formatter, "image {}: not a file", path.display()),
             Self::TooLarge { path, bytes } => write!(
                 formatter,
-                "image {}: {bytes} bytes exceeds the {MAX_USER_IMAGE_BYTES}-byte (3.75 MiB) \
-                 limit; downscale it and attach it again",
+                "image {}: {bytes} bytes exceeds the {MAX_SOURCE_BYTES}-byte (64 MiB) \
+                 limit for an image file",
                 path.display()
             ),
-            Self::NotAnImage { path, source } => {
+            Self::Unusable { path, source } => {
                 write!(formatter, "image {}: {source}", path.display())
             }
         }
@@ -63,19 +71,20 @@ impl std::error::Error for ImageFileError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Unreadable { source, .. } => Some(source),
-            Self::NotAnImage { source, .. } => Some(source),
+            Self::Unusable { source, .. } => Some(source),
             Self::NotAFile { .. } | Self::TooLarge { .. } => None,
         }
     }
 }
 
-/// Reads one image file within the admission bound and sniffs its type from
-/// its bytes; the extension is never trusted.
+/// Reads one image file, sniffs its type from its bytes (the extension is
+/// never trusted) and [`normalize`]s it into the bounds.
 ///
 /// # Errors
 ///
 /// Returns [`ImageFileError`] naming the file when it cannot be read, is not
-/// a file, exceeds the bound, or is not an image.
+/// a file, exceeds [`MAX_SOURCE_BYTES`], or is not an image within reach of
+/// the bounds.
 pub fn read_image(path: &Path) -> Result<DraftImage, ImageFileError> {
     let unreadable = |source| ImageFileError::Unreadable {
         path: path.to_owned(),
@@ -91,25 +100,20 @@ pub fn read_image(path: &Path) -> Result<DraftImage, ImageFileError> {
         path: path.to_owned(),
         bytes,
     };
-    if metadata.len() > MAX_USER_IMAGE_BYTES as u64 {
+    if metadata.len() > MAX_SOURCE_BYTES {
         return Err(too_large(metadata.len()));
     }
     let bytes = std::fs::read(path).map_err(unreadable)?;
-    if bytes.len() > MAX_USER_IMAGE_BYTES {
+    if bytes.len() as u64 > MAX_SOURCE_BYTES {
         return Err(too_large(bytes.len() as u64));
     }
-    let header =
-        plakous::tools::sniff_image(&bytes).map_err(|source| ImageFileError::NotAnImage {
-            path: path.to_owned(),
-            source,
-        })?;
-    Ok(DraftImage {
-        name: path.file_name().map_or_else(
-            || path.display().to_string(),
-            |name| name.to_string_lossy().into_owned(),
-        ),
-        media_type: header.media_type().to_owned(),
-        bytes,
+    let name = path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    normalize(name, bytes).map_err(|source| ImageFileError::Unusable {
+        path: path.to_owned(),
+        source,
     })
 }
 
@@ -177,13 +181,14 @@ mod tests {
         let text = dir.path().join("notes.png");
         std::fs::write(&text, "not an image").unwrap();
         let error = read_image(&text).unwrap_err();
-        assert!(matches!(error, ImageFileError::NotAnImage { .. }));
+        assert!(matches!(error, ImageFileError::Unusable { .. }));
         assert!(error.to_string().contains("notes.png"));
 
+        // Over the bound, so decoded to be downscaled: a header alone fails.
         let big = dir.path().join("big.png");
         std::fs::write(&big, png(2, 2, MAX_USER_IMAGE_BYTES)).unwrap();
         let error = read_image(&big).unwrap_err();
-        assert!(matches!(error, ImageFileError::TooLarge { .. }));
-        assert!(error.to_string().contains("big.png") && error.to_string().contains("downscale"));
+        assert!(matches!(error, ImageFileError::Unusable { .. }));
+        assert!(error.to_string().contains("big.png") && error.to_string().contains("decoded"));
     }
 }

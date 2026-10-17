@@ -25,28 +25,43 @@ pub(crate) fn image_chip(
         media_type.strip_prefix("image/").unwrap_or(media_type),
         byte_len,
         dimensions,
+        None,
     )
 }
 
-fn labelled_chip(label: &str, byte_len: usize, dimensions: Option<(u32, u32)>) -> String {
+fn labelled_chip(
+    label: &str,
+    byte_len: usize,
+    dimensions: Option<(u32, u32)>,
+    source: Option<(u32, u32)>,
+) -> String {
     let size = if byte_len < 1024 * 1024 {
         format!("{} KB", byte_len.div_ceil(1024))
     } else {
         let tenths = (byte_len * 10).div_ceil(1024 * 1024);
         format!("{}.{} MB", tenths / 10, tenths % 10)
     };
+    let source = source.map_or_else(String::new, |(width, height)| {
+        format!(", downscaled from {width}x{height}")
+    });
     match dimensions {
-        Some((width, height)) => format!("[image: {label} {width}x{height} {size}]"),
-        None => format!("[image: {label} {size}]"),
+        Some((width, height)) => format!("[image: {label} {width}x{height} {size}{source}]"),
+        None => format!("[image: {label} {size}{source}]"),
     }
 }
 
-/// [`image_chip`] of attached image bytes, as history will show it.
+/// [`image_chip`] of attached image bytes, as history will show it, plus
+/// the dimensions it was attached at when it was downscaled:
+/// `[image: png 2048x1324 1.9 MB, downscaled from 3456x2234]`.
 pub(crate) fn draft_image_chip(image: &plakous_host_protocol::DraftImage) -> String {
-    image_chip(
-        &image.media_type,
+    labelled_chip(
+        image
+            .media_type
+            .strip_prefix("image/")
+            .unwrap_or(&image.media_type),
         image.bytes.len(),
         sniffed_dimensions(&image.bytes),
+        image.source_dimensions,
     )
 }
 
@@ -58,6 +73,7 @@ pub fn named_image_chip(image: &plakous_host_protocol::DraftImage) -> String {
         &image.name,
         image.bytes.len(),
         sniffed_dimensions(&image.bytes),
+        image.source_dimensions,
     )
 }
 

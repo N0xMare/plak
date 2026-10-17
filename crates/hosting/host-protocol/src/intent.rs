@@ -332,8 +332,12 @@ pub struct DraftImage {
     pub name: String,
     /// `image/png`, `image/jpeg`, `image/gif` or `image/webp`.
     pub media_type: String,
-    /// The unmodified encoded image.
+    /// The encoded image as it is sent.
     pub bytes: Vec<u8>,
+    /// The attached image's dimensions when Plak downscaled it to fit the
+    /// bounds; `None` when it was attached at the dimensions sent. Display
+    /// only: history keeps the sent image's facts alone.
+    pub source_dimensions: Option<(u32, u32)>,
 }
 
 impl fmt::Debug for DraftImage {
@@ -342,6 +346,7 @@ impl fmt::Debug for DraftImage {
             .debug_struct("DraftImage")
             .field("media_type", &self.media_type)
             .field("bytes", &self.bytes.len())
+            .field("source_dimensions", &self.source_dimensions)
             .finish_non_exhaustive()
     }
 }

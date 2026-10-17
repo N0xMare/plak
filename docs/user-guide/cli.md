@@ -257,7 +257,7 @@ plak run --account codex --model gpt-5.6-luna --effort low --image shot.png -- '
 | `--max-turns <n>` | Admitted turns including the first, 1..=100; default 25. |
 | `--timeout <seconds>` | Whole-run wall clock, including authentication/catalog preparation and idle waiting; default none. |
 | `--print-session-id` | Print `session_id=<uuid>` on stdout before the turn starts. |
-| `--image <path>` | Attach an image to the prompt; repeat for more (at most 8). png, jpeg, gif or webp, detected from the bytes, at most 3.75 MiB each; nothing is resized. With images, the prompt after `--` may be left out. A file that cannot be read, is not an image or is too large is refused (exit 2) naming the file. A model without image input refuses the run naming the route and model. |
+| `--image <path>` | Attach an image to the prompt; repeat for more (at most 8). png, jpeg, gif or webp, detected from the bytes; an image over 2048 px on its long edge or 3.75 MiB is downscaled to fit (PNG when that fits, otherwise JPEG) and reported on stderr as `plak: attached [image: shot.png 2048x1324 1.9 MB, downscaled from 3456x2234]`; smaller ones are sent unchanged. With images, the prompt after `--` may be left out. A file that cannot be read, is not a decodable image or is over 64 MiB is refused (exit 2) naming the file. A model without image input refuses the run naming the route and model. |
 
 `plak run` needs a ready OAuth login or key; an API account with no key exits 3
 naming `plak key set <account>` and its environment variable, and a signed-out

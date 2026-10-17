@@ -22,6 +22,9 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 toml.workspace = true
 time = { version = "0.3", features = ["formatting", "local-offset"] }
+# Every attached image is decoded and, when over the bounds, downscaled and
+# re-encoded (png, jpeg, gif first frame, webp).
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 tracing.workspace = true
 uuid = { workspace = true, features = ["v4"] }

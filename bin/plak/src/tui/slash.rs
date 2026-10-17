@@ -243,7 +243,7 @@ pub fn resolve(parsed: &ParsedSlash, _ctx: &SlashContext) -> SlashEffect {
         "recover" => SlashEffect::Action(UserAction::Recover),
         "drop" => SlashEffect::Action(UserAction::DropQueued),
         "image" if parsed.args.is_empty() => SlashEffect::LocalNote(
-            "usage: /image <path>...  —  attach png, jpeg, gif or webp files".to_owned(),
+            "usage: /image <path>...  —  attach png, jpeg, gif or webp files; Ctrl+V (not Cmd+V) attaches a clipboard image".to_owned(),
         ),
         "image" => SlashEffect::AttachImage(parsed.args.clone()),
         "reload" => SlashEffect::Reload,

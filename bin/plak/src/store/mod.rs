@@ -1126,6 +1126,8 @@ fn load_queue(c: &Connection, id: &str) -> Result<Vec<QueueItem>, String> {
                     name: row.get(0)?,
                     media_type: row.get(1)?,
                     bytes: row.get(2)?,
+                    // The queue keeps the image as sent, not how it was attached.
+                    source_dimensions: None,
                 })
             },
         )?
@@ -2732,6 +2734,7 @@ mod tests {
             name: name.to_owned(),
             media_type: "image/png".to_owned(),
             bytes: plakous_hosted::attachments::png(width, 3, 100),
+            source_dimensions: None,
         };
         let mut with_images = QueueItem::new("look at these");
         with_images.images = vec![image("a.png", 2), image("b.png", 5)].into();
