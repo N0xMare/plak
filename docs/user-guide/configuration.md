@@ -288,7 +288,10 @@ A child gets at most its parent's tools: a working-set template may not list
 holds for every `spawns` entry. `web_search`, `web_fetch` and `x_search` are
 exempt, so a root can hand X search to a Grok child it could not run itself.
 The check runs when the configuration loads and names the edge and the extra
-tools. The full key reference is in spec 07 §3.4 and §3.5.
+tools. A session keeps the root tools it was created with, so `spawn_agent`
+checks again against those: after you add a tool to the root template, an
+existing session still cannot spawn a child that needs it; start a new
+session. The full key reference is in spec 07 §3.4 and §3.5.
 
 ### Rust build caches
 

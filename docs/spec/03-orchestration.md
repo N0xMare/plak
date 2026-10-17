@@ -422,7 +422,15 @@ list; with no `[root] agent` the root has none.
   route lacks `x_search` delegate it to a template on a route that has it.
 
 A violation is a load error naming the edge and the extra tools, never a
-spawn-time clip. The edit ceiling (`access`) keeps its clip-not-refuse rule.
+spawn-time clip. Because a node's tools are frozen (a root's in its session
+record, a child's on its card) while the configuration and the epoch can move
+on, `spawn_agent` checks the same rule again before any durable work: the
+requested card's list against the tools the **calling node is bound with**,
+each side expanding `mcp:<id>` through its own frozen tables. A violation is
+`template_not_spawnable` naming the template and the extra tools, and no
+agent is spawned; a root created off its template's tuple has no optional
+tools, so it can spawn only templates without local-authority tools. The edit
+ceiling (`access`) keeps its clip-not-refuse rule.
 
 ## 4. The ten tools
 

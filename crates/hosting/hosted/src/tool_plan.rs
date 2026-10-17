@@ -343,6 +343,76 @@ impl NodeToolSelection {
             mcp_tools: None,
         }
     }
+
+    /// The local-authority tools `child` selects that this node does not
+    /// grant, as template list names (spec 03 §3.1). `fetch_url`,
+    /// `image_gen` and MCP tools count, each MCP server expanded to the
+    /// allowlist of its own frozen table; hosted retrieval is exempt.
+    ///
+    /// # Errors
+    ///
+    /// Returns a one-line reason when a reached MCP table is missing or
+    /// invalid.
+    pub(crate) fn tools_beyond(&self, child: &Self) -> Result<Vec<String>, String> {
+        let parent = self.grants()?;
+        Ok(child
+            .grants()?
+            .into_iter()
+            .filter(|grant| {
+                !parent.contains(grant)
+                    && !matches!(grant, ToolGrant::McpTool(server, _)
+                        if parent.contains(&ToolGrant::McpServer(server.clone())))
+            })
+            .map(|grant| match grant {
+                ToolGrant::Local(tool) => tool.name().to_owned(),
+                ToolGrant::McpServer(server) => format!("mcp:{server}"),
+                ToolGrant::McpTool(server, tool) => format!("mcp:{server}/{tool}"),
+            })
+            .collect())
+    }
+
+    fn grants(&self) -> Result<BTreeSet<ToolGrant>, String> {
+        let mut grants = BTreeSet::new();
+        for entry in self.selection.entries() {
+            match entry {
+                SelectedTool::Optional(tool) if tool.is_hosted_retrieval() => {}
+                SelectedTool::Optional(tool) => {
+                    grants.insert(ToolGrant::Local(*tool));
+                }
+                SelectedTool::McpServer(server) => {
+                    let rendered = self
+                        .tool_sections
+                        .get(&format!("mcp_servers.{server}"))
+                        .ok_or_else(|| format!("mcp server {server} is not configured"))?;
+                    match crate::mcp_binding::frozen_allowlist(server, rendered)? {
+                        Some(allowed) => grants.extend(
+                            allowed
+                                .into_iter()
+                                .map(|tool| ToolGrant::McpTool(server.clone(), tool)),
+                        ),
+                        None => {
+                            grants.insert(ToolGrant::McpServer(server.clone()));
+                        }
+                    }
+                }
+                SelectedTool::McpTool { server, tool } => {
+                    grants.insert(ToolGrant::McpTool(server.clone(), tool.clone()));
+                }
+            }
+        }
+        Ok(grants)
+    }
+}
+
+/// One local-authority grant a tool list resolves to.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum ToolGrant {
+    /// `fetch_url` or `image_gen`.
+    Local(OptionalTool),
+    /// `mcp:<id>` on a server with no allowlist: every tool it lists.
+    McpServer(McpServerName),
+    /// One MCP tool of one server.
+    McpTool(McpServerName, String),
 }
 
 /// The optional tools a session appends after its core menu, in the one
@@ -2049,5 +2119,45 @@ mod tests {
         ] {
             assert_eq!(ToolRoute::api(ApiTarget::Platform { provider }), route);
         }
+    }
+
+    fn node(tools: &[&str], allowlist: Option<&[&str]>) -> TestResult<NodeToolSelection> {
+        let mut table =
+            "[mcp_servers.gh]\ntransport = \"stdio\"\ncommand = \"gh-mcp\"\n".to_owned();
+        if let Some(tools) = allowlist {
+            let quoted = tools
+                .iter()
+                .map(|tool| format!("{tool:?}"))
+                .collect::<Vec<_>>();
+            table.push_str(&format!("tools = [{}]\n", quoted.join(", ")));
+        }
+        table.push_str("startup_seconds = 20\ncall_seconds = 120\n");
+        Ok(NodeToolSelection {
+            selection: TemplateToolSelection::parse(tools)?,
+            tool_sections: BTreeMap::from([("mcp_servers.gh".to_owned(), table)]),
+            mcp_tools: None,
+        })
+    }
+
+    /// A child is bounded by the tools its parent is bound with, each side
+    /// expanding MCP servers through its own frozen table; hosted retrieval
+    /// is exempt.
+    #[test]
+    fn tools_beyond_bounds_a_child_by_its_parents_bound_tools() -> TestResult {
+        let none = NodeToolSelection::default();
+        let child = node(&["fetch_url", "web_search", "mcp:gh/get_me"], None)?;
+        assert_eq!(none.tools_beyond(&child)?, ["fetch_url", "mcp:gh/get_me"]);
+        let parent = node(&["fetch_url", "mcp:gh"], None)?;
+        assert_eq!(parent.tools_beyond(&child)?, Vec::<String>::new());
+        let narrow = node(&["mcp:gh"], Some(&["list_commits"]))?;
+        assert_eq!(narrow.tools_beyond(&node(&["mcp:gh"], None)?)?, ["mcp:gh"]);
+        assert_eq!(
+            narrow.tools_beyond(&node(&["mcp:gh"], Some(&["list_commits", "get_me"]))?)?,
+            ["mcp:gh/get_me"]
+        );
+        let mut missing = node(&["mcp:gh"], None)?;
+        missing.tool_sections.clear();
+        assert!(parent.tools_beyond(&missing).is_err());
+        Ok(())
     }
 }

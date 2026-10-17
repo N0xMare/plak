@@ -285,6 +285,22 @@ struct RenderedTables {
     mcp_servers: BTreeMap<String, RenderedServer>,
 }
 
+/// The `tools` allowlist of one frozen canonical `[mcp_servers.<id>]` table:
+/// `Ok(None)` when the server allows every tool it lists.
+pub(crate) fn frozen_allowlist(
+    server: &McpServerName,
+    rendered: &str,
+) -> Result<Option<Vec<String>>, String> {
+    let mut tables = crate::frozen_tables::parse::<RenderedTables>(rendered)
+        .ok_or_else(|| format!("mcp server {server} has an invalid frozen definition"))?;
+    tables
+        .mcp_servers
+        .remove(server.as_str())
+        .filter(|_| tables.mcp_servers.is_empty())
+        .map(|definition| definition.tools)
+        .ok_or_else(|| format!("mcp server {server} has an invalid frozen definition"))
+}
+
 /// Rebuilds one server definition from its frozen canonical table. Every
 /// secret it names must be stored now; values are read again at each spawn.
 pub(crate) fn server_spec(

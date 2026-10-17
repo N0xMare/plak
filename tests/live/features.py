@@ -49,6 +49,7 @@ CATALOG = (
     ("web_fetch", "cli"),
     ("x_search", "cli"),
     ("image_gen_roundtrip", "cli"),
+    ("frozen_child_tools", "cli"),
 )
 
 BROWSER_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -737,11 +738,48 @@ class Features:
                 f"({vision.name}, {sent}) names the cat")
 
 
-def set_tools(home: Path, tools: list[str]) -> None:
-    """List `tools` on the root template `live.write_home` wrote."""
+    # --- the child-tool bound after a root template edit ----------------------------
+
+    def frozen_child_tools(self) -> str:
+        """The root's tools are the session's frozen set, not the live `[root]`
+        template. The root template lists `fetch_url` but names another model,
+        so a session created on this route freezes no tools; the configuration
+        loads (the worker's `fetch_url` is within the live root template's), and
+        spawning the worker must still be refused."""
+        other = "claude-sonnet-5-5" if self.route.model != "claude-sonnet-5-5" else "claude-haiku-5-5"
+
+        def arrange(home: Path) -> None:
+            root = home / "agents" / "root-agent.toml"
+            text = root.read_text()
+            root.write_text(text.replace(f'model = "{self.route.model}"\n',
+                                         f'model = "{other}"\n', 1))
+            set_tools(home, ["fetch_url"], "worker")
+
+        out, records, segments, _, session = self.run(
+            "frozen_child_tools",
+            "Call spawn_agent once with template worker and the message \"Say hi.\". Then "
+            "reply with the exact error code spawn_agent returned, or the word spawned if "
+            "it succeeded. Do not retry and do not wait for the agent.",
+            ["fetch_url"], before=arrange)
+        requests = json.dumps(capture_requests(segments))
+        detail = f"session {session}"
+        if not tool_calls(records, "spawn_agent"):
+            raise ScenarioFailure(MODEL, f"{detail}: the model never called spawn_agent")
+        if "template_not_spawnable" not in requests or "lack: fetch_url" not in requests:
+            raise ScenarioFailure(HARNESS, f"{detail}: spawn_agent was not refused for "
+                                           "fetch_url beyond the root's frozen tools")
+        first = next(iter(capture_requests(segments)), None)
+        if isinstance(first, dict) and '"name": "fetch_url"' in json.dumps(first.get("tools")):
+            raise ScenarioFailure(HARNESS, f"{detail}: the root was offered fetch_url")
+        return (f"{detail}: root froze no tools (template on {other}); spawning worker "
+                "(fetch_url) was refused template_not_spawnable")
+
+
+def set_tools(home: Path, tools: list[str], template: str = "root-agent") -> None:
+    """List `tools` on a template `live.write_home` wrote (the root's by default)."""
     if not tools:
         return
-    path = home / "agents" / "root-agent.toml"
+    path = home / "agents" / f"{template}.toml"
     text = path.read_text()
     if "\ntools = " in text:
         raise ScenarioFailure(HARNESS, "root template already lists tools")
