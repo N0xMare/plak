@@ -22,6 +22,12 @@ const EVENT_COUNT_FORMAT_REVISION: u64 = 3;
 /// detects the byte-length mismatch and rebuilds by a bounded rescan.
 pub const SESSION_LOG_INDEX_INTERVAL: Duration = Duration::from_secs(2);
 
+/// Longest wait for another handle's log lock. A holder keeps it only for one
+/// append or sidecar write, but a holder suspended inside that window (a
+/// stopped process past its lease) keeps it until it resumes. An unbounded
+/// wait would hang the next owner's open on an observational journal.
+const LOG_LOCK_WAIT: Duration = Duration::from_secs(2);
+
 /// One structured session event (serialized as a single JSON object line).
 #[derive(Clone, Debug)]
 pub struct SessionEvent {
@@ -227,9 +233,23 @@ impl LogFileLock {
         let file = file
             .try_clone()
             .map_err(|_| "could not clone session event log".to_owned())?;
-        file.lock()
-            .map_err(|_| "could not lock session event log".to_owned())?;
-        Ok(Self(file))
+        let deadline = Instant::now() + LOG_LOCK_WAIT;
+        let mut pause = Duration::from_millis(1);
+        loop {
+            match file.try_lock() {
+                Ok(()) => return Ok(Self(file)),
+                Err(std::fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                    std::thread::sleep(pause);
+                    pause = (pause * 2).min(Duration::from_millis(50));
+                }
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    return Err("session event log is busy".to_owned());
+                }
+                Err(std::fs::TryLockError::Error(_)) => {
+                    return Err("could not lock session event log".to_owned());
+                }
+            }
+        }
     }
 
     fn try_acquire(file: &File) -> Result<Self, String> {
@@ -876,6 +896,33 @@ mod tests {
         let home = SessionHome::new(dir.path().join("sessions"));
         home.ensure().unwrap();
         (dir, home)
+    }
+
+    #[test]
+    fn a_suspended_holder_of_the_log_lock_never_blocks_an_open_or_append() {
+        let (_dir, home) = paths();
+        let id = "44444444-5555-6666-7777-888888888888";
+        let log = SessionLog::open(&home, id).unwrap();
+        log.append(SessionEvent::new("before")).unwrap();
+        // A separate open file description is a separate lock owner, like a
+        // stopped process that held the lock when it was suspended.
+        let holder = File::open(home.session_events_file(id)).unwrap();
+        holder.lock().unwrap();
+        let (sent, received) = std::sync::mpsc::channel();
+        let opener = home.clone();
+        std::thread::spawn(move || {
+            let _ = sent.send(SessionLog::open(&opener, id).err());
+        });
+        let refused = received
+            .recv_timeout(LOG_LOCK_WAIT * 4)
+            .expect("an open waited on the held log lock past its bound");
+        assert_eq!(refused.as_deref(), Some("session event log is busy"));
+        let started = Instant::now();
+        assert!(log.append(SessionEvent::new("while held")).is_err());
+        assert!(started.elapsed() < LOG_LOCK_WAIT * 4);
+        holder.unlock().unwrap();
+        log.append(SessionEvent::new("after")).unwrap();
+        assert_eq!(count_events(&home, id).unwrap(), 2);
     }
 
     #[test]
