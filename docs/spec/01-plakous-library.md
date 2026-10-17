@@ -7612,6 +7612,11 @@ as the existing `ModelErrorKind::Policy`. They are terminal and never authorize
 a transport retry. Unknown labels remain protocol failures; diagnostic message
 text (including cybersecurity-risk wording) is not classification authority.
 The bounded provider message remains available in the operator-facing error.
+On the xAI Platform and SuperGrok routes an HTTP 403 whose provider `code` is
+exactly `permission-denied` is xAI's pre-generation usage-guideline refusal
+(its `error` field is a refusal sentence) and is also `ModelErrorKind::Policy`,
+never `Authorization`; any other 403 keeps `Authorization`. The product renders
+`Policy` as a provider usage-policy refusal, not a credential failure.
 
 Connect, response-head, stream-idle, per-attempt, tool, approval, cleanup,
 store, and shutdown deadlines are distinct and reported by phase. A timeout

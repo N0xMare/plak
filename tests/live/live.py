@@ -232,8 +232,11 @@ class ScenarioFailure(Exception):
 # Typed provider refusals and outages. `QuotaExhausted` is the name some
 # driver surfaces used before the product kind `QuotaExceeded`; both count.
 # `Authentication` is the provider refusing the credential, not a product bug.
+# `Policy` is the provider refusing the request content (spec 05 §3.2: a
+# refusal rejected before acceptance, or a model refusal terminal).
 PROVIDER_ERROR_KINDS = frozenset({
     "RateLimited", "QuotaExceeded", "QuotaExhausted", "Unavailable", "Authentication",
+    "Policy",
 })
 # Statuses that refuse before acceptance, or are the ambiguous 5xx the spec
 # already records as provider. 429 is the rate-limit case on every surface.

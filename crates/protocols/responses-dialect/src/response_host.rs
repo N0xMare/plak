@@ -436,6 +436,8 @@ pub enum ResponsesProviderErrorClass {
     RateLimited,
     /// The provider reported an internal service failure.
     Server,
+    /// The provider refused the request content before generation.
+    ContentRefusal,
     /// No allowlisted safe classification matched.
     Unknown,
 }
@@ -1588,6 +1590,10 @@ pub(crate) fn parse_provider_error_with_canonical_type(
                 },
             },
             ResponsesProviderErrorPolicy::Grok => match (kind.as_deref(), code.as_deref()) {
+                // xAI's usage-guideline check answers HTTP 403 with exactly
+                // this code and a refusal sentence before any generation;
+                // credential failures carry `unauthenticated:*` codes.
+                (_, Some("permission-denied")) => ResponsesProviderErrorClass::ContentRefusal,
                 (Some("authentication_error"), _)
                 | (_, Some("invalid_api_key" | "authentication_error")) => {
                     ResponsesProviderErrorClass::Authentication

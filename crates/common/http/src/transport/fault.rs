@@ -13,13 +13,14 @@
 //! | `host=<host>` | Only requests to this origin host (any host when absent) |
 //! | `path=<prefix>` | Only requests whose path and query start with this |
 //! | `nth=<n>` | Only the n-th matching request, counting from 1 (every one when absent) |
-//! | `fault=<kind>` | `401`, `429`, `500`, `502`, `503`, `529`, `connect`, `write-reset`, `record-rejected`, `reset`, `eof` or `stall` |
+//! | `fault=<kind>` | `401`, `429`, `500`, `502`, `503`, `529`, `xai-refusal`, `connect`, `write-reset`, `record-rejected`, `reset`, `eof` or `stall` |
 //! | `retry-after=<secs>` | Status faults: send this `Retry-After` |
 //! | `after-events=<n>` / `after-bytes=<n>` | Stream faults: deliver this much of the body first |
 //! | `seconds=<secs>` | `stall`: how long the body goes silent |
 //!
 //! Status faults answer from an in-memory peer before anything is resolved,
-//! connected or sent upstream. `connect` fails the exchange in the connect
+//! connected or sent upstream; `xai-refusal` is an HTTP 403 carrying xAI's
+//! pre-generation usage-guideline refusal body. `connect` fails the exchange in the connect
 //! phase. `write-reset` fails it as a peer that resets the connection while
 //! the request is still being written does. `record-rejected` supplies the
 //! HTTP/1.1 TLS `bad_record_mac` proof without connecting or sending content.
@@ -246,6 +247,10 @@ fn parse_rule(rule: &str) -> Result<Rule, String> {
             status: kind.parse().map_err(|_| "status")?,
             retry_after,
         },
+        "xai-refusal" => Fault::Status {
+            status: 403,
+            retry_after,
+        },
         "connect" => Fault::Connect,
         "write-reset" => Fault::WriteReset,
         "record-rejected" => Fault::RecordRejected,
@@ -415,19 +420,22 @@ pub(super) async fn injected_status(
 }
 
 fn status_reply(status: u16, retry_after: Option<u64>) -> Vec<u8> {
-    let (reason, error_type) = match status {
-        401 => ("Unauthorized", "authentication_error"),
-        429 => ("Too Many Requests", "rate_limit_error"),
-        500 => ("Internal Server Error", "api_error"),
-        502 => ("Bad Gateway", "api_error"),
-        503 => ("Service Unavailable", "api_error"),
-        _ => ("Overloaded", "overloaded_error"),
+    let body = if status == 403 {
+        // xAI's pre-generation usage-guideline refusal, byte for byte.
+        r#"{"code":"permission-denied","error":"I'm sorry, I can't help with that request."}"#
+            .to_owned()
+    } else {
+        dialect_error_body(status)
     };
-    // One body both error dialects read: Anthropic's `type`/`error.type` and
-    // the OpenAI-style `error.code`/`error.message`.
-    let body = format!(
-        r#"{{"type":"error","error":{{"type":"{error_type}","code":{status},"message":"injected by {FAULTS_ENV}"}}}}"#
-    );
+    let reason = match status {
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        _ => "Overloaded",
+    };
     let retry_after = retry_after
         .map(|seconds| format!("retry-after: {seconds}\r\n"))
         .unwrap_or_default();
@@ -436,6 +444,20 @@ fn status_reply(status: u16, retry_after: Option<u64>) -> Vec<u8> {
         body.len()
     )
     .into_bytes()
+}
+
+fn dialect_error_body(status: u16) -> String {
+    let error_type = match status {
+        401 => "authentication_error",
+        429 => "rate_limit_error",
+        500 | 502 | 503 => "api_error",
+        _ => "overloaded_error",
+    };
+    // One body both error dialects read: Anthropic's `type`/`error.type` and
+    // the OpenAI-style `error.code`/`error.message`.
+    format!(
+        r#"{{"type":"error","error":{{"type":"{error_type}","code":{status},"message":"injected by {FAULTS_ENV}"}}}}"#
+    )
 }
 
 #[cfg(test)]

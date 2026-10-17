@@ -1035,6 +1035,13 @@ fn model_error_from_attempt_without_summary(
         } => {
             let kind = match class {
                 ResponsesHttpStatusClass::Authentication => ModelErrorKind::Authentication,
+                ResponsesHttpStatusClass::Authorization
+                    if provider.as_ref().is_some_and(|provider| {
+                        provider.class() == crate::ResponsesProviderErrorClass::ContentRefusal
+                    }) =>
+                {
+                    ModelErrorKind::Policy
+                }
                 ResponsesHttpStatusClass::Authorization => ModelErrorKind::Authorization,
                 ResponsesHttpStatusClass::RateLimited => ModelErrorKind::RateLimited,
                 ResponsesHttpStatusClass::Quota => ModelErrorKind::QuotaExceeded,
@@ -1053,10 +1060,13 @@ fn model_error_from_attempt_without_summary(
                 ResponsesHttpStatusClass::Server => ModelErrorKind::Unavailable,
                 ResponsesHttpStatusClass::Unknown => ModelErrorKind::Protocol,
             };
-            // A terminal credential rejection needs new credentials, not a
-            // caller retry of the exhausted authentication attempt.
-            let retryability = if kind == ModelErrorKind::Authentication
-                && retryability == ModelRetryability::Exhausted
+            // A terminal credential rejection needs new credentials, and a
+            // content refusal a different request, not a caller retry of the
+            // exhausted attempt.
+            let retryability = if matches!(
+                kind,
+                ModelErrorKind::Authentication | ModelErrorKind::Policy
+            ) && retryability == ModelRetryability::Exhausted
             {
                 ModelRetryability::Permanent
             } else {
@@ -1296,6 +1306,7 @@ fn provider_terminal_error(
         Some(crate::ResponsesProviderErrorClass::Quota) => ModelErrorKind::QuotaExceeded,
         Some(crate::ResponsesProviderErrorClass::RateLimited) => ModelErrorKind::RateLimited,
         Some(crate::ResponsesProviderErrorClass::Server) => ModelErrorKind::Unavailable,
+        Some(crate::ResponsesProviderErrorClass::ContentRefusal) => ModelErrorKind::Policy,
         Some(crate::ResponsesProviderErrorClass::Unknown)
             if provider.is_some_and(|provider| {
                 [provider.code(), provider.kind()]
@@ -1590,6 +1601,78 @@ mod rejection_tests {
                 risk: ModelRetryRisk::DuplicateInferenceOrBilling
             })
         );
+        Ok(())
+    }
+
+    /// The body is the live xAI 403 a SuperGrok turn received; the same
+    /// status without that exact code stays an authorization failure.
+    #[test]
+    fn xai_pre_generation_refusal_is_policy_not_authorization()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let rejected = TerminalFacts::from_snapshot(ObservationSnapshot {
+            physical_attempts: 1,
+            provider_acceptance: ProviderAcceptance::NotAccepted,
+            visible_output: false,
+            replay_safety: plakous_attempt::ReplaySafety::CostOnly,
+            hosted_effects_possible: false,
+            logical_success: false,
+        });
+        let classify =
+            |body: serde_json::Value, policy| -> Result<ModelError, Box<dyn std::error::Error>> {
+                let provider = crate::parse_provider_error_with_policy(
+                    crate::response_host::provider_error_object(&body),
+                    crate::ResponsesResponseLimits::default(),
+                    policy,
+                )?;
+                Ok(model_error_from_attempt(
+                    ResponsesAttemptError::HttpStatus {
+                        retry_after: None,
+                        retry_disabled: false,
+                        physical: None,
+                        status: StatusCode::FORBIDDEN,
+                        class: ResponsesHttpStatusClass::Authorization,
+                        provider: Some(provider),
+                        facts: rejected,
+                    },
+                    &descriptor()?,
+                    None,
+                    &StreamProgress::new(Instant::now()),
+                ))
+            };
+        let refusal = serde_json::json!({
+            "code": "permission-denied",
+            "error": "I'm sorry, I can't help with that request.",
+        });
+        let error = classify(refusal.clone(), crate::ResponsesProviderErrorPolicy::Grok)?;
+        assert_eq!(error.kind(), ModelErrorKind::Policy);
+        assert!(
+            error
+                .message()
+                .contains("I'm sorry, I can't help with that request.")
+        );
+        let context = error.context().ok_or("refusal context missing")?;
+        assert_eq!(context.http_status().map(ModelHttpStatus::get), Some(403));
+        assert_eq!(context.provider_code(), Some("permission-denied"));
+        for (body, policy) in [
+            (
+                serde_json::json!({"code": "unauthenticated:bad-credentials", "error": "denied"}),
+                crate::ResponsesProviderErrorPolicy::Grok,
+            ),
+            (
+                serde_json::json!({"code": "permission-denied:team-blocked", "error": "blocked"}),
+                crate::ResponsesProviderErrorPolicy::Grok,
+            ),
+            (
+                refusal,
+                crate::ResponsesProviderErrorPolicy::OpenAiCompatible,
+            ),
+        ] {
+            assert_eq!(
+                classify(body, policy)?.kind(),
+                ModelErrorKind::Authorization,
+                "{policy:?}"
+            );
+        }
         Ok(())
     }
 

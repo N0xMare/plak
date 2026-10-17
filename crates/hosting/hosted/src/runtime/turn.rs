@@ -428,6 +428,9 @@ fn typed_model_kind_error(
         ModelErrorKind::ContextLimit => Some(format!(
             "the request exceeded the model or route context limit\n{raw}"
         )),
+        ModelErrorKind::Policy => Some(format!(
+            "the provider refused this request under its usage policy; this is not a credential failure\n{raw}"
+        )),
         _ => None,
     }
 }
@@ -1576,6 +1579,20 @@ mod tests {
             rendered.starts_with("the provider reported that quota is exhausted"),
             "{rendered}"
         );
+    }
+
+    /// A provider content refusal is not framed as a credential problem.
+    #[test]
+    fn operator_facing_render_reports_a_policy_refusal_as_a_refusal() {
+        let rendered = operator_facing_render(
+            "agent turn failed: Responses HTTP request failed: I'm sorry, I can't help with that request. · HTTP 403 · provider code: permission-denied".to_owned(),
+            Some(plakous::model::ModelErrorKind::Policy),
+        );
+        assert!(
+            rendered.starts_with("the provider refused this request under its usage policy"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("authentication failed"));
     }
 
     /// An unknown outcome never earns a recovery promise from its words.
