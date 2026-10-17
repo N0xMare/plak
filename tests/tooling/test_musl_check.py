@@ -127,20 +127,6 @@ raise SystemExit(int(os.environ.get('MUSL_EXIT', '0')))
         self.assertEqual(result.returncode, 17, result.stderr)
         self.assertIn('EXIT 17', result.stdout)
 
-    def test_timing_ledger_is_beside_artifacts_on_the_writable_mount(self):
-        result, call = self.run_gate()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        command = call['args'][call['args'].index('-c') + 1]
-        target = next(word.split('=', 1)[1] for word in command.split()
-                      if word.startswith('CARGO_TARGET_DIR='))
-        ledger = Path(target).parent / '.gate-times.jsonl'
-        self.assertTrue(ledger.is_relative_to('/qual/target'), str(ledger))
-        mount = self.root / 'target/musl-gate'
-        self.assertIn(str(mount) + ':/qual/target', call['args'])
-        local_ledger = mount / ledger.relative_to('/qual/target')
-        local_ledger.write_text('timing sample\n')
-        self.assertEqual(local_ledger.read_text(), 'timing sample\n')
-
     def test_jobs_default_to_host_cores_and_allow_override(self):
         result, call = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stderr)

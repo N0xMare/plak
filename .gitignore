@@ -1,6 +1,5 @@
 target/
 .public-contracts/
-/.gate-times.jsonl
 /.dev-tools/
 tests/fixtures/authority-negative/target/
 __pycache__/

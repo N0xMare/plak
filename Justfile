@@ -1,11 +1,10 @@
-# Plak / Plakous local recipes (Linux/macOS). `just changed` for scoped verification,
+# Plak / Plakous local recipes (Linux/macOS). `just fast` while iterating,
 # `just check` before each commit, `just full` at batch boundaries and before a push.
 
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
-# fmt/clippy, input-scoped workspace/features checks, then the parallel lane over packages
-# the working-tree diff touches (or the named ones) and their dependents. The
-# serial wall-clock-budget lane is left to `just check`.
+# fmt, structure checkers, clippy, then the parallel lane over the packages the
+# working-tree diff touches (or the named ones) and their dependents.
 fast *PACKAGES:
     scripts/dev-check.sh --fast {{PACKAGES}}
 
@@ -14,12 +13,7 @@ fast *PACKAGES:
 check:
     scripts/dev-check.sh
 
-# Conservative path-rule plan against BASE plus untracked files; prints reasons,
-# then runs selected groups. Unknown paths widen to the whole check tier.
-changed BASE="":
-    scripts/dev-check.sh --changed {{quote(BASE)}}
-
-# Exactly these comma-separated groups, in full-tier order (for independent lanes).
+# Exactly these comma-separated groups, in canonical order (for independent lanes).
 steps GROUPS:
     scripts/dev-check.sh --steps {{quote(GROUPS)}}
 
@@ -29,8 +23,7 @@ steps GROUPS:
 platform:
     scripts/dev-check.sh --platform
 
-# Integrated union: check + rustdoc, durability lane,
-# perf smoke and LOC report (both informational).
+# Every group: check + rustdoc and the durability lane.
 full:
     scripts/dev-check.sh --full
 
@@ -45,9 +38,8 @@ musl-native *ARGS:
 dev-tools *ARGS:
     bash scripts/dev-tools.sh {{ARGS}}
 
-# Offline nextest. Three invocations of one profile: the parallel lane, the
-# serial wall-clock-budget lane, then the durability lane. `just check` omits
-# the durability lane. See .config/nextest.toml and docs/spec/05-testing-and-evidence.md.
+# Offline nextest: the parallel, serial and durability lanes, one profile each.
+# See .config/nextest.toml and docs/spec/05-testing-and-evidence.md.
 test:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -57,14 +49,11 @@ test:
     mkdir -p "$isolated_home"
     chmod 700 "$isolated_home"
     export PLAK_HOME="$isolated_home"
-    cargo nextest run --locked --workspace --all-features --profile offline \
-      -E "$(python3 tools/checks/budget_filterset.py --exclude)"
-    cargo nextest run --locked --workspace --all-features --profile offline \
-      --test-threads=1 -E "$(python3 tools/checks/budget_filterset.py)"
-    cargo nextest run --locked --workspace --all-features --profile offline \
-      --test-threads=1 -E "$(python3 tools/checks/budget_filterset.py --durability)"
+    cargo nextest run --locked --workspace --all-features --profile offline
+    cargo nextest run --locked --workspace --all-features --profile serial --test-threads=1
+    cargo nextest run --locked --workspace --all-features --profile durability --test-threads=1
 
-# Line/region/function coverage for the offline gate, both lanes merged.
+# Line/region/function coverage for the parallel and serial lanes, merged.
 # Needs: rustup component add llvm-tools-preview && cargo install cargo-llvm-cov
 # Writes target/llvm-cov/html/html/index.html and target/llvm-cov/coverage.json.
 # Uses its own CARGO_TARGET_DIR so it never invalidates the normal build.
@@ -81,13 +70,11 @@ coverage:
     export PLAK_HOME="$isolated_home"
     export CARGO_TARGET_DIR="$PWD/target/llvm-cov"
     export CARGO_INCREMENTAL=0
-    exclude="$(python3 tools/checks/budget_filterset.py --exclude)"
-    include="$(python3 tools/checks/budget_filterset.py)"
     cargo llvm-cov clean --workspace
     cargo llvm-cov --no-report --no-cfg-coverage nextest --locked --workspace --all-features \
-      --profile offline -E "$exclude"
+      --profile offline
     cargo llvm-cov --no-report --no-cfg-coverage nextest --locked --workspace --all-features \
-      --profile offline --test-threads=1 -E "$include"
+      --profile serial --test-threads=1
     cargo llvm-cov report --html --output-dir "$CARGO_TARGET_DIR/html"
     cargo llvm-cov report --json --output-path "$CARGO_TARGET_DIR/coverage.json"
     cargo llvm-cov report --summary-only
@@ -137,7 +124,7 @@ estimate *ARGS:
 daily-driver *ARGS:
     python3 tests/live/daily_driver.py {{ARGS}}
 
-# Offline performance smoke over the scripted model. Informational: it reports
+# Offline performance smoke over the scripted model, not in any gate tier. It reports
 # six metrics and compares them against this machine's seed row in
 # tests/performance/baselines/offline-perf-smoke.json. See docs/spec/05.
 perf-smoke *ARGS:
@@ -236,7 +223,7 @@ bloat:
     command -v cargo-bloat >/dev/null || { echo "install: cargo install cargo-bloat" >&2; exit 1; }
     cargo bloat --release -p plak --crates -n 40
 
-# Production LOC density report (informational).
+# Production LOC density report (informational, not in any gate tier).
 density:
     python3 tools/checks/check_prod_loc.py
 

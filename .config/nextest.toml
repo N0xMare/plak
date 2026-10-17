@@ -1,7 +1,7 @@
 # nextest profiles for Plak / Plakous
 #
-# Prefer: cargo nextest run --locked --workspace --all-features --profile offline
-# See docs/spec/05-testing-and-evidence.md.
+# `just test` runs the offline, serial and durability profiles in turn:
+#   cargo nextest run --locked --workspace --all-features --profile <lane>
 
 [store]
 dir = "target/nextest"
@@ -12,16 +12,15 @@ dir = "target/nextest"
 native-auth-serial = { max-threads = 1 }
 cli-contract-serial = { max-threads = 1 }
 
-# Tests that assert wall-clock bounds run in a separate serial budget lane.
-# Crash matrices and the sqlite SIGKILL commit campaign run in the durability
-# lane: `just check` skips it; platform and full run it serially. The host
-# PTY/parity module predicates include every test in those families.
-# Auth-group serialization alone does not protect callback deadlines.
-#
-# dev-check.sh and `just test` derive the lanes from these overrides through
-# tools/checks/budget_filterset.py; its tests check membership and names.
-# Full-pool reservations also protect ad-hoc nextest runs. The 240-second slow
-# timeout on both lanes accommodates bounded crash and first-launch checks.
+# Lanes. `default` runs everything nextest selects (ad-hoc runs); the three
+# lane profiles inherit its settings and overrides and partition the suite:
+#   offline     parallel lane: everything not in `serial` or `durability`
+#   serial      tests whose subject is a wall-clock budget, one at a time
+#   durability  crash matrices and the sqlite SIGKILL campaign, one at a time
+# A test added to `serial` or `durability` must also be added to the
+# exclusion in `offline`; tests/tooling/test_nextest_lanes.py checks that the
+# three sets partition the suite and that every predicate names a real test.
+# See docs/spec/05-testing-and-evidence.md section 2.3.
 
 [profile.default]
 fail-fast = false
@@ -64,124 +63,81 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 filter = 'test(tls_integrity_reproducer_matrix)'
 slow-timeout = { period = "300s", terminate-after = 2 }
 
-# BUDGET LANE (default) -- keep byte-identical to the offline block below.
-[[profile.default.overrides]]
-filter = '''
-  test(a_stuck_worker_request_is_killed_and_reported_as_session_loss)
-  | test(product_terminal_e2e_tests::)
-  | test(real_composition_quit_releases_nested_process)
-  | test(real_process_quit_releases_and_resumes_exact_session)
-  | test(real_process_jsonl_quit_releases_and_resumes_exact_session)
-  | test(real_promoted_job_quit_releases_and_resumes_exact_session)
-  | test(tui_exit_bound_idle_and_stalled_turn)
-  | test(tui_local_launch_budget_new_and_resume_with_network_faults)
-  | test(a_reload_onto_the_same_state_key_resumes_exactly)
-  | test(tui_shutdown_deadlines_are_at_most_one_second)
-  | test(interactive_exit_batches_real_root_and_child_leases_without_settling)
-  | test(thinking_settle_tests::)
-  | test(quit_projection_stages_share_the_original_deadline)
-  | test(interactive_observation_timeout_releases_gate_and_joins_without_masking_failure)
-  | test(failed_interactive_publication_recovers_in_place_on_the_next_prompt)
-  | test(fresh_real_binary_shell_keeps_controls_and_draft_usable)
-  | test(deferred_startup_never_claims_attachment_before_failed_open_falls_back)
-  | test(exec_command_with_zero_yield_returns_the_joined_output)
-  | test(host_process_bounds_live_output_and_enforces_timeout)
-  | test(joined_process_pty_cancellation_and_timeout_join_the_group)
-  | test(cancel_during_a_cell_running_a_real_process_command_joins_inside_the_settle_window)
-  | test(terminal_status_without_joined_owner_is_not_durable_proof)
-  | test(contended_operation_does_not_stall_joined_proof_probe)
-  | test(admitted_exchange_deadline_is_conservative_and_joins_work)
-  | test(flushed_request_head_deadline_is_precise_and_joins_work)
-  | test(stalled_request_write_after_body_poll_keeps_write_deadline)
-  | test(slow_allowed_write_does_not_spend_response_head_budget)
-  | test(asymmetric_write_and_head_timeouts_are_sequential)
-  | test(cancelling_claimed_refresh_after_request_observation_restores_ready)
-  | test(completed_terminal_outcome_remains_authoritative_when_exit_was_requested)
-  | test(scheduled_compaction_failure_keeps_host_worker_alive)
-  | test(interrupt_then_quit_publishes_the_cancelled_terminal)
-  | test(quit_during_active_turn_waits_for_cancelled_terminal_projection)
-  | test(product_session_facade_create_turn_shutdown_and_reopen)
-  | test(retiring_a_live_child_advances_its_session_locator)
-  | test(a_held_lease_is_refused_as_recovery_lease_held)
-  | test(real_session_late_start_ack_releases_after_deadline_without_redispatch)
-  | test(observation_parity_tests::)
-  | test(local_browser_rejects_wrong_host_without_dispatch_and_returns_no_store)
-  | test(terminal_utf8_larger_than_observation_bound_returns_without_deadline_spin)
-  | test(terminal_hint_drains_more_than_one_record_batch_without_waiting)
-  | test(contended_observation_does_not_block_the_async_worker)
-  | test(promoted_short_job_is_retired_without_observer_polling)
-  | test(promoted_monitor_exits_on_owner_drop_without_terminal_publication)
-  | test(process_await_wait_does_not_reserve_a_blocking_worker)
-  | test(process_session_missing_cwd_is_correctable_before_pipes_or_pty_spawn)
-  | test(canonical_process_operations_close_poll_terminate_and_reject_stale_authority)
-  | test(process_session_executor_rejects_stale_poll_cursor_as_model_failure)
-  | test(running_children_still_count_against_the_session_limit)
-  | test(host_cancel_and_future_drop_join_the_owned_process_group)
-  | test(joined_process_sessions_join_cancelled_group)
-  | test(a_slow_jsonl_reader_does_not_make_the_writer_fail_the_stream)
-  | test(paging_to_the_head_of_a_long_transcript_and_back_moves_on_every_key)
-  | test(control_center_chords_switch_tabs_edit_rows_search_scroll_and_copy)
-  | test(the_launch_picker_lists_earlier_sessions_and_reopens_the_chosen_one)
-  | test(durability::)
-'''
-threads-required = "num-test-threads"
-slow-timeout = { period = "240s", terminate-after = 2 }
-
-# DURABILITY LANE (default) -- crash matrices (sweep uses min(16, available_parallelism) internal workers) and the sqlite SIGKILL campaign. Byte-identical to offline. `just check` does not run it.
-[[profile.default.overrides]]
-filter = '''
-  test(crash_sweep::durability_subset)
-  | test(actual_host_sigkill_relaunch_matrix_uses_real_handlers_and_reconcilers)
-  | test(gc_after_a_compaction_cut_before_projection_prunes_at_the_compacted_head)
-  | test(sqlite_paid_compaction_sigkill_reopens_exactly_once)
-  | test(sqlite_no_locator_paid_compaction_sigkill_is_never_redispatched)
-  | test(complete_run_is_one_exact_new_state_and_probe_is_inert)
-  | test(every_runtime_commit_cut_reopens_without_redispatch)
-  | test(bounded_async_sigkill_campaign_accepts_only_exact_old_or_new_commit)
-  | test(sigkill_gc_cuts_preserve_queue_counters_and_oracle)
-'''
-threads-required = "num-test-threads"
-slow-timeout = { period = "240s", terminate-after = 2 }
-
-# Hermetic default for local development.
 [profile.offline]
-fail-fast = false
-slow-timeout = { period = "60s", terminate-after = 2 }
+default-filter = '''
+not (
+  test(a_stuck_worker_request_is_killed_and_reported_as_session_loss)
+  | test(product_terminal_e2e_tests::)
+  | test(real_composition_quit_releases_nested_process)
+  | test(real_process_quit_releases_and_resumes_exact_session)
+  | test(real_process_jsonl_quit_releases_and_resumes_exact_session)
+  | test(real_promoted_job_quit_releases_and_resumes_exact_session)
+  | test(tui_exit_bound_idle_and_stalled_turn)
+  | test(tui_local_launch_budget_new_and_resume_with_network_faults)
+  | test(a_reload_onto_the_same_state_key_resumes_exactly)
+  | test(tui_shutdown_deadlines_are_at_most_one_second)
+  | test(interactive_exit_batches_real_root_and_child_leases_without_settling)
+  | test(thinking_settle_tests::)
+  | test(quit_projection_stages_share_the_original_deadline)
+  | test(interactive_observation_timeout_releases_gate_and_joins_without_masking_failure)
+  | test(failed_interactive_publication_recovers_in_place_on_the_next_prompt)
+  | test(fresh_real_binary_shell_keeps_controls_and_draft_usable)
+  | test(deferred_startup_never_claims_attachment_before_failed_open_falls_back)
+  | test(exec_command_with_zero_yield_returns_the_joined_output)
+  | test(host_process_bounds_live_output_and_enforces_timeout)
+  | test(joined_process_pty_cancellation_and_timeout_join_the_group)
+  | test(cancel_during_a_cell_running_a_real_process_command_joins_inside_the_settle_window)
+  | test(terminal_status_without_joined_owner_is_not_durable_proof)
+  | test(contended_operation_does_not_stall_joined_proof_probe)
+  | test(admitted_exchange_deadline_is_conservative_and_joins_work)
+  | test(flushed_request_head_deadline_is_precise_and_joins_work)
+  | test(stalled_request_write_after_body_poll_keeps_write_deadline)
+  | test(slow_allowed_write_does_not_spend_response_head_budget)
+  | test(asymmetric_write_and_head_timeouts_are_sequential)
+  | test(cancelling_claimed_refresh_after_request_observation_restores_ready)
+  | test(completed_terminal_outcome_remains_authoritative_when_exit_was_requested)
+  | test(scheduled_compaction_failure_keeps_host_worker_alive)
+  | test(interrupt_then_quit_publishes_the_cancelled_terminal)
+  | test(quit_during_active_turn_waits_for_cancelled_terminal_projection)
+  | test(product_session_facade_create_turn_shutdown_and_reopen)
+  | test(retiring_a_live_child_advances_its_session_locator)
+  | test(a_held_lease_is_refused_as_recovery_lease_held)
+  | test(real_session_late_start_ack_releases_after_deadline_without_redispatch)
+  | test(observation_parity_tests::)
+  | test(local_browser_rejects_wrong_host_without_dispatch_and_returns_no_store)
+  | test(terminal_utf8_larger_than_observation_bound_returns_without_deadline_spin)
+  | test(terminal_hint_drains_more_than_one_record_batch_without_waiting)
+  | test(contended_observation_does_not_block_the_async_worker)
+  | test(promoted_short_job_is_retired_without_observer_polling)
+  | test(promoted_monitor_exits_on_owner_drop_without_terminal_publication)
+  | test(process_await_wait_does_not_reserve_a_blocking_worker)
+  | test(process_session_missing_cwd_is_correctable_before_pipes_or_pty_spawn)
+  | test(canonical_process_operations_close_poll_terminate_and_reject_stale_authority)
+  | test(process_session_executor_rejects_stale_poll_cursor_as_model_failure)
+  | test(running_children_still_count_against_the_session_limit)
+  | test(host_cancel_and_future_drop_join_the_owned_process_group)
+  | test(joined_process_sessions_join_cancelled_group)
+  | test(a_slow_jsonl_reader_does_not_make_the_writer_fail_the_stream)
+  | test(paging_to_the_head_of_a_long_transcript_and_back_moves_on_every_key)
+  | test(control_center_chords_switch_tabs_edit_rows_search_scroll_and_copy)
+  | test(the_launch_picker_lists_earlier_sessions_and_reopens_the_chosen_one)
+  | test(durability::)
+  | test(crash_sweep::durability_subset)
+  | test(actual_host_sigkill_relaunch_matrix_uses_real_handlers_and_reconcilers)
+  | test(gc_after_a_compaction_cut_before_projection_prunes_at_the_compacted_head)
+  | test(sqlite_paid_compaction_sigkill_reopens_exactly_once)
+  | test(sqlite_no_locator_paid_compaction_sigkill_is_never_redispatched)
+  | test(complete_run_is_one_exact_new_state_and_probe_is_inert)
+  | test(every_runtime_commit_cut_reopens_without_redispatch)
+  | test(bounded_async_sigkill_campaign_accepts_only_exact_old_or_new_commit)
+  | test(sigkill_gc_cuts_preserve_queue_counters_and_oracle)
+)
+'''
 
-# macOS creates pipes without an atomic close-on-exec flag, so a test process
-# spawned concurrently can briefly inherit another test's output pipe and
-# hold it past exit. A leak there names a random passing test, never a leak of
-# the test itself; Linux, whose pipes are atomic, keeps leaks fatal.
-[[profile.offline.overrides]]
-platform = 'cfg(target_os = "macos")'
-filter = 'all()'
-leak-timeout = { period = "1s", result = "pass" }
-
-[[profile.offline.overrides]]
-filter = 'test(native_auth::)'
-test-group = 'native-auth-serial'
-
-[[profile.offline.overrides]]
-filter = 'package(=plak) & binary(=integration) & test(/^cli_contract::/)'
-test-group = 'cli-contract-serial'
-
-[[profile.offline.overrides]]
-filter = 'binary(local_transport)'
-test-group = 'native-auth-serial'
-
-# Opt-in (ignored) pruning sweep-cost measurement over a large store.
-[[profile.offline.overrides]]
-filter = 'test(sqlite_prune_sweep_cost_on_a_large_store)'
-slow-timeout = { period = "300s", terminate-after = 2 }
-
-# Opt-in (ignored) TLS write-path reproducer matrix.
-[[profile.offline.overrides]]
-filter = 'test(tls_integrity_reproducer_matrix)'
-slow-timeout = { period = "300s", terminate-after = 2 }
-
-# BUDGET LANE (offline) -- the set `tools/checks/budget_filterset.py` reads.
-[[profile.offline.overrides]]
-filter = '''
+[profile.serial]
+test-threads = 1
+slow-timeout = { period = "240s", terminate-after = 2 }
+default-filter = '''
   test(a_stuck_worker_request_is_killed_and_reported_as_session_loss)
   | test(product_terminal_e2e_tests::)
   | test(real_composition_quit_releases_nested_process)
@@ -239,12 +195,12 @@ filter = '''
   | test(the_launch_picker_lists_earlier_sessions_and_reopens_the_chosen_one)
   | test(durability::)
 '''
-threads-required = "num-test-threads"
-slow-timeout = { period = "240s", terminate-after = 2 }
 
-# DURABILITY LANE (offline) -- sweep uses min(16, available_parallelism) internal workers; the set `tools/checks/budget_filterset.py --durability` reads. Byte-identical to default.
-[[profile.offline.overrides]]
-filter = '''
+# The crash sweep inside this lane uses min(16, available_parallelism) internal workers.
+[profile.durability]
+test-threads = 1
+slow-timeout = { period = "240s", terminate-after = 2 }
+default-filter = '''
   test(crash_sweep::durability_subset)
   | test(actual_host_sigkill_relaunch_matrix_uses_real_handlers_and_reconcilers)
   | test(gc_after_a_compaction_cut_before_projection_prunes_at_the_compacted_head)
@@ -255,5 +211,3 @@ filter = '''
   | test(bounded_async_sigkill_campaign_accepts_only_exact_old_or_new_commit)
   | test(sigkill_gc_cuts_preserve_queue_counters_and_oracle)
 '''
-threads-required = "num-test-threads"
-slow-timeout = { period = "240s", terminate-after = 2 }

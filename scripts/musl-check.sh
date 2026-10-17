@@ -47,7 +47,6 @@ docker run --rm --platform linux/amd64 --pull never --network none \
       touch "$CARGO_HOME/.seeded"
     fi
     cd /qual/src
-    # The timing ledger is beside Cargo artifacts, both on the writable mount.
     export PATH=/qual/tools:$PATH CARGO_TARGET_DIR=/qual/target/artifacts CARGO_NET_OFFLINE=true
     export CARGO_BUILD_TARGET=x86_64-unknown-linux-musl
     rustc -V; rustc -Vv | grep "^host:"; cargo nextest --version; python3 -V
