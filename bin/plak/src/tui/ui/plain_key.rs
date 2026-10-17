@@ -251,11 +251,6 @@ impl App {
                 self.mark_dirty();
                 None
             }
-            KeyCode::Backspace if self.input.is_empty() && !self.attachments.is_empty() => {
-                self.attachments.pop();
-                self.mark_dirty();
-                None
-            }
             KeyCode::Backspace => {
                 self.backspace_char();
                 self.dismiss_history();

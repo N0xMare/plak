@@ -726,36 +726,24 @@ impl App {
             .collect();
         frame.render_widget(Paragraph::new(para_lines), inner);
 
+        let geometry = ComposerGeometry {
+            inner,
+            glyph_cols,
+            wrap_w,
+            scroll,
+            max_rows,
+        };
+        // Attachment tokens read as one chip; a pending one is dimmed.
+        for (range, pending) in self.attachment_token_ranges() {
+            let style = if pending {
+                self.theme.chrome_dim
+            } else {
+                self.theme.user_label
+            };
+            self.paint_composer_chars(frame, &geometry, range, style);
+        }
         if let Some(range) = self.composer_selection.render_range(&self.input) {
-            let wrap_rows = self.composer_wrap.rows(&self.input, wrap_w);
-            let mut char_index = 0usize;
-            for grapheme in self.input.graphemes(true) {
-                let grapheme_start = char_index;
-                char_index = char_index.saturating_add(grapheme.chars().count());
-                if grapheme_start >= range.end || char_index <= range.start {
-                    continue;
-                }
-                let (selected_col, selected_row) =
-                    visual_cursor_xy_from_rows(wrap_rows, grapheme_start);
-                if selected_row < scroll || selected_row >= scroll.saturating_add(max_rows) {
-                    continue;
-                }
-                let y = inner.y.saturating_add(
-                    u16::try_from(selected_row.saturating_sub(scroll)).unwrap_or(u16::MAX),
-                );
-                let cells = UnicodeWidthStr::width(grapheme).max(1);
-                for offset in 0..cells {
-                    let x = inner
-                        .x
-                        .saturating_add(glyph_cols)
-                        .saturating_add(u16::try_from(selected_col + offset).unwrap_or(u16::MAX));
-                    if x < inner.x.saturating_add(inner.width)
-                        && y < inner.y.saturating_add(inner.height)
-                    {
-                        frame.buffer_mut()[(x, y)].set_style(self.theme.slash_selected);
-                    }
-                }
-            }
+            self.paint_composer_chars(frame, &geometry, range, self.theme.slash_selected);
         }
 
         // The cursor is shown only while the composer owns the operator's
@@ -778,6 +766,63 @@ impl App {
             );
             let cy = inner.y.saturating_add(u16::try_from(vis_row).unwrap_or(0));
             frame.set_cursor_position(ratatui::layout::Position { x: cx, y: cy });
+        }
+    }
+}
+
+/// Where the composer's draft text sits on screen.
+struct ComposerGeometry {
+    inner: Rect,
+    glyph_cols: u16,
+    wrap_w: usize,
+    scroll: usize,
+    max_rows: usize,
+}
+
+impl App {
+    /// Sets `style` on the visible cells of the draft's chars in `range`.
+    fn paint_composer_chars(
+        &mut self,
+        frame: &mut Frame<'_>,
+        geometry: &ComposerGeometry,
+        range: std::ops::Range<usize>,
+        style: Style,
+    ) {
+        let ComposerGeometry {
+            inner,
+            glyph_cols,
+            wrap_w,
+            scroll,
+            max_rows,
+        } = *geometry;
+        let wrap_rows = self.composer_wrap.rows(&self.input, wrap_w);
+        let mut char_index = 0usize;
+        for grapheme in self.input.graphemes(true) {
+            let grapheme_start = char_index;
+            char_index = char_index.saturating_add(grapheme.chars().count());
+            if grapheme_start >= range.end || char_index <= range.start {
+                continue;
+            }
+            let (selected_col, selected_row) =
+                visual_cursor_xy_from_rows(wrap_rows, grapheme_start);
+            if selected_row < scroll || selected_row >= scroll.saturating_add(max_rows) {
+                continue;
+            }
+            let y = inner.y.saturating_add(
+                u16::try_from(selected_row.saturating_sub(scroll)).unwrap_or(u16::MAX),
+            );
+            let cells = UnicodeWidthStr::width(grapheme).max(1);
+            for offset in 0..cells {
+                let x = inner
+                    .x
+                    .saturating_add(glyph_cols)
+                    .saturating_add(u16::try_from(selected_col + offset).unwrap_or(u16::MAX));
+                if x < inner.x.saturating_add(inner.width)
+                    && y < inner.y.saturating_add(inner.height)
+                {
+                    frame.buffer_mut()[(x, y)].set_style(style);
+                }
+            }
         }
     }
 }

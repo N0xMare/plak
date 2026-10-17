@@ -500,6 +500,7 @@ pub(super) fn run_app(
         app.sync_agent_transcript(actions);
         app.refresh_launch_binary_id();
         app.maybe_flush_pending_prompt_after_attach(actions);
+        app.poll_attachments();
         if std::mem::take(&mut app.pending_reload) {
             // Asked while the session is still attached: once the handoff
             // starts there is nothing left to show a slow answer on.
@@ -767,10 +768,8 @@ pub(super) fn send_user_action(
                 UserAction::Prompt(draft)
                 | UserAction::FollowUp(draft)
                 | UserAction::Steer(draft) => {
-                    let mut images = draft.images;
-                    images.append(&mut app.attachments);
-                    app.attachments = images;
-                    app.set_input(draft.text);
+                    let text = app.adopt_draft_images(draft);
+                    app.set_input(text);
                     app.slash_open = false;
                     app.history_browse = None;
                 }

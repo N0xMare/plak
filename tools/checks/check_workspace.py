@@ -1177,6 +1177,9 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
         "agent": {"MAX_USER_IMAGES", "MAX_USER_IMAGE_BYTES"},
         "tools": {"ImageSniffError", "sniff_image"},
     },
+    ("plakous-hosted", "src/attachments/normalize.rs"): {
+        "tools": {"ImageSniffError", "sniff_image"},
+    },
     ("plakous-hosted", "src/sessions/queue.rs"): {
         "agent": {"MAX_USER_IMAGES", "MAX_USER_IMAGE_BYTES", "UserInput", "UserPart"},
         "tools": {"sniff_image"},

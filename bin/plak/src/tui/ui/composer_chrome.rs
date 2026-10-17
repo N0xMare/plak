@@ -466,29 +466,6 @@ impl App {
         );
     }
 
-    /// The composer's attachment chips within `budget` cells: every chip
-    /// when they fit, else a count.
-    pub(super) fn attachment_chips(&self, budget: usize) -> String {
-        if self.attachments.is_empty() {
-            return String::new();
-        }
-        let full = self
-            .attachments
-            .iter()
-            .map(crate::config::image_attachments::chip)
-            .collect::<Vec<_>>()
-            .join(" ");
-        let count = format!(
-            "[{} image{}]",
-            self.attachments.len(),
-            if self.attachments.len() == 1 { "" } else { "s" }
-        );
-        [full, count]
-            .into_iter()
-            .find(|text| text.width() <= budget)
-            .unwrap_or_default()
-    }
-
     /// Seeds the idle clock from the host's stored time of the last prompt
     /// after an attach. A prompt sent from this surface since is newer and
     /// stays; a stored time ahead of the local clock reads as just sent.

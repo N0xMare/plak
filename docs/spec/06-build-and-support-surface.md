@@ -299,7 +299,9 @@ unconditional dependency of `bin/plak`. Its `tui` module is private to the
 product library. There is no separate presentation package or `ui` feature.
 Clipboard image paste (`Ctrl+V`) uses `arboard` (image data only: AppKit on
 macOS, the pure-Rust X11 client `x11rb` on Linux, no Wayland feature), an
-unconditional `bin/plak` dependency. Attached images are normalized in
+unconditional `bin/plak` dependency; on macOS `bin/plak` also depends on
+`objc2`, `objc2-app-kit` (`NSPasteboard` only) and `objc2-foundation` to read
+a screenshot's PNG flavour without the TIFF decode. Attached images are normalized in
 `plakous-hosted` with the pure-Rust `image` crate (features `png`, `jpeg`,
 `gif`, `webp` only). Both build for both supported targets, musl static
 included.

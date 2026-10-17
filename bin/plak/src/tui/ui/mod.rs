@@ -430,9 +430,9 @@ pub(crate) struct App {
     pub(crate) agent_enabled: bool,
     /// Prompt submitted before attach completes; flushed on `AgentAttached(true)`.
     pending_prompt: Option<String>,
-    /// Images attached to the draft (`/image`, a pasted image path); sent
-    /// with the next prompt.
-    pub(crate) attachments: Vec<plakous_host_protocol::DraftImage>,
+    /// Images the draft's `[image #N]` tokens name (`/image`, a pasted
+    /// image path, `Ctrl+V`); sent with the prompt that references them.
+    attachments: attachments::Attachments,
     /// True when the app host attached action/event channels.
     pub(crate) hosted: bool,
     /// The transcript on screen: the root's, or an open agent's.
@@ -831,7 +831,7 @@ impl App {
             model_extra: launch.extra,
             agent_enabled: launch.agent_enabled,
             pending_prompt: None,
-            attachments: Vec::new(),
+            attachments: attachments::Attachments::default(),
             hosted,
             pane: pane::TranscriptPane::new(blocks),
             agent_view: None,
@@ -1087,6 +1087,7 @@ mod agent_view_review_probes;
 )]
 mod agent_view_tests;
 mod agents_tab;
+mod attachments;
 mod call_detail;
 mod clipboard;
 mod composer;

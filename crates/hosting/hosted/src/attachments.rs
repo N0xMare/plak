@@ -143,6 +143,13 @@ pub fn chip(image: &DraftImage) -> String {
     crate::sessions::named_image_chip(image)
 }
 
+/// The chip of an attached image under its type, as the transcript shows
+/// it: `[image: png 2048x1324 1.9 MB, downscaled from 3456x2234]`.
+#[must_use]
+pub fn unnamed_chip(image: &DraftImage) -> String {
+    crate::sessions::draft_image_chip(image)
+}
+
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
 #[must_use]

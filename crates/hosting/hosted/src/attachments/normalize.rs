@@ -9,7 +9,7 @@ use std::fmt;
 use std::io::Cursor;
 
 use image::codecs::jpeg::JpegEncoder;
-use image::codecs::png::PngEncoder;
+use image::codecs::png::{CompressionType, FilterType as PngFilter, PngEncoder};
 use image::imageops::FilterType;
 use image::{DynamicImage, ImageDecoder as _, ImageFormat, Limits, RgbImage, RgbaImage};
 use plakous_host_protocol::DraftImage;
@@ -197,7 +197,12 @@ fn fit(name: String, image: &DynamicImage, lossless: bool) -> Result<DraftImage,
 fn encode_png(image: &DynamicImage) -> Result<Vec<u8>, NormalizeError> {
     let mut bytes = Vec::new();
     image
-        .write_with_encoder(PngEncoder::new(&mut bytes))
+        // Fast compression: an interactive paste waits on this encode.
+        .write_with_encoder(PngEncoder::new_with_quality(
+            &mut bytes,
+            CompressionType::Fast,
+            PngFilter::Adaptive,
+        ))
         .map_err(|error| NormalizeError::Undecodable(Box::new(error)))?;
     Ok(bytes)
 }

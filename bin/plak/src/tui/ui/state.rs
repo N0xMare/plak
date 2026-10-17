@@ -58,7 +58,8 @@ impl App {
                 || self.tree_live_descendants > 0
                 || self.background_processes > 0
                 || self.open_approval.is_some()
-                || self.reload_probe.is_some(),
+                || self.reload_probe.is_some()
+                || self.attachments_pending(),
             // An open Agents list does not keep the idle cadence. Ages dim
             // and expire on a one-shot wake; running rows use the spinner.
             animating: self.busy
@@ -297,14 +298,11 @@ impl App {
         self.mark_transcript_structural();
     }
 
-    /// Restores a refused draft: its text, and its images ahead of any
-    /// attached since, within the per-message image bound.
+    /// Restores a refused draft: its text, and its images as the first
+    /// attachments, ahead of any attached since.
     pub(super) fn restore_draft(&mut self, draft: plakous_host_protocol::Draft) {
-        let mut images = draft.images;
-        images.append(&mut self.attachments);
-        images.truncate(crate::config::image_attachments::MAX_IMAGES);
-        self.attachments = images;
-        self.restore_draft_text(draft.text);
+        let text = self.adopt_draft_images(draft);
+        self.restore_draft_text(text);
     }
 
     pub(super) fn restore_draft_text(&mut self, text: String) {

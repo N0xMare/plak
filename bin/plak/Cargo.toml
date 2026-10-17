@@ -66,6 +66,13 @@ opentelemetry-otlp = { workspace = true, optional = true }
 opentelemetry_sdk = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
 
+# Ctrl+V reads a macOS screenshot's PNG flavour directly instead of
+# arboard's TIFF decode.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6.5", default-features = false, features = ["std"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSPasteboard"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSData", "NSString"] }
+
 [dev-dependencies]
 rustix = { workspace = true, features = ["pty", "termios"] }
 plakous-hosted = { version = "0.1.0", path = "../../crates/hosting/hosted", features = ["test-support"], default-features = false }

@@ -1225,7 +1225,7 @@ mod sidecar {
 }
 
 #[test]
-fn composer_image_chips_attach_by_slash_or_path_drop_and_ride_the_next_prompt() {
+fn composer_image_tokens_attach_by_slash_or_path_drop_and_ride_the_next_prompt() {
     let dir = tempfile::tempdir().unwrap();
     let shot = dir.path().join("shot one.png");
     std::fs::write(
@@ -1237,62 +1237,59 @@ fn composer_image_chips_attach_by_slash_or_path_drop_and_ride_the_next_prompt() 
     std::fs::write(&notes, "not an image").unwrap();
     let mut app = App::new(launch_basic(), true);
 
-    // `/image <path>` attaches without sending anything.
+    // `/image <path>` puts a token in the draft without sending anything.
     app.set_input(format!("/image {}", shot.display()));
     assert_eq!(app.submit_line(false), None);
-    assert_eq!(app.input, "");
+    assert_eq!(app.input, "[image #1] ");
+    app.settle_attachments();
     assert_eq!(app.semantic_snapshot().composer.attachment_count, 1);
     assert_eq!(
         app.attachment_chips(200),
-        "[image: shot one.png 1280x720 3 KB]"
+        "[image #1: shot one.png 1280x720 3 KB]"
     );
     assert_eq!(app.attachment_chips(20), "[1 image]");
 
     // A dropped path (escaped space) attaches; a dropped non-image types.
     app.handle_paste(&shot.display().to_string().replace(' ', "\\ "));
-    assert_eq!(app.attachments.len(), 2);
-    assert_eq!(app.input, "");
+    app.settle_attachments();
+    assert_eq!(app.input, "[image #1] [image #2] ");
     app.handle_paste(&notes.display().to_string());
-    assert_eq!(app.attachments.len(), 2);
-    assert_eq!(app.input, notes.display().to_string());
-    app.set_input(String::new());
+    assert_eq!(app.attachment_count(), 2);
+    assert!(app.input.ends_with(&notes.display().to_string()));
+    app.set_input("[image #2] ".to_owned());
 
-    // Backspace on an empty composer removes the last chip.
-    app.handle_key(super::test_support::key(
-        crossterm::event::KeyCode::Backspace,
-    ));
-    assert_eq!(app.attachments.len(), 1);
-
-    // Submit with chips but no text sends the images alone.
+    // Tokens alone send the images alone.
     let sent = app.submit_line(false);
     let Some(UserAction::Prompt(draft)) = sent else {
         panic!("expected an image-only prompt, got {sent:?}")
     };
     assert_eq!(draft.text, "");
     assert_eq!(draft.images.len(), 1);
-    assert_eq!(app.attachments.len(), 0);
+    assert_eq!(app.attachment_count(), 0);
 
-    // A prompt the host withholds comes back with its images.
+    // A prompt the host withholds comes back with its images as tokens.
     app.apply_host_event(HostEvent::DraftRestored(draft));
-    assert_eq!(app.input, "");
-    assert_eq!(app.attachments.len(), 1);
+    assert_eq!(app.input, "[image #1]");
+    assert_eq!(app.attachment_count(), 1);
 
-    app.set_input("what is this?".to_owned());
+    app.set_input("what is [image #1]?".to_owned());
     let sent = app.submit_line(false);
     let Some(UserAction::Prompt(draft)) = sent else {
         panic!("expected a prompt, got {sent:?}")
     };
-    assert_eq!(draft.text, "what is this?");
+    assert_eq!(draft.text, "what is [image #1]?");
     assert_eq!(draft.images.len(), 1);
     assert_eq!(draft.images[0].name, "shot one.png");
-    assert_eq!(app.attachments.len(), 0);
+    assert_eq!(app.attachment_count(), 0);
 
     // A refused draft returns its images to the composer.
     app.apply_host_event(HostEvent::DraftRejected(UserAction::Prompt(draft)));
-    assert_eq!(app.attachments.len(), 1);
-    assert_eq!(app.input, "what is this?");
+    assert_eq!(app.attachment_count(), 1);
+    assert_eq!(app.input, "what is [image #1]?");
 
-    // A missing file is a note naming it; nothing attaches.
+    // A missing file is a note naming it; its token leaves the draft.
     app.attach_image(&dir.path().join("gone.png"));
-    assert_eq!(app.attachments.len(), 1);
+    app.settle_attachments();
+    assert_eq!(app.attachment_count(), 1);
+    assert_eq!(app.input, "what is [image #1]?");
 }

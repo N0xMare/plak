@@ -42,8 +42,7 @@ impl App {
     pub(crate) fn submit_line(&mut self, steer: bool) -> Option<UserAction> {
         let line = self.input.trim().to_owned();
         // Empty Enter while busy + queue → send-now (plak: Steer top / FIFO head).
-        // Attached images alone are a message.
-        if line.is_empty() && (self.attachments.is_empty() || self.queue_focused) {
+        if line.is_empty() {
             if self.queue_focused {
                 return self.queue_activate_selected(steer || self.busy);
             }
@@ -68,6 +67,15 @@ impl App {
             return Some(action);
         }
         let parsed = parse_slash(&line);
+        if parsed.is_none()
+            && let Some(number) = self.pending_attachment_in(&line)
+        {
+            self.push_block(ScrollBlock::System(format!(
+                "image #{number} is still being read; send again when it is attached"
+            )));
+            self.mark_dirty();
+            return None;
+        }
         // Hold a prompt only while the agent is still preparing. Once the host
         // settled without one, it refuses the prompt with the reason and
         // returns the draft, rather than holding it here forever.
@@ -107,12 +115,8 @@ impl App {
         }
 
         self.last_prompt_at = Some(self.now());
-        let images = std::mem::take(&mut self.attachments);
-        Some(route_submit(
-            self.busy,
-            steer,
-            plakous_host_protocol::Draft::new(line, images),
-        ))
+        let draft = self.take_draft(&line);
+        Some(route_submit(self.busy, steer, draft))
     }
 
     /// Send-now the queue item at FIFO index (0 = oldest).

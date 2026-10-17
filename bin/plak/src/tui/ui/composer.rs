@@ -97,6 +97,10 @@ impl App {
         if self.input.is_empty() {
             return;
         }
+        if let Some(token) = self.token_at_caret(false) {
+            self.delete_token(token);
+            return;
+        }
         self.record_undo(EditKind::Discrete);
         if self.composer_selection.range(&self.input).is_none() {
             self.composer_selection
@@ -114,14 +118,18 @@ impl App {
     /// a cut or copy of the whole draft needed a pointer.
     /// `Delete` and `Ctrl+D`: the selection, or the character after the caret.
     pub(super) fn delete_forward(&mut self) {
-        self.record_undo(EditKind::Discrete);
-        if self.composer_selection.range(&self.input).is_none() {
-            self.composer_selection
-                .set_caret(&self.input, self.input_cursor);
+        if let Some(token) = self.token_at_caret(true) {
+            self.delete_token(token);
+        } else {
+            self.record_undo(EditKind::Discrete);
+            if self.composer_selection.range(&self.input).is_none() {
+                self.composer_selection
+                    .set_caret(&self.input, self.input_cursor);
+            }
+            self.composer_selection.delete_forward(&mut self.input);
+            self.input_cursor = self.composer_selection.head();
+            self.composer_wheel_scroll = None;
         }
-        self.composer_selection.delete_forward(&mut self.input);
-        self.input_cursor = self.composer_selection.head();
-        self.composer_wheel_scroll = None;
         self.dismiss_history();
         self.sync_slash_open();
         self.mark_dirty();
@@ -474,34 +482,17 @@ impl App {
 }
 
 impl App {
-    /// Attaches one image file to the draft; a refusal is a system note
-    /// naming the file, and the draft is unchanged.
+    /// Attaches one image file to the draft as a token at the caret; a
+    /// refusal turns it into a system note naming the file.
     pub(super) fn attach_image(&mut self, path: &std::path::Path) {
-        self.push_attachment(|| {
-            crate::config::image_attachments::read_image(path).map_err(|error| error.to_string())
+        let path = path.to_owned();
+        self.begin_attachment(move || {
+            crate::config::image_attachments::read_image(&path).map_err(|error| error.to_string())
         });
     }
 
     /// Attaches the image on the system clipboard (Ctrl+V).
     pub(super) fn paste_clipboard_image(&mut self) {
-        self.push_attachment(super::clipboard::read_image);
-    }
-
-    fn push_attachment(
-        &mut self,
-        read: impl FnOnce() -> Result<plakous_host_protocol::DraftImage, String>,
-    ) {
-        self.mark_dirty();
-        if self.attachments.len() >= crate::config::image_attachments::MAX_IMAGES {
-            self.push_block(ScrollBlock::System(format!(
-                "image not attached: a message carries at most {} images",
-                crate::config::image_attachments::MAX_IMAGES
-            )));
-            return;
-        }
-        match read() {
-            Ok(image) => self.attachments.push(image),
-            Err(error) => self.push_block(ScrollBlock::System(format!("not attached: {error}"))),
-        }
+        self.begin_attachment(super::clipboard::read_image);
     }
 }

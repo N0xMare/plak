@@ -236,7 +236,7 @@ impl App {
                 editing_queue_item: self.queue_editing.is_some(),
                 pending_prompt: self.pending_prompt.is_some(),
                 pending_draft_count: self.pending_drafts.len(),
-                attachment_count: self.attachments.len(),
+                attachment_count: self.attachment_count(),
                 cancel_pending: self.cancel_pending,
                 host_disconnected: self.host_disconnected,
             },

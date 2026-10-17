@@ -4610,7 +4610,9 @@ A prompt can carry images, attached to the draft three ways:
 - `Ctrl+V` in the composer reads an image from the system clipboard (AppKit on
   macOS, the X11 clipboard on Linux; Wayland sessions reach it through
   XWayland), and so does an empty bracketed paste, which is what a terminal
-  sends for a clipboard that holds only an image. Chip name `clipboard.png`.
+  sends for a clipboard that holds only an image. On macOS the pasteboard's
+  `public.png` flavour is read when present (a screenshot carries one beside
+  a much larger TIFF), else the image arboard decodes. Name `clipboard.png`.
   It is `Ctrl+V`, not `Cmd+V`: a terminal sends nothing for `Cmd+V` while the
   clipboard holds only an image, so the Keybinds sheet and the bare `/image`
   note say so. A clipboard without an image, or no clipboard, is a system
@@ -4634,24 +4636,43 @@ one normalizer in `plakous-hosted`:
 - A file over 64 MiB is refused unread, and decoding is bounded at 16384 px
   per edge and 256 MiB of allocation.
 
-A refusal is a system note naming the file; the draft is unchanged. Terminal
-image rendering does not exist.
+Terminal image rendering does not exist.
 
-Attached images show as chips in the composer's bottom border,
-`[image: shot.png 1280x720 412 KB]`, collapsing to `[N images]` when they do
-not fit. A downscaled image's chip and the live transcript line of the message
-that sends it name the attached dimensions:
-`[image: shot.png 2048x1324 1.9 MB, downscaled from 3456x2234]` and
+An attachment is an inline token in the draft, `[image #N]`, inserted at the
+caret (with a following space) the moment the image is attached; `N` counts
+up within the draft. Reading, decoding and downscaling run on a worker
+thread, never on the UI thread: the token shows dimmed while its image is
+read and in the user-label style once it is ready, and a failure removes the
+token and posts a system note naming the file. The token is draft text for
+caret movement, selection, undo and history; `Backspace` with the caret just
+after it and `Delete` with the caret just before it remove it as one unit.
+Only a token whose number names an attachment of this draft is one; any
+other `[image #N]` is plain text. A draft that names a still-pending image is
+not sent: a system note says so and the draft stays.
+
+The composer's bottom border lists the draft's attachments in token order,
+`[image #1: shot.png 1280x720 412 KB]` (`[image #1: reading…]` while
+pending), collapsing to `[N images]` when they do not fit. A downscaled
+image's chip and the live transcript line of the message that sends it name
+the attached dimensions:
+`[image #1: shot.png 2048x1324 1.9 MB, downscaled from 3456x2234]` and
 `[image: png 2048x1324 1.9 MB, downscaled from 3456x2234]`; `plak run --image`
 prints the chip on stderr as `plak: attached [image: ...]`. The note is
 presentation only: history, the queue store and a reopened transcript keep
-the sent image's facts alone. `Backspace` in an empty composer removes the last chip. Submit sends
-the text and the chips' images together as one draft (prompt, queued
-follow-up or steer); images alone are a message, so `Enter` on an empty
-composer with chips sends them without text (the queue panel's own `Enter`
-keeps its meaning while the panel is focused). A refused draft, and a prompt
-the host withholds at the context window, return their images to the
-composer with their text.
+the sent image's facts alone.
+
+Submit sends one draft (prompt, queued follow-up or steer): the images its
+tokens name, in token order (an image named twice is sent once), and its
+text with those tokens renumbered `#1..#n` in that order, so `[image #k]` in
+the text is the k-th image of the message. The tokens stay in the text
+because a draft is one text part followed by its images (the delivery order
+below): the token is the only place the operator's reference survives, and it
+names the image by position. A draft that is only tokens and whitespace is
+an image-only message with no text. An attachment whose token was deleted is
+not sent. A refused draft, and a prompt the host withholds at the context
+window, return to the composer with their images as attachments `#1..#k`,
+ahead of (and renumbering) any attached since; an image the returned text
+does not name gets a token appended.
 
 A queued item keeps its images for its whole life: a queue edit replaces only
 the text, and may clear it when the item has images; the queue panel marks

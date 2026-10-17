@@ -198,12 +198,8 @@ impl App {
         self.history_browse = None;
         self.mark_dirty();
         if let Some(tx) = actions {
-            let images = std::mem::take(&mut self.attachments);
-            let _ = tx.send(route_submit(
-                self.busy,
-                false,
-                plakous_host_protocol::Draft::new(text, images),
-            ));
+            let draft = self.take_draft(&text);
+            let _ = tx.send(route_submit(self.busy, false, draft));
         }
     }
 

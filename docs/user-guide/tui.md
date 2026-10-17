@@ -57,12 +57,18 @@ you are writing (at most 8 per message):
   as `clipboard.png`. On Linux this reads the X11 clipboard.
 - `/image <path>...` attaches the named files.
 
-Each attachment shows as a chip in the composer's bottom border,
-`[image: shot.png 1280x720 412 KB]`; `Backspace` in an empty composer removes
-the last one. Press `Enter` to send the text and its images together, or the
-images alone with no text. A queued message keeps its images when you edit
-its text, and the queue panel marks it `[1 image]`. In the transcript the
-message shows one chip per image, such as `[image: png 1280x720 412 KB]`
+Each attachment appears in your text at the cursor as a token such as
+`[image #1]`, at once, while the image is read in the background (dimmed
+until it is ready); a file that cannot be attached disappears again with a
+note saying why. Refer to images by their tokens ("compare [image #1] with
+[image #2]"). `Backspace` right after a token, or `Delete` right before it,
+removes it and its image. The composer's bottom border lists the
+attachments, `[image #1: shot.png 1280x720 412 KB]`. Press `Enter` to send
+the text and its images together; a message of tokens alone sends the images
+without text. The model receives the images in token order, with the tokens
+renumbered from `#1` to match. A queued message keeps its images when you
+edit its text, and the queue panel marks it `[1 image]`. In the transcript
+the message shows one chip per image, such as `[image: png 1280x720 412 KB]`
 (history keeps the type, not the file name). The context meter counts each
 image before it is sent (up to about 3,300 tokens on Claude routes, a
 conservative 8,192 elsewhere). A model without image input refuses the
@@ -71,7 +77,7 @@ message, naming the route and model. Images are not drawn in the terminal.
 An image larger than 2048 px on its long edge or 3.75 MiB is downscaled when
 you attach it, so a full-resolution Retina screenshot attaches as is: it is
 resized to at most 2048 px (kept as PNG when that fits, otherwise JPEG) and
-the chip says so, `[image: shot.png 2048x1324 1.9 MB, downscaled from
+the chip says so, `[image #1: shot.png 2048x1324 1.9 MB, downscaled from
 3456x2234]`, as does the message's line in the transcript while the session
 runs. Smaller images are sent unchanged.
 
