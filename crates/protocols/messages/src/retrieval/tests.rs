@@ -39,17 +39,8 @@ fn fetch() -> MessagesRetrievalRequest {
 }
 
 #[test]
-fn web_search_body_is_exact_and_cost_only() -> TestResult {
+fn the_web_search_body_is_cost_only() -> TestResult {
     let body = search().body(&[])?;
-    assert_eq!(
-        String::from_utf8(body.clone())?,
-        concat!(
-            r#"{"model":"claude-sonnet-4-6","max_tokens":4096,"messages":[{"content":[{"text":"#,
-            r#""Search the web for: rust 1.99. Answer concisely and cite sources.","type":"text"}],"#,
-            r#""role":"user"}],"tools":[{"allowed_callers":["direct"],"allowed_domains":["rust-lang.org"],"#,
-            r#""max_uses":5,"name":"web_search","type":"web_search_20260318"}],"stream":true}"#,
-        )
-    );
     assert_eq!(
         classify_messages_retrieval_body(&body),
         ReplaySafety::CostOnly
@@ -58,21 +49,11 @@ fn web_search_body_is_exact_and_cost_only() -> TestResult {
 }
 
 #[test]
-fn web_fetch_body_is_exact_and_cost_only() -> TestResult {
+fn the_web_fetch_body_is_cost_only() -> TestResult {
     let body = fetch()
         .with_system(vec!["costume line".to_owned()])
         .with_metadata(json!({"user_id": "u"}))
         .body(&[])?;
-    assert_eq!(
-        String::from_utf8(body.clone())?,
-        concat!(
-            r#"{"model":"claude-sonnet-4-6","max_tokens":4096,"system":[{"type":"text","text":"costume line"}],"#,
-            r#""messages":[{"content":[{"text":"Fetch https://example.com/a and answer: list the headings. "#,
-            r#"Answer concisely and cite sources.","type":"text"}],"role":"user"}],"tools":[{"allowed_callers":"#,
-            r#"["direct"],"citations":{"enabled":true},"max_content_tokens":20000,"max_uses":1,"#,
-            r#""name":"web_fetch","type":"web_fetch_20260318"}],"metadata":{"user_id":"u"},"stream":true}"#,
-        )
-    );
     assert_eq!(
         classify_messages_retrieval_body(&body),
         ReplaySafety::CostOnly

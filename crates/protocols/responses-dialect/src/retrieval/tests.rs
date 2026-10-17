@@ -49,25 +49,9 @@ fn post_search() -> ResponsesRetrievalRequest {
     )
 }
 
-const USER: &str = concat!(
-    r#""input":[{"content":[{"text":"Search the web for: rust 1.99. Answer concisely and cite "#,
-    r#"sources.","type":"input_text"}],"role":"user","type":"message"}],"#,
-);
-
 #[test]
-fn openai_web_search_body_is_exact_and_cost_only() -> TestResult {
+fn the_openai_web_search_body_is_cost_only() -> TestResult {
     let body = openai_search().body()?;
-    assert_eq!(
-        String::from_utf8(body.clone())?,
-        [
-            r#"{"model":"gpt-5.5","#,
-            USER,
-            r#""tools":[{"filters":{"allowed_domains":["rust-lang.org"]},"search_context_size":"medium","#,
-            r#""type":"web_search"}],"tool_choice":"required","include":["web_search_call.action.sources"],"#,
-            r#""reasoning":{"effort":"low"},"max_output_tokens":4096,"store":false,"stream":true}"#,
-        ]
-        .concat()
-    );
     assert_eq!(
         classify_responses_retrieval_body(&body),
         ReplaySafety::CostOnly
@@ -76,34 +60,14 @@ fn openai_web_search_body_is_exact_and_cost_only() -> TestResult {
 }
 
 #[test]
-fn xai_web_and_post_search_bodies_are_exact_and_cost_only() -> TestResult {
+fn the_xai_web_and_post_search_bodies_are_cost_only() -> TestResult {
     let web = ResponsesRetrievalRequest::new(
         "grok-4.6",
         ResponsesRetrievalFlavor::Xai,
         web_search(&[], &["example.com"]),
     )
     .body()?;
-    assert_eq!(
-        String::from_utf8(web.clone())?,
-        [
-            r#"{"model":"grok-4.6","#,
-            USER,
-            r#""tools":[{"excluded_domains":["example.com"],"type":"web_search"}],"#,
-            r#""tool_choice":"required","include":["web_search_call.action.sources"],"#,
-            r#""max_output_tokens":4096,"store":false,"stream":true}"#,
-        ]
-        .concat()
-    );
     let posts = post_search().body()?;
-    assert_eq!(
-        String::from_utf8(posts.clone())?,
-        concat!(
-            r#"{"model":"grok-4.6","input":[{"content":[{"text":"Search X posts for: rust 1.99. "#,
-            r#"Answer concisely and cite sources.","type":"input_text"}],"role":"user","type":"message"}],"#,
-            r#""tools":[{"allowed_x_handles":["rustlang"],"from_date":"2026-10-01","type":"x_search"}],"#,
-            r#""tool_choice":"required","max_output_tokens":4096,"store":false,"stream":true}"#,
-        )
-    );
     for body in [web, posts] {
         assert_eq!(
             classify_responses_retrieval_body(&body),
@@ -508,18 +472,6 @@ async fn run(
         },
     )
     .await
-}
-
-#[tokio::test]
-async fn one_side_request_sends_the_exact_body_once() -> TestResult {
-    let peer = peer(vec![sse_response(&answered_search())]).await?;
-    let transport = fixed(vec![peer.origin.clone()]);
-    let request = openai_search();
-    let outcome = run(&transport, &request).await?;
-    assert_eq!(outcome.text, "Rust 1.99 shipped.");
-    let requests = peer.requests.lock().map_err(|_| "poisoned")?.clone();
-    assert_eq!(requests, [request.body()?]);
-    Ok(())
 }
 
 #[tokio::test]

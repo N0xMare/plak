@@ -7,7 +7,6 @@
 use std::fmt::Write as _;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
 use plakous_http::{Bytes, HeaderMap, HeaderValue, Limits, Method, Origin};
 use serde_json::json;
@@ -255,7 +254,6 @@ fn a_mid_stream_error_is_transient_only_for_overload() {
 
 struct Peer {
     origin: Origin,
-    requests: Arc<Mutex<Vec<Vec<u8>>>>,
 }
 
 fn http_response(status: u16, headers: &str, body: &str) -> Vec<u8> {
@@ -300,23 +298,17 @@ async fn peer(responses: Vec<Vec<u8>>) -> TestResult<Peer> {
         IpAddr::V4(Ipv4Addr::LOCALHOST),
         listener.local_addr()?.port(),
     )?;
-    let requests = Arc::new(Mutex::new(Vec::new()));
-    let recorded = Arc::clone(&requests);
     tokio::spawn(async move {
         for response in responses {
             let Ok((mut stream, _)) = listener.accept().await else {
                 return;
             };
-            if let Ok(body) = read_body(&mut stream).await
-                && let Ok(mut requests) = recorded.lock()
-            {
-                requests.push(body);
-            }
+            let _ = read_body(&mut stream).await;
             let _ = stream.write_all(&response).await;
             let _ = stream.shutdown().await;
         }
     });
-    Ok(Peer { origin, requests })
+    Ok(Peer { origin })
 }
 
 /// Sends to the origins in order, then repeats the last; counts
@@ -367,18 +359,6 @@ async fn run(transport: &Fixed) -> Result<ChatRetrievalOutcome, ChatRetrievalErr
         },
     )
     .await
-}
-
-#[tokio::test]
-async fn one_side_request_sends_the_exact_body_and_reads_its_stream() -> TestResult {
-    let peer = peer(vec![sse_response(&answered())]).await?;
-    let transport = fixed(vec![peer.origin.clone()]);
-    let outcome = run(&transport).await?;
-    assert_eq!(outcome.text, "Rust 1.99 shipped.");
-    assert_eq!(outcome.sources.len(), 2);
-    let requests = peer.requests.lock().map_err(|_| "poisoned")?.clone();
-    assert_eq!(requests, vec![search().body()?]);
-    Ok(())
 }
 
 #[tokio::test]

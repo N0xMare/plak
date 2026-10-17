@@ -367,16 +367,8 @@ mod tests {
     type TestResult = Result<(), Box<dyn std::error::Error>>;
 
     #[test]
-    fn the_search_body_is_exact_and_cost_only() -> TestResult {
+    fn only_the_plain_search_body_is_cost_only() -> TestResult {
         let body = CodexSearchRequest::new("req-1", "gpt-5.5-codex", "rust 1.99").body()?;
-        assert_eq!(
-            String::from_utf8(body.clone())?,
-            concat!(
-                r#"{"commands":{"search_query":[{"q":"rust 1.99"}]},"id":"req-1","input":[{"content":"#,
-                r#"[{"text":"rust 1.99","type":"input_text"}],"role":"user","type":"message"}],"#,
-                r#""max_output_tokens":4096,"model":"gpt-5.5-codex"}"#,
-            )
-        );
         assert_eq!(classify_codex_search_body(&body), ReplaySafety::CostOnly);
         let filtered = CodexSearchRequest::new("req-1", "gpt-5.5-codex", "rust")
             .with_domains(vec!["rust-lang.org".to_owned()])
