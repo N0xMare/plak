@@ -1028,13 +1028,16 @@ mod tests {
         };
         let matched = session_profile(&prepared.config, dir.path(), &session);
         assert_eq!(matched.id, "claude-default");
-        assert_eq!(matched.cards.len(), 3);
+        let working_set = |row: &crate::surface_protocol::ProfileRow| {
+            row.cards.iter().filter(|card| card.depth == 0).count()
+        };
+        assert_eq!(working_set(&matched), 3);
         let frozen = session.roster.as_mut().unwrap();
         frozen.roster.values_mut().next().unwrap().tuple_id = "frozen-session-model".into();
         frozen.templates_digest = "different-frozen-roster".into();
         let custom = session_profile(&prepared.config, dir.path(), &session);
         assert_eq!(custom.id, "custom");
-        assert_eq!(custom.cards.len(), 3);
+        assert_eq!(working_set(&custom), 3);
         assert!(
             custom
                 .cards

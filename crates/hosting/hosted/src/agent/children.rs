@@ -84,34 +84,7 @@ impl crate::agent_tree_tools::SpawnedSessionBinder for ProductChildSessionBinder
                     "template account is not a supported tree account",
                 ));
             }
-            let child = crate::tool_plan::TemplateToolSelection::parse(&binding.tools)
-                .map(|selection| crate::tool_plan::NodeToolSelection {
-                    selection,
-                    tool_sections: tree.snapshot.tool_sections.clone(),
-                    mcp_tools: None,
-                })
-                .map_err(|error| error.to_string());
-            let extra = child.and_then(|child| self.parent.tool_selection().tools_beyond(&child));
-            match extra {
-                Ok(extra) if extra.is_empty() => Ok(()),
-                Ok(extra) => Err(crate::agent_tree::TopologyError::new(
-                    crate::agent_tree_protocol::TopologyErrorCode::TemplateNotSpawnable,
-                    format!(
-                        "template {} lists tools this agent's frozen tools lack: {}; a child \
-                         gets at most its parent's fetch_url, image_gen and mcp tools; no agent \
-                         was spawned",
-                        request.template,
-                        extra.join(", ")
-                    ),
-                )),
-                Err(detail) => Err(crate::agent_tree::TopologyError::new(
-                    crate::agent_tree_protocol::TopologyErrorCode::TemplateNotSpawnable,
-                    format!(
-                        "template {} tools could not be checked against this agent's: {detail}",
-                        request.template
-                    ),
-                )),
-            }
+            Ok(())
         })?
     }
 

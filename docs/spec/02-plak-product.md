@@ -3991,10 +3991,17 @@ moves `❯`, and a double-click or Enter opens the apply dialog; Enter does noth
 the filter hides every row. The box under the list names the highlighted
 profile in its border, then the root account, model, and effort, then each
 sub-agent. Fast is shown only when that role has it on. The built-in names are
-`codex-default`, `claude-default`, and `grok-default`; further names come from
-`~/.plak/profiles/<name>.toml`. A built-in also answers to short aliases
-(`codex`, `chatgpt`, `claude`, `grok`, `supergrok`) unless a user profile owns
-that stem.
+`codex-default`, `claude-default`, `grok-default`, and `multi-default` (root
+and reviewer on Claude, worker on Codex, researcher on Grok); further names
+come from `~/.plak/profiles/<name>.toml`. Every built-in has the default role
+set of chapter 07 §8: a root with core tools only, and a working set of
+`worker`, `reviewer` and `researcher`. A built-in also answers to short
+aliases (`codex`, `chatgpt`, `claude`, `grok`, `supergrok`, `multi`) unless a
+user profile owns that stem. A built-in loads whether or not every account it
+names is ready; only its root's account gates the apply, a spawn of a role on
+an unready account is refused `model_not_admitted` naming the `plak login`
+that fixes it, and `plak doctor` lists each such role under
+`spawn_templates`.
 
 The dialog is the destructive confirmation pop-up (§5.7), titled `Apply
 profile <name>?`: `[ Cancel ]`, then `[ Fork now ]` (`[ Use now ]` when the
@@ -4046,7 +4053,8 @@ already active) or `ProfileRefused` with its reason; the transcript line and
 the `current` mark follow that answer, never the key press. `/clear`, `/fork`,
 and `/fork-then-compact` keep the binding they already have. Applying a
 built-in publishes its templates as `{name}-root`, `{name}-worker`,
-`{name}-reviewer`, and `{name}-scout` together with the pointers; a template
+`{name}-reviewer`, and `{name}-researcher` together with the pointers, the
+worker's `spawns` naming its siblings under the same prefix; a template
 that already exists under one of those names is kept as it is, never rewritten.
 The apply does not touch theme or orchestration bounds. A project whose
 `.plak/config.toml` owns the root or the working set refuses the apply. Account,
@@ -5665,7 +5673,7 @@ the result `missing` and the remedy that state is created by the first stateful
 command (for the config file, `plak config init`). Doctor reads the configured
 locations (`PLAK_HOME`, `XDG_STATE_HOME`) without creating them.
 
-Twenty checks are always emitted, in a fixed order, grouped as product,
+Twenty-one checks are always emitted, in a fixed order, grouped as product,
 storage, config, environment, terminal, composition, provider, and OAuth:
 version; the home; the config file; the product and runtime databases; the
 runtime store's retained usage (`runtime_store`: per aggregate bound used/limit
@@ -5684,7 +5692,11 @@ telemetry databases; the secrets and sessions directories; kept carry files
 failed carry, with the remedy to import it with `plak session import <file>`
 or delete it); the working
 directory; stdin and stdout being terminals; the composition host; the
-OpenRouter catalog; the root template; and the three OAuth verticals.
+OpenRouter catalog; the root template; the spawnable templates
+(`spawn_templates`: a warning naming each template the working set reaches,
+directly or through `spawns`, whose account or model is not ready, with the
+remedy `plak login <account>`; the config still loads and only that role's
+spawn is refused); and the three OAuth verticals.
 
 Each row prints a check name, a severity of `OK`, `WARNING`, or `ERROR`, a
 detail that leads with a closed result token — `available`, `missing`,
@@ -5704,7 +5716,7 @@ would be worse than no diagnostic.
 **One check is not offline.** The OpenRouter catalog probe performs discovery
 GETs — never inference — and only when a key resolves, the default account is
 OpenRouter, and a model is set; otherwise it short-circuits locally. Everything
-else, the root-template readiness check included, is computed from the
+else, the root-template and spawnable-template readiness checks included, is computed from the
 persisted catalog and the offline credential posture. The help text says so,
 and so does this chapter, because "doctor is offline" would otherwise be a
 claim the code does not keep.

@@ -363,13 +363,14 @@ Sessions dir       OK       available · /home/you/.plak/state/r25.e27.p32.t6/se
 Cwd                OK       available · /home/you/project                 —
 Composition host   OK       included · not required by the selected …     —
 Root template      OK       unset · no [root] agent; new sessions …       —
+Spawn templates    OK       none · [roster] working_set is empty          —
 Oauth codex        OK       ready · generation 13 · record 22h old …      —
 
-Result: 20 passed · 0 warnings · 0 failures
+Result: 21 passed · 0 warnings · 0 failures
 Provider credentials: run `plak status`
 ```
 
-The same 20 checks are always emitted. Every failing row carries its own FIX
+The same 21 checks are always emitted. Every failing row carries its own FIX
 column. `Runtime store` is an ERROR (`full`) once new work is refused for lack
 of space and a WARNING (`nearly_full`) shortly before; its fix is
 `plak session gc --all`, then `plak session delete <id>`. The row also shows

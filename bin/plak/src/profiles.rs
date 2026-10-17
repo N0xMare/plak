@@ -1,11 +1,10 @@
 //! Named agent profiles.
 //!
 //! A profile selects the root template and the working set together. The
-//! three provider homes ship inside the binary as `{id}-root`,
-//! `{id}-worker`, `{id}-reviewer`, and `{id}-scout`, so a user's own
-//! `worker.toml` is left alone. A file in `~/.plak/profiles/<name>.toml`
-//! names templates the user already has. The names `codex-default`,
-//! `claude-default`, and `grok-default` are reserved for the built-ins.
+//! built-ins ship inside the binary as `{id}-root`, `{id}-worker`,
+//! `{id}-reviewer`, and `{id}-researcher`, so a user's own `worker.toml` is
+//! left alone. A file in `~/.plak/profiles/<name>.toml` names templates the
+//! user already has. The built-in ids in [`BUILTINS`] are reserved.
 //!
 //! Nothing here writes. [`prepare`] answers the config a profile would
 //! produce; the caller saves it once the choice has landed.
@@ -31,76 +30,73 @@ struct Builtin {
     files: &'static [BuiltinFile],
 }
 
-const CODEX: Builtin = Builtin {
-    id: "codex-default",
-    aliases: &["codex", "chatgpt"],
-    files: &[
-        BuiltinFile {
-            role: "root",
-            body: include_str!("../../../configs/providers/codex/agents/root-agent.toml"),
-        },
-        BuiltinFile {
-            role: "worker",
-            body: include_str!("../../../configs/providers/codex/agents/worker.toml"),
-        },
-        BuiltinFile {
-            role: "reviewer",
-            body: include_str!("../../../configs/providers/codex/agents/reviewer.toml"),
-        },
-        BuiltinFile {
-            role: "scout",
-            body: include_str!("../../../configs/providers/codex/agents/scout.toml"),
-        },
-    ],
-};
+/// The roles every built-in ships, the working set in this order.
+const ROLES: [&str; 3] = ["worker", "reviewer", "researcher"];
 
-const CLAUDE: Builtin = Builtin {
-    id: "claude-default",
-    aliases: &["claude"],
-    files: &[
-        BuiltinFile {
-            role: "root",
-            body: include_str!("../../../configs/providers/claude/agents/root-agent.toml"),
-        },
-        BuiltinFile {
-            role: "worker",
-            body: include_str!("../../../configs/providers/claude/agents/worker.toml"),
-        },
-        BuiltinFile {
-            role: "reviewer",
-            body: include_str!("../../../configs/providers/claude/agents/reviewer.toml"),
-        },
-        BuiltinFile {
-            role: "scout",
-            body: include_str!("../../../configs/providers/claude/agents/scout.toml"),
-        },
-    ],
-};
+/// One built-in's files from `configs/providers/<dir>`: the root template
+/// and the three working-set roles.
+macro_rules! builtin_files {
+    ($dir:literal) => {
+        &[
+            BuiltinFile {
+                role: "root",
+                body: include_str!(concat!(
+                    "../../../configs/providers/",
+                    $dir,
+                    "/agents/root-agent.toml"
+                )),
+            },
+            BuiltinFile {
+                role: "worker",
+                body: include_str!(concat!(
+                    "../../../configs/providers/",
+                    $dir,
+                    "/agents/worker.toml"
+                )),
+            },
+            BuiltinFile {
+                role: "reviewer",
+                body: include_str!(concat!(
+                    "../../../configs/providers/",
+                    $dir,
+                    "/agents/reviewer.toml"
+                )),
+            },
+            BuiltinFile {
+                role: "researcher",
+                body: include_str!(concat!(
+                    "../../../configs/providers/",
+                    $dir,
+                    "/agents/researcher.toml"
+                )),
+            },
+        ]
+    };
+}
 
-const GROK: Builtin = Builtin {
-    id: "grok-default",
-    aliases: &["grok", "supergrok"],
-    files: &[
-        BuiltinFile {
-            role: "root",
-            body: include_str!("../../../configs/providers/grok/agents/root-agent.toml"),
-        },
-        BuiltinFile {
-            role: "worker",
-            body: include_str!("../../../configs/providers/grok/agents/worker.toml"),
-        },
-        BuiltinFile {
-            role: "reviewer",
-            body: include_str!("../../../configs/providers/grok/agents/reviewer.toml"),
-        },
-        BuiltinFile {
-            role: "scout",
-            body: include_str!("../../../configs/providers/grok/agents/scout.toml"),
-        },
-    ],
-};
-
-const BUILTINS: &[Builtin] = &[CODEX, CLAUDE, GROK];
+const BUILTINS: &[Builtin] = &[
+    Builtin {
+        id: "codex-default",
+        aliases: &["codex", "chatgpt"],
+        files: builtin_files!("codex"),
+    },
+    Builtin {
+        id: "claude-default",
+        aliases: &["claude"],
+        files: builtin_files!("claude"),
+    },
+    Builtin {
+        id: "grok-default",
+        aliases: &["grok", "supergrok"],
+        files: builtin_files!("grok"),
+    },
+    // Root and reviewer on Claude, worker on Codex, researcher on Grok.
+    Builtin {
+        id: "multi-default",
+        aliases: &["multi"],
+        files: builtin_files!("multi"),
+    },
+];
 
 /// A profile ready to apply: the config it produces and its root binding.
 pub(crate) struct Prepared {
@@ -216,9 +212,19 @@ fn resolve_builtin(config: &ProductConfig, builtin: &Builtin) -> Result<Resolved
     for file in builtin.files {
         let name = format!("{}-{}", builtin.id, file.role);
         // A template the user already has under this name is the one used.
-        let template = match config.templates.get(&name) {
-            Some(template) => template.clone(),
-            None => parse_template(file.body, &name)?,
+        let template = if let Some(template) = config.templates.get(&name) {
+            template.clone()
+        } else {
+            let mut template = parse_template(file.body, &name)?;
+            // The shipped files name sibling roles; in a profile each role is
+            // `{id}-{role}`.
+            template.spawns = template
+                .spawns
+                .iter()
+                .map(|role| TemplateName::parse(&format!("{}-{role}", builtin.id)))
+                .collect::<Result<_, _>>()
+                .map_err(|error| format!("{name}: spawns: {error}"))?;
+            template
         };
         if file.role == "root" {
             root = Some((name, template));
@@ -312,7 +318,7 @@ fn current(config: &ProductConfig, rows: &[ProfileRow], users: &[Resolved]) -> O
     let builtin = BUILTINS.iter().find(|builtin| {
         root == format!("{}-root", builtin.id)
             && cards
-                == ["worker", "reviewer", "scout"]
+                == ROLES
                     .map(|role| format!("{}-{role}", builtin.id))
                     .iter()
                     .map(String::as_str)
@@ -423,15 +429,73 @@ mod tests {
                 .iter()
                 .map(|row| row.id.as_str())
                 .collect::<Vec<_>>(),
-            ["codex-default", "claude-default", "grok-default"]
+            [
+                "codex-default",
+                "claude-default",
+                "grok-default",
+                "multi-default"
+            ]
         );
         assert_eq!(view.diagnostics, [] as [String; 0]);
         assert!(
             view.rows[2]
                 .cards
                 .iter()
-                .any(|card| card.label == "scout" && card.model == "grok-4.7-build-fast")
+                .any(|card| card.label == "researcher" && card.model == "grok-4.7-build-fast")
         );
+        let multi = &view.rows[3];
+        assert_eq!(
+            (multi.root.account.as_str(), multi.root.model.as_str()),
+            ("claude", "claude-opus-5-5")
+        );
+        assert_eq!(
+            multi
+                .cards
+                .iter()
+                .filter(|card| card.depth == 0)
+                .map(|card| (card.label.as_str(), card.account.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                ("worker", "codex"),
+                ("reviewer", "claude"),
+                ("researcher", "grok")
+            ]
+        );
+    }
+
+    /// Every built-in applies and saves as a loadable home: the shipped
+    /// worker's `spawns` name its sibling roles under the profile's prefix.
+    #[test]
+    fn every_builtin_saves_a_home_whose_worker_spawns_its_own_siblings() {
+        for id in [
+            "codex-default",
+            "claude-default",
+            "grok-default",
+            "multi-default",
+        ] {
+            let (_root, paths) = home();
+            let config = ProductConfig::load(&paths).unwrap();
+            let prepared = prepare(&config, paths.home(), id).unwrap();
+            prepared.config.save(&paths).unwrap();
+            let reloaded = ProductConfig::load(&paths).unwrap();
+            assert_eq!(
+                reloaded.templates[&format!("{id}-worker")]
+                    .spawns
+                    .iter()
+                    .map(|name| name.as_str().to_owned())
+                    .collect::<Vec<_>>(),
+                [format!("{id}-reviewer"), format!("{id}-researcher")],
+                "{id}"
+            );
+            assert!(
+                reloaded.templates[&format!("{id}-root")]
+                    .tools
+                    .entries()
+                    .is_empty(),
+                "{id}: the root has core tools only"
+            );
+            assert_eq!(list(&reloaded, paths.home()).current.as_deref(), Some(id));
+        }
     }
 
     #[test]
@@ -452,7 +516,7 @@ mod tests {
         .unwrap();
         let config = ProductConfig::load(&paths).unwrap();
         let view = list(&config, paths.home());
-        assert_eq!(view.rows.len(), 3, "built-ins stay listed");
+        assert_eq!(view.rows.len(), 4, "built-ins stay listed");
         assert_eq!(view.diagnostics.len(), 4, "{:?}", view.diagnostics);
         assert!(
             view.diagnostics

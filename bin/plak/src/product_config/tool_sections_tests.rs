@@ -1,5 +1,5 @@
 //! `access`, template `tools`, `[tools.*]`, `[mcp_servers.*]`, the reference
-//! checks and the child subset rule.
+//! checks.
 
 #![allow(clippy::unwrap_used, reason = "unit tests")]
 
@@ -341,84 +341,28 @@ fn templates_must_name_configured_servers_and_allowed_tools() {
     config.validate().unwrap();
 }
 
+/// The spawn graph is the capability grant: a child lists its own tools
+/// whatever its parent has, on the root edge and on a `spawns` edge, and
+/// `config set` accepts the same.
 #[test]
-fn a_child_gets_at_most_its_parents_local_tools_on_every_spawn_edge() {
+fn a_child_lists_tools_its_parent_lacks_on_every_spawn_edge() {
     let mut config = ProductConfig::parse(FULL_SECTIONS).unwrap();
-    with_template(
-        &mut config,
-        "root",
-        "tools = [\"fetch_url\", \"mcp:github\"]\n",
-    );
+    with_template(&mut config, "root", "");
     config.root_agent = Some("root".to_owned());
     config.working_set = WorkingSet::parse(vec!["kid".to_owned()]).unwrap();
-
-    // Hosted retrieval is exempt; the allowlist expansion admits a subset.
     with_template(
         &mut config,
         "kid",
-        "tools = [\"x_search\", \"web_search\", \"fetch_url\", \"mcp:github/create_issue\"]\n",
+        "tools = [\"fetch_url\", \"image_gen\", \"mcp:github\"]\nspawns = [\"leaf\"]\n",
     );
-    config.validate().unwrap();
-
-    // mcp:github expands to the server allowlist on both sides.
-    with_template(&mut config, "kid", "tools = [\"mcp:github\"]\n");
-    config.validate().unwrap();
-
-    // Root -> working set names the edge and the extras.
-    with_template(
-        &mut config,
-        "kid",
-        "tools = [\"image_gen\", \"mcp:linear\", \"web_fetch\"]\n",
-    );
-    assert_eq!(
-        config.validate().unwrap_err(),
-        "[roster] working_set template kid lists tools its root template root lacks: image_gen, mcp:linear; a child gets at most its parent's fetch_url, image_gen and mcp tools (web_search, web_fetch and x_search are exempt)"
-    );
-
-    // Without a root agent the root has no optional tools.
-    config.root_agent = None;
-    with_template(&mut config, "kid", "tools = [\"fetch_url\"]\n");
-    assert!(
-        config.validate().unwrap_err().contains(
-            "lists tools the root (no [root] agent, so no optional tools) lacks: fetch_url"
-        )
-    );
-    config.root_agent = Some("root".to_owned());
-
-    // Template -> spawns: a wildcard child under a narrower parent.
-    with_template(
-        &mut config,
-        "kid",
-        "tools = [\"mcp:linear/list_issues\"]\nspawns = [\"leaf\"]\n",
-    );
-    config.templates.get_mut("root").unwrap().tools =
-        TemplateToolSelection::parse(["fetch_url", "mcp:github", "mcp:linear/list_issues"])
-            .unwrap();
     with_template(&mut config, "leaf", "tools = [\"mcp:linear\"]\n");
-    assert_eq!(
-        config.validate().unwrap_err(),
-        "template kid spawns leaf, which lists tools kid lacks: mcp:linear; a child gets at most its parent's fetch_url, image_gen and mcp tools (web_search, web_fetch and x_search are exempt)"
-    );
-    // The explicit tool the parent has is fine; a wildcard parent covers it.
-    with_template(
-        &mut config,
-        "leaf",
-        "tools = [\"mcp:linear/list_issues\", \"x_search\"]\n",
-    );
     config.validate().unwrap();
 
-    // The same rule refuses `config set` before anything is written.
+    config.root_agent = None;
+    config.validate().unwrap();
+
     with_template(&mut config, "wide", "tools = [\"mcp:linear\"]\n");
-    let before = config.clone();
-    assert!(
-        config
-            .set_key("roster.working_set", "kid,wide")
-            .unwrap_err()
-            .contains(
-                "working_set template wide lists tools its root template root lacks: mcp:linear"
-            )
-    );
-    assert_eq!(config, before);
+    config.set_key("roster.working_set", "kid,wide").unwrap();
 }
 
 #[test]

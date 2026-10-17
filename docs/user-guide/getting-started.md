@@ -186,7 +186,7 @@ Result: 20 passed · 0 warnings · 0 failures
 Provider credentials: run `plak status`
 ```
 
-`doctor` always emits the same 20 checks. It exits 5 if any row is ERROR. Warnings alone do not fail it.
+`doctor` always emits the same 21 checks. It exits 5 if any row is ERROR. Warnings alone do not fail it.
 
 ## Your first run
 

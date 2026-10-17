@@ -2138,6 +2138,7 @@ fn run_doctor(services: &Services, stdout: &mut dyn io::Write) -> CliResult<Proc
             }
         },
     };
+    let spawn_templates = doctor_spawn_templates(paths, &selected);
     let state_home = services.home().state()?.to_path_buf();
     // The same offline classification `plak status` and model runs read.
     let mut accounts = PlakousApplication::for_accounts(state_home.clone());
@@ -2172,6 +2173,7 @@ fn run_doctor(services: &Services, stdout: &mut dyn io::Write) -> CliResult<Proc
         runtime_directory: env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from),
         openrouter_catalog,
         root_template,
+        spawn_templates,
         oauth: product_doctor::OauthCredentialProbes {
             codex: product_doctor::probe_oauth_credential(
                 "codex",
@@ -2240,6 +2242,57 @@ fn run_doctor(services: &Services, stdout: &mut dyn io::Write) -> CliResult<Proc
 
 /// The role label and text `session show` prints for one transcript row;
 /// rows without operator text are skipped.
+/// Readiness of every template the root can spawn, from the same local
+/// inputs as the root template check.
+fn doctor_spawn_templates(
+    paths: &home::paths::PlakPaths,
+    config: &product_config::ProductConfig,
+) -> product_doctor::SpawnTemplatesStatus {
+    let names = roster_input::nested_spawns(config.working_set.names(), |name| {
+        config
+            .templates
+            .get(name.as_str())
+            .map(|template| template.spawns.clone())
+            .unwrap_or_default()
+    });
+    let mut spawnable: Vec<&str> = names.iter().map(|(_, name)| name.as_str()).collect();
+    spawnable.sort_unstable();
+    spawnable.dedup();
+    if spawnable.is_empty() {
+        return product_doctor::SpawnTemplatesStatus::None;
+    }
+    let sections = match presentation::tui_presentation_values(paths) {
+        Ok((_, sections)) => sections,
+        Err(error) => {
+            return product_doctor::SpawnTemplatesStatus::Unknown {
+                detail: error.message().to_owned(),
+            };
+        }
+    };
+    let templates: Vec<_> = spawnable
+        .iter()
+        .filter_map(|name| {
+            let template = config.templates.get(*name)?;
+            let credential =
+                product_config::catalog_credential_readiness(&template.account, &sections);
+            let reason =
+                product_config::template_readiness(template, credential, &sections).reason()?;
+            Some(product_doctor::NotReadyTemplate {
+                name: (*name).to_owned(),
+                account: template.account.clone(),
+                reason,
+            })
+        })
+        .collect();
+    if templates.is_empty() {
+        product_doctor::SpawnTemplatesStatus::Ready {
+            count: spawnable.len(),
+        }
+    } else {
+        product_doctor::SpawnTemplatesStatus::NotReady { templates }
+    }
+}
+
 fn transcript_entry(row: &product_sessions::TranscriptRow) -> Option<(&'static str, &str)> {
     use product_sessions::TranscriptRow;
     match row {

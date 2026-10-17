@@ -148,12 +148,12 @@ pub(super) fn builtin_profiles_view() -> crate::tui::ProfilesView {
         depth: 0,
     };
     let row = |id: &str, aliases: &[&str], roles: [ProfileRole; 4]| {
-        let [root, worker, reviewer, scout] = roles;
+        let [root, worker, reviewer, researcher] = roles;
         ProfileRow {
             id: id.to_owned(),
             aliases: aliases.iter().map(|alias| (*alias).to_owned()).collect(),
             root,
-            cards: vec![worker, reviewer, scout],
+            cards: vec![worker, reviewer, researcher],
         }
     };
     crate::tui::ProfilesView {
@@ -165,7 +165,7 @@ pub(super) fn builtin_profiles_view() -> crate::tui::ProfilesView {
                     role("root", "codex", "gpt-6-astra", "medium", false),
                     role("worker", "codex", "gpt-6-sol", "medium", false),
                     role("reviewer", "codex", "gpt-6-astra", "medium", false),
-                    role("scout", "codex", "gpt-6-luna", "xhigh", true),
+                    role("researcher", "codex", "gpt-6-luna", "xhigh", true),
                 ],
             ),
             row(
@@ -175,7 +175,7 @@ pub(super) fn builtin_profiles_view() -> crate::tui::ProfilesView {
                     role("root", "claude", "claude-opus-5-5", "high", false),
                     role("worker", "claude", "claude-sonnet-5", "medium", false),
                     role("reviewer", "claude", "claude-opus-5-5", "high", false),
-                    role("scout", "claude", "claude-sonnet-5", "low", false),
+                    role("researcher", "claude", "claude-opus-5-5", "low", false),
                 ],
             ),
             row(
@@ -185,7 +185,7 @@ pub(super) fn builtin_profiles_view() -> crate::tui::ProfilesView {
                     role("root", "grok", "grok-4.7", "medium", false),
                     role("worker", "grok", "grok-4.7-build-fast", "medium", false),
                     role("reviewer", "grok", "grok-4.7", "high", false),
-                    role("scout", "grok", "grok-4.7-build-fast", "low", false),
+                    role("researcher", "grok", "grok-4.7-build-fast", "medium", false),
                 ],
             ),
         ],

@@ -25,7 +25,7 @@ use plakous_hosted::agent_tree_protocol::{
     Delegation, MAX_DIRECT_CHILDREN, MAX_TREE_ATTEMPTS, MAX_TREE_DEPTH, MAX_TREE_NODES,
     MAX_WORKING_SET, TemplateName, Tier, WorkingSet, WriterMode,
 };
-use plakous_hosted::tool_plan::{NodeToolSelection, SelectedTool, TemplateToolSelection};
+use plakous_hosted::tool_plan::{SelectedTool, TemplateToolSelection};
 use std::collections::{BTreeMap, BTreeSet};
 
 // Session-binding vocabulary lives in `plakous_hosted::binding`; these names stay for
@@ -248,9 +248,6 @@ const TOOL_SECTIONS_REFERENCE: &str = "
 # headers = { X-Client = \"plak\" }
 # secret_headers = { X-Workspace = \"linear-ws\" }
 ";
-
-/// The rule a subset refusal ends with.
-const SUBSET_RULE: &str = "a child gets at most its parent's fetch_url, image_gen and mcp tools (web_search, web_fetch and x_search are exempt)";
 
 #[cfg(test)]
 mod tool_sections_tests;
@@ -1702,8 +1699,7 @@ impl ProductConfig {
                 ));
             }
         }
-        self.validate_tool_references()?;
-        self.validate_tool_subsets()
+        self.validate_tool_references()
     }
 
     /// Every `mcp:<id>` a template lists names an `[mcp_servers.<id>]`
@@ -1731,65 +1727,6 @@ impl ProductConfig {
             }
         }
         Ok(())
-    }
-
-    /// A child gets at most its parent's local-authority tools, on every
-    /// edge an epoch can spawn: the root to each working-set member, and each
-    /// template to each template its `spawns` list names. Hosted retrieval
-    /// (`web_search`, `web_fetch`, `x_search`) is exempt: it grants no local
-    /// authority and spends on the child's own route.
-    fn validate_tool_subsets(&self) -> Result<(), String> {
-        let root = self
-            .root_template()
-            .map(|template| self.node_tools(&template.tools))
-            .unwrap_or_default();
-        for child in self.working_set.names() {
-            let Some(template) = self.templates.get(child.as_str()) else {
-                continue;
-            };
-            let extra = root.tools_beyond(&self.node_tools(&template.tools))?;
-            if extra.is_empty() {
-                continue;
-            }
-            let parent = match &self.root_agent {
-                Some(root) => format!("its root template {root}"),
-                None => "the root (no [root] agent, so no optional tools)".to_owned(),
-            };
-            return Err(format!(
-                "[roster] working_set template {child} lists tools {parent} lacks: {}; {SUBSET_RULE}",
-                extra.join(", ")
-            ));
-        }
-        for (name, template) in &self.templates {
-            let parent = self.node_tools(&template.tools);
-            for child in &template.spawns {
-                if child.as_str() == name {
-                    continue;
-                }
-                let Some(record) = self.templates.get(child.as_str()) else {
-                    continue;
-                };
-                let extra = parent.tools_beyond(&self.node_tools(&record.tools))?;
-                if !extra.is_empty() {
-                    return Err(format!(
-                        "template {name} spawns {child}, which lists tools {name} lacks: {}; {SUBSET_RULE}",
-                        extra.join(", ")
-                    ));
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// A template's list with the canonical tables it reaches, as an epoch
-    /// would freeze it, so the load-time rule and the spawn-time check are
-    /// one comparison ([`NodeToolSelection::tools_beyond`]).
-    fn node_tools(&self, selection: &TemplateToolSelection) -> NodeToolSelection {
-        NodeToolSelection {
-            selection: selection.clone(),
-            tool_sections: self.tool_sections.reached(selection),
-            mcp_tools: None,
-        }
     }
 
     /// Preflight every existing body before creating any file. Existing files
@@ -2748,7 +2685,7 @@ pub const TEMPLATE_FIELD_DOCS: &[TemplateFieldDoc] = &[
         key: "tools",
         value_type: "array of string",
         default: "[]",
-        constraint: "web_search|web_fetch|x_search|fetch_url|image_gen|mcp:<id>|mcp:<id>/<tool>, none twice; each mcp:<id> names a [mcp_servers.<id>] table; a child lists no fetch_url, image_gen or mcp tool its parent lacks",
+        constraint: "web_search|web_fetch|x_search|fetch_url|image_gen|mcp:<id>|mcp:<id>/<tool>, none twice; each mcp:<id> names a [mcp_servers.<id>] table; a child gets exactly its own list, never its parent's",
         meaning: "Optional tools enabled by name after the core tools; options come from config.toml [tools.<name>] and [mcp_servers.<id>]. Each is resolved against the route when a session or child binds, and a tool the route cannot serve refuses the bind.",
         example: "[\"web_search\", \"mcp:github\"]",
     },
@@ -4476,12 +4413,14 @@ mod tests {
         }
     }
 
-    /// Every shipped preset loads as a `PLAK_HOME` with the approved
-    /// four-role shape, and each role carries its approved binding.
+    /// Every shipped preset loads as a `PLAK_HOME` with the default role set
+    /// (root, worker, reviewer, researcher), and each role carries its
+    /// approved binding.
     #[test]
     fn the_shipped_presets_load_as_a_home() {
         // The approved (account, model, effort, fast) assignment per role, in
-        // the role order root-agent, worker, reviewer, scout.
+        // the role order root-agent, worker, reviewer, researcher, and the
+        // researcher's tools.
         type Row = [(&'static str, &'static str, &'static str, bool); 4];
         // The reference tree is the annotated render of `configs/providers/codex`.
         let provider_codex: Row = [
@@ -4490,9 +4429,16 @@ mod tests {
             ("codex", "gpt-6-astra", "medium", false),
             ("codex", "gpt-6-luna", "xhigh", true),
         ];
-        let expectations: [(&str, Option<&str>, Row); 4] = [
-            ("reference", None, provider_codex),
-            ("providers/codex", Some("codex"), provider_codex),
+        let codex_tools: &[&str] = &["web_search", "fetch_url"];
+        let grok_tools: &[&str] = &["web_search", "x_search", "fetch_url"];
+        let expectations: [(&str, Option<&str>, Row, &[&str]); 5] = [
+            ("reference", None, provider_codex, codex_tools),
+            (
+                "providers/codex",
+                Some("codex"),
+                provider_codex,
+                codex_tools,
+            ),
             (
                 "providers/claude",
                 Some("claude"),
@@ -4502,6 +4448,7 @@ mod tests {
                     ("claude", "claude-opus-5-5", "xhigh", false),
                     ("claude", "claude-opus-5-5", "low", false),
                 ],
+                &["web_search", "web_fetch", "fetch_url"],
             ),
             (
                 "providers/grok",
@@ -4510,11 +4457,23 @@ mod tests {
                     ("grok", "grok-4.7", "high", false),
                     ("grok", "grok-4.7-build-fast", "medium", false),
                     ("grok", "grok-4.7", "high", false),
-                    ("grok", "grok-4.7-build-fast", "low", false),
+                    ("grok", "grok-4.7-build-fast", "medium", false),
                 ],
+                grok_tools,
+            ),
+            (
+                "providers/multi",
+                None,
+                [
+                    ("claude", "claude-opus-5-5", "high", false),
+                    ("codex", "gpt-6.1-sol", "medium", true),
+                    ("claude", "claude-opus-5-5", "high", false),
+                    ("grok", "grok-4.7-build-fast", "medium", false),
+                ],
+                grok_tools,
             ),
         ];
-        for (preset, provider, rows) in expectations {
+        for (preset, provider, rows, researcher_tools) in expectations {
             let dir = repo_configs_dir().join(preset);
             let paths =
                 PlakPaths::resolve(Some(std::ffi::OsStr::new(&dir)), None).expect("preset home");
@@ -4532,7 +4491,7 @@ mod tests {
                     .iter()
                     .map(TemplateName::as_str)
                     .collect::<Vec<_>>(),
-                ["worker", "reviewer", "scout"],
+                ["worker", "reviewer", "researcher"],
                 "configs/{preset} working set"
             );
             assert_eq!(loaded.templates.len(), 4, "configs/{preset}");
@@ -4545,12 +4504,10 @@ mod tests {
                     Delegation::Explicit,
                     "configs/{preset}/{name}"
                 );
-                if name != "root-agent" {
-                    assert!(
-                        template.spawns.is_empty() && !template.may_adopt,
-                        "configs/{preset}/{name} must not delegate or adopt"
-                    );
-                }
+                assert!(
+                    !template.may_adopt,
+                    "configs/{preset}/{name} must not adopt"
+                );
                 if let Some(provider) = provider {
                     assert_eq!(
                         template.account, provider,
@@ -4558,10 +4515,15 @@ mod tests {
                     );
                 }
             }
-            for (role, (account, model, effort, fast)) in
-                ["root-agent", "worker", "reviewer", "scout"]
-                    .into_iter()
-                    .zip(rows.iter())
+            // (role, access, spawns, tools)
+            let shape: [(&str, Tier, &[&str], &[&str]); 4] = [
+                ("root-agent", Tier::Mutate, &[], &[]),
+                ("worker", Tier::Mutate, &["reviewer", "researcher"], &[]),
+                ("reviewer", Tier::Execute, &[], &[]),
+                ("researcher", Tier::Mutate, &[], researcher_tools),
+            ];
+            for ((role, access, spawns, tools), (account, model, effort, fast)) in
+                shape.into_iter().zip(rows.iter())
             {
                 let template = &loaded.templates[role];
                 assert_eq!(template.account, *account, "{preset}/{role} account");
@@ -4572,6 +4534,26 @@ mod tests {
                     "{preset}/{role} effort"
                 );
                 assert_eq!(template.is_fast(), *fast, "{preset}/{role} fast_mode");
+                assert_eq!(template.max_tier, access, "{preset}/{role} access");
+                assert_eq!(
+                    template
+                        .spawns
+                        .iter()
+                        .map(TemplateName::as_str)
+                        .collect::<Vec<_>>(),
+                    spawns,
+                    "{preset}/{role} spawns"
+                );
+                assert_eq!(
+                    template
+                        .tools
+                        .entries()
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>(),
+                    tools,
+                    "{preset}/{role} tools"
+                );
             }
         }
         // The reference tree round-trips: what it renders is what it parses.

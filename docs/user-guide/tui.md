@@ -475,8 +475,8 @@ wheel and keyboard scrolling still work. Only the main transcript and an agent
 transcript keep a scrollbar. Usage rows wrap complete words, including reset times.
 
 - **Settings** — the rows below; changes apply immediately.
-- **Agents** — the agent profiles: the three built-ins (`codex-default`,
-  `claude-default`, `grok-default`) and any `~/.plak/profiles/<name>.toml`.
+- **Agents** — the agent profiles: the four built-ins (`codex-default`,
+  `claude-default`, `grok-default`, `multi-default`) and any `~/.plak/profiles/<name>.toml`.
   Type to filter; `Esc` clears the filter. The box under the list shows the
   root and each sub-agent. A profile file that could not be used is listed
   under the profiles with the reason. See [Agent profiles](#agent-profiles).

@@ -14,8 +14,9 @@ use plak::product_doctor::{
     CheckKind, CompositionHostStatus, ConfigStatus, DatabaseStatus, DoctorInputs, DoctorPaths,
     DoctorReport, OauthCredentialProbe, OauthCredentialProbes, OauthRecordStatus,
     OauthRefreshLookup, OauthRefreshTelemetry, OpenRouterCatalogStatus, Requirement,
-    RootTemplateStatus, RuntimeStoreStatus, Severity, TerminalFacts, diagnose, inspect_config,
-    inspect_oauth_record, inspect_runtime_database, inspect_runtime_store,
+    RootTemplateStatus, RuntimeStoreStatus, Severity, SpawnTemplatesStatus, TerminalFacts,
+    diagnose, inspect_config, inspect_oauth_record, inspect_runtime_database,
+    inspect_runtime_store,
 };
 use plak::telemetry_sink::TelemetryHealth;
 use tempfile::TempDir;
@@ -71,6 +72,7 @@ fn input(temp: &TempDir) -> DoctorInputs {
         runtime_directory: Some(temp.path().to_path_buf()),
         openrouter_catalog: OpenRouterCatalogStatus::NotConfigured,
         root_template: RootTemplateStatus::Unset,
+        spawn_templates: SpawnTemplatesStatus::None,
         oauth: OauthCredentialProbes {
             codex: OauthCredentialProbe {
                 provider: "codex",
@@ -150,6 +152,30 @@ fn report_is_table_ready_and_summarizes_warnings() {
     assert_eq!(report.summary.errors, 1);
     assert!(report.summary.ok >= 2);
     assert_eq!(CheckKind::ProductDatabase.key(), "product_db");
+}
+
+/// A spawnable template whose account is not ready loads; doctor names it
+/// and the login that makes it spawnable.
+#[test]
+fn a_spawnable_template_without_its_login_is_a_named_warning() {
+    let temp = TempDir::new().unwrap();
+    let mut values = input(&temp);
+    values.spawn_templates = SpawnTemplatesStatus::NotReady {
+        templates: vec![product_doctor::NotReadyTemplate {
+            name: "multi-default-researcher".to_owned(),
+            account: "grok".to_owned(),
+            reason: "not logged in",
+        }],
+    };
+    let report = diagnose(values);
+    let spawn = check(&report, CheckKind::SpawnTemplates);
+    assert_eq!(spawn.severity, Severity::Warning);
+    assert_eq!(
+        spawn.detail,
+        "multi-default-researcher · grok · not logged in; spawning it is refused"
+    );
+    assert!(spawn.remediation.as_deref().unwrap().contains("plak login"));
+    assert_eq!(CheckKind::SpawnTemplates.key(), "spawn_templates");
 }
 
 #[test]

@@ -2,7 +2,7 @@
 agent = "root-agent"
 
 [roster]
-working_set = ["worker", "reviewer", "scout"]
+working_set = ["worker", "reviewer", "researcher"]
 
 [orchestration]
 subagents = true

@@ -77,7 +77,7 @@ A user profile is `~/.plak/profiles/<name>.toml` with exactly two keys,
 `root = "<template>"` and `working_set = ["<template>", ...]` (at least one
 name, every entry a string); any other key, a wrong type, a missing template,
 or a stem that is a built-in's name (`codex-default`, `claude-default`,
-`grok-default`) leaves that file out of the list with a line saying why.
+`grok-default`, `multi-default`) leaves that file out of the list with a line saying why.
 Nothing in a session changes the live root's binding except a profile's Fork
 now or Use now; no slash command rebinds it.
 
@@ -306,7 +306,7 @@ One flat object plus an optional `[env]` table. The file stem is the name.
 | `protocol` | enum | `"auto"` | auto\|chat\|responses\|messages; anything but auto is OpenRouter-only | Wire protocol pin for an OpenRouter model whose family the gateway reports wrongly. |
 | `description` | string | `""` | required and non-blank for a template named in [roster] working_set or in a spawns list | The spawn card a parent routes on: what this agent is for, in the parent's words. |
 | `access` | enum | `"full"` | full\|read-execute | Edit ceiling: full includes file-edit tools; read-execute omits dedicated file-edit tools but permits shell commands. Neither is an OS sandbox. A spawn request above the ceiling is clipped, not refused. |
-| `tools` | array of string | `[]` | web_search\|web_fetch\|x_search\|fetch_url\|image_gen\|mcp:<id>\|mcp:<id>/<tool>, none twice; each mcp:<id> names a [mcp_servers.<id>] table; a child lists no fetch_url, image_gen or mcp tool its parent lacks | Optional tools enabled by name after the core tools; options come from config.toml [tools.<name>] and [mcp_servers.<id>]. Each is resolved against the route when a session or child binds, and a tool the route cannot serve refuses the bind. |
+| `tools` | array of string | `[]` | web_search\|web_fetch\|x_search\|fetch_url\|image_gen\|mcp:<id>\|mcp:<id>/<tool>, none twice; each mcp:<id> names a [mcp_servers.<id>] table; a child gets exactly its own list, never its parent's | Optional tools enabled by name after the core tools; options come from config.toml [tools.<name>] and [mcp_servers.<id>]. Each is resolved against the route when a session or child binds, and a tool the route cannot serve refuses the bind. |
 | `spawns` | array of string | `[]` | 0..=5 names, no duplicates, each a template file with a description | The templates a copy of this template may spawn; its own name is never on its menu. Empty is a leaf with no spawn_agent. The root spawns [roster] working_set instead; this list applies where the template runs as a child. |
 | `may_adopt` | bool | `false` | requires spawns naming another template | Whether a copy may adopt a sealed candidate out of its own subtree. |
 | `delegation` | enum | `"explicit"` | explicit\|proactive | Whether the model is told to delegate unprompted or only when asked. |
@@ -351,11 +351,8 @@ Cross-field rules, all checked at load and again before any save:
   `mcp:<id>` MUST name an `[mcp_servers.<id>]` table in the effective
   config.toml, and an `mcp:<id>/<tool>` MUST name a tool that table's `tools`
   allowlist admits (a table without one admits any name).
-- The child subset rule (chapter 03 §3.1): on every spawn edge — the root's
-  `[root] agent` template to each working-set member, and each template to
-  each template its `spawns` names — the child's `fetch_url`, `image_gen` and
-  MCP tools MUST be a subset of the parent's, with `mcp:<id>` expanded to the
-  server allowlist. `web_search`, `web_fetch` and `x_search` are exempt.
+- A child's list is never compared with its parent's (chapter 03 §3.1): the
+  spawn graph is the capability grant.
 - A template named in `[roster] working_set` MUST carry a non-blank
   `description`.
 
@@ -391,8 +388,6 @@ and a template message is prefixed `template <name>: `.
 | template `tools` entry refused by the grammar | `template <name>: tools: ` followed by `unknown tool "<x>"; expected one of …`, `tool "<x>" is listed twice`, `tool "<x>" is already included by mcp:<id>; list one or the other`, or the invalid server-id / tool-name sentence |
 | `mcp:<id>` with no table | `template <name>: tools names mcp:<id>, and config.toml has no [mcp_servers.<id>]` |
 | `mcp:<id>/<tool>` outside the allowlist | `template <name>: tools names mcp:<id>/<tool>, which [mcp_servers.<id>] tools does not allow` |
-| subset rule, root edge | `[roster] working_set template <child> lists tools its root template <root> lacks: <tools>; a child gets at most its parent's fetch_url, image_gen and mcp tools (web_search, web_fetch and x_search are exempt)`; with no `[root] agent`, `its root template <root>` reads `the root (no [root] agent, so no optional tools)` |
-| subset rule, spawns edge | `template <parent> spawns <child>, which lists tools <parent> lacks: <tools>; ` and the same rule sentence |
 | `[tools.<x>]` for another name | `unknown config section [tools.<x>]; [tools.<name>] takes fetch_url, web_search or x_search` |
 | a `[tools.*]` or `[mcp_servers.*]` value out of range or of the wrong shape | `[<table>] <key> must be an integer in <a>..=<b>` / `must be an array of at most <n> <what>` / `must be a string` / `must be a table of strings` / `must be an array of strings` |
 | both domain lists set | `[tools.web_search] allowed_domains and blocked_domains cannot both be set; list one or the other` |
@@ -582,14 +577,27 @@ Two keys take a value spelling the file grammar cannot:
 
 | path | what it is |
 | --- | --- |
-| `configs/reference/` | Every key and every template field, each with its meaning, type, default and constraint as a comment. It is the approved Codex provider preset annotated by the product's own renderer — regenerated by a test (`PLAK_REGENERATE_REFERENCE_CONFIGS=1 cargo test -p plak reference`), so it cannot describe a key the loader does not have or carry values the preset does not approve. It is a working home: `root-agent` bound as root, `worker`, `reviewer` and `explorer` in the working set. |
-| `configs/providers/` | The same four roles, one home per provider: `codex`, `claude`, `grok`. The Agents tab embeds these three as `codex-default`, `claude-default`, and `grok-default`. The fourth role in each is `scout`. |
+| `configs/reference/` | Every key and every template field, each with its meaning, type, default and constraint as a comment. It is the approved Codex provider preset annotated by the product's own renderer — regenerated by a test (`PLAK_REGENERATE_REFERENCE_CONFIGS=1 cargo test -p plak reference`), so it cannot describe a key the loader does not have or carry values the preset does not approve. It is a working home: `root-agent` bound as root, `worker`, `reviewer` and `researcher` in the working set. |
+| `configs/providers/` | The default role set, one home per built-in profile: `codex`, `claude`, `grok`, and `multi` (root and reviewer on `claude`, worker on `codex`, researcher on `grok`). The Agents tab embeds these four as `codex-default`, `claude-default`, `grok-default` and `multi-default`. |
 | `configs/scenarios/` | Complete scenario homes — single-agent, mixed-account trees, direct and PTC compositions, OpenRouter-only. |
 
-No shipped preset or scenario lists an optional tool or carries a `[tools.*]`
-or `[mcp_servers.*]` table: the built-in profiles keep their core tool sets,
-and optional tools are opt-in per template. The reference `config.toml` ends
-with a fully commented example of both table families.
+Every built-in profile has the same four roles:
+
+| role | `access` | `spawns` | `tools` |
+| --- | --- | --- | --- |
+| root (`root-agent`) | `full` | `[]` | none: core tools only; its menu is the working set |
+| `worker` | `full` | `["reviewer", "researcher"]`, inert at the default `max_depth = 1` | none |
+| `reviewer` | `read-execute` | `[]` | none |
+| `researcher` | `full` | `[]` | hosted retrieval the route serves plus `fetch_url`: `web_search, web_fetch, fetch_url` on `claude`, `web_search, fetch_url` on `codex`, `web_search, x_search, fetch_url` on `grok` |
+
+The researcher's card asks it to save fetched sources and write its report
+under `research/<topic>/` (or the path the parent names) and to return a short
+summary with the paths it wrote. In a built-in profile each role is the
+template `<profile>-<role>`, and the worker's `spawns` name its siblings under
+the same prefix. No shipped preset or scenario carries a `[tools.*]` or
+`[mcp_servers.*]` table: the researchers run their tools on the table
+defaults. The reference `config.toml` ends with a fully commented example of
+both table families.
 
 Every preset under `configs/` is loadable as a `PLAK_HOME`, and
 `bin/plak/tests/integration/product_config_fixtures.rs` loads them

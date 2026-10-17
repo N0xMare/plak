@@ -42,7 +42,7 @@ Templates MUST NOT be authored through `plak config set`, which refuses
 | `protocol` | OpenRouter-only wire selection |
 | `description` | **required** for a template named in the working set or in any `spawns` list: the card text the spawner routes on |
 | `access` | edit ceiling, default `full`; `read-execute` omits file-edit tools; a higher ask is clipped, not refused |
-| `tools` | optional tools enabled by name (`web_search`, `web_fetch`, `x_search`, `fetch_url`, `image_gen`, `mcp:<id>`, `mcp:<id>/<tool>`); default `[]`; subject to the child subset rule (§3.1) |
+| `tools` | optional tools enabled by name (`web_search`, `web_fetch`, `x_search`, `fetch_url`, `image_gen`, `mcp:<id>`, `mcp:<id>/<tool>`); default `[]`; a copy of the template gets exactly this list (§3.1) |
 | `spawns` | array of template names this node may spawn, at most 5, no duplicates; omitted or `[]` is a leaf that compiles no `spawn_agent` |
 | `may_adopt` | this node compiles `adopt_candidate`; requires `spawns` naming another template |
 | `delegation` | `explicit` (default) or `proactive`: which single policy sentence renders |
@@ -401,36 +401,20 @@ model). Editing the template or a table changes new sessions only. A wildcard
 `mcp:<id>` tool omitted at creation leaves one Settings notice in the
 transcript.
 
-### 3.1 A child gets at most its parent's tools
+### 3.1 The spawn graph is the capability grant
 
-The rule is checked **statically when the configuration loads** (and again
-before any save, so `plak config set roster.working_set` refuses too), on
-every edge an epoch can spawn: the root to each `[roster] working_set` member,
-and each template to each template its `spawns` list names (a template naming
-itself is not an edge). The root's tools are its `[root] agent` template's
-list; with no `[root] agent` the root has none.
-
-- `fetch_url`, `image_gen` and MCP tools carry local authority (local network,
-  local processes, user secrets): a child's set MUST be a subset of its
-  parent's. `mcp:<id>` expands to the server's `tools` allowlist for the
-  comparison; a server with no allowlist is "every tool it lists", which
-  covers any `mcp:<id>/<tool>` of that server but is covered only by
-  `mcp:<id>` itself.
-- `web_search`, `web_fetch` and `x_search` (hosted retrieval) are **exempt**:
-  they grant no local authority and spend on the child's own route, which the
-  capacity and usage budgets already bound. This is what lets a parent whose
-  route lacks `x_search` delegate it to a template on a route that has it.
-
-A violation is a load error naming the edge and the extra tools, never a
-spawn-time clip. Because a node's tools are frozen (a root's in its session
-record, a child's on its card) while the configuration and the epoch can move
-on, `spawn_agent` checks the same rule again before any durable work: the
-requested card's list against the tools the **calling node is bound with**,
-each side expanding `mcp:<id>` through its own frozen tables. A violation is
-`template_not_spawnable` naming the template and the extra tools, and no
-agent is spawned; a root created off its template's tuple has no optional
-tools, so it can spawn only templates without local-authority tools. The edit
-ceiling (`access`) keeps its clip-not-refuse rule.
+A child gets exactly its own template's `tools`, whatever its parent was bound
+with. The grant is the spawn graph itself: a node can start a template only
+when that template is on its menu (the root's working set, or its own card's
+`spawns` list), so whoever writes the roster and the `spawns` lists decides
+which tools each node can reach, directly or through a child. There is no
+parent-subset rule: neither the configuration load nor `spawn_agent` compares
+a child's list with its parent's, and a root with no optional tools may spawn
+a template that lists `fetch_url`, `image_gen` or an MCP tool. Every list
+still passes the reference checks at load (each `mcp:<id>` names an
+`[mcp_servers.<id>]` table, each `mcp:<id>/<tool>` a tool that table allows),
+and every bind still refuses a tool its route cannot serve. The edit ceiling
+(`access`) keeps its clip-not-refuse rule.
 
 ## 4. The ten tools
 

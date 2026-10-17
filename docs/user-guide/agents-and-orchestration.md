@@ -34,7 +34,7 @@ reach for first:
 | `effort`, `composition`, `protocol`, `fast_mode` | Model options and tool composition. `composition = "native-ptc"` is the vertical's own programmatic tool calling, enrolled today only for Codex Code Mode; a card on another vertical is refused, so use `js-ptc` or `py-ptc` there (see [Providers and accounts](providers-and-accounts.md)). `fast_mode` is a template setting; its provider-native processing tier is resolved at bind. |
 | `description` | The card the spawning model reads. Required for anything in the working set or in a `spawns` list. |
 | `access` | `full` or `read-execute`. Default `full`. `read-execute` omits dedicated file-edit tools but still permits shell commands. |
-| `tools` | Optional tools by name (`web_search`, `fetch_url`, `mcp:github`, ...). Default `[]`. A child may not list `fetch_url`, `image_gen` or an MCP tool its parent lacks; see [Configuration](configuration.md#optional-tools-and-mcp-servers). |
+| `tools` | Optional tools by name (`web_search`, `fetch_url`, `mcp:github`, ...). Default `[]`. A child gets exactly its own template's list, whatever its parent has; see [Configuration](configuration.md#optional-tools-and-mcp-servers). |
 | `spawns` | The templates this agent may spawn when it runs as a child, e.g. `["worker", "reviewer"]`. Default `[]`: a leaf with no `spawn_agent`. |
 | `may_adopt` | May it adopt a child's work? Default `false`, and requires `spawns` naming another template. |
 | `delegation` | `explicit` (default) or `proactive`. |
@@ -154,7 +154,7 @@ adoptable candidates; the running-agent limit applies across the tree.
 
 A spawn asks for a **tier** (what the child may do) and optionally a
 **workspace** (where it sits). The requested tier is clipped down to the
-template's `tools` ceiling. Omit `workspace` or pass `inherit` to share your live
+template's `access` ceiling. Omit `workspace` or pass `inherit` to share your live
 checkout. Pass `workspace=fork` to mint an isolated copy (a git worktree or jj
 workspace when the child may write; otherwise a disposable snapshot).
 
@@ -468,8 +468,10 @@ plak config show | head -1      # confirms which home you are on
 
 That home is already a tree: `[root] agent = "root-agent"` names
 `agents/root-agent.toml`, and `[roster] working_set = ["worker", "reviewer",
-"scout"]` names the three templates the root may hand work to; the three
-are leaves. Edit `account` and `model` in each of the four
+"researcher"]` names the three templates the root may hand work to. The
+reviewer and researcher are leaves; the worker lists `spawns = ["reviewer",
+"researcher"]`, which takes effect only once you raise `[orchestration]
+max_depth` to 2. Edit `account` and `model` in each of the four
 files to accounts you are actually logged in to (`plak status`), then:
 
 ```sh

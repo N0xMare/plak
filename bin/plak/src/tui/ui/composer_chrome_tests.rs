@@ -945,7 +945,13 @@ fn profile_is_a_hover_only_role_popup_and_border_uses_body_colour() {
         assert_eq!(app.handle_mouse(left_click(hit.x, hit.y)), None);
         app.handle_mouse(left_mouse(MouseEventKind::Moved, hit.x, hit.y));
         let text = render_to_string(&mut app, 120, 24);
-        for role in ["root:", "worker:", "reviewer:", "scout:", "Menu → Agents"] {
+        for role in [
+            "root:",
+            "worker:",
+            "reviewer:",
+            "researcher:",
+            "Menu → Agents",
+        ] {
             assert!(text.contains(role), "{text}");
         }
         assert!(app.control_tab.is_none());

@@ -1,0 +1,10 @@
+account = "claude"
+model = "claude-opus-5-5"
+effort = "high"
+fast_mode = false
+composition = "plakous-default"
+description = "Review changes and run relevant diagnostics; report concrete findings. Dedicated file-edit tools are unavailable; shell commands still have host authority."
+access = "read-execute"
+may_adopt = false
+delegation = "explicit"
+show_model = true

@@ -1,0 +1,11 @@
+account = "codex"
+model = "gpt-6.1-sol"
+effort = "medium"
+fast_mode = true
+composition = "plakous-default"
+description = "Implement a bounded change and run its relevant checks; report changes, evidence, and unresolved issues."
+access = "full"
+spawns = ["reviewer", "researcher"]
+may_adopt = false
+delegation = "explicit"
+show_model = true

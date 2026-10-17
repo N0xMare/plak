@@ -35,6 +35,7 @@ pub enum CheckKind {
     CompositionHost,
     OpenRouterCatalog,
     RootTemplate,
+    SpawnTemplates,
     OauthCodex,
     OauthXai,
     OauthClaude,
@@ -60,6 +61,7 @@ impl CheckKind {
             Self::CompositionHost => "composition_host",
             Self::OpenRouterCatalog => "openrouter_catalog",
             Self::RootTemplate => "root_template",
+            Self::SpawnTemplates => "spawn_templates",
             Self::OauthCodex => "oauth_codex",
             Self::OauthXai => "oauth_xai",
             Self::OauthClaude => "oauth_claude",
@@ -260,6 +262,7 @@ pub struct DoctorInputs {
     pub runtime_directory: Option<PathBuf>,
     pub openrouter_catalog: OpenRouterCatalogStatus,
     pub root_template: RootTemplateStatus,
+    pub spawn_templates: SpawnTemplatesStatus,
     pub oauth: OauthCredentialProbes,
 }
 
@@ -286,6 +289,29 @@ pub enum RootTemplateStatus {
     },
     /// The catalog could not be read, so readiness is unknown.
     Unknown { detail: String },
+}
+
+/// Attach readiness of every template the root can spawn: the working set
+/// and each template their `spawns` lists reach. A config loads with a
+/// template whose account is not ready; spawning it is refused until it is.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SpawnTemplatesStatus {
+    /// The working set is empty: nothing is spawnable.
+    None,
+    /// Every spawnable template is attachable now.
+    Ready { count: usize },
+    /// These templates' spawns are refused until their account is ready.
+    NotReady { templates: Vec<NotReadyTemplate> },
+    /// The catalog could not be read, so readiness is unknown.
+    Unknown { detail: String },
+}
+
+/// One spawnable template that cannot attach as written.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NotReadyTemplate {
+    pub name: String,
+    pub account: String,
+    pub reason: &'static str,
 }
 
 /// Owner-supplied OAuth record + latest refresh telemetry (no secrets).
@@ -880,6 +906,7 @@ pub fn diagnose(input: DoctorInputs) -> DoctorReport {
     ));
     checks.push(openrouter_catalog_check(input.openrouter_catalog));
     checks.push(root_template_check(input.root_template));
+    checks.push(spawn_templates_check(input.spawn_templates));
     checks.push(oauth_check(CheckKind::OauthCodex, input.oauth.codex));
     checks.push(oauth_check(CheckKind::OauthXai, input.oauth.xai));
     checks.push(oauth_check(CheckKind::OauthClaude, input.oauth.claude));
@@ -1222,6 +1249,54 @@ fn openrouter_catalog_check(status: OpenRouterCatalogStatus) -> DoctorCheck {
                 Some(remediation),
             )
         }
+    }
+}
+
+fn spawn_templates_check(status: SpawnTemplatesStatus) -> DoctorCheck {
+    let check = |severity, result: &str, detail: String, remediation| {
+        DoctorCheck::new(
+            CheckKind::SpawnTemplates,
+            "config",
+            severity,
+            result,
+            detail,
+            remediation,
+        )
+    };
+    match status {
+        SpawnTemplatesStatus::None => check(
+            Severity::Ok,
+            "none",
+            "[roster] working_set is empty".to_owned(),
+            None,
+        ),
+        SpawnTemplatesStatus::Ready { count } => check(
+            Severity::Ok,
+            "attachable",
+            format!("{count} spawnable templates"),
+            None,
+        ),
+        SpawnTemplatesStatus::NotReady { templates } => check(
+            Severity::Warning,
+            "not attachable",
+            templates
+                .iter()
+                .map(|template| {
+                    format!(
+                        "{} · {} · {}; spawning it is refused",
+                        template.name, template.account, template.reason
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("; "),
+            Some("run `plak login <account>` for each account named"),
+        ),
+        SpawnTemplatesStatus::Unknown { detail } => check(
+            Severity::Warning,
+            "unknown",
+            format!("catalog unavailable, readiness not checked: {detail}"),
+            Some("run `plak models <account>` to see whether the catalog can be read"),
+        ),
     }
 }
 

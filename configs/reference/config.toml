@@ -17,7 +17,7 @@ agent = "root-agent"
 
 # Templates the root may spawn this epoch; every other node spawns from its own template's spawns list.
 # type: array of string · default: [] · 0..=5 names, no duplicates, each a template file with a description
-working_set = ["worker", "reviewer", "scout"]
+working_set = ["worker", "reviewer", "researcher"]
 
 # Tree shape and spawn authority.
 [orchestration]

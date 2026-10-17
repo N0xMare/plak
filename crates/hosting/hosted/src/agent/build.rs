@@ -574,15 +574,6 @@ impl SpawnParent {
         }
     }
 
-    /// The optional tools this node is bound with: a root's frozen session
-    /// selection, a child's frozen card list.
-    pub(super) const fn tool_selection(&self) -> &crate::tool_plan::NodeToolSelection {
-        match self {
-            Self::Native(spec) => &spec.tool_selection,
-            Self::Api(parent) => &parent.tool_selection,
-        }
-    }
-
     /// The product's `subagents` fact for this parent.
     /// The product home behind this parent, when it has one.
     pub(super) fn product_home(&self) -> Option<&Path> {

@@ -283,15 +283,12 @@ data. An `http` server is reached at its `url` (HTTPS, or plain HTTP only to
 `127.0.0.1` or `[::1]`); `bearer_secret` and `secret_headers` name stored
 secrets that are sent as `Authorization: Bearer` and as those headers.
 
-A child gets at most its parent's tools: a working-set template may not list
-`fetch_url`, `image_gen` or an MCP tool its root template lacks, and the same
-holds for every `spawns` entry. `web_search`, `web_fetch` and `x_search` are
-exempt, so a root can hand X search to a Grok child it could not run itself.
-The check runs when the configuration loads and names the edge and the extra
-tools. A session keeps the root tools it was created with, so `spawn_agent`
-checks again against those: after you add a tool to the root template, an
-existing session still cannot spawn a child that needs it; start a new
-session. The full key reference is in spec 07 §3.4 and §3.5.
+A child gets exactly its own template's tools, whatever its parent has: the
+spawn graph is the grant. A root with no optional tools can spawn a researcher
+that lists `web_search` and `fetch_url`, and a worker can spawn a template with
+an MCP server the worker itself never sees. Decide who may reach a tool by
+deciding which templates appear in the working set and in `spawns` lists.
+The full key reference is in spec 07 §3.4 and §3.5.
 
 ### Rust build caches
 
@@ -383,15 +380,31 @@ databases, logs and cache all stay under `~/.plak`.
 # The annotated reference: every key, every field, with its meaning inline.
 cp -r configs/reference/. "$PLAK_HOME"
 
-# The same four roles pinned to one provider each.
-cp -r configs/providers/codex/. "$PLAK_HOME"    # or claude, grok
+# The same four roles pinned to one provider each, or mixed.
+cp -r configs/providers/codex/. "$PLAK_HOME"    # or claude, grok, multi
 ```
 
-The Agents tab lists `codex-default`, `claude-default`, and `grok-default`
-even when `~/.plak/profiles/` is empty. Choosing one writes `{name}-root`,
-`{name}-worker`, `{name}-reviewer`, and `{name}-scout` under `~/.plak/agents/`
-(a file you already have under one of those names is kept as it is) and points
-the root and the working set at those files. With **Next session** that happens
+Every built-in has the same four roles:
+
+- **root** — `full` access, core tools only; it spawns the working set.
+- **worker** — `full` access; `spawns = ["reviewer", "researcher"]`, which
+  only takes effect once you raise `[orchestration] max_depth` to 2.
+- **reviewer** — `read-execute`, a leaf.
+- **researcher** — `full` access, a leaf with web tools (`web_search` and
+  `fetch_url`, plus `web_fetch` on Claude and `x_search` on Grok). It saves the
+  sources it fetched and writes its report under `research/<topic>/` (or the
+  path you name), and replies with a short summary and the paths it wrote.
+
+The Agents tab lists `codex-default`, `claude-default`, `grok-default` and
+`multi-default` even when `~/.plak/profiles/` is empty. `multi-default` runs
+the root and reviewer on Claude (`claude-opus-5-5`, high), the worker on Codex
+(`gpt-6.1-sol`, medium, fast mode) and the researcher on Grok
+(`grok-4.7-build-fast`, medium). It loads with only the Claude login; spawning
+the worker or researcher without its login is refused with the `plak login`
+to run, and `plak doctor` names each such role. Choosing a profile writes
+`{name}-root`, `{name}-worker`, `{name}-reviewer`, and `{name}-researcher`
+under `~/.plak/agents/` (a file you already have under one of those names is
+kept as it is) and points the root and the working set at those files. With **Next session** that happens
 right away; with **Fork now** it happens once the fork has landed, so a refused
 fork changes nothing. Fork now branches the current session onto that profile,
 briefs the new session as that profile with its own sub-agent cards, and
@@ -408,7 +421,7 @@ working_set = ["grok-worker", "grok-reviewer"]
 
 The templates it names must already exist. A file with another key, a missing
 template, or a built-in's name (`codex-default`, `claude-default`,
-`grok-default`) is not listed; the Agents tab shows a line saying why. Copy into a **new, empty** `PLAK_HOME`:
+`grok-default`, `multi-default`) is not listed; the Agents tab shows a line saying why. Copy into a **new, empty** `PLAK_HOME`:
 copying over an existing home leaves your old templates beside the preset's,
 and files written for an older grammar will fail the current loader.
 
