@@ -5971,8 +5971,15 @@ would have said last, usually the open work and the next step, so the fold is a
 definite failure that publishes nothing (§10.5), and mid-turn it falls to the
 placeholder rung like any failed paid fold. The instruction is a short
 checklist — goal and constraints with the user's requirements verbatim,
-decisions, files with paths, commands and their results, open errors, the plan
-with each item's status, and the next step.
+every value the remaining work still needs copied exactly (identifiers, tokens,
+numbers, short file contents, text to write or report later), decisions, files
+with paths, commands and their results, open errors, the plan with each item's
+status, and the next step. It tells the model that the summary replaces the
+conversation and any earlier summary in its own context and is not a reply, so
+a user's rule about what a reply may show does not license dropping a value the
+work depends on, and that whatever still applies from an earlier summary
+carries forward: repeated folds see only the previous summary, so a value it
+omits is unrecoverable.
 
 **The plan survives compaction.** An `AgentBuilder` may carry a
 post-compaction note: a function of the source and successor histories that
