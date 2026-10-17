@@ -865,16 +865,18 @@ impl plakous_http::ExchangeObserver for ExchangeStarts {
 /// request bytes. Two prompts whose wire bytes together exceed the window are
 /// sent; once the provider reports its input count, the meter compares that
 /// count (plus a conservative byte charge for what was added since) against
-/// the token window and its compaction trigger.
+/// the token window and its compaction trigger. Each route runs one cell that
+/// fits although its bytes exceed the window and one that compacts on its
+/// reported count; together the routes cover every cell.
 #[tokio::test]
 async fn api_working_window_is_measured_in_provider_tokens() {
     use crate::context::{
         ContextDisposition, occupancy_requires_scheduled_compact, project_context_status,
     };
-    for (provider, model) in [
-        (PlatformProvider::Anthropic, "claude-haiku-5-5"),
-        (PlatformProvider::OpenAi, "gpt-5.6-luna"),
-        (PlatformProvider::Xai, "grok-4.6"),
+    for (provider, model, cells) in [
+        (PlatformProvider::Anthropic, "claude-haiku-5-5", [0, 1]),
+        (PlatformProvider::OpenAi, "gpt-5.6-luna", [3, 2]),
+        (PlatformProvider::Xai, "grok-4.6", [3, 1]),
     ] {
         let row = platform_model(provider, model).unwrap();
         let working = row.window(ApiWindow::Working);
@@ -884,12 +886,13 @@ async fn api_working_window_is_measured_in_provider_tokens() {
         let prompt = "word ".repeat(usize::try_from(working * 3 / 25).unwrap());
         let first_report = working * 3 / 20;
         // (reported input tokens, window, whether fence (a) compacts)
-        for (reported, window, compacts) in [
+        let table = [
             (working * 3 / 5, ApiWindow::Working, false),
             (working * 19 / 20, ApiWindow::Working, true),
             (working * 21 / 20, ApiWindow::Working, true),
             (working * 21 / 20, ApiWindow::Full, false),
-        ] {
+        ];
+        for (reported, window, compacts) in cells.map(|cell| table[cell]) {
             let label = format!("{provider:?} reported={reported} window={window:?}");
             let directory = tempfile::tempdir().unwrap();
             let extensions = crate::tools::ProductToolExtensions::default();
