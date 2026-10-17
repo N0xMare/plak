@@ -4645,25 +4645,21 @@ fn real_composition_quit_releases_nested_process() {
 /// not announce, because its completion carries no attempt id and the event is
 /// call-scoped, so one note for the composed answer is the contract.
 ///
-/// HELD, and the reason is narrower than the note this replaces. Code Mode now
-/// runs: this case reaches the model, executes the cell and completes the turn,
-/// and five tool records reach the stream. What does not arrive is the clip
-/// note. The product side looks right on inspection: the composition success
-/// path clips and publishes, at `driver/composition.rs`, "Code Mode cuts here
-/// too". So the likely fault is in this case's own arrangement, and the two
-/// candidates are that the nested call's own output bound truncates the body
-/// long before 60,000 bytes ever reaches the composed answer, and that the
-/// nested result consumes the 2,048-byte budget first, leaving the answer
-/// nothing to clip.
+/// The command must be plain text: a `tr '\0' x` spelling reaches the process
+/// tool as a literal NUL, which it refuses, so the cell fails with nothing to
+/// clip.
 ///
-/// Both are answerable only by running it and reading the session log, which
-/// is where composition detail lives; the JSONL face carries none of it.
-/// Un-hold this after that run rather than by guessing which one it is.
+/// HELD on a product bug this case now shows: the nested `exec_command` result
+/// is clipped against the turn's observation budget and announced (2,013 of
+/// 60,262 bytes kept against the 2,048-byte bound), and then the composed
+/// answer that carries it is charged again and clipped to the 35 bytes left.
+/// The model only ever sees the composed answer, so nested results inside a
+/// cell must neither charge the budget nor announce. Un-hold with that fix.
 #[test]
-#[ignore = "held: the clip note does not arrive; needs a run against the session log to say why"]
+#[ignore = "held: a nested Code Mode result is clipped and announced before its composed answer"]
 fn a_clipped_observation_inside_a_composed_answer_is_announced_once() {
     let mut plan = code_mode_script(&json!([
-        {"output": {"cell": "const big = await tools.exec_command({ cmd: \"head -c 60000 /dev/zero | tr '\\0' x\" });\ntext(big);\n"}, "finish": "tool_calls"},
+        {"output": {"cell": "const big = await tools.exec_command({ cmd: \"yes x | head -c 60000\" });\ntext(big);\n"}, "finish": "tool_calls"},
         {"output": {"text": "answered from the kept portion"}}
     ]));
     if let Some(object) = plan.as_object_mut() {
