@@ -4858,20 +4858,24 @@ async fn browser_and_device_deadlines_bound_near_expiry_lifecycle_waits() -> Tes
         .map(|(_, value)| value.into_owned())
         .ok_or("missing state")?;
     let port = browser_login.listener.local_addr()?.port();
+    // Queue the callback in the listener's backlog before the login task
+    // runs. Written after the spawn, a loaded runner could let the deadline
+    // drop the listener first, resetting the test's own connection; queued
+    // first, the task ends in `Callback` however late it runs.
+    let mut callback = TcpStream::connect(("127.0.0.1", port)).await?;
+    callback
+        .write_all(
+            format!(
+                "GET /auth/callback?code=lock-code&state={state} HTTP/1.1\r\nHost: localhost:{port}\r\nConnection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .await?;
     browser_login.attempt.deadline = Instant::now() + Duration::from_millis(200);
     let browser_lifecycle = browser_manager.lifecycle.lock().await;
     let worker_manager = Arc::clone(&browser_manager);
     let browser_completion =
         tokio::spawn(async move { worker_manager.complete_browser_login(browser_login).await });
-    let mut callback = TcpStream::connect(("127.0.0.1", port)).await?;
-    callback
-            .write_all(
-                format!(
-                    "GET /auth/callback?code=lock-code&state={state} HTTP/1.1\r\nHost: localhost:{port}\r\nConnection: close\r\n\r\n"
-                )
-                .as_bytes(),
-            )
-            .await?;
     let browser_outcome =
         tokio::time::timeout(Duration::from_secs(2), browser_completion).await??;
     assert_eq!(browser_outcome, Err(NativeCodexAuthError::Callback));
@@ -4905,12 +4909,14 @@ async fn browser_and_device_deadlines_bound_near_expiry_lifecycle_waits() -> Tes
         )],
     );
     let device_lifecycle = device_manager.lifecycle.lock().await;
-    let device_login = device_login_for_deadline_test(Instant::now() + Duration::from_millis(200));
+    // The deadline must outlast the one poll round trip on a loaded runner and
+    // then expire in the lifecycle wait.
+    let device_login = device_login_for_deadline_test(Instant::now() + Duration::from_secs(1));
     let worker_manager = Arc::clone(&device_manager);
     let device_completion =
         tokio::spawn(async move { complete_device(&worker_manager, device_login).await });
     assert_eq!(device_server.await??.len(), 1);
-    let device_outcome = tokio::time::timeout(Duration::from_secs(2), device_completion).await??;
+    let device_outcome = tokio::time::timeout(Duration::from_secs(5), device_completion).await??;
     assert_eq!(device_outcome, Err(NativeCodexAuthError::Provider));
     drop(device_lifecycle);
     assert_eq!(device_manager.status()?, CodexCredentialStatus::SignedOut);
