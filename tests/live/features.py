@@ -50,7 +50,10 @@ CATALOG = (
     ("web_fetch", "cli"),
     ("x_search", "cli"),
     ("image_gen_roundtrip", "cli"),
-    ("frozen_child_tools", "cli"),
+    ("child_own_tools", "cli"),
+    ("profile_researcher", "cli"),
+    ("multi_roles", "cli"),
+    ("worker_spawns_researcher", "cli"),
     ("web_search_401", "cli"),
     ("image_gen_401", "cli"),
 )
@@ -421,15 +424,19 @@ class Features:
     def run(self, name: str, prompt: str, tools: list[str], *, config: str = "",
             images: list[Path] = (), route: live.Route | None = None,
             stage: str = "turn", timeout: float = 600, composition: str | None = None,
-            faults: str | None = None, before=None) -> tuple[str, list[dict], list[Path], Path, str]:
+            faults: str | None = None, before=None,
+            profile: str | None = None) -> tuple[str, list[dict], list[Path], Path, str]:
         route = route or self.route
         base = self.env.artifacts / name
         repo = base / "repo"
         if not repo.exists():
             live.git_repo(repo, {"README.md": f"{name} scenario workspace\n"})
         home = base / ("home" if stage == "turn" else f"home-{stage}")
-        live.write_home(home, route, self.env.home)
-        set_tools(home, tools)
+        if profile:
+            write_profile_home(home, profile)
+        else:
+            live.write_home(home, route, self.env.home)
+            set_tools(home, tools)
         if composition:
             live.pin_composition(home, composition)
         if config:
@@ -439,7 +446,8 @@ class Features:
             before(home)
         segment_start = len(self.env.capture_segments)
         log = base / f"{stage}.log"
-        args = [*route.flags(), "--print-session-id"]
+        # A profile's root binds its own root template.
+        args = ["--print-session-id"] if profile else [*route.flags(), "--print-session-id"]
         if composition:
             args += ["--composition", composition]
         for image in images:
@@ -838,39 +846,235 @@ class Features:
 
     # --- the child-tool bound after a root template edit ----------------------------
 
-    def frozen_child_tools(self) -> str:
-        """The root's tools are the session's frozen set, not the live `[root]`
-        template. The root template lists `fetch_url` but names another model,
-        so a session created on this route freezes no tools; the configuration
-        loads (the worker's `fetch_url` is within the live root template's), and
-        spawning the worker must still be refused."""
-        other = "claude-sonnet-5-5" if self.route.model != "claude-sonnet-5-5" else "claude-haiku-5-5"
+    def child_own_tools(self) -> str:
+        """A child gets exactly its own template's tools: a root with no
+        optional tools spawns a worker that lists `fetch_url`, and the worker
+        is offered and runs it."""
+        rev, marker = _marker()
 
         def arrange(home: Path) -> None:
-            root = home / "agents" / "root-agent.toml"
-            text = root.read_text()
-            root.write_text(text.replace(f'model = "{self.route.model}"\n',
-                                         f'model = "{other}"\n', 1))
             set_tools(home, ["fetch_url"], "worker")
 
         out, records, segments, _, session = self.run(
-            "frozen_child_tools",
-            "Call spawn_agent once with template worker and the message \"Say hi.\". Then "
-            "reply with the exact error code spawn_agent returned, or the word spawned if "
-            "it succeeded. Do not retry and do not wait for the agent.",
-            ["fetch_url"], before=arrange)
-        requests = json.dumps(capture_requests(segments))
+            "child_own_tools",
+            "Spawn one worker (template worker, tier execute, workspace inherit) and tell it: "
+            f"use fetch_url to read {raw_url(rev)} and reply with the one SHA-256 value "
+            "(64 hexadecimal characters) the file records. Wait for the worker, then reply "
+            "with that value only.",
+            [], before=arrange, timeout=900)
         detail = f"session {session}"
         if not tool_calls(records, "spawn_agent"):
             raise ScenarioFailure(MODEL, f"{detail}: the model never called spawn_agent")
-        if "template_not_spawnable" not in requests or "lack: fetch_url" not in requests:
-            raise ScenarioFailure(HARNESS, f"{detail}: spawn_agent was not refused for "
-                                           "fetch_url beyond the root's frozen tools")
-        first = next(iter(capture_requests(segments)), None)
-        if isinstance(first, dict) and '"name": "fetch_url"' in json.dumps(first.get("tools")):
+        requests = capture_requests(segments)
+        root = [body for body in requests if offers_card(body, "worker")]
+        child = [body for body in requests if not offers_card(body, "worker")]
+        if any(offered(body, "fetch_url") for body in root):
             raise ScenarioFailure(HARNESS, f"{detail}: the root was offered fetch_url")
-        return (f"{detail}: root froze no tools (template on {other}); spawning worker "
-                "(fetch_url) was refused template_not_spawnable")
+        if not child or not all(offered(body, "fetch_url") for body in child):
+            raise ScenarioFailure(HARNESS, f"{detail}: the worker was not offered fetch_url")
+        if marker not in answer_text(out, records):
+            raise ScenarioFailure(MODEL, f"{detail}: answer lacks the fetched SHA-256")
+        return (f"{detail}: root without optional tools spawned a worker listing fetch_url; "
+                "the worker fetched the marker")
+
+    # --- built-in profiles: the default role set ----------------------------------
+
+    def _research(self, name: str, profile: str, *, spawner: str = "root",
+                  config_edit=None) -> tuple[str, list[object], Path]:
+        """The researcher web-searches and writes research/<topic>/report.md.
+
+        `spawner = "worker"` asks the root to delegate to the worker, which
+        spawns the researcher itself (needs max_depth 2)."""
+        x = profile in ("grok-default", "multi-default")
+        task = ("use web_search to find the date Rust " + RUST_DATED_RELEASE + " was released "
+                "as stable" + (", and use x_search to find one recent post by @rustlang" if x
+                               else "") +
+                "; write research/rust-release/report.md with the findings and a Sources "
+                "list of every URL used, then return the path")
+        if spawner == "root":
+            prompt = ("Spawn the researcher (template " + profile + "-researcher, tier mutate, "
+                      "workspace inherit) with this task: " + task + ". Wait for it, then "
+                      "reply with the report path only.")
+        else:
+            prompt = ("Spawn the worker (template " + profile + "-worker, tier mutate, "
+                      "workspace inherit) and tell it: spawn the researcher (template " +
+                      profile + "-researcher, tier mutate, workspace inherit) yourself with "
+                      "this task: " + task + "; wait for it and return the path. Do not "
+                      "spawn the researcher yourself. Wait for the worker, then reply with "
+                      "the report path only.")
+        out, records, segments, repo, session = self.run(
+            name, prompt, [], profile=profile, before=config_edit, timeout=1500)
+        detail = f"session {session}"
+        requests = capture_requests(segments)
+        researcher = profile_model(profile, "researcher")
+        root_card = f"{profile}-worker"
+        roots = [body for body in requests if offers_card(body, root_card)]
+        if any(offered(body, "web_search") for body in roots):
+            raise ScenarioFailure(HARNESS, f"{detail}: the root was offered web_search")
+        child = [body for body in requests if request_model(body) == researcher
+                 and offered(body, "web_search")]
+        if not child:
+            raise ScenarioFailure(MODEL, f"{detail}: no researcher ({researcher}) request "
+                                         "offering web_search")
+        urls = source_urls("\n".join(text for body in child for text in json_strings(body)
+                                     if "Sources:" in text))
+        if not urls:
+            raise ScenarioFailure(MODEL, f"{detail}: no web_search result with sources")
+        if x and not x_status_ids(urls):
+            raise ScenarioFailure(MODEL, f"{detail}: no x_search post among the sources")
+        reports = sorted((repo / "research").glob("*/report.md"))
+        if not reports:
+            raise ScenarioFailure(MODEL, f"{detail}: no research/<topic>/report.md")
+        written = _URL.findall(reports[0].read_text(errors="replace"))
+        if not written:
+            raise ScenarioFailure(MODEL, f"{detail}: {reports[0].relative_to(repo)} cites no URL")
+        root_spawns = spawn_templates(roots)
+        if spawner == "worker":
+            worker_spawns = spawn_templates([body for body in requests
+                                             if not offers_card(body, root_card)])
+            if f"{profile}-researcher" in root_spawns:
+                raise ScenarioFailure(MODEL, f"{detail}: the root spawned the researcher itself")
+            if f"{profile}-researcher" not in worker_spawns:
+                raise ScenarioFailure(MODEL, f"{detail}: the worker never spawned the researcher")
+        elif f"{profile}-researcher" not in root_spawns:
+            raise ScenarioFailure(MODEL, f"{detail}: the root never spawned the researcher")
+        summary = (f"{detail}: {spawner} spawned {profile}-researcher ({researcher}); "
+                   f"{len(urls)} sources" + (f", {len(x_status_ids(urls))} X posts" if x else "")
+                   + f"; {reports[0].relative_to(repo)} cites {len(set(written))} URLs")
+        return summary, requests, repo
+
+    def profile_researcher(self) -> str:
+        """The route's own built-in profile: root spawns the researcher."""
+        profile = {"claude": "claude-default", "codex": "codex-default",
+                   "grok": "grok-default"}.get(self.route.account)
+        if not profile:
+            raise ScenarioFailure(HARNESS, f"no built-in profile for {self.route.account}")
+        return self._research("profile_researcher", profile)[0]
+
+    def multi_roles(self) -> str:
+        """multi-default: the Grok researcher, then the Codex worker and the
+        Claude reviewer on a tiny task."""
+        research = self._research("multi_research", "multi-default")[0]
+        out, records, segments, repo, session = self.run(
+            "multi_roles",
+            "Spawn the worker (template multi-default-worker, tier mutate, workspace inherit) "
+            "to create hello.txt containing the single word hello. Wait for it. Then spawn "
+            "the reviewer (template multi-default-reviewer, tier execute, workspace inherit) "
+            "to check that hello.txt contains hello and report. Wait for it, then reply done.",
+            [], profile="multi-default", timeout=1500)
+        detail = f"session {session}"
+        requests = capture_requests(segments)
+        spawned = spawn_templates(requests)
+        for role in ("worker", "reviewer"):
+            if f"multi-default-{role}" not in spawned:
+                raise ScenarioFailure(MODEL, f"{detail}: the root never spawned the {role}")
+            model = profile_model("multi-default", role)
+            if not any(request_model(body) == model
+                       and not offers_card(body, "multi-default-worker")
+                       for body in requests):
+                raise ScenarioFailure(MODEL, f"{detail}: no {role} ({model}) request")
+        if (repo / "hello.txt").read_text(errors="replace").strip().lower() != "hello":
+            raise ScenarioFailure(MODEL, f"{detail}: hello.txt does not contain hello")
+        return f"{research}; {detail}: codex worker wrote hello.txt, claude reviewer ran"
+
+    def worker_spawns_researcher(self) -> str:
+        """With max_depth = 2 the worker spawns the researcher itself."""
+        profile = {"claude": "claude-default", "codex": "codex-default",
+                   "grok": "grok-default"}.get(self.route.account, "multi-default")
+
+        def depth_two(home: Path) -> None:
+            config = home / "config.toml"
+            text = config.read_text()
+            if "max_depth = 1\n" not in text:
+                raise ScenarioFailure(HARNESS, "preset config has no max_depth = 1")
+            config.write_text(text.replace("max_depth = 1\n", "max_depth = 2\n", 1))
+
+        return self._research("worker_spawns_researcher", profile, spawner="worker",
+                              config_edit=depth_two)[0]
+
+
+PROFILE_DIRS = {"codex-default": "codex", "claude-default": "claude",
+                "grok-default": "grok", "multi-default": "multi"}
+PROFILE_ROLES = (("root", "root-agent"), ("worker", "worker"), ("reviewer", "reviewer"),
+                 ("researcher", "researcher"))
+_SPAWNS = re.compile(r"^spawns = \[(.*)\]$", re.M)
+
+
+def write_profile_home(home: Path, profile: str) -> None:
+    """The home applying a built-in profile writes: `<profile>-<role>`
+    templates from `configs/providers/<dir>`, the worker's `spawns` under the
+    same prefix, and the preset's `config.toml` pointed at them."""
+    source = live.ROOT / "configs/providers" / PROFILE_DIRS[profile]
+    (home / "agents").mkdir(parents=True, exist_ok=True)
+    home.chmod(0o700)
+    for role, stem in PROFILE_ROLES:
+        text = (source / "agents" / f"{stem}.toml").read_text()
+        text = _SPAWNS.sub(lambda m: "spawns = " + toml_array(
+            f"{profile}-{name}" for name in tomllib.loads(m.group(0))["spawns"]), text)
+        (home / "agents" / f"{profile}-{role}.toml").write_text(text)
+    config = (source / "config.toml").read_text()
+    config = config.replace('agent = "root-agent"', f'agent = "{profile}-root"', 1)
+    config = re.sub(r"^working_set = .*$", "working_set = " + toml_array(
+        f"{profile}-{role}" for role, _ in PROFILE_ROLES[1:]), config, count=1, flags=re.M)
+    (home / "config.toml").write_text(config)
+
+
+def profile_model(profile: str, role: str) -> str:
+    stem = dict(PROFILE_ROLES)[role]
+    path = live.ROOT / "configs/providers" / PROFILE_DIRS[profile] / "agents" / f"{stem}.toml"
+    return tomllib.loads(path.read_text())["model"]
+
+
+def request_model(body: object) -> str | None:
+    return body.get("model") if isinstance(body, dict) else None
+
+
+def _tools_text(body: object) -> str:
+    tools = body.get("tools") if isinstance(body, dict) else None
+    return json.dumps(tools) if tools else ""
+
+
+def offered(body: object, tool: str) -> bool:
+    """Whether a captured request's tool list names `tool` (or its other
+    model-visible spelling): a direct tool or one inside a Code Mode cell."""
+    text = _tools_text(body)
+    # A direct tool by name, or a Code Mode cell catalog entry `name(`; a
+    # spawn card's `· tools <names>` capability line is neither.
+    return any(f'"name": "{name}"' in text or f"{name}(" in text
+               for name in RETRIEVAL_NAMES.get(tool, (tool,)))
+
+
+def offers_card(body: object, template: str) -> bool:
+    """Whether the request's spawn_agent menu carries `template`'s card. Only
+    the root's menu carries the worker: a node's menu never holds itself."""
+    return f"- {template}:" in _tools_text(body)
+
+
+def spawn_templates(bodies: list[object]) -> set[str]:
+    """Templates named by spawn_agent calls the captured histories carry."""
+    found: set[str] = set()
+
+    def visit(value: object) -> None:
+        if isinstance(value, dict):
+            if value.get("name") == "spawn_agent":
+                for key in ("input", "arguments"):
+                    args = value.get(key)
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except ValueError:
+                            args = None
+                    if isinstance(args, dict) and isinstance(args.get("template"), str):
+                        found.add(args["template"])
+            for item in value.values():
+                visit(item)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    for body in bodies:
+        visit(body)
+    return found
 
 
 def refresh_rows(home: Path, account: str) -> list[tuple[str, int]]:

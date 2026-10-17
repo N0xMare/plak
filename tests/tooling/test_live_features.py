@@ -209,5 +209,43 @@ class MarkerTests(unittest.TestCase):
                 features.set_tools(home, ["web_search"])
 
 
+
+class ProfileHomeTests(unittest.TestCase):
+    def test_profile_home_prefixes_roles_and_worker_spawns(self):
+        import tempfile
+        import tomllib
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            features.write_profile_home(home, "multi-default")
+            config = tomllib.loads((home / "config.toml").read_text())
+            self.assertEqual(config["root"]["agent"], "multi-default-root")
+            self.assertEqual(config["roster"]["working_set"],
+                             ["multi-default-worker", "multi-default-reviewer",
+                              "multi-default-researcher"])
+            worker = tomllib.loads((home / "agents/multi-default-worker.toml").read_text())
+            self.assertEqual(worker["spawns"],
+                             ["multi-default-reviewer", "multi-default-researcher"])
+            self.assertEqual(features.profile_model("multi-default", "researcher"),
+                             "grok-4.7-build-fast")
+
+    def test_offered_ignores_spawn_card_tool_lists(self):
+        card = ("Templates you may spawn:\n- r-researcher: research (tier <= mutate "
+                "· tools web_search, fetch_url)")
+        root = {"tools": [{"name": "spawn_agent", "description": card}]}
+        child = {"tools": [{"type": "function", "name": "web_search"}]}
+        self.assertFalse(features.offered(root, "web_search"))
+        self.assertTrue(features.offers_card(root, "r-researcher"))
+        self.assertTrue(features.offered(child, "web_search"))
+        self.assertFalse(features.offers_card(child, "r-researcher"))
+
+    def test_spawn_templates_reads_message_and_responses_calls(self):
+        bodies = [
+            {"messages": [{"content": [{"type": "tool_use", "name": "spawn_agent",
+                                        "input": {"template": "a"}}]}]},
+            {"input": [{"type": "function_call", "name": "spawn_agent",
+                        "arguments": json.dumps({"template": "b"})}]},
+        ]
+        self.assertEqual(features.spawn_templates(bodies), {"a", "b"})
+
 if __name__ == "__main__":
     unittest.main()
