@@ -244,8 +244,10 @@ class ProfileHomeTests(unittest.TestCase):
                                         "input": {"template": "a"}}]}]},
             {"input": [{"type": "function_call", "name": "spawn_agent",
                         "arguments": json.dumps({"template": "b"})}]},
+            {"input": [{"type": "custom_tool_call",
+                        "input": 'text(await tools.spawn_agent({template:"c",tier:"mutate"}))'}]},
         ]
-        self.assertEqual(features.spawn_templates(bodies), {"a", "b"})
+        self.assertEqual(features.spawn_templates(bodies), {"a", "b", "c"})
 
 if __name__ == "__main__":
     unittest.main()

@@ -1038,8 +1038,16 @@ def request_model(body: object) -> str | None:
 
 
 def _tools_text(body: object) -> str:
-    tools = body.get("tools") if isinstance(body, dict) else None
-    return json.dumps(tools) if tools else ""
+    """The request's tool catalog: its `tools`, plus the instructions and
+    system/developer items, where a Code Mode cell declares its tools."""
+    if not isinstance(body, dict):
+        return ""
+    parts = [body.get("tools"), body.get("instructions"), body.get("system")]
+    items = body.get("input") or body.get("messages")
+    if isinstance(items, list):
+        parts += [item for item in items if isinstance(item, dict)
+                  and item.get("role") in ("system", "developer")]
+    return json.dumps([part for part in parts if part])
 
 
 def offered(body: object, tool: str) -> bool:
@@ -1058,12 +1066,18 @@ def offers_card(body: object, template: str) -> bool:
     return f"- {template}:" in _tools_text(body)
 
 
+# A Code Mode cell's `tools.spawn_agent({template: "...", ...})`.
+_CELL_SPAWN = re.compile(r"spawn_agent\(\{[^}]*?[\"']?template[\"']?\s*:\s*[\"']([a-z0-9-]+)")
+
+
 def spawn_templates(bodies: list[object]) -> set[str]:
     """Templates named by spawn_agent calls the captured histories carry."""
     found: set[str] = set()
 
     def visit(value: object) -> None:
         if isinstance(value, dict):
+            if value.get("type") == "custom_tool_call" and isinstance(value.get("input"), str):
+                found.update(_CELL_SPAWN.findall(value["input"]))
             if value.get("name") == "spawn_agent":
                 for key in ("input", "arguments"):
                     args = value.get(key)
