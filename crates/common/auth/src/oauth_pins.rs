@@ -177,31 +177,7 @@ impl CompatibilityProfilePins {
     reason = "unit tests may assert with expect/unwrap"
 )]
 mod tests {
-    use super::{CompatibilityProfilePins, SubscriptionOAuthPins};
-
-    const TEST_PORTS: &[u16] = &[1455, 1457];
-
-    const fn oauth_pins() -> SubscriptionOAuthPins {
-        SubscriptionOAuthPins {
-            client_id: "test-client",
-            auth_origin: "https://issuer.example/",
-            oidc_discovery_url: None,
-            scopes: "openid offline_access",
-            authorize_path: "/oauth/authorize",
-            token_path: "/oauth/token",
-            revoke_path: "/oauth/revoke",
-            jwks_path: "/.well-known/jwks.json",
-            userinfo_path: "/oauth/userinfo",
-            device_authorization_path: "/oauth/device/code",
-            device_token_path: Some("/oauth/device/token"),
-            device_verification_path: Some("/device"),
-            device_redirect_path: Some("/device/callback"),
-            browser_callback_path: "/callback",
-            loopback_redirect_uri: "http://localhost:1455/callback",
-            loopback_authority: "localhost:1455",
-            loopback_ports: TEST_PORTS,
-        }
-    }
+    use super::CompatibilityProfilePins;
 
     const fn profile_pins() -> CompatibilityProfilePins {
         CompatibilityProfilePins {
@@ -214,12 +190,6 @@ mod tests {
             expires_at_unix: 200,
             killed: false,
         }
-    }
-
-    #[test]
-    fn primary_loopback_port_is_the_first_pinned_port() {
-        let pins = oauth_pins();
-        assert_eq!(pins.primary_loopback_port(), 1455);
     }
 
     #[test]

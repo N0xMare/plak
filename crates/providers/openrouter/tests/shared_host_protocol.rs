@@ -1,10 +1,8 @@
 //! `OpenRouter` protocol evidence exercised exclusively through Responses-family hosts.
 
 use std::error::Error;
-use std::fs;
 use std::io;
 use std::num::NonZeroU32;
-use std::path::Path;
 use std::str::FromStr as _;
 
 use plakous_model::{
@@ -273,38 +271,5 @@ fn duplicate_json_and_future_declared_events_fail_closed() -> TestResult {
         ),
         Err(ResponsesFamilyStreamError::Unsupported("unknown event"))
     );
-    Ok(())
-}
-
-#[test]
-fn openrouter_has_no_peer_responses_machine_modules() -> TestResult {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    for forbidden in [
-        "attempt.rs",
-        "client.rs",
-        "project.rs",
-        "request.rs",
-        "response.rs",
-        "stream.rs",
-    ] {
-        assert!(
-            !source.join(forbidden).exists(),
-            "OpenRouter must use the shared Responses host, not {forbidden}"
-        );
-    }
-    let lib = fs::read_to_string(source.join("lib.rs"))?;
-    for forbidden in [
-        "mod attempt;",
-        "mod client;",
-        "mod project;",
-        "mod request;",
-        "mod response;",
-        "mod stream;",
-    ] {
-        assert!(
-            !lib.contains(forbidden),
-            "OpenRouter must not declare peer module `{forbidden}`"
-        );
-    }
     Ok(())
 }

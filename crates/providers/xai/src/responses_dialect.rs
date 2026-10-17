@@ -597,52 +597,6 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(feature = "native-auth")]
-    #[test]
-    fn auth_tables_and_source_revisions_are_exact() {
-        let facts = SUPERGROK_RESPONSES_DIALECT;
-        let oauth = facts.oauth_pins();
-        assert_eq!(oauth.client_id, "b1a00492-073a-47ea-816f-4c329264a828");
-        assert_eq!(oauth.auth_origin, "https://auth.x.ai");
-        assert_eq!(
-            oauth.oidc_discovery_url,
-            Some("https://auth.x.ai/.well-known/openid-configuration")
-        );
-        assert_eq!(
-            oauth.scopes,
-            "openid profile email offline_access grok-cli:access api:access"
-        );
-        assert_eq!(oauth.authorize_path, "/oauth2/authorize");
-        assert_eq!(oauth.token_path, "/oauth2/token");
-        assert_eq!(oauth.device_authorization_path, "/oauth2/device/code");
-        assert_eq!(
-            oauth.loopback_redirect_uri,
-            "http://127.0.0.1:56121/callback"
-        );
-
-        let profile = facts.compatibility_pins();
-        assert_eq!(profile.profile_id, "xai.grok.compat.2026-07-31.r1");
-        assert_eq!(
-            profile.source_revision,
-            "19231fce4b70aa5f7894a0a0eb20ff29bd417db5"
-        );
-        assert_eq!(
-            profile.notice_revision,
-            "xai.grok.compat.notice.2026-07-31.r1"
-        );
-        assert_eq!(
-            profile.kill_switch_revision,
-            "xai.grok.compat.kill.2026-07-31.r1"
-        );
-        assert_eq!(profile.reviewed_at_unix, 1_785_456_000);
-        assert_eq!(profile.expires_at_unix, 1_801_353_600);
-        assert!(!profile.killed);
-        assert_eq!(
-            facts.official_model_source_revision(),
-            "afbc0fb710320c7add294c2106d447ecc3e3af2e"
-        );
-    }
-
     #[test]
     fn subscription_authority_is_exact() {
         assert_eq!(

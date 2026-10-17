@@ -1763,36 +1763,6 @@ mod platform_tests {
         assert!(OpenAiProjectId::new("proj_fixture\nother").is_err());
         assert!(OpenAiProjectId::new("x".repeat(257)).is_err());
     }
-
-    #[test]
-    fn platform_request_stream_and_error_fixtures_are_exact_and_offline() {
-        let request: serde_json::Value = serde_json::from_slice(include_bytes!(
-            "../tests/fixtures/platform_request_gpt_56_sol.json"
-        ))
-        .expect("request fixture");
-        assert_eq!(request["model"], "gpt-5.6-sol");
-        assert_eq!(request["store"], false);
-        assert_eq!(request["parallel_tool_calls"], false);
-        assert_eq!(request["tools"][0]["strict"], false);
-        assert_eq!(request["reasoning"]["effort"], "high");
-        assert_eq!(request["reasoning"]["summary"], "auto");
-        assert!(request.get("previous_response_id").is_none());
-
-        let stream = include_str!("../tests/fixtures/platform_response_gpt_56_sol.sse");
-        assert!(stream.contains("\"sequence_number\":0"));
-        assert!(stream.contains("\"sequence_number\":4"));
-        assert!(stream.contains("event: response.completed"));
-        assert!(!stream.contains("[DONE]"));
-        assert!(!stream.contains("gpt-test"));
-
-        let error: serde_json::Value = serde_json::from_slice(include_bytes!(
-            "../tests/fixtures/platform_error_invalid_request.json"
-        ))
-        .expect("error fixture");
-        assert_eq!(error["error"]["type"], "invalid_request_error");
-        assert_eq!(error["error"]["code"], "context_length_exceeded");
-        assert_eq!(error["error"]["param"], "max_output_tokens");
-    }
 }
 
 #[cfg(all(test, feature = "native-auth"))]

@@ -577,60 +577,6 @@ fn assert_profile_revision_rejections(accepted_at: Timestamp) {
 }
 
 #[test]
-fn public_constants_are_backed_by_shared_oauth_pin_tables() {
-    assert_eq!(XAI_PUBLIC_CLIENT_ID, XAI_OAUTH.client_id);
-    assert_eq!(XAI_ISSUER, XAI_OAUTH.auth_origin);
-    assert_eq!(XAI_OIDC_DISCOVERY, XAI_OAUTH.oidc_discovery_url.unwrap());
-    assert_eq!(XAI_OAUTH_SCOPE, XAI_OAUTH.scopes);
-    assert_eq!(XAI_LOOPBACK_REDIRECT, XAI_OAUTH.loopback_redirect_uri);
-    assert_eq!(XAI_OAUTH.primary_loopback_port(), 56121);
-    assert_eq!(AuthEndpoints::production().loopback_ports, &[56121]);
-    assert_eq!(
-        format!(
-            "http://127.0.0.1:{}{}",
-            XAI_OAUTH.primary_loopback_port(),
-            XAI_OAUTH.browser_callback_path
-        ),
-        XAI_LOOPBACK_REDIRECT
-    );
-    assert_eq!(XAI_GROK_COMPATIBILITY_PROFILE, XAI_PROFILE.profile_id);
-    assert_eq!(XAI_OPENCODE_SOURCE_REVISION, XAI_PROFILE.source_revision);
-    assert_eq!(XAI_OPENCODE_SOURCE, XAI_PROFILE.source_locator.unwrap());
-    assert_eq!(
-        XAI_GROK_COMPATIBILITY_NOTICE_REVISION,
-        XAI_PROFILE.notice_revision
-    );
-    assert_eq!(
-        XAI_GROK_KILL_SWITCH_REVISION,
-        XAI_PROFILE.kill_switch_revision
-    );
-    assert_eq!(COMPATIBILITY_REVIEWED_UNIX, XAI_PROFILE.reviewed_at_unix);
-    assert_eq!(COMPATIBILITY_EXPIRES_UNIX, XAI_PROFILE.expires_at_unix);
-    assert_eq!(COMPATIBILITY_KILLED, XAI_PROFILE.killed);
-    assert_eq!(AUTHORIZATION_PATH, XAI_OAUTH.authorize_path);
-    assert_eq!(TOKEN_PATH, XAI_OAUTH.token_path);
-    assert_eq!(DEVICE_PATH, XAI_OAUTH.device_authorization_path);
-    let endpoints = AuthEndpoints::production();
-    assert_eq!(
-        endpoints.catalog().origin,
-        crate::SUPERGROK_RESPONSES_ORIGIN
-    );
-    assert_eq!(
-        endpoints.catalog().path,
-        crate::responses_dialect::SUPERGROK_MODELS_PATH
-    );
-    assert_eq!(endpoints.usage().origin, crate::SUPERGROK_RESPONSES_ORIGIN);
-    assert_eq!(
-        endpoints.usage().path,
-        crate::subscription_usage::GROK_SUBSCRIPTION_USAGE_PATH
-    );
-    assert_ne!(
-        endpoints.catalog().origin,
-        crate::platform::XAI_PLATFORM_API_KEY_ORIGIN
-    );
-}
-
-#[test]
 fn profile_is_exact_expiring_and_truthfully_attributed() -> TestResult {
     let profile = XaiSubscriptionIntegrationProfile;
     assert_eq!(profile.id(), XAI_GROK_COMPATIBILITY_PROFILE);

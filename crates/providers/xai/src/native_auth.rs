@@ -100,14 +100,8 @@ use crate::{
 
 /// Exact immutable compatibility profile accepted by this implementation.
 pub const XAI_GROK_COMPATIBILITY_PROFILE: &str = XAI_PROFILE.profile_id;
-#[cfg(test)]
-/// Official OIDC discovery document pinned by the profile.
-pub(crate) const XAI_OIDC_DISCOVERY: &str = XAI_OAUTH.oidc_discovery_url.unwrap();
 /// Immutable upstream source revision reviewed for public-client compatibility.
 pub(crate) const XAI_OPENCODE_SOURCE_REVISION: &str = XAI_PROFILE.source_revision;
-#[cfg(test)]
-/// Immutable upstream source file reviewed for public-client compatibility.
-pub(crate) const XAI_OPENCODE_SOURCE: &str = XAI_PROFILE.source_locator.unwrap();
 /// Pinned xAI public OAuth client identifier.
 pub(crate) const XAI_PUBLIC_CLIENT_ID: &str = XAI_OAUTH.client_id;
 /// Fixed loopback redirect registered for the pinned public client.

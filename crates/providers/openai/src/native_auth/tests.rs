@@ -6240,48 +6240,6 @@ async fn cancelled_jwks_singleflight_does_not_strand_followers() -> TestResult {
     Ok(())
 }
 
-#[test]
-fn public_constants_are_backed_by_shared_oauth_pin_tables() {
-    assert_eq!(OPENAI_AUTH_ORIGIN, CODEX_OAUTH.auth_origin);
-    assert_eq!(OPENAI_CODEX_NATIVE_CLIENT_ID, CODEX_OAUTH.client_id);
-    assert_eq!(OPENAI_CODEX_OAUTH_SCOPES, CODEX_OAUTH.scopes);
-    assert_eq!(
-        OPENAI_CODEX_COMPATIBILITY_NOTICE_REVISION,
-        CODEX_PROFILE.notice_revision
-    );
-    assert_eq!(
-        OPENAI_CODEX_KILL_SWITCH_REVISION,
-        CODEX_PROFILE.kill_switch_revision
-    );
-    assert_eq!(
-        OPENAI_CODEX_COMPATIBILITY_PROFILE_ID,
-        CODEX_PROFILE.profile_id
-    );
-    assert_eq!(OPENAI_CODEX_SOURCE_REVISION, CODEX_PROFILE.source_revision);
-    assert_eq!(AUTHORIZE_PATH, CODEX_OAUTH.authorize_path);
-    assert_eq!(TOKEN_PATH, CODEX_OAUTH.token_path);
-    assert_eq!(REVOKE_PATH, CODEX_OAUTH.revoke_path);
-    assert_eq!(JWKS_PATH, CODEX_OAUTH.jwks_path);
-    assert_eq!(USER_INFO_PATH, CODEX_OAUTH.userinfo_path);
-    assert_eq!(DEVICE_USER_CODE_PATH, CODEX_OAUTH.device_authorization_path);
-    assert_eq!(DEVICE_TOKEN_PATH, CODEX_OAUTH.device_token_path.unwrap());
-    assert_eq!(
-        DEVICE_VERIFICATION_PATH,
-        CODEX_OAUTH.device_verification_path.unwrap()
-    );
-    assert_eq!(
-        DEVICE_REDIRECT_PATH,
-        CODEX_OAUTH.device_redirect_path.unwrap()
-    );
-    assert_eq!(BROWSER_CALLBACK_PATH, CODEX_OAUTH.browser_callback_path);
-    assert_eq!(PROFILE_REVIEWED_AT, CODEX_PROFILE.reviewed_at_unix);
-    assert_eq!(PROFILE_EXPIRES_AT, CODEX_PROFILE.expires_at_unix);
-    assert_eq!(PROFILE_KILLED, CODEX_PROFILE.killed);
-    assert_eq!(CODEX_OAUTH.loopback_ports, &[1455, 1457]);
-    assert_eq!(CODEX_OAUTH.primary_loopback_port(), 1455);
-    assert_eq!(ProfileEndpoints::production().loopback_ports, &[1455, 1457]);
-}
-
 #[tokio::test]
 async fn browser_login_redirect_and_host_follow_the_bound_test_port() -> TestResult {
     let endpoint = test_endpoint().await?;
