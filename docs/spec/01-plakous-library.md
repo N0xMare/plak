@@ -5996,6 +5996,26 @@ history, so release, resume and recovery replay it exactly once. Failure to
 construct or append the note fails the compaction publication rather than
 publishing a successor that silently lost the restoration instruction.
 
+**The turn continues after a mid-turn fold.** After a fold, the model sees its
+earlier turn as one assistant summary that describes the next step, and some
+models answer that with narration and end the turn instead of taking the step.
+So when a live turn-fence fold's successor has a tool exchange as its newest
+non-steering segment (fence (b), where the same turn's next round follows), the
+driver appends one more steering segment with `Instruction` provenance as the
+last segment. It opens with the constant marker
+`[plak: earlier work in this turn was summarized]` and says the task is not
+finished, that the model should continue from the latest tool result with its
+next tool call, and that it should end the turn only when the task is done or
+it needs the user. A turn carries at most one such note: a fold only appends
+(the compaction provenance pins the successor prefix) and steering is never
+folded inside its own turn, so the first mid-turn fold's note stays, and a
+later fold in the same turn whose successor already holds it after the latest
+user intent appends nothing; that note then sits just before the current
+round's batch. A later turn folds it whole with its intent group. A fold before a new prompt (fence (a)), an
+endpoint compaction and a recovery-published fold append no continuation note.
+The note is part of the published successor, like the plan note, and failure to
+build it fails the publication.
+
 The direct API adapters admit this bounded request refinement under the same
 selected and effective configuration identities: a session-workflow request
 may set `ToolChoice::None` and exactly that summary bound for the configured

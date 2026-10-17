@@ -4,6 +4,7 @@ use super::commands::ordinary_capacity_refusal;
 use super::operations::transition_admission;
 use crate::input::UserInput;
 use crate::runtime::admission::validate_configuration_runtime_authority;
+use crate::runtime::compaction::continuation::with_turn_continuation_note;
 use crate::runtime::compaction::fold::{
     build_compaction_success_fold, compact_diagnostic, nested_observation_token_upper_bound,
 };
@@ -2864,6 +2865,10 @@ impl Driver {
                     "compaction note could not be appended",
                 ))
             })?;
+        }
+        if turn_id.is_some() {
+            fold.history = with_turn_continuation_note(fold.history, identity.workflow_id)
+                .map_err(CompactionCompletionError::semantic)?;
         }
         // A turn-fence fold is still inside its admitted root even when every
         // operation visible in the folded ledger is already finalized.  Do

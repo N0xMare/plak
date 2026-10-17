@@ -15,6 +15,8 @@ pub(in crate::runtime) mod record;
 
 pub(in crate::runtime) mod request;
 
+pub(in crate::runtime) mod continuation;
+
 pub(in crate::runtime) mod fold;
 
 pub(in crate::runtime) mod placeholder;
