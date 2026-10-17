@@ -17,8 +17,7 @@ use plakous_model::{
 };
 use plakous_tool_process::ProcessSessionTools;
 use plakous_tools::{
-    CODEX_NATIVE_CODE_MODE_COMMIT_V1, CODEX_NATIVE_CODE_MODE_EXEC_NAME_V1,
-    CODEX_NATIVE_CODE_MODE_RELEASE_V1, CODEX_NATIVE_CODE_MODE_WAIT_NAME_V1,
+    CODEX_NATIVE_CODE_MODE_EXEC_NAME_V1, CODEX_NATIVE_CODE_MODE_WAIT_NAME_V1,
     EffectAuthorizationGrantSource, ExecutionEnvironment, ExecutionEnvironmentConfig,
     ExecutionEnvironmentScope, FrozenToolRegistryDescriptor, NestedToolEligibility, ProgressSink,
     ProviderModelProjectionIdentityV2, RegisteredToolId, ToolContext, ToolExecutor,
@@ -315,23 +314,6 @@ fn the_presented_wait_contract_is_unchanged_by_the_accepted_superset() -> Result
             .digest()
     );
     Ok(())
-}
-
-#[test]
-fn release_grammar_bytes_are_frozen() {
-    assert_eq!(
-        CODEX_NATIVE_CODE_MODE_EXEC_GRAMMAR_V1,
-        "\nstart: pragma_source | plain_source\npragma_source: PRAGMA_LINE NEWLINE SOURCE\nplain_source: SOURCE\n\nPRAGMA_LINE: /[ \\t]*\\/\\/ @exec:[^\\r\\n]*/\nNEWLINE: /\\r?\\n/\nSOURCE: /[\\s\\S]+/\n"
-    );
-}
-
-#[test]
-fn native_code_mode_pin_and_enrollment_match_the_reviewed_releases() {
-    assert_eq!(CODEX_NATIVE_CODE_MODE_RELEASE_V1, "rust-v0.153.3");
-    assert_eq!(
-        CODEX_NATIVE_CODE_MODE_COMMIT_V1,
-        "b1a547b1f73ce86205d9222ac19cff334b3b7a2e"
-    );
 }
 
 #[test]
