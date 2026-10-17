@@ -20,7 +20,7 @@ pub static TOPOLOGY_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "topology.topology_spawn_description_template",
         PLAK_TOPOLOGY_SPAWN_DESCRIPTION_TEMPLATE,
-        "ee206ef2aca3bdd42aa96ff40f54f92a21c3bcbe273cc36326662950affb23e1",
+        "085549c413b96c9fd1a03ed8c83e2508427f6d5488bf8566cd20ed9e850b39ff",
     ),
     PromptPin::new(
         "topology.topology_send_description",
@@ -115,8 +115,9 @@ pub static TOPOLOGY_PROMPT_PINS: &[PromptPin] = &[
 ];
 
 /// `spawn_agent` tool description template; `{await}` is the presented await
-/// tool and `{cards}` is the working-set template block.
-pub const PLAK_TOPOLOGY_SPAWN_DESCRIPTION_TEMPLATE: &str = "Spawn a child from a template in the working set. Required fields: template, prompt, output_schema_json, tier. The receipt is a running child with an attempt_id, not a result. Child results and questions arrive as mail; {await} returns them. Default: children share your checkout. Give them file-disjoint work, or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. tier is clipped to the template ceiling: read_only refuses Plak file writes; mutate allows them. Settlement is not success: output_json is present only after submit_result. Do not call send_agent_message to start it. output_schema_json is a JSON string for the child's submit_result object, like {\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}. Caps: 32 live nodes, depth 4, 8 undelivered or active direct children, 8 running agents in the tree; messages ≤16384 bytes; output_json ≤262144 bytes.\n\n{cards}";
+/// tool, `{nodes}` and `{children}` are the caller's granted tree and
+/// direct-child bounds, and `{cards}` is the working-set template block.
+pub const PLAK_TOPOLOGY_SPAWN_DESCRIPTION_TEMPLATE: &str = "Spawn a child from a template in the working set. Required fields: template, prompt, output_schema_json, tier. The receipt is a running child with an attempt_id, not a result. Child results and questions arrive as mail; {await} returns them. Default: children share your checkout. Give them file-disjoint work, or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. tier is clipped to the template ceiling: read_only refuses Plak file writes; mutate allows them. Settlement is not success: output_json is present only after submit_result. Do not call send_agent_message to start it. output_schema_json is a JSON string for the child's submit_result object, like {\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}},\"required\":[\"summary\"]}. Caps: {nodes} live nodes, depth 4, {children} undelivered or active direct children; messages ≤16384 bytes; output_json ≤262144 bytes.\n\n{cards}";
 
 /// `send_agent_message` tool description on hub roots with topology granted.
 pub const PLAK_TOPOLOGY_SEND_DESCRIPTION: &str = "Send a message to another agent. A child is already working from spawn: mail is a follow-up on its running turn (priority=urgent steers; omitted priority is urgent from a parent to its running child, deferred otherwise), not how the prompt is assigned. A finished child takes purpose=followup, which re-tasks it on a new attempt with a new turn token and, if you give one, a new output_schema_json. purpose=reply requires in_reply_to set to a message_id from list_agents inbox[]; in_reply_to only when purpose=reply.";
@@ -206,19 +207,17 @@ where
 mod tests {
     use super::*;
     use crate::protocol::{
-        DEFAULT_WAIT_TIMEOUT_MS, MAX_DIRECT_CHILDREN, MAX_MESSAGE_BYTES, MAX_OUTPUT_JSON_BYTES,
-        MAX_RUNNING_CHILDREN, MAX_TREE_DEPTH, MAX_TREE_NODES, MAX_WAIT_TIMEOUT_MS,
+        DEFAULT_WAIT_TIMEOUT_MS, MAX_MESSAGE_BYTES, MAX_OUTPUT_JSON_BYTES, MAX_TREE_DEPTH,
+        MAX_WAIT_TIMEOUT_MS,
     };
 
     #[test]
     fn topology_spawn_limits_match_protocol_constants() {
-        assert!(PLAK_TOPOLOGY_SPAWN_DESCRIPTION_TEMPLATE.contains(&MAX_TREE_NODES.to_string()));
+        assert!(PLAK_TOPOLOGY_SPAWN_DESCRIPTION_TEMPLATE.contains("{nodes} live nodes"));
         assert!(PLAK_TOPOLOGY_SPAWN_DESCRIPTION_TEMPLATE.contains(&MAX_TREE_DEPTH.to_string()));
         assert!(
-            PLAK_TOPOLOGY_SPAWN_DESCRIPTION_TEMPLATE.contains(&MAX_DIRECT_CHILDREN.to_string())
-        );
-        assert!(
-            PLAK_TOPOLOGY_SPAWN_DESCRIPTION_TEMPLATE.contains(&MAX_RUNNING_CHILDREN.to_string())
+            PLAK_TOPOLOGY_SPAWN_DESCRIPTION_TEMPLATE
+                .contains("{children} undelivered or active direct children")
         );
         assert!(PLAK_TOPOLOGY_SPAWN_DESCRIPTION_TEMPLATE.contains(&MAX_MESSAGE_BYTES.to_string()));
         assert!(

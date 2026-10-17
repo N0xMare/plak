@@ -2539,7 +2539,8 @@ are both refused with a named message.
 
 **Correlation.** A command's `id` is echoed on the events it caused. Turn-scoped
 events — `status`, `busy`, `assistant`, `assistant_done`, `model_refusal`, `tool`, `queue`,
-`turn`, `turn_lifecycle`, `reasoning`, `approval`, `approval_resolved`, `steer_ack` — carry the
+`turn`, `turn_lifecycle`, `reasoning`, `approval`, `approval_resolved`, `steer_ack`,
+`model_request_queued` — carry the
 proven originating prompt's id, and otherwise omit it. Operator `invoke_tool`
 observations instead carry the originating invocation's command id, bound to
 the host-generated call UUID by an explicit in-process provenance receipt;
@@ -2652,6 +2653,7 @@ closes. This does not change the v1 command or event encoding.
 | `reasoning` | `location` and either `text` or `sealed: true` |
 | `approval` / `approval_resolved` | the decision's id, name, expiry, subject and prompt; then its resolution |
 | `steer_ack` | `state`, optional `position` |
+| `model_request_queued` | `account` — the root's next model request waits for a slot in that account's request budget (chapter 03 §10.4); the request proceeds when one frees |
 | `queue` | `drain` ∈ `live_auto_drain` \| `restored_paused`, and `items[]` of `{id, revision, text, rejected}` |
 | `turn` | terminal usage: `input_tokens`, `output_tokens`, `reasoning_tokens`, `cached_input_tokens`, `cache_write_tokens` |
 | `turn_lifecycle` | `turn_id`, `phase` ∈ `admitted` \| `completed` \| `refused` \| `cancelled` \| `failed` \| `recovery_required` \| `unresolved`, and where known `model_error_kind`, `http_status` |

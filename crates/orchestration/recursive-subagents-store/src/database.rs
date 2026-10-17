@@ -470,7 +470,7 @@ mod tests {
     #[test]
     fn a_foreign_schema_version_is_refused_as_unsupported() {
         // Earlier cohorts have no transient-resume command or decision.
-        for foreign in [4_i64, 5, 99] {
+        for foreign in [4_i64, 5, 6, 99] {
             let root = tempfile::tempdir().unwrap();
             let database = root.path().join("subagents.sqlite3");
             drop(SubagentsDatabase::open(&database).unwrap());
@@ -486,7 +486,7 @@ mod tests {
             assert!(
                 error
                     .message()
-                    .contains(&format!("subagents schema {foreign}, expected 6")),
+                    .contains(&format!("subagents schema {foreign}, expected 7")),
                 "{error}"
             );
         }

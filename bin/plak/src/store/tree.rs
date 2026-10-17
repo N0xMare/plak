@@ -692,12 +692,12 @@ mod tests {
     /// card and each card's `spawns` list come back exactly, under the same
     /// digest.
     #[test]
-    fn a_nested_spawn_roster_round_trips_at_tree_schema_6() {
+    fn a_nested_spawn_roster_round_trips_at_tree_schema_7() {
         use crate::product_config::{AgentTemplate, ProductConfig};
         use plakous_hosted::agent_tree::ProductAgentTree;
         use plakous_hosted::agent_tree_protocol::{TemplateName, WorkingSet, WriterMode};
 
-        assert_eq!(plakous_recursive_subagents_store::SCHEMA_VERSION, 6);
+        assert_eq!(plakous_recursive_subagents_store::SCHEMA_VERSION, 7);
         let name = |name: &str| TemplateName::parse(name).unwrap();
         let card = |spawns: Vec<TemplateName>| AgentTemplate {
             account: "codex".to_owned(),

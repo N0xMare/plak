@@ -31,11 +31,11 @@ subagents = true
 max_depth = 1
 
 # Active or undelivered direct children; dormant children release slots.
-# type: integer · default: 8 · 1..=8
+# type: integer · default: 8 · 1..=64
 max_children = 8
 
 # Root plus active, undelivered or recovery-required nodes.
-# type: integer · default: 32 · 1..=32
+# type: integer · default: 32 · 1..=65
 max_nodes = 32
 
 # Idle seconds before lossless dormant-checkout reclamation.
@@ -55,12 +55,16 @@ child_retention_days = 7
 child_retention_count = 128
 
 # Attempts one root prompt may open across the tree.
-# type: integer · default: 64 · 1..=64
+# type: integer · default: 64 · 1..=256
 max_attempts = 64
 
 # New continuation turns after transient failure per root user prompt or child attempt; 0 disables automatic continuation.
 # type: integer · default: 1 · 0..=2
 transient_resumes = 1
+
+# Model requests one account may have in flight across the root and every descendant; excess requests wait in order for a slot. Takes effect on the next launch.
+# type: integer · default: 8 · 1..=64
+max_concurrent_requests_per_account = 8
 
 # When true, adopt_candidate refuses unless its evidence names a subtree attempt that referenced the candidate.
 # type: bool · default: false · true or false

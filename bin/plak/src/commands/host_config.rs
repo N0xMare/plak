@@ -254,6 +254,7 @@ pub fn build_host_config(
     native_models: &[TuiNativeModelFact],
 ) -> Result<product_host::HostConfig<crate::surface_protocol::PlakExtension>, String> {
     let policy = product_config::SessionPolicy::load(paths)?;
+    policy.install_request_budget();
     // The repository gate's offline model, when this build carries the hook and
     // the process was started with one. It is resolved before any credential or
     // catalog authority is consulted, so a scripted lifecycle never touches a

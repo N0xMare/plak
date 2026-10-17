@@ -104,7 +104,9 @@ mod driver;
 pub(crate) use driver::{DurableEffectIntentEnvelope, DurableUndispatchedToolRequest};
 pub(crate) use terminal::DurableAgentError;
 mod prompts;
+mod request_slots;
 mod reresolution;
+pub use request_slots::RequestSlots;
 mod round_classification;
 pub use reresolution::{
     ModelReresolutionError, ModelReresolutionOperation, ModelReresolver, ReresolvedModel,
@@ -163,6 +165,7 @@ pub struct AgentBuilder {
     local_composition: Option<LocalCompositionConstruction>,
     post_compaction_note: Option<PostCompactionNote>,
     model_reresolver: Option<(Arc<dyn ModelReresolver>, plakous_model::Timestamp)>,
+    request_slots: Option<RequestSlots>,
 }
 
 /// Derives a note to append after a committed compaction from its source and
@@ -215,6 +218,7 @@ struct PreparedAgent {
     interpreter_observation: Option<InterpreterObservation>,
     post_compaction_note: Option<PostCompactionNote>,
     model_rebind: Option<reresolution::ModelRebind>,
+    request_slots: Option<RequestSlots>,
 }
 
 #[derive(Clone, Copy, Default, Eq, PartialEq)]

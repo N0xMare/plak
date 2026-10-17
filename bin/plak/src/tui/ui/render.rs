@@ -216,6 +216,9 @@ impl App {
         if self.phase == "compacting" {
             return Some("compacting".to_owned());
         }
+        if let Some(account) = &self.request_slot_wait {
+            return Some(format!("waiting for a {account} slot"));
+        }
         if let Some((retry, announced)) = &self.pending_retry {
             return Some(retry_status_label(
                 retry,

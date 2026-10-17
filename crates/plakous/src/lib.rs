@@ -264,6 +264,7 @@ pub mod agent {
         ReasoningPreferenceStrategy,
         RecoveredTurnHandle,
         RegisteredContextSource,
+        RequestSlots,
         ReresolvedModel,
         ResolvedContextSourceFact,
         ResolvedHarnessPlan,

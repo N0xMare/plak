@@ -83,6 +83,7 @@ struct OrchestrationSection {
     max_nodes: Entry,
     max_attempts: Entry,
     transient_resumes: Entry,
+    max_concurrent_requests_per_account: Entry,
     require_review_evidence: Entry,
 }
 
@@ -200,6 +201,10 @@ pub(super) fn parse_config(text: &str) -> Result<ProductConfig, String> {
         assign(
             "orchestration.transient_resumes",
             &section.transient_resumes,
+        )?;
+        assign(
+            "orchestration.max_concurrent_requests_per_account",
+            &section.max_concurrent_requests_per_account,
         )?;
         assign(
             "orchestration.require_review_evidence",

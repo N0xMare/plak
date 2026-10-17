@@ -6,13 +6,13 @@ use std::collections::BTreeSet;
 use super::{
     AbandonedChildTurn, Arc, AttemptFailure, AttemptId, AttemptRecord, AttemptScopedRequest,
     AttemptStatus, BlockedReason, CandidateId, FollowupRollback, MAX_DIRECT_CHILDREN,
-    MAX_PENDING_SPAWNS, MAX_RUNNING_CHILDREN, MAX_TREE_DEPTH, MAX_TREE_NODES, MintedCopy,
-    NodeDetach, NodeRecord, NodeStatus, ProductAgentTree, SpawnAdmission, SpawnAgentOutput,
-    SpawnAgentRequest, SpawnIdentity, SpawnReservation, SubmitNudgeBudget, SubmitResultOutput,
-    SubmitResultRequest, TemplateName, TopologyError, TopologyErrorCode, TopologyGrant,
-    TopologyObserver, TreeAdmissionState, UsageRow, VcsSnapshot, WorkspaceMode, WorkspacePlan,
-    WorkspaceReceipt, WorkspaceStatus, admit_output_schema, next_child_id, now_unix_millis,
-    topology_error_from_vcs, topology_submit_request_invalid_message, validate_output_json,
+    MAX_PENDING_SPAWNS, MAX_TREE_DEPTH, MAX_TREE_NODES, MintedCopy, NodeDetach, NodeRecord,
+    NodeStatus, ProductAgentTree, SpawnAdmission, SpawnAgentOutput, SpawnAgentRequest,
+    SpawnIdentity, SpawnReservation, SubmitNudgeBudget, SubmitResultOutput, SubmitResultRequest,
+    TemplateName, TopologyError, TopologyErrorCode, TopologyGrant, TopologyObserver,
+    TreeAdmissionState, UsageRow, VcsSnapshot, WorkspaceMode, WorkspacePlan, WorkspaceReceipt,
+    WorkspaceStatus, admit_output_schema, next_child_id, now_unix_millis, topology_error_from_vcs,
+    topology_submit_request_invalid_message, validate_output_json,
 };
 
 impl ProductAgentTree {
@@ -139,22 +139,6 @@ impl ProductAgentTree {
                      hold slots until their result is delivered (or they are closed). children: {}",
                     children.len(),
                     listed.join(", ")
-                ),
-            ));
-        }
-        // Saturation is a typed error carrying the running set, not a queue
-        // and not a flat budget string. The caller decides what to interrupt
-        // or wait for from the ids in the message. The bound counts executing
-        // children only: the root's own turn never consumes a child slot.
-        let running = self.running_child_ids();
-        if running.len() >= MAX_RUNNING_CHILDREN {
-            return Err(TopologyError::new(
-                TopologyErrorCode::Capacity,
-                format!(
-                    "running capacity is full ({} of {MAX_RUNNING_CHILDREN} children); there is \
-                     no queue. running: {}",
-                    running.len(),
-                    running.join(", ")
                 ),
             ));
         }
@@ -452,16 +436,6 @@ impl ProductAgentTree {
             return failed;
         }
         error
-    }
-
-    /// Children holding a running turn, in tree order. The root is never in
-    /// the set: execution capacity is a children-only bound.
-    pub(super) fn running_child_ids(&self) -> Vec<String> {
-        self.nodes
-            .values()
-            .filter(|node| node.parent_agent_id.is_some() && node.status == NodeStatus::Running)
-            .map(|node| node.agent_id.clone())
-            .collect()
     }
 
     pub(super) fn holds_direct_child_slot(&self, node: &NodeRecord) -> bool {
@@ -2306,46 +2280,6 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.code, TopologyErrorCode::RequestKeyConflict);
         assert_eq!(tree.nodes().len(), 2, "the conflict spawns nothing");
-    }
-
-    /// Saturation is typed and names the running children, because a flat
-    /// "budget exhausted" left the caller nothing to interrupt or wait on.
-    /// The bound counts children only: a flat root's own running turn never
-    /// consumes a slot, so reaching it takes children spawning children.
-    #[test]
-    fn capacity_error_carries_the_running_set() {
-        let (_tmp, mut tree) = tree();
-        tree.grants_mut_for_test("root").max_depth = 3;
-        // Two supervising children with three leaves each: eight running
-        // children, every parent's own direct-child budget still open.
-        let mut spawned = Vec::new();
-        for _ in 0..2 {
-            let parent = tree
-                .spawn_agent("root", &SpawnAgentRequest::test_orchestrate(), None)
-                .unwrap();
-            spawned.push(parent.agent_id.clone());
-            for _ in 0..3 {
-                let leaf = tree
-                    .spawn_agent(&parent.agent_id, &spawn_req(), None)
-                    .unwrap();
-                spawned.push(leaf.agent_id);
-            }
-        }
-        let error = tree.spawn_agent("root", &spawn_req(), None).unwrap_err();
-        assert_eq!(error.code, TopologyErrorCode::Capacity);
-        assert!(
-            error.message.contains("no queue"),
-            "there is no queue in v1: {}",
-            error.message
-        );
-        assert!(
-            !error.message.contains("root"),
-            "the root never consumes a child slot: {}",
-            error.message
-        );
-        for id in &spawned {
-            assert!(error.message.contains(id.as_str()), "{}", error.message);
-        }
     }
 
     /// B1: `max_attempts` is a per-tree cap the tree may only

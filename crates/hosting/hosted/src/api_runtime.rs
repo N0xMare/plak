@@ -82,7 +82,8 @@ pub(crate) fn runtime_binding(
         .post_compaction_note(Arc::new(plakous::tools::plan_restoration_note))
         .tool_policy(session_tool_policy(spec.tool_fence))
         .host_process_options(crate::process_environment::options(&physical_root)?)
-        .job_config(spec.job_config);
+        .job_config(spec.job_config)
+        .request_slots(crate::request_slots::for_account(spec.account));
     if let Some(telemetry) = spec.telemetry {
         builder = builder.telemetry(Arc::clone(telemetry));
     }

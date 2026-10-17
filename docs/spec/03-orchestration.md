@@ -2017,19 +2017,21 @@ attempt except those whose failure kind is `turn_abandoned`.
 
 Running-children saturation is the typed `capacity` error carrying the
 **running children**, so the caller has ids to interrupt or wait on. **There
-is no queue.** The bound counts executing children only — the root's own turn
-is free — and because `MAX_DIRECT_CHILDREN` and `MAX_RUNNING_CHILDREN` are
-both 8, `capacity` is reachable only across several hubs, never from one
-parent alone.
+is no spawn queue.** The bound counts executing children only — the root's own
+turn is free — and because `MAX_DIRECT_CHILDREN` and `MAX_RUNNING_CHILDREN` are
+both 64, `capacity` is reachable only across several hubs, never from one
+parent alone. What paces a wide tree is the per-account request budget
+(§10.4), which delays model requests and never refuses a spawn.
 
 | Bound | Value | Configurable |
 | --- | --- | --- |
 | `MAX_TREE_DEPTH` | 4 | `[orchestration] max_depth`, 1–4 |
-| `MAX_DIRECT_CHILDREN` | 8 | `[orchestration] max_children`, 1–8 |
-| `MAX_TREE_NODES` | 32 live nodes, root included | `[orchestration] max_nodes`, 1–32 |
-| `MAX_RUNNING_CHILDREN` | 8 | — |
-| `MAX_PENDING_SPAWNS` | 16 | — |
-| `MAX_TREE_ATTEMPTS` | 64 per root prompt | `[orchestration] max_attempts`, 1–64 |
+| `MAX_DIRECT_CHILDREN` | 64 | `[orchestration] max_children`, 1–64, default 8 |
+| `MAX_TREE_NODES` | 65 live nodes, root included | `[orchestration] max_nodes`, 1–65, default 32 |
+| `MAX_RUNNING_CHILDREN` | 64 | — |
+| `MAX_PENDING_SPAWNS` | 64 | — |
+| `MAX_TREE_ATTEMPTS` | 256 per root prompt | `[orchestration] max_attempts`, 1–256, default 64 |
+| `MAX_WAIT_TARGETS` | 64 ids per `wait_agent` | — |
 | per-cell agents | 8 | — (fixed) |
 
 Every configured bound is a closed `1..=ceiling` range: a value outside it is a
@@ -2042,6 +2044,11 @@ the root, active or undelivered children, and `recovery_required` nodes; dormant
 children keep their identity and candidates without consuming capacity.
 The attempt budget counts attempts opened since the root's
 current prompt began, and every root prompt starts a fresh count.
+
+The ceilings exist so a root can hold a full row of 64 children (`max_nodes`
+65 is the root plus 64); the defaults stay at 8, 32 and 64. The `spawn_agent`
+description states the caller's granted `max_nodes` and `max_children`, so a
+model sees the bounds it is actually under.
 
 ### 10.2 Blocked and failed attempts
 
@@ -2092,6 +2099,21 @@ Model-visible rows carry per-attempt usage only: `elapsed_ms`, `turns`,
 **Cost, quota balances, and subtree rollups MUST NOT appear in any prompt.**
 They belong to the TUI and to the telemetry sink, which is never recovery
 authority. The context-occupancy meter is untouched by any of this.
+
+### 10.4 Per-account request budget
+
+Every session the process builds — the root and every descendant — draws its
+model requests from one budget per account, sized by the home-scoped
+`[orchestration] max_concurrent_requests_per_account` (1–64, default 8; read
+at launch). A request takes a slot before its operation deadline starts and
+holds it until its response stream ends; a compaction summary is a request
+too. A full budget never fails a request: the request waits in arrival order,
+publishes `ModelRequestQueued` once (TUI status `waiting for a <account>
+slot`, the child's Agents-tab activity, the JSONL `model_request_queued`
+line, and a `model.request_queued` session-log event), and proceeds when a
+slot frees. Interrupt, close, shutdown and a lost lease end the wait without
+taking a slot. A request never holds a slot while its tools run, so a
+parent waiting on its children cannot starve them.
 
 ## 11. Code Mode cells and the per-cell budget
 

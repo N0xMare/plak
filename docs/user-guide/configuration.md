@@ -167,6 +167,9 @@ The array form the file uses works there too, quoted for the shell:
 A change to `[root]`, `[roster]` or `[orchestration]` is accepted only when no
 tree is mid-run. Plak tells you which happened: `applied`, or `saved; applies
 at the next session genesis`.
+`orchestration.max_concurrent_requests_per_account` is the exception: it is
+not tree state, so a save never waits on a running tree, and it takes effect
+the next time Plak launches.
 
 ## Write a template
 

@@ -471,6 +471,7 @@ impl PlakousApplication {
             return Err(CliFailure::new(product_agent::RESTORED_PAUSED_RESUME_HINT));
         }
         let policy = admitted.session_policy();
+        policy.install_request_budget();
         let child_agents = face::child_agents(admitted, paths);
         let (effort, explicit) = product_host::effort_from_config(session.effort.as_deref());
         // The repository gate's offline model; see `crate::test_hooks`. The

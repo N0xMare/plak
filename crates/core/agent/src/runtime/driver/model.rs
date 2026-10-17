@@ -10,6 +10,7 @@ use crate::runtime::driver::model_cleanup::{
 use crate::runtime::driver::{Driver, ModelOperationResult, ModelStartAdmission};
 use crate::runtime::observation::budget::observation_bytes_for_sent_status;
 use crate::runtime::observation::model_event_stamps_ttft;
+use crate::runtime::request_slots::RequestSlot;
 use crate::runtime::terminal::{agent_terminal_status, cancelled_error};
 use crate::runtime::{OperationId, PromptCommand};
 use crate::{
@@ -212,6 +213,21 @@ impl Driver {
         attempt_id: AttemptId,
         request: ModelRequest,
     ) -> ModelOperationResult {
+        let _slot = match self.take_request_slot(command).await {
+            Ok(slot) => slot,
+            Err(error) => {
+                return ModelOperationResult {
+                    result: Err(error),
+                    usage: None,
+                    operation_id: None,
+                    plan: None,
+                    request_estimate_tokens: None,
+                    request_wire_input: None,
+                    request_context_status: None,
+                    wire_output_limit: None,
+                };
+            }
+        };
         let started = tokio::time::Instant::now();
         let operation_deadline = started + self.config.model_operation_timeout;
         let context = self
@@ -272,6 +288,44 @@ impl Driver {
             request_wire_input,
             request_context_status,
             wire_output_limit: prepared_wire_output_limit,
+        }
+    }
+
+    /// Takes a slot in the host's shared request budget, if it set one,
+    /// before any deadline of this request starts. A full budget publishes
+    /// one `ModelRequestQueued` and waits in arrival order; cancellation,
+    /// shutdown and a lost lease end the wait without taking a slot.
+    pub(super) async fn take_request_slot(
+        &mut self,
+        command: &PromptCommand,
+    ) -> Result<Option<RequestSlot>, AgentError> {
+        let Some(slots) = self.request_slots.clone() else {
+            return Ok(None);
+        };
+        if let Some(slot) = slots.try_take() {
+            return Ok(Some(slot));
+        }
+        let _ = command.shared.events.publish(
+            EventContext::turn(command.turn_id),
+            AgentEventKind::ModelRequestQueued {
+                slots: slots.label().to_owned(),
+            },
+        );
+        let take = slots.take();
+        tokio::pin!(take);
+        loop {
+            tokio::select! {
+                slot = &mut take => return Ok(Some(slot)),
+                () = self.authority.lease_lost() => return Err(self.authority.heartbeat_failure()),
+                () = command.cancellation.cancelled() => return Err(cancelled_error()),
+                () = self.shutdown.cancelled() => return Err(cancelled_error()),
+                control = self.control_receiver.recv() => {
+                    let Some(control) = control else {
+                        return Err(cancelled_error());
+                    };
+                    Box::pin(self.handle_control(Some(command), control)).await;
+                }
+            }
         }
     }
 

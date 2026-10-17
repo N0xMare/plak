@@ -134,6 +134,8 @@ struct Driver {
     nested_committed_observation_tokens: u64,
     /// Derives the note a committed compaction leaves behind.
     post_compaction_note: Option<crate::runtime::PostCompactionNote>,
+    /// The host's shared bound on concurrent model requests, if any.
+    request_slots: Option<crate::runtime::RequestSlots>,
     effect_decision_tombstones: VecDeque<EffectDecisionTombstone>,
     command_ledger: BTreeMap<CommandId, CommandLedgerEntry>,
     next_command_sequence: u64,

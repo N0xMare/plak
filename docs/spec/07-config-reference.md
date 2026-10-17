@@ -137,14 +137,15 @@ keys: they are authored in the file, a save leaves them exactly as written, and
 | `roster.working_set` | array of string | `[]` | 0..=5 names, no duplicates, each a template file with a description | Templates the root may spawn this epoch; every other node spawns from its own template's spawns list. |
 | `orchestration.subagents` | bool | `true` | true or false | Whether the topology tools are compiled into the root catalog at all. |
 | `orchestration.max_depth` | integer | `1` | 1..=4 | Deepest node the tree admits, counting the root as depth 0. |
-| `orchestration.max_children` | integer | `8` | 1..=8 | Active or undelivered direct children; dormant children release slots. |
-| `orchestration.max_nodes` | integer | `32` | 1..=32 | Root plus active, undelivered or recovery-required nodes. |
+| `orchestration.max_children` | integer | `8` | 1..=64 | Active or undelivered direct children; dormant children release slots. |
+| `orchestration.max_nodes` | integer | `32` | 1..=65 | Root plus active, undelivered or recovery-required nodes. |
 | `orchestration.workspace_idle_seconds` | integer | `600` | 1..=65535 | Idle seconds before lossless dormant-checkout reclamation. |
 | `orchestration.workspace_budget_mib` | integer | `4096` | 1..=65535 | Soft fork-checkout disk budget in MiB; retains uncovered work. |
 | `orchestration.child_retention_days` | integer | `7` | 1..=65535 | Days before a sealed dormant child conversation is retired. |
 | `orchestration.child_retention_count` | integer | `128` | 1..=65535 | Dormant conversations retained; protected work refs never expire. |
-| `orchestration.max_attempts` | integer | `64` | 1..=64 | Attempts one root prompt may open across the tree. |
+| `orchestration.max_attempts` | integer | `64` | 1..=256 | Attempts one root prompt may open across the tree. |
 | `orchestration.transient_resumes` | integer | `1` | 0..=2 | New continuation turns after transient failure per root user prompt or child attempt; 0 disables automatic continuation. |
+| `orchestration.max_concurrent_requests_per_account` | integer | `8` | 1..=64 | Model requests one account may have in flight across the root and every descendant; excess requests wait in order for a slot. Takes effect on the next launch. |
 | `orchestration.require_review_evidence` | bool | `false` | true or false | When true, adopt_candidate refuses unless its evidence names a subtree attempt that referenced the candidate. |
 | `turn.auto_continue` | bool | `true` | true or false | Wake an idle interactive root when background processes finish or child results or questions arrive. Takes effect immediately; JSONL and children do not auto-continue. |
 | `turn.max_model_rounds` | integer | `512` | 1..=1024 | Model rounds one root turn may run; the next round must answer without tools. A turn has no wall clock, so this is what stops a runaway turn. Takes effect when a session next attaches; a running turn keeps the cap it was admitted under. |
@@ -181,12 +182,18 @@ Grok output awaits, pi `wait` and Claude blocking output waits cap at one hour. 
 JSONL `background` are one-shot actions, not configuration or future-call defaults.
 
 The four `[orchestration]` bounds — `max_depth`, `max_children`, `max_nodes`,
-`max_attempts` — take exactly `1..=` the built-in ceiling (4, 8, 32, 64). A
+`max_attempts` — take exactly `1..=` the built-in ceiling (4, 64, 65, 256). A
 value outside the range is a load error naming the key and its ceiling, and
 `plak config set` refuses it the same way; nothing is clamped at load or set.
 The epoch finalize clamps in `OrchestrationSnapshot::from_config` remain as
 defense in depth for values that arrive already resolved. Raising a ceiling
 requires a change to this chapter and a code change, never a config edit.
+
+`max_concurrent_requests_per_account` takes `1..=64` the same way. It is
+home-scoped like the other `[orchestration]` keys but is not epoch state: it
+sizes the process-wide per-account request budgets when Plak launches
+(chapter 03 §10.4), so an edit applies to the next launch, never to a running
+tree, and does not roll the epoch digest.
 
 The workspace writer mode is fixed at `single_lease` and the Code Mode cell
 spawn budget is fixed at 8; neither is a config key any more, and a file that

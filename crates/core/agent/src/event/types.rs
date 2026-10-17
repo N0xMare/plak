@@ -1220,6 +1220,15 @@ pub enum AgentEventKind {
     },
     /// Steering was committed at a safe boundary.
     SteeringApplied,
+    /// A model request is waiting for a slot in a shared request budget.
+    ///
+    /// Published once per wait, before the request's operation deadline
+    /// starts; the request proceeds with `ModelDispatchStarted` once a slot
+    /// frees. `slots` is the host's label for the budget.
+    ModelRequestQueued {
+        /// The host-supplied label of the budget the request waits on.
+        slots: String,
+    },
     /// The turn spent its model-operation budget and is wrapping up.
     ///
     /// Published when the runtime injects its budget note and before the one
@@ -1521,6 +1530,9 @@ impl AgentEventKind {
             },
             Self::SteeringApplied => Self::SteeringApplied,
             Self::OperationBudgetExhausted => Self::OperationBudgetExhausted,
+            Self::ModelRequestQueued { slots } => Self::ModelRequestQueued {
+                slots: slots.clone(),
+            },
             Self::OutputLimitRetry { bound } => Self::OutputLimitRetry { bound: *bound },
             Self::ToolResultsReplaced {
                 results,
@@ -1686,6 +1698,7 @@ impl AgentEventKind {
             | Self::CompactionStarted { .. }
             | Self::TurnCompleted { .. }
             | Self::TurnFailed { .. } => 0,
+            Self::ModelRequestQueued { slots } => slots.len(),
             Self::CompactionFinished { detail, .. } => {
                 detail.as_ref().map_or(0, |detail| detail.len())
             }
@@ -1972,6 +1985,9 @@ impl fmt::Debug for AgentEventKind {
                 .field("position", position),
             Self::SteeringApplied => event.field("kind", &"steering_applied"),
             Self::OperationBudgetExhausted => event.field("kind", &"operation_budget_exhausted"),
+            Self::ModelRequestQueued { slots } => event
+                .field("kind", &"model_request_queued")
+                .field("slots", slots),
             Self::OutputLimitRetry { bound } => event
                 .field("kind", &"output_limit_retry")
                 .field("bound", bound),
@@ -2222,6 +2238,7 @@ impl AgentEvent {
             | AgentEventKind::SteeringQueued { .. }
             | AgentEventKind::SteeringApplied
             | AgentEventKind::OperationBudgetExhausted
+            | AgentEventKind::ModelRequestQueued { .. }
             | AgentEventKind::OutputLimitRetry { .. }
             | AgentEventKind::ToolResultsReplaced { .. }
             | AgentEventKind::ObservationClipped { .. }
@@ -2411,6 +2428,7 @@ pub(super) fn event_metadata(kind: &AgentEventKind) -> (EventOrigin, DataClassif
         }
         // Counts, budgets and tool names only: agent-owned and public.
         AgentEventKind::OperationBudgetExhausted
+        | AgentEventKind::ModelRequestQueued { .. }
         | AgentEventKind::OutputLimitRetry { .. }
         | AgentEventKind::ToolResultsReplaced { .. }
         | AgentEventKind::ObservationClipped { .. }

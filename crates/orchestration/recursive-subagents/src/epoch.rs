@@ -14,8 +14,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::cell_budget::CEILING_MAX_AGENTS_PER_CELL;
 use crate::protocol::{
-    DEFAULT_GRANT_DEPTH, Delegation, MAX_DIRECT_CHILDREN, MAX_TREE_ATTEMPTS, MAX_TREE_DEPTH,
-    MAX_TREE_NODES, TemplateName, Tier, WriterMode,
+    DEFAULT_DIRECT_CHILDREN, DEFAULT_GRANT_DEPTH, DEFAULT_TREE_ATTEMPTS, DEFAULT_TREE_NODES,
+    Delegation, MAX_DIRECT_CHILDREN, MAX_TREE_ATTEMPTS, MAX_TREE_DEPTH, MAX_TREE_NODES,
+    TemplateName, Tier, WriterMode,
 };
 use crate::tree::text::{
     PLAK_TEMPLATE_CARDS_HEADER, PLAK_TEMPLATE_CARDS_NONE, delegation_policy_sentence,
@@ -244,7 +245,7 @@ pub struct OrchestrationSnapshot {
     ///
     pub writer_mode: WriterMode,
     /// Frozen bounds for this epoch. Genesis may only lower the appendix
-    /// ceilings (4 / 8 / 32); running nodes stays at the appendix value.
+    /// ceilings (4 / 64 / 65); running nodes stays at the appendix value.
     /// Deepest descendant this epoch admits.
     pub max_depth: u8,
     /// Direct children one node may hold at once.
@@ -254,7 +255,7 @@ pub struct OrchestrationSnapshot {
     /// Attempts this epoch may open; lower-only against
     /// `MAX_TREE_ATTEMPTS`.
     #[serde(default = "default_max_attempts")]
-    pub max_attempts: u8,
+    pub max_attempts: u16,
     /// Agents one Code Mode cell may admit in this epoch;
     /// lower-only against `CEILING_MAX_AGENTS_PER_CELL`. Frozen here, like the
     /// four tree bounds, so a config edit never moves a running tree's
@@ -301,8 +302,8 @@ pub struct OrchestrationSnapshot {
     pub tool_sections: BTreeMap<String, String>,
 }
 
-const fn default_max_attempts() -> u8 {
-    MAX_TREE_ATTEMPTS as u8
+const fn default_max_attempts() -> u16 {
+    DEFAULT_TREE_ATTEMPTS as u16
 }
 
 const fn default_max_agents_per_cell() -> u16 {
@@ -368,12 +369,12 @@ pub struct EpochBounds {
 }
 
 impl EpochBounds {
-    /// The appendix ceilings, with the default grant depth.
+    /// The configuration defaults, with the default grant depth.
     pub const DEFAULT: Self = Self {
         max_depth: DEFAULT_GRANT_DEPTH as u16,
-        max_children: MAX_DIRECT_CHILDREN as u16,
-        max_nodes: MAX_TREE_NODES as u16,
-        max_attempts: MAX_TREE_ATTEMPTS as u16,
+        max_children: DEFAULT_DIRECT_CHILDREN as u16,
+        max_nodes: DEFAULT_TREE_NODES as u16,
+        max_attempts: DEFAULT_TREE_ATTEMPTS as u16,
         max_agents_per_cell: CEILING_MAX_AGENTS_PER_CELL,
     };
 }
@@ -531,7 +532,7 @@ impl OrchestrationSnapshot {
             max_depth: clamp_bound(bounds.max_depth, MAX_TREE_DEPTH),
             max_children: clamp_bound(bounds.max_children, MAX_DIRECT_CHILDREN as u8),
             max_nodes: clamp_bound(bounds.max_nodes, MAX_TREE_NODES as u8),
-            max_attempts: clamp_bound(bounds.max_attempts, MAX_TREE_ATTEMPTS as u8),
+            max_attempts: bounds.max_attempts.clamp(1, MAX_TREE_ATTEMPTS as u16),
             max_agents_per_cell: crate::cell_budget::clamp_max_agents_per_cell(
                 bounds.max_agents_per_cell,
             ),
@@ -776,8 +777,8 @@ mod tests {
         let again = OrchestrationSnapshot::unpinned("selected-tuple");
         assert_eq!(snapshot.digest, again.digest);
         assert_eq!(snapshot.max_depth, DEFAULT_GRANT_DEPTH);
-        assert_eq!(snapshot.max_children, MAX_DIRECT_CHILDREN as u8);
-        assert_eq!(snapshot.max_nodes, MAX_TREE_NODES as u8);
+        assert_eq!(snapshot.max_children, DEFAULT_DIRECT_CHILDREN as u8);
+        assert_eq!(snapshot.max_nodes, DEFAULT_TREE_NODES as u8);
         assert!(snapshot.template_cards(None).contains("(none;"));
         assert!(
             snapshot

@@ -371,6 +371,12 @@ pub enum SessionObservation<P: ProtocolExtension = Core> {
     /// A model round was dispatched. Starts the presentation's waiting clock;
     /// busy, tool, and compaction phase transitions do not start this clock.
     ModelRequestStarted,
+    /// A model request is waiting for a slot in its account's shared request
+    /// budget. `ModelRequestStarted` follows once a slot frees.
+    ModelRequestQueued {
+        /// The account whose budget is full.
+        slots: String,
+    },
     /// The host finished opening the session. Carries the host's own
     /// `session_open_ms` measurement (logged, not painted as TUI chrome).
     SessionOpened {

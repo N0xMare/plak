@@ -54,6 +54,7 @@ CATALOG = (
     ("profile_researcher", "cli"),
     ("multi_roles", "cli"),
     ("worker_spawns_researcher", "cli"),
+    ("wide_fanout", "cli"),
     ("web_search_401", "cli"),
     ("image_gen_401", "cli"),
 )
@@ -992,6 +993,91 @@ class Features:
 
         return self._research("worker_spawns_researcher", profile, spawner="worker",
                               config_edit=depth_two)[0]
+
+    # --- wide trees: 24 children under one per-account request budget ------------
+
+    def wide_fanout(self) -> str:
+        """A root with max_children 24 spawns 24 reviewers in one batch, each over
+        its own directory; at most 8 model requests per account are in flight."""
+        width, budget = 24, 8
+        dirs = wide_dirs(width)
+        base = self.env.artifacts / "wide_fanout"
+        repo = base / "repo"
+        if not repo.exists():
+            files = {"README.md": "wide_fanout scenario workspace\n"}
+            for name, source in dirs:
+                files[f"{name}/Cargo.toml"] = source.read_text(errors="replace")
+            live.git_repo(repo, files)
+
+        def wide(home: Path) -> None:
+            config = home / "config.toml"
+            text = config.read_text()
+            if "max_children = 4\n" not in text:
+                raise ScenarioFailure(HARNESS, "write_home config has no max_children = 4")
+            config.write_text(text.replace(
+                "max_children = 4\n",
+                f"max_children = {width}\nmax_nodes = {width + 1}\n"
+                f"max_concurrent_requests_per_account = {budget}\n", 1))
+
+        names = ", ".join(name for name, _ in dirs)
+        out, records, segments, _, session = self.run(
+            "wide_fanout",
+            f"Spawn {width} workers in one batch, one per directory ({names}): call spawn_agent "
+            f"{width} times in a single response, template worker, tier mutate, workspace "
+            "inherit. Tell each worker: read <dir>/Cargo.toml, do not change it, and write "
+            "findings/<dir>.md with one line naming the package and its dependency count; then "
+            "submit_result with that line. Then call wait_agent until no_pending_children, and "
+            "reply with the number of workers that submitted.",
+            [], before=wide, timeout=2400)
+        detail = f"session {session}"
+        spawned = tool_calls(records, "spawn_agent")
+        if len(spawned) < width:
+            raise ScenarioFailure(MODEL, f"{detail}: {len(spawned)} spawn_agent calls, "
+                                         f"expected {width}")
+        missing = [name for name, _ in dirs if not (repo / "findings" / f"{name}.md").is_file()]
+        if missing:
+            raise ScenarioFailure(MODEL, f"{detail}: no findings file for {missing}")
+        home = base / "home"
+        peak, attempts = peak_in_flight(home)
+        if peak > budget:
+            raise ScenarioFailure(PROVIDER, f"{detail}: {peak} model requests in flight, "
+                                            f"budget {budget}")
+        if attempts <= width:
+            raise ScenarioFailure(HARNESS, f"{detail}: only {attempts} model attempts recorded")
+        return (f"{detail}: {len(spawned)} spawns, {width} findings files, {attempts} model "
+                f"requests, peak {peak} in flight (budget {budget})")
+
+
+def wide_dirs(width: int) -> list[tuple[str, Path]]:
+    """`width` distinct crate manifests of this checkout, named by directory."""
+    manifests = sorted(live.ROOT.glob("crates/**/Cargo.toml"))
+    picked = []
+    for manifest in manifests:
+        name = manifest.parent.name
+        if name not in {seen for seen, _ in picked} and "target" not in manifest.parts:
+            picked.append((name, manifest))
+    if len(picked) < width:
+        raise ScenarioFailure(HARNESS, f"only {len(picked)} crate directories")
+    return picked[:width]
+
+
+def peak_in_flight(home: Path) -> tuple[int, int]:
+    """(peak concurrent model attempts, attempt count) from the home's telemetry."""
+    import sqlite3
+    events = []
+    for path in sorted(home.rglob("telemetry*.sqlite3")):
+        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
+            for started, finished in db.execute(
+                    "SELECT started_at, finished_at FROM model_attempts "
+                    "WHERE started_at IS NOT NULL AND finished_at IS NOT NULL"):
+                events += [(started, 1), (finished, -1)]
+    peak = current = 0
+    # A finish at the same instant as a start frees the slot first.
+    for _, delta in sorted(events, key=lambda event: (event[0], event[1])):
+        current += delta
+        peak = max(peak, current)
+    return peak, len(events) // 2
+
 
 
 PROFILE_DIRS = {"codex-default": "codex", "claude-default": "claude",

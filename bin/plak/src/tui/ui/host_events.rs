@@ -854,7 +854,12 @@ impl App {
                 self.open_notes_from = Some(self.pane.blocks.len());
                 self.mark_dirty();
             }
+            HostEvent::ModelRequestQueued { slots } => {
+                self.request_slot_wait = Some(slots);
+                self.mark_dirty();
+            }
             HostEvent::ModelRequestStarted => {
+                self.request_slot_wait = None;
                 self.model_request_started = Some(self.now());
                 self.pane.assistant_stream_active = false;
                 self.mark_dirty();
@@ -879,6 +884,7 @@ impl App {
                     self.turn_started = None;
                     self.phase_started = None;
                     self.model_request_started = None;
+                    self.request_slot_wait = None;
                     self.retire_unresolved_approval();
                 }
                 if busy {

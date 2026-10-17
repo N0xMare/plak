@@ -837,7 +837,7 @@ mod tests {
         snapshot.max_attempts = 3;
         tree.install_snapshot(snapshot.clone());
         assert_eq!(tree.max_attempts(), 3);
-        snapshot.max_attempts = u8::MAX;
+        snapshot.max_attempts = u16::MAX;
         tree.install_snapshot(snapshot);
         assert_eq!(tree.max_attempts(), MAX_TREE_ATTEMPTS);
         tree.pin_template(

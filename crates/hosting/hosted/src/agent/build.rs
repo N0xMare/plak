@@ -3589,7 +3589,11 @@ pub(super) fn coding_session_runtime_binding_for(
                 .unwrap_or(topology_spec.plan_state_authority.as_str()),
         ),
     );
-    let mut builder = builder.tool_policy(session_tool_policy(fence));
+    let mut builder = builder
+        .tool_policy(session_tool_policy(fence))
+        .request_slots(crate::request_slots::for_account(
+            state_roots.roster_source().account_name(provider),
+        ));
     if let Some((reresolver, admitted_until)) = model_reresolver {
         builder = builder.model_reresolver(reresolver, admitted_until);
     }

@@ -22,8 +22,9 @@ pub mod project_trust;
 
 use plakous::model::ProcessingTierDisposition;
 use plakous_hosted::agent_tree_protocol::{
-    Delegation, MAX_DIRECT_CHILDREN, MAX_TREE_ATTEMPTS, MAX_TREE_DEPTH, MAX_TREE_NODES,
-    MAX_WORKING_SET, TemplateName, Tier, WorkingSet, WriterMode,
+    DEFAULT_DIRECT_CHILDREN, DEFAULT_TREE_ATTEMPTS, DEFAULT_TREE_NODES, Delegation,
+    MAX_DIRECT_CHILDREN, MAX_TREE_ATTEMPTS, MAX_TREE_DEPTH, MAX_TREE_NODES, MAX_WORKING_SET,
+    TemplateName, Tier, WorkingSet, WriterMode,
 };
 use plakous_hosted::tool_plan::{SelectedTool, TemplateToolSelection};
 use std::collections::{BTreeMap, BTreeSet};
@@ -81,6 +82,8 @@ pub struct SessionPolicy {
     pub topology_enabled: bool,
     /// Wake idle interactive roots on unread child results or questions.
     pub auto_continue: bool,
+    /// `[orchestration] max_concurrent_requests_per_account`.
+    pub requests_per_account: u16,
     /// `[root] agent` as a fact the runtime compares its bound tuple against.
     pub root_template: Option<RootTemplateFact>,
 }
@@ -96,6 +99,14 @@ impl SessionPolicy {
     #[must_use]
     pub fn defaults() -> Self {
         ProductConfig::default_product().session_policy()
+    }
+
+    /// Sizes the process-wide per-account request budgets every session
+    /// built after this call draws on, root and children alike.
+    pub fn install_request_budget(&self) {
+        if let Some(limit) = std::num::NonZeroUsize::new(usize::from(self.requests_per_account)) {
+            plakous_hosted::request_slots::set_requests_per_account(limit);
+        }
     }
 }
 
@@ -189,6 +200,8 @@ pub const CEILING_MAX_CHILDREN: u16 = MAX_DIRECT_CHILDREN as u16;
 pub const CEILING_MAX_NODES: u16 = MAX_TREE_NODES as u16;
 /// `[orchestration] max_attempts` ceiling.
 pub const CEILING_MAX_ATTEMPTS: u16 = MAX_TREE_ATTEMPTS as u16;
+/// `[orchestration] max_concurrent_requests_per_account` ceiling.
+pub const CEILING_REQUESTS_PER_ACCOUNT: u16 = 64;
 
 /// `[turn] max_model_rounds` default and ceiling (spec 07 §3). The ceiling is
 /// the runtime's own; the subscription gate is sized for it.
@@ -688,6 +701,9 @@ pub struct ProductConfig {
     pub max_attempts: u16,
     /// New continuation turns after transient failure, per child attempt.
     pub transient_resumes: u16,
+    /// `[orchestration] max_concurrent_requests_per_account`: model requests
+    /// one account may have in flight across this process's sessions.
+    pub requests_per_account: u16,
     /// `[orchestration] require_review_evidence`: when true, `adopt_candidate`
     /// refuses unless `evidence` names a subtree attempt whose output
     /// references the candidate. Off by default.
@@ -753,6 +769,7 @@ impl PartialEq for ProductConfig {
             && self.max_agents_per_cell == other.max_agents_per_cell
             && self.max_attempts == other.max_attempts
             && self.transient_resumes == other.transient_resumes
+            && self.requests_per_account == other.requests_per_account
             && self.require_review_evidence == other.require_review_evidence
             && self.auto_continue == other.auto_continue
             && self.jobs_foreground_seconds == other.jobs_foreground_seconds
@@ -1037,6 +1054,9 @@ impl ProductConfig {
             ConfigField::MaxNodes => self.max_nodes = source.max_nodes,
             ConfigField::MaxAttempts => self.max_attempts = source.max_attempts,
             ConfigField::TransientResumes => self.transient_resumes = source.transient_resumes,
+            ConfigField::RequestsPerAccount => {
+                self.requests_per_account = source.requests_per_account;
+            }
             ConfigField::RequireReviewEvidence => {
                 self.require_review_evidence = source.require_review_evidence;
             }
@@ -1095,6 +1115,7 @@ impl ProductConfig {
             api_full_window: self.api_full_window,
             topology_enabled: self.subagents,
             auto_continue: self.auto_continue,
+            requests_per_account: self.requests_per_account,
             root_template: self.root_template_fact(),
         }
     }
@@ -1135,15 +1156,16 @@ impl ProductConfig {
             subagents: true,
             occupancy: WriterMode::SingleLease,
             max_depth: 1,
-            max_children: CEILING_MAX_CHILDREN,
+            max_children: DEFAULT_DIRECT_CHILDREN as u16,
             workspace_idle_seconds: 600,
             workspace_budget_mib: 4096,
             child_retention_days: 7,
             child_retention_count: 128,
-            max_nodes: CEILING_MAX_NODES,
+            max_nodes: DEFAULT_TREE_NODES as u16,
             max_agents_per_cell: plakous_hosted::cell_budget::DEFAULT_MAX_AGENTS_PER_CELL,
-            max_attempts: CEILING_MAX_ATTEMPTS,
+            max_attempts: DEFAULT_TREE_ATTEMPTS as u16,
             transient_resumes: 1,
+            requests_per_account: 8,
             require_review_evidence: false,
             auto_continue: true,
             max_model_rounds: DEFAULT_MAX_MODEL_ROUNDS,
@@ -1411,6 +1433,7 @@ impl ProductConfig {
             ConfigField::MaxNodes => Value::from(i64::from(self.max_nodes)),
             ConfigField::MaxAttempts => Value::from(i64::from(self.max_attempts)),
             ConfigField::TransientResumes => Value::from(i64::from(self.transient_resumes)),
+            ConfigField::RequestsPerAccount => Value::from(i64::from(self.requests_per_account)),
             ConfigField::RequireReviewEvidence => Value::from(self.require_review_evidence),
             ConfigField::MaxModelRounds => Value::from(i64::from(self.max_model_rounds)),
             ConfigField::JobsForegroundSeconds => {
@@ -1882,6 +1905,10 @@ impl ProductConfig {
                 self.transient_resumes =
                     u16::try_from(count).map_err(|_| format!("{} must be 0..=2", key.key()))?;
             }
+            ConfigField::RequestsPerAccount => {
+                self.requests_per_account =
+                    parse_bound(key.key(), value, CEILING_REQUESTS_PER_ACCOUNT)?;
+            }
             ConfigField::RequireReviewEvidence => self.require_review_evidence = value.boolean()?,
             ConfigField::MaxModelRounds => {
                 self.max_model_rounds = parse_max_model_rounds(value)?;
@@ -2244,6 +2271,8 @@ pub enum ConfigField {
     MaxAttempts,
     /// `[orchestration] transient_resumes`.
     TransientResumes,
+    /// `[orchestration] max_concurrent_requests_per_account`.
+    RequestsPerAccount,
     /// `[orchestration] require_review_evidence`.
     RequireReviewEvidence,
     /// `[turn] max_model_rounds`.
@@ -2286,6 +2315,7 @@ impl ConfigField {
                 | Self::MaxNodes
                 | Self::MaxAttempts
                 | Self::TransientResumes
+                | Self::RequestsPerAccount
                 | Self::RequireReviewEvidence
         )
     }
@@ -2380,7 +2410,7 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         path: "orchestration.max_children",
         field: ConfigField::MaxChildren,
         kind: "integer",
-        constraint: "1..=8",
+        constraint: "1..=64",
         doc: "Active or undelivered direct children; dormant children release slots.",
         example: "8",
         scope: ConfigScope::Epoch,
@@ -2389,7 +2419,7 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         path: "orchestration.max_nodes",
         field: ConfigField::MaxNodes,
         kind: "integer",
-        constraint: "1..=32",
+        constraint: "1..=65",
         doc: "Root plus active, undelivered or recovery-required nodes.",
         example: "32",
         scope: ConfigScope::Epoch,
@@ -2434,7 +2464,7 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         path: "orchestration.max_attempts",
         field: ConfigField::MaxAttempts,
         kind: "integer",
-        constraint: "1..=64",
+        constraint: "1..=256",
         doc: "Attempts one root prompt may open across the tree.",
         example: "64",
         scope: ConfigScope::Epoch,
@@ -2447,6 +2477,15 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         doc: "New continuation turns after transient failure per root user prompt or child attempt; 0 disables automatic continuation.",
         example: "1",
         scope: ConfigScope::Epoch,
+    },
+    ConfigKey {
+        path: "orchestration.max_concurrent_requests_per_account",
+        field: ConfigField::RequestsPerAccount,
+        kind: "integer",
+        constraint: "1..=64",
+        doc: "Model requests one account may have in flight across the root and every descendant; excess requests wait in order for a slot. Takes effect on the next launch.",
+        example: "8",
+        scope: ConfigScope::Immediate,
     },
     ConfigKey {
         path: "orchestration.require_review_evidence",
@@ -3220,14 +3259,14 @@ mod tests {
         let (_temp, project, paths) = project_fixture();
         fs::write(
             paths.config_file(),
-            "[orchestration]\nsubagents = false\nmax_depth = 2\nmax_children = 3\nmax_nodes = 8\nmax_attempts = 12\ntransient_resumes = 0\nrequire_review_evidence = true\n[turn]\nauto_continue = false\n",
+            "[orchestration]\nsubagents = false\nmax_depth = 2\nmax_children = 3\nmax_nodes = 8\nmax_attempts = 12\ntransient_resumes = 0\nmax_concurrent_requests_per_account = 3\nrequire_review_evidence = true\n[turn]\nauto_continue = false\n",
         )
         .unwrap();
         let home = project_home(&project);
         fs::create_dir_all(&home).unwrap();
         fs::write(
             home.join("config.toml"),
-            "[orchestration]\nsubagents = true\nmax_depth = 4\nmax_children = 8\nmax_nodes = 32\nmax_attempts = 64\ntransient_resumes = 2\nrequire_review_evidence = false\n[turn]\nauto_continue = true\n[tui]\nmouse = false\n",
+            "[orchestration]\nsubagents = true\nmax_depth = 4\nmax_children = 8\nmax_nodes = 32\nmax_attempts = 64\ntransient_resumes = 2\nmax_concurrent_requests_per_account = 9\nrequire_review_evidence = false\n[turn]\nauto_continue = true\n[tui]\nmouse = false\n",
         )
         .unwrap();
         project_trust::trust(&paths, project.path()).unwrap();
@@ -4249,6 +4288,10 @@ mod tests {
             ("max_children", CEILING_MAX_CHILDREN),
             ("max_nodes", CEILING_MAX_NODES),
             ("max_attempts", CEILING_MAX_ATTEMPTS),
+            (
+                "max_concurrent_requests_per_account",
+                CEILING_REQUESTS_PER_ACCOUNT,
+            ),
         ] {
             for bad in ["0", "-1"] {
                 assert!(
@@ -4279,14 +4322,14 @@ mod tests {
         }
         let defaults = ProductConfig::default_product();
         assert_eq!(defaults.max_depth, 1);
-        assert_eq!(defaults.max_children, CEILING_MAX_CHILDREN);
-        assert_eq!(defaults.max_nodes, CEILING_MAX_NODES);
+        assert_eq!(defaults.max_children, 8);
+        assert_eq!(defaults.max_nodes, 32);
     }
 
     #[test]
     fn max_attempts_and_require_review_evidence_are_orchestration_keys() {
         let defaults = ProductConfig::default_product();
-        assert_eq!(defaults.max_attempts, CEILING_MAX_ATTEMPTS);
+        assert_eq!(defaults.max_attempts, 64);
         assert!(!defaults.require_review_evidence);
         let parsed = ProductConfig::parse(
             "[orchestration]\nmax_attempts = 12\nrequire_review_evidence = true\n",
@@ -4696,6 +4739,10 @@ mod tests {
             ("orchestration.max_children", CEILING_MAX_CHILDREN),
             ("orchestration.max_nodes", CEILING_MAX_NODES),
             ("orchestration.max_attempts", CEILING_MAX_ATTEMPTS),
+            (
+                "orchestration.max_concurrent_requests_per_account",
+                CEILING_REQUESTS_PER_ACCOUNT,
+            ),
         ] {
             let row = config_key(path).expect(path);
             assert!(

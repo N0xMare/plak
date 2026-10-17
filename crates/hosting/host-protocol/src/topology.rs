@@ -12,25 +12,30 @@ pub const MAX_MESSAGE_BYTES: usize = 16 * 1024;
 pub const DEFAULT_WAIT_TIMEOUT_MS: u64 = 300_000;
 /// `wait_agent` timeout ceiling; a larger request is clamped, not refused.
 pub const MAX_WAIT_TIMEOUT_MS: u64 = 3_600_000;
-/// Agent ids one `wait_agent` may name.
-pub const MAX_WAIT_TARGETS: usize = 32;
+/// Agent ids one `wait_agent` may name: every direct child a node may hold.
+pub const MAX_WAIT_TARGETS: usize = MAX_DIRECT_CHILDREN;
 /// Byte ceiling on a `submit_result` payload.
 pub const MAX_OUTPUT_JSON_BYTES: usize = 262_144;
-/// Nodes one tree may hold that are not closed, root included. A
-/// `recovery_required` node counts until it is resolved and closed.
-pub const MAX_TREE_NODES: usize = 32;
+/// Ceiling on nodes one tree may hold that are not closed, root included:
+/// the root plus a full row of direct children. A `recovery_required` node
+/// counts until it is resolved and closed.
+pub const MAX_TREE_NODES: usize = MAX_DIRECT_CHILDREN + 1;
+/// `max_nodes` when the configuration leaves it unset.
+pub const DEFAULT_TREE_NODES: usize = 32;
 /// Depth one tree may reach, with the root at depth 0.
 pub const MAX_TREE_DEPTH: u8 = 4;
-/// Direct children one node may hold.
-pub const MAX_DIRECT_CHILDREN: usize = 8;
-/// Children one tree may run at once; the root does not consume a slot.
-/// More is `capacity`.
-pub const MAX_RUNNING_CHILDREN: usize = 8;
-/// Spawns one tree may hold admitted but not yet started.
-pub const MAX_PENDING_SPAWNS: usize = 16;
-/// Attempts one root prompt may open across every node
+/// Ceiling on direct children one node may hold.
+pub const MAX_DIRECT_CHILDREN: usize = 64;
+/// `max_children` when the configuration leaves it unset.
+pub const DEFAULT_DIRECT_CHILDREN: usize = 8;
+/// Spawns one tree may hold admitted but not yet started: one batch may
+/// start a full row of direct children.
+pub const MAX_PENDING_SPAWNS: usize = MAX_DIRECT_CHILDREN;
+/// Ceiling on attempts one root prompt may open across every node
 /// (`max_attempts`). A tree may lower it; nothing raises it.
-pub const MAX_TREE_ATTEMPTS: usize = 64;
+pub const MAX_TREE_ATTEMPTS: usize = 256;
+/// `max_attempts` when the configuration leaves it unset.
+pub const DEFAULT_TREE_ATTEMPTS: usize = 64;
 /// Records one node's mailbox may hold; more is `mailbox_full`.
 pub const MAX_MAILBOX_RECORDS: usize = 256;
 /// Bytes one tree may hold queued across every mailbox.

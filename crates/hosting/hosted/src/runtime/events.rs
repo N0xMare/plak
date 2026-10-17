@@ -2235,6 +2235,17 @@ pub(super) fn apply_event<P: plakous_host_protocol::ProtocolExtension>(
                 position: None,
             });
         }
+        AgentEventKind::ModelRequestQueued { slots } => {
+            flush_assistant_delta(delta_buf, last_flush, events, true);
+            log_event(
+                log,
+                observed_session_id,
+                SessionEvent::new("model.request_queued").str("account", slots),
+            );
+            let _ = events.send(HostEvent::ModelRequestQueued {
+                slots: slots.clone(),
+            });
+        }
         AgentEventKind::OperationBudgetExhausted => {
             flush_assistant_delta(delta_buf, last_flush, events, true);
             log_event(

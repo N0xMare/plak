@@ -698,6 +698,8 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "ReasoningPreferenceStrategy",
         "RecoveredTurnHandle",
         "RegisteredContextSource",
+        # One shared per-account bound on concurrent model requests.
+        "RequestSlots",
         "ReresolvedModel",
         "ResolvedContextSourceFact",
         "Turn",

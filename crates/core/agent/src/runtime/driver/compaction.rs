@@ -40,6 +40,7 @@ use crate::runtime::operation_record::{
     compaction_success_lifecycle, operation_result_component, working_lifecycle,
     working_lifecycle_for_root,
 };
+use crate::runtime::request_slots::RequestSlot;
 use crate::runtime::terminal::cancelled_error;
 use crate::runtime::{ArtifactTransition, OperationId, PromptCommand};
 use crate::{
@@ -2329,10 +2330,41 @@ impl Driver {
         Ok(())
     }
 
+    /// The compaction summary is a model request too: it waits for a slot in
+    /// the host's shared budget before its own deadline starts.
+    async fn take_compaction_request_slot(
+        &mut self,
+        cancellation: plakous_model::CancellationToken,
+    ) -> Result<Option<RequestSlot>, AgentError> {
+        let Some(slots) = self.request_slots.clone() else {
+            return Ok(None);
+        };
+        if let Some(slot) = slots.try_take() {
+            return Ok(Some(slot));
+        }
+        if let Some(root) = &self.active_root {
+            let _ = root.shared.events.publish(
+                EventContext::turn(root.turn_id),
+                AgentEventKind::ModelRequestQueued {
+                    slots: slots.label().to_owned(),
+                },
+            );
+        }
+        tokio::select! {
+            slot = slots.take() => Ok(Some(slot)),
+            () = self.authority.lease_lost() => Err(self.authority.heartbeat_failure()),
+            () = cancellation.cancelled() => Err(cancelled_error()),
+            () = self.shutdown.cancelled() => Err(cancelled_error()),
+        }
+    }
+
     async fn run_compaction_call(
         &mut self,
         live: &mut LiveCompaction,
     ) -> Result<ModelResponse, AgentError> {
+        let _slot = self
+            .take_compaction_request_slot(live.cancellation().clone())
+            .await?;
         let (deadline_at, context) = live.begin_call()?;
         let identity = live.identity();
         let (compaction_operation, provider_operation) = live.operations();

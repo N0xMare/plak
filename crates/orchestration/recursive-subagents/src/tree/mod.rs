@@ -22,12 +22,13 @@ use crate::epoch::BindHints;
 use crate::epoch::{OrchestrationSnapshot, RosterBinding};
 use crate::protocol::{
     AdoptCandidateRequest, AdoptOutcome, AttemptId, AttemptScopedRequest, AttemptStatus,
-    CandidateId, DEFAULT_GRANT_DEPTH, ListAgentsRequest, MAX_DESCRIPTION_PROMPT_SCHEMA_BYTES,
+    CandidateId, DEFAULT_DIRECT_CHILDREN, DEFAULT_GRANT_DEPTH, DEFAULT_TREE_ATTEMPTS,
+    DEFAULT_TREE_NODES, ListAgentsRequest, MAX_DESCRIPTION_PROMPT_SCHEMA_BYTES,
     MAX_DIRECT_CHILDREN, MAX_MAILBOX_RECORDS, MAX_PENDING_SPAWNS, MAX_QUEUED_MAIL_BYTES,
-    MAX_RUNNING_CHILDREN, MAX_TREE_ATTEMPTS, MAX_TREE_DEPTH, MAX_TREE_NODES, MessagePriority,
-    MessagePurpose, NodeStatus, SendAgentMessageRequest, SpawnAgentRequest, SpawnWorkspace,
-    SubmitResultRequest, TemplateName, Tier, TopologyErrorCode, TopologyGrant, WaitAgentRequest,
-    WorkspaceIdRequest, WorkspaceMode, WorkspaceStatus, WriterMode,
+    MAX_TREE_ATTEMPTS, MAX_TREE_DEPTH, MAX_TREE_NODES, MessagePriority, MessagePurpose, NodeStatus,
+    SendAgentMessageRequest, SpawnAgentRequest, SpawnWorkspace, SubmitResultRequest, TemplateName,
+    Tier, TopologyErrorCode, TopologyGrant, WaitAgentRequest, WorkspaceIdRequest, WorkspaceMode,
+    WorkspaceStatus, WriterMode,
 };
 use plakous_workspace::occupancy_vcs::{
     AdoptFailure, AdoptLanding, MintedCopy, SystemVcs, VcsError, VcsErrorKind, VcsOps, VcsSnapshot,
@@ -1571,8 +1572,8 @@ impl ProductAgentTree {
             may_spawn: true,
             may_adopt: true,
             max_depth: DEFAULT_GRANT_DEPTH,
-            max_nodes: MAX_TREE_NODES as u8,
-            max_children: MAX_DIRECT_CHILDREN as u8,
+            max_nodes: DEFAULT_TREE_NODES as u8,
+            max_children: DEFAULT_DIRECT_CHILDREN as u8,
             interrupt_ids: Vec::new(),
             close_ids: Vec::new(),
         };
@@ -1644,7 +1645,7 @@ impl ProductAgentTree {
             fault_reasons: BTreeMap::new(),
             adopt_conflicts: BTreeMap::new(),
             terminal_recovery: BTreeMap::new(),
-            max_attempts: MAX_TREE_ATTEMPTS,
+            max_attempts: DEFAULT_TREE_ATTEMPTS,
             prompt_attempt_base: 0,
             notify: Arc::new(tokio::sync::Notify::new()),
             vcs: TreeVcs(vcs),
@@ -2121,7 +2122,7 @@ impl ProductAgentTree {
         }
     }
 
-    fn grant(&self, id: &str) -> Result<&TopologyGrant, TopologyError> {
+    pub(crate) fn grant(&self, id: &str) -> Result<&TopologyGrant, TopologyError> {
         self.grants
             .get(id)
             .ok_or_else(|| TopologyError::new(TopologyErrorCode::GrantDenied, "grant is missing"))

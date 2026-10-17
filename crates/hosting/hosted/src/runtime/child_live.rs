@@ -45,6 +45,9 @@ impl Progress {
                 ];
                 self.view.activity = Some("thinking".into());
             }
+            AgentEventKind::ModelRequestQueued { slots } => {
+                self.view.activity = Some(format!("waiting for a {slots} slot"));
+            }
             AgentEventKind::ToolStarted {
                 identity,
                 observation,

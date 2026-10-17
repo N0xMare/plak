@@ -122,6 +122,16 @@ load error. Full key list and defaults in
 finished child frees its slot, and `max_attempts` counts attempts within one
 root prompt; neither is a lifetime total.
 
+A root can hold up to 64 direct children: raise `max_children` (up to 64),
+`max_nodes` (up to 65, the root plus 64) and, for long fan-outs,
+`max_attempts` (up to 256). The defaults stay at 8, 32 and 64. However wide
+the tree, `max_concurrent_requests_per_account` (default 8, up to 64) caps how
+many model requests one account has in flight across the root and all of its
+descendants. Extra requests wait their turn instead of failing: the status
+line says `waiting for a codex slot` (for whichever account is full), a
+waiting child's Agents-tab row says the same, and JSONL hosts get a
+`model_request_queued` line. Interrupting or closing an agent ends its wait.
+
 A parent that calls `wait_agent` with no `agent_ids` gets each child's result
 once: every call returns when the next child settles, and after the last one it
 answers `no_pending_children`. Naming `agent_ids` re-reads a child's row at any

@@ -520,7 +520,7 @@ mod tests {
         input.bounds = EpochBounds {
             max_depth: 2,
             max_children: 3,
-            max_nodes: 900,
+            max_nodes: 32,
             max_attempts: 5,
             max_agents_per_cell: 4,
         };
@@ -555,7 +555,7 @@ mod tests {
         let snapshot = OrchestrationSnapshot::freeze(input.clone());
         assert_eq!(snapshot.max_depth, 2);
         assert_eq!(snapshot.max_children, 3);
-        assert_eq!(snapshot.max_nodes, MAX_TREE_NODES as u8);
+        assert_eq!(snapshot.max_nodes, 32);
         assert_eq!(snapshot.max_attempts, 5);
         assert_eq!(snapshot.max_agents_per_cell, 4);
         assert!(snapshot.digest_matches());
@@ -584,7 +584,7 @@ mod tests {
 
         // The attempt ceiling and the evidence rule are epoch
         // state too, lower-only and inside the digest.
-        assert_eq!(usize::from(snapshot.max_attempts), MAX_TREE_ATTEMPTS);
+        assert_eq!(snapshot.max_attempts, 64);
         assert!(!snapshot.require_review_evidence);
         config.max_attempts = 900;
         config.require_review_evidence = true;

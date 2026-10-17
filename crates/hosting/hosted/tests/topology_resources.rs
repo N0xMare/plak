@@ -28,8 +28,9 @@ use std::path::PathBuf;
 
 use plakous_hosted::agent_tree::ProductAgentTree;
 use plakous_hosted::agent_tree_protocol::{
-    AttemptScopedRequest, MAX_DIRECT_CHILDREN, MAX_RUNNING_CHILDREN, MAX_TREE_DEPTH,
-    SpawnAgentRequest, SpawnWorkspace, TemplateName, Tier, TopologyErrorCode, WriterMode,
+    AttemptScopedRequest, DEFAULT_DIRECT_CHILDREN, DEFAULT_TREE_NODES, MAX_DIRECT_CHILDREN,
+    MAX_TREE_DEPTH, SpawnAgentRequest, SpawnWorkspace, TemplateName, Tier, TopologyErrorCode,
+    WriterMode,
 };
 use plakous_hosted::orchestration::{OrchestrationSnapshot, RosterBinding};
 
@@ -239,15 +240,14 @@ fn an_epoch_cannot_raise_the_bounds_above_the_appendix_ceilings() {
 
 #[test]
 fn a_flat_fan_out_hits_the_child_budget_before_running_saturation() {
-    // `MAX_RUNNING_CHILDREN` counts executing children only — the root's own
-    // turn is free — so a single parent meets `MAX_DIRECT_CHILDREN` (8) first.
+    // A single parent meets its granted direct-child budget (8 by default).
     // The refusal must arrive as a budget error, not as an unbounded tree.
     let root = tempfile::tempdir().expect("tempdir");
     let mut tree = recursive_tree(root.path(), MAX_TREE_DEPTH);
 
     let mut live = Vec::new();
     let mut refusal = None;
-    for _ in 0..=MAX_DIRECT_CHILDREN {
+    for _ in 0..=DEFAULT_DIRECT_CHILDREN {
         match tree.spawn_agent("root", &request("critic", "critic"), None) {
             Ok(output) => live.push(output.agent_id),
             Err(error) => {
@@ -259,7 +259,7 @@ fn a_flat_fan_out_hits_the_child_budget_before_running_saturation() {
     let error = refusal.expect("a wide fan-out must hit a budget");
     assert_eq!(error.code, TopologyErrorCode::SpawnBudget, "{error:?}");
     assert!(error.message.contains("direct child budget"), "{error:?}");
-    assert_eq!(live.len(), MAX_DIRECT_CHILDREN);
+    assert_eq!(live.len(), DEFAULT_DIRECT_CHILDREN);
 
     // Closing a child frees the budget again: the bound is on live nodes, not
     // on ids ever issued.
@@ -276,59 +276,6 @@ fn a_flat_fan_out_hits_the_child_budget_before_running_saturation() {
     assert_eq!(closed.len(), 1);
     tree.spawn_agent("root", &request("critic", "critic"), None)
         .expect("a closed slot is reusable");
-}
-
-#[test]
-fn a_nested_fan_out_saturates_the_running_children_budget() {
-    // Eight executing children anywhere in the tree is `capacity`; the root
-    // never consumes a slot, so the bound is only reachable when children
-    // spawn children. The error names the running children so the caller can
-    // pick what to interrupt or wait on. There is no queue.
-    let root = tempfile::tempdir().expect("tempdir");
-    let mut tree = recursive_tree(root.path(), MAX_TREE_DEPTH);
-
-    let mut live = Vec::new();
-    for _ in 0..2 {
-        let supervisor = tree
-            .spawn_agent("root", &request("supervisor", "supervisor"), None)
-            .expect("supervisor spawn")
-            .agent_id;
-        live.push(supervisor.clone());
-        for _ in 0..3 {
-            let leaf = tree
-                .spawn_agent(&supervisor, &request("critic", "critic"), None)
-                .expect("leaf spawn")
-                .agent_id;
-            live.push(leaf);
-        }
-    }
-    assert_eq!(live.len(), MAX_RUNNING_CHILDREN);
-
-    let error = tree
-        .spawn_agent("root", &request("scout", "scout"), None)
-        .expect_err("the ninth running child must refuse");
-    assert_eq!(error.code, TopologyErrorCode::Capacity, "{error:?}");
-    assert!(error.message.contains("no queue"), "{error:?}");
-    assert!(
-        !error.message.contains("root"),
-        "the root is not part of the running set: {error:?}"
-    );
-    for id in &live {
-        assert!(error.message.contains(id.as_str()), "{error:?}");
-    }
-
-    // Closing a subtree releases its execution slots.
-    tree.close_agent(
-        "root",
-        &AttemptScopedRequest {
-            agent_id: live[0].clone(),
-            expected_attempt_id: None,
-        },
-        None,
-    )
-    .expect("root may close its own child");
-    tree.spawn_agent("root", &request("scout", "scout"), None)
-        .expect("closing a subtree frees the running budget");
 }
 
 #[test]
@@ -380,8 +327,8 @@ fn deep_and_wide_together_stay_inside_every_bound() {
         "depth {max_depth} exceeded the appendix ceiling {MAX_TREE_DEPTH}"
     );
     assert!(
-        issued.len() <= MAX_RUNNING_CHILDREN * usize::from(MAX_TREE_DEPTH) + 1,
-        "issued {} nodes, far above what the running budget can hold live",
+        issued.len() <= DEFAULT_TREE_NODES,
+        "issued {} nodes, above what the node budget can hold live",
         issued.len()
     );
 }

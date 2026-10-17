@@ -736,6 +736,7 @@ fn event_context_shape_is_valid(event: &AgentEvent) -> bool {
         | AgentEventKind::SteeringQueued { .. }
         | AgentEventKind::SteeringApplied
         | AgentEventKind::OperationBudgetExhausted
+        | AgentEventKind::ModelRequestQueued { .. }
         | AgentEventKind::OutputLimitRetry { .. }
         | AgentEventKind::ToolResultsReplaced { .. }
         | AgentEventKind::ConversationCommitted { .. }
@@ -998,6 +999,7 @@ fn plan_transition(
         | AgentEventKind::SteeringQueued { .. }
         | AgentEventKind::SteeringApplied
         | AgentEventKind::OperationBudgetExhausted
+        | AgentEventKind::ModelRequestQueued { .. }
         | AgentEventKind::OutputLimitRetry { .. }
         | AgentEventKind::ToolResultsReplaced { .. }
         | AgentEventKind::ObservationClipped { .. }

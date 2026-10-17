@@ -5,6 +5,7 @@ use crate::manifest::{
     InterpreterAvailability, InterpreterObservation, InterpreterResetReason, RuntimeContextState,
 };
 use crate::profile::compile_construction_bound_plan;
+use crate::runtime::RequestSlots;
 use crate::runtime::admission::{
     refreshed_reopen_admission, validate_configuration_runtime_authority,
 };
@@ -209,6 +210,7 @@ impl AgentBuilder {
             local_composition: None,
             post_compaction_note: None,
             model_reresolver: None,
+            request_slots: None,
         }
     }
 
@@ -363,6 +365,18 @@ impl AgentBuilder {
     #[must_use]
     pub fn post_compaction_note(mut self, note: PostCompactionNote) -> Self {
         self.post_compaction_note = Some(note);
+        self
+    }
+
+    /// Shares `slots` as this agent's bound on concurrent model requests.
+    ///
+    /// Each model request, compaction summaries included, waits in arrival
+    /// order for a slot before its operation deadline starts and holds it
+    /// until its response stream ends. A wait publishes
+    /// [`crate::AgentEventKind::ModelRequestQueued`]; cancellation ends it.
+    #[must_use]
+    pub fn request_slots(mut self, slots: RequestSlots) -> Self {
+        self.request_slots = Some(slots);
         self
     }
 
@@ -934,6 +948,7 @@ impl PreparedAgent {
             local_composition: builder.local_composition,
             interpreter_observation,
             post_compaction_note: builder.post_compaction_note,
+            request_slots: builder.request_slots,
             model_rebind: builder
                 .model_reresolver
                 .map(|(reresolver, admitted_until)| {

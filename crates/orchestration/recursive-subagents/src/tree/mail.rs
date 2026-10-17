@@ -1996,7 +1996,7 @@ mod tests {
         tree.settle_for_test();
         let result = tree.pending_result_mail("root")[0].message_id.clone();
         tree.acknowledge_mail(&result).unwrap();
-        let running: Vec<_> = (0..MAX_DIRECT_CHILDREN)
+        let running: Vec<_> = (0..DEFAULT_DIRECT_CHILDREN)
             .map(|_| {
                 tree.spawn_agent("root", &spawn_req(), None)
                     .unwrap()
@@ -2097,7 +2097,7 @@ mod tests {
         tree.record_turn_completed(&first.agent_id).unwrap();
         tree.settle_for_test();
         let candidate = candidate_of(&tree, &first.agent_id);
-        for _ in 1..MAX_DIRECT_CHILDREN {
+        for _ in 1..DEFAULT_DIRECT_CHILDREN {
             let child = tree.spawn_agent("root", &spawn_req(), None).unwrap();
             tree.record_turn_completed(&child.agent_id).unwrap();
             tree.settle_for_test();
@@ -2126,7 +2126,7 @@ mod tests {
     fn acknowledged_results_release_slots_after_reopen_and_history_pruning() {
         let (_tmp, mut tree) = tree();
         let mut finished = Vec::new();
-        for _ in 0..MAX_DIRECT_CHILDREN {
+        for _ in 0..DEFAULT_DIRECT_CHILDREN {
             let child = tree.spawn_agent("root", &spawn_req(), None).unwrap();
             tree.record_turn_completed(&child.agent_id).unwrap();
             finished.push(child.agent_id);
@@ -2143,7 +2143,7 @@ mod tests {
             tree.acknowledge_mail(&sent.message_id).unwrap();
         }
         assert_eq!(tree.inbox_for("root", true).len(), 64);
-        assert!(tree.messages.len() <= 64 + MAX_DIRECT_CHILDREN);
+        assert!(tree.messages.len() <= 64 + DEFAULT_DIRECT_CHILDREN);
         let mut reopened = ProductAgentTree::reopen(tree.to_persisted());
         reopened.state = TreeAdmissionState::Live;
         for id in finished {

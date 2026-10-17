@@ -200,6 +200,7 @@ impl PreparedAgent {
             request_anchor,
             nested_committed_observation_tokens: 0,
             post_compaction_note: self.post_compaction_note,
+            request_slots: self.request_slots,
             prompt_in_history: None,
             appended_prompt: None,
             effect_decision_tombstones: VecDeque::new(),

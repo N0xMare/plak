@@ -22,9 +22,10 @@ use serde_json::{Value, json};
 use crate::cell_budget::{CellAgentBudget, CellIdentity};
 use crate::epoch::RosterBinding;
 use crate::protocol::{
-    AdoptCandidateRequest, AttemptScopedRequest, ListAgentsRequest, MessagePurpose,
-    SendAgentMessageRequest, SpawnAgentRequest, SubmitResultRequest, TemplateName, Tier,
-    TopologyErrorCode, WaitAgentRequest, WorkspaceIdRequest,
+    AdoptCandidateRequest, AttemptScopedRequest, ListAgentsRequest, MAX_DIRECT_CHILDREN,
+    MAX_TREE_NODES, MessagePurpose, SendAgentMessageRequest, SpawnAgentRequest,
+    SubmitResultRequest, TemplateName, Tier, TopologyErrorCode, WaitAgentRequest,
+    WorkspaceIdRequest,
 };
 use crate::tree::text::errors::topology_wait_request_invalid_message;
 use crate::tree::text::{
@@ -4621,6 +4622,13 @@ fn schema(kind: TopologyKind, spawnable_templates: &[String]) -> Value {
     }
 }
 
+/// The caller-specific parts of the `spawn_agent` description.
+struct SpawnDescription {
+    nodes: usize,
+    children: usize,
+    cards: String,
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "one registration binds every collaborator the executor owns"
@@ -4629,7 +4637,7 @@ fn registration(
     driver: TreeDriver,
     caller_id: Arc<Mutex<String>>,
     kind: TopologyKind,
-    spawn_description: Option<&str>,
+    spawn_description: Option<&SpawnDescription>,
     spawnable_templates: &[String],
     binder: Option<Arc<dyn SpawnedSessionBinder>>,
     deliverer: Option<Arc<dyn MailDeliverer>>,
@@ -4641,14 +4649,16 @@ fn registration(
 ) -> TreeRuntimeResult<ToolRegistration> {
     let name = kind.name();
     let description = match (kind, spawn_description) {
-        (TopologyKind::Spawn, Some(cards)) => {
+        (TopologyKind::Spawn, Some(spawn)) => {
             // The Code Mode `exec` catalog renders a nested tool as a bare
             // TypeScript declaration and drops per-field descriptions, so
             // the `output_schema_json` shape has to be stated here or a
             // Code Mode root never sees it.
             PLAK_TOPOLOGY_SPAWN_DESCRIPTION_TEMPLATE
                 .replace("{await}", vocabulary.presented_name("wait_agent"))
-                .replace("{cards}", cards)
+                .replace("{nodes}", &spawn.nodes.to_string())
+                .replace("{children}", &spawn.children.to_string())
+                .replace("{cards}", &spawn.cards)
         }
         (TopologyKind::TaskOutput, _) => PLAK_TOPOLOGY_TASK_OUTPUT_DESCRIPTION.to_owned(),
         (TopologyKind::TaskKill, _) => PLAK_TOPOLOGY_TASK_KILL_DESCRIPTION.to_owned(),
@@ -4801,10 +4811,21 @@ pub fn topology_tool_registrations_on(
             .template
             .as_ref()
             .map(|template| template.as_str().to_owned());
-        let spawn_description = compiled
+        let spawn_description = if compiled
             .iter()
             .any(|name| *name == TopologyKind::Spawn.name())
-            .then(|| tree.snapshot.template_cards(caller_template.as_deref()));
+        {
+            let grant = tree
+                .grant(&caller_id)
+                .map_err(|error| TreeRuntimeError::new(error.message))?;
+            Some(SpawnDescription {
+                nodes: MAX_TREE_NODES.min(usize::from(grant.max_nodes)),
+                children: MAX_DIRECT_CHILDREN.min(usize::from(grant.max_children)),
+                cards: tree.snapshot.template_cards(caller_template.as_deref()),
+            })
+        } else {
+            None
+        };
         let spawnable_templates: Vec<String> = tree
             .snapshot
             .spawnable_template_names(caller_template.as_deref())
@@ -4827,7 +4848,7 @@ pub fn topology_tool_registrations_on(
             driver.clone(),
             Arc::clone(&caller_id),
             vocabulary.presents(slot),
-            spawn_description.as_deref(),
+            spawn_description.as_ref(),
             &spawnable_templates,
             binder.as_ref().map(Arc::clone),
             deliverer.as_ref().map(Arc::clone),
