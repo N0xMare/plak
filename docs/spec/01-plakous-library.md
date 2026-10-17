@@ -749,6 +749,10 @@ route or round that reports no usage still keeps ordinary tool results instead
 of withholding all of them and forcing a pressure fold. A completed matching
 response with positive input usage refreshes that allowance before any tool
 results in the round are canonicalized.
+A nested call's result inside a local composition cell (`LocalProgrammatic`
+lineage) goes to the cell, not the model: it neither charges the allowance nor
+is clipped, and emits no `ObservationClipped`. Only the cell's composed answer
+is charged, clipped and announced, once.
 Committed compaction can create room for later calls. The exhaustion message
 says output was withheld for context capacity, the harness compacts automatically
 when enabled, and to retry narrower afterwards; it never hands recovery to the

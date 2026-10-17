@@ -9,8 +9,8 @@ use crate::{
 };
 use plakous_model::{
     Actor, CallId, ContentBlock, ContextOverflow, ConversationItem, EntryId, MediaSource,
-    ModelError, ModelEvent, Provenance, TextBlock, ToolCallBlock, ToolExecutionOwner,
-    ToolResultBlock, ToolResultKind, ToolResultPart, TurnId, Usage,
+    ModelError, ModelEvent, Provenance, TextBlock, ToolCallBlock, ToolCallerLineage,
+    ToolExecutionOwner, ToolResultBlock, ToolResultKind, ToolResultPart, TurnId, Usage,
 };
 use plakous_tools::{ToolRuntimeError, internal::preview};
 /// First output item or delta, including activity from suppressed tool input.
@@ -326,6 +326,15 @@ pub(super) fn clip_tool_result(
     result: ToolResultBlock,
     budget: &mut budget::ObservationBudget,
 ) -> Result<(ToolResultBlock, Option<ObservationClip>), AgentError> {
+    // A nested call's result goes to the evaluator cell, not to the model:
+    // only the cell's composed answer is observed, clipped and announced, so
+    // a nested result neither charges the budget nor clips.
+    if matches!(
+        result.correlation().caller_lineage(),
+        ToolCallerLineage::LocalProgrammatic { .. }
+    ) {
+        return Ok((result, None));
+    }
     let original_bytes = tool_result_text_len(&result);
     let capacity_limited = budget.capacity_limited();
     let available = budget.remaining.unwrap_or(usize::MAX);

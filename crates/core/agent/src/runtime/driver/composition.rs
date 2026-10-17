@@ -1779,11 +1779,10 @@ impl Driver {
             .await?;
         let result = match execution.result {
             Ok(result) => {
-                // A nested composition child's own result. Not announced,
-                // because this completion carries no attempt id and the clip
-                // observation is call-scoped; the composed answer that reaches
-                // the model is announced at the outer site instead, and its
-                // bytes are what the operator is told about.
+                // A nested composition child's own result goes to the cell,
+                // not the model, so the observation budget passes it through
+                // unclipped; the composed answer is clipped and announced once
+                // at the outer site.
                 let (item, _) = canonicalize_observed_tool_execution(
                     execution.result_entry_id,
                     result,

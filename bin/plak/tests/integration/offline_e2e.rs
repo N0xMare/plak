@@ -4647,16 +4647,10 @@ fn real_composition_quit_releases_nested_process() {
 ///
 /// The command must be plain text: a `tr '\0' x` spelling reaches the process
 /// tool as a literal NUL, which it refuses, so the cell fails with nothing to
-/// clip.
-///
-/// HELD on a product bug this case now shows: the nested `exec_command` result
-/// is clipped against the turn's observation budget and announced (2,013 of
-/// 60,262 bytes kept against the 2,048-byte bound), and then the composed
-/// answer that carries it is charged again and clipped to the 35 bytes left.
-/// The model only ever sees the composed answer, so nested results inside a
-/// cell must neither charge the budget nor announce. Un-hold with that fix.
+/// clip. Before nested results bypassed the budget, the nested `exec_command`
+/// result was clipped and announced and the composed answer was then clipped
+/// again to what was left: two notes.
 #[test]
-#[ignore = "held: a nested Code Mode result is clipped and announced before its composed answer"]
 fn a_clipped_observation_inside_a_composed_answer_is_announced_once() {
     let mut plan = code_mode_script(&json!([
         {"output": {"cell": "const big = await tools.exec_command({ cmd: \"yes x | head -c 60000\" });\ntext(big);\n"}, "finish": "tool_calls"},
