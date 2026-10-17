@@ -387,8 +387,9 @@ cp -r configs/providers/codex/. "$PLAK_HOME"    # or claude, grok, multi
 Every built-in has the same four roles:
 
 - **root** — `full` access, core tools only; it spawns the working set.
-- **worker** — `full` access; `spawns = ["reviewer", "researcher"]`, which
-  only takes effect once you raise `[orchestration] max_depth` to 2.
+- **worker** — `full` access; `spawns = ["researcher"]`, which only takes
+  effect once you raise `[orchestration] max_depth` to 2. The researcher is a
+  leaf, so this role graph is never deeper than 2 whatever `max_depth` says.
 - **reviewer** — `read-execute`, a leaf.
 - **researcher** — `full` access, a leaf with web tools (`web_search` and
   `fetch_url`, plus `web_fetch` on Claude and `x_search` on Grok). It saves the

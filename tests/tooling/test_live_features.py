@@ -224,7 +224,7 @@ class ProfileHomeTests(unittest.TestCase):
                               "multi-default-researcher"])
             worker = tomllib.loads((home / "agents/multi-default-worker.toml").read_text())
             self.assertEqual(worker["spawns"],
-                             ["multi-default-reviewer", "multi-default-researcher"])
+                             ["multi-default-researcher"])
             self.assertEqual(features.profile_model("multi-default", "researcher"),
                              "grok-4.7-build-fast")
 

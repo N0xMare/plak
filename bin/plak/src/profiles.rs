@@ -464,9 +464,9 @@ mod tests {
     }
 
     /// Every built-in applies and saves as a loadable home: the shipped
-    /// worker's `spawns` name its sibling roles under the profile's prefix.
+    /// worker's `spawns` names the researcher under the profile's prefix.
     #[test]
-    fn every_builtin_saves_a_home_whose_worker_spawns_its_own_siblings() {
+    fn every_builtin_saves_a_home_whose_worker_spawns_its_own_researcher() {
         for id in [
             "codex-default",
             "claude-default",
@@ -484,7 +484,7 @@ mod tests {
                     .iter()
                     .map(|name| name.as_str().to_owned())
                     .collect::<Vec<_>>(),
-                [format!("{id}-reviewer"), format!("{id}-researcher")],
+                [format!("{id}-researcher")],
                 "{id}"
             );
             assert!(
