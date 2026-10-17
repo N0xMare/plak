@@ -371,7 +371,7 @@ class LongSessionOracleTests(unittest.TestCase):
     def test_prompts_do_not_carry_the_fact_token(self):
         token = "plak-fact-abcdef12"
         for prompt in (long_session.growth_prompt(10), long_session.follow_prompt(),
-                       long_session.overflow_prompt([1, 175]), long_session.child_prompt(10),
+                       long_session.overflow_prompt(20, [[1, 21], [41, 61]]), long_session.child_prompt(10),
                        long_session.plant_prompt()):
             self.assertNotIn(token, prompt)
         long_session.hide_token(long_session.growth_prompt(4), token)
@@ -606,7 +606,35 @@ class LongSessionOracleTests(unittest.TestCase):
         self.assertNotIn("read_file", codex)
         self.assertIn(str(long_session.GROWTH_CALL_LINES), codex)
         self.assertNotIn("2000", long_session.growth_prompt(40))
-        self.assertNotIn("2000", long_session.overflow_prompt([1]))
+        self.assertNotIn("2000", long_session.overflow_prompt(20, [[1, 21]]))
+
+    def test_overflow_rounds_stay_under_the_round_cap_and_reach_the_trigger(self):
+        """No batch is clipped by the observation cap, and together they pass the trigger."""
+        for name in ("codex", "grok", "claude-sonnet55-low", "deepseek", "grok-46"):
+            route = live.ROUTES[name]
+            window = long_session.catalog_window(route.model)
+            pack = long_session.pack_of(route)
+            line_count = long_session.default_pages(route) * long_session.lines_per_page()
+            lines, batches = long_session.overflow_plan(window, pack, line_count, route.model)
+            batch_bytes = long_session.OVERFLOW_BATCH_CALLS * lines * long_session.LINE_BYTES
+            self.assertLessEqual(batch_bytes, long_session.round_cap_bytes(window), name)
+            self.assertTrue(all(len(batch) == long_session.OVERFLOW_BATCH_CALLS
+                                for batch in batches), name)
+            offsets = [offset for batch in batches for offset in batch]
+            self.assertEqual(offsets, sorted(set(offsets)), name)
+            self.assertLessEqual(offsets[-1] + lines - 1, line_count, name)
+            per_token = long_session.bulk_bytes_per_token(pack)
+            self.assertGreater(len(batches) * batch_bytes / per_token,
+                               long_session.compaction_trigger(window, route.model), name)
+        self.assertEqual(long_session.round_cap_bytes(1_000_000), 262_144)
+        self.assertEqual(long_session.round_cap_bytes(65_536), 32_768)
+        self.assertEqual(long_session.round_cap_bytes(272_000), 87_040)
+        prompt = long_session.overflow_prompt(21, [[1, 22], [43, 64]], "codex")
+        self.assertIn("Print the first 84 lines in 2 execs", prompt)
+        self.assertIn("exec_command", prompt)
+        self.assertIn("Round 2: offsets 41, 61.",
+                      long_session.overflow_prompt(20, [[1, 21], [41, 61]], "grok"))
+        self.assertNotIn("read_file", prompt)
 
     def test_child_compaction_projection_and_ordinals(self):
         segment = {

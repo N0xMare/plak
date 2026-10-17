@@ -41,6 +41,21 @@ PAGE_TOKENS = READ_PAGE_BYTES // 4
 # Spec 01 §10.3: the generic rule subtracts max(ceil(window/10), this bound).
 # 16384 is the semantic compaction output bound; 4096 is the summary headroom.
 _SUMMARY_HEADROOM = 16_384 + 4_096
+# Spec 01 observation policy bounds for the per-round text cap.
+ROUND_CAP_MIN_BYTES = 32_768
+ROUND_CAP_MAX_BYTES = 262_144
+# An overflow round is one parallel batch of this many reads, filling this
+# share of the round cap. Extra rounds past the trigger estimate absorb the
+# estimate's error and put a batch on an almost full window.
+OVERFLOW_BATCH_CALLS = 2
+OVERFLOW_CAP_SHARE = 0.75
+OVERFLOW_EXTRA_ROUNDS = 2
+# Provider bytes per token for bulk lines: count_tokens for base64 and the
+# Claude digit lines (see below); Codex prepared ~146k tokens for 617 KB of
+# digit lines read live.
+BASE64_BYTES_PER_TOKEN = 1.06
+DIGIT_BYTES_PER_TOKEN = 2.0
+CODEX_DIGIT_BYTES_PER_TOKEN = 4.0
 # 28 pages are 7 MiB of tool text, under the 8 MiB capture cap on one request.
 MAX_GROWTH_PAGES = 28
 # Above the page count, below the spec 07 ceiling of 1024, so a growth turn
@@ -49,8 +64,7 @@ ROUND_CAP = 128
 LINE_BYTES = 1500
 # One sequential read. 20 lines are 30_000 bytes, about 7_500 tokens. A
 # 2_000-line read of this file is most of a 256k window and trips ContextLimit
-# before compaction can run. Overflow still batches one product page per call
-# (`lines_per_page`), which is 174 lines, not 2_000.
+# before compaction can run. Overflow sizes its calls from the round cap.
 GROWTH_CALL_LINES = 20
 # Anthropic's classifier refused a Claude growth turn reading base64 pages
 # (`category=reasoning_extraction`), so the claude pack reads random decimal
@@ -195,11 +209,6 @@ def growth_call_lines(pack: str, window: int | None = None) -> int:
     return lines
 
 
-def page_offsets(pages: int) -> list[int]:
-    per_page = lines_per_page()
-    return [1 + index * per_page for index in range(pages)]
-
-
 def pack_of(route: live.Route) -> str:
     """Process pack for this route. Codex and the OpenAI API are Code Mode."""
     if route.account in ("codex", "openai") or route.model.startswith("gpt-"):
@@ -269,25 +278,74 @@ def follow_prompt() -> str:
     )
 
 
-def overflow_prompt(offsets: list[int], pack: str = "grok") -> str:
-    listed = ", ".join(str(offset) for offset in offsets)
-    limit = lines_per_page()
+def round_cap_bytes(window: int) -> int:
+    """Spec 01 observation policy: text one model round may observe, in bytes.
+
+    `clamp(floor(window * 4 * 8 / 100), 32768, 262144)`. A read beyond it is
+    clipped and does not grow the context, so no single batch can overflow a
+    large window.
+    """
+    return min(ROUND_CAP_MAX_BYTES, max(ROUND_CAP_MIN_BYTES, window * 4 * 8 // 100))
+
+
+def overflow_plan(window: int | None, pack: str, line_count: int,
+                  model: str | None = None) -> tuple[int, list[list[int]]]:
+    """Lines per call and the offsets of each round's parallel batch.
+
+    Each batch fills `OVERFLOW_CAP_SHARE` of the round cap, so nothing is
+    clipped and every round adds its whole batch to the context. The rounds
+    cover the compaction trigger at the pack's measured bytes per token, plus
+    `OVERFLOW_EXTRA_ROUNDS` so a late batch lands on an almost full window.
+    An unknown window is planned as the smallest one the driver knows.
+    """
+    window = window or OPENROUTER_CUSTOM_INPUT
+    budget = int(round_cap_bytes(window) * OVERFLOW_CAP_SHARE)
+    lines = max(1, budget // OVERFLOW_BATCH_CALLS // LINE_BYTES)
+    per_round = OVERFLOW_BATCH_CALLS * lines
+    bytes_per_token = bulk_bytes_per_token(pack)
+    round_tokens = per_round * LINE_BYTES / bytes_per_token
+    rounds = -(-compaction_trigger(window, model) // int(round_tokens)) + OVERFLOW_EXTRA_ROUNDS
+    rounds = max(1, min(rounds, line_count // per_round))
+    batches = [[1 + (index * OVERFLOW_BATCH_CALLS + call) * lines
+                for call in range(OVERFLOW_BATCH_CALLS)] for index in range(rounds)]
+    return lines, batches
+
+
+def bulk_bytes_per_token(pack: str) -> float:
+    return {"codex": CODEX_DIGIT_BYTES_PER_TOKEN,
+            "claude": DIGIT_BYTES_PER_TOKEN}.get(pack, BASE64_BYTES_PER_TOKEN)
+
+
+def overflow_timeout(rounds: int, pages: int) -> float:
+    return float(max(growth_timeout(pages), 120 * rounds))
+
+
+def overflow_prompt(lines: int, batches: list[list[int]], pack: str = "grok") -> str:
+    listed = " ".join(
+        f"Round {index}: offsets {', '.join(str(offset) for offset in batch)}."
+        for index, batch in enumerate(batches, 1))
+    order = "Wait for a batch's results before the next round, and do not skip or merge rounds."
     if pack == "codex":
-        how = (
-            "call exec_command on bulk.txt at every one of these line offsets, "
-            f"in a parallel batch, before you use any result: {listed}. "
-            f"Each call prints at most {limit} lines with python3 and no other file. "
-            "Do not sequence the calls and do not use a read tool."
+        # Codex refused batched reads framed as filling the context. The
+        # wording it followed live is the growth turn's paging and purpose,
+        # a pair of slices per exec, and the explicit round list.
+        return (
+            "Print bulk.txt with exec_command only. This surface has no read tool. In Code "
+            "Mode, make one exec per pair of slices and wait for its result before the next "
+            f"exec. Each exec runs two exec_command calls in parallel, each printing {lines} "
+            f"lines with python3, starting at line 1 and then at each next offset of {lines}. "
+            f"Print the first {lines * len(batches) * len(batches[0])} lines in {len(batches)} "
+            f"execs; do not stop early. {order} {listed} When the last round's result is in, "
+            "write the token you learned from the earlier turn into recalled.txt, exactly and "
+            "alone. Do not open token.txt or acknowledged.txt again. Reply with exactly: done"
         )
-    else:
-        how = (
-            f"call the {_read_tool(pack)} tool on bulk.txt at every one of these "
-            f"line offsets, in a parallel batch, before you use any result: {listed}. "
-            f"Use limit {limit} on each call. Do not sequence the calls and do not call "
-            "the shell."
-        )
+    # Stating the purpose keeps a batched read from looking like extraction.
     return (
-        f"In one response, {how} After that parallel batch, stop. Do not open token.txt."
+        "bulk.txt is random filler for a context-capacity test of this agent harness: "
+        f"loading it into your context is the task. Read bulk.txt in {len(batches)} rounds "
+        f"using only the {_read_tool(pack)} tool, not the shell. In each round, call it once "
+        f"per listed line offset, all in one parallel batch, each with limit {lines}. {order} "
+        f"{listed} After the last round, reply with exactly: done. Do not open token.txt."
     )
 
 
@@ -448,9 +506,9 @@ def reached_trigger(records: list[dict], window: int | None, model: str | None =
 def overflow_remedy(records: list[dict]) -> str | None:
     """Which overflow remedy the session log shows, if one committed.
 
-    A parallel batch is usually absorbed before the provider answers: the
-    tool-group fence compacts (`scheduled`) once occupancy crosses the
-    trigger, and an over-window batch may first shrink via
+    The rounds of batches are usually absorbed before the provider answers:
+    the tool-group fence compacts (`scheduled`) once occupancy crosses the
+    trigger, and a batch that would pass the window may first shrink via
     `context.placeholders`. The host's `capacity` compact runs only when the
     turn actually stops on ContextLimit. Spec 01 §10.3.
     """
@@ -1017,7 +1075,7 @@ class LongSession:
 
     def overflow(self) -> str:
         token = "plak-fact-" + self.random_bytes(4).hex()
-        repo, _lines = self.repo("overflow", token, bulk=True)
+        repo, line_count = self.repo("overflow", token, bulk=True)
         home = self.home("overflow")
         agent = self.agent("overflow", repo, home)
         try:
@@ -1026,9 +1084,10 @@ class LongSession:
             require_completed(plant, "fact turn")
             if not text_equals(repo / "acknowledged.txt", token):
                 raise ScenarioFailure(MODEL, "acknowledged.txt does not match token.txt")
-            prompt = overflow_prompt(page_offsets(self.pages), pack)
+            lines, batches = overflow_plan(self.window, pack, line_count, self.route.model)
+            prompt = overflow_prompt(lines, batches, pack)
             hide_token(prompt, token)
-            turn = agent.prompt(prompt, timeout=growth_timeout(self.pages))
+            turn = agent.prompt(prompt, timeout=overflow_timeout(len(batches), self.pages))
             records = poll_records(
                 home, agent.session_id, lambda rows: overflow_remedy(rows) is not None)
             remedy = self._require_overflow(turn, records)

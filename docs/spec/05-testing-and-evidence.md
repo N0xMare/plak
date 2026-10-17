@@ -2381,7 +2381,12 @@ in `tests/live/` (whose README lists every scenario and its oracle):
   the default twelve: in-turn compaction, an overflow remedy and continuation,
   SIGKILL mid-tool then reopen, and a child that compacts and still reports.
   The pre-release bar runs all four on every `full` row, via `--all` (§3.4).
-  The overflow remedy is whichever the session log shows: an in-turn
+  The product caps the text one model round observes (chapter 01,
+  observation policy), so one parallel batch cannot fill a large window. The
+  overflow turn reads in rounds instead: each round is one parallel batch of
+  reads under that cap, and the rounds together pass the route's compaction
+  trigger, so the last batches land on an almost full window. The overflow
+  remedy is whichever the session log shows: an in-turn
   `scheduled` compact, a `context.placeholders` shrink, or a failed
   `ContextLimit` turn followed by a `capacity` compact. `just smoke <route>
   --only <names>` selects them too. Oracles are session-log and file facts,
