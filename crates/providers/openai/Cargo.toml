@@ -21,6 +21,7 @@ native-auth = [
     "dep:subtle",
     "plakous-auth/http-refresh",
     "tokio/io-util",
+    "tokio/macros",
     "tokio/net",
 ]
 # Test-only: lets a dependent's tests bind native browser-login callbacks on an
