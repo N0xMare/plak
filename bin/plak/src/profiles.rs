@@ -33,68 +33,95 @@ struct Builtin {
 /// The roles every built-in ships, the working set in this order.
 const ROLES: [&str; 3] = ["worker", "reviewer", "researcher"];
 
-/// One built-in's files from `configs/providers/<dir>`: the root template
-/// and the three working-set roles.
-macro_rules! builtin_files {
-    ($dir:literal) => {
-        &[
-            BuiltinFile {
-                role: "root",
-                body: include_str!(concat!(
-                    "../../../configs/providers/",
-                    $dir,
-                    "/agents/root-agent.toml"
-                )),
-            },
-            BuiltinFile {
-                role: "worker",
-                body: include_str!(concat!(
-                    "../../../configs/providers/",
-                    $dir,
-                    "/agents/worker.toml"
-                )),
-            },
-            BuiltinFile {
-                role: "reviewer",
-                body: include_str!(concat!(
-                    "../../../configs/providers/",
-                    $dir,
-                    "/agents/reviewer.toml"
-                )),
-            },
-            BuiltinFile {
-                role: "researcher",
-                body: include_str!(concat!(
-                    "../../../configs/providers/",
-                    $dir,
-                    "/agents/researcher.toml"
-                )),
-            },
-        ]
-    };
-}
-
 const BUILTINS: &[Builtin] = &[
     Builtin {
         id: "codex-default",
         aliases: &["codex", "chatgpt"],
-        files: builtin_files!("codex"),
+        files: &[
+            BuiltinFile {
+                role: "root",
+                body: include_str!("../../../configs/providers/codex/agents/root-agent.toml"),
+            },
+            BuiltinFile {
+                role: "worker",
+                body: include_str!("../../../configs/providers/codex/agents/worker.toml"),
+            },
+            BuiltinFile {
+                role: "reviewer",
+                body: include_str!("../../../configs/providers/codex/agents/reviewer.toml"),
+            },
+            BuiltinFile {
+                role: "researcher",
+                body: include_str!("../../../configs/providers/codex/agents/researcher.toml"),
+            },
+        ],
     },
     Builtin {
         id: "claude-default",
         aliases: &["claude"],
-        files: builtin_files!("claude"),
+        files: &[
+            BuiltinFile {
+                role: "root",
+                body: include_str!("../../../configs/providers/claude/agents/root-agent.toml"),
+            },
+            BuiltinFile {
+                role: "worker",
+                body: include_str!("../../../configs/providers/claude/agents/worker.toml"),
+            },
+            BuiltinFile {
+                role: "reviewer",
+                body: include_str!("../../../configs/providers/claude/agents/reviewer.toml"),
+            },
+            BuiltinFile {
+                role: "researcher",
+                body: include_str!("../../../configs/providers/claude/agents/researcher.toml"),
+            },
+        ],
     },
     Builtin {
         id: "grok-default",
         aliases: &["grok", "supergrok"],
-        files: builtin_files!("grok"),
+        files: &[
+            BuiltinFile {
+                role: "root",
+                body: include_str!("../../../configs/providers/grok/agents/root-agent.toml"),
+            },
+            BuiltinFile {
+                role: "worker",
+                body: include_str!("../../../configs/providers/grok/agents/worker.toml"),
+            },
+            BuiltinFile {
+                role: "reviewer",
+                body: include_str!("../../../configs/providers/grok/agents/reviewer.toml"),
+            },
+            BuiltinFile {
+                role: "researcher",
+                body: include_str!("../../../configs/providers/grok/agents/researcher.toml"),
+            },
+        ],
     },
     // Root and reviewer on Claude, worker on Codex, researcher on Grok.
     Builtin {
         id: "multi-default",
         aliases: &["multi"],
-        files: builtin_files!("multi"),
+        files: &[
+            BuiltinFile {
+                role: "root",
+                body: include_str!("../../../configs/providers/multi/agents/root-agent.toml"),
+            },
+            BuiltinFile {
+                role: "worker",
+                body: include_str!("../../../configs/providers/multi/agents/worker.toml"),
+            },
+            BuiltinFile {
+                role: "reviewer",
+                body: include_str!("../../../configs/providers/multi/agents/reviewer.toml"),
+            },
+            BuiltinFile {
+                role: "researcher",
+                body: include_str!("../../../configs/providers/multi/agents/researcher.toml"),
+            },
+        ],
     },
 ];
 

@@ -422,10 +422,10 @@ EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
     # fragments (head, maintainer verbs, tail) and one page per verb. The
     # renderer supplies only what a page cannot state for itself.
     ("plak", "src/cli/render.rs"): ("include_str",) * 23,
-    # The three provider homes are the built-in Agents profiles. Each home's
+    # The four provider homes are the built-in Agents profiles. Each home's
     # four role files are compiled into the binary so a user with no
-    # `~/.plak/profiles` still has codex, claude, and grok.
-    ("plak", "src/profiles.rs"): ("include_str",) * 12,
+    # `~/.plak/profiles` still has codex, claude, grok and multi.
+    ("plak", "src/profiles.rs"): ("include_str",) * 16,
 }
 EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]] = {
     ("plak", "src/terminal_application.rs"): [
