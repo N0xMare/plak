@@ -40,6 +40,7 @@ CATALOG = (
     ("fetch_url", "cli"),
     ("mcp_stdio", "cli"),
     ("mcp_http", "cli"),
+    ("mcp_stdio_py", "cli"),
     ("mcp_github_stdio", "cli"),
     ("mcp_github_http", "cli"),
     ("mcp_everything_all", "cli"),
@@ -406,7 +407,7 @@ class Features:
     # One `plak run` on a private home whose root template lists `tools`.
     def run(self, name: str, prompt: str, tools: list[str], *, config: str = "",
             images: list[Path] = (), route: live.Route | None = None,
-            stage: str = "turn", timeout: float = 600,
+            stage: str = "turn", timeout: float = 600, composition: str | None = None,
             before=None) -> tuple[str, list[dict], list[Path], Path, str]:
         route = route or self.route
         base = self.env.artifacts / name
@@ -416,6 +417,8 @@ class Features:
         home = base / ("home" if stage == "turn" else f"home-{stage}")
         live.write_home(home, route, self.env.home)
         set_tools(home, tools)
+        if composition:
+            live.pin_composition(home, composition)
         if config:
             with (home / "config.toml").open("a") as file:
                 file.write("\n" + config)
@@ -424,6 +427,8 @@ class Features:
         segment_start = len(self.env.capture_segments)
         log = base / f"{stage}.log"
         args = [*route.flags(), "--print-session-id"]
+        if composition:
+            args += ["--composition", composition]
         for image in images:
             args += ["--image", str(image)]
         code, out = live.run_cli(self.env, repo, [*args, "--", prompt], log,
@@ -488,11 +493,17 @@ class Features:
     def mcp_http(self) -> str:
         return self._mcp_everything("mcp_http", "http")
 
+    def mcp_stdio_py(self) -> str:
+        """The stdio reference server from a Python Code Mode cell: `get-sum` is
+        not a Python identifier, so the cell must reach it as `get_sum`."""
+        return self._mcp_everything("mcp_stdio_py", "stdio", composition="py-ptc")
+
     def mcp_everything_all(self) -> str:
         """Every tool the reference server lists (no allowlist), over stdio."""
         return self._mcp_everything("mcp_everything_all", "stdio", wildcard=True)
 
-    def _mcp_everything(self, name: str, transport: str, wildcard: bool = False) -> str:
+    def _mcp_everything(self, name: str, transport: str, wildcard: bool = False,
+                        composition: str | None = None) -> str:
         entry = everything_server()
         node = shutil.which("node")
         if not node:
@@ -528,14 +539,17 @@ class Features:
                 raise ScenarioFailure(HARNESS, "reference MCP server did not start")
             config = ("[mcp_servers.everything]\ntransport = \"http\"\n"
                       f"url = \"http://127.0.0.1:{port}/mcp\"\n{allowlist}")
-        cell = (" Make both calls from inside one exec cell (Code Mode), not as direct "
+        python = composition == "py-ptc"
+        cell = (" Make both calls from inside one exec_py Python cell." if python else
+                " Make both calls from inside one exec cell (Code Mode), not as direct "
                 "tool calls." if code_mode(self.route) else "")
         prompt = (f"Use the MCP server named everything. Call its get-sum tool with a={a} and "
                   f"b={b}, then call its get-env tool.{cell} Reply on one line with the sum "
                   "returned by get-sum and the value of PLAK_LIVE_MCP_TOKEN returned by get-env.")
         try:
             out, records, segments, _, session = self.run(name, prompt, ["mcp:everything"],
-                                                          config=config)
+                                                          config=config,
+                                                          composition=composition)
         finally:
             if server is not None:
                 server.terminate()
@@ -560,7 +574,15 @@ class Features:
         else:
             posts = (base / "server.log").read_text().count("Received MCP POST request")
             detail += f"; server saw {posts} POSTs and returned its own token"
-        if code_mode(self.route):
+        if python:
+            if not tool_calls(records, "exec_py"):
+                raise ScenarioFailure(MODEL, f"{detail}: session log has no exec_py cell")
+            if not any("mcp__everything__get_sum(" in json.dumps(request)
+                       for request in requests):
+                raise ScenarioFailure(MODEL, f"{detail}: no Python cell called "
+                                             "mcp__everything__get_sum")
+            detail += "; called as mcp__everything__get_sum from an exec_py cell"
+        elif code_mode(self.route):
             if not any(name in source for source in cell_sources(requests)
                        for name in ("mcp__everything__get-sum", "mcp__everything__get_sum")):
                 raise ScenarioFailure(MODEL, f"{detail}: no Code Mode cell called get-sum")
