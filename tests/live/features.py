@@ -802,9 +802,18 @@ class Features:
         out, records, segments, repo, session = self.run(f"{tool}_401", prompt, [tool],
                                                          faults=plan)
         after = self.credential_generation()
+        self.refreshes = refresh_rows(self.env.artifacts / f"{tool}_401" / "home",
+                                      self.route.account)
         if after <= before:
             raise ScenarioFailure(HARNESS, f"session {session}: login generation stayed "
                                            f"{before}; the 401 forced no refresh")
+        # One refresh is two record writes: the claim stores the old payload as
+        # outcome-unknown at G+1 before any token I/O, the success stores Ready
+        # at G+2. Anything else is a second refresh.
+        grants = sum(phase == "completed" for phase, _ in self.refreshes)
+        if self.refreshes and after - before != 2 * grants:
+            raise ScenarioFailure(HARNESS, f"session {session}: generation {before} -> {after} "
+                                           f"for {grants} completed refresh(es)")
         return out, records, segments, repo, session, f"generation {before} -> {after}"
 
     def web_search_401(self) -> str:
@@ -812,7 +821,8 @@ class Features:
         one more request, and the search succeeds."""
         _, records, segments, _, session, refreshed = self._side_request_401("web_search")
         urls = self._retrieval_sources("web_search", records, segments, session)
-        return f"session {session}: 401 then {refreshed}; web_search returned {len(urls)} sources"
+        return (f"session {session}: 401 then {refreshed}; refresh telemetry "
+                f"{self.refreshes}; web_search returned {len(urls)} sources")
 
     def image_gen_401(self) -> str:
         """An injected 401 on the images request: refresh, resend, image saved."""
@@ -861,6 +871,17 @@ class Features:
             raise ScenarioFailure(HARNESS, f"{detail}: the root was offered fetch_url")
         return (f"{detail}: root froze no tools (template on {other}); spawning worker "
                 "(fetch_url) was refused template_not_spawnable")
+
+
+def refresh_rows(home: Path, account: str) -> list[tuple[str, int]]:
+    """(phase, generation) of each credential refresh the home's telemetry holds."""
+    import sqlite3
+    rows = []
+    for path in sorted(home.rglob("telemetry*.sqlite3")):
+        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
+            rows += db.execute("SELECT phase, generation FROM credential_refreshes "
+                               "WHERE provider LIKE ? ORDER BY id", (f"%{account}%",)).fetchall()
+    return rows
 
 
 def set_tools(home: Path, tools: list[str], template: str = "root-agent") -> None:
