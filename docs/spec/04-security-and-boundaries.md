@@ -542,6 +542,17 @@ refresh restoration or completion, or a login. Dropping a claim leaves the
 quarantine in place, so a crash mid-refresh leaves it quarantined. No error or
 disposition value is accepted as authority to clear one.
 
+The durable Unknown record a claim writes first is not yet a quarantine while
+its claim is in flight. A reader that finds Unknown while a live process (this
+one or another) holds the refresh execution lock reads **refreshing**: status,
+doctor and the TUI say so, a usage read reports contention, and dispatch
+admission (model catalog, child spawn) waits up to 30 seconds for the outcome
+before judging it. Only an Unknown whose lock is free is quarantined. The login
+recovery gate treats an Unknown under the login it cleared as that record's own
+lifecycle, never as recovery-state damage, so it sets no process-local
+quarantine: a long-running process sees another process's (or its own)
+completed refresh on its next read, without a restart.
+
 One vertical differs and says so: for xAI SuperGrok a retryable unknown outcome
 is a **new claimed generation** of the already-stored refresh token rather than
 an in-place replay of the ambiguous POST. Chapter 01 §7.3 holds the exact split
@@ -593,8 +604,8 @@ that confirmed replacement removes a newer receipt or recovery marker;
 record, removing an envelope it cannot decode. Nothing is converted and no
 stored format changes.
 
-One classification of a stored credential (signed out, usable, needs refresh,
-quarantined, needs login with its reason, written by a newer build, profile
+One classification of a stored credential (signed out, usable, refreshing,
+needs refresh, quarantined, needs login with its reason, written by a newer build, profile
 inactive, unsupported) drives `plak status`, login, logout, refresh, the usage
 read and model runs, and its repair never names the command that produced it.
 

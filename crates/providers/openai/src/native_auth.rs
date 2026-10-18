@@ -1041,6 +1041,14 @@ fn local_credential_status(
     {
         return Ok(OfflineCredentialLifecycle::LoginRequired);
     }
+    if fence
+        .as_ref()
+        .is_some_and(|fence| fence.status() == CredentialStatus::RefreshOutcomeUnknown)
+    {
+        return store
+            .offline_lifecycle()
+            .map_err(|_| NativeCodexAuthError::Store);
+    }
     Ok(OfflineCredentialLifecycle::classify(
         fence.as_ref().map(CredentialFence::status),
     ))

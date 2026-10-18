@@ -196,6 +196,7 @@ pub(super) fn map_codex_status(status: plakous_openai::CodexCredentialStatus) ->
         plakous_openai::CodexCredentialStatus::Ready => NativeAuthStatus::Ready,
         plakous_openai::CodexCredentialStatus::RefreshRequired => NativeAuthStatus::RefreshRequired,
         plakous_openai::CodexCredentialStatus::Quarantined => NativeAuthStatus::Quarantined,
+        plakous_openai::CodexCredentialStatus::Refreshing => NativeAuthStatus::Refreshing,
         plakous_openai::CodexCredentialStatus::Revoked => NativeAuthStatus::Revoked,
         plakous_openai::CodexCredentialStatus::LoginRequired => NativeAuthStatus::LoginRequired,
         plakous_openai::CodexCredentialStatus::WrittenByNewerBuild => {
@@ -233,6 +234,7 @@ pub(super) fn map_xai_offline_status(
             NativeAuthStatus::RefreshRequired
         }
         plakous_xai::XaiOfflineCredentialStatus::Quarantined => NativeAuthStatus::Quarantined,
+        plakous_xai::XaiOfflineCredentialStatus::Refreshing => NativeAuthStatus::Refreshing,
         plakous_xai::XaiOfflineCredentialStatus::Revoked => NativeAuthStatus::Revoked,
         plakous_xai::XaiOfflineCredentialStatus::WrittenByNewerBuild => {
             NativeAuthStatus::WrittenByNewerBuild
@@ -490,6 +492,7 @@ pub(super) fn map_claude_offline_status(
             NativeAuthStatus::RefreshRequired
         }
         plakous_auth::OfflineCredentialLifecycle::Quarantined => NativeAuthStatus::Quarantined,
+        plakous_auth::OfflineCredentialLifecycle::Refreshing => NativeAuthStatus::Refreshing,
         plakous_auth::OfflineCredentialLifecycle::Revoked => NativeAuthStatus::Revoked,
         plakous_auth::OfflineCredentialLifecycle::LoginRequired => NativeAuthStatus::LoginRequired,
         plakous_auth::OfflineCredentialLifecycle::WrittenByNewerBuild => {

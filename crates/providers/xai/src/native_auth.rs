@@ -527,7 +527,7 @@ impl XaiOfflineSelectedSlot {
             if let Some(fence) = self.store.load()? {
                 refuse_retired_payload(&self.store, &fence)?;
             }
-            offline_status(self.store.status()?)
+            Ok(self.store.offline_lifecycle()?)
         })();
         match status {
             Err(
@@ -3158,12 +3158,6 @@ fn map_oauth_workflow_error(error: OAuthWorkflowError) -> XaiNativeAuthError {
         ),
         _ => XaiNativeAuthError::InvalidTokenResponse(CredentialRefreshFailureReason::TokenShape),
     }
-}
-
-fn offline_status(
-    status: Option<CredentialStatus>,
-) -> Result<XaiOfflineCredentialStatus, XaiNativeAuthError> {
-    Ok(OfflineCredentialLifecycle::classify(status))
 }
 
 fn system_unix_seconds() -> Result<u64, XaiNativeAuthError> {

@@ -1413,6 +1413,7 @@ fn oauth_check(kind: CheckKind, probe: OauthCredentialProbe) -> DoctorCheck {
         (_, CredentialState::Ready) => "ready",
         (_, CredentialState::RefreshRequired) => "refresh_required",
         (_, CredentialState::Quarantined) => "refresh_outcome_unknown",
+        (_, CredentialState::Refreshing) => "refreshing",
         (_, CredentialState::Revoked) => "revoked",
         (_, CredentialState::LoginRequired) => "retired_format",
         (_, CredentialState::ProfileChanged) => "profile_changed",

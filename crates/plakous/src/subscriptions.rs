@@ -219,6 +219,9 @@ pub enum NativeAuthStatus {
     RefreshRequired,
     /// A rotating-token outcome is unknown and inference is blocked.
     Quarantined,
+    /// A refresh claimed by a live process (this one or another) is in
+    /// flight; the outcome settles to another state when its owner finishes.
+    Refreshing,
     /// A local revoked tombstone prevents stale resurrection.
     Revoked,
     /// A stored login this build cannot use (made by an earlier build); a new
@@ -1295,6 +1298,11 @@ impl Drop for ArmedLoginRecovery<'_> {
     }
 }
 
+/// Bound on how long dispatch admission waits for another owner's claimed
+/// refresh to settle; a refresh exchange is bounded well inside it.
+const REFRESH_IN_FLIGHT_WAIT: Duration = Duration::from_secs(30);
+const REFRESH_IN_FLIGHT_POLL: Duration = Duration::from_millis(200);
+
 /// The single credential admission rule for every dispatch-shaped path: model
 /// catalog, inference, and child spawn.
 ///
@@ -1690,6 +1698,7 @@ impl NativeSubscriptions {
             Ok(NativeAuthStatus::Quarantined) => SubscriptionUsageUnavailable::CredentialState(
                 SubscriptionUsageCredentialState::Quarantined,
             ),
+            Ok(NativeAuthStatus::Refreshing) => SubscriptionUsageUnavailable::Busy,
             Ok(NativeAuthStatus::Revoked) => SubscriptionUsageUnavailable::CredentialState(
                 SubscriptionUsageCredentialState::Revoked,
             ),
@@ -1976,12 +1985,30 @@ impl NativeSubscriptions {
         &self,
         provider: NativeProvider,
     ) -> Result<NativeSubscriptionStatus, NativeSubscriptionError> {
+        self.await_refresh_in_flight(provider).await?;
         let _ = self.refresh(provider).await;
-        let status = self.status(provider).await?;
+        let status = self.await_refresh_in_flight(provider).await?;
         if !dispatch_credential_admitted(provider, status.credential()) {
             return Err(NativeSubscriptionError::CredentialUnavailable);
         }
         Ok(status)
+    }
+
+    /// Reads the status, waiting a bounded time while a refresh another task
+    /// or process claimed is in flight, so admission judges its outcome
+    /// rather than the transient Unknown record it writes first.
+    async fn await_refresh_in_flight(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<NativeSubscriptionStatus, NativeSubscriptionError> {
+        let deadline = Instant::now() + REFRESH_IN_FLIGHT_WAIT;
+        loop {
+            let status = self.status(provider).await?;
+            if status.credential() != NativeAuthStatus::Refreshing || Instant::now() >= deadline {
+                return Ok(status);
+            }
+            run_blocking(|| std::thread::sleep(REFRESH_IN_FLIGHT_POLL)).await?;
+        }
     }
 
     /// Ensures the exact selected subscription credential is fresh enough for

@@ -320,6 +320,7 @@ pub const fn credential_state(status: FacadeAuthStatus) -> CredentialState {
         FacadeAuthStatus::Ready => CredentialState::Ready,
         FacadeAuthStatus::RefreshRequired => CredentialState::RefreshRequired,
         FacadeAuthStatus::Quarantined => CredentialState::Quarantined,
+        FacadeAuthStatus::Refreshing => CredentialState::Refreshing,
         FacadeAuthStatus::Revoked => CredentialState::Revoked,
         FacadeAuthStatus::LoginRequired => CredentialState::LoginRequired,
         FacadeAuthStatus::WrittenByNewerBuild => CredentialState::WrittenByNewerBuild,
@@ -378,6 +379,7 @@ pub const fn credential_display_label(status: CredentialState) -> &'static str {
         CredentialState::SignedOut => "Missing",
         CredentialState::RefreshRequired => "Refresh required",
         CredentialState::Quarantined => "Unavailable",
+        CredentialState::Refreshing => "Refreshing",
         CredentialState::Revoked => "Revoked",
         CredentialState::LoginRequired => "Login required",
         CredentialState::ProfileChanged => "Profile changed",
@@ -428,6 +430,7 @@ pub const fn credential_status_name(status: CredentialState) -> &'static str {
         CredentialState::Ready => "ready",
         CredentialState::RefreshRequired => "refresh-required",
         CredentialState::Quarantined => "quarantined",
+        CredentialState::Refreshing => "refreshing",
         CredentialState::Revoked => "revoked",
         CredentialState::LoginRequired => "login-required",
         CredentialState::ProfileChanged => "profile-changed",
@@ -493,6 +496,9 @@ fn credential_not_ready(provider: NativeProvider, status: CredentialState) -> Cl
         ),
         CredentialState::Quarantined => format!(
             "{account} credential is quarantined after an uncertain refresh; run `plak login {account}`"
+        ),
+        CredentialState::Refreshing => format!(
+            "{account} credential is being refreshed by a running plak process; retry in a moment"
         ),
         CredentialState::Revoked => {
             format!("{account} credential was revoked; run `plak login {account}`")

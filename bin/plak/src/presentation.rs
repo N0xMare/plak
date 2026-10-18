@@ -42,6 +42,8 @@ pub enum CredentialState {
     RefreshRequired,
     /// Credential is quarantined.
     Quarantined,
+    /// A refresh claimed by a live process is in flight.
+    Refreshing,
     /// Credential was revoked.
     Revoked,
     /// A stored login this build cannot use; a new login is required.
@@ -344,6 +346,11 @@ pub fn tui_presentation_bundle_with_backend_and_composition(
                 CredentialState::Quarantined => (
                     plakous_host_protocol::views::ProviderState::RefreshUnknown,
                     "quarantined".to_owned(),
+                    false,
+                ),
+                CredentialState::Refreshing => (
+                    plakous_host_protocol::views::ProviderState::Ready,
+                    "refreshing".to_owned(),
                     false,
                 ),
                 CredentialState::Revoked => (

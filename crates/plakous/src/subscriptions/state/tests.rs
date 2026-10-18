@@ -1915,6 +1915,64 @@ fn durable_unknown_after_cleared_recovery_gate_is_xai_only() -> Result<(), Box<d
     Ok(())
 }
 
+/// A long-running host that reads status while a refresh it (or another
+/// process) claimed is in flight must see `Refreshing`, and must see the
+/// rotated Ready record once that refresh completes, without a restart.
+#[cfg(unix)]
+#[tokio::test]
+async fn in_flight_refresh_reads_refreshing_and_leaves_no_sticky_quarantine()
+-> Result<(), Box<dyn Error>> {
+    for provider in [NativeProvider::Claude, NativeProvider::Codex] {
+        let root = unique_test_root(&format!("in-flight-refresh-{}", provider.as_str()))?;
+        let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
+        let consent_generation = install_ready_login_fixture(&paths, provider, 7)?;
+        let operation = arm_login_recovery(&paths, provider, &consent_generation)?;
+        clear_login_recovery(&paths, provider, &operation, 7)?;
+        let notice = NativeSubscriptions::notice(provider);
+        let profile = plakous_auth::SubscriptionIntegrationProfileId::new(notice.profile_id())?;
+        let store = plakous_auth::PrivateCredentialStore::open_slot(
+            paths.provider_record(provider),
+            profile.clone(),
+            plakous_auth::CredentialSlotId::new(PRIMARY_SLOT)?,
+        )?;
+        let ready = store.load()?.ok_or("missing ready fixture")?;
+        let claim = store.begin_refresh(&ready)?.start();
+
+        let subscriptions = NativeSubscriptions::new(paths.clone());
+        let during = subscriptions.status(provider).await?;
+        assert_eq!(
+            during.credential(),
+            NativeAuthStatus::Refreshing,
+            "{provider:?}"
+        );
+        assert!(!dispatch_credential_admitted(provider, during.credential()));
+
+        store.complete_refresh(
+            claim,
+            plakous_auth::CredentialRecord::new(
+                profile,
+                plakous_auth::AccountBinding::new("fixture-account")?,
+                plakous_auth::CredentialGeneration::new(9)?,
+                plakous_auth::CredentialStatus::Ready,
+                plakous_auth::SecretBytes::new(b"fixture-rotated-credential".to_vec()),
+            )?,
+        )?;
+        // The same process admits the rotated record: no process-local
+        // quarantine outlived the refresh.
+        assert!(
+            !login_recovery_required_for_status(
+                &paths,
+                provider,
+                Some(&consent_generation),
+                NativeAuthStatus::Ready,
+            )?,
+            "{provider:?}"
+        );
+        fs::remove_dir_all(root)?;
+    }
+    Ok(())
+}
+
 #[test]
 fn dispatch_admission_is_one_rule_for_spawn_and_catalog() {
     for provider in [
@@ -1933,6 +1991,7 @@ fn dispatch_admission_is_one_rule_for_spawn_and_catalog() {
         for refused in [
             NativeAuthStatus::SignedOut,
             NativeAuthStatus::RefreshRequired,
+            NativeAuthStatus::Refreshing,
             NativeAuthStatus::Revoked,
         ] {
             assert!(!dispatch_credential_admitted(provider, refused));

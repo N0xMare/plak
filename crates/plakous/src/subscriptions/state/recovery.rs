@@ -220,6 +220,7 @@ pub(super) fn login_recovery_required_for_status(
         NativeAuthStatus::Ready
             | NativeAuthStatus::RefreshRequired
             | NativeAuthStatus::Quarantined
+            | NativeAuthStatus::Refreshing
             | NativeAuthStatus::LoginRequired
     );
     let marker = match (
@@ -283,20 +284,24 @@ pub(super) fn login_recovery_required_for_status(
             }
         }
     }
-    // xAI durable Unknown after a claimed refresh is retryable with the stored
-    // refresh token (xAI reconciliation). Matching consent/
-    // epoch means this is not a foreign slot takeover. Codex/Claude stay
-    // fail-closed.
-    if provider == NativeProvider::Xai
-        && consent_matches
+    // A durable Unknown under the login this marker cleared is the record's
+    // own lifecycle, not a recovery-state mismatch, so it never sets the
+    // process-local quarantine: that would outlive the refresh and keep this
+    // process refusing a credential every other process reads as Ready.
+    // A claim still in flight settles on its own. xAI retries a settled
+    // Unknown on the stored refresh token (xAI reconciliation); Codex/Claude
+    // stay fail-closed until a new login, through the durable record alone.
+    let own_unknown = consent_matches
         && epoch_matches
-        && credential == NativeAuthStatus::Quarantined
         && matches!(
             (current_generation, marker.credential_generation),
             (Some(current), Some(pinned)) if current >= pinned
-        )
-    {
+        );
+    if own_unknown && credential == NativeAuthStatus::Refreshing {
         return Ok(false);
+    }
+    if own_unknown && credential == NativeAuthStatus::Quarantined {
+        return Ok(provider != NativeProvider::Xai);
     }
     quarantine(&LOGIN_RECOVERY_QUARANTINE, key)?;
     Ok(true)

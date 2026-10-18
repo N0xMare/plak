@@ -291,7 +291,7 @@ impl ClaudeOfflineSelectedSlot {
     /// Fails closed on unsafe or malformed explicit storage.
     pub fn status(&self) -> Result<OfflineCredentialLifecycle, ClaudeNativeAuthError> {
         let status = validate_current_ready_record(&self.store)
-            .and_then(|()| Ok(OfflineCredentialLifecycle::classify(self.store.status()?)));
+            .and_then(|()| Ok(self.store.offline_lifecycle()?));
         match status {
             Err(
                 ClaudeNativeAuthError::StoredCredentialWrittenByNewerBuild

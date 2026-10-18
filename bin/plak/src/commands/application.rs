@@ -126,10 +126,18 @@ impl CredentialVerdict {
         let inactive = status.compatibility == CompatibilityState::Inactive;
         match status.credential {
             CredentialState::SignedOut | CredentialState::Revoked => Self::SignedOut,
-            CredentialState::Ready | CredentialState::RefreshRequired if inactive => {
+            CredentialState::Ready
+            | CredentialState::RefreshRequired
+            | CredentialState::Refreshing
+                if inactive =>
+            {
                 Self::ProfileInactive
             }
-            CredentialState::Ready => Self::Usable(status.compatibility),
+            // A refresh another process owns settles to a new Ready generation
+            // or to its own failure state; it is a stored, usable login now.
+            CredentialState::Ready | CredentialState::Refreshing => {
+                Self::Usable(status.compatibility)
+            }
             CredentialState::RefreshRequired => Self::NeedsRefresh(status.compatibility),
             CredentialState::Quarantined => Self::Quarantined,
             CredentialState::LoginRequired => Self::NeedsLogin(LoginReason::RetiredFormat),

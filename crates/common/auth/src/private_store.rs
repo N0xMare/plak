@@ -538,6 +538,29 @@ impl PrivateCredentialStore {
         result
     }
 
+    /// Classifies the stored record for offline status surfaces.
+    ///
+    /// A durable Unknown record whose refresh claim a live process still owns
+    /// is [`crate::OfflineCredentialLifecycle::Refreshing`], never a settled
+    /// quarantine. A claim writes its outcome before it releases the execution
+    /// lock, so a free lock is followed by a re-read that sees that outcome.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::load`] and rejects unsafe lock files.
+    pub fn offline_lifecycle(
+        &self,
+    ) -> Result<crate::OfflineCredentialLifecycle, PrivateStoreError> {
+        let status = self.status()?;
+        if status != Some(CredentialStatus::RefreshOutcomeUnknown) {
+            return Ok(crate::OfflineCredentialLifecycle::classify(status));
+        }
+        if self.refresh_claim_in_flight()? {
+            return Ok(crate::OfflineCredentialLifecycle::Refreshing);
+        }
+        Ok(crate::OfflineCredentialLifecycle::classify(self.status()?))
+    }
+
     /// Loads only the current credential lifecycle status under lock.
     ///
     /// # Errors
@@ -3048,6 +3071,28 @@ mod tests {
         assert!(store.refresh_outcome_settled(&unknown)?);
         assert!(!store.refresh_outcome_settled(&fence)?);
         assert_eq!(store.load()?, Some(unknown));
+        Ok(())
+    }
+
+    #[test]
+    fn offline_lifecycle_reads_a_live_claim_as_refreshing_not_quarantined()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::OfflineCredentialLifecycle as Lifecycle;
+        let fixture = Fixture::new()?;
+        let store = fixture.store()?;
+        store.initialize(&fixture.record(1, CredentialStatus::Ready, b"lifecycle-secret")?)?;
+        assert_eq!(store.offline_lifecycle()?, Lifecycle::Ready);
+        let fence = store.load()?.ok_or("missing ready")?;
+        let claim = fixture.store()?.begin_refresh(&fence)?.start();
+        assert_eq!(store.offline_lifecycle()?, Lifecycle::Refreshing);
+        fixture.store()?.complete_refresh(
+            claim,
+            fixture.record(3, CredentialStatus::Ready, b"lifecycle-rotated")?,
+        )?;
+        assert_eq!(store.offline_lifecycle()?, Lifecycle::Ready);
+        let fence = store.load()?.ok_or("missing rotated")?;
+        drop(fixture.store()?.begin_refresh(&fence)?.start());
+        assert_eq!(store.offline_lifecycle()?, Lifecycle::Quarantined);
         Ok(())
     }
 

@@ -315,6 +315,9 @@ pub enum OfflineCredentialLifecycle {
     RefreshRequired,
     /// A remote outcome is ambiguous and inference remains blocked.
     Quarantined,
+    /// A refresh claim owned by a live process (this one or another) is in
+    /// flight: the durable Unknown record is not yet a settled outcome.
+    Refreshing,
     /// A local revoked tombstone prevents stale resurrection.
     Revoked,
     /// A record exists that this build cannot use (for example a login made
