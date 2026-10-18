@@ -819,7 +819,7 @@ fn run_refuses_an_invalid_config_before_any_account_or_session_work() {
     std::fs::write(paths.config_file(), "[tui]\nshow_timestamps = true\n").unwrap();
     let services = crate::shell::services::Services::for_home(paths.clone());
     let commands = [
-        crate::Command::Run {
+        crate::command::Command::Run {
             limits: plakous_hosted::runtime::RunBounds::default(),
             provider: NativeProvider::Codex,
             model: "gpt-5.6-sol".into(),
@@ -828,7 +828,7 @@ fn run_refuses_an_invalid_config_before_any_account_or_session_work() {
             prompt: "must not dispatch".into(),
             print_session_id: false,
         },
-        crate::Command::ContinueSession {
+        crate::command::Command::ContinueSession {
             limits: plakous_hosted::runtime::RunBounds::default(),
             session_id: "00000000-0000-0000-0000-000000000000".into(),
             prompt: "must not dispatch".into(),
@@ -879,7 +879,7 @@ fn run_with_a_signed_out_subscription_exits_3_naming_plak_login() {
     let services = crate::shell::services::Services::for_home(paths.clone());
     let mut app = PlakousApplication::for_accounts(home.path().join("state")).unwrap();
     let failure = crate::execute_application_command(
-        crate::Command::Run {
+        crate::command::Command::Run {
             limits: plakous_hosted::runtime::RunBounds::default(),
             provider: NativeProvider::Codex,
             model: "gpt-5.6-sol".into(),

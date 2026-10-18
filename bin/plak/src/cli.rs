@@ -7,7 +7,7 @@ use std::ffi::OsString;
 use clap::{ArgAction, Parser, Subcommand};
 use plakous::subscriptions::{NativeLoginMode, NativeProvider};
 
-use crate::{Command, NATIVE_RUN_MAX_PROMPT_BYTES, RunEffort};
+use crate::command::{Command, NATIVE_RUN_MAX_PROMPT_BYTES, RunEffort};
 
 /// Parse argv tokens (without binary name) into a product [`Command`].
 pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Command, String> {
@@ -1093,7 +1093,7 @@ fn finish_run(
         }
         let effort = effort
             .as_deref()
-            .map(|value| RunEffort::parse(value).ok_or_else(crate::run_effort_usage))
+            .map(|value| RunEffort::parse(value).ok_or_else(crate::command::run_effort_usage))
             .transpose()?
             .map(RunEffort::as_reasoning_effort);
         let composition = composition
@@ -1111,7 +1111,7 @@ fn finish_run(
             limits,
             provider,
             model,
-            effort: effort.ok_or_else(crate::run_effort_usage)?,
+            effort: effort.ok_or_else(crate::command::run_effort_usage)?,
             composition,
             prompt: plakous_host_protocol::Draft::new(prompt, images),
             print_session_id,
@@ -1122,7 +1122,7 @@ fn finish_run(
             .map(|value| {
                 RunEffort::parse(&value)
                     .map(RunEffort::as_reasoning_effort)
-                    .ok_or_else(crate::run_effort_usage)
+                    .ok_or_else(crate::command::run_effort_usage)
             })
             .transpose()?;
         let composition = composition
@@ -1161,7 +1161,7 @@ fn finish_run(
     // No silent default: the catalog decides whether an effort is required, and
     // `plak run` says so by name when it is (see `PlakousApplication::run`).
     let effort = effort
-        .map(|value| RunEffort::parse(&value).ok_or_else(crate::run_effort_usage))
+        .map(|value| RunEffort::parse(&value).ok_or_else(crate::command::run_effort_usage))
         .transpose()?;
     let composition = composition
         .map(|value| crate::product_config::ProductCompositionSelection::parse(&value))
@@ -1232,7 +1232,7 @@ fn finish_agent(
                 .map(|value| {
                     RunEffort::parse(value)
                         .map(RunEffort::as_reasoning_effort)
-                        .ok_or_else(crate::run_effort_usage)
+                        .ok_or_else(crate::command::run_effort_usage)
                 })
                 .transpose()?;
             let composition = composition
@@ -1271,7 +1271,7 @@ fn finish_agent(
                 .map(|value| {
                     RunEffort::parse(&value)
                         .map(RunEffort::as_reasoning_effort)
-                        .ok_or_else(crate::run_effort_usage)
+                        .ok_or_else(crate::command::run_effort_usage)
                 })
                 .transpose()?;
             let effort_explicit = effort.is_some();
@@ -1312,7 +1312,7 @@ fn finish_agent(
         None => None,
         Some(value) => Some(
             RunEffort::parse(&value)
-                .ok_or_else(crate::run_effort_usage)?
+                .ok_or_else(crate::command::run_effort_usage)?
                 .as_reasoning_effort(),
         ),
     };
@@ -1448,7 +1448,7 @@ mod tests {
             .map(OsString::from),
         )
         .unwrap_err();
-        assert_eq!(error, crate::run_effort_usage());
+        assert_eq!(error, crate::command::run_effort_usage());
     }
 
     #[test]
@@ -1527,7 +1527,7 @@ mod tests {
         }
     }
     use super::*;
-    use crate::Command;
+    use crate::command::Command;
     use proptest::prelude::*;
 
     fn args(values: &[&str]) -> Vec<OsString> {

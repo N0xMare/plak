@@ -96,7 +96,7 @@ pub(crate) fn entries(
 #[allow(clippy::unwrap_used, reason = "offline product contracts")]
 mod tests {
     use super::*;
-    use crate::Command;
+    use crate::command::Command;
 
     #[test]
     fn api_run_and_jsonl_commands_choose_exact_billed_accounts() {

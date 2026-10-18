@@ -7,6 +7,8 @@
 use std::io::Cursor;
 
 use super::*;
+use crate::command::{RunEffort, run_effort_levels, run_effort_usage};
+use plakous::subscriptions::NativeLoginMode;
 
 #[test]
 fn import_resume_post_commit_failure_names_the_successor_and_recovery_command() {
