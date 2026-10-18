@@ -1176,8 +1176,9 @@ payloads.
 
 ## 8. Reporting a vulnerability
 
-Security fixes target the latest commit on the default branch, and that is the
-only supported revision.
+Security fixes target the latest `0.0.x` release and the default branch; older
+releases are not patched. `SECURITY.md` at the repository root is the reporting
+policy.
 
 A vulnerability is reported **privately to the maintainer**. It MUST NOT be
 opened as a public issue, or discussed in a pull request, a discussion thread,
@@ -1185,9 +1186,8 @@ or anywhere else public before a fix exists. A report MUST NOT carry live
 credentials, authorization headers, private session databases, Plak home
 directories, or unredacted provider transcripts.
 
-Reach the maintainer privately through the repository's GitHub security
-reporting once it is enabled, or through the contact on the repository owner's
-GitHub profile; include the affected revision, configuration, impact and
+Reach the maintainer privately through the repository's GitHub private
+vulnerability reporting; include the affected revision, configuration, impact and
 reproduction steps. This chapter states what is and is not a vulnerability:
 behavior documented here as unbounded, unenforced, or convention is not one.
 

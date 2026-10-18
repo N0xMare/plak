@@ -1,7 +1,7 @@
 # Embedding Plakous in your own Rust program
 
 Plakous is an embeddable single-agent library. Plak is the CLI/TUI product built
-on it. Nothing is published to crates.io: depend on a source checkout by path.
+on it. Depend on `plakous` from crates.io, or on a source checkout by path.
 Use Rust **1.99.0** or later and edition **2024**. Supported platforms are Linux
 x86_64 musl and Apple Silicon macOS.
 
@@ -43,7 +43,8 @@ secrets; those are Plak product adapters.
 ## Your manifest
 
 This complete manifest supports copying a scripted example and
-`examples/common/scripted.rs` into a consumer crate. Adjust the checkout path:
+`examples/common/scripted.rs` into a consumer crate. For a source checkout,
+replace the version with `path = "../plak/crates/plakous"`:
 
 ```toml
 [package]
@@ -53,7 +54,7 @@ edition = "2024"
 rust-version = "1.99.0"
 
 [dependencies]
-plakous = { path = "../plak/crates/plakous", features = ["composition", "sessions-sqlite"] }
+plakous = { version = "0.0.1", features = ["composition", "sessions-sqlite"] }
 tokio = { version = "1.48", features = ["rt-multi-thread", "macros", "sync", "time"] }
 serde_json = "1.0"
 uuid = { version = "1.18", features = ["v4"] }
@@ -68,10 +69,10 @@ The manifest plus lockfile in `tests/fixtures/js-embedder-consumer` additionally
 pins the JavaScript-only API's external nameability; it is a compile fixture,
 not a second runnable agent implementation.
 
-JavaScript-only consumers need no `[patch]` table. Python,
-`native-subscriptions` and `full` reach the Monty dependency closure; repeat the
-checkout-relative patch tables documented in spec 06 §6.1. Cargo does not
-inherit a dependency's patch tables.
+No facade feature selection needs a `[patch]` table, including those that reach
+the Python evaluator. The evaluators run as worker executables:
+`cargo install --locked plakous-js-runtime plakous-py-worker` installs
+`plakous-js-host` and `monty`.
 
 ## Examples
 

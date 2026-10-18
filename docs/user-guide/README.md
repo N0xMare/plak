@@ -1,11 +1,11 @@
 # Plak user guide
 
-Plak is a coding agent with a CLI and a TUI, built from source. There are no
-releases and no published binaries: you clone the repository and build it.
+Plak is a coding agent with a CLI and a TUI. Install it with the release
+installer, `cargo install`, or a source build; see getting started.
 
 Start here:
 
-- **[Getting started](getting-started.md)** — clone, build, connect an account,
+- **[Getting started](getting-started.md)** — install or build, connect an account,
   run your first turn, open your first TUI session.
 - **[CLI reference](cli.md)** — every command, its flags, its output shape, and
   the exit codes.

@@ -45,7 +45,26 @@ Built-in compatibility pins carry review expiry dates: the Codex subscription pr
 
 **By default, agents run with full coding tools and no tool-approval prompts in their host environment.** They can modify or delete files and execute commands. Process tools run with your full host authority on Linux and macOS alike; there is no OS sandbox. Use a container or VM if you need a hard boundary around your machine. See [known limits and security model](docs/user-guide/known-limits-and-security-model.md).
 
-### Build the release binary
+### Install
+
+On Apple Silicon macOS or Linux x86_64:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/N0xMare/plak/main/install.sh | sh
+```
+
+The installer downloads the latest GitHub Release (or `PLAK_VERSION`), verifies
+its SHA-256 checksum, and installs `plak`, `plakous-js-host` and `monty` under
+`~/.local/lib/plak` with links in `~/.local/bin` (put that directory on your
+PATH). It needs no `sudo`. Alternatively, with Rust 1.99.0:
+
+```sh
+cargo install --locked plak plakous-js-runtime plakous-py-worker
+```
+
+Changes per release are in [CHANGELOG.md](CHANGELOG.md).
+
+### Build from source
 
 From the repository root, with Rust **1.99.0**, a platform C/C++ toolchain,
 [`just`](https://github.com/casey/just), Python 3.11+ and `nm` (or `llvm-nm`)
@@ -95,8 +114,8 @@ builds include the
 in-process jj-lib backend and the Git CLI backend; only the latter requires
 the `git` executable. To update, run `git pull` and repeat the build command.
 
-To **embed Plakous as a library**, depend on the source checkout by path,
-using Rust 1.99.0 or later and edition 2024. Defaults are empty: a Custom
+To **embed Plakous as a library**, depend on `plakous` from crates.io or on a
+source checkout by path, using Rust 1.99.0 or later and edition 2024. Defaults are empty: a Custom
 model with Direct tools needs no interpreter or provider credentials.
 `composition` adds consumer-owned JavaScript through the `plakous-js-host`
 worker, with no credential, HTTP or Python machinery and no `[patch]` table.
@@ -196,6 +215,7 @@ You can then start the TUI with `plak`. To configure multiple agents, use the [o
 - **[Behavioral specification](docs/spec/README.md):** authority for architecture, runtime behavior, security boundaries, persistence, and supported surfaces. Start with the [system overview](docs/spec/00-overview.md).
 - **[Crate map](docs/spec/00-overview.md#crate-map):** entrypoints and the authoritative package map.
 - **[Example configurations](configs/):** annotated reference settings and complete scenario homes.
+- **[Changelog](CHANGELOG.md)**, **[contributing](CONTRIBUTING.md)** and **[security policy](SECURITY.md)**.
 
 For local development, `just fast` lints and tests the packages you touched and their dependents, `just check` runs formatting, linting, structure checks, feature builds, the parallel and serial offline Rust test lanes, public compile contracts and Python tooling tests before each commit. `just full` adds the durability lane and rustdoc. Live tests are explicit opt-in and may incur provider usage. See [testing and evidence](docs/spec/05-testing-and-evidence.md).
 

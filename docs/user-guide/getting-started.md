@@ -1,9 +1,33 @@
 # Getting started
 
-Plak is built from source. There are no releases, no published binaries, and no
-`plak update`. Updating means pulling and rebuilding.
+Plak installs from a GitHub Release, from crates.io, or from a source checkout.
+There is no `plak update`: updating means installing again.
 
-## Before you start
+## Install
+
+The installer supports `aarch64-apple-darwin` and `x86_64-unknown-linux-musl`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/N0xMare/plak/main/install.sh | sh
+```
+
+It downloads the latest release tarball and `SHA256SUMS` from GitHub Releases
+(set `PLAK_VERSION` to pick a release), refuses a checksum mismatch, and checks
+the build attestation when `gh` is installed. It installs `plak`,
+`plakous-js-host` and `monty` into the same snapshot layout as `just install`
+below, with links in `~/.local/bin`, and never needs `sudo`. Any other platform
+is refused; build from source there.
+
+With a Rust 1.99.0 toolchain, Cargo installs the same three executables from
+crates.io into `~/.cargo/bin`, where Plak finds its workers beside itself:
+
+```sh
+cargo install --locked plak plakous-js-runtime plakous-py-worker
+```
+
+## Build from source
+
+### Before you start
 
 - **Rust 1.99.0**, pinned by `rust-toolchain.toml`, so rustup installs it on the
   first build. That is also the MSRV.
@@ -28,7 +52,7 @@ Plak is built from source. There are no releases, no published binaries, and no
   locked public compile-contract dependencies. Installation needs network
   access; subsequent compile-contract gates stay offline.
 
-## Build
+### Build
 
 ```sh
 git clone https://github.com/N0xMare/plak.git
