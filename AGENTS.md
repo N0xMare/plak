@@ -31,7 +31,7 @@ before each commit. Before installing a maintainer build, run `just full` and a
 strict crash sweep on Linux, plus `just platform` on macOS and `just musl-native`
 on Linux. The full strict crash sweep runs at publication boundaries.
 `just musl-check` is a maintainer-only container gate: it needs the preloaded
-offline image `plak-qual-base:6b7eb083`, which is not published (spec 06).
+offline image `plak-qual-base:07d6b926`, which is not published (spec 06).
 
 ```text
 just fast [PKG...]  # static checks + parallel lane over diff packages and dependents

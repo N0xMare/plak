@@ -564,7 +564,7 @@ just musl-check --fast plak  # optional targeted iteration
 ```
 
 `just musl-check` is a maintainer-only gate. `scripts/musl-check.sh` uses the
-preloaded image `plak-qual-base:6b7eb083` (image ID `6b7eb0837c32`), which is
+preloaded image `plak-qual-base:07d6b926` (image ID `07d6b926351c`), which is
 not published; without that image on a Linux x86_64 Docker host the gate cannot
 run, and the platform tiers above remain the public evidence. The image holds Alpine 3.24.2,
 Rust 1.99.0 with a musl host toolchain, clippy, rustfmt and C/C++ tools, Python 3.14,
