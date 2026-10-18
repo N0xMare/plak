@@ -3866,7 +3866,12 @@ payload is not printed in the transcript. It is not a completed tool execution
 despite sharing the activity-line projection. The JSONL surface carries the
 same synthetic activity line rather than an English system note.
 
-The context meter and HUD share the composer's upper-left border. Recovery
+The context meter and HUD share the composer's upper-left border. During a
+turn the meter reads the newest provider input count the turn has seen plus
+the `bytes÷4` estimate of what was added since; each new request of the turn
+keeps that count as its anchor rather than the older one the turn started
+from. Within a turn the reading never falls: only a provider count or a
+committed compaction may state a lower figure. Recovery
 attention stays red (`error: needs recovery · next prompt recovers`);
 `/recover` recovers at once, and in a detached shell `/attach` reopens the
 session, which recovers it.

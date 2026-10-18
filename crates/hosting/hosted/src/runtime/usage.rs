@@ -195,6 +195,10 @@ pub(super) fn emit_context_projection<P: plakous_host_protocol::ProtocolExtensio
 /// against the estimate as of that round's request. The reading is always
 /// [`plakous::model::context_occupancy_tokens`] over those, the one formula
 /// the next context query states exactly.
+///
+/// Within a turn the reading never falls: context only grows until a
+/// compaction, so a lower `bytes/4` reading is estimate error. Only a provider
+/// count (or a compaction) may state a lower figure.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) struct LiveOccupancy {
     /// Whole-request estimate through the last round boundary.
@@ -207,6 +211,10 @@ pub(super) struct LiveOccupancy {
     parts_estimate: bool,
     /// Bytes appended since the last round boundary.
     pending_round_bytes: u64,
+    /// The last reading shown this turn; `None` after a compaction.
+    floor: Option<u64>,
+    /// A provider count arrived since the last reading, which it may lower.
+    provider_counted: bool,
 }
 
 impl LiveOccupancy {
@@ -223,7 +231,23 @@ impl LiveOccupancy {
             anchor: projection.context_anchor(),
             parts_estimate,
             pending_round_bytes: 0,
+            floor: None,
+            provider_counted: false,
         }
+    }
+
+    /// The driver prepared the next request of this turn. Its parts estimate
+    /// replaces the running one, and the newest provider count this turn saw
+    /// stays the anchor: the held projection's anchor is only as new as the
+    /// turn's start, and re-reading it each round made the meter fall back to
+    /// that older count before every round and rise again on its usage report.
+    pub(super) fn next_request(self, projection: &ContextProjection) -> Self {
+        let mut next = Self::from_projection(projection);
+        if next.parts_estimate && self.parts_estimate {
+            next.anchor = self.anchor;
+        }
+        next.floor = self.floor;
+        next
     }
 
     /// A model round starts: what was appended becomes part of its request.
@@ -259,6 +283,7 @@ impl LiveOccupancy {
             .and_then(|estimate| plakous::model::ContextAnchor::new(input_tokens, estimate))
         {
             self.anchor = Some(anchor);
+            self.provider_counted = true;
         }
     }
 
@@ -274,19 +299,29 @@ impl LiveOccupancy {
         self.anchor = None;
         self.parts_estimate = parts_estimate;
         self.pending_round_bytes = 0;
+        self.floor = None;
+        self.provider_counted = false;
     }
 
     pub(super) const fn anchored(self) -> bool {
         self.anchor.is_some()
     }
 
-    pub(super) fn tokens(self) -> Option<u64> {
-        self.estimate.map(|estimate| {
+    /// The reading to show now, recorded as this turn's floor.
+    pub(super) fn tokens(&mut self) -> Option<u64> {
+        let measured = self.estimate.map(|estimate| {
             plakous::model::context_occupancy_tokens(
                 estimate.saturating_add(self.pending_round_bytes / 4),
                 self.anchor,
             )
-        })
+        })?;
+        let reading = match self.floor {
+            Some(floor) if !self.provider_counted => measured.max(floor),
+            _ => measured,
+        };
+        self.floor = Some(reading);
+        self.provider_counted = false;
+        Some(reading)
     }
 }
 
@@ -1321,8 +1356,49 @@ mod tests {
         assert_eq!(live.tokens(), Some(12_000));
         assert!(live.anchored());
 
-        let unavailable = LiveOccupancy::from_projection(&ContextProjection::unavailable());
+        let mut unavailable = LiveOccupancy::from_projection(&ContextProjection::unavailable());
         assert_eq!(unavailable.tokens(), None);
+    }
+
+    /// A long turn's rounds each publish a new request whose held projection
+    /// still carries the turn-start anchor. The meter must stay on the newest
+    /// provider count plus the estimated growth since, and never fall back to
+    /// the older count between a round's request and its usage report.
+    #[test]
+    fn live_occupancy_is_monotone_across_rounds_of_one_turn() {
+        let parts = plakous::model::ContextInputParts::measure_wire(br#"{"input":"x"}"#).unwrap();
+        let base = ContextProjection::test_fits(
+            crate::context::PreparedInputCount::UpperBound(900_000),
+            1_000_000,
+            1_000_000,
+            Some(parts),
+        );
+        let turn_start_anchor = plakous::model::ContextAnchor::new(700_000, 700_000);
+        let mut live = LiveOccupancy::from_projection(
+            &base.with_occupancy_measure(Some(700_000), turn_start_anchor),
+        );
+        live.round_started();
+        assert_eq!(live.tokens(), Some(700_000));
+        let mut readings = Vec::new();
+        for round in 1..=4_u64 {
+            // The provider counts 5k more than `bytes/4` saw for each round.
+            live.provider_input(700_000 + round * 15_000);
+            readings.push(live.tokens().unwrap());
+            live.appended(4_000);
+            readings.push(live.tokens().unwrap());
+            live = live.next_request(
+                &base.with_occupancy_measure(Some(700_000 + round * 10_000), turn_start_anchor),
+            );
+            readings.push(live.tokens().unwrap());
+            live.round_started();
+            readings.push(live.tokens().unwrap());
+        }
+        assert!(
+            readings.windows(2).all(|pair| pair[0] <= pair[1]),
+            "meter fell within the turn: {readings:?}"
+        );
+        // The last request reads the newest count plus its estimated growth.
+        assert_eq!(readings.last().copied(), Some(760_000 + 10_000));
     }
 
     /// A bound is not on the parts scale, so a provider count never anchors
