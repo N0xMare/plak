@@ -129,6 +129,9 @@ impl OpenRouterChatRoute {
             config.maximum_body_bytes,
         )
         .await?;
+        // The catalog decides whether the literal exists before its endpoints
+        // are asked for: an absent model is a catalog answer, not a status.
+        let model_facts = validate_models_document(&parse_unique_json(&models)?, literal)?;
         let endpoints = get_json(
             client,
             origin,
@@ -138,9 +141,7 @@ impl OpenRouterChatRoute {
             config.maximum_body_bytes,
         )
         .await?;
-        let model_value = parse_unique_json(&models)?;
         let endpoints_value = parse_unique_json(&endpoints)?;
-        let model_facts = validate_models_document(&model_value, literal)?;
         let candidates = validate_endpoints_document(&endpoints_value, literal)?;
         let observed_at = SystemClock.now();
         let expires_at = Timestamp::new(
@@ -823,7 +824,7 @@ fn validate_models_document(
             image_input,
         });
     }
-    matched.ok_or(OpenRouterChatDiscoveryError::AmbiguousModel)
+    matched.ok_or(OpenRouterChatDiscoveryError::AbsentModel)
 }
 
 fn validate_endpoints_document(
@@ -1153,8 +1154,11 @@ pub enum OpenRouterChatDiscoveryError {
     /// Catalog JSON omitted a required observation field.
     #[error("OpenRouter Chat discovery response is invalid: missing catalog field at {0}")]
     MissingCatalogField(String),
-    /// The literal model was absent or duplicated.
-    #[error("OpenRouter Chat discovery model is absent or ambiguous")]
+    /// The authenticated catalog lists no row for the literal model.
+    #[error("OpenRouter Chat discovery model is absent from the catalog")]
+    AbsentModel,
+    /// The literal model was duplicated or its canonical slug was unsafe.
+    #[error("OpenRouter Chat discovery model is ambiguous")]
     AmbiguousModel,
     /// A configured or catalog bound was exceeded.
     #[error("OpenRouter Chat discovery exceeded a resource bound")]
@@ -1415,6 +1419,20 @@ mod tests {
              "context_length": 1024, "supported_parameters": ["tools"]}
         ]});
         assert!(validate_models_document(&variant, "vendor/model:free").is_ok());
+        assert!(matches!(
+            validate_models_document(&evolving_neighbor, "vendor/absent"),
+            Err(OpenRouterChatDiscoveryError::AbsentModel)
+        ));
+        let duplicated = serde_json::json!({"data": [
+            {"id": "vendor/model", "canonical_slug": "vendor/model", "context_length": 1024,
+             "supported_parameters": ["tools"]},
+            {"id": "vendor/model", "canonical_slug": "vendor/model", "context_length": 1024,
+             "supported_parameters": ["tools"]}
+        ]});
+        assert!(matches!(
+            validate_models_document(&duplicated, "vendor/model"),
+            Err(OpenRouterChatDiscoveryError::AmbiguousModel)
+        ));
     }
 
     #[test]

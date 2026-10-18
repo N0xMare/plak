@@ -18,9 +18,9 @@ use plakous::model::{
     ToolChoice, ToolPresentationMode,
 };
 use plakous::openrouter::{
-    OpenRouterApiKeySource, OpenRouterChatClient, OpenRouterChatEndpointCandidate,
-    OpenRouterChatModelEvidence, OpenRouterKeyUsage, OpenRouterReasoningFacts,
-    OpenRouterRetentionPolicy, OpenRouterToolChoiceModes,
+    OpenRouterApiKeySource, OpenRouterChatClient, OpenRouterChatDiscoveryError,
+    OpenRouterChatEndpointCandidate, OpenRouterChatModelEvidence, OpenRouterKeyUsage,
+    OpenRouterReasoningFacts, OpenRouterRetentionPolicy, OpenRouterToolChoiceModes,
 };
 use plakous::sessions::{SessionRuntimeBinding, SessionTargetBinding};
 use plakous::tools::CodingPresentation;
@@ -30,7 +30,7 @@ use plakous::tools::CompiledSurface;
 #[cfg(test)]
 use crate::agent::NATIVE_RUN_MAX_OUTPUT_TOKENS;
 use crate::binding::{CompositionSelection, ResolvedProtocol};
-use crate::error::{CliFailure, CliResult};
+use crate::error::{CliFailure, CliFailureKind, CliResult};
 
 const OPENROUTER_CHAT_PROFILE: &str = "openrouter.chat.dynamic-v1";
 const OPENROUTER_CHAT_RETENTION_REVISION: &str = "openrouter-chat-gateway-retention-v1";
@@ -202,7 +202,17 @@ async fn prepare_openrouter(spec: &ProductOpenRouterSpec) -> CliResult<PreparedO
         || client.discover_exact(&spec.literal_model),
     )
     .await
-    .map_err(|error| CliFailure::new(format!("OpenRouter exact discovery failed: {error}")))?;
+    .map_err(|error| match error {
+        OpenRouterChatDiscoveryError::AbsentModel => CliFailure::classified(
+            CliFailureKind::Usage,
+            format!(
+                "model `{}` is not in the OpenRouter catalog of account `openrouter`; \
+                 run `plak models openrouter` to list the models it offers",
+                spec.literal_model
+            ),
+        ),
+        error => CliFailure::new(format!("OpenRouter exact discovery failed: {error}")),
+    })?;
     let reasoning_disable_wire =
         openrouter_reasoning_disable_wire(spec.wire, spec.effort, &evidence);
     if let Err(diagnostic) = openrouter_endpoint_admission(

@@ -2795,6 +2795,10 @@ admission, or qualification evidence.
 Catalog listing returns bounded opaque strings, including provider aliases such as
 `~vendor/latest`; a listing entry is not an admitted `ModelId`. Exact model
 discovery and execution continue to enforce their own literal and evidence rules.
+Exact discovery reads `GET /api/v1/models` first and asks for the model's
+endpoints only when that catalog lists the literal exactly once; a literal the
+catalog does not list is the typed `AbsentModel` answer, which Plak reports as
+a usage refusal naming the `openrouter` account and catalog.
 
 OpenRouter is one first-class dynamic provider with thin Chat, Responses, and
 Messages dialects over the existing kernels. A consumer exposes

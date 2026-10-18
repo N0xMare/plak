@@ -375,7 +375,8 @@ offline. A new binding's account and model pair (`plak agent`, the TUI's
 seeded root template) is admitted the same way, before any attach: the model
 must be a row of that account's table, never a name that merely looks like the
 provider's. OpenRouter ids are dynamic gateway selections and are left to its
-discovery; an account with no table is refused. The refusal names the model,
+authenticated discovery, which refuses an id the gateway catalog does not list
+in the same shape; an account with no table is refused. The refusal names the model,
 the account and its catalog, and the `plak models` listing that shows the rows.
 
 Codex OAuth enrolls exactly `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`,
