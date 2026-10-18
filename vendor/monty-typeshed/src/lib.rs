@@ -55,4 +55,14 @@ mod tests {
         // VERSIONS file should contain module version info like "builtins: 3.0-"
         assert!(versions_content.contains("builtins:"));
     }
+
+    #[test]
+    fn typeshed_zip_has_fixed_timestamps() {
+        let mut typeshed_zip_archive = zip::ZipArchive::new(io::Cursor::new(TYPESHED_ZIP_BYTES)).unwrap();
+
+        for index in 0..typeshed_zip_archive.len() {
+            let entry = typeshed_zip_archive.by_index(index).unwrap();
+            assert_eq!(entry.last_modified(), Some(zip::DateTime::default()));
+        }
+    }
 }

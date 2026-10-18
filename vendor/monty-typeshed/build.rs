@@ -47,6 +47,8 @@ fn write_zipped_typeshed_to(writer: File) -> ZipResult<File> {
         CompressionMethod::Stored
     };
 
+    // Fixed timestamps and sorted entries make the archive, and so the crate's
+    // embedded bytes, reproducible across builds.
     let options = SimpleFileOptions::default()
         .last_modified_time(zip::DateTime::default())
         .compression_method(method)
