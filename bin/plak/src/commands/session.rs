@@ -1454,7 +1454,8 @@ pub fn repair_invalid_new_session_binding(
 ) -> bool {
     let invalid = matches!(
         (record.account.as_deref(), record.model.as_deref()),
-        (Some(account), Some(model)) if !product_host::account_model_compatible(account, model)
+        (Some(account), Some(model))
+            if super::support::admit_account_model(account, model).is_err()
     );
     if !invalid {
         return false;

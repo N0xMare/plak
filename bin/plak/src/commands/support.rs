@@ -169,6 +169,17 @@ pub fn config_set_failure(message: String) -> CliFailure {
     CliFailure::classified(CliFailureKind::Usage, message)
 }
 
+/// Admits a new binding's account and model against the account's catalog.
+/// The gate's offline model has no catalog row; under the test hook it is the
+/// model the scripted lifecycle binds.
+pub(crate) fn admit_account_model(account: &str, model: &str) -> Result<(), String> {
+    #[cfg(feature = "test-hooks")]
+    if model == crate::test_hooks::SELECTOR && crate::test_hooks::selected().is_some() {
+        return Ok(());
+    }
+    plakous_hosted::binding::admit_account_model(account, model)
+}
+
 pub const fn cli_provider_name(provider: NativeProvider) -> &'static str {
     match provider {
         NativeProvider::Codex => "codex",

@@ -296,7 +296,14 @@ stdin and stdout. Stdio is the pipe; there is no `plak agent stdio` subcommand.
 Binding flags match `plak run` (`--account`, `--model`, `--effort`,
 `--composition`, `--protocol`, `--session`, `--resume-tree`); an omitted flag
 falls back to the `[root] agent` template's value, and `plak agent` refuses to
-start when neither supplies an account, a model, or a required effort.
+start when neither supplies an account, a model, or a required effort. A model
+that is not a row of the account's catalog is refused before anything attaches,
+naming the account, the catalog and the `plak models` command that lists it
+(OpenRouter model ids are left to OpenRouter):
+
+```
+model `gpt-5.6-luna` is not in the SuperGrok subscription catalog of account `grok`; run `plak models grok` to list the models it offers
+```
 
 ```
 plak agent --account codex --model gpt-5.6-luna --effort low

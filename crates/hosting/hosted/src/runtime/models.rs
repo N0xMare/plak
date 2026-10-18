@@ -3,8 +3,6 @@
 use plakous::agent::ReasoningEffort;
 use plakous::subscriptions::NativeProvider;
 
-use crate::binding::PlatformProvider;
-use crate::platform::platform_model;
 use crate::{CliFailure, CliResult};
 
 pub const fn native_compact_facet(provider: NativeProvider) -> bool {
@@ -82,45 +80,12 @@ pub fn ready_catalog_model_needs_effort(
         .map(|entry| !entry.effort_options.is_empty())
 }
 
-/// Heuristic: refuse attach when account and model id clearly belong to
-/// different OAuth catalogs (prevents `grok` + `gpt-5.6-luna` death spiral).
-pub fn account_model_compatible(account: &str, model_id: &str) -> bool {
-    let m = model_id.to_ascii_lowercase();
-    let looks_codex = m.starts_with("gpt-")
-        || m.contains("codex")
-        || m.starts_with("o1")
-        || m.starts_with("o3")
-        || m.starts_with("o4");
-    let looks_grok = m.starts_with("grok");
-    let looks_claude = m.starts_with("claude");
-    match account {
-        "openai" => platform_model(PlatformProvider::OpenAi, model_id).is_some(),
-        "anthropic" => platform_model(PlatformProvider::Anthropic, model_id).is_some(),
-        "xai-api" => platform_model(PlatformProvider::Xai, model_id).is_some(),
-        "codex" | "chatgpt" => !looks_grok && !looks_claude,
-        "grok" | "supergrok" | "xai-oauth" => !looks_codex && !looks_claude,
-        "claude" => !looks_codex && !looks_grok,
-        _ => true,
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
     use super::*;
 
     use plakous::subscriptions::NativeProvider;
-
-    #[test]
-    fn account_model_compatible_rejects_cross_provider() {
-        assert!(account_model_compatible("codex", "gpt-5.6-luna"));
-        assert!(account_model_compatible("grok", "grok-4.5"));
-        assert!(account_model_compatible("claude", "claude-sonnet-5"));
-        assert!(!account_model_compatible("grok", "gpt-5.6-luna"));
-        assert!(!account_model_compatible("codex", "grok-4.5"));
-        assert!(!account_model_compatible("claude", "grok-4.5"));
-        assert!(!account_model_compatible("codex", "claude-sonnet-5"));
-    }
 
     #[test]
     fn oauth_account_mapping() {

@@ -371,7 +371,12 @@ presentation, coding selection, Code Mode eligibility, attach admission,
 rows. A test in the hosted
 crate walks every row of every route through presentation, selection and
 admission, so a model enrolled in one place and missing from another fails
-offline.
+offline. A new binding's account and model pair (`plak agent`, the TUI's
+seeded root template) is admitted the same way, before any attach: the model
+must be a row of that account's table, never a name that merely looks like the
+provider's. OpenRouter ids are dynamic gateway selections and are left to its
+discovery; an account with no table is refused. The refusal names the model,
+the account and its catalog, and the `plak models` listing that shows the rows.
 
 Codex OAuth enrolls exactly `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6-sol`, `gpt-6-luna`,
 `gpt-5.6-sol`, `gpt-5.6-terra`,

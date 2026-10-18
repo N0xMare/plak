@@ -159,7 +159,6 @@ pub use binding_document::{
 pub use clear::clear_session_rebuild;
 pub(crate) use host_loop::publication::RECOVERY_PENDING_NOTE;
 pub use info::effort_label;
-pub use models::account_model_compatible;
 pub use models::effort_from_config;
 pub use models::effort_from_record;
 pub use models::native_compact_facet;

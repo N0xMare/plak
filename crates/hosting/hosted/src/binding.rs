@@ -331,6 +331,46 @@ pub const fn oauth_provider_for_account(account: &str) -> Option<NativeProvider>
     }
 }
 
+/// Admits `model` on `account` only when the account's catalog lists it: the
+/// provider's enrollment table on an OAuth subscription, the usable API
+/// catalog on a platform account. `OpenRouter` ids are dynamic gateway
+/// selections with no product catalog, so its own discovery decides. An
+/// account with neither is refused rather than guessed at.
+///
+/// # Errors
+/// The refusal names the account and the catalog the model is absent from,
+/// with the command that lists the catalog.
+pub fn admit_account_model(account: &str, model: &str) -> Result<(), String> {
+    let (catalog, listing) = if let Some(provider) = oauth_provider_for_account(account) {
+        if provider.enrolls(model) {
+            return Ok(());
+        }
+        match provider {
+            NativeProvider::Xai => ("SuperGrok subscription", "grok"),
+            NativeProvider::Claude => ("Claude subscription", "claude"),
+            _ => ("ChatGPT/Codex subscription", "codex"),
+        }
+    } else if let Some(provider) = PlatformProvider::for_account(account) {
+        if crate::platform::platform_model(provider, model).is_some() {
+            return Ok(());
+        }
+        let catalog = match provider {
+            PlatformProvider::OpenAi => "OpenAI API",
+            PlatformProvider::Anthropic => "Anthropic API",
+            PlatformProvider::Xai => "xAI API",
+        };
+        (catalog, provider.account())
+    } else if account == "openrouter" {
+        return Ok(());
+    } else {
+        return Err(RouteRefusal::NotOauth.message(account));
+    };
+    Err(format!(
+        "model `{model}` is not in the {catalog} catalog of account `{account}`; \
+         run `plak models {listing}` to list the models it offers"
+    ))
+}
+
 /// Refusal for an explicit `native-ptc` on a subscription row that enrolls no
 /// native programmatic tool calling. Only Codex Code Mode is enrolled, and only
 /// on `CodeModeOnly` rows.
@@ -524,8 +564,57 @@ impl From<ProtocolSelection> for plakous_host_protocol::ProtocolSelection {
 mod tests {
     use super::{
         CompositionSelection, OpenRouterRoutingSelection, ProtocolSelection, ResolvedProtocol,
-        TargetSelection, WIRE_RESOLUTION_REVISION, WireBinding,
+        TargetSelection, WIRE_RESOLUTION_REVISION, WireBinding, admit_account_model,
     };
+
+    #[test]
+    fn account_model_admission_reads_the_account_catalog() {
+        for (account, model) in [
+            ("codex", "gpt-5.6-luna"),
+            ("chatgpt", "gpt-5.6-luna"),
+            ("grok", "grok-4.5"),
+            ("supergrok", "grok-4.5"),
+            ("claude", "claude-sonnet-5"),
+            ("openrouter", "anything/at-all"),
+        ] {
+            assert_eq!(
+                admit_account_model(account, model),
+                Ok(()),
+                "{account} {model}"
+            );
+        }
+        // A plausible name is not an admission: only catalog rows are.
+        for (account, model) in [
+            ("codex", "gpt-3"),
+            ("codex", "grok-4.5"),
+            ("grok", "gpt-5.6-luna"),
+            ("grok", "grok-legacy"),
+            ("claude", "claude-instant-1"),
+            ("claude", "grok-4.5"),
+            ("openai", "grok-4.5"),
+            ("xai-api", "claude-sonnet-5"),
+        ] {
+            let refusal = admit_account_model(account, model).unwrap_err();
+            assert!(refusal.contains(&format!("`{model}`")), "{refusal}");
+            assert!(
+                refusal.contains(&format!("account `{account}`")),
+                "{refusal}"
+            );
+            assert!(refusal.contains("catalog"), "{refusal}");
+            assert!(refusal.contains("run `plak models "), "{refusal}");
+        }
+        assert_eq!(
+            admit_account_model("grok", "gpt-5.6-luna").unwrap_err(),
+            "model `gpt-5.6-luna` is not in the SuperGrok subscription catalog of account `grok`; \
+             run `plak models grok` to list the models it offers"
+        );
+        // An account with no catalog is refused, not guessed at.
+        assert!(
+            admit_account_model("mystery", "gpt-5.6-luna")
+                .unwrap_err()
+                .contains("account `mystery` requires")
+        );
+    }
 
     #[test]
     fn composition_selection_has_one_outer_marker_vocabulary() {

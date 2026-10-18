@@ -167,13 +167,9 @@ pub(crate) fn new_agent_record(
     } else if record.account.as_deref() == Some("openrouter") {
         record.effort = None;
     }
-    if let (Some(account), Some(model)) = (record.account.as_deref(), record.model.as_deref())
-        && !product_host::account_model_compatible(account, model)
-    {
-        return Err(CliFailure::classified(
-            CliFailureKind::Usage,
-            format!("account `{account}` is incompatible with model `{model}`"),
-        ));
+    if let (Some(account), Some(model)) = (record.account.as_deref(), record.model.as_deref()) {
+        super::support::admit_account_model(account, model)
+            .map_err(|refusal| CliFailure::classified(CliFailureKind::Usage, refusal))?;
     }
     Ok(record)
 }

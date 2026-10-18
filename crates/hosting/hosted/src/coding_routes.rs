@@ -436,8 +436,9 @@ mod tests {
                     "{}",
                     row.model
                 );
-                assert!(
-                    crate::runtime::account_model_compatible(provider.account(), &row.model),
+                assert_eq!(
+                    crate::binding::admit_account_model(provider.account(), &row.model),
+                    Ok(()),
                     "{}",
                     row.model
                 );
