@@ -90,7 +90,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         if self.transient_resumes_used >= budget {
             return false;
         }
-        let human = super::humanize_turn_error(error);
+        let human = error.to_owned();
         let wait = match failure.gate {
             ResumeGate::Network => "when the network returns".to_owned(),
             ResumeGate::Delay(delay) => format!("after {}s", delay.as_secs()),

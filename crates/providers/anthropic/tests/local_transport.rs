@@ -1507,6 +1507,13 @@ async fn fable_included_limit_requires_exact_oauth_model_and_header_claim() -> T
             expected,
             "oauth={oauth}, model={model}, status={status}: {error}",
         );
+        // Only the attested claim is typed quota exhaustion; every other
+        // response keeps its own category.
+        assert_eq!(
+            error.usage_limit(),
+            expected,
+            "oauth={oauth}, model={model}, status={status}: {error}",
+        );
         assert_eq!(
             error.http_status().map(plakous_model::ModelHttpStatus::get),
             Some(status)

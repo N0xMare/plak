@@ -24,8 +24,8 @@ use super::views::{
 };
 use crate::runtime::events::{
     abandoned_turn_operator_detail, compact_terminal_subject, completed_tool_detail,
-    completed_tool_state, compose_counts_subject, host_owns_subject, humanize_turn_error,
-    projected_tool_subject, wait_settled, wait_started,
+    completed_tool_state, compose_counts_subject, host_owns_subject, projected_tool_subject,
+    wait_settled, wait_started,
 };
 use crate::sessions::{
     MAX_TRANSCRIPT_BYTES, MAX_TRANSCRIPT_LINES, NoticeScope, ProductCompactReason, ThinkingRow,
@@ -1154,7 +1154,7 @@ impl Applier<'_> {
         match outcome {
             FeedTurnOutcome::Failed { context, .. } => {
                 let text = match self.terminal_read(turn_id)? {
-                    TerminalRead::Failed(error) => humanize_turn_error(&error),
+                    TerminalRead::Failed(error) => error,
                     _ => "agent turn failed".to_owned(),
                 };
                 self.push(TranscriptRow::error(NoticeScope::Turn, text));

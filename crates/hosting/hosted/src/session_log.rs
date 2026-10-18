@@ -642,18 +642,9 @@ fn recover_last_sequence(file: &mut File) -> Result<u64, String> {
     let mut tail = vec![0_u8; bytes_read];
     file.read_exact(&mut tail)
         .map_err(|_| "could not read session event log".to_owned())?;
-    let ends_with_newline = tail.last() == Some(&b'\n');
-    let sequence =
-        tail.rsplit(|byte| *byte == b'\n')
-            .enumerate()
-            .find_map(|(reverse_index, line)| {
-                let line = trim_ascii(line);
-                event_sequence(line).or_else(|| {
-                    (ends_with_newline || reverse_index > 0)
-                        .then(|| legacy_event_sequence(line))
-                        .flatten()
-                })
-            });
+    let sequence = tail
+        .rsplit(|byte| *byte == b'\n')
+        .find_map(|line| event_sequence(trim_ascii(line)));
     match sequence {
         Some(sequence) => Ok(sequence),
         None if file_len <= bytes_read as u64 => Ok(0),
@@ -799,20 +790,6 @@ fn event_kind_is(line: &[u8], expected: &str) -> bool {
                     .strip_prefix(expected)
                     .is_some_and(|suffix| suffix.starts_with('.'))
         })
-}
-
-/// Old builds escaped quotes and backslashes but could write literal control
-/// characters. Such a record is not returned as JSON, but its leading sequence
-/// remains useful to prevent reuse when repairing the append boundary.
-fn legacy_event_sequence(line: &[u8]) -> Option<u64> {
-    let text = std::str::from_utf8(line).ok()?;
-    let (_, suffix) = text.split_once("\"seq\"")?;
-    let suffix = suffix.trim_start();
-    let suffix = suffix.strip_prefix(':')?.trim_start();
-    let digits = suffix.bytes().take_while(u8::is_ascii_digit).count();
-    (digits > 0)
-        .then(|| suffix[..digits].parse().ok())
-        .flatten()
 }
 
 fn trim_ascii(mut bytes: &[u8]) -> &[u8] {
@@ -1672,26 +1649,6 @@ mod tests {
         let decoded: Value = serde_json::from_str(encoded.trim_end()).unwrap();
         assert_eq!(decoded["odd\nkey"], value);
         assert_eq!(decoded["text"], value);
-    }
-
-    #[test]
-    fn reopen_repairs_after_legacy_multiline_record_without_reusing_sequence() {
-        let (_dir, paths) = paths();
-        let home = paths.clone();
-        let id = "11111111-2222-3333-4444-555555555555";
-        let path = home.session_events_file(id);
-        std::fs::write(
-            &path,
-            b"{\"ts\":0, \"seq\":41, \"kind\":\"legacy\", \"text\":\"split\nhere\"}\n",
-        )
-        .unwrap();
-
-        let log = SessionLog::open(&home, id).unwrap();
-        log.append(SessionEvent::new("repaired")).unwrap();
-        let lines = read_tail(&home, id, 10).unwrap();
-        assert_eq!(lines.len(), 1);
-        assert_eq!(event_sequence(lines[0].as_bytes()), Some(42));
-        assert_eq!(count_events(&home, id).unwrap(), 1);
     }
 
     #[test]

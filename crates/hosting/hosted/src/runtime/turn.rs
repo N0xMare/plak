@@ -23,7 +23,6 @@ pub(super) fn completed_turn_row(assistant: &str) -> TranscriptRow {
         TranscriptRow::assistant(assistant)
     }
 }
-use super::models::humanize_turn_error;
 use super::rebind::durable_tree_id;
 use super::reconcile::{
     commit_definite_failure_projection, commit_exceptional_terminal_projection,
@@ -310,7 +309,7 @@ pub(super) fn publish_recovered_turn_outcome<P: plakous_host_protocol::ProtocolE
             {
                 let _ = events.send(HostEvent::Row(TranscriptRow::error(
                     NoticeScope::Turn,
-                    humanize_turn_error(&error),
+                    error,
                 )));
                 false
             } else {
@@ -361,9 +360,6 @@ pub(super) fn operator_facing_model_context_suffix(
     suffix
 }
 
-/// The exact provider-attested quota notice, passed through unframed.
-const FABLE_LIMIT_NOTICE: &str = "You've reached your Fable limit.";
-
 pub(crate) fn operator_facing_agent_error(prefix: &str, error: &AgentError) -> String {
     let mut raw = format!("{prefix}: {}", error.message());
     if error.is_storage_full() {
@@ -372,152 +368,53 @@ pub(crate) fn operator_facing_agent_error(prefix: &str, error: &AgentError) -> S
     if let Some(pressure) = plakous::sessions::SessionStorePressure::from_agent_error(error) {
         return crate::storage_pressure::storage_pressure_message(Some(pressure), &raw);
     }
-    if let Some(context) = error.model_context() {
+    let retry_after = error.model_context().and_then(|context| {
         raw.push_str(&operator_facing_model_context_suffix(context));
-    }
-    operator_facing_render(raw, error.model_kind())
+        match context.retryability() {
+            plakous::model::ModelRetryability::Eligible { retry_after } => retry_after,
+            _ => None,
+        }
+    });
+    operator_facing_render(raw, error.model_kind(), retry_after)
 }
 
-fn operator_facing_render(raw: String, kind: Option<plakous::model::ModelErrorKind>) -> String {
-    // Attested provider notices pass through unframed, exactly as the text
-    // path treats them; the typed kind must not fabricate quota over one.
-    if raw.contains(FABLE_LIMIT_NOTICE) {
-        return raw;
-    }
-    if let Some(rendered) = typed_model_kind_error(&raw, kind) {
-        return rendered;
-    }
-    if kind.is_some() {
-        return raw;
-    }
-    operator_facing_error(&raw)
-}
-
-/// The typed classification for an error carrying a model kind.
-///
-/// The kind is the authority for these categories: a diagnostic that merely
-/// contains "429" — a request id, a suffix field — is not a rate limit. A
-/// typed kind outside this table still suppresses the text heuristics: the
-/// caller renders the raw diagnostic rather than guessing a category.
-fn typed_model_kind_error(
-    raw: &str,
+/// The operator text for a failure: the typed model kind is the only
+/// classifier. A diagnostic without a kind, or with a kind outside this table,
+/// renders raw; its words are never read for a category.
+fn operator_facing_render(
+    raw: String,
     kind: Option<plakous::model::ModelErrorKind>,
-) -> Option<String> {
+    retry_after: Option<plakous::model::ModelRetryDelay>,
+) -> String {
     use plakous::model::ModelErrorKind;
-    match kind? {
-        ModelErrorKind::RateLimited => Some(format!(
-            "the provider returned a rate-limit response; the exact cause is unavailable{}\n{raw}",
-            retry_after_detail(raw).map_or_else(String::new, |hint| format!(" · {hint}")),
-        )),
-        ModelErrorKind::QuotaExceeded => Some(format!(
-            "the provider reported that quota is exhausted{}\n{raw}",
-            retry_after_detail(raw).map_or_else(String::new, |hint| format!(" · {hint}")),
-        )),
-        ModelErrorKind::UnsupportedCapability => Some(format!(
-            "request uses a capability not admitted by the selected model; inspect its supported options\n{raw}"
-        )),
-        ModelErrorKind::Authentication => Some(format!(
-            "provider authentication failed — the account credential was refused\n{raw}"
-        )),
-        ModelErrorKind::ReauthenticationRequired => Some(format!(
-            "the selected subscription requires interactive reauthentication\n{raw}"
-        )),
-        ModelErrorKind::ProtectedHistory => Some(format!(
-            "protected history cannot be replayed under the selected binding; clear context or fork from a checkpoint without incompatible native history, or switch back to the model and account that produced it\n{raw}"
-        )),
-        ModelErrorKind::ContextLimit => Some(format!(
-            "the request exceeded the model or route context limit\n{raw}"
-        )),
-        ModelErrorKind::Policy => Some(format!(
-            "the provider refused this request under its usage policy; this is not a credential failure\n{raw}"
-        )),
-        _ => None,
-    }
-}
-
-/// The provider-reported reset hint, when the diagnostic carries one.
-fn retry_after_detail(raw: &str) -> Option<String> {
-    let lower = raw.to_ascii_lowercase();
-    for key in [
-        "resets_at",
-        "reset_at",
-        "resets at",
-        "retry after",
-        "retry-after",
-    ] {
-        if let Some(idx) = lower.find(key) {
-            let slice = raw
-                .get(idx..)
-                .unwrap_or("")
-                .chars()
-                .take(96)
-                .collect::<String>();
-            return Some(slice.trim().to_owned());
+    let retry_hint = retry_after.map_or_else(String::new, |delay| {
+        format!(" · retry after {}s", delay.as_millis().div_ceil(1000))
+    });
+    let headline = match kind {
+        Some(ModelErrorKind::RateLimited) => format!(
+            "the provider returned a rate-limit response; the exact cause is unavailable{retry_hint}"
+        ),
+        Some(ModelErrorKind::QuotaExceeded) => {
+            format!("the provider reported that quota is exhausted{retry_hint}")
         }
-    }
-    None
-}
-
-/// Make provider failures readable for operators (Codex CLI–style framing).
-pub(super) fn operator_facing_error(raw: &str) -> String {
-    let lower = raw.to_ascii_lowercase();
-    if lower.contains("server_is_overloaded") || lower.contains("server is overloaded") {
-        return format!(
-            "the selected provider/model is temporarily overloaded — retry shortly or select another model\n{raw}"
-        );
-    }
-    // This exact notice is emitted by the provider adapter after quota attestation.
-    if raw.contains(FABLE_LIMIT_NOTICE) {
-        return raw.to_owned();
-    }
-    let quota = lower.contains("quotaexceeded")
-        || lower.contains("quota_exceeded")
-        || lower.contains("usage_limit")
-        || lower.contains("usage limit");
-    let rateish = lower.contains("ratelimited")
-        || lower.contains("rate_limited")
-        || lower.contains("rate limit")
-        || lower.contains("too many requests")
-        || lower.contains("429")
-        || quota;
-    if rateish {
-        let mut out = if quota {
-            String::from("the provider reported that quota is exhausted")
-        } else {
-            String::from(
-                "the provider returned a rate-limit response; the exact cause is unavailable",
-            )
-        };
-        if let Some(hint) = retry_after_detail(raw) {
-            out.push_str(" · ");
-            out.push_str(&hint);
+        Some(ModelErrorKind::Unavailable) => format!(
+            "the selected provider/model is temporarily unavailable — retry shortly or select another model{retry_hint}"
+        ),
+        Some(ModelErrorKind::UnsupportedCapability) => "request uses a capability not admitted by the selected model; inspect its supported options".to_owned(),
+        Some(ModelErrorKind::Authentication) => {
+            "provider authentication failed — the account credential was refused".to_owned()
         }
-        out.push('\n');
-        out.push_str(raw);
-        return out;
-    }
-    // Adapter rejected effort / options before the network (common: xhigh/max/ultra
-    // on models that only admit low|medium|high, or mistyped capability).
-    if lower.contains("admitted model/adapter subset")
-        || lower.contains("unsupportedreasoningeffort")
-        || lower.contains("unsupported capability")
-        || lower.contains("unsupportedreasoning")
-    {
-        return format!(
-            "request not supported for this model/effort — try effort low|medium|high (or another model)\n{raw}"
-        );
-    }
-    if lower.contains("unresolved working turn") {
-        return format!(
-            "session has unresolved work; inspect recovery state before continuing\n{raw}"
-        );
-    }
-    if lower.contains("responses error") || lower.contains("terminal responses") {
-        return format!(
-            "provider rejected or aborted the Responses stream (network, quota, or protocol)\n{raw}"
-        );
-    }
-    raw.to_owned()
+        Some(ModelErrorKind::ReauthenticationRequired) => {
+            "the selected subscription requires interactive reauthentication".to_owned()
+        }
+        Some(ModelErrorKind::ProtectedHistory) => "protected history cannot be replayed under the selected binding; clear context or fork from a checkpoint without incompatible native history, or switch back to the model and account that produced it".to_owned(),
+        Some(ModelErrorKind::ContextLimit) => {
+            "the request exceeded the model or route context limit".to_owned()
+        }
+        Some(ModelErrorKind::Policy) => "the provider refused this request under its usage policy; this is not a credential failure".to_owned(),
+        _ => return raw,
+    };
+    format!("{headline}\n{raw}")
 }
 
 /// Observes one in-flight cancel request against its settle deadline.
@@ -1072,28 +969,31 @@ mod tests {
     }
 
     #[test]
-    fn trusted_fable_limit_notice_is_not_reframed_as_unknown_rate_limit() {
-        let raw =
-            "agent turn failed: Anthropic RateLimited HTTP 429: You've reached your Fable limit.";
-        assert_eq!(operator_facing_error(raw), raw);
-    }
-
-    #[test]
     fn rate_limit_presentation_does_not_invent_subscription_exhaustion() {
-        let rendered =
-            operator_facing_error("anthropic/RateLimited status=Some(429) request_id=req_safe");
+        let rendered = operator_facing_render(
+            "agent turn failed: anthropic/RateLimited request_id=req_safe".to_owned(),
+            Some(plakous::model::ModelErrorKind::RateLimited),
+            Some(plakous::model::ModelRetryDelay::from_millis(60_000).unwrap()),
+        );
         assert!(rendered.starts_with(
-            "the provider returned a rate-limit response; the exact cause is unavailable"
+            "the provider returned a rate-limit response; the exact cause is unavailable · retry after 60s\n"
         ));
         assert!(rendered.contains("request_id=req_safe"));
-        assert!(!rendered.contains("plan window"));
         assert!(!rendered.contains("quota is exhausted"));
     }
 
+    /// Words in an untyped diagnostic are not a category.
     #[test]
-    fn exact_quota_presentation_remains_distinct_from_generic_429() {
-        let rendered = operator_facing_error("model QuotaExceeded: provider quota exhausted");
-        assert!(rendered.starts_with("the provider reported that quota is exhausted"));
+    fn untyped_failures_render_raw_whatever_their_words() {
+        for raw in [
+            "agent turn failed: HTTP 429 Too Many Requests: rate limit",
+            "agent turn failed: quota_exceeded usage limit",
+            "agent turn failed: provider code: server_is_overloaded",
+            "agent turn failed: effort outside the admitted model/adapter subset",
+            "agent turn failed: native item has no compatible replay target",
+        ] {
+            assert_eq!(operator_facing_render(raw.to_owned(), None, None), raw);
+        }
     }
 
     #[test]
@@ -1107,16 +1007,21 @@ mod tests {
         assert!(ordinary.ends_with(raw));
         // Text alone is not a capacity classification.
         let untyped = "session store capacity was reached: checkpoints 14/16";
-        assert_eq!(operator_facing_error(untyped), untyped);
+        assert_eq!(
+            operator_facing_render(untyped.to_owned(), None, None),
+            untyped
+        );
     }
 
     #[test]
     fn provider_overload_presentation_preserves_actionable_typed_code() {
-        let rendered = operator_facing_error(
-            "agent turn failed: Responses provider returned a typed terminal error · provider code: server_is_overloaded",
+        let rendered = operator_facing_render(
+            "agent turn failed: Responses provider returned a typed terminal error · provider code: server_is_overloaded".to_owned(),
+            Some(plakous::model::ModelErrorKind::Unavailable),
+            None,
         );
         assert!(rendered.starts_with(
-            "the selected provider/model is temporarily overloaded — retry shortly or select another model"
+            "the selected provider/model is temporarily unavailable — retry shortly or select another model\n"
         ));
         assert!(rendered.contains("server_is_overloaded"));
     }
@@ -1541,6 +1446,7 @@ mod tests {
         let rendered = operator_facing_render(
             raw.clone(),
             Some(plakous::model::ModelErrorKind::ProtectedHistory),
+            None,
         );
         assert!(rendered.contains("protected history"));
         assert!(rendered.contains("clear context or fork"));
@@ -1549,7 +1455,8 @@ mod tests {
         assert_eq!(
             operator_facing_render(
                 raw.clone(),
-                Some(plakous::model::ModelErrorKind::InvalidRequest)
+                Some(plakous::model::ModelErrorKind::InvalidRequest),
+                None,
             ),
             raw
         );
@@ -1561,8 +1468,11 @@ mod tests {
     #[test]
     fn operator_facing_render_does_not_call_a_request_id_429_a_rate_limit() {
         let raw = "agent turn failed: protocol violation request_id=req_429abc".to_owned();
-        let rendered =
-            operator_facing_render(raw.clone(), Some(plakous::model::ModelErrorKind::Protocol));
+        let rendered = operator_facing_render(
+            raw.clone(),
+            Some(plakous::model::ModelErrorKind::Protocol),
+            None,
+        );
         assert_eq!(rendered, raw);
         assert!(!rendered.contains("rate-limit"));
         assert!(!rendered.contains("quota"));
@@ -1574,6 +1484,7 @@ mod tests {
         let rendered = operator_facing_render(
             "agent turn failed: provider refused the request".to_owned(),
             Some(plakous::model::ModelErrorKind::QuotaExceeded),
+            None,
         );
         assert!(
             rendered.starts_with("the provider reported that quota is exhausted"),
@@ -1587,6 +1498,7 @@ mod tests {
         let rendered = operator_facing_render(
             "agent turn failed: Responses HTTP request failed: I'm sorry, I can't help with that request. · HTTP 403 · provider code: permission-denied".to_owned(),
             Some(plakous::model::ModelErrorKind::Policy),
+            None,
         );
         assert!(
             rendered.starts_with("the provider refused this request under its usage policy"),

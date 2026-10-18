@@ -157,9 +157,11 @@ impl MessagesAttemptProtocolError {
         self
     }
 
-    /// Marks exhausted quota, billing, or entitlement from the error body.
+    /// Marks exhausted quota, billing, or entitlement: from the error body,
+    /// or from a dialect that read the provider's attestation elsewhere. The
+    /// marked error is permanent and its retry refusal is cleared.
     #[must_use]
-    pub(crate) const fn with_usage_limit(mut self) -> Self {
+    pub const fn with_usage_limit(mut self) -> Self {
         self.usage_limit = true;
         self.refusal = None;
         self

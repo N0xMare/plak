@@ -3458,7 +3458,8 @@ identity are unchanged by that costume.
 
 For `claude-fable-5-1` over OAuth, HTTP 429 with exactly one
 `anthropic-ratelimit-unified-representative-claim: seven_day_overage_included`
-header reports "You've reached your Fable limit."
+header reports "You've reached your Fable limit." as typed quota exhaustion
+(`QuotaExceeded`, permanent, never retried by the protocol owner).
 A generic 429, an unknown or duplicated claim, another model, or an API-key
 route does not establish this model-specific quota. Acceptance, retry-safety,
 and provider-hosted-effect safeguards remain unchanged.

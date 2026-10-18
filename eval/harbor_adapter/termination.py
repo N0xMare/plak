@@ -143,6 +143,7 @@ _KIND_MARKERS: tuple[tuple[str, tuple[str, ...]], ...] = (
         KIND_PROVIDER_REJECTION,
         (
             "temporarily overloaded",
+            "provider/model is temporarily unavailable",
             "server_is_overloaded",
             "typed terminal error",
             "provider code:",

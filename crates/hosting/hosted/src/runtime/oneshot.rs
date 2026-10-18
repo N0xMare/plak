@@ -210,10 +210,9 @@ pub(super) fn terminal(drive: &Result<TurnHostOutcome, String>) -> CliResult<One
             format!("{error}; the session recovers automatically the next time it is used"),
         )),
         Ok(TurnHostOutcome::AdmissionRejected { error, .. })
-        | Ok(TurnHostOutcome::Failed { error, .. }) => Err(CliFailure::classified(
-            CliFailureKind::Agent,
-            super::models::humanize_turn_error(error),
-        )),
+        | Ok(TurnHostOutcome::Failed { error, .. }) => {
+            Err(CliFailure::classified(CliFailureKind::Agent, error.clone()))
+        }
         Ok(TurnHostOutcome::ContextCapacity { error, .. }) | Err(error) => {
             Err(CliFailure::classified(CliFailureKind::Agent, error.clone()))
         }
@@ -801,20 +800,5 @@ mod presentation_tests {
                     || error.message() == "queued prompt already ran; its result is no longer kept"
             );
         }
-    }
-
-    #[test]
-    fn returned_failure_preserves_reasoning_recovery_guidance() {
-        let failed = terminal(&Ok(TurnHostOutcome::Failed {
-            transient: None,
-            error: "reasoning without an exact replay binding".into(),
-            exchange: crate::agent::TerminalExchange::Closed,
-        }))
-        .unwrap_err();
-        assert_eq!(failed.exit_code(), 5);
-        assert_eq!(
-            failed.message(),
-            "This chat's native reasoning cannot be sent to the selected model. Resume the previous session or pick that model again to return to it."
-        );
     }
 }

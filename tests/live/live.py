@@ -272,7 +272,7 @@ def text_is_provider_refusal(text: str) -> bool:
         return True
     if "rejected-before-acceptance" in lowered or "rejected before acceptance" in lowered:
         return True
-    if "temporarily overloaded" in lowered:
+    if "temporarily overloaded" in lowered or "temporarily unavailable" in lowered:
         return True
     if any(marker in lowered for marker in (
             "ratelimited", "rate_limited", "rate limit", "rate-limit",

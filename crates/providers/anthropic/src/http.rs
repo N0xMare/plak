@@ -833,13 +833,14 @@ impl MessagesHttpHooks for AnthropicHttpHooks {
             ),
         )
         .with_retry_after_millis(metadata.retry_after_millis);
-        let error =
-            if metadata.fable_included_limit && error.kind() == AnthropicErrorKind::RateLimited {
-                error.with_notice("You've reached your Fable limit.")
-            } else {
-                error
-            };
-        protocol_source(&error)
+        // The included-limit claim attests exhausted quota, not a transient
+        // rate limit: the typed kind carries it, never the notice text.
+        if metadata.fable_included_limit && error.kind() == AnthropicErrorKind::RateLimited {
+            protocol_source(&error.with_notice("You've reached your Fable limit."))
+                .with_usage_limit()
+        } else {
+            protocol_source(&error)
+        }
     }
 
     fn classify_transport_failure(

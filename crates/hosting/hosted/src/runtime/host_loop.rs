@@ -39,7 +39,7 @@ use super::info::{
 use super::logging::{
     elapsed_ms_since, log_ev, log_host_attached, log_host_ready, log_session_ready,
 };
-use super::models::{humanize_turn_error, native_compact_facet};
+use super::models::native_compact_facet;
 use super::rebind::{Rebound, durable_tree_id, handle_rebind};
 use super::reconcile::{
     commit_definite_failure_projection, commit_exceptional_terminal_projection, persist,

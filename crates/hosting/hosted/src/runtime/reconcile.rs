@@ -18,10 +18,7 @@ pub(super) fn commit_definite_failure_projection(
     save: impl FnOnce(&mut SessionRecord) -> Result<(), String>,
 ) -> Result<(), String> {
     let mut candidate = session.clone();
-    candidate.append_transcript(TranscriptRow::error(
-        NoticeScope::Turn,
-        super::models::humanize_turn_error(error),
-    ));
+    candidate.append_transcript(TranscriptRow::error(NoticeScope::Turn, error));
     candidate.touch();
     save(&mut candidate)?;
     *session = candidate;

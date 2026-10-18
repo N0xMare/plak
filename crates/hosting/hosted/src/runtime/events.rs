@@ -24,7 +24,7 @@ use super::tree::{
     continuation_parent_call_id, emit_tree_snapshot_if_revision_advanced, lineage_parent_call_id,
     nested_parent_call_id,
 };
-use super::turn::{flush_assistant_delta, operator_facing_error, take_pending_approval};
+use super::turn::{flush_assistant_delta, take_pending_approval};
 use super::usage::record_operation_prepared_input;
 use super::{
     APPROVAL_REFUSED_NOTE, COMPACT_COMMITTED_DETAIL, COMPACT_FAILED_DETAIL,
@@ -163,7 +163,7 @@ pub(super) async fn resolve_approval_intent<P: plakous_host_protocol::ProtocolEx
     if let Err(error) = outcome {
         let _ = events.notice(TranscriptRow::error(
             NoticeScope::Approval,
-            operator_facing_error(&format!("approval was not applied: {error}")),
+            format!("approval was not applied: {error}"),
         ));
     }
 }
@@ -1237,7 +1237,6 @@ pub(super) fn completed_tool_summary(
 
 pub(super) use crate::sessions::live_tool_subject;
 // Row derivations the feed projector shares with the live path.
-pub(crate) use super::models::humanize_turn_error;
 pub(crate) use super::tool_facts::{wait_settled, wait_started};
 pub(crate) use super::turn::operator_facing_agent_error;
 

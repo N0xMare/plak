@@ -1332,7 +1332,7 @@ start and finish timestamps rather than time spent qualifying the operation.
 | retry | every field | (d) a notice intent: a transport retry is not a commit |
 | milestone | every field | (d) a notice intent the host writes when it observes the tree transition; an `adopted` milestone's file count is read from the root's committed `adopt_candidate` result through `feed_call`, and an `adopt conflict` milestone's paths (not in the result) from the call's tool-boundary facts |
 | notice, recovery and turn scope | the line and its tone | (a) the `TurnTerminal` (claim, cause, whether a model round and a tool round completed, steering clause) and (b) the terminal record through `feed_terminal`; a recovered turn that completed uses the live completion wording. Abandoning a root whose `RecoveryRequired` terminal was already committed derives no further notice: that `TurnTerminal` already derived its row |
-| error row of a failed turn | the humanized text | (b) the failure kind and message of the terminal record through `feed_terminal`, humanized by a pure function |
+| error row of a failed turn | the rendered text | (b) the failure kind and message of the terminal record through `feed_terminal`, rendered by a pure function whose only classifier is the typed model error kind; a message without a kind, or with a kind the renderer does not frame, is shown raw and its words are never read for a category |
 | notice, compaction scope | the not-applied and outcome lines | (a) `WorkflowSettled` |
 | notice, queue scope (recorded rejection) | the line | (a) `CommandRejected` |
 | notice, tree scope (pause and wake-failure lines) | the line | (d) a notice intent |
@@ -2210,7 +2210,7 @@ process applies it:
   line states whether earlier completed rounds remain. Truthfulness takes precedence
   over byte-identical notices.
 - `Failed`, `Refused` and `RecoveryRequired` derive their ordinary rows, the
-  error text humanized from the terminal record `feed_terminal` reads; a
+  error text rendered from the terminal record `feed_terminal` reads; a
   context-capacity failure derives its capacity error row and a pause cause in
   the same transaction as its head (§2.6). A recorded `Failed` or `Cancelled`
   terminal that settled queued steering unapplied derives no steering clause.
@@ -3329,7 +3329,7 @@ has exactly one writer, named by the provenance table of §2.6:
   recovery line, a recorded rejection, a compaction outcome) is written by the
   projector transaction that applies the record, once, whichever process
   applies it, and the host emits that same row live after the transaction
-  commits. On the definite failure path the stored error row is the humanized
+  commits. On the definite failure path the stored error row is the rendered
   text the operator is shown.
 - A host-authored notice in a persisted scope (a retry, a milestone, a pause or
   wake-failure line, an unrecorded refusal, a withdrawn request) is a notice

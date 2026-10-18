@@ -5,8 +5,8 @@ use super::{
     InterruptWatch, SessionEvent, SessionQueueDrainState, TurnHostOutcome,
     commit_definite_failure_projection, commit_exceptional_terminal_projection,
     commit_session_update, context_capacity_recovery_guidance, elapsed_ms_since,
-    emit_unavailable_context, handle_compact, humanize_turn_error, log_ev, native_compact_facet,
-    report_context, sessions, should_schedule_compaction,
+    emit_unavailable_context, handle_compact, log_ev, native_compact_facet, report_context,
+    sessions, should_schedule_compaction,
 };
 #[cfg(any(test, feature = "test-support"))]
 use super::{TestHostBoundary, TestHostWorkflow, observe_test_boundary};
@@ -321,7 +321,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     if matches!(error_presentation, TerminalErrorPresentation::Events) {
                         let _ = self.events.send(HostEvent::Row(TranscriptRow::error(
                             NoticeScope::Turn,
-                            humanize_turn_error(&error),
+                            error.clone(),
                         )));
                     }
                     if !transient
@@ -401,7 +401,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     |candidate| self.config.store.save(candidate),
                 );
                 if saved.is_ok() {
-                    // drive_one_turn already applies operator_facing_error.
+                    // drive_one_turn already applies operator_facing_agent_error.
                     log_ev(
                         self.log.as_ref(),
                         &self.config,

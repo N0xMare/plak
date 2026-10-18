@@ -507,7 +507,7 @@ async fn execute<H: MessagesHttpHooks>(
                 let refused =
                     outcome == PhysicalRequestOutcome::DefiniteRejection && !head.provider_accepted;
                 attempt.observe_physical_request_finished(outcome)?;
-                let step = if usage_limit {
+                let step = if error.usage_limit() {
                     RetryStep::End
                 } else if status == StatusCode::UNAUTHORIZED
                     && refused

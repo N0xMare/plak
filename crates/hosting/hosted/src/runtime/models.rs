@@ -11,21 +11,6 @@ pub const fn native_compact_facet(provider: NativeProvider) -> bool {
     matches!(provider, NativeProvider::Codex)
 }
 
-pub(crate) fn humanize_turn_error(error: &str) -> String {
-    let lower = error.to_ascii_lowercase();
-    if lower.contains("unknown reasoning visibility")
-        || lower.contains("assistantphasewithoutreplay")
-        || lower.contains("assistant phase without")
-        || lower.contains("reasoning without an exact")
-        || lower.contains("opaque-only")
-        || lower.contains("no compatible replay")
-    {
-        "This chat's native reasoning cannot be sent to the selected model. Resume the previous session or pick that model again to return to it.".to_owned()
-    } else {
-        error.to_owned()
-    }
-}
-
 // The account -> OAuth provider decision lives with the rest of the binding
 // vocabulary (`crate::binding`), next to `TargetSelection::route`. It is
 // re-exported here so every existing `runtime::oauth_provider_for_account`
@@ -148,13 +133,6 @@ mod tests {
             Some(NativeProvider::Codex)
         );
         assert_eq!(oauth_provider_for_account("openai"), None);
-        assert!(
-            humanize_turn_error(
-                "model preparation failed: unknown reasoning visibility cannot be replayed"
-            )
-            .contains("Resume the previous session")
-        );
-        assert_eq!(humanize_turn_error("tool failed"), "tool failed");
     }
 
     #[test]
