@@ -603,7 +603,9 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # A refused tree publish (the store's compare-and-swap found another
     # writer) is reported through the tracing boundary, like the
     # credential-refresh warning above; typed fields only.
-    ("plakous-hosted", "src/agent/children.rs"): {"error", "pin", "select"},
+    ("plakous-hosted", "src/agent/children/bind.rs"): {"error"},
+    ("plakous-hosted", "src/agent/children/turns.rs"): {"error"},
+    ("plakous-hosted", "src/agent/children/waiter.rs"): {"error", "pin", "select"},
     # Background recovery reports only typed child ids and closed recovery
     # dispositions after the pass has settled; it never logs prompt content.
     ("plakous-hosted", "src/agent/recovery.rs"): {"info"},
