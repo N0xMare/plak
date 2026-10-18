@@ -126,8 +126,8 @@ impl ToolName {
     pub fn namespace(&self) -> Option<&str> {
         self.namespace.as_deref()
     }
-    pub(crate) fn to_upstream(&self) -> codex_code_mode_protocol::ToolName {
-        codex_code_mode_protocol::ToolName::new(self.namespace.clone(), self.name.clone())
+    pub(crate) fn to_upstream(&self) -> plakous_codex_code_mode_protocol::ToolName {
+        plakous_codex_code_mode_protocol::ToolName::new(self.namespace.clone(), self.name.clone())
     }
 }
 
@@ -138,10 +138,10 @@ pub enum CodeModeToolKind {
     Freeform,
 }
 impl CodeModeToolKind {
-    pub(crate) fn to_upstream(self) -> codex_code_mode_protocol::CodeModeToolKind {
+    pub(crate) fn to_upstream(self) -> plakous_codex_code_mode_protocol::CodeModeToolKind {
         match self {
-            Self::Function => codex_code_mode_protocol::CodeModeToolKind::Function,
-            Self::Freeform => codex_code_mode_protocol::CodeModeToolKind::Freeform,
+            Self::Function => plakous_codex_code_mode_protocol::CodeModeToolKind::Function,
+            Self::Freeform => plakous_codex_code_mode_protocol::CodeModeToolKind::Freeform,
         }
     }
 }
@@ -218,8 +218,8 @@ impl ToolDefinition {
     pub fn output_schema(&self) -> Option<&JsonValue> {
         self.output_schema.as_ref()
     }
-    pub(crate) fn to_upstream(&self) -> codex_code_mode_protocol::ToolDefinition {
-        codex_code_mode_protocol::ToolDefinition {
+    pub(crate) fn to_upstream(&self) -> plakous_codex_code_mode_protocol::ToolDefinition {
+        plakous_codex_code_mode_protocol::ToolDefinition {
             name: self.name.clone(),
             tool_name: self.tool_name.to_upstream(),
             description: self.description.clone(),

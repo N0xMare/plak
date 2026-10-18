@@ -4403,10 +4403,8 @@ mod tests {
 
     /// The reference home is the approved Codex provider preset itself.
     fn reference_config() -> ProductConfig {
-        ProductConfig::load(&PlakPaths::explicit(
-            repo_configs_dir().join("providers/codex"),
-        ))
-        .expect("the Codex provider preset is the reference example")
+        ProductConfig::load(&PlakPaths::explicit(presets_dir().join("codex")))
+            .expect("the Codex provider preset is the reference example")
     }
 
     /// `configs/reference/**`, relative path and exact body.
@@ -4424,6 +4422,11 @@ mod tests {
 
     fn repo_configs_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../configs")
+    }
+
+    /// The built-in profile homes the binary embeds (`presets/<provider>`).
+    fn presets_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("presets")
     }
 
     /// The shipped reference tree is this renderer's own output, so it cannot
@@ -4465,7 +4468,7 @@ mod tests {
         // the role order root-agent, worker, reviewer, researcher, and the
         // researcher's tools.
         type Row = [(&'static str, &'static str, &'static str, bool); 4];
-        // The reference tree is the annotated render of `configs/providers/codex`.
+        // The reference tree is the annotated render of `presets/codex`.
         let provider_codex: Row = [
             ("codex", "gpt-6-astra", "medium", false),
             ("codex", "gpt-6-sol", "medium", false),
@@ -4476,14 +4479,9 @@ mod tests {
         let grok_tools: &[&str] = &["web_search", "x_search", "fetch_url"];
         let expectations: [(&str, Option<&str>, Row, &[&str]); 5] = [
             ("reference", None, provider_codex, codex_tools),
+            ("codex", Some("codex"), provider_codex, codex_tools),
             (
-                "providers/codex",
-                Some("codex"),
-                provider_codex,
-                codex_tools,
-            ),
-            (
-                "providers/claude",
+                "claude",
                 Some("claude"),
                 [
                     ("claude", "claude-opus-5-5", "high", false),
@@ -4494,7 +4492,7 @@ mod tests {
                 &["web_search", "web_fetch", "fetch_url"],
             ),
             (
-                "providers/grok",
+                "grok",
                 Some("grok"),
                 [
                     ("grok", "grok-4.7", "high", false),
@@ -4505,7 +4503,7 @@ mod tests {
                 grok_tools,
             ),
             (
-                "providers/multi",
+                "multi",
                 None,
                 [
                     ("claude", "claude-opus-5-5", "high", false),
@@ -4517,15 +4515,19 @@ mod tests {
             ),
         ];
         for (preset, provider, rows, researcher_tools) in expectations {
-            let dir = repo_configs_dir().join(preset);
+            let dir = if preset == "reference" {
+                repo_configs_dir().join(preset)
+            } else {
+                presets_dir().join(preset)
+            };
             let paths =
                 PlakPaths::resolve(Some(std::ffi::OsStr::new(&dir)), None).expect("preset home");
-            let loaded = ProductConfig::load(&paths)
-                .unwrap_or_else(|error| panic!("configs/{preset}: {error}"));
+            let loaded =
+                ProductConfig::load(&paths).unwrap_or_else(|error| panic!("{preset}: {error}"));
             assert_eq!(
                 loaded.root_agent.as_deref(),
                 Some("root-agent"),
-                "configs/{preset} must bind root-agent"
+                "{preset} must bind root-agent"
             );
             assert_eq!(
                 loaded
@@ -4535,26 +4537,19 @@ mod tests {
                     .map(TemplateName::as_str)
                     .collect::<Vec<_>>(),
                 ["worker", "reviewer", "researcher"],
-                "configs/{preset} working set"
+                "{preset} working set"
             );
-            assert_eq!(loaded.templates.len(), 4, "configs/{preset}");
-            assert!(loaded.subagents, "configs/{preset}");
-            assert_eq!(loaded.max_depth, 1, "configs/{preset}");
-            assert_eq!(loaded.max_children, 8, "configs/{preset}");
+            assert_eq!(loaded.templates.len(), 4, "{preset}");
+            assert!(loaded.subagents, "{preset}");
+            assert_eq!(loaded.max_depth, 1, "{preset}");
+            assert_eq!(loaded.max_children, 8, "{preset}");
             for (name, template) in &loaded.templates {
-                assert_eq!(
-                    template.delegation,
-                    Delegation::Explicit,
-                    "configs/{preset}/{name}"
-                );
-                assert!(
-                    !template.may_adopt,
-                    "configs/{preset}/{name} must not adopt"
-                );
+                assert_eq!(template.delegation, Delegation::Explicit, "{preset}/{name}");
+                assert!(!template.may_adopt, "{preset}/{name} must not adopt");
                 if let Some(provider) = provider {
                     assert_eq!(
                         template.account, provider,
-                        "configs/{preset}/{name} must bind the preset's own provider"
+                        "{preset}/{name} must bind the preset's own provider"
                     );
                 }
             }

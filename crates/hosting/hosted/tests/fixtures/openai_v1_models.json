@@ -1,0 +1,115 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "tts-1",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "gpt-6-luna",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "gpt-6-sol",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "gpt-5.6-luna",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "gpt-5.6-sol",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "gpt-5.6-terra",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "gpt-6-astra",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "gpt-6.1-sol",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "gpt-5",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "gpt-5-mini",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "gpt-4.1",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "gpt-4o",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "o3",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "gpt-daybreak-blue-latest",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "gpt-daybreak-red-latest",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "whisper-1",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "text-embedding-3-small",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "sora-2",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "gpt-image-1",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "omni-moderation-latest",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "gpt-realtime",
+      "object": "model",
+      "owned_by": "system"
+    },
+    {
+      "id": "gpt-5-nano-2099-01-01",
+      "object": "model",
+      "owned_by": "system"
+    }
+  ]
+}

@@ -2,13 +2,10 @@ use super::*;
 use crate::response_host::{ResponsesProviderErrorClass, ResponsesUsage};
 
 const MODEL: &str = "gpt-5.4";
-const MIXED: &str = include_str!("../../../../providers/openai/tests/fixtures/response_mixed.sse");
-const O1_SURFACES: &str =
-    include_str!("../../../../providers/openai/tests/fixtures/response_o1_surfaces.sse");
-const INCOMPLETE: &str =
-    include_str!("../../../../providers/openai/tests/fixtures/response_incomplete.sse");
-const FAILED_RESIDUAL: &str =
-    include_str!("../../../../providers/openai/tests/fixtures/response_failed.sse");
+const MIXED: &str = include_str!("../../tests/fixtures/response_mixed.sse");
+const O1_SURFACES: &str = include_str!("../../tests/fixtures/response_o1_surfaces.sse");
+const INCOMPLETE: &str = include_str!("../../tests/fixtures/response_incomplete.sse");
+const FAILED_RESIDUAL: &str = include_str!("../../tests/fixtures/response_failed.sse");
 
 #[test]
 fn stream_identity_covers_model_binding_and_reasoning_text_lifecycle() -> Result<(), &'static str> {

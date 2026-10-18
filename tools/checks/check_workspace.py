@@ -3169,6 +3169,51 @@ def workspace_manifest_tables(workspace: Workspace) -> dict[str, dict[str, Any]]
     return {name: package.manifest for name, package in workspace.packages.items()}
 
 
+def packaged_dependency_names(manifest: dict[str, Any]) -> set[str]:
+    """Regular and build dependencies, including target-specific tables.
+
+    Dev-dependencies are excluded: Cargo strips a version-less one when
+    packaging, and one with a version must resolve from the registry.
+    """
+    names: set[str] = set()
+    tables = [manifest] + list(manifest.get("target", {}).values())
+    for table in tables:
+        for section in ("dependencies", "build-dependencies"):
+            for key, spec in table.get(section, {}).items():
+                names.add(spec.get("package", key) if isinstance(spec, dict) else key)
+    return names
+
+
+def validate_packaged_dependencies(
+    manifests: dict[str, dict[str, Any]], classes: dict[str, str], published_plak: dict[str, Any],
+) -> list[str]:
+    """No packaged manifest names a repository-only package outside dev-dependencies.
+
+    `plak` is judged by its published shape, which drops `test-hooks` and the
+    offline harness edge; dev-dependencies on repository-only packages must be
+    version-less so packaging strips them.
+    """
+    repository_only = {name for name, kind in classes.items() if kind == "repository-only"}
+    errors: list[str] = []
+    for name, manifest in sorted(manifests.items()):
+        if name in repository_only:
+            continue
+        shape = published_plak if name == "plak" else manifest
+        for dependency in sorted(packaged_dependency_names(shape) & repository_only):
+            errors.append(f"{name}: packaged manifest depends on repository-only {dependency}")
+        tables = [manifest] + list(manifest.get("target", {}).values())
+        for table in tables:
+            for key, spec in table.get("dev-dependencies", {}).items():
+                dependency = spec.get("package", key) if isinstance(spec, dict) else key
+                if dependency in repository_only and (
+                    not isinstance(spec, dict) or "version" in spec
+                ):
+                    errors.append(
+                        f"{name}: dev-dependency on repository-only {dependency} must be path-only"
+                    )
+    return errors
+
+
 def validate_commit_trace_edge(manifests: dict[str, dict[str, Any]]) -> list[str]:
     """The host -> store exception exists only for the repository crash tracer."""
     tree = manifests.get("plakous-recursive-subagents-store", {})
@@ -3310,6 +3355,64 @@ def validate_tracked_hygiene(
     return errors
 
 
+INCLUDED_FILE = re.compile(
+    r'include_(?:str|bytes)!\s*\(\s*(?:concat!\s*\(\s*env!\s*\(\s*"CARGO_MANIFEST_DIR"\s*\)\s*,\s*)?"([^"]+)"'
+)
+
+
+def validate_package_local_includes(
+    package_name: str, sources: dict[str, str],
+) -> list[str]:
+    """Every `include_str!`/`include_bytes!` stays inside its own package.
+
+    `sources` maps package-relative Rust paths to their text. A path that
+    climbs out of the package root builds in the repository but not from the
+    packaged crate, which holds only files under its own root.
+    """
+    errors: list[str] = []
+    for relative, text in sorted(sources.items()):
+        for match in INCLUDED_FILE.finditer(text):
+            literal = match.group(1)
+            if "CARGO_MANIFEST_DIR" in match.group(0):
+                target = os.path.normpath(literal.lstrip("/"))
+            else:
+                target = os.path.normpath(os.path.join(os.path.dirname(relative), literal))
+            if target == ".." or target.startswith("../") or os.path.isabs(target):
+                line = text.count("\n", 0, match.start()) + 1
+                errors.append(
+                    f"{package_name}: {relative}:{line} includes {literal!r}, "
+                    "outside the package root"
+                )
+    return errors
+
+
+def package_rust_files(root: Path, package: Package, nested: set[str]) -> dict[str, str]:
+    """Tracked Rust files of one package, excluding nested package roots."""
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--", f"{package.directory}/*.rs"],
+        cwd=root, capture_output=True, check=True,
+    ).stdout.decode().split("\0")
+    files: dict[str, str] = {}
+    for path in filter(None, listed):
+        if any(path.startswith(f"{other}/") for other in nested):
+            continue
+        files[os.path.relpath(path, package.directory)] = (root / path).read_text(encoding="utf-8")
+    return files
+
+
+def load_publish_shape() -> Any:
+    """Import tools/release/publish_shape.py, the published plak manifest shape."""
+    import importlib.util
+
+    path = ROOT / "tools/release/publish_shape.py"
+    spec = importlib.util.spec_from_file_location("publish_shape", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def validate_workspace_excludes(
     root_workspace: dict[str, Any], supported_fixture_paths: set[str],
 ) -> list[str]:
@@ -3356,10 +3459,32 @@ def main() -> int:
     errors.extend(validate_tracked_hygiene(ROOT))
     errors.extend(validate_local_production_lints(workspace_manifest_tables(workspace)))
     errors.extend(validate_commit_trace_edge(workspace_manifest_tables(workspace)))
+    publish_shape = load_publish_shape()
+    errors.extend(
+        validate_packaged_dependencies(
+            workspace_manifest_tables(workspace),
+            {name: package.package_class for name, package in packages.items()},
+            tomllib.loads(
+                publish_shape.published_plak_manifest(
+                    (ROOT / publish_shape.PLAK_MANIFEST).read_text(encoding="utf-8")
+                )
+            ),
+        )
+    )
     for name in COMMIT_TRACE_SOURCE_PREFIXES:
         sources, discovery_errors = package_sources(packages[name], ROOT)
         errors.extend(discovery_errors)
         errors.extend(validate_commit_trace_sql(name, sources))
+
+    directories = {package.directory for package in packages.values()}
+    for name, package in sorted(packages.items()):
+        nested = {
+            other for other in directories
+            if other != package.directory and other.startswith(f"{package.directory}/")
+        }
+        errors.extend(
+            validate_package_local_includes(name, package_rust_files(ROOT, package, nested))
+        )
 
     # Layer policy: metadata shape, layout, edges, classes, pinned dependencies.
     errors.extend(validate_package_metadata(workspace))

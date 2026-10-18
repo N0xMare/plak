@@ -384,7 +384,7 @@ databases, logs and cache all stay under `~/.plak`.
 cp -r configs/reference/. "$PLAK_HOME"
 
 # The same four roles pinned to one provider each, or mixed.
-cp -r configs/providers/codex/. "$PLAK_HOME"    # or claude, grok, multi
+cp -r bin/plak/presets/codex/. "$PLAK_HOME"    # or claude, grok, multi
 ```
 
 Every built-in has the same four roles:

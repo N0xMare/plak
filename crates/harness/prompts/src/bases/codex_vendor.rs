@@ -20,45 +20,45 @@ use plakous_tools::PromptPin;
 
 /// `vendor/codex-prompt/prompt/01-identity.md`, upstream template line 1.
 pub const CODEX_VENDOR_IDENTITY: &str =
-    include_str!("../../../../../vendor/codex-prompt/prompt/01-identity.md");
+    include_str!("../../vendor/codex-prompt/prompt/01-identity.md");
 
 /// `vendor/codex-prompt/prompt/02-technical-communication.md`, upstream
 /// `gpt_5_2_prompt.md` lines 13-15: the Personality heading and the one
 /// paragraph under it that is about technical communication.
 pub const CODEX_VENDOR_TECHNICAL_COMMUNICATION: &str =
-    include_str!("../../../../../vendor/codex-prompt/prompt/02-technical-communication.md");
+    include_str!("../../vendor/codex-prompt/prompt/02-technical-communication.md");
 
 /// `vendor/codex-prompt/prompt/03-working-with-the-user.md`, upstream template
 /// lines 5-36: the whole "Working with the user" section, which at this
 /// revision carries no channel mechanics and no visualizations.
 pub const CODEX_VENDOR_WORKING_WITH_THE_USER: &str =
-    include_str!("../../../../../vendor/codex-prompt/prompt/03-working-with-the-user.md");
+    include_str!("../../vendor/codex-prompt/prompt/03-working-with-the-user.md");
 
 /// `vendor/codex-prompt/prompt/04-autonomy-and-persistence.md`, upstream
 /// `gpt_5_2_prompt.md` lines 29-32.
 pub const CODEX_VENDOR_AUTONOMY_AND_PERSISTENCE: &str =
-    include_str!("../../../../../vendor/codex-prompt/prompt/04-autonomy-and-persistence.md");
+    include_str!("../../vendor/codex-prompt/prompt/04-autonomy-and-persistence.md");
 
 /// `vendor/codex-prompt/prompt/05-general-and-editing-constraints.md`,
 /// upstream template lines 38-55: search preference, the file editing
 /// constraints, the dirty-worktree rules and the destructive-command rule.
 pub const CODEX_VENDOR_GENERAL_AND_EDITING_CONSTRAINTS: &str =
-    include_str!("../../../../../vendor/codex-prompt/prompt/05-general-and-editing-constraints.md");
+    include_str!("../../vendor/codex-prompt/prompt/05-general-and-editing-constraints.md");
 
 /// Every kept section, in file order, one blank line between them.
 ///
 /// Each vendored file ends with the newline that ended its last upstream line,
 /// so a single `"\n"` joiner produces the blank line.
 pub const CODEX_VENDOR_BASE: &str = concat!(
-    include_str!("../../../../../vendor/codex-prompt/prompt/01-identity.md"),
+    include_str!("../../vendor/codex-prompt/prompt/01-identity.md"),
     "\n",
-    include_str!("../../../../../vendor/codex-prompt/prompt/02-technical-communication.md"),
+    include_str!("../../vendor/codex-prompt/prompt/02-technical-communication.md"),
     "\n",
-    include_str!("../../../../../vendor/codex-prompt/prompt/03-working-with-the-user.md"),
+    include_str!("../../vendor/codex-prompt/prompt/03-working-with-the-user.md"),
     "\n",
-    include_str!("../../../../../vendor/codex-prompt/prompt/04-autonomy-and-persistence.md"),
+    include_str!("../../vendor/codex-prompt/prompt/04-autonomy-and-persistence.md"),
     "\n",
-    include_str!("../../../../../vendor/codex-prompt/prompt/05-general-and-editing-constraints.md"),
+    include_str!("../../vendor/codex-prompt/prompt/05-general-and-editing-constraints.md"),
 );
 
 /// Every vendored section and the joined base.

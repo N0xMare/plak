@@ -333,8 +333,7 @@ fn bundled_rows_keep_openai_and_xai_on_their_current_facts() {
     assert!(xai.admit("grok-4.7", Some(ReasoningEffort::Ultra)).is_err());
 }
 
-const OPENAI_FIXTURE: &str =
-    include_str!("../../../../../providers/openai/tests/fixtures/v1_models.json");
+const OPENAI_FIXTURE: &str = include_str!("../../../tests/fixtures/openai_v1_models.json");
 
 fn openai_listed() -> Vec<plakous::openai::OpenAiListedModel> {
     let page: serde_json::Value = serde_json::from_str(OPENAI_FIXTURE).unwrap();

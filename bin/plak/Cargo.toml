@@ -76,7 +76,7 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 [dev-dependencies]
 rustix = { workspace = true, features = ["pty", "termios"] }
 plakous-hosted = { version = "0.1.0", path = "../../crates/hosting/hosted", features = ["test-support"], default-features = false }
-plakous-offline-crash-harness = { version = "0.1.0", path = "../../tests/harnesses/offline-crash" }
+plakous-offline-crash-harness = { path = "../../tests/harnesses/offline-crash" }
 plakous-recursive-subagents = { version = "0.1.0", path = "../../crates/orchestration/recursive-subagents", features = ["test-support"], default-features = false }
 portable-pty.workspace = true
 proptest = { workspace = true, features = ["std"] }

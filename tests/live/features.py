@@ -1095,9 +1095,9 @@ PROFILE_ROLES = (("root", "root-agent"), ("worker", "worker"), ("reviewer", "rev
 
 def write_profile_home(home: Path, profile: str) -> None:
     """The home applying a built-in profile writes: `<profile>-<role>`
-    templates from `configs/providers/<dir>` and the preset's `config.toml`
+    templates from `bin/plak/presets/<dir>` and the preset's `config.toml`
     pointed at them."""
-    source = live.ROOT / "configs/providers" / PROFILE_DIRS[profile]
+    source = live.ROOT / "bin/plak/presets" / PROFILE_DIRS[profile]
     (home / "agents").mkdir(parents=True, exist_ok=True)
     home.chmod(0o700)
     for role, stem in PROFILE_ROLES:
@@ -1111,7 +1111,7 @@ def write_profile_home(home: Path, profile: str) -> None:
 
 
 def profile_root_flags(profile: str) -> list[str]:
-    path = live.ROOT / "configs/providers" / PROFILE_DIRS[profile] / "agents/root-agent.toml"
+    path = live.ROOT / "bin/plak/presets" / PROFILE_DIRS[profile] / "agents/root-agent.toml"
     root = tomllib.loads(path.read_text())
     flags = ["--account", root["account"], "--model", root["model"]]
     return flags + (["--effort", root["effort"]] if root.get("effort") else [])
@@ -1119,7 +1119,7 @@ def profile_root_flags(profile: str) -> list[str]:
 
 def profile_model(profile: str, role: str) -> str:
     stem = dict(PROFILE_ROLES)[role]
-    path = live.ROOT / "configs/providers" / PROFILE_DIRS[profile] / "agents" / f"{stem}.toml"
+    path = live.ROOT / "bin/plak/presets" / PROFILE_DIRS[profile] / "agents" / f"{stem}.toml"
     return tomllib.loads(path.read_text())["model"]
 
 

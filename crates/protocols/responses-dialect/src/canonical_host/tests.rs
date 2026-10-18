@@ -450,7 +450,7 @@ fn terminal_preserves_text_citation_reasoning_tool_unknown_usage_and_replay() {
 #[test]
 fn codex_final_after_multiple_execs_omits_empty_placeholders_but_retains_replay() {
     let value: Value = serde_json::from_str(include_str!(
-        "../../../../providers/openai/tests/fixtures/response_codex_final_empty_placeholders.json"
+        "../../tests/fixtures/response_codex_final_empty_placeholders.json"
     ))
     .expect("Codex multi-exec terminal fixture");
     let raw = terminal_from_json(&value);
@@ -932,7 +932,7 @@ fn codex_and_grok_reject_non_object_or_non_unique_function_json() {
 
 #[test]
 fn live_projector_emits_best_effort_text_reasoning_tools_and_unknowns() {
-    let fixture = include_str!("../../../../providers/openai/tests/fixtures/response_mixed.sse");
+    let fixture = include_str!("../../tests/fixtures/response_mixed.sse");
     let mut decoder = ResponsesFamilySseDecoder::new(
         ResponsesStreamDialectData::codex("gpt-5.4"),
         ResponsesStreamLimits::default(),
@@ -980,8 +980,7 @@ fn live_projector_emits_best_effort_text_reasoning_tools_and_unknowns() {
 
 #[test]
 fn live_projector_emits_citations_and_custom_tool_completion() {
-    let fixture =
-        include_str!("../../../../providers/openai/tests/fixtures/response_o1_surfaces.sse");
+    let fixture = include_str!("../../tests/fixtures/response_o1_surfaces.sse");
     let mut decoder = ResponsesFamilySseDecoder::new(
         ResponsesStreamDialectData::codex("gpt-5.4"),
         ResponsesStreamLimits::default(),

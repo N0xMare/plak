@@ -53,6 +53,53 @@ class WorkspaceExclusionTests(unittest.TestCase):
         ])
 
 
+class PackageLocalIncludeTests(unittest.TestCase):
+    def test_paths_inside_the_package_pass(self):
+        self.assertEqual(workspace_policy.validate_package_local_includes('demo', {
+            'src/a/b.rs': 'const A: &str = include_str!("../../presets/x.toml");',
+            'tests/t.rs': 'const B: &[u8] = include_bytes!("fixtures/y.sse");',
+            'src/c.rs': 'include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/help/z.txt"))',
+        }), [])
+
+    def test_paths_that_climb_out_are_reported(self):
+        findings = workspace_policy.validate_package_local_includes('demo', {
+            'src/profiles.rs': 'x\nconst A: &str = include_str!(\n    "../../../configs/a.toml");',
+            'src/c.rs': 'include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../vendor/z.md"))',
+        })
+        self.assertEqual(len(findings), 2)
+        self.assertIn('src/c.rs:1', findings[0])
+        self.assertIn("src/profiles.rs:2 includes '../../../configs/a.toml'", findings[1])
+
+
+class PackagedDependencyTests(unittest.TestCase):
+    CLASSES = {'plak': 'supported', 'lib': 'published-internal', 'harness': 'repository-only'}
+
+    def test_dev_only_path_edges_and_the_published_plak_shape_pass(self):
+        manifests = {
+            'plak': {'dependencies': {'harness': {'path': 'h', 'version': '0.1.0', 'optional': True}}},
+            'lib': {'dev-dependencies': {'harness': {'path': 'h'}}},
+            'harness': {'dependencies': {'lib': {'path': 'l', 'version': '0.1.0'}}},
+        }
+        self.assertEqual(workspace_policy.validate_packaged_dependencies(
+            manifests, self.CLASSES, {'dependencies': {}}), [])
+
+    def test_regular_and_versioned_dev_edges_are_reported(self):
+        manifests = {
+            'plak': {},
+            'lib': {
+                'target': {'cfg(unix)': {'dependencies': {'h2': {'package': 'harness', 'path': 'h'}}}},
+                'dev-dependencies': {'harness': {'path': 'h', 'version': '0.1.0'}},
+            },
+        }
+        findings = workspace_policy.validate_packaged_dependencies(
+            manifests, self.CLASSES, {'dependencies': {'harness': {'path': 'h'}}})
+        self.assertEqual(findings, [
+            'lib: packaged manifest depends on repository-only harness',
+            'lib: dev-dependency on repository-only harness must be path-only',
+            'plak: packaged manifest depends on repository-only harness',
+        ])
+
+
 class TrackedHygieneTests(unittest.TestCase):
     # Synthetic private names; the real list is an untracked local file.
     HOST = "privhost1"

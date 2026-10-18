@@ -1,7 +1,10 @@
-# Provenance: `codex-code-mode-protocol` vendor snapshot
+# Provenance: `plakous-codex-code-mode-protocol` vendor snapshot
 
 This package is a reviewed, license-preserving copy of a small part of the
-OpenAI Codex repository. It exists so that a Plakous consumer needs no
+OpenAI Codex repository. Upstream publishes it as `codex-code-mode-protocol`;
+the copy is renamed `plakous-codex-code-mode-protocol` (library
+`plakous_codex_code_mode_protocol`) so it can be published beside Plakous
+without claiming the upstream name, and keeps the upstream version number. It exists so that a Plakous consumer needs no
 `[patch]` table to build Code Mode, and so that the model-visible `exec` and
 `wait` descriptions stay byte-identical to the pinned upstream wording.
 

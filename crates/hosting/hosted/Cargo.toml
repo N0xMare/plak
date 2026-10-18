@@ -41,7 +41,7 @@ plakous-anthropic = { version = "0.1.0", path = "../../providers/anthropic" }
 plakous-chat-completions = { version = "0.1.0", path = "../../protocols/chat-completions" }
 plakous-messages = { version = "0.1.0", path = "../../protocols/messages" }
 plakous-model = { version = "0.1.0", path = "../../core/model" }
-plakous-offline-crash-harness = { version = "0.1.0", path = "../../../tests/harnesses/offline-crash" }
+plakous-offline-crash-harness = { path = "../../../tests/harnesses/offline-crash" }
 plakous-http = { version = "0.1.0", path = "../../common/http" }
 plakous-openai = { version = "0.1.0", path = "../../providers/openai" }
 plakous-openrouter = { version = "0.1.0", path = "../../providers/openrouter" }

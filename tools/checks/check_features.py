@@ -228,12 +228,12 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
 EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-py-worker": "a57158273317e3c1c0ebe404e30d6e81f3c7074a51c9b713ad946093bcee9bda",
     "plakous-js-runtime": "6c68fa7e92379b21f826b9a64729008865573b5cd9dd0439cea8d765ae10e99e",
-    "plakous": "62afe3ab30f43575c1894a9e4c5b25fab9346601dda987c0e1617c7fc5d57d3e",
-    "plakous-agent": "bd86d54cede49bb93150a0461f2c803b79525872d1fe243715261f9f0d6ef8e8",
+    "plakous": "436379a73371e2a00418da03a1c2e8592e3fdc54e47bdb9d3de2029dd261c6fc",
+    "plakous-agent": "a6e0a087ecfc6d2979b85a3e8ce987414efbb7c1445e2c5f43ee64abd7e8776d",
     "plakous-anthropic": "b24186b9bde9a727d28a12bc90cb6919922118e77f3d048ab3d29a994a0598fa",
     "plakous-attempt": "6fa8c59b329b4de7ae6eb497bf4b3e2d93f916551c682c2f1a803a506ee65992",
     "plakous-auth": "5f45056d97e40ee2e4281e6b625a1d9a95e464d30d4c24126fb7fb2e95835c2a",
-    "plakous-code-mode": "6126837839f8d7f0647eaff50f357f144940d5eca849a54805f70102d4de3cf9",
+    "plakous-code-mode": "8441b385a6c538a362d980d57d5b24c1a3b8b9882953061457931372da53ac87",
     "plakous-chat-completions": "d8085531aeadc39ac48ea5ce25f914f731529d5c4ca323fe7d7d976f96b96288",
     "plakous-exchange": "e0f496fedf43d21bf110457d61e96f7f99dbec9d337ff0770fab2afe9530b129",
     "plakous-http": "509477319f7c960b67654006da39d7b5ccf281b2f656d9229ba0dd22b1e99e57",
@@ -242,7 +242,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-mcp": "ed1fc19e0a46a24becdcb0731cddce8ecdd38cc038dd4234c614301000ed20c3",
     "plakous-messages": "5d7e6faa7134e308d22117482f06e3a11bc4faf667eb13356d9589e43db36b70",
     "plakous-model": "ad51d57d372a8bceb2696f96a4e87f7ac31071c9690f074c41559cb2677ad78d",
-    "plakous-openai": "c6d73792c103e38eca9c34dc88ffb548712e95687c97e376c3de1d8518de03fc",
+    "plakous-openai": "5aa1bb77fb26a26025cd41c8ac7390079adbace87603a0fb63af0a30e79e769f",
     "plakous-tool-files": "032d5367ef52db60dd8a5f798aecb2517aa5464787cb962d743b18d48f2dc9b0",
     "plakous-tool-plan": "97d99c53c448bc26d4bfb53ef555578d2c2185a98579a6df934ea3ce7a245da4",
     "plakous-tool-process": "6fa78529b74a6ed25c559f877278b23022a2203cd66f0ac393a9c3d0d8b5d790",
@@ -255,7 +255,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-responses-dialect": "db14ebd84b815ab6f9b60041c49224cebabe859a3bf56a3787dad7209ce94c8a",
     "plakous-store": "c23f61cbedc0d1f35c7eb983f164580f83b9147f8213b5fe403b142c1027e25e",
     "plakous-tools": "105550b8044a8418f497b8d4d4f1b0adf2b772c181b9b4c8aef19fa6fd56f5d1",
-    "plakous-xai": "e13ddd5d34ea121b503e82d00d2696ba8c96e798927172626c01c00e8dadb1f5",
+    "plakous-xai": "1a81bdc4eba0a24b20362e51dac5ea3d494bc46f3ca03b59d2c43e12feae0365",
 }
 
 

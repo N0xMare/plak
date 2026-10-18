@@ -178,6 +178,38 @@ compose against it. `#[doc(hidden)]` is not a support boundary, and the lasting
 proof is the supported-root inventory plus the compile-negative pins described
 in chapter 05.
 
+### 3.3 Package contents
+
+Every non-repository-only package builds from its own packaged files, so
+publication needs no file outside the package root:
+
+- Every `include_str!`/`include_bytes!` in a package's tracked Rust files,
+  tests included, resolves inside that package. Embedded assets live in the
+  package that embeds them: the built-in profile homes in `bin/plak/presets/`,
+  the vendored Codex instruction text in
+  `crates/harness/prompts/vendor/codex-prompt/`, and test fixtures beside the
+  tests that read them (a fixture two packages read is copied into each).
+- No packaged manifest names a repository-only package outside
+  dev-dependencies, and a dev-dependency on one is path-only, so `cargo
+  package` strips it.
+- `plak/test-hooks` is repository-only. Cargo packages no regular dependency
+  that is not on the registry, optional or not, so the repository manifest
+  keeps the feature with its optional `plakous-offline-crash-harness` edge and
+  the published manifest is that manifest with both removed
+  (`tools/release/publish_shape.py`; `stage DEST` copies the tree with that
+  manifest for `cargo package`). Every `cfg(feature = "test-hooks")` site
+  compiles out of the published crate, and the workspace lints declare the
+  feature name to `check-cfg`, so it builds without an unexpected-cfg warning.
+  Repository builds, the gate, and the live drivers keep
+  `--features plak/test-hooks`.
+- The Code Mode grammar snapshot under `vendor/codex-code-mode-protocol` is the
+  package `plakous-codex-code-mode-protocol`: upstream `codex-code-mode-protocol`
+  renamed, keeping the upstream version, `LICENSE`, `NOTICE` and
+  `PROVENANCE.md`.
+
+`tools/checks/check_workspace.py` enforces the first two rules and judges
+`plak` by its published shape.
+
 ## 4. Product features
 
 `plakous` facade features are listed in chapter 00. The host and product
@@ -737,7 +769,9 @@ evaluator. Only building the Monty worker package itself selects the reviewed
 upstream crate, whose type-checker archive is not byte-reproducible.
 
 There is no Codex patch table. `plakous-code-mode` depends on the
-reviewed vendor snapshot `vendor/codex-code-mode-protocol` by path; its
+reviewed vendor snapshot `vendor/codex-code-mode-protocol`, the package
+`plakous-codex-code-mode-protocol` (the upstream crate renamed so it can be
+published without claiming the upstream name), by path and version; its
 `PROVENANCE.md` records the upstream repository, revision
 `b1a547b1f73ce86205d9222ac19cff334b3b7a2e`, version `0.153.3`, Apache-2.0
 license, and the exact files and line ranges copied.

@@ -2144,7 +2144,7 @@ async fn provider_rejection_and_ambiguous_disconnect_keep_exact_physical_facts()
 
 #[tokio::test]
 async fn accepted_sse_error_uses_anthropic_classification_and_terminal_delivery() -> TestResult {
-    let body = include_bytes!("../../../protocols/messages/tests/fixtures/stream_error.sse");
+    let body = include_bytes!("fixtures/stream_error.sse");
     let mut response = format!(
         "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nrequest-id: req_stream_01\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
         body.len(),

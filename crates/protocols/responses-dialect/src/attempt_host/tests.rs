@@ -3757,7 +3757,7 @@ fn long_function_arguments_cross_the_old_budget_and_count_the_terminal() {
 }
 
 fn mixed_model_sse() -> Vec<u8> {
-    include_str!("../../../../providers/openai/tests/fixtures/response_mixed.sse")
+    include_str!("../../tests/fixtures/response_mixed.sse")
         .replace("gpt-5.4", "gpt-test")
         .into_bytes()
 }

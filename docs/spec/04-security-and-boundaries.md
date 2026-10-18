@@ -1145,7 +1145,8 @@ a Codex patch table.
 | --- | --- | --- |
 | `monty-typeshed` from crates.io | the reviewed local 1.1.0 snapshot | deterministic ZIP timestamps and entry ordering for bundled type-checker assets, written with `zip` 9 instead of the advisory-affected `zip` 0.6 |
 
-The vendored `codex-code-mode-protocol` snapshot is upstream version 0.153.3
+The vendored snapshot (package `plakous-codex-code-mode-protocol`, upstream
+`codex-code-mode-protocol`) is upstream version 0.153.3
 at an exact Git revision. Plakous uses its protocol and presentation types;
 there is no vendored remote-session client or upstream evaluator host. Code Mode
 execution uses the `plakous-js-eval` protocol/client and `plakous-js-runtime`

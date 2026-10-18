@@ -228,13 +228,13 @@ Third-party material keeps its upstream license:
   `monty-typeshed` crate (MIT; the bundled typeshed stubs are Apache-2.0) and OpenAI Codex
   prompt and code-mode protocol material (Apache-2.0).
 - Excerpts reproduced from the OpenAI Codex CLI (Apache-2.0, Copyright 2025
-  OpenAI; license and notice in `vendor/codex-prompt/`): the `apply_patch`
+  OpenAI; license and notice in `crates/harness/prompts/vendor/codex-prompt/`): the `apply_patch`
   grammar and description (`crates/harness/tool-files/src/codex_patch.rs`,
   `crates/harness/tool-files/src/text.rs`), the `exec_command` description
   (`crates/harness/tool-process/src/text.rs`), and the model catalog facts in
   `crates/hosting/hosted/src/agent/fixtures/codex-reference-catalog.json`.
 - Tool schemas adapted from xAI's [Grok Build](https://github.com/xai-org/grok-build)
-  1.0.46 (Apache-2.0; license text in `vendor/codex-prompt/LICENSE`):
+  1.0.46 (Apache-2.0; license text in `crates/harness/prompts/vendor/codex-prompt/LICENSE`):
   `crates/harness/tool-process/src/grok.rs`.
 - Prompt text and tool descriptions adapted from
   [pi](https://github.com/earendil-works/pi) 1.1.0, Copyright (c) 2025 Mario

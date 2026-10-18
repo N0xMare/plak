@@ -145,7 +145,8 @@ vendor snapshot (chapter 06 §7.3).
 `plakous-py-eval` owns only the session that drives that worker.
 
 `plakous-code-mode` consumes the reviewed vendor snapshot at
-`vendor/codex-code-mode-protocol`,
+`vendor/codex-code-mode-protocol`, packaged as
+`plakous-codex-code-mode-protocol` (upstream `codex-code-mode-protocol`, renamed),
 which carries only the description and schema-rendering closure Plakous calls,
 with its upstream identity and license recorded in its `PROVENANCE.md`. That
 package is excluded from workspace membership and compiled by Cargo as an

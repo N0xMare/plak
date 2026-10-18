@@ -48,7 +48,7 @@ zeroize.workspace = true
 
 [dev-dependencies]
 plakous-http = { version = "0.1.0", path = "../../common/http", features = ["fault-injection"] }
-plakous-test-support = { version = "0.1.0", path = "../../../tests/support/plakous-test-support" }
+plakous-test-support = { path = "../../../tests/support/plakous-test-support" }
 base64.workspace = true
 futures-core.workspace = true
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }

@@ -4868,7 +4868,7 @@ gets and stays.
 
 **Codex.** The parity base is Codex's own base instruction text, copied
 verbatim under Apache-2.0 from the OpenAI Codex repository at the revision the
-Code Mode protocol snapshot already pins, and vendored at `vendor/codex-prompt`
+Code Mode protocol snapshot already pins, and vendored at `crates/harness/prompts/vendor/codex-prompt` (inside the package that embeds it)
 with a `PROVENANCE.md` that records the upstream paths, the exact line ranges,
 the whole-file digests and the vendored digests. Five sections are kept: the
 identity line; the one Personality paragraph that is about technical

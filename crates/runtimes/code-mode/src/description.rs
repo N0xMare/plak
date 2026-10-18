@@ -1,6 +1,6 @@
 use crate::ToolDefinition;
 use crate::ToolNamespaceDescription;
-use codex_code_mode_protocol::ImageDetailVisibility;
+use plakous_codex_code_mode_protocol::ImageDetailVisibility;
 use std::collections::BTreeMap;
 
 /// Exact parsed form of raw `exec` tool input.
@@ -32,7 +32,7 @@ pub struct ExecDescription<'a> {
 
 /// Parses raw exec input using the exact pinned upstream grammar.
 pub fn parse_exec_source(input: &str) -> Result<ParsedExecSource, String> {
-    codex_code_mode_protocol::parse_exec_source(input).map(|parsed| ParsedExecSource {
+    plakous_codex_code_mode_protocol::parse_exec_source(input).map(|parsed| ParsedExecSource {
         code: parsed.code,
         yield_time_ms: parsed.yield_time_ms,
         max_output_tokens: parsed.max_output_tokens,
@@ -57,14 +57,14 @@ pub fn build_exec_description(input: &ExecDescription<'_>) -> String {
         .map(|(key, value)| {
             (
                 key.clone(),
-                codex_code_mode_protocol::ToolNamespaceDescription {
+                plakous_codex_code_mode_protocol::ToolNamespaceDescription {
                     name: value.name.clone(),
                     description: value.description.clone(),
                 },
             )
         })
         .collect();
-    codex_code_mode_protocol::build_exec_tool_description(
+    plakous_codex_code_mode_protocol::build_exec_tool_description(
         &enabled,
         &deferred,
         &namespaces,
@@ -80,5 +80,5 @@ pub fn build_exec_description(input: &ExecDescription<'_>) -> String {
 
 /// Returns the exact pinned upstream wait tool description.
 pub fn build_wait_description() -> &'static str {
-    codex_code_mode_protocol::build_wait_tool_description()
+    plakous_codex_code_mode_protocol::build_wait_tool_description()
 }

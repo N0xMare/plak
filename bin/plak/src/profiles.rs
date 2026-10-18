@@ -40,19 +40,19 @@ const BUILTINS: &[Builtin] = &[
         files: &[
             BuiltinFile {
                 role: "root",
-                body: include_str!("../../../configs/providers/codex/agents/root-agent.toml"),
+                body: include_str!("../presets/codex/agents/root-agent.toml"),
             },
             BuiltinFile {
                 role: "worker",
-                body: include_str!("../../../configs/providers/codex/agents/worker.toml"),
+                body: include_str!("../presets/codex/agents/worker.toml"),
             },
             BuiltinFile {
                 role: "reviewer",
-                body: include_str!("../../../configs/providers/codex/agents/reviewer.toml"),
+                body: include_str!("../presets/codex/agents/reviewer.toml"),
             },
             BuiltinFile {
                 role: "researcher",
-                body: include_str!("../../../configs/providers/codex/agents/researcher.toml"),
+                body: include_str!("../presets/codex/agents/researcher.toml"),
             },
         ],
     },
@@ -62,19 +62,19 @@ const BUILTINS: &[Builtin] = &[
         files: &[
             BuiltinFile {
                 role: "root",
-                body: include_str!("../../../configs/providers/claude/agents/root-agent.toml"),
+                body: include_str!("../presets/claude/agents/root-agent.toml"),
             },
             BuiltinFile {
                 role: "worker",
-                body: include_str!("../../../configs/providers/claude/agents/worker.toml"),
+                body: include_str!("../presets/claude/agents/worker.toml"),
             },
             BuiltinFile {
                 role: "reviewer",
-                body: include_str!("../../../configs/providers/claude/agents/reviewer.toml"),
+                body: include_str!("../presets/claude/agents/reviewer.toml"),
             },
             BuiltinFile {
                 role: "researcher",
-                body: include_str!("../../../configs/providers/claude/agents/researcher.toml"),
+                body: include_str!("../presets/claude/agents/researcher.toml"),
             },
         ],
     },
@@ -84,19 +84,19 @@ const BUILTINS: &[Builtin] = &[
         files: &[
             BuiltinFile {
                 role: "root",
-                body: include_str!("../../../configs/providers/grok/agents/root-agent.toml"),
+                body: include_str!("../presets/grok/agents/root-agent.toml"),
             },
             BuiltinFile {
                 role: "worker",
-                body: include_str!("../../../configs/providers/grok/agents/worker.toml"),
+                body: include_str!("../presets/grok/agents/worker.toml"),
             },
             BuiltinFile {
                 role: "reviewer",
-                body: include_str!("../../../configs/providers/grok/agents/reviewer.toml"),
+                body: include_str!("../presets/grok/agents/reviewer.toml"),
             },
             BuiltinFile {
                 role: "researcher",
-                body: include_str!("../../../configs/providers/grok/agents/researcher.toml"),
+                body: include_str!("../presets/grok/agents/researcher.toml"),
             },
         ],
     },
@@ -107,19 +107,19 @@ const BUILTINS: &[Builtin] = &[
         files: &[
             BuiltinFile {
                 role: "root",
-                body: include_str!("../../../configs/providers/multi/agents/root-agent.toml"),
+                body: include_str!("../presets/multi/agents/root-agent.toml"),
             },
             BuiltinFile {
                 role: "worker",
-                body: include_str!("../../../configs/providers/multi/agents/worker.toml"),
+                body: include_str!("../presets/multi/agents/worker.toml"),
             },
             BuiltinFile {
                 role: "reviewer",
-                body: include_str!("../../../configs/providers/multi/agents/reviewer.toml"),
+                body: include_str!("../presets/multi/agents/reviewer.toml"),
             },
             BuiltinFile {
                 role: "researcher",
-                body: include_str!("../../../configs/providers/multi/agents/researcher.toml"),
+                body: include_str!("../presets/multi/agents/researcher.toml"),
             },
         ],
     },
