@@ -263,8 +263,9 @@ Notes worth knowing:
   `plak login`, `plak logout`, `plak key set|clear`.
 - Templates, the roster and orchestration are config-only. `/config` opens
   `config.toml`; there is no roster editor.
-- Skills, MCP and workflows are not implemented and have no
-  command.
+- Skills and workflows are not implemented. MCP servers are configured in
+  `config.toml` and enabled per template (see configuration.md); the TUI has
+  no MCP command.
 - There is no `/model`, `/account` or `/effort`. The session's account, model,
   effort, Fast mode, composition and protocol change only through profiles:
   the Agents tab's **Fork now**, **Use now** on a fresh session with no
