@@ -1,4 +1,8 @@
 use super::*;
+use crate::canonical::{
+    AwaitWake, CanonicalProcessAwaitRequest, CanonicalProcessInputDisposition,
+    CanonicalProcessStartRequest, CanonicalProcessWriteRequest,
+};
 use plakous_model::{CancellationToken, RunId};
 use plakous_tools::{ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope};
 use std::str::FromStr;
