@@ -13,10 +13,10 @@ USAGE:
 ADD OPTIONS:
   --scope user|project      Which config.toml gets the table (default user)
   --env KEY=VALUE           Literal environment (stdio; repeatable)
-  --secret-env KEY=SECRET   Environment from a named secret (stdio; repeatable)
-  --bearer-secret SECRET    Authorization: Bearer from a named secret (http)
+  --secret-env KEY=SECRET_NAME     Environment from a stored secret (stdio; repeatable)
+  --bearer-secret SECRET_NAME      Authorization: Bearer from a stored secret (http)
   --header NAME=VALUE       Literal header (http; repeatable)
-  --header-secret NAME=SECRET  Header from a named secret (http; repeatable)
+  --header-secret NAME=SECRET_NAME Header from a stored secret (http; repeatable)
   --tools a,b               Server allowlist; mcp:<id> means exactly these
   --startup-seconds N       Start and list budget (1..=120, default 20)
   --call-seconds N          Per-call ceiling (1..=3600, default 120)
@@ -33,5 +33,8 @@ ADD OPTIONS:
   enable and disable edit only that template file's tools array (mcp:<id>,
   or mcp:<id>/<tool> per --tool). New sessions pick the change up; existing
   sessions keep the tools they froze.
-  remove refuses while a template still lists the server; --force also
-  removes those template entries.
+  remove refuses while a template would be left listing what no layer
+  serves; --force also removes those template entries, checking every file
+  first. Every edit is checked against the home configuration alone and with
+  the trusted project over it; only the home's templates and the current
+  trusted project's templates are checked.

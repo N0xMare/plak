@@ -266,8 +266,10 @@ Notes worth knowing:
   `config.toml`; there is no roster editor.
 - `/mcp` is read-only. It lists every configured MCP server with its
   transport, scope, the templates that enable it and any secret it names that
-  is not stored; whether this session bound it and with how many tools; the
-  tools this session's bind left out and why; and the `plak mcp` commands that
+  is not stored; whether this session bound it and with how many tools (or
+  with an earlier definition than the current one); the tools this session's
+  bind left out and why, while its transcript still holds those notices; and
+  the `plak mcp` commands that
   add, test and enable a server. Setup is CLI-only (`plak mcp`, see the CLI
   reference); a session keeps the tools it started with.
 - Skills and workflows are not implemented.

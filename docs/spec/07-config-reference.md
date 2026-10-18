@@ -76,8 +76,9 @@ edit ~/.plak/agents/<name>.toml*. The one exception is `plak mcp enable` and
 `plak mcp disable` (and `plak mcp remove --force`, which disables first): they
 rewrite only the `tools` array of the one template file the name resolves to
 (the project's when a trusted project supplies it), adding or removing
-`mcp:<id>` or `mcp:<id>/<tool>` entries, keeping every other line, and
-validating the result as a load would before publishing it. A session that
+`mcp:<id>` or `mcp:<id>/<tool>` entries, keeping every other line and the
+comments beside the remaining entries, and validating the result as both
+layers would load it (§3.5) before publishing it. A session that
 already exists keeps the tools it froze; new sessions pick the change up. The Agents tab selects a whole profile.
 A user profile is `~/.plak/profiles/<name>.toml` with exactly two keys,
 `root = "<template>"` and `working_set = ["<template>", ...]` (at least one
@@ -291,7 +292,7 @@ reach the server; it starts nothing until a template that lists it binds.
 | `secret_env` | table of string | `{}` | keys as `env`, none also in `env`; values are secret names; stdio only | Environment variables whose values are named secrets. |
 | `url` | string | `(required for http)` | `https://`, or `http://` only to `127.0.0.1` or `[::1]`; no credentials or fragment; http only | The streamable HTTP endpoint. |
 | `bearer_secret` | string | `(unset)` | a secret name; http only | Sent as `Authorization: Bearer <secret>`. |
-| `headers` | table of string | `{}` | header names; never `Authorization`; no control characters; http only | Literal, non-secret headers. |
+| `headers` | table of string | `{}` | header names; never `Authorization` or `Proxy-Authorization`; no control characters; http only | Literal, non-secret headers. |
 | `secret_headers` | table of string | `{}` | header names, none also in `headers` (case-insensitive), no `Authorization` beside `bearer_secret`; values are secret names; http only | Headers whose values are named secrets. |
 | `tools` | array of string | `(every listed tool)` | MCP tool names, 1 to 128 bytes without whitespace, none twice | Server-level allowlist; `mcp:<id>` means exactly these. |
 | `startup_seconds` | integer | `20` | 1..=120 | Budget to start the server and list its tools. |
@@ -302,9 +303,20 @@ TOML: a secret name matches `[a-z][a-z0-9-]{0,31}` and resolves from the home
 (spec 04 §3.1) when the server is started; whether it exists is a bind check,
 not a load check. `plak mcp add` writes a table into the home or (with
 `--scope project`) the trusted project's `config.toml` in place, keeping the
-rest of the file and spelling out only the keys given; the result must pass
-this section's parser and leave every template reference valid, or nothing is
-written. A trusted project may add an `[mcp_servers.<id>]` or
+rest of the file and spelling out only the keys given; `--replace` keeps the
+old table's place and comments. Every `plak mcp` edit (`add`, `remove`,
+`enable`, `disable`) is checked before any file is written against both layers
+it leaves: the home alone, as every load outside a project reads it, and the
+home with the current trusted project over it. A home template therefore
+cannot list a server or a tool only the project serves. `remove` refuses while
+a template file would be left naming what its layer no longer serves;
+`--force` removes those entries, checks the config and every template file
+together, then writes the templates and then the config. Only the home's
+templates and the current trusted project's templates are checked: a
+template of another project that lists the server is not visible and is left
+as it is. A secret reference given to `plak mcp add` that is not a secret
+name is refused without repeating it. A written file keeps its permissions,
+and a symlinked `config.toml` is written at its target. A trusted project may add an `[mcp_servers.<id>]` or
 `[tools.<name>]` table or replace one of the home's by name, whole (a stdio
 server is a host-authority command, like `on_mint`); its secrets still resolve
 only from the home.
@@ -414,7 +426,7 @@ and a template message is prefixed `template <name>: `.
 | a key of the other transport | `[mcp_servers.<id>] <key> does not apply to transport = "<transport>"` |
 | a url outside the rule | `[mcp_servers.<id>] url must be https://, or http:// to a loopback literal (127.0.0.1 or [::1])`; with userinfo, `url cannot carry credentials; name a secret with bearer_secret` |
 | a secret reference that is not a name | `[mcp_servers.<id>] <key> names a secret: secret name "<x>" must match [a-z][a-z0-9-]{0,31}` |
-| a literal `Authorization` header | `[mcp_servers.<id>] headers cannot carry Authorization; name a secret with bearer_secret or secret_headers` |
+| a literal `Authorization` or `Proxy-Authorization` header | `[mcp_servers.<id>] headers cannot carry <header>; name a secret with bearer_secret or secret_headers` |
 | a template field of the wrong type | `template <name>: <key> must be a string` / `a boolean` / `an integer` |
 | direct API template whose model is not a usable listed row, or whose effort is missing or off the model's published ladder | `template <name>: ` followed by the API admission refusal: the model is not listed (with up to three closest ids), is listed but not usable (with its status and reason), or `requires --effort <ladder>` |
 | a template `[env]` value that is not a string | `template <name>: env <key> must be a string` |

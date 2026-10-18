@@ -695,6 +695,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                 .request(self.config.target.native_subscriptions().cloned());
                         }
                     }
+                    let with_tools =
+                        surface::needs_session_tools(self.config.surface.as_deref(), &intent);
                     let effect = surface::dispatch(
                         self.config.surface.as_deref(),
                         intent,
@@ -702,6 +704,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             session: Some(surface::session_facts(
                                 &self.config.session,
                                 Some(&self.config.topology_rows()),
+                                with_tools,
                             )),
                             phase: surface::SurfacePhase::Idle,
                             attached_one_shot: self.config.attached_one_shot,

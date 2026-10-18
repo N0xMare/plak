@@ -63,8 +63,9 @@ pub struct SurfaceSession {
     pub workspace: std::path::PathBuf,
     /// This session's frozen tree epoch, when it has one.
     pub roster: Option<crate::orchestration::OrchestrationSnapshot>,
-    /// The MCP tools this session froze at creation.
-    pub mcp: SurfaceMcp,
+    /// The MCP tools this session froze at creation; `None` unless the
+    /// handler asked for them ([`SurfaceHandler::needs_session_tools`]).
+    pub mcp: Option<SurfaceMcp>,
 }
 
 /// A session's frozen MCP tools, for an operator view.
@@ -76,6 +77,9 @@ pub struct SurfaceMcp {
     pub tools: Vec<(String, String)>,
     /// The omission notices of the creation bind still in the transcript.
     pub omitted: Vec<String>,
+    /// The canonical `[mcp_servers.<id>]` table each listed server was bound
+    /// with, keyed by id.
+    pub definitions: std::collections::BTreeMap<String, String>,
 }
 
 impl SurfaceMcp {
@@ -119,6 +123,14 @@ impl SurfaceMcp {
                 })
                 .collect(),
             omitted,
+            definitions: selection
+                .tool_sections
+                .iter()
+                .filter_map(|(key, table)| {
+                    key.strip_prefix("mcp_servers.")
+                        .map(|id| (id.to_owned(), table.clone()))
+                })
+                .collect(),
         }
     }
 }
@@ -126,6 +138,7 @@ impl SurfaceMcp {
 pub(super) fn session_facts(
     session: &crate::sessions::SessionRecord,
     rows: Option<&dyn super::topology_state::TopologyRows>,
+    with_tools: bool,
 ) -> SurfaceSession {
     let roster = rows.and_then(|rows| {
         let tree_id = super::topology_state::durable_tree_id(rows, session);
@@ -141,7 +154,7 @@ pub(super) fn session_facts(
         fast: session.target_selection == crate::binding::TargetSelection::NativePriority,
         workspace: session.workspace_root.clone(),
         roster,
-        mcp: SurfaceMcp::of(session),
+        mcp: with_tools.then(|| SurfaceMcp::of(session)),
     }
 }
 
@@ -232,6 +245,11 @@ pub trait SurfaceHandler<P: ProtocolExtension>: Send {
     fn needs_usage(&self, _intent: &P::Intent) -> bool {
         false
     }
+    /// Whether the dispatch reads the session's frozen MCP tools
+    /// ([`SurfaceSession::mcp`]); they are gathered only when it does.
+    fn needs_session_tools(&self, _intent: &P::Intent) -> bool {
+        false
+    }
     /// Answer the driver's intent using immutable facts and bounded observations.
     fn dispatch(
         &self,
@@ -249,6 +267,13 @@ pub trait SurfaceHandler<P: ProtocolExtension>: Send {
 
 /// Optional driver-owned extension handler.
 pub type Surface<P = Core> = Option<Box<dyn SurfaceHandler<P>>>;
+
+pub(super) fn needs_session_tools<P: ProtocolExtension>(
+    surface: Option<&dyn SurfaceHandler<P>>,
+    intent: &P::Intent,
+) -> bool {
+    surface.is_some_and(|handler| handler.needs_session_tools(intent))
+}
 
 pub(super) fn needs_usage<P: ProtocolExtension>(
     surface: Option<&dyn SurfaceHandler<P>>,

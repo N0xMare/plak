@@ -294,6 +294,10 @@ fn every_tool_section_rule_is_a_located_load_error() {
             "[mcp_servers.linear] headers cannot carry Authorization; name a secret with bearer_secret or secret_headers (line 4, column 11)",
         ),
         (
+            format!("{http}headers = {{ proxy-authorization = \"Basic x\" }}\n"),
+            "[mcp_servers.linear] headers cannot carry proxy-authorization; name a secret with bearer_secret or secret_headers (line 4, column 11)",
+        ),
+        (
             format!("{stdio}env = {{ \"BAD NAME\" = \"x\" }}\n"),
             "[mcp_servers.github] env key \"BAD NAME\" is not one of the valid environment names (line 4, column 7)",
         ),

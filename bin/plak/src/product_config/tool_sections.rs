@@ -542,13 +542,15 @@ fn parse_mcp_server(
             &section.secret_headers,
             secret_headers.values(),
         )?;
-        if headers
-            .keys()
-            .any(|header| header.eq_ignore_ascii_case("authorization"))
-        {
+        if let Some(header) = headers.keys().find(|header| {
+            header.eq_ignore_ascii_case("authorization")
+                || header.eq_ignore_ascii_case("proxy-authorization")
+        }) {
             return Err(reader.at_entry(
                 &section.headers,
-                "headers cannot carry Authorization; name a secret with bearer_secret or secret_headers",
+                &format!(
+                    "headers cannot carry {header}; name a secret with bearer_secret or secret_headers"
+                ),
             ));
         }
         if let Some((header, _)) = headers

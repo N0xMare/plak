@@ -301,11 +301,17 @@ pub fn run_shell_host_loop<P: plakous_host_protocol::ProtocolExtension>(
                         config.subscriptions.clone(),
                     );
                 }
+                let with_tools =
+                    super::surface::needs_session_tools(config.surface.as_deref(), &intent);
                 let effect = super::surface::dispatch(
                     config.surface.as_deref(),
                     intent,
                     super::surface::SurfaceFacts {
-                        session: Some(super::surface::session_facts(&config.session, None)),
+                        session: Some(super::surface::session_facts(
+                            &config.session,
+                            None,
+                            with_tools,
+                        )),
                         phase: super::surface::SurfacePhase::Detached,
                         attached_one_shot: false,
                         catalog: &config.ready_catalog.accounts,

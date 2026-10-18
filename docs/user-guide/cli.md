@@ -214,8 +214,8 @@ plak mcp remove github
 - `add <id> [options] -- <command> [args...]` adds a stdio server;
   `add <id> --url <url>` an HTTP one. Options: `--scope user|project` (default
   `user`; `project` writes the trusted project's `.plak/config.toml`),
-  `--env KEY=VALUE`, `--secret-env KEY=SECRET` (stdio), `--bearer-secret
-  SECRET`, `--header NAME=VALUE`, `--header-secret NAME=SECRET` (http),
+  `--env KEY=VALUE`, `--secret-env KEY=SECRET_NAME` (stdio), `--bearer-secret
+  SECRET_NAME`, `--header NAME=VALUE`, `--header-secret NAME=SECRET_NAME` (http),
   `--tools a,b` (the server allowlist), `--startup-seconds`, `--call-seconds`
   and `--replace` to overwrite an existing id. The table is written in place,
   keeping the rest of the file, and anything a config load would refuse is
@@ -232,8 +232,12 @@ plak mcp remove github
   `mcp:<id>/<t>` per `--tool`) to that template file's `tools`; `disable`
   removes every entry for the server. Only the `tools` line changes. New
   sessions pick it up; a session that already exists keeps its tools.
-- `remove <id>` refuses while a template still lists the server; `--force`
-  removes those entries first.
+- `remove <id>` refuses while a template would be left listing a server or
+  tool nothing serves; `--force` removes those entries first.
+- Every edit is checked against your home configuration alone and with the
+  current trusted project over it, so a home template cannot list a server
+  that only a project defines. Only your home's templates and the current
+  project's are checked; another project's templates are not seen.
 
 ---
 

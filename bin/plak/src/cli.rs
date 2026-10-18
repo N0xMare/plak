@@ -780,15 +780,15 @@ enum McpAction {
         scope: Option<String>,
         #[arg(long)]
         url: Option<String>,
-        #[arg(long = "bearer-secret")]
+        #[arg(long = "bearer-secret", value_name = "SECRET_NAME")]
         bearer_secret: Option<String>,
         #[arg(long = "header", value_name = "NAME=VALUE")]
         header: Vec<String>,
-        #[arg(long = "header-secret", value_name = "NAME=SECRET")]
+        #[arg(long = "header-secret", value_name = "NAME=SECRET_NAME")]
         header_secret: Vec<String>,
         #[arg(long = "env", value_name = "KEY=VALUE")]
         env: Vec<String>,
-        #[arg(long = "secret-env", value_name = "KEY=SECRET")]
+        #[arg(long = "secret-env", value_name = "KEY=SECRET_NAME")]
         secret_env: Vec<String>,
         #[arg(long, value_delimiter = ',')]
         tools: Option<Vec<String>>,
@@ -848,13 +848,49 @@ fn pairs(
     let mut out = std::collections::BTreeMap::new();
     for value in values {
         let Some((key, value)) = value.split_once('=') else {
-            return Err(format!("{flag} takes NAME=VALUE, got {value:?}"));
+            return Err(format!(
+                "{flag} takes NAME=VALUE; one value has no `=` (it is not repeated here)"
+            ));
         };
         if out.insert(key.to_owned(), value.to_owned()).is_some() {
             return Err(format!("{flag} names {key} twice"));
         }
     }
     Ok(out)
+}
+
+/// Every secret an `mcp add` names must be a secret *name*; a rejected one
+/// may be a pasted value, so it is never repeated back.
+fn secret_references_are_names(
+    transport: &crate::product_config::McpTransport,
+) -> Result<(), String> {
+    let named: Vec<(&str, &String)> = match transport {
+        crate::product_config::McpTransport::Stdio { secret_env, .. } => secret_env
+            .values()
+            .map(|name| ("--secret-env", name))
+            .collect(),
+        crate::product_config::McpTransport::Http {
+            bearer_secret,
+            secret_headers,
+            ..
+        } => bearer_secret
+            .iter()
+            .map(|name| ("--bearer-secret", name))
+            .chain(
+                secret_headers
+                    .values()
+                    .map(|name| ("--header-secret", name)),
+            )
+            .collect(),
+    };
+    for (flag, name) in named {
+        if crate::product_secrets::validate_secret_name(name).is_err() {
+            return Err(format!(
+                "{flag} takes the name of a stored secret ([a-z][a-z0-9-]{{0,31}}), never its value; the value given is not shown. Store the value with `plak secret set <name>`"
+            ));
+        }
+    }
+    Ok(())
 }
 
 impl McpAction {
@@ -931,6 +967,7 @@ impl McpAction {
                         }
                     }
                 };
+                secret_references_are_names(&transport)?;
                 McpCommand::Add {
                     id,
                     scope: write_scope(scope.as_deref())?.unwrap_or_default(),
@@ -2639,6 +2676,47 @@ mod tests {
             &["mcp", "enable", "gh"][..],
         ] {
             assert!(parse(args(argv)).is_err(), "must reject {argv:?}");
+        }
+        for argv in [
+            &[
+                "mcp",
+                "add",
+                "gh",
+                "--url",
+                "https://x.test",
+                "--bearer-secret",
+                "ghp_Pasted_Value",
+            ][..],
+            &[
+                "mcp",
+                "add",
+                "gh",
+                "--secret-env",
+                "T=ghp_Pasted_Value",
+                "--",
+                "cmd",
+            ][..],
+            &[
+                "mcp",
+                "add",
+                "gh",
+                "--url",
+                "https://x.test",
+                "--header-secret",
+                "X-Key=ghp_Pasted_Value",
+            ][..],
+            &[
+                "mcp",
+                "add",
+                "gh",
+                "--url",
+                "https://x.test",
+                "--header",
+                "ghp_Pasted_Value",
+            ][..],
+        ] {
+            let refused = parse(args(argv)).unwrap_err();
+            assert!(!refused.contains("Pasted"), "{refused}");
         }
         assert!(matches!(
             parse(args(&["mcp"])),

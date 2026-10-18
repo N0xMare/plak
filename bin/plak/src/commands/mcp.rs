@@ -60,13 +60,37 @@ pub(crate) fn run(
             server,
             replace,
         } => {
-            let file = mcp_edit::add_server(paths, scope, &id, &server, replace)
+            let added = mcp_edit::add_server(paths, scope, &id, &server, replace)
                 .map_err(CliFailure::new)?;
-            out.push_str(&format!("added [mcp_servers.{id}] to {}\n", file.display()));
-            for name in missing_secrets(paths, &server)? {
+            writeln!(
+                stdout,
+                "added [mcp_servers.{id}] to {}",
+                added.file.display()
+            )
+            .map_err(|_| CliFailure::new("stdout failed"))?;
+            if let Some(project) = &added.overridden_by {
                 out.push_str(&format!(
-                    "secret {name} is not set; run `plak secret set {name}`\n"
+                    "note: {} also defines [mcp_servers.{id}]; in this project that table overrides the one just written\n",
+                    project.display()
                 ));
+            }
+            if let Some(home) = &added.overrides {
+                out.push_str(&format!(
+                    "note: in this project this table overrides [mcp_servers.{id}] in {}\n",
+                    home.display()
+                ));
+            }
+            match missing_secrets(paths, &server) {
+                Ok(missing) => {
+                    for name in missing {
+                        out.push_str(&format!(
+                            "secret {name} is not set; run `plak secret set {name}`\n"
+                        ));
+                    }
+                }
+                Err(error) => out.push_str(&format!(
+                    "warning: stored secrets could not be listed ({error}); `plak mcp show {id}` checks them again\n"
+                )),
             }
             out.push_str(&format!(
                 "next: `plak mcp test {id}`, then `plak mcp enable {id} --template <name>`\n"
@@ -79,7 +103,10 @@ pub(crate) fn run(
             let removed =
                 mcp_edit::remove_server(paths, scope, &id, force).map_err(CliFailure::new)?;
             for template in &removed.disabled {
-                out.push_str(&format!("removed mcp:{id} from template {template}\n"));
+                out.push_str(&format!(
+                    "removed mcp:{id} from template {}\n",
+                    template.label()
+                ));
             }
             out.push_str(&format!(
                 "removed [mcp_servers.{id}] from {}\n",
@@ -169,22 +196,33 @@ fn reach_text(reaching: &[TemplateReach]) -> String {
 pub(crate) fn overview_lines(paths: &PlakPaths, config: &ProductConfig) -> CliResult<Vec<String>> {
     let mut lines = Vec::new();
     for (id, server) in &config.tool_sections.mcp_servers {
-        let (transport, target) = transport_line(server);
-        let scope = mcp_edit::server_scope(paths, config, id).map_err(CliFailure::new)?;
-        lines.push(format!("{id}  {transport}  {}  {target}", scope.as_str()));
-        let reaching = mcp_edit::templates_reaching(config, id);
-        lines.push(if reaching.is_empty() {
-            "  templates: none".to_owned()
-        } else {
-            format!("  templates: {}", reach_text(&reaching))
-        });
-        let missing = missing_secrets(paths, server)?;
-        if !missing.is_empty() {
-            lines.push(format!(
-                "  missing secrets: {} (plak secret set <name>)",
-                missing.join(", ")
-            ));
-        }
+        lines.extend(server_lines(paths, config, id, server)?);
+    }
+    Ok(lines)
+}
+
+/// One server's block: a header line, then indented facts.
+fn server_lines(
+    paths: &PlakPaths,
+    config: &ProductConfig,
+    id: &str,
+    server: &McpServerConfig,
+) -> CliResult<Vec<String>> {
+    let (transport, target) = transport_line(server);
+    let scope = mcp_edit::server_scope(paths, config, id).map_err(CliFailure::new)?;
+    let mut lines = vec![format!("{id}  {transport}  {}  {target}", scope.as_str())];
+    let reaching = mcp_edit::templates_reaching(config, id);
+    lines.push(if reaching.is_empty() {
+        "  templates: none".to_owned()
+    } else {
+        format!("  templates: {}", reach_text(&reaching))
+    });
+    let missing = missing_secrets(paths, server)?;
+    if !missing.is_empty() {
+        lines.push(format!(
+            "  missing secrets: {} (plak secret set <name>)",
+            missing.join(", ")
+        ));
     }
     Ok(lines)
 }
@@ -232,6 +270,11 @@ fn show(paths: &PlakPaths, id: &str) -> CliResult<String> {
     Ok(out)
 }
 
+/// Text a server chose (tool names, refusal notices), made safe to print.
+fn shown(text: &str) -> String {
+    crate::cli_output::safe_terminal_text(text, 512)
+}
+
 fn test(paths: &PlakPaths, id: &str) -> CliResult<String> {
     let config = load(paths)?;
     server(&config, id)?;
@@ -244,27 +287,31 @@ fn test(paths: &PlakPaths, id: &str) -> CliResult<String> {
         &workspace,
         secrets::ProductNamedSecrets::shared(paths),
     )
-    .map_err(|error| CliFailure::new(format!("mcp server {id} failed: {error}")))?;
+    .map_err(|error| CliFailure::new(format!("mcp server {id} failed: {}", shown(&error))))?;
     let mut out = format!(
         "mcp server {id}: {} tool{} a session would bind as mcp:{id}\n",
         probe.tools.len(),
         if probe.tools.len() == 1 { "" } else { "s" }
     );
     for (name, exposed) in &probe.tools {
-        out.push_str(&format!("  {name}  ({exposed})\n"));
+        out.push_str(&format!("  {}  ({})\n", shown(name), shown(exposed)));
     }
     if !(probe.unlowerable.is_empty() && probe.not_allowed.is_empty()) {
         out.push_str("left out:\n");
         for line in &probe.unlowerable {
-            out.push_str(&format!("  {line}\n"));
+            out.push_str(&format!("  {}\n", shown(line)));
         }
         for name in &probe.not_allowed {
-            out.push_str(&format!("  {name}: not in [mcp_servers.{id}] tools\n"));
+            out.push_str(&format!(
+                "  {}: not in [mcp_servers.{id}] tools\n",
+                shown(name)
+            ));
         }
     }
     for name in &probe.not_listed {
         out.push_str(&format!(
-            "warning: [mcp_servers.{id}] tools names {name}, which the server does not list\n"
+            "warning: [mcp_servers.{id}] tools names {}, which the server does not list\n",
+            shown(name)
         ));
     }
     Ok(out)
@@ -277,39 +324,46 @@ pub(crate) fn session_overview(
     paths: &PlakPaths,
     session: Option<&plakous_hosted::runtime::SurfaceSession>,
 ) -> String {
-    let mut lines = Vec::new();
     let empty = plakous_hosted::runtime::SurfaceMcp::default();
-    let mcp = session.map_or(&empty, |session| &session.mcp);
-    let bound = |id: &str| mcp.tools.iter().filter(|(server, _)| server == id).count();
-    match ProductConfig::load(paths) {
-        Err(error) => lines.push(format!("config.toml could not be read: {error}")),
-        Ok(config) => match overview_lines(paths, &config) {
-            Err(error) => lines.push(error.to_string()),
-            Ok(overview) if overview.is_empty() => lines.push(NONE_CONFIGURED.to_owned()),
-            Ok(overview) => {
-                lines.push("configured servers:".to_owned());
-                let mut ids = config.tool_sections.mcp_servers.keys();
-                for line in overview {
-                    let starts_server = !line.starts_with(' ');
-                    lines.push(format!("  {line}"));
-                    if starts_server && let Some(id) = ids.next() {
-                        lines.push(format!("    {}", session_state(mcp, id, bound(id))));
-                    }
-                }
+    let mcp = session
+        .and_then(|session| session.mcp.as_ref())
+        .unwrap_or(&empty);
+    let mut lines = Vec::new();
+    let config = match ProductConfig::load(paths) {
+        Ok(config) => Some(config),
+        Err(error) => {
+            lines.push(format!("config.toml could not be read: {error}"));
+            None
+        }
+    };
+    if let Some(config) = &config {
+        if config.tool_sections.mcp_servers.is_empty() {
+            lines.push(NONE_CONFIGURED.to_owned());
+        } else {
+            lines.push("configured servers:".to_owned());
+        }
+        for (id, server) in &config.tool_sections.mcp_servers {
+            match server_lines(paths, config, id, server) {
+                Ok(block) => lines.extend(block.into_iter().map(|line| format!("  {line}"))),
+                Err(error) => lines.push(format!("  {id}: {error}")),
             }
-        },
+            lines.push(format!("    {}", session_state(mcp, config, id)));
+        }
     }
-    let configured = config_ids(paths);
-    for id in mcp.servers.iter().filter(|id| !configured.contains(*id)) {
+    for id in mcp.servers.iter().filter(|id| {
+        config
+            .as_ref()
+            .is_none_or(|config| !config.tool_sections.mcp_servers.contains_key(*id))
+    }) {
         lines.push(format!(
-            "  {id}: bound by this session, no longer configured; {}",
-            session_state(mcp, id, bound(id))
+            "  {id}: no longer configured; this session: bound, {}",
+            tool_count(mcp, id)
         ));
     }
     if !mcp.omitted.is_empty() {
         lines.push(String::new());
-        lines.push("left out when this session bound:".to_owned());
-        lines.extend(mcp.omitted.iter().map(|line| format!("  {line}")));
+        lines.push("left out when this session bound (as its transcript still shows):".to_owned());
+        lines.extend(mcp.omitted.iter().map(|line| format!("  {}", shown(line))));
     }
     lines.push(String::new());
     lines.push("change it from a shell (new sessions pick it up):".to_owned());
@@ -317,10 +371,26 @@ pub(crate) fn session_overview(
     lines.join("\n")
 }
 
-fn config_ids(paths: &PlakPaths) -> Vec<String> {
-    ProductConfig::load(paths)
-        .map(|config| config.tool_sections.mcp_servers.into_keys().collect())
-        .unwrap_or_default()
+fn tool_count(mcp: &plakous_hosted::runtime::SurfaceMcp, id: &str) -> String {
+    let tools = mcp.tools.iter().filter(|(server, _)| server == id).count();
+    format!("{tools} tool{}", if tools == 1 { "" } else { "s" })
+}
+
+fn session_state(
+    mcp: &plakous_hosted::runtime::SurfaceMcp,
+    config: &ProductConfig,
+    id: &str,
+) -> String {
+    if !mcp.servers.iter().any(|server| server == id) {
+        return "this session: not bound".to_owned();
+    }
+    let count = tool_count(mcp, id);
+    if mcp.definitions.get(id) != config.tool_sections.render_server(id).as_ref() {
+        return format!(
+            "this session: bound with an earlier definition, {count}; new sessions get the current one"
+        );
+    }
+    format!("this session: bound, {count}")
 }
 
 /// The commands the `/mcp` panel names; a test walks each through the parser.
@@ -330,16 +400,6 @@ const PANEL_COMMANDS: &[&str] = &[
     "plak mcp test <id>",
     "plak mcp enable <id> --template <name>",
 ];
-
-fn session_state(mcp: &plakous_hosted::runtime::SurfaceMcp, id: &str, tools: usize) -> String {
-    if !mcp.servers.iter().any(|server| server == id) {
-        return "this session: not bound".to_owned();
-    }
-    format!(
-        "this session: bound, {tools} tool{}",
-        if tools == 1 { "" } else { "s" }
-    )
-}
 
 #[cfg(test)]
 mod tests {

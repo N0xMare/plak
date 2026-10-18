@@ -480,6 +480,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                             self.host.subscription_usage_refresh,
                         );
                     }
+                    let with_tools =
+                        surface::needs_session_tools(self.host.surface.as_deref(), &intent);
                     let effect = surface::dispatch(
                         self.host.surface.as_deref(),
                         intent,
@@ -487,6 +489,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                             session: Some(surface::session_facts(
                                 self.host.session,
                                 Some(self.host.rows),
+                                with_tools,
                             )),
                             phase: surface::SurfacePhase::Busy,
                             attached_one_shot: self.host.attached_one_shot,

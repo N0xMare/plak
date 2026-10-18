@@ -1604,7 +1604,7 @@ version. There is no top-level prompt positional.
 | `refresh [<account>]` | rotate one refreshable credential |
 | `key set\|clear <openai\|xai-api\|anthropic\|openrouter>`, `key status [<account>]` | `set` and `clear` refuse an account that is not an API-key account |
 | `secret set\|rm <name>`, `secret list` | named secrets config.toml refers to by name (spec 04 §3.1); `set` prompts with masked input, `list` prints names only |
-| `mcp add <id> [--scope user\|project] [--env K=V]… [--secret-env K=<secret>]… [--tools a,b] [--startup-seconds <n>] [--call-seconds <n>] [--replace] -- <command> [args…]`, `mcp add <id> --url <url> [--scope user\|project] [--bearer-secret <secret>] [--header N=V]… [--header-secret N=<secret>]… [--tools a,b] [--startup-seconds <n>] [--call-seconds <n>] [--replace]`, `mcp list`, `mcp show <id>`, `mcp test <id>`, `mcp remove <id> [--scope user\|project] [--force]`, `mcp enable <id> --template <name> [--tool <t>]…`, `mcp disable <id> --template <name>` | MCP server setup (spec 07 §3.5). `add` writes `[mcp_servers.<id>]` in place, validated by the load parser, and refuses an existing id without `--replace`; secrets are names only. `list` and `show` print transport, scope, the templates that enable each server and the secrets it names that are not stored. `test` starts or connects to the server through the bind's spawn, environment and secret path on a pool of its own, lists the tools `mcp:<id>` would bind and the ones left out with the reason (schema not representable, not in the allowlist), stops it, and exits non-zero with the cause on failure; it calls no model. `enable`/`disable` edit only that template's `tools` array (spec 07 §1). `remove` refuses while a template lists the server unless `--force`, which disables it there first |
+| `mcp add <id> [--scope user\|project] [--env K=V]… [--secret-env K=SECRET_NAME]… [--tools a,b] [--startup-seconds <n>] [--call-seconds <n>] [--replace] -- <command> [args…]`, `mcp add <id> --url <url> [--scope user\|project] [--bearer-secret SECRET_NAME] [--header N=V]… [--header-secret N=SECRET_NAME]… [--tools a,b] [--startup-seconds <n>] [--call-seconds <n>] [--replace]`, `mcp list`, `mcp show <id>`, `mcp test <id>`, `mcp remove <id> [--scope user\|project] [--force]`, `mcp enable <id> --template <name> [--tool <t>]…`, `mcp disable <id> --template <name>` | MCP server setup (spec 07 §3.5). `add` writes `[mcp_servers.<id>]` in place, validated by the load parser, and refuses an existing id without `--replace`; secrets are names only. `list` and `show` print transport, scope, the templates that enable each server and the secrets it names that are not stored. `test` starts or connects to the server through the bind's spawn, environment and secret path on a pool of its own, lists the tools `mcp:<id>` would bind and the ones left out with the reason (schema not representable, not in the allowlist), stops it, and exits non-zero with the cause on failure; it calls no model. `enable`/`disable` edit only that template's `tools` array (spec 07 §1). `remove` refuses while a template would be left listing what its layer no longer serves unless `--force`, which removes those entries first; every edit is checked against the home alone and with the trusted project over it (spec 07 §3.5); secret flags take `SECRET_NAME`s and a rejected one is never echoed |
 | `run [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>] [--resume-tree] [--print-session-id] [--max-turns <1..100>] [--timeout <seconds>] -- <prompt…>` | runs until idle, including continuation turns, bounded by `--max-turns` (default 25); each turn can be billable |
 | `agent [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>] [--resume-tree]` | the long-lived JSONL host client |
 | `resume [<session>]` | the TUI picker, or an exact id |
@@ -2823,10 +2823,14 @@ line. The argument-taking commands keep their grammar below.
 
 `/mcp` opens a read-only panel: every configured MCP server with its
 transport, scope, the templates that enable it and any secret it names that is
-not stored; whether the current session bound it and with how many tools; the
-tools the session's bind left out with their reasons; and the `plak mcp`
-commands that add, test and enable a server. It edits nothing and starts no
-server.
+not stored; whether the current session bound it and with how many tools, and
+when the session was bound with a different definition than the current one,
+`bound with an earlier definition; new sessions get the current one`; the
+tools the session's bind left out with their reasons, as far as the session's
+bounded transcript still holds those notices (an omission is not otherwise
+recorded with the session, so an old one may no longer be listed); and the
+`plak mcp` commands that add, test and enable a server. It edits nothing,
+starts no server, and reads the session's frozen tools only when it opens.
 
 `/image <path>...` attaches image files to the draft (§5.9); bare `/image`
 answers `usage: /image <path>...  —  attach png, jpeg, gif or webp files; Ctrl+V
