@@ -6769,8 +6769,8 @@ the runtime store.
 
 ## 12. The public facade
 
-Complete-workflow embedders depend on the `plakous` facade crate, consumed by
-path and not published to crates.io. Narrow component embedders may use the
+Complete-workflow embedders depend on the `plakous` facade crate, by version
+from the registry cohort or by path from a source checkout (chapter 06 §1). Narrow component embedders may use the
 explicit supported `plakous-agent`,
 `plakous-model` (Custom model integration), or `plakous-tools` (Custom tool
 integration) roots.

@@ -14,7 +14,7 @@ layer = "test"
 class = "repository-only"
 
 [dependencies]
-plakous-model = { version = "0.1.0", path = "../../../crates/core/model" }
-plakous-tools = { version = "0.1.0", path = "../../../crates/core/tools" }
+plakous-model = { version = "0.0.1", path = "../../../crates/core/model" }
+plakous-tools = { version = "0.0.1", path = "../../../crates/core/tools" }
 
 [workspace]

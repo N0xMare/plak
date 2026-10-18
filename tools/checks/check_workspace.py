@@ -221,7 +221,7 @@ def supported_compile_fixtures(workspace: Workspace) -> dict[str, dict[str, Any]
         for dependency in contract["dependencies"]:
             package = workspace.packages[dependency]
             entry: dict[str, Any] = {
-                "version": "0.1.0",
+                "version": workspace.root_manifest["workspace"]["package"]["version"],
                 "path": os.path.relpath(package.directory, fixture_root),
             }
             if package.layer == "facade":

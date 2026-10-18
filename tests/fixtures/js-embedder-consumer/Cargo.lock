@@ -436,7 +436,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "plakous"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "plakous-agent",
  "plakous-code-mode",
@@ -459,7 +459,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-agent"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "futures-util",
  "getrandom",
@@ -475,7 +475,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-code-mode"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "plakous-codex-code-mode-protocol",
  "serde",
@@ -493,7 +493,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-compose"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "plakous-model",
  "plakous-tool-files",
@@ -516,7 +516,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-js-eval"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "nix",
  "serde",
@@ -526,7 +526,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-model"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "futures-core",
  "futures-util",
@@ -541,7 +541,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-prompts"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "plakous-agent",
  "plakous-model",
@@ -551,7 +551,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-store"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "futures-channel",
  "nix",
@@ -564,7 +564,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-tool-files"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "diffy",
  "plakous-model",
@@ -575,7 +575,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-tool-plan"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "plakous-model",
  "plakous-tools",
@@ -585,7 +585,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-tool-process"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "filedescriptor",
  "plakous-model",
@@ -599,7 +599,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-tool-search"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "plakous-model",
  "plakous-tools",
@@ -609,7 +609,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-tool-web"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "plakous-model",
  "plakous-tools",
@@ -619,7 +619,7 @@ dependencies = [
 
 [[package]]
 name = "plakous-tools"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "filedescriptor",
  "globset",

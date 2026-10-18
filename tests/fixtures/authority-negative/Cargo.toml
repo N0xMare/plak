@@ -14,9 +14,9 @@ layer = "test"
 class = "repository-only"
 
 [dependencies]
-plakous = { version = "0.1.0", path = "../../../crates/plakous", features = ["full"] }
-plakous-agent = { version = "0.1.0", path = "../../../crates/core/agent" }
-plakous-tools = { version = "0.1.0", path = "../../../crates/core/tools" }
+plakous = { version = "0.0.1", path = "../../../crates/plakous", features = ["full"] }
+plakous-agent = { version = "0.0.1", path = "../../../crates/core/agent" }
+plakous-tools = { version = "0.0.1", path = "../../../crates/core/tools" }
 
 [[bin]]
 name = "tools_internal_process_dispatch"

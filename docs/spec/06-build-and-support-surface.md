@@ -8,18 +8,29 @@ constrain them.
 
 ## 1. Distribution
 
-**Plak is built from source.** There are no releases, no published binaries, and
-no registry packages. Every workspace package sets `publish = false`, nothing is
-on crates.io, and the repository carries no released API, wire, or
-persisted-format compatibility obligation.
+**Plak and Plakous release as one exact cohort.** Every workspace package has
+the workspace version `0.0.1`; internal dependencies are declared once in the
+root `[workspace.dependencies]` as `{ version = "0.0.1", path = ... }` and
+inherited with `.workspace = true`, so each packaged manifest requires exactly
+its siblings' version (Cargo's caret on a `0.0.x` version admits only that
+version). The vendored `plakous-codex-code-mode-protocol` keeps its upstream
+version and is required exactly.
+
+A package's class decides publication (§3): supported and published-internal
+packages and the vendored Code Mode protocol snapshot are publishable to
+crates.io; repository-only packages, the compile fixtures under
+`tests/fixtures/`, and the `crates/core/model/fuzz` crate set `publish = false`.
+`tools/checks/check_workspace.py` enforces both directions and the registry
+metadata of §3.3. Uploading the cohort is a maintainer act outside the gate; a
+source checkout remains a complete build. The `0.0.x` cohort carries no API,
+wire, or persisted-format compatibility obligation across versions beyond the
+export-document rule of chapter 02 §2.5.1.
 
 There is no `plak update` verb and no self-update path. Updating means pulling
 the source and rebuilding (§6.3).
 
-The absence of releases is what makes the support classification in §2 a
-statement of intent rather than a shipped promise. Support classes describe
-which surfaces a consumer would be entitled to rely on, and which inventories
-are pinned so that entitlement is checkable today.
+Support classes describe which surfaces a consumer is entitled to rely on, and
+which inventories are pinned so that entitlement is checkable (§3).
 
 The product's facade dependency enables the three direct API providers as well
 as subscriptions and OpenRouter. Each provider feature exposes the same
@@ -60,8 +71,8 @@ provider qualification, recovery certification, or source compatibility.
 | Class | Meaning |
 | --- | --- |
 | Supported | A documented consumer product with an explicit inventory, a compatibility baseline, a direct external workflow, and a correctness obligation |
-| Published internal | A necessary dependency and deliberate advanced-use implementation surface, intended to release in the exact cohort, with no direct-use compatibility, qualification, or support promise |
-| Repository-only | Test, fixture, and crash-harness packages kept outside the production dependency closure entirely |
+| Published internal | A necessary dependency and deliberate advanced-use implementation surface, released in the exact cohort, with no direct-use compatibility, qualification, or support promise |
+| Repository-only | Test, fixture, and crash-harness packages kept outside the production dependency closure entirely and never published |
 
 The workspace holds 39 packages: five supported, 31 published internal, three
 repository-only.

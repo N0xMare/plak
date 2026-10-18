@@ -54,8 +54,10 @@ package carries no direct-use compatibility, qualification, or support promise
 unless it is in the supported class.
 
 The workspace contains 39 packages: five supported, 31 published internal, and
-three repository-only. Nothing is published to a registry today; every package
-sets `publish = false`.
+three repository-only. The supported and published-internal packages, with the
+vendored `plakous-codex-code-mode-protocol`, are publishable to crates.io as one
+exact version cohort; the repository-only packages set `publish = false`
+(chapter 06 §1).
 
 - **Supported:** `plakous`, `plakous-agent`, `plakous-model`, `plakous-tools`,
   `plak`. Each has an exact inventory pinned by a compile fixture or process

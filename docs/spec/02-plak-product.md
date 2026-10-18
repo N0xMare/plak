@@ -43,7 +43,7 @@ The launch banner distinguishes `maintainer release`, `maintainer debug`,
 `release`, and `debug`, and shows a binary ID: the first twelve hexadecimal
 digits of SHA-256 over the executable. A `test-hooks` build is labeled separately.
 `plak version` and global help carry the same build identity alongside the
-package version. `0.1.0` alone is package metadata, not proof of build recency.
+package version. `0.0.1` alone is package metadata, not proof of build recency.
 The binary ID is computed once per process with bounded-memory file reads;
 unreadable executable identity is shown as `unavailable`, never invented from
 the current checkout. Maintainer installations use immutable executable/sidecar

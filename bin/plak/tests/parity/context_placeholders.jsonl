@@ -6,7 +6,7 @@
 {"kind":"pending_continuation","payload":"PendingContinuation { results: 0, questions: 0, process_exits: 0, auto_continue_paused: false, tree_paused: false }"}
 {"kind":"presentation","payload":"PresentationSnapshot(PresentationSnapshot { schema: 2, revision: 0, rows: [SessionHeader { session_id: \"<uuid>\", carried_from: None }] })"}
 {"kind":"prompt_history","payload":"PromptHistorySnapshot([\"run the loopback\"])"}
-{"kind":"session_info","payload":"SessionInfo(SessionInfoView { host_version: \"0.1.0\", session_id: \"<uuid>\", working_dir: \"<root>/workspace\", root_template: None, root_model: Some(\"offline-loopback-v1\"), root_effort: Some(\"medium\"), thinking: \"reasoning summaries (auto) requested at medium\", tool_policy: Some(\"js-ptc\"), admitted_options: [\"effort = medium\"], api_kernel: Some(\"Responses\"), turn_number: Some(0), tree_epoch: None, context: None })"}
+{"kind":"session_info","payload":"SessionInfo(SessionInfoView { host_version: \"0.0.1\", session_id: \"<uuid>\", working_dir: \"<root>/workspace\", root_template: None, root_model: Some(\"offline-loopback-v1\"), root_effort: Some(\"medium\"), thinking: \"reasoning summaries (auto) requested at medium\", tool_policy: Some(\"js-ptc\"), admitted_options: [\"effort = medium\"], api_kernel: Some(\"Responses\"), turn_number: Some(0), tree_epoch: None, context: None })"}
 {"kind":"session_opened","payload":"SessionOpened { session_open_ms: Some(<n>) }"}
 {"kind":"session_opening","payload":"SessionOpening"}
 {"kind":"status","payload":"Status { phase: \"idle\", queue_len: 0 }"}
@@ -37,7 +37,7 @@
 {"kind":"model_request_started","payload":"ModelRequestStarted"}
 {"kind":"assistant","payload":"AssistantDelta(\"loopback turn committed\")"}
 {"kind":"turn_lifecycle","payload":"TurnLifecycle(TurnLifecycle { turn_id: \"<uuid>\", phase: Completed, model_error_kind: None, http_status: None })"}
-{"kind":"session_info","payload":"SessionInfo(SessionInfoView { host_version: \"0.1.0\", session_id: \"<uuid>\", working_dir: \"<root>/workspace\", root_template: None, root_model: Some(\"offline-loopback-v1\"), root_effort: Some(\"medium\"), thinking: \"reasoning summaries (auto) requested at medium\", tool_policy: Some(\"js-ptc\"), admitted_options: [\"effort = medium\"], api_kernel: Some(\"Responses\"), turn_number: Some(1), tree_epoch: None, context: None })"}
+{"kind":"session_info","payload":"SessionInfo(SessionInfoView { host_version: \"0.0.1\", session_id: \"<uuid>\", working_dir: \"<root>/workspace\", root_template: None, root_model: Some(\"offline-loopback-v1\"), root_effort: Some(\"medium\"), thinking: \"reasoning summaries (auto) requested at medium\", tool_policy: Some(\"js-ptc\"), admitted_options: [\"effort = medium\"], api_kernel: Some(\"Responses\"), turn_number: Some(1), tree_epoch: None, context: None })"}
 {"kind":"assistant_done","payload":"AssistantDone"}
 {"kind":"busy","payload":"SetBusy(false)"}
 {"kind":"context_capacity_recovery","payload":"ContextCapacityRecovery(None)"}
