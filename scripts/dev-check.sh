@@ -8,7 +8,7 @@ root="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$root"
 
 # Canonical group order; every tier runs its groups in this order.
-all_groups=(static builds rustdoc tests-parallel tests-serial tests-durability contracts tooling)
+all_groups=(static builds rustdoc tests-parallel tests-serial tests-durability contracts tooling package)
 check_groups=static,builds,tests-parallel,tests-serial,contracts,tooling
 platform_groups=static,builds,tests-parallel,tests-serial,tests-durability
 
@@ -211,9 +211,25 @@ run_group() {
     tooling)
       echo "== structure: checker unit tests =="
       python3 tools/checks/run_tooling_tests.py -v ;;
+    package)
+      # Publication packages a git tree; the musl container mounts an export.
+      if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "skip package: not a git work tree (the dry run stages tracked files)"
+        return 0
+      fi
+      echo "== publish dry run: package and verify the cohort offline =="
+      CARGO_NET_OFFLINE=true scripts/publish.sh --gate ;;
     *) echo "unimplemented step group: $1" >&2; exit 2 ;;
   esac
 }
+
+# A passing full tier on a clean tree records that tree as publication
+# evidence (scripts/publish.sh refuses a tree without it).
+evidence_tree=''
+if [[ "$tier" == full ]] && git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+    && [[ -z "$(git status --porcelain --untracked-files=normal)" ]]; then
+  evidence_tree="$(git rev-parse 'HEAD^{tree}')"
+fi
 
 failed_groups=""
 gate_status=0
@@ -253,5 +269,16 @@ done
 if [[ "$gate_status" -ne 0 ]]; then
   echo "== failed groups: $failed_groups =="
   exit "$gate_status"
+fi
+if [[ -n "$evidence_tree" ]]; then
+  if [[ -z "$(git status --porcelain --untracked-files=normal)" && "$(git rev-parse 'HEAD^{tree}')" == "$evidence_tree" ]]; then
+    mkdir -p "$target_dir/gate-evidence"
+    printf '%s\n' "$evidence_tree" >"$target_dir/gate-evidence/full"
+    echo "== evidence: full gate passed on tree $evidence_tree =="
+  else
+    echo "== no evidence: the tree changed during the run ==" >&2
+  fi
+elif [[ "$tier" == full ]]; then
+  echo "== no evidence: not a clean git tree when the run started =="
 fi
 echo "== ok: $tier gate passed =="

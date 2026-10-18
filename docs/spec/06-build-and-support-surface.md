@@ -17,8 +17,8 @@ version). The vendored `plakous-codex-code-mode-protocol` keeps its upstream
 version and is required exactly.
 
 A package's class decides publication (§3): supported and published-internal
-packages and the vendored Code Mode protocol snapshot are publishable to
-crates.io; repository-only packages, the compile fixtures under
+packages, the vendored Code Mode protocol snapshot among them, are publishable
+to crates.io; repository-only packages, the compile fixtures under
 `tests/fixtures/`, and the `crates/core/model/fuzz` crate set `publish = false`.
 `tools/checks/check_workspace.py` enforces both directions and the registry
 metadata of §3.3. Uploading the cohort is a maintainer act outside the gate; a
@@ -74,7 +74,7 @@ provider qualification, recovery certification, or source compatibility.
 | Published internal | A necessary dependency and deliberate advanced-use implementation surface, released in the exact cohort, with no direct-use compatibility, qualification, or support promise |
 | Repository-only | Test, fixture, and crash-harness packages kept outside the production dependency closure entirely and never published |
 
-The workspace holds 39 packages: five supported, 31 published internal, three
+The workspace holds 40 packages: five supported, 32 published internal, three
 repository-only.
 
 The root `[workspace].exclude` includes `.plak`, the local operator-state and
@@ -86,12 +86,13 @@ exclusion and continues to reject other unreviewed nested-package exclusions.
 
 `plakous`, `plakous-agent`, `plakous-model`, `plakous-tools`, `plak`.
 
-**Published internal (31)**
+**Published internal (32)**
 
 `plakous-host-protocol`, `plakous-workspace`, `plakous-recursive-subagents`,
 `plakous-recursive-subagents-store`, `plakous-hosted`,
 `plakous-anthropic`, `plakous-attempt`, `plakous-auth`,
-`plakous-chat-completions`, `plakous-code-mode`, `plakous-compose`, `plakous-exchange`,
+`plakous-chat-completions`, `plakous-code-mode`, `plakous-codex-code-mode-protocol`,
+`plakous-compose`, `plakous-exchange`,
 `plakous-http`, `plakous-js-eval`, `plakous-mcp`, `plakous-js-runtime`, `plakous-py-worker`, `plakous-messages`, `plakous-openai`,
 `plakous-openrouter`, `plakous-prompts`, `plakous-py-eval`,
 `plakous-responses`, `plakous-responses-dialect`, `plakous-store`,
@@ -127,6 +128,7 @@ explicit metadata. Directory placement never grants dependency permission.
 | `crates/orchestration/` | workspace, recursive subagents and their store | host |
 | `bin/plak/` | CLI, TUI and JSONL product | bin |
 | `tests/` | repository support, fixtures and harnesses | test |
+| `vendor/` | the reviewed Code Mode protocol snapshot (`vendor/monty-typeshed` is a `[patch]` source, not a member) | vendor |
 | `eval/` | Opt-in, paid Harbor / Terminal-Bench harness bakeoff; linux/amd64 or linux/arm64 GNU agent packaging selected by `HARBOR_ARCH`, not musl qualification; ARM cells are rebuilt from task definitions rather than the published amd64 images; an eval lane is not product support; paid runs are not in the daily gate | (none) |
 
 The `harness` layer sits under the facade and depends on `core`, `common`,
@@ -134,7 +136,12 @@ The `harness` layer sits under the facade and depends on `core`, `common`,
 narrows that — `plakous-prompts` depends on no pack and no composition crate in
 production, so instruction text never acquires an opinion about which tools
 exist. The `host` layer sits above the facade and consumes only `plakous` and
-other `host` packages; nothing in it is re-exported by the facade.
+other `host` packages; nothing in it is re-exported by the facade. The
+`vendor` layer holds `plakous-codex-code-mode-protocol` alone; it depends on
+no workspace package and only `engine` may depend on it. It is a member so the
+cohort packages together (§6.5), and it keeps its upstream edition,
+rust-version, Apache-2.0 license and `unsafe_code = "forbid"` lint table rather
+than the workspace's.
 
 `plak` names `plakous-host-protocol` directly under an edge exception recorded
 in the same policy table, and `[workspace.metadata.plakous.modules.plak.tui]`
@@ -223,11 +230,11 @@ publication needs no file outside the package root:
   `documentation` (`https://docs.rs/<name>` for a library; `plak` and the
   binary-only `plakous-py-worker` point into the repository), a `readme`, one
   to five crates.io keywords and categories, and a `LICENSE` file in the
-  package root. Members are MIT, and each `LICENSE` is a link to the root
-  `LICENSE`, which Cargo packages as a regular file; the vendor snapshot keeps
-  its Apache-2.0 `LICENSE` and `NOTICE`. `plak` and `plakous` use the root
+  package root. Members other than the vendor snapshot are MIT, and each
+  `LICENSE` is a link to the root `LICENSE`, which Cargo packages as a regular
+  file; the vendor snapshot keeps its Apache-2.0 `LICENSE` and `NOTICE`. `plak` and `plakous` use the root
   `README.md`; every other package has its own short `README.md`.
-- Members inherit `[workspace.package].exclude`: `/tests/`, `/benches/` and
+- Members other than the vendor snapshot inherit `[workspace.package].exclude`: `/tests/`, `/benches/` and
   `/fixtures/` stay in the repository. A packaged crate builds its library and
   binaries; its integration tests, benches and test data, and the unit tests
   that read that data, run only from the repository.
@@ -926,6 +933,39 @@ The native musl qualification script selects the environment's compiler/linker
 and defaults to rust-lld for static PIE as described in §6.1. A
 contributor who wants faster Linux links configures `clang` plus `mold` for
 `x86_64-unknown-linux-gnu` in their own Cargo configuration, outside the tree.
+
+### 6.5 Publishing the cohort
+
+`scripts/publish.sh` (`just publish`) is the only publication path. It stages
+the tracked tree with the published `plak` manifest (§3.3), derives the order
+from `cargo metadata` there (`tools/release/publish_plan.py`: every member
+whose `publish` is not `false`, dependencies first, where normal, build and
+versioned dev-dependencies order the cohort because crates.io resolves each at
+upload; a cycle is an error), and runs one `cargo package --locked` over that
+selection. Cargo packages the members against a local overlay of the archives
+it has just written, so unpublished siblings resolve, and verifies each by
+building it from its archive, with `CARGO_TARGET_DIR` at
+`<target>/package`. The vendor snapshot is a workspace member (§3) precisely so
+the overlay includes it.
+
+A packaged crate resolves its registry dependencies without the root
+`[patch]` table, so verifying `plakous-py-worker` needs the upstream
+`monty-typeshed` (§6.1), which `Cargo.lock` does not name and `cargo fetch`
+does not download. The offline `package` gate therefore needs a Cargo cache
+warmed by one networked dry run (`scripts/publish.sh --gate` or `just
+publish`); the verification target directory holds a debug build per crate
+selection and is roughly 20 GB.
+
+| Invocation | Preconditions | Effect |
+| --- | --- | --- |
+| `scripts/publish.sh` | Clean git tree; `<target>/gate-evidence/full` names `HEAD^{tree}` | Package and verify; nothing uploaded |
+| `scripts/publish.sh --gate` | None | The same packaging and verification; the full tier's `package` group runs it with `CARGO_NET_OFFLINE=true` |
+| `scripts/publish.sh --execute` | The dry run's, plus `CARGO_REGISTRY_TOKEN` | After packaging, `cargo publish --locked --no-verify -p NAME` per crate in order; before each, a crate already in the index at its version is skipped, and after each the script polls the sparse index (`PLAK_PUBLISH_INDEX`, default `https://index.crates.io`) until the version appears, failing after `PLAK_PUBLISH_TIMEOUT` seconds (default 600). A rerun resumes |
+
+The evidence file is written only by a passing `just full` that began and
+ended on the same clean tree (chapter 05 §1), so an upload always follows a
+full gate on exactly the bytes it packages. Publishing is a maintainer act;
+no gate uploads.
 
 ## 7. Dependency and supply-chain policy
 

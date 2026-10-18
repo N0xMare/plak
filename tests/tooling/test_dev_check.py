@@ -11,7 +11,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 GROUPS = ('static', 'builds', 'rustdoc', 'tests-parallel', 'tests-serial',
-          'tests-durability', 'contracts', 'tooling')
+          'tests-durability', 'contracts', 'tooling', 'package')
 CHECK_GROUPS = ('static', 'builds', 'tests-parallel', 'tests-serial', 'contracts', 'tooling')
 PLATFORM_GROUPS = ('static', 'builds', 'tests-parallel', 'tests-serial', 'tests-durability')
 
@@ -109,6 +109,15 @@ if sys.argv[1].endswith('changed_packages.py'):
     print(os.environ.get('GATE_CHANGED', ''), end='')
 ''')
 
+        publish = self.root / 'scripts/publish.sh'
+        publish.write_text('#!' + sys.executable + r'''
+import json, os, sys
+with open(os.environ['GATE_CALLS'], 'a') as log:
+    log.write(json.dumps(dict(publish=sys.argv[1:], offline=os.environ.get('CARGO_NET_OFFLINE'))) + '\n')
+raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
+''')
+        publish.chmod(0o700)
+
     def executable(self, name, source):
         path = self.bin / name
         path.write_text('#!' + sys.executable + '\n' + source)
@@ -119,6 +128,24 @@ if sys.argv[1].endswith('changed_packages.py'):
                                 env=self.env, text=True, capture_output=True, timeout=15)
         calls = [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
         return result, [c for c in calls if 'args' in c], [c['python'] for c in calls if 'python' in c]
+
+    def commit_fixture(self):
+        """Make the fixture a clean git tree; gate scratch and logs are ignored."""
+        (self.root / '.gitignore').write_text('calls.jsonl\n/test-tmp/\n/custom target/\n')
+        git = ['git', '-C', str(self.root), '-c', 'user.name=t', '-c', 'user.email=t@t']
+        subprocess.run([*git, 'init', '-q'], check=True)
+        subprocess.run([*git, 'add', '-A'], check=True)
+        subprocess.run([*git, 'commit', '-q', '-m', 'fixture'], check=True)
+        return subprocess.run([*git, 'rev-parse', 'HEAD^{tree}'], check=True, text=True,
+                              capture_output=True).stdout.strip()
+
+    def publish_calls(self):
+        lines = self.log.read_text().splitlines() if self.log.exists() else []
+        return [call for call in map(json.loads, lines) if 'publish' in call]
+
+    @property
+    def evidence(self):
+        return self.root / 'custom target' / 'gate-evidence' / 'full'
 
     def assert_feature_builds_deny_warnings(self, calls):
         builds = [c for c in calls if c['args'][0] == 'build']
@@ -443,3 +470,44 @@ if sys.argv[1].endswith('changed_packages.py'):
         self.assertEqual(self.profiles(calls), ['durability'])
         self.assertIn('--test-threads=1', self.lanes(calls)[0]['args'])
         self.assertEqual([c['args'][0] for c in calls if c['args'][0] != 'nextest'], ['test'])
+
+    def test_package_group_runs_the_offline_publish_dry_run_in_a_git_tree(self):
+        self.commit_fixture()
+        result, calls, _ = self.run_gate('--steps', 'package')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.publish_calls(), [dict(publish=['--gate'], offline='true')])
+        self.assertEqual([c['args'] for c in calls], [['nextest', '--version']])
+
+    def test_package_group_is_skipped_outside_a_git_work_tree(self):
+        result, _, _ = self.run_gate('--steps', 'package')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('skip package: not a git work tree', result.stdout)
+        self.assertEqual(self.publish_calls(), [])
+
+    def test_failed_package_dry_run_fails_the_gate(self):
+        self.commit_fixture()
+        self.env['GATE_PUBLISH_FAILURE'] = '3'
+        result, _, _ = self.run_gate('--steps', 'package')
+        self.assertEqual(result.returncode, 3)
+        self.assertIn('failed groups: package', result.stdout)
+
+    def test_only_a_passing_full_run_on_a_clean_tree_records_evidence(self):
+        tree = self.commit_fixture()
+        for tier in (('--steps', 'package'), ()):
+            result, _, _ = self.run_gate(*tier)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(self.evidence.exists(), tier)
+        self.env['GATE_PUBLISH_FAILURE'] = '1'
+        result, _, _ = self.run_gate('--full')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.evidence.exists())
+        del self.env['GATE_PUBLISH_FAILURE']
+        (self.root / 'untracked').write_text('x')
+        result, _, _ = self.run_gate('--full')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('no evidence: not a clean git tree', result.stdout)
+        self.assertFalse(self.evidence.exists())
+        (self.root / 'untracked').unlink()
+        result, _, _ = self.run_gate('--full')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.evidence.read_text(), tree + '\n')

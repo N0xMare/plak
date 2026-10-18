@@ -463,6 +463,7 @@ scripts/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these gro
 | `tests-durability` | nextest profile `durability`: crash matrices and the sqlite SIGKILL campaign, one test thread |
 | `contracts` | Positive/negative public compile contracts |
 | `tooling` | Python tooling self-tests |
+| `package` | Offline publish dry run, `scripts/publish.sh --gate`: package and verify every publishable crate from the staged published tree (chapter 06 §6.5); skipped outside a git work tree |
 
 | Tier | Groups |
 | --- | --- |
@@ -476,7 +477,10 @@ checkers, feature builds, the parallel and serial lanes, contracts and tooling,
 but no durability lane. Platform is the per-install, per-platform gate:
 fmt/clippy, feature builds and all three lanes, without the
 platform-independent structure checkers and contracts. Full is their union
-plus rustdoc. `--steps` runs exactly its named groups, in canonical order,
+plus rustdoc and the package dry run; a passing full run that started and ended
+on the same clean git tree writes that tree id to
+`$CARGO_TARGET_DIR/gate-evidence/full` (default `target/`), the evidence
+`scripts/publish.sh` requires. `--steps` runs exactly its named groups, in canonical order,
 rejects unknown or empty groups, and implies no other group; test groups still
 prepare their real Monty-worker prerequisite. Independent runners must use
 separate checkout, target and temporary roots. Each group prints a
@@ -892,8 +896,9 @@ strict density mode, or justification-file requirement.
 
 `check_prod_loc.py` derives its scopes from each package's `layer`: `l0` is
 core plus facade, `below_facade` the common, engine, protocol, provider, store, and
-harness layers, `host` and `product` the packages above the facade, and `test` the
-repository-only packages — reported separately, with `library` (`l0` + `below_facade`) kept for continuity. `--json` emits the path-rule responsibility
+harness layers, `host` and `product` the packages above the facade, `test` the
+repository-only packages, and `vendor` the reviewed upstream snapshot — the last
+two outside the production total, reported separately, with `library` (`l0` + `below_facade`) kept for continuity. `--json` emits the path-rule responsibility
 inventory, every source file with its LOC, and the reconciliation between the
 subtotals.
 

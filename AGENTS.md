@@ -38,7 +38,7 @@ just fast [PKG...]  # static checks + parallel lane over diff packages and depen
 just steps GROUPS   # exactly the named comma-separated groups, in canonical order
 just check          # fmt/clippy, structure checks, feature builds, parallel+serial lanes, contracts, tooling
 just platform       # fmt/clippy, default/maintainer builds, parallel, serial and durability lanes
-just full           # every group: check + rustdoc and the durability lane
+just full           # every group: check + rustdoc, durability lane, publish dry run
 just musl-native    # platform tier for x86_64-unknown-linux-musl (static-PIE via rust-lld)
 just musl-check     # full tier in the pinned offline Alpine container (publication)
 just crash-sweep [--shapes SHAPES] [--jobs N] [--repeat R] [--strict] # opt-in commit cuts
@@ -50,6 +50,7 @@ just perf-smoke     # offline performance smoke, informational, not a gate
 just deny           # cargo deny (when deps change)
 just prompts / prompts-diff / prompts-pins   # local prompt renders
 just smoke [route] / just soak [route] --hours N   # opt-in live runs (tests/live)
+just publish [--execute]   # crates.io cohort dry run; --execute uploads (maintainer)
 ```
 
 `eval/` is the opt-in Harbor bakeoff plane: Rung A uses selected
@@ -66,9 +67,12 @@ features, so they share one artifact set. The groups, in canonical order, are
 `static` (fmt, the workspace and feature structure checkers, clippy -D warnings),
 `builds` (default-feature and maintainer-feature builds, rustc warnings denied),
 `rustdoc`, `tests-parallel`, `tests-serial`, `tests-durability`, `contracts`
-(public compile contracts) and `tooling` (Python self-tests). Check runs all but
-rustdoc and durability; platform runs static without the platform-independent
-structure checkers, builds and the three lanes; full runs every group.
+(public compile contracts), `tooling` (Python self-tests) and `package` (the
+offline publish dry run: `scripts/publish.sh --gate` packages and verifies the
+cohort). Check runs all but rustdoc, durability and package; platform runs
+static without the platform-independent structure checkers, builds and the
+three lanes; full runs every group, and a full pass on a clean tree records that
+tree as the evidence `just publish` requires.
 `just fast` maps the working-tree diff against HEAD to packages (a root Cargo
 input means all of them), runs static and the parallel lane over `rdeps(...)`
 of those packages; it is iteration evidence, not a substitute for check. Every
@@ -99,8 +103,8 @@ requests count too. Syntax and classification: spec 05 §2.8.
 Prompt renders are regenerated locally into the gitignored `target/prompt-renders/`
 and are **never committed**; correctness is pinned by sha256 tables in code.
 
-The workspace has 39 packages in three classes: supported (5),
-published-internal (31), repository-only (3). Publication and nameability
+The workspace has 40 packages in three classes: supported (5),
+published-internal (32), repository-only (3). Publication and nameability
 confer accessibility, not support.
 
 Packages declare the dependency features their Rust targets use rather than

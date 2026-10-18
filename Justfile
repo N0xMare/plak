@@ -23,9 +23,15 @@ steps GROUPS:
 platform:
     scripts/dev-check.sh --platform
 
-# Every group: check + rustdoc and the durability lane.
+# Every group: check + rustdoc, the durability lane and the publish dry run.
+# A pass on a clean tree records it as publication evidence.
 full:
     scripts/dev-check.sh --full
+
+# crates.io cohort: dry run by default (clean tree with `just full` evidence,
+# package and verify every crate); `--execute` uploads, with CARGO_REGISTRY_TOKEN.
+publish *ARGS:
+    bash scripts/publish.sh {{ARGS}}
 
 # Linux x86_64: pinned offline Docker musl qualification; defaults to full.
 musl-check *ARGS:
