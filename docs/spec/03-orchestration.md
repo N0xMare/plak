@@ -74,6 +74,11 @@ at all). Cycles in `spawns` lists are allowed; the depth bounds end them. The
 host MUST NOT classify, route, or learn: the spawning model is the router and
 sees one card per template on its menu.
 
+The built-in profiles (spec 07 §8) ship a depth-1 tree: the root orchestrates
+its working set and every role under it is a leaf. A deeper tree is user
+configuration: a template whose `spawns` names other templates, plus an
+`[orchestration] max_depth` that admits the extra level.
+
 ### 1.1 The template card
 
 The `spawn_agent` description carries exactly one delegation sentence, a blank

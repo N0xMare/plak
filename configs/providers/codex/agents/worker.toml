@@ -5,7 +5,6 @@ fast_mode = false
 composition = "plakous-default"
 description = "Implement a bounded change and run its relevant checks; report changes, evidence, and unresolved issues."
 access = "full"
-spawns = ["researcher"]
 may_adopt = false
 delegation = "explicit"
 show_model = true

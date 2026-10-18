@@ -593,17 +593,18 @@ Every built-in profile has the same four roles:
 | role | `access` | `spawns` | `tools` |
 | --- | --- | --- | --- |
 | root (`root-agent`) | `full` | `[]` | none: core tools only; its menu is the working set |
-| `worker` | `full` | `["researcher"]`: spawns researchers when `max_depth` ≥ 2, inert at the default `max_depth = 1` | none |
+| `worker` | `full` | `[]` | none |
 | `reviewer` | `read-execute` | `[]` | none |
 | `researcher` | `full` | `[]` | hosted retrieval the route serves plus `fetch_url`: `web_search, web_fetch, fetch_url` on `claude`, `web_search, fetch_url` on `codex`, `web_search, x_search, fetch_url` on `grok` |
 
 The researcher's card asks it to save fetched sources and write its report
 under `research/<topic>/` (or the path the parent names) and to return a short
-summary with the paths it wrote. The reviewer and researcher are leaves, so
-the default role graph is at most two levels deep (root, worker, researcher)
-whatever a larger `max_depth` allows. In a built-in profile each role is the
-template `<profile>-<role>`, and the worker's `spawns` names the researcher
-under the same prefix. No shipped preset or scenario carries a `[tools.*]` or
+summary with the paths it wrote. The root orchestrates; the worker, reviewer
+and researcher are leaves, so the default role graph is one level deep
+whatever a larger `max_depth` allows. A deeper tree is user configuration: a
+template whose `spawns` names other templates (for example a worker with
+`spawns = ["researcher"]`) and `[orchestration] max_depth` raised to admit it.
+In a built-in profile each role is the template `<profile>-<role>`. No shipped preset or scenario carries a `[tools.*]` or
 `[mcp_servers.*]` table: the researchers run their tools on the table
 defaults. The reference `config.toml` ends with a fully commented example of
 both table families.

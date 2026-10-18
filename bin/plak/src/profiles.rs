@@ -239,19 +239,9 @@ fn resolve_builtin(config: &ProductConfig, builtin: &Builtin) -> Result<Resolved
     for file in builtin.files {
         let name = format!("{}-{}", builtin.id, file.role);
         // A template the user already has under this name is the one used.
-        let template = if let Some(template) = config.templates.get(&name) {
-            template.clone()
-        } else {
-            let mut template = parse_template(file.body, &name)?;
-            // The shipped files name sibling roles; in a profile each role is
-            // `{id}-{role}`.
-            template.spawns = template
-                .spawns
-                .iter()
-                .map(|role| TemplateName::parse(&format!("{}-{role}", builtin.id)))
-                .collect::<Result<_, _>>()
-                .map_err(|error| format!("{name}: spawns: {error}"))?;
-            template
+        let template = match config.templates.get(&name) {
+            Some(template) => template.clone(),
+            None => parse_template(file.body, &name)?,
         };
         if file.role == "root" {
             root = Some((name, template));
@@ -427,7 +417,7 @@ fn role(label: &str, template: &AgentTemplate, depth: usize) -> ProfileRole {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
-    use super::{list, prepare};
+    use super::{ROLES, list, prepare};
     use crate::home::paths::PlakPaths;
     use crate::product_config::ProductConfig;
     use std::fs;
@@ -490,10 +480,10 @@ mod tests {
         );
     }
 
-    /// Every built-in applies and saves as a loadable home: the shipped
-    /// worker's `spawns` names the researcher under the profile's prefix.
+    /// Every built-in applies and saves as a loadable home whose roles under
+    /// the root are leaves: deeper trees are the user's to configure.
     #[test]
-    fn every_builtin_saves_a_home_whose_worker_spawns_its_own_researcher() {
+    fn every_builtin_saves_a_home_whose_roles_under_the_root_are_leaves() {
         for id in [
             "codex-default",
             "claude-default",
@@ -505,15 +495,14 @@ mod tests {
             let prepared = prepare(&config, paths.home(), id).unwrap();
             prepared.config.save(&paths).unwrap();
             let reloaded = ProductConfig::load(&paths).unwrap();
-            assert_eq!(
-                reloaded.templates[&format!("{id}-worker")]
-                    .spawns
-                    .iter()
-                    .map(|name| name.as_str().to_owned())
-                    .collect::<Vec<_>>(),
-                [format!("{id}-researcher")],
-                "{id}"
-            );
+            for role in ROLES {
+                assert!(
+                    reloaded.templates[&format!("{id}-{role}")]
+                        .spawns
+                        .is_empty(),
+                    "{id}-{role} is a leaf"
+                );
+            }
             assert!(
                 reloaded.templates[&format!("{id}-root")]
                     .tools

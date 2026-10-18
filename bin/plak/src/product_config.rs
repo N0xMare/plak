@@ -4561,7 +4561,7 @@ mod tests {
             // (role, access, spawns, tools)
             let shape: [(&str, Tier, &[&str], &[&str]); 4] = [
                 ("root-agent", Tier::Mutate, &[], &[]),
-                ("worker", Tier::Mutate, &["researcher"], &[]),
+                ("worker", Tier::Mutate, &[], &[]),
                 ("reviewer", Tier::Execute, &[], &[]),
                 ("researcher", Tier::Mutate, &[], researcher_tools),
             ];

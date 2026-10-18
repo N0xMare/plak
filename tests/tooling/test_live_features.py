@@ -211,7 +211,7 @@ class MarkerTests(unittest.TestCase):
 
 
 class ProfileHomeTests(unittest.TestCase):
-    def test_profile_home_prefixes_roles_and_worker_spawns(self):
+    def test_profile_home_prefixes_roles_and_roles_are_leaves(self):
         import tempfile
         import tomllib
         with tempfile.TemporaryDirectory() as tmp:
@@ -222,9 +222,9 @@ class ProfileHomeTests(unittest.TestCase):
             self.assertEqual(config["roster"]["working_set"],
                              ["multi-default-worker", "multi-default-reviewer",
                               "multi-default-researcher"])
-            worker = tomllib.loads((home / "agents/multi-default-worker.toml").read_text())
-            self.assertEqual(worker["spawns"],
-                             ["multi-default-researcher"])
+            for role in ("worker", "reviewer", "researcher"):
+                text = (home / f"agents/multi-default-{role}.toml").read_text()
+                self.assertNotIn("spawns", tomllib.loads(text), role)
             self.assertEqual(features.profile_model("multi-default", "researcher"),
                              "grok-4.7-build-fast")
 

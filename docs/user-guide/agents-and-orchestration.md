@@ -478,9 +478,10 @@ plak config show | head -1      # confirms which home you are on
 
 That home is already a tree: `[root] agent = "root-agent"` names
 `agents/root-agent.toml`, and `[roster] working_set = ["worker", "reviewer",
-"researcher"]` names the three templates the root may hand work to. The
-reviewer and researcher are leaves; the worker lists `spawns = ["researcher"]`,
-which takes effect only once you raise `[orchestration] max_depth` to 2. Edit `account` and `model` in each of the four
+"researcher"]` names the three templates the root may hand work to. All
+three are leaves; to let the worker hand research on, add
+`spawns = ["researcher"]` to `agents/worker.toml` and raise
+`[orchestration] max_depth` to 2. Edit `account` and `model` in each of the four
 files to accounts you are actually logged in to (`plak status`), then:
 
 ```sh

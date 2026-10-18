@@ -190,7 +190,7 @@ PLAK_LIVE_VISION_ROUTE=claude-haiku55-low just smoke api-openai --only image_gen
 | `child_own_tools` | `fetch_url` on the worker only | a root with no optional tools spawns a worker whose template lists `fetch_url`: the root's requests never offer `fetch_url`, the worker's do, and the answer carries the marker SHA-256 the worker fetched |
 | `profile_researcher` | the built-in profile's | a home laid out as applying the route's built-in profile writes (`<profile>-<role>` templates from `configs/providers/`); the root spawns `<profile>-researcher`, whose requests offer `web_search` (the root's do not), its search result lists sources (Grok: including an X post from `x_search`), and the repo gains `research/<topic>/report.md` citing URLs |
 | `multi_roles` | `multi-default`'s | the `profile_researcher` oracle on `multi-default`, then a second run where the Claude root spawns the Codex worker (writes `hello.txt`) and the Claude reviewer; both roles' requests are captured on their own models |
-| `worker_spawns_researcher` | the built-in profile's | the route's built-in profile (`multi-default` on other routes) with `[orchestration] max_depth = 2`: the worker, not the root, spawns the researcher, with the `profile_researcher` oracle |
+| `worker_spawns_researcher` | the built-in profile's | the route's built-in profile (`multi-default` on other routes) with `[orchestration] max_depth = 2` and a user-authored `<profile>-worker` whose `spawns` names `<profile>-researcher` (the built-in worker is a leaf): the worker, not the root, spawns the researcher, with the `profile_researcher` oracle |
 
 The marker commit is the newest first-parent ancestor of `HEAD` that
 `raw.githubusercontent.com` serves (`PLAK_LIVE_PUBLIC_REV` pins one), so an

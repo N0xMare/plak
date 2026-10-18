@@ -4055,8 +4055,8 @@ already active) or `ProfileRefused` with its reason; the transcript line and
 the `current` mark follow that answer, never the key press. `/clear`, `/fork`,
 and `/fork-then-compact` keep the binding they already have. Applying a
 built-in publishes its templates as `{name}-root`, `{name}-worker`,
-`{name}-reviewer`, and `{name}-researcher` together with the pointers, the
-worker's `spawns` naming `{name}-researcher`; a template
+`{name}-reviewer`, and `{name}-researcher` together with the pointers; every
+role under the root is a leaf. A template
 that already exists under one of those names is kept as it is, never rewritten.
 The apply does not touch theme or orchestration bounds. A project whose
 `.plak/config.toml` owns the root or the working set refuses the apply. Account,

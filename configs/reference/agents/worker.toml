@@ -42,7 +42,7 @@ access = "full"
 
 # The templates a copy of this template may spawn; its own name is never on its menu. Empty is a leaf with no spawn_agent. The root spawns [roster] working_set instead; this list applies where the template runs as a child.
 # type: array of string · default: [] · 0..=5 names, no duplicates, each a template file with a description
-spawns = ["researcher"]
+spawns = []
 
 # Whether a copy may adopt a sealed candidate out of its own subtree.
 # type: bool · default: false · requires spawns naming another template

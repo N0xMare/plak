@@ -980,7 +980,9 @@ class Features:
         return f"{research}; {detail}: codex worker wrote hello.txt, claude reviewer ran"
 
     def worker_spawns_researcher(self) -> str:
-        """With max_depth = 2 the worker spawns the researcher itself."""
+        """A user-authored worker whose `spawns` names the researcher, at
+        max_depth = 2, spawns the researcher itself. The built-in worker is a
+        leaf, so the scenario writes its own worker template."""
         profile = {"claude": "claude-default", "codex": "codex-default",
                    "grok": "grok-default"}.get(self.route.account, "multi-default")
 
@@ -990,6 +992,11 @@ class Features:
             if "max_depth = 1\n" not in text:
                 raise ScenarioFailure(HARNESS, "preset config has no max_depth = 1")
             config.write_text(text.replace("max_depth = 1\n", "max_depth = 2\n", 1))
+            worker = home / "agents" / f"{profile}-worker.toml"
+            text = worker.read_text()
+            if "spawns" in text:
+                raise ScenarioFailure(HARNESS, f"{worker.name} already has spawns")
+            worker.write_text(text + "spawns = " + toml_array([f"{profile}-researcher"]) + "\n")
 
         return self._research("worker_spawns_researcher", profile, spawner="worker",
                               config_edit=depth_two)[0]
@@ -1084,21 +1091,18 @@ PROFILE_DIRS = {"codex-default": "codex", "claude-default": "claude",
                 "grok-default": "grok", "multi-default": "multi"}
 PROFILE_ROLES = (("root", "root-agent"), ("worker", "worker"), ("reviewer", "reviewer"),
                  ("researcher", "researcher"))
-_SPAWNS = re.compile(r"^spawns = \[(.*)\]$", re.M)
 
 
 def write_profile_home(home: Path, profile: str) -> None:
     """The home applying a built-in profile writes: `<profile>-<role>`
-    templates from `configs/providers/<dir>`, the worker's `spawns` under the
-    same prefix, and the preset's `config.toml` pointed at them."""
+    templates from `configs/providers/<dir>` and the preset's `config.toml`
+    pointed at them."""
     source = live.ROOT / "configs/providers" / PROFILE_DIRS[profile]
     (home / "agents").mkdir(parents=True, exist_ok=True)
     home.chmod(0o700)
     for role, stem in PROFILE_ROLES:
-        text = (source / "agents" / f"{stem}.toml").read_text()
-        text = _SPAWNS.sub(lambda m: "spawns = " + toml_array(
-            f"{profile}-{name}" for name in tomllib.loads(m.group(0))["spawns"]), text)
-        (home / "agents" / f"{profile}-{role}.toml").write_text(text)
+        (home / "agents" / f"{profile}-{role}.toml").write_text(
+            (source / "agents" / f"{stem}.toml").read_text())
     config = (source / "config.toml").read_text()
     config = config.replace('agent = "root-agent"', f'agent = "{profile}-root"', 1)
     config = re.sub(r"^working_set = .*$", "working_set = " + toml_array(
