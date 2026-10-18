@@ -1852,7 +1852,7 @@ pub(crate) fn import_and_resume(services: &Services, path: &Path) -> CliResult<P
         Err(error) => format!("{note}; could not delete {}: {error}", path.display()),
     };
     let successor = record.id;
-    crate::launch_tui(services, Some(successor.clone()), false, Some(note))
+    crate::tui_launch::launch_tui(services, Some(successor.clone()), false, Some(note))
         .map_err(|failure| import_resume_failure(failure, &successor, &source_id))
 }
 

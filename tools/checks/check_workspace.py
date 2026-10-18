@@ -463,7 +463,7 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[SourceKey, list[tuple[str, tuple[tuple[s
         ("std::process::Command", (("string", "rundll32"),)),
     ],
     # `/reload` execs the installed `plak` its own argv[0] resolves to.
-    ("plak", "src/lib.rs"): [
+    ("plak", "src/tui_launch.rs"): [
         ("std::process::Command", (("punct", "&"), ("identifier", "executable"))),
     ],
     ("plak", "src/commands/support.rs"): [
@@ -553,8 +553,9 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plak", "src/commands/session_delete_tests.rs"): {"assert_eq", "assert_ne"},
     # Read-only child history projects its bounded JSONL response at the CLI boundary.
     ("plak", "src/commands/session/read_only.rs"): {"json"},
-    # `/reload` logs the exec of the installed build before replacing itself.
     ("plak", "src/lib.rs"): {"eprint", "info", "join"},
+    # `/reload` logs the exec of the installed build before replacing itself.
+    ("plak", "src/tui_launch.rs"): {"info"},
     # The help pages; see EXPECTED_PRODUCT_GENERATED_MACROS.
     ("plak", "src/cli/render.rs"): {"include_str"},
     ("plak", "src/profiles.rs"): {"include_str"},

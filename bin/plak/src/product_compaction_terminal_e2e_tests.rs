@@ -31,10 +31,12 @@ use plakous_offline_crash_harness::{
 };
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
+use crate::commands::host_config::TuiAttacher;
 use crate::product_host::{HostConfig, TestHostInjection, TestHostWorkflow};
 use crate::product_paths::PlakPaths;
 use crate::product_sessions::{self, SessionRecord};
-use crate::{HostedAgentChannels, ProcessOutcome, TuiAttacher, launch_tui_with_attacher};
+use crate::tui_launch::launch_tui_with_attacher;
+use crate::{HostedAgentChannels, ProcessOutcome};
 
 const CHILD_TEST: &str = "product_compaction_terminal_e2e_tests::compaction_terminal_e2e_child";
 const WAIT: Duration = Duration::from_secs(45);

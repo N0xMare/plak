@@ -29,11 +29,13 @@ use plakous_offline_crash_harness::{
 };
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
+use crate::commands::host_config::TuiAttacher;
 use crate::product_host::{HostConfig, TestHostInjection, TestRuntimeRole};
 use crate::product_paths::PlakPaths;
 use crate::product_sessions::{self, SessionRecord, TranscriptRow};
 use crate::test_support::latency_budget;
-use crate::{HostedAgentChannels, ProcessOutcome, TuiAttacher, launch_tui_with_attacher};
+use crate::tui_launch::launch_tui_with_attacher;
+use crate::{HostedAgentChannels, ProcessOutcome};
 
 const CHILD_TEST: &str = "product_terminal_e2e_tests::terminal_e2e_child";
 const COLS: u16 = 100;
@@ -3306,7 +3308,7 @@ fn profile_fork_now_branches_onto_its_own_tree_and_saves_after_it_lands()
         .map_err(|error| error.message().to_owned())?;
     // The host ended only after the source attachment join finished, inside the
     // launcher's worker join deadline.
-    assert!(quit_at.elapsed() < crate::HOST_WORKER_JOIN_TIMEOUT);
+    assert!(quit_at.elapsed() < crate::commands::support::HOST_WORKER_JOIN_TIMEOUT);
     let source = product_sessions::load_session(&paths, &source_id)?;
     let store: Arc<dyn plakous_hosted::session_store::SessionRecordStore> = Arc::new(
         crate::store::session_records::SqliteSessionStore::new(paths.clone()),

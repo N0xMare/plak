@@ -1483,16 +1483,23 @@ fn production() {}
         return {
             "plak": {
                 "src/lib.rs": f"""
-use std::env;
 use std::process::ExitCode;
-fn main_reads() {{
-    let _ = env::var_os("XDG_RUNTIME_DIR");
-    let _ = env::var_os("NO_COLOR");
-}}
-fn reload(executable: &std::path::Path) {{
-    let _ = std::process::Command::new(&executable);
-}}
 {main_extra}
+""",
+                "src/commands/doctor.rs": """
+fn doctor() {
+    let _ = std::env::var_os("XDG_RUNTIME_DIR");
+}
+""",
+                "src/presentation.rs": """
+fn cli_human_output() {
+    let _ = std::env::var_os("NO_COLOR");
+}
+""",
+                "src/tui_launch.rs": """
+fn reload(executable: &std::path::Path) {
+    let _ = std::process::Command::new(&executable);
+}
 """,
                 "src/main.rs": "use std::process::ExitCode;",
                 "src/commands/support.rs": """

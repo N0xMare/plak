@@ -8,9 +8,24 @@ use std::io::Cursor;
 
 use super::*;
 use crate::command::{RunEffort, run_effort_levels, run_effort_usage};
+use crate::commands::host_config::{
+    TuiAttachEligibility, build_host_config, deferred_attach_refusal_reason, tui_attach_eligibility,
+};
+use crate::commands::session::{repair_invalid_new_session_binding, seed_new_session_binding};
+use crate::commands::support::{join_host_worker_bounded, join_tui_host_worker};
 use crate::presentation::credential_locations_text;
+use crate::tui_launch::{
+    adopt_attached_session, apply_tui_handoff, apply_tui_handoff_after_host,
+    begin_tui_session_launch, combine_cleanup, handle_tui_handoff, headless_run_command_for,
+    reload_installed_plak, restore_former_attachment, resume_exit_line,
+    tui_presentation_values_with_backend,
+};
+use plakous::agent::ReasoningEffort;
 use plakous::subscriptions::NativeLoginMode;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 #[test]
 fn reload_handoff_reuses_the_tui_probe_verdict_without_reprobing() {
