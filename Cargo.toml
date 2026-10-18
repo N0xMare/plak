@@ -56,7 +56,11 @@ edition = "2024"
 rust-version = "1.99.0"
 license = "MIT"
 repository = "https://github.com/N0xMare/plak"
+homepage = "https://github.com/N0xMare/plak"
 readme = "README.md"
+# Published packages carry their sources and embedded assets; tests, benches
+# and test data stay in the repository.
+exclude = ["/tests/", "/benches/", "/fixtures/"]
 
 [workspace.dependencies]
 base64 = "0.22"

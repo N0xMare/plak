@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import json
 import os
 import re
 import shlex
@@ -53,6 +54,25 @@ ROOT = Path(__file__).resolve().parents[2]
 # for a member and spelled out for a standalone fixture workspace.
 WORKSPACE_LICENSE = "MIT"
 WORKSPACE_REPOSITORY = "https://github.com/N0xMare/plak"
+# The reviewed vendor snapshot published beside the cohort under its upstream
+# license; every other published package is a workspace member.
+PUBLISHED_VENDOR_PACKAGE = Path("vendor/codex-code-mode-protocol")
+VENDOR_LICENSE = "Apache-2.0"
+# The crates.io category slugs this workspace uses (a reviewed subset of the
+# registry's list; an unknown slug is rejected at upload).
+CRATES_IO_CATEGORIES = frozenset({
+    "api-bindings",
+    "asynchronous",
+    "authentication",
+    "command-line-utilities",
+    "database",
+    "development-tools",
+    "filesystem",
+    "network-programming",
+    "text-processing",
+    "web-programming::http-client",
+})
+CRATES_IO_KEYWORD = re.compile(r"[a-z][a-z0-9_-]{0,19}")
 
 # The supported library packages' external compile-positive fixtures. The
 # dependency paths are derived from the workspace at load time; only the
@@ -3387,6 +3407,75 @@ def validate_package_local_includes(
     return errors
 
 
+def validate_publication(
+    name: str,
+    package_class: str,
+    metadata: dict[str, Any],
+    manifest: dict[str, Any],
+    package_dir: Path,
+    license_expression: str,
+    license_text: str | None,
+) -> list[str]:
+    """A package's class decides publication; a published package carries full metadata.
+
+    `metadata` is the package's `cargo metadata` entry and `manifest` its own
+    manifest. `license_text`, when given, is what the packaged `LICENSE` must
+    say; the vendor snapshot keeps its upstream license file instead.
+    """
+    if package_class == "repository-only":
+        if metadata.get("publish") != []:
+            return [f"{name}: repository-only packages must have publish = false"]
+        return []
+    errors: list[str] = []
+    if not metadata.get("description"):
+        errors.append(f"{name}: published packages need a description")
+    if metadata.get("license") != license_expression:
+        errors.append(f"{name}: license must be {license_expression}")
+    for key in ("repository", "homepage"):
+        if metadata.get(key) != WORKSPACE_REPOSITORY:
+            errors.append(f"{name}: {key} must be {WORKSPACE_REPOSITORY}")
+    libraries = [target for target in metadata.get("targets", []) if "lib" in target["kind"]]
+    documentation = metadata.get("documentation") or ""
+    if libraries and name != "plak":
+        if documentation != f"https://docs.rs/{name}":
+            errors.append(f"{name}: a library's documentation is https://docs.rs/{name}")
+    elif not documentation.startswith(f"{WORKSPACE_REPOSITORY}/"):
+        errors.append(f"{name}: documentation must point into {WORKSPACE_REPOSITORY}")
+    readme = metadata.get("readme")
+    if not readme or not (package_dir / readme).is_file():
+        errors.append(f"{name}: published packages need a readme file")
+    for key, limit in (("keywords", 5), ("categories", 5)):
+        values = metadata.get(key) or []
+        if not 1 <= len(values) <= limit:
+            errors.append(f"{name}: {key} must list 1 to {limit} entries")
+    for keyword in metadata.get("keywords") or []:
+        if not CRATES_IO_KEYWORD.fullmatch(keyword):
+            errors.append(f"{name}: keyword {keyword!r} is not a crates.io keyword")
+    for category in metadata.get("categories") or []:
+        if category not in CRATES_IO_CATEGORIES:
+            errors.append(f"{name}: category {category!r} is not a reviewed crates.io slug")
+    packaged_license = package_dir / "LICENSE"
+    if not packaged_license.is_file():
+        errors.append(f"{name}: published packages carry a LICENSE file")
+    elif license_text is not None and packaged_license.read_text(encoding="utf-8") != license_text:
+        errors.append(f"{name}: LICENSE differs from the repository LICENSE")
+    if license_text is not None and manifest.get("package", {}).get("exclude") != {"workspace": True}:
+        errors.append(f"{name}: published members inherit the workspace exclude list")
+    return errors
+
+
+def vendor_package_metadata(root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Cargo metadata and manifest of the published vendor snapshot."""
+    manifest_path = root / PUBLISHED_VENDOR_PACKAGE / "Cargo.toml"
+    graph = json.loads(subprocess.check_output(
+        ["cargo", "metadata", "--format-version", "1", "--no-deps", "--offline",
+         "--manifest-path", str(manifest_path)],
+        cwd=root, text=True,
+    ))
+    with manifest_path.open("rb") as stream:
+        return graph["packages"][0], tomllib.load(stream)
+
+
 def package_rust_files(root: Path, package: Package, nested: set[str]) -> dict[str, str]:
     """Tracked Rust files of one package, excluding nested package roots."""
     listed = subprocess.run(
@@ -3496,6 +3585,7 @@ def main() -> int:
     errors.extend(validate_facade_features(workspace))
     errors.extend(validate_neutral_dependencies(workspace))
 
+    root_license = (ROOT / "LICENSE").read_text(encoding="utf-8")
     for name, package in sorted(packages.items()):
         metadata = package.metadata
         # This is the pre-release workspace baseline, not the final publication
@@ -3509,6 +3599,15 @@ def main() -> int:
             errors.append(f"{name}: rust-version must be 1.99.0")
         if metadata.get("license") != WORKSPACE_LICENSE:
             errors.append(f"{name}: license expression is inconsistent")
+        errors.extend(validate_publication(
+            name, package.package_class, metadata, package.manifest,
+            package.manifest_path.parent, WORKSPACE_LICENSE, root_license,
+        ))
+    vendor_metadata, vendor_manifest = vendor_package_metadata(ROOT)
+    errors.extend(validate_publication(
+        vendor_metadata["name"], "published-internal", vendor_metadata, vendor_manifest,
+        ROOT / PUBLISHED_VENDOR_PACKAGE, VENDOR_LICENSE, None,
+    ))
 
     # Every supported library package has exactly one external consumer fixture;
     # `plak` is pinned by cli_contract.rs instead.

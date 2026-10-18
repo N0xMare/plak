@@ -6,6 +6,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/plakous-http"
+readme = "README.md"
+keywords = ["llm", "agent", "http", "tls"]
+categories = ["web-programming::http-client", "network-programming"]
+exclude.workspace = true
 publish = false
 
 [package.metadata.plakous]

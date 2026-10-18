@@ -6,6 +6,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/plakous-tool-search"
+readme = "README.md"
+keywords = ["llm", "agent", "tools", "search"]
+categories = ["development-tools", "filesystem"]
+exclude.workspace = true
 publish = false
 
 [package.metadata.plakous]

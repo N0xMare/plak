@@ -100,6 +100,105 @@ class PackagedDependencyTests(unittest.TestCase):
         ])
 
 
+class WorkspaceInheritanceTests(unittest.TestCase):
+    def test_inherited_edges_resolve_as_cargo_does(self):
+        shared = {
+            'lib': {'version': '0.0.1', 'path': 'crates/lib', 'default-features': False,
+                    'features': ['a']},
+            'serde': '1',
+        }
+        manifest = {
+            'package': {'exclude': {'workspace': True}},
+            'dependencies': {
+                'lib': {'workspace': True, 'features': ['b'], 'optional': True},
+                'serde': {'workspace': True},
+                'local': {'path': 'l'},
+            },
+            'target': {'cfg(unix)': {'dev-dependencies': {
+                'lib': {'workspace': True, 'default-features': True},
+            }}},
+        }
+        resolved = policy_module.inherit_workspace_dependencies(manifest, shared)
+        self.assertEqual(resolved['dependencies']['lib'], {
+            'version': '0.0.1', 'path': 'crates/lib', 'default-features': False,
+            'features': ['a', 'b'], 'optional': True,
+        })
+        self.assertEqual(resolved['dependencies']['serde'], {'version': '1'})
+        self.assertEqual(resolved['dependencies']['local'], {'path': 'l'})
+        self.assertIs(
+            resolved['target']['cfg(unix)']['dev-dependencies']['lib']['default-features'], True)
+        self.assertEqual(resolved['package'], manifest['package'])
+        self.assertEqual(manifest['dependencies']['lib'], {
+            'workspace': True, 'features': ['b'], 'optional': True})
+
+    def test_an_edge_the_workspace_lacks_is_refused(self):
+        with self.assertRaisesRegex(ValueError, 'missing'):
+            policy_module.inherit_workspace_dependencies(
+                {'dependencies': {'missing': {'workspace': True}}}, {})
+
+
+class PublicationTests(unittest.TestCase):
+    LICENSE = 'MIT License\n'
+
+    def published(self, directory: Path, **overrides):  # type: ignore[no-untyped-def]
+        (directory / 'README.md').write_text('# demo\n')
+        (directory / 'LICENSE').write_text(self.LICENSE)
+        metadata = {
+            'publish': None,
+            'description': 'A demo package',
+            'license': 'MIT',
+            'repository': workspace_policy.WORKSPACE_REPOSITORY,
+            'homepage': workspace_policy.WORKSPACE_REPOSITORY,
+            'documentation': 'https://docs.rs/plakous-demo',
+            'readme': 'README.md',
+            'keywords': ['llm', 'agent'],
+            'categories': ['development-tools'],
+            'targets': [{'kind': ['lib']}],
+        }
+        metadata.update(overrides)
+        return metadata
+
+    def validate(self, directory: Path, metadata, manifest=None, license_text=LICENSE):  # type: ignore[no-untyped-def]
+        manifest = {'package': {'exclude': {'workspace': True}}} if manifest is None else manifest
+        return workspace_policy.validate_publication(
+            'plakous-demo', 'published-internal', metadata, manifest, directory, 'MIT',
+            license_text)
+
+    def test_a_complete_published_package_passes(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            self.assertEqual(self.validate(directory, self.published(directory)), [])
+
+    def test_missing_and_malformed_metadata_is_reported(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            metadata = self.published(
+                directory, description='', homepage=None, documentation='https://example.com',
+                keywords=['LLM', 'a', 'b', 'c', 'd', 'e'], categories=['ai'], readme=None,
+            )
+            (directory / 'LICENSE').write_text('Apache\n')
+            findings = self.validate(directory, metadata, {'package': {}})
+        self.assertEqual(findings, [
+            'plakous-demo: published packages need a description',
+            f'plakous-demo: homepage must be {workspace_policy.WORKSPACE_REPOSITORY}',
+            'plakous-demo: a library\'s documentation is https://docs.rs/plakous-demo',
+            'plakous-demo: published packages need a readme file',
+            'plakous-demo: keywords must list 1 to 5 entries',
+            "plakous-demo: keyword 'LLM' is not a crates.io keyword",
+            "plakous-demo: category 'ai' is not a reviewed crates.io slug",
+            'plakous-demo: LICENSE differs from the repository LICENSE',
+            'plakous-demo: published members inherit the workspace exclude list',
+        ])
+
+    def test_repository_only_packages_stay_unpublished(self):
+        with tempfile.TemporaryDirectory() as raw:
+            findings = workspace_policy.validate_publication(
+                'plakous-test-support', 'repository-only', {'publish': None}, {}, Path(raw),
+                'MIT', self.LICENSE)
+        self.assertEqual(findings, [
+            'plakous-test-support: repository-only packages must have publish = false'])
+
+
 class TrackedHygieneTests(unittest.TestCase):
     # Synthetic private names; the real list is an untracked local file.
     HOST = "privhost1"

@@ -6,7 +6,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-readme.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/plakous-tools"
+readme = "README.md"
+keywords = ["llm", "agent", "tool-calling", "tools"]
+categories = ["development-tools", "asynchronous"]
+exclude.workspace = true
 publish = false
 
 [package.metadata.plakous]

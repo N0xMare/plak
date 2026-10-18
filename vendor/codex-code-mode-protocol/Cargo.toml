@@ -9,7 +9,13 @@ version = "0.153.3"
 edition = "2024"
 rust-version = "1.97.1"
 license = "Apache-2.0"
-repository = "https://github.com/openai/codex"
+# Where this snapshot is maintained; PROVENANCE.md names the upstream source.
+repository = "https://github.com/N0xMare/plak"
+homepage = "https://github.com/N0xMare/plak"
+documentation = "https://docs.rs/plakous-codex-code-mode-protocol"
+readme = "README.md"
+keywords = ["llm", "agent", "codex", "code-mode", "schema"]
+categories = ["development-tools"]
 publish = false
 
 [lib]

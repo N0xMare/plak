@@ -207,8 +207,22 @@ publication needs no file outside the package root:
   renamed, keeping the upstream version, `LICENSE`, `NOTICE` and
   `PROVENANCE.md`.
 
-`tools/checks/check_workspace.py` enforces the first two rules and judges
-`plak` by its published shape.
+- A published package carries the registry metadata: its description,
+  `license`, `repository` and `homepage` (both the repository URL),
+  `documentation` (`https://docs.rs/<name>` for a library; `plak` and the
+  binary-only `plakous-py-worker` point into the repository), a `readme`, one
+  to five crates.io keywords and categories, and a `LICENSE` file in the
+  package root. Members are MIT, and each `LICENSE` is a link to the root
+  `LICENSE`, which Cargo packages as a regular file; the vendor snapshot keeps
+  its Apache-2.0 `LICENSE` and `NOTICE`. `plak` and `plakous` use the root
+  `README.md`; every other package has its own short `README.md`.
+- Members inherit `[workspace.package].exclude`: `/tests/`, `/benches/` and
+  `/fixtures/` stay in the repository. A packaged crate builds its library and
+  binaries; its integration tests, benches and test data, and the unit tests
+  that read that data, run only from the repository.
+
+`tools/checks/check_workspace.py` enforces these rules and judges `plak` by its
+published shape.
 
 ## 4. Product features
 

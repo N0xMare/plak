@@ -6,7 +6,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+documentation = "https://github.com/N0xMare/plak/tree/main/docs/user-guide"
 readme.workspace = true
+keywords = ["llm", "agent", "cli", "tui", "coding-agent"]
+categories = ["command-line-utilities", "development-tools"]
+exclude.workspace = true
 publish = false
 
 [package.metadata.plakous]
