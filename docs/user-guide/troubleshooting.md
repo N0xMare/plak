@@ -126,7 +126,11 @@ occurrences indicate in-path corruption. Try the same request from another
 network (for example a mobile hotspot), then compare with VPN/proxy disabled
 where permitted. If that network works, check the original router, VPN/proxy,
 and ISP path; do not disable TLS verification or paste request contents into
-logs. Retry log records for roots and children include host, route path and
+logs. A local adapter can be the corrupting hop: USB Ethernet adapters with TCP
+segmentation offload are a known source. If a large upload with another client
+from the same machine (for example `curl --data-binary @file` of a few
+megabytes to the same host) also ends in `alert bad record mac`, the path is at
+fault, not Plak; switch adapter or network. Retry log records for roots and children include host, route path and
 request body byte count, never the body or query parameters.
 
 `plak telemetry status --views` includes `v_replay_loss`: content-free retry
