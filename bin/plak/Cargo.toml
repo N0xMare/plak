@@ -20,15 +20,15 @@ doc = false
 
 [dependencies]
 clap = { workspace = true, features = ["derive", "env"] }
-plakous-hosted = { version = "0.1.0", path = "../../crates/hosting/hosted", default-features = false }
-plakous-recursive-subagents = { version = "0.1.0", path = "../../crates/orchestration/recursive-subagents", default-features = false }
-plakous-recursive-subagents-store = { version = "0.1.0", path = "../../crates/orchestration/recursive-subagents-store", default-features = false }
-plakous-host-protocol = { version = "0.1.0", path = "../../crates/hosting/host-protocol" }
+plakous-hosted.workspace = true
+plakous-recursive-subagents.workspace = true
+plakous-recursive-subagents-store.workspace = true
+plakous-host-protocol.workspace = true
 # `test-hooks` only. The optional edge is what keeps the deterministic offline
 # model out of every build that does not explicitly ask for it.
-plakous-offline-crash-harness = { version = "0.1.0", path = "../../tests/harnesses/offline-crash", optional = true }
+plakous-offline-crash-harness = { path = "../../tests/harnesses/offline-crash", optional = true }
 tracing-subscriber.workspace = true
-plakous = { version = "0.1.0", path = "../../crates/plakous", default-features = false, features = ["native-subscriptions", "mcp", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"] }
+plakous = { workspace = true, features = ["native-subscriptions", "mcp", "openai", "anthropic", "xai", "openrouter", "sessions-sqlite"] }
 nix.workspace = true
 rusqlite.workspace = true
 rustix = { workspace = true, features = ["event", "fs", "process", "termios", "time"] }
@@ -75,9 +75,9 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 
 [dev-dependencies]
 rustix = { workspace = true, features = ["pty", "termios"] }
-plakous-hosted = { version = "0.1.0", path = "../../crates/hosting/hosted", features = ["test-support"], default-features = false }
+plakous-hosted = { workspace = true, features = ["test-support"] }
 plakous-offline-crash-harness = { path = "../../tests/harnesses/offline-crash" }
-plakous-recursive-subagents = { version = "0.1.0", path = "../../crates/orchestration/recursive-subagents", features = ["test-support"], default-features = false }
+plakous-recursive-subagents = { workspace = true, features = ["test-support"] }
 portable-pty.workspace = true
 proptest = { workspace = true, features = ["std"] }
 rusqlite.workspace = true

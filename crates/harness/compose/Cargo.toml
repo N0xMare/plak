@@ -13,12 +13,12 @@ layer = "harness"
 class = "published-internal"
 
 [dependencies]
-plakous-model = { version = "0.1.0", path = "../../core/model" }
-plakous-tool-files = { version = "0.1.0", path = "../tool-files" }
-plakous-tool-plan = { version = "0.1.0", path = "../tool-plan" }
-plakous-tool-process = { version = "0.1.0", path = "../tool-process" }
-plakous-tool-search = { version = "0.1.0", path = "../tool-search" }
-plakous-tools = { version = "0.1.0", path = "../../core/tools" }
+plakous-model.workspace = true
+plakous-tool-files.workspace = true
+plakous-tool-plan.workspace = true
+plakous-tool-process.workspace = true
+plakous-tool-search.workspace = true
+plakous-tools.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 
@@ -32,7 +32,7 @@ serde_json.workspace = true
 scripted-code-mode-enrolment = []
 
 [dev-dependencies]
-plakous-code-mode = { version = "0.1.0", path = "../../runtimes/code-mode" }
+plakous-code-mode.workspace = true
 futures = { workspace = true, features = ["async-await", "executor", "std"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

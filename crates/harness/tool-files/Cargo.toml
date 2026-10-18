@@ -14,8 +14,8 @@ class = "published-internal"
 
 [dependencies]
 diffy.workspace = true
-plakous-model = { version = "0.1.0", path = "../../core/model" }
-plakous-tools = { version = "0.1.0", path = "../../core/tools" }
+plakous-model.workspace = true
+plakous-tools.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 

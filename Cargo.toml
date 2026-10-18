@@ -114,6 +114,44 @@ vt100 = { version = "=0.15.2", default-features = false }
 webpki-roots = "1"
 zeroize = "1"
 
+# Internal packages, declared once. Members inherit them with `.workspace = true`;
+# an internal edge takes the dependency's default features only when the member
+# sets `default-features = true`.
+plakous = { version = "0.1.0", path = "crates/plakous", default-features = false }
+plakous-agent = { version = "0.1.0", path = "crates/core/agent", default-features = false }
+plakous-anthropic = { version = "0.1.0", path = "crates/providers/anthropic", default-features = false }
+plakous-attempt = { version = "0.1.0", path = "crates/common/attempt", default-features = false }
+plakous-auth = { version = "0.1.0", path = "crates/common/auth", default-features = false }
+plakous-chat-completions = { version = "0.1.0", path = "crates/protocols/chat-completions", default-features = false }
+plakous-code-mode = { version = "0.1.0", path = "crates/runtimes/code-mode", default-features = false }
+plakous-compose = { version = "0.1.0", path = "crates/harness/compose", default-features = false }
+plakous-exchange = { version = "0.1.0", path = "crates/protocols/exchange", default-features = false }
+plakous-host-protocol = { version = "0.1.0", path = "crates/hosting/host-protocol", default-features = false }
+plakous-hosted = { version = "0.1.0", path = "crates/hosting/hosted", default-features = false }
+plakous-http = { version = "0.1.0", path = "crates/common/http", default-features = false }
+plakous-js-eval = { version = "0.1.0", path = "crates/runtimes/js-eval", default-features = false }
+plakous-mcp = { version = "0.1.0", path = "crates/harness/mcp", default-features = false }
+plakous-messages = { version = "0.1.0", path = "crates/protocols/messages", default-features = false }
+plakous-model = { version = "0.1.0", path = "crates/core/model", default-features = false }
+plakous-openai = { version = "0.1.0", path = "crates/providers/openai", default-features = false }
+plakous-openrouter = { version = "0.1.0", path = "crates/providers/openrouter", default-features = false }
+plakous-prompts = { version = "0.1.0", path = "crates/harness/prompts", default-features = false }
+plakous-py-eval = { version = "0.1.0", path = "crates/runtimes/py-eval", default-features = false }
+plakous-recursive-subagents = { version = "0.1.0", path = "crates/orchestration/recursive-subagents", default-features = false }
+plakous-recursive-subagents-store = { version = "0.1.0", path = "crates/orchestration/recursive-subagents-store", default-features = false }
+plakous-responses = { version = "0.1.0", path = "crates/protocols/responses", default-features = false }
+plakous-responses-dialect = { version = "0.1.0", path = "crates/protocols/responses-dialect", default-features = false }
+plakous-store = { version = "0.1.0", path = "crates/store", default-features = false }
+plakous-tool-files = { version = "0.1.0", path = "crates/harness/tool-files", default-features = false }
+plakous-tool-plan = { version = "0.1.0", path = "crates/harness/tool-plan", default-features = false }
+plakous-tool-process = { version = "0.1.0", path = "crates/harness/tool-process", default-features = false }
+plakous-tool-search = { version = "0.1.0", path = "crates/harness/tool-search", default-features = false }
+plakous-tool-web = { version = "0.1.0", path = "crates/harness/tool-web", default-features = false }
+plakous-tools = { version = "0.1.0", path = "crates/core/tools", default-features = false }
+plakous-workspace = { version = "0.1.0", path = "crates/orchestration/workspace", default-features = false }
+plakous-xai = { version = "0.1.0", path = "crates/providers/xai", default-features = false }
+plakous-codex-code-mode-protocol = { version = "=0.153.3", path = "vendor/codex-code-mode-protocol" }
+
 # Dependency boundaries enforced by the workspace checker (Spec 06).
 [workspace.metadata.plakous]
 layers = [

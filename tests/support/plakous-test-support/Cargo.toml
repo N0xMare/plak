@@ -15,8 +15,8 @@ class = "repository-only"
 [dependencies]
 futures-core.workspace = true
 futures-util = { workspace = true, features = ["std"] }
-plakous-model = { version = "0.1.0", path = "../../../crates/core/model" }
-plakous-tools = { version = "0.1.0", path = "../../../crates/core/tools" }
+plakous-model.workspace = true
+plakous-tools.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true

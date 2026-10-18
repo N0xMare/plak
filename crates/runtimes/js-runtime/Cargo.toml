@@ -17,7 +17,7 @@ name = "plakous-js-host"
 path = "src/bin/plakous-js-host.rs"
 
 [dependencies]
-plakous-js-eval = { version = "0.1.0", path = "../js-eval" }
+plakous-js-eval.workspace = true
 rquickjs.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

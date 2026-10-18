@@ -15,7 +15,7 @@ class = "published-internal"
 [dependencies]
 base64.workspace = true
 getrandom.workspace = true
-plakous-http = { path = "../http", version = "0.1.0", optional = true }
+plakous-http = { workspace = true, optional = true }
 rustix = { workspace = true, features = ["fs", "process"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

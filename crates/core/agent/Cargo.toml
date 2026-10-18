@@ -20,8 +20,8 @@ default = []
 [dependencies]
 futures-util = { workspace = true, features = ["std"] }
 getrandom.workspace = true
-plakous-model = { version = "0.1.0", path = "../model" }
-plakous-tools = { version = "0.1.0", path = "../tools" }
+plakous-model.workspace = true
+plakous-tools.workspace = true
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json.workspace = true
 thiserror.workspace = true
@@ -32,11 +32,11 @@ uuid.workspace = true
 [dev-dependencies]
 # Test-only: the composition presentations the agent hosts are compiled above
 # it, so only its tests name them.
-plakous-compose = { version = "0.1.0", path = "../../harness/compose" }
-plakous-tool-files = { version = "0.1.0", path = "../../harness/tool-files" }
-plakous-tool-plan = { version = "0.1.0", path = "../../harness/tool-plan" }
-plakous-tool-process = { version = "0.1.0", path = "../../harness/tool-process" }
-plakous-tool-search = { version = "0.1.0", path = "../../harness/tool-search" }
+plakous-compose.workspace = true
+plakous-tool-files.workspace = true
+plakous-tool-plan.workspace = true
+plakous-tool-process.workspace = true
+plakous-tool-search.workspace = true
 futures = { workspace = true, features = ["async-await", "executor", "std"] }
 plakous-test-support = { path = "../../../tests/support/plakous-test-support" }
 proptest = { workspace = true, features = ["std"] }

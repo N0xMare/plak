@@ -21,7 +21,7 @@ default = []
 filedescriptor.workspace = true
 globset.workspace = true
 ignore.workspace = true
-plakous-model = { version = "0.1.0", path = "../model" }
+plakous-model.workspace = true
 portable-pty.workspace = true
 regex.workspace = true
 rustix = { workspace = true, features = ["fs", "process"] }

@@ -13,14 +13,14 @@ layer = "provider"
 class = "published-internal"
 
 [dependencies]
-plakous-attempt = { version = "0.1.0", path = "../../common/attempt" }
-plakous-chat-completions = { version = "0.1.0", path = "../../protocols/chat-completions" }
-plakous-exchange = { version = "0.1.0", path = "../../protocols/exchange" }
-plakous-http = { version = "0.1.0", path = "../../common/http" }
-plakous-model = { version = "0.1.0", path = "../../core/model" }
-plakous-messages = { version = "0.1.0", path = "../../protocols/messages" }
-plakous-responses = { version = "0.1.0", path = "../../protocols/responses" }
-plakous-responses-dialect = { version = "0.1.0", path = "../../protocols/responses-dialect" }
+plakous-attempt.workspace = true
+plakous-chat-completions.workspace = true
+plakous-exchange.workspace = true
+plakous-http.workspace = true
+plakous-model.workspace = true
+plakous-messages.workspace = true
+plakous-responses.workspace = true
+plakous-responses-dialect.workspace = true
 futures-util.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["raw_value"] }
@@ -29,9 +29,9 @@ secrecy.workspace = true
 
 [dev-dependencies]
 futures-util.workspace = true
-plakous-agent = { version = "0.1.0", path = "../../core/agent" }
-plakous-http = { version = "0.1.0", path = "../../common/http", features = ["fault-injection"] }
-plakous-tools = { version = "0.1.0", path = "../../core/tools" }
+plakous-agent.workspace = true
+plakous-http = { workspace = true, features = ["fault-injection"] }
+plakous-tools.workspace = true
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "test-util", "time"] }

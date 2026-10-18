@@ -16,10 +16,10 @@ class = "repository-only"
 [dependencies]
 futures-util = { workspace = true, features = ["std"] }
 # `composition`: the local-composition API the scripted Code Mode binding attaches.
-plakous = { version = "0.1.0", path = "../../../crates/plakous", features = ["composition", "sessions-sqlite"] }
-plakous-agent = { version = "0.1.0", path = "../../../crates/core/agent" }
-plakous-model = { version = "0.1.0", path = "../../../crates/core/model" }
-plakous-store = { version = "0.1.0", path = "../../../crates/store", features = ["commit-trace"] }
+plakous = { workspace = true, features = ["composition", "sessions-sqlite"] }
+plakous-agent.workspace = true
+plakous-model.workspace = true
+plakous-store = { workspace = true, features = ["commit-trace"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -30,21 +30,19 @@ uuid = { workspace = true, features = ["v4"] }
 # repository-only harness: it is in a build only because something asked for it,
 # so the enrolment cannot reach a default or release binary, and no feature edge
 # has to cross a layer boundary to arrive.
-plakous-compose = { version = "0.1.0", path = "../../../crates/harness/compose", features = [
-    "scripted-code-mode-enrolment",
-] }
+plakous-compose = { workspace = true, features = ["scripted-code-mode-enrolment"] }
 # `PLAK_TEST_FAULTS` transport fault injection, for the same reason and in the
 # same way: `plak/test-hooks` is the only product edge to this package.
-plakous-http = { version = "0.1.0", path = "../../../crates/common/http", features = ["fault-injection"] }
+plakous-http = { workspace = true, features = ["fault-injection"] }
 
 [dev-dependencies]
 # The route axis lowers one recovered canonical history through each real wire
 # builder, so the reopen contract is proven carriable on every wire shape rather
 # than on the one the harness happens to speak. This is why the abandonment note
 # is spelled as User/Instruction: a shape every dialect can carry.
-plakous-chat-completions = { version = "0.1.0", path = "../../../crates/protocols/chat-completions" }
-plakous-messages = { version = "0.1.0", path = "../../../crates/protocols/messages" }
-plakous-responses-dialect = { version = "0.1.0", path = "../../../crates/protocols/responses-dialect" }
+plakous-chat-completions.workspace = true
+plakous-messages.workspace = true
+plakous-responses-dialect.workspace = true
 tempfile.workspace = true
 
 [lints]

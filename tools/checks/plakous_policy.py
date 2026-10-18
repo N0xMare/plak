@@ -4,7 +4,9 @@
 The policy lives in two places, both exposed by `cargo metadata`:
 
 * every workspace manifest carries `[package.metadata.plakous]` with its
-  `layer`, its support `class`, and an optional `neutral = true`;
+  `layer`, its support `class`, and an optional `neutral = true`; a loaded
+  manifest has its `workspace = true` dependencies resolved against the root
+  `[workspace.dependencies]`, so checkers read each edge as Cargo does;
 * the root `Cargo.toml` carries `[workspace.metadata.plakous]`: the layer list,
   the layer-pair edge matrix, explicit today-only `edge-exceptions`, the
   per-layer `layout` path templates, the legal `classes` per layer, the exact
@@ -233,6 +235,49 @@ def package_metadata(manifest: dict[str, Any], name: str) -> tuple[str, str, boo
     return layer, package_class, neutral
 
 
+DEPENDENCY_SECTIONS = ("dependencies", "dev-dependencies", "build-dependencies")
+
+
+def inherit_workspace_dependencies(
+    manifest: dict[str, Any], workspace_dependencies: dict[str, Any],
+) -> dict[str, Any]:
+    """Return the manifest with each `workspace = true` dependency resolved.
+
+    Cargo's inheritance: the member's `features` extend the workspace entry's,
+    the member's `optional` and `default-features` apply over it.
+    """
+
+    def resolve(alias: str, spec: Any) -> Any:
+        if not isinstance(spec, dict) or spec.get("workspace") is not True:
+            return spec
+        shared = workspace_dependencies.get(alias)
+        if shared is None:
+            raise ValueError(f"{alias}: inherits a dependency [workspace.dependencies] lacks")
+        resolved = {"version": shared} if isinstance(shared, str) else dict(shared)
+        for key, value in spec.items():
+            if key == "features":
+                resolved["features"] = [*resolved.get("features", []), *value]
+            elif key != "workspace":
+                resolved[key] = value
+        return resolved
+
+    def resolve_tables(table: dict[str, Any]) -> dict[str, Any]:
+        resolved = dict(table)
+        for section in DEPENDENCY_SECTIONS:
+            if isinstance(table.get(section), dict):
+                resolved[section] = {
+                    alias: resolve(alias, spec) for alias, spec in table[section].items()
+                }
+        return resolved
+
+    resolved = resolve_tables(manifest)
+    if isinstance(manifest.get("target"), dict):
+        resolved["target"] = {
+            target: resolve_tables(table) for target, table in manifest["target"].items()
+        }
+    return resolved
+
+
 def load_workspace(root: Path = ROOT, graph: dict[str, Any] | None = None) -> Workspace:
     """Load the policy and every workspace member from Cargo metadata."""
     graph = cargo_metadata(root) if graph is None else graph
@@ -246,7 +291,10 @@ def load_workspace(root: Path = ROOT, graph: dict[str, Any] | None = None) -> Wo
             continue
         manifest_path = Path(metadata["manifest_path"]).resolve()
         with manifest_path.open("rb") as stream:
-            manifest = tomllib.load(stream)
+            manifest = inherit_workspace_dependencies(
+                tomllib.load(stream),
+                root_manifest.get("workspace", {}).get("dependencies", {}),
+            )
         layer, package_class, neutral = package_metadata(manifest, metadata["name"])
         packages[metadata["name"]] = Package(
             name=metadata["name"],

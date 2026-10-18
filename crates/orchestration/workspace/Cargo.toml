@@ -14,7 +14,7 @@ class = "published-internal"
 neutral = true
 
 [dependencies]
-plakous-host-protocol = { version = "0.1.0", path = "../../hosting/host-protocol" }
+plakous-host-protocol.workspace = true
 rustix = { workspace = true, features = ["process"] }
 sha2.workspace = true
 jj-lib = { version = "=0.45.1", default-features = false, features = ["git"], optional = true }

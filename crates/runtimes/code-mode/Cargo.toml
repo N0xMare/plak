@@ -15,7 +15,7 @@ class = "published-internal"
 [dependencies]
 # Reviewed vendor snapshot of the pinned Codex 0.153.3 grammar. Consuming it by
 # path is what lets an external embedder build Code Mode with no `[patch]` table.
-plakous-codex-code-mode-protocol = { version = "=0.153.3", path = "../../../vendor/codex-code-mode-protocol" }
+plakous-codex-code-mode-protocol.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true

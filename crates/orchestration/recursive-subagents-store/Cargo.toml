@@ -15,8 +15,8 @@ neutral = true
 
 [dependencies]
 # Repository-only commit tracing; never selected by a default or maintainer build.
-plakous-store = { version = "0.1.0", path = "../../store", optional = true }
-plakous-recursive-subagents = { version = "0.1.0", path = "../recursive-subagents", default-features = false }
+plakous-store = { workspace = true, optional = true }
+plakous-recursive-subagents.workspace = true
 rusqlite.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
@@ -24,8 +24,8 @@ sha2.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
-plakous = { version = "0.1.0", path = "../../plakous", default-features = false }
-plakous-workspace = { version = "0.1.0", path = "../workspace", default-features = false }
+plakous.workspace = true
+plakous-workspace.workspace = true
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 

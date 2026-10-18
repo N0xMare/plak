@@ -15,9 +15,9 @@ neutral = true
 
 [dependencies]
 futures-util = { workspace = true, features = ["std"] }
-plakous = { version = "0.1.0", path = "../../plakous", default-features = false }
-plakous-host-protocol = { version = "0.1.0", path = "../../hosting/host-protocol" }
-plakous-workspace = { version = "0.1.0", path = "../workspace", default-features = false }
+plakous.workspace = true
+plakous-host-protocol.workspace = true
+plakous-workspace.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tempfile = { workspace = true, optional = true }
@@ -27,7 +27,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 plakous-offline-crash-harness = { path = "../../../tests/harnesses/offline-crash" }
-plakous-workspace = { version = "0.1.0", path = "../workspace", features = ["test-support"], default-features = false }
+plakous-workspace = { workspace = true, features = ["test-support"] }
 proptest = { workspace = true, features = ["std"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }

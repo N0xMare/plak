@@ -13,9 +13,9 @@ layer = "harness"
 class = "published-internal"
 
 [dependencies]
-plakous-agent = { version = "0.1.0", path = "../../core/agent" }
-plakous-model = { version = "0.1.0", path = "../../core/model" }
-plakous-tools = { version = "0.1.0", path = "../../core/tools" }
+plakous-agent.workspace = true
+plakous-model.workspace = true
+plakous-tools.workspace = true
 rustix = { workspace = true, features = ["fs"] }
 
 [dev-dependencies]
@@ -23,7 +23,7 @@ rustix = { workspace = true, features = ["fs"] }
 # `harness-pack-independent` rule, which reads production edges); the tests
 # that assert which paragraph a compiled surface earns need a real compiled
 # surface, which is what `plakous-compose` builds.
-plakous-compose = { version = "0.1.0", path = "../compose" }
+plakous-compose.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 

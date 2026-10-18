@@ -31,8 +31,7 @@ HARNESS = "plakous-offline-crash-harness"
 HARNESS_DEPENDENCY = (
     "# `test-hooks` only. The optional edge is what keeps the deterministic offline\n"
     "# model out of every build that does not explicitly ask for it.\n"
-    f'{HARNESS} = {{ version = "0.1.0", path = "../../tests/harnesses/offline-crash", '
-    "optional = true }\n"
+    f'{HARNESS} = {{ path = "../../tests/harnesses/offline-crash", optional = true }}\n'
 )
 TEST_HOOKS_FEATURE = (
     "# Repository gate only: bind the deterministic offline model named by\n"

@@ -77,37 +77,37 @@ sessions-sqlite = ["plakous-store/sqlite"]
 xai = ["dep:plakous-xai", "dep:plakous-http", "plakous-tool-web/fetch", "plakous-tool-web/image-gen"]
 
 [dependencies]
-plakous-agent = { version = "0.1.0", path = "../core/agent" }
-plakous-anthropic = { version = "0.1.0", path = "../providers/anthropic", optional = true }
-plakous-auth = { version = "0.1.0", path = "../common/auth", default-features = false, optional = true }
-plakous-code-mode = { version = "0.1.0", path = "../runtimes/code-mode", optional = true }
-plakous-js-eval = { version = "0.1.0", path = "../runtimes/js-eval", optional = true }
-plakous-py-eval = { version = "0.1.0", path = "../runtimes/py-eval", optional = true }
-plakous-compose = { version = "0.1.0", path = "../harness/compose" }
-plakous-mcp = { version = "0.1.0", path = "../harness/mcp", optional = true }
-plakous-model = { version = "0.1.0", path = "../core/model" }
-plakous-tool-files = { version = "0.1.0", path = "../harness/tool-files" }
-plakous-tool-plan = { version = "0.1.0", path = "../harness/tool-plan" }
-plakous-tool-process = { version = "0.1.0", path = "../harness/tool-process" }
-plakous-tool-search = { version = "0.1.0", path = "../harness/tool-search" }
-plakous-tool-web = { version = "0.1.0", path = "../harness/tool-web" }
-plakous-prompts = { version = "0.1.0", path = "../harness/prompts" }
-plakous-openai = { version = "0.1.0", path = "../providers/openai", default-features = false, optional = true }
-plakous-openrouter = { version = "0.1.0", path = "../providers/openrouter", optional = true }
-plakous-store = { version = "0.1.0", path = "../store" }
-plakous-http = { version = "0.1.0", path = "../common/http", optional = true }
+plakous-agent.workspace = true
+plakous-anthropic = { workspace = true, optional = true }
+plakous-auth = { workspace = true, optional = true }
+plakous-code-mode = { workspace = true, optional = true }
+plakous-js-eval = { workspace = true, optional = true }
+plakous-py-eval = { workspace = true, optional = true }
+plakous-compose.workspace = true
+plakous-mcp = { workspace = true, optional = true }
+plakous-model.workspace = true
+plakous-tool-files.workspace = true
+plakous-tool-plan.workspace = true
+plakous-tool-process.workspace = true
+plakous-tool-search.workspace = true
+plakous-tool-web.workspace = true
+plakous-prompts.workspace = true
+plakous-openai = { workspace = true, optional = true }
+plakous-openrouter = { workspace = true, optional = true }
+plakous-store.workspace = true
+plakous-http = { workspace = true, optional = true }
 rustix = { workspace = true, features = ["fs", "process"], optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
-plakous-tools = { version = "0.1.0", path = "../core/tools" }
-plakous-xai = { version = "0.1.0", path = "../providers/xai", default-features = false, optional = true }
+plakous-tools.workspace = true
+plakous-xai = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [dev-dependencies]
 futures-core.workspace = true
 futures-util.workspace = true
-plakous-openai = { version = "0.1.0", path = "../providers/openai", default-features = false, features = ["test-support"] }
+plakous-openai = { workspace = true, features = ["test-support"] }
 plakous-test-support = { path = "../../tests/support/plakous-test-support" }
 rusqlite.workspace = true
 rustix = { workspace = true, features = ["pty", "termios"] }
