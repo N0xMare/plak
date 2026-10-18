@@ -629,6 +629,7 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "OpenRouterCatalogCredentialRequest",
         "OpenRouterChatClient",
         "OpenRouterChatCredentialRequest",
+        "OpenRouterChatDiscoveryError",  # Host refuses a model the catalog does not list.
         "OpenRouterChatEndpointCandidate",
         "OpenRouterChatModelEvidence",
         "OpenRouterReasoningFacts",

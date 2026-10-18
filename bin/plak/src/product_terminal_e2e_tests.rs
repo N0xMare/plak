@@ -243,9 +243,9 @@ fn terminal_e2e_child() -> Result<(), Box<dyn Error>> {
     let paths = PlakPaths::explicit(home);
     let mut config = crate::product_config::ProductConfig::default_product();
     if std::env::var_os("PLAK_PTY_PROFILE_FORK").is_some() {
-        config.bind_root_tuple("grok", "grok-source-test", Some("medium"));
+        config.bind_root_tuple("grok", "grok-4.6", Some("medium"));
     } else {
-        config.bind_root_tuple("codex", "gpt-offline-loopback", Some("medium"));
+        config.bind_root_tuple("codex", "gpt-5.6-luna", Some("medium"));
     }
     config.compaction_enabled = false;
     config.save(&paths)?;
@@ -3090,7 +3090,7 @@ fn profile_ready_catalog() -> plakous_host_protocol::views::ReadyCatalog {
 }
 
 fn tui_profile_ready_catalog() -> plakous_host_protocol::views::ReadyCatalog {
-    [("grok", "grok-source-test"), ("claude", "claude-opus-test")]
+    [("grok", "grok-4.6"), ("claude", "claude-opus-test")]
         .into_iter()
         .map(
             |(account, model)| plakous_host_protocol::views::ProviderSection {
@@ -3176,7 +3176,7 @@ fn real_tui_profile_fork_now_accepts_first_prompt_and_reopens_target() -> Result
         .collect::<Result<Vec<_>, _>>()?;
     let source = records
         .iter()
-        .find(|session| session.model.as_deref() == Some("grok-source-test"))
+        .find(|session| session.model.as_deref() == Some("grok-4.6"))
         .ok_or("durable source session missing")?;
     let target = records
         .iter()

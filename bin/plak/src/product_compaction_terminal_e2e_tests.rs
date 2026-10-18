@@ -167,7 +167,7 @@ fn compaction_terminal_e2e_child() -> TestResult {
     };
     let paths = PlakPaths::explicit(PathBuf::from(home));
     let mut config = crate::product_config::ProductConfig::default_product();
-    config.bind_root_tuple("codex", "gpt-offline-loopback", Some("medium"));
+    config.bind_root_tuple("codex", "gpt-5.6-luna", Some("medium"));
     config.compaction_enabled = true;
     config.save(&paths)?;
     let attacher = CompactionAttacher {
