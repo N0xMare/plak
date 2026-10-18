@@ -450,7 +450,7 @@ EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
     # files under `bin/plak/help/` included at compile time — three global
     # fragments (head, maintainer verbs, tail) and one page per verb. The
     # renderer supplies only what a page cannot state for itself.
-    ("plak", "src/cli/render.rs"): ("include_str",) * 23,
+    ("plak", "src/cli/render.rs"): ("include_str",) * 24,
     # The four provider homes are the built-in Agents profiles. Each home's
     # four role files are compiled into the binary so a user with no
     # `~/.plak/profiles` still has codex, claude, grok and multi.

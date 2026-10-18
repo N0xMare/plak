@@ -479,5 +479,4 @@ fn publish(path: &Path, text: &str) -> Result<(), String> {
 }
 
 #[cfg(test)]
-#[path = "mcp_edit_tests.rs"]
 mod tests;
