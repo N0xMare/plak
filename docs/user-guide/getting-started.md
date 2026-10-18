@@ -13,7 +13,7 @@ curl -fsSL https://raw.githubusercontent.com/N0xMare/plak/main/install.sh | sh
 
 It downloads the latest release tarball and `SHA256SUMS` from GitHub Releases
 (set `PLAK_VERSION` to pick a release), refuses a checksum mismatch, and checks
-the build attestation when `gh` is installed. It installs `plak`,
+the build attestation when `gh` is installed and signed in. It installs `plak`,
 `plakous-js-host` and `monty` into the same snapshot layout as `just install`
 below, with links in `~/.local/bin`, and never needs `sudo`. Any other platform
 is refused; build from source there.
