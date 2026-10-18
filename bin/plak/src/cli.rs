@@ -207,6 +207,8 @@ fn is_known_command(name: &str) -> bool {
             | "status"
             | "refresh"
             | "key"
+            | "secret"
+            | "mcp"
             | "run"
             | "agent"
             | "resume"
@@ -304,6 +306,11 @@ enum TopCommand {
     Secret {
         #[command(subcommand)]
         action: Option<SecretAction>,
+    },
+    /// MCP servers: add, inspect, test and enable them on templates.
+    Mcp {
+        #[command(subcommand)]
+        action: Option<McpAction>,
     },
     #[cfg(feature = "maintainer")]
     Compatibility {
@@ -470,6 +477,12 @@ impl TopCommand {
                 command: "secret".to_owned(),
             }),
             Self::Secret {
+                action: Some(action),
+            } => action.into_command(),
+            Self::Mcp { action: None } => Ok(Command::CommandHelp {
+                command: "mcp".to_owned(),
+            }),
+            Self::Mcp {
                 action: Some(action),
             } => action.into_command(),
             #[cfg(feature = "maintainer")]
@@ -756,6 +769,212 @@ impl SecretAction {
             }
             Self::List => Ok(Command::SecretList),
         }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum McpAction {
+    Add {
+        id: Option<String>,
+        #[arg(long, value_parser = ["user", "global", "project"])]
+        scope: Option<String>,
+        #[arg(long)]
+        url: Option<String>,
+        #[arg(long = "bearer-secret")]
+        bearer_secret: Option<String>,
+        #[arg(long = "header", value_name = "NAME=VALUE")]
+        header: Vec<String>,
+        #[arg(long = "header-secret", value_name = "NAME=SECRET")]
+        header_secret: Vec<String>,
+        #[arg(long = "env", value_name = "KEY=VALUE")]
+        env: Vec<String>,
+        #[arg(long = "secret-env", value_name = "KEY=SECRET")]
+        secret_env: Vec<String>,
+        #[arg(long, value_delimiter = ',')]
+        tools: Option<Vec<String>>,
+        #[arg(long = "startup-seconds")]
+        startup_seconds: Option<u16>,
+        #[arg(long = "call-seconds")]
+        call_seconds: Option<u16>,
+        #[arg(long, action = ArgAction::SetTrue)]
+        replace: bool,
+        #[arg(last = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
+    List,
+    Show {
+        id: Option<String>,
+    },
+    Test {
+        id: Option<String>,
+    },
+    Remove {
+        id: Option<String>,
+        #[arg(long, value_parser = ["user", "global", "project"])]
+        scope: Option<String>,
+        #[arg(long, action = ArgAction::SetTrue)]
+        force: bool,
+    },
+    Enable {
+        id: Option<String>,
+        #[arg(long)]
+        template: Option<String>,
+        #[arg(long = "tool")]
+        tool: Vec<String>,
+    },
+    Disable {
+        id: Option<String>,
+        #[arg(long)]
+        template: Option<String>,
+    },
+}
+
+fn write_scope(
+    scope: Option<&str>,
+) -> Result<Option<crate::product_config::ConfigWriteScope>, String> {
+    scope
+        .map(|scope| {
+            crate::product_config::ConfigWriteScope::parse(scope)
+                .ok_or_else(|| "--scope must be user|global|project".to_owned())
+        })
+        .transpose()
+}
+
+/// `KEY=VALUE` pairs of one repeated flag; a key given twice is refused.
+fn pairs(
+    flag: &str,
+    values: Vec<String>,
+) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let mut out = std::collections::BTreeMap::new();
+    for value in values {
+        let Some((key, value)) = value.split_once('=') else {
+            return Err(format!("{flag} takes NAME=VALUE, got {value:?}"));
+        };
+        if out.insert(key.to_owned(), value.to_owned()).is_some() {
+            return Err(format!("{flag} names {key} twice"));
+        }
+    }
+    Ok(out)
+}
+
+impl McpAction {
+    fn into_command(self) -> Result<Command, String> {
+        use crate::commands::mcp::McpCommand;
+        let help = || {
+            Ok(Command::CommandHelp {
+                command: "mcp".to_owned(),
+            })
+        };
+        let command = match self {
+            Self::Add { id: None, .. }
+            | Self::Show { id: None }
+            | Self::Test { id: None }
+            | Self::Remove { id: None, .. }
+            | Self::Enable { id: None, .. }
+            | Self::Disable { id: None, .. } => return help(),
+            Self::Add {
+                id: Some(id),
+                scope,
+                url,
+                bearer_secret,
+                header,
+                header_secret,
+                env,
+                secret_env,
+                tools,
+                startup_seconds,
+                call_seconds,
+                replace,
+                command,
+            } => {
+                let transport = match (url, command.split_first()) {
+                    (Some(_), Some(_)) => {
+                        return Err(
+                            "mcp add takes either --url or a command after `--`, not both"
+                                .to_owned(),
+                        );
+                    }
+                    (None, None) => {
+                        return Err("mcp add needs a command after `--` (stdio) or --url (http): plak mcp add <id> -- <command> [args...]".to_owned());
+                    }
+                    (Some(url), None) => {
+                        for (flag, given) in [
+                            ("--env", !env.is_empty()),
+                            ("--secret-env", !secret_env.is_empty()),
+                        ] {
+                            if given {
+                                return Err(format!("{flag} applies only to a stdio server"));
+                            }
+                        }
+                        crate::product_config::McpTransport::Http {
+                            url,
+                            bearer_secret,
+                            headers: pairs("--header", header)?,
+                            secret_headers: pairs("--header-secret", header_secret)?,
+                        }
+                    }
+                    (None, Some((program, args))) => {
+                        for (flag, given) in [
+                            ("--bearer-secret", bearer_secret.is_some()),
+                            ("--header", !header.is_empty()),
+                            ("--header-secret", !header_secret.is_empty()),
+                        ] {
+                            if given {
+                                return Err(format!("{flag} applies only to an http server"));
+                            }
+                        }
+                        crate::product_config::McpTransport::Stdio {
+                            command: program.clone(),
+                            args: args.to_vec(),
+                            env: pairs("--env", env)?,
+                            secret_env: pairs("--secret-env", secret_env)?,
+                        }
+                    }
+                };
+                McpCommand::Add {
+                    id,
+                    scope: write_scope(scope.as_deref())?.unwrap_or_default(),
+                    server: crate::product_config::McpServerConfig {
+                        transport,
+                        tools,
+                        startup_seconds: startup_seconds
+                            .unwrap_or(crate::product_config::DEFAULT_MCP_STARTUP_SECONDS),
+                        call_seconds: call_seconds
+                            .unwrap_or(crate::product_config::DEFAULT_MCP_CALL_SECONDS),
+                    },
+                    replace,
+                }
+            }
+            Self::List => McpCommand::List,
+            Self::Show { id: Some(id) } => McpCommand::Show { id },
+            Self::Test { id: Some(id) } => McpCommand::Test { id },
+            Self::Remove {
+                id: Some(id),
+                scope,
+                force,
+            } => McpCommand::Remove {
+                id,
+                scope: write_scope(scope.as_deref())?,
+                force,
+            },
+            Self::Enable {
+                id: Some(id),
+                template,
+                tool,
+            } => McpCommand::Enable {
+                id,
+                template: template.ok_or("mcp enable needs --template <name>")?,
+                tools: tool,
+            },
+            Self::Disable {
+                id: Some(id),
+                template,
+            } => McpCommand::Disable {
+                id,
+                template: template.ok_or("mcp disable needs --template <name>")?,
+            },
+        };
+        Ok(Command::Mcp(command))
     }
 }
 
@@ -2351,6 +2570,84 @@ mod tests {
         ] {
             assert!(parse(args(argv)).is_err(), "must reject {argv:?}");
         }
+    }
+
+    #[test]
+    fn mcp_add_takes_secret_names_never_values_and_one_transport() {
+        use crate::commands::mcp::McpCommand;
+        use crate::product_config::McpTransport;
+        let Ok(Command::Mcp(McpCommand::Add { id, server, .. })) = parse(args(&[
+            "mcp",
+            "add",
+            "github",
+            "--secret-env",
+            "GITHUB_PERSONAL_ACCESS_TOKEN=github",
+            "--tools",
+            "get_me,search_code",
+            "--",
+            "docker",
+            "run",
+            "-i",
+            "--rm",
+            "img",
+        ])) else {
+            panic!("stdio add must parse");
+        };
+        assert_eq!(id, "github");
+        assert_eq!(
+            server.tools.as_deref(),
+            Some(&["get_me".to_owned(), "search_code".to_owned()][..])
+        );
+        let McpTransport::Stdio {
+            command,
+            args: argv,
+            secret_env,
+            ..
+        } = server.transport
+        else {
+            panic!("expected stdio");
+        };
+        assert_eq!(command, "docker");
+        assert_eq!(argv, ["run", "-i", "--rm", "img"]);
+        assert_eq!(secret_env["GITHUB_PERSONAL_ACCESS_TOKEN"], "github");
+        assert!(matches!(
+            parse(args(&[
+                "mcp",
+                "add",
+                "gh",
+                "--url",
+                "https://x.test/mcp",
+                "--bearer-secret",
+                "github"
+            ])),
+            Ok(Command::Mcp(McpCommand::Add { .. }))
+        ));
+        for argv in [
+            &["mcp", "add", "gh"][..],
+            &["mcp", "add", "gh", "--url", "https://x.test", "--", "cmd"][..],
+            &[
+                "mcp",
+                "add",
+                "gh",
+                "--url",
+                "https://x.test",
+                "--env",
+                "A=b",
+            ][..],
+            &["mcp", "add", "gh", "--bearer-secret", "s", "--", "cmd"][..],
+            &["mcp", "add", "gh", "--secret-env", "NOEQUALS", "--", "cmd"][..],
+            &["mcp", "enable", "gh"][..],
+        ] {
+            assert!(parse(args(argv)).is_err(), "must reject {argv:?}");
+        }
+        assert!(matches!(
+            parse(args(&["mcp"])),
+            Ok(Command::CommandHelp { command }) if command == "mcp"
+        ));
+        assert!(matches!(
+            parse(args(&["mcp", "add", "--help"])),
+            Ok(Command::CommandHelp { command }) if command == "mcp"
+        ));
     }
 
     #[test]

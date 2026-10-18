@@ -181,8 +181,8 @@ pub use startup::spawn_deferred_tui_host;
 pub use startup::spawn_deferred_tui_host_with_clear_publication;
 pub use startup::spawn_host_worker;
 pub use surface::{
-    ProfileForkOutcome, Surface, SurfaceEffect, SurfaceFacts, SurfaceHandler, SurfacePhase,
-    SurfaceProfileFork, SurfaceRefusal, SurfaceSaved, SurfaceSession,
+    ProfileForkOutcome, Surface, SurfaceEffect, SurfaceFacts, SurfaceHandler, SurfaceMcp,
+    SurfacePhase, SurfaceProfileFork, SurfaceRefusal, SurfaceSaved, SurfaceSession,
 };
 #[cfg(any(test, feature = "test-support"))]
 pub use topology_state::install_successor_epoch_headless;

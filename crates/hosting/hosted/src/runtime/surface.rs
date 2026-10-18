@@ -63,6 +63,64 @@ pub struct SurfaceSession {
     pub workspace: std::path::PathBuf,
     /// This session's frozen tree epoch, when it has one.
     pub roster: Option<crate::orchestration::OrchestrationSnapshot>,
+    /// The MCP tools this session froze at creation.
+    pub mcp: SurfaceMcp,
+}
+
+/// A session's frozen MCP tools, for an operator view.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct SurfaceMcp {
+    /// Every server the session's frozen template lists, in id order.
+    pub servers: Vec<String>,
+    /// `(server id, MCP tool name)` per bound tool, in bind order.
+    pub tools: Vec<(String, String)>,
+    /// The omission notices of the creation bind still in the transcript.
+    pub omitted: Vec<String>,
+}
+
+impl SurfaceMcp {
+    fn of(session: &crate::sessions::SessionRecord) -> Self {
+        let Some(selection) = session
+            .frozen_tools
+            .as_ref()
+            .map(crate::frozen_tools::FrozenRootTools::selection)
+        else {
+            return Self::default();
+        };
+        let omitted = session
+            .transcript
+            .rows()
+            .into_iter()
+            .filter_map(|(row, _)| match row {
+                TranscriptRow::Notice(notice)
+                    if notice.text.starts_with("mcp tool ")
+                        && notice.text.ends_with("; omitted") =>
+                {
+                    Some(notice.text.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        Self {
+            servers: selection
+                .selection
+                .mcp_servers()
+                .map(|server| server.as_str().to_owned())
+                .collect(),
+            tools: selection
+                .mcp_tools
+                .iter()
+                .flatten()
+                .map(|record| {
+                    (
+                        record.server().as_str().to_owned(),
+                        record.mcp_name().to_owned(),
+                    )
+                })
+                .collect(),
+            omitted,
+        }
+    }
 }
 
 pub(super) fn session_facts(
@@ -83,6 +141,7 @@ pub(super) fn session_facts(
         fast: session.target_selection == crate::binding::TargetSelection::NativePriority,
         workspace: session.workspace_root.clone(),
         roster,
+        mcp: SurfaceMcp::of(session),
     }
 }
 

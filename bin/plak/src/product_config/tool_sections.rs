@@ -191,6 +191,14 @@ impl ToolSections {
         out
     }
 
+    /// One server's canonical table, exactly as a session freezes it.
+    #[must_use]
+    pub fn render_server(&self, id: &str) -> Option<String> {
+        self.mcp_servers
+            .get(id)
+            .map(|server| render_mcp_server(id, server))
+    }
+
     /// Every table this config carries, canonically rendered, for
     /// `plak config show`.
     #[must_use]

@@ -192,6 +192,49 @@ input (the value is never an argument) and writes
 prints names only. A name matches `[a-z][a-z0-9-]{0,31}`. There is no
 environment override.
 
+### `plak mcp add|list|show|test|remove|enable|disable`
+
+MCP server setup without editing `config.toml` by hand.
+
+```sh
+plak mcp add everything -- npx -y @modelcontextprotocol/server-everything
+plak secret set github                        # the token; never an argument
+plak mcp add github --url https://api.githubcopilot.com/mcp/readonly --bearer-secret github
+plak mcp add ghlocal --secret-env GITHUB_PERSONAL_ACCESS_TOKEN=github \
+  -- docker run -i --rm -e GITHUB_PERSONAL_ACCESS_TOKEN ghcr.io/github/github-mcp-server stdio --read-only
+plak mcp list
+plak mcp show github
+plak mcp test github
+plak mcp enable github --template root-agent             # every allowed tool
+plak mcp enable github --template root-agent --tool get_me   # or one at a time
+plak mcp disable github --template root-agent
+plak mcp remove github
+```
+
+- `add <id> [options] -- <command> [args...]` adds a stdio server;
+  `add <id> --url <url>` an HTTP one. Options: `--scope user|project` (default
+  `user`; `project` writes the trusted project's `.plak/config.toml`),
+  `--env KEY=VALUE`, `--secret-env KEY=SECRET` (stdio), `--bearer-secret
+  SECRET`, `--header NAME=VALUE`, `--header-secret NAME=SECRET` (http),
+  `--tools a,b` (the server allowlist), `--startup-seconds`, `--call-seconds`
+  and `--replace` to overwrite an existing id. The table is written in place,
+  keeping the rest of the file, and anything a config load would refuse is
+  refused before the file changes. Secrets are named, never given; `add` tells
+  you which are not stored yet.
+- `list` prints each server's transport, scope and target, the templates that
+  enable it, and the secrets it names that are not stored. `show <id>` prints
+  the full table as a session freezes it, plus the same facts.
+- `test <id>` starts or connects to the server the way a session does (same
+  spawn, environment and secret path), lists the tools `mcp:<id>` would bind
+  and the ones left out with the reason, then stops it. A failure exits
+  non-zero with the cause. It calls no model.
+- `enable <id> --template <name> [--tool <t>]...` adds `mcp:<id>` (or one
+  `mcp:<id>/<t>` per `--tool`) to that template file's `tools`; `disable`
+  removes every entry for the server. Only the `tools` line changes. New
+  sessions pick it up; a session that already exists keeps its tools.
+- `remove <id>` refuses while a template still lists the server; `--force`
+  removes those entries first.
+
 ---
 
 ### Subscription compatibility review deadlines

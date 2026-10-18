@@ -221,6 +221,101 @@ async fn bind_on_pool(
     Ok(bound)
 }
 
+/// What one server offers a template that lists it as `mcp:<id>`, as
+/// [`probe_mcp_server`] found it.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct McpProbe {
+    /// `(mcp name, exposed name)` per tool a session would bind.
+    pub tools: Vec<(String, String)>,
+    /// One line per allowed tool left out because its input schema cannot be
+    /// represented.
+    pub unlowerable: Vec<String>,
+    /// Listed tools the server's `tools` allowlist leaves out.
+    pub not_allowed: Vec<String>,
+    /// Allowlist names the server does not list.
+    pub not_listed: Vec<String>,
+}
+
+/// Starts or connects to one server exactly as a session bind does (the
+/// definition from its canonical `[mcp_servers.<id>]` table, secrets through
+/// `secrets`, the stdio environment of `workspace_root`) on a pool of its own,
+/// lists its tools, and stops it. Nothing is bound and no model is called.
+///
+/// # Errors
+///
+/// Returns the one-line cause a session bind would report: an invalid table,
+/// a missing secret, or a start, handshake or listing failure.
+pub fn probe_mcp_server(
+    server: &str,
+    rendered: &str,
+    workspace_root: &std::path::Path,
+    secrets: Arc<dyn NamedSecrets>,
+) -> Result<McpProbe, String> {
+    let server = McpServerName::new(server.to_owned())
+        .map_err(|_| format!("{server:?} is not a valid MCP server id"))?;
+    let spec = server_spec(&server, rendered, &secrets)?;
+    let allowlist = crate::frozen_tables::parse::<RenderedTables>(rendered)
+        .and_then(|mut tables| tables.mcp_servers.remove(server.as_str()))
+        .and_then(|definition| definition.tools);
+    let environment = Arc::new(service_environment(workspace_root)?);
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_name("plak-mcp-probe")
+        .enable_all()
+        .build()
+        .map_err(|_| "mcp server executor could not be started".to_owned())?;
+    let pool = McpPool::new().running_on(runtime.handle().clone());
+    runtime.block_on(async {
+        let probed = async {
+            let lease = pool
+                .lease(spec, environment)
+                .await
+                .map_err(|error| error.to_string())?;
+            let listing = lease
+                .freeze(&McpToolSelection::All)
+                .await
+                .map_err(|error| error.to_string())?;
+            let listed = lease
+                .listed_tool_names()
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok::<_, String>((listing, listed))
+        }
+        .await;
+        pool.shutdown().await;
+        let (listing, listed) = probed?;
+        let allows = |name: &str| {
+            allowlist
+                .as_ref()
+                .is_none_or(|names| names.iter().any(|allowed| allowed == name))
+        };
+        Ok(McpProbe {
+            tools: listing
+                .records()
+                .iter()
+                .map(|record| {
+                    (
+                        record.mcp_name().to_owned(),
+                        record.exposed_name().as_str().to_owned(),
+                    )
+                })
+                .collect(),
+            unlowerable: listing.notices().to_vec(),
+            not_allowed: listed
+                .iter()
+                .filter(|name| !allows(name))
+                .cloned()
+                .collect(),
+            not_listed: allowlist
+                .iter()
+                .flatten()
+                .filter(|name| !listed.contains(name))
+                .cloned()
+                .collect(),
+        })
+    })
+}
+
 fn server_selection(selection: &TemplateToolSelection, server: &McpServerName) -> McpToolSelection {
     let mut named = Vec::new();
     for entry in selection.entries() {

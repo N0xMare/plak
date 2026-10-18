@@ -843,6 +843,11 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
                 });
             }
             SurfaceIntent::OpenSettings => emit_settings(&self.paths, events),
+            SurfaceIntent::ShowMcp => {
+                let body =
+                    crate::commands::mcp::session_overview(&self.paths, facts.session.as_ref());
+                let _ = events.send(HostEvent::Extension(SurfaceObservation::McpOverview(body)));
+            }
             SurfaceIntent::SaveSettings(update) => {
                 return SurfaceEffect {
                     saved: save_settings(&self.paths, update, facts.catalog, events).map(|saved| {
@@ -951,6 +956,7 @@ mod tests {
             fast: false,
             workspace: std::path::PathBuf::from("."),
             roster: None,
+            mcp: plakous_hosted::runtime::SurfaceMcp::default(),
         };
         let row = session_profile(&config, std::path::Path::new("."), &session);
         let (events, rx) = host_event_sink();
@@ -984,6 +990,7 @@ mod tests {
             fast: false,
             workspace,
             roster: None,
+            mcp: plakous_hosted::runtime::SurfaceMcp::default(),
         };
         ProductSurface::new(paths).dispatch(
             SurfaceIntent::RefreshComposerChrome,
@@ -1025,6 +1032,7 @@ mod tests {
             fast: root.is_fast(),
             workspace: dir.path().to_owned(),
             roster: Some(frozen),
+            mcp: plakous_hosted::runtime::SurfaceMcp::default(),
         };
         let matched = session_profile(&prepared.config, dir.path(), &session);
         assert_eq!(matched.id, "claude-default");
@@ -1096,6 +1104,7 @@ mod tests {
                 root.model.clone(),
                 root.effort.clone(),
             )),
+            mcp: plakous_hosted::runtime::SurfaceMcp::default(),
         };
         let shape = |cards: &[crate::surface_protocol::ProfileRole]| {
             cards
@@ -1147,6 +1156,7 @@ mod tests {
                 root.model.clone(),
                 None,
             )),
+            mcp: plakous_hosted::runtime::SurfaceMcp::default(),
         };
         assert_eq!(
             session_profile(&prepared.config, dir.path(), &session).id,
@@ -1345,6 +1355,7 @@ mod tests {
                     )),
                     SurfaceIntent::ListProfiles
                     | SurfaceIntent::RefreshComposerChrome
+                    | SurfaceIntent::ShowMcp
                     | SurfaceIntent::ApplyProfile { .. }
                     | SurfaceIntent::AcknowledgeAgent { .. }
                     | SurfaceIntent::ListAgentAcknowledgements { .. } => {

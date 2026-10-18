@@ -72,7 +72,13 @@ with a reserved name, is a load error naming the file.
 
 A template is authored in its file. `plak config set` never writes a template
 body; `agent.<name>.<field>` is refused with *templates are file-authored;
-edit ~/.plak/agents/<name>.toml*. The Agents tab selects a whole profile.
+edit ~/.plak/agents/<name>.toml*. The one exception is `plak mcp enable` and
+`plak mcp disable` (and `plak mcp remove --force`, which disables first): they
+rewrite only the `tools` array of the one template file the name resolves to
+(the project's when a trusted project supplies it), adding or removing
+`mcp:<id>` or `mcp:<id>/<tool>` entries, keeping every other line, and
+validating the result as a load would before publishing it. A session that
+already exists keeps the tools it froze; new sessions pick the change up. The Agents tab selects a whole profile.
 A user profile is `~/.plak/profiles/<name>.toml` with exactly two keys,
 `root = "<template>"` and `working_set = ["<template>", ...]` (at least one
 name, every entry a string); any other key, a wrong type, a missing template,
@@ -294,7 +300,11 @@ reach the server; it starts nothing until a template that lists it binds.
 A key of the other transport is a load error. Secrets are never values in
 TOML: a secret name matches `[a-z][a-z0-9-]{0,31}` and resolves from the home
 (spec 04 §3.1) when the server is started; whether it exists is a bind check,
-not a load check. A trusted project may add an `[mcp_servers.<id>]` or
+not a load check. `plak mcp add` writes a table into the home or (with
+`--scope project`) the trusted project's `config.toml` in place, keeping the
+rest of the file and spelling out only the keys given; the result must pass
+this section's parser and leave every template reference valid, or nothing is
+written. A trusted project may add an `[mcp_servers.<id>]` or
 `[tools.<name>]` table or replace one of the home's by name, whole (a stdio
 server is a host-authority command, like `on_mint`); its secrets still resolve
 only from the home.

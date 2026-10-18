@@ -1604,6 +1604,7 @@ version. There is no top-level prompt positional.
 | `refresh [<account>]` | rotate one refreshable credential |
 | `key set\|clear <openai\|xai-api\|anthropic\|openrouter>`, `key status [<account>]` | `set` and `clear` refuse an account that is not an API-key account |
 | `secret set\|rm <name>`, `secret list` | named secrets config.toml refers to by name (spec 04 §3.1); `set` prompts with masked input, `list` prints names only |
+| `mcp add <id> [--scope user\|project] [--env K=V]… [--secret-env K=<secret>]… [--tools a,b] [--startup-seconds <n>] [--call-seconds <n>] [--replace] -- <command> [args…]`, `mcp add <id> --url <url> [--scope user\|project] [--bearer-secret <secret>] [--header N=V]… [--header-secret N=<secret>]… [--tools a,b] [--startup-seconds <n>] [--call-seconds <n>] [--replace]`, `mcp list`, `mcp show <id>`, `mcp test <id>`, `mcp remove <id> [--scope user\|project] [--force]`, `mcp enable <id> --template <name> [--tool <t>]…`, `mcp disable <id> --template <name>` | MCP server setup (spec 07 §3.5). `add` writes `[mcp_servers.<id>]` in place, validated by the load parser, and refuses an existing id without `--replace`; secrets are names only. `list` and `show` print transport, scope, the templates that enable each server and the secrets it names that are not stored. `test` starts or connects to the server through the bind's spawn, environment and secret path on a pool of its own, lists the tools `mcp:<id>` would bind and the ones left out with the reason (schema not representable, not in the allowlist), stops it, and exits non-zero with the cause on failure; it calls no model. `enable`/`disable` edit only that template's `tools` array (spec 07 §1). `remove` refuses while a template lists the server unless `--force`, which disables it there first |
 | `run [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>] [--resume-tree] [--print-session-id] [--max-turns <1..100>] [--timeout <seconds>] -- <prompt…>` | runs until idle, including continuation turns, bounded by `--max-turns` (default 25); each turn can be billable |
 | `agent [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>] [--resume-tree]` | the long-lived JSONL host client |
 | `resume [<session>]` | the TUI picker, or an exact id |
@@ -1772,11 +1773,11 @@ prompt text. Every visible clap long flag is listed on its verb's rendered page.
 
 **A bare command group prints its own help rather than a parse error.** That is
 the rule for `login`, `logout`, `refresh`, `key`, `key set`, `key clear`,
-`secret`, `secret set`, `secret rm`,
+`secret`, `secret set`, `secret rm`, `mcp` and each `mcp` verb without its id,
 `run`, `config`, `config set` without a key, `session`, `session show`,
 `session log`, `session recover`, `session export`, `session import`, `session reference`, `session delete`, `session gc`, `telemetry`, `telemetry sql`, and `models`. The exceptions are
 the bare forms that are themselves complete commands — `status` (every
-vertical), `key status`, `secret list`, `usage`, `resume`, `session list`, `doctor`, and
+vertical), `key status`, `secret list`, `mcp list`, `usage`, `resume`, `session list`, `doctor`, and
 `agent` — and `telemetry prune`, which refuses (§3.4).
 
 Global help closes with the warning that agents use full coding tools by
@@ -2804,10 +2805,10 @@ requests. Pending terminal notices alone do not refuse a transition.
 Same-branch recovery and authority refresh transfer the process service instead;
 compaction preserves that branch's jobs.
 
-The catalog is **closed**. Twenty-three commands ship, and a command that does
+The catalog is **closed**. Twenty-four commands ship, and a command that does
 nothing but announce a deferred capability is not one of them:
 
-`/help`, `/keybinds`, `/status`, `/settings`, `/agents`, `/providers`,
+`/help`, `/keybinds`, `/status`, `/settings`, `/agents`, `/providers`, `/mcp`,
 `/usage`, `/context`, `/attach`, `/recover`, `/clear`, `/compact`,
 `/config`, `/resume`, `/tree`, `/ps`, `/stop-all`, `/fork`, `/fork-then-compact`,
 `/drop`, `/image`, `/reload`, `/quit`. Two spellings are accepted aliases rather than extra rows:
@@ -2819,6 +2820,13 @@ text with a one-line system note, `usage: /<name>  —  takes no arguments`, and
 does nothing else. `/compact now` starts no paid compaction and `/clear all`
 clears nothing. `/fork` and `/fork-then-compact` refuse with their own usage
 line. The argument-taking commands keep their grammar below.
+
+`/mcp` opens a read-only panel: every configured MCP server with its
+transport, scope, the templates that enable it and any secret it names that is
+not stored; whether the current session bound it and with how many tools; the
+tools the session's bind left out with their reasons; and the `plak mcp`
+commands that add, test and enable a server. It edits nothing and starts no
+server.
 
 `/image <path>...` attaches image files to the draft (§5.9); bare `/image`
 answers `usage: /image <path>...  —  attach png, jpeg, gif or webp files; Ctrl+V
@@ -2853,7 +2861,7 @@ input; a process exiting while the root idles stops blocking `/reload` without
 another turn. Pending notices alone do not refuse reload. This count is neither
 a JSONL command nor durable authority.
 
-There is no `/skills`, `/mcp`, `/sandbox`, `/workflows`, `/login`,
+There is no `/skills`, `/sandbox`, `/workflows`, `/login`,
 `/connect`, or `/load-api-key` — not in the catalog and not in completion.
 There is no `/model`, `/account` or `/effort` either: the session's binding
 (account, model, effort, Fast, composition, protocol) changes only through
@@ -6051,9 +6059,9 @@ These are shipped gaps, stated so that nothing above reads as a promise the
 product does not keep. The agent tree's own limits are chapter 03 §17, and the
 distribution and platform limits are chapter 06.
 
-**Deferred capabilities.** Skills are designed and not implemented; MCP
-servers bind through template tools (section 6.3) and have no command of
-their own. Skills have no command,
+**Deferred capabilities.** Skills are designed and not implemented. MCP
+servers bind through template tools (section 6.3); `plak mcp` sets them up and
+`/mcp` shows them read-only, with no editing in the TUI. Skills have no command,
 because a deferred capability that occupies a menu row is worse than an absent
 one; `/help` names them in prose.
 

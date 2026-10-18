@@ -8,6 +8,7 @@ use toml_edit::Value;
 
 use crate::home::paths::PlakPaths;
 
+pub(crate) mod mcp_edit;
 mod toml_file;
 mod tool_sections;
 

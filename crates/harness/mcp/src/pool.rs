@@ -238,6 +238,21 @@ impl McpLease {
         freeze_listing(&self.entry.spec, &connection.listing, selection)
     }
 
+    /// Returns the name of every tool the server lists, in listing order,
+    /// before the allowlist or any selection applies.
+    ///
+    /// # Errors
+    ///
+    /// Returns the entry's start error.
+    pub async fn listed_tool_names(&self) -> Result<Vec<String>, McpError> {
+        let connection = self.entry.connection().await?;
+        Ok(connection
+            .listing
+            .iter()
+            .map(|tool| tool.name.to_string())
+            .collect())
+    }
+
     /// Returns the entry's state and stderr tail.
     pub async fn status(&self) -> McpServerStatus {
         let state = self.entry.state.lock().await;

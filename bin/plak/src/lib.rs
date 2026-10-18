@@ -967,6 +967,7 @@ fn execute_command(
         }
         Command::SecretRm { name } => commands::secret::secret_rm(services.paths()?, &name, stdout),
         Command::SecretList => commands::secret::secret_list(services.paths()?, stdout),
+        Command::Mcp(command) => commands::mcp::run(services.paths()?, command, stdout),
         Command::StatusAll => {
             struct StatusRow {
                 ready: bool,

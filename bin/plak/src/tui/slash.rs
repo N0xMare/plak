@@ -11,6 +11,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("settings", "Go to interactive settings menu"),
     ("agents", "Choose an agent profile"),
     ("providers", "View connected providers"),
+    ("mcp", "View MCP servers and this session's MCP tools"),
     ("usage", "View usage data for connected providers"),
     ("context", "View context window data"),
     ("attach", "Reconnect the agent"),
@@ -190,6 +191,7 @@ const TAKES_NO_ARGUMENTS: &[&str] = &[
     "status",
     "settings",
     "providers",
+    "mcp",
     "usage",
     "context",
     "attach",
@@ -237,6 +239,7 @@ pub fn resolve(parsed: &ParsedSlash, _ctx: &SlashContext) -> SlashEffect {
         "fork-then-compact" => resolve_fork_then_compact(&parsed.args),
         "agents" => resolve_agents(&parsed.args),
         "providers" => SlashEffect::OpenProviders,
+        "mcp" => SlashEffect::Action(UserAction::Extension(SurfaceIntent::ShowMcp)),
         "usage" => SlashEffect::OpenUsage,
         "context" => SlashEffect::OpenContext,
         "attach" => SlashEffect::Action(UserAction::RetryAttach),
@@ -306,7 +309,7 @@ fn help_text() -> String {
     // Deferred capabilities are named in prose, never advertised as commands
     // that only print a placeholder (spec 02 §5.1).
     lines.push(String::new());
-    lines.push("not implemented: skills, MCP, and workflows have no command.".to_owned());
+    lines.push("not implemented: skills and workflows have no command.".to_owned());
     lines.push(String::new());
     lines.push("/providers is a read-only status view: per vertical it names the".to_owned());
     lines.push("account, the status, and the CLI command that connects it.".to_owned());
@@ -559,7 +562,6 @@ mod tests {
         // and API keys are CLI-only; the roster is config-only.
         for dead in [
             "skills",
-            "mcp",
             "sandbox",
             "workflows",
             "login",

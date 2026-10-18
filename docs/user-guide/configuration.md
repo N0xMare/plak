@@ -258,6 +258,19 @@ line. The model chooses the URL, so anything it has read can leave in a query
 string; leave `fetch_url` off templates that must not send workspace content
 out.
 
+`plak mcp` writes these tables and the template entries for you, keeping
+the rest of each file:
+
+```sh
+plak mcp add github --url https://api.githubcopilot.com/mcp/readonly --bearer-secret github
+plak mcp test github                       # starts it, lists the tools a session gets
+plak mcp enable github --template root-agent
+```
+
+`plak mcp list` shows every server, the templates that enable it and any
+secret it still needs; `/mcp` in the TUI shows the same plus what the current
+session bound. See the CLI reference for every option.
+
 Secrets are never written in `config.toml`. Store one under a name and refer
 to the name:
 

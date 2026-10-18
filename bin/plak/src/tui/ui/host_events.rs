@@ -648,6 +648,11 @@ impl App {
                 self.workspace_chrome = label;
                 self.mark_dirty();
             }
+            HostEvent::Extension(SurfaceObservation::McpOverview(body)) => {
+                self.info_overlay = Some(("mcp".to_owned(), body));
+                self.info_overlay_scroll = super::modal_chrome::ScrollState::default();
+                self.mark_dirty();
+            }
             HostEvent::Extension(SurfaceObservation::ProfileApplied { name, outcome }) => {
                 self.composer_chrome.refresh_pending = true;
                 self.apply_profile_applied(&name, outcome);

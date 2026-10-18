@@ -243,6 +243,8 @@ pub enum SurfaceIntent {
     ListProfiles,
     /// Re-read workspace branch and profile facts for composer chrome.
     RefreshComposerChrome,
+    /// Request the read-only MCP view ([`SurfaceObservation::McpOverview`]).
+    ShowMcp,
     /// Select a named agent profile (built-in or `~/.plak/profiles`).
     ///
     /// `fork_now` branches the attached session onto that profile (or binds
@@ -284,6 +286,7 @@ impl fmt::Debug for SurfaceIntent {
             Self::OpenUsage => "OpenUsage",
             Self::ListProfiles => "ListProfiles",
             Self::RefreshComposerChrome => "RefreshComposerChrome",
+            Self::ShowMcp => "ShowMcp",
             Self::ApplyProfile { .. } => "ApplyProfile{..}",
             Self::AcknowledgeAgent { .. } => "AcknowledgeAgent{..}",
             Self::ListAgentAcknowledgements { .. } => "ListAgentAcknowledgements{..}",
@@ -311,6 +314,8 @@ pub enum SurfaceObservation {
     SessionProfile(ProfileRow),
     /// Fresh product-owned workspace presentation, never session authority.
     WorkspaceChrome(String),
+    /// The read-only MCP view: configured servers and this session's tools.
+    McpOverview(String),
     /// A profile was applied.
     ProfileApplied {
         /// Profile id.
@@ -363,6 +368,7 @@ impl ObservationExtension for SurfaceObservation {
             Self::Profiles(_) => "profiles",
             Self::SessionProfile(_) => "session_profile",
             Self::WorkspaceChrome(_) => "workspace_chrome",
+            Self::McpOverview(_) => "mcp_overview",
             Self::ProfileApplied { .. } => "profile_applied",
             Self::ProfileRefused { .. } => "profile_refused",
             Self::AgentAcknowledgements { .. } => "agent_acknowledgements",

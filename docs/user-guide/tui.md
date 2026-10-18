@@ -219,7 +219,7 @@ commands that act for good, `/clear`, `/compact`, `/fork-then-compact`,
 `/fork`, `/drop` and `/recover`, run from `Enter` only when you typed the
 full name: `Enter` on a shorter word (`/co`) completes it, as `Tab` does, and
 runs nothing, and an `Enter` within about 600 ms of that completion runs
-nothing either; look, then press `Enter` again. There are 23 commands:
+nothing either; look, then press `Enter` again. There are 24 commands:
 
 | Command | Effect |
 | --- | --- |
@@ -229,6 +229,7 @@ nothing either; look, then press `Enter` again. There are 23 commands:
 | `/settings` | Go to interactive settings menu |
 | `/agents` | Choose an agent profile |
 | `/providers` | View connected providers |
+| `/mcp` | View MCP servers and this session's MCP tools |
 | `/usage` | View usage data for connected providers |
 | `/context` | View context window data |
 | `/attach` | Reconnect the agent |
@@ -263,9 +264,13 @@ Notes worth knowing:
   `plak login`, `plak logout`, `plak key set|clear`.
 - Templates, the roster and orchestration are config-only. `/config` opens
   `config.toml`; there is no roster editor.
-- Skills and workflows are not implemented. MCP servers are configured in
-  `config.toml` and enabled per template (see configuration.md); the TUI has
-  no MCP command.
+- `/mcp` is read-only. It lists every configured MCP server with its
+  transport, scope, the templates that enable it and any secret it names that
+  is not stored; whether this session bound it and with how many tools; the
+  tools this session's bind left out and why; and the `plak mcp` commands that
+  add, test and enable a server. Setup is CLI-only (`plak mcp`, see the CLI
+  reference); a session keeps the tools it started with.
+- Skills and workflows are not implemented.
 - There is no `/model`, `/account` or `/effort`. The session's account, model,
   effort, Fast mode, composition and protocol change only through profiles:
   the Agents tab's **Fork now**, **Use now** on a fresh session with no

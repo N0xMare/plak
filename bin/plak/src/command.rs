@@ -77,6 +77,7 @@ pub(crate) enum Command {
         name: String,
     },
     SecretList,
+    Mcp(crate::commands::mcp::McpCommand),
     Usage {
         account: Option<String>,
         session_id: Option<String>,
@@ -284,6 +285,7 @@ impl Command {
             | Self::ConfigUntrust => "config",
             Self::KeySet { .. } | Self::KeyClear { .. } | Self::KeyStatus { .. } => "key",
             Self::SecretSet { .. } | Self::SecretRm { .. } | Self::SecretList => "secret",
+            Self::Mcp(_) => "mcp",
             Self::Usage { .. } => "usage",
             Self::SessionList
             | Self::SessionShow { .. }
@@ -357,6 +359,10 @@ pub(crate) fn command_is_read_only(command: &Command) -> bool {
             | Command::Doctor
             | Command::KeyStatus { .. }
             | Command::SecretList
+            | Command::Mcp(
+                crate::commands::mcp::McpCommand::List
+                    | crate::commands::mcp::McpCommand::Show { .. }
+            )
             | Command::ConfigShow
             | Command::SessionShow { .. }
             | Command::SessionLog { .. }

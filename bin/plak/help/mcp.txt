@@ -1,0 +1,37 @@
+plak mcp — MCP servers a template can list as mcp:<id>
+
+USAGE:
+  plak mcp add <id> [options] -- <command> [args...]        (stdio)
+  plak mcp add <id> --url <url> [options]                   (http)
+  plak mcp list
+  plak mcp show <id>
+  plak mcp test <id>
+  plak mcp remove <id> [--scope user|project] [--force]
+  plak mcp enable <id> --template <name> [--tool <tool>]...
+  plak mcp disable <id> --template <name>
+
+ADD OPTIONS:
+  --scope user|project      Which config.toml gets the table (default user)
+  --env KEY=VALUE           Literal environment (stdio; repeatable)
+  --secret-env KEY=SECRET   Environment from a named secret (stdio; repeatable)
+  --bearer-secret SECRET    Authorization: Bearer from a named secret (http)
+  --header NAME=VALUE       Literal header (http; repeatable)
+  --header-secret NAME=SECRET  Header from a named secret (http; repeatable)
+  --tools a,b               Server allowlist; mcp:<id> means exactly these
+  --startup-seconds N       Start and list budget (1..=120, default 20)
+  --call-seconds N          Per-call ceiling (1..=3600, default 120)
+  --replace                 Overwrite an existing [mcp_servers.<id>]
+
+  add writes [mcp_servers.<id>] into config.toml, keeping the rest of the
+  file, and refuses anything a config load would refuse. Secrets are named,
+  never given: store each with `plak secret set <name>`.
+  list and show print transport, scope, the templates that enable a server
+  and any secret it names that is not stored.
+  test starts or connects to the server the way a session does, lists the
+  tools a template would bind and the ones left out with the reason, and
+  exits non-zero with the cause when the server fails. It calls no model.
+  enable and disable edit only that template file's tools array (mcp:<id>,
+  or mcp:<id>/<tool> per --tool). New sessions pick the change up; existing
+  sessions keep the tools they froze.
+  remove refuses while a template still lists the server; --force also
+  removes those template entries.
