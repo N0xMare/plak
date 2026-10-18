@@ -125,7 +125,7 @@ fn settle_tui_round(
 
 /// Pair the host worker's verdict with terminal restoration: either one
 /// failing fails the round, and both failures keep both reasons.
-pub(crate) fn combine_cleanup(primary: CliResult<()>, cleanup: CliResult<()>) -> CliResult<()> {
+fn combine_cleanup(primary: CliResult<()>, cleanup: CliResult<()>) -> CliResult<()> {
     match (primary, cleanup) {
         (Ok(()), result) | (result, Ok(())) => result,
         (Err(primary), Err(cleanup)) => Err(CliFailure::new(format!(
@@ -138,7 +138,7 @@ pub(crate) fn combine_cleanup(primary: CliResult<()>, cleanup: CliResult<()>) ->
 
 /// The cooked-terminal line printed after a quit. The short id is the resume
 /// picker's prefix, which `plak resume` resolves within the workspace.
-pub(crate) fn resume_exit_line(session_id: &str, workspace: &Path) -> String {
+fn resume_exit_line(session_id: &str, workspace: &Path) -> String {
     let short: String = session_id.chars().take(tui::SHORT_ID_CHARS).collect();
     format!(
         "Resume this session with: plak resume {short}  (workspace {})",
@@ -247,7 +247,7 @@ pub(crate) fn restore_former_attachment(
 /// A pending resume is settled by the adoption: the host published a different
 /// attachment than the one the resume selected, so its rollback source is no
 /// longer the truth about what is attached.
-pub(crate) fn adopt_attached_session(
+fn adopt_attached_session(
     store: &dyn store::session_records::SessionRecordStore,
     record: &mut product_sessions::SessionRecord,
     resume: &mut bool,
@@ -336,7 +336,7 @@ pub(crate) fn launch_tui(
     )
 }
 
-pub(crate) fn begin_tui_session_launch(
+fn begin_tui_session_launch(
     _paths: &product_paths::PlakPaths,
     _record: &mut product_sessions::SessionRecord,
     resume: bool,
@@ -397,7 +397,7 @@ fn headless_run_command(services: &Services) -> &'static str {
 }
 
 /// The command text alone, so a test can pin both forms without a product home.
-pub(crate) const fn headless_run_command_for(bound: bool) -> &'static str {
+const fn headless_run_command_for(bound: bool) -> &'static str {
     if bound {
         "plak run -- \"<prompt>\""
     } else {
@@ -1360,7 +1360,7 @@ pub(crate) fn handle_tui_handoff(
 /// (`--import-resume`). When the export is refused nothing is exec'd: the
 /// returned note says why and the session stays open in this process. Exec
 /// failure is the error.
-pub(crate) fn reload_installed_plak(
+fn reload_installed_plak(
     paths: &product_paths::PlakPaths,
     store: &dyn store::session_records::SessionRecordStore,
     record: &mut product_sessions::SessionRecord,
@@ -1439,3 +1439,6 @@ pub(crate) fn reload_installed_plak(
         unverified.unwrap_or_default()
     )))
 }
+
+#[cfg(test)]
+mod tests;
