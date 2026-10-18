@@ -1,12 +1,12 @@
 # Scenario: tree-mixed-oauth.
 # Three OAuth subscriptions in one tree — Codex lead and implementer,
-# Claude reviewer at execute, Grok scout at read_only.
+# Claude reviewer at execute, Grok researcher with web and X search.
 
 [root]
 agent = "lead"
 
 [roster]
-working_set = ["implementer", "reviewer", "scout"]
+working_set = ["implementer", "reviewer", "researcher"]
 
 [orchestration]
 subagents = true

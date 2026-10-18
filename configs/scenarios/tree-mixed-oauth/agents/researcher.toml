@@ -1,0 +1,8 @@
+# Template researcher for the tree-mixed-oauth scenario.
+account = "grok"
+model = "grok-4.7-build-fast"
+effort = "medium"
+composition = "direct"
+description = "Grok researcher; searches the web and X and writes its report under research/<topic>/."
+access = "full"
+tools = ["web_search", "x_search", "fetch_url"]

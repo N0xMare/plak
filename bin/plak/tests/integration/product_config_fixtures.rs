@@ -210,12 +210,23 @@ fn tree_mixed_oauth_spans_three_subscriptions_with_tier_ceilings() {
         ProductCompositionSelection::Direct
     );
 
-    let scout = cfg.working_set_template("scout").expect("scout template");
-    assert_eq!(scout.account, "grok");
-    assert_eq!(scout.model, "grok-4.6");
-    assert_eq!(scout.max_tier, Tier::Execute);
+    let research = cfg
+        .working_set_template("researcher")
+        .expect("researcher template");
+    assert_eq!(research.account, "grok");
+    assert_eq!(research.model, "grok-4.7-build-fast");
+    assert_eq!(research.max_tier, Tier::Mutate);
     assert_eq!(
-        scout.composition_or_default(),
+        research
+            .tools
+            .entries()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+        ["web_search", "x_search", "fetch_url"]
+    );
+    assert_eq!(
+        research.composition_or_default(),
         ProductCompositionSelection::Direct
     );
 }
