@@ -217,7 +217,7 @@ You can then start the TUI with `plak`. To configure multiple agents, use the [o
 - **[Example configurations](configs/):** annotated reference settings and complete scenario homes.
 - **[Changelog](CHANGELOG.md)**, **[contributing](CONTRIBUTING.md)** and **[security policy](SECURITY.md)**.
 
-For local development, `just fast` lints and tests the packages you touched and their dependents, `just check` runs formatting, linting, structure checks, feature builds, the parallel and serial offline Rust test lanes, public compile contracts and Python tooling tests before each commit. `just full` adds the durability lane and rustdoc. Live tests are explicit opt-in and may incur provider usage. See [testing and evidence](docs/spec/05-testing-and-evidence.md).
+For local development, `just fast` lints and tests the packages you touched and their dependents, `just check` runs formatting, linting, structure checks, feature builds, the parallel and serial offline Rust test lanes, public compile contracts and Python tooling tests before each commit. `just full` adds the durability lane, rustdoc and the offline publish dry run. Live tests are explicit opt-in and may incur provider usage. See [testing and evidence](docs/spec/05-testing-and-evidence.md).
 
 ## Repository layout
 
