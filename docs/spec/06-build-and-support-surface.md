@@ -26,8 +26,10 @@ source checkout remains a complete build. The `0.0.x` cohort carries no API,
 wire, or persisted-format compatibility obligation across versions beyond the
 export-document rule of chapter 02 §2.5.1.
 
-There is no `plak update` verb and no self-update path. Updating means pulling
-the source and rebuilding (§6.3).
+Each `v<version>` tag also has a GitHub Release carrying one tarball per
+supported target and `SHA256SUMS`, installed by the repository's `install.sh`
+(§6.6). There is no `plak update` verb and no self-update path. Updating means
+rerunning the installer or pulling the source and rebuilding (§6.3).
 
 Support classes describe which surfaces a consumer is entitled to rely on, and
 which inventories are pinned so that entitlement is checkable (§3).
@@ -530,7 +532,8 @@ just musl-native          # defaults to --platform
 just musl-native --fast plak  # optional targeted iteration
 ```
 
-`scripts/musl-native.sh` requires the installed rustup musl target and an
+`scripts/musl-native.sh`, through `scripts/musl-toolchain.sh` (shared with
+release packaging, §6.6), requires the installed rustup musl target and an
 executable musl C compiler/linker. It takes the compiler from
 `CC_x86_64_unknown_linux_musl` (default `musl-gcc` on `PATH`) and the linker from
 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER` (default `rust-lld`). Rustc adds
@@ -912,7 +915,7 @@ privacy and coverage limits.
 
 ### 6.3 Updating
 
-Pull the source and rebuild:
+Rerun the release installer (§6.6), or pull the source and rebuild:
 
 ```sh
 git pull && just install
@@ -920,10 +923,9 @@ git pull && just install
 
 (Maintainers use `just build-release` or `just build-maintainer`.)
 
-The build installs a new snapshot and moves the symlinks from §6.1 to it, so
-new launches use the new binary once the build succeeds; a running TUI shows
-`new build installed · /reload`. There is no package manager path, no downloadable
-artifact, and no in-product updater.
+Either installs a new snapshot and moves the symlinks from §6.1 to it, so
+new launches use the new binary once the install succeeds; a running TUI shows
+`new build installed · /reload`. There is no in-product updater.
 
 ### 6.4 Linkers
 
@@ -965,7 +967,73 @@ selection and is roughly 20 GB.
 The evidence file is written only by a passing `just full` that began and
 ended on the same clean tree (chapter 05 §1), so an upload always follows a
 full gate on exactly the bytes it packages. Publishing is a maintainer act;
-no gate uploads.
+no gate or workflow uploads. The maintainer runs `just full` and then
+`just publish --execute` on a gated host, from the tagged tree whose release
+tarballs §6.6 builds.
+
+### 6.6 Release artifacts and the installer
+
+`tools/release/package-release.sh [--untagged] [--out DIR]` builds a release
+on the host's supported target: `x86_64-unknown-linux-musl` on Linux x86_64,
+with the compiler, linker and prerequisite checks of `just musl-native`
+(`scripts/musl-toolchain.sh`), and `aarch64-apple-darwin` on Apple Silicon. It
+refuses a dirty tree and, unless `--untagged` (a rehearsal), a `HEAD` without
+the tag `v<version>` of the workspace version. The build is
+`tools/build/build-plak.sh --artifacts`: the `just install` Cargo invocations
+and artifact linkage check, without installing. It adds
+`--remap-path-prefix` for the Cargo home and the checkout through
+`CARGO_ENCODED_RUSTFLAGS`, so the binaries carry no build-host paths; caller
+rustc flags go in that variable too, and `RUSTFLAGS` is refused because Cargo
+would ignore it. `tools/release/release_tarball.py` then writes
+`plak-<version>-<triple>.tar.gz` and rewrites `SHA256SUMS` over every release
+tarball in the output directory (default `<target dir>/release-dist`). The
+tarball holds one directory `plak-<version>-<triple>/` with `plak`,
+`plakous-js-host`, `monty`, the repository `LICENSE`, `THIRD-PARTY` (each
+package outside this repository, vendored ones included, that the three
+executables reach through normal dependency edges for the target, with its
+`cargo metadata` license and repository) and `licenses/<name>-<version>/`
+holding the license, copying and NOTICE files those packages ship. Entries are
+sorted, owned by 0:0 and stamped with the release commit's time, so the archive
+bytes depend only on the packed files. The Linux executables must be
+static: an ELF program interpreter fails packaging.
+
+`.github/workflows/release.yml` is the repository's only workflow. A pushed
+`v*` tag runs `package-release.sh` on a GitHub macOS arm64 runner and an
+Ubuntu x86_64 runner with `musl-tools`, attests each tarball with
+`actions/attest-build-provenance`, and creates the GitHub Release with both
+tarballs and their combined `SHA256SUMS`. It never publishes crates: a runner
+has no full-gate evidence for the tree (§6.5). Every action is pinned to a full
+commit SHA.
+
+`install.sh` at the repository root is a POSIX `sh` installer that never
+needs elevated privileges:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/N0xMare/plak/main/install.sh | sh
+PLAK_VERSION=0.0.1 sh install.sh   # a specific release instead of the latest
+```
+
+It supports exactly `aarch64-apple-darwin` (including an x86_64 shell under
+Rosetta) and `x86_64-unknown-linux-musl`; any other host is refused with a
+pointer to the source build. It resolves the latest release from the
+`releases/latest` redirect, downloads the tarball and `SHA256SUMS` over HTTPS
+only, and refuses a missing entry or checksum mismatch before writing
+anything under `~/.local`. When `gh` is installed and signed in it also runs
+`gh attestation verify --repo N0xMare/plak` and refuses on failure;
+otherwise it reports that only the checksum was verified
+(`PLAK_SKIP_ATTESTATION=1` skips the step). `PLAK_RELEASE_BASE` replaces
+`https://github.com/N0xMare/plak` for mirrors and tests and lifts the HTTPS-only
+restriction. The install is exactly the §6.1 layout: the snapshot
+`~/.local/lib/plak/release/<id>/` with the same `<id>`, its `state-key` and
+`export-version` manifests, the shared mode-0555 workers under
+`~/.local/lib/plak/sidecars/`, the same ownership and writability refusals for
+installation directories and their physical ancestors, and `~/.local/bin`
+links that replace only links already pointing into the maintainer, release
+or sidecar roots. A release install and a `just install` of the same bytes
+therefore share one snapshot, and `plak doctor`, carry discovery and `/reload`
+behave identically. `~/.cargo/bin` is not touched; the installer notes a `plak`
+earlier on `PATH`. Downloads use `curl`, which sets no quarantine attribute on
+macOS.
 
 ## 7. Dependency and supply-chain policy
 
@@ -1141,9 +1209,10 @@ the external `monty-pool` / `monty-proto` / `monty-types` / `monty-alloc` at
 
 Some controls cannot live in the worktree. Authorized signed commits go directly
 to `main`, and local verification is the authoritative gate. **The repository
-uses local gates and has no CI**: hosted GitHub Actions are absent, so a
-contributor runs `just check` before each commit on their own machine, and
-`just full` runs at batch and publication boundaries.
+uses local gates and has no CI except the release workflow** (§6.6), which
+builds and publishes a pushed tag and checks nothing else. A contributor runs
+`just check` before each commit on their own machine, and `just full` runs at
+batch and publication boundaries.
 
 This does not weaken release requirements, nor claim that an unprotected branch
 is suitable for public collaboration. The desired remote settings are:

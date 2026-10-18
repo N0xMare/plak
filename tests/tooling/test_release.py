@@ -432,5 +432,24 @@ esac""")
         self.assertEqual(len(sums), 2)
 
 
+class ReleaseWorkflowTests(unittest.TestCase):
+    def test_the_only_workflow_runs_on_v_tags_with_pinned_actions_and_never_publishes_crates(self) -> None:
+        import re
+        workflows = ROOT / ".github/workflows"
+        self.assertEqual(sorted(path.name for path in workflows.iterdir()), ["release.yml"])
+        text = (workflows / "release.yml").read_text()
+        trigger = text.split("\non:\n", 1)[1].split("\n\n", 1)[0]
+        self.assertEqual([line for line in trigger.splitlines() if not line.startswith("    ")],
+                         ["  push:"])
+        self.assertIn('    tags: ["v*"]', trigger)
+        uses = re.findall(r"uses: (\S+)", text)
+        self.assertTrue(uses)
+        for action in uses:
+            self.assertRegex(action, r"^actions/[a-z-]+@[0-9a-f]{40}$")
+        self.assertIn("tools/release/package-release.sh", text)
+        for publish in ("publish.sh", "cargo publish", "CARGO_REGISTRY_TOKEN", "workflow_dispatch"):
+            self.assertNotIn(publish, text)
+
+
 if __name__ == "__main__":
     unittest.main()

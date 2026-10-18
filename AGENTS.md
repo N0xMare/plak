@@ -91,7 +91,9 @@ load breaks process deadlines, and under `/private/tmp` on macOS, outside
 `HOME`; `PLAK_TEST_TMPDIR` overrides) and `PLAK_HOME=$TMPDIR/plak-isolated-home`
 (mode 0700) for nextest, so a test that forgets a product home cannot create the
 operator's `~/.plak`. Set both yourself if you run `cargo nextest` by hand:
-`TMPDIR="$(bash scripts/test-tmpdir.sh)"`. There is no CI.
+`TMPDIR="$(bash scripts/test-tmpdir.sh)"`. There is no CI: the only workflow,
+`.github/workflows/release.yml`, builds, attests and releases a pushed `v*` tag
+(`tools/release/package-release.sh`, `install.sh`; spec 06 §6.6).
 
 Transport faults for smoke and soak runs: a `test-hooks` build of `plak` reads
 `PLAK_TEST_FAULTS`, e.g.

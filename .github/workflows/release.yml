@@ -1,0 +1,70 @@
+# The repository's only workflow. A pushed v* tag builds the two release
+# tarballs, attests them and creates the GitHub Release. Nothing else runs
+# here: the gates are local, and publishing the crate cohort is a maintainer
+# act (docs/spec/06-build-and-support-surface.md).
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            triple: x86_64-unknown-linux-musl
+          - os: macos-15
+            triple: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: |
+          rustup toolchain install
+          rustup target add ${{ matrix.triple }}
+      - name: musl C compiler
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Package
+        run: tools/release/package-release.sh --out dist
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/plak-*.tar.gz
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ matrix.triple }}
+          path: dist/plak-*.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd dist
+          sha256sum plak-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+          gh release create "$TAG" plak-*.tar.gz SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --title "$TAG" --verify-tag
+
