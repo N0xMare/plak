@@ -83,7 +83,7 @@ Never edit a rendered artifact — `just prompts` overwrites it from Rust.
 | Pi base (OpenRouter Direct) | `crates/harness/prompts/src/bases/pi.rs` |
 | JS/Python PTC harness | `crates/harness/prompts/src/ptc.rs` |
 | Workspace / `You are {model}` / VCS / working agreements | `crates/harness/prompts/src/identity.rs` |
-| Spawn, mail, wait, submit, merge, discard | `crates/orchestration/recursive-subagents/src/tree/text/mod.rs`, with the argument descriptions in `crates/orchestration/recursive-subagents/src/tools.rs` |
+| Spawn, mail, wait, submit, merge, discard | `crates/orchestration/recursive-subagents/src/tree/text/mod.rs`, with the argument descriptions in `crates/orchestration/recursive-subagents/src/tools/registrations.rs` |
 | Child Start / reminder / force | `crates/harness/prompts/src/child.rs` |
 | Coding tool descriptions | each pack's `crates/harness/tool-{files,search,process,plan}/src/text.rs` and `crates/harness/compose/src/text.rs`; Claude Bash in `crates/harness/tool-process/src/lib.rs`; pi `read`/`edit`/`write` in `crates/harness/tool-files/src/lib.rs` and pi `bash`/`wait`/`stop` in `crates/harness/tool-process/src/text.rs` (schemas in `pi.rs`) |
 
