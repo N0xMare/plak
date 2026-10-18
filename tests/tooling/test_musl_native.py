@@ -17,9 +17,8 @@ class MuslNativeTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         (self.root / 'scripts').mkdir()
-        script = ROOT / 'scripts/musl-native.sh'
-        if script.exists():
-            shutil.copyfile(script, self.root / 'scripts/musl-native.sh')
+        for name in ('musl-native.sh', 'musl-toolchain.sh'):
+            shutil.copyfile(ROOT / 'scripts' / name, self.root / 'scripts' / name)
         (self.root / 'scripts/dev-check.sh').write_text('''#!/bin/bash
 python3 - "$@" <<'PY'
 import json, os, sys

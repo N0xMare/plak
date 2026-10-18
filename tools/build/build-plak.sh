@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Native Linux/macOS build and install of plak and its rquickjs and pinned
 # upstream Monty sidecars. --install is the plain (non-maintainer) release
-# build; the other modes are maintainer builds.
+# build; the other modes are maintainer builds. --artifacts is the --install
+# build and linkage check without installing; it prints the output directory.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -9,16 +10,19 @@ cd "$repo_root"
 profile=debug
 snapshot_flavor=maintainer
 plak_features=(--features plak/maintainer)
+artifacts_only=
 case "${1:-}" in
   --release) profile=release; shift ;;
   --maintainer) profile=maintainer; shift ;;
   --install) profile=release; snapshot_flavor=release; plak_features=(); shift ;;
+  --artifacts) profile=release; plak_features=(); artifacts_only=1; shift ;;
 esac
 if [[ $# -ne 0 ]]; then
-  echo "usage: $0 [--release|--maintainer|--install]" >&2
+  echo "usage: $0 [--release|--maintainer|--install|--artifacts]" >&2
   exit 2
 fi
 
+if [[ -z "$artifacts_only" ]]; then
 # BEGIN LINKED WORKTREE GUARD
 # This command also updates the installed symlinks. A build from a
 # linked worktree must never silently repoint those daily-use commands away from
@@ -30,6 +34,7 @@ if [[ "$git_dir" != "$git_common_dir" ]]; then
   exit 2
 fi
 # END LINKED WORKTREE GUARD
+fi
 
 profile_flag=()
 if [[ "$profile" != debug ]]; then
@@ -60,6 +65,10 @@ fi
 
 # Inspect raw symbols on both ELF and Mach-O; require worker positive controls.
 python3 tools/build/check-artifact-linkage.py "$output_dir"
+if [[ -n "$artifacts_only" ]]; then
+  printf '%s\n' "$output_dir"
+  exit 0
+fi
 
 if [[ "$profile" == debug ]]; then
   echo "build-plak: debug binary (slow TUI cold start); daily PATH CLI is just build-release" >&2
@@ -126,7 +135,8 @@ ensure_install_directory() {
   fi
   physical="$(cd "$directory" && pwd -P)" || return 1
   while [[ "$physical" != / ]]; do
-    facts="$(stat -f '%u %Lp' "$physical" 2>/dev/null)" || facts="$(stat -c '%u %a' "$physical")"
+    # BSD %Lp omits the sticky bit that %Mp carries.
+    facts="$(stat -f '%u %Mp%Lp' "$physical" 2>/dev/null)" || facts="$(stat -c '%u %a' "$physical")"
     owner="${facts%% *}"
     mode="${facts##* }"
     # Root-owned sticky temporary roots are trusted system anchors, not
