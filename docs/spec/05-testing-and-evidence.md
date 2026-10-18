@@ -2562,16 +2562,11 @@ exact model, effort, protocol and composition. The composition for this bar
 is `plakous-default`; the report names it as `composition_requested` and names
 `composition_bound`, every composition the run's `plak agent` hellos reported,
 because a pack may bind the request to its own composition (Codex binds
-`plakous-default` as `native-ptc`). It names every scenario in the cell. On the
-`codex` row (`gpt-6-luna` at low) `child_compaction` is a recorded model
-limitation, not a harness pass: told an exact read count, the child still stops
-paging long before its trigger and says so, while the same scenario on
-`codex-sol` commits the child compaction. That cell's `model` outcome does not
-block the bar; any other outcome of it does. A dirty tree, a
-digest that changes mid-run, or any other tuple is diagnostic only. The
-headless soak's intentional rebuild to a byte-distinct `plak` is part of that
-scenario: both digests are recorded, and any other digest change is not a
-qualification.
+`plakous-default` as `native-ptc`). It names every scenario in the cell. A
+dirty tree, a digest that changes mid-run, or any other tuple is diagnostic
+only. The headless soak's intentional rebuild to a byte-distinct `plak` is part
+of that scenario: both digests are recorded, and any other digest change is not
+a qualification.
 
 Route names are the keys of `ROUTES` in `tests/live/live.py`. Account, model,
 effort and protocol are that route's fields. Routes with `planned` false stay

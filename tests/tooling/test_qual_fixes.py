@@ -394,13 +394,12 @@ class QualificationFixTests(unittest.TestCase):
         for pack in ("codex", "claude", "grok"):
             self.assertNotIn("Do not print", long_session.plant_prompt(pack))
             self.assertNotIn("token", long_session.plant_prompt(pack))
-        prompt = long_session.child_prompt(40, "codex", 5)
+        prompt = long_session.child_prompt("codex", 5)
         child = json.loads(prompt.split("Give the child exactly this prompt: ", 1)[1]
                            .split("\nWait for the child", 1)[0])
         self.assertIn(plant.split(" Reply with exactly:", 1)[0], child)
-        self.assertIn("at most 5 lines", child)
-        self.assertIn("one exec per slice", child)
-        self.assertIn("40 lines", child)
+        self.assertIn("python3 page.py k 1", child)
+        self.assertIn("notify(a.output)", child)
         self.assertIn("recalled.txt", child)
         self.assertTrue(child.endswith("Reply with exactly: done"))
         self.assertEqual(child.count("Reply with exactly:"), 1)
@@ -408,7 +407,7 @@ class QualificationFixTests(unittest.TestCase):
     def test_child_reply_directive_follows_all_plant_paging_and_recall_steps(self):
         for pack in ("codex", "claude", "grok", "pi"):
             with self.subTest(pack=pack):
-                prompt = long_session.child_prompt(40, pack, 5)
+                prompt = long_session.child_prompt(pack, 5)
                 child = json.loads(prompt.split("Give the child exactly this prompt: ", 1)[1]
                                    .split("\nWait for the child", 1)[0])
                 self.assertNotIn("Reply with exactly: ok", child)

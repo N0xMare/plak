@@ -82,6 +82,19 @@ _DIGITS_PER_GROUP = 5
 # xAI's usage-guideline check refused that follow-up before generation.
 FACT_FILE = "codeword.txt"
 FACT_FILES = (FACT_FILE, "acknowledged.txt")
+# A child told an exact read count of a plain file stopped well short of its
+# trigger. Its pages carry check words it writes here, one file per page.
+CHILD_PAGE_DIR = "pages"
+# A Codex child read 3 to 9 of the 30 KB exec results its trigger needed and
+# then stopped, so a Codex child page is two halves read in one exec, one
+# through `notify` and one through `text`. One `exec_command` result stops at
+# 40,000 bytes (10,000 tokens at bytes/4); two halves stay under the 87,040
+# byte round cap of a 272k window. Base64 is denser than the digit lines:
+# gpt-6-luna counted 20,042 tokens for 29,380 bytes of it, against 14,721 for
+# digits.
+CODEX_CHILD_HALF_LINES = 26
+CODEX_BASE64_BYTES_PER_TOKEN = 1.47
+CHILD_PAGER = "page.py"
 # `session log <root>.cN --json` pages newest-first. The compaction segment
 # sits at position zero, so the tail has to cover the whole child history.
 CHILD_HISTORY_TAIL = 65_536
@@ -103,7 +116,8 @@ def catalog_window(model: str) -> int | None:
     """Catalog context window for a route model, when this driver knows it.
 
     Spec 01 §6.7 and the user guide: `grok-4.7` is 256k, `grok-4.6` is 500k,
-    Claude is 1M, OpenAI and Codex rows are 272k. DeepSeek reports 1M, but
+    Claude is 1M, OpenAI and Codex rows are 272k except `gpt-6.1-sol`, whose
+    Codex catalog row reports `context_length=500000`. DeepSeek reports 1M, but
     Plak's OpenRouter custom route projects at most 65,536 input tokens
     (`OPENROUTER_CUSTOM_MAX_PROJECTED_INPUT`), which is the window that
     compacts. Other OpenRouter models are not in that list.
@@ -111,6 +125,8 @@ def catalog_window(model: str) -> int | None:
     if model == "grok-4.7":
         return 256_000
     if model == "grok-4.6":
+        return 500_000
+    if model == "gpt-6.1-sol":
         return 500_000
     if model.startswith("deepseek/"):
         return OPENROUTER_CUSTOM_INPUT
@@ -183,9 +199,96 @@ def write_bulk(path: Path, pages: int, pack: str = "grok", random_bytes=os.urand
     total = per_page * pages
     with path.open("w") as handle:
         for _ in range(total):
-            handle.write((digit_line(random_bytes) if pack in ("claude", "codex")
-                          else base64_line(random_bytes)) + "\n")
+            handle.write(bulk_line(pack, random_bytes) + "\n")
     return total
+
+
+def bulk_line(pack: str, random_bytes=os.urandom) -> str:
+    return digit_line(random_bytes) if pack in ("claude", "codex") else base64_line(random_bytes)
+
+
+def new_check_word(random_bytes=os.urandom) -> str:
+    return f"check-{random_bytes(3).hex()}"
+
+
+def child_page_lines(pack: str, call_lines: int) -> int:
+    """Bulk lines on one child page, after its header line."""
+    return 2 * CODEX_CHILD_HALF_LINES if pack == "codex" else call_lines
+
+
+def child_page_bytes_per_token(pack: str) -> float:
+    return CODEX_BASE64_BYTES_PER_TOKEN if pack == "codex" else bulk_bytes_per_token(pack)
+
+
+def child_pages(window: int | None, pack: str, call_lines: int,
+                model: str | None = None) -> int:
+    """Child pages whose text passes the compaction trigger, plus margin.
+
+    The margin is `GROWTH_EXTRA_READS` sequential reads, at least one page.
+    """
+    window = window or OPENROUTER_CUSTOM_INPUT
+    page_lines = child_page_lines(pack, call_lines)
+    per_page = int(page_lines * LINE_BYTES / child_page_bytes_per_token(pack))
+    extra = max(1, GROWTH_EXTRA_READS * call_lines // page_lines)
+    return -(-compaction_trigger(window, model) // per_page) + extra
+
+
+def page_header(index: int, count: int, word: str, size: int, pack: str = "grok") -> str:
+    """A page's first line. Only the last page says it is last; the count is not stated."""
+    if index == count:
+        after = "This is the last page."
+    elif pack == "codex":
+        after = f"The next page is page {index + 1}."
+    else:
+        after = f"The next page starts at line {1 + index * size}."
+    return f"Page {index}. Check word: {word}. {after}"
+
+
+def write_child_pages(path: Path, pages: int, call_lines: int, pack: str = "grok",
+                      random_bytes=os.urandom) -> list[str]:
+    """Write `pages` child pages: one header line, then `child_page_lines` bulk lines.
+
+    Returns each page's check word, in page order. The header is the only
+    place a page's word appears, so `pages/<k>.txt` shows the child saw page k.
+    A Codex child told the page count bailed after 3 of 37 pages, reporting
+    the paging as incomplete: the count times the page size is past its
+    window, and only compaction makes it fit. The header names the next page
+    instead, and the last page alone says it is last. A Codex child reads
+    through `page.py` beside `bulk.txt`.
+    """
+    page_lines = child_page_lines(pack, call_lines)
+    size = page_lines + 1
+    words = []
+    with path.open("w") as handle:
+        for index in range(1, pages + 1):
+            word = new_check_word(random_bytes)
+            words.append(word)
+            handle.write(page_header(index, pages, word, size, pack) + "\n")
+            for _ in range(page_lines):
+                line = base64_line(random_bytes) if pack == "codex" else bulk_line(pack, random_bytes)
+                handle.write(line + "\n")
+    if pack == "codex":
+        (path.parent / CHILD_PAGER).write_text(codex_pager(path.name))
+    return words
+
+
+def codex_pager(bulk: str) -> str:
+    """`python3 page.py K H` prints half H (1 or 2) of page K; half 1 holds the header."""
+    half = CODEX_CHILD_HALF_LINES
+    return (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "page, half = int(sys.argv[1]), int(sys.argv[2])\n"
+        f"lines = Path({bulk!r}).read_text().splitlines(keepends=True)\n"
+        f"start = (page - 1) * {2 * half + 1} + (0 if half == 1 else {half + 1})\n"
+        f"sys.stdout.write(''.join(lines[start:start + ({half + 1} if half == 1 else {half})]))\n"
+    )
+
+
+def pages_written(repo: Path, words: list[str]) -> int:
+    """Pages whose `pages/<k>.txt` holds that page's check word."""
+    return sum(text_equals(repo / CHILD_PAGE_DIR / f"{index}.txt", word)
+               for index, word in enumerate(words, 1))
 
 
 def base64_line(random_bytes=os.urandom) -> str:
@@ -299,6 +402,10 @@ RECALL_STEP = (
     "write the code word from the earlier turn into recalled.txt, exactly and alone, "
     f"from memory: do not open {FACT_FILE} or acknowledged.txt again."
 )
+CHILD_RECALL_STEP = (
+    "write the code word you copied into acknowledged.txt into recalled.txt, exactly and "
+    f"alone, from memory: do not open {FACT_FILE} or acknowledged.txt again."
+)
 
 
 def follow_prompt() -> str:
@@ -397,8 +504,7 @@ def growth_reads(window: int | None, pack: str, call_lines: int, line_count: int
                  model: str | None = None) -> int:
     """Sequential reads whose text passes the compaction trigger, plus margin.
 
-    A child told to page to eof stopped after 11 of the ~50 calls Codex needs,
-    so the child prompt names this count. Bounded by the file.
+    Bounded by the file.
     """
     window = window or OPENROUTER_CUSTOM_INPUT
     per_read = call_lines * LINE_BYTES / bulk_bytes_per_token(pack)
@@ -406,12 +512,45 @@ def growth_reads(window: int | None, pack: str, call_lines: int, line_count: int
     return max(1, min(reads, line_count // call_lines))
 
 
-def child_prompt(line_count: int, pack: str = "grok", call_lines: int | None = None,
-                 reads: int | None = None) -> str:
+def child_paging(pack: str, call_lines: int) -> str:
+    """Page-by-page reading of the child's `bulk.txt` with one deliverable per page."""
+    if pack == "codex":
+        read = (
+            f"bulk.txt is a sequence of pages; read it only through {CHILD_PAGER}. Read page k "
+            "with one exec whose source has these two lines, with k replaced by the page "
+            "number:\n"
+            f"const a = JSON.parse(await tools.exec_command({{cmd: \"python3 {CHILD_PAGER} k 1\"}})); "
+            "notify(a.output);\n"
+            f"const b = JSON.parse(await tools.exec_command({{cmd: \"python3 {CHILD_PAGER} k 2\"}})); "
+            "text(b.output);\n"
+            "Do not add max_output_tokens. Read page 1 first, and wait for each page's result "
+            "before the next page."
+        )
+        nxt = "which page is next"
+    else:
+        size = call_lines + 1
+        read = (
+            f"bulk.txt is a sequence of pages of {size} lines each; page 1 starts at line 1. "
+            f"Page through it using only the {_read_tool(pack)} tool. Read one page per call "
+            f"with limit {size}, one call per response, and wait for its result before the "
+            "next call."
+        )
+        nxt = "where the next page starts"
+    return (
+        f"{read} Each page's first line names that page's check word and {nxt}, or says "
+        "it is the last page. After you have seen page k, write its check word, exactly and "
+        f"alone, into {CHILD_PAGE_DIR}/k.txt; you may do that in the call that reads the next "
+        "page. Keep paging until you have read the last page: your context is compacted "
+        f"automatically when it fills, and the files in {CHILD_PAGE_DIR}/ record your "
+        "progress. Do not read or search bulk.txt any other way."
+    )
+
+
+def child_prompt(pack: str = "grok", call_lines: int | None = None) -> str:
     instructions = (
         f"{plant_steps(pack)} "
-        f"{_page_bulk(pack, line_count, call_lines or growth_call_lines(pack), reads)} "
-        f"Then {RECALL_STEP} Reply with exactly: done"
+        f"{child_paging(pack, call_lines or growth_call_lines(pack))} "
+        f"Then {CHILD_RECALL_STEP} Reply with exactly: done"
     )
     return (
         "Spawn one worker child from the worker template, tier mutate, "
@@ -1232,13 +1371,16 @@ class LongSession:
 
     def child_compaction(self) -> str:
         token = new_code_word(self.random_bytes)
-        repo, lines = self.repo("child_compaction", token, bulk=True)
+        repo, _lines = self.repo("child_compaction", token, bulk=False)
+        pack = pack_of(self.route)
+        pages = child_pages(self.window, pack, self.call_lines, self.route.model)
+        words = write_child_pages(repo / "bulk.txt", pages, self.call_lines, pack,
+                                  self.random_bytes)
+        commit_extra(repo, "bulk")
         home = self.home("child_compaction")
         agent = self.agent("child_compaction", repo, home)
         try:
-            pack = pack_of(self.route)
-            reads = growth_reads(self.window, pack, self.call_lines, lines, self.route.model)
-            prompt = child_prompt(lines, pack, self.call_lines, reads)
+            prompt = child_prompt(pack, self.call_lines)
             hide_token(prompt, token)
             turn = agent.prompt(prompt, timeout=child_timeout(self.pages))
             require_completed(turn, "root turn")
@@ -1275,19 +1417,25 @@ class LongSession:
                 if any(is_committed_compaction_projection(item) for item in items):
                     committed = True
                     break
+            written = pages_written(repo, words)
             if not committed:
                 if channel_error is not None:
                     raise channel_error
                 # The projection has no `model.operation_usage`, so a missing
                 # segment is not evidence the trigger was reached.
-                raise ScenarioFailure(MODEL, "child history has no committed compaction segment")
+                raise ScenarioFailure(
+                    MODEL, "child history has no committed compaction segment "
+                    f"(check words for {written}/{pages} pages)")
+            if written != pages:
+                raise ScenarioFailure(MODEL, f"child wrote check words for {written}/{pages} pages")
             if not text_equals(repo / "recalled.txt", token):
                 raise ScenarioFailure(MODEL, "child did not report the code word in recalled.txt")
             if not text_equals(repo / "acknowledged.txt", token):
                 raise ScenarioFailure(MODEL, "child did not write acknowledged.txt before compaction")
         finally:
             close_agent(agent)
-        return f"child compaction segment committed; recalled.txt matches {FACT_FILE}"
+        return (f"child compaction segment committed; {pages}/{pages} page check words; "
+                f"recalled.txt matches {FACT_FILE}")
 
     @staticmethod
     def _reap(marker: str, pid: int | None) -> None:

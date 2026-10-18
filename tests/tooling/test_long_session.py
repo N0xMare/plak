@@ -129,6 +129,12 @@ for line in sys.stdin:
     if "Spawn one worker child" in text:
         (repo / "acknowledged.txt").write_text(token() + "\n")
         (repo / "recalled.txt").write_text(token() + "\n")
+        (repo / "pages").mkdir(exist_ok=True)
+        for line in (repo / "bulk.txt").read_text().splitlines():
+            if line.startswith("Page "):
+                index = line.split()[1]
+                word = line.split("Check word: ", 1)[1].split(".", 1)[0]
+                (repo / "pages" / f"{index.rstrip('.')}.txt").write_text(word + "\n")
         reply(command_id, [
             {"v": 1, "kind": "tree", "nodes": [
                 {"depth": 0, "agent_id": "root", "status": "running"},
@@ -265,7 +271,7 @@ class LongSessionOracleTests(unittest.TestCase):
         self.assertEqual(long_session.harness_bar(window),
                          long_session.compaction_trigger(window))
         self.assertIn("limit 5", long_session.growth_prompt(348, "pi", lines))
-        self.assertIn("limit 5", long_session.child_prompt(348, "pi", lines))
+        self.assertIn("limit 6", long_session.child_prompt("pi", lines))
 
     def test_claude_growth_reads_digit_groups_and_other_packs_keep_base64(self):
         line = long_session.digit_line()
@@ -287,8 +293,8 @@ class LongSessionOracleTests(unittest.TestCase):
         claude_prompt = long_session.growth_prompt(4, "claude")
         self.assertIn(f"limit {long_session.CLAUDE_GROWTH_CALL_LINES}", claude_prompt)
         self.assertIn(f"limit {long_session.GROWTH_CALL_LINES}", long_session.growth_prompt(4))
-        self.assertIn(f"limit {long_session.CLAUDE_GROWTH_CALL_LINES}",
-                      long_session.child_prompt(4, "claude"))
+        self.assertIn(f"limit {long_session.CLAUDE_GROWTH_CALL_LINES + 1}",
+                      long_session.child_prompt("claude"))
 
     def test_any_tool_that_names_a_fact_file_is_a_reread(self):
         records = [
@@ -371,7 +377,7 @@ class LongSessionOracleTests(unittest.TestCase):
     def test_prompts_do_not_carry_the_fact_token(self):
         token = "ZEBRA-123456"
         for prompt in (long_session.growth_prompt(10), long_session.follow_prompt(),
-                       long_session.overflow_prompt(20, [[1, 21], [41, 61]]), long_session.child_prompt(10),
+                       long_session.overflow_prompt(20, [[1, 21], [41, 61]]), long_session.child_prompt(),
                        long_session.plant_prompt()):
             self.assertNotIn(token, prompt)
         long_session.hide_token(long_session.growth_prompt(4), token)
@@ -643,6 +649,69 @@ class LongSessionOracleTests(unittest.TestCase):
         self.assertIn("Round 2: offsets 41, 61.",
                       long_session.overflow_prompt(20, [[1, 21], [41, 61]], "grok"))
         self.assertNotIn("read_file", prompt)
+
+    def test_child_pages_carry_the_check_words_the_oracle_counts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            words = long_session.write_child_pages(repo / "bulk.txt", 3, 4, "claude")
+            lines = (repo / "bulk.txt").read_text().splitlines()
+            self.assertEqual(len(lines), 3 * 5)
+            self.assertEqual(len(set(words)), 3)
+            for index, word in enumerate(words):
+                after = ("This is the last page." if index == 2
+                         else f"The next page starts at line {1 + (index + 1) * 5}.")
+                self.assertEqual(lines[index * 5], f"Page {index + 1}. Check word: {word}. {after}")
+                self.assertTrue(set("".join(lines[index * 5 + 1:index * 5 + 5]))
+                                <= set("0123456789 "))
+            self.assertFalse((repo / long_session.CHILD_PAGER).exists())
+            self.assertEqual(long_session.pages_written(repo, words), 0)
+            (repo / "pages").mkdir()
+            (repo / "pages" / "1.txt").write_text(words[0] + "\n")
+            (repo / "pages" / "2.txt").write_text(words[0] + "\n")
+            self.assertEqual(long_session.pages_written(repo, words), 1)
+        child = long_session.child_prompt("claude", 40)
+        self.assertIn("pages of 41 lines each; page 1 starts at line 1", child)
+        self.assertIn("limit 41", child)
+
+    def test_codex_child_page_is_two_halves_under_the_exec_and_round_caps(self):
+        half = long_session.CODEX_CHILD_HALF_LINES
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            words = long_session.write_child_pages(repo / "bulk.txt", 2, 20, "codex")
+            halves = {}
+            for page in (1, 2):
+                for part in (1, 2):
+                    halves[page, part] = subprocess.run(
+                        [sys.executable, long_session.CHILD_PAGER, str(page), str(part)],
+                        cwd=repo, check=True, capture_output=True, text=True).stdout
+        self.assertEqual(halves[1, 1].splitlines()[0],
+                         f"Page 1. Check word: {words[0]}. The next page is page 2.")
+        self.assertEqual(halves[2, 1].splitlines()[0],
+                         f"Page 2. Check word: {words[1]}. This is the last page.")
+        for (page, part), text in halves.items():
+            body = text.splitlines()[1:] if part == 1 else text.splitlines()
+            self.assertEqual(len(body), half, (page, part))
+            self.assertFalse(any(line.startswith("Page ") for line in body))
+            # One exec_command result is at most 40,000 bytes.
+            self.assertLess(len(text.encode()), 40_000)
+        self.assertLess(len(halves[1, 1].encode()) + len(halves[1, 2].encode()),
+                        long_session.round_cap_bytes(272_000))
+        self.assertEqual(long_session.catalog_window("gpt-6-luna"), 272_000)
+        self.assertEqual(long_session.catalog_window("gpt-6.1-sol"), 500_000)
+        self.assertEqual(long_session.child_pages(500_000, "codex", 20, "gpt-6.1-sol"), 10)
+        pages = long_session.child_pages(272_000, "codex", 20, "gpt-6-luna")
+        self.assertEqual(pages, 6)
+        per_page = 2 * half * long_session.LINE_BYTES / long_session.CODEX_BASE64_BYTES_PER_TOKEN
+        self.assertGreater((pages - 1) * per_page,
+                           long_session.compaction_trigger(272_000, "gpt-6-luna"))
+        prompt = long_session.child_prompt("codex", 20)
+        child = json.loads(prompt.split("Give the child exactly this prompt: ", 1)[1]
+                           .split("\nWait for the child", 1)[0])
+        self.assertIn('{cmd: "python3 page.py k 1"})); notify(a.output);\n', child)
+        self.assertIn('{cmd: "python3 page.py k 2"})); text(b.output);', child)
+        self.assertIn("which page is next", child)
+        self.assertNotIn(str(pages), child.split("Then write")[0].split("acknowledged.txt.", 1)[1])
+        self.assertNotIn("earlier turn", child)
 
     def test_child_compaction_projection_and_ordinals(self):
         segment = {
