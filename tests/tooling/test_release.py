@@ -435,6 +435,24 @@ esac""")
         sums = (self.base / "target/release-dist/SHA256SUMS").read_text().splitlines()
         self.assertEqual(len(sums), 2)
 
+    def test_a_release_candidate_tag_names_the_tarball_and_other_tags_are_refused(self) -> None:
+        result = self.run_script("--tag", f"v{VERSION}-rc.2", FAKE_TAG=f"v{VERSION}-rc.2")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), str(
+            self.base / f"target/release-dist/plak-{VERSION}-rc.2-{LINUX}.tar.gz"))
+        for tag, head_tag, message in (
+                (f"v{VERSION}-rc.0", f"v{VERSION}-rc.0", "is neither"),
+                (f"v{VERSION}-beta.1", f"v{VERSION}-beta.1", "is neither"),
+                ("v9.9.9", "v9.9.9", "is neither"),
+                (f"v{VERSION}-rc.3", f"v{VERSION}-rc.2", f"not tagged v{VERSION}-rc.3")):
+            with self.subTest(tag=tag):
+                result = self.run_script("--tag", tag, FAKE_TAG=head_tag)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(message, result.stderr)
+        result = self.run_script("--untagged", "--tag", f"v{VERSION}")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("exclude each other", result.stderr)
+
 
 class ReleaseWorkflowTests(unittest.TestCase):
     def test_the_only_workflow_runs_on_v_tags_with_pinned_actions_and_never_publishes_crates(self) -> None:

@@ -973,12 +973,16 @@ tarballs §6.6 builds.
 
 ### 6.6 Release artifacts and the installer
 
-`tools/release/package-release.sh [--untagged] [--out DIR]` builds a release
+`tools/release/package-release.sh [--untagged | --tag TAG] [--out DIR]` builds a release
 on the host's supported target: `x86_64-unknown-linux-musl` on Linux x86_64,
 with the compiler, linker and prerequisite checks of `just musl-native`
 (`scripts/musl-toolchain.sh`), and `aarch64-apple-darwin` on Apple Silicon. It
 refuses a dirty tree and, unless `--untagged` (a rehearsal), a `HEAD` without
-the tag `v<version>` of the workspace version. The build is
+the tag `v<version>` of the workspace version, or without the tag `--tag`
+names. `--tag` accepts `v<version>` or a release candidate `v<version>-rc.<n>`
+(`n` from 1); a candidate's tarball is named `plak-<version>-rc.<n>-<triple>`
+while its executables still report `<version>`, so the final tag can name the
+same qualified commit. The build is
 `tools/build/build-plak.sh --artifacts`: the `just install` Cargo invocations
 and artifact linkage check, without installing. It maps the Cargo home, the
 checkout and the target directory to `/cargo`, `/plak` and `/target` with
@@ -1000,10 +1004,11 @@ bytes depend only on the packed files. The Linux executables must be
 static: an ELF program interpreter fails packaging.
 
 `.github/workflows/release.yml` is the repository's only workflow. A pushed
-`v*` tag runs `package-release.sh` on a GitHub macOS arm64 runner and an
-Ubuntu x86_64 runner with `musl-tools`, attests each tarball with
+`v*` tag runs `package-release.sh --tag <tag>` on a GitHub macOS arm64 runner
+and an Ubuntu x86_64 runner with `musl-tools`, attests each tarball with
 `actions/attest-build-provenance`, and creates the GitHub Release with both
-tarballs and their combined `SHA256SUMS`. It never publishes crates: a runner
+tarballs and their combined `SHA256SUMS`, marked as a prerelease for a
+`-rc.<n>` tag so `releases/latest` never resolves to a candidate. It never publishes crates: a runner
 has no full-gate evidence for the tree (§6.5). Every action is pinned to a full
 commit SHA.
 
