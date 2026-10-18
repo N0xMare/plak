@@ -2671,8 +2671,8 @@ fn scripted_agent_config(script: &ScriptPlan) -> plakous::agent::AgentConfig {
 /// markers over the Codex minimal nested catalog, so a scripted cell runs a
 /// JavaScript program in the sidecar and its nested calls are real.
 ///
-/// Built the way `crates/plakous/tests/public_facade.rs` builds it, over the
-/// public surface only.
+/// Built the way the `tests/fixtures/facade-consumer` inventory builds it, over
+/// the public surface only.
 ///
 /// # Errors
 ///

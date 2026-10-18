@@ -1504,6 +1504,7 @@ version = "0.0.0"
 dependencies = [
  "futures-util",
  "plakous",
+ "rusqlite",
  "serde_json",
  "tempfile",
  "tokio",

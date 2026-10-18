@@ -9,7 +9,7 @@
 //!
 //! | Tier | Modules | Stability |
 //! | --- | --- | --- |
-//! | **Embedder workflow** | [`agent`], [`application`], [`construction`], [`sessions`] (including `feed`), [`model`], [`tools`], [`profiles`], [`prompts`], [`VERSION`] | Exact-set supported inventory in `public_facade.rs` and consumer fixtures |
+//! | **Embedder workflow** | [`agent`], [`application`], [`construction`], [`sessions`] (including `feed`), [`model`], [`tools`], [`profiles`], [`prompts`], [`VERSION`] | Exact-set supported inventory in the `tests/fixtures/facade-consumer` fixture |
 //! | **Credentials/subscriptions** | `auth`, `subscriptions` | Feature-gated library workflows; supported inventory imports, not product UX |
 //! | **Observations** | `exchange_observation` | Passive feature-gated hooks; no dispatch authority |
 //! | **Provider integrations** | `openai`, `xai`, `openrouter`, `anthropic` | Feature-gated; only inventory-named facade workflows are supported; remaining exports are nameable internals |
@@ -62,7 +62,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 ///
 /// Includes content-free [`TelemetryEmitter`](crate::agent::TelemetryEmitter) / [`TelemetrySink`](crate::agent::TelemetrySink) types for TUI
 /// status strips. Telemetry is off unless `AgentBuilder::telemetry` is set.
-/// Exact-set inventory: `crates/plakous/tests/public_facade.rs`.
+/// Exact-set inventory: the `tests/fixtures/facade-consumer` fixture.
 /// Start with `cancellation_shutdown` or `durable_session` in the examples directory.
 ///
 /// Full durable bootstrapping is sealed behind the high-level session workflow:
@@ -537,6 +537,20 @@ pub mod mcp {
     pub use plakous_tools::ServiceSecretValue;
 }
 /// Exact-origin OpenAI API-key execution and the separate Codex subscription integration.
+///
+/// The colliding upstream names are re-exported only under `OpenAi*` names:
+///
+/// ```compile_fail
+/// use plakous::openai::SecretString;
+/// ```
+///
+/// ```compile_fail
+/// use plakous::openai::ConfigError;
+/// ```
+///
+/// ```compile_fail
+/// use plakous::openai::AuthError;
+/// ```
 #[cfg(feature = "openai")]
 pub mod openai {
     pub use crate::responses_images::OpenAiImagePort;

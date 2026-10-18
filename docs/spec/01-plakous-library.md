@@ -6791,7 +6791,7 @@ attach its turn-scoped preempt watch through the crate-private `with_preempt`.
 `McpServerName` and `MAX_MCP_SERVER_NAME_BYTES`, with
 `ToolRegistration::with_owner`, `RegisteredToolIdentity::owner` and
 `ToolExecutorBindingsBuilder::owner`. They are supported inventory, pinned by
-`crates/plakous/tests/public_facade.rs`.
+the external `tests/fixtures/facade-consumer`.
 
 `plakous::sessions::feed` is the change feed's public surface (§5.11):
 `FeedSeq`, `FeedCursor`, `FeedRecord`, `FeedChange`, `FeedFact` and its typed
@@ -6807,8 +6807,7 @@ reads are `feed_page`, `subscribe_feed`, `feed_items`, `feed_call` and
 `inspect_feed_call_sqlite` and `inspect_feed_terminal_sqlite` twins; the
 accessors are `CommandAck::feed_seq`, `TurnResult::feed_seq` and the compact,
 fork and rebind outcomes' `feed_seq`. All of it is supported inventory, pinned
-by `crates/plakous/tests/public_facade.rs` and the external
-`tests/fixtures/facade-consumer`. It is the only public surface the feed adds:
+by the external `tests/fixtures/facade-consumer`. It is the only public surface the feed adds:
 the store port's feed methods and the SQLite table remain store mechanics.
 
 The feed is the only cross-store reconciliation surface. The facade has no

@@ -74,11 +74,7 @@ EMBEDDING_SOURCES = tuple(
     source
     for source in sorted((ROOT / "crates/plakous/examples").rglob("*.rs"))
 )
-NAMEABILITY_POLICY_SOURCES = (
-    SUPPORTED_INVENTORY_SOURCES
-    + EMBEDDING_SOURCES
-    + (ROOT / "crates/plakous/tests/public_facade.rs",)
-)
+NAMEABILITY_POLICY_SOURCES = SUPPORTED_INVENTORY_SOURCES + EMBEDDING_SOURCES
 RUNTIME_ONLY_TOOL_NAMES = (
     "AuthorizedToolInvocation",
     "ClaimedToolInvocation",

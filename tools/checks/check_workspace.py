@@ -98,6 +98,7 @@ SUPPORTED_COMPILE_FIXTURE_FILES = {
             "src/control_observation.rs",
             "src/custom_model.rs",
             "src/custom_tool.rs",
+            "src/inventory.rs",
             "src/lifecycle.rs",
             "src/lifecycle_configuration.rs",
             "src/local_composition.rs",
@@ -134,6 +135,7 @@ SUPPORTED_COMPILE_FIXTURES = {
         "dependencies": ("plakous",),
         "facade-features": (
             "anthropic",
+            "auth",
             "native-subscriptions",
             "openai",
             "openrouter",
@@ -142,6 +144,11 @@ SUPPORTED_COMPILE_FIXTURES = {
         ),
         "extra-dependencies": {
             "futures-util": "0.3.31",
+            "rusqlite": {
+                "version": "=0.40.2",
+                "default-features": False,
+                "features": ["bundled"],
+            },
             "serde_json": "1.0",
             "tempfile": "3.23",
             "tokio": {

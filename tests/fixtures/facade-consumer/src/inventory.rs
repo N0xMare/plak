@@ -1,28 +1,10 @@
-//! Compile-time facade workflow and current-nameability contracts.
-//!
-//! This proves embedders can name the build, turn-control, observation, result,
-//! and shutdown workflow without importing a component crate. Low-level
-//! durability/store mechanics deliberately remain absent. Every test in this
-//! file is part of the exact supported `plakous` inventory; the external
-//! facade fixture separately proves an executable consumer workflow.
+//! The curated root inventory as workflows: every supported import outside the
+//! topic modules, with the signatures and behaviors that make each one usable
+//! without a component crate. Low-level durability and store mechanics stay
+//! absent; their negative pins are the `authority-negative` fixture and the
+//! facade's `compile_fail` doctests.
 
-#![allow(
-    clippy::doc_markdown,
-    clippy::expect_used,
-    clippy::items_after_statements,
-    clippy::too_many_lines,
-    clippy::unwrap_used,
-    reason = "facade inventory pins type names before compile-pinning local workflow signatures; serde/assert helpers use expect"
-)]
-
-/// Always-on facade: version + curated agent + model + tools + profiles.
-#[test]
-fn facade_reports_its_package_version() {
-    assert_eq!(plakous::VERSION, env!("CARGO_PKG_VERSION"));
-}
-
-#[test]
-fn construction_helpers_are_supported_facade_workflows() {
+pub(crate) fn construction_helpers_are_supported_facade_workflows() {
     use plakous::construction::{
         CustomProviderConfigurationRequest, bind_custom_model_authority,
         compile_local_composition_plan, provider_model_projection_identity,
@@ -51,8 +33,7 @@ fn construction_helpers_are_supported_facade_workflows() {
     hold(provider_model_projection_identity);
 }
 
-#[test]
-fn application_accepts_caller_supplied_cancellation_without_subscription_features() {
+pub(crate) fn application_accepts_caller_supplied_cancellation_without_subscription_features() {
     use plakous::agent::Agent;
     use plakous::application::{TurnDriveError, TurnDriveOutcome, run_once_until_signal};
     use plakous::sessions::{AgentSessionsError, isolated_tool_scheduler};
@@ -70,9 +51,7 @@ fn application_accepts_caller_supplied_cancellation_without_subscription_feature
     );
 }
 
-#[cfg(feature = "native-subscriptions")]
-#[test]
-fn local_composition_attachment_is_a_capability_poor_facade_workflow() {
+pub(crate) fn local_composition_attachment_is_a_capability_poor_facade_workflow() {
     use plakous::agent::{
         AgentBuilder, AgentError, LocalCompositionAttachment, LocalCompositionAttachmentBuilder,
         LocalCompositionContainment, LocalCompositionEngineArtifact, LocalCompositionLanguage,
@@ -190,8 +169,7 @@ fn local_composition_attachment_is_a_capability_poor_facade_workflow() {
     hold(&dormant);
 }
 
-#[cfg(feature = "native-subscriptions")]
-mod codex_local_composition_reconstruction {
+pub(crate) mod codex_local_composition_reconstruction {
     use plakous::agent::{
         AgentError, AgentErrorKind, LocalCompositionAttachment, LocalCompositionEngineArtifact,
         LocalCompositionProfile,
@@ -247,8 +225,7 @@ mod codex_local_composition_reconstruction {
         Ok(())
     }
 
-    #[test]
-    fn four_and_seven_tool_profiles_reconstruct_exactly_and_refuse_cross_profile_substitution()
+    pub(crate) fn four_and_seven_tool_profiles_reconstruct_exactly_and_refuse_cross_profile_substitution()
     -> Result<(), TestError> {
         let original_registry = registry()?;
         let bindings = ToolExecutorBindings::capture(&original_registry);
@@ -323,8 +300,7 @@ mod codex_local_composition_reconstruction {
         Ok(())
     }
 
-    #[test]
-    fn rquickjs_sidecar_attaches_minimal_code_mode_profile() -> Result<(), TestError> {
+    pub(crate) fn rquickjs_sidecar_attaches_minimal_code_mode_profile() -> Result<(), TestError> {
         let registry = registry()?;
         let target = target()?;
         let minimal = CodexMinimalLocalCodeModeV1::compile(
@@ -348,8 +324,7 @@ mod codex_local_composition_reconstruction {
 ///
 /// If this fails to compile, a public signature is no longer nameable through
 /// `plakous` or a withdrawn durability primitive leaked back into the inventory.
-#[test]
-fn exact_supported_root_inventory_is_importable() {
+pub(crate) fn exact_supported_root_inventory_is_importable() {
     use plakous::agent::{
         Agent, AgentBuilder, AgentConfig, AgentError, AgentErrorKind, AgentEvent, AgentEventKind,
         AgentRequestPolicy, AgentViewSnapshot, CancellationStatus, CapabilityRequirement,
@@ -492,8 +467,7 @@ fn exact_supported_root_inventory_is_importable() {
     assert_ne!(plakous::tools::PROCESS_TOOL_PROJECTION_REVISION, 0);
 }
 
-#[test]
-fn exact_context_source_workflow_is_nameable_through_the_facade() {
+pub(crate) fn exact_context_source_workflow_is_nameable_through_the_facade() {
     use plakous::agent::{
         ContextSourceCatalog, ContextSourceResolver, ContextSourceSelector, HarnessProfileId,
         HarnessProfileSpecBuilder, InstructionCompositionStrategy, RegisteredContextSource,
@@ -522,8 +496,7 @@ fn exact_context_source_workflow_is_nameable_through_the_facade() {
 }
 
 /// Compile-pin the complete workflow rather than isolated type names.
-#[test]
-fn wave_1_agent_workflow_is_nameable_through_the_facade() {
+pub(crate) fn agent_workflow_is_nameable_through_the_facade() {
     use plakous::agent::{
         Agent, AgentBuilder, AgentError, AgentErrorKind, CancellationStatus, CheckpointId,
         CommandId, ControlError, ResumeOutcome, SteeringStatus, Turn, TurnCommand, TurnControl,
@@ -635,8 +608,7 @@ fn wave_1_agent_workflow_is_nameable_through_the_facade() {
 
 /// Durable-session callers see exact workflow values, never store rows,
 /// leases, compare-and-swap receipts, or a backend implementation.
-#[test]
-fn exact_session_workflow_is_nameable_through_the_facade() {
+pub(crate) fn exact_session_workflow_is_nameable_through_the_facade() {
     use plakous::sessions::{
         AbandonCodeCellOutcome, AbandonCodeCellRequest, AbandonCompactionOutcome,
         AbandonCompactionRequest, AgentSessions, AgentSessionsError, AgentSessionsErrorKind,
@@ -723,7 +695,6 @@ fn exact_session_workflow_is_nameable_through_the_facade() {
         AgentSessions::genesis_locator_for(operation)
     }
 
-    #[cfg(feature = "sessions-sqlite")]
     fn compose_sqlite(path: &std::path::Path) -> Result<AgentSessions, AgentSessionsError> {
         AgentSessions::new(SessionBackend::sqlite(path)?)
     }
@@ -800,7 +771,6 @@ fn exact_session_workflow_is_nameable_through_the_facade() {
         sessions.call_detail(locator, call_id).await
     }
 
-    #[cfg(feature = "sessions-sqlite")]
     fn inspect_history_page_sqlite(
         path: &std::path::Path,
         request: &SessionHistoryPageRequest,
@@ -864,12 +834,10 @@ fn exact_session_workflow_is_nameable_through_the_facade() {
     );
     hold(&SESSION_HISTORY_VISIBILITY_REVISION);
 
-    #[cfg(feature = "sessions-sqlite")]
     let _ = (compose_sqlite, inspect_history_page_sqlite);
 }
 
-#[test]
-fn public_memory_session_identities_are_exact_and_portable() {
+pub(crate) fn public_memory_session_identities_are_exact_and_portable() {
     use plakous::model::{BranchId, SessionId};
     use plakous::sessions::{
         AgentSessions, AgentSessionsErrorKind, SessionBackend, SessionLocator, SessionOperationId,
@@ -914,8 +882,7 @@ fn public_memory_session_identities_are_exact_and_portable() {
 /// and the compact, fork and rebind outcomes.
 /// Removed receipt methods and request/result names have negative compile pins
 /// in the `sessions` module documentation; publication is observed here instead.
-#[test]
-fn change_feed_replaces_receipt_reconciliation_in_supported_inventory() {
+pub(crate) async fn change_feed_replaces_receipt_reconciliation_in_supported_inventory() {
     use plakous::agent::{AgentEvent, CommandAck, TurnResult};
     use plakous::model::SessionId;
     use plakous::sessions::feed::{
@@ -984,7 +951,6 @@ fn change_feed_replaces_receipt_reconciliation_in_supported_inventory() {
     }
     hold(&seq_accessors);
 
-    #[cfg(feature = "sessions-sqlite")]
     {
         hold(&|path: &std::path::Path,
                page: FeedPageRequest,
@@ -998,33 +964,28 @@ fn change_feed_replaces_receipt_reconciliation_in_supported_inventory() {
         });
     }
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime");
     let sessions =
         AgentSessions::new(SessionBackend::memory().expect("memory backend lease clock"))
             .expect("memory facade backend");
     let unknown = "00000000-0000-0000-0000-00000000feed"
         .parse::<SessionId>()
         .expect("session id");
-    let page =
-        runtime.block_on(sessions.feed_page(FeedPageRequest::after(FeedCursor::start(unknown))));
+    let page = sessions
+        .feed_page(FeedPageRequest::after(FeedCursor::start(unknown)))
+        .await;
     let refused: Result<FeedPage, _> = page;
     assert_eq!(
         refused.expect_err("unknown session").kind(),
         AgentSessionsErrorKind::NotFound
     );
-    let subscribed = runtime.block_on(sessions.subscribe_feed(unknown));
+    let subscribed = sessions.subscribe_feed(unknown).await;
     assert_eq!(
         subscribed.expect_err("unknown session").kind(),
         AgentSessionsErrorKind::NotFound
     );
 }
 
-#[cfg(feature = "sessions-sqlite")]
-#[test]
-fn sqlite_persistence_admission_distinguishes_unsupported_from_corrupt() {
+pub(crate) fn sqlite_persistence_admission_distinguishes_unsupported_from_corrupt() {
     use plakous::sessions::{AgentSessionsErrorKind, SessionBackend};
 
     let unsupported = tempfile::tempdir().expect("unsupported fixture");
@@ -1061,8 +1022,7 @@ fn sqlite_persistence_admission_distinguishes_unsupported_from_corrupt() {
 /// Event types used for TUI transcript / cursor resume must stay on the facade.
 ///
 /// Wire serde round-trips: `agent_event_and_cursor_serde_round_trip` below.
-#[test]
-fn transcript_cursor_types_remain_on_curated_agent_surface() {
+pub(crate) fn transcript_cursor_types_remain_on_curated_agent_surface() {
     use plakous::agent::{
         AgentEvent, AgentEventKind, EventCursor, EventSequence, EventSubscription, TurnControl,
         TurnEvents,
@@ -1077,8 +1037,7 @@ fn transcript_cursor_types_remain_on_curated_agent_surface() {
 }
 
 /// Serde round-trip for transcript affordances (claimed by facade freeze docs).
-#[test]
-fn agent_event_and_cursor_serde_round_trip() {
+pub(crate) fn agent_event_and_cursor_serde_round_trip() {
     use plakous::agent::{AgentEventKind, EventSequence, EventVisibility};
     let kind = AgentEventKind::TurnStarted;
     let json = serde_json::to_string(&kind).expect("serialize kind");
@@ -1099,14 +1058,9 @@ fn agent_event_and_cursor_serde_round_trip() {
     assert_eq!(vis, back);
 }
 
-/// Retired existing-login surface must stay compile-fail closed.
-///
-/// ```compile_fail
-/// use plakous::auth::ExistingLoginAccess;
-/// ```
-#[cfg(feature = "auth")]
-#[test]
-fn auth_module_exists_without_existing_login() {
+/// The auth module re-exports credential foundations; the retired existing-login
+/// surface is a `compile_fail` doctest on the facade module.
+pub(crate) fn auth_module_exists_without_existing_login() {
     use plakous::auth::{CredentialGeneration, SecretString};
     assert_ne!(std::any::type_name::<CredentialGeneration>(), "");
     assert_ne!(std::any::type_name::<SecretString>(), "");
@@ -1116,8 +1070,7 @@ fn auth_module_exists_without_existing_login() {
 ///
 /// `AgentBuilder::telemetry` takes `Arc<TelemetryEmitter>`; sinks implement
 /// [`plakous::agent::TelemetrySink`].
-#[test]
-fn curated_agent_telemetry_surface_is_importable() {
+pub(crate) fn curated_agent_telemetry_surface_is_importable() {
     use plakous::agent::{
         TelemetryContext, TelemetryEmitter, TelemetryObservation, TelemetryObservationKind,
         TelemetrySink, TelemetrySinkError, TelemetryStatus, TelemetryTerminalStatus,
@@ -1139,22 +1092,9 @@ fn curated_agent_telemetry_surface_is_importable() {
 /// integration is supported at the stated qualification level; it never turns
 /// offline-only API lanes into admitted or exact live-qualified routes.
 ///
-/// Bare colliding names must **not** reappear under `plakous::openai`.
-///
-/// ```compile_fail
-/// use plakous::openai::SecretString;
-/// ```
-///
-/// ```compile_fail
-/// use plakous::openai::ConfigError;
-/// ```
-///
-/// ```compile_fail
-/// use plakous::openai::AuthError;
-/// ```
-#[cfg(feature = "openai")]
-#[test]
-fn curated_provider_namespaces_are_nameable_without_unqualified_lanes() {
+/// Bare colliding names must not reappear under `plakous::openai`; the facade
+/// module pins that with `compile_fail` doctests.
+pub(crate) fn curated_provider_namespaces_are_nameable_without_unqualified_lanes() {
     use plakous::anthropic::{
         ANTHROPIC_API_VERSION, AnthropicMessagesDialect, AnthropicPlatformCapabilityProfile,
         AnthropicPlatformModelConfig, AnthropicPlatformModelResolver,
@@ -1225,9 +1165,8 @@ fn curated_provider_namespaces_are_nameable_without_unqualified_lanes() {
     hold(&std::any::type_name::<XaiResolvedModel>());
 }
 
-#[cfg(feature = "openrouter")]
-#[test]
-fn openrouter_facade_is_custom_bounded_and_redacted() -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn openrouter_facade_is_custom_bounded_and_redacted()
+-> Result<(), Box<dyn std::error::Error>> {
     use std::sync::Arc;
 
     use plakous::model::IntegrationClass;
@@ -1302,9 +1241,7 @@ fn openrouter_facade_is_custom_bounded_and_redacted() -> Result<(), Box<dyn std:
     Ok(())
 }
 
-#[cfg(all(feature = "native-subscriptions", feature = "openai"))]
-#[test]
-fn curated_subscription_models_are_nameable() {
+pub(crate) fn curated_subscription_models_are_nameable() {
     use plakous::model::ReasoningEffort;
     use plakous::subscriptions::{
         NativeModelSummary, NativeModelVisibility, NativeToolMode, NativeToolModeRequirementError,
