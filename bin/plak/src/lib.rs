@@ -161,7 +161,7 @@ use crate::product_config::ConfigScope;
 use std::env;
 use std::ffi::OsString;
 use std::io::{self, IsTerminal as _, Write as _};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::thread;
@@ -399,7 +399,7 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         Command::Resume {
             session_id: Some(id),
         } => return launch_tui(&services, Some(id), false, None),
-        Command::ImportResume { path } => return import_and_resume(&services, &path),
+        Command::ImportResume { path } => return carry::import_and_resume(&services, &path),
         command @ Command::Agent { .. } => return run_agent_command(&services, command),
         command => command,
     };
@@ -1885,7 +1885,7 @@ fn launch_tui_with_attacher(
     let session_id = match session_id {
         Some(requested) => {
             let carried = if names_no_local_session(store.as_ref(), &cwd, &requested) {
-                carry_foreign_session(services, &paths, &cwd, &requested)?
+                carry::carry_foreign_session(services, &paths, &cwd, &requested)?
             } else {
                 None
             };
@@ -2721,7 +2721,7 @@ fn reload_installed_plak(
             command.arg("--resume").arg(&record.id);
         }
         carry::ReloadPlan::Carry => {
-            let path = match carry_out(paths, record) {
+            let path = match carry::carry_out(paths, record) {
                 Ok(path) => path,
                 Err(reason) => {
                     return Ok(format!(
@@ -2756,156 +2756,6 @@ fn reload_installed_plak(
         executable.display(),
         unverified.unwrap_or_default()
     )))
-}
-
-/// Exports `record` into a fresh private carry file and returns its path.
-fn carry_out(
-    paths: &product_paths::PlakPaths,
-    record: &product_sessions::SessionRecord,
-) -> Result<PathBuf, String> {
-    let document = carry::export_session(paths, record)
-        .map_err(|refusal| format!("session {} cannot be exported: {refusal}", record.id))?;
-    let path = carry::new_carry_file(paths, &record.id)?;
-    carry::write_document(&path, &document)?;
-    Ok(path)
-}
-
-/// `plak --resume` of a session another build's state holds. When a kept
-/// maintainer snapshot of that build exists, it exports the session and this
-/// build imports it as a new session; the new id and its note are returned.
-/// Without one the caller's refusal stands.
-fn carry_foreign_session(
-    services: &Services,
-    paths: &product_paths::PlakPaths,
-    cwd: &Path,
-    requested: &str,
-) -> CliResult<Option<(String, String)>> {
-    let Some((key, id)) = home::state::foreign_session(paths, requested) else {
-        return Ok(None);
-    };
-    if let Some(existing) =
-        carry::already_carried(services.session_records()?.as_ref(), cwd, &id, &key)
-            .map_err(CliFailure::new)?
-    {
-        let note = format!(
-            "session {id} ({key}) was already carried forward as {}; resuming it",
-            existing.id
-        );
-        return Ok(Some((existing.id, note)));
-    }
-    let Some(snapshot) = carry::snapshot_for_key(&home::paths::installed_snapshot_roots(), &key)
-    else {
-        return Ok(None);
-    };
-    let workspace_paths = product_paths::PlakPaths::for_workspace(paths.home().to_path_buf(), cwd);
-    product_config::SessionPolicy::load(&workspace_paths).map_err(|error| {
-        CliFailure::new(format!(
-            "could not carry session {id} forward: {error}; fix the config and retry the same command"
-        ))
-    })?;
-    let export_version = carry::snapshot_export_version(&snapshot).map_err(|error| {
-        CliFailure::new(format!(
-            "could not carry session {id} forward: {error}; fix the error and retry the same command"
-        ))
-    })?;
-    if let Some(version) = export_version
-        && !carry::IMPORTABLE_VERSIONS.contains(&version)
-    {
-        return Err(CliFailure::new(format!(
-            "could not carry session {id} forward: the kept snapshot writes version {version} session exports; this build imports versions {:?}; use this workspace's newest carried session from `plak session list`",
-            carry::IMPORTABLE_VERSIONS
-        )));
-    }
-    let out = carry::new_carry_file(paths, &id).map_err(CliFailure::new)?;
-    let result = carry::export_with_snapshot(&snapshot, &id, &out, cwd)
-        .map_err(CliFailure::new)
-        .and_then(|()| {
-            carry::read_document(&out).map_err(|error| {
-                CliFailure::new(format!(
-                    "{error}; use this workspace's newest carried session from `plak session list`"
-                ))
-            })?;
-            commands::session::import_session(services, &out).map_err(|failure| {
-                CliFailure::new(format!(
-                    "{}; fix the error and retry the same command",
-                    failure.message()
-                ))
-            })
-        });
-    let (record, note) = result.map_err(|failure| {
-        let cleanup = match std::fs::remove_file(&out) {
-            Ok(()) => String::new(),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
-            Err(error) => format!("; could not delete {}: {error}", out.display()),
-        };
-        CliFailure::new(format!(
-            "could not carry session {id} forward: {}{cleanup}",
-            failure.message()
-        ))
-    })?;
-    let note = match std::fs::remove_file(&out) {
-        Ok(()) => note,
-        Err(error) => format!("{note}; could not delete {}: {error}", out.display()),
-    };
-    Ok(Some((record.id, note)))
-}
-
-/// `plak --import-resume <file>`: the new build's half of a carrying
-/// `/reload`. The file is deleted once the import committed and kept, with
-/// its path named, when it did not.
-fn import_and_resume(services: &Services, path: &Path) -> CliResult<ProcessOutcome> {
-    let document = carry::read_document(path).map_err(|failure| {
-        CliFailure::new(format!(
-            "could not carry the session forward: {failure}; the export is kept at {}",
-            path.display()
-        ))
-    })?;
-    let source_id = document.source().0.to_owned();
-    let paths = product_paths::PlakPaths::for_workspace(
-        services.paths()?.home().to_path_buf(),
-        document.workspace_root(),
-    );
-    product_config::SessionPolicy::load(&paths).map_err(CliFailure::new)?;
-    if !rustix::termios::isatty(io::stdin()) || !io::stdout().is_terminal() {
-        return Err(CliFailure::classified(
-            CliFailureKind::Usage,
-            "the interactive TUI needs a terminal; import was refused before creating a successor",
-        ));
-    }
-    let cwd = env::current_dir().map_err(|_| CliFailure::new("cwd unavailable"))?;
-    let requested = std::fs::canonicalize(&cwd).unwrap_or(cwd);
-    let recorded = std::fs::canonicalize(document.workspace_root())
-        .unwrap_or_else(|_| document.workspace_root().to_path_buf());
-    if requested != recorded {
-        return Err(CliFailure::new(format!(
-            "session {source_id} belongs to {}; import-resume from {} was refused before creating a successor",
-            recorded.display(),
-            requested.display()
-        )));
-    }
-    home::state::ensure_usable_state(services.paths()?, &mut io::stderr().lock())
-        .map_err(CliFailure::new)?;
-    let (record, note) = commands::session::import_session(services, path).map_err(|failure| {
-        CliFailure::new(format!(
-            "could not carry the session forward: {}; the export is kept at {}",
-            failure.message(),
-            path.display()
-        ))
-    })?;
-    let note = match std::fs::remove_file(path) {
-        Ok(()) => note,
-        Err(error) => format!("{note}; could not delete {}: {error}", path.display()),
-    };
-    let successor = record.id;
-    launch_tui(services, Some(successor.clone()), false, Some(note))
-        .map_err(|failure| import_resume_failure(failure, &successor, &source_id))
-}
-
-fn import_resume_failure(failure: CliFailure, successor: &str, source: &str) -> CliFailure {
-    CliFailure::new(format!(
-        "{}; session {successor} was carried forward from {source}; fix the error and run: plak --resume {successor}",
-        failure.message()
-    ))
 }
 
 fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Command, String> {

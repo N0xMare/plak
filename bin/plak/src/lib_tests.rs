@@ -10,19 +10,7 @@ use super::*;
 use crate::command::{RunEffort, run_effort_levels, run_effort_usage};
 use crate::presentation::credential_locations_text;
 use plakous::subscriptions::NativeLoginMode;
-
-#[test]
-fn import_resume_post_commit_failure_names_the_successor_and_recovery_command() {
-    let failure = import_resume_failure(
-        CliFailure::new("synthetic TUI failure"),
-        "new-session",
-        "old-session",
-    );
-    assert_eq!(
-        failure.message(),
-        "synthetic TUI failure; session new-session was carried forward from old-session; fix the error and run: plak --resume new-session"
-    );
-}
+use std::path::PathBuf;
 
 #[test]
 fn reload_handoff_reuses_the_tui_probe_verdict_without_reprobing() {
