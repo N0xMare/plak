@@ -2,7 +2,6 @@
 default-members = ["bin/plak"]
 exclude = [
     ".plak",
-    "vendor/codex-code-mode-protocol",
     "vendor/monty-typeshed",
     "tests/fixtures/agent-consumer",
     "tests/fixtures/facade-consumer",
@@ -47,6 +46,7 @@ members = [
     "crates/providers/xai",
     "tests/harnesses/offline-crash",
     "tests/fixtures/mcp-fake-server",
+    "vendor/codex-code-mode-protocol",
 ]
 resolver = "3"
 
@@ -170,6 +170,7 @@ layers = [
     "host",
     "bin",
     "test",
+    "vendor",
 ]
 
 harness-pack-independent = ["plakous-prompts"]
@@ -177,7 +178,7 @@ harness-pack-independent = ["plakous-prompts"]
 [workspace.metadata.plakous.edges]
 core = ["core"]
 common = ["common"]
-engine = ["core", "common", "engine"]
+engine = ["core", "common", "engine", "vendor"]
 protocol = ["core:plakous-model", "common", "protocol"]
 provider = ["core:plakous-model", "common", "protocol"]
 store = ["core"]
@@ -186,6 +187,7 @@ facade = ["core", "common", "engine", "provider", "store", "harness"]
 host = ["facade", "host"]
 bin = ["facade", "host"]
 test = ["*"]
+vendor = []
 
 [workspace.metadata.plakous.edge-exceptions]
 plak = [
@@ -214,6 +216,7 @@ facade = ["crates/plakous"]
 host = ["crates/hosting/{short}", "crates/orchestration/{short}"]
 bin = ["bin/{name}"]
 test = ["tests/**"]
+vendor = ["vendor/{short}"]
 
 [workspace.metadata.plakous.classes]
 core = ["supported"]
@@ -227,6 +230,7 @@ facade = ["supported"]
 host = ["published-internal"]
 bin = ["supported", "published-internal"]
 test = ["repository-only"]
+vendor = ["published-internal"]
 
 [workspace.metadata.plakous.production-dependencies]
 plak = [

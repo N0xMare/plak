@@ -1,7 +1,7 @@
 # Reviewed vendor snapshot. See PROVENANCE.md for the exact upstream identity
-# and the files copied. This package is excluded from workspace membership and
-# is compiled by Cargo as an ordinary path dependency, so it neither inherits
-# nor is bound by the workspace lints.
+# and the files copied. A workspace member so `cargo package --workspace`
+# packages it with the cohort; it keeps its upstream edition, rust-version,
+# license and lints instead of inheriting the workspace's.
 [package]
 name = "plakous-codex-code-mode-protocol"
 description = "Reviewed vendor snapshot of the pinned Codex Code Mode description and schema rendering, packaged for Plakous"
@@ -16,6 +16,10 @@ documentation = "https://docs.rs/plakous-codex-code-mode-protocol"
 readme = "README.md"
 keywords = ["llm", "agent", "codex", "code-mode", "schema"]
 categories = ["development-tools"]
+
+[package.metadata.plakous]
+layer = "vendor"
+class = "published-internal"
 
 [lib]
 path = "src/lib.rs"

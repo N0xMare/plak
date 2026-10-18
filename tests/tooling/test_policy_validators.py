@@ -955,7 +955,7 @@ class RepositoryPolicyTests(unittest.TestCase):
 
     def test_every_package_carries_layer_metadata_and_the_tree_is_clean(self) -> None:
         workspace = self.workspace
-        self.assertEqual(len(workspace.packages), 39)
+        self.assertEqual(len(workspace.packages), 40)
         for validator in (
             workspace_policy.validate_package_metadata,
             workspace_policy.validate_layout,
@@ -1033,6 +1033,7 @@ class RepositoryPolicyTests(unittest.TestCase):
                 "plakous-auth",
                 "plakous-chat-completions",
                 "plakous-code-mode",
+                "plakous-codex-code-mode-protocol",
                 "plakous-exchange",
                 "plakous-js-eval",
                 "plakous-js-runtime",
@@ -1056,7 +1057,7 @@ class RepositoryPolicyTests(unittest.TestCase):
         }
         actual = workspace_policy.package_classifications(self.workspace)
         self.assertEqual(actual, expected)
-        self.assertEqual(sum(map(len, actual.values())), 39)
+        self.assertEqual(sum(map(len, actual.values())), 40)
 
     def test_layers_and_neutral_packages_are_as_designed(self) -> None:
         by_layer = {
@@ -1076,6 +1077,7 @@ class RepositoryPolicyTests(unittest.TestCase):
             },
         )
         self.assertEqual(by_layer["bin"], {"plak"})
+        self.assertEqual(by_layer["vendor"], {"plakous-codex-code-mode-protocol"})
         self.assertEqual(
             by_layer["harness"],
             {
@@ -2066,7 +2068,8 @@ class FeaturePolicyTests(unittest.TestCase):
         self.assertEqual(edges["plakous-agent"], {"plakous-model", "plakous-tools"})
         self.assertEqual(edges["plakous-store"], {"plakous-agent"})
         self.assertIn("plakous-responses-dialect", edges["plakous-openai"])
-        self.assertEqual(edges["plakous-code-mode"], set())
+        self.assertEqual(edges["plakous-code-mode"], {"plakous-codex-code-mode-protocol"})
+        self.assertEqual(edges["plakous-codex-code-mode-protocol"], set())
         self.assertNotIn("plakous-dispatch", edges)
         self.assertEqual(self.workspace.policy.edge_exceptions.get("plakous-code-mode"), None)
         self.assertIn(
@@ -2242,6 +2245,7 @@ class DensityScopeTests(unittest.TestCase):
         self.assertEqual(scopes["plakous-hosted"], "host")
         self.assertEqual(scopes["plak"], "product")
         self.assertEqual(scopes["plakous-test-support"], "test")
+        self.assertEqual(scopes["plakous-codex-code-mode-protocol"], "vendor")
 
 
 if __name__ == "__main__":

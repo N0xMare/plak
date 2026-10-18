@@ -54,9 +54,9 @@ ROOT = Path(__file__).resolve().parents[2]
 # for a member and spelled out for a standalone fixture workspace.
 WORKSPACE_LICENSE = "MIT"
 WORKSPACE_REPOSITORY = "https://github.com/N0xMare/plak"
-# The reviewed vendor snapshot published beside the cohort under its upstream
-# license; every other published package is a workspace member.
-PUBLISHED_VENDOR_PACKAGE = Path("vendor/codex-code-mode-protocol")
+# The reviewed vendor snapshot, the one `vendor` layer member: published with
+# the cohort under its upstream license, edition, rust-version and lints.
+VENDOR_PACKAGE = "plakous-codex-code-mode-protocol"
 VENDOR_LICENSE = "Apache-2.0"
 # The crates.io category slugs this workspace uses (a reviewed subset of the
 # registry's list; an unknown slug is rejected at upload).
@@ -2571,12 +2571,10 @@ def validate_local_production_lints(
     """Require the repository's unsafe prohibition for every local production crate."""
     errors = []
     for name, manifest in workspace_manifests.items():
-        if name == "plakous-js-eval":
+        if name in ("plakous-js-eval", VENDOR_PACKAGE):
             unsafe_code = manifest.get("lints", {}).get("rust", {}).get("unsafe_code")
             if unsafe_code != "forbid":
-                errors.append(
-                    'plakous-js-eval: unsafe_code must be explicitly "forbid"'
-                )
+                errors.append(f'{name}: unsafe_code must be explicitly "forbid"')
             continue
         if manifest.get("lints") != {"workspace": True}:
             errors.append(f"{name}: workspace lint inheritance is required")
@@ -3473,18 +3471,6 @@ def validate_publication(
     return errors
 
 
-def vendor_package_metadata(root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Cargo metadata and manifest of the published vendor snapshot."""
-    manifest_path = root / PUBLISHED_VENDOR_PACKAGE / "Cargo.toml"
-    graph = json.loads(subprocess.check_output(
-        ["cargo", "metadata", "--format-version", "1", "--no-deps", "--offline",
-         "--manifest-path", str(manifest_path)],
-        cwd=root, text=True,
-    ))
-    with manifest_path.open("rb") as stream:
-        return graph["packages"][0], tomllib.load(stream)
-
-
 def package_rust_files(root: Path, package: Package, nested: set[str]) -> dict[str, str]:
     """Tracked Rust files of one package, excluding nested package roots."""
     listed = subprocess.run(
@@ -3520,10 +3506,7 @@ def validate_workspace_excludes(
     errors: list[str] = []
     if ".plak" not in excludes:
         errors.append("workspace must exclude .plak operator state and fork worktrees")
-    reviewed_vendor_packages = {
-        "vendor/codex-code-mode-protocol",
-        "vendor/monty-typeshed",
-    }
+    reviewed_vendor_packages = {"vendor/monty-typeshed"}
     unknown_excludes = excludes - supported_fixture_paths - reviewed_vendor_packages - {".plak"}
     if unknown_excludes:
         errors.append(
@@ -3597,6 +3580,12 @@ def main() -> int:
     root_license = (ROOT / "LICENSE").read_text(encoding="utf-8")
     for name, package in sorted(packages.items()):
         metadata = package.metadata
+        if name == VENDOR_PACKAGE:
+            errors.extend(validate_publication(
+                name, package.package_class, metadata, package.manifest,
+                package.manifest_path.parent, VENDOR_LICENSE, None,
+            ))
+            continue
         if metadata.get("edition") != "2024":
             errors.append(f"{name}: edition must be 2024")
         if metadata.get("rust_version") != "1.99.0":
@@ -3607,11 +3596,6 @@ def main() -> int:
             name, package.package_class, metadata, package.manifest,
             package.manifest_path.parent, WORKSPACE_LICENSE, root_license,
         ))
-    vendor_metadata, vendor_manifest = vendor_package_metadata(ROOT)
-    errors.extend(validate_publication(
-        vendor_metadata["name"], "published-internal", vendor_metadata, vendor_manifest,
-        ROOT / PUBLISHED_VENDOR_PACKAGE, VENDOR_LICENSE, None,
-    ))
 
     # Every supported library package has exactly one external consumer fixture;
     # `plak` is pinned by cli_contract.rs instead.

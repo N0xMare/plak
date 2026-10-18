@@ -33,9 +33,11 @@ SCOPE_LAYERS: dict[str, tuple[str, ...]] = {
     "host": ("host",),
     "product": ("bin",),
     "test": ("test",),
+    # The reviewed upstream snapshot ships, but it is not code written here.
+    "vendor": ("vendor",),
 }
 SCOPES = tuple(SCOPE_LAYERS)
-# Scopes that count as shipped production code (everything but test).
+# Scopes that count as shipped production code written here (not test or vendor).
 PRODUCTION_SCOPES = ("l0", "below_facade", "host", "product")
 
 RESPONSIBILITIES = (

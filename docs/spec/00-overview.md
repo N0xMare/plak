@@ -53,17 +53,17 @@ Publication and Rust nameability confer accessibility, not support. A published
 package carries no direct-use compatibility, qualification, or support promise
 unless it is in the supported class.
 
-The workspace contains 39 packages: five supported, 31 published internal, and
-three repository-only. The supported and published-internal packages, with the
-vendored `plakous-codex-code-mode-protocol`, are publishable to crates.io as one
-exact version cohort; the repository-only packages set `publish = false`
-(chapter 06 §1).
+The workspace contains 40 packages: five supported, 32 published internal
+(the vendored `plakous-codex-code-mode-protocol` among them), and three
+repository-only. The supported and published-internal packages are publishable
+to crates.io as one exact cohort; the repository-only packages set
+`publish = false` (chapter 06 §1).
 
 - **Supported:** `plakous`, `plakous-agent`, `plakous-model`, `plakous-tools`,
   `plak`. Each has an exact inventory pinned by a compile fixture or process
   test, not by whatever happens to be `pub`.
 - **Published internal:** the common, engine, protocol, provider, store,
-  harness, and host crates listed in the crate map below.
+  harness, host, and vendor crates listed in the crate map below.
 - **Repository-only:** `plakous-test-support`,
   `plakous-offline-crash-harness`, and `plakous-mcp-fake-server`.
 
@@ -87,8 +87,8 @@ SQLite is statically embedded (3.53.2) with the reviewed compile options.
 ## Crate map
 
 Every workspace member declares its architectural `layer` and support class in
-`[package.metadata.plakous]`. The fuzz crate and `vendor/codex-code-mode-protocol`
-are not workspace members and carry no such table. Libraries are grouped by
+`[package.metadata.plakous]`. The fuzz crate and `vendor/monty-typeshed` are
+not workspace members and carry no such table. Libraries are grouped by
 responsibility under `crates/`; the complete-workflow crate is
 `crates/plakous`, and the product is `bin/plak`. Directory groups do not
 authorize dependency edges. Chapter 06 §3 owns the legal dependencies, support
@@ -150,9 +150,11 @@ vendor snapshot (chapter 06 §7.3).
 `vendor/codex-code-mode-protocol`, packaged as
 `plakous-codex-code-mode-protocol` (upstream `codex-code-mode-protocol`, renamed),
 which carries only the description and schema-rendering closure Plakous calls,
-with its upstream identity and license recorded in its `PROVENANCE.md`. That
-package is excluded from workspace membership and compiled by Cargo as an
-ordinary path dependency, so no consumer carries a Codex `[patch]` table.
+with its upstream identity and license recorded in its `PROVENANCE.md`. It is
+the one member of the `vendor` layer, with no internal dependencies, and keeps
+its upstream edition, rust-version, license and lints; `plakous-code-mode`
+depends on it by path and exact version, so no consumer carries a Codex
+`[patch]` table.
 
 ## Facade features
 
