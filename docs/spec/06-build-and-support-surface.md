@@ -568,7 +568,7 @@ preloaded image `plak-qual-base:6b7eb083` (image ID `6b7eb0837c32`), which is
 not published; without that image on a Linux x86_64 Docker host the gate cannot
 run, and the platform tiers above remain the public evidence. The image holds Alpine 3.24.2,
 Rust 1.99.0 with a musl host toolchain, clippy, rustfmt and C/C++ tools, Python 3.14,
-git, jj, just, and the registry sources for cargo-deny (not its executable),
+curl, git, jj, just, and the registry sources for cargo-deny (not its executable),
 the workspace and compile-contract fixture lockfiles. It never pulls an image or installs tools.
 Provide the executable musl cargo-nextest 0.9.100 in `~/plak-musl/bin`
 (override with `PLAK_MUSL_TOOLS`); GNU-host tools cannot substitute for it.

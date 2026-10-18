@@ -12,7 +12,7 @@
 #     docker build --platform linux/amd64 -f scripts/musl-image.Dockerfile \
 #       --target nextest --output type=local,dest="$HOME/plak-musl/bin" -
 FROM rust:1.99.0-alpine AS base
-RUN apk add --no-cache bash bubblewrap clang22-dev coreutils findutils gcc git jujutsu \
+RUN apk add --no-cache bash bubblewrap clang22-dev coreutils curl findutils gcc git jujutsu \
       just lld make musl-dev musl-utils openssl-dev perl pkgconf procps python3 tar \
       util-linux xz \
  && rustup component add clippy rustfmt
