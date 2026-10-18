@@ -371,7 +371,9 @@ pub(crate) fn operator_facing_agent_error(prefix: &str, error: &AgentError) -> S
     let retry_after = error.model_context().and_then(|context| {
         raw.push_str(&operator_facing_model_context_suffix(context));
         match context.retryability() {
-            plakous::model::ModelRetryability::Eligible { retry_after } => retry_after,
+            plakous::model::ModelRetryability::Eligible { retry_after } => {
+                retry_after.map(|delay| delay.as_millis().div_ceil(1000))
+            }
             _ => None,
         }
     });
@@ -384,12 +386,11 @@ pub(crate) fn operator_facing_agent_error(prefix: &str, error: &AgentError) -> S
 fn operator_facing_render(
     raw: String,
     kind: Option<plakous::model::ModelErrorKind>,
-    retry_after: Option<plakous::model::ModelRetryDelay>,
+    retry_after_secs: Option<u64>,
 ) -> String {
     use plakous::model::ModelErrorKind;
-    let retry_hint = retry_after.map_or_else(String::new, |delay| {
-        format!(" · retry after {}s", delay.as_millis().div_ceil(1000))
-    });
+    let retry_hint =
+        retry_after_secs.map_or_else(String::new, |secs| format!(" · retry after {secs}s"));
     let headline = match kind {
         Some(ModelErrorKind::RateLimited) => format!(
             "the provider returned a rate-limit response; the exact cause is unavailable{retry_hint}"
@@ -973,7 +974,7 @@ mod tests {
         let rendered = operator_facing_render(
             "agent turn failed: anthropic/RateLimited request_id=req_safe".to_owned(),
             Some(plakous::model::ModelErrorKind::RateLimited),
-            Some(plakous::model::ModelRetryDelay::from_millis(60_000).unwrap()),
+            Some(60),
         );
         assert!(rendered.starts_with(
             "the provider returned a rate-limit response; the exact cause is unavailable · retry after 60s\n"
