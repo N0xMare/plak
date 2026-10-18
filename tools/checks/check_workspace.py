@@ -359,7 +359,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[SourceKey, list[tuple[str, tuple[tuple[
         ("var_os", (("string", "PLAK_LOG"),)),
         ("var_os", (("string", "OTEL_EXPORTER_OTLP_ENDPOINT"),)),
     ],
-    ("plak", "src/lib.rs"): [
+    ("plak", "src/commands/doctor.rs"): [
         ("var_os", (("string", "XDG_RUNTIME_DIR"),)),
     ],
     ("plak", "src/presentation.rs"): [

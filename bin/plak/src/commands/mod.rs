@@ -8,6 +8,7 @@
 pub mod agent;
 pub mod application;
 pub mod catalog;
+pub(crate) mod doctor;
 pub mod host_config;
 pub mod login;
 pub(crate) mod login_flow;
