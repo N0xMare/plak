@@ -48,6 +48,11 @@ fn git_branch(cwd: &Path) -> Option<String> {
     }
 }
 
+#[cfg(not(feature = "git-cli"))]
+fn git_branch(_: &Path) -> Option<String> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::shorten_home;
@@ -62,9 +67,4 @@ mod tests {
             );
         }
     }
-}
-
-#[cfg(not(feature = "git-cli"))]
-fn git_branch(_: &Path) -> Option<String> {
-    None
 }

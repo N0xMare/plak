@@ -458,6 +458,7 @@ pub fn candidate_ref(namespace: &str, candidate_id: &str) -> String {
     )
 }
 
+#[cfg(feature = "jj-lib")]
 pub(crate) fn reserve_candidate_namespace(
     common: &Path,
     digest: &str,

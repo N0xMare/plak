@@ -774,19 +774,23 @@ fn kill_at(
             native_finals >= 2,
             "the live cut must carry prior and final sealed candidates"
         );
-        let product: String = rusqlite::Connection::open(paths.product_database())?.query_row(
-            "SELECT id FROM sessions",
-            [],
-            |row| row.get(0),
-        )?;
-        let record = crate::product_sessions::load_session(&paths, &product)?;
-        let before = std::fs::read(paths.runtime_database())?;
-        crate::commands::reload_rehearsal::assert_finalization_rehearsal(&paths, &record, head);
-        assert_eq!(
-            before,
-            std::fs::read(paths.runtime_database())?,
-            "rehearsal wrote the runtime store"
-        );
+        // The reload rehearsal is a maintainer-build command.
+        #[cfg(feature = "maintainer")]
+        {
+            let product: String = rusqlite::Connection::open(paths.product_database())?.query_row(
+                "SELECT id FROM sessions",
+                [],
+                |row| row.get(0),
+            )?;
+            let record = crate::product_sessions::load_session(&paths, &product)?;
+            let before = std::fs::read(paths.runtime_database())?;
+            crate::commands::reload_rehearsal::assert_finalization_rehearsal(&paths, &record, head);
+            assert_eq!(
+                before,
+                std::fs::read(paths.runtime_database())?,
+                "rehearsal wrote the runtime store"
+            );
+        }
         let pid = std::fs::read_to_string(workspace.join("finalization-job.pid"))?;
         assert!(
             Command::new("kill")
@@ -853,19 +857,23 @@ fn kill_at(
                 "provider/effect is not Finalized"
             );
         }
-        let product: String = rusqlite::Connection::open(paths.product_database())?.query_row(
-            "SELECT id FROM sessions",
-            [],
-            |row| row.get(0),
-        )?;
-        let record = crate::product_sessions::load_session(&paths, &product)?;
-        let before = std::fs::read(paths.runtime_database())?;
-        crate::commands::reload_rehearsal::assert_abandonment_rehearsal(&paths, &record, head);
-        assert_eq!(
-            before,
-            std::fs::read(paths.runtime_database())?,
-            "rehearsal wrote the runtime store"
-        );
+        // The reload rehearsal is a maintainer-build command.
+        #[cfg(feature = "maintainer")]
+        {
+            let product: String = rusqlite::Connection::open(paths.product_database())?.query_row(
+                "SELECT id FROM sessions",
+                [],
+                |row| row.get(0),
+            )?;
+            let record = crate::product_sessions::load_session(&paths, &product)?;
+            let before = std::fs::read(paths.runtime_database())?;
+            crate::commands::reload_rehearsal::assert_abandonment_rehearsal(&paths, &record, head);
+            assert_eq!(
+                before,
+                std::fs::read(paths.runtime_database())?,
+                "rehearsal wrote the runtime store"
+            );
+        }
         let pid = std::fs::read_to_string(workspace.join("finalization-job.pid"))?;
         assert!(
             Command::new("kill")
