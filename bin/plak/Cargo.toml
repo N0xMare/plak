@@ -12,7 +12,6 @@ readme.workspace = true
 keywords = ["llm", "agent", "cli", "tui", "coding-agent"]
 categories = ["command-line-utilities", "development-tools"]
 exclude.workspace = true
-publish = false
 
 [package.metadata.plakous]
 layer = "bin"

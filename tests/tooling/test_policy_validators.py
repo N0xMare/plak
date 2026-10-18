@@ -190,6 +190,13 @@ class PublicationTests(unittest.TestCase):
             'plakous-demo: published members inherit the workspace exclude list',
         ])
 
+    def test_a_published_class_with_publish_false_is_reported(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            findings = self.validate(directory, self.published(directory, publish=[]))
+        self.assertEqual(findings, [
+            'plakous-demo: published-internal packages are published (no publish key)'])
+
     def test_repository_only_packages_stay_unpublished(self):
         with tempfile.TemporaryDirectory() as raw:
             findings = workspace_policy.validate_publication(

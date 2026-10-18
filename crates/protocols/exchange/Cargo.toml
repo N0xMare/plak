@@ -12,7 +12,6 @@ readme = "README.md"
 keywords = ["llm", "agent", "http"]
 categories = ["api-bindings", "web-programming::http-client"]
 exclude.workspace = true
-publish = false
 
 [package.metadata.plakous]
 layer = "protocol"

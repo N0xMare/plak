@@ -12,7 +12,6 @@ readme = "README.md"
 keywords = ["llm", "agent", "mcp", "tools"]
 categories = ["development-tools"]
 exclude.workspace = true
-publish = false
 
 [package.metadata.plakous]
 layer = "harness"

@@ -12,7 +12,6 @@ readme = "README.md"
 keywords = ["llm", "agent", "http", "tls"]
 categories = ["web-programming::http-client", "network-programming"]
 exclude.workspace = true
-publish = false
 
 [package.metadata.plakous]
 layer = "common"

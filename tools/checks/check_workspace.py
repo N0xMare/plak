@@ -3427,6 +3427,8 @@ def validate_publication(
             return [f"{name}: repository-only packages must have publish = false"]
         return []
     errors: list[str] = []
+    if metadata.get("publish") is not None:
+        errors.append(f"{name}: {package_class} packages are published (no publish key)")
     if not metadata.get("description"):
         errors.append(f"{name}: published packages need a description")
     if metadata.get("license") != license_expression:
@@ -3588,11 +3590,6 @@ def main() -> int:
     root_license = (ROOT / "LICENSE").read_text(encoding="utf-8")
     for name, package in sorted(packages.items()):
         metadata = package.metadata
-        # This is the pre-release workspace baseline, not the final publication
-        # topology. Published-internal packages remain unpublished until the
-        # consolidation and registry-cohort stages deliberately change it.
-        if metadata.get("publish") != []:
-            errors.append(f"{name}: pre-release packages must have publish = false")
         if metadata.get("edition") != "2024":
             errors.append(f"{name}: edition must be 2024")
         if metadata.get("rust_version") != "1.99.0":

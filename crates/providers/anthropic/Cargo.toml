@@ -12,7 +12,6 @@ readme = "README.md"
 keywords = ["llm", "agent", "anthropic", "claude", "provider"]
 categories = ["api-bindings"]
 exclude.workspace = true
-publish = false
 
 [package.metadata.plakous]
 layer = "provider"

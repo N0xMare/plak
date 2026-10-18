@@ -12,7 +12,6 @@ readme = "README.md"
 keywords = ["llm", "agent", "prompts"]
 categories = ["text-processing"]
 exclude.workspace = true
-publish = false
 
 [package.metadata.plakous]
 layer = "harness"

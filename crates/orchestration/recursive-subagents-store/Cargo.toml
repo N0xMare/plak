@@ -12,7 +12,6 @@ readme = "README.md"
 keywords = ["llm", "agent", "subagents", "sqlite"]
 categories = ["database"]
 exclude.workspace = true
-publish = false
 
 [package.metadata.plakous]
 layer = "host"

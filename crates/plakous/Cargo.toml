@@ -12,7 +12,6 @@ readme.workspace = true
 keywords = ["llm", "agent", "ai", "harness", "embedding"]
 categories = ["development-tools", "asynchronous"]
 exclude.workspace = true
-publish = false
 
 [package.metadata.plakous]
 layer = "facade"
