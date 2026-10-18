@@ -373,8 +373,9 @@ class PackageReleaseTests(unittest.TestCase):
         writer = "".join(
             f"printf '#!/bin/sh\\n# {name}\\n' >\"$out/{name}\"; chmod 755 \"$out/{name}\"; "
             for name in EXECUTABLES)
-        self.stub("cargo", f"""printf 'cargo %s target=%s flags=%s\\n' "$*" "$CARGO_BUILD_TARGET" \
-"$(printf '%s' "${{CARGO_ENCODED_RUSTFLAGS:-}}" | tr '\\037' ' ')" >>{self.log}
+        self.stub("cargo", f"""cflags="CFLAGS_${{CARGO_BUILD_TARGET//-/_}}"
+printf 'cargo %s target=%s flags=%s cflags=%s\\n' "$*" "$CARGO_BUILD_TARGET" \
+"$(printf '%s' "${{CARGO_ENCODED_RUSTFLAGS:-}}" | tr '\\037' ' ')" "${{!cflags:-}}" >>{self.log}
 case "$1" in
   metadata)
     case "$*" in *--no-deps*) echo '{{"packages":[{{"name":"plak","version":"{VERSION}"}}]}}' ;;
@@ -424,10 +425,12 @@ esac""")
                 builds = [line for line in self.log.read_text().splitlines()
                           if line.startswith("cargo build")]
                 self.assertEqual(len(builds), 2)
+                maps = (f"{self.base}=/cargo", f"{self.repo}=/plak", f"{self.base}/target=/target")
+                rust = " ".join(f"--remap-path-prefix={m}" for m in maps)
+                c = " ".join(f"-ffile-prefix-map={m}" for m in maps)
                 for line in builds:
-                    self.assertIn(f"--profile release target={triple} flags="
-                                  f"--remap-path-prefix={self.base}=/cargo "
-                                  f"--remap-path-prefix={self.repo}=/plak", line)
+                    self.assertIn(f"--profile release target={triple} flags={rust} cflags={c}",
+                                  line)
                     self.assertNotIn("maintainer", line)
         sums = (self.base / "target/release-dist/SHA256SUMS").read_text().splitlines()
         self.assertEqual(len(sums), 2)

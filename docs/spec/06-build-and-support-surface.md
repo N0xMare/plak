@@ -980,11 +980,13 @@ with the compiler, linker and prerequisite checks of `just musl-native`
 refuses a dirty tree and, unless `--untagged` (a rehearsal), a `HEAD` without
 the tag `v<version>` of the workspace version. The build is
 `tools/build/build-plak.sh --artifacts`: the `just install` Cargo invocations
-and artifact linkage check, without installing. It adds
-`--remap-path-prefix` for the Cargo home and the checkout through
-`CARGO_ENCODED_RUSTFLAGS`, so the binaries carry no build-host paths; caller
-rustc flags go in that variable too, and `RUSTFLAGS` is refused because Cargo
-would ignore it. `tools/release/release_tarball.py` then writes
+and artifact linkage check, without installing. It maps the Cargo home, the
+checkout and the target directory to `/cargo`, `/plak` and `/target` with
+`--remap-path-prefix` in `CARGO_ENCODED_RUSTFLAGS` and `-ffile-prefix-map` in
+the target's `CFLAGS_<triple>`/`CXXFLAGS_<triple>`, so neither Rust panic
+locations nor vendored C assertions carry build-host paths; caller rustc flags
+go in that variable too, and `RUSTFLAGS` is refused because Cargo would ignore
+it. `tools/release/release_tarball.py` then writes
 `plak-<version>-<triple>.tar.gz` and rewrites `SHA256SUMS` over every release
 tarball in the output directory (default `<target dir>/release-dist`). The
 tarball holds one directory `plak-<version>-<triple>/` with `plak`,
