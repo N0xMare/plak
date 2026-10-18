@@ -3483,11 +3483,25 @@ def validate_publication(
 
 
 def package_rust_files(root: Path, package: Package, nested: set[str]) -> dict[str, str]:
-    """Tracked Rust files of one package, excluding nested package roots."""
-    listed = subprocess.run(
-        ["git", "ls-files", "-z", "--", f"{package.directory}/*.rs"],
-        cwd=root, capture_output=True, check=True,
-    ).stdout.decode().split("\0")
+    """Tracked Rust files of one package, excluding nested package roots.
+
+    Outside a git checkout (the musl container's source export holds exactly
+    the tracked and nonignored untracked files) every `*.rs` file under the
+    package directory except build output counts as tracked.
+    """
+    if (root / ".git").exists():
+        listed = subprocess.run(
+            ["git", "ls-files", "-z", "--", f"{package.directory}/*.rs"],
+            cwd=root, capture_output=True, check=True,
+        ).stdout.decode().split("\0")
+    else:
+        listed = []
+        for directory, directories, names in os.walk(root / package.directory):
+            directories[:] = sorted(name for name in directories if name not in {".git", "target"})
+            listed.extend(
+                (Path(directory) / name).relative_to(root).as_posix()
+                for name in sorted(names) if name.endswith(".rs")
+            )
     files: dict[str, str] = {}
     for path in filter(None, listed):
         if any(path.startswith(f"{other}/") for other in nested):

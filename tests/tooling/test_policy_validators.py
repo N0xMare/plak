@@ -71,6 +71,49 @@ class PackageLocalIncludeTests(unittest.TestCase):
         self.assertIn("src/profiles.rs:2 includes '../../../configs/a.toml'", findings[1])
 
 
+class PackageRustFilesTests(unittest.TestCase):
+    FILES = {
+        'pkg/src/lib.rs': 'pub fn a() {}',
+        'pkg/src/deep/b.rs': 'pub fn b() {}',
+        'pkg/tests/t.rs': '#[test] fn t() {}',
+        'pkg/README.md': 'not rust',
+        'pkg/inner/src/lib.rs': 'nested package',
+        'pkg/target/debug/build/out.rs': 'build output',
+    }
+    EXPECTED = {
+        'src/lib.rs': 'pub fn a() {}',
+        'src/deep/b.rs': 'pub fn b() {}',
+        'tests/t.rs': '#[test] fn t() {}',
+    }
+
+    def write_tree(self, root: Path) -> Package:
+        for relative, text in self.FILES.items():
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding='utf-8')
+        return synthetic_package('pkg', 'common', 'pkg')
+
+    def test_source_export_without_git_lists_package_rust_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = self.write_tree(root)
+            files = workspace_policy.package_rust_files(root, package, {'pkg/inner'})
+        self.assertEqual(files, self.EXPECTED)
+
+    def test_export_listing_matches_git_tracked_listing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = self.write_tree(root)
+            exported = workspace_policy.package_rust_files(root, package, {'pkg/inner'})
+            (root / '.gitignore').write_text('target/\n', encoding='utf-8')
+            git = ['git', '-c', 'init.defaultBranch=main', '-C', directory]
+            subprocess.run([*git, 'init', '-q'], check=True)
+            subprocess.run([*git, 'add', '-A'], check=True)
+            tracked = workspace_policy.package_rust_files(root, package, {'pkg/inner'})
+        self.assertEqual(exported, tracked)
+        self.assertEqual(tracked, self.EXPECTED)
+
+
 class PackagedDependencyTests(unittest.TestCase):
     CLASSES = {'plak': 'supported', 'lib': 'published-internal', 'harness': 'repository-only'}
 
