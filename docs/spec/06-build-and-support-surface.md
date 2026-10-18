@@ -789,10 +789,12 @@ complete example, including utility dependencies. No registry publication or
 independent binary distribution is established by these examples.
 
 The root `[patch.crates-io]` selects the reviewed `vendor/monty-typeshed`
-1.1.0 dependency snapshot. Only its build script changes: ZIP timestamps
-are fixed to 1980-01-01 and entries are sorted by name. The Python stubs and
-interpreter remain unchanged. The snapshot's provenance is recorded in
-`vendor/monty-typeshed/PLAK-PATCH.md`; it is excluded from workspace membership
+1.1.0 dependency snapshot. Only its build script and ZIP dependency change:
+ZIP timestamps are fixed to 1980-01-01, entries are sorted by name, and the
+archive is written and read with `zip` 9 instead of the advisory-affected
+`zip` 0.6. The Python stubs and interpreter remain unchanged. The snapshot's
+provenance is recorded in `vendor/monty-typeshed/PLAK-PATCH.md`; it is
+excluded from workspace membership
 and compiled by Cargo as a dependency. This eliminates per-build archive
 extraction and patch application while preserving deterministic type-checker
 assets. The shared lock
@@ -965,6 +967,13 @@ check cannot complete. This is not a vulnerability waiver for a shipped
 component. Reevaluate the exception when these dependencies or supported
 targets change.
 
+The `zip` extraction advisories RUSTSEC-2026-0367, -0368 and -0369 are
+excepted only for `zip` 8.6.0, which `ruff_db` 0.0.14 (the Ruff/ty version
+Monty 1.1.0 locks) uses to read the bundled typeshed archive from memory; it
+never calls the affected extraction APIs. `monty-typeshed` itself uses the
+patched `zip` 9 (§7.3). Reevaluate the exception when `ruff_db` moves to
+`zip` 9 or starts extracting archives.
+
 ### 7.2 Licenses
 
 The workspace is `MIT`; vendored sources and the Codex and pi excerpts named in
@@ -995,8 +1004,10 @@ sources.
 ### 7.3 Dependency overrides and the Code Mode protocol
 
 One `[patch.crates-io]` redirect steers a dependency to the reviewed set:
-`monty-typeshed` → the reviewed local reproducibility fix. No dependency
-resolves from a Git source.
+`monty-typeshed` → the reviewed local fix: a reproducible typeshed archive
+(fixed timestamps, sorted entries) built with `zip` 9. The same change is
+prepared for upstream Monty; remove the override once a reviewed upstream
+release carries it. No dependency resolves from a Git source.
 
 Code Mode uses the reviewed `vendor/codex-code-mode-protocol` snapshot and the
 local `plakous-js-runtime` rquickjs evaluator, which runs only in the

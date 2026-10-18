@@ -1143,7 +1143,7 @@ a Codex patch table.
 
 | Override | Replacement | Why |
 | --- | --- | --- |
-| `monty-typeshed` from crates.io | the reviewed local 1.1.0 snapshot | deterministic ZIP timestamps and entry ordering for bundled type-checker assets |
+| `monty-typeshed` from crates.io | the reviewed local 1.1.0 snapshot | deterministic ZIP timestamps and entry ordering for bundled type-checker assets, written with `zip` 9 instead of the advisory-affected `zip` 0.6 |
 
 The vendored `codex-code-mode-protocol` snapshot is upstream version 0.153.3
 at an exact Git revision. Plakous uses its protocol and presentation types;

@@ -17,7 +17,7 @@ use path_slash::PathExt;
 use zip::{
     CompressionMethod,
     result::ZipResult,
-    write::{FileOptions, ZipWriter},
+    write::{SimpleFileOptions, ZipWriter},
 };
 
 const TYPESHED_SOURCE_DIR: &str = "vendor/typeshed";
@@ -47,7 +47,7 @@ fn write_zipped_typeshed_to(writer: File) -> ZipResult<File> {
         CompressionMethod::Stored
     };
 
-    let options = FileOptions::default()
+    let options = SimpleFileOptions::default()
         .last_modified_time(zip::DateTime::default())
         .compression_method(method)
         .unix_permissions(0o644);
