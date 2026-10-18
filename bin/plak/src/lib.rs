@@ -194,6 +194,10 @@ use crate::commands::support::{
     profile_acceptance_label, status_credential_cell, subscription_provider_label,
 };
 use crate::commands::usage::{collect_usage_limits, usage_vertical_for_account};
+use crate::presentation::{
+    cli_human_output, credential_locations_line, event_table_row, format_unix_seconds,
+    product_account_label, session_preview_line, title_case_token, transcript_entry,
+};
 use crate::shell::services::Services;
 
 /// Run the Plak CLI using process arguments from the environment.
@@ -1923,122 +1927,6 @@ fn doctor_spawn_templates(
     }
 }
 
-fn transcript_entry(row: &product_sessions::TranscriptRow) -> Option<(&'static str, &str)> {
-    use product_sessions::TranscriptRow;
-    match row {
-        TranscriptRow::User { text, .. } => Some(("User", text)),
-        TranscriptRow::Steer { text, .. } => Some(("Steer", text)),
-        TranscriptRow::Assistant { text } => Some(("Assistant", text)),
-        TranscriptRow::Notice(notice)
-            if notice.placement() != product_sessions::NoticePlacement::SessionLog =>
-        {
-            Some(("Note", &notice.text))
-        }
-        _ => None,
-    }
-}
-
-/// First meaningful transcript snippet for session lists / resume picker.
-fn session_preview_line(session: &product_sessions::SessionRecord) -> String {
-    if let Some(title) = session.title.as_deref().filter(|t| !t.is_empty()) {
-        return title.chars().take(48).collect();
-    }
-    for row in session.transcript.iter() {
-        let (product_sessions::TranscriptRow::User { text, .. }
-        | product_sessions::TranscriptRow::Assistant { text }) = row
-        else {
-            continue;
-        };
-        let body = text.trim();
-        if !body.is_empty() {
-            return body.chars().take(48).collect();
-        }
-    }
-    "(empty)".to_owned()
-}
-
-fn cli_human_output() -> cli_output::HumanOutput {
-    cli_output::HumanOutput::resolve(
-        cli_output::TerminalMode::of_stdout(),
-        env::var_os("NO_COLOR").as_deref(),
-        cli_output::DetailLevel::Summary,
-    )
-}
-
-fn product_account_label(account: Option<&str>) -> String {
-    account.map_or_else(
-        || "—".to_owned(),
-        |account| cli_output::ProviderLabel::new(account).to_string(),
-    )
-}
-
-fn format_unix_seconds(seconds: u64) -> String {
-    i64::try_from(seconds)
-        .ok()
-        .and_then(|seconds| time::OffsetDateTime::from_unix_timestamp(seconds).ok())
-        .and_then(|timestamp| {
-            timestamp
-                .format(&time::format_description::well_known::Rfc3339)
-                .ok()
-        })
-        .unwrap_or_else(|| seconds.to_string())
-}
-
-fn format_unix_millis(milliseconds: u64) -> String {
-    let nanos = i128::from(milliseconds).saturating_mul(1_000_000);
-    time::OffsetDateTime::from_unix_timestamp_nanos(nanos)
-        .ok()
-        .and_then(|timestamp| {
-            timestamp
-                .format(&time::format_description::well_known::Rfc3339)
-                .ok()
-        })
-        .unwrap_or_else(|| milliseconds.to_string())
-}
-
-fn title_case_token(value: &str) -> String {
-    let words = value.replace(['-', '_'], " ");
-    let mut chars = words.chars();
-    chars.next().map_or_else(String::new, |first| {
-        first.to_uppercase().chain(chars).collect()
-    })
-}
-
-fn event_table_row(value: &serde_json::Value) -> [String; 4] {
-    let time = value
-        .get("ts")
-        .and_then(serde_json::Value::as_u64)
-        .map_or_else(|| "—".to_owned(), format_unix_millis);
-    let sequence = value
-        .get("seq")
-        .and_then(serde_json::Value::as_u64)
-        .map_or_else(|| "—".to_owned(), |value| value.to_string());
-    let kind = value
-        .get("kind")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("unknown")
-        .to_owned();
-    let details = value
-        .as_object()
-        .map(|object| {
-            object
-                .iter()
-                .filter(|(key, _)| !matches!(key.as_str(), "ts" | "seq" | "kind"))
-                .take(4)
-                .map(|(key, value)| {
-                    let value = value
-                        .as_str()
-                        .map_or_else(|| value.to_string(), str::to_owned);
-                    format!("{key}={value}")
-                })
-                .collect::<Vec<_>>()
-                .join(" · ")
-        })
-        .filter(|details| !details.is_empty())
-        .unwrap_or_else(|| "—".to_owned());
-    [time, sequence, kind, details]
-}
-
 /// Keys whose save must move through the successor-epoch apply.
 ///
 /// The verdict is the key table's own `scope` column, so a new orchestration
@@ -2208,30 +2096,6 @@ fn request_resume_picker(action_tx: &surface_protocol::UserActionSender) -> CliR
     action_tx
         .send(surface_protocol::UserAction::ResumeSession { id: None })
         .map_err(|_| CliFailure::new("resume picker host is unavailable"))
-}
-
-/// Where each kind of credential `plak status` reports actually lives.
-///
-/// OAuth subscription records are XDG state, not product home, so emptying
-/// `PLAK_HOME` leaves every OAuth account Ready. API keys are the opposite:
-/// they are files under the product home. One line says both.
-fn credential_locations_line(services: &Services) -> String {
-    let oauth = home::paths::application_state_home().map_or_else(
-        |_| "$XDG_STATE_HOME".to_owned(),
-        |root| root.join("plak/subscriptions").display().to_string(),
-    );
-    let keys = services.paths().map_or_else(
-        |_| "$PLAK_HOME/secrets".to_owned(),
-        |paths| paths.secrets_dir().display().to_string(),
-    );
-    credential_locations_text(&oauth, &keys)
-}
-
-/// The sentence alone, so a test pins it without a product home.
-fn credential_locations_text(oauth: &str, keys: &str) -> String {
-    format!(
-        "OAuth credentials live in {oauth}, outside the product home, so emptying it does not log you out. API keys live in {keys}."
-    )
 }
 
 /// The exact `plak run` a non-terminal reader can paste, given their config.

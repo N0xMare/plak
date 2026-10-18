@@ -8,6 +8,7 @@ use std::io::Cursor;
 
 use super::*;
 use crate::command::{RunEffort, run_effort_levels, run_effort_usage};
+use crate::presentation::credential_locations_text;
 use plakous::subscriptions::NativeLoginMode;
 
 #[test]

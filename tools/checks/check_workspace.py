@@ -361,6 +361,8 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[SourceKey, list[tuple[str, tuple[tuple[
     ],
     ("plak", "src/lib.rs"): [
         ("var_os", (("string", "XDG_RUNTIME_DIR"),)),
+    ],
+    ("plak", "src/presentation.rs"): [
         ("var_os", (("string", "NO_COLOR"),)),
     ],
     # Config edit selects the operator's VISUAL/EDITOR shell command.

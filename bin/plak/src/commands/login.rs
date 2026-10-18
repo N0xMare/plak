@@ -319,7 +319,7 @@ pub fn key_status(
             ])
             .map_err(CliFailure::new)?;
     }
-    crate::cli_human_output()
+    crate::presentation::cli_human_output()
         .write_table(stdout, &table)
         .map_err(|_| CliFailure::new("stdout failed"))?;
     Ok(ProcessOutcome::Success)

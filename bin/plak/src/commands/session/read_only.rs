@@ -173,7 +173,7 @@ pub(crate) fn log_child_read_only(
             writeln!(stdout, "No canonical history records for this child.")
                 .map_err(|_| CliFailure::new("stdout failed"))?;
         } else {
-            crate::cli_human_output()
+            crate::presentation::cli_human_output()
                 .write_table(stdout, &table)
                 .map_err(|_| CliFailure::new("stdout failed"))?;
         }

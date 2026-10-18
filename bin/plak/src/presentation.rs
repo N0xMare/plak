@@ -1,5 +1,7 @@
-//! TUI provider/model presentation derived from offline native-subscription state.
+//! TUI provider/model presentation derived from offline native-subscription state,
+//! and the small CLI formatting helpers the command surfaces share.
 
+use std::env;
 use std::path::PathBuf;
 
 use plakous::agent::ReasoningEffort;
@@ -9,10 +11,13 @@ use plakous::subscriptions::{
 };
 pub use plakous_hosted::runtime::TuiNativeModelFact;
 
+use crate::cli_output;
 use crate::commands::support::native_subscription_failure;
 use crate::home::paths::{self, PlakPaths};
 use crate::home::secrets;
 use crate::product_config::ProductCompositionSelection;
+use crate::shell::services::Services;
+use crate::store::sessions as product_sessions;
 use plakous_hosted::error::{CliFailure, CliResult};
 
 /// Maximum pasted authorization input for remote OAuth completion.
@@ -617,6 +622,148 @@ const fn native_tool_mode_label(mode: NativeToolMode) -> &'static str {
 
 fn application_execution_failure<T>(_: T) -> CliFailure {
     CliFailure::new("application execution failed")
+}
+
+pub(crate) fn transcript_entry(
+    row: &product_sessions::TranscriptRow,
+) -> Option<(&'static str, &str)> {
+    use product_sessions::TranscriptRow;
+    match row {
+        TranscriptRow::User { text, .. } => Some(("User", text)),
+        TranscriptRow::Steer { text, .. } => Some(("Steer", text)),
+        TranscriptRow::Assistant { text } => Some(("Assistant", text)),
+        TranscriptRow::Notice(notice)
+            if notice.placement() != product_sessions::NoticePlacement::SessionLog =>
+        {
+            Some(("Note", &notice.text))
+        }
+        _ => None,
+    }
+}
+
+/// First meaningful transcript snippet for session lists / resume picker.
+pub(crate) fn session_preview_line(session: &product_sessions::SessionRecord) -> String {
+    if let Some(title) = session.title.as_deref().filter(|t| !t.is_empty()) {
+        return title.chars().take(48).collect();
+    }
+    for row in session.transcript.iter() {
+        let (product_sessions::TranscriptRow::User { text, .. }
+        | product_sessions::TranscriptRow::Assistant { text }) = row
+        else {
+            continue;
+        };
+        let body = text.trim();
+        if !body.is_empty() {
+            return body.chars().take(48).collect();
+        }
+    }
+    "(empty)".to_owned()
+}
+
+pub(crate) fn cli_human_output() -> cli_output::HumanOutput {
+    cli_output::HumanOutput::resolve(
+        cli_output::TerminalMode::of_stdout(),
+        env::var_os("NO_COLOR").as_deref(),
+        cli_output::DetailLevel::Summary,
+    )
+}
+
+pub(crate) fn product_account_label(account: Option<&str>) -> String {
+    account.map_or_else(
+        || "—".to_owned(),
+        |account| cli_output::ProviderLabel::new(account).to_string(),
+    )
+}
+
+pub(crate) fn format_unix_seconds(seconds: u64) -> String {
+    i64::try_from(seconds)
+        .ok()
+        .and_then(|seconds| time::OffsetDateTime::from_unix_timestamp(seconds).ok())
+        .and_then(|timestamp| {
+            timestamp
+                .format(&time::format_description::well_known::Rfc3339)
+                .ok()
+        })
+        .unwrap_or_else(|| seconds.to_string())
+}
+
+pub(crate) fn format_unix_millis(milliseconds: u64) -> String {
+    let nanos = i128::from(milliseconds).saturating_mul(1_000_000);
+    time::OffsetDateTime::from_unix_timestamp_nanos(nanos)
+        .ok()
+        .and_then(|timestamp| {
+            timestamp
+                .format(&time::format_description::well_known::Rfc3339)
+                .ok()
+        })
+        .unwrap_or_else(|| milliseconds.to_string())
+}
+
+pub(crate) fn title_case_token(value: &str) -> String {
+    let words = value.replace(['-', '_'], " ");
+    let mut chars = words.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(chars).collect()
+    })
+}
+
+pub(crate) fn event_table_row(value: &serde_json::Value) -> [String; 4] {
+    let time = value
+        .get("ts")
+        .and_then(serde_json::Value::as_u64)
+        .map_or_else(|| "—".to_owned(), format_unix_millis);
+    let sequence = value
+        .get("seq")
+        .and_then(serde_json::Value::as_u64)
+        .map_or_else(|| "—".to_owned(), |value| value.to_string());
+    let kind = value
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown")
+        .to_owned();
+    let details = value
+        .as_object()
+        .map(|object| {
+            object
+                .iter()
+                .filter(|(key, _)| !matches!(key.as_str(), "ts" | "seq" | "kind"))
+                .take(4)
+                .map(|(key, value)| {
+                    let value = value
+                        .as_str()
+                        .map_or_else(|| value.to_string(), str::to_owned);
+                    format!("{key}={value}")
+                })
+                .collect::<Vec<_>>()
+                .join(" · ")
+        })
+        .filter(|details| !details.is_empty())
+        .unwrap_or_else(|| "—".to_owned());
+    [time, sequence, kind, details]
+}
+
+/// Where each kind of credential `plak status` reports actually lives.
+///
+/// OAuth subscription records are XDG state, not product home, so emptying
+/// `PLAK_HOME` leaves every OAuth account Ready. API keys are the opposite:
+/// they are files under the product home. One line says both.
+pub(crate) fn credential_locations_line(services: &Services) -> String {
+    let oauth = paths::application_state_home().map_or_else(
+        |_| "$XDG_STATE_HOME".to_owned(),
+        |root| root.join("plak/subscriptions").display().to_string(),
+    );
+    let keys = services.paths().map_or_else(
+        |_| "$PLAK_HOME/secrets".to_owned(),
+        |paths| paths.secrets_dir().display().to_string(),
+    );
+    credential_locations_text(&oauth, &keys)
+}
+
+/// The sentence alone, so a test pins it without a product home.
+pub(crate) fn credential_locations_text(oauth: &str, keys: &str) -> String {
+    format!(
+        "OAuth credentials live in {oauth}, outside the product home, so emptying it does not log you out. API keys live in {keys}."
+    )
 }
 
 #[cfg(test)]
