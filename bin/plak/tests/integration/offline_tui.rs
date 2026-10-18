@@ -529,6 +529,26 @@ impl Terminal {
         self.writer.flush().expect("pty flush");
     }
 
+    /// Sends to a child that may exit at any moment: once it has, the pty
+    /// write fails (EIO on macOS) and that is not a test failure.
+    fn send_until_exit(&mut self, bytes: &[u8]) {
+        let sent = self
+            .writer
+            .write_all(bytes)
+            .and_then(|()| self.writer.flush());
+        if let Err(error) = sent {
+            // The pty closes as the child exits, just before it is reapable.
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while self.is_alive() {
+                assert!(
+                    Instant::now() < deadline,
+                    "pty write to a live child: {error}"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+
     fn resize(&mut self, rows: u16, cols: u16) {
         self.master
             .resize(PtySize {
@@ -2112,7 +2132,7 @@ fn a_reload_onto_the_same_state_key_resumes_exactly() {
             Instant::now() < deadline,
             "same-key reload exceeded the exit budget"
         );
-        terminal.send(b"/reload\r");
+        terminal.send_until_exit(b"/reload\r");
         std::thread::sleep(Duration::from_millis(5));
     }
     let reload_raw = terminal.raw_since(raw_before_reload);
@@ -2170,7 +2190,7 @@ fn a_reload_onto_another_state_key_hands_the_new_build_an_export() {
             "reload never left\n{}",
             terminal.screen()
         );
-        terminal.send(b"/reload\r");
+        terminal.send_until_exit(b"/reload\r");
         std::thread::sleep(Duration::from_millis(500));
     }
     assert!(terminal.finish().success());
