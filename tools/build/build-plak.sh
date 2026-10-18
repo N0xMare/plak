@@ -64,7 +64,8 @@ if [[ ! -x "$js_host" ]]; then
 fi
 
 # Inspect raw symbols on both ELF and Mach-O; require worker positive controls.
-python3 tools/build/check-artifact-linkage.py "$output_dir"
+# Report on stderr: --artifacts prints only the output directory on stdout.
+python3 tools/build/check-artifact-linkage.py "$output_dir" >&2
 if [[ -n "$artifacts_only" ]]; then
   printf '%s\n' "$output_dir"
   exit 0

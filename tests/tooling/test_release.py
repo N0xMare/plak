@@ -357,7 +357,8 @@ class PackageReleaseTests(unittest.TestCase):
                      "tools/build/build-plak.sh", "scripts/musl-toolchain.sh", "LICENSE"):
             (self.repo / path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(ROOT / path, self.repo / path)
-        (self.repo / "tools/build/check-artifact-linkage.py").write_text("")
+        # The real check prints a report; stdout must stay the output directory.
+        (self.repo / "tools/build/check-artifact-linkage.py").write_text("print('artifact linkage checked')\n")
         self.stubs = self.base / "stubs"
         self.stubs.mkdir()
         self.log = self.base / "calls.log"
