@@ -10,20 +10,26 @@ Raw reports stay private under the ignored `target/live/`.
 No revision has passed the spec 05 §3.4 pre-release bar. Nothing below
 qualifies a tuple for publication.
 
-## Latest install check
+## Latest matrix
 
-A pre-publication revision of this tree, `plak/test-hooks` release builds on
-`aarch64-apple-darwin` and `x86_64-unknown-linux-musl`. This is an install
-check, not the §3.4 bar.
-Routes are the `ROUTES` keys in `live.py`, which fix account, model and effort.
+The §3.4 matrix on `plak/test-hooks` release builds for `aarch64-apple-darwin`
+and `x86_64-unknown-linux-musl`, composition `plakous-default`, at revisions
+`1a2938ce` and `e6d13d15`. The second changes only the live drivers' outcome
+classification (spec 05 §3.2), so its `plak`, `plakous-js-host` and `monty`
+builds are byte-identical to the first's and every row carries its earlier
+result. Routes are the `ROUTES` keys in `live.py`.
 
-| Matrix | Platform | Outcome |
+| Cells | Platform | Outcome |
 | --- | --- | --- |
-| `crash_jobs` x3 on every `full` row (`claude-sonnet55-low`, `codex`, `deepseek`, `deepseek-messages`, `grok`) | Apple Silicon | 3/3 pass on every row |
-| Smoke subset (`tui`, `cli_resume`, `jsonl_resume`, `cancel`; `compaction` on `deepseek`) on four `full` rows | Apple Silicon | pass |
-| Long-session `kill_reopen` on `claude-sonnet55-low` and `deepseek` | Apple Silicon | pass |
-| `crash_jobs` x3, `jsonl_resume`, `compaction`, `cancel`, `tui`, `kill_reopen` on `claude-sonnet55-low` | Linux x86_64 musl | pass |
+| Long-session `--all`, jobs and `crash_jobs` x3 on every `full` row | Apple Silicon | pass; `codex` long-session after its one MODEL rerun |
+| Headless soak, one hour, `deepseek` | Apple Silicon | pass, 54/54 tasks across the intentional rebuild |
+| Smoke on `claude-sonnet55-low`, `codex`, `grok`, `deepseek-messages` | Apple Silicon, Linux x86_64 musl | pass |
+| Smoke on `deepseek` | Apple Silicon, Linux x86_64 musl | blocked: OpenRouter refused twice with HTTP 429 (`temporarily rate-limited upstream`); on Apple Silicon the rerun's startup discovery then failed to connect (`EHOSTUNREACH`, nothing sent), which scores harness |
+| Smoke on the 17 `light` rows | Apple Silicon | pass |
+| Smoke on `api-openai`, `api-openai-medium`, `api-anthropic`, `api-xai` | Linux x86_64 musl | pass |
+| Smoke on `or-nemotron-free`, `or-laguna-free`, `or-qwen38` | Apple Silicon | pass |
+| Smoke on `or-lfm-free` | Apple Silicon | model, recorded: the root spawned fewer children than asked |
+| Smoke on `or-ling` | Apple Silicon | provider, recorded: upstream HTTP 429 |
 
-No outcome was a product harness failure. The `light` and `informational`
-rows, the `jobs` and soak drivers and the full smoke set were not re-run at
-that revision.
+The `deepseek` smoke cell blocks these revisions. A later revision is
+re-confirmed by a new smoke on each `full` row on both platforms.
