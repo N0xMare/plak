@@ -64,12 +64,16 @@ printf '  %s\n' "${order[@]}"
 # One invocation packages the cohort: Cargo resolves the members against a
 # local overlay of the packages it just built and verifies each in order.
 # Cargo unpacks overlay packages into the cargo home under name-version and
-# reuses an existing unpacked copy, so a cohort version packaged by an earlier
-# run would be verified in place of this tree's. Drop every unpacked cohort
-# copy first; Cargo unpacks again from the package or its cache.
+# reuses an existing unpacked copy, and it treats a registry package's build in
+# the verification target as fresh by package id alone. The cohort keeps its
+# version across commits, so an earlier run's sources or artifacts would be
+# verified in place of this tree's. Drop every unpacked cohort copy and the
+# cohort's verification fingerprints first; Cargo unpacks and rebuilds them.
 cargo_home="${CARGO_HOME:-$HOME/.cargo}"
 for entry in "${order[@]}"; do
-  for unpacked in "$cargo_home"/registry/src/*/"${entry%% *}-${entry#* }"; do
+  name="${entry%% *}"
+  for unpacked in "$cargo_home"/registry/src/*/"$name-${entry#* }" \
+    "$CARGO_TARGET_DIR"/debug/.fingerprint/"$name"-*; do
     if [[ -d "$unpacked" ]]; then rm -rf -- "$unpacked"; fi
   done
 done
