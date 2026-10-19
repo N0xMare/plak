@@ -73,6 +73,7 @@ fn numeric_tool_segment(raw: &str) -> TestResult<HistorySegment> {
 #[test]
 fn numeric_tool_arguments_round_trip_checkpoint_segment() -> TestResult {
     for raw in [
+        "null",
         r#"{"a":21345.0,"b":42171.0}"#,
         r#"{"nested":[-0.0,1e2,1.5,9007199254740993,18446744073709551615]}"#,
     ] {

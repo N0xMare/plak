@@ -874,7 +874,8 @@ impl<'de> Deserialize<'de> for ToolCallBlock {
                         == serde_json_canonicalizer::to_vec(stored)
                             .map_err(serde::de::Error::custom)?
             }
-            (None, None) => true,
+            // Option<Value> decodes a serialized Some(Null) as None.
+            (Some(Value::Null) | None, None) => true,
             _ => false,
         };
         if !arguments_match {

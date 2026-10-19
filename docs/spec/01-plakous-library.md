@@ -3812,7 +3812,9 @@ the JCS byte domain, not in the JSON parser's integer-versus-float
 representation: whole-number floats, negative zero, exponent notation, and
 binary64 rounding of large integers survive checkpoint round trips. Decoding
 retains the value reparsed from the raw text; it does not replace the raw text
-or change history bytes or identities. Structured executors still receive
+or change history bytes or identities. A top-level JSON `null` retains its
+parsed null value even though the redundant optional wire value decodes as
+absent; both encode as JSON `null`. Structured executors still receive
 the validated `SemanticJsonV1` normalized value (§8.3), not the raw numeric
 spelling; bounded UTF-8 executors receive exact validated text.
 The SuperGrok `read_file` presentation advertises the canonical maximum of
