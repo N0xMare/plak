@@ -464,7 +464,13 @@ class Features:
         stderr = log.read_text(errors="replace").split("--- stderr\n", 1)[-1]
         session = next((line.split("=", 1)[1] for line in out.splitlines()
                         if line.startswith("session_id=")), None)
-        records = session_log(self.env, home, repo, session) if session else []
+        records = []
+        if session:
+            try:
+                records = session_log(self.env, home, repo, session)
+            except ScenarioFailure:
+                if code == 0:
+                    raise
         if code != 0:
             refused = row_refusal(stderr, records=records)
             if refused:

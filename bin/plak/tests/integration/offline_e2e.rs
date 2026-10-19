@@ -4520,6 +4520,55 @@ fn a_code_mode_cell_calls_a_template_mcp_tool_as_a_nested_call() {
 }
 
 #[test]
+fn mcp_completed_result_mapping_failure_requires_recovery() {
+    for code_mode in [false, true] {
+        let steps = if code_mode {
+            json!([
+                {"output": {"cell": "await tools.mcp__fake__escaped_result({});"}, "finish": "tool_calls"},
+                {"output": {"text": "must not continue"}}
+            ])
+        } else {
+            json!([
+                {"output": {"tool": {"name": "mcp__fake__escaped_result", "arguments": {}}}, "finish": "tool_calls"},
+                {"output": {"text": "must not continue"}}
+            ])
+        };
+        let script = if code_mode {
+            code_mode_script(&steps)
+        } else {
+            json!({"version": 1, "steps": steps})
+        };
+        let fixture = Fixture::new(&script);
+        let log = fixture.root.join("mcp-calls.log");
+        enable_fake_mcp(&fixture, &["--call-log", log.to_str().expect("log path")]);
+        let mut agent = AgentProcess::start(&fixture, &[]);
+        agent.wait_for("ready", |record| record["kind"] == "ready");
+        agent.send(&prompt_frame("call the tool"));
+        agent.wait_for("terminal", |record| {
+            record["kind"] == "turn_lifecycle"
+                && matches!(
+                    record["phase"].as_str(),
+                    Some("completed" | "failed" | "recovery_required")
+                )
+        });
+        agent.send(&quit_frame());
+        let outcome = agent.finish();
+        let terminals = terminal_lifecycles(&outcome);
+        assert_eq!(terminals.len(), 1);
+        assert_eq!(
+            terminals[0].1,
+            "recovery_required",
+            "{}",
+            outcome.lines.join("\n")
+        );
+        assert_eq!(
+            std::fs::read_to_string(&log).expect("call log"),
+            "escaped_result\n"
+        );
+    }
+}
+
+#[test]
 fn mcp_definite_errors_continue_direct_and_code_mode_turns() {
     for code_mode in [false, true] {
         for (tool, diagnostic) in [

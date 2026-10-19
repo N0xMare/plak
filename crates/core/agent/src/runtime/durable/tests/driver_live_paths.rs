@@ -1,6 +1,76 @@
 //! Live driver paths that must settle without recovery.
 use super::*;
 
+#[tokio::test]
+async fn top_level_no_effect_executor_error_completes_with_durable_completed_effect() -> TestResult
+{
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let descriptor = durable_test_descriptor("test.route")?;
+    let model = Arc::new(
+        ArtifactModel::new(
+            descriptor.clone(),
+            artifact_authority(&descriptor, 1)?,
+            0,
+            94_001,
+            false,
+        )
+        .with_scripted_tool_calls([(0, "probe", "{}".to_owned())]),
+    );
+    let registry = mutating_tool_registry_with_results([Err(ToolRuntimeError::new(
+        ToolRuntimeErrorKind::InvalidArguments,
+        "size is not available on this route; omit it",
+    ))])?;
+    let store = Arc::new(TestCreateStore::default());
+    let sessions = DurableSessionRuntime::current(
+        store.clone(),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("nonzero lease")?,
+    )?;
+    let agent = sessions
+        .create(
+            "create:top-level-no-effect",
+            session_update_builder(workspace, model, registry)?,
+        )
+        .await?;
+    let command_id = CommandId::new("root:top-level-no-effect")?;
+    let result = agent
+        .start(command_id.clone(), "call the tool and continue")
+        .await?
+        .into_turn()
+        .ok_or("not admitted")?
+        .result()
+        .await?;
+    assert!(
+        matches!(result.outcome(), TurnResultOutcome::Completed(_)),
+        "{:?}",
+        result.outcome()
+    );
+    assert!(result.recovery_operation().is_none());
+    assert_exact_terminal_result(&result, &command_id)?;
+    assert!(result.conversation().items().iter().flat_map(ConversationItem::blocks).any(|block| {
+        matches!(block, ContentBlock::ToolResult(result) if result.kind() == ToolResultKind::Failure
+            && result.parts().iter().any(|part| matches!(part, ToolResultPart::Text(text) if text.text().contains("size is not available"))))
+    }));
+    assert!(
+        lock_mutex(&store.accepted_commits)
+            .iter()
+            .any(|(checkpoint, _)| {
+                checkpoint
+                    .manifest()
+                    .ledger()
+                    .operations()
+                    .iter()
+                    .any(|record| {
+                        matches!(record.kind(), DurableOperationKind::Effect { .. })
+                            && matches!(record.state(), DurableOperationState::Completed(_))
+                    })
+            })
+    );
+    agent.shutdown().await?;
+    Ok(())
+}
+
 /// A cell that yielded earlier in the batch is still live when a later sibling
 /// fails operationally. Its marker holds the yielded result, so the batch
 /// closes with that result, the turn fails with the sibling's error, and the

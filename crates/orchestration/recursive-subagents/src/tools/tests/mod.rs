@@ -22,6 +22,13 @@ mod spawn;
 mod wait;
 mod workspace;
 
+#[test]
+fn topology_envelope_limit_failure_is_not_proven_no_effect() {
+    let outcome = ToolOutcome::success_text("\"".repeat(350_000)).unwrap();
+    let error = topology_envelope(outcome).unwrap_err();
+    assert!(!error.proven_no_effect());
+}
+
 fn spawn_request() -> SpawnAgentRequest {
     SpawnAgentRequest::test_review()
 }

@@ -147,7 +147,7 @@ async fn registry(
 ) -> TestResult<FrozenToolRegistry> {
     let lease = pool.lease(spec, Arc::clone(&workspace.environment)).await?;
     let listing = lease.freeze(&McpToolSelection::All).await?;
-    assert_eq!(listing.records().len(), 11);
+    assert_eq!(listing.records().len(), 12);
     let pack: Arc<dyn ToolPack> = Arc::new(McpToolPack::new(lease, &listing));
     let mut builder = ToolRegistryBuilder::default();
     register_packs(&[pack], &mut builder)?;

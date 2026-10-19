@@ -480,6 +480,38 @@ fn mismatched_claim_and_predispatch_cancel_never_poll_executor() -> TestResult {
 }
 
 #[test]
+fn started_outcome_construction_and_runtime_limits_are_unknown() -> TestResult {
+    use plakous_model::{TextBlock, ToolResultPart};
+    use plakous_tools::ToolOutcomeLimits;
+    let parts = vec![ToolResultPart::Text(TextBlock::new("part", None)?); 129];
+    for result in [
+        ToolOutcome::success(parts.clone()),
+        ToolOutcome::failure(parts.clone()),
+        ToolOutcome::new(
+            ToolOutcomeKind::Success,
+            parts,
+            ToolOutcomeLimits {
+                max_parts: 129,
+                max_bytes: 1_048_576,
+            },
+        ),
+        ToolOutcome::success_text("\0".repeat(200_000)),
+    ] {
+        let rejected = fixture(17, result)?;
+        let authorized = block_on(authorized(&rejected))?;
+        let claimed = claim(&rejected.runtime, authorized)?;
+        let report = block_on(rejected.runtime.execute_claimed(claimed, rejected.control));
+        assert_eq!(report.state(), ToolDispatchState::Started);
+        assert_eq!(
+            report.outcome().map(ToolOutcome::kind),
+            Some(ToolOutcomeKind::OutcomeUnknown)
+        );
+        assert!(report.uncertainty_cause().is_some());
+    }
+    Ok(())
+}
+
+#[test]
 fn started_executor_no_effect_error_is_definite() -> TestResult {
     for error in [
         ToolRuntimeError::new(

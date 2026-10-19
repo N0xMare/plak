@@ -4066,6 +4066,12 @@ tool failure even after runtime dispatch started; it does not require recovery.
 The same rule applies to direct calls and calls nested in composition cells.
 An error with undetermined disposition still requires `OutcomeUnknown` unless
 the executor supplies another authoritative terminal classification.
+Errors raised while constructing an outcome or by the runtime after the executor
+returns are never proof of no effect: output limits, result mapping, and terminal
+bookkeeping failures retain an undetermined disposition and require
+`OutcomeUnknown` for a mutating call. An MCP call whose completed response cannot
+be mapped to a bounded outcome likewise settles `OutcomeUnknown`, never a
+no-effect rejection.
 
 On reopen, canonical bounded descriptors for the complete frozen registry and
 exposure map are decoded and resolved against a fresh process-local binding

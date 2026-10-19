@@ -163,6 +163,11 @@ pub fn standard_tools() -> Vec<Tool> {
         tool("fail", "Returns an error result.", empty.clone()),
         tool("rpc_error", "Returns a JSON-RPC error.", empty.clone()),
         tool(
+            "escaped_result",
+            "Returns text exceeding encoded outcome limits.",
+            empty.clone(),
+        ),
+        tool(
             "slow",
             "Reports progress, then finishes.",
             json!({"type": "object", "properties": {"steps": {"anyOf": [{"type": "integer"}, {"type": "null"}]}}}),
@@ -266,6 +271,7 @@ impl ServerHandler for FakeServer {
                 "scripted failure",
             )])),
             "rpc_error" => return Err(ErrorData::invalid_params("scripted RPC refusal", None)),
+            "escaped_result" => text("\0".repeat(200_000)),
             "slow" => {
                 let steps = arguments
                     .get("steps")

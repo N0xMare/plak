@@ -3,8 +3,10 @@
 import base64
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests" / "live"))
@@ -18,6 +20,28 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 8
 
 
 class RefusalTests(unittest.TestCase):
+    def test_session_log_failure_does_not_mask_cli_failure_or_refusal(self):
+        for code, stderr, expected in [
+            (1, "x_search is not available on claude/model", features.REFUSED),
+            (1, "the turn failed: Authentication", live.PROVIDER),
+            (0, "", live.HARNESS),
+        ]:
+            with tempfile.TemporaryDirectory() as directory:
+                artifacts = Path(directory)
+                base = artifacts / "case"
+                (base / "repo").mkdir(parents=True)
+                (base / "turn.log").write_text("--- stderr\n" + stderr)
+                env = Mock(artifacts=artifacts, capture_segments=[])
+                with patch.object(live, "write_home"), patch.object(features, "set_tools"), \
+                        patch.object(live, "run_cli", return_value=(code, "session_id=test\n")), \
+                        patch.object(features, "session_log", side_effect=live.ScenarioFailure(
+                            live.HARNESS, "session log unavailable")), \
+                        patch.object(live, "classify_cli_failure", side_effect=live.ScenarioFailure(
+                            live.PROVIDER, "original CLI failure")):
+                    with self.assertRaises(live.ScenarioFailure) as raised:
+                        features.Features(live.ROUTES["api-xai"], env).run("case", "prompt", [])
+                    self.assertEqual(raised.exception.outcome, expected)
+
     def test_route_row_refusals_are_refused_not_failures(self):
         lines = (
             "error: web_search is not yet qualified on codex/gpt-6-luna; remedy: remove "

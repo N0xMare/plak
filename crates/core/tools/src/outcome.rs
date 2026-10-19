@@ -134,7 +134,8 @@ impl ToolOutcome {
             return Err(ToolRuntimeError::new(
                 ToolRuntimeErrorKind::ResourceLimit,
                 "tool outcome exceeds its part-count limit",
-            ));
+            )
+            .with_proven_no_effect(false));
         }
         let mut retained_bytes = 0_usize;
         for part in &parts {
@@ -150,7 +151,8 @@ impl ToolOutcome {
                 return Err(ToolRuntimeError::new(
                     ToolRuntimeErrorKind::ResourceLimit,
                     "tool outcome exceeds its byte limit",
-                ));
+                )
+                .with_proven_no_effect(false));
             }
         }
         Ok(Self {
@@ -346,13 +348,15 @@ impl ToolOutcome {
             return Err(ToolRuntimeError::new(
                 ToolRuntimeErrorKind::ResourceLimit,
                 "tool outcome exceeds the runtime part-count limit",
-            ));
+            )
+            .with_proven_no_effect(false));
         }
         if self.retained_bytes > limits.max_bytes {
             return Err(ToolRuntimeError::new(
                 ToolRuntimeErrorKind::ResourceLimit,
                 "tool outcome exceeds the runtime byte limit",
-            ));
+            )
+            .with_proven_no_effect(false));
         }
         Ok(self)
     }

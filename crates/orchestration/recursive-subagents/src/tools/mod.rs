@@ -284,12 +284,12 @@ fn topology_envelope(outcome: ToolOutcome) -> Result<ToolOutcome, ToolRuntimeErr
         return Ok(outcome);
     }
     let subject = outcome.presentation_subject().map(str::to_owned);
-    ToolOutcome::success_text(json!({ "result": outcome.joined_text() }).to_string()).map(
-        |wrapped| match subject {
+    ToolOutcome::success_text(json!({ "result": outcome.joined_text() }).to_string())
+        .map_err(|error| error.with_proven_no_effect(false))
+        .map(|wrapped| match subject {
             Some(subject) => wrapped.with_presentation_subject(subject),
             None => wrapped,
-        },
-    )
+        })
 }
 
 fn decode<T: DeserializeOwned>(value: &Value) -> Result<T, TopologyError> {

@@ -1353,6 +1353,7 @@ impl ToolRuntime {
             }
                 .and_then(|outcome| {
                     plakous_tools::internal::enforce_outcome_limits(outcome, outcome_limits)
+                        .map_err(|error| error.with_proven_no_effect(false))
                 })
                 .map(|outcome| {
                     plakous_tools::internal::enforce_completed_output_contract(
@@ -1362,7 +1363,7 @@ impl ToolRuntime {
                 });
                     active
                         .terminalize()
-                        .map_err(ToolDispatchError::into_portable)?;
+                        .map_err(|error| error.into_portable().with_proven_no_effect(false))?;
                     result
                 }))
                 .map_err(ToolDispatchError::from_control)?;

@@ -45,6 +45,12 @@ pub(super) fn one_mutating_tool_registry() -> TestResult<FrozenToolRegistry> {
 pub(super) fn mutating_tool_registry_with_outcomes(
     outcomes: usize,
 ) -> TestResult<FrozenToolRegistry> {
+    mutating_tool_registry_with_results((0..outcomes).map(|_| ToolOutcome::success_text("ok")))
+}
+
+pub(super) fn mutating_tool_registry_with_results(
+    outcomes: impl IntoIterator<Item = Result<ToolOutcome, ToolRuntimeError>>,
+) -> TestResult<FrozenToolRegistry> {
     let definition = ToolDefinition::new(
         ToolName::new("probe")?,
         "1.0.0",
@@ -66,9 +72,7 @@ pub(super) fn mutating_tool_registry_with_outcomes(
         ToolExecutorId::new("probe.executor")?,
         plakous_tools::ToolExecutorBindingIdentity::new(1, &[b"probe.executor"])?,
         definition,
-        Arc::new(plakous_test_support::ScriptedTool::new(
-            (0..outcomes).map(|_| ToolOutcome::success_text("ok")),
-        )),
+        Arc::new(plakous_test_support::ScriptedTool::new(outcomes)),
     ))?;
     Ok(registry.freeze())
 }

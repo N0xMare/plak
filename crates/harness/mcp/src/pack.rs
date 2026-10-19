@@ -216,7 +216,13 @@ impl ToolExecutor for McpToolExecutor {
                     "mcp result mapping did not finish",
                     &error,
                 )
-            })?
+            })
+            .and_then(std::convert::identity)
+            .or_else(|error| {
+                ToolOutcome::outcome_unknown_text(format!(
+                    "mcp call completed but its result could not be represented ({error}); it may have acted; nothing was retried"
+                ))
+            })
         })
     }
 }

@@ -175,6 +175,8 @@ errors: the model can correct the arguments and continue. Definite MCP errors
 (JSON-RPC errors or `isError` results) likewise reach the model, or are catchable
 inside a Code Cell. An MCP connection failure after sending a request may still
 require recovery because the server might have acted.
+Output mapping or size-limit failures after execution also require recovery:
+failure to represent the result does not mean the tool had no effect.
 
 ## `session store is full`
 
