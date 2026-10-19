@@ -96,7 +96,7 @@ async fn the_stdio_binary_serves_both_lifecycle_styles_through_the_pack() -> Tes
         let pool = McpPool::new();
         let lease = pool.lease(spec, Arc::clone(&environment)).await?;
         let listing = lease.freeze(&McpToolSelection::All).await?;
-        assert_eq!(listing.records().len(), 10, "{style}");
+        assert_eq!(listing.records().len(), 11, "{style}");
         let pack: Arc<dyn ToolPack> = Arc::new(McpToolPack::new(lease, &listing));
         let mut builder = ToolRegistryBuilder::default();
         register_packs(&[pack], &mut builder)?;
