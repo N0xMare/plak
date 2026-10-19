@@ -948,7 +948,11 @@ selection. Cargo packages the members against a local overlay of the archives
 it has just written, so unpublished siblings resolve, and verifies each by
 building it from its archive, with `CARGO_TARGET_DIR` at
 `<target>/package`. The vendor snapshot is a workspace member (§3) precisely so
-the overlay includes it.
+the overlay includes it. Cargo unpacks overlay archives into the Cargo home
+under their name and version and reuses an existing unpacked copy, so before
+packaging the script removes every unpacked `<name>-<version>` of the cohort;
+otherwise a copy left by an earlier run of the same version would be verified
+in place of the tree being packaged.
 
 A packaged crate resolves its registry dependencies without the root
 `[patch]` table, so verifying `plakous-py-worker` needs the upstream

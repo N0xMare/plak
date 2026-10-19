@@ -203,6 +203,24 @@ class PublishScriptTests(unittest.TestCase):
         self.assert_packaged_in_order(calls[0])
         self.assertEqual(calls[0]["offline"], "true")
 
+    def test_packaging_drops_unpacked_cohort_copies_from_earlier_runs(self) -> None:
+        # Cargo reuses an unpacked name-version directory, so a stale copy of a
+        # cohort crate would be verified instead of the tree being packaged.
+        cargo_home = self.repo.parent / "cargo-home"
+        src = cargo_home / "registry" / "src"
+        stale = [src / "-overlay" / f"{name}-0.0.1" for name in ORDER]
+        stale.append(src / "index.crates.io-x" / "plakous-mid-0.0.1")
+        kept = [src / "-overlay" / "serde-1.0.0", src / "-overlay" / "plakous-mid-0.0.2"]
+        for directory in (*stale, *kept):
+            directory.mkdir(parents=True)
+            (directory / ".cargo-ok").write_text("ok")
+        self.env["CARGO_HOME"] = str(cargo_home)
+        result, calls = self.publish("--gate")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual([path for path in stale if path.exists()], [])
+        self.assertEqual([path for path in kept if not path.exists()], [])
+
     def test_execute_needs_a_registry_token(self) -> None:
         self.record_evidence()
         result, calls = self.publish("--execute")
