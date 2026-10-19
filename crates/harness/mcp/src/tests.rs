@@ -191,6 +191,9 @@ async fn results_errors_and_input_requests_settle_without_unknowns() -> TestResu
     let failed = invoke_simple(&lease, &frozen, "fail", json!({})).await?;
     assert_eq!(failed.kind(), ToolOutcomeKind::Failure);
     assert!(failed.joined_text().ends_with("scripted failure"));
+    let rpc_error = invoke_simple(&lease, &frozen, "rpc_error", json!({})).await?;
+    assert_eq!(rpc_error.kind(), ToolOutcomeKind::Failure);
+    assert!(rpc_error.joined_text().contains("scripted RPC refusal"));
     let structured = invoke_simple(&lease, &frozen, "structured", json!({})).await?;
     assert_eq!(
         structured.joined_text(),

@@ -4060,6 +4060,13 @@ reconcile. A mutating tool has exactly one durable operation with states
 There is no consumer-facing effect journal. Cancellation and future drop use
 the same bounded cleanup path.
 
+Entering an executor is not proof that it caused an external effect. An
+executor error with `proven_no_effect()` remains a definite, model-visible
+tool failure even after runtime dispatch started; it does not require recovery.
+The same rule applies to direct calls and calls nested in composition cells.
+An error with undetermined disposition still requires `OutcomeUnknown` unless
+the executor supplies another authoritative terminal classification.
+
 On reopen, canonical bounded descriptors for the complete frozen registry and
 exposure map are decoded and resolved against a fresh process-local binding
 table; a missing executor binding fails before dispatch. A supplied V2 projection
@@ -4855,8 +4862,12 @@ running server's listing (a changed or vanished tool fails without dispatch:
 call's progress sink as transient observations that never extend the bound.
 Turn cancellation or the timeout sends `notifications/cancelled` and settles
 `OutcomeUnknown`; so do a transport failure and a task result. A JSON-RPC error
-and an `input_required` result ("elicitation is not supported") are tool
-failures; `isError` is a failure with its content. Text and embedded text
+and an `input_required` result ("elicitation is not supported") are definite tool
+failures; a terminal `isError` result is a definite failure with its content.
+These failures reach the model, or reject the nested call inside a composition
+cell, without fencing the turn. A bare HTTP failure is not such a terminal MCP
+response: other than 401/403 or a request proven unsent, it remains
+`OutcomeUnknown` as specified above. Text and embedded text
 resources are text, the first two PNG, JPEG, WebP or GIF images within
 196,608 bytes are images, other media and blobs become one-line placeholders,
 resource links are `resource <uri> (<name>)`, and structured content without

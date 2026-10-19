@@ -36,6 +36,17 @@ class RefusalTests(unittest.TestCase):
         self.assertIsNone(features.row_refusal("HTTP 429 rate limited"))
         self.assertIsNone(features.row_refusal("the turn failed: Authentication"))
 
+    def test_admitted_turn_is_never_a_route_refusal(self):
+        text = "size is not available on this route; omit it"
+        for records in [
+            [{"kind": "turn.lifecycle", "phase": "admitted"}],
+            [{"kind": "turn.lifecycle", "phase": "failed"}],
+            [{"kind": "turn.lifecycle", "phase": "recovery_required"}],
+        ]:
+            self.assertIsNone(features.row_refusal(text, records=records))
+        for prefix in ["agent turn requires recovery: ", "the turn failed: "]:
+            self.assertIsNone(features.row_refusal(prefix + text))
+
     def test_refused_is_selectable_and_not_a_failure_class(self):
         names = {name for name, _ in smoke.selected_scenarios({"image_input", "x_search"})}
         self.assertEqual(names, {"image_input", "x_search"})

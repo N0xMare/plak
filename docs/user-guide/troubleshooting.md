@@ -168,6 +168,14 @@ session is ready, send a new prompt describing the remaining work. If it reports
 recovery required or a paused queue, follow that recovery instruction first.
 A failed turn is not a completed answer; a usage record does not prove success.
 
+## Tool errors and recovery
+
+Tool argument rejections made before any external effect are ordinary tool
+errors: the model can correct the arguments and continue. Definite MCP errors
+(JSON-RPC errors or `isError` results) likewise reach the model, or are catchable
+inside a Code Cell. An MCP connection failure after sending a request may still
+require recovery because the server might have acted.
+
 ## `session store is full`
 
 This is a retained-state limit across the runtime database, not a context-token

@@ -1083,8 +1083,8 @@ impl ToolRuntime {
     /// Every failure before executor invocation is reported as `NotStarted`.
     /// Once invocation begins, loss of an authoritative outcome is conservatively
     /// reported as `Started` with `OutcomeUnknown` and its safe uncertainty cause.
-    /// An executor that joins cancellation and classifies its own stop as
-    /// `Cancelled` is a definite `Started` terminal and keeps that error.
+    /// An executor error proven to have had no effect, or a joined stop classified
+    /// as `Cancelled`, is a definite `Started` terminal and keeps that error.
     pub async fn execute_claimed(
         &self,
         claimed: ClaimedToolInvocation,
@@ -1118,9 +1118,9 @@ impl ToolRuntime {
             (false, Err(error)) => ToolDispatchReport::not_started(error.into_portable()),
             (true, Ok(outcome)) => ToolDispatchReport::started(outcome),
             (true, Err(DispatchFailure::Executor(error)))
-                if error.kind() == ToolRuntimeErrorKind::Cancelled =>
+                if error.proven_no_effect() || error.kind() == ToolRuntimeErrorKind::Cancelled =>
             {
-                ToolDispatchReport::started_cancelled(error)
+                ToolDispatchReport::started_error(error)
             }
             (true, Err(error)) => ToolDispatchReport::started_unknown(error.into_portable()),
             (false, Ok(_)) => ToolDispatchReport::not_started(

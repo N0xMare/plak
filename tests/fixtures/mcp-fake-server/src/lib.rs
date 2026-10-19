@@ -161,6 +161,7 @@ pub fn standard_tools() -> Vec<Tool> {
             empty.clone(),
         ),
         tool("fail", "Returns an error result.", empty.clone()),
+        tool("rpc_error", "Returns a JSON-RPC error.", empty.clone()),
         tool(
             "slow",
             "Reports progress, then finishes.",
@@ -264,6 +265,7 @@ impl ServerHandler for FakeServer {
             "fail" => CallToolResponse::Complete(CallToolResult::error(vec![ContentBlock::text(
                 "scripted failure",
             )])),
+            "rpc_error" => return Err(ErrorData::invalid_params("scripted RPC refusal", None)),
             "slow" => {
                 let steps = arguments
                     .get("steps")

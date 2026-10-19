@@ -19,7 +19,7 @@ pub enum ToolDispatchState {
 /// Once dispatch starts, runtime failures without an authoritative executor
 /// outcome are normalized to [`ToolOutcomeKind::OutcomeUnknown`](plakous_tools::ToolOutcomeKind::OutcomeUnknown). The retained
 /// error form therefore describes a failure before dispatch or the executor's
-/// own joined cancellation: an executor that stops and classifies its stop as
+/// own no-effect rejection or joined cancellation: an executor that classifies its stop as
 /// [`ToolRuntimeErrorKind::Cancelled`](plakous_tools::ToolRuntimeErrorKind::Cancelled)
 /// has reported a definite terminal, not a lost one.
 #[derive(Clone)]
@@ -54,14 +54,14 @@ impl ToolDispatchReport {
         }
     }
 
-    /// A started executor joined cancellation and said so itself.
+    /// A started executor proved no effect or joined cancellation itself.
     ///
     /// The executor is the authority on its own stop; a possibly completed
     /// external effect must be reported by it as `OutcomeUnknown`, not as
     /// `Cancelled`. Treating the joined classification as unknown would turn
     /// every observed interrupt of a running mutating tool into a recovery
     /// obligation.
-    pub(crate) fn started_cancelled(error: ToolRuntimeError) -> Self {
+    pub(crate) fn started_error(error: ToolRuntimeError) -> Self {
         Self {
             state: ToolDispatchState::Started,
             result: Err(error),
@@ -81,7 +81,7 @@ impl ToolDispatchReport {
         self.result.as_ref().ok()
     }
 
-    /// Returns a pre-dispatch failure or the executor's joined cancellation.
+    /// Returns a pre-dispatch failure, no-effect rejection, or joined cancellation.
     #[must_use]
     pub fn error(&self) -> Option<&ToolRuntimeError> {
         self.result.as_ref().err()
@@ -98,7 +98,7 @@ impl ToolDispatchReport {
     /// # Errors
     ///
     /// Returns the retained failure when executor dispatch never started or
-    /// when the started executor joined cancellation.
+    /// when the started executor proved no effect or joined cancellation.
     pub fn into_result(self) -> Result<ToolOutcome, ToolRuntimeError> {
         self.result
     }

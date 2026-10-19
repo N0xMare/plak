@@ -5,6 +5,7 @@ pub(super) enum DriverSchedulerScenario {
     #[default]
     Ordinary,
     UnknownMutation,
+    NoEffectMutation,
     EdgePublicationFailure,
     DeliveryHostLost,
     DeliveryRefused,
@@ -154,6 +155,12 @@ impl plakous_tools::ToolExecutor for DriverSchedulerTool {
                         .fetch_sub(1, Ordering::AcqRel);
                     self.evidence.mutations_done.fetch_add(1, Ordering::AcqRel);
                     if invocation.identity().name().as_str() == "mutate_one" {
+                        if self.evidence.scenario == DriverSchedulerScenario::NoEffectMutation {
+                            return Err(ToolRuntimeError::new(
+                                ToolRuntimeErrorKind::InvalidArguments,
+                                "mutation rejected before effects",
+                            ));
+                        }
                         if self.evidence.scenario == DriverSchedulerScenario::UnknownMutation {
                             return ToolOutcome::outcome_unknown_text("exact unknown mutation");
                         }
@@ -410,6 +417,11 @@ fn driver_scheduler_registry(
 fn private_driver_composition_scheduler_is_concurrent_bounded_correlated_and_joined() -> TestResult
 {
     run_driver_scheduler_scenario(DriverSchedulerScenario::Ordinary)
+}
+
+#[test]
+fn nested_mutation_no_effect_error_is_catchable_and_siblings_continue() -> TestResult {
+    run_driver_scheduler_scenario(DriverSchedulerScenario::NoEffectMutation)
 }
 
 #[test]
@@ -838,9 +850,16 @@ pub(super) fn run_driver_scheduler_scenario(scenario: DriverSchedulerScenario) -
             let _ = agent.shutdown().await;
             return Ok(());
         }
-        wait_for_scheduler_fact(&evidence.cancel_started).await;
+        let result = turn.result();
+        tokio::pin!(result);
+        tokio::select! {
+            () = wait_for_scheduler_fact(&evidence.cancel_started) => {},
+            result = &mut result => {
+                return Err(format!("turn ended before sibling execution: {:?}", result?.outcome()).into());
+            }
+        }
         assert_eq!(control.cancel().await?, CancellationStatus::Requested);
-        let result = turn.result().await?;
+        let result = result.await?;
 
         assert!(
             matches!(result.outcome(), TurnResultOutcome::Cancelled(_)),
@@ -884,11 +903,12 @@ pub(super) fn run_driver_scheduler_scenario(scenario: DriverSchedulerScenario) -
             assert!(deliveries[a].1 && deliveries[a].2.contains("read-a"));
             let mutation = positions("M1")?;
             assert!(!deliveries[mutation].1);
-            assert!(
-                deliveries[mutation]
-                    .2
-                    .contains("mutation failed after partial effects")
-            );
+            let diagnostic = if scenario == DriverSchedulerScenario::NoEffectMutation {
+                "mutation rejected before effects"
+            } else {
+                "mutation failed after partial effects"
+            };
+            assert!(deliveries[mutation].2.contains(diagnostic));
             assert!(deliveries[positions("M2")?].1);
             let invalid_mutation = positions("INVALID_MUTATION")?;
             assert!(

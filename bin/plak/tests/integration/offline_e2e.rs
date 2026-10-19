@@ -4519,6 +4519,70 @@ fn a_code_mode_cell_calls_a_template_mcp_tool_as_a_nested_call() {
     assert_eq!(std::fs::read_to_string(&log).expect("call log"), "echo\n");
 }
 
+#[test]
+fn mcp_definite_errors_continue_direct_and_code_mode_turns() {
+    for code_mode in [false, true] {
+        for (tool, diagnostic) in [
+            ("fail", "scripted failure"),
+            ("rpc_error", "scripted RPC refusal"),
+        ] {
+            let name = format!("mcp__fake__{tool}");
+            let steps = if code_mode {
+                json!([
+                    {"output": {"cell": format!(
+                        "let caught = false; try {{ await tools.{name}({{}}); }} catch (error) {{ if (!String(error).includes('{diagnostic}')) throw error; caught = true; text(String(error)); }} if (!caught) throw new Error('missing rejection');"
+                    )}, "finish": "tool_calls"},
+                    {"output": {"text": "continued after definite MCP error"}}
+                ])
+            } else {
+                json!([
+                    {"output": {"tool": {"name": name, "arguments": {}}}, "finish": "tool_calls"},
+                    {"output": {"text": "continued after definite MCP error"}}
+                ])
+            };
+            let script = if code_mode {
+                code_mode_script(&steps)
+            } else {
+                json!({"version": 1, "steps": steps})
+            };
+            let fixture = Fixture::new(&script);
+            let log = fixture.root.join("mcp-calls.log");
+            enable_fake_mcp(&fixture, &["--call-log", log.to_str().expect("log path")]);
+            let mut agent = AgentProcess::start(&fixture, &[]);
+            agent.wait_for("ready", |record| record["kind"] == "ready");
+            agent.send(&prompt_frame("call the failing tool, then continue"));
+            agent.wait_for("assistant_done", |record| {
+                record["kind"] == "assistant_done"
+            });
+            agent.send(&quit_frame());
+            let outcome = agent.finish();
+            let stream = outcome.lines.join("\n");
+            assert!(outcome.status.success(), "stderr:\n{}", outcome.stderr);
+            assert!(stream.contains(diagnostic), "stream:\n{stream}");
+            assert!(
+                stream.contains("continued after definite MCP error"),
+                "stream:\n{stream}"
+            );
+            assert!(!stream.contains("recovery_required"), "stream:\n{stream}");
+            let terminals = terminal_lifecycles(&outcome);
+            assert_eq!(terminals.len(), 1, "stream:\n{stream}");
+            assert_eq!(terminals[0].1, "completed", "stream:\n{stream}");
+            if code_mode {
+                assert!(
+                    completed_tool_names(&outcome)
+                        .iter()
+                        .any(|name| name == "exec"),
+                    "stream:\n{stream}"
+                );
+            }
+            assert_eq!(
+                std::fs::read_to_string(&log).expect("call log"),
+                format!("{tool}\n")
+            );
+        }
+    }
+}
+
 /// An explicit compaction of a session whose history holds a template MCP
 /// call commits: the summary binding carries the root's MCP extension, so
 /// its tool surface is the source's, and the server sees the call once.

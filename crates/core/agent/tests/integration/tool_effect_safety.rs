@@ -480,6 +480,54 @@ fn mismatched_claim_and_predispatch_cancel_never_poll_executor() -> TestResult {
 }
 
 #[test]
+fn started_executor_no_effect_error_is_definite() -> TestResult {
+    for error in [
+        ToolRuntimeError::new(
+            ToolRuntimeErrorKind::InvalidArguments,
+            "size is not available on this route; omit it",
+        ),
+        ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, "request was not sent")
+            .with_proven_no_effect(true),
+    ] {
+        let rejected = fixture(15, Err(error.clone()))?;
+        let authorized = block_on(authorized(&rejected))?;
+        let claimed = claim(&rejected.runtime, authorized)?;
+        let report = block_on(rejected.runtime.execute_claimed(claimed, rejected.control));
+        assert_eq!(report.state(), ToolDispatchState::Started);
+        assert_eq!(report.error(), Some(&error));
+        assert!(report.uncertainty_cause().is_none());
+        assert_eq!(rejected.calls.load(Ordering::SeqCst), 1);
+    }
+    Ok(())
+}
+
+#[test]
+fn started_executor_uncertain_disposition_overrides_argument_error_category() -> TestResult {
+    let uncertain = fixture(
+        16,
+        Err(ToolRuntimeError::new(
+            ToolRuntimeErrorKind::InvalidArguments,
+            "validation failed after a possible effect",
+        )
+        .with_proven_no_effect(false)),
+    )?;
+    let authorized = block_on(authorized(&uncertain))?;
+    let claimed = claim(&uncertain.runtime, authorized)?;
+    let report = block_on(
+        uncertain
+            .runtime
+            .execute_claimed(claimed, uncertain.control),
+    );
+    assert_eq!(report.state(), ToolDispatchState::Started);
+    assert_eq!(
+        report.outcome().map(ToolOutcome::kind),
+        Some(ToolOutcomeKind::OutcomeUnknown)
+    );
+    assert!(report.uncertainty_cause().is_some());
+    Ok(())
+}
+
+#[test]
 fn started_error_becomes_unknown_and_known_failure_is_preserved() -> TestResult {
     let uncertain = fixture(
         4,

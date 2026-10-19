@@ -107,9 +107,13 @@ RETRIEVAL_NAMES = {
 # --- pure oracle logic (covered by tests/tooling/test_live_features.py) ------
 
 
-def row_refusal(text: str) -> str | None:
+def row_refusal(text: str, *, records: list[dict] | None = None) -> str | None:
     """`refused: route row unsupported (<line>)` when Plak refused the row."""
+    if any(record.get("kind") == "turn.lifecycle" for record in records or ()):
+        return None
     flat = " ".join(text.split())
+    if re.search(r"recovery_required|OutcomeUnknown|turn requires recovery|turn failed", flat):
+        return None
     for pattern in ROW_REFUSALS:
         match = pattern.search(flat)
         if match:
@@ -460,14 +464,14 @@ class Features:
         stderr = log.read_text(errors="replace").split("--- stderr\n", 1)[-1]
         session = next((line.split("=", 1)[1] for line in out.splitlines()
                         if line.startswith("session_id=")), None)
+        records = session_log(self.env, home, repo, session) if session else []
         if code != 0:
-            refused = row_refusal(stderr)
+            refused = row_refusal(stderr, records=records)
             if refused:
                 raise ScenarioFailure(REFUSED, refused)
             live.classify_cli_failure(code, stderr, f"{stage} ({route.name})", segments=segments)
         if not session:
             raise ScenarioFailure(HARNESS, f"{stage} exited 0 without a session id")
-        records = session_log(self.env, home, repo, session)
         import smoke
         terminals = smoke.durable_terminals(records)
         if not terminals:
