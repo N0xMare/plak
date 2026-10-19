@@ -30,7 +30,7 @@ composition = "plakous-default"
 
 # The spawn card a parent routes on: what this agent is for, in the parent's words.
 # type: string · default: "" · required and non-blank for a template named in [roster] working_set or in a spawns list
-description = "Investigate the codebase and the web. Save fetched sources and write research reports under research/<topic>/ (or the path the parent names) instead of only replying; return a short summary plus the paths written. Never edit other files."
+description = "Research the workspace and the web; report grounded findings with their sources. Edit files only when the brief asks."
 
 # Edit ceiling: full includes file-edit tools; read-execute omits dedicated file-edit tools but permits shell commands. Neither is an OS sandbox. A spawn request above the ceiling is clipped, not refused.
 # type: enum · default: "full" · full|read-execute

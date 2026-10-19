@@ -619,9 +619,10 @@ Every built-in profile has the same four roles:
 | `reviewer` | `read-execute` | `[]` | none |
 | `researcher` | `full` | `[]` | hosted retrieval the route serves plus `fetch_url`: `web_search, web_fetch, fetch_url` on `claude`, `web_search, fetch_url` on `codex`, `web_search, x_search, fetch_url` on `grok` |
 
-The researcher's card asks it to save fetched sources and write its report
-under `research/<topic>/` (or the path the parent names) and to return a short
-summary with the paths it wrote. The root orchestrates; the worker, reviewer
+The researcher's card names what it researches with its tools (the workspace
+and the web, and posts on X (x.com) where it has `x_search`), asks for grounded findings
+with their sources, and asks it to edit files only when the brief asks. The
+capability line after the card lists the tools themselves. The root orchestrates; the worker, reviewer
 and researcher are leaves, so the default role graph is one level deep
 whatever a larger `max_depth` allows. A deeper tree is user configuration: a
 template whose `spawns` names other templates (for example a worker with

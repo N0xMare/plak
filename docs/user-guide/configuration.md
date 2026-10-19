@@ -406,9 +406,10 @@ Every built-in has the same four roles:
 - **worker** — `full` access, a leaf.
 - **reviewer** — `read-execute`, a leaf.
 - **researcher** — `full` access, a leaf with web tools (`web_search` and
-  `fetch_url`, plus `web_fetch` on Claude and `x_search` on Grok). It saves the
-  sources it fetched and writes its report under `research/<topic>/` (or the
-  path you name), and replies with a short summary and the paths it wrote.
+  `fetch_url`, plus `web_fetch` on Claude and `x_search` on Grok). It
+  researches the workspace and the web (and posts on X on Grok), reports grounded
+  findings with their sources, and edits files only when the brief asks, for
+  example to write a report where you name it.
 
 The built-in tree is one level deep. For a deeper one, give a template its own
 `spawns` (for example a worker with `spawns = ["researcher"]`) and raise

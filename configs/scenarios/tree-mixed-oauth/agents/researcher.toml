@@ -3,6 +3,6 @@ account = "grok"
 model = "grok-4.7-build-fast"
 effort = "medium"
 composition = "direct"
-description = "Grok researcher; searches the web and X and writes its report under research/<topic>/."
+description = "Research the workspace, the web and posts on X (x.com); report grounded findings with their sources. Edit files only when the brief asks."
 access = "full"
 tools = ["web_search", "x_search", "fetch_url"]
