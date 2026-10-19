@@ -31,6 +31,84 @@ use uuid::Uuid;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
+fn numeric_tool_segment(raw: &str) -> TestResult<HistorySegment> {
+    let call_id = CallId::try_from(Uuid::from_u128(101))?;
+    let correlation = ToolCorrelation::default();
+    Ok(HistorySegment::new(
+        HistorySegmentKind::ToolExchange,
+        vec![
+            ConversationItem::new(
+                EntryId::try_from(Uuid::from_u128(102))?,
+                Actor::Assistant,
+                vec![ContentBlock::ToolCall(ToolCallBlock::new(
+                    call_id,
+                    ToolName::new("sum")?,
+                    ToolExecutionOwner::Local,
+                    ToolCallState::Requested,
+                    correlation.clone(),
+                    raw,
+                )?)],
+                Provenance::ModelOutput,
+            )?,
+            ConversationItem::new(
+                EntryId::try_from(Uuid::from_u128(103))?,
+                Actor::Tool,
+                vec![ContentBlock::ToolResult(
+                    plakous_model::ToolResultBlock::new(
+                        call_id,
+                        ToolExecutionOwner::Local,
+                        plakous_model::ToolResultKind::Success,
+                        vec![plakous_model::ToolResultPart::Text(TextBlock::new(
+                            "ok", None,
+                        )?)],
+                        correlation,
+                    )?,
+                )],
+                Provenance::ModelOutput,
+            )?,
+        ],
+    )?)
+}
+
+#[test]
+fn numeric_tool_arguments_round_trip_checkpoint_segment() -> TestResult {
+    for raw in [
+        r#"{"a":21345.0,"b":42171.0}"#,
+        r#"{"nested":[-0.0,1e2,1.5,9007199254740993,18446744073709551615]}"#,
+    ] {
+        let segment = numeric_tool_segment(raw)?;
+        let mut writer = Writer::default();
+        writer.segment(&segment)?;
+        let decoded = Reader::new(&writer.bytes).segment()?;
+        assert_eq!(decoded, segment);
+        assert_eq!(decoded.canonical_bytes(), segment.canonical_bytes());
+        assert_eq!(decoded.identity(), segment.identity());
+    }
+    Ok(())
+}
+
+#[test]
+fn numeric_tool_segment_persisted_bytes_and_digest_are_unchanged() -> TestResult {
+    let segment = numeric_tool_segment(r#"{"a":21345.0,"b":42171.0}"#)?;
+    let canonical = include_bytes!("../../tests/fixtures/numeric_tool_segment.json");
+    let digest = [
+        251, 101, 55, 24, 104, 72, 142, 37, 213, 140, 120, 119, 170, 86, 143, 76, 6, 118, 254, 60,
+        18, 172, 88, 226, 200, 29, 191, 18, 152, 96, 13, 192,
+    ];
+    assert_eq!(segment.canonical_bytes(), canonical);
+    assert_eq!(segment.identity().bytes(), &digest);
+
+    // Pin the checkpoint segment framing as well as the model-owned bytes.
+    let mut expected = u32::try_from(canonical.len())?.to_be_bytes().to_vec();
+    expected.extend_from_slice(canonical);
+    expected.extend_from_slice(&[1, 16, 0, 0, 0, 2]);
+    expected.extend_from_slice(&digest);
+    let mut writer = Writer::default();
+    writer.segment(&segment)?;
+    assert_eq!(writer.bytes, expected);
+    Ok(())
+}
+
 /// Encodes `record`, then decodes it resolving each referenced component from
 /// the record's own components, as the checkpoint graph resolves them from
 /// its component objects.

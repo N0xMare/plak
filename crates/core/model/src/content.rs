@@ -864,7 +864,20 @@ impl<'de> Deserialize<'de> for ToolCallBlock {
         )
         .map_err(serde::de::Error::custom)?
         .with_canonical_name(wire.canonical_name);
-        if block.arguments != wire.arguments {
+        // History is stored as JCS: e.g. 1.0 becomes 1, and large integers
+        // round to binary64. Validate in that same domain, but retain the
+        // value parsed from the exact raw text for in-memory readers.
+        let arguments_match = match (&block.arguments, &wire.arguments) {
+            (Some(parsed), Some(stored)) => {
+                parsed == stored
+                    || serde_json_canonicalizer::to_vec(parsed).map_err(serde::de::Error::custom)?
+                        == serde_json_canonicalizer::to_vec(stored)
+                            .map_err(serde::de::Error::custom)?
+            }
+            (None, None) => true,
+            _ => false,
+        };
+        if !arguments_match {
             return Err(serde::de::Error::custom(
                 ContentError::ToolArgumentsMismatch,
             ));
@@ -2412,6 +2425,54 @@ mod tests {
         assert_eq!(decoded, call);
         assert_eq!(decoded.canonical_name().as_str(), "apply_patch");
         assert_eq!(decoded.exposed_name().as_str(), "edit");
+        Ok(())
+    }
+
+    #[test]
+    fn tool_arguments_validate_jcs_equivalence() -> Result<(), Box<dyn std::error::Error>> {
+        for raw in [
+            r#"{"a":21345.0,"b":42171.0}"#,
+            r#"{"nested":[-0.0,1e2,1.5,9007199254740993,18446744073709551615]}"#,
+        ] {
+            let call = ToolCallBlock::new(
+                CallId::try_from(Uuid::from_u128(31))?,
+                ToolName::new("sum")?,
+                ToolExecutionOwner::Local,
+                ToolCallState::Requested,
+                ToolCorrelation::default(),
+                raw,
+            )?;
+            let bytes = serde_json_canonicalizer::to_vec(&call)?;
+            let decoded: ToolCallBlock = serde_json::from_slice(&bytes)?;
+            assert_eq!(decoded, call);
+            assert_eq!(decoded.raw_arguments(), raw);
+            assert_eq!(
+                decoded.arguments(),
+                Some(&serde_json::from_str::<Value>(raw)?)
+            );
+
+            for invalid in [serde_json::json!({"nested": [1]}), Value::Null] {
+                let mut wire: Value = serde_json::from_slice(&bytes)?;
+                wire["arguments"] = invalid;
+                assert!(serde_json::from_value::<ToolCallBlock>(wire).is_err());
+            }
+        }
+
+        let call = ToolCallBlock::new(
+            CallId::try_from(Uuid::from_u128(32))?,
+            ToolName::new("sum")?,
+            ToolExecutionOwner::Local,
+            ToolCallState::Requested,
+            ToolCorrelation::default(),
+            "not JSON",
+        )?;
+        assert_eq!(
+            serde_json::from_value::<ToolCallBlock>(serde_json::to_value(&call)?)?,
+            call
+        );
+        let mut wire = serde_json::to_value(&call)?;
+        wire["arguments"] = serde_json::json!({});
+        assert!(serde_json::from_value::<ToolCallBlock>(wire).is_err());
         Ok(())
     }
 

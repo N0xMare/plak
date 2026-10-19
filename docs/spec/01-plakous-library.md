@@ -3806,6 +3806,15 @@ private agent admission boundary decodes that string exactly once before V1
 UTF-8 exposure or V2 `CustomUtf8` projection validation; pending-effect
 reconstruction uses the same boundary. Structured tool calls keep their
 canonical JSON object bytes.
+`ToolCallBlock` retains the exact raw argument text and reparses it when
+decoding history. Its redundant parsed value MUST agree with that text in
+the JCS byte domain, not in the JSON parser's integer-versus-float
+representation: whole-number floats, negative zero, exponent notation, and
+binary64 rounding of large integers survive checkpoint round trips. Decoding
+retains the value reparsed from the raw text; it does not replace the raw text
+or change history bytes or identities. Structured executors still receive
+the validated `SemanticJsonV1` normalized value (§8.3), not the raw numeric
+spelling; bounded UTF-8 executors receive exact validated text.
 The SuperGrok `read_file` presentation advertises the canonical maximum of
 2,000 lines per call; its `target_file` lowering cannot admit a larger
 `limit` that the canonical tool would reject. Its `grep` presentation likewise
