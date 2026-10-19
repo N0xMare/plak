@@ -101,6 +101,35 @@ fn registry(
 }
 
 #[test]
+fn javascript_description_declares_normalized_mcp_identifiers() -> Result<(), TestError> {
+    let name = "mcp__everything__get-sum";
+    let descriptor = ProductJavaScriptCompositionV1::compile(
+        registry([registration(name, "test.mcp.get-sum.v1", true)?])?,
+        target(
+            IntegrationClass::Standard,
+            b"javascript-normalized-description",
+        )?,
+        [ToolName::new(name)?],
+    )?;
+    assert!(
+        descriptor
+            .run_description()
+            .contains("`mcp__everything__get-sum`")
+    );
+    assert!(
+        descriptor
+            .run_description()
+            .contains("tools.mcp__everything__get_sum(args:")
+    );
+    assert!(
+        !descriptor
+            .run_description()
+            .contains("tools.mcp__everything__get-sum(args:")
+    );
+    Ok(())
+}
+
+#[test]
 fn grok_target_gets_ordinary_function_outer_projection_and_ordered_nested_catalog()
 -> Result<(), TestError> {
     let registry = registry([

@@ -23,7 +23,7 @@ use plakous_agent::internal::{
     LocalCompositionWaitOutcome, LocalCompositionWaitRequest,
 };
 use plakous_compose::{
-    CodexMinimalLocalCodeModeV1, CodexNativeLocalCodeModeV1,
+    CodexMinimalLocalCodeModeV1, CodexNativeLocalCodeModeV1, javascript_globals,
     validate_codex_minimal_local_code_mode_candidate_v1,
     validate_codex_native_local_code_mode_candidate_v1,
 };
@@ -270,32 +270,6 @@ pub(crate) fn session_bundle_from_engine(host: Arc<SidecarHost>) -> LocalComposi
             rx: Mutex::new(events_rx),
         }),
     }
-}
-
-/// The `tools.<key>` each nested tool is declared under, in catalog order:
-/// its normalized JavaScript identifier, as Codex Code Mode exposes it, unless
-/// that identifier is another tool's name or alias, in which case the tool
-/// keeps its exact name. The cell's `tools` proxy also dispatches the exact
-/// name (`tools["mcp__srv__get-sum"]`), so the canonical name always works.
-fn javascript_globals<'a>(names: impl Iterator<Item = &'a str> + Clone) -> Vec<String> {
-    let mut claims: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
-    for name in names.clone() {
-        *claims.entry(name.to_owned()).or_default() += 1;
-        let alias = plakous_compose::normalize_javascript_identifier(name);
-        if alias != name {
-            *claims.entry(alias).or_default() += 1;
-        }
-    }
-    names
-        .map(|name| {
-            let alias = plakous_compose::normalize_javascript_identifier(name);
-            if claims.get(&alias) == Some(&1) {
-                alias
-            } else {
-                name.to_owned()
-            }
-        })
-        .collect()
 }
 
 impl LocalCompositionEventReceiver for RquickjsEvents {

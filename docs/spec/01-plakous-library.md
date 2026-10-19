@@ -5316,7 +5316,12 @@ nested tool is declared on `tools` under its normalized JavaScript identifier,
 Codex's rule (every character outside `[A-Za-z0-9_$]`, and a leading digit,
 becomes `_`: `tools.mcp__srv__get_sum` for `mcp__srv__get-sum`), unless that
 identifier is another tool's name or alias, when the tool keeps its exact
-name; `tools["<exact name>"]` always dispatches too. A call of a name the
+name; `tools["<exact name>"]` always dispatches too. The exec description uses
+that same selected key in its TypeScript signature. When the exact name differs
+from the callable identifier, its heading retains the exact name and explicitly
+shows the `tools` call form; a collision fallback uses bracket notation and a
+quoted declaration member. Already valid identifiers retain their declaration
+text unchanged. A call of a name the
 cell's catalog lacks fails naming the tool and the closest catalog name. For admitted `CodeModeOnly` targets the default
 instead selects a separately identified minimum-optimal native profile
 containing `exec_command`, `write_stdin`, `apply_patch`, and `update_plan` on a

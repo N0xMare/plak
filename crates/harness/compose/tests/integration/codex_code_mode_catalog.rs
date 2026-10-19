@@ -839,6 +839,25 @@ fn registry_with_extra(name: &str) -> Result<plakous_tools::FrozenToolRegistry, 
 }
 
 #[test]
+fn exec_description_declares_the_callable_javascript_identifier() -> Result<(), TestError> {
+    let name = "mcp__everything__get-sum";
+    let descriptor = CodexMinimalLocalCodeModeV1::compile_with_extensions(
+        plakous_tools::JobConfig::default(),
+        registry_with_extra(name)?,
+        target(b"normalized-description")?,
+        &[ToolName::new(name)?],
+    )?;
+    let description = descriptor.exec_description();
+    assert!(
+        description
+            .contains("### `mcp__everything__get-sum` (call `tools.mcp__everything__get_sum`)")
+    );
+    assert!(description.contains("mcp__everything__get_sum(args: { value: string; })"));
+    assert!(!description.contains("mcp__everything__get-sum(args:"));
+    Ok(())
+}
+
+#[test]
 fn empty_product_extensions_preserve_four_tool_minimal_identity() -> Result<(), TestError> {
     let registry = registry()?;
     let target = target(b"codex-minimal-empty-extras")?;

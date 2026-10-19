@@ -996,18 +996,36 @@ fn build_exec_description(tools: &[CodexCodeModeNestedToolV1], exact_reference: 
     } else {
         MINIMAL_EXEC_DESCRIPTION_TEMPLATE
     };
+    let globals = javascript_globals(tools.iter().map(|tool| tool.exposed_name.as_str()));
     let nested = tools
         .iter()
-        .map(|tool| {
+        .zip(globals)
+        .map(|(tool, global)| {
             let name = tool.exposed_name.as_str();
+            let identifier = normalize_javascript_identifier(&global) == global;
+            let member = if identifier {
+                global.clone()
+            } else {
+                json!(global).to_string()
+            };
+            let heading = if global != name || !identifier {
+                let call = if identifier {
+                    format!("tools.{global}")
+                } else {
+                    format!("tools[{member}]")
+                };
+                format!("### `{name}` (call `{call}`)")
+            } else {
+                format!("### `{name}`")
+            };
             let signature = if tool.string_input {
-                format!("{name}(input: string)")
+                format!("{member}(input: string)")
             } else {
                 let input = tool.input_schema.as_ref().map_or_else(
                     || "unknown".to_owned(),
                     |schema| render_schema_type(schema.document().value()),
                 );
-                format!("{name}(args: {input})")
+                format!("{member}(args: {input})")
             };
             let return_type = if matches!(name, "exec_command" | "write_stdin") {
                 PROCESS_TOOL_RESULT_TYPE
@@ -1015,7 +1033,7 @@ fn build_exec_description(tools: &[CodexCodeModeNestedToolV1], exact_reference: 
                 "Promise<unknown>"
             };
             format!(
-                "### `{name}`\n{}\n\n```ts\n{signature}: {return_type};\n```",
+                "{heading}\n{}\n\n```ts\n{signature}: {return_type};\n```",
                 tool.description
             )
         })
@@ -1194,6 +1212,33 @@ fn validate_nested_catalog(
     Ok(())
 }
 
+/// The `tools.<key>` each nested tool is declared under, in catalog order:
+/// its normalized JavaScript identifier, as Codex Code Mode exposes it, unless
+/// that identifier is another tool's name or alias, in which case the tool
+/// keeps its exact name. The cell's `tools` proxy also dispatches the exact
+/// name (`tools["mcp__srv__get-sum"]`), so the canonical name always works.
+#[must_use]
+pub fn javascript_globals<'a>(names: impl Iterator<Item = &'a str> + Clone) -> Vec<String> {
+    let mut claims: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for name in names.clone() {
+        *claims.entry(name.to_owned()).or_default() += 1;
+        let alias = normalize_javascript_identifier(name);
+        if alias != name {
+            *claims.entry(alias).or_default() += 1;
+        }
+    }
+    names
+        .map(|name| {
+            let alias = normalize_javascript_identifier(name);
+            if claims.get(&alias) == Some(&1) {
+                alias
+            } else {
+                name.to_owned()
+            }
+        })
+        .collect()
+}
+
 /// The JavaScript identifier a nested tool is reachable as on `tools`:
 /// Codex Code Mode's rule, every character outside `[A-Za-z0-9_$]` (and a
 /// leading digit) mapped to `_` (`mcp__srv__get-sum` -> `mcp__srv__get_sum`).
@@ -1296,4 +1341,42 @@ fn definition_error(
     error: &(dyn std::error::Error + 'static),
 ) -> ToolRuntimeError {
     ToolRuntimeError::from_sensitive_source(ToolRuntimeErrorKind::InvalidDefinition, context, error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exec_description_string_members_follow_runtime_collision_rules()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let tool = |name: &str| -> Result<_, Box<dyn std::error::Error>> {
+            Ok(CodexCodeModeNestedToolV1 {
+                exposed_name: ToolName::new(name)?,
+                description: "A string tool.".to_owned(),
+                input_schema: None,
+                string_input: true,
+                projection_identity: Digest::sha256(
+                    DigestDomain::ToolDefinition,
+                    1,
+                    &[name.as_bytes()],
+                )?,
+            })
+        };
+        for exact_reference in [false, true] {
+            let tools = [tool("mcp__srv__get-sum")?];
+            let description = build_exec_description(&tools, exact_reference);
+            assert!(description.contains("mcp__srv__get_sum(input: string): Promise<unknown>;"));
+            assert!(description.contains("(call `tools.mcp__srv__get_sum`)"));
+
+            let tools = [tool("mcp__srv__get-sum")?, tool("mcp__srv__get_sum")?];
+            let description = build_exec_description(&tools, exact_reference);
+            assert!(
+                description.contains("\"mcp__srv__get-sum\"(input: string): Promise<unknown>;")
+            );
+            assert!(description.contains("(call `tools[\"mcp__srv__get-sum\"]`)"));
+            assert!(description.contains("### `mcp__srv__get_sum`\n"));
+        }
+        Ok(())
+    }
 }
