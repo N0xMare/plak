@@ -16,7 +16,7 @@ class LookupRetryTests(unittest.TestCase):
                       "transport timeout", "DNS failure", "connect failure",
                       "transport stream failure",
                       "HTTP transport failed in Connect (NotStarted, Io)"]:
-            for attempts in [1, 2, 3]:
+            for attempts in ([2, 3] if cause == "transport timeout" else [1, 2, 3]):
                 text = f"plak: model lookup failed after {attempts} attempts: {cause}"
                 self.assertIsNotNone(live.provider_reason_from(None, None, text), text)
                 with self.assertRaises(live.ScenarioFailure) as caught:
@@ -25,6 +25,23 @@ class LookupRetryTests(unittest.TestCase):
                 with self.assertRaises(live.ScenarioFailure) as caught:
                     live.classify_command_error(text, "startup")
                 self.assertEqual(caught.exception.outcome, live.PROVIDER)
+
+    def test_injected_lookup_exhaustion_is_harness_until_real_attempts_follow(self):
+        text = "model lookup failed after 3 attempts: HTTP 503"
+        for faults, outcome in [
+            ("host=openrouter.ai,path=/api/v1/models,nth=1,fault=503", live.PROVIDER),
+            ("host=openrouter.ai,path=/api/v1/models,fault=503", live.HARNESS),
+            ("path=/v1/models,nth=1,fault=503;path=/v1/models,nth=1,fault=503;path=/v1/models,nth=1,fault=503", live.HARNESS),
+            ("path=/v1/responses,fault=503", live.PROVIDER),
+            ("path=/v1/models,nth=10,fault=503", live.PROVIDER),
+        ]:
+            with self.assertRaises(live.ScenarioFailure) as caught:
+                live.classify_cli_failure(5, text, "lookup", lookup_faults=faults)
+            self.assertEqual(caught.exception.outcome, outcome)
+
+    def test_one_timeout_attempt_is_not_provider_evidence(self):
+        for cause in ["transport timeout", "HTTP transport failed in Resolution (NotStarted, DeadlineExceeded)"]:
+            self.assertIsNone(live.lookup_failure_reason(f"model lookup failed after 1 attempts: {cause}"))
 
     def test_jsonl_startup_exhaustion_scores_provider_and_can_observe_the_cap(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -48,7 +65,7 @@ class LookupRetryTests(unittest.TestCase):
                     with self.assertRaises(live.ScenarioFailure) as caught:
                         agent.__init__(env, root, "agent", args=[])
                     self.assertEqual(caught.exception.outcome, live.PROVIDER)
-                    self.assertGreater(wait.call_args.args[1], 60,
+                    self.assertGreater(wait.call_args.args[1], 120,
                         "driver must leave room to observe the lookup cap's terminal error")
                 finally:
                     agent.stderr.close()

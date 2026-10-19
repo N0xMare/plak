@@ -385,6 +385,7 @@ impl SubscriptionInferenceScope {
 
 #[derive(Clone, Copy, Debug, Default)]
 struct ClassState {
+    dispatch_attempts: u32,
     reserved: u32,
     dispatched: u32,
     abandoned: u32,
@@ -775,6 +776,67 @@ fn scope_snapshot(
     })
 }
 
+impl InMemorySubscriptionRequestGate {
+    /// Returns all dispatch authorizations, including proven `NotStarted` refunds.
+    /// This is process-local attempt evidence, not charged request capacity.
+    ///
+    /// # Errors
+    /// Returns unavailable accounting if the gate's lock is poisoned.
+    pub fn dispatch_attempts(
+        &self,
+        class: SubscriptionRequestClass,
+    ) -> Result<u32, SubscriptionLimitError> {
+        let state = self
+            .inner
+            .state
+            .lock()
+            .map_err(|_| SubscriptionLimitError::Unavailable)?;
+        Ok(state.class(class).dispatch_attempts)
+    }
+}
+
+/// Per-physical-attempt catalog authorization and trusted unsent refunds.
+#[cfg(feature = "http-refresh")]
+pub struct CatalogRequestDispatch {
+    gate: Option<Arc<dyn SubscriptionRequestGate>>,
+    permit: Option<Box<dyn SubscriptionRequestPermit>>,
+}
+
+#[cfg(feature = "http-refresh")]
+impl CatalogRequestDispatch {
+    /// Uses the caller's existing catalog allowance; no gate means unmetered maintenance.
+    #[must_use]
+    pub fn new(gate: Option<Arc<dyn SubscriptionRequestGate>>) -> Self {
+        Self { gate, permit: None }
+    }
+
+    /// `None` authorizes the next dispatch; `Some` settles a transport failure.
+    /// Only trusted `NotStarted` proof refunds a spent authorization.
+    ///
+    /// # Errors
+    /// Propagates denied acquisition/authorization or unavailable refund accounting.
+    pub fn observe(
+        &mut self,
+        failure: Option<plakous_http::TransmissionFact>,
+    ) -> Result<(), SubscriptionLimitError> {
+        if let Some(failure) = failure {
+            if failure == plakous_http::TransmissionFact::NotStarted
+                && let Some(permit) = &mut self.permit
+            {
+                permit.refund_not_started()?;
+            }
+        } else {
+            self.permit = None;
+            if let Some(gate) = &self.gate {
+                let mut permit = gate.acquire(SubscriptionRequestClass::Catalog)?;
+                permit.authorize_dispatch()?;
+                self.permit = Some(permit);
+            }
+        }
+        Ok(())
+    }
+}
+
 impl SubscriptionRequestGate for InMemorySubscriptionRequestGate {
     fn acquire(
         &self,
@@ -915,6 +977,10 @@ impl SubscriptionRequestPermit for InMemoryPermit {
             .lock()
             .map_err(|_| SubscriptionLimitError::Unavailable)?;
         let class = state.class_mut(self.class);
+        class.dispatch_attempts = class
+            .dispatch_attempts
+            .checked_add(1)
+            .ok_or(SubscriptionLimitError::Unavailable)?;
         class.dispatched = class
             .dispatched
             .checked_add(1)
@@ -1452,6 +1518,43 @@ mod tests {
                 reserved: 8,
                 allowance: 8,
             })
+        );
+    }
+}
+
+#[cfg(all(test, feature = "http-refresh"))]
+#[allow(
+    clippy::expect_used,
+    reason = "test constants and accounting assertions"
+)]
+mod catalog_dispatch_tests {
+    use super::*;
+
+    #[test]
+    fn catalog_attempts_keep_fresh_permits_and_only_refund_not_started() {
+        let gate = Arc::new(InMemorySubscriptionRequestGate::new(
+            SubscriptionRequestLimits::new(0, 3, 0, 0, None, 0).expect("limits"),
+            Arc::new(SystemSubscriptionGateClock::default()),
+        ));
+        let mut dispatch = CatalogRequestDispatch::new(Some(gate.clone()));
+        dispatch.observe(None).expect("first permit");
+        dispatch
+            .observe(Some(plakous_http::TransmissionFact::NotStarted))
+            .expect("refund");
+        dispatch.observe(None).expect("fresh permit");
+        dispatch
+            .observe(Some(plakous_http::TransmissionFact::MayHaveTransmitted))
+            .expect("sent");
+        let state = gate
+            .snapshot()
+            .expect("snapshot")
+            .class(SubscriptionRequestClass::Catalog);
+        assert_eq!(state.reserved(), 1);
+        assert_eq!(state.dispatched(), 1);
+        assert_eq!(
+            gate.dispatch_attempts(SubscriptionRequestClass::Catalog)
+                .expect("attempts"),
+            2
         );
     }
 }

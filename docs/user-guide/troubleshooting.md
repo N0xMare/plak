@@ -23,7 +23,12 @@ Before attaching, Plak retries transient catalog/discovery GET failures up to
 three times, without changing the URL, account or model. CLI and TUI status show
 `retrying model lookup (2/3): <cause>`. The waits are roughly half a second and
 two seconds; provider `Retry-After` advice is honored only within the lookup's
-60-second overall cap. Existing per-request deadlines still apply.
+60-second overall cap, and only when enough time remains for a useful next
+attempt. Existing per-request deadlines still apply. Codex/Grok catalog
+renewals inside an attached session remain single-attempt; the retry window
+applies to startup and binding, not to holding an in-session credential lease.
+Native catalog operations allow up to 120 seconds for credential setup, the
+lookup window and cleanup; an outer timeout retains the actual attempt count.
 
 `model lookup failed after N attempts: <cause>` means the transient failure
 outlasted that budget. Check connectivity or provider availability and try

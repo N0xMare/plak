@@ -2353,7 +2353,13 @@ asserting a success.
 
 A startup model lookup that exhausts the bounded GET retry policy (chapter 01
 §6.2) on a transport or retryable provider-status cause scores `provider`, not
-`harness`, on CLI, JSONL and TUI surfaces. The exhausted error names the actual
+`harness`, on CLI, JSONL and TUI surfaces, except that timeout evidence needs
+at least two attempts. A zero/one-attempt deadline is `harness`, not provider
+outage evidence. When `PLAK_TEST_FAULTS` targets the lookup, exhaustion with
+an attempt count no greater than the injected fault count is `harness`: the
+product was required to absorb those faults. An unbounded matching injection
+cannot establish a real-provider failure; a finite injection can only do so
+when actual failed attempts outnumber the injected faults. The exhausted error names the actual
 attempt count and cause; a malformed catalog, invalid admission evidence,
 absent model or unrelated startup failure does not acquire this classification.
 Transient first-attempt lookup fault scenarios must still bind the session and

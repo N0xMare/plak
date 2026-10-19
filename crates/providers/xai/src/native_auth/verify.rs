@@ -236,7 +236,7 @@ impl ManagerCore {
             self.get_login_json(self.endpoints.jwks(), None, LoginHttpStage::SigningKeys)
                 .await?
         } else {
-            self.get(self.endpoints.jwks(), None, None).await?
+            self.get(self.endpoints.jwks(), None, None, false).await?
         };
         let set: JwkSet = decode_json(&response, MAX_AUTH_BODY_BYTES)
             .map_err(|error| login_signing_keys_or(login, error))?;
@@ -274,7 +274,7 @@ impl ManagerCore {
             )
             .await?
         } else {
-            self.get(self.endpoints.userinfo(), Some(access_token), None)
+            self.get(self.endpoints.userinfo(), Some(access_token), None, false)
                 .await?
         };
         let mut info: UserInfo = decode_json(&response, MAX_AUTH_BODY_BYTES)

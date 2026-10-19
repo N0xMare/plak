@@ -4,6 +4,19 @@ use super::lookup::*;
 use plakous_http::{ErrorKind, Phase};
 use std::time::Duration;
 
+async fn run<F, Fut>(
+    timeout: Duration,
+    cap: Duration,
+    exchange: F,
+    notify: impl FnMut(u8, &str),
+) -> Result<LookupReply, LookupError>
+where
+    F: FnMut(std::time::Instant) -> Fut,
+    Fut: Future<Output = Result<LookupReply, LookupError>>,
+{
+    super::lookup::run(timeout, cap, exchange, notify, &mut |_| Ok(()), 3).await
+}
+
 #[test]
 fn lookup_status_retry_classes() {
     for status in [429, 500, 502, 503, 504] {
@@ -266,4 +279,90 @@ async fn lookup_attempt_deadlines_are_renewed_and_clamped() {
         tokio::time::Instant::now() - started,
         Duration::from_secs(60)
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn lookup_retry_after_leaves_useful_attempt_time() {
+    let started = tokio::time::Instant::now();
+    let mut attempts = 0;
+    let result = run(
+        Duration::from_secs(20),
+        Duration::from_secs(60),
+        |_| {
+            attempts += 1;
+            let value = if attempts == 1 {
+                reply_with_advice(429, b"", Some("59"))
+            } else {
+                reply(200, b"ok")
+            };
+            async { Ok(value) }
+        },
+        |_, _| {},
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(LookupError::Exhausted {
+            attempts: 1,
+            cause: LookupCause::Status(429)
+        })
+    ));
+    assert_eq!(tokio::time::Instant::now(), started);
+}
+
+#[tokio::test(start_paused = true)]
+async fn lookup_zero_budget_keeps_plain_transport_error() {
+    let client = plakous_http::Client::new(plakous_http::Limits::default()).unwrap();
+    let request = plakous_http::Request::new(
+        plakous_http::Origin::loopback_http(std::net::Ipv4Addr::LOCALHOST.into(), 1234).unwrap(),
+        plakous_http::Method::GET,
+        "/models",
+        plakous_http::HeaderMap::new(),
+        plakous_http::Bytes::new(),
+        client.limits(),
+    )
+    .unwrap();
+    let failure = client
+        .execute(
+            request,
+            plakous_http::ExchangeControl::new(std::time::Instant::now()),
+        )
+        .await
+        .unwrap_err();
+    for cap in [Duration::ZERO, Duration::from_secs(60)] {
+        let result = run(
+            Duration::ZERO,
+            cap,
+            |deadline| {
+                assert!(
+                    deadline <= tokio::time::Instant::now().into_std(),
+                    "an expired attempt borrowed the operation cap"
+                );
+                async { Err(LookupError::Transport(failure)) }
+            },
+            |_, _| panic!("zero budget retried"),
+        )
+        .await;
+        assert!(matches!(result, Err(LookupError::Transport(_))));
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn lookup_single_attempt_renewal_does_not_retry_transient_status() {
+    let mut attempts = 0;
+    let value = super::lookup::run(
+        Duration::from_secs(30),
+        Duration::from_secs(60),
+        |_| {
+            attempts += 1;
+            async { Ok(reply(503, b"")) }
+        },
+        |_, _| panic!("renewal retried"),
+        &mut |_| Ok(()),
+        1,
+    )
+    .await
+    .unwrap();
+    assert_eq!(value.status.as_u16(), 503);
+    assert_eq!(attempts, 1);
 }

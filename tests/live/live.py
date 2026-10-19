@@ -418,16 +418,47 @@ def durable_refusals(record: dict) -> list[str]:
     return ["canonical model refusal"] if record.get("phase") == "refused" else []
 
 
-def lookup_failure_reason(text: str) -> str | None:
-    """Only an exhausted startup lookup with a transient cause scores provider."""
+def lookup_failure(text: str, faults: str | None = None) -> tuple[str, str] | None:
+    """An exhausted lookup's cause and evidence-based live outcome."""
     text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
-    lookup = re.search(
-        r"model lookup failed after [1-3] attempts: "
-        r"(?:HTTP (?:429|500|502|503|504)\b|transport timeout\b|DNS failure\b|"
+    match = re.search(
+        r"model lookup failed after ([1-3]) attempts: "
+        r"(HTTP (?:429|500|502|503|504)\b|transport timeout\b|DNS failure\b|"
         r"connect failure\b|transport stream failure\b|HTTP transport failed in "
         r"(?:Resolution|Connect|RequestWrite|RequestWriteOrResponseHead|ResponseHead|ResponseBody) "
         r"\([^\n]*, (?:Io|Resolution|DeadlineExceeded|Protocol)\))", text)
-    return lookup.group(0) if lookup else None
+    if not match:
+        return None
+    attempts, cause = int(match.group(1)), match.group(2)
+    if attempts < 2 and ("timeout" in cause or "DeadlineExceeded" in cause):
+        return match.group(0), HARNESS
+    injected = 0
+    for rule in (faults or "").split(";"):
+        fields = {}
+        for item in rule.split(","):
+            if "=" in item:
+                key, value = item.split("=", 1)
+                fields[key.strip()] = value.strip()
+        path = fields.get("path", "")
+        if path and "/models" not in path:
+            continue
+        if fields.get("fault") not in {"connect", "stall", "reset", "eof", "429", "500", "502", "503", "504"}:
+            continue
+        if "nth" not in fields:
+            return match.group(0), HARNESS
+        try:
+            nth = int(fields["nth"])
+        except ValueError:
+            continue
+        if 1 <= nth <= attempts:
+            injected += 1
+    return match.group(0), HARNESS if attempts <= injected else PROVIDER
+
+
+def lookup_failure_reason(text: str) -> str | None:
+    """Only exhausted real-provider failures, not a single deadline, qualify."""
+    failure = lookup_failure(text)
+    return failure[0] if failure and failure[1] == PROVIDER else None
 
 
 def provider_reason_from(kind: str | None, http_status: int | None, text: str) -> str | None:
@@ -689,9 +720,12 @@ def classify_command_error(message: str, what: str, *,
 
 
 def classify_cli_failure(code: int, stderr: str, what: str, *,
-                         segments: list[Path] | None = None) -> None:
+                         segments: list[Path] | None = None, lookup_faults: str | None = None) -> None:
     """`plak run` exit. Exit 5 is the agent class; the text decides provider."""
-    detail = lookup_failure_reason(stderr) or " ".join(stderr.split())[:200]
+    lookup = lookup_failure(stderr, lookup_faults)
+    if lookup:
+        raise ScenarioFailure(lookup[1], f"{what}: {lookup[0]}")
+    detail = " ".join(stderr.split())[:200]
     validation = stream_validation_outcome(stderr, segments)
     if validation == MODEL:
         raise ScenarioFailure(MODEL, f"{what}: model emitted invalid tool arguments")
@@ -1224,14 +1258,13 @@ class Agent:
         # Constructors that skip __init__ simply do not have it.
         if observe:
             self.observed: collections.deque = collections.deque(maxlen=OBSERVED_LIMIT)
-        # Observe the lookup cap's terminal error after credential/setup work,
-        # rather than racing the 60-second lookup budget with a driver timeout.
-        hello = self.wait_for(lambda event: event.get("kind") in ("ready", "bye"), 120)
+        # Leave room to observe the catalog outer deadline after setup/refresh.
+        hello = self.wait_for(lambda event: event.get("kind") in ("ready", "bye"), 180)
         if hello.get("kind") != "ready" or not self.session_id:
             self.stderr.flush()
             detail = Path(self.stderr.name).read_text(errors="replace")
             classify_cli_failure(self.proc.poll() or 5, detail + json.dumps(hello),
-                                 "plak agent startup", segments=[self.capture_dir])
+                                 "plak agent startup", segments=[self.capture_dir], lookup_faults=faults)
         if self.composition:
             env.bound_compositions.add(self.composition)
 
@@ -1401,8 +1434,9 @@ class Tui:
     """The interactive TUI on a pseudo-terminal, driven by keystrokes."""
 
     def __init__(self, env: Env, repo: Path, log: Path, args: list[str] = (),
-                 capture_dir: Path | None = None):
-        child_env = {**env.environ(capture_dir=capture_dir), "TERM": "xterm-256color"}
+                 capture_dir: Path | None = None, faults: str | None = None):
+        self.lookup_faults = faults
+        child_env = {**env.environ(faults=faults, capture_dir=capture_dir), "TERM": "xterm-256color"}
         self.capture_dir = env.capture_segments[-1]
         self.log = log.open("wb")
         self.pid, self.fd = pty.fork()
@@ -1443,10 +1477,10 @@ class Tui:
             self.pump(0.5)
             if predicate():
                 return True
-            reason = lookup_failure_reason(self.screen.decode(errors="replace"))
-            if reason:
+            failure = lookup_failure(self.screen.decode(errors="replace"), getattr(self, "lookup_faults", None))
+            if failure:
                 self.quit()
-                raise ScenarioFailure(PROVIDER, f"TUI startup: {reason}")
+                raise ScenarioFailure(failure[1], f"TUI startup: {failure[0]}")
         return False
 
     def quit(self, timeout: float = 30) -> int | None:

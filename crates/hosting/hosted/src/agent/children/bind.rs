@@ -1015,7 +1015,7 @@ pub async fn spawned_child_spec(
     let catalog = subscriptions
         .model_catalog(target_provider)
         .await
-        .map_err(|_| "spawn child model catalog could not be read".to_string())?;
+        .map_err(child_catalog_failure)?;
     let catalog_entry = catalog
         .models()
         .iter()
@@ -1145,4 +1145,28 @@ pub(crate) fn assignment_start_prompt(
         message,
     }
     .render()
+}
+
+fn child_catalog_failure(error: NativeSubscriptionError) -> String {
+    match error {
+        NativeSubscriptionError::ModelLookup { .. } => {
+            format!("spawn child model catalog could not be read: {error}")
+        }
+        _ => "spawn child model catalog could not be read".to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod lookup_failure_tests {
+    #[test]
+    fn child_binding_keeps_lookup_attempt_count_and_cause() {
+        let message = super::child_catalog_failure(super::NativeSubscriptionError::ModelLookup {
+            attempts: 3,
+            cause: "HTTP 503",
+        });
+        assert!(
+            message.contains("model lookup failed after 3 attempts: HTTP 503"),
+            "{message}"
+        );
+    }
 }

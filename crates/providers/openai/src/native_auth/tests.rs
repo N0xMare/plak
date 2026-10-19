@@ -7596,3 +7596,93 @@ async fn a_dispatch_dropped_during_its_401_refresh_lets_the_refresh_complete() -
 }
 
 mod retrieval;
+
+#[tokio::test]
+async fn startup_catalog_retry_authorizes_every_physical_get() -> TestResult {
+    let endpoint = test_endpoint().await?;
+    let client = endpoint.client.clone();
+    let (_directory, slot) = private_slot()?;
+    seed_ready_credential(
+        &slot,
+        "retry-permit-account",
+        "retry-permit-subject",
+        now_unix_secs() + 3_600,
+    )?;
+    let gate = subscription_gate(4, 4)?;
+    let manager = manager_for_endpoint_with_gate(&slot, &endpoint, gate.clone())?;
+    let server = spawn_sequence_then_probe(
+        endpoint,
+        vec![
+            response("503 Service Unavailable", "application/json", b"{}", ""),
+            catalog_reply()?,
+        ],
+    );
+    let resolver =
+        CodexModelResolver::new_for_test(manager, client, saturated_observation_config()?)?;
+    resolver.refresh_catalog().await?;
+    assert_eq!(
+        gate.snapshot()?
+            .class(SubscriptionRequestClass::Catalog)
+            .dispatched(),
+        2
+    );
+    let (requests, unexpected) = server.await??;
+    assert_eq!(requests.len(), 2);
+    assert!(!unexpected);
+    Ok(())
+}
+
+#[tokio::test]
+async fn receipt_catalog_renewal_is_single_attempt_on_transient_status() -> TestResult {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Starts(AtomicUsize);
+    impl plakous_http::ExchangeObserver for Starts {
+        fn start(&self, _body: &[u8]) -> Option<Box<dyn plakous_http::ExchangeObservation>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            None
+        }
+    }
+    let (mut fixture, _peers, server) = renew_fixture(
+        "renew-single-account",
+        "renew-single-subject",
+        now_unix_secs() + 3_600,
+        0,
+        vec![response(
+            "503 Service Unavailable",
+            "application/json",
+            b"{}",
+            "",
+        )],
+    )
+    .await?;
+    let observed = Arc::new(Starts(AtomicUsize::new(0)));
+    fixture.resolver.client = fixture
+        .resolver
+        .client
+        .clone()
+        .with_observer(Some(observed.clone()));
+    let fence = fixture.manager.load_fence().await?;
+    let floor = CodexRenewalFloor::default();
+    let renewal = CatalogRenewal {
+        selection: ExpectedSelection {
+            account: fence.account_binding(),
+            selection_epoch: fixture.evidence.credential_selection_epoch(),
+        },
+        floor: &floor,
+    };
+    let result = fixture
+        .resolver
+        .catalog_source()
+        .fetch_catalog(Some(&renewal))
+        .await;
+    assert!(result.is_err());
+    assert_eq!(
+        observed.0.load(Ordering::SeqCst),
+        1,
+        "receipt renewal retried its GET"
+    );
+    let (requests, unexpected) = server.await??;
+    assert_eq!(requests.len(), 2);
+    assert!(!unexpected);
+    Ok(())
+}

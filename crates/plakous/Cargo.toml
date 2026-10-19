@@ -117,7 +117,7 @@ rusqlite.workspace = true
 rustix = { workspace = true, features = ["pty", "termios"] }
 serde_json.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util", "time"] }
 uuid = { workspace = true, features = ["v4"] }
 
 [lints]

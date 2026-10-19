@@ -91,7 +91,8 @@ use plakous_model::{
 };
 
 const PRIMARY_SLOT: &str = "primary";
-const MODEL_CATALOG_DEADLINE: Duration = Duration::from_secs(30);
+// Refresh/setup (up to 30 s) plus the shared 60 s lookup cap and cleanup margin.
+const MODEL_CATALOG_DEADLINE: Duration = Duration::from_secs(120);
 
 /// A built-in Plak-owned subscription integration.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -1347,24 +1348,42 @@ where
     if !dispatch_credential_admitted(provider, status.credential()) {
         return Err(NativeSubscriptionError::CredentialUnavailable);
     }
-    let limits = SubscriptionRequestLimits::new(0, 1, 0, 0, Some(MODEL_CATALOG_DEADLINE), 0)
+    let limits = SubscriptionRequestLimits::new(0, 3, 0, 0, Some(MODEL_CATALOG_DEADLINE), 0)
         .map_err(|_| NativeSubscriptionError::Internal)?;
-    let gate: Arc<dyn SubscriptionRequestGate> = Arc::new(InMemorySubscriptionRequestGate::new(
+    let gate = Arc::new(InMemorySubscriptionRequestGate::new(
         limits,
         Arc::new(SystemSubscriptionGateClock::default()),
     ));
-    let models = tokio::time::timeout(MODEL_CATALOG_DEADLINE, operation(Arc::clone(&gate)))
+    let dispatch_gate: Arc<dyn SubscriptionRequestGate> = gate.clone();
+    let models = tokio::time::timeout(MODEL_CATALOG_DEADLINE, operation(dispatch_gate))
         .await
-        .map_err(|_| NativeSubscriptionError::Transport(None))??;
+        .map_err(|_| {
+            let attempts = gate
+                .dispatch_attempts(SubscriptionRequestClass::Catalog)
+                .unwrap_or(0);
+            if attempts == 0 {
+                NativeSubscriptionError::Transport(None)
+            } else {
+                NativeSubscriptionError::ModelLookup {
+                    attempts: u8::try_from(attempts).unwrap_or(u8::MAX),
+                    cause: "transport timeout",
+                }
+            }
+        })??;
     let snapshot = gate
         .snapshot()
         .map_err(|_| NativeSubscriptionError::Internal)?;
-    validate_model_catalog_snapshot(snapshot)?;
+    validate_model_catalog_snapshot(
+        snapshot,
+        gate.dispatch_attempts(SubscriptionRequestClass::Catalog)
+            .map_err(|_| NativeSubscriptionError::Internal)?,
+    )?;
     Ok(models)
 }
 
 fn validate_model_catalog_snapshot(
     snapshot: SubscriptionLimitSnapshot,
+    attempts: u32,
 ) -> Result<(), NativeSubscriptionError> {
     let auth = snapshot.class(SubscriptionRequestClass::AuthRefresh);
     let catalog = snapshot.class(SubscriptionRequestClass::Catalog);
@@ -1378,9 +1397,10 @@ fn validate_model_catalog_snapshot(
             && class.input_token_upper_bound() == 0
     };
     if !exact_zero(auth)
-        || catalog.allowance() != 1
-        || catalog.reserved() != 1
-        || catalog.dispatched() != 1
+        || catalog.allowance() != 3
+        || !(1..=3).contains(&attempts)
+        || !(1..=attempts).contains(&catalog.dispatched())
+        || catalog.reserved() != catalog.dispatched()
         || catalog.abandoned() != 0
         || catalog.denied() != 0
         || catalog.input_token_upper_bound() != 0

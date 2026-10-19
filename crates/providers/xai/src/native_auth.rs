@@ -1643,12 +1643,6 @@ impl ManagerCore {
             }
             Err(error) => return Err(error),
         }
-        let mut request_permit = self
-            .request_gate
-            .as_ref()
-            .map(|gate| gate.acquire(SubscriptionRequestClass::Catalog))
-            .transpose()
-            .map_err(|_| XaiNativeAuthError::CatalogUnavailable)?;
         let fence = self.store.load()?.ok_or(XaiNativeAuthError::NotLoggedIn)?;
         if fence.status() != CredentialStatus::Ready {
             return Err(XaiNativeAuthError::NotReady);
@@ -1664,17 +1658,13 @@ impl ManagerCore {
         {
             return Err(XaiNativeAuthError::SelectionChanged);
         }
-        if let Some(permit) = &mut request_permit {
-            permit
-                .authorize_dispatch()
-                .map_err(|_| XaiNativeAuthError::CatalogUnavailable)?;
-        }
         let requested_at = system_unix_seconds()?;
         let response = self
             .get(
                 self.endpoints.catalog(),
                 Some(&stored.access_token),
                 Some(fence.account_binding()),
+                renewal.is_none(),
             )
             .await?;
         let catalog: CatalogResponse = decode_json(&response, MAX_AUTH_BODY_BYTES)?;
@@ -2164,6 +2154,7 @@ impl ManagerCore {
         endpoint: &Endpoint,
         bearer_token: Option<&str>,
         catalog_subject: Option<&AccountBinding>,
+        retry: bool,
     ) -> Result<Zeroizing<Vec<u8>>, XaiNativeAuthError> {
         let mut headers = fixed_headers("application/json");
         headers.insert(HEADER_ACCEPT, HeaderValue::from_static("application/json"));
@@ -2194,13 +2185,27 @@ impl ManagerCore {
             } else {
                 self.client.clone()
             };
-            let reply = plakous_exchange::lookup::get(
+            let mut dispatch = plakous_auth::subscription_limit::CatalogRequestDispatch::new(
+                self.request_gate.clone(),
+            );
+            let reply = plakous_exchange::lookup::get_with_dispatch(
                 &client,
                 request,
-                plakous_exchange::lookup::LookupBudget::from_deadline(
-                    Instant::now() + REQUEST_TIMEOUT,
-                ),
+                if retry {
+                    plakous_exchange::lookup::LookupBudget::from_deadline(
+                        Instant::now() + REQUEST_TIMEOUT,
+                    )
+                } else {
+                    plakous_exchange::lookup::LookupBudget::single_attempt(
+                        Instant::now() + REQUEST_TIMEOUT,
+                    )
+                },
                 MAX_AUTH_BODY_BYTES,
+                &mut |failure| {
+                    dispatch
+                        .observe(failure.map(Failure::transmission))
+                        .map_err(|_| plakous_exchange::lookup::LookupError::DispatchDenied)
+                },
             )
             .await
             .map_err(|error| match error {

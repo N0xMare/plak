@@ -48,6 +48,8 @@ pub enum LookupError {
     BodyLimit,
     /// The successful response head was not the required JSON media type.
     MediaType,
+    /// The caller refused physical dispatch or could not settle its accounting.
+    DispatchDenied,
     /// Only GET requests may enter this policy.
     NotGet,
     /// A transient cause exhausted the attempt or wall-clock budget.
@@ -90,6 +92,7 @@ impl fmt::Display for LookupError {
             Self::Transport(failure) => failure.fmt(f),
             Self::BodyLimit => f.write_str("model lookup exceeded its body bound"),
             Self::MediaType => f.write_str("model lookup has an invalid media type"),
+            Self::DispatchDenied => f.write_str("model lookup dispatch was not authorized"),
             Self::NotGet => f.write_str("model lookup requires GET"),
             Self::Exhausted { attempts, cause } => {
                 write!(f, "model lookup failed after {attempts} attempts: {cause}")
@@ -115,6 +118,7 @@ pub struct LookupReply {
 pub struct LookupBudget {
     attempt_timeout: Duration,
     deadline: tokio::time::Instant,
+    maximum_attempts: u8,
 }
 
 impl LookupBudget {
@@ -124,6 +128,16 @@ impl LookupBudget {
         Self {
             attempt_timeout: deadline.saturating_duration_since(Instant::now()),
             deadline: tokio::time::Instant::now() + OVERALL_CAP,
+            maximum_attempts: 3,
+        }
+    }
+
+    /// Keeps in-session receipt renewal single-dispatch under its existing deadline.
+    #[must_use]
+    pub fn single_attempt(deadline: Instant) -> Self {
+        Self {
+            maximum_attempts: 1,
+            ..Self::from_deadline(deadline)
         }
     }
 }
@@ -140,7 +154,15 @@ pub async fn get(
     budget: LookupBudget,
     maximum_body_bytes: usize,
 ) -> Result<LookupReply, LookupError> {
-    get_inner(client, request, budget, maximum_body_bytes, false).await
+    get_inner(
+        client,
+        request,
+        budget,
+        maximum_body_bytes,
+        false,
+        &mut |_| Ok(()),
+    )
+    .await
 }
 
 /// Like [`get`], but rejects a non-JSON successful response head before reading
@@ -154,7 +176,32 @@ pub async fn get_json(
     budget: LookupBudget,
     maximum_body_bytes: usize,
 ) -> Result<LookupReply, LookupError> {
-    get_inner(client, request, budget, maximum_body_bytes, true).await
+    get_inner(
+        client,
+        request,
+        budget,
+        maximum_body_bytes,
+        true,
+        &mut |_| Ok(()),
+    )
+    .await
+}
+
+/// Executes a lookup with caller-owned authorization immediately before every
+/// physical attempt. A transport failure is reported to the hook before retry
+/// classification, so trusted `NotStarted` proof can refund the spent permit.
+///
+/// # Errors
+/// Returns [`LookupError::DispatchDenied`] if the hook refuses dispatch or refund,
+/// or the same failures as [`get`].
+pub async fn get_with_dispatch(
+    client: &Client,
+    request: Request,
+    budget: LookupBudget,
+    maximum_body_bytes: usize,
+    dispatch: &mut (dyn FnMut(Option<Failure>) -> Result<(), LookupError> + Send),
+) -> Result<LookupReply, LookupError> {
+    get_inner(client, request, budget, maximum_body_bytes, false, dispatch).await
 }
 
 async fn get_inner(
@@ -163,6 +210,7 @@ async fn get_inner(
     budget: LookupBudget,
     maximum_body_bytes: usize,
     require_json: bool,
+    dispatch: &mut (dyn FnMut(Option<Failure>) -> Result<(), LookupError> + Send),
 ) -> Result<LookupReply, LookupError> {
     if request.method() != Method::GET {
         return Err(LookupError::NotGet);
@@ -183,6 +231,8 @@ async fn get_inner(
             )
         },
         |attempt, cause| client.observe_lookup_retry(attempt, cause),
+        dispatch,
+        budget.maximum_attempts,
     ))
     .await
 }
@@ -192,15 +242,28 @@ pub(super) async fn run<F, Fut>(
     overall_cap: Duration,
     mut exchange: F,
     mut notify: impl FnMut(u8, &str),
+    dispatch: &mut (dyn FnMut(Option<Failure>) -> Result<(), LookupError> + Send),
+    maximum_attempts: u8,
 ) -> Result<LookupReply, LookupError>
 where
     F: FnMut(Instant) -> Fut,
     Fut: Future<Output = Result<LookupReply, LookupError>>,
 {
     let cap = tokio::time::Instant::now() + overall_cap;
-    for attempt in 1..=3 {
+    if timeout.is_zero() || overall_cap.is_zero() {
+        let deadline = (tokio::time::Instant::now() + timeout).min(cap);
+        return exchange(deadline.into_std()).await;
+    }
+    for attempt in 1..=maximum_attempts {
         let now = tokio::time::Instant::now();
+        dispatch(None)?;
         let result = exchange((now + timeout).min(cap).into_std()).await;
+        if let Err(LookupError::Transport(failure)) = &result {
+            dispatch(Some(*failure))?;
+        }
+        if maximum_attempts == 1 {
+            return result;
+        }
         let (cause, retry_after) = match result {
             Ok(reply) if LookupCause::Status(reply.status.as_u16()).retryable() => {
                 let delay = reply
@@ -218,7 +281,10 @@ where
         let mut jitter = [0];
         let _ = getrandom::fill(&mut jitter);
         let delay = retry_delay(attempt, retry_after, jitter[0]);
-        if timeout.is_zero()
+        let remaining = cap.saturating_duration_since(tokio::time::Instant::now());
+        let useful_attempt = timeout.min(Duration::from_secs(5));
+        if attempt >= maximum_attempts
+            || (retry_after.is_some() && remaining.saturating_sub(delay) < useful_attempt)
             || !can_retry(
                 attempt,
                 delay,

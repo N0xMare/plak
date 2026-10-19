@@ -7364,9 +7364,13 @@ async fn a_waiter_behind_a_failed_renewal_keeps_its_floor() -> TestResult {
     )?;
     let renewer_checked_at = Timestamp::new(admitted_at.seconds() + 6, 500_000_000)?;
     let waiter_checked_at = Timestamp::new(admitted_at.seconds() + 4, 250_000_000)?;
-    // Invalid catalog evidence fails without retry; the waiter's succeeds.
+    // A renewal is single-attempt even on a transient failure.
     auth.responses
-        .send(raw_response("200 OK", "application/json", "{}"))
+        .send(raw_response(
+            "503 Service Unavailable",
+            "application/json",
+            "{}",
+        ))
         .await?;
     enqueue_admitted_catalog(&auth).await?;
     let (renewer, waiter) = tokio::time::timeout(Duration::from_secs(5), async {
@@ -7520,6 +7524,41 @@ async fn catalog_observation_never_observes_credential_exchange_bodies() -> Test
         observed.0.load(Ordering::SeqCst),
         1,
         "catalog observation must never see credential request/response bodies"
+    );
+    peer.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn startup_catalog_retry_authorizes_every_physical_get() -> TestResult {
+    let _serial = AUTH_TEST_GATE.lock().await;
+    let temp = tempdir()?;
+    let peer = mock_peer().await?;
+    let gate = Arc::new(InMemorySubscriptionRequestGate::new(
+        SubscriptionRequestLimits::new(0, 3, 0, 0, None, 0)?,
+        Arc::new(SystemSubscriptionGateClock::default()),
+    ));
+    let manager = manager(&temp, &peer)?.with_subscription_request_gate(gate.clone())?;
+    install_stored(
+        &manager,
+        "retry-permit-subject",
+        "retry-permit-access",
+        "retry-permit-refresh",
+        system_unix_seconds()? + 3_600,
+    )?;
+    peer.responses
+        .send(raw_response(
+            "503 Service Unavailable",
+            "application/json",
+            "{}",
+        ))
+        .await?;
+    admit_catalog(&manager, &peer).await?;
+    assert_eq!(
+        gate.snapshot()?
+            .class(SubscriptionRequestClass::Catalog)
+            .dispatched(),
+        2
     );
     peer.shutdown().await?;
     Ok(())

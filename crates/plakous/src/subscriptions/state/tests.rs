@@ -2445,3 +2445,65 @@ async fn accepting_a_notice_does_not_rebind_a_login_from_another_consent()
     assert_eq!(status.credential(), NativeAuthStatus::Quarantined);
     Ok(())
 }
+
+#[tokio::test(start_paused = true)]
+async fn model_catalog_stalled_first_attempt_can_retry_and_succeed() {
+    let ready = NativeSubscriptionStatus {
+        compatibility: CompatibilityStatus::Current,
+        credential: NativeAuthStatus::Ready,
+    };
+    let result = run_classified_model_catalog(NativeProvider::Codex, ready, |gate| async move {
+        for attempt in 0..2 {
+            let mut permit = gate
+                .acquire(SubscriptionRequestClass::Catalog)
+                .map_err(|_| NativeSubscriptionError::Internal)?;
+            permit
+                .authorize_dispatch()
+                .map_err(|_| NativeSubscriptionError::Internal)?;
+            if attempt == 0 {
+                tokio::time::sleep(Duration::from_secs(31)).await;
+            }
+        }
+        Ok(Vec::new())
+    })
+    .await;
+    assert!(
+        result.is_ok(),
+        "stalled catalog attempt was cancelled before retry: {result:?}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn model_catalog_outer_deadline_reports_attempts_including_unsent_refunds() {
+    let ready = NativeSubscriptionStatus {
+        compatibility: CompatibilityStatus::Current,
+        credential: NativeAuthStatus::Ready,
+    };
+    let result = run_classified_model_catalog(NativeProvider::Codex, ready, |gate| async move {
+        let mut first = gate
+            .acquire(SubscriptionRequestClass::Catalog)
+            .map_err(|_| NativeSubscriptionError::Internal)?;
+        first
+            .authorize_dispatch()
+            .map_err(|_| NativeSubscriptionError::Internal)?;
+        first
+            .refund_not_started()
+            .map_err(|_| NativeSubscriptionError::Internal)?;
+        let mut second = gate
+            .acquire(SubscriptionRequestClass::Catalog)
+            .map_err(|_| NativeSubscriptionError::Internal)?;
+        second
+            .authorize_dispatch()
+            .map_err(|_| NativeSubscriptionError::Internal)?;
+        std::future::pending::<()>().await;
+        Ok(Vec::new())
+    })
+    .await;
+    assert!(matches!(
+        result,
+        Err(NativeSubscriptionError::ModelLookup {
+            attempts: 2,
+            cause: "transport timeout"
+        })
+    ));
+}

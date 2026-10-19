@@ -51,7 +51,7 @@ def main() -> int:
         "Write lookup-proof.txt containing exactly LOOKUP_OK, then reply DONE."], log, faults=faults)
     text = log.read_text(errors="replace")
     if code:
-        live.classify_cli_failure(code, text, "lookup retry", segments=env.capture_segments)
+        live.classify_cli_failure(code, text, "lookup retry", segments=env.capture_segments, lookup_faults=faults)
     if "retrying model lookup (2/3):" not in text:
         raise live.ScenarioFailure(live.HARNESS, "fault did not exercise the model lookup retry")
     if route.account in {"openai", "anthropic", "xai-api"} and not any((env.home / "cache/api-models").glob("*.json")):

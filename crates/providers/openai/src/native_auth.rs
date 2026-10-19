@@ -1521,7 +1521,8 @@ async fn execute_catalog_bounded(
     path: &str,
     headers: HeaderMap,
     body: Vec<u8>,
-    deadline: Instant,
+    budget: plakous_exchange::lookup::LookupBudget,
+    gate: Option<Arc<dyn SubscriptionRequestGate>>,
 ) -> Result<HttpReply, NativeCodexAuthError> {
     let request = Request::new(
         Origin::parse(origin.as_str()).map_err(|_| NativeCodexAuthError::Validation)?,
@@ -1532,11 +1533,17 @@ async fn execute_catalog_bounded(
         client.limits(),
     )
     .map_err(|_| NativeCodexAuthError::Validation)?;
-    let reply = plakous_exchange::lookup::get(
+    let mut dispatch = plakous_auth::subscription_limit::CatalogRequestDispatch::new(gate);
+    let reply = plakous_exchange::lookup::get_with_dispatch(
         client,
         request,
-        plakous_exchange::lookup::LookupBudget::from_deadline(deadline),
+        budget,
         MAX_CATALOG_BODY_BYTES,
+        &mut |failure| {
+            dispatch
+                .observe(failure.map(plakous_http::Failure::transmission))
+                .map_err(|_| plakous_exchange::lookup::LookupError::DispatchDenied)
+        },
     )
     .await
     .map_err(|error| match error {
@@ -1546,6 +1553,7 @@ async fn execute_catalog_bounded(
         plakous_exchange::lookup::LookupError::Exhausted { .. } => {
             NativeCodexAuthError::Lookup(error)
         }
+        plakous_exchange::lookup::LookupError::DispatchDenied => NativeCodexAuthError::Catalog,
         _ => NativeCodexAuthError::Transport(None),
     })?;
     Ok(HttpReply {
@@ -2868,13 +2876,6 @@ impl CodexCatalogSource {
                     other => other,
                 })?;
         }
-        let mut request_permit = self
-            .manager
-            .request_gate
-            .as_ref()
-            .map(|gate| gate.acquire(SubscriptionRequestClass::Catalog))
-            .transpose()
-            .map_err(|_| NativeCodexAuthError::Catalog)?;
         let fence = self.manager.load_fence().await?;
         if fence.status() != CredentialStatus::Ready
             || fence.account_binding() != &self.manager.selected_account()?
@@ -2914,11 +2915,6 @@ impl CodexCatalogSource {
         let account = sensitive_header_value(credential.account_id.as_bytes().to_vec())
             .map_err(|_| NativeCodexAuthError::CatalogAccountHeader)?;
         headers.insert(HeaderName::from_static("chatgpt-account-id"), account);
-        if let Some(permit) = &mut request_permit {
-            permit
-                .authorize_dispatch()
-                .map_err(|_| NativeCodexAuthError::Catalog)?;
-        }
         let reply = execute_catalog_bounded(
             &self.client,
             &self.manager.endpoints.chatgpt_origin,
@@ -2926,7 +2922,16 @@ impl CodexCatalogSource {
             &path,
             headers,
             Vec::new(),
-            Instant::now() + Duration::from_secs(30),
+            if renewal.is_some() {
+                plakous_exchange::lookup::LookupBudget::single_attempt(
+                    Instant::now() + Duration::from_secs(30),
+                )
+            } else {
+                plakous_exchange::lookup::LookupBudget::from_deadline(
+                    Instant::now() + Duration::from_secs(30),
+                )
+            },
+            self.manager.request_gate.clone(),
         )
         .await;
         drop(credential);
