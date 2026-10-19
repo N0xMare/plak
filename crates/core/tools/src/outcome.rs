@@ -4,7 +4,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use plakous_model::{
-    TextBlock, ToolOutputContract, ToolResultBlock, ToolResultKind, ToolResultPart,
+    TextBlock, ToolEffect, ToolOutputContract, ToolResultBlock, ToolResultKind, ToolResultPart,
 };
 
 use crate::{ToolInvocation, ToolRuntimeError, ToolRuntimeErrorKind};
@@ -231,14 +231,26 @@ impl ToolOutcome {
 
     fn output_contract_failure(
         process_session_update: Option<crate::internal::ProcessSessionUpdate>,
+        effect: ToolEffect,
     ) -> Self {
-        match Self::failure_text("tool executor output violated its registered contract") {
+        let (kind, message) = if effect == ToolEffect::ReadOnly {
+            (
+                ToolOutcomeKind::Failure,
+                "tool executor output violated its registered contract",
+            )
+        } else {
+            (
+                ToolOutcomeKind::OutcomeUnknown,
+                "tool completed but its output violated its contract; it may have acted",
+            )
+        };
+        match Self::text(kind, message) {
             Ok(mut outcome) => {
                 outcome.process_session_update = process_session_update;
                 outcome
             }
             Err(_) => Self {
-                kind: ToolOutcomeKind::Failure,
+                kind,
                 parts: Vec::new(),
                 retained_bytes: 0,
                 process_session_update,
@@ -391,12 +403,16 @@ impl ToolOutcome {
         Ok(self)
     }
 
-    pub(crate) fn enforce_completed_output_contract(self, contract: &ToolOutputContract) -> Self {
+    pub(crate) fn enforce_completed_output_contract(
+        self,
+        contract: &ToolOutputContract,
+        effect: ToolEffect,
+    ) -> Self {
         let process_session_update = self.process_session_update.clone();
         let process_telemetry = self.process_telemetry;
         let presentation_subject = self.presentation_subject.clone();
         self.validate_contract(contract).unwrap_or_else(|_| {
-            let mut outcome = Self::output_contract_failure(process_session_update);
+            let mut outcome = Self::output_contract_failure(process_session_update, effect);
             outcome.process_telemetry = process_telemetry;
             outcome.presentation_subject = presentation_subject;
             outcome
@@ -565,11 +581,18 @@ mod tests {
                 owner_generation: NonZeroU64::new(2).ok_or("generation")?,
             },
         ] {
-            let outcome = ToolOutcome::success_text("too long")?
-                .with_process_session_update(update.clone())
-                .enforce_completed_output_contract(&ToolOutputContract::utf8(1)?);
-            assert_eq!(outcome.kind(), ToolOutcomeKind::Failure);
-            assert_eq!(outcome.process_session_update(), Some(update));
+            for (effect, expected) in [
+                (ToolEffect::ReadOnly, ToolOutcomeKind::Failure),
+                (ToolEffect::Mutating, ToolOutcomeKind::OutcomeUnknown),
+            ] {
+                let outcome = ToolOutcome::success_text("too long")?
+                    .with_process_session_update(update.clone())
+                    .with_presentation_subject("retained subject")
+                    .enforce_completed_output_contract(&ToolOutputContract::utf8(1)?, effect);
+                assert_eq!(outcome.kind(), expected);
+                assert_eq!(outcome.process_session_update(), Some(update.clone()));
+                assert_eq!(outcome.presentation_subject(), Some("retained subject"));
+            }
         }
         Ok(())
     }
@@ -581,19 +604,19 @@ mod tests {
         let encoded_bytes = u32::try_from(one.retained_bytes())?;
         assert_eq!(
             one.clone()
-                .enforce_completed_output_contract(&ToolOutputContract::model_content(
-                    1,
-                    encoded_bytes,
-                )?)
+                .enforce_completed_output_contract(
+                    &ToolOutputContract::model_content(1, encoded_bytes)?,
+                    ToolEffect::ReadOnly
+                )
                 .kind(),
             ToolOutcomeKind::Success
         );
         assert_eq!(
             one.clone()
-                .enforce_completed_output_contract(&ToolOutputContract::model_content(
-                    1,
-                    encoded_bytes - 1,
-                )?)
+                .enforce_completed_output_contract(
+                    &ToolOutputContract::model_content(1, encoded_bytes - 1)?,
+                    ToolEffect::ReadOnly
+                )
                 .kind(),
             ToolOutcomeKind::Failure
         );
@@ -603,10 +626,13 @@ mod tests {
             ToolResultPart::Text(TextBlock::new("b", None)?),
         ])?;
         assert_eq!(
-            two.enforce_completed_output_contract(&ToolOutputContract::model_content(
-                1,
-                plakous_model::ModelContentContractV1::MAX_BYTES,
-            )?)
+            two.enforce_completed_output_contract(
+                &ToolOutputContract::model_content(
+                    1,
+                    plakous_model::ModelContentContractV1::MAX_BYTES,
+                )?,
+                ToolEffect::ReadOnly
+            )
             .kind(),
             ToolOutcomeKind::Failure
         );

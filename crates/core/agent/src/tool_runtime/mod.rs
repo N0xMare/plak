@@ -1174,6 +1174,7 @@ impl ToolRuntime {
             ));
         };
         let output_contract = definition.output().clone();
+        let effect = definition.effect();
         let concurrency = definition.concurrency();
         // A foreground process call may legitimately run as long as a joined
         // process session (a 20-minute build), so one dispatch is bounded by
@@ -1353,14 +1354,15 @@ impl ToolRuntime {
             }
                 .and_then(|outcome| {
                     plakous_tools::internal::enforce_outcome_limits(outcome, outcome_limits)
-                        .map_err(|error| error.with_proven_no_effect(false))
                 })
                 .map(|outcome| {
                     plakous_tools::internal::enforce_completed_output_contract(
                         outcome,
                         &output_contract,
+                        effect,
                     )
                 });
+                    // Bookkeeping failure deliberately overrides even a proven-no-effect executor error.
                     active
                         .terminalize()
                         .map_err(|error| error.into_portable().with_proven_no_effect(false))?;

@@ -4041,8 +4041,10 @@ field.
 
 Complete tool-call input MUST be strictly parsed, duplicate-key rejected,
 bounded, and locally validated before policy, approval, or execution. Executor
-output MUST be bounded and locally validated after dispatch; a mismatch
-preserves the definite effect outcome and MUST NOT authorize redispatch. A
+output MUST be bounded and locally validated after dispatch. A successful
+mutating tool whose output violates its contract becomes `OutcomeUnknown`:
+the tool may already have acted. A read-only mismatch is a definite tool
+failure. Neither classification authorizes redispatch of the same invocation. A
 structured assistant result is successful only when the complete terminal
 aggregate is strictly parsed and validates against its exact output contract.
 
@@ -4107,8 +4109,9 @@ The same rule applies to direct calls and calls nested in composition cells.
 An error with undetermined disposition still requires `OutcomeUnknown` unless
 the executor supplies another authoritative terminal classification.
 Errors raised while constructing an outcome or by the runtime after the executor
-returns are never proof of no effect: output limits, result mapping, and terminal
-bookkeeping failures retain an undetermined disposition and require
+returns are never proof of no effect: output limits, result mapping, terminal
+bookkeeping failures, and successful outputs that violate the tool's contract
+retain an undetermined disposition and require
 `OutcomeUnknown` for a mutating call. An MCP call whose completed response cannot
 be mapped to a bounded outcome likewise settles `OutcomeUnknown`, never a
 no-effect rejection.

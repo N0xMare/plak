@@ -480,6 +480,29 @@ fn mismatched_claim_and_predispatch_cancel_never_poll_executor() -> TestResult {
 }
 
 #[test]
+fn started_mutating_output_contract_violation_is_unknown() -> TestResult {
+    let mismatched = fixture_with_output(
+        18,
+        ToolOutcome::success_text("completed effect"),
+        ToolOutputContract::utf8(1)?,
+    )?;
+    let authorized = block_on(authorized(&mismatched))?;
+    let claimed = claim(&mismatched.runtime, authorized)?;
+    let report = block_on(
+        mismatched
+            .runtime
+            .execute_claimed(claimed, mismatched.control),
+    );
+    assert_eq!(report.state(), ToolDispatchState::Started);
+    assert_eq!(
+        report.outcome().map(ToolOutcome::kind),
+        Some(ToolOutcomeKind::OutcomeUnknown)
+    );
+    assert_eq!(mismatched.calls.load(Ordering::SeqCst), 1);
+    Ok(())
+}
+
+#[test]
 fn started_outcome_construction_and_runtime_limits_are_unknown() -> TestResult {
     use plakous_model::{TextBlock, ToolResultPart};
     use plakous_tools::ToolOutcomeLimits;
@@ -625,7 +648,7 @@ fn started_executor_that_joins_cancellation_is_a_definite_cancelled_terminal() -
 }
 
 #[test]
-fn completed_contract_mismatch_is_definite_failure_and_cannot_redispatch() -> TestResult {
+fn completed_mutating_contract_mismatch_is_unknown_and_cannot_redispatch() -> TestResult {
     let mismatched = fixture_with_output(
         12,
         ToolOutcome::success(vec![
@@ -645,7 +668,7 @@ fn completed_contract_mismatch_is_definite_failure_and_cannot_redispatch() -> Te
     assert_eq!(report.state(), ToolDispatchState::Started);
     assert_eq!(
         report.outcome().map(ToolOutcome::kind),
-        Some(ToolOutcomeKind::Failure)
+        Some(ToolOutcomeKind::OutcomeUnknown)
     );
     assert!(report.uncertainty_cause().is_none());
     assert_eq!(mismatched.calls.load(Ordering::SeqCst), 1);

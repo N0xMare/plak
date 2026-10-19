@@ -192,6 +192,8 @@ inside a Code Cell. An MCP connection failure after sending a request may still
 require recovery because the server might have acted.
 Output mapping or size-limit failures after execution also require recovery:
 failure to represent the result does not mean the tool had no effect.
+A mutating tool whose returned output violates its declared contract likewise
+requires recovery; a read-only contract mismatch remains an ordinary tool error.
 
 ## `session store is full`
 

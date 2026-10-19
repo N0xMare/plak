@@ -350,8 +350,9 @@ pub fn enforce_outcome_limits(
 pub fn enforce_completed_output_contract(
     outcome: ToolOutcome,
     contract: &plakous_model::ToolOutputContract,
+    effect: plakous_model::ToolEffect,
 ) -> ToolOutcome {
-    outcome.enforce_completed_output_contract(contract)
+    outcome.enforce_completed_output_contract(contract, effect)
 }
 
 pub fn runtime_outcome_unknown() -> ToolOutcome {
