@@ -7563,3 +7563,40 @@ async fn startup_catalog_retry_authorizes_every_physical_get() -> TestResult {
     peer.shutdown().await?;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn attached_catalog_refresh_is_single_attempt_on_transient_status() -> TestResult {
+    let _serial = AUTH_TEST_GATE.lock().await;
+    let temp = tempdir()?;
+    let peer = mock_peer().await?;
+    let gate = Arc::new(InMemorySubscriptionRequestGate::new(
+        SubscriptionRequestLimits::new(0, 3, 0, 0, None, 0)?,
+        Arc::new(SystemSubscriptionGateClock::default()),
+    ));
+    let manager = manager(&temp, &peer)?
+        .with_subscription_request_gate(gate.clone())?
+        .without_catalog_retries()?;
+    install_stored(
+        &manager,
+        "retry-permit-subject",
+        "retry-permit-access",
+        "retry-permit-refresh",
+        system_unix_seconds()? + 3_600,
+    )?;
+    peer.responses
+        .send(raw_response(
+            "503 Service Unavailable",
+            "application/json",
+            "{}",
+        ))
+        .await?;
+    assert!(manager.refresh_catalog().await.is_err());
+    assert_eq!(
+        gate.snapshot()?
+            .class(SubscriptionRequestClass::Catalog)
+            .dispatched(),
+        1
+    );
+    peer.shutdown().await?;
+    Ok(())
+}

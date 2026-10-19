@@ -7686,3 +7686,64 @@ async fn receipt_catalog_renewal_is_single_attempt_on_transient_status() -> Test
     assert!(!unexpected);
     Ok(())
 }
+
+#[tokio::test]
+async fn attached_catalog_refresh_is_single_attempt_on_transient_status() -> TestResult {
+    let endpoint = test_endpoint().await?;
+    let client = endpoint.client.clone();
+    let (_directory, slot) = private_slot()?;
+    seed_ready_credential(
+        &slot,
+        "retry-permit-account",
+        "retry-permit-subject",
+        now_unix_secs() + 3_600,
+    )?;
+    let gate = subscription_gate(4, 4)?;
+    let manager = manager_for_endpoint_with_gate(&slot, &endpoint, gate.clone())?;
+    let server = spawn_sequence_then_probe(
+        endpoint,
+        vec![response(
+            "503 Service Unavailable",
+            "application/json",
+            b"{}",
+            "",
+        )],
+    );
+    let resolver =
+        CodexModelResolver::new_for_test(manager, client, saturated_observation_config()?)?;
+    struct Starts(std::sync::atomic::AtomicUsize);
+    impl plakous_http::ExchangeObserver for Starts {
+        fn start(&self, _body: &[u8]) -> Option<Box<dyn plakous_http::ExchangeObservation>> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            None
+        }
+    }
+    let observed = Arc::new(Starts(std::sync::atomic::AtomicUsize::new(0)));
+    let mut resolver = resolver;
+    resolver.client = resolver
+        .client
+        .clone()
+        .with_observer(Some(observed.clone()));
+    assert!(
+        resolver
+            .without_catalog_retries()
+            .refresh_catalog()
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        observed.0.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "attached lookup retried"
+    );
+    assert_eq!(
+        gate.snapshot()?
+            .class(SubscriptionRequestClass::Catalog)
+            .dispatched(),
+        1
+    );
+    let (requests, unexpected) = server.await??;
+    assert_eq!(requests.len(), 1);
+    assert!(!unexpected);
+    Ok(())
+}

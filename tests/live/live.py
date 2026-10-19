@@ -318,8 +318,11 @@ def provider_child_label(label: str) -> bool:
     return False
 
 
-def _provider_child_fault(text: str) -> bool:
+def _provider_child_fault(text: str, lookup_faults: str | None = None) -> bool:
     """Fault prose that is a provider refusal, including provider-unavailable."""
+    lookup = lookup_failure(text, lookup_faults)
+    if lookup:
+        return lookup[1] == PROVIDER
     if text_is_provider_refusal(text):
         return True
     lowered = text.lower()
@@ -331,7 +334,7 @@ def _provider_child_fault(text: str) -> bool:
     return False
 
 
-def provider_child_record(record: dict) -> bool:
+def provider_child_record(record: dict, *, lookup_faults: str | None = None) -> bool:
     """True when a child row's quota, failure kind, or fault text is a provider refusal."""
     blocked = record.get("blocked")
     if isinstance(blocked, dict):
@@ -344,34 +347,37 @@ def provider_child_record(record: dict) -> bool:
         message = failure.get("message")
         if isinstance(kind, str) and provider_child_label(kind):
             return True
-        if isinstance(message, str) and _provider_child_fault(message):
+        if isinstance(message, str) and _provider_child_fault(message, lookup_faults):
             return True
-    elif isinstance(failure, str) and _provider_child_fault(failure):
+    elif isinstance(failure, str) and _provider_child_fault(failure, lookup_faults):
         return True
     fault = record.get("fault")
-    if isinstance(fault, str) and _provider_child_fault(fault):
+    if isinstance(fault, str) and _provider_child_fault(fault, lookup_faults):
         return True
     return False
 
 
-def _provider_child_json(value: dict) -> bool:
-    if provider_child_record(value):
+def _provider_child_json(value: dict, lookup_faults: str | None = None) -> bool:
+    if provider_child_record(value, lookup_faults=lookup_faults):
         return True
     for key in ("agents", "nodes"):
         rows = value.get(key)
         if isinstance(rows, list) and any(
-                isinstance(row, dict) and provider_child_record(row) for row in rows):
+                isinstance(row, dict) and provider_child_record(row, lookup_faults=lookup_faults) for row in rows):
             return True
     return False
 
 
-def provider_child_text(text: str) -> bool:
+def provider_child_text(text: str, *, lookup_faults: str | None = None) -> bool:
     """True when child-failure text, or wait/tree JSON embedded in it, is a provider refusal.
 
     Reads `quota <label>` and `failure <kind>` from the flattened row, and
     `blocked.quota` / `failure` / `fault` from a wait receipt or tree node.
     """
-    if _provider_child_fault(text):
+    lookup = lookup_failure(text, lookup_faults)
+    if lookup:
+        return lookup[1] == PROVIDER
+    if _provider_child_fault(text, lookup_faults):
         return True
     parts = text.lower().split()
     for index, part in enumerate(parts[:-1]):
@@ -393,7 +399,7 @@ def provider_child_text(text: str) -> bool:
         except json.JSONDecodeError:
             index = start + 1
             continue
-        if isinstance(value, dict) and _provider_child_json(value):
+        if isinstance(value, dict) and _provider_child_json(value, lookup_faults):
             return True
         index = end if end > start else start + 1
     return False
@@ -418,19 +424,38 @@ def durable_refusals(record: dict) -> list[str]:
     return ["canonical model refusal"] if record.get("phase") == "refused" else []
 
 
+LOOKUP_ENDPOINTS = (
+    ("chatgpt.com", "/backend-api/codex/models"),
+    ("cli-chat-proxy.grok.com", "/v1/models"),
+    ("openrouter.ai", "/api/v1/models"),
+    ("api.openai.com", "/v1/models"),
+    ("api.anthropic.com", "/v1/models"),
+    ("api.x.ai", "/v1/models"),
+)
+
+
+def _lookup_fault_matches(host: str, path: str) -> bool:
+    return any((not host or host == origin) and (not path or target.startswith(path)
+               or origin == "openrouter.ai" and path.startswith(target + "/"))
+               for origin, target in LOOKUP_ENDPOINTS)
+
+
 def lookup_failure(text: str, faults: str | None = None) -> tuple[str, str] | None:
     """An exhausted lookup's cause and evidence-based live outcome."""
     text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
     match = re.search(
-        r"model lookup failed after ([1-3]) attempts: "
-        r"(HTTP (?:429|500|502|503|504)\b|transport timeout\b|DNS failure\b|"
+        r"model lookup failed after ([0-3]) attempts: "
+        r"(operation deadline\b|HTTP (?:429|500|502|503|504)\b|transport timeout\b|DNS failure\b|"
         r"connect failure\b|transport stream failure\b|HTTP transport failed in "
         r"(?:Resolution|Connect|RequestWrite|RequestWriteOrResponseHead|ResponseHead|ResponseBody) "
         r"\([^\n]*, (?:Io|Resolution|DeadlineExceeded|Protocol)\))", text)
     if not match:
         return None
     attempts, cause = int(match.group(1)), match.group(2)
-    if attempts < 2 and ("timeout" in cause or "DeadlineExceeded" in cause):
+    if cause == "operation deadline":
+        return match.group(0), HARNESS
+    timed_out = "timeout" in cause or "DeadlineExceeded" in cause
+    if (timed_out and attempts < 2) or (not timed_out and attempts != 3 and cause != "HTTP 429"):
         return match.group(0), HARNESS
     injected = 0
     for rule in (faults or "").split(";"):
@@ -440,7 +465,7 @@ def lookup_failure(text: str, faults: str | None = None) -> tuple[str, str] | No
                 key, value = item.split("=", 1)
                 fields[key.strip()] = value.strip()
         path = fields.get("path", "")
-        if path and "/models" not in path:
+        if not _lookup_fault_matches(fields.get("host", ""), path):
             continue
         if fields.get("fault") not in {"connect", "stall", "reset", "eof", "429", "500", "502", "503", "504"}:
             continue
@@ -455,22 +480,23 @@ def lookup_failure(text: str, faults: str | None = None) -> tuple[str, str] | No
     return match.group(0), HARNESS if attempts <= injected else PROVIDER
 
 
-def lookup_failure_reason(text: str) -> str | None:
+def lookup_failure_reason(text: str, faults: str | None = None) -> str | None:
     """Only exhausted real-provider failures, not a single deadline, qualify."""
-    failure = lookup_failure(text)
+    failure = lookup_failure(text, faults)
     return failure[0] if failure and failure[1] == PROVIDER else None
 
 
-def provider_reason_from(kind: str | None, http_status: int | None, text: str) -> str | None:
+def provider_reason_from(kind: str | None, http_status: int | None, text: str, *,
+                         lookup_faults: str | None = None) -> str | None:
     """Why this observation is a typed provider refusal, or None.
 
     Covers JSONL turn failures, `plak run` stderr, TUI session-log terminals,
     manual `/compact` refusals, and child job output. A kernel
     stream-validation failure is not decided here.
     """
-    lookup = lookup_failure_reason(text)
+    lookup = lookup_failure(text, lookup_faults)
     if lookup:
-        return lookup
+        return lookup[0] if lookup[1] == PROVIDER else None
     if kind in PROVIDER_ERROR_KINDS or http_status in PROVIDER_HTTP_STATUSES:
         status = f"{kind or ''} {http_status or ''}".strip()
         return status or text[:160]
@@ -667,7 +693,7 @@ def _real_errors_followed_the_injection(turn: Turn) -> bool:
 
 
 def classify_incomplete(turn: Turn, what: str, *, injected_fault: str | None = None,
-                        segments: list[Path] | None = None) -> None:
+                        segments: list[Path] | None = None, lookup_faults: str | None = None) -> None:
     """Raise when `turn` did not complete, using the shared outcome rules.
 
     A typed provider refusal is `provider` on every surface, including during
@@ -679,6 +705,9 @@ def classify_incomplete(turn: Turn, what: str, *, injected_fault: str | None = N
     if turn.completed:
         return
     text = " ".join(turn.errors)
+    lookup = lookup_failure(text, lookup_faults or turn.lookup_faults)
+    if lookup:
+        raise ScenarioFailure(lookup[1], f"{what}: {lookup[0]}")
     status = f"{turn.phase} {turn.model_error_kind or ''} {turn.http_status or ''}".strip()
     validation = stream_validation_outcome(f"{text} {turn.model_error_kind or ''}", segments)
     if validation == MODEL:
@@ -703,9 +732,12 @@ def classify_incomplete(turn: Turn, what: str, *, injected_fault: str | None = N
 
 
 def classify_command_error(message: str, what: str, *,
-                           segments: list[Path] | None = None) -> None:
+                           segments: list[Path] | None = None, lookup_faults: str | None = None) -> None:
     """A manual `/compact` or other command error, classified like a turn."""
     text = message or ""
+    lookup = lookup_failure(text, lookup_faults)
+    if lookup:
+        raise ScenarioFailure(lookup[1], f"{what}: {lookup[0]}")
     validation = stream_validation_outcome(text, segments)
     if validation == MODEL:
         raise ScenarioFailure(MODEL, f"{what}: model emitted invalid tool arguments")
@@ -1085,6 +1117,7 @@ class Env:
 
     def __init__(self, binary: Path, home: Path, artifacts: Path):
         self.binary, self.home, self.artifacts = binary, home, artifacts
+        self.lookup_faults: str | None = None
         self.fixture_seed: int | None = None
         self._capture_root: Path | None = None
         self.capture_segments: list[Path] = []
@@ -1114,6 +1147,7 @@ class Env:
     def environ(self, faults: str | None = None,
                 source: dict[str, str] | None = None,
                 capture_dir: Path | None = None) -> dict[str, str]:
+        self.lookup_faults = faults
         dropped = {"PLAK_TEST_FAULTS", "PLAK_HOME", "PLAK_TEST_EXCHANGE_CAPTURE_DIR"}
         # A stale environment key must never shadow a key copied from the
         # product-supported file store. Drop all supported API-key variables;
@@ -1179,6 +1213,7 @@ class Turn:
     cached_input_tokens: int = 0
     reasoning_tokens: int = 0
     seconds: float = 0.0
+    lookup_faults: str | None = None
 
     @property
     def completed(self) -> bool:
@@ -1232,6 +1267,7 @@ class Agent:
     def __init__(self, env: Env, repo: Path, name: str, *, args: list[str],
                  faults: str | None = None, capture_dir: Path | None = None,
                  home: Path | None = None, observe: bool = False):
+        self.lookup_faults = faults
         child_env = env.environ(faults, capture_dir=capture_dir)
         # A scenario that must pin `[turn]` uses a private home. Capture stays
         # on `env`, matching `run_cli`'s home override.
@@ -1334,7 +1370,7 @@ class Agent:
     def prompt(self, text: str, timeout: float = 300, on_event=None) -> Turn:
         """Send a root prompt and wait for its terminal lifecycle and `busy:false`."""
         command_id = self.send("prompt", text=text)
-        turn, started, terminal = Turn(), time.monotonic(), False
+        turn, started, terminal = Turn(lookup_faults=getattr(self, "lookup_faults", None)), time.monotonic(), False
         while True:
             event = self.wait_for(lambda e: e.get("id") == command_id or
                                   e.get("kind") in ("error", "busy", "eof"), timeout)

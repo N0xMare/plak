@@ -855,6 +855,7 @@ impl XaiNativeAuthManager {
         let store = PrivateCredentialStore::open_slot(path, profile, slot)?;
         Ok(Self {
             core: Arc::new(ManagerCore {
+                catalog_retries: true,
                 store,
                 client,
                 acceptance,
@@ -900,6 +901,16 @@ impl XaiNativeAuthManager {
     ) -> Result<Self, XaiNativeAuthError> {
         let core = Arc::get_mut(&mut self.core).ok_or(XaiNativeAuthError::Request)?;
         core.refresh_observer = Some(observer);
+        Ok(self)
+    }
+
+    /// Limits catalog resolution to one physical GET while a session is attached.
+    ///
+    /// # Errors
+    /// Refuses configuration changes after the manager has been shared.
+    pub fn without_catalog_retries(mut self) -> Result<Self, XaiNativeAuthError> {
+        let core = Arc::get_mut(&mut self.core).ok_or(XaiNativeAuthError::Request)?;
+        core.catalog_retries = false;
         Ok(self)
     }
 
@@ -1473,6 +1484,7 @@ impl XaiNativeAuthManager {
         let store = PrivateCredentialStore::open_slot(path, profile, slot)?;
         Ok(Self {
             core: Arc::new(ManagerCore {
+                catalog_retries: true,
                 store,
                 client,
                 acceptance: XaiCompatibilityAcceptance {
@@ -1526,6 +1538,7 @@ impl fmt::Debug for XaiNativeAuthManager {
 }
 
 struct ManagerCore {
+    catalog_retries: bool,
     store: PrivateCredentialStore,
     client: Client,
     catalog_observer: Option<Arc<dyn plakous_http::ExchangeObserver>>,
@@ -1664,7 +1677,7 @@ impl ManagerCore {
                 self.endpoints.catalog(),
                 Some(&stored.access_token),
                 Some(fence.account_binding()),
-                renewal.is_none(),
+                renewal.is_none() && self.catalog_retries,
             )
             .await?;
         let catalog: CatalogResponse = decode_json(&response, MAX_AUTH_BODY_BYTES)?;

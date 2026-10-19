@@ -16,7 +16,7 @@ class LookupRetryTests(unittest.TestCase):
                       "transport timeout", "DNS failure", "connect failure",
                       "transport stream failure",
                       "HTTP transport failed in Connect (NotStarted, Io)"]:
-            for attempts in ([2, 3] if cause == "transport timeout" else [1, 2, 3]):
+            for attempts in ([2, 3] if cause == "transport timeout" else [1, 2, 3] if cause == "HTTP 429" else [3]):
                 text = f"plak: model lookup failed after {attempts} attempts: {cause}"
                 self.assertIsNotNone(live.provider_reason_from(None, None, text), text)
                 with self.assertRaises(live.ScenarioFailure) as caught:
@@ -38,6 +38,44 @@ class LookupRetryTests(unittest.TestCase):
             with self.assertRaises(live.ScenarioFailure) as caught:
                 live.classify_cli_failure(5, text, "lookup", lookup_faults=faults)
             self.assertEqual(caught.exception.outcome, outcome)
+
+    def test_lookup_prefix_faults_and_early_exhaustion_are_harness(self):
+        for attempts, cause, faults in [
+            (1, "HTTP 429", "host=api.openai.com,path=/v1,nth=1,fault=429,retry-after=120"),
+            (3, "HTTP 503", "path=/api,fault=503"),
+            (3, "HTTP 503", "path=/backend-api/codex,fault=503"),
+            (2, "HTTP 503", None), (1, "connect failure", None),
+            (2, "operation deadline", None),
+        ]:
+            with self.subTest(attempts=attempts, cause=cause, faults=faults):
+                text = f"model lookup failed after {attempts} attempts: {cause}"
+                with self.assertRaises(live.ScenarioFailure) as caught:
+                    live.classify_cli_failure(5, text, "lookup", lookup_faults=faults)
+                self.assertEqual(caught.exception.outcome, live.HARNESS)
+
+    def test_fault_plan_reaches_turn_command_and_child_scoring(self):
+        text = "model lookup failed after 3 attempts: HTTP 503"
+        faults = "path=/v1,fault=503"
+        self.assertIsNone(live.provider_reason_from(None, None, text, lookup_faults=faults))
+        turn = live.Turn(phase="failed", errors=[text])
+        for classify in [lambda: live.classify_incomplete(turn, "turn", lookup_faults=faults),
+                         lambda: live.classify_command_error(text, "compact", lookup_faults=faults)]:
+            with self.assertRaises(live.ScenarioFailure) as caught:
+                classify()
+            self.assertEqual(caught.exception.outcome, live.HARNESS)
+        self.assertFalse(live.provider_child_text(text, lookup_faults=faults))
+        self.assertTrue(live.provider_child_text(text))
+
+    def test_durable_tui_turn_keeps_scenario_fault_plan(self):
+        import jobs
+        record = {"kind": "turn.lifecycle", "phase": "failed",
+                  "message": "model lookup failed after 3 attempts: HTTP 503"}
+        with patch.object(live, "session_records", return_value=[record]), \
+                patch.object(jobs, "last_retry", return_value=None):
+            with self.assertRaises(live.ScenarioFailure) as caught:
+                jobs.classify_tui_turn(Path("unused"), "session", 0, "TUI",
+                                      lookup_faults="path=/v1,fault=503")
+            self.assertEqual(caught.exception.outcome, live.HARNESS)
 
     def test_one_timeout_attempt_is_not_provider_evidence(self):
         for cause in ["transport timeout", "HTTP transport failed in Resolution (NotStarted, DeadlineExceeded)"]:

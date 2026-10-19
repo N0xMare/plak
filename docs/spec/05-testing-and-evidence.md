@@ -2352,18 +2352,20 @@ asserting a success.
 ### 3.2 Live scenarios
 
 A startup model lookup that exhausts the bounded GET retry policy (chapter 01
-§6.2) on a transport or retryable provider-status cause scores `provider`, not
-`harness`, on CLI, JSONL and TUI surfaces, except that timeout evidence needs
-at least two attempts. A zero/one-attempt deadline is `harness`, not provider
-outage evidence. When `PLAK_TEST_FAULTS` targets the lookup, exhaustion with
-an attempt count no greater than the injected fault count is `harness`: the
-product was required to absorb those faults. An unbounded matching injection
-cannot establish a real-provider failure; a finite injection can only do so
-when actual failed attempts outnumber the injected faults. The exhausted error names the actual
-attempt count and cause; a malformed catalog, invalid admission evidence,
-absent model or unrelated startup failure does not acquire this classification.
-Transient first-attempt lookup fault scenarios must still bind the session and
-complete a real turn; a retry message alone is not success evidence.
+§6.2) scores `provider` only for a real-provider cause: a timeout requires at
+least two attempts, and a non-timeout requires three attempts or HTTP 429.
+An `operation deadline` is always `harness`, including after multiple charged
+dispatches. Early exhaustion otherwise is `harness`, not outage evidence.
+When `PLAK_TEST_FAULTS` targets a lookup, attempts no greater than the number of
+injected faults score `harness`: the product was required to absorb those
+faults. `path=` is a prefix of path and query, including broad `/v1`, `/api`
+and `/backend-api/codex` prefixes; an empty path matches all lookup paths on
+the selected host. An unbounded matching injection cannot establish a real
+provider failure. CLI, JSONL, TUI, command and child-output classifiers use the
+scenario's fault plan consistently. Malformed catalogs, invalid admission
+evidence and absent models do not acquire provider classification.
+Transient first-attempt proof scenarios must still bind and complete a real
+turn; a retry message alone is not success evidence.
 
 A live scenario drives the real `plak` binary against a real provider account
 and checks its result independently of a clean protocol terminal. It is opt-in,

@@ -932,14 +932,14 @@ def child_tool_failure(events: list[dict]) -> str | None:
     return None
 
 
-def raise_child_tool_failure(text: str) -> None:
+def raise_child_tool_failure(text: str, lookup_faults: str | None = None) -> None:
     """Surface the child tool failure itself, not the missing session log.
 
     `rate_limited`, a quota exhaustion, and provider-unavailable fault text
     are `provider` (spec 05 §3.2). Any other child failure is `harness`.
     """
     detail = f"child tool failure: {' '.join(text.split())[:200]}"
-    if (live.provider_child_text(text)
+    if (live.provider_child_text(text, lookup_faults=lookup_faults)
             or live.stream_validation_outcome(text, None) == live.PROVIDER):
         raise ScenarioFailure(live.PROVIDER, detail)
     raise ScenarioFailure(HARNESS, detail)
@@ -1390,7 +1390,7 @@ class LongSession:
             events = transcript_events(agent)
             failure = child_tool_failure(events)
             if failure is not None:
-                raise_child_tool_failure(failure)
+                raise_child_tool_failure(failure, getattr(agent, "lookup_faults", None))
             session = agent.session_id
             if not isinstance(session, str) or not session:
                 raise ScenarioFailure(HARNESS, "agent has no session id")

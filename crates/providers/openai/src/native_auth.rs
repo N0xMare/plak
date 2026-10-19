@@ -2366,6 +2366,7 @@ impl CodexRowSemantics {
 /// model renews its receipt through the same resolution that admitted it.
 #[derive(Clone)]
 pub(crate) struct CodexCatalogSource {
+    catalog_retries: bool,
     manager: Arc<CodexSubscriptionCredentialManager>,
     route: OpenAiRoute,
     client: Client,
@@ -2523,6 +2524,7 @@ fn validate_catalog_fence(
 
 /// Provider-local catalog and model resolver for the native Codex route.
 pub struct CodexModelResolver {
+    catalog_retries: bool,
     manager: Arc<CodexSubscriptionCredentialManager>,
     route: OpenAiRoute,
     client: Client,
@@ -2554,6 +2556,7 @@ impl CodexModelResolver {
     /// The exact catalog inputs this resolver's models renew their receipts with.
     fn catalog_source(&self) -> CodexCatalogSource {
         CodexCatalogSource {
+            catalog_retries: self.catalog_retries,
             manager: Arc::clone(&self.manager),
             route: self.route.clone(),
             client: self.client.clone(),
@@ -2583,6 +2586,7 @@ impl CodexModelResolver {
             .resolve_native(Arc::clone(&manager))
             .map_err(|_| NativeCodexAuthError::Unavailable)?;
         Ok(Self {
+            catalog_retries: true,
             manager,
             route,
             client,
@@ -2591,6 +2595,13 @@ impl CodexModelResolver {
             catalog: Mutex::new(None),
             clock: Arc::new(SystemClock),
         })
+    }
+
+    /// Limits catalog resolution to one physical GET while a session is attached.
+    #[must_use]
+    pub fn without_catalog_retries(mut self) -> Self {
+        self.catalog_retries = false;
+        self
     }
 
     /// Observes only inference exchanges, never catalog or credential traffic.
@@ -2624,6 +2635,7 @@ impl CodexModelResolver {
         )
         .map_err(|_| NativeCodexAuthError::Unavailable)?;
         Ok(Self {
+            catalog_retries: true,
             manager,
             route,
             client,
@@ -2922,7 +2934,7 @@ impl CodexCatalogSource {
             &path,
             headers,
             Vec::new(),
-            if renewal.is_some() {
+            if renewal.is_some() || !self.catalog_retries {
                 plakous_exchange::lookup::LookupBudget::single_attempt(
                     Instant::now() + Duration::from_secs(30),
                 )

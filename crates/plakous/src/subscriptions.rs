@@ -1329,9 +1329,33 @@ pub const fn dispatch_credential_admitted(
     )
 }
 
+#[cfg(test)]
 async fn run_classified_model_catalog<F, Fut>(
     provider: NativeProvider,
     status: NativeSubscriptionStatus,
+    operation: F,
+) -> Result<Vec<NativeModelSummary>, NativeSubscriptionError>
+where
+    F: FnOnce(Arc<dyn SubscriptionRequestGate>) -> Fut,
+    Fut: Future<Output = Result<Vec<NativeModelSummary>, NativeSubscriptionError>>,
+{
+    let gate = model_catalog_gate()?;
+    run_classified_model_catalog_with_gate(provider, status, gate, operation).await
+}
+
+fn model_catalog_gate() -> Result<Arc<InMemorySubscriptionRequestGate>, NativeSubscriptionError> {
+    let limits = SubscriptionRequestLimits::new(0, 3, 0, 0, Some(MODEL_CATALOG_DEADLINE), 0)
+        .map_err(|_| NativeSubscriptionError::Internal)?;
+    Ok(Arc::new(InMemorySubscriptionRequestGate::new(
+        limits,
+        Arc::new(SystemSubscriptionGateClock::default()),
+    )))
+}
+
+async fn run_classified_model_catalog_with_gate<F, Fut>(
+    provider: NativeProvider,
+    status: NativeSubscriptionStatus,
+    gate: Arc<InMemorySubscriptionRequestGate>,
     operation: F,
 ) -> Result<Vec<NativeModelSummary>, NativeSubscriptionError>
 where
@@ -1348,28 +1372,10 @@ where
     if !dispatch_credential_admitted(provider, status.credential()) {
         return Err(NativeSubscriptionError::CredentialUnavailable);
     }
-    let limits = SubscriptionRequestLimits::new(0, 3, 0, 0, Some(MODEL_CATALOG_DEADLINE), 0)
-        .map_err(|_| NativeSubscriptionError::Internal)?;
-    let gate = Arc::new(InMemorySubscriptionRequestGate::new(
-        limits,
-        Arc::new(SystemSubscriptionGateClock::default()),
-    ));
     let dispatch_gate: Arc<dyn SubscriptionRequestGate> = gate.clone();
     let models = tokio::time::timeout(MODEL_CATALOG_DEADLINE, operation(dispatch_gate))
         .await
-        .map_err(|_| {
-            let attempts = gate
-                .dispatch_attempts(SubscriptionRequestClass::Catalog)
-                .unwrap_or(0);
-            if attempts == 0 {
-                NativeSubscriptionError::Transport(None)
-            } else {
-                NativeSubscriptionError::ModelLookup {
-                    attempts: u8::try_from(attempts).unwrap_or(u8::MAX),
-                    cause: "transport timeout",
-                }
-            }
-        })??;
+        .map_err(|_| catalog_operation_deadline(gate.as_ref()))??;
     let snapshot = gate
         .snapshot()
         .map_err(|_| NativeSubscriptionError::Internal)?;
@@ -1379,6 +1385,18 @@ where
             .map_err(|_| NativeSubscriptionError::Internal)?,
     )?;
     Ok(models)
+}
+
+fn catalog_operation_deadline(gate: &dyn SubscriptionRequestGate) -> NativeSubscriptionError {
+    let attempts = gate.snapshot().map_or(0, |snapshot| {
+        snapshot
+            .class(SubscriptionRequestClass::Catalog)
+            .dispatched()
+    });
+    NativeSubscriptionError::ModelLookup {
+        attempts: u8::try_from(attempts).unwrap_or(u8::MAX),
+        cause: "operation deadline",
+    }
 }
 
 fn validate_model_catalog_snapshot(
@@ -1429,6 +1447,7 @@ impl fmt::Debug for PendingNativeLogin {
 /// provider-native route object.
 #[derive(Clone)]
 pub struct NativeSubscriptions {
+    catalog_retries: bool,
     state: SubscriptionState,
     exchange_observer: Option<Arc<dyn plakous_http::ExchangeObserver>>,
 }
@@ -1438,6 +1457,7 @@ impl NativeSubscriptions {
         Self {
             state,
             exchange_observer: None,
+            catalog_retries: true,
         }
     }
     /// Creates the curated facade without filesystem or network I/O.
@@ -1446,7 +1466,16 @@ impl NativeSubscriptions {
         Self {
             state: SubscriptionState::new(paths),
             exchange_observer: None,
+            catalog_retries: true,
         }
+    }
+
+    /// Uses single-attempt model lookups for background refresh or child binding
+    /// while a session is already attached. Receipt renewals are always single-attempt.
+    #[must_use]
+    pub fn without_model_lookup_retries(mut self) -> Self {
+        self.catalog_retries = false;
+        self
     }
 
     /// Attaches passive observation to Claude and Grok inference, never auth exchanges.
@@ -2364,127 +2393,149 @@ impl NativeSubscriptions {
         &self,
         provider: NativeProvider,
     ) -> Result<NativeModelCatalog, NativeSubscriptionError> {
+        let gate = model_catalog_gate()?;
+        tokio::time::timeout(
+            MODEL_CATALOG_DEADLINE,
+            self.model_catalog_inner(provider, gate.clone()),
+        )
+        .await
+        .map_err(|_| catalog_operation_deadline(gate.as_ref()))?
+    }
+
+    async fn model_catalog_inner(
+        &self,
+        provider: NativeProvider,
+        gate: Arc<InMemorySubscriptionRequestGate>,
+    ) -> Result<NativeModelCatalog, NativeSubscriptionError> {
         let lock = self.acquire_compatibility_lock(provider).await?;
         let status = self.status_unlocked(provider).await?;
-        let models = run_classified_model_catalog(provider, status, |gate| async move {
-            match provider {
-                NativeProvider::Codex => {
-                    let online = self.codex_online_with_gate(Some(gate), true).await?;
-                    let resolver = plakous_openai::CodexModelResolver::new(
-                        Arc::clone(&online.manager),
-                        online.client.with_observer(self.exchange_observer.clone()),
-                        codex_native_http_config()?,
-                    )
-                    .map_err(map_codex_error)?;
-                    let catalog = resolver.refresh_catalog().await.map_err(map_codex_error)?;
-                    Ok(catalog
-                        .entries()
-                        .iter()
-                        .filter(|entry| entry.supports_text())
-                        .map(|entry| NativeModelSummary {
-                            exact_id: entry.model_id().to_owned(),
-                            visibility: entry
-                                .visibility()
-                                .map_or(NativeModelVisibility::None, facade_codex_visibility),
-                            native_tool_mode: facade_native_tool_mode(entry.tool_mode()),
-                            streaming: true,
-                            tools: entry.supports_tools(),
-                            reasoning_efforts: entry.reasoning_effort_options().to_vec(),
-                            default_reasoning_effort: entry.default_reasoning_effort(),
-                            service_tiers: entry
-                                .service_tiers()
-                                .iter()
-                                .map(|tier| NativeServiceTierSummary {
-                                    id: tier.id().to_owned(),
-                                    name: tier.name().to_owned(),
-                                    description: tier.description().to_owned(),
-                                })
-                                .collect(),
-                            default_service_tier: entry.default_service_tier().map(str::to_owned),
-                            reported_context_length: entry
-                                .capacity_facts()
-                                .context_window()
-                                .map(|window| u64::from(window.get())),
-                        })
-                        .collect())
-                }
-                NativeProvider::Xai => {
-                    {
-                        let online = self.xai_online_with_gate(None, true).await?;
-                        online
+        let models =
+            run_classified_model_catalog_with_gate(provider, status, gate, |gate| async move {
+                match provider {
+                    NativeProvider::Codex => {
+                        let online = self.codex_online_with_gate(Some(gate), true).await?;
+                        let resolver = plakous_openai::CodexModelResolver::new(
+                            Arc::clone(&online.manager),
+                            online.client.with_observer(self.exchange_observer.clone()),
+                            codex_native_http_config()?,
+                        )
+                        .map_err(map_codex_error)?;
+                        let resolver = if self.catalog_retries {
+                            resolver
+                        } else {
+                            resolver.without_catalog_retries()
+                        };
+                        let catalog = resolver.refresh_catalog().await.map_err(map_codex_error)?;
+                        Ok(catalog
+                            .entries()
+                            .iter()
+                            .filter(|entry| entry.supports_text())
+                            .map(|entry| NativeModelSummary {
+                                exact_id: entry.model_id().to_owned(),
+                                visibility: entry
+                                    .visibility()
+                                    .map_or(NativeModelVisibility::None, facade_codex_visibility),
+                                native_tool_mode: facade_native_tool_mode(entry.tool_mode()),
+                                streaming: true,
+                                tools: entry.supports_tools(),
+                                reasoning_efforts: entry.reasoning_effort_options().to_vec(),
+                                default_reasoning_effort: entry.default_reasoning_effort(),
+                                service_tiers: entry
+                                    .service_tiers()
+                                    .iter()
+                                    .map(|tier| NativeServiceTierSummary {
+                                        id: tier.id().to_owned(),
+                                        name: tier.name().to_owned(),
+                                        description: tier.description().to_owned(),
+                                    })
+                                    .collect(),
+                                default_service_tier: entry
+                                    .default_service_tier()
+                                    .map(str::to_owned),
+                                reported_context_length: entry
+                                    .capacity_facts()
+                                    .context_window()
+                                    .map(|window| u64::from(window.get())),
+                            })
+                            .collect())
+                    }
+                    NativeProvider::Xai => {
+                        {
+                            let online = self.xai_online_with_gate(None, true).await?;
+                            online
+                                .manager
+                                .refresh_if_needed()
+                                .await
+                                .map_err(map_xai_error)?;
+                        }
+                        let online = self.xai_online_with_gate(Some(gate), true).await?;
+                        let receipt = online
                             .manager
-                            .refresh_if_needed()
+                            .refresh_catalog()
                             .await
                             .map_err(map_xai_error)?;
+                        Ok(receipt
+                            .entries()
+                            .iter()
+                            .filter(|entry| facade_xai_model_is_selectable(entry.model().as_str()))
+                            .map(|entry| NativeModelSummary {
+                                exact_id: entry.model().as_str().to_owned(),
+                                visibility: NativeModelVisibility::List,
+                                native_tool_mode: None,
+                                streaming: true,
+                                tools: true,
+                                reasoning_efforts:
+                                    plakous_xai::subscription_model_reasoning_effort_options(
+                                        entry.model().as_str(),
+                                    )
+                                    .to_vec(),
+                                default_reasoning_effort: None,
+                                service_tiers: Vec::new(),
+                                default_service_tier: None,
+                                reported_context_length: Some(u64::from(
+                                    entry.diagnostics().reported_context_length().get(),
+                                )),
+                            })
+                            .collect())
                     }
-                    let online = self.xai_online_with_gate(Some(gate), true).await?;
-                    let receipt = online
-                        .manager
-                        .refresh_catalog()
-                        .await
-                        .map_err(map_xai_error)?;
-                    Ok(receipt
-                        .entries()
-                        .iter()
-                        .filter(|entry| facade_xai_model_is_selectable(entry.model().as_str()))
-                        .map(|entry| NativeModelSummary {
-                            exact_id: entry.model().as_str().to_owned(),
-                            visibility: NativeModelVisibility::List,
-                            native_tool_mode: None,
-                            streaming: true,
-                            tools: true,
-                            reasoning_efforts:
-                                plakous_xai::subscription_model_reasoning_effort_options(
-                                    entry.model().as_str(),
-                                )
-                                .to_vec(),
-                            default_reasoning_effort: None,
-                            service_tiers: Vec::new(),
-                            default_service_tier: None,
-                            reported_context_length: Some(u64::from(
-                                entry.diagnostics().reported_context_length().get(),
-                            )),
-                        })
-                        .collect())
+                    NativeProvider::Claude => {
+                        let online = self
+                            .claude_online_with_gate(Some(gate.clone()), true)
+                            .await?;
+                        let mut permit = gate
+                            .acquire(SubscriptionRequestClass::Catalog)
+                            .map_err(|_| NativeSubscriptionError::Internal)?;
+                        permit
+                            .authorize_dispatch()
+                            .map_err(|_| NativeSubscriptionError::Internal)?;
+                        Ok(online
+                            .manager
+                            .enrolled_catalog()
+                            .map_err(map_claude_error)?
+                            .into_iter()
+                            .map(|entry| NativeModelSummary {
+                                exact_id: entry.exact_id().to_owned(),
+                                visibility: NativeModelVisibility::List,
+                                native_tool_mode: None,
+                                streaming: true,
+                                tools: true,
+                                reasoning_efforts:
+                                    plakous_anthropic::claude_oauth_reasoning_effort_options(
+                                        entry.exact_id(),
+                                    )
+                                    .to_vec(),
+                                default_reasoning_effort: None,
+                                service_tiers: Vec::new(),
+                                default_service_tier: None,
+                                // Claude publishes no OAuth catalog window; this is
+                                // the enrolled row's window, the one the session runs at.
+                                reported_context_length: Some(entry.input_tokens()),
+                            })
+                            .collect())
+                    }
                 }
-                NativeProvider::Claude => {
-                    let online = self
-                        .claude_online_with_gate(Some(gate.clone()), true)
-                        .await?;
-                    let mut permit = gate
-                        .acquire(SubscriptionRequestClass::Catalog)
-                        .map_err(|_| NativeSubscriptionError::Internal)?;
-                    permit
-                        .authorize_dispatch()
-                        .map_err(|_| NativeSubscriptionError::Internal)?;
-                    Ok(online
-                        .manager
-                        .enrolled_catalog()
-                        .map_err(map_claude_error)?
-                        .into_iter()
-                        .map(|entry| NativeModelSummary {
-                            exact_id: entry.exact_id().to_owned(),
-                            visibility: NativeModelVisibility::List,
-                            native_tool_mode: None,
-                            streaming: true,
-                            tools: true,
-                            reasoning_efforts:
-                                plakous_anthropic::claude_oauth_reasoning_effort_options(
-                                    entry.exact_id(),
-                                )
-                                .to_vec(),
-                            default_reasoning_effort: None,
-                            service_tiers: Vec::new(),
-                            default_service_tier: None,
-                            // Claude publishes no OAuth catalog window; this is
-                            // the enrolled row's window, the one the session runs at.
-                            reported_context_length: Some(entry.input_tokens()),
-                        })
-                        .collect())
-                }
-            }
-        })
-        .await?;
+            })
+            .await?;
         if models.is_empty() {
             return Err(NativeSubscriptionError::ModelUnavailable);
         }
@@ -2803,6 +2854,11 @@ impl NativeSubscriptions {
                     )
                 })?
                 .with_inference_observer(self.exchange_observer.clone());
+                let resolver = if self.catalog_retries {
+                    resolver
+                } else {
+                    resolver.without_catalog_retries()
+                };
                 let catalog = resolver.refresh_catalog().await.map_err(|error| {
                     let error = match error {
                         plakous_openai::NativeCodexAuthError::Validation => {
@@ -3346,9 +3402,17 @@ impl NativeSubscriptions {
             Arc::new(SystemSubscriptionGateClock::default()),
         ));
         let gate: Arc<dyn SubscriptionRequestGate> = turn_gate.clone();
-        let resolved = self
-            .resolve_gated_provider(selected.clone(), gate, lineage)
-            .await?;
+        let resolved = tokio::time::timeout(
+            MODEL_CATALOG_DEADLINE,
+            self.resolve_gated_provider(selected.clone(), gate, lineage),
+        )
+        .await
+        .map_err(|_| {
+            NativeModelResolutionError::after_selection(
+                selected.route().requested_model().clone(),
+                catalog_operation_deadline(turn_gate.as_ref()),
+            )
+        })??;
         let resolved = apply_turn_scoped_provider_gate(resolved, Arc::clone(&turn_gate))?;
         Ok(self.with_reresolution(resolved, selected, lineage, turn_gate))
     }
@@ -3368,9 +3432,17 @@ impl NativeSubscriptions {
             Arc::new(SystemSubscriptionGateClock::default()),
         ));
         let gate: Arc<dyn SubscriptionRequestGate> = turn_gate.clone();
-        let resolved = self
-            .resolve_gated_provider_for_attach(selected.clone(), gate)
-            .await?;
+        let resolved = tokio::time::timeout(
+            MODEL_CATALOG_DEADLINE,
+            self.resolve_gated_provider_for_attach(selected.clone(), gate),
+        )
+        .await
+        .map_err(|_| {
+            NativeModelResolutionError::after_selection(
+                selected.route().requested_model().clone(),
+                catalog_operation_deadline(turn_gate.as_ref()),
+            )
+        })??;
         let resolved = apply_turn_scoped_provider_gate(resolved, Arc::clone(&turn_gate))?;
         Ok(self.with_reresolution(resolved, selected, SessionLineage::Root, turn_gate))
     }
@@ -3548,6 +3620,7 @@ impl NativeSubscriptions {
             }
         }
         let catalog_observer = self.exchange_observer.clone();
+        let catalog_retries = self.catalog_retries;
         run_blocking(move || {
             let timestamp =
                 Timestamp::new(accepted_at, 0).map_err(|_| NativeSubscriptionError::Internal)?;
@@ -3579,6 +3652,9 @@ impl NativeSubscriptions {
             manager = manager
                 .with_catalog_observer(catalog_observer)
                 .map_err(map_xai_error)?;
+            if !catalog_retries {
+                manager = manager.without_catalog_retries().map_err(map_xai_error)?;
+            }
             if let Some(gate) = request_gate {
                 manager = manager
                     .with_subscription_request_gate(gate)

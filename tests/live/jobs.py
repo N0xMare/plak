@@ -1181,8 +1181,9 @@ def root_is_idle(records: list[dict]) -> bool:
     return phase == "completed" and turn_id is not None and turn_id == admitted[-1]
 
 
-def classify_turn(turn: live.Turn, what: str, segments: list[Path] | None = None) -> None:
-    live.classify_incomplete(turn, what, segments=segments)
+def classify_turn(turn: live.Turn, what: str, segments: list[Path] | None = None, *,
+                  lookup_faults: str | None = None) -> None:
+    live.classify_incomplete(turn, what, segments=segments, lookup_faults=lookup_faults)
 
 
 def require_script(repo: Path, name: str, expected: str) -> None:
@@ -1275,7 +1276,8 @@ def retry_budget_exhausted(retry: tuple[str, int, int, str | None] | None) -> bo
     return declined == "budget" and nxt == limit + 1
 
 
-def classify_tui_turn(home: Path, session: str, index: int, what: str) -> None:
+def classify_tui_turn(home: Path, session: str, index: int, what: str, *,
+                      lookup_faults: str | None = None) -> None:
     """Classify a TUI turn from the session log, then from retry telemetry.
 
     `emit_turn_lifecycle` (`crates/hosting/hosted/src/runtime/turn.rs` lines
@@ -1294,6 +1296,7 @@ def classify_tui_turn(home: Path, session: str, index: int, what: str) -> None:
     record = records[index]
     status = record.get("http_status")
     turn = live.Turn(
+        lookup_faults=lookup_faults,
         phase=record.get("phase"),
         model_error_kind=record.get("model_error_kind"),
         http_status=status if type(status) is int else None,
@@ -1302,6 +1305,9 @@ def classify_tui_turn(home: Path, session: str, index: int, what: str) -> None:
     )
     if turn.completed:
         return
+    lookup = live.lookup_failure(" ".join(turn.errors), lookup_faults)
+    if lookup:
+        raise ScenarioFailure(lookup[1], f"{what}: {lookup[0]}")
     retry = last_retry(home, str(record.get("turn_id") or ""))
     if retry_budget_exhausted(retry):
         raise ScenarioFailure(PROVIDER, f"{what}: model_retries {retry[0]} exhausted")
@@ -1955,7 +1961,7 @@ class Jobs:
 
             if not tui.wait_until(running_foreground, 120):
                 if terminals(home, session):
-                    classify_tui_turn(home, session, len(terminals(home, session)) - 1, "ctrl+b")
+                    classify_tui_turn(home, session, len(terminals(home, session)) - 1, "ctrl+b", lookup_faults=tui.lookup_faults)
                 raise ScenarioFailure(MODEL, "no foreground command was running for Ctrl+B")
             if nested:
                 # The outer cell is not required to preempt the nested call.
@@ -2000,9 +2006,9 @@ class Jobs:
             tui.key(b"\r")
             if not tui.wait_until(lambda: len(terminals(home, session)) > before, 180):
                 if terminals(home, session):
-                    classify_tui_turn(home, session, len(terminals(home, session)) - 1, "stop")
+                    classify_tui_turn(home, session, len(terminals(home, session)) - 1, "stop", lookup_faults=tui.lookup_faults)
                 raise ScenarioFailure(HARNESS, "root turn did not finish")
-            classify_tui_turn(home, session, before, "stop")
+            classify_tui_turn(home, session, before, "stop", lookup_faults=tui.lookup_faults)
             require_script(repo, "hold.py", HOLD_PY)
             if marker(repo, "job-finished"):
                 raise ScenarioFailure(MODEL, "command finished before the stop")
@@ -2072,9 +2078,9 @@ class Jobs:
 
             if not tui.wait_until(root_finished, 180):
                 if terminals(home, session):
-                    classify_tui_turn(home, session, len(terminals(home, session)) - 1, "wake")
+                    classify_tui_turn(home, session, len(terminals(home, session)) - 1, "wake", lookup_faults=tui.lookup_faults)
                 raise ScenarioFailure(HARNESS, "root turn did not finish")
-            classify_tui_turn(home, session, 0, "wake")
+            classify_tui_turn(home, session, 0, "wake", lookup_faults=tui.lookup_faults)
             require_script(repo, "hold.py", HOLD_PY)
             painted = mark["n"] or 0
 
@@ -2127,9 +2133,9 @@ class Jobs:
 
             if not tui.wait_until(root_finished, 180):
                 if terminals(home, session):
-                    classify_tui_turn(home, session, len(terminals(home, session)) - 1, "badge")
+                    classify_tui_turn(home, session, len(terminals(home, session)) - 1, "badge", lookup_faults=tui.lookup_faults)
                 raise ScenarioFailure(HARNESS, "root turn did not finish")
-            classify_tui_turn(home, session, 0, "badge")
+            classify_tui_turn(home, session, 0, "badge", lookup_faults=tui.lookup_faults)
             require_script(repo, "hold.py", HOLD_PY)
             painted = mark["n"] or 0
             captured = {"hud": "", "live": False}

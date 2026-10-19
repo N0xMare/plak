@@ -200,8 +200,6 @@ const MAX_PROMPT_BYTES: usize = sessions::MAX_PROMPT_BYTES;
 
 const MAX_RESUME_CHOICES: usize = 200;
 
-const HOST_TRANSITION_RESOLVE_TIMEOUT: Duration = Duration::from_secs(30);
-
 /// The outer bound on the whole durable release. It sits far above the
 /// per-child bounds inside it — hub retirement is 2s plus a 250ms detach —
 /// so a bounded child error is retained and the parent's release is still

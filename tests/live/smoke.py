@@ -375,7 +375,7 @@ class Smoke:
             answer = agent.command("compact")
             if answer.get("kind") == "error":
                 live.classify_command_error(str(answer.get("message") or ""), "manual compact",
-                                            segments=[agent.capture_dir])
+                                            segments=[agent.capture_dir], lookup_faults=agent.lookup_faults)
             for _ in range(30):  # the log line can trail the command's answer
                 committed = live.committed_compactions(live.session_records(self.env.home,
                                                                             agent.session_id))

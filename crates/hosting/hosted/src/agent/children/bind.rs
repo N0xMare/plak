@@ -999,7 +999,8 @@ pub async fn spawned_child_spec(
 
     let subscriptions = state_roots
         .native_subscriptions()
-        .map_err(|failure| failure.message().to_owned())?;
+        .map_err(|failure| failure.message().to_owned())?
+        .without_model_lookup_retries();
     // One admission rule with the catalog and inference paths: refresh first
     // (a durable xAI Unknown is reclaimed on the stored refresh token), then
     // read the fail-closed status, then admit.
@@ -1063,7 +1064,7 @@ pub async fn spawned_child_spec(
                 plakous::model::SessionLineage::SpawnedChild,
             )
             .await
-            .map_err(|_| "spawn child provider could not be resolved".to_string())?,
+            .map_err(|error| child_provider_failure(error.kind()))?,
     );
 
     Ok(ProductAgentSpec {
@@ -1156,8 +1157,29 @@ fn child_catalog_failure(error: NativeSubscriptionError) -> String {
     }
 }
 
+fn child_provider_failure(error: NativeSubscriptionError) -> String {
+    match error {
+        NativeSubscriptionError::ModelLookup { .. } => {
+            format!("spawn child provider could not be resolved: {error}")
+        }
+        _ => "spawn child provider could not be resolved".to_owned(),
+    }
+}
+
 #[cfg(test)]
 mod lookup_failure_tests {
+    #[test]
+    fn child_resolution_keeps_lookup_attempt_count_and_cause() {
+        let message = super::child_provider_failure(super::NativeSubscriptionError::ModelLookup {
+            attempts: 2,
+            cause: "operation deadline",
+        });
+        assert!(
+            message.contains("model lookup failed after 2 attempts: operation deadline"),
+            "{message}"
+        );
+    }
+
     #[test]
     fn child_binding_keeps_lookup_attempt_count_and_cause() {
         let message = super::child_catalog_failure(super::NativeSubscriptionError::ModelLookup {

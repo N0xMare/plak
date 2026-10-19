@@ -2474,7 +2474,7 @@ async fn model_catalog_stalled_first_attempt_can_retry_and_succeed() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn model_catalog_outer_deadline_reports_attempts_including_unsent_refunds() {
+async fn model_catalog_outer_deadline_reports_only_charged_dispatches() {
     let ready = NativeSubscriptionStatus {
         compatibility: CompatibilityStatus::Current,
         credential: NativeAuthStatus::Ready,
@@ -2502,8 +2502,8 @@ async fn model_catalog_outer_deadline_reports_attempts_including_unsent_refunds(
     assert!(matches!(
         result,
         Err(NativeSubscriptionError::ModelLookup {
-            attempts: 2,
-            cause: "transport timeout"
+            attempts: 1,
+            cause: "operation deadline"
         })
     ));
 }

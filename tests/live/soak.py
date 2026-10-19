@@ -238,7 +238,8 @@ class Soak:
             after = ""
             if not turn.completed:
                 reason = live.provider_reason_from(
-                    turn.model_error_kind, turn.http_status, " ".join(turn.errors))
+                    turn.model_error_kind, turn.http_status, " ".join(turn.errors),
+                    lookup_faults=turn.lookup_faults)
                 validation = live.stream_validation_outcome(
                     " ".join(turn.errors), [agent.capture_dir])
                 if reason or validation == live.PROVIDER:
@@ -328,7 +329,7 @@ class Soak:
             if answer.get("kind") == "error":
                 live.classify_command_error(
                     str(answer.get("message") or ""), "manual compact",
-                    segments=[agent.capture_dir])
+                    segments=[agent.capture_dir], lookup_faults=agent.lookup_faults)
         finally:
             agent.quit()
 

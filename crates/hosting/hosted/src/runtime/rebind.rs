@@ -1,6 +1,6 @@
 //! Model rebinding: immutable requests, canonical dispatch and feed projection.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use plakous::application::ApplicationExecutor;
 use plakous::model::{ModelId, ProcessingTierDisposition, ProviderServiceTierId};
@@ -31,9 +31,8 @@ use super::startup::{
 use super::startup::{injected_rebind_target, observe_test_boundary};
 use super::usage::report_context;
 use super::{
-    HOST_TRANSITION_RESOLVE_TIMEOUT, HostConfig, HostLifecyclePhase, HostTargetAuthority,
-    RebindBefore, RebindRoute, ResolvedRebindTarget, Sender, TestRuntimeRole, TopologyRows,
-    TreeRows, topology_state,
+    HostConfig, HostLifecyclePhase, HostTargetAuthority, RebindBefore, RebindRoute,
+    ResolvedRebindTarget, Sender, TestRuntimeRole, TopologyRows, TreeRows, topology_state,
 };
 #[cfg(any(test, feature = "test-support"))]
 use super::{TestHostBoundary, TestHostWorkflow};
@@ -244,14 +243,11 @@ pub(super) fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExtension>
         let catalog = run_watched(
             executor,
             watch,
-            bounded_transition_stage(
-                HOST_TRANSITION_RESOLVE_TIMEOUT,
-                subscriptions.model_catalog(provider),
-            ),
+            bounded_rebind_lookup(subscriptions.model_catalog(provider)),
         )
         .map_err(|_| CliFailure::new("application execution failed"))?
         .map_err(|()| CliFailure::new("rebind catalog refresh timed out; source unchanged"))?
-        .map_err(|_| CliFailure::new("rebind catalog refresh failed; source unchanged"))?;
+        .map_err(rebind_catalog_failure)?;
         let catalog_entry = catalog
             .models()
             .iter()
@@ -320,14 +316,11 @@ pub(super) fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExtension>
     let resolved = run_watched(
         executor,
         watch,
-        bounded_transition_stage(
-            HOST_TRANSITION_RESOLVE_TIMEOUT,
-            subscriptions.resolve_turn_scoped_provider(
-                selected,
-                limits,
-                plakous::model::SessionLineage::Root,
-            ),
-        ),
+        bounded_rebind_lookup(subscriptions.resolve_turn_scoped_provider(
+            selected,
+            limits,
+            plakous::model::SessionLineage::Root,
+        )),
     )
     .map_err(|_| CliFailure::new("application execution failed"))?
     .map_err(|()| CliFailure::new("rebind target resolution timed out; source unchanged"))?
@@ -2790,5 +2783,59 @@ mod tests {
             crate::agent_tree::ProductAgentTree::TREE_EPOCH_REBIND_PAUSED
         );
         assert!(no_unsettled_rebind_requests(&config));
+    }
+}
+
+// Native catalog operations allow 120 s; leave margin for the compatibility flock.
+const REBIND_LOOKUP_TIMEOUT: Duration = Duration::from_secs(150);
+
+async fn bounded_rebind_lookup<T>(operation: impl Future<Output = T>) -> Result<T, ()> {
+    bounded_transition_stage(REBIND_LOOKUP_TIMEOUT, operation).await
+}
+
+fn rebind_catalog_failure(error: plakous::subscriptions::NativeSubscriptionError) -> CliFailure {
+    match error {
+        plakous::subscriptions::NativeSubscriptionError::ModelLookup { .. } => CliFailure::new(
+            format!("rebind catalog refresh failed: {error}; source unchanged"),
+        ),
+        _ => CliFailure::new("rebind catalog refresh failed; source unchanged"),
+    }
+}
+
+#[cfg(test)]
+mod lookup_retry_tests {
+    #[test]
+    fn rebind_catalog_keeps_lookup_attempt_count_and_cause() {
+        let error = super::rebind_catalog_failure(
+            plakous::subscriptions::NativeSubscriptionError::ModelLookup {
+                attempts: 3,
+                cause: "HTTP 503",
+            },
+        );
+        assert!(
+            error
+                .message()
+                .contains("model lookup failed after 3 attempts: HTTP 503")
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rebind_lookup_allows_stalled_first_attempt_and_retry() {
+        let mut attempts = 0;
+        let result = super::bounded_rebind_lookup(async {
+            attempts += 1;
+            let first = tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                std::future::pending::<()>(),
+            )
+            .await;
+            assert!(first.is_err());
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            attempts += 1;
+            "second lookup attempt succeeded"
+        })
+        .await;
+        assert_eq!(result, Ok("second lookup attempt succeeded"));
+        assert_eq!(attempts, 2);
     }
 }

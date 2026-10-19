@@ -26,9 +26,14 @@ two seconds; provider `Retry-After` advice is honored only within the lookup's
 60-second overall cap, and only when enough time remains for a useful next
 attempt. Existing per-request deadlines still apply. Codex/Grok catalog
 renewals inside an attached session remain single-attempt; the retry window
-applies to startup and binding, not to holding an in-session credential lease.
+applies to an operator-waited startup, attach or explicit model switch, not to
+holding an in-session credential lease. Background native catalog refresh and
+native child binding use a single attempt. OpenRouter and API-key child
+binding still retry because they hold no subscription locks or leases.
 Native catalog operations allow up to 120 seconds for credential setup, the
-lookup window and cleanup; an outer timeout retains the actual attempt count.
+lookup window and cleanup; an outer timeout is labeled `operation deadline`
+and retains the charged-dispatch count. An explicit model switch allows that
+inner operation to finish rather than cutting its retry off at 30 seconds.
 
 `model lookup failed after N attempts: <cause>` means the transient failure
 outlasted that budget. Check connectivity or provider availability and try

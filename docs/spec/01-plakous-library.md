@@ -2467,12 +2467,17 @@ capability, policy mode, capacity guarantee, replay or storage contract, or
 qualification. Unknown or ambiguous rows and fields fail closed until an owning
 revision-pinned integration admits their semantics.
 
-**Read-only model lookup exchanges.** Session and child binding use the same
-shared bounded GET retry in `plakous-exchange`; no provider owns a second copy.
-In-session Codex and Grok receipt renewals stay **single-attempt**, including on
-transient failures. They do not retain a lifecycle lock or credential lease
-through a lookup retry window. Startup, explicit resolution and child binding
-use the retry policy below.
+**Read-only model lookup exchanges.** The shared bounded GET retry in
+`plakous-exchange` applies where the operator is waiting on a bind: `plak run`,
+`plak agent`, TUI new-session/attach and an explicit model rebind (`/model`).
+No provider owns a second retry copy. Native TUI background catalog refresh and
+native child binding (both its catalog probe and its provider resolution) use
+one physical attempt. OpenRouter discovery and API-key child binding retain
+bounded retries: those paths hold no subscription compatibility flock,
+lifecycle lock or Ready lease. In-session Codex and Grok receipt renewals also remain
+single-attempt, including on transient failures: an attached session does not
+hold its compatibility flock, Codex lifecycle lock or Ready credential lease
+through a catalog retry window.
 The lookup inventory is:
 
 | Route | Lookup before binding | Existing cache/credential behavior |
@@ -2511,16 +2516,25 @@ charge every possibly sent physical GET to their existing catalog allowances,
 not to inference or its retry reserve. The catalog-only classified operation
 allows three catalog requests, zero inference and zero inference retries;
 its accounting validator accepts one to three attempts and their unsent refunds.
-A process-local, non-refunded authorization counter retains actual attempt
-counts for diagnostics; it changes no persisted encoding.
+A process-local, non-refunded authorization counter validates physical attempt
+accounting; it changes no persisted encoding.
 
-The catalog-only outer operation and gate deadline are 120 seconds, allowing
-credential refresh/setup, the 60-second lookup cap and cleanup margin. If that
-outer bound fires after dispatch began, the error is `ModelLookup` with the
-actual authorization count (including refunded unsent attempts); a deadline
-before any attempt remains a plain transport failure. An already-zero lookup
-budget likewise returns its plain transport failure, not exhausted-retry
-evidence. Child-binding errors retain the lookup attempt count and cause.
+Native catalog-only and scoped-provider binding operations have a 120-second
+outer bound, including compatibility lock acquisition, credential setup,
+lookup and cleanup. The retrying paths may hold their compatibility flock,
+Codex lifecycle lock and Ready lease for at most that operation bound; the
+physical catalog phase shares a tighter 60-second cap. Single-attempt paths
+keep the original 30-second exchange deadline and do not sleep between GETs.
+Explicit rebind allows 150 seconds per native catalog/resolution stage, leaving
+margin above the inner bound for host-side coordination; it must not cancel a
+stalled first GET at 30 seconds before the retry can start.
+
+An outer 120-second cut reports `ModelLookup` with cause `operation deadline`
+and the number of **charged dispatches** (unsent refunds excluded, possibly
+zero), never a provider timeout claim. It is a harness outcome in live scoring.
+An already-zero lookup budget still returns its plain transport failure, not
+exhausted-retry evidence. Child catalog and provider-resolution errors and both
+rebind stages retain the full lookup attempt count and cause.
 
 401/403 stay with the existing credential/refresh path, without a lookup retry.
 Other 4xx, absent models, malformed/oversized catalogs, invalid media types and
