@@ -2467,6 +2467,46 @@ capability, policy mode, capacity guarantee, replay or storage contract, or
 qualification. Unknown or ambiguous rows and fields fail closed until an owning
 revision-pinned integration admits their semantics.
 
+**Read-only model lookup exchanges.** Session and child binding use the same
+shared bounded GET retry in `plakous-exchange`; no provider owns a second copy.
+The lookup inventory is:
+
+| Route | Lookup before binding | Existing cache/credential behavior |
+| --- | --- | --- |
+| Codex subscription | `GET /backend-api/codex/models?client_version=0.162.1` on `chatgpt.com` | Authenticated catalog evidence lasts 6 h; the existing credential refresh path is separate |
+| Grok subscription | `GET /v1/models` on `cli-chat-proxy.grok.com` | Authenticated catalog evidence lasts the access-token window (6 h); renewal/refresh remains separate |
+| Claude subscription | Pinned enrolled catalog, no network model lookup | Credential/profile GETs are not model catalogs and do not enter this retry policy |
+| OpenRouter | `GET /api/v1/models`, then the exact model's `/api/v1/models/{author}/{slug}/endpoints` on `openrouter.ai` | Both discovery GETs use the policy; binding uses the successful exact evidence |
+| Anthropic API key | `GET /v1/models`, including each bounded pagination page, on `api.anthropic.com` | Existing per-key 6 h product list cache, stale-cache/bundled-table behavior and 5-minute failed-fetch suppression remain unchanged |
+| OpenAI API key | `GET /v1/models` on `api.openai.com` | Same product list-cache policy |
+| xAI API key | `GET /v1/models` on `api.x.ai` | Same product list-cache policy |
+
+Credential refresh and inference retry are distinct policies, not catalog
+retries. A lookup retries
+DNS/connect I/O failures, timeouts even after send, interrupted body reads
+(including transport EOF/framing failures), HTTP 429, 500, 502, 503 and 504.
+It makes at most three physical attempts, with 500-750 ms then 2000-2250 ms
+jittered backoff. `Retry-After` (seconds or HTTP date) is a minimum delay;
+if it cannot fit the remaining budget, the lookup fails without sleeping or
+sending again. Each catalog/discovery operation shares one 60-second overall
+cap across its GETs and pages; every physical attempt
+retains its existing whole-exchange duration and phase deadlines, shortened
+when necessary by that cap. No attempt changes the exact URL, headers or
+credentials, and none falls back to a different route. Only the successful
+exchange's body and headers can become admission evidence.
+
+401/403 stay with the existing credential/refresh path, without a lookup retry.
+Other 4xx, absent models, malformed/oversized catalogs, invalid media types and
+invalid admission evidence fail immediately with their existing errors. Parsing
+and evidence validation happen after transport retry, not inside it. CLI and
+TUI status report each retry as `retrying model lookup (2/3): <cause>` (then
+`3/3`), and diagnostic logs record the same attempt and redacted cause. A
+transient failure that exhausts either bound reports `model lookup failed after
+N attempts: <cause>`; N counts only attempts actually run. No persisted encoding
+or admission identity changes. Catalog progress/capture observation is attached
+only to model lookup clients; OAuth, token, profile and usage clients do not
+inherit the catalog observer.
+
 An API-key provider's own model list (`GET /v1/models` on the exact route
 origin, with the same key) is such a catalog. It attests that a model id
 exists and the facts the provider publishes for it: input window, output
@@ -7719,6 +7759,8 @@ Cancellation stops a stream at once; the single-dispatch paid-compaction
 workflow is unchanged. Connect and write bounds remain 10 and 30 seconds;
 auth, catalog, discovery and other REST exchanges keep 30-second stalls and a
 whole-exchange deadline (`ExchangeControl::new`), including their bodies.
+Read-only model lookup GETs additionally use the bounded retry in §6.2;
+OAuth, refresh, profile and key-usage exchanges do not inherit it.
 
 **Connection reuse is opt-in and limited to inference.** A plain
 `plakous-http` client opens a fresh connection for every `execute`.

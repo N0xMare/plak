@@ -49,6 +49,13 @@ just jobs grok --only promotion_budget,steer_command,ctrl_b
 python3 tests/live/jobs.py grok --only crash_jobs
 ```
 
+Startup lookup fault proof (opt-in, real provider usage, fresh private home):
+`python3 tests/live/lookup_retry.py deepseek --fault connect`, or `--fault 503`.
+The same driver accepts Codex, Grok and the API-key routes; Claude subscription
+has a pinned local catalog and no catalog GET. It requires a retry status, a
+completed durable turn and an independently checked file, and reports its
+session id and binary hash. It does not alter inference retry budgets.
+
 The Python drivers default to `target/release/plak`. Build it with
 `cargo build --release --locked -p plak --features plak/test-hooks` before a
 direct Python invocation; `--binary PATH` selects another capture-capable

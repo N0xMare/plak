@@ -754,6 +754,14 @@ pub struct NativeModelResolutionError {
     pub kind: NativeSubscriptionError,
 }
 
+impl fmt::Display for NativeModelResolutionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.kind.fmt(f)
+    }
+}
+
+impl Error for NativeModelResolutionError {}
+
 impl NativeModelResolutionError {
     fn before_selection(error: NativeSubscriptionError) -> Self {
         Self {
@@ -2344,7 +2352,7 @@ impl NativeSubscriptions {
                     let online = self.codex_online_with_gate(Some(gate), true).await?;
                     let resolver = plakous_openai::CodexModelResolver::new(
                         Arc::clone(&online.manager),
-                        online.client,
+                        online.client.with_observer(self.exchange_observer.clone()),
                         codex_native_http_config()?,
                     )
                     .map_err(map_codex_error)?;
@@ -2754,7 +2762,7 @@ impl NativeSubscriptions {
                     })?;
                 let resolver = plakous_openai::CodexModelResolver::new(
                     Arc::clone(&online.manager),
-                    online.client,
+                    online.client.with_observer(self.exchange_observer.clone()),
                     codex_native_http_config().map_err(|error| {
                         exact_selection.clone().map_or_else(
                             || NativeModelResolutionError::before_selection(error),
@@ -3519,6 +3527,7 @@ impl NativeSubscriptions {
                 return Err(NativeSubscriptionError::CredentialUnavailable);
             }
         }
+        let catalog_observer = self.exchange_observer.clone();
         run_blocking(move || {
             let timestamp =
                 Timestamp::new(accepted_at, 0).map_err(|_| NativeSubscriptionError::Internal)?;
@@ -3547,6 +3556,9 @@ impl NativeSubscriptions {
                 provider_acceptance,
             )
             .map_err(map_xai_error)?;
+            manager = manager
+                .with_catalog_observer(catalog_observer)
+                .map_err(map_xai_error)?;
             if let Some(gate) = request_gate {
                 manager = manager
                     .with_subscription_request_gate(gate)

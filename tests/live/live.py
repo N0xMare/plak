@@ -418,6 +418,18 @@ def durable_refusals(record: dict) -> list[str]:
     return ["canonical model refusal"] if record.get("phase") == "refused" else []
 
 
+def lookup_failure_reason(text: str) -> str | None:
+    """Only an exhausted startup lookup with a transient cause scores provider."""
+    text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
+    lookup = re.search(
+        r"model lookup failed after [1-3] attempts: "
+        r"(?:HTTP (?:429|500|502|503|504)\b|transport timeout\b|DNS failure\b|"
+        r"connect failure\b|transport stream failure\b|HTTP transport failed in "
+        r"(?:Resolution|Connect|RequestWrite|RequestWriteOrResponseHead|ResponseHead|ResponseBody) "
+        r"\([^\n]*, (?:Io|Resolution|DeadlineExceeded|Protocol)\))", text)
+    return lookup.group(0) if lookup else None
+
+
 def provider_reason_from(kind: str | None, http_status: int | None, text: str) -> str | None:
     """Why this observation is a typed provider refusal, or None.
 
@@ -425,6 +437,9 @@ def provider_reason_from(kind: str | None, http_status: int | None, text: str) -
     manual `/compact` refusals, and child job output. A kernel
     stream-validation failure is not decided here.
     """
+    lookup = lookup_failure_reason(text)
+    if lookup:
+        return lookup
     if kind in PROVIDER_ERROR_KINDS or http_status in PROVIDER_HTTP_STATUSES:
         status = f"{kind or ''} {http_status or ''}".strip()
         return status or text[:160]
@@ -668,7 +683,7 @@ def classify_command_error(message: str, what: str, *,
     if validation == HARNESS:
         raise ScenarioFailure(HARNESS, f"{what}: kernel stream validation failed without "
                                        f"a captured protocol violation")
-    if text_is_provider_refusal(text):
+    if provider_reason_from(None, None, text):
         raise ScenarioFailure(PROVIDER, f"{what}: {' '.join(text.split())[:200]}")
     raise ScenarioFailure(HARNESS, f"{what}: {' '.join(text.split())[:200]}")
 
@@ -676,7 +691,7 @@ def classify_command_error(message: str, what: str, *,
 def classify_cli_failure(code: int, stderr: str, what: str, *,
                          segments: list[Path] | None = None) -> None:
     """`plak run` exit. Exit 5 is the agent class; the text decides provider."""
-    detail = " ".join(stderr.split())[:200]
+    detail = lookup_failure_reason(stderr) or " ".join(stderr.split())[:200]
     validation = stream_validation_outcome(stderr, segments)
     if validation == MODEL:
         raise ScenarioFailure(MODEL, f"{what}: model emitted invalid tool arguments")
@@ -1209,9 +1224,14 @@ class Agent:
         # Constructors that skip __init__ simply do not have it.
         if observe:
             self.observed: collections.deque = collections.deque(maxlen=OBSERVED_LIMIT)
-        hello = self.wait_for(lambda event: event.get("kind") in ("ready", "bye"), 60)
+        # Observe the lookup cap's terminal error after credential/setup work,
+        # rather than racing the 60-second lookup budget with a driver timeout.
+        hello = self.wait_for(lambda event: event.get("kind") in ("ready", "bye"), 120)
         if hello.get("kind") != "ready" or not self.session_id:
-            raise ScenarioFailure(HARNESS, f"plak agent did not become ready: {hello}")
+            self.stderr.flush()
+            detail = Path(self.stderr.name).read_text(errors="replace")
+            classify_cli_failure(self.proc.poll() or 5, detail + json.dumps(hello),
+                                 "plak agent startup", segments=[self.capture_dir])
         if self.composition:
             env.bound_compositions.add(self.composition)
 
@@ -1423,6 +1443,10 @@ class Tui:
             self.pump(0.5)
             if predicate():
                 return True
+            reason = lookup_failure_reason(self.screen.decode(errors="replace"))
+            if reason:
+                self.quit()
+                raise ScenarioFailure(PROVIDER, f"TUI startup: {reason}")
         return False
 
     def quit(self, timeout: float = 30) -> int | None:

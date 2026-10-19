@@ -176,8 +176,8 @@ async fn a_cursor_that_is_not_the_last_row_or_is_unsafe_fails_the_list() {
 }
 
 #[tokio::test]
-async fn non_200_and_401_fail_the_list() {
-    for status in ["401 Unauthorized", "503 Service Unavailable"] {
+async fn permanent_non_200_and_401_fail_the_list() {
+    for status in ["401 Unauthorized", "400 Bad Request"] {
         let (client, origin, _server) = serve(vec![http_response(status, b"{}")]).await;
         let error = list(&client, origin).await.expect_err("status");
         let code = status.split(' ').next().expect("code");
@@ -244,7 +244,7 @@ async fn a_repeated_id_across_pages_fails_the_list() {
 }
 
 #[tokio::test]
-async fn the_twenty_second_deadline_bounds_the_whole_listing() {
+async fn the_existing_attempt_deadline_prevents_an_expired_listing() {
     assert_eq!(LIST_TIMEOUT, Duration::from_secs(20));
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let origin = Origin::parse(&format!(
@@ -258,7 +258,7 @@ async fn the_twenty_second_deadline_bounds_the_whole_listing() {
     let error = list_from(&Fixture, &client, origin, deadline)
         .await
         .expect_err("deadline");
-    assert!(error.to_string().contains("request failed"), "{error}");
+    assert!(error.to_string().contains("DeadlineExceeded"), "{error}");
     let accepted = tokio::time::timeout(Duration::from_millis(50), listener.accept()).await;
     assert!(
         accepted.is_err(),

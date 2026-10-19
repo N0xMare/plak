@@ -13,8 +13,8 @@
 use std::time::Instant;
 
 use plakous_http::{
-    Client, ExchangeControl, HeaderMap, HeaderName, HeaderValue, Method, Origin, Request,
-    SensitiveBytes, StatusCode, sensitive_header_value,
+    Client, HeaderMap, HeaderName, HeaderValue, Method, Origin, Request, SensitiveBytes,
+    StatusCode, sensitive_header_value,
 };
 use plakous_model::{ModelErrorKind, ReasoningEffort};
 use serde::Deserialize;
@@ -259,26 +259,24 @@ async fn get_models(
         client.limits(),
     )
     .map_err(|_| transport_error())?;
-    let response = client
-        .execute(request, ExchangeControl::new(deadline))
-        .await
-        .map_err(|_| transport_error())?;
-    if response.status() != StatusCode::OK {
-        let status = response.status().as_u16();
-        let _ = response.into_body().close().await;
-        return Err(list_error(&format!("answered HTTP {status}")));
+    let reply = plakous_exchange::lookup::get(
+        client,
+        request,
+        plakous_exchange::lookup::LookupBudget::from_deadline(deadline),
+        MAX_BODY_BYTES,
+    )
+    .await
+    .map_err(|error| match error {
+        plakous_exchange::lookup::LookupError::BodyLimit => list_error("exceeds the body bound"),
+        _ => list_error(&error.to_string()),
+    })?;
+    if reply.status != StatusCode::OK {
+        return Err(list_error(&format!(
+            "answered HTTP {}",
+            reply.status.as_u16()
+        )));
     }
-    let mut body = response.into_body();
-    let mut retained = Vec::new();
-    while let Some(chunk) = body.next_chunk().await {
-        let chunk = chunk.map_err(|_| transport_error())?;
-        if retained.len() + chunk.len() > MAX_BODY_BYTES {
-            let _ = body.close().await;
-            return Err(list_error("exceeds the body bound"));
-        }
-        retained.extend_from_slice(&chunk);
-    }
-    Ok(retained)
+    Ok(reply.body.to_vec())
 }
 
 fn deadline_instant() -> Result<Instant, OpenAiError> {

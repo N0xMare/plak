@@ -428,7 +428,7 @@ pub fn build_host_config(
         )
         .map_err(|e| format!("resolve {account}/{model_id}: {e:?}"))?
         .map_err(|e| {
-            format!("resolve {account}/{model_id}: {e:?} — check `plak login {account}` and `plak models {account}`")
+            format!("resolve {account}/{model_id}: {e} — check `plak login {account}` and `plak models {account}`")
         })?;
 
     let resolved = Arc::new(resolved);

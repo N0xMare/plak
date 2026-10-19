@@ -16,6 +16,12 @@ use crate::{ConnectionUse, ErrorKind, Failure, Phase, TransmissionFact};
 /// callback panics disable passive observation; required observation instead
 /// fails the exchange. The process panic hook still runs.
 pub trait ExchangeObserver: Send + Sync {
+    /// Reports a caller-owned read-only lookup retry, without URL or credentials.
+    fn lookup_retry(&self, _attempt: u8, _cause: &str) {}
+
+    /// Clears the status of a completed or cancelled lookup.
+    fn lookup_finished(&self) {}
+
     /// Refuses unobserved dispatch and aborts delivery if the sink fails.
     /// Passive observers leave this false. This never authorizes a retry.
     fn required(&self) -> bool {

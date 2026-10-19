@@ -235,7 +235,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-auth": "c8512e57c39f0ad1610fc5b70ac2e9864f01f0e3d418b2e0b127aaac40bd06ca",
     "plakous-code-mode": "55d345667ad5bed05fda32a4c2daac6848058f1878dd98b894205c2046670537",
     "plakous-chat-completions": "fee0157b1dfe8f68e2565ddeb4c30ed2b2f4a8bafba9463bff8e45592289d81f",
-    "plakous-exchange": "6a0ea0716df0413c94e2f61a85f97e76ededffcf212145d4c7f78f4507060e4b",
+    "plakous-exchange": "687a603a0d0d5847cc2484bd009657a887bbcc3cbff87e7bad34baf9aa3ef58c",
     "plakous-http": "4ba11a284120802378d429ec77ea58c8a3f25663d1808a795974c297f934ede9",
     "plakous-js-eval": "b8f627bbdfca516731b5a4a856002904ba307930f95f149ae06f1a42e3b7b3e1",
     "plakous-py-eval": "37c5d7ab1879a167a96617f90a469d171ec9ba92a5371617ec49f45659ad5879",

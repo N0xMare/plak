@@ -18,10 +18,17 @@ layer = "protocol"
 class = "published-internal"
 
 [dependencies]
+getrandom.workspace = true
+httpdate.workspace = true
+tokio = { workspace = true, features = ["time"] }
+zeroize.workspace = true
 futures-util = { workspace = true, features = ["std"] }
 plakous-attempt.workspace = true
 plakous-http.workspace = true
 plakous-model.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 
 [lints]
 workspace = true

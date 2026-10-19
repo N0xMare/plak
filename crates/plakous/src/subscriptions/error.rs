@@ -91,6 +91,13 @@ pub enum NativeSubscriptionError {
     CatalogDocumentRejected,
     /// A catalog model identifier was outside the pinned grammar.
     CatalogIdentifierRejected,
+    /// Transient model lookup failures exhausted the bounded retry budget.
+    ModelLookup {
+        /// Physical attempts that ran before exhaustion.
+        attempts: u8,
+        /// Redacted transport or provider cause.
+        cause: &'static str,
+    },
     /// A bounded provider transport operation failed.
     Transport(Option<plakous_model::ModelNetworkFailure>),
     /// Internal application execution or coordination failed.
@@ -99,6 +106,12 @@ pub enum NativeSubscriptionError {
 
 impl fmt::Display for NativeSubscriptionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Self::ModelLookup { attempts, cause } = self {
+            return write!(
+                formatter,
+                "model lookup failed after {attempts} attempts: {cause}"
+            );
+        }
         if let Self::Transport(Some(cause)) = self {
             return write!(formatter, "native subscription transport failed: {cause}");
         }
@@ -178,6 +191,7 @@ impl fmt::Display for NativeSubscriptionError {
             Self::CatalogMediaTypeRejected => "native catalog media type was rejected",
             Self::CatalogDocumentRejected => "native catalog document was rejected",
             Self::CatalogIdentifierRejected => "native catalog model identifier was rejected",
+            Self::ModelLookup { .. } => unreachable!("handled above"),
             Self::Transport(_) => "native subscription transport failed",
             Self::Internal => "native subscription operation failed internally",
         })
@@ -306,6 +320,11 @@ pub(super) fn map_codex_error(
         plakous_openai::NativeCodexAuthError::LoginPersistence => {
             NativeSubscriptionError::LoginPersistence
         }
+        plakous_openai::NativeCodexAuthError::Lookup(error) => error
+            .exhaustion()
+            .map_or(NativeSubscriptionError::Internal, |(attempts, cause)| {
+                NativeSubscriptionError::ModelLookup { attempts, cause }
+            }),
         plakous_openai::NativeCodexAuthError::Transport(cause) => {
             NativeSubscriptionError::Transport(cause)
         }
@@ -372,6 +391,11 @@ pub(super) fn map_xai_error(error: plakous_xai::XaiNativeAuthError) -> NativeSub
         | plakous_xai::XaiNativeAuthError::HttpRequest(_) => {
             NativeSubscriptionError::Transport(None)
         }
+        plakous_xai::XaiNativeAuthError::Lookup(error) => error
+            .exhaustion()
+            .map_or(NativeSubscriptionError::Internal, |(attempts, cause)| {
+                NativeSubscriptionError::ModelLookup { attempts, cause }
+            }),
         plakous_xai::XaiNativeAuthError::Transport(cause) => {
             NativeSubscriptionError::Transport(*cause)
         }

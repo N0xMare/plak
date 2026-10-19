@@ -671,7 +671,7 @@ def _reject_binding_loss(what: str, log: Path, out: str, records: list[dict]) ->
 def _stderr_excerpt(log: Path) -> str:
     text = log.read_text(errors="replace") if log.is_file() else ""
     stderr = text.split("--- stderr\n", 1)[-1]
-    return " ".join(stderr.split())[:200]
+    return " ".join(stderr.split())
 
 
 def _raise_cli_failure(code: int, log: Path, what: str, missing_session: bool = False,

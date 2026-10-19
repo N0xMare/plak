@@ -297,6 +297,24 @@ async fn resolve(
 }
 
 impl Client {
+    /// Publishes completion of a caller-owned lookup to the observer.
+    pub fn observe_lookup_finished(&self) {
+        if let Some(observer) = &self.observer {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                observer.lookup_finished();
+            }));
+        }
+    }
+
+    /// Publishes a caller-owned lookup retry to the diagnostic observer.
+    pub fn observe_lookup_retry(&self, attempt: u8, cause: &str) {
+        if let Some(observer) = &self.observer {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                observer.lookup_retry(attempt, cause);
+            }));
+        }
+    }
+
     /// Creates a client using Mozilla `WebPKI` roots and Rustls.
     ///
     /// # Errors

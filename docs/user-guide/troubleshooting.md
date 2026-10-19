@@ -17,6 +17,21 @@ actions or provider-hosted effects.
 Start with `plak doctor`. Every failing row carries its own FIX column, and the
 command exits 5 when anything is ERROR. Then `plak status` for credentials.
 
+## Startup Model Lookup
+
+Before attaching, Plak retries transient catalog/discovery GET failures up to
+three times, without changing the URL, account or model. CLI and TUI status show
+`retrying model lookup (2/3): <cause>`. The waits are roughly half a second and
+two seconds; provider `Retry-After` advice is honored only within the lookup's
+60-second overall cap. Existing per-request deadlines still apply.
+
+`model lookup failed after N attempts: <cause>` means the transient failure
+outlasted that budget. Check connectivity or provider availability and try
+again. Authentication failures, missing models and invalid catalogs do not
+retry; use `plak status`, `plak models <account>` and the reported remedy.
+Cached catalogs can avoid a network lookup. Claude subscription models use a
+pinned local catalog, so they do not make a startup catalog GET.
+
 ## `model refused the request`
 
 The model declined the request; this is not a login or refresh failure.

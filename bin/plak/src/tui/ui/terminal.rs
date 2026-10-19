@@ -108,6 +108,7 @@ impl TerminalRestoration {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         *held = false;
+        crate::lookup_status::tui_active(false);
         if self.bracketed_paste
             && let Err(error) = stdout().execute(DisableBracketedPaste)
         {
@@ -280,6 +281,7 @@ impl PersistentTerminal {
         *TERMINAL_HELD
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
+        crate::lookup_status::tui_active(true);
         Ok(Self {
             terminal,
             restoration,

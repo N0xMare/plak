@@ -56,6 +56,7 @@ pub mod commands;
 mod composition_tests;
 mod config;
 mod diagnostics;
+mod lookup_status;
 pub(crate) mod surface_protocol;
 /// Terminal-only application adapters.
 pub(crate) mod terminal_application;

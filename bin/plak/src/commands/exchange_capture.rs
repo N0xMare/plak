@@ -1,4 +1,4 @@
-//! Automatic private maintainer inference capture; explicit test-hooks capture.
+//! Automatic private maintainer model-exchange capture; explicit test-hooks capture.
 
 use plakous::exchange_observation::ExchangeObserver;
 use std::sync::{Arc, OnceLock};
@@ -9,7 +9,7 @@ pub(super) fn from_environment(
     // CLI services and TUI reattachments construct roots separately. They must
     // share one process sequence rather than collide with earlier file names.
     static CAPTURE: OnceLock<Result<Option<Arc<dyn ExchangeObserver>>, String>> = OnceLock::new();
-    CAPTURE
+    let capture = CAPTURE
         .get_or_init(|| {
             let dir = std::env::var_os("PLAK_TEST_EXCHANGE_CAPTURE_DIR");
             #[cfg(not(any(feature = "maintainer", feature = "test-hooks")))]
@@ -36,7 +36,32 @@ pub(super) fn from_environment(
                 )) as Arc<dyn ExchangeObserver>))
             }
         })
-        .clone()
+        .clone()?;
+    Ok(Some(Arc::new(LookupObserver(capture))))
+}
+
+struct LookupObserver(Option<Arc<dyn ExchangeObserver>>);
+
+impl ExchangeObserver for LookupObserver {
+    fn required(&self) -> bool {
+        self.0.as_ref().is_some_and(|capture| capture.required())
+    }
+
+    fn start(
+        &self,
+        body: &[u8],
+    ) -> Option<Box<dyn plakous::exchange_observation::ExchangeObservation>> {
+        self.0.as_ref()?.start(body)
+    }
+
+    fn lookup_retry(&self, attempt: u8, cause: &str) {
+        tracing::warn!(target: "plak.lookup", attempt, cause, "retrying model lookup");
+        crate::lookup_status::retry(attempt, cause);
+    }
+
+    fn lookup_finished(&self) {
+        crate::lookup_status::finished();
+    }
 }
 
 #[cfg(any(feature = "maintainer", feature = "test-hooks"))]

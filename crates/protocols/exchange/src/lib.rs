@@ -14,6 +14,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod lookup;
+
 use std::future::Future;
 use std::time::Duration;
 
@@ -357,3 +359,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod lookup_tests;

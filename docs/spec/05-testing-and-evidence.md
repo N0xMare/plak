@@ -1249,14 +1249,15 @@ Explicit qualification/reference OAuth/API wire captures belong in gitignored
 §3.5 is the safe collection and sanitization procedure. Do not commit raw
 traffic or treat a local structural capture as live provider qualification.
 
-Plak's private inference observer is available in `maintainer` or `test-hooks`
+Plak's private exchange observer is available in `maintainer` or `test-hooks`
 builds. Maintainer builds select fresh private capture automatically in the
 product home, including private scratch homes inside the checkout. Selection
-is lazy: the first inference exchange creates and logs the run, shared by later
-roots and reattachments in that process. Commands that send no inference
-create no capture directories and log no capture-selection message. Explicit
+is lazy: the first inference or read-only model lookup exchange creates and logs
+the run, shared by later roots and reattachments in that process. Commands that
+send neither create no capture directories and log no capture-selection message.
+Catalog observers never attach to OAuth, token, profile or usage clients. Explicit
 capture validation likewise happens before that first exchange can dispatch.
-Automatic capture is passive and never blocks inference on recording failures.
+Automatic capture is passive and never blocks inference or lookup on recording failures.
 Maintainer startup enables safe `plak.capture=warn` file diagnostics
 in `PLAK_HOME/logs/plak.log`, including alongside `PLAK_LOG` target selection,
 not TUI stderr. The live smoke and soak drivers also require capture for every process and default to
@@ -2349,6 +2350,14 @@ tuple refuses with an exact message is evidence of the same weight as one
 asserting a success.
 
 ### 3.2 Live scenarios
+
+A startup model lookup that exhausts the bounded GET retry policy (chapter 01
+§6.2) on a transport or retryable provider-status cause scores `provider`, not
+`harness`, on CLI, JSONL and TUI surfaces. The exhausted error names the actual
+attempt count and cause; a malformed catalog, invalid admission evidence,
+absent model or unrelated startup failure does not acquire this classification.
+Transient first-attempt lookup fault scenarios must still bind the session and
+complete a real turn; a retry message alone is not success evidence.
 
 A live scenario drives the real `plak` binary against a real provider account
 and checks its result independently of a clean protocol terminal. It is opt-in,

@@ -10,8 +10,8 @@
 use std::time::Instant;
 
 use plakous_http::{
-    Client, ExchangeControl, HeaderMap, HeaderName, HeaderValue, Method, Origin, Request,
-    SensitiveBytes, StatusCode, sensitive_header_value,
+    Client, HeaderMap, HeaderName, HeaderValue, Method, Origin, Request, SensitiveBytes,
+    StatusCode, sensitive_header_value,
 };
 use plakous_model::ReasoningEffort;
 use serde::{Deserialize, Serialize};
@@ -275,6 +275,7 @@ async fn list_from(
     origin: Origin,
     deadline: Instant,
 ) -> Result<Vec<AnthropicListedModel>, AnthropicError> {
+    let deadline = plakous_exchange::lookup::LookupBudget::from_deadline(deadline);
     let key = source.current_key()?;
     let mut models: Vec<AnthropicListedModel> = Vec::new();
     let mut after: Option<String> = None;
@@ -311,7 +312,7 @@ async fn get_page(
     origin: Origin,
     path: &str,
     key: &str,
-    deadline: Instant,
+    deadline: plakous_exchange::lookup::LookupBudget,
 ) -> Result<Vec<u8>, AnthropicError> {
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -336,30 +337,21 @@ async fn get_page(
         client.limits(),
     )
     .map_err(transport_error)?;
-    let response = client
-        .execute(request, ExchangeControl::new(deadline))
+    let reply = plakous_exchange::lookup::get(client, request, deadline, MAX_BODY_BYTES)
         .await
-        .map_err(transport_error)?;
-    if response.status() != StatusCode::OK {
-        let status = response.status().as_u16();
-        let _ = response.into_body().close().await;
-        return Err(AnthropicError::new(
-            AnthropicErrorKind::InvalidResponse,
-            AnthropicErrorPhase::Prepare,
-            format!("Anthropic model list answered HTTP {status}"),
-        ));
+        .map_err(|error| match error {
+            plakous_exchange::lookup::LookupError::BodyLimit => {
+                list_error("exceeds the body bound")
+            }
+            _ => list_error(&error.to_string()),
+        })?;
+    if reply.status != StatusCode::OK {
+        return Err(list_error(&format!(
+            "answered HTTP {}",
+            reply.status.as_u16()
+        )));
     }
-    let mut body = response.into_body();
-    let mut retained = Vec::new();
-    while let Some(chunk) = body.next_chunk().await {
-        let chunk = chunk.map_err(transport_error)?;
-        if retained.len() + chunk.len() > MAX_BODY_BYTES {
-            let _ = body.close().await;
-            return Err(list_error("exceeds the body bound"));
-        }
-        retained.extend_from_slice(&chunk);
-    }
-    Ok(retained)
+    Ok(reply.body.to_vec())
 }
 
 /// Hosted features the reviewed table records per model, from the docs'

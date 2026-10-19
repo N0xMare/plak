@@ -1060,8 +1060,12 @@ It may still over-redact text that happens to match a rule. No exhaustive or
 adversarial detection guarantee is made.
 
 Private exchange observation (Spec 05) is separate from normal telemetry.
-It receives no headers and is attached only to inference
-clients, never credential refresh clients. Captured bodies remain sensitive:
+It receives no headers and is attached to inference and read-only model catalog/
+exact-discovery clients, never OAuth, credential refresh, profile or usage
+clients. Subscription catalog observation uses a separate client/observer
+selection from credential traffic, so adding lookup progress cannot expose token
+request or response bodies. Captured catalog bodies remain sensitive, just as
+inference bodies do:
 explicit qualification requires a designated fixture root; automatic maintainer
 capture uses private home-local storage and bounded retention. Both require
 private owned, non-symlink directories and exclusive mode-0600 files. Failed,

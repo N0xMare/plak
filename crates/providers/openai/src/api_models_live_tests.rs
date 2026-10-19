@@ -117,7 +117,7 @@ async fn past_deadline_does_not_connect() {
     let error = get_models(&client, origin, "unused", deadline)
         .await
         .expect_err("deadline");
-    assert!(error.to_string().contains("request failed"), "{error}");
+    assert!(error.to_string().contains("DeadlineExceeded"), "{error}");
     let accepted = tokio::time::timeout(Duration::from_millis(50), listener.accept()).await;
     assert!(
         accepted.is_err(),
@@ -159,7 +159,7 @@ async fn loopback_list_sends_the_bearer_and_ignores_a_cursor() {
 }
 
 #[tokio::test]
-async fn non_200_fails_the_list() {
+async fn permanent_non_200_fails_the_list() {
     let endpoint = loopback().await;
     let origin = endpoint.origin.clone();
     let client = endpoint.client.clone();
@@ -168,7 +168,7 @@ async fn non_200_fails_the_list() {
         let mut stream = endpoint.acceptor.accept(stream).await.expect("tls");
         let _ = read_head(&mut stream).await;
         stream
-            .write_all(&http_response("503 Service Unavailable", b"{}"))
+            .write_all(&http_response("400 Bad Request", b"{}"))
             .await
             .expect("write");
         stream.shutdown().await.expect("shutdown");
@@ -176,7 +176,7 @@ async fn non_200_fails_the_list() {
     let error = list_via(&reference(), &fixture_source(), &client, origin)
         .await
         .expect_err("status");
-    assert!(error.to_string().contains("HTTP 503"), "{error}");
+    assert!(error.to_string().contains("HTTP 400"), "{error}");
 }
 
 #[tokio::test]

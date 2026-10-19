@@ -6,8 +6,8 @@ use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
 use plakous_http::{
-    Client, ExchangeControl, HeaderMap, HeaderName, HeaderValue, Method, Origin, Request,
-    SensitiveBytes, StatusCode, sensitive_header_value,
+    Client, HeaderMap, HeaderName, HeaderValue, Method, Origin, Request, SensitiveBytes,
+    StatusCode, sensitive_header_value,
 };
 use plakous_model::{Clock as _, Digest, DigestDomain, ModelId, SystemClock, Timestamp};
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
@@ -32,7 +32,7 @@ const MAX_REASONING_EFFORT_BYTES: usize = 64;
 /// Explicit bounds for one two-request authenticated discovery operation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct OpenRouterChatDiscoveryConfig {
-    /// Complete two-request operation timeout.
+    /// Per-attempt exchange duration; discovery also has a shared 60-second cap.
     pub operation_timeout: Duration,
     /// Maximum retained bytes for each JSON response.
     pub maximum_body_bytes: usize,
@@ -73,6 +73,7 @@ impl OpenRouterChatRoute {
         let deadline = Instant::now()
             .checked_add(config.operation_timeout)
             .ok_or(OpenRouterChatDiscoveryError::InvalidPolicy)?;
+        let deadline = plakous_exchange::lookup::LookupBudget::from_deadline(deadline);
         let body = get_json(
             client,
             Origin::parse(self.identity().origin().as_str())?,
@@ -119,6 +120,7 @@ impl OpenRouterChatRoute {
         let deadline = Instant::now()
             .checked_add(config.operation_timeout)
             .ok_or(OpenRouterChatDiscoveryError::InvalidPolicy)?;
+        let deadline = plakous_exchange::lookup::LookupBudget::from_deadline(deadline);
         let origin = Origin::parse(self.identity().origin().as_str())?;
         let models = get_json(
             client,
@@ -232,7 +234,7 @@ async fn get_json(
     origin: Origin,
     path: &str,
     bearer: Vec<u8>,
-    deadline: Instant,
+    deadline: plakous_exchange::lookup::LookupBudget,
     maximum_body_bytes: usize,
 ) -> Result<Vec<u8>, OpenRouterChatDiscoveryError> {
     let mut headers = HeaderMap::new();
@@ -256,45 +258,27 @@ async fn get_json(
         SensitiveBytes::new(Vec::new()).into_bytes(),
         client.limits(),
     )?;
-    let response = client
-        .execute(request, ExchangeControl::new(deadline))
-        .await?;
-    if response.status() != StatusCode::OK {
-        let _ = response.into_body().close().await;
+    let reply = plakous_exchange::lookup::get_json(client, request, deadline, maximum_body_bytes)
+        .await
+        .map_err(|error| match error {
+            plakous_exchange::lookup::LookupError::Transport(failure) => {
+                OpenRouterChatDiscoveryError::Transport(failure)
+            }
+            plakous_exchange::lookup::LookupError::MediaType => {
+                OpenRouterChatDiscoveryError::UnexpectedMediaType
+            }
+            plakous_exchange::lookup::LookupError::BodyLimit => {
+                OpenRouterChatDiscoveryError::ResourceLimit
+            }
+            error => OpenRouterChatDiscoveryError::Lookup(error),
+        })?;
+    if reply.status != StatusCode::OK {
         return Err(OpenRouterChatDiscoveryError::UnexpectedStatus);
     }
-    if !response
-        .headers()
-        .get(&HeaderName::from_static("content-type"))
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| {
-            value
-                .split(';')
-                .next()
-                .is_some_and(|media| media.trim().eq_ignore_ascii_case("application/json"))
-        })
-    {
-        let _ = response.into_body().close().await;
-        return Err(OpenRouterChatDiscoveryError::UnexpectedMediaType);
-    }
-    let mut body = response.into_body();
-    let mut retained = Vec::new();
-    while let Some(chunk) = body.next_chunk().await {
-        let chunk = chunk?;
-        if retained
-            .len()
-            .checked_add(chunk.len())
-            .is_none_or(|size| size > maximum_body_bytes)
-        {
-            let _ = body.close().await;
-            return Err(OpenRouterChatDiscoveryError::ResourceLimit);
-        }
-        retained.extend_from_slice(&chunk);
-    }
-    if retained.is_empty() {
+    if reply.body.is_empty() {
         return Err(OpenRouterChatDiscoveryError::EmptyBody);
     }
-    Ok(retained)
+    Ok(reply.body.to_vec())
 }
 
 fn parse_unique_json(bytes: &[u8]) -> Result<Value, OpenRouterChatDiscoveryError> {
@@ -1127,6 +1111,9 @@ fn safe_endpoint(value: &str) -> bool {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum OpenRouterChatDiscoveryError {
+    /// Transient model lookup retries exhausted their bounded budget.
+    #[error(transparent)]
+    Lookup(plakous_exchange::lookup::LookupError),
     /// Literal author/slug was not a permanent exact identity.
     #[error("OpenRouter Chat discovery literal is invalid")]
     InvalidLiteral,

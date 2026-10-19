@@ -291,6 +291,9 @@ pub type CodexCredentialStatus = OfflineCredentialLifecycle;
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
 #[non_exhaustive]
 pub enum NativeCodexAuthError {
+    /// Transient model lookup retries exhausted their bounded budget.
+    #[error(transparent)]
+    Lookup(plakous_exchange::lookup::LookupError),
     /// The exact experimental notice was not accepted.
     #[error("native Codex compatibility profile was not accepted exactly")]
     ProfileNotAccepted,
@@ -1520,18 +1523,47 @@ async fn execute_catalog_bounded(
     body: Vec<u8>,
     deadline: Instant,
 ) -> Result<HttpReply, NativeCodexAuthError> {
-    execute_classified(
-        client,
-        origin,
+    let request = Request::new(
+        Origin::parse(origin.as_str()).map_err(|_| NativeCodexAuthError::Validation)?,
         method,
         path,
         headers,
-        body,
-        deadline,
+        SensitiveBytes::new(body).into_bytes(),
+        client.limits(),
+    )
+    .map_err(|_| NativeCodexAuthError::Validation)?;
+    let reply = plakous_exchange::lookup::get(
+        client,
+        request,
+        plakous_exchange::lookup::LookupBudget::from_deadline(deadline),
         MAX_CATALOG_BODY_BYTES,
     )
     .await
-    .map_err(|error| NativeCodexAuthError::Transport(error.0))
+    .map_err(|error| match error {
+        plakous_exchange::lookup::LookupError::Transport(failure) => {
+            NativeCodexAuthError::Transport(network_failure(failure))
+        }
+        plakous_exchange::lookup::LookupError::Exhausted { .. } => {
+            NativeCodexAuthError::Lookup(error)
+        }
+        _ => NativeCodexAuthError::Transport(None),
+    })?;
+    Ok(HttpReply {
+        status: reply.status,
+        cache_control: reply
+            .headers
+            .get(&HeaderName::from_static("cache-control"))
+            .and_then(|v| v.to_str().ok())
+            .filter(|v| v.len() <= 1024)
+            .map(str::to_owned),
+        content_type: reply
+            .headers
+            .get(&HeaderName::from_static("content-type"))
+            .and_then(|v| v.to_str().ok())
+            .filter(|v| v.len() <= 128)
+            .map(str::to_owned),
+        body: reply.body,
+    })
 }
 
 async fn execute_classified(

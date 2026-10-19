@@ -865,6 +865,7 @@ impl XaiNativeAuthManager {
                 catalog: Mutex::new(None),
                 request_gate: None,
                 refresh_observer: None,
+                catalog_observer: None,
                 #[cfg(test)]
                 resolution_pause: Mutex::new(None),
             }),
@@ -899,6 +900,19 @@ impl XaiNativeAuthManager {
     ) -> Result<Self, XaiNativeAuthError> {
         let core = Arc::get_mut(&mut self.core).ok_or(XaiNativeAuthError::Request)?;
         core.refresh_observer = Some(observer);
+        Ok(self)
+    }
+
+    /// Observes catalog GETs only, never credential or usage exchanges.
+    ///
+    /// # Errors
+    /// Returns an internal binding error if this manager has already been shared.
+    pub fn with_catalog_observer(
+        mut self,
+        observer: Option<Arc<dyn plakous_http::ExchangeObserver>>,
+    ) -> Result<Self, XaiNativeAuthError> {
+        let core = Arc::get_mut(&mut self.core).ok_or(XaiNativeAuthError::Request)?;
+        core.catalog_observer = observer;
         Ok(self)
     }
 
@@ -1471,6 +1485,7 @@ impl XaiNativeAuthManager {
                 catalog: Mutex::new(None),
                 request_gate: None,
                 refresh_observer: None,
+                catalog_observer: None,
                 resolution_pause: Mutex::new(None),
             }),
         })
@@ -1513,6 +1528,7 @@ impl fmt::Debug for XaiNativeAuthManager {
 struct ManagerCore {
     store: PrivateCredentialStore,
     client: Client,
+    catalog_observer: Option<Arc<dyn plakous_http::ExchangeObserver>>,
     acceptance: XaiCompatibilityAcceptance,
     endpoints: AuthEndpoints,
     compatibility_expires_unix: AtomicU64,
@@ -2170,7 +2186,36 @@ impl ManagerCore {
             Bytes::new(),
             self.client.limits(),
         )?;
-        let (status, is_json, response) = self.execute(request).await?;
+        let (status, is_json, response) = if endpoint.path == CATALOG_PATH {
+            let client = if let Some(observer) = &self.catalog_observer {
+                self.client
+                    .clone()
+                    .with_observer(Some(Arc::clone(observer)))
+            } else {
+                self.client.clone()
+            };
+            let reply = plakous_exchange::lookup::get(
+                &client,
+                request,
+                plakous_exchange::lookup::LookupBudget::from_deadline(
+                    Instant::now() + REQUEST_TIMEOUT,
+                ),
+                MAX_AUTH_BODY_BYTES,
+            )
+            .await
+            .map_err(|error| match error {
+                plakous_exchange::lookup::LookupError::Transport(failure) => {
+                    XaiNativeAuthError::Transport(network_failure(failure))
+                }
+                plakous_exchange::lookup::LookupError::Exhausted { .. } => {
+                    XaiNativeAuthError::Lookup(error)
+                }
+                _ => XaiNativeAuthError::CatalogUnavailable,
+            })?;
+            (reply.status, headers_are_json(&reply.headers), reply.body)
+        } else {
+            self.execute(request).await?
+        };
         if status != StatusCode::OK {
             return Err(status_error(status));
         }
@@ -2535,6 +2580,9 @@ fn login_account_verification_or(login: bool, fallback: XaiNativeAuthError) -> X
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum XaiNativeAuthError {
+    /// Transient model lookup retries exhausted their bounded budget.
+    #[error(transparent)]
+    Lookup(plakous_exchange::lookup::LookupError),
     /// The caller did not explicitly accept the exact pinned revision.
     #[error("the exact xAI compatibility profile was not accepted")]
     CompatibilityNotAccepted,
