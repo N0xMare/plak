@@ -1546,9 +1546,13 @@ name = "plakous-exchange"
 version = "0.0.1"
 dependencies = [
  "futures-util",
+ "getrandom 0.4.3",
+ "httpdate",
  "plakous-attempt",
  "plakous-http",
  "plakous-model",
+ "tokio",
+ "zeroize",
 ]
 
 [[package]]
