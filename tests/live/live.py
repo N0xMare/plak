@@ -568,7 +568,12 @@ def _finished_invalid_arguments(text: str, protocol: str) -> bool:
 
 
 def capture_shows_invalid_tool_arguments(segments: list[Path] | None, protocol: str) -> bool:
-    """Only the failing process's highest-numbered, complete exchange is model evidence."""
+    """Only the failing process's highest-numbered, finished exchange is model evidence.
+
+    A kernel that fails closed on finished arguments stops reading there, so
+    `ClosedEarly` counts: the finish evidence in the body itself, not end of
+    body, shows the arguments were complete.
+    """
     if not segments or len(segments) != 1 or not capture_integrity(segments):
         return False
     body = max(segments[0].glob("exchange-*.body"),
@@ -577,7 +582,8 @@ def capture_shows_invalid_tool_arguments(segments: list[Path] | None, protocol: 
         return False
     try:
         metadata = body.with_suffix(".info").read_text().splitlines()
-        return (any(line in ("terminal=Complete", "terminal=ProtocolComplete") for line in metadata)
+        return (any(line in ("terminal=Complete", "terminal=ProtocolComplete",
+                             "terminal=ClosedEarly") for line in metadata)
                 and _finished_invalid_arguments(body.read_text(), protocol))
     except (OSError, UnicodeError):
         return False

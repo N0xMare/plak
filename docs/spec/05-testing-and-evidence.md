@@ -2485,9 +2485,11 @@ tool-use blocks contain malformed JSON arguments is `model`, not `harness`:
 the model emitted invalid tool input and the kernel correctly failed closed.
 This evidence is restricted to the failing process's capture segment and its
 highest-numbered exchange, ordered by the integer exchange number rather than
-the filename. That exchange must be `Complete` or `ProtocolComplete`; a later
-unfinished exchange prevents earlier complete exchanges from serving as model
-evidence. An earlier scenario, process, or exchange cannot relabel a later
+the filename. That exchange must be `Complete`, `ProtocolComplete` or
+`ClosedEarly`: a kernel that fails closed on finished arguments stops reading
+there and closes before end of body, so the finish evidence in the body below,
+not end of body, shows the arguments were complete. A later unfinished
+exchange prevents earlier exchanges from serving as model evidence. An earlier scenario, process, or exchange cannot relabel a later
 harness failure; multiple process
 segments without an identified failing process are insufficient evidence.
 The full kernel diagnostic, including the protocol's `stream validation
@@ -2501,19 +2503,22 @@ Chat argument fragments are joined per choice and tool-call index; duplicate
 object keys are also invalid. Messages fragments are joined per tool block
 and require its close plus the message terminal. Messages input permits
 duplicate keys (the last value wins), matching its kernel; both protocols
-reject non-JSON constants and require an object. This exception requires a
-complete transport terminal (`Complete` or `ProtocolComplete`) and paired
-request/body/metadata with matching recorded byte length; missing, truncated,
+reject non-JSON constants and require an object. This exception requires one
+of those three transport terminals (an `Abandoned` or `Failed` exchange is not
+evidence) and paired request/body/metadata with matching recorded byte length; missing, truncated,
 unfinished, or valid-argument captures stay `harness`. A model-selected job
 stop (`stop_reason` `model`) is `model`, not `harness`.
 An injected fault the scenario required the product to absorb stays
 `harness` when the turn fails with that same fault; a different provider
 refusal during that scenario is still `provider`.
 
-TUI `turn.lifecycle` terminals carry only the turn id and phase. Smoke uses
-that turn's last `model_retries` telemetry row to recognize an exhausted
-provider retry budget (`next_attempt == max_attempts`). A transient retry
-below that budget is not enough to relabel a later product failure.
+TUI `turn.lifecycle` terminals carry only the turn id and phase. Smoke and the
+jobs driver use that turn's last `model_retries` telemetry row to recognize an
+exhausted provider retry budget: a provider cause on a dispatched row with
+`next_attempt == max_attempts`, or on a row declined for `budget`, whose
+proposed `next_attempt` is `max_attempts + 1` (chapter 01 §13.1). Any other
+declined row is not exhaustion: the last allowed attempt was never sent. A
+transient retry below that budget is not enough to relabel a later product failure.
 
 A live run uses an isolated, disposable `PLAK_HOME` under the ignored
 `target/live/`; the ordinary home is never imported. OAuth subscription credentials are the

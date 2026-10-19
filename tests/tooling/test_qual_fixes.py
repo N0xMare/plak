@@ -206,17 +206,36 @@ class QualificationFixTests(unittest.TestCase):
             info.write_text(info.read_text().replace("terminal=Complete", "terminal=ProtocolComplete"))
             self.assertEqual(live.stream_validation_outcome(message, [segment]), live.MODEL)
 
-    def test_invalid_argument_evidence_requires_the_highest_exchange_to_be_complete(self):
+    def test_invalid_argument_evidence_requires_the_highest_exchange_to_be_finished(self):
         message = "OpenRouter Chat stream validation failed: tool arguments are malformed or ambiguous"
         with tempfile.TemporaryDirectory() as directory:
             segment = Path(directory)
             self.write_capture(segment, self.chat_arguments("{"))
-            for terminal in ("ClosedEarly", "Abandoned"):
+            for terminal, outcome in (("ClosedEarly", live.MODEL), ("Abandoned", live.HARNESS)):
                 with self.subTest(terminal=terminal):
                     self.write_capture(segment, self.chat_arguments("{"), exchange=2)
                     info = segment / "exchange-0002.info"
                     info.write_text(info.read_text().replace("terminal=Complete", f"terminal={terminal}"))
-                    self.assertEqual(live.stream_validation_outcome(message, [segment]), live.HARNESS)
+                    self.assertEqual(live.stream_validation_outcome(message, [segment]), outcome)
+
+    def test_a_fail_closed_early_close_needs_the_finish_in_the_body(self):
+        # The kernel rejects the finished arguments and closes before end of
+        # body: the captured finish proves the model ended them unterminated.
+        chat = "OpenRouter Chat stream validation failed: tool arguments are malformed or ambiguous"
+        messages = "Messages stream validation failed: terminal Messages tool input was not complete valid JSON"
+        unterminated = '{"path": "repo. cwd: repo. cwd: repo'
+        with tempfile.TemporaryDirectory() as directory:
+            segment = Path(directory)
+            for marker, finished, unfinished in (
+                    (chat, self.chat_arguments(unterminated), self.chat_arguments(unterminated)[:1]),
+                    (messages, self.messages_arguments(unterminated),
+                     self.messages_arguments(unterminated)[:2])):
+                for events, outcome in ((finished, live.MODEL), (unfinished, live.HARNESS)):
+                    with self.subTest(marker=marker, events=len(events)):
+                        self.write_capture(segment, events)
+                        info = segment / "exchange-0001.info"
+                        info.write_text(info.read_text().replace("terminal=Complete", "terminal=ClosedEarly"))
+                        self.assertEqual(live.stream_validation_outcome(marker, [segment]), outcome)
 
     def test_subagents_scores_only_its_root_process_capture(self):
         message = "Chat stream validation failed: tool arguments are malformed or ambiguous"
@@ -269,7 +288,7 @@ class QualificationFixTests(unittest.TestCase):
             self.assertEqual(live.stream_validation_outcome(message, [segment]), live.HARNESS)
             self.assertEqual(live.stream_validation_outcome(message, None), live.HARNESS)
 
-    def test_messages_arguments_need_a_finished_complete_capture(self):
+    def test_messages_arguments_need_a_finished_capture(self):
         message = "Messages stream validation failed: terminal Messages tool input was not complete valid JSON"
         with tempfile.TemporaryDirectory() as directory:
             segment = Path(directory)
@@ -286,6 +305,8 @@ class QualificationFixTests(unittest.TestCase):
             self.assertEqual(live.stream_validation_outcome(message, [segment]), live.MODEL)
             info = segment / "exchange-0001.info"
             info.write_text(info.read_text().replace("terminal=Complete", "terminal=ClosedEarly"))
+            self.assertEqual(live.stream_validation_outcome(message, [segment]), live.MODEL)
+            info.write_text(info.read_text().replace("terminal=ClosedEarly", "terminal=Abandoned"))
             self.assertEqual(live.stream_validation_outcome(message, [segment]), live.HARNESS)
             self.write_capture(segment, events[:-2])
             self.assertEqual(live.stream_validation_outcome(message, [segment]), live.HARNESS)
@@ -314,14 +335,19 @@ class QualificationFixTests(unittest.TestCase):
             with closing(sqlite3.connect(telemetry / "telemetry-v14.sqlite3")) as connection, connection:
                 connection.execute("CREATE TABLE model_retries "
                                    "(turn_id TEXT, cause_kind TEXT, "
-                                   "next_attempt INTEGER, max_attempts INTEGER)")
-                connection.executemany("INSERT INTO model_retries VALUES (?, ?, ?, ?)", [
-                    ("transient", "http_status", 2, 4),
-                    ("exhausted", "http_status", 4, 4),
-                    ("other-turn", "http_status", 4, 4),
+                                   "next_attempt INTEGER, max_attempts INTEGER, declined_reason TEXT)")
+                connection.executemany("INSERT INTO model_retries VALUES (?, ?, ?, ?, ?)", [
+                    ("transient", "http_status", 2, 4, None),
+                    ("exhausted", "http_status", 4, 4, None),
+                    ("other-turn", "http_status", 4, 4, None),
+                    ("declined-budget", "http_status", 4, 4, None),
+                    ("declined-budget", "http_status", 5, 4, "budget"),
+                    ("declined-deadline", "http_status", 4, 4, "deadline"),
                 ])
             for turn_id, outcome in (("transient", live.HARNESS),
                                      ("exhausted", live.PROVIDER),
+                                     ("declined-budget", live.PROVIDER),
+                                     ("declined-deadline", live.HARNESS),
                                      ("no-retries", live.HARNESS)):
                 with self.subTest(turn_id=turn_id):
                     with self.assertRaises(live.ScenarioFailure) as raised:

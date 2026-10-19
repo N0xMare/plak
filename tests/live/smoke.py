@@ -104,10 +104,8 @@ def require_durable_completed(record: dict, what: str,
     """Classify a durable TUI terminal with the same policy as JSONL turns."""
     if home is not None and record.get("phase") != "completed":
         retry = jobs.last_retry(home, str(record.get("turn_id") or ""))
-        if retry is not None:
-            cause, attempt, limit = retry
-            if cause in jobs.PROVIDER_RETRY_CAUSES and attempt == limit:
-                raise ScenarioFailure(PROVIDER, f"{what}: model_retries {cause} exhausted")
+        if jobs.retry_budget_exhausted(retry):
+            raise ScenarioFailure(PROVIDER, f"{what}: model_retries {retry[0]} exhausted")
     status = record.get("http_status")
     require_completed(live.Turn(phase=record.get("phase"),
                                 model_error_kind=record.get("model_error_kind"),

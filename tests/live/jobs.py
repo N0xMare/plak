@@ -1221,8 +1221,9 @@ def terminals(home: Path, session: str) -> list[str]:
             and record.get("phase") not in (None, "admitted")]
 
 
-def last_retry(home: Path, turn_id: str) -> tuple[str, int, int] | None:
-    """The turn's last `model_retries` row: cause, next attempt, max attempts.
+def last_retry(home: Path, turn_id: str) -> tuple[str, int, int, str | None] | None:
+    """The turn's last `model_retries` row: cause, next attempt, max attempts
+    and declined reason.
 
     A missing store, or a row that does not name both attempt counters, is no
     evidence. `rowid` order is insertion order.
@@ -1240,7 +1241,7 @@ def last_retry(home: Path, turn_id: str) -> tuple[str, int, int] | None:
         return None
     try:
         rows = connection.execute(
-            "SELECT cause_kind, next_attempt, max_attempts FROM model_retries "
+            "SELECT cause_kind, next_attempt, max_attempts, declined_reason FROM model_retries "
             "WHERE turn_id = ? ORDER BY rowid",
             (turn_id,),
         ).fetchall()
@@ -1250,10 +1251,28 @@ def last_retry(home: Path, turn_id: str) -> tuple[str, int, int] | None:
         connection.close()
     if not rows:
         return None
-    cause, nxt, limit = rows[-1]
+    cause, nxt, limit, declined = rows[-1]
     if type(nxt) is not int or type(limit) is not int:
         return None
-    return str(cause), nxt, limit
+    return str(cause), nxt, limit, declined if isinstance(declined, str) else None
+
+
+def retry_budget_exhausted(retry: tuple[str, int, int, str | None] | None) -> bool:
+    """The last allowed attempt failed on a provider cause.
+
+    Either the last row dispatched that attempt (`next_attempt ==
+    max_attempts`), or it declined the proposed attempt after it for `budget`
+    (`next_attempt == max_attempts + 1`). Any other declined row is not
+    exhaustion: the last allowed attempt was never sent.
+    """
+    if retry is None:
+        return False
+    cause, nxt, limit, declined = retry
+    if cause not in PROVIDER_RETRY_CAUSES:
+        return False
+    if declined is None:
+        return nxt == limit
+    return declined == "budget" and nxt == limit + 1
 
 
 def classify_tui_turn(home: Path, session: str, index: int, what: str) -> None:
@@ -1263,9 +1282,9 @@ def classify_tui_turn(home: Path, session: str, index: int, what: str) -> None:
     204-208) writes `turn_id` and `phase` only. `model_error_kind` and
     `http_status` are absent there. A provider failure is still provider when
     the row itself carries them, or when the turn's last `model_retries` row
-    is a provider cause and that attempt exhausted the budget
-    (`next_attempt == max_attempts`). A product failure after a transient
-    retry that was not the last allowed attempt stays harness.
+    shows a provider cause exhausted the budget (`retry_budget_exhausted`).
+    A product failure after a transient retry that was not the last allowed
+    attempt stays harness.
     """
     records = [record for record in live.session_records(home, session)
                if record.get("kind") == "turn.lifecycle"
@@ -1284,10 +1303,8 @@ def classify_tui_turn(home: Path, session: str, index: int, what: str) -> None:
     if turn.completed:
         return
     retry = last_retry(home, str(record.get("turn_id") or ""))
-    if retry is not None:
-        cause, nxt, limit = retry
-        if cause in PROVIDER_RETRY_CAUSES and nxt == limit:
-            raise ScenarioFailure(PROVIDER, f"{what}: model_retries {cause} exhausted")
+    if retry_budget_exhausted(retry):
+        raise ScenarioFailure(PROVIDER, f"{what}: model_retries {retry[0]} exhausted")
     classify_turn(turn, what)
 
 

@@ -354,15 +354,18 @@ The durable `turn.lifecycle` row stores `turn_id` and `phase` only
 from it. A failed TUI turn is `provider` when that row does carry them, or
 when the turn's last `model_retries` row has `cause_kind` `http_status`,
 `connect`, `record_rejected_in_transit`, `transport_after_send`, or
-`stream_interrupted`, and `next_attempt` equals `max_attempts`. A failed turn
+`stream_interrupted`, and either `next_attempt` equals `max_attempts` on a
+dispatched row or the row was declined for `budget` (its proposed
+`next_attempt` is `max_attempts + 1`). A failed turn
 after a transient retry that did not exhaust that budget, and a failed turn
 with neither a status nor such a row, is `harness`.
 
 **Outcome classes.** `pass`; `harness`, Plak's failure (a crash, no terminal, a
 dead end, a refused reopen); `model`, a completed turn whose work misses the
-oracle, or invalid tool arguments proven by a complete capture (spec 05 §3.2);
+oracle, or invalid tool arguments proven by a finished capture (spec 05 §3.2);
 model-invalid argument evidence must be in the failing process's highest-numbered
-exchange, which must be complete, never an earlier scenario, process or exchange;
+exchange, whose body shows the arguments finished (a fail-closed `ClosedEarly`
+counts), never an earlier scenario, process or exchange;
 `provider`, the real provider refusing with no injected fault; and
 `pending`, a failure a named in-flight slice is expected to fix
 (`EXPECTED_PENDING` in `smoke.py`).

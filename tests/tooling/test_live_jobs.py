@@ -676,19 +676,29 @@ class JobEvidenceTests(unittest.TestCase):
             database.parent.mkdir()
             connection = sqlite3.connect(database)
             connection.execute(
-                "CREATE TABLE model_retries "
-                "(turn_id TEXT, cause_kind TEXT, next_attempt INTEGER, max_attempts INTEGER)"
+                "CREATE TABLE model_retries (turn_id TEXT, cause_kind TEXT, "
+                "next_attempt INTEGER, max_attempts INTEGER, declined_reason TEXT)"
             )
             connection.execute(
-                "INSERT INTO model_retries VALUES ('t1', 'connect', 1, 4)"
+                "INSERT INTO model_retries VALUES ('t1', 'connect', 1, 4, NULL)"
             )
             connection.execute(
-                "INSERT INTO model_retries VALUES ('t1', 'http_status', 2, 4)"
+                "INSERT INTO model_retries VALUES ('t1', 'http_status', 2, 4, NULL)"
             )
             connection.commit()
             failure(self, lambda: jobs.classify_tui_turn(home, "sess", 0, "stop"), live.HARNESS)
             connection.execute(
-                "INSERT INTO model_retries VALUES ('t1', 'http_status', 4, 4)"
+                "INSERT INTO model_retries VALUES ('t1', 'http_status', 3, 4, 'deadline')"
+            )
+            connection.commit()
+            failure(self, lambda: jobs.classify_tui_turn(home, "sess", 0, "stop"), live.HARNESS)
+            connection.execute(
+                "INSERT INTO model_retries VALUES ('t1', 'http_status', 4, 4, NULL)"
+            )
+            connection.commit()
+            failure(self, lambda: jobs.classify_tui_turn(home, "sess", 0, "stop"), live.PROVIDER)
+            connection.execute(
+                "INSERT INTO model_retries VALUES ('t1', 'http_status', 5, 4, 'budget')"
             )
             connection.commit()
             connection.close()
