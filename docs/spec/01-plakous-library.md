@@ -5479,7 +5479,7 @@ There are exactly three local PTC deployments plus `direct` (no PTC):
 | --- | --- | --- | --- |
 | `native-ptc` | Plakous | freeform `exec`, structured `wait` | rquickjs — the sidecar `plakous-js-host`, reached by the JSONL client that `composition` links |
 | `js-ptc` | Product | `exec_js`, `wait_js`, JSON field `source` | rquickjs in the sidecar `plakous-js-host`, one process per agent |
-| `py-ptc` | Product | `exec_py`, `wait_py`, JSON field `code` | Monty exactly `1.1.0` via monty-pool in `plakous-py-eval`, one checkout per agent incarnation |
+| `py-ptc` | Product | `exec_py`, `wait_py`, JSON field `code` | Monty exactly `1.2.0` via monty-pool in `plakous-py-eval`, one checkout per agent incarnation |
 | `direct` | — | none | — |
 
 The engine contract includes the deployment identity —

@@ -226,7 +226,7 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
 )
 # Exact reviewed dependency and feature surfaces; path changes require review too.
 EXPECTED_SECURITY_SURFACE_DIGESTS = {
-    "plakous-py-worker": "a57158273317e3c1c0ebe404e30d6e81f3c7074a51c9b713ad946093bcee9bda",
+    "plakous-py-worker": "8d89be2d61b38520db99c47b40eb2d2b57754595c5ae17d838c64a1015b61530",
     "plakous-js-runtime": "a0c51be262dd767d2f906c29ab16c5037bfc7dce1e3c722bf64cd5aaf0191136",
     "plakous": "76d063d8fb4257164ce57d78bcda4f679664e9f98cfeae347a07cb5bd475c04c",
     "plakous-agent": "1d87242cbe6b58656abd87d498e9f9cc27bea0c01cbaa4253a2e0c76910d2619",
@@ -238,7 +238,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-exchange": "687a603a0d0d5847cc2484bd009657a887bbcc3cbff87e7bad34baf9aa3ef58c",
     "plakous-http": "4ba11a284120802378d429ec77ea58c8a3f25663d1808a795974c297f934ede9",
     "plakous-js-eval": "b8f627bbdfca516731b5a4a856002904ba307930f95f149ae06f1a42e3b7b3e1",
-    "plakous-py-eval": "37c5d7ab1879a167a96617f90a469d171ec9ba92a5371617ec49f45659ad5879",
+    "plakous-py-eval": "ae9f522bd6b40e514ace4db215f46be7f1829c0fbee778e02e1ab134cb9b9fc0",
     "plakous-mcp": "55b94c59ed3eedeac964478944f9bd79933c282f5db3df2258c6ea68748147b5",
     "plakous-messages": "09a984f9e1df12b505500d55bde11d777405c4be1d27b471682570e0fe2be7b8",
     "plakous-model": "b292beea53bde3bb93436217d68d237e1341d72b5239eaa66cc5c6c996123a07",

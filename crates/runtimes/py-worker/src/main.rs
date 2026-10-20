@@ -10,7 +10,7 @@ static ALLOC: monty_alloc::LimitedAllocator = monty_alloc::LimitedAllocator;
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.len() == 1 && args[0] == "--version" {
-        println!("monty 1.1.0");
+        println!("monty 1.2.0");
         ExitCode::SUCCESS
     } else if args.len() == 1 && args[0] == "subprocess" {
         subprocess::run()

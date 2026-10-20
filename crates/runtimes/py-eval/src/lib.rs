@@ -59,7 +59,7 @@ const MAX_OUTSTANDING_NESTED: usize = 16;
 /// Start of the monty-pool protocol context for a raised exception whose
 /// payload would not convert.
 ///
-/// monty-pool 1.1.0 builds this context at exactly one site (`checkout.rs`,
+/// monty-pool 1.2.0 builds this context at exactly one site (`checkout.rs`,
 /// the `Error` child-event arm) when `MontyException::try_from` rejects the
 /// worker's exception — monty-proto refusing a single-line traceback
 /// `StackFrame` whose columns are inverted or run past its preview line, which
@@ -815,7 +815,7 @@ async fn resume_futures_batch(
 ) -> Result<TurnEvent, PoolError> {
     let on_print = &mut on_print_sync(|_, text: &str| append_print(printed, text));
     let resumed = checkout.resume_futures(batch.results, on_print).await;
-    // With monty-pool/proto pinned at 1.1.0, batch validation excludes the
+    // With monty-pool/proto pinned at 1.2.0, batch validation excludes the
     // pre-send frame-size refusal and the worker's full-frame decoding and
     // conversion errors; this adapter sends no mounts or working directory,
     // the other pre-send Runtime sources. The sole remaining non-wire Runtime

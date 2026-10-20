@@ -2308,11 +2308,18 @@ probe('getenv', lambda: os.getenv('HOME'))
 probe('environ', lambda: os.environ)
 probe('urandom', lambda: os.urandom(4))
 probe('sleep', lambda: time.sleep(0))
+probe('os.path', lambda: os.path.isfile('/etc/hosts'))
+probe('scan', lambda: list(os.scandir('/etc')))
 try:
     await asyncio.sleep(0)
     results.append('async_sleep: ok')
 except Exception as error:
     results.append('async_sleep: ' + type(error).__name__)
+try:
+    import plak_host_module
+    results.append('host_import: ok')
+except Exception as error:
+    results.append('host_import: ' + type(error).__name__)
 probe('now', lambda: datetime.now())
 probe('today', lambda: date.today())
 probe('time', lambda: time.time())
@@ -2326,7 +2333,8 @@ probe('cwd', lambda: os.getcwd())
         text,
         "open: PermissionError\npath: PermissionError\ngetenv: RuntimeError\n\
          environ: RuntimeError\nurandom: RuntimeError\nsleep: RuntimeError\n\
-         async_sleep: RuntimeError\nnow: ok\ntoday: ok\ntime: ok\nrandom: ok\ncwd: ok"
+         os.path: PermissionError\nscan: PermissionError\nasync_sleep: RuntimeError\n\
+         host_import: ModuleNotFoundError\nnow: ok\ntoday: ok\ntime: ok\nrandom: ok\ncwd: ok"
     );
 }
 

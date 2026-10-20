@@ -1,7 +1,7 @@
 # Monty typeshed reproducible archive fix
 
-Source: crates.io `monty-typeshed =1.1.0`, archive SHA-256
-`07a30851142ad0a76ea54df919514fc6a12571b963e1677853be22d4249a0781`.
+Source: crates.io `monty-typeshed =1.2.0`, archive SHA-256
+`7fc2079654d8d7574deb72c526e2b132c4fa7550ffc62df8b9ea1dad26d44797`.
 Upstream: https://github.com/pydantic/monty/ (MIT).
 License of this directory: `MIT AND Apache-2.0` (the crate is MIT; the bundled
 typeshed stubs are Apache-2.0, see `TYPESHED-LICENSE`).
@@ -21,7 +21,7 @@ build script. Both changes are prepared as one upstream Monty pull request;
 remove the override once a reviewed upstream release includes them.
 
 The upstream MIT license is retained as `LICENSE` from source revision
-`591527397445bf734873252d1ee20c1b6308fe7f`. Registry bookkeeping files and
+`e8db9aef41aa73f4f709c15a4bc8a2d198be5ead`. Registry bookkeeping files and
 the unused packaged Cargo.lock are omitted; dependency resolution uses the
 root Cargo.lock.
 The typeshed license is retained as `TYPESHED-LICENSE` from the exact typeshed

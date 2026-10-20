@@ -1,6 +1,6 @@
 //! `monty subprocess`: protocol child mode.
 //!
-//! Adapted from monty-runtime 1.1.0 (MIT), src/subprocess.rs.
+//! Adapted from monty-runtime 1.2.0 (MIT), src/subprocess.rs.
 //! Interpreter state and framing remain in the pinned upstream monty-proto crate.
 //!
 //! A thin stdio shell around [`monty_proto::worker::Child`] (the transport-agnostic
@@ -119,9 +119,10 @@ fn serve() -> ExitCode {
 ///
 /// Reading the child's state rather than the request is what keeps the limit
 /// honest: a rejected `Configure` changes nothing, a `Load` brings the dump's
-/// own limits, and `Reset` ends the session. It lives in the shell rather than
-/// in the shared state machine because each entry point declares its own
-/// allocator: the wasm worker does the same thing in its own turn loop.
+/// limits capped by the `Configure` limits, and `Reset` ends the session. It
+/// lives in the shell rather than in the shared state machine because each
+/// entry point declares its own allocator: the wasm worker does the same thing
+/// in its own turn loop.
 fn apply_memory_limit(child: &Child) {
     let budget = child.session_budget();
     let hard_memory_limit = memory_limit_with_headroom(budget.max_memory, budget.type_check);

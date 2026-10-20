@@ -141,7 +141,7 @@ workspace policy checks per module. `plakous-js-host` is not a package either:
 it is a `[[bin]]` of `plakous-js-runtime`, and it is the rquickjs worker for Code Mode and js-ptc.
 
 The Monty interpreter and protocol remain external dependencies pinned at
-`=1.1.0`; only their `monty-typeshed` dependency resolves to a reviewed
+`=1.2.0`; only their `monty-typeshed` dependency resolves to a reviewed
 vendor snapshot (chapter 06 §7.3).
 `plakous-py-worker` supplies the process entry point;
 `plakous-py-eval` owns only the session that drives that worker.
