@@ -75,6 +75,8 @@ pub(crate) enum CodexPatchOp {
     },
     Update {
         path: PathBuf,
+        /// The new path, only from [`parse_codex_patch_with_moves`].
+        move_to: Option<PathBuf>,
         chunks: Vec<CodexUpdateChunk>,
     },
 }
@@ -92,6 +94,20 @@ pub(crate) fn looks_like_codex_patch(text: &str) -> bool {
 }
 
 pub(crate) fn parse_codex_patch(text: &str) -> Result<Vec<CodexPatchOp>, ToolRuntimeError> {
+    parse_codex_patch_ops(text, false)
+}
+
+/// The same envelope with `*** Move to:` accepted, for the SDK's `edit_files`.
+pub(crate) fn parse_codex_patch_with_moves(
+    text: &str,
+) -> Result<Vec<CodexPatchOp>, ToolRuntimeError> {
+    parse_codex_patch_ops(text, true)
+}
+
+fn parse_codex_patch_ops(
+    text: &str,
+    allow_moves: bool,
+) -> Result<Vec<CodexPatchOp>, ToolRuntimeError> {
     let normalized = text.replace('\r', "");
     let mut lines = normalized.lines().peekable();
     let begin = lines.next().ok_or_else(|| patch_error("patch is empty"))?;
@@ -121,7 +137,7 @@ pub(crate) fn parse_codex_patch(text: &str) -> Result<Vec<CodexPatchOp>, ToolRun
             });
         } else if let Some(path) = trimmed.strip_prefix("*** Update File: ") {
             let _ = lines.next();
-            ops.push(parse_update_file(path, &mut lines)?);
+            ops.push(parse_update_file(path, &mut lines, allow_moves)?);
         } else {
             return Err(patch_error(
                 "patch file operation must be *** Add File, *** Update File, or *** Delete File",
@@ -190,14 +206,20 @@ fn parse_add_file(
 fn parse_update_file(
     path: &str,
     lines: &mut std::iter::Peekable<std::str::Lines<'_>>,
+    allow_moves: bool,
 ) -> Result<CodexPatchOp, ToolRuntimeError> {
-    if lines
+    let mut move_to = None;
+    if let Some(destination) = lines
         .peek()
-        .is_some_and(|line| line.trim_start().starts_with("*** Move to:"))
+        .and_then(|line| line.trim().strip_prefix("*** Move to:"))
     {
-        return Err(patch_error(
-            "patch rename/move operations are unsupported; add and delete the file separately",
-        ));
+        if !allow_moves {
+            return Err(patch_error(
+                "patch rename/move operations are unsupported; add and delete the file separately",
+            ));
+        }
+        move_to = Some(patch_path(destination.trim())?);
+        let _ = lines.next();
     }
     let mut chunks = Vec::new();
     while let Some(line) = lines.peek().copied() {
@@ -222,11 +244,12 @@ fn parse_update_file(
         }
         return Err(patch_error("update hunks must start with @@"));
     }
-    if chunks.is_empty() {
+    if chunks.is_empty() && move_to.is_none() {
         return Err(patch_error("update file is missing hunks"));
     }
     Ok(CodexPatchOp::Update {
         path: patch_path(path)?,
+        move_to,
         chunks,
     })
 }

@@ -18,6 +18,8 @@ layer = "harness"
 class = "published-internal"
 
 [dependencies]
+globset.workspace = true
+ignore.workspace = true
 plakous-model.workspace = true
 plakous-tools.workspace = true
 serde = { workspace = true, features = ["derive"] }

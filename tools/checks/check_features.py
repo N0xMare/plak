@@ -246,7 +246,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-tool-files": "245d58f34202ec359f9fe87ccc085e91efa63046e333ae36f67bc5e825f75d52",
     "plakous-tool-plan": "a24834c174bad9b4b590be0c70a60cc8a740263333db483cc8023f2064e89145",
     "plakous-tool-process": "8e36e8dcfd2c98ede2659e0ad7ed3210b7bbd88c5a8dae75b94f9d03f10f9776",
-    "plakous-tool-search": "3c88883a60c39cdd710cb36ca592394f1bf9f0a9f5c070c104020530f6cc3c11",
+    "plakous-tool-search": "86edd01843c5711412288fbf47e2961551b0f432d004788c22a87799b3aa4aba",
     "plakous-tool-web": "9698ba8d94bd1214f20ba42a536e7a6e69eceadf9b80338f52deec5d79505e47",
     "plakous-compose": "56b469cc34f94f867749eb7335c23e4985127d80b7468677855cd5bb3df1e11b",
     "plakous-prompts": "4b261e3a2cd88cf47288cc7b421cbcd9658d5fc1be1314aff475e5f3981c8c5d",

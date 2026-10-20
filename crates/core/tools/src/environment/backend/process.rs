@@ -2052,6 +2052,34 @@ fn displayed_command(command: &JoinedProcessCommand) -> String {
     crate::internal::sanitize_job_command(&text)
 }
 
+/// The executable a literal command runs: its absolute path, or a bare file
+/// name resolved on exactly the `PATH` the child receives. `None` for a shell
+/// command.
+fn resolve_literal_program(
+    command: &JoinedProcessCommand,
+    process: &HostProcessContext,
+    environment: &[(EnvironmentVariableName, EnvironmentVariableValue)],
+) -> Result<Option<PathBuf>, ExecutionBackendError> {
+    let JoinedProcessCommand::Literal { executable, .. } = command else {
+        return Ok(None);
+    };
+    if executable.is_absolute() {
+        return Ok(Some(executable.as_ref().clone()));
+    }
+    let path = host_process_path(process, environment)?;
+    path.split(':')
+        .filter(|directory| Path::new(directory).is_absolute())
+        .map(|directory| Path::new(directory).join(executable.as_ref()))
+        .find(|candidate| {
+            fs::metadata(candidate).is_ok_and(|metadata| {
+                metadata.is_file()
+                    && std::os::unix::fs::PermissionsExt::mode(&metadata.permissions()) & 0o111 != 0
+            })
+        })
+        .map(Some)
+        .ok_or_else(|| invalid_request("joined process executable was not found on PATH"))
+}
+
 pub(super) fn validate_absolute_program(
     executable: &Path,
     message: &'static str,
@@ -2153,11 +2181,12 @@ fn start_joined_pipes_process(
         JoinedProcessCommand::Shell { profile, .. } => Some(profile.executable()),
         JoinedProcessCommand::Literal { .. } => None,
     };
+    let resolved = resolve_literal_program(&request.command, process, environment)?;
     let (program, arguments): (&Path, Vec<&str>) = match &request.command {
-        JoinedProcessCommand::Literal {
-            executable,
-            arguments,
-        } => (executable, arguments.iter().map(String::as_str).collect()),
+        JoinedProcessCommand::Literal { arguments, .. } => (
+            resolved.as_deref().unwrap_or(Path::new("")),
+            arguments.iter().map(String::as_str).collect(),
+        ),
         JoinedProcessCommand::Shell { profile, .. } => {
             let mut arguments = profile
                 .arguments()
@@ -2466,11 +2495,12 @@ fn start_joined_pty_process(
         JoinedProcessCommand::Shell { profile, .. } => Some(profile.executable()),
         JoinedProcessCommand::Literal { .. } => None,
     };
+    let resolved = resolve_literal_program(&request.command, process, environment)?;
     let (program, arguments): (&Path, Vec<&str>) = match &request.command {
-        JoinedProcessCommand::Literal {
-            executable,
-            arguments,
-        } => (executable, arguments.iter().map(String::as_str).collect()),
+        JoinedProcessCommand::Literal { arguments, .. } => (
+            resolved.as_deref().unwrap_or(Path::new("")),
+            arguments.iter().map(String::as_str).collect(),
+        ),
         JoinedProcessCommand::Shell { profile, .. } => {
             let mut arguments = profile
                 .arguments()

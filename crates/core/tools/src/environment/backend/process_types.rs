@@ -288,6 +288,41 @@ impl JoinedProcessCommand {
         })
     }
 
+    /// Creates a literal command whose executable is absolute or a bare file
+    /// name. The backend resolves a bare name on the child's own `PATH` when it
+    /// spawns, and runs the arguments without a shell.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an executable that is neither absolute nor one bare UTF-8 file
+    /// name, or invalid argv.
+    pub fn program(
+        executable: impl Into<PathBuf>,
+        arguments: impl IntoIterator<Item = String>,
+    ) -> Result<Self, ExecutionBackendError> {
+        let executable = executable.into();
+        if !executable.is_absolute() {
+            let bare = executable
+                .to_str()
+                .filter(|name| {
+                    !name.is_empty() && !name.contains('/') && *name != "." && *name != ".."
+                })
+                .ok_or_else(|| {
+                    invalid_request(
+                        "joined process executable must be absolute or a bare file name",
+                    )
+                })?;
+            validate_process_values(&[bare.to_owned()])?;
+            let arguments = arguments.into_iter().collect::<Vec<_>>();
+            validate_process_values(&arguments)?;
+            return Ok(Self::Literal {
+                executable: Arc::new(executable),
+                arguments: arguments.into(),
+            });
+        }
+        Self::literal(executable, arguments)
+    }
+
     /// Creates an explicit-shell command.
     ///
     /// # Errors

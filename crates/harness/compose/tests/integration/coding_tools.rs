@@ -2359,3 +2359,212 @@ async fn apply_patch_edits_beside_a_patch_are_refused_not_dropped() -> TestResul
     assert_eq!(fs::read(workspace.path().join("seed.txt"))?, b"alpha\n");
     Ok(())
 }
+
+/// `list_entries` walks to its depth in name order, honours `.gitignore`,
+/// skips hidden names, filters by a glob over the relative path, and returns
+/// typed entries matching its text.
+#[cfg(unix)]
+#[tokio::test]
+async fn list_entries_is_depth_bounded_gitignore_aware_and_typed() -> TestResult {
+    use plakous_tools::{ExecutionValue, ListedEntryKind};
+
+    let workspace = tempfile::tempdir()?;
+    fs::create_dir_all(workspace.path().join("src/nested"))?;
+    fs::create_dir_all(workspace.path().join("target"))?;
+    fs::write(workspace.path().join(".gitignore"), b"target/\n")?;
+    fs::write(workspace.path().join(".hidden"), b"x")?;
+    fs::write(workspace.path().join("README.md"), b"hello")?;
+    fs::write(workspace.path().join("src/lib.rs"), b"fn a() {}\n")?;
+    fs::write(workspace.path().join("src/nested/deep.rs"), b"")?;
+    fs::write(workspace.path().join("target/out.rs"), b"")?;
+    let mut builder = ToolRegistryBuilder::default();
+    builder.register(plakous_tool_search::list_entries_registration()?)?;
+    let registry = builder.freeze();
+    let environment = Arc::new(ExecutionEnvironment::host(
+        ExecutionEnvironmentScope::Run(ids(0x91)?.run),
+        workspace.path(),
+        ".",
+        ExecutionEnvironmentConfig::default(),
+    )?);
+    let listing = |outcome: &ToolOutcome| -> TestResult<Vec<(String, ListedEntryKind, u64)>> {
+        let Some(ExecutionValue::Listing(listing)) = outcome.execution_value() else {
+            return Err("list_entries attached no listing".into());
+        };
+        assert_eq!((listing.entries_cut, listing.incomplete), (0, false));
+        Ok(listing
+            .entries
+            .iter()
+            .map(|entry| (entry.path.clone(), entry.kind, entry.size))
+            .collect())
+    };
+
+    let shallow = execute(
+        &registry,
+        Arc::clone(&environment),
+        ids(0x91)?,
+        "list_entries",
+        r#"{"path": ".", "depth": 1}"#,
+    )
+    .await?;
+    assert_eq!(
+        listing(&shallow)?,
+        [
+            ("README.md".to_owned(), ListedEntryKind::File, 5),
+            ("src".to_owned(), ListedEntryKind::Directory, 0),
+        ]
+    );
+    assert_eq!(text(&shallow)?, "README.md\t5\nsrc/\n");
+
+    let rust = execute(
+        &registry,
+        environment,
+        ids(0x92)?,
+        "list_entries",
+        r#"{"path": ".", "depth": 3, "glob": "**/*.rs"}"#,
+    )
+    .await?;
+    assert_eq!(
+        listing(&rust)?,
+        [
+            ("src/lib.rs".to_owned(), ListedEntryKind::File, 10),
+            ("src/nested/deep.rs".to_owned(), ListedEntryKind::File, 0),
+        ]
+    );
+    Ok(())
+}
+
+/// `edit_files` checks every op and expected revision before it writes
+/// anything, folds several ops on one path in order, moves through the patch
+/// envelope, and reports each changed path with its new revision.
+#[cfg(unix)]
+#[tokio::test]
+async fn edit_files_validates_everything_first_and_folds_ops_per_path() -> TestResult {
+    use plakous_tools::{ExecutionValue, FileChangeAction, WorkspaceContentIdentity};
+
+    let workspace = tempfile::tempdir()?;
+    let root = workspace.path();
+    fs::write(root.join("a.txt"), b"one\ntwo\n")?;
+    fs::write(root.join("b.txt"), b"bee\n")?;
+    fs::write(root.join("m.txt"), b"keep\nold\n")?;
+    let mut builder = ToolRegistryBuilder::default();
+    builder.register(plakous_tool_files::edit_files_registration()?)?;
+    let registry = builder.freeze();
+    let environment = Arc::new(ExecutionEnvironment::host(
+        ExecutionEnvironmentScope::Run(ids(0x93)?.run),
+        root,
+        ".",
+        ExecutionEnvironmentConfig::default(),
+    )?);
+    let revision = |bytes: &[u8]| -> TestResult<String> {
+        Ok(WorkspaceContentIdentity::from_bytes(bytes)?.revision_token())
+    };
+    let edit = |call: u8, ops: serde_json::Value| {
+        let registry = &registry;
+        let environment = Arc::clone(&environment);
+        async move {
+            execute(
+                registry,
+                environment,
+                ids(call)?,
+                "edit_files",
+                &serde_json::json!({ "ops": ops }).to_string(),
+            )
+            .await
+        }
+    };
+
+    // A later failing op stops the whole call before any write.
+    let refused = edit(
+        0x94,
+        serde_json::json!([
+            {"op": "replace", "path": "a.txt", "old": "one", "new": "ONE", "count": 1},
+            {"op": "replace", "path": "b.txt", "old": "zzz", "new": "y", "count": 1}
+        ]),
+    )
+    .await?;
+    assert_eq!(refused.kind(), ToolOutcomeKind::Failure);
+    assert!(text(&refused)?.starts_with("op 2: b.txt: old text occurs 0 times, expected 1"));
+    assert_eq!(fs::read(root.join("a.txt"))?, b"one\ntwo\n");
+
+    // A revision read before an outside change is refused, and so is
+    // `absent` for a file that exists.
+    let stale = revision(b"one\ntwo\n")?;
+    fs::write(root.join("a.txt"), b"one\ntwo\nthree\n")?;
+    let refused = edit(
+        0x95,
+        serde_json::json!([
+            {"op": "write", "path": "a.txt", "content": "x", "expect": stale}
+        ]),
+    )
+    .await?;
+    assert!(text(&refused)?.contains("changed since that revision"));
+    let refused = edit(
+        0x96,
+        serde_json::json!([
+            {"op": "write", "path": "b.txt", "content": "x", "expect": "absent"}
+        ]),
+    )
+    .await?;
+    assert!(text(&refused)?.contains("exists, expected absent"));
+    assert_eq!(fs::read(root.join("a.txt"))?, b"one\ntwo\nthree\n");
+
+    // Several ops fold per path, in order, into one transaction.
+    let current = revision(b"one\ntwo\nthree\n")?;
+    let applied = edit(0x97, serde_json::json!([
+        {"op": "write", "path": "new.txt", "content": "alpha alpha\n", "expect": "absent"},
+        {"op": "replace", "path": "new.txt", "old": "alpha", "new": "beta", "count": 2},
+        {"op": "replace", "path": "a.txt", "old": "two", "new": "2", "count": 1, "expect": current},
+        {"op": "patch", "text": "*** Begin Patch\n*** Update File: m.txt\n*** Move to: moved/m.txt\n@@\n keep\n-old\n+new\n*** End Patch\n"},
+        {"op": "delete", "path": "b.txt"}
+    ]))
+    .await?;
+    assert_eq!(
+        applied.kind(),
+        ToolOutcomeKind::Success,
+        "{}",
+        text(&applied)?
+    );
+    assert_eq!(fs::read(root.join("new.txt"))?, b"beta beta\n");
+    assert_eq!(fs::read(root.join("a.txt"))?, b"one\n2\nthree\n");
+    assert_eq!(fs::read(root.join("moved/m.txt"))?, b"keep\nnew\n");
+    assert!(!root.join("m.txt").exists() && !root.join("b.txt").exists());
+    let Some(ExecutionValue::FileChanges(value)) = applied.execution_value() else {
+        return Err("edit_files attached no change list".into());
+    };
+    let rows = value
+        .changes
+        .iter()
+        .map(|change| {
+            (
+                change.path.clone(),
+                change.action,
+                change
+                    .revision
+                    .map(WorkspaceContentIdentity::revision_token),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rows,
+        [
+            (
+                "a.txt".to_owned(),
+                FileChangeAction::Update,
+                Some(revision(b"one\n2\nthree\n")?)
+            ),
+            ("b.txt".to_owned(), FileChangeAction::Delete, None),
+            ("m.txt".to_owned(), FileChangeAction::Delete, None),
+            (
+                "moved/m.txt".to_owned(),
+                FileChangeAction::Move,
+                Some(revision(b"keep\nnew\n")?)
+            ),
+            (
+                "new.txt".to_owned(),
+                FileChangeAction::Add,
+                Some(revision(b"beta beta\n")?)
+            ),
+        ]
+    );
+    Ok(())
+}

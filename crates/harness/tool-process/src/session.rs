@@ -219,31 +219,46 @@ impl Drop for StartedProcessGuard {
     }
 }
 
+/// The canonical operation a registration names, and whether it is the
+/// SDK-only argv start.
+fn enrolled_operation(
+    invocation: &ToolInvocation,
+) -> Result<(CanonicalProcessOperationV2, bool), ToolRuntimeError> {
+    let identity = invocation.identity();
+    let exec = (identity.name().as_str(), identity.tool_id().as_str())
+        == (
+            crate::PROCESS_SESSION_EXEC_NAME,
+            crate::PROCESS_SESSION_EXEC_REGISTERED_TOOL_ID,
+        );
+    let canonical = match (identity.name().as_str(), identity.tool_id().as_str()) {
+        (PROCESS_SESSION_CAPABILITY_NAME, PROCESS_SESSION_REGISTERED_TOOL_ID) => {
+            Some(CanonicalProcessOperationV2::Start)
+        }
+        _ if exec => Some(CanonicalProcessOperationV2::Start),
+        (PROCESS_SESSION_WRITE_NAME, PROCESS_SESSION_WRITE_REGISTERED_TOOL_ID) => {
+            Some(CanonicalProcessOperationV2::Write)
+        }
+        (PROCESS_SESSION_POLL_NAME, PROCESS_SESSION_POLL_REGISTERED_TOOL_ID) => {
+            Some(CanonicalProcessOperationV2::Poll)
+        }
+        (PROCESS_SESSION_TERMINATE_NAME, PROCESS_SESSION_TERMINATE_REGISTERED_TOOL_ID) => {
+            Some(CanonicalProcessOperationV2::Terminate)
+        }
+        _ => None,
+    }
+    .ok_or_else(|| {
+        ToolRuntimeError::new(
+            ToolRuntimeErrorKind::InvalidArguments,
+            "canonical process registration identity is not enrolled",
+        )
+    })?;
+    Ok((canonical, exec))
+}
+
 impl ToolExecutor for ProcessSessionTools {
     fn execute(self: Arc<Self>, invocation: ToolInvocation, context: ToolContext) -> ToolFuture {
         Box::pin(async move {
-            let identity = invocation.identity();
-            let canonical = match (identity.name().as_str(), identity.tool_id().as_str()) {
-                (PROCESS_SESSION_CAPABILITY_NAME, PROCESS_SESSION_REGISTERED_TOOL_ID) => {
-                    Some(CanonicalProcessOperationV2::Start)
-                }
-                (PROCESS_SESSION_WRITE_NAME, PROCESS_SESSION_WRITE_REGISTERED_TOOL_ID) => {
-                    Some(CanonicalProcessOperationV2::Write)
-                }
-                (PROCESS_SESSION_POLL_NAME, PROCESS_SESSION_POLL_REGISTERED_TOOL_ID) => {
-                    Some(CanonicalProcessOperationV2::Poll)
-                }
-                (PROCESS_SESSION_TERMINATE_NAME, PROCESS_SESSION_TERMINATE_REGISTERED_TOOL_ID) => {
-                    Some(CanonicalProcessOperationV2::Terminate)
-                }
-                _ => None,
-            }
-            .ok_or_else(|| {
-                ToolRuntimeError::new(
-                    ToolRuntimeErrorKind::InvalidArguments,
-                    "canonical process registration identity is not enrolled",
-                )
-            })?;
+            let (canonical, exec) = enrolled_operation(&invocation)?;
             let mut value = invocation.arguments().value().as_ref().clone();
             let (operation, hint_source) = process_observation_labels(canonical, &mut value);
             if canonical == CanonicalProcessOperationV2::Poll {
@@ -265,6 +280,14 @@ impl ToolExecutor for ProcessSessionTools {
                     .await;
             }
             let result = match canonical {
+                CanonicalProcessOperationV2::Start if exec => {
+                    Self::start_program(
+                        &environment,
+                        serde_json::from_value(value).map_err(projection_arguments)?,
+                        control,
+                    )
+                    .await
+                }
                 CanonicalProcessOperationV2::Start => {
                     self.start_canonical(
                         &environment,
@@ -587,6 +610,54 @@ impl ProcessSessionTools {
             .nested_eligible())
         })
         .collect()
+    }
+
+    /// The SDK-only `process_session_exec` registration: argv without a
+    /// shell, with the start's session, promotion, output and job semantics.
+    /// It is nested-eligible and belongs to no standard pack; the composition
+    /// that presents it registers it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid-definition error if the registration cannot be constructed.
+    pub fn exec_registration(self: Arc<Self>) -> Result<ToolRegistration, ToolRuntimeError> {
+        let definition = ToolDefinition::new(
+            ToolName::new(crate::PROCESS_SESSION_EXEC_NAME.to_owned()).map_err(|error| {
+                ToolRuntimeError::from_sensitive_source(
+                    ToolRuntimeErrorKind::InvalidDefinition,
+                    "process exec name is invalid",
+                    &error,
+                )
+            })?,
+            PROCESS_SESSION_CAPABILITY_REVISION,
+            "Start one canonical joined process session from argv, without a shell.",
+            ToolInputContract::Structured(crate::projection::process_exec_input_schema()?),
+            ToolOutputContract::Utf8(Utf8TextContractV1::new(1_048_576).map_err(|error| {
+                ToolRuntimeError::from_sensitive_source(
+                    ToolRuntimeErrorKind::InvalidDefinition,
+                    "process exec output contract is invalid",
+                    &error,
+                )
+            })?),
+            ToolConcurrency::Serial,
+            ToolEffect::Mutating,
+        )
+        .map_err(|error| {
+            ToolRuntimeError::from_sensitive_source(
+                ToolRuntimeErrorKind::InvalidDefinition,
+                "process exec definition is invalid",
+                &error,
+            )
+        })?;
+        let executor: Arc<dyn ToolExecutor> = self;
+        Ok(ToolRegistration::new(
+            RegisteredToolId::new(crate::PROCESS_SESSION_EXEC_REGISTERED_TOOL_ID)?,
+            ToolExecutorId::new(crate::PROCESS_SESSION_EXEC_EXECUTOR_ID)?,
+            ToolExecutorBindingIdentity::new(1, &[b"process-session-exec", b"literal-argv"])?,
+            definition,
+            executor,
+        )
+        .nested_eligible())
     }
 
     pub(crate) fn reported_canonical(

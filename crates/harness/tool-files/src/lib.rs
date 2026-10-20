@@ -13,7 +13,10 @@
 )]
 
 mod codex_patch;
+mod edit_files;
 mod text;
+
+pub use edit_files::{EDIT_FILES_NAME, EDIT_FILES_REGISTERED_TOOL_ID, edit_files_registration};
 use text::{
     PLAKOUS_TOOL_EDIT_AMBIGUOUS, PLAKOUS_TOOL_EDIT_EMPTY, PLAKOUS_TOOL_EDIT_NOT_FOUND,
     PLAKOUS_TOOL_EDITS_FORM, PLAKOUS_TOOL_EDITS_OVERLAP, PLAKOUS_TOOL_READ_BINARY,
@@ -935,7 +938,7 @@ async fn codex_patch_mutations(
                     })?,
                 );
             }
-            CodexPatchOp::Update { path, chunks } => {
+            CodexPatchOp::Update { path, chunks, .. } => {
                 let target = relative_workspace_path(context, path)?;
                 let read = read_patch_target(context, &target).await?;
                 let original = std::str::from_utf8(read.bytes()).map_err(|_| {

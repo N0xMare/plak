@@ -2813,3 +2813,79 @@ async fn process_session_executor_rejects_stale_poll_cursor_as_model_failure()
     );
     Ok(())
 }
+
+/// `process_session_exec` passes argv to the program without a shell: quotes,
+/// globs and `$` reach the program as written, a bare name resolves on the
+/// child's `PATH`, and its typed value matches the canonical text.
+#[cfg(unix)]
+#[tokio::test]
+async fn process_session_exec_runs_argv_without_a_shell() -> Result<(), Box<dyn Error>> {
+    use plakous_model::ToolResultPart;
+    use plakous_tools::{
+        ExecutionEnvironment, ExecutionEnvironmentConfig, ExecutionEnvironmentScope, ExecutionValue,
+    };
+
+    let workspace = tempfile::tempdir()?;
+    let environment = Arc::new(ExecutionEnvironment::host(
+        ExecutionEnvironmentScope::Run(RunId::from_str("00000000-0000-0000-0000-000000000593")?),
+        workspace.path(),
+        ".",
+        ExecutionEnvironmentConfig::default(),
+    )?);
+    let mut builder = ToolRegistryBuilder::new(ToolRegistryLimits::default());
+    builder.register(Arc::new(ProcessSessionTools::posix_sh()?).exec_registration()?)?;
+    let registry = builder.freeze();
+    let exec = |argv: Value| {
+        serde_json::json!({
+            "argv": argv,
+            "workdir": ".",
+            "tty": false,
+            "keep_stdin_open": false,
+            "yield_time_ms": 5_000,
+            "max_output_bytes": 4096
+        })
+        .to_string()
+    };
+
+    let outcome = execute_process_session_tool(
+        &registry,
+        Arc::clone(&environment),
+        PROCESS_SESSION_EXEC_NAME,
+        &exec(serde_json::json!([
+            "printf", "%s|", "a b", "$HOME", "*", "'q'"
+        ])),
+    )
+    .await?;
+    assert_eq!(outcome.kind(), ToolOutcomeKind::Success);
+    let Some(ExecutionValue::Process(value)) = outcome.execution_value() else {
+        return Err("exec attached no process value".into());
+    };
+    assert_eq!(
+        (
+            value.status.as_str(),
+            value.exit_code,
+            value.output.as_str()
+        ),
+        ("exited", Some(0), "a b|$HOME|*|'q'|")
+    );
+    let [ToolResultPart::Text(text)] = outcome.parts() else {
+        return Err("exec did not return one text part".into());
+    };
+    let canonical: Value = serde_json::from_str(text.text())?;
+    assert_eq!(canonical["output"], "a b|$HOME|*|'q'|");
+
+    let missing = execute_process_session_tool(
+        &registry,
+        environment,
+        PROCESS_SESSION_EXEC_NAME,
+        &exec(serde_json::json!(["plakous-no-such-program-7f3a"])),
+    )
+    .await?;
+    assert_eq!(missing.kind(), ToolOutcomeKind::Failure);
+    assert!(
+        missing.joined_text().contains("not found on PATH"),
+        "{}",
+        missing.joined_text()
+    );
+    Ok(())
+}

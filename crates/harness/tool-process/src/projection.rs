@@ -43,6 +43,36 @@ fn claude_task_stop_schema() -> Value {
 /// Codex `exec_command` default/max `max_output_tokens` (code-mode native).
 pub(crate) const CODEX_PROCESS_OUTPUT_TOKENS: u64 = 10_000;
 
+/// The input schema of the SDK-only `process_session_exec`.
+pub(crate) fn process_exec_input_schema() -> Result<PortableToolSchemaV2, ToolRuntimeError> {
+    let document = object_schema(
+        json!({
+            "argv": {"type":"array","items":{"type":"string"},"minItems":1,"maxItems":257},
+            "workdir": {"type":"string"},
+            "tty": {"type":"boolean"},
+            "keep_stdin_open": {"type":"boolean"},
+            "model_description": {"type":"string"},
+            "yield_time_ms": {"type":"integer","minimum":0,"maximum":600_000},
+            "max_output_bytes": {"type":"integer","minimum":1,"maximum":40000}
+        }),
+        &[
+            "argv",
+            "workdir",
+            "tty",
+            "keep_stdin_open",
+            "yield_time_ms",
+            "max_output_bytes",
+        ],
+    );
+    PortableToolSchemaV2::new(document).map_err(|error| {
+        ToolRuntimeError::from_sensitive_source(
+            ToolRuntimeErrorKind::InvalidDefinition,
+            "process exec input schema is invalid",
+            &error,
+        )
+    })
+}
+
 pub(crate) fn canonical_process_input_schema(
     operation: CanonicalProcessOperationV2,
 ) -> Result<PortableToolSchemaV2, ToolRuntimeError> {

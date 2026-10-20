@@ -68,6 +68,51 @@ impl WorkspaceContentIdentity {
     pub const fn digest(self) -> Digest {
         self.digest
     }
+
+    /// The opaque revision token a composition cell sees for this content:
+    /// `r<revision>-<byte length>-<64 lowercase hex digest>`.
+    #[must_use]
+    pub fn revision_token(self) -> String {
+        format!(
+            "r{WORKSPACE_CONTENT_IDENTITY_REVISION}-{}-{}",
+            self.byte_len, self.digest
+        )
+    }
+
+    /// Parses a token [`Self::revision_token`] produced.
+    ///
+    /// # Errors
+    ///
+    /// Rejects any other spelling.
+    pub fn from_revision_token(token: &str) -> Result<Self, ExecutionBackendError> {
+        let invalid = || invalid_request("revision token is invalid");
+        let rest = token
+            .strip_prefix(&format!("r{WORKSPACE_CONTENT_IDENTITY_REVISION}-"))
+            .ok_or_else(invalid)?;
+        let (length, hex) = rest.split_once('-').ok_or_else(invalid)?;
+        if length.is_empty()
+            || (length.len() > 1 && length.starts_with('0'))
+            || hex.len() != 64
+            || !hex
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+        {
+            return Err(invalid());
+        }
+        let byte_len = length.parse::<u64>().map_err(|_| invalid())?;
+        let mut bytes = [0_u8; 32];
+        for (index, byte) in bytes.iter_mut().enumerate() {
+            *byte =
+                u8::from_str_radix(&hex[index * 2..index * 2 + 2], 16).map_err(|_| invalid())?;
+        }
+        let digest = Digest::from_sha256_bytes(
+            DigestDomain::Blob,
+            WORKSPACE_CONTENT_IDENTITY_REVISION,
+            bytes,
+        )
+        .map_err(|_| invalid())?;
+        Self::new(byte_len, digest)
+    }
 }
 
 /// Cursor bound to one normalized path and immutable content state.

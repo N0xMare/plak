@@ -52,6 +52,51 @@ impl CanonicalProcessStartRequest {
     }
 }
 
+/// The closed wire DTO of the SDK-only `process_session_exec`: a start with
+/// argv instead of a shell command.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CanonicalProcessExecRequest {
+    pub(crate) argv: Vec<String>,
+    pub(crate) workdir: PathBuf,
+    pub(crate) tty: bool,
+    pub(crate) keep_stdin_open: bool,
+    #[serde(default, rename = "model_description")]
+    pub(crate) _model_description: Option<String>,
+    #[serde(deserialize_with = "deserialize_semantic_u64")]
+    pub(crate) yield_time_ms: u64,
+    #[serde(deserialize_with = "deserialize_semantic_usize")]
+    pub(crate) max_output_bytes: usize,
+}
+
+impl CanonicalProcessExecRequest {
+    pub(crate) fn validate(&self) -> Result<(), ToolRuntimeError> {
+        let bytes = self.argv.iter().map(String::len).sum::<usize>();
+        if self.argv.first().is_none_or(String::is_empty)
+            || self.argv.len() > 257
+            || bytes > 1_048_576
+            || !(1..=PROCESS_OBSERVATION_BYTES).contains(&self.max_output_bytes)
+        {
+            return Err(ToolRuntimeError::new(
+                ToolRuntimeErrorKind::InvalidArguments,
+                "canonical process exec bounds are invalid",
+            )
+            .with_proven_no_effect(true));
+        }
+        Ok(())
+    }
+}
+
+/// One validated start, whichever command form it carries.
+struct JoinedStart {
+    command: JoinedProcessCommand,
+    workdir: PathBuf,
+    keep_stdin_open: bool,
+    tty: bool,
+    yield_time_ms: u64,
+    max_output_bytes: usize,
+}
+
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum CanonicalProcessInputDisposition {
@@ -517,24 +562,71 @@ impl ProcessSessionTools {
         control: ExecutionOperationControl,
     ) -> Result<ProcessExecutionResult, ToolRuntimeError> {
         request.validate()?;
-        let yield_time_ms = request.yield_time_ms.clamp(250, 600_000);
-        let max_output_bytes = request.max_output_bytes;
         let profile = if request.login {
             &self.login_shell
         } else {
             &self.shell
         };
+        let command = JoinedProcessCommand::shell(profile.clone(), request.command)
+            .map_err(backend_runtime_error)?;
+        Self::start_joined(
+            environment,
+            JoinedStart {
+                command,
+                workdir: request.workdir,
+                keep_stdin_open: request.keep_stdin_open,
+                tty: request.tty,
+                yield_time_ms: request.yield_time_ms,
+                max_output_bytes: request.max_output_bytes,
+            },
+            control,
+        )
+        .await
+    }
+
+    /// Starts argv without a shell: the SDK-only `process_session_exec`.
+    pub(crate) async fn start_program(
+        environment: &plakous_tools::ExecutionEnvironment,
+        request: CanonicalProcessExecRequest,
+        control: ExecutionOperationControl,
+    ) -> Result<ProcessExecutionResult, ToolRuntimeError> {
+        request.validate()?;
+        let mut argv = request.argv.into_iter();
+        let executable = argv.next().unwrap_or_default();
+        let command = JoinedProcessCommand::program(executable, argv)
+            .map_err(|error| backend_runtime_error(error).with_proven_no_effect(true))?;
+        Self::start_joined(
+            environment,
+            JoinedStart {
+                command,
+                workdir: request.workdir,
+                keep_stdin_open: request.keep_stdin_open,
+                tty: request.tty,
+                yield_time_ms: request.yield_time_ms,
+                max_output_bytes: request.max_output_bytes,
+            },
+            control,
+        )
+        .await
+    }
+
+    async fn start_joined(
+        environment: &plakous_tools::ExecutionEnvironment,
+        start: JoinedStart,
+        control: ExecutionOperationControl,
+    ) -> Result<ProcessExecutionResult, ToolRuntimeError> {
+        let yield_time_ms = start.yield_time_ms.clamp(250, 600_000);
+        let max_output_bytes = start.max_output_bytes;
         let sessions = environment
             .joined_process_sessions()
             .map_err(backend_runtime_error)?;
         let observation_control = control.clone();
         let request = JoinedProcessStartRequest::new(
-            JoinedProcessCommand::shell(profile.clone(), request.command)
-                .map_err(backend_runtime_error)?,
-            request.workdir,
+            start.command,
+            start.workdir,
             Vec::new(),
-            request.keep_stdin_open,
-            if request.tty {
+            start.keep_stdin_open,
+            if start.tty {
                 JoinedProcessTerminalMode::UnixPty
             } else {
                 JoinedProcessTerminalMode::Pipes

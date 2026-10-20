@@ -17,6 +17,12 @@ pub use text::{
     PLAKOUS_TOOL_SEARCH_REQUIRES_QUERY, PLAKOUS_TOOL_SEARCH_RESULT_BOUND,
 };
 
+mod list_entries;
+
+pub use list_entries::{
+    LIST_ENTRIES_NAME, LIST_ENTRIES_REGISTERED_TOOL_ID, list_entries_registration,
+};
+
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fmt::Write as _;

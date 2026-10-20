@@ -18,6 +18,10 @@ pub enum ExecutionValue {
     Image(ImageValue),
     /// Regex search matches.
     SearchHits(SearchHitsValue),
+    /// Directory entries.
+    Listing(ListingValue),
+    /// The files one edit transaction changed.
+    FileChanges(FileChangesValue),
     /// One process session observation.
     Process(ProcessValue),
     /// The plan after a replacement.
@@ -80,6 +84,72 @@ pub struct SearchHit {
     pub line: u64,
     /// The line's text.
     pub text: String,
+}
+
+/// Directory entries in walk order.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ListingValue {
+    /// The entries the result kept.
+    pub entries: Vec<ListedEntry>,
+    /// Entries found beyond the ones kept.
+    pub entries_cut: u64,
+    /// Whether the walk stopped before visiting everything.
+    pub incomplete: bool,
+}
+
+/// One directory entry.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ListedEntry {
+    /// Path relative to the listed directory.
+    pub path: String,
+    /// What the entry is, without following a symbolic link.
+    pub kind: ListedEntryKind,
+    /// Size in bytes of a regular file; zero otherwise.
+    pub size: u64,
+}
+
+/// What a directory entry is.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ListedEntryKind {
+    /// A regular file.
+    File,
+    /// A directory.
+    Directory,
+    /// A symbolic link, not followed.
+    Link,
+    /// Anything else.
+    Other,
+}
+
+/// The files one edit transaction changed, in op order.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FileChangesValue {
+    /// One row per changed path.
+    pub changes: Vec<FileChange>,
+}
+
+/// One changed path.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FileChange {
+    /// Workspace-relative path after the change.
+    pub path: String,
+    /// What happened to it.
+    pub action: FileChangeAction,
+    /// The new whole-file content identity; `None` after a delete.
+    pub revision: Option<WorkspaceContentIdentity>,
+}
+
+/// What an edit did to one path.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileChangeAction {
+    /// Created.
+    Add,
+    /// Changed in place.
+    Update,
+    /// Removed.
+    Delete,
+    /// Moved to `path`.
+    Move,
 }
 
 /// One process session observation.

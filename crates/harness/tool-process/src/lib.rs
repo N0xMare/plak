@@ -34,6 +34,14 @@ pub use projection::{
 };
 pub use session::ProcessSessionTools;
 
+/// Canonical name of the SDK-only argv start.
+pub const PROCESS_SESSION_EXEC_NAME: &str = "process_session_exec";
+/// Registered tool id of the SDK-only argv start.
+pub const PROCESS_SESSION_EXEC_REGISTERED_TOOL_ID: &str = "plakous.process-session-exec.v1";
+/// Executor id of the SDK-only argv start: the process service under its own id,
+/// so the standard process registrations keep their identity.
+pub const PROCESS_SESSION_EXEC_EXECUTOR_ID: &str = "plakous.process-session-exec-executor.v1";
+
 use canonical::{
     CanonicalProcessTerminateRequest, await_process_change, classify_process_outcome,
     execute_process_await, process_backend, process_observation_labels, raised_stop_result,
