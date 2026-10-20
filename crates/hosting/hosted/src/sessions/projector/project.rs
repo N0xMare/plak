@@ -324,20 +324,17 @@ impl Applier<'_> {
             self.views.state.archived = true;
             return Ok(None);
         }
-        if self.views.state.lineage.is_empty() {
-            if !matches!(header.change, FeedChange::Created { .. }) {
-                return Ok(None);
+        if self.views.state.applies_own(&header) {
+            if self.views.state.lineage.is_empty() {
+                self.views.state.lineage.push(LineageStep {
+                    branch_id: header.branch_id,
+                    from_seq: 0,
+                });
             }
-            self.views.state.lineage.push(LineageStep {
-                branch_id: header.branch_id,
-                from_seq: 0,
-            });
-        }
-        let ours = self.views.state.branch_at(header.seq.get());
-        if ours == Some(header.branch_id) {
             self.apply_own()?;
             return Ok(None);
         }
+        let ours = self.views.state.branch_at(header.seq.get());
         match header.change {
             FeedChange::Branched {
                 source, transition, ..

@@ -261,6 +261,57 @@ mod contract {
     }
 
     #[test]
+    fn partial_ancestor_projection_preserves_the_successor_binding() {
+        use plakous::sessions::feed::{FeedLocator, FeedSeq};
+        use plakous_hosted::sessions::projector::LineageStep;
+        each_store(|store, workspace| {
+            let mut session = record(workspace);
+            let target = locator();
+            session.bind_plakous_locator(target).unwrap();
+            store.save(&mut session).unwrap();
+            let ancestor = "00000000-0000-4000-8000-000000000004".parse().unwrap();
+            let empty = SessionViews::empty();
+            let mut partial = SessionViews::empty_with_lineage(vec![
+                LineageStep {
+                    branch_id: ancestor,
+                    from_seq: 0,
+                },
+                LineageStep {
+                    branch_id: target.branch_id(),
+                    from_seq: 300,
+                },
+            ]);
+            partial.cursor = FeedSeq::new(256);
+            partial.state.runtime_session_id = Some(target.session_id());
+            partial.state.head = Some(FeedLocator {
+                session_id: target.session_id(),
+                branch_id: ancestor,
+                checkpoint_id: target.checkpoint_id(),
+            });
+            store
+                .commit_projection_views(
+                    &session.id,
+                    &ViewWrites::between(&empty, &partial),
+                    &partial,
+                )
+                .unwrap();
+            assert_eq!(
+                store.load(&session.id).unwrap().plakous_locator,
+                Some(target)
+            );
+            let listed = store.list_for_workspace(workspace).unwrap();
+            assert_eq!(
+                listed
+                    .iter()
+                    .find(|row| row.id == session.id)
+                    .unwrap()
+                    .plakous_locator,
+                Some(target)
+            );
+        });
+    }
+
+    #[test]
     fn projected_rebind_successors_are_atomic_idempotent_and_keep_the_source_selection() {
         use plakous::sessions::feed::{FeedBranchTransition, FeedLocator, FeedSeq};
         use plakous_hosted::sessions::projector::{

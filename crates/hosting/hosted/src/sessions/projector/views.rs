@@ -287,6 +287,15 @@ pub struct SessionViewState {
 }
 
 impl SessionViewState {
+    pub(super) fn applies_own(&self, header: &plakous::sessions::feed::FeedHeader) -> bool {
+        self.branch_at(header.seq.get()) == Some(header.branch_id)
+            || (self.lineage.is_empty()
+                && matches!(
+                    header.change,
+                    plakous::sessions::feed::FeedChange::Created { .. }
+                ))
+    }
+
     /// The branch a record at `seq` must be on to apply.
     #[must_use]
     pub fn branch_at(&self, seq: u64) -> Option<plakous::model::BranchId> {
@@ -317,6 +326,29 @@ pub struct SessionViews {
 }
 
 impl SessionViews {
+    /// Updates a binding only from its own branch's projected head. An
+    /// ancestor page of a partially rebuilt successor cannot redirect it.
+    #[must_use]
+    pub fn projected_locator(
+        &self,
+        recorded: Option<plakous::sessions::SessionLocator>,
+    ) -> Option<plakous::sessions::SessionLocator> {
+        let head = self.state.head.map(|head| {
+            plakous::sessions::SessionLocator::new(
+                head.session_id,
+                head.branch_id,
+                head.checkpoint_id,
+            )
+        });
+        head.filter(|head| {
+            recorded.is_none_or(|recorded| {
+                head.session_id() == recorded.session_id()
+                    && head.branch_id() == recorded.branch_id()
+            })
+        })
+        .or(recorded)
+    }
+
     /// Settles intents older than the retained window without inventing facts
     /// or withdrawing a historical clear's successor reservation.
     pub fn consume_before_retention(&mut self, intents: &ProductIntents) {

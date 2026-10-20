@@ -672,14 +672,23 @@ fn commit_views(
     let state = serde_json::to_string(&views.state)
         .map_err(|_| "product session views are not encodable".to_owned())?;
     let counters = views.state.counters;
+    let recorded: Option<String> = tx
+        .query_row(
+            "SELECT locator FROM sessions WHERE id=?1",
+            [session_id],
+            |row| row.get(0),
+        )
+        .map_err(unavailable)?;
+    let recorded = recorded
+        .map(|locator| locator.parse::<SessionLocator>())
+        .transpose()
+        .map_err(|_| "product session locator is invalid".to_owned())?;
+    let head = views.projected_locator(recorded);
     tx.execute(
             "INSERT INTO session_views(session_id,head_locator,root_turn_count,tool_call_count,compaction_count,state) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(session_id) DO UPDATE SET head_locator=excluded.head_locator,root_turn_count=excluded.root_turn_count,tool_call_count=excluded.tool_call_count,compaction_count=excluded.compaction_count,state=excluded.state",
             params![
                 session_id,
-                views.state.head.map(|head| {
-                    SessionLocator::new(head.session_id, head.branch_id, head.checkpoint_id)
-                        .to_string()
-                }),
+                head.map(|head| head.to_string()),
                 to_i64(counters.root_turns)?,
                 to_i64(counters.tool_calls)?,
                 to_i64(counters.compactions)?,

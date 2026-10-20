@@ -600,7 +600,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 }
                 Ok(UserAction::ForkSession { account, compact }) => {
                     self.last_tree_revision.child_live.close_agent_view();
-                    match handle_fork(
+                    let _ = self.events.send(HostEvent::SetBusy(true));
+                    let _ = self.events.send(HostEvent::Status {
+                        phase: "fork".into(),
+                        queue_len: self.config.session.pending_queue.len(),
+                        detail: Some("forking session".into()),
+                    });
+                    let forked = handle_fork(
                         &self.executor,
                         InterruptWatch::new(self.actions, &self.interrupt_state),
                         &mut self.config,
@@ -608,7 +614,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         &mut self.stderr_buf,
                         &self.events,
                         account.as_deref(),
-                    ) {
+                    );
+                    let _ = self.events.send(HostEvent::SetBusy(false));
+                    let _ = self.events.send(HostEvent::Status {
+                        phase: "idle".into(),
+                        queue_len: self.config.session.pending_queue.len(),
+                        detail: None,
+                    });
+                    match forked {
                         Ok(()) if compact => {
                             let current =
                                 query_context(&self.executor, &self.opened, ContextQuery::Current);

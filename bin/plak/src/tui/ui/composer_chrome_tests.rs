@@ -1092,3 +1092,17 @@ fn hud_labels_web_and_mcp_calls() {
         );
     }
 }
+
+#[test]
+fn workflow_escape_offers_operation_stop_not_turn_loss() {
+    for phase in ["fork", "rebind"] {
+        let mut app = App::new(launch_basic(), true);
+        app.busy = true;
+        app.phase = phase.into();
+        assert!(app.handle_key(key(KeyCode::Esc)).is_none());
+        let text = render_to_string(&mut app, 120, 24);
+        assert!(text.contains("Stop this operation?"), "{text}");
+        assert!(!text.contains("work in flight is lost"), "{text}");
+        assert_eq!(confirm_action(&mut app), Some(UserAction::Interrupt));
+    }
+}

@@ -606,6 +606,17 @@ recovery authority.
 
 ### 2.5 Versioned state
 
+Projector reads are planned only for records on the product session's followed
+lineage (or its initial creation record); sibling-branch facts advance the
+cursor without loading their checkpoint contents. Missing required reads still
+refuse the whole page. Fork and rebind catch-up projections observe interrupts
+between pages, each committed under the cursor CAS. Partial ancestor pages preserve the successor's recorded branch binding until
+its own head is projected. The source publication
+settles the canonical receipt before stopping successor catch-up: the source
+stays attached and any saved successor remains available through `/resume`.
+The TUI acknowledges Escape for these workflows as stopping an operation,
+not cancelling a model turn.
+
 Plak does not migrate state. Each build keeps its state in
 `~/.plak/state/<key>/`, where the key names every persisted format the build
 reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree

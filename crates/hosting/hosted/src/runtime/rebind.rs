@@ -494,15 +494,20 @@ pub(super) fn complete_rebind<P: plakous_host_protocol::ProtocolExtension>(
         }
     };
     let target_record_result = (|| -> CliResult<SessionRecord> {
-        executor
-            .block_on(super::projection::project_to_tail(
+        // Publish the successor and settle the canonical receipt before an
+        // interrupt can stop catch-up on the saved, resumable target.
+        run_watched(
+            executor,
+            watch,
+            super::projection::project_to_tail(
                 opened.sessions(),
                 &config.store,
                 &config.session.id,
                 source_locator,
-            ))
-            .map_err(|_| CliFailure::new("application execution failed"))?
-            .map_err(CliFailure::new)?;
+            ),
+        )
+        .map_err(|_| CliFailure::new("application execution failed"))?
+        .map_err(CliFailure::new)?;
         let request = config
             .store
             .load_intents(&config.session.id)
@@ -510,15 +515,19 @@ pub(super) fn complete_rebind<P: plakous_host_protocol::ProtocolExtension>(
             .workflow_request(operation)
             .cloned()
             .ok_or_else(|| CliFailure::new("rebind request is missing"))?;
-        executor
-            .block_on(super::projection::project_to_tail(
+        run_watched(
+            executor,
+            watch,
+            super::projection::project_to_tail_interruptible(
                 opened.sessions(),
                 &config.store,
                 &request.successor_product_id(),
                 target_locator,
-            ))
-            .map_err(|_| CliFailure::new("application execution failed"))?
-            .map_err(CliFailure::new)?;
+                || watch.observe_now(),
+            ),
+        )
+        .map_err(|_| CliFailure::new("application execution failed"))?
+        .map_err(CliFailure::new)?;
         let record = config
             .store
             .load(&request.successor_product_id())
@@ -534,7 +543,20 @@ pub(super) fn complete_rebind<P: plakous_host_protocol::ProtocolExtension>(
         Ok(record) => record,
         Err(error) => {
             restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
-            return Err(error);
+            let target_id = config
+                .store
+                .load_intents(&config.session.id)
+                .map_err(CliFailure::new)?
+                .workflow_request(operation)
+                .map(sessions::projector::WorkflowRequest::successor_product_id)
+                .ok_or_else(|| CliFailure::new("rebind request is missing"))?;
+            if config.store.load(&target_id).is_err() {
+                return Err(error);
+            }
+            return Err(CliFailure::new(format!(
+                "the fork was saved as session {target_id} but could not project ({}); this session stays attached, and /resume {target_id} opens the fork",
+                error.message(),
+            )));
         }
     };
     #[cfg(any(test, feature = "test-support"))]

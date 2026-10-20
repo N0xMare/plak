@@ -504,12 +504,8 @@ mod memory {
         record.queue_drain_state = crate::sessions::QueueDrainState::LiveAutoDrain;
         let intents = state.intents.get(&record.id).cloned().unwrap_or_default();
         let views = state.views.get(&record.id);
-        if let Some(head) = views.and_then(|views| views.state.head) {
-            record.plakous_locator = Some(plakous::sessions::SessionLocator::new(
-                head.session_id,
-                head.branch_id,
-                head.checkpoint_id,
-            ));
+        if let Some(views) = views {
+            record.plakous_locator = views.projected_locator(record.plakous_locator);
         }
         record.queue_commands = crate::sessions::queue::QueueCommands::from_join(&intents, views);
         record

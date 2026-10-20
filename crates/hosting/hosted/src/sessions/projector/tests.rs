@@ -2468,3 +2468,28 @@ fn a_web_call_row_keeps_the_host_subject_over_the_runtime_subject() {
         ])
     );
 }
+
+#[tokio::test]
+async fn sibling_records_need_no_reads_and_match_fully_loaded_views() -> TestResult {
+    let feed = feed_of(&[Step::Turn {
+        host_wake: false,
+        submitted: true,
+        tools: 1,
+        nested_duplicate: false,
+        steer: false,
+        end: End::Completed,
+    }]);
+    let views = SessionViews::empty_with_lineage(vec![LineageStep {
+        branch_id: id(999),
+        from_seq: 0,
+    }]);
+    let expected = project(&views, &feed.intents, &feed.records, &feed.reads)?.views;
+    let directory = tempfile::tempdir()?;
+    let sessions = AgentSessions::new(plakous::sessions::SessionBackend::sqlite(
+        directory.path().join("runtime.sqlite"),
+    )?)?;
+    // These synthetic checkpoints do not exist: any planned read fails closed.
+    let actual = run(&sessions, &views, &feed.intents, &feed.records).await?;
+    assert_eq!(actual.views, expected);
+    Ok(())
+}

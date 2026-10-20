@@ -503,10 +503,7 @@ fn load_record(connection: &Connection, id: &str) -> Result<SessionRecord, Strin
         session.queue_drain_state = QueueDrainState::RestoredPaused;
     }
     if let Some(views) = &views {
-        session.plakous_locator = views
-            .state
-            .head
-            .map(|head| SessionLocator::new(head.session_id, head.branch_id, head.checkpoint_id));
+        session.plakous_locator = views.projected_locator(session.plakous_locator);
         // Spec 02 §2.6: the counters are views.
         session.root_turn_count = views.state.counters.root_turns;
         session.tool_call_count = views.state.counters.tool_calls;

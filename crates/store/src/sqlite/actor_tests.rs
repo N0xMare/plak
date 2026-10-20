@@ -603,6 +603,12 @@ async fn validated_checkpoint_cache_bounds_second_branch_load_to_four_statements
         );
         let selector = request.session();
         store.create(request).await?;
+        store
+            .dispatch(|b| {
+                b.checkpoints = CheckpointCache::new(1);
+                Ok(())
+            })
+            .await?;
         let (cold, cold_count, cold_objects) = traced_branch_load(&store, selector).await?;
         let (cached, cached_count, cached_objects) = traced_branch_load(&store, selector).await?;
         assert_eq!(cached.checkpoint(), cold.checkpoint());
@@ -673,8 +679,16 @@ async fn validated_checkpoint_cache_is_byte_bounded_and_evicts_least_recently_us
     cache.insert(checkpoints[1].clone());
     assert!(cache.get(ids[1]).is_some());
     let mut oversized = CheckpointCache::new(weights[0] - 1);
+    oversized.insert(checkpoints[2].clone());
     oversized.insert(checkpoints[0].clone());
+    assert!(oversized.get(ids[2]).is_none());
+    assert!(oversized.get(ids[0]).is_some());
+    oversized.insert(checkpoints[1].clone());
     assert!(oversized.get(ids[0]).is_none());
+    assert!(oversized.get(ids[1]).is_some());
+    assert!(oversized.get(ids[2]).is_none());
+    oversized.clear();
+    assert!(ids.iter().all(|id| oversized.get(*id).is_none()));
     cache.clear();
     assert!(ids.iter().all(|id| cache.get(*id).is_none()));
     Ok(())
@@ -682,13 +696,30 @@ async fn validated_checkpoint_cache_is_byte_bounded_and_evicts_least_recently_us
 
 #[tokio::test]
 async fn validated_checkpoint_cache_keeps_pruned_and_deleted_lookups_exact() -> TestResult {
-    for bypass_eviction in [false, true] {
+    for (bypass_eviction, budget) in [
+        (false, CHECKPOINT_CACHE_BYTES),
+        (true, CHECKPOINT_CACHE_BYTES),
+        (false, 1),
+        (true, 1),
+    ] {
         let directory = tempfile::tempdir()?;
         let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
+        store
+            .dispatch(move |b| {
+                b.checkpoints = CheckpointCache::new(budget);
+                Ok(())
+            })
+            .await?;
         let (created, head, checkpoints) = checkpoint_chain(&store).await?;
         let pruned_id = checkpoints[1].reference().checkpoint_id();
         let head_id = head.checkpoint().checkpoint_id();
         let request = PruneBranch::new(created.lease().clone(), head, BTreeSet::new(), 1);
+        store.load_checkpoint(pruned_id).await?;
+        assert!(
+            store
+                .dispatch_read(move |b| Ok(b.checkpoints.get(pruned_id).is_some()))
+                .await?
+        );
         if bypass_eviction {
             // Leave a stale entry deliberately: even a hit must probe authority.
             store.dispatch(move |b| prune(b, &request)).await?;
@@ -696,7 +727,8 @@ async fn validated_checkpoint_cache_keeps_pruned_and_deleted_lookups_exact() -> 
             store.prune(request).await?;
             assert!(
                 store
-                    .dispatch_read(move |b| Ok(b.checkpoints.get(head_id).is_none()))
+                    .dispatch_read(move |b| Ok(b.checkpoints.get(head_id).is_none()
+                        && b.checkpoints.get(pruned_id).is_none()))
                     .await?
             );
         }
@@ -747,22 +779,36 @@ async fn validated_checkpoint_cache_keeps_pruned_and_deleted_lookups_exact() -> 
 
 #[tokio::test]
 async fn validated_checkpoint_cache_hit_still_verifies_checkpoint_row_seal() -> TestResult {
-    let directory = tempfile::tempdir()?;
-    let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
-    let created = store.create(seed()?).await?;
-    store.load_branch(created.branch().session()).await?;
-    store
-        .dispatch(|b| {
-            b.connection
-                .execute("UPDATE checkpoints SET validation_seal=zeroblob(32)", [])
-                .map_err(map_sqlite)?;
-            Ok(())
-        })
-        .await?;
-    assert_eq!(
-        store.load_branch(created.branch().session()).await.err(),
-        Some(SessionStoreError::corrupt())
-    );
+    for budget in [CHECKPOINT_CACHE_BYTES, 1] {
+        let directory = tempfile::tempdir()?;
+        let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
+        let created = store.create(seed()?).await?;
+        store
+            .dispatch(move |b| {
+                b.checkpoints = CheckpointCache::new(budget);
+                Ok(())
+            })
+            .await?;
+        store.load_branch(created.branch().session()).await?;
+        let head_id = created.branch().checkpoint().checkpoint_id();
+        assert!(
+            store
+                .dispatch_read(move |b| Ok(b.checkpoints.get(head_id).is_some()))
+                .await?
+        );
+        store
+            .dispatch(|b| {
+                b.connection
+                    .execute("UPDATE checkpoints SET validation_seal=zeroblob(32)", [])
+                    .map_err(map_sqlite)?;
+                Ok(())
+            })
+            .await?;
+        assert_eq!(
+            store.load_branch(created.branch().session()).await.err(),
+            Some(SessionStoreError::corrupt())
+        );
+    }
     Ok(())
 }
 

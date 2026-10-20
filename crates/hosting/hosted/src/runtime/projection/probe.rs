@@ -98,4 +98,19 @@ pub(crate) fn view_write(id: &str) {
         );
         count.writes += 1;
     }
+    let hook = write_hooks().lock().unwrap().remove(id);
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
+type WriteHook = Box<dyn FnOnce() + Send>;
+
+fn write_hooks() -> &'static Mutex<BTreeMap<String, WriteHook>> {
+    static HOOKS: OnceLock<Mutex<BTreeMap<String, WriteHook>>> = OnceLock::new();
+    HOOKS.get_or_init(Mutex::default)
+}
+
+pub(in crate::runtime) fn after_next_write(id: String, hook: impl FnOnce() + Send + 'static) {
+    write_hooks().lock().unwrap().insert(id, Box::new(hook));
 }

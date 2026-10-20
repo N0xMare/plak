@@ -1146,7 +1146,11 @@ budget. Hits still probe the checkpoint's primary-key row and verify its
 relational integrity seal; `Pruned` and `NotFound` never come from cache state.
 A repeated branch-head load needs only the session, branch and checkpoint row
 probes, independent of its object closure. Prune and delete clear the cache,
-including on failure; oversized entries are not retained. Accounting charges
+including on failure. An oversized entry is retained alone, evicting every
+other entry; the next insert displaces it under the same LRU policy. Retention
+is bounded by the validated graph limits (1 GiB encoded objects and the
+checkpoint object-count limit), even when it exceeds the cache budget.
+Accounting charges
 twice the encoded object/edge bytes plus object and entry overhead, not process
 RSS. Read-only inspections and cold loads still validate the full object graph.
 Disabled durability does not open SQLite. Initial `BestEffort` truthfully uses

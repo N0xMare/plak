@@ -333,6 +333,14 @@ impl App {
     /// The root's busy `Esc` (spec 02 §5.3): stop the turn, or the turn and
     /// every background process.
     pub(super) fn confirm_turn_stop(&mut self) {
+        if matches!(self.phase.as_str(), "fork" | "rebind") {
+            self.open_confirm(
+                "Stop this operation?".to_owned(),
+                vec!["The source stays attached; any saved fork remains resumable.".to_owned()],
+                vec![("[ Stop operation ]", UserAction::Interrupt)],
+            );
+            return;
+        }
         let mut lines = vec!["The root turn is cancelled; its work in flight is lost.".to_owned()];
         if self.tree_live_descendants > 0 {
             lines.push(format!(

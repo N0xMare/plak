@@ -614,3 +614,280 @@ fn background_projection_releases_the_next_admission_without_resending_the_previ
         [] as [crate::sessions::queue::QueueItem; 0]
     );
 }
+
+#[test]
+fn fork_and_rebind_interrupt_between_pages_keep_source_and_resumable_target() {
+    use crate::interrupt::{InterruptWatch, InterruptWatchState};
+    use crate::runtime::{TestHostBoundary, TestHostInjection, TestHostWorkflow};
+    use std::cell::RefCell;
+
+    for rebind in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let executor = plakous::application::ApplicationExecutor::new().unwrap();
+        let (mut config, injection) = fresh_injected_attached_host(root.path());
+        config.ready_catalog = plakous_host_protocol::views::ReadyCatalog::new(vec![
+            plakous_host_protocol::views::ProviderSection {
+                account: "codex".into(),
+                label: "Codex".into(),
+                ready: true,
+                entries: vec![plakous_host_protocol::views::ModelEntry {
+                    id: "offline-loopback-v2".into(),
+                    tag: "offline".into(),
+                    reasoning: true,
+                    effort_options: vec!["medium".into()],
+                    extras: Vec::new(),
+                    unavailable_reason: None,
+                }],
+            },
+        ]);
+        let mut opened = executor
+            .block_on(crate::runtime::startup::build_session_from_config(
+                &mut config,
+                &mut Vec::new(),
+            ))
+            .unwrap()
+            .unwrap();
+        for turn in 0..40 {
+            let result = executor
+                .block_on(async {
+                    opened
+                        .agent()
+                        .unwrap()
+                        .prompt(format!("history turn {turn}"))
+                        .await
+                        .unwrap()
+                        .result()
+                        .await
+                        .unwrap()
+                })
+                .unwrap();
+            assert!(matches!(
+                result.outcome(),
+                plakous::agent::TurnResultOutcome::Completed(_)
+            ));
+        }
+        let source = opened.locator();
+        config.session.bind_plakous_locator(source).unwrap();
+        config.store.save(&mut config.session).unwrap();
+        let source_id = config.session.id.clone();
+        let store = Arc::clone(&config.store);
+        let observed_source = source_id.clone();
+        let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
+        let resuming = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let resumed_target = Arc::clone(&resuming);
+        let primary = Arc::clone(&injection.runtime);
+        let workspace = config.cwd.clone();
+        let controller =
+            plakous_offline_crash_harness::BoundaryController::quiet_from_evidence_path(
+                plakous_offline_crash_harness::protocol::CrashBoundary::None,
+                root.path().join("rebind-evidence.jsonl"),
+            )
+            .unwrap();
+        let alternate = plakous_offline_crash_harness::runtime_binding_for_account(
+            &workspace,
+            controller.clone(),
+            b"projection-target-account",
+        )
+        .unwrap()
+        .target_binding();
+        config.test_injection = Some(Arc::new(TestHostInjection {
+            runtime: Arc::new(move |role| {
+                if rebind
+                    && (role == crate::runtime::TestRuntimeRole::Rebind
+                        || resumed_target.load(std::sync::atomic::Ordering::SeqCst))
+                {
+                    plakous_offline_crash_harness::runtime_binding_for_account(
+                        &workspace,
+                        controller.clone(),
+                        b"projection-target-account",
+                    )
+                    .map_err(|error| error.to_string())
+                } else {
+                    primary(role)
+                }
+            }),
+            rebind_target: if rebind {
+                alternate
+            } else {
+                injection.rebind_target.clone()
+            },
+            observe: Arc::new(move |workflow, boundary| {
+                if boundary == TestHostBoundary::RuntimeReturned
+                    && workflow
+                        == if rebind {
+                            TestHostWorkflow::Rebind
+                        } else {
+                            TestHostWorkflow::Fork
+                        }
+                {
+                    let request = store
+                        .load_intents(&observed_source)
+                        .unwrap()
+                        .workflow_requests
+                        .last()
+                        .unwrap()
+                        .clone();
+                    let target = request.successor_product_id();
+                    super::probe::track(&target);
+                    let actions = actions.clone();
+                    super::probe::after_next_write(target, move || {
+                        actions.send(UserAction::Interrupt).unwrap();
+                    });
+                }
+            }),
+            child_runtime: None,
+            rebind_builds: std::sync::Mutex::new(Vec::new()),
+        }));
+        let state = RefCell::new(InterruptWatchState::default());
+        let watch = InterruptWatch::new(&receiver, &state);
+        let (events, _events_rx) = crate::runtime::test_support::host_event_sink();
+        let error = if rebind {
+            crate::runtime::rebind::handle_rebind(
+                &executor,
+                watch,
+                &mut config,
+                &mut opened,
+                &mut Vec::new(),
+                &events,
+                "codex",
+                "offline-loopback-v2",
+                Some("medium"),
+                None,
+                None,
+                None,
+                &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+            )
+            .unwrap_err()
+        } else {
+            crate::runtime::fork::handle_fork(
+                &executor,
+                watch,
+                &mut config,
+                &mut opened,
+                &mut Vec::new(),
+                &events,
+                None,
+            )
+            .unwrap_err()
+        };
+        assert!(watch.interrupted(), "rebind={rebind}: {error:?}");
+        assert!(
+            error.message().contains("projection interrupted"),
+            "{error:?}"
+        );
+        assert!(error.message().contains("/resume"), "{error:?}");
+        assert_eq!(config.session.id, source_id);
+        assert!(
+            opened.agent().is_some(),
+            "the source must still be attached"
+        );
+        assert_eq!(opened.locator().branch_id(), source.branch_id());
+        let request = config
+            .store
+            .load_intents(&source_id)
+            .unwrap()
+            .workflow_requests
+            .last()
+            .unwrap()
+            .clone();
+        let target_id = request.successor_product_id();
+        assert_eq!(super::probe::take(&target_id).writes, 1);
+        let partial = config.store.load_views(&target_id).unwrap().unwrap();
+        assert!(partial.cursor.get() > 0);
+        let tail = feed_records(opened.sessions(), source.session_id())
+            .last()
+            .unwrap()
+            .header()
+            .seq;
+        assert!(
+            partial.cursor < tail,
+            "the saved target still owes another page"
+        );
+        executor.block_on(opened.release()).unwrap().unwrap();
+        config.session = config.store.load(&target_id).unwrap();
+        resuming.store(true, std::sync::atomic::Ordering::SeqCst);
+        let resumed = executor
+            .block_on(crate::runtime::startup::build_session_from_config(
+                &mut config,
+                &mut Vec::new(),
+            ))
+            .unwrap()
+            .unwrap();
+        assert_ne!(resumed.locator().branch_id(), source.branch_id());
+        assert_eq!(config.session.id, target_id);
+        executor.block_on(resumed.release()).unwrap().unwrap();
+    }
+}
+
+#[test]
+fn pruned_lineage_rebuild_from_zero_equals_incremental_views() {
+    use crate::runtime::test_support::run_attached_actions;
+    use plakous::sessions::PruneHistoryOutcome;
+
+    let root = tempfile::tempdir().unwrap();
+    let (mut config, _) = fresh_injected_attached_host(root.path());
+    let store = Arc::new(MemoryStore::new());
+    config.store = store.clone();
+    let source_id = config.session.id.clone();
+    run_prompts(config, &["first prompt", "second prompt"]);
+    run_attached_actions(
+        reopened(root.path(), &store, &source_id),
+        vec![UserAction::ForkSession {
+            account: None,
+            compact: false,
+        }],
+    );
+    let request = store
+        .load_intents(&source_id)
+        .unwrap()
+        .workflow_requests
+        .last()
+        .unwrap()
+        .clone();
+    let target_id = request.successor_product_id();
+    let incremental = caught_up(root.path(), &store, &target_id);
+    assert_eq!(incremental.state.lineage.len(), 2);
+    let (config, _) = fresh_injected_attached_host(root.path());
+    let sessions = config.state_roots.runtime_sessions().unwrap();
+    let executor = plakous::application::ApplicationExecutor::new().unwrap();
+    let mut pruned = 0;
+    for id in [&source_id, &target_id] {
+        let locator = store.load(id).unwrap().plakous_locator.unwrap();
+        let PruneHistoryOutcome::Pruned(report) = executor
+            .block_on(sessions.prune_history(locator))
+            .unwrap()
+            .unwrap()
+        else {
+            panic!("released session must prune")
+        };
+        pruned += report.pruned_checkpoints();
+    }
+    assert!(pruned > 0);
+    // A fresh facade has no process-local published-checkpoint shortcuts.
+    let (fresh, _) = fresh_injected_attached_host(root.path());
+    let sessions = fresh.state_roots.runtime_sessions().unwrap();
+    let records = feed_records(&sessions, incremental.state.runtime_session_id.unwrap());
+    let initial = SessionViews::empty_with_lineage(incremental.state.lineage.clone());
+    assert_eq!(initial.cursor.get(), 0);
+    let mut intents = store.load_intents(&target_id).unwrap();
+    intents
+        .submissions
+        .extend(store.load_inherited_submissions(&target_id).unwrap());
+    let incremental = executor
+        .block_on(crate::sessions::projector::run(
+            &sessions,
+            &incremental,
+            &intents,
+            &records,
+        ))
+        .unwrap()
+        .unwrap()
+        .views;
+    let rebuilt = executor
+        .block_on(crate::sessions::projector::run(
+            &sessions, &initial, &intents, &records,
+        ))
+        .unwrap()
+        .unwrap();
+    assert_eq!(rebuilt.views, incremental);
+}

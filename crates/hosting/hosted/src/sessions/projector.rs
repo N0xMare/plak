@@ -82,7 +82,7 @@ impl std::error::Error for RunError {
     }
 }
 
-/// Loads the reads `records` name and applies them to `views`.
+/// Loads reads only for followed-lineage records and applies the page to `views`.
 ///
 /// # Errors
 ///
@@ -94,10 +94,23 @@ pub async fn run(
     records: &[FeedRecord],
 ) -> Result<Projection, RunError> {
     let mut cache = ReadCache::default();
+    let mut state = SessionViewState {
+        lineage: views.state.lineage.clone(),
+        ..SessionViewState::default()
+    };
     for record in records
         .iter()
         .filter(|record| record.header().seq > views.cursor)
     {
+        if !state.applies_own(record.header()) {
+            continue;
+        }
+        if state.lineage.is_empty() {
+            state.lineage.push(LineageStep {
+                branch_id: record.header().branch_id,
+                from_seq: 0,
+            });
+        }
         load_reads(
             sessions,
             record.header().session_id,

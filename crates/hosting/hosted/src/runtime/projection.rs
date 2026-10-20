@@ -150,11 +150,7 @@ pub fn projected_head(
     recorded: plakous::sessions::SessionLocator,
     views: &SessionViews,
 ) -> plakous::sessions::SessionLocator {
-    head_locator(views)
-        .filter(|head| {
-            head.session_id() == recorded.session_id() && head.branch_id() == recorded.branch_id()
-        })
-        .unwrap_or(recorded)
+    views.projected_locator(Some(recorded)).unwrap_or(recorded)
 }
 
 /// The head the views name.
@@ -182,12 +178,33 @@ pub(crate) async fn project_to_tail(
     project_to_tail_cached(sessions, store, product_id, followed, None).await
 }
 
+pub(super) async fn project_to_tail_interruptible(
+    sessions: &AgentSessions,
+    store: &Arc<dyn SessionRecordStore>,
+    product_id: &str,
+    followed: plakous::sessions::SessionLocator,
+    interrupted: impl Fn() -> bool,
+) -> Result<SessionViews, ReadFailure> {
+    project_to_tail_controlled(sessions, store, product_id, followed, None, interrupted).await
+}
+
 async fn project_to_tail_cached(
     sessions: &AgentSessions,
     store: &Arc<dyn SessionRecordStore>,
     product_id: &str,
     followed: plakous::sessions::SessionLocator,
     cached: Option<SessionViews>,
+) -> Result<SessionViews, ReadFailure> {
+    project_to_tail_controlled(sessions, store, product_id, followed, cached, || false).await
+}
+
+async fn project_to_tail_controlled(
+    sessions: &AgentSessions,
+    store: &Arc<dyn SessionRecordStore>,
+    product_id: &str,
+    followed: plakous::sessions::SessionLocator,
+    cached: Option<SessionViews>,
+    interrupted: impl Fn() -> bool,
 ) -> Result<SessionViews, ReadFailure> {
     #[cfg(test)]
     let _entry = probe::enter(product_id);
@@ -201,6 +218,9 @@ async fn project_to_tail_cached(
     })
     .await?;
     for _ in 0..MAX_PASS_PAGES {
+        if interrupted() {
+            return Err("projection interrupted between pages".to_owned().into());
+        }
         // A target's atomic join can seed only a source's completion at zero.
         // Its branch lineage still comes from the source's publishing records.
         if views.state.lineage.is_empty() {

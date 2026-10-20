@@ -46,10 +46,9 @@ impl CheckpointCache {
         let id = checkpoint.reference().checkpoint_id();
         self.remove(id);
         let bytes = weight(&checkpoint);
-        if bytes > self.limit {
-            return;
-        }
-        while self.bytes > self.limit - bytes {
+        // A validated graph is already bounded to 1 GiB of encoded objects.
+        // Retain an over-budget head alone rather than reload it on every read.
+        while self.bytes > self.limit.saturating_sub(bytes) {
             let Some((&age, &oldest)) = self.recency.first_key_value() else {
                 break;
             };
