@@ -1383,6 +1383,7 @@ dependencies = [
  "plakous-tools",
  "serde",
  "serde_json",
+ "serde_json_canonicalizer",
  "thiserror 2.0.20",
  "time",
  "tokio",
@@ -1634,11 +1635,15 @@ dependencies = [
 name = "plakous-py-eval"
 version = "0.0.1"
 dependencies = [
+ "base64",
+ "getrandom 0.4.3",
  "monty-pool",
  "monty-proto",
  "monty-types",
  "plakous-agent",
  "plakous-js-eval",
+ "plakous-model",
+ "plakous-tools",
  "serde_json",
  "tokio",
 ]
@@ -1724,6 +1729,8 @@ dependencies = [
 name = "plakous-tool-search"
 version = "0.0.1"
 dependencies = [
+ "globset",
+ "ignore",
  "plakous-model",
  "plakous-tools",
  "serde",

@@ -467,6 +467,7 @@ dependencies = [
  "plakous-tools",
  "serde",
  "serde_json",
+ "serde_json_canonicalizer",
  "thiserror 2.0.20",
  "time",
  "tokio",
@@ -601,6 +602,8 @@ dependencies = [
 name = "plakous-tool-search"
 version = "0.0.1"
 dependencies = [
+ "globset",
+ "ignore",
  "plakous-model",
  "plakous-tools",
  "serde",

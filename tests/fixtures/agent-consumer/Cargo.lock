@@ -336,6 +336,7 @@ dependencies = [
  "plakous-tools",
  "serde",
  "serde_json",
+ "serde_json_canonicalizer",
  "thiserror 2.0.20",
  "time",
  "tokio",
