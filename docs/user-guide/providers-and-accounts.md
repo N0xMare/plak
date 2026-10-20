@@ -283,7 +283,8 @@ Steers yield observation without killing the cell, and nested agent/process
 awaits are allowed.
 
 This build runs Monty 1.2.0 under adapter `plakous.monty-python-adapter.v6`. It
-refuses to reopen py-ptc roots and children recorded under adapter
+refuses to reopen py-ptc roots and children recorded by a Monty 1.1.0 build
+(the same adapter, a different engine contract), under adapter
 `plakous.monty-python-adapter.v4` or `plakous.monty-python-adapter.v5` (the
 Monty 0.0.21 builds), profile `plakous.python-ptc-profile.v2`, or
 presentation `plakous.python-ptc-presentation.v3`. There is no migration; use

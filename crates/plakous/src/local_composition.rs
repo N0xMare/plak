@@ -1128,7 +1128,7 @@ fn monty_engine_contract_identity() -> Result<Digest, AgentError> {
         &[
             b"plakous.monty-python-engine-contract.v2",
             b"monty-pool",
-            b"1.1.0",
+            b"1.2.0",
             crate::monty_python::ADAPTER_REVISION.as_bytes(),
         ],
     )
@@ -2381,8 +2381,8 @@ mod artifact_recovery_tests {
 mod monty_upgrade_tests {
     use super::*;
 
-    /// The engine contract this build's predecessor recorded: Monty 0.0.21
-    /// under adapter revision v5.
+    /// The engine contract this build's predecessor recorded: Monty 1.1.0
+    /// under the same adapter revision v6.
     fn previous_monty_contract() -> Result<Digest, AgentError> {
         Digest::sha256(
             DigestDomain::ExecutionEnvironment,
@@ -2390,15 +2390,15 @@ mod monty_upgrade_tests {
             &[
                 b"plakous.monty-python-engine-contract.v2",
                 b"monty-pool",
-                b"0.0.21",
-                b"plakous.monty-python-adapter.v5",
+                b"1.1.0",
+                b"plakous.monty-python-adapter.v6",
             ],
         )
         .map_err(identity_error)
     }
 
     #[test]
-    fn the_contract_names_monty_1_1_0_and_adapter_v6() -> Result<(), AgentError> {
+    fn the_contract_names_monty_1_2_0_and_adapter_v6() -> Result<(), AgentError> {
         assert_eq!(
             crate::monty_python::ADAPTER_REVISION,
             "plakous.monty-python-adapter.v6"
@@ -2409,7 +2409,7 @@ mod monty_upgrade_tests {
             &[
                 b"plakous.monty-python-engine-contract.v2",
                 b"monty-pool",
-                b"1.1.0",
+                b"1.2.0",
                 b"plakous.monty-python-adapter.v6",
             ],
         )
@@ -2419,7 +2419,7 @@ mod monty_upgrade_tests {
     }
 
     #[test]
-    fn a_py_ptc_record_under_the_previous_adapter_is_a_typed_refusal()
+    fn a_py_ptc_record_under_the_previous_contract_is_a_typed_refusal()
     -> Result<(), Box<dyn std::error::Error>> {
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("monty");
@@ -2450,7 +2450,7 @@ mod monty_upgrade_tests {
             host: environment_identity.clone(),
         };
         let Err(refusal) = restore_stored_artifact(&stored) else {
-            return Err("a previous-adapter record must not reopen".into());
+            return Err("a previous-contract record must not reopen".into());
         };
         assert_eq!(refusal.kind(), AgentErrorKind::IncompatibleSession);
         assert!(
