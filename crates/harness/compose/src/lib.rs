@@ -27,6 +27,7 @@ mod codex_code_mode;
 mod coding_menu;
 mod javascript;
 mod python;
+mod python_sdk;
 mod sidecar;
 mod text;
 
@@ -35,4 +36,5 @@ pub use codex_code_mode::*;
 pub use coding_menu::*;
 pub use javascript::*;
 pub use python::*;
+pub use python_sdk::*;
 pub use sidecar::SidecarLocator;

@@ -449,7 +449,7 @@ impl PythonPtcNestedToolV1 {
     }
 }
 
-fn nested_projection(
+pub(crate) fn nested_projection(
     registry: &FrozenToolRegistry,
     target: &ProviderModelProjectionIdentityV2,
     names: &[ToolName],
@@ -779,16 +779,16 @@ fn object_schema(properties: Value, required: &[&str]) -> Value {
     })
 }
 
-fn empty_object() -> Result<SemanticJsonV1, ToolRuntimeError> {
+pub(crate) fn empty_object() -> Result<SemanticJsonV1, ToolRuntimeError> {
     SemanticJsonV1::from_value(json!({})).map_err(definition_error)
 }
 
-fn generic_output_schema() -> Result<PortableToolSchemaV2, ToolRuntimeError> {
+pub(crate) fn generic_output_schema() -> Result<PortableToolSchemaV2, ToolRuntimeError> {
     PortableToolSchemaV2::new(object_schema(json!({"result": {"type": "string"}}), &[]))
         .map_err(definition_error)
 }
 
-fn component_identity(revision: &str, bytes: &[u8]) -> Result<Digest, ToolRuntimeError> {
+pub(crate) fn component_identity(revision: &str, bytes: &[u8]) -> Result<Digest, ToolRuntimeError> {
     Digest::sha256(
         DigestDomain::ToolDefinition,
         COMPONENT_DIGEST_VERSION,
@@ -806,11 +806,11 @@ fn is_composition_marker(executor: &ToolExecutorId) -> bool {
     )
 }
 
-fn registration_error(message: &'static str) -> ToolRuntimeError {
+pub(crate) fn registration_error(message: &'static str) -> ToolRuntimeError {
     ToolRuntimeError::new(ToolRuntimeErrorKind::Registration, message)
 }
 
-fn definition_error(error: impl std::error::Error + 'static) -> ToolRuntimeError {
+pub(crate) fn definition_error(error: impl std::error::Error + 'static) -> ToolRuntimeError {
     ToolRuntimeError::from_sensitive_source(
         ToolRuntimeErrorKind::InvalidDefinition,
         "local Python profile definition is invalid",
@@ -822,7 +822,7 @@ fn definition_error(error: impl std::error::Error + 'static) -> ToolRuntimeError
     clippy::needless_pass_by_value,
     reason = "this function is used directly as a Result::map_err adapter"
 )]
-fn encoding_error(error: serde_json::Error) -> ToolRuntimeError {
+pub(crate) fn encoding_error(error: serde_json::Error) -> ToolRuntimeError {
     ToolRuntimeError::from_sensitive_source(
         ToolRuntimeErrorKind::InvalidDefinition,
         "local Python profile identity could not be encoded",
@@ -830,7 +830,7 @@ fn encoding_error(error: serde_json::Error) -> ToolRuntimeError {
     )
 }
 
-fn digest_error(error: plakous_model::DigestError) -> ToolRuntimeError {
+pub(crate) fn digest_error(error: plakous_model::DigestError) -> ToolRuntimeError {
     ToolRuntimeError::from_sensitive_source(
         ToolRuntimeErrorKind::InvalidDefinition,
         "local Python profile identity could not be built",

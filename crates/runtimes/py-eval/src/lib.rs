@@ -1,10 +1,16 @@
-//! monty-pool py-ptc session.
+//! monty-pool py-ptc session and the neutral Python SDK (`py-harness-sdk`) engine.
 
 mod bindings;
 mod codec;
 mod prompts;
+mod sdk;
 
 pub use bindings::{PythonToolBinding, PythonToolInput};
+pub use sdk::{
+    HarnessSdkDescriptorAuthority, HarnessSdkIntegration, HarnessSdkProgram, InMemoryNamedState,
+    NamedStateEntry, NamedStateError, NamedStateFuture, NamedStateLimits, NamedStatePort,
+    NamedStateSlot, validate_state_name,
+};
 
 #[cfg(test)]
 mod tests;

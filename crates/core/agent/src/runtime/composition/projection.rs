@@ -170,8 +170,18 @@ pub(in crate::runtime) fn local_composition_response_parts(
     wall_time: Duration,
     integration: &dyn LocalCompositionIntegration,
 ) -> Result<Vec<ToolResultPart>, AgentError> {
-    if integration.result_projection() == LocalCompositionResultProjection::BytesPythonPtcV1 {
-        return local_composition_python_response_parts(response, max_output_tokens, integration);
+    match integration.result_projection() {
+        LocalCompositionResultProjection::BytesPythonPtcV1 => {
+            return local_composition_python_response_parts(
+                response,
+                max_output_tokens,
+                integration,
+            );
+        }
+        LocalCompositionResultProjection::TextPythonHarnessSdkV1 => {
+            return local_composition_sdk_response_parts(response, max_output_tokens, integration);
+        }
+        LocalCompositionResultProjection::TokensScriptV1 => {}
     }
     let (items, error) = match response {
         LocalCompositionResponse::Yielded { items, .. }
@@ -261,6 +271,40 @@ fn local_composition_items_to_parts(
         }
     }
     Ok(parts)
+}
+
+/// Passes an engine-rendered SDK observation through: its first text item is
+/// the header, and a response without one (an explicit termination) gets the
+/// closed status line instead.
+fn local_composition_sdk_response_parts(
+    response: &LocalCompositionResponse,
+    max_output_bytes: usize,
+    integration: &dyn LocalCompositionIntegration,
+) -> Result<Vec<ToolResultPart>, AgentError> {
+    let items = match response {
+        LocalCompositionResponse::Yielded { items, .. }
+        | LocalCompositionResponse::Terminated { items, .. }
+        | LocalCompositionResponse::Result { items, .. } => items,
+    };
+    let mut items = integration.truncate_items(items.clone(), max_output_bytes);
+    let head = match items.first() {
+        Some(LocalCompositionContentItem::Text(text)) if !text.is_empty() => {
+            let text = text.clone();
+            items.remove(0);
+            text
+        }
+        _ => local_composition_projection_status(
+            LocalCompositionResultProjection::TextPythonHarnessSdkV1,
+            response,
+        ),
+    };
+    let header = TextBlock::new(head, None).map_err(|_| {
+        AgentError::new(
+            AgentErrorKind::Tool,
+            "local composition SDK observation is invalid",
+        )
+    })?;
+    local_composition_items_to_parts(header, &items)
 }
 
 fn local_composition_python_response_parts(
@@ -377,6 +421,18 @@ pub(in crate::runtime) fn local_composition_projection_status(
             LocalCompositionResultProjection::BytesPythonPtcV1,
             LocalCompositionResponse::Result { error: None, .. },
         ) => prompts::PLAKOUS_RUNTIME_PYTHON_CELL_STATUS_COMPLETED.to_owned(),
+        (
+            LocalCompositionResultProjection::TextPythonHarnessSdkV1,
+            LocalCompositionResponse::Terminated { .. },
+        ) => "cell stopped: cancelled".to_owned(),
+        (
+            LocalCompositionResultProjection::TextPythonHarnessSdkV1,
+            LocalCompositionResponse::Result { error: None, .. },
+        ) => "cell completed".to_owned(),
+        (
+            LocalCompositionResultProjection::TextPythonHarnessSdkV1,
+            LocalCompositionResponse::Yielded { .. } | LocalCompositionResponse::Result { .. },
+        ) => "cell failed".to_owned(),
     }
 }
 

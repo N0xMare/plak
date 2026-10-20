@@ -326,6 +326,129 @@ fn python_ptc_definition_error(error: impl std::error::Error + 'static) -> ToolR
 }
 
 // ---------------------------------------------------------------------------
+// Neutral Python SDK (py-harness-sdk)
+// ---------------------------------------------------------------------------
+
+/// Provider-visible sole tool of the neutral Python SDK composition.
+pub const PYTHON_HARNESS_SDK_RUN_NAME_V1: &str = "run_py";
+/// Driver-only executor of the `run_py` marker.
+pub const PYTHON_HARNESS_SDK_DRIVER_MARKER_EXECUTOR_ID_V1: &str =
+    "plakous.python-harness-sdk.driver-marker.v1";
+/// Semantic revision the `run_py` marker definition carries.
+pub const PYTHON_HARNESS_SDK_PROFILE_REVISION_V1: &str = "plakous.python-harness-sdk-profile.v1";
+
+/// The model-visible `run_py` argument schema: exactly `{"code": string}`.
+#[must_use]
+pub fn python_harness_sdk_run_schema() -> Value {
+    object_schema(json!({"code": {"type": "string"}}), &["code"])
+}
+
+/// The identity-bearing limits of the neutral Python SDK composition
+/// (`PythonHarnessSdkLimitsV1`). They are not configuration: a later layer
+/// that changes a value revises the descriptor.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct PythonHarnessSdkLimitsV1 {
+    /// Maximum UTF-8 source bytes of one cell, refused before any checkout.
+    pub source_bytes: u64,
+    /// Engine allocator ceiling inside the worker.
+    pub engine_memory_bytes: u64,
+    /// Pure compute per cell, excluding host suspensions.
+    pub compute_ms: u64,
+    /// Foreground wall budget of one cell from admission, nested calls included.
+    pub foreground_budget_ms: u64,
+    /// Background-cell slots per agent; zero stops a cell at the budget.
+    pub background_cell_slots: u32,
+    /// Nested calls per cell; the next one stops the cell.
+    pub nested_calls: u32,
+    /// Concurrent nested calls; later calls wait in order.
+    pub concurrent_nested_calls: u32,
+    /// Helper requests per agent turn, reserved at the nested-call choke point.
+    pub helper_requests_per_turn: u32,
+    /// Host suspensions per cell.
+    pub suspensions: u32,
+    /// Interpreter recursion frames.
+    pub recursion_frames: u32,
+    /// Model-visible output bytes of one cell observation.
+    pub output_bytes: u64,
+    /// Images attached to one cell observation.
+    pub images: u32,
+    /// Bytes of one attached image.
+    pub image_bytes: u64,
+    /// Named-state names per agent.
+    pub state_names: u32,
+    /// Canonical JSON bytes of one named-state value.
+    pub state_value_bytes: u64,
+    /// Canonical JSON bytes of all named-state values together.
+    pub state_total_bytes: u64,
+    /// Encoded bytes of one nested argument.
+    pub nested_argument_bytes: u64,
+    /// Encoded bytes of one nested result.
+    pub nested_result_bytes: u64,
+    /// Encoded bytes of all nested results of one cell.
+    pub aggregate_nested_result_bytes: u64,
+}
+
+impl PythonHarnessSdkLimitsV1 {
+    /// The Gate A values.
+    pub const EXACT: Self = Self {
+        source_bytes: 262_144,
+        engine_memory_bytes: 268_435_456,
+        compute_ms: 90_000,
+        foreground_budget_ms: 300_000,
+        background_cell_slots: 0,
+        nested_calls: 100,
+        concurrent_nested_calls: 16,
+        helper_requests_per_turn: 32,
+        suspensions: 1_000,
+        recursion_frames: 1_000,
+        output_bytes: 16_384,
+        images: 2,
+        image_bytes: 196_608,
+        state_names: 64,
+        state_value_bytes: 1_048_576,
+        state_total_bytes: 16_777_216,
+        nested_argument_bytes: 1_048_576,
+        nested_result_bytes: 1_048_576,
+        aggregate_nested_result_bytes: 16_777_216,
+    };
+}
+
+/// Registers the `run_py` marker.
+///
+/// # Errors
+///
+/// Returns the registry's normal invalid-definition, collision, or capacity error.
+pub fn register_python_harness_sdk_markers_into(
+    registry: &mut ToolRegistryBuilder,
+) -> Result<(), ToolRuntimeError> {
+    let definition = ToolDefinition::new(
+        ToolName::new(PYTHON_HARNESS_SDK_RUN_NAME_V1.to_owned())
+            .map_err(python_ptc_definition_error)?,
+        PYTHON_HARNESS_SDK_PROFILE_REVISION_V1,
+        "Driver-mediated neutral Python SDK run marker; ordinary execution is forbidden.",
+        ToolInputContract::structured(python_harness_sdk_run_schema())
+            .map_err(python_ptc_definition_error)?,
+        ToolOutputContract::model_content(128, 1_048_576).map_err(python_ptc_definition_error)?,
+        ToolConcurrency::Serial,
+        ToolEffect::ReadOnly,
+    )
+    .map_err(python_ptc_definition_error)?;
+    registry.register(ToolRegistration::new(
+        RegisteredToolId::new("plakous.python-harness-sdk.run-marker.v1")?,
+        ToolExecutorId::new(PYTHON_HARNESS_SDK_DRIVER_MARKER_EXECUTOR_ID_V1)?,
+        ToolExecutorBindingIdentity::new(
+            1,
+            &[
+                b"plakous-tools/python-harness-sdk-driver-marker-v1",
+                PYTHON_HARNESS_SDK_PROFILE_REVISION_V1.as_bytes(),
+            ],
+        )?,
+        definition,
+        Arc::new(DriverMediatedPythonMarker),
+    ))
+}
+
+// ---------------------------------------------------------------------------
 // Codex Code Mode (native-ptc)
 // ---------------------------------------------------------------------------
 
@@ -593,6 +716,7 @@ pub fn is_composition_marker_executor(executor: &ToolExecutorId) -> bool {
         executor.as_str(),
         PRODUCT_JAVASCRIPT_DRIVER_MARKER_EXECUTOR_ID_V1
             | PYTHON_PTC_DRIVER_MARKER_EXECUTOR_ID_V1
+            | PYTHON_HARNESS_SDK_DRIVER_MARKER_EXECUTOR_ID_V1
             | CODEX_NATIVE_CODE_MODE_DRIVER_MARKER_EXECUTOR_ID_V1
     )
 }

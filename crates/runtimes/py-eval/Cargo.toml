@@ -18,6 +18,8 @@ layer = "engine"
 class = "published-internal"
 
 [dependencies]
+base64.workspace = true
+getrandom.workspace = true
 monty-pool = "=1.2.0"
 monty-proto = "=1.2.0"
 monty-types = "=1.2.0"
@@ -25,11 +27,15 @@ plakous-agent.workspace = true
 # `sample_children_rusage` / `children_rusage_delta`: the shared child-process
 # resource sampler already owned by the JS evaluator crate.
 plakous-js-eval.workspace = true
+plakous-model.workspace = true
+plakous-tools.workspace = true
 serde_json.workspace = true
+serde_json_canonicalizer.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 
 [dev-dependencies]
 num-bigint = "0.4"
+plakous-compose.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]

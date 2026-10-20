@@ -44,6 +44,10 @@ pub enum LocalCompositionResultProjection {
     TokensScriptV1,
     /// Byte-budgeted `PythonPtcV1` Python-cell grammar.
     BytesPythonPtcV1,
+    /// Engine-rendered `PythonHarnessSdkV1` observation: the first text item
+    /// already carries the untrusted line and the status line, and the
+    /// engine has bounded the text, so items pass through unchanged.
+    TextPythonHarnessSdkV1,
 }
 
 /// Declared runtime behavior, independent of tool spelling or language.

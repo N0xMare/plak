@@ -2438,6 +2438,10 @@ async fn list_entries_is_depth_bounded_gitignore_aware_and_typed() -> TestResult
 /// envelope, and reports each changed path with its new revision.
 #[cfg(unix)]
 #[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one workspace walks refusal, folding and the typed change list in order"
+)]
 async fn edit_files_validates_everything_first_and_folds_ops_per_path() -> TestResult {
     use plakous_tools::{ExecutionValue, FileChangeAction, WorkspaceContentIdentity};
 

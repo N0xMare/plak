@@ -247,6 +247,24 @@ pub(crate) fn format_monty(value: &MontyObject, limit: usize) -> String {
     rendered.text
 }
 
+/// Renders a value as Python `repr()` does, bounded like [`format_monty`]: a
+/// top-level `str` is quoted, and every other value renders as its `str()`,
+/// which is already its `repr()`.
+pub(crate) fn repr_monty(value: &MontyObject, limit: usize) -> String {
+    match unstable::node(value.as_ref()) {
+        MontyNode::String(text) => {
+            const NOTICE: &str = "\n[Python result truncated]";
+            let mut rendered = Capped::new(limit.saturating_sub(NOTICE.len()));
+            let _ = monty_types::string_repr_fmt(text, &mut rendered);
+            if rendered.truncated {
+                rendered.text.push_str(NOTICE);
+            }
+            rendered.text
+        }
+        _ => format_monty(value, limit),
+    }
+}
+
 /// A copy of `value` whose oversized `int` nodes are replaced by verbatim
 /// `<int with N bits>` text, or `None` when it holds none. The scan and copy
 /// are linear in the arena, never in the expanded value.
