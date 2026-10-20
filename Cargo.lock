@@ -4615,6 +4615,8 @@ dependencies = [
 name = "plakous-tool-search"
 version = "0.0.1"
 dependencies = [
+ "globset",
+ "ignore",
  "plakous-model",
  "plakous-tools",
  "serde",
