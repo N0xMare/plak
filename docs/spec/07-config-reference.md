@@ -20,6 +20,7 @@ $PLAK_HOME/            # default ~/.plak
   agents/<name>.toml   # one template per file
   secrets/             # credentials; never in config.toml
     named/<name>.secret  # `plak secret set`; config names these, never holds them
+    mcp-oauth/<id>/      # `plak mcp login`; the server's OAuth login (spec 04 §3.1)
 ```
 
 `PLAK_HOME` MUST be absolute when set; otherwise the home is `$HOME/.plak`
@@ -50,7 +51,8 @@ source as a warning.
 global `root.agent` or `working_set` name must name a **global** template — a
 project file can never satisfy a reference the global home made. A trusted
 `project/.plak/config.toml` then overrides only the keys it carries, except
-`[orchestration]` and `turn.auto_continue`: those controls are home-scoped. Project orchestration
+`[orchestration]`, `turn.auto_continue` and `mcp.client_id_metadata_url`:
+those controls are home-scoped. Project orchestration
 values are ignored with a warning, and their displayed origins remain user
 or default. The entire file still must satisfy TOML syntax and schema validation;
 invalid values are load errors even in a home-scoped section.
@@ -131,9 +133,9 @@ never in it.
 
 ## 3. `config.toml`
 
-Nine key sections, in render order: `[root] [roster] [orchestration] [turn]
-[jobs] [api] [tui] [compaction] [telemetry]`, plus two families of named
-tables, `[tools.<name>]` (§3.4) and `[mcp_servers.<id>]` (§3.5), eleven in
+Ten key sections, in render order: `[root] [roster] [orchestration] [turn]
+[jobs] [api] [tui] [compaction] [telemetry] [mcp]`, plus two families of named
+tables, `[tools.<name>]` (§3.4) and `[mcp_servers.<id>]` (§3.5), twelve in
 all. Any other section is an error. The two families are not `plak config set`
 keys: they are authored in the file, a save leaves them exactly as written, and
 `plak config show` prints their canonical rendering after the keys.
@@ -168,6 +170,7 @@ keys: they are authored in the file, a save leaves them exactly as written, and
 | `compaction.enabled` | bool | `true` | — | Automatic transcript compaction when a session approaches its context bound. |
 | `telemetry.max_bytes` | integer | `536870912` | greater than 0; zero is refused as ambiguous. 536870912 is 512 MiB | Best-effort byte retention target for the main database, WAL and SHM; busy readers or unfinished sessions may keep it above target. |
 | `telemetry.max_age_days` | integer | `90` | greater than 0; zero is refused as ambiguous | Retention cutoff for local analytics rows, in days. |
+| `mcp.client_id_metadata_url` | string | `(unset)` | `https://` URL with a path, no query or fragment; home-scoped | The OAuth Client ID Metadata Document that identifies Plak to an MCP authorization server that supports one (spec 01 §8.5). Unset disables that registration path; the document must list Plak's pinned loopback redirect URIs. Takes effect at the next `plak mcp login`. |
 
 
 ### 3.1 Bounds are closed ranges
@@ -294,11 +297,21 @@ reach the server; it starts nothing until a template that lists it binds.
 | `bearer_secret` | string | `(unset)` | a secret name; http only | Sent as `Authorization: Bearer <secret>`. |
 | `headers` | table of string | `{}` | header names; never `Authorization` or `Proxy-Authorization`; no control characters; http only | Literal, non-secret headers. |
 | `secret_headers` | table of string | `{}` | header names, none also in `headers` (case-insensitive), no `Authorization` beside `bearer_secret`; values are secret names; http only | Headers whose values are named secrets. |
+| `auth` | string | `(unset)` | `oauth`; http only; not with `bearer_secret` | Authenticate with the server's OAuth authorization server through a `plak mcp login <id>` login instead of a static bearer secret. |
+| `oauth_issuer` | string | `(unset)` | `https://` URL (or `http://` to a loopback literal when `url` is one), no query or fragment; requires `auth = "oauth"` | The authorization server to use; it must be one the server's resource metadata lists. Required with `oauth_client_id`. |
+| `oauth_client_id` | string | `(unset)` | 1 to 255 bytes of visible ASCII; requires `oauth_issuer` | A client registered with that authorization server in advance; without it Plak uses a Client ID Metadata Document (when `mcp.client_id_metadata_url` is set and the server supports one) or dynamic registration. |
+| `oauth_client_secret` | string | `(unset)` | a secret name; requires `oauth_client_id` | The pre-registered client's secret, sent only to that issuer's token and revocation endpoints. |
+| `oauth_callback_port` | integer | `(ephemeral)` | 1024..=65535; requires `auth = "oauth"` | Fixed loopback port of the login callback `http://127.0.0.1:<port>/callback`, for a client registered with that exact redirect. |
 | `tools` | array of string | `(every listed tool)` | MCP tool names, 1 to 128 bytes without whitespace, none twice | Server-level allowlist; `mcp:<id>` means exactly these. |
+| `resources` | bool | `false` | either transport | Give templates that list the server its `mcp__<id>__read_resource` tool (spec 01 §8.5); the server must advertise resources. Without it a server's resources never reach a model. |
 | `startup_seconds` | integer | `20` | 1..=120 | Budget to start the server and list its tools. |
 | `call_seconds` | integer | `120` | 1..=3600 | Hard per-call ceiling; progress does not extend it. |
 
-A key of the other transport is a load error. Secrets are never values in
+A key of the other transport is a load error, and so is an `oauth_*` key
+without `auth = "oauth"` or `auth` beside `bearer_secret`. The canonical
+rendering a session freezes spells out `auth`, the `oauth_*` keys and
+`resources` only when they are set, so a table without them renders, freezes
+and digests exactly as before they existed. Secrets are never values in
 TOML: a secret name matches `[a-z][a-z0-9-]{0,31}` and resolves from the home
 (spec 04 §3.1) when the server is started; whether it exists is a bind check,
 not a load check. `plak mcp add` writes a table into the home or (with

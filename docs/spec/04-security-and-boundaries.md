@@ -80,7 +80,7 @@ that answers it, and the section here that states that control in full.
 | 12 | A consumer bypasses Plakous, rebuilds history from display text, or rewrites a binding in place | Facade-only dependency, no second runtime, exact resume, confirmed fork and rebind | §1 (consumer → Plakous), §4.2 |
 | 13 | An editable product queue dispatches after restart or loses an item | Plak owns the durable queue; restored queues pause, live queues drain serially, dequeue is atomic | §4.2 |
 | 14 | Dependencies, fixtures, or release inputs are compromised or license-incompatible | Locked dependencies, source/license/advisory policy, sanitized fixtures, no copied credentials | §7 |
-| 15 | Skills or MCP work bypasses core policy or amplifies authority and cost | MCP: frozen host-built server definitions, a per-process pool supervising each server's process group, tool listings frozen at bind with closed lowered schemas validated before dispatch, every MCP tool serial and mutating under the write-ahead claim (never replayed), untrusted-data framing of every result; skills are not implemented | §1.1, §2.5, §9 |
+| 15 | Skills or MCP work bypasses core policy or amplifies authority and cost | MCP: frozen host-built server definitions, a per-process pool supervising each server's process group, tool listings frozen at bind with closed lowered schemas validated before dispatch, every MCP tool serial and mutating under the write-ahead claim (never replayed), including the opt-in `read_resource` tool, untrusted-data framing of every result and prompt expansion, prompts invoked only by the user, MCP OAuth tokens bound to the exact server URI and refreshed without resending a call; skills are not implemented | §1.1, §2.5, §9 |
 | 15a | Multi-agent work amplifies authority or cost beyond the root turn | Tier ceilings, grants, spawn and capacity budgets, sealed candidates, per-cell budgets | chapter 03 |
 | 16 | Guessed, stale, or cross-scope capacity evidence admits an oversized request | Exact-scope capacity certificate, full prepared-projection measurement, enforced output maximum, pre-dispatch refusal | §4.4 |
 | 17 | Paid compaction publishes a partial transition, loses its receipt, or repeats a paid call | Exact source and operation binding, recovery-only checkpoint before ambiguous paid work, one lease-fenced atomic publication, never redispatch after possible acceptance (an unapplied fold is abandoned, never re-sent), and at most one paid fold per root turn after one fails to commit | §4.1, §4.3 |
@@ -162,6 +162,35 @@ a private or metadata address is the operator's choice. Secret header values
 are resolved at each server start, held only as sensitive header values in
 that server's transport client, and never enter rmcp, the definition digest,
 `Debug` output, errors, events or logs.
+
+A server's resources reach a model only through the `read_resource` tool an
+operator enables per server; that a server advertises resources changes
+nothing on its own. The tool follows every MCP tool rule above, and the URI it
+takes is model input that Plakous passes to the server without dereferencing
+it: a `file://` URI is the server's to answer, never a local read that
+bypasses the file tools' containment. A prompt is server text that only the
+user invokes, by name, from the CLI (or a host surface acting for the user);
+no tool and no model output reaches `prompts/get`. Its expansion is one user
+message that opens with `[prompt mcp:<server>/<name> requested by the user;
+its content comes from an untrusted server]` and labels every message with its
+role, and it never inserts an assistant turn into canonical history, so a
+server cannot author what the model believes it said. Sampling and
+elicitation are not advertised, so no server request reaches a model or the
+user.
+
+An HTTP server with `auth = "oauth"` (chapter 01 §8.5, MCP authorization)
+receives an access token issued for it and nothing else. Discovery follows
+URLs the server names, so each is held to the transport policy (`https://`,
+or a loopback literal only when the server itself is loopback; no redirect, no
+proxy, bounded bodies) and to the MCP specification's checks: the resource
+metadata must name this server's canonical URI (or a same-origin
+path-segment prefix of it), the authorization-server metadata's `issuer` must
+be identical to the issuer its URL was built from, PKCE S256 must be
+advertised, and the callback's `iss` must match the recorded issuer before any
+code reaches a token endpoint. A pre-registered client requires an issuer pin,
+so a configured client secret is only ever sent to the token endpoint of the
+issuer the operator named. No address policy applies to these server-named
+URLs (§9).
 
 A terminal provider refusal can revoke provisional streamed output before any
 local effect is admitted. Messages discards the refused response's client-tool
@@ -396,8 +425,10 @@ benchmarking, multicast and reserved ranges, re-checks IPv4 addresses embedded
 in IPv6, and refuses `localhost`, `*.localhost` and `metadata.google.internal`
 before resolution (chapter 01 §13.1 lists the table). Provider, OAuth, catalog
 and discovery clients install no policy: their origins are fixed configuration,
-not model input. The policy is a mechanism; it does not by itself make a
-model-directed fetch safe against exfiltration through the URL it requests.
+not model input. MCP OAuth discovery follows URLs an operator-configured
+server names and installs no policy either (§1, §9). The policy is a
+mechanism; it does not by itself make a model-directed fetch safe against
+exfiltration through the URL it requests.
 
 ### 2.8 Plak-run network fetch
 
@@ -480,6 +511,24 @@ effective uid, no group or other permission bits) and refuses rather than
 uses a file that fails; the value is held in a zeroizing type that is neither
 cloned nor serialized and whose `Debug` is redacted. A trusted project may
 name secrets but never supplies one: secrets resolve only from the home.
+`oauth_client_secret` names a secret the same way.
+
+**MCP server logins** (`plak mcp login <id>`) live in the home, not under XDG
+state, one private credential record per server id:
+
+```text
+<plak home>/secrets/mcp-oauth/<id>/credential.json
+```
+
+The `secrets/mcp-oauth/` and `<id>/` directories are `0700` and are created
+on first login; the record and its locks are the Plakous private store's
+(§3.2) under the profile `plakous.mcp.oauth.compat.2026-07-28.r1`. Its
+payload (version 1) binds the server's canonical URI, the issuer and the
+client id and holds the access token, its expiry, the refresh token, the
+requested scope, the token and revocation endpoints, and a dynamic
+registration's client id and secret when one was made. No token, client
+secret or registration ever enters `config.toml`, a canonical table, a
+definition digest, a frozen session record, an error line or a log.
 
 The same API-key label rule applies to Usage account lines and rejection
 messages. A provider-reported key label, even a masked prefix or suffix, is
@@ -604,6 +653,15 @@ that confirmed replacement removes a newer receipt or recovery marker;
 record, removing an envelope it cannot decode. Nothing is converted and no
 stored format changes.
 
+An MCP server login is versioned the same way: the envelope by its
+`format_version` (2), the payload by its `version` (1), and the profile id by
+date then revision. Its refresh is the same claimed refresh: a definite
+rejection (`invalid_grant`) retires it as login-required, an outcome that may
+have reached the token endpoint quarantines it, and a returned refresh token
+replaces the stored one in the claimed generation, so a rotated token is
+never sent twice. A quarantined or login-required MCP login fails that
+server's calls without sending them and names `plak mcp login <id>`.
+
 One classification of a stored credential (signed out, usable, refreshing,
 needs refresh, quarantined, needs login with its reason, written by a newer build, profile
 inactive, unsupported) drives `plak status`, login, logout, refresh, the usage
@@ -670,6 +728,14 @@ identities; generation never decreasing), spends the same turn-scoped permits,
 never re-targets a prepared call, and any changed fact ends the turn before
 inference with no fallback. The agent runtime sees only a provider-neutral hook;
 credential material never crosses it.
+
+An MCP server login is used only by the server id it was stored for, and
+only while the record's canonical URI, issuer and client id equal what the
+server's current definition and discovery name; a definition that moved to
+another URL, issuer or client reads the login as belonging to another server
+and refuses, naming `plak mcp login <id>`. Its access token is sent only to
+that exact endpoint URL, never on a redirect (there is none) and never
+alongside or instead of a `bearer_secret`, which `auth = "oauth"` excludes.
 
 **Automatic cross-provider, cross-account, or paid-route fallback is
 forbidden.** A child agent never receives another vertical's token: a Grok child
@@ -755,6 +821,20 @@ credential is validated, fenced and committed exactly like a browser login
 (same OIDC, `UserInfo`, account-continuity, consent and profile rules). Polling
 holds no lock and writes nothing, so cancellation or expiry before approval
 leaves no credential and no login-recovery marker.
+
+MCP server logins follow the same surface rules. `plak mcp login <id>` is
+CLI-only and never started by an agent or a tool: an expired, revoked or
+under-scoped login is a tool failure naming the command. Locally it binds the
+loopback callback port (a configured one, else ephemeral) and completes on
+the callback, checked against the redirect it sent exactly as above. `--remote`
+binds nothing: it runs the device grant only when the authorization server
+advertises one, and otherwise, or when that request is refused before a code
+is shown, takes the pasted callback URL under the paste rules above. A local
+login over SSH is refused with the hint to re-run with `--remote`. A device
+user code is shown only to the operator, with the anti-phishing line.
+`plak mcp logout <id>` revokes at the authorization server when it advertised
+a revocation endpoint, and retires locally (saying the grant may remain)
+otherwise or with `--local`.
 
 Logout is local retirement or, where the provider offers one, a remote
 revocation. Where no remote revoke exists, logout retires the local credential
@@ -1218,6 +1298,14 @@ sent to a public host it names. Unlike a provider's hosted fetch that only
 fetches URLs already present in the conversation, `fetch_url` fetches any
 public https URL. A template that must not leak workspace content does not
 list `fetch_url`.
+
+MCP OAuth discovery fetches the HTTPS URLs a configured server's metadata
+names without a destination address policy, the same operator-trust stance as
+the server URL itself. Those requests carry no credential except the token,
+device and revocation requests, which go only to the endpoints of the issuer
+the checks in §1 accepted (a pinned issuer when a client secret is
+configured). A server that names a private HTTPS address can make a login
+fetch it; the response must parse as the expected metadata to have any effect.
 
 Evidence follows one ladder: unit, then scripted fault, then offline protocol
 and store integration, then explicitly authorized live. A claim about a
