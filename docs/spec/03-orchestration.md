@@ -38,7 +38,7 @@ Templates MUST NOT be authored through `plak config set`, which refuses
 | --- | --- |
 | `account`, `model`, `effort` | the bind tuple; never shown on the card unless `show_model` |
 | `fast_mode` | Codex-only fast lane (provider-native `priority` processing tier) |
-| `composition` | catalog selection for this node (`direct`, `plakous-default`, `native-ptc`, `js-ptc`, `py-ptc`, or the experimental root-only `py-harness-sdk`, which a working set or `spawns` list may not name in Gate A) |
+| `composition` | catalog selection for this node (`direct`, `plakous-default`, `native-ptc`, `js-ptc`, `py-ptc`, or the experimental `py-harness-sdk`) |
 | `protocol` | OpenRouter-only wire selection |
 | `description` | **required** for a template named in the working set or in any `spawns` list: the card text the spawner routes on |
 | `access` | edit ceiling, default `full`; `read-execute` omits file-edit tools; a higher ask is clipped, not refused |
@@ -59,6 +59,13 @@ The main `config.toml` holds only `[root] agent` and
 load errors** that say where the field moved. Every name a `spawns` list
 carries MUST be a template file; an unknown name refuses the load, naming the
 template and the missing name.
+
+**A spawnable template presents a result channel.** A child reports through
+`submit_result` or its composition's equivalent, so a template whose
+composition presents no result channel cannot be a child: naming it in the
+working set or in any `spawns` list refuses the load (spec 07 §5). Every
+composition presents one except `py-harness-sdk` before its `agents`
+namespace exists (spec 01 §9.8.2).
 
 **An empty working set is an ordinary single-agent root.** `subagents = true`
 still omits `spawn_agent` until the working set names a template, and such a

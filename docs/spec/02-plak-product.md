@@ -5310,22 +5310,23 @@ do not change.
   may be called inside Python cells, just as in JavaScript.
 
 - **`py-harness-sdk`** (experimental) — the neutral Python SDK on the Monty
-  worker (spec 01 §9.8). The provider-visible set is exactly `exec`, which
-  takes a `code` string. There is no wait tool and no cell id. Each cell runs
-  to completion under a 300-second wall cap, starts with fresh globals, and is
-  type-checked before it runs. Five namespaces are pre-imported: `ctx`, `fs`,
-  `proc`, `state` and `plan`, with sixteen functions. Optional tools become
-  the namespaces `web`, `x`, `image` and `mcp.<server>`. The `exec`
-  description carries the generated `.pyi` stubs, which are also the type
-  checker's input. The stubs list `fs.Patch` first on Codex and OpenAI API
-  routes and `fs.Replace` first elsewhere. Under `access = "read-execute"`
-  the `fs` namespace is absent. In Gate A a `py-harness-sdk` node is a root
-  or single agent only: it compiles no topology tools, and a template on it
-  cannot be spawned (chapter 07 §4). Its base instruction, which replaces the
+  worker (spec 01 §9.8). The provider-visible set is exactly `run_py`, which
+  takes a `code` string. There is no wait tool and no cell id. A cell starts
+  with fresh globals, is type-checked before it runs, and has a 300-second
+  foreground budget. Five namespaces are pre-bound: `ctx`, `fs`, `proc`,
+  `state` and `plan`, with sixteen async I/O functions and plain-data
+  constructors. Optional tools become the namespaces `web`, `x`, `image` and
+  `mcp.<server>`. The `run_py` description carries the generated `.pyi`
+  stubs, which are also the type checker's input. The stubs list `fs.Patch`
+  first on Codex and OpenAI API routes and `fs.Replace` first elsewhere.
+  Under `access = "read-execute"` the `fs` namespace is absent. Until its
+  `agents` namespace ships, a `py-harness-sdk` node presents no result
+  channel: it compiles no topology tools and a template on it cannot be
+  spawned (chapter 03 §1). Its Gate A base instruction, which replaces the
   family base, is:
 
   ```text
-  You work by writing Python. Your only tool is exec, which runs one cell against this workspace's SDK and returns what the cell printed and its last expression. Each cell starts with fresh globals; only what you save with state.put survives. Use Python for loops, filtering and arithmetic over exact results; print only what you need to read. Cells are type-checked against the SDK before running; a type error runs nothing. A cell has a 300-second limit: start long commands with proc.start and end your turn; you are woken when a job finishes or the user writes. Never poll. Cells cannot open files, read the environment or reach the network except through the SDK. Processes run with the user's full authority and are not sandboxed.
+  You work by writing Python. Your only tool is run_py, which runs one cell against this workspace's SDK and returns what the cell printed and its last expression. Each cell starts with fresh globals; only what you save with state.put survives. SDK functions that do I/O are async: await one call, or asyncio.gather several. Use Python for loops, filtering and arithmetic over exact results; print only what you need to read. Cells are type-checked against the SDK before running; a type error runs nothing. Keep each cell under 300 seconds: start long commands with proc.start and end your turn; you are woken when a job finishes or the user writes. Never poll. Cells cannot open files, read the environment or reach the network except through the SDK. Processes run with the user's full authority and are not sandboxed.
   ```
 
   Where `PromptHostFacts.host_wakes` is false, the clause from "you are
@@ -5334,7 +5335,10 @@ do not change.
   result.` The base carries the job-completion sentence itself, so this
   composition does not earn the process wake paragraph. It earns the
   untrusted-data paragraph whenever an `mcp`, `web` or `x` namespace is
-  presented.
+  presented. Later layers only add sentences (spec 01 §9.8.1): Gate B adds
+  `A cell still running at 300 seconds continues in the background as a job
+  when a slot is free.` after the 300-second sentence, and names `a child
+  reports` among the wake sources where the node can spawn.
 
 All three cell harnesses tell the model that if the user supplies JavaScript or
 Python, it calls the cell tool with that source rather than echoing it as
@@ -5655,6 +5659,11 @@ The honesty clauses are the governing law of the whole surface:
    endpoint supplied them — a non-Ready vertical is never painted as connected,
    and the UI does not invent a meter bar;
 4. explicit unknown or unavailable values otherwise.
+
+A turn on the experimental `py-harness-sdk` composition also shows its
+helper requests (spec 01 §9.8.7) beside its model rounds: how many were made,
+how many reported usage, and the usage they reported, from the same durable
+turn aggregate. Their cost follows the same honesty rule.
 
 Terminal presentation takes its prepared-input peak only from the durable
 turn aggregate. A streamed-only peak is not carried across the drive/projector

@@ -373,21 +373,21 @@ Cross-field rules, all checked at load and again before any save:
 - `protocol` other than `auto` requires `account = "openrouter"`.
 - `composition = "native-ptc"` selects the vertical's own programmatic tool calling system (spec 02 §6.5); today only Codex Code Mode is enrolled, on Codex `CodeModeOnly` rows and OpenAI API models enrolled as `CodeModeOnly`, and other verticals have none enrolled. It is refused for `openrouter`, `anthropic` and `xai-api`; on `openai` it is valid only for a model the API enrollment table marks `CodeModeOnly` (spec 02 §3.1), checked at load. On a subscription account it is checked at bind.
 - `composition = "py-harness-sdk"` selects the experimental neutral Python
-  SDK on every account (spec 02 §6.5, spec 01 §9.8): one `exec` tool over a
+  SDK on every account (spec 02 §6.5, spec 01 §9.8): one `run_py` tool over a
   typed SDK. `plakous-default` never selects it. Under `access =
   "read-execute"` its `fs` namespace is absent from the stubs and the cell
   runtime, and the template's `tools` appear as the SDK namespaces `web`,
   `x`, `image` and `mcp.<id>` instead of tools. The §4 field table gains this
   value in the same change as the code's template field table, which a test
-  holds equal to it. It is experimental and root-only: the SDK
-  reserves its `agents` namespace for a later gate, so a node on it compiles
-  no topology tools and cannot report to a parent. A template that selects it
-  and is named in `[roster] working_set` or in any template's `spawns` list
-  is refused at load with the named error in §5. As a root it
-  leaves the working set unused. Its limits are fixed (spec 01 §9.8), not
-  keys: `[jobs] max_runtime_hours` caps `proc.start` jobs, while
-  `[jobs] foreground_seconds` does not apply, because `proc.run` and
-  `proc.shell` take their own `timeout_s`.
+  holds equal to it. A template is spawnable only when its composition
+  presents a result channel (spec 03 §1); until the SDK's `agents` namespace
+  ships (spec 01 §9.8.9), `py-harness-sdk` presents none, so a template that
+  selects it and is named in `[roster] working_set` or in any template's
+  `spawns` list is refused at load with the named error in §5. As a root it
+  compiles no topology tools and leaves the working set unused. Its limits
+  are fixed (spec 01 §9.8.6), not keys: `[jobs] max_runtime_hours` caps
+  `proc.start` jobs, while `[jobs] foreground_seconds` does not apply,
+  because `proc.run` and `proc.shell` take their own `timeout_s`.
 - Direct API accounts require an enrolled model and an explicit effort on that model's published ladder (`plak models <account>`); the provider route fixes their wire protocol.
 - `max_turns` must be 1 or more.
 - `tools` entries are parsed in order: a name outside the closed set, a
@@ -429,7 +429,7 @@ and a template message is prefixed `template <name>: `.
 | unknown template key | `template <name>: unknown key <key>` |
 | template `tools` written as the old string ceiling | `template <name>: tools is now a list of tool names; the edit ceiling moved to access` |
 | template `access` outside its set | `template <name>: access must be full\|read-execute` |
-| template on `py-harness-sdk` named in `working_set` or a `spawns` list | `template <name>: py-harness-sdk cannot run as a child yet; remove it from working_set and spawns lists` |
+| template whose composition presents no result channel, named in `working_set` or a `spawns` list | `template <name>: composition <composition> presents no result channel, so it cannot be spawned; remove it from working_set and spawns lists` |
 | template `tools` that is not an array of strings | `template <name>: tools must be an array of tool names` |
 | template `tools` entry refused by the grammar | `template <name>: tools: ` followed by `unknown tool "<x>"; expected one of …`, `tool "<x>" is listed twice`, `tool "<x>" is already included by mcp:<id>; list one or the other`, or the invalid server-id / tool-name sentence |
 | `mcp:<id>` with no table | `template <name>: tools names mcp:<id>, and config.toml has no [mcp_servers.<id>]` |

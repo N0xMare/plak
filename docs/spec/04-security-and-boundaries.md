@@ -150,7 +150,14 @@ untrusted source. A named-state value written by such a cell keeps a taint
 bit that frames any later cell reading it. Named state is stored inside
 `runtime.sqlite3` with the same at-rest posture as checkpoints. It is bounded
 at 16 MiB per agent and never leaves the runtime store through export or
-carry.
+carry. An SDK id (`Ref`, `Image`, `proc.Job`) is a capability only together
+with the host table that issued it to that agent: a forged id, another
+agent's id and an unretained id fail with the same text, so a refusal does
+not reveal which. A `Ref` reads only a file the service issued, through the
+issued-path admission of chapter 01 §8.5; from Gate C, after a reopen, only
+an indexed file whose length and SHA-256 still match. From Gate B a cell
+can continue in the background after its turn ends, with the same authority
+as a promoted process and the same stop controls.
 
 What an MCP server returns is untrusted data. Plakous treats a server as an
 unreviewed peer, not as policy: its tool annotations (`readOnlyHint` and the
@@ -922,6 +929,11 @@ The wrappers are opt-in per template; no shipped preset enables them.
 session's route and key, never resent once it may have reached the provider,
 and never replayed after a crash; it is opt-in per template and no shipped
 preset enables it.
+Inside a `py-harness-sdk` cell these calls are helper requests: the
+nested-call choke point reserves each call's declared maximum against a
+fixed budget of 32 helper requests per agent turn before it dispatches, and
+never refunds a request that may have reached the provider (chapter 01
+§9.8.7). The budget bounds spend; it grants none.
 
 That is a local defense against restoring the authority root alone. A malicious
 same-uid writer, and a coherent restore of the witness together with the whole
@@ -1164,9 +1176,16 @@ The worker holds no host authority. Only the local subprocess transport is
 configured; `monty-pool`'s remote WebSocket transport is never used, and no
 mounts or working directory are sent (`os.getcwd()` reports the virtual `/`).
 Every OS call the interpreter routes to the host is refused, except that
-`py-harness-sdk` answers the `import` and `import_stubs` calls for its own
-SDK namespaces with host-generated module values and stubs (chapter 01 §9.8);
-an import of any other name is still `ModuleNotFoundError`. Every other call is
+`py-harness-sdk` answers one import, of its private `_sdk_host` module, and
+only while its fixed bootstrap program runs (chapter 01 §9.8.2); after the
+bootstrap, an import of that or any other name is still
+`ModuleNotFoundError`. The SDK's host functions are its only route out of
+the worker, and each call is validated and admitted host-side whether a cell
+reached it through the bootstrap's wrappers or not. From Gate B a suspended
+SDK cell may be serialized and restored into a fresh worker (chapter 01
+§9.8.9); a snapshot is restored only from the session's own runtime store
+after its content address verifies, because Monty's restore is not
+authentication. Every other call is
 refused, so the cell raises the call's own no-handler exception: filesystem paths and `open`
 (`PermissionError`), `os.getenv` and `os.environ`, `os.urandom`, and
 `time.sleep` and `asyncio.sleep`, which are configured to suspend to the host

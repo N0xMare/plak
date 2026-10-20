@@ -2220,24 +2220,33 @@ not move library evidence out of §3.1.
 
 The experimental `py-harness-sdk` composition (chapter 01 §9.8) carries
 offline evidence of its own, against a real `monty` worker and
-deterministic in-process tool executors. The Gate A acceptance test is a
-scripted model driving a real worker through `exec` cells end to end: a read,
-an edit with a revision precondition, a process run, a named-state write, and
-a `proc.start` job whose completion wakes the idle root. Around it, offline
-tests pin:
+deterministic in-process tool executors. Each layer's evidence is added to
+the earlier layers' evidence, which keeps passing unchanged. The Gate A
+acceptance test is a scripted model driving a real worker through `run_py`
+cells end to end: a read, an edit with a revision precondition, a process
+run, a gathered pair of calls, a named-state write, and a `proc.start` job
+whose completion wakes the idle root. Around it, offline tests pin:
 
-- fresh globals in every cell;
+- fresh globals in every cell, and that the bootstrap's private import is
+  refused after the bootstrap;
 - exact round trips of every SDK value through the codec;
 - that `fs` is absent under the read-execute ceiling and admission still
   refuses file writes;
-- that forged, foreign and expired references fail identically;
-- each limit in §9.8.6 at its boundary;
+- that forged, foreign and unretained references fail identically;
+- each limit of chapter 01 §9.8.6 on both sides of its boundary, including
+  the helper-spend reservation and its settlement;
 - that a type error makes no SDK call and no effect;
 - that named state survives a failed cell, compaction and reopen, and is
   absent from the export;
 - the untrusted banner, including its taint through state;
 - that the descriptors and prompt pins of `direct`, `native-ptc`, `js-ptc`
   and `py-ptc` are unchanged.
+
+Gate B adds a cell that moves to the background and wakes the agent with its
+notice, a restore after a killed host that delivers each pending call's
+ledger verdict without replay, a parked coordination decision, and an SDK
+child that reports through `agents.submit`. Gate C adds a reference read
+after reopen and its refusal once the file changes or is evicted.
 
 Child-observation regressions exercise the eight-subscription activity bound,
 live counter replacement and terminal clearing, canonical prefix before the
