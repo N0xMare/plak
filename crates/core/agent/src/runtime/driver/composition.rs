@@ -583,7 +583,10 @@ impl Driver {
                 state,
             ))
             .await
-        } else if call.exposed_name().as_str() == state.descriptor().wait_name.as_ref() {
+        } else if state
+            .descriptor()
+            .is_wait_name(call.exposed_name().as_str())
+        {
             Box::pin(self.drive_local_composition_wait(
                 command,
                 attempt_id,
@@ -1407,7 +1410,7 @@ impl Driver {
             let tool_name = plakous_model::ToolName::new(nested.tool_name.clone())
                 .map_err(|_| AgentError::new(AgentErrorKind::InvalidInput, "nested tool name is invalid"))?;
             if tool_name.as_str() == state.descriptor().execute_name.as_ref()
-                || tool_name.as_str() == state.descriptor().wait_name.as_ref()
+                || state.descriptor().is_wait_name(tool_name.as_str())
             {
                 return Err(AgentError::new(
                     AgentErrorKind::InvalidInput,
@@ -1933,7 +1936,7 @@ impl Driver {
             AgentError::new(AgentErrorKind::InvalidInput, "nested tool name is invalid")
         })?;
         if tool_name.as_str() == state.descriptor().execute_name.as_ref()
-            || tool_name.as_str() == state.descriptor().wait_name.as_ref()
+            || state.descriptor().is_wait_name(tool_name.as_str())
         {
             return Err(AgentError::new(
                 AgentErrorKind::InvalidInput,

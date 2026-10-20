@@ -227,7 +227,7 @@ pub(super) fn cancel_cell_python_descriptor(
             .into(),
         identity: exact.identity(),
         execute_name: "exec_py".into(),
-        wait_name: "wait_py".into(),
+        wait_name: Some("wait_py".into()),
         marker_executor: ToolExecutorId::new(
             plakous_tools::PYTHON_PTC_DRIVER_MARKER_EXECUTOR_ID_V1,
         )?,
@@ -252,7 +252,7 @@ pub(super) fn cancel_cell_descriptor(
             .into(),
         identity: exact.identity(),
         execute_name: "exec_js".into(),
-        wait_name: "wait_js".into(),
+        wait_name: Some("wait_js".into()),
         marker_executor: ToolExecutorId::new(
             "plakous.product-javascript-composition.driver-marker.v1",
         )?,

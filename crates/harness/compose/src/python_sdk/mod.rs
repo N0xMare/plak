@@ -110,6 +110,26 @@ impl PythonHarnessSdkV1 {
         register_python_harness_sdk_markers_into(registry)
     }
 
+    /// Registers the SDK-only canonical capabilities — `edit_files`,
+    /// `list_entries` and `process_session_exec` on `process` — and the
+    /// `run_py` marker. The standard coding packs registered over the same
+    /// `process` supply every other nested member. Registration grants no
+    /// exposure: the access ceiling chooses the nested catalog.
+    ///
+    /// # Errors
+    ///
+    /// Returns the registry's normal invalid-definition, collision, or
+    /// capacity error.
+    pub fn register_tools_into(
+        registry: &mut ToolRegistryBuilder,
+        process: Arc<plakous_tool_process::ProcessSessionTools>,
+    ) -> Result<(), ToolRuntimeError> {
+        registry.register(plakous_tool_files::edit_files_registration()?)?;
+        registry.register(plakous_tool_search::list_entries_registration()?)?;
+        registry.register(process.exec_registration()?)?;
+        Self::register_markers_into(registry)
+    }
+
     /// The canonical nested names the SDK calls under one access ceiling, in
     /// catalog order. Each must be registered nested-eligible.
     ///

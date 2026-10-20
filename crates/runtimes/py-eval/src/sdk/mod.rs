@@ -17,7 +17,6 @@ mod process;
 mod render;
 mod scope;
 mod session;
-mod state;
 mod values;
 
 #[cfg(test)]
@@ -30,6 +29,7 @@ use plakous_agent::internal::{
     LocalCompositionFuture, LocalCompositionIntegration, LocalCompositionLifecycle,
     LocalCompositionResultProjection, LocalCompositionRuntimeContract,
     LocalCompositionSessionBundle, LocalCompositionShutdownResult, LocalCompositionWaitInput,
+    NamedStatePort,
 };
 use plakous_model::CompiledProviderConfiguration;
 use plakous_tools::{
@@ -38,10 +38,10 @@ use plakous_tools::{
 };
 use serde_json::Value;
 
-pub use state::{
-    InMemoryNamedState, NamedStateEntry, NamedStateError, NamedStateFuture, NamedStateLimits,
-    NamedStatePort, NamedStateSlot, validate_state_name,
-};
+/// Identity of this engine's delivery contract: its host functions, value
+/// conversion, limits enforcement and observation rendering. A change to any
+/// of them revises it, and with it the engine contract a session records.
+pub const HARNESS_SDK_ENGINE_REVISION: &str = "plakous.monty-python-harness-sdk-engine.v1";
 
 /// The compiled program one SDK evaluator runs: the harness compiler's stubs,
 /// bootstrap, `_sdk_host` function names and limits.

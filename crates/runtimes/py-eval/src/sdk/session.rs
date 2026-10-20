@@ -23,6 +23,7 @@ use plakous_agent::internal::{
     LocalCompositionSession, LocalCompositionSessionBundle, LocalCompositionSessionFuture,
     LocalCompositionSessionLoss, LocalCompositionShutdownResult, LocalCompositionStartedCell,
     LocalCompositionTerminateResult, LocalCompositionWaitOutcome, LocalCompositionWaitRequest,
+    NamedStatePort,
 };
 use tokio::sync::{Mutex, mpsc, watch};
 
@@ -32,7 +33,6 @@ use super::{
     evidence::EvidenceTable,
     render::{Observation, Terminal, render},
     scope::{CellScope, StopReason},
-    state::NamedStatePort,
 };
 use crate::AbortOnDropJoinHandle;
 

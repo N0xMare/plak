@@ -26,8 +26,9 @@ use plakous_tools::{
     CODEX_NATIVE_CODE_MODE_ENGINE_REVISION_V1, CODEX_NATIVE_CODE_MODE_RELEASE_V1,
     PRODUCT_JAVASCRIPT_DRIVER_MARKER_EXECUTOR_ID_V1, PRODUCT_JAVASCRIPT_PROFILE_REVISION_V1,
     PRODUCT_JAVASCRIPT_RUN_NAME_V1, PRODUCT_JAVASCRIPT_WAIT_NAME_V1,
-    PYTHON_PTC_DRIVER_MARKER_EXECUTOR_ID_V1, product_javascript_run_schema,
-    product_javascript_wait_schema, register_product_javascript_markers_into,
+    PYTHON_HARNESS_SDK_DRIVER_MARKER_EXECUTOR_ID_V1, PYTHON_PTC_DRIVER_MARKER_EXECUTOR_ID_V1,
+    product_javascript_run_schema, product_javascript_wait_schema,
+    register_product_javascript_markers_into,
 };
 use plakous_tools::{
     CanonicalProcessOperationV2, FrozenToolRegistry, NestedToolEligibility, PortableToolSchemaV2,
@@ -322,6 +323,7 @@ fn nested_projection(
             PRODUCT_JAVASCRIPT_DRIVER_MARKER_EXECUTOR_ID_V1
                 | CODEX_NATIVE_CODE_MODE_DRIVER_MARKER_EXECUTOR_ID_V1
                 | PYTHON_PTC_DRIVER_MARKER_EXECUTOR_ID_V1
+                | PYTHON_HARNESS_SDK_DRIVER_MARKER_EXECUTOR_ID_V1
         ) {
             return Err(registration_error(
                 "composition outer markers cannot enter a nested catalog",

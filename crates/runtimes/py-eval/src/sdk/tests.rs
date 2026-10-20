@@ -18,10 +18,10 @@ use std::{
 };
 
 use plakous_agent::internal::{
-    LocalCompositionContentItem, LocalCompositionDescriptor, LocalCompositionEvent,
-    LocalCompositionExecuteRequest, LocalCompositionIntegration, LocalCompositionNestedDelivery,
-    LocalCompositionNestedResponder, LocalCompositionResponse, LocalCompositionSession,
-    LocalCompositionStartAdmission,
+    InMemoryNamedState, LocalCompositionContentItem, LocalCompositionDescriptor,
+    LocalCompositionEvent, LocalCompositionExecuteRequest, LocalCompositionIntegration,
+    LocalCompositionNestedDelivery, LocalCompositionNestedResponder, LocalCompositionResponse,
+    LocalCompositionSession, LocalCompositionStartAdmission, NamedStateLimits, NamedStatePort,
 };
 use plakous_compose::{PythonHarnessSdkAccessV1, PythonHarnessSdkV1};
 use plakous_model::{
@@ -39,8 +39,8 @@ use plakous_tools::{
 use serde_json::{Value, json};
 
 use super::{
-    HarnessSdkDescriptorAuthority, HarnessSdkIntegration, HarnessSdkProgram, InMemoryNamedState,
-    NamedStateLimits, NamedStatePort, evidence::EvidenceTable,
+    HarnessSdkDescriptorAuthority, HarnessSdkIntegration, HarnessSdkProgram,
+    evidence::EvidenceTable,
 };
 
 // --- program --------------------------------------------------------------

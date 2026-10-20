@@ -14,8 +14,14 @@
     reason = "the narrow unsupported seam is consumed only by official sibling composition"
 )]
 
+mod named_state;
+
 use std::{future::Future, pin::Pin, sync::Arc};
 
+pub use named_state::{
+    InMemoryNamedState, NamedStateEntry, NamedStateError, NamedStateFuture, NamedStateLimits,
+    NamedStatePort, NamedStateSlot, validate_state_name,
+};
 use plakous_model::{CompiledProviderConfiguration, Digest};
 use plakous_tools::{
     FrozenToolRegistry, ProviderModelProjectionIdentityV2, ToolExecutorId, ToolProjectionMap,
@@ -75,8 +81,17 @@ pub struct LocalCompositionDescriptor {
     pub nested_tools: Arc<[LocalCompositionToolDefinition]>,
     pub identity: Digest,
     pub execute_name: Arc<str>,
-    pub wait_name: Arc<str>,
+    /// The wait marker of a yielding profile; `None` for a profile whose
+    /// cells always run to a terminal inside the execute call.
+    pub wait_name: Option<Arc<str>>,
     pub marker_executor: ToolExecutorId,
+}
+
+impl LocalCompositionDescriptor {
+    /// Whether `name` is this profile's wait marker.
+    pub fn is_wait_name(&self, name: &str) -> bool {
+        self.wait_name.as_deref() == Some(name)
+    }
 }
 
 #[derive(Clone, Debug)]

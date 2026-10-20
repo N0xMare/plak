@@ -9,13 +9,13 @@ use std::sync::{
 
 use plakous_agent::internal::{
     LocalCompositionEvent, LocalCompositionFuture, LocalCompositionNestedCall,
-    LocalCompositionNestedDelivery, LocalCompositionNestedResponder,
+    LocalCompositionNestedDelivery, LocalCompositionNestedResponder, NamedStatePort,
 };
 use plakous_tools::{ExecutionValue, ImageValue, PythonHarnessSdkLimitsV1};
 use serde_json::Value;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch};
 
-use super::{evidence::EvidenceTable, state::NamedStatePort};
+use super::evidence::EvidenceTable;
 
 /// A limit that stops a cell.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

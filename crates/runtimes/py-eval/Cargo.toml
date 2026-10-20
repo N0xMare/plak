@@ -30,7 +30,6 @@ plakous-js-eval.workspace = true
 plakous-model.workspace = true
 plakous-tools.workspace = true
 serde_json.workspace = true
-serde_json_canonicalizer.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 
 [dev-dependencies]

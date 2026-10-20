@@ -1,8 +1,10 @@
 //! Named state: the only memory that outlives a cell (spec 01 §9.8.4).
 //!
-//! The port is the only access path. The in-memory implementation enforces
-//! the name rule and the size limits before a write; a store-backed
-//! implementation adds durable write-through behind the same trait.
+//! Named state is host-owned memory of one agent incarnation, so the port
+//! lives beside the local-composition seam rather than in an engine. The port
+//! is the only access path. The in-memory implementation enforces the name
+//! rule and the size limits before a write; a store-backed implementation adds
+//! durable write-through behind the same trait.
 
 use std::{collections::BTreeMap, future::Future, pin::Pin, sync::Mutex};
 

@@ -289,7 +289,7 @@ pub(super) fn lineage_composition_descriptor(
         nested_tools: lineage_nested_definitions(scenario).into(),
         identity,
         execute_name: class.execute_name().into(),
-        wait_name: class.wait_name().into(),
+        wait_name: Some(class.wait_name().into()),
         marker_executor: ToolExecutorId::new(class.marker_executor_id())?,
     })
 }

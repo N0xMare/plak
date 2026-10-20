@@ -269,13 +269,14 @@ impl ToolExecutorBindingsBuilder {
 fn exact_composition_marker_registrations() -> Result<Vec<RegistrationWireV1>, ToolDescriptorError>
 {
     let mut registrations = Vec::new();
-    // The durable identity of the three markers lives in `composition_markers`
+    // The durable identity of the markers lives in `composition_markers`
     // beside the rest of the descriptor vocabulary, so this authority never
     // reaches the crates that compile the presentations they belong to.
     for register in [
         crate::composition_markers::register_codex_code_mode_markers_into,
         crate::composition_markers::register_product_javascript_markers_into,
         crate::composition_markers::register_python_ptc_markers_into,
+        crate::composition_markers::register_python_harness_sdk_markers_into,
     ] {
         let mut registry = ToolRegistryBuilder::default();
         register(&mut registry).map_err(invalid_runtime)?;
@@ -562,6 +563,7 @@ impl FrozenToolRegistryDescriptor {
                 crate::composition_markers::CODEX_NATIVE_CODE_MODE_DRIVER_MARKER_EXECUTOR_ID_V1
                     | crate::composition_markers::PRODUCT_JAVASCRIPT_DRIVER_MARKER_EXECUTOR_ID_V1
                     | crate::composition_markers::PYTHON_PTC_DRIVER_MARKER_EXECUTOR_ID_V1
+                    | crate::composition_markers::PYTHON_HARNESS_SDK_DRIVER_MARKER_EXECUTOR_ID_V1
             ) {
                 if !exact_markers.contains(registration) {
                     return Err(ToolDescriptorError::InvalidSemantics);
@@ -1806,6 +1808,7 @@ mod tests {
             FrozenToolRegistryDescriptor::capture(&ToolRegistryBuilder::default().freeze())?;
         let mut markers = ToolRegistryBuilder::default();
         crate::composition_markers::register_product_javascript_markers_into(&mut markers)?;
+        crate::composition_markers::register_python_harness_sdk_markers_into(&mut markers)?;
         let markers = FrozenToolRegistryDescriptor::capture(&markers.freeze())?;
         assert_eq!(
             empty.canonical_authority_identity()?,

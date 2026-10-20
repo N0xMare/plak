@@ -514,7 +514,7 @@ pub(super) fn run_driver_scheduler_scenario(scenario: DriverSchedulerScenario) -
                 .into(),
             identity: exact.identity(),
             execute_name: "exec_js".into(),
-            wait_name: "wait_js".into(),
+            wait_name: Some("wait_js".into()),
             marker_executor: ToolExecutorId::new(
                 "plakous.product-javascript-composition.driver-marker.v1",
             )?,

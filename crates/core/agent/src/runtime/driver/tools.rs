@@ -1240,7 +1240,9 @@ impl Driver {
             });
         }
         if self.local_composition.as_ref().is_some_and(|state| {
-            call.exposed_name().as_str() == state.descriptor().wait_name.as_ref()
+            state
+                .descriptor()
+                .is_wait_name(call.exposed_name().as_str())
                 && state.evaluation_operation().is_none()
         }) {
             // Asking what a cell is doing when none is running is a question

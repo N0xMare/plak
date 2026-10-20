@@ -28,6 +28,7 @@ plakous-model.workspace = true
 plakous-tools.workspace = true
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json.workspace = true
+serde_json_canonicalizer.workspace = true
 thiserror.workspace = true
 time = { version = "0.3", default-features = false, features = ["formatting"] }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }

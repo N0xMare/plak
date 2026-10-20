@@ -263,7 +263,7 @@ pub(super) fn neutral_composition_descriptor(
         nested_tools: nested_tools.into(),
         identity: exact.identity(),
         execute_name: "exec".into(),
-        wait_name: "wait".into(),
+        wait_name: Some("wait".into()),
         marker_executor: ToolExecutorId::new("plakous.codex-code-mode.driver-marker.v1")?,
     })
 }

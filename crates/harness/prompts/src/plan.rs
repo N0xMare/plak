@@ -131,6 +131,34 @@ pub fn target_instructions(
     .assemble()
 }
 
+/// The complete first-turn instruction string for a `py-harness-sdk` node.
+///
+/// The experimental SDK composition is selected beside [`target_instructions`]
+/// rather than through [`Composition`]: its base replaces the family base in
+/// the same order, but it names no nested catalog, because the `run_py` stubs
+/// carry the SDK. `host_wakes` selects the base's job-completion clause. The
+/// earned paragraphs are the surface's; a surface of canonical SDK members
+/// earns no process wait or wake paragraph, since the base states it.
+#[must_use]
+pub fn python_harness_sdk_instructions(
+    surface: &CompiledSurface,
+    host_wakes: bool,
+    workspace_root: &Path,
+    cwd: &Path,
+    selected_model: &str,
+    selected_effort: Option<&str>,
+) -> String {
+    PromptPlan::new(
+        crate::ptc::python_harness_sdk_base(host_wakes),
+        workspace_root,
+        cwd,
+        selected_model,
+        selected_effort,
+        surface.contributions().to_vec(),
+    )
+    .assemble()
+}
+
 const CATALOG_BOUND_EDIT_SENTENCES: &[(&[&str], &str)] = &[
     (
         &["apply_patch"],
@@ -352,6 +380,34 @@ mod tests {
                 Some("high"),
             );
             assert!(assembled.starts_with("family base\n\nWorkspace root: /repo"));
+        }
+    }
+
+    #[test]
+    fn the_python_harness_sdk_base_replaces_the_family_base_in_plan_order() {
+        let surface = surface(CodingPresentation::Codex, &[]);
+        for host_wakes in [true, false] {
+            let assembled = python_harness_sdk_instructions(
+                &surface,
+                host_wakes,
+                Path::new("/repo"),
+                Path::new("/repo/src"),
+                "gpt-5",
+                Some("high"),
+            );
+            let base = crate::ptc::python_harness_sdk_base(host_wakes);
+            let expected = PromptPlan::new(
+                base,
+                Path::new("/repo"),
+                Path::new("/repo/src"),
+                "gpt-5",
+                Some("high"),
+                surface.contributions().to_vec(),
+            )
+            .assemble();
+            assert_eq!(assembled, expected);
+            assert!(assembled.starts_with(&format!("{base}\n\nWorkspace root: /repo")));
+            assert_eq!(assembled.matches("Workspace root:").count(), 1);
         }
     }
 

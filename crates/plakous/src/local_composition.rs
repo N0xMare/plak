@@ -44,7 +44,9 @@ use plakous_compose::{
     ProductJavaScriptCompositionDescriptorV1, ProductJavaScriptCompositionV1,
 };
 #[cfg(feature = "composition-python")]
-use plakous_compose::{PythonPtcDescriptorV1, PythonPtcLimitsV1, PythonPtcV1};
+use plakous_compose::{
+    PythonHarnessSdkDescriptorV1, PythonPtcDescriptorV1, PythonPtcLimitsV1, PythonPtcV1,
+};
 use plakous_model::{
     CompiledProviderConfiguration, Digest, DigestDomain, EffectiveProviderConfigurationId,
     IntegrationClass, SelectedProviderConfigurationId, ToolExecutionDisposition, ToolName,
@@ -67,6 +69,9 @@ const PYTHON_DEFAULT_YIELD_TIME_MS: u64 = 10_000;
 /// Maximum UTF-8 source bytes in one cell.
 #[cfg(feature = "composition-python")]
 const PYTHON_SOURCE_MAX_BYTES: usize = 256 * 1024;
+
+#[cfg(feature = "composition-python")]
+pub(crate) mod python_sdk;
 
 /// The source-language semantics owned by one exact local-composition profile.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -143,6 +148,43 @@ impl ProductExtensionEvidence {
             descriptor.catalog_identity(),
             descriptor.presentation_identity(),
             limits,
+            product_issuer,
+            qualification_receipt,
+            configuration,
+        )
+    }
+
+    /// Derives exact product-extension evidence for `PythonHarnessSdkV1`.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a foreign profile, target, artifact, or provider configuration.
+    #[cfg(feature = "composition-python")]
+    pub fn python_harness_sdk_v1(
+        profile: &LocalCompositionProfile,
+        artifact: &LocalCompositionEngineArtifact,
+        product_issuer: Digest,
+        qualification_receipt: Digest,
+        configuration: &CompiledProviderConfiguration,
+    ) -> Result<Self, AgentError> {
+        let LocalCompositionProfileKind::PythonHarnessSdkV1(descriptor) = &profile.kind else {
+            return Err(invalid(
+                "Python SDK extension evidence requires PythonHarnessSdkV1",
+            ));
+        };
+        let target = descriptor.outer_projection().target().integration_class();
+        if configuration.effective().descriptor().integration_class() != target {
+            return Err(invalid(
+                "Python SDK extension evidence disagrees with its admitted target",
+            ));
+        }
+        extension_evidence(
+            target,
+            profile.identity(),
+            artifact,
+            descriptor.catalog_identity(),
+            descriptor.outer_projection().digest(),
+            python_sdk::extension_limits(),
             product_issuer,
             qualification_receipt,
             configuration,
@@ -327,6 +369,8 @@ enum LocalCompositionProfileKind {
     ProductJavaScriptV1(ProductJavaScriptCompositionDescriptorV1),
     #[cfg(feature = "composition-python")]
     PythonPtcV1(PythonPtcDescriptorV1),
+    #[cfg(feature = "composition-python")]
+    PythonHarnessSdkV1(PythonHarnessSdkDescriptorV1),
 }
 
 impl LocalCompositionProfileKind {
@@ -337,7 +381,7 @@ impl LocalCompositionProfileKind {
             Self::CodexNativeLocalCodeModeV1(_) | Self::CodexMinimalLocalCodeModeV1(_) => false,
             Self::ProductJavaScriptV1(_) => true,
             #[cfg(feature = "composition-python")]
-            Self::PythonPtcV1(_) => true,
+            Self::PythonPtcV1(_) | Self::PythonHarnessSdkV1(_) => true,
         }
     }
 }
@@ -402,6 +446,24 @@ impl LocalCompositionProfile {
         })
     }
 
+    /// Selects the experimental neutral Python SDK (`py-harness-sdk`): the
+    /// model sees `run_py` alone, and cells call canonical capabilities
+    /// through the descriptor's typed SDK.
+    ///
+    /// # Errors
+    ///
+    /// Returns an identity error if the pinned SDK engine contract cannot be identified.
+    #[cfg(feature = "composition-python")]
+    pub fn python_harness_sdk_v1(
+        descriptor: &PythonHarnessSdkDescriptorV1,
+    ) -> Result<Self, AgentError> {
+        Ok(Self {
+            kind: LocalCompositionProfileKind::PythonHarnessSdkV1(descriptor.clone()),
+            profile_identity: descriptor.identity(),
+            engine_contract_identity: python_sdk::engine_contract_identity()?,
+        })
+    }
+
     /// Returns this profile's exact semantic identity.
     #[must_use]
     pub const fn identity(&self) -> Digest {
@@ -424,7 +486,10 @@ impl LocalCompositionProfile {
                 LocalCompositionLanguage::JavaScript
             }
             #[cfg(feature = "composition-python")]
-            LocalCompositionProfileKind::PythonPtcV1(_) => LocalCompositionLanguage::Python,
+            LocalCompositionProfileKind::PythonPtcV1(_)
+            | LocalCompositionProfileKind::PythonHarnessSdkV1(_) => {
+                LocalCompositionLanguage::Python
+            }
         }
     }
 }
@@ -486,6 +551,8 @@ enum LocalCompositionEngineArtifactKind {
         path: PathBuf,
         environment_identity: Vec<u8>,
     },
+    /// The digest-pinned `monty` worker. Both Python profiles run on it; the
+    /// artifact's engine contract names which adapter drives it.
     #[cfg(feature = "composition-python")]
     MontyPythonPtcV1 {
         path: PathBuf,
@@ -501,7 +568,28 @@ impl LocalCompositionEngineArtifact {
     /// Fails when the path is not a readable canonical regular file.
     #[cfg(feature = "composition-python")]
     pub fn monty_pool_v1(worker_path: impl Into<PathBuf>) -> Result<Self, AgentError> {
-        let (canonical, _dev, _ino, sha) = file_identity(&worker_path.into())?;
+        Self::monty_pool(&worker_path.into(), monty_engine_contract_identity()?)
+    }
+
+    /// Digest-pinned `monty` worker for the experimental `py-harness-sdk`.
+    ///
+    /// The worker file and its recorded facts are those of
+    /// [`Self::monty_pool_v1`]; the engine contract names the SDK engine.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the path is not a readable canonical regular file.
+    #[cfg(feature = "composition-python")]
+    pub fn monty_pool_harness_sdk_v1(worker_path: impl Into<PathBuf>) -> Result<Self, AgentError> {
+        Self::monty_pool(&worker_path.into(), python_sdk::engine_contract_identity()?)
+    }
+
+    #[cfg(feature = "composition-python")]
+    fn monty_pool(
+        worker_path: &Path,
+        engine_contract_identity: Digest,
+    ) -> Result<Self, AgentError> {
+        let (canonical, _dev, _ino, sha) = file_identity(worker_path)?;
         let environment_identity = [
             b"monty-pool".as_slice(),
             canonical.as_os_str().as_encoded_bytes(),
@@ -531,7 +619,7 @@ impl LocalCompositionEngineArtifact {
                 environment_identity,
             },
             artifact_identity,
-            engine_contract_identity: monty_engine_contract_identity()?,
+            engine_contract_identity,
             host_identity,
             containment,
         })
@@ -787,6 +875,23 @@ impl LocalCompositionAttachmentBuilder {
                     "local Python composition requires product-extension evidence",
                 ));
             }
+            #[cfg(feature = "composition-python")]
+            (LocalCompositionProfileKind::PythonHarnessSdkV1(descriptor), Some(evidence)) => {
+                python_sdk::validate_attachment(
+                    &self.profile,
+                    &artifact,
+                    descriptor,
+                    &evidence,
+                    self.presentation_kind,
+                )?;
+                Some(evidence)
+            }
+            #[cfg(feature = "composition-python")]
+            (LocalCompositionProfileKind::PythonHarnessSdkV1(_), None) => {
+                return Err(invalid(
+                    "local Python SDK composition requires product-extension evidence",
+                ));
+            }
         };
         if self.profile.kind.requires_presentation_kind() && self.presentation_kind.is_none() {
             return Err(AgentError::new(
@@ -982,6 +1087,28 @@ pub fn attach_local_composition(
                 presentation_kind,
             )
         }
+        #[cfg(feature = "composition-python")]
+        (
+            LocalCompositionProfileKind::PythonHarnessSdkV1(descriptor),
+            LocalCompositionEngineArtifactKind::MontyPythonPtcV1 {
+                path,
+                environment_identity,
+            },
+            Some(evidence),
+        ) => {
+            let presentation_kind = presentation_kind.ok_or_else(|| {
+                invalid("product Python SDK attachment requires presentation kind")
+            })?;
+            python_sdk::attach(
+                builder,
+                &descriptor,
+                path,
+                environment_identity,
+                attachment_identity,
+                evidence,
+                presentation_kind,
+            )
+        }
         _ => Err(AgentError::new(
             AgentErrorKind::InvalidInput,
             "local composition profile and product evidence lane disagree",
@@ -1093,7 +1220,8 @@ pub(crate) fn restore_stored_artifact(
     } else {
         #[cfg(feature = "composition-python")]
         {
-            LocalCompositionEngineArtifact::monty_pool_v1(&path).map_err(|_| refused())?
+            restore_monty_artifact(&path, &stored.engine_contract_identity)
+                .map_err(|_| refused())?
         }
         #[cfg(not(feature = "composition-python"))]
         {
@@ -1106,6 +1234,21 @@ pub(crate) fn restore_stored_artifact(
         return Err(refused());
     }
     Ok(artifact)
+}
+
+/// Both Python profiles record the same worker facts; the recorded engine
+/// contract selects the adapter.
+#[cfg(feature = "composition-python")]
+fn restore_monty_artifact(
+    path: &Path,
+    engine_contract: &[u8],
+) -> Result<LocalCompositionEngineArtifact, AgentError> {
+    let artifact = LocalCompositionEngineArtifact::monty_pool_v1(path)?;
+    if artifact.engine_contract_identity().identity_bytes() == engine_contract {
+        Ok(artifact)
+    } else {
+        LocalCompositionEngineArtifact::monty_pool_harness_sdk_v1(path)
+    }
 }
 
 fn invalid(message: impl Into<String>) -> AgentError {
@@ -2092,7 +2235,7 @@ pub(crate) fn neutral_descriptor(
         nested_tools: nested_tools.into(),
         identity: exact.identity(),
         execute_name: "exec".into(),
-        wait_name: "wait".into(),
+        wait_name: Some("wait".into()),
         marker_executor: ToolExecutorId::new("plakous.codex-code-mode.driver-marker.v1")
             .map_err(|error| error.to_string())?,
     })
@@ -2116,7 +2259,7 @@ pub(crate) fn neutral_minimal_descriptor(
         nested_tools: nested_tools.into(),
         identity: exact.identity(),
         execute_name: "exec".into(),
-        wait_name: "wait".into(),
+        wait_name: Some("wait".into()),
         marker_executor: ToolExecutorId::new(
             plakous_tools::CODEX_NATIVE_CODE_MODE_DRIVER_MARKER_EXECUTOR_ID_V1,
         )
@@ -2142,7 +2285,7 @@ fn neutral_product_descriptor(
         nested_tools: nested_tools.into(),
         identity: exact.identity(),
         execute_name: PRODUCT_JAVASCRIPT_RUN_NAME_V1.into(),
-        wait_name: PRODUCT_JAVASCRIPT_WAIT_NAME_V1.into(),
+        wait_name: Some(PRODUCT_JAVASCRIPT_WAIT_NAME_V1.into()),
         marker_executor: ToolExecutorId::new(PRODUCT_JAVASCRIPT_DRIVER_MARKER_EXECUTOR_ID_V1)
             .map_err(|error| error.to_string())?,
     })
@@ -2167,7 +2310,7 @@ fn neutral_python_descriptor(
         nested_tools: nested_tools.into(),
         identity: exact.identity(),
         execute_name: PYTHON_PTC_RUN_NAME_V1.into(),
-        wait_name: PYTHON_PTC_WAIT_NAME_V1.into(),
+        wait_name: Some(PYTHON_PTC_WAIT_NAME_V1.into()),
         marker_executor: ToolExecutorId::new(PYTHON_PTC_DRIVER_MARKER_EXECUTOR_ID_V1)
             .map_err(|error| error.to_string())?,
     })
@@ -2571,7 +2714,7 @@ mod shutdown_tests {
         )?;
         let compiled = super::neutral_python_descriptor(&exact)?;
         assert_eq!(compiled.execute_name.as_ref(), "exec_py");
-        assert_eq!(compiled.wait_name.as_ref(), "wait_py");
+        assert_eq!(compiled.wait_name.as_deref(), Some("wait_py"));
         Ok(())
     }
 

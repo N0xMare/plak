@@ -81,6 +81,8 @@ mod debt;
 mod feed;
 #[cfg(feature = "composition-python")]
 mod python;
+#[cfg(all(feature = "composition-python", feature = "sessions-sqlite"))]
+mod python_sdk;
 #[cfg(all(unix, feature = "sessions-sqlite"))]
 mod retention;
 

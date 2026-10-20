@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use monty_types::{ExcType, MontyException, MontyObject};
+use plakous_agent::internal::NamedStateError;
 use plakous_tools::ExecutionValue;
 use serde_json::{Value, json};
 
@@ -13,7 +14,6 @@ use super::{
     evidence::Evidence,
     process,
     scope::{Ack, CellScope, NestedError, NestedResult},
-    state::NamedStateError,
     values::{self, FileFields},
 };
 

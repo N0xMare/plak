@@ -121,8 +121,16 @@ Custom models instead select `ProductJavaScriptCompositionV1` (`exec_js` and
 `ProductExtensionEvidence` with caller issuer and qualification-candidate
 identities. Such a receipt is self-attestation, not successful live qualification.
 `PythonPtcV1` is the explicit Python alternative with its own worker and
-`composition-python` feature. Attach at most one profile/engine; there is no
-language switching or fallback.
+`composition-python` feature. The experimental neutral SDK
+(`py-harness-sdk`) uses the same feature: register the standard coding packs
+and `PythonHarnessSdkV1::register_tools_into` over one `ProcessSessionTools`,
+compile with `PythonHarnessSdkV1::compile` under a
+`PythonHarnessSdkAccessV1` ceiling, then attach
+`LocalCompositionProfile::python_harness_sdk_v1` with
+`LocalCompositionEngineArtifact::monty_pool_harness_sdk_v1` and
+`ProductExtensionEvidence::python_harness_sdk_v1`. The model sees `run_py`
+alone; the configuration must present exactly that marker. Attach at most one
+profile/engine; there is no language switching or fallback.
 
 ## Construction
 
