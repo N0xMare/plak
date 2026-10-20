@@ -1207,7 +1207,8 @@ performs the full render and checks the pins; it just writes nothing.
 
 Beyond the digests, the tests assert file-free structural facts: the route
 matrix is exactly 76 included routes plus one documented exclusion
-(`native-ptc` is enrolled only as Codex Code Mode); the rendered wire JSON equals the
+(`native-ptc` is enrolled only as Codex Code Mode), and the experimental
+`py-harness-sdk` adds nine single-agent routes outside it (chapter 02 §6.7); the rendered wire JSON equals the
 kernel-lowered request and the Markdown `## Request` fence equals the jsonc
 formatter's output; the harness footprint excludes the enrolled `AGENTS.md` and
 the scenario assignment, subtracts enrolled source bytes, and keeps the Claude
@@ -2216,6 +2217,27 @@ offline contract. §3.4 is the pre-release bar for those live runs. It does
 not move library evidence out of §3.1.
 
 ### 3.1 Offline fixture evidence
+
+The experimental `py-harness-sdk` composition (chapter 01 §9.8) carries
+offline evidence of its own, against a real `monty` worker and
+deterministic in-process tool executors. The Gate A acceptance test is a
+scripted model driving a real worker through `exec` cells end to end: a read,
+an edit with a revision precondition, a process run, a named-state write, and
+a `proc.start` job whose completion wakes the idle root. Around it, offline
+tests pin:
+
+- fresh globals in every cell;
+- exact round trips of every SDK value through the codec;
+- that `fs` is absent under the read-execute ceiling and admission still
+  refuses file writes;
+- that forged, foreign and expired references fail identically;
+- each limit in §9.8.6 at its boundary;
+- that a type error makes no SDK call and no effect;
+- that named state survives a failed cell, compaction and reopen, and is
+  absent from the export;
+- the untrusted banner, including its taint through state;
+- that the descriptors and prompt pins of `direct`, `native-ptc`, `js-ptc`
+  and `py-ptc` are unchanged.
 
 Child-observation regressions exercise the eight-subscription activity bound,
 live counter replacement and terminal clearing, canonical prefix before the

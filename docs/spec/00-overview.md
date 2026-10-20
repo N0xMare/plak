@@ -105,7 +105,7 @@ classes and directory policy.
 | `plakous-js-eval` | `crates/runtimes/js-eval` | `engine` | Evaluator protocol and sidecar client; never links the QuickJS engine |
 | `plakous-js-runtime` | `crates/runtimes/js-runtime` | `engine` | QuickJS runtime for the `plakous-js-host` binary and opt-in library embedding |
 | `plakous-py-worker` | `crates/runtimes/py-worker` | `engine` | Thin `monty` subprocess entry point over the pinned upstream interpreter and wire state machine |
-| `plakous-py-eval` | `crates/runtimes/py-eval` | `engine` | monty-pool py-ptc session: cell lifecycle, nested-call delivery, JSON/Monty codec, py-ptc refusal strings |
+| `plakous-py-eval` | `crates/runtimes/py-eval` | `engine` | monty-pool py-ptc session: cell lifecycle, nested-call delivery, JSON/Monty codec, py-ptc refusal strings; and the experimental `py-harness-sdk` session: per-cell checkout, SDK host modules and stubs, plain-data value codec |
 | `plakous-code-mode` | `crates/runtimes/code-mode` | `engine` | Parse/DTO helpers for the Code Mode presentation (source parsing, tool-description rendering, result truncation). Not an evaluator |
 | `plakous-responses` | `crates/protocols/responses` | `protocol` | Responses-family kernel: wire grammar, stream framing, limits, sequencing |
 | `plakous-responses-dialect` | `crates/protocols/responses-dialect` | `protocol` | Generic Responses dialect host shapes shared by the Responses commercial routes |
@@ -118,7 +118,7 @@ classes and directory policy.
 | `plakous-openrouter` | `crates/providers/openrouter` | `provider` | Dynamic OpenRouter route, discovery, authz, and capability tables across three wire dialects |
 | `plakous-store` | `crates/store` | `store` | `SessionStore` backends: bounded in-memory by default, SQLite behind the `sqlite` feature |
 | `plakous-prompts` | `crates/harness/prompts` | `harness` | Model-visible instruction text, the first-turn assembler, the recommended profiles, and `AGENTS.md` discovery. Depends on no pack |
-| `plakous-compose` | `crates/harness/compose` | `harness` | The js/py cell outer tools, the Codex Code Mode `exec`/`wait` compilers, nested catalogs, and the `SidecarLocator` port |
+| `plakous-compose` | `crates/harness/compose` | `harness` | The js/py cell outer tools, the Codex Code Mode `exec`/`wait` compilers, the experimental `py-harness-sdk` `exec` compiler and SDK stub generator, nested catalogs, and the `SidecarLocator` port |
 | `plakous-tool-files` | `crates/harness/tool-files` | `harness` | Bounded reads, exact-content patching, image inspection, and the Codex patch envelope, behind `ToolPack` |
 | `plakous-tool-search` | `crates/harness/tool-search` | `harness` | Bounded deterministic repository search and directory listing, behind `ToolPack` |
 | `plakous-tool-web` | `crates/harness/tool-web` | `harness` | Local wrapper tools for provider-hosted web search, page fetch and X search over a `RetrievalPort`, behind `ToolPack` |
@@ -166,7 +166,7 @@ agent, application, construction, sessions, model, tools, profiles, `VERSION` â€
 | `openai`, `xai`, `anthropic`, `openrouter` | Re-export that provider crate as `plakous::<name>`. Provider internals, not a presentation surface |
 | `auth` | `plakous::auth` secret, credential-store, OAuth, pin, and account-binding foundations; implies `openai` and `xai` |
 | `composition` | The local composition attachment seam in `plakous::agent` (`LocalCompositionAttachment`, `attach_local_composition`): Code Mode presentation and JavaScript evaluation through the `plakous-js-host` sidecar. It reaches no credential, HTTP, subscription, or Python machinery |
-| `composition-python` | The Monty-backed Python PTC projection over the same composition API; implies `composition` |
+| `composition-python` | The Monty-backed Python PTC projection, and the experimental `py-harness-sdk` composition, over the same composition API; implies `composition` |
 | `native-subscriptions` | The subscription tier: `subscriptions` and the native-auth facets of the provider crates. It implies `composition` and `composition-python`, which is Plak's product closure |
 | `sessions-sqlite` | The SQLite `SessionStore` backend |
 | `full` | All of the supported features above |

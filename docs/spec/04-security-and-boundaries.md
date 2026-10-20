@@ -132,6 +132,26 @@ never from a model, and their environment is emptied and curated the same way
 (delegated allowlist, captured PATH and HOME, declared values, named secrets);
 once running, a server can do anything the operator can.
 
+The experimental `py-harness-sdk` composition (chapter 01 §9.8) changes the
+spelling of process authority, not its extent. `proc.run(argv)` executes argv
+without a shell, and `proc.shell`, `proc.start` and the other `proc` functions
+reach the same joined process sessions as every route's shell tool. None of
+them is a sandbox: a process started from a cell carries the operator's full
+host authority exactly as above, and its argv form only removes shell parsing.
+The SDK's type checker is a convenience for the model, never a control: it
+runs inside the untrusted worker, `# type: ignore` disables it per line, and
+every SDK call is validated and admitted host-side as if the checker had not
+run. Under `read-execute` the `fs` namespace is absent from both the stubs and
+the cell runtime, and host admission still refuses file-writing capabilities
+by the occupancy policy, so omission is presentation and admission is the
+fence. MCP and web results reach an SDK cell as values, not as text, so the
+untrusted-data line frames the whole cell output whenever the cell called an
+untrusted source. A named-state value written by such a cell keeps a taint
+bit that frames any later cell reading it. Named state is stored inside
+`runtime.sqlite3` with the same at-rest posture as checkpoints. It is bounded
+at 16 MiB per agent and never leaves the runtime store through export or
+carry.
+
 What an MCP server returns is untrusted data. Plakous treats a server as an
 unreviewed peer, not as policy: its tool annotations (`readOnlyHint` and the
 rest) decide nothing, so every MCP tool registers as serial and mutating and a
@@ -341,6 +361,9 @@ These are the known limits of the security model:
 - No protection against native Rust extensions, which execute with the host
   process's full authority.
 - No sandboxing of a `mutate` or `execute` shell.
+- No sandboxing of `py-harness-sdk` processes: `proc.run`'s argv form avoids
+  a shell but grants no less authority than `proc.shell`, and the cell type
+  checker is not a security control (chapter 01 §9.8).
 - No guarantee against a malicious same-uid writer, or a coherent restore of
   the whole home directory, filesystem, or VM.
 
@@ -1140,8 +1163,11 @@ snapshots are part of the repository source closure.
 The worker holds no host authority. Only the local subprocess transport is
 configured; `monty-pool`'s remote WebSocket transport is never used, and no
 mounts or working directory are sent (`os.getcwd()` reports the virtual `/`).
-Every OS call the interpreter routes to the host is refused, so the cell raises
-the call's own no-handler exception: filesystem paths and `open`
+Every OS call the interpreter routes to the host is refused, except that
+`py-harness-sdk` answers the `import` and `import_stubs` calls for its own
+SDK namespaces with host-generated module values and stubs (chapter 01 §9.8);
+an import of any other name is still `ModuleNotFoundError`. Every other call is
+refused, so the cell raises the call's own no-handler exception: filesystem paths and `open`
 (`PermissionError`), `os.getenv` and `os.environ`, `os.urandom`, and
 `time.sleep` and `asyncio.sleep`, which are configured to suspend to the host
 (`RuntimeError`). The interpreter answers clock reads (`datetime.now`,
