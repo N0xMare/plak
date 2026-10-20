@@ -77,7 +77,7 @@ fn version_reports_the_interpreter_pin() {
         .output()
         .expect("worker version");
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"monty 1.1.0\n");
+    assert_eq!(output.stdout, b"monty 1.2.0\n");
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn configured_memory_limit_applies_to_the_next_request_frame() {
                 max_memory_bytes: Some(64 * 1024),
                 ..Default::default()
             }),
-            monty_version: "1.1.0".into(),
+            monty_version: "1.2.0".into(),
             protocol_version: monty_proto::PROTOCOL_VERSION,
             ..Default::default()
         }),
@@ -130,7 +130,7 @@ fn configured_memory_limit_applies_to_the_next_request_frame() {
         assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
     }
     let output = child.wait_with_output().expect("worker exits");
-    // Upstream monty-types 1.1.0 OOM_EXIT_CODE, part of the pool/process contract.
+    // Upstream monty-types 1.2.0 OOM_EXIT_CODE, part of the pool/process contract.
     assert_eq!(
         output.status.code(),
         Some(65),

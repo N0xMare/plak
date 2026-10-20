@@ -18,9 +18,9 @@ layer = "engine"
 class = "published-internal"
 
 [dependencies]
-monty-pool = "=1.1.0"
-monty-proto = "=1.1.0"
-monty-types = "=1.1.0"
+monty-pool = "=1.2.0"
+monty-proto = "=1.2.0"
+monty-types = "=1.2.0"
 plakous-agent.workspace = true
 # `sample_children_rusage` / `children_rusage_delta`: the shared child-process
 # resource sampler already owned by the JS evaluator crate.

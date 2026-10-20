@@ -612,9 +612,9 @@ with the result; the image name alone is not evidence for the current tree.
 `plakous-js-runtime` owns QuickJS and the JavaScript worker. Selecting that
 package alongside Plak cannot enable an in-process runtime feature in Plak.
 The Monty worker is a thin Rust process entry point over `monty-proto`'s
-upstream `Child`, framing, interpreter and type checker, pinned at `1.1.0`
+upstream `Child`, framing, interpreter and type checker, pinned at `1.2.0`
 together with `monty-pool`, `monty-types`, and `monty-alloc`. Its shell follows
-upstream `monty-runtime` 1.1.0: a 16 MiB worker thread stack, the allocator's
+upstream `monty-runtime` 1.2.0: a 16 MiB worker thread stack, the allocator's
 hard ceiling at the interpreter's soft memory limit plus upstream headroom,
 fatal frames, panic handling, EOF and shutdown behavior. Only `monty subprocess` and `monty --version` are accepted.
 
@@ -858,7 +858,7 @@ complete example, including utility dependencies. No registry publication or
 independent binary distribution is established by these examples.
 
 The root `[patch.crates-io]` selects the reviewed `vendor/monty-typeshed`
-1.1.0 dependency snapshot. Only its build script and ZIP dependency change:
+1.2.0 dependency snapshot. Only its build script and ZIP dependency change:
 ZIP timestamps are fixed to 1980-01-01, entries are sorted by name, and the
 archive is written and read with `zip` 9 instead of the advisory-affected
 `zip` 0.6. The Python stubs and interpreter remain unchanged. The snapshot's
@@ -868,7 +868,7 @@ and compiled by Cargo as a dependency. This eliminates per-build archive
 extraction and patch application while preserving deterministic type-checker
 assets. The shared lock
 pins `salsa`, `salsa-macros` and `salsa-macro-rules` at 0.28.2 and the Ruff/ty
-crates at 0.0.14, the versions upstream Monty 1.1.0 locks: `salsa` 0.28.5 does
+crates at 0.0.14, the versions upstream Monty 1.2.0 locks: `salsa` 0.28.5 does
 not compile with `ruff_python_ast` 0.0.14. `just deny` audits the unified
 workspace and worker dependency graph.
 
@@ -1137,7 +1137,7 @@ just deny   # cargo deny check advisories bans licenses sources
 ```
 
 The maintenance advisory RUSTSEC-2023-0089 is excepted only for
-`atomic-polyfill` 1.0.3 in the all-target lock graph. `monty` 1.1.0 enables
+`atomic-polyfill` 1.0.3 in the all-target lock graph. `monty` 1.2.0 enables
 Postcard's default `heapless-cas` feature; `heapless` 0.7.17 selects
 `atomic-polyfill` only for AVR, RISC-V 32-bit bare-metal, Thumbv6m, and Xtensa
 bare-metal targets. Neither supported product target reaches that dependency.
@@ -1149,7 +1149,7 @@ targets change.
 
 The `zip` extraction advisories RUSTSEC-2026-0367, -0368 and -0369 are
 excepted only for `zip` 8.6.0, which `ruff_db` 0.0.14 (the Ruff/ty version
-Monty 1.1.0 locks) uses to read the bundled typeshed archive from memory; it
+Monty 1.2.0 locks) uses to read the bundled typeshed archive from memory; it
 never calls the affected extraction APIs. `monty-typeshed` itself uses the
 patched `zip` 9 (§7.3). Reevaluate the exception when `ruff_db` moves to
 `zip` 9 or starts extracting archives.
@@ -1216,7 +1216,7 @@ Exact pins (`=`) are used where a version is a reviewed artifact rather than a
 range: `filedescriptor`, `jsonwebtoken`, `nix`, `portable-pty`, `rusqlite`,
 `serde_json_canonicalizer`, `tracing`, `vt100`, the OpenTelemetry family, and
 the external `monty-pool` / `monty-proto` / `monty-types` / `monty-alloc` at
-`=1.1.0`.
+`=1.2.0`.
 
 ## 8. Repository settings
 

@@ -1495,7 +1495,7 @@ fn composition_checks(
 }
 
 fn composition_host_unavailable_remediation() -> &'static str {
-    "set PLAK_MONTY_WORKER to the monty 1.1.0 worker or place monty beside plak"
+    "set PLAK_MONTY_WORKER to the monty 1.2.0 worker or place monty beside plak"
 }
 
 fn javascript_host_unavailable_remediation() -> &'static str {

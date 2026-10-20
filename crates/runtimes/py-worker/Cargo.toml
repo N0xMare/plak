@@ -22,9 +22,9 @@ name = "monty"
 path = "src/main.rs"
 
 [dependencies]
-monty-proto = { version = "=1.1.0", features = ["worker"] }
-monty-alloc = { version = "=1.1.0", features = ["exit-code"] }
-monty-types = "=1.1.0"
+monty-proto = { version = "=1.2.0", features = ["worker"] }
+monty-alloc = { version = "=1.2.0", features = ["exit-code"] }
+monty-types = "=1.2.0"
 
 [lints]
 workspace = true

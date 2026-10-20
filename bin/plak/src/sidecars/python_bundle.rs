@@ -33,8 +33,8 @@ pub fn locate() -> Result<PathBuf, String> {
 #[must_use]
 pub fn python_host_hello_status() -> (String, &'static str) {
     match locate() {
-        Ok(_) => ("discovered".to_owned(), "monty-pool-1.1.0"),
-        Err(_) => ("unavailable".to_owned(), "monty-pool-1.1.0"),
+        Ok(_) => ("discovered".to_owned(), "monty-pool-1.2.0"),
+        Err(_) => ("unavailable".to_owned(), "monty-pool-1.2.0"),
     }
 }
 

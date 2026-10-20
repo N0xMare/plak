@@ -282,7 +282,7 @@ per-cell cap has an explicit truncation notice.
 Steers yield observation without killing the cell, and nested agent/process
 awaits are allowed.
 
-This build runs Monty 1.1.0 under adapter `plakous.monty-python-adapter.v6`. It
+This build runs Monty 1.2.0 under adapter `plakous.monty-python-adapter.v6`. It
 refuses to reopen py-ptc roots and children recorded under adapter
 `plakous.monty-python-adapter.v4` or `plakous.monty-python-adapter.v5` (the
 Monty 0.0.21 builds), profile `plakous.python-ptc-profile.v2`, or
