@@ -326,3 +326,60 @@ fn options_replace_the_model_lists_and_set_the_search_count() {
         posts(&["xai"])
     );
 }
+
+struct DeclaredPort(Vec<RetrievalKind>);
+
+impl RetrievalPort for DeclaredPort {
+    fn kinds(&self) -> &[RetrievalKind] {
+        &self.0
+    }
+
+    fn max_requests(&self, _kind: RetrievalKind) -> Option<u32> {
+        Some(16)
+    }
+
+    fn retrieve(&self, _: RetrievalRequest, _: ExecutionOperationControl) -> RetrievalFuture {
+        Box::pin(async { Ok(RetrievalOutcome::default()) })
+    }
+}
+
+/// SDK wrappers exist only for served kinds, under canonical names and SDK
+/// ids, carrying the port's declared maximum; a port without a declaration
+/// backs none, and the per-presentation registrations declare nothing.
+#[test]
+fn sdk_wrappers_carry_their_declared_maximum_for_served_kinds_only() -> TestResult {
+    let served: Arc<dyn RetrievalPort> = Arc::new(DeclaredPort(vec![
+        RetrievalKind::WebSearch,
+        RetrievalKind::PostSearch,
+    ]));
+    let tools =
+        PythonHarnessSdkOptionalTools::new().retrieval(&served, &RetrievalOptions::default())?;
+    let registered = tools
+        .registrations()
+        .iter()
+        .map(|registration| {
+            (
+                registration.name().as_str().to_owned(),
+                registration.declared_helper_requests(),
+                registration.is_nested_eligible(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        registered,
+        [
+            ("web_search".to_owned(), Some(16), true),
+            ("x_search".to_owned(), Some(16), true)
+        ]
+    );
+    let undeclared = PythonHarnessSdkOptionalTools::new()
+        .retrieval(&port(&ALL_KINDS), &RetrievalOptions::default());
+    assert!(undeclared.is_err());
+    let pack = WebToolPack::new(CodingPresentation::Grok, [WebTool::WebSearch], served)?;
+    assert!(
+        pack.registrations()?
+            .iter()
+            .all(|registration| registration.declared_helper_requests().is_none())
+    );
+    Ok(())
+}

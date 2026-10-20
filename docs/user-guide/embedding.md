@@ -129,8 +129,13 @@ compile with `PythonHarnessSdkV1::compile` under a
 `LocalCompositionProfile::python_harness_sdk_v1` with
 `LocalCompositionEngineArtifact::monty_pool_harness_sdk_v1` and
 `ProductExtensionEvidence::python_harness_sdk_v1`. The model sees `run_py`
-alone; the configuration must present exactly that marker. Attach at most one
-profile/engine; there is no language switching or fallback.
+alone; the configuration must present exactly that marker. Optional
+namespaces (`web`, `x`, `image`, `mcp`) appear only for what you register with
+`tools::web::PythonHarnessSdkOptionalTools`: its retrieval wrappers need a
+port that declares `RetrievalPort::max_requests`, `image_gen` an
+`ImageGenPort::max_requests`, and MCP tools come from your MCP pack's
+registrations. Attach at most one profile/engine; there is no language
+switching or fallback.
 
 ## Construction
 

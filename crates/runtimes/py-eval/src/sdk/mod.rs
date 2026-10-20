@@ -41,7 +41,7 @@ use serde_json::Value;
 /// Identity of this engine's delivery contract: its host functions, value
 /// conversion, limits enforcement and observation rendering. A change to any
 /// of them revises it, and with it the engine contract a session records.
-pub const HARNESS_SDK_ENGINE_REVISION: &str = "plakous.monty-python-harness-sdk-engine.v1";
+pub const HARNESS_SDK_ENGINE_REVISION: &str = "plakous.monty-python-harness-sdk-engine.v2";
 
 /// The compiled program one SDK evaluator runs: the harness compiler's stubs,
 /// bootstrap, `_sdk_host` function names and limits.

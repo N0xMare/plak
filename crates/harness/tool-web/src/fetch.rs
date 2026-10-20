@@ -174,6 +174,26 @@ impl FetchUrlPack {
     }
 }
 
+impl FetchUrlPack {
+    /// The SDK-only `fetch_url` registration: a local fetch, so it declares
+    /// no helper requests.
+    pub(crate) fn sdk_registration(&self) -> Result<ToolRegistration, ToolRuntimeError> {
+        crate::sdk::sdk_registration(
+            plakous_tools::PYTHON_HARNESS_SDK_FETCH_URL_V1,
+            (
+                PLAKOUS_WEB_FETCH_URL_DESCRIPTION,
+                schema(),
+                ToolConcurrency::Parallel,
+                ToolEffect::ReadOnly,
+            ),
+            None,
+            Arc::new(FetchUrlTool {
+                fetcher: Arc::clone(&self.fetcher),
+            }),
+        )
+    }
+}
+
 impl ToolPack for FetchUrlPack {
     fn id(&self) -> &'static str {
         "plakous.web.fetch_url.v1"

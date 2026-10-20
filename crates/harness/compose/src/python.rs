@@ -744,7 +744,7 @@ fn render_python_dict_type(object: &serde_json::Map<String, Value>) -> String {
     }
 }
 
-fn normalize_python_identifier(name: &str) -> String {
+pub(crate) fn normalize_python_identifier(name: &str) -> String {
     let mut normalized = String::with_capacity(name.len() + 1);
     for (index, character) in name.chars().enumerate() {
         let valid = character == '_' || character.is_ascii_alphanumeric();

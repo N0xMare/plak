@@ -30,6 +30,8 @@ pub(super) struct Observation<'a> {
     pub(super) printed: &'a str,
     pub(super) untrusted: &'a [String],
     pub(super) images: &'a [(String, ImageValue)],
+    /// Issued image ids the host attaches without a print (MCP images).
+    pub(super) attached: &'a [String],
 }
 
 /// The model-visible items and, for every outcome but completion, the status
@@ -167,6 +169,11 @@ fn attachments<'a>(observation: &Observation<'a>) -> Vec<(&'a str, &'a [u8])> {
         .filter(|(id, _)| observation.printed.contains(id.as_str()))
         .map(|(id, _)| id.as_str())
         .collect();
+    for id in observation.attached {
+        if !chosen.contains(&id.as_str()) {
+            chosen.push(id);
+        }
+    }
     if let Terminal::Completed(value) = observation.terminal
         && let Some(id) = image_id(value)
         && !chosen.contains(&id.as_str())

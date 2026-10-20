@@ -2,7 +2,8 @@
 
 use plakous_model::{ImageBlock, MediaSource, TextBlock, ToolResultPart};
 use plakous_tools::{
-    MAX_STANDARD_IMAGE_BYTES, ToolOutcome, ToolRuntimeError, ToolRuntimeErrorKind,
+    ExecutionValue, MAX_STANDARD_IMAGE_BYTES, McpImageValue, McpValue, ToolOutcome,
+    ToolRuntimeError, ToolRuntimeErrorKind,
 };
 use rmcp::model::{CallToolResult, ContentBlock, ResourceContents};
 
@@ -41,6 +42,7 @@ pub(crate) fn map_call_result(
 ) -> Result<ToolOutcome, ToolRuntimeError> {
     let mut pieces = Vec::new();
     let mut images = 0;
+    let mut image_values = Vec::new();
     for block in result.content {
         pieces.push(match block {
             ContentBlock::Text(text) => Piece::Text(text.text),
@@ -48,6 +50,10 @@ pub(crate) fn map_call_result(
                 match inline_image(&image.mime_type, &image.data, images)? {
                     Some(block) => {
                         images += 1;
+                        image_values.push(McpImageValue {
+                            media_type: image.mime_type.clone(),
+                            data: image.data.clone(),
+                        });
                         Piece::Image(block)
                     }
                     None => Piece::Text(format!(
@@ -92,6 +98,21 @@ pub(crate) fn map_call_result(
         }
     }
     let pieces = bound_text(merge_text(pieces), spill);
+    let value = McpValue {
+        content: result.structured_content.clone().unwrap_or_else(|| {
+            serde_json::Value::String(
+                pieces
+                    .iter()
+                    .filter_map(|piece| match piece {
+                        Piece::Text(text) => Some(text.as_str()),
+                        Piece::Image(_) => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )
+        }),
+        images: image_values,
+    };
     let mut parts = Vec::with_capacity(pieces.len() + 1);
     let header = untrusted_header(server, tool);
     let mut pieces = pieces.into_iter().peekable();
@@ -111,7 +132,7 @@ pub(crate) fn map_call_result(
     if result.is_error == Some(true) {
         ToolOutcome::failure(parts)
     } else {
-        ToolOutcome::success(parts)
+        Ok(ToolOutcome::success(parts)?.with_execution_value(ExecutionValue::Mcp(value)))
     }
 }
 

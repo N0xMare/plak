@@ -21,13 +21,13 @@ use plakous_model::{
     ToolInputContract, ToolName, ToolOutputContract, ToolResultPart,
 };
 use plakous_tools::{
-    CodingPresentation, ExecutionBackendErrorKind, ExecutionOperationControl,
-    MAX_STANDARD_IMAGE_BYTES, MAX_WORKSPACE_READ_SLICE_BYTES, MenuEntry, PassthroughPack,
-    PromptPin, RegisteredToolId, RetrievalError, RetrievalErrorKind, ToolContext, ToolExecutor,
-    ToolExecutorBindingIdentity, ToolExecutorId, ToolFuture, ToolInvocation, ToolOutcome, ToolPack,
-    ToolRegistration, ToolRuntimeError, ToolRuntimeErrorKind, WorkspaceExpectedFileState,
-    WorkspaceMutation, WorkspaceMutationTransaction, WorkspaceReadSliceRequest,
-    WorkspaceReplacement, object_schema, operation_control,
+    CodingPresentation, ExecutionBackendErrorKind, ExecutionOperationControl, ExecutionValue,
+    ImageValue, MAX_STANDARD_IMAGE_BYTES, MAX_WORKSPACE_READ_SLICE_BYTES, MenuEntry,
+    PassthroughPack, PromptPin, RegisteredToolId, RetrievalError, RetrievalErrorKind, ToolContext,
+    ToolExecutor, ToolExecutorBindingIdentity, ToolExecutorId, ToolFuture, ToolInvocation,
+    ToolOutcome, ToolPack, ToolRegistration, ToolRuntimeError, ToolRuntimeErrorKind,
+    WorkspaceExpectedFileState, WorkspaceMutation, WorkspaceMutationTransaction,
+    WorkspaceReadSliceRequest, WorkspaceReplacement, object_schema, operation_control,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -168,6 +168,28 @@ impl ImageGenPack {
             }),
         )
         .nested_eligible())
+    }
+}
+
+impl ImageGenPack {
+    /// The SDK-only `image_gen` registration, carrying the port's declared
+    /// most physical requests per call.
+    pub(crate) fn sdk_registration(&self) -> Result<ToolRegistration, ToolRuntimeError> {
+        let tool = plakous_tools::PYTHON_HARNESS_SDK_IMAGE_GEN_V1;
+        let max = crate::sdk::declared(self.port.max_requests(), tool.name)?;
+        crate::sdk::sdk_registration(
+            tool,
+            (
+                PLAKOUS_WEB_IMAGE_GEN_DESCRIPTION,
+                schema(),
+                ToolConcurrency::Serial,
+                ToolEffect::Mutating,
+            ),
+            Some(max),
+            Arc::new(ImageGenTool {
+                port: Arc::clone(&self.port),
+            }),
+        )
     }
 }
 
@@ -379,6 +401,20 @@ async fn generate(
             call.shown
         ));
     }
+    let outcome = written_outcome(call, &header, bytes)?;
+    Ok(match requests {
+        Some(requests) => outcome.with_helper_requests(requests),
+        None => outcome,
+    })
+}
+
+/// The result of a written image: its text, the inline image when it fits,
+/// and the image as the execution value.
+fn written_outcome(
+    call: &Call,
+    header: &plakous_tools::ImageHeader,
+    bytes: Vec<u8>,
+) -> Result<ToolOutcome, ToolRuntimeError> {
     let dimensions = header.dimensions().map_or_else(
         || String::from("unknown"),
         |(width, height)| format!("{width}x{height}"),
@@ -411,16 +447,18 @@ async fn generate(
         parts.push(ToolResultPart::Image(
             ImageBlock::new(
                 header.media_type(),
-                MediaSource::bytes(bytes).map_err(unreturnable)?,
+                MediaSource::bytes(bytes.clone()).map_err(unreturnable)?,
             )
             .map_err(unreturnable)?,
         ));
     }
-    let outcome = ToolOutcome::success(parts)?;
-    Ok(match requests {
-        Some(requests) => outcome.with_helper_requests(requests),
-        None => outcome,
-    })
+    let image = ImageValue {
+        path: call.shown.clone(),
+        media_type: header.media_type().to_owned(),
+        bytes,
+        dimensions: header.dimensions(),
+    };
+    Ok(ToolOutcome::success(parts)?.with_execution_value(ExecutionValue::Image(image)))
 }
 
 /// The first slice of a workspace file of at most `max` bytes, and whether

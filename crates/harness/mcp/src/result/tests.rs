@@ -50,6 +50,14 @@ fn text_is_framed_by_the_untrusted_header_and_merged() -> TestResult {
     ]))?;
     assert_eq!(outcome.kind(), ToolOutcomeKind::Success);
     assert_eq!(texts(&outcome), [format!("{HEADER}\none\ntwo")]);
+    // A cell receives the text without the header as its value.
+    assert_eq!(
+        outcome.execution_value(),
+        Some(&ExecutionValue::Mcp(McpValue {
+            content: json!("one\ntwo"),
+            images: Vec::new(),
+        }))
+    );
     Ok(())
 }
 
@@ -104,6 +112,16 @@ fn an_image_only_result_still_leads_with_the_header() -> TestResult {
     assert!(matches!(outcome.parts()[0], ToolResultPart::Text(_)));
     assert_eq!(texts(&outcome), [HEADER]);
     assert_eq!(images(&outcome), 1);
+    let Some(ExecutionValue::Mcp(value)) = outcome.execution_value() else {
+        return Err("an image result carries no MCP value".into());
+    };
+    assert_eq!(
+        value.images,
+        [McpImageValue {
+            media_type: "image/webp".to_owned(),
+            data: zero_base64(3),
+        }]
+    );
     Ok(())
 }
 
@@ -137,6 +155,11 @@ fn structured_content_without_text_is_compact_json() -> TestResult {
     let text = texts(&outcome).join("");
     assert!(text.starts_with(&format!("{HEADER}\n{{")), "{text}");
     assert!(!text.contains(": "), "{text}");
+    // Structured content is the value itself.
+    let Some(ExecutionValue::Mcp(value)) = outcome.execution_value() else {
+        return Err("a structured result carries no MCP value".into());
+    };
+    assert_eq!(value.content, json!({"b": 1, "a": [true]}));
     let empty = map(CallToolResult::success(Vec::new()))?;
     assert_eq!(texts(&empty), [format!("{HEADER}\n(no content)")]);
     Ok(())

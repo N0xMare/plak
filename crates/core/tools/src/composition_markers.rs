@@ -337,6 +337,48 @@ pub const PYTHON_HARNESS_SDK_DRIVER_MARKER_EXECUTOR_ID_V1: &str =
 /// Semantic revision the `run_py` marker definition carries.
 pub const PYTHON_HARNESS_SDK_PROFILE_REVISION_V1: &str = "plakous.python-harness-sdk-profile.v1";
 
+/// One SDK-only optional capability of `PythonHarnessSdkV1`: its canonical
+/// name and the registered tool id that marks the SDK registration, so a
+/// per-presentation registration of the same name never enters the SDK.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PythonHarnessSdkOptionalToolV1 {
+    /// Canonical, nested-call name.
+    pub name: &'static str,
+    /// Registered tool id of the SDK registration.
+    pub tool_id: &'static str,
+}
+
+/// `web.search`.
+pub const PYTHON_HARNESS_SDK_WEB_SEARCH_V1: PythonHarnessSdkOptionalToolV1 =
+    PythonHarnessSdkOptionalToolV1 {
+        name: "web_search",
+        tool_id: "plakous.web.web-search.sdk.v1",
+    };
+/// `web.fetch`.
+pub const PYTHON_HARNESS_SDK_WEB_FETCH_V1: PythonHarnessSdkOptionalToolV1 =
+    PythonHarnessSdkOptionalToolV1 {
+        name: "web_fetch",
+        tool_id: "plakous.web.web-fetch.sdk.v1",
+    };
+/// `web.fetch_url`.
+pub const PYTHON_HARNESS_SDK_FETCH_URL_V1: PythonHarnessSdkOptionalToolV1 =
+    PythonHarnessSdkOptionalToolV1 {
+        name: "fetch_url",
+        tool_id: "plakous.web.fetch-url.sdk.v1",
+    };
+/// `x.search`.
+pub const PYTHON_HARNESS_SDK_X_SEARCH_V1: PythonHarnessSdkOptionalToolV1 =
+    PythonHarnessSdkOptionalToolV1 {
+        name: "x_search",
+        tool_id: "plakous.web.x-search.sdk.v1",
+    };
+/// `image.generate`.
+pub const PYTHON_HARNESS_SDK_IMAGE_GEN_V1: PythonHarnessSdkOptionalToolV1 =
+    PythonHarnessSdkOptionalToolV1 {
+        name: "image_gen",
+        tool_id: "plakous.web.image-gen.sdk.v1",
+    };
+
 /// The model-visible `run_py` argument schema: exactly `{"code": string}`.
 #[must_use]
 pub fn python_harness_sdk_run_schema() -> Value {

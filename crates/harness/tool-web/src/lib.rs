@@ -24,6 +24,7 @@ mod fetch;
 #[cfg(feature = "image-gen")]
 mod image_gen;
 mod render;
+mod sdk;
 mod search;
 mod text;
 mod web_fetch;
@@ -42,6 +43,7 @@ pub use image_gen::{
     MAX_IMAGE_PROMPT_BYTES,
 };
 pub use render::render_outcome;
+pub use sdk::PythonHarnessSdkOptionalTools;
 pub use text::{
     PLAKOUS_WEB_CLAUDE_FETCH_DESCRIPTION, PLAKOUS_WEB_CLAUDE_SEARCH_DESCRIPTION,
     PLAKOUS_WEB_FETCH_URL_DESCRIPTION, PLAKOUS_WEB_IMAGE_GEN_DESCRIPTION,
@@ -56,10 +58,11 @@ use plakous_model::{
 use serde_json::Value;
 
 use plakous_tools::{
-    CodingPresentation, MenuEntry, PassthroughPack, PromptPin, RegisteredToolId,
-    RetrievalErrorKind, RetrievalKind, RetrievalPort, RetrievalRequest, ToolContext, ToolExecutor,
-    ToolExecutorBindingIdentity, ToolExecutorId, ToolFuture, ToolInvocation, ToolOutcome, ToolPack,
-    ToolRegistration, ToolRuntimeError, ToolRuntimeErrorKind, operation_control,
+    AnswerValue, CodingPresentation, ExecutionValue, MenuEntry, PassthroughPack, PromptPin,
+    RegisteredToolId, RetrievalErrorKind, RetrievalKind, RetrievalPort, RetrievalRequest,
+    ToolContext, ToolExecutor, ToolExecutorBindingIdentity, ToolExecutorId, ToolFuture,
+    ToolInvocation, ToolOutcome, ToolPack, ToolRegistration, ToolRuntimeError,
+    ToolRuntimeErrorKind, operation_control,
 };
 
 /// Longest accepted query, in bytes.
@@ -392,7 +395,11 @@ fn call_result(
 ) -> Result<ToolOutcome, ToolRuntimeError> {
     match outcome {
         Ok(outcome) => {
-            let result = ToolOutcome::success_text(render_outcome(presented, &outcome))?;
+            let result = ToolOutcome::success_text(render_outcome(presented, &outcome))?
+                .with_execution_value(ExecutionValue::Answer(AnswerValue {
+                    text: outcome.text.clone(),
+                    sources: outcome.sources.clone(),
+                }));
             Ok(match outcome.physical_requests {
                 Some(requests) => result.with_helper_requests(requests),
                 None => result,

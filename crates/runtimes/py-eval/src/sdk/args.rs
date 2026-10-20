@@ -92,6 +92,17 @@ pub(super) enum HostCall {
     PlanUpdate {
         steps: Vec<Value>,
     },
+    /// An optional namespace's helper or fetch call: the canonical tool and
+    /// its arguments, without the absent optional ones.
+    Optional {
+        tool: &'static str,
+        input: Value,
+    },
+    /// `mcp.<server>.<tool>`: the canonical MCP tool and its arguments.
+    Mcp {
+        tool: String,
+        input: Value,
+    },
 }
 
 /// A refused argument, raised in the cell.
@@ -191,6 +202,20 @@ impl<'a> Args<'a> {
             .collect()
     }
 
+    fn optional_string_list(
+        &self,
+        index: usize,
+        name: &str,
+    ) -> Result<Option<Vec<String>>, ArgError> {
+        match unstable::node(self.arg(index, name)?) {
+            MontyNode::None => Ok(None),
+            _ => self
+                .string_list(index, name)
+                .map(Some)
+                .map_err(|_| self.wrong(name, "list[str] or None")),
+        }
+    }
+
     fn job(&self) -> Result<String, ArgError> {
         let value = self.arg(0, "job")?;
         id_tuple(value, "Job").ok_or_else(|| self.wrong("job", "proc.Job"))
@@ -227,10 +252,11 @@ pub(super) fn parse(function: &str, call: &CallArgs) -> Result<HostCall, ArgErro
     let args = Args { function, call };
     let count = match function {
         "state_list" => 0,
-        "fs_apply" | "proc_poll" | "proc_cancel" | "state_drop" | "plan_update" => 1,
-        "ctx_read" | "proc_join" | "state_get" | "state_put" => 2,
-        "ctx_list" | "ctx_grep" | "proc_stdin" | "proc_start" => 3,
-        "proc_run" | "proc_shell" => 4,
+        "fs_apply" | "proc_poll" | "proc_cancel" | "state_drop" | "plan_update"
+        | "web_fetch_url" => 1,
+        "ctx_read" | "proc_join" | "state_get" | "state_put" | "web_fetch" | "mcp_call" => 2,
+        "ctx_list" | "ctx_grep" | "proc_stdin" | "proc_start" | "web_search" => 3,
+        "proc_run" | "proc_shell" | "x_search" | "image_generate" => 4,
         _ => {
             return Err(ArgError::type_error(format!(
                 "{function} is not an SDK function"
@@ -272,8 +298,92 @@ pub(super) fn parse(function: &str, call: &CallArgs) -> Result<HostCall, ArgErro
         "state_drop" => Ok(HostCall::StateDrop {
             name: args.string(0, "name")?,
         }),
+        "web_search" | "web_fetch" | "web_fetch_url" | "x_search" | "image_generate" => {
+            parse_optional(&args)
+        }
+        "mcp_call" => parse_mcp(&args),
         _ => parse_plan(&args),
     }
+}
+
+/// Builds a JSON object from present fields only.
+fn object(fields: Vec<(&str, Option<Value>)>) -> Value {
+    Value::Object(
+        fields
+            .into_iter()
+            .filter_map(|(name, value)| value.map(|value| (name.to_owned(), value)))
+            .collect(),
+    )
+}
+
+fn parse_optional(args: &Args<'_>) -> Result<HostCall, ArgError> {
+    let list = |values: Option<Vec<String>>| values.map(|values| json!(values));
+    let string = |value: Option<String>| value.map(Value::String);
+    let (tool, input) = match args.function {
+        "web_search" => (
+            "web_search",
+            object(vec![
+                ("query", Some(json!(args.string(0, "query")?))),
+                (
+                    "allowed_domains",
+                    list(args.optional_string_list(1, "allowed_domains")?),
+                ),
+                (
+                    "blocked_domains",
+                    list(args.optional_string_list(2, "blocked_domains")?),
+                ),
+            ]),
+        ),
+        "web_fetch" => (
+            "web_fetch",
+            json!({"url": args.string(0, "url")?, "prompt": args.string(1, "prompt")?}),
+        ),
+        "web_fetch_url" => ("fetch_url", json!({"url": args.string(0, "url")?})),
+        "x_search" => (
+            "x_search",
+            object(vec![
+                ("query", Some(json!(args.string(0, "query")?))),
+                ("handles", list(args.optional_string_list(1, "handles")?)),
+                ("from_date", string(args.optional_string(2, "from_date")?)),
+                ("to_date", string(args.optional_string(3, "to_date")?)),
+            ]),
+        ),
+        _ => (
+            "image_gen",
+            object(vec![
+                ("prompt", Some(json!(args.string(0, "prompt")?))),
+                ("path", Some(json!(args.string(1, "path")?))),
+                ("size", string(args.optional_string(2, "size")?)),
+                (
+                    "edit_from",
+                    list(args.optional_string_list(3, "edit_from")?),
+                ),
+            ]),
+        ),
+    };
+    Ok(HostCall::Optional { tool, input })
+}
+
+/// `mcp_call(tool, arguments)`: only an MCP tool, with the arguments the
+/// cell passed as strict JSON and its omitted (`None`) ones dropped.
+fn parse_mcp(args: &Args<'_>) -> Result<HostCall, ArgError> {
+    let tool = args.string(0, "tool")?;
+    if !tool.starts_with("mcp__") {
+        return Err(ArgError::value_error(format!("{tool} is not an MCP tool")));
+    }
+    let Value::Object(arguments) =
+        state_json(args.arg(1, "arguments")?).map_err(ArgError::value_error)?
+    else {
+        return Err(args.wrong("arguments", "dict"));
+    };
+    let input = arguments
+        .into_iter()
+        .filter(|(_, value)| !value.is_null())
+        .collect();
+    Ok(HostCall::Mcp {
+        tool,
+        input: Value::Object(input),
+    })
 }
 
 fn parse_read(args: &Args<'_>) -> Result<HostCall, ArgError> {

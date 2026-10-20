@@ -191,11 +191,13 @@ fn finish(
 ) -> LocalCompositionResponse {
     let untrusted = scope.map(CellScope::untrusted_sources).unwrap_or_default();
     let images = scope.map(CellScope::images).unwrap_or_default();
+    let attached = scope.map(CellScope::attached).unwrap_or_default();
     let observation = Observation {
         terminal,
         printed,
         untrusted: &untrusted,
         images: &images,
+        attached: &attached,
     };
     let (items, error) = render(&observation, &shared.program.limits, &shared.evidence);
     result(cell_id, items, error)

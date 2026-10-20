@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use base64::Engine as _;
 use monty_types::{ExcType, MontyException, MontyObject};
 use plakous_agent::internal::NamedStateError;
 use plakous_tools::ExecutionValue;
@@ -155,7 +156,108 @@ pub(super) async fn execute(call: HostCall, scope: Arc<CellScope>) -> HostReply 
                 .map(MontyObject::bool)
                 .map_err(state_error),
         ),
+        HostCall::Optional { tool, input } => optional(&scope, tool, input).await,
+        HostCall::Mcp { tool, input } => mcp(&scope, &tool, input).await,
         other => HostReply::done(process::execute(other, &scope).await),
+    }
+}
+
+/// One optional-namespace call. A committed web or X result is untrusted
+/// data, named for the banner by its canonical tool; `image_gen` is not.
+async fn optional(scope: &CellScope, tool: &'static str, input: Value) -> HostReply {
+    let result = match scope.call(tool, input).await {
+        Ok(result) => result,
+        Err(error) => return HostReply::done(Err(nested_error(error))),
+    };
+    if tool != "image_gen" {
+        scope.mark_untrusted(tool.to_owned());
+    }
+    let value = typed(&result, tool).and_then(|value| match value {
+        ExecutionValue::Answer(answer) if tool != "fetch_url" && tool != "image_gen" => {
+            Ok(values::answer(answer))
+        }
+        ExecutionValue::Page(page) if tool == "fetch_url" => fetched_page(scope, page),
+        ExecutionValue::Image(image) if tool == "image_gen" => {
+            let id = super::evidence::new_id().map_err(id_error)?;
+            let object = values::image(&id, image);
+            scope.issue_image(id, image.clone());
+            Ok(object)
+        }
+        _ => Err(unexpected(tool)),
+    });
+    HostReply {
+        value,
+        ack: Some(result.ack),
+    }
+}
+
+fn fetched_page(
+    scope: &CellScope,
+    page: &plakous_tools::PageValue,
+) -> Result<MontyObject, MontyException> {
+    let image = match &page.image {
+        Some(image) => {
+            let id = super::evidence::new_id().map_err(id_error)?;
+            let object = values::image(&id, image);
+            scope.issue_image(id, image.clone());
+            Some(object)
+        }
+        None => None,
+    };
+    let full = page
+        .full_output
+        .as_deref()
+        .map(|path| scope.evidence.process_output(path))
+        .transpose()
+        .map_err(id_error)?;
+    Ok(values::page(page, image, full.as_deref()))
+}
+
+/// The banner label of one MCP tool: `mcp:<server>/<tool>`.
+fn mcp_label(tool: &str) -> String {
+    let rest = tool.strip_prefix("mcp__").unwrap_or(tool);
+    match rest.split_once("__") {
+        Some((server, name)) => format!("mcp:{server}/{name}"),
+        None => format!("mcp:{rest}"),
+    }
+}
+
+/// One `mcp.<server>.<tool>` call: its structured content or text as plain
+/// data; its inline images are issued and attached to the cell's output.
+async fn mcp(scope: &CellScope, tool: &str, input: Value) -> HostReply {
+    let result = match scope.call(tool, input).await {
+        Ok(result) => result,
+        Err(error) => return HostReply::done(Err(nested_error(error))),
+    };
+    let label = mcp_label(tool);
+    scope.mark_untrusted(label.clone());
+    let value = typed(&result, tool).and_then(|value| {
+        let ExecutionValue::Mcp(value) = value else {
+            return Err(unexpected(tool));
+        };
+        for image in &value.images {
+            let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&image.data) else {
+                continue;
+            };
+            let dimensions = plakous_tools::sniff_image(&bytes)
+                .ok()
+                .and_then(|header| header.dimensions());
+            let id = super::evidence::new_id().map_err(id_error)?;
+            scope.attach_image(
+                id,
+                plakous_tools::ImageValue {
+                    path: label.clone(),
+                    media_type: image.media_type.clone(),
+                    bytes,
+                    dimensions,
+                },
+            );
+        }
+        crate::codec::json_to_monty(&value.content).map_err(runtime_error)
+    });
+    HostReply {
+        value,
+        ack: Some(result.ack),
     }
 }
 

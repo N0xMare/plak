@@ -7,8 +7,8 @@ use monty_types::{
     unstable::{self, MontyNode},
 };
 use plakous_tools::{
-    FileChangeAction, FileChangesValue, FileReadValue, ImageValue, ListedEntryKind, ListingValue,
-    SearchHitsValue,
+    AnswerValue, FileChangeAction, FileChangesValue, FileReadValue, ImageValue, ListedEntryKind,
+    ListingValue, PageValue, SearchHitsValue,
 };
 use serde_json::{Map, Value};
 
@@ -126,6 +126,64 @@ pub(super) fn image(id: &str, value: &ImageValue) -> MontyObject {
             int(value.bytes.len() as u64),
             optional_int(width),
             optional_int(height),
+        ],
+    )
+}
+
+/// `Answer(text, sources)` with `Source(url, title)` items.
+pub(super) fn answer(value: &AnswerValue) -> MontyObject {
+    let sources = value.sources.iter().map(|source| {
+        tuple(
+            "Source",
+            &["url", "title"],
+            vec![
+                text(&source.url),
+                source.title.as_deref().map_or_else(MontyObject::none, text),
+            ],
+        )
+    });
+    tuple(
+        "Answer",
+        &["text", "sources"],
+        vec![text(&value.text), MontyObject::list(sources)],
+    )
+}
+
+/// `Page(...)`; `image` is the issued `Image` and `full` the `Ref` of the
+/// whole text, when there are ones.
+pub(super) fn page(
+    value: &PageValue,
+    image: Option<MontyObject>,
+    full: Option<&str>,
+) -> MontyObject {
+    let mut omitted = Vec::new();
+    if value.omitted_bytes > 0 {
+        omitted.push(omission("output", 0, value.omitted_bytes, full));
+    }
+    tuple(
+        "Page",
+        &[
+            "url",
+            "final_url",
+            "status",
+            "content_type",
+            "text",
+            "image",
+            "truncated",
+            "omitted",
+        ],
+        vec![
+            text(&value.url),
+            text(&value.final_url),
+            int(u64::from(value.status)),
+            value
+                .content_type
+                .as_deref()
+                .map_or_else(MontyObject::none, text),
+            text(&value.text),
+            image.unwrap_or_else(MontyObject::none),
+            MontyObject::bool(value.truncated),
+            MontyObject::list(omitted),
         ],
     )
 }

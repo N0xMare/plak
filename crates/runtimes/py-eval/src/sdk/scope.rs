@@ -180,6 +180,7 @@ pub(super) struct CellScope {
     pub(super) state: Arc<dyn NamedStatePort>,
     untrusted: Mutex<Vec<String>>,
     images: Mutex<Vec<(String, ImageValue)>>,
+    attached: Mutex<Vec<String>>,
 }
 
 impl CellScope {
@@ -203,6 +204,7 @@ impl CellScope {
             state,
             untrusted: Mutex::new(Vec::new()),
             images: Mutex::new(Vec::new()),
+            attached: Mutex::new(Vec::new()),
         }
     }
 
@@ -229,6 +231,16 @@ impl CellScope {
     /// Issues an image id valid for this cell's observation.
     pub(super) fn issue_image(&self, id: String, image: ImageValue) {
         lock(&self.images).push((id, image));
+    }
+
+    /// Issues an image the cell's output attaches without a print.
+    pub(super) fn attach_image(&self, id: String, image: ImageValue) {
+        lock(&self.attached).push(id.clone());
+        self.issue_image(id, image);
+    }
+
+    pub(super) fn attached(&self) -> Vec<String> {
+        lock(&self.attached).clone()
     }
 
     pub(super) fn images(&self) -> Vec<(String, ImageValue)> {

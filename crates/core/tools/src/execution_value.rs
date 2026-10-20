@@ -6,7 +6,7 @@
 //! history, the ledger, checkpoints or exports, which keep the presentation
 //! text alone.
 
-use crate::WorkspaceContentIdentity;
+use crate::{RetrievalSource, WorkspaceContentIdentity};
 
 /// One typed execution value.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -26,6 +26,62 @@ pub enum ExecutionValue {
     Process(ProcessValue),
     /// The plan after a replacement.
     Plan(PlanValue),
+    /// A hosted retrieval's answer.
+    Answer(AnswerValue),
+    /// One fetched page.
+    Page(PageValue),
+    /// One MCP tool result.
+    Mcp(McpValue),
+}
+
+/// A hosted retrieval's answer with the sources the provider reported.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AnswerValue {
+    /// The side model's answer.
+    pub text: String,
+    /// Sources in first-reported order, without duplicate URLs.
+    pub sources: Vec<RetrievalSource>,
+}
+
+/// One fetched page, as `fetch_url` returned it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PageValue {
+    /// The URL requested.
+    pub url: String,
+    /// The URL after redirects.
+    pub final_url: String,
+    /// The HTTP status.
+    pub status: u16,
+    /// The declared content type.
+    pub content_type: Option<String>,
+    /// The page as text (HTML converted to Markdown); empty for an image.
+    pub text: String,
+    /// The image, when the page is one.
+    pub image: Option<ImageValue>,
+    /// Whether the body was cut at the byte cap before conversion.
+    pub truncated: bool,
+    /// Text bytes left out of `text` past the inline bound.
+    pub omitted_bytes: u64,
+    /// The issued job-output file holding the whole text, when it was kept.
+    pub full_output: Option<String>,
+}
+
+/// One MCP tool result.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct McpValue {
+    /// The structured content when the server sent it, otherwise the text.
+    pub content: serde_json::Value,
+    /// Inline images in the result, in order.
+    pub images: Vec<McpImageValue>,
+}
+
+/// One inline MCP image.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct McpImageValue {
+    /// The declared media type.
+    pub media_type: String,
+    /// The base64 image data as the server sent it.
+    pub data: String,
 }
 
 /// One page of a file, as the read returned it.

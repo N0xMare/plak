@@ -38,7 +38,7 @@ pub(crate) fn shape(presentation: CodingPresentation) -> Shape {
     }
 }
 
-fn domains_schema() -> Value {
+pub(crate) fn domains_schema() -> Value {
     json!({
         "type": "array",
         "items": {"type": "string", "minLength": 1, "maxLength": 253},

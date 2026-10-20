@@ -6,12 +6,13 @@
 //! outer `run_py` projection and the canonical nested catalog. It does not
 //! run a cell.
 //!
-//! Gate A presents the five core namespaces. The optional namespaces (`web`,
-//! `x`, `image`, `mcp`) and `describe()` are not compiled yet; they add stub
-//! and bootstrap pieces and catalog members after the core ones without
-//! changing the core text.
+//! Gate A presents the five core namespaces, then the optional namespaces
+//! (`web`, `x`, `image`, `mcp`) the registry carries, and `describe()` when
+//! their stubs exceed the inline budget. Optional pieces come after the core
+//! ones and never change the core text.
 
 mod bootstrap;
+mod optional;
 mod stubs;
 #[cfg(test)]
 mod tests;
@@ -202,12 +203,19 @@ impl PythonHarnessSdkV1 {
                 "neutral Python SDK target class is not admitted",
             ));
         }
-        let stubs = render_stubs(access, order);
-        let bootstrap = bootstrap::render(access, order);
-        let nested_names = Self::nested_names(access)?;
+        let optional = optional::Optional::of(&registry)?;
+        let rendered = optional.render();
+        let core = render_stubs(access, order);
+        let stubs = format!("{core}{}", rendered.stubs);
+        let description = format!("{core}{}", rendered.description);
+        let bootstrap = bootstrap::render(access, order, &rendered);
+        let mut host_functions = bootstrap::host_functions(access);
+        host_functions.extend(optional.host_functions());
+        let mut nested_names = Self::nested_names(access)?;
+        nested_names.extend(optional.names()?);
         let nested_projection = nested_projection(&registry, &target, &nested_names)?;
         let nested_tools = nested_catalog(&nested_projection, &nested_names)?;
-        let outer_projection = outer_projection(registry, target, &stubs)?;
+        let outer_projection = outer_projection(registry, target, &description)?;
         let component = |revision: &str, bytes: &[u8]| component_identity(revision, bytes);
         let stubs_identity = component(STUBS_REVISION, stubs.as_bytes())?;
         let bootstrap_identity = component(BOOTSTRAP_REVISION, bootstrap.as_bytes())?;
@@ -244,8 +252,9 @@ impl PythonHarnessSdkV1 {
             nested_projection,
             nested_tools: nested_tools.into(),
             stubs: stubs.into(),
+            description: description.into(),
             bootstrap: bootstrap.into(),
-            host_functions: bootstrap::host_functions(access).into(),
+            host_functions: host_functions.into(),
             limits,
             access,
             order,
@@ -273,6 +282,7 @@ pub struct PythonHarnessSdkDescriptorV1 {
     nested_projection: ToolProjectionMap,
     nested_tools: Arc<[PythonHarnessSdkNestedToolV1]>,
     stubs: Arc<str>,
+    description: Arc<str>,
     bootstrap: Arc<str>,
     host_functions: Arc<[&'static str]>,
     limits: PythonHarnessSdkLimitsV1,
@@ -307,10 +317,16 @@ impl PythonHarnessSdkDescriptorV1 {
     pub fn nested_tools(&self) -> &[PythonHarnessSdkNestedToolV1] {
         &self.nested_tools
     }
-    /// The `.pyi` stub text: the `run_py` description and the type checker's input.
+    /// The complete `.pyi` stub text: the type checker's input.
     #[must_use]
     pub fn stubs(&self) -> &str {
         &self.stubs
+    }
+    /// The `run_py` description: the stubs, or past the inline budget the
+    /// core stubs with the optional namespace and function names only.
+    #[must_use]
+    pub fn description(&self) -> &str {
+        &self.description
     }
     /// The bootstrap program, fed with type checking skipped.
     #[must_use]
@@ -457,7 +473,7 @@ fn nested_catalog(
 fn outer_projection(
     registry: FrozenToolRegistry,
     target: ProviderModelProjectionIdentityV2,
-    stubs: &str,
+    description: &str,
 ) -> Result<ToolProjectionMap, ToolRuntimeError> {
     let name =
         ToolName::new(PYTHON_HARNESS_SDK_RUN_NAME_V1.to_owned()).map_err(definition_error)?;
@@ -469,7 +485,7 @@ fn outer_projection(
     let run = plakous_tools::internal::projection_exposure(
         [(CanonicalProcessOperationV2::Poll, marker)],
         PYTHON_HARNESS_SDK_RUN_NAME_V1,
-        stubs.to_owned(),
+        description.to_owned(),
         PortableToolSchemaV2::new(python_harness_sdk_run_schema()).map_err(definition_error)?,
         empty_object()?,
         ToolProjectionLoweringV2::CanonicalPassthrough,

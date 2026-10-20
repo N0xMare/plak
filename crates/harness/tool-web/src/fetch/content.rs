@@ -5,7 +5,8 @@ use std::rc::Rc;
 
 use plakous_model::{ImageBlock, MediaSource, TextBlock, ToolResultPart};
 use plakous_tools::{
-    MAX_STANDARD_IMAGE_BYTES, ToolOutcome, ToolRuntimeError, ToolRuntimeErrorKind,
+    ExecutionValue, ImageValue, MAX_STANDARD_IMAGE_BYTES, PageValue, ToolOutcome, ToolRuntimeError,
+    ToolRuntimeErrorKind,
 };
 
 use super::{Fetched, MAX_INLINE_FETCH_TEXT_BYTES};
@@ -81,8 +82,15 @@ pub(crate) fn render(
                 );
             }
             head.push('\n');
-            head.push_str(&bounded(text, spill));
-            ToolOutcome::success_text(head)
+            let text = bound_text(text, spill);
+            head.push_str(&text.shown);
+            let page = PageValue {
+                text: text.kept,
+                omitted_bytes: text.omitted,
+                full_output: text.full,
+                ..page(fetched)
+            };
+            Ok(ToolOutcome::success_text(head)?.with_execution_value(ExecutionValue::Page(page)))
         }
         Kind::Image(media_type) => image(fetched, head, media_type),
         Kind::Binary => ToolOutcome::failure_text(format!(
@@ -90,6 +98,21 @@ pub(crate) fn render(
             essence.as_deref().unwrap_or("no content type"),
             size(fetched)
         )),
+    }
+}
+
+/// The page value of a settled response before its text is known.
+fn page(fetched: &Fetched) -> PageValue {
+    PageValue {
+        url: fetched.requested.to_string(),
+        final_url: fetched.final_url.to_string(),
+        status: fetched.status.as_u16(),
+        content_type: fetched.content_type.clone(),
+        text: String::new(),
+        image: None,
+        truncated: fetched.truncated,
+        omitted_bytes: 0,
+        full_output: None,
     }
 }
 
@@ -208,7 +231,16 @@ fn image(
             &error,
         )
     };
-    ToolOutcome::success(vec![
+    let value = PageValue {
+        image: Some(ImageValue {
+            path: fetched.final_url.to_string(),
+            media_type: declared.to_owned(),
+            bytes: fetched.body.clone(),
+            dimensions: header.dimensions(),
+        }),
+        ..page(fetched)
+    };
+    Ok(ToolOutcome::success(vec![
         ToolResultPart::Text(TextBlock::new(head, None).map_err(content)?),
         ToolResultPart::Image(
             ImageBlock::new(
@@ -217,7 +249,8 @@ fn image(
             )
             .map_err(content)?,
         ),
-    ])
+    ])?
+    .with_execution_value(ExecutionValue::Page(value)))
 }
 
 /// UTF-8 text and whether invalid bytes were replaced. A body cut at the cap
@@ -273,27 +306,58 @@ fn depth(root: &Rc<htmd::Node>) -> usize {
     deepest
 }
 
+/// One text kept within [`MAX_INLINE_FETCH_TEXT_BYTES`].
+pub(crate) struct BoundedText {
+    /// The model-visible text, with the spill line when cut.
+    pub(crate) shown: String,
+    /// The head and tail kept, with the omission marker but no spill line.
+    pub(crate) kept: String,
+    /// Bytes left out between head and tail.
+    pub(crate) omitted: u64,
+    /// The issued file holding the whole text, when it was kept.
+    pub(crate) full: Option<String>,
+}
+
 /// `text` within [`MAX_INLINE_FETCH_TEXT_BYTES`]: an oversized text keeps
 /// its head and tail around the line naming the spilled file.
+#[cfg(test)]
 pub(crate) fn bounded(text: String, spill: &mut dyn FnMut(&[u8]) -> Option<String>) -> String {
-    if text.is_empty() {
-        return String::from("(empty body)");
-    }
-    if text.len() <= MAX_INLINE_FETCH_TEXT_BYTES {
-        return text;
+    bound_text(text, spill).shown
+}
+
+fn bound_text(text: String, spill: &mut dyn FnMut(&[u8]) -> Option<String>) -> BoundedText {
+    if text.is_empty() || text.len() <= MAX_INLINE_FETCH_TEXT_BYTES {
+        let shown = if text.is_empty() {
+            String::from("(empty body)")
+        } else {
+            text.clone()
+        };
+        return BoundedText {
+            shown,
+            kept: text,
+            omitted: 0,
+            full: None,
+        };
     }
     let head = floor_boundary(&text, SPILL_EDGE_BYTES);
     let tail = ceil_boundary(&text, text.len() - SPILL_EDGE_BYTES);
-    let location = match spill(text.as_bytes()) {
+    let full = spill(text.as_bytes());
+    let location = match &full {
         Some(path) => format!("full output: {path}"),
         None => String::from("[the full output could not be retained]"),
     };
-    format!(
-        "{}\n[... {} bytes omitted ...]\n{}\n{location}",
+    let kept = format!(
+        "{}\n[... {} bytes omitted ...]\n{}",
         &text[..head],
         tail - head,
         &text[tail..]
-    )
+    );
+    BoundedText {
+        shown: format!("{kept}\n{location}"),
+        kept,
+        omitted: (tail - head) as u64,
+        full,
+    }
 }
 
 fn floor_boundary(text: &str, mut index: usize) -> usize {

@@ -98,8 +98,13 @@ pub(super) fn host_functions(access: PythonHarnessSdkAccessV1) -> Vec<&'static s
     names
 }
 
-/// Renders the bootstrap for one access ceiling and op order.
-pub(super) fn render(access: PythonHarnessSdkAccessV1, order: PythonHarnessSdkOpOrderV1) -> String {
+/// Renders the bootstrap for one access ceiling and op order, with the
+/// optional namespaces' pieces and names after the core ones.
+pub(super) fn render(
+    access: PythonHarnessSdkAccessV1,
+    order: PythonHarnessSdkOpOrderV1,
+    optional: &super::optional::Rendered,
+) -> String {
     let mut source = String::from(HEAD);
     let bound = if access == PythonHarnessSdkAccessV1::Full {
         source.push_str(FS_HEAD);
@@ -119,6 +124,11 @@ pub(super) fn render(access: PythonHarnessSdkAccessV1, order: PythonHarnessSdkOp
         format!("{VALUE_NAMES}, proc, state, plan")
     };
     source.push_str(TAIL);
+    source.push_str(&optional.bootstrap);
+    let bound = optional
+        .bound
+        .iter()
+        .fold(bound, |bound, name| format!("{bound}, {name}"));
     let _ = write!(
         source,
         "    return {bound}\n{bound} = _plakous_sdk_install()\n_plakous_sdk_install = None\n"

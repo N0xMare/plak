@@ -1174,12 +1174,13 @@ pub mod tools {
             feature = "xai"
         ))]
         pub use plakous_tool_web::{
-            ImageGenFuture, ImageGenPack, ImageGenPort, ImageGenRequest, ImageGenSource,
-            MAX_IMAGE_EDIT_INPUT_BYTES, MAX_IMAGE_EDIT_INPUTS, MAX_IMAGE_PROMPT_BYTES,
+            ImageGenFuture, ImageGenOutcome, ImageGenOutcomeFuture, ImageGenPack, ImageGenPort,
+            ImageGenRequest, ImageGenSource, MAX_IMAGE_EDIT_INPUT_BYTES, MAX_IMAGE_EDIT_INPUTS,
+            MAX_IMAGE_PROMPT_BYTES,
         };
         pub use plakous_tool_web::{
-            MAX_DOMAINS, MAX_PROMPT_BYTES, MAX_QUERY_BYTES, MAX_URL_BYTES, RetrievalOptions,
-            WebTool, WebToolPack, render_outcome,
+            MAX_DOMAINS, MAX_PROMPT_BYTES, MAX_QUERY_BYTES, MAX_URL_BYTES,
+            PythonHarnessSdkOptionalTools, RetrievalOptions, WebTool, WebToolPack, render_outcome,
         };
         pub use plakous_tools::{
             DEFAULT_WEB_SEARCH_MAX_USES, RetrievalError, RetrievalErrorKind, RetrievalFuture,
