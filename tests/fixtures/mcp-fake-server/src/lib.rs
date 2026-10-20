@@ -12,6 +12,8 @@
 // server dependencies; they never compile the HTTP fixture.
 #[cfg(not(test))]
 pub mod http;
+#[cfg(not(test))]
+pub mod oauth;
 
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicUsize, Ordering};

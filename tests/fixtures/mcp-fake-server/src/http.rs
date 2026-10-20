@@ -22,6 +22,7 @@ use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 use crate::FakeServer;
+use crate::oauth::{OAuthGate, Reply};
 
 /// The endpoint path the fixture serves.
 pub const PATH: &str = "/mcp";
@@ -33,6 +34,8 @@ pub struct HttpGate {
     pub bearer: Option<String>,
     /// A header name and value every request must carry.
     pub header: Option<(String, String)>,
+    /// An OAuth authorization server and resource gate instead of `bearer`.
+    pub oauth: Option<Arc<OAuthGate>>,
 }
 
 /// One request the gate saw.
@@ -146,6 +149,9 @@ pub async fn serve_http(server: FakeServer, gate: HttpGate) -> io::Result<HttpFi
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
     let address = listener.local_addr()?;
     let observed = Arc::new(HttpObserved::default());
+    if let Some(oauth) = &gate.oauth {
+        oauth.set_origin(format!("http://{address}"));
+    }
     let revoked = Arc::new(AtomicBool::new(false));
     let service = StreamableHttpService::new(
         move || Ok(server.clone()),
@@ -204,6 +210,45 @@ impl GateState {
             refused: None,
             issued_session: None,
         };
+        if let Some(oauth) = &self.gate.oauth {
+            let path = request.uri().path().to_owned();
+            let query = request.uri().query().map(ToOwned::to_owned);
+            let method = request.method().to_string();
+            let authorization = seen.header("authorization").map(ToOwned::to_owned);
+            if path != PATH {
+                let body = request
+                    .into_body()
+                    .collect()
+                    .await
+                    .map(http_body_util::Collected::to_bytes)
+                    .unwrap_or_default();
+                let reply = oauth
+                    .handle(
+                        &method,
+                        &path,
+                        query.as_deref(),
+                        &body,
+                        authorization.as_deref(),
+                        PATH,
+                    )
+                    .unwrap_or(Reply {
+                        status: 404,
+                        headers: Vec::new(),
+                        body: String::new(),
+                    });
+                seen.refused = Some(reply.status);
+                self.observed.record(seen);
+                return reply_response(reply);
+            }
+            if let Err(reply) = oauth.check(PATH, authorization.as_deref()) {
+                seen.refused = Some(reply.status);
+                self.observed.record(seen);
+                return reply_response(reply);
+            }
+            let response = self.service.handle(request).await;
+            self.observed.record(seen);
+            return response;
+        }
         let bearer_ok = self.gate.bearer.as_ref().is_none_or(|token| {
             seen.header("authorization") == Some(format!("Bearer {token}").as_str())
         });
@@ -232,4 +277,15 @@ impl GateState {
         self.observed.record(seen);
         response
     }
+}
+
+fn reply_response(reply: Reply) -> Response<Body> {
+    let mut response = Response::new(Full::new(Bytes::from(reply.body)).boxed());
+    *response.status_mut() = StatusCode::from_u16(reply.status).unwrap_or(StatusCode::BAD_REQUEST);
+    for (name, value) in reply.headers {
+        if let Ok(value) = hyper::header::HeaderValue::from_str(&value) {
+            response.headers_mut().insert(name, value);
+        }
+    }
+    response
 }

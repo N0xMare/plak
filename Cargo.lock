@@ -4281,6 +4281,7 @@ dependencies = [
 name = "plakous-mcp"
 version = "0.0.1"
 dependencies = [
+ "base64 0.22.1",
  "futures-util",
  "http",
  "plakous-auth",
@@ -4295,6 +4296,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "url",
  "zeroize",
 ]
 
@@ -4302,6 +4304,7 @@ dependencies = [
 name = "plakous-mcp-fake-server"
 version = "0.0.1"
 dependencies = [
+ "base64 0.22.1",
  "bytes",
  "http-body-util",
  "hyper",
@@ -4312,6 +4315,7 @@ dependencies = [
  "plakous-tools",
  "rmcp",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "tracing",

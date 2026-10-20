@@ -205,6 +205,16 @@ impl McpHttpEndpoint {
         &self.url
     }
 
+    /// The literal headers, which an OAuth discovery probe carries too.
+    pub(crate) fn literal_headers(&self) -> HeaderMap {
+        self.headers.iter().cloned().collect()
+    }
+
+    /// Whether the endpoint is plain HTTP to a loopback literal.
+    pub(crate) const fn is_loopback(&self) -> bool {
+        self.origin.is_loopback_http()
+    }
+
     pub(crate) const fn oauth(&self) -> Option<&McpOAuthSettings> {
         self.oauth.as_ref()
     }

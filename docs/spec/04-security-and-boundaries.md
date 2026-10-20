@@ -837,7 +837,8 @@ login over SSH is refused with the hint to re-run with `--remote`. A device
 user code is shown only to the operator, with the anti-phishing line.
 `plak mcp logout <id>` revokes at the authorization server when it advertised
 a revocation endpoint, and retires locally (saying the grant may remain)
-otherwise or with `--local`.
+otherwise or with `--local`; as with `plak logout`, a revocation that fails
+retires nothing.
 
 Logout is local retirement or, where the provider offers one, a remote
 revocation. Where no remote revoke exists, logout retires the local credential

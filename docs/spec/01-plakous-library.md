@@ -4968,7 +4968,8 @@ secret or the store location. The canonical server URI is the endpoint URL
 with its scheme and host lowercased and its default port and a bare `/` path
 dropped; an OAuth endpoint refuses a URL with a query. The library never
 starts a login on its own: only `McpLogin`, which an embedder's login command
-drives, contacts an authorization server outside a refresh.
+drives (`McpPool::login`, then `McpLogin::local` or `remote`; `McpPool::logout`),
+contacts an authorization server outside a refresh.
 
 *Discovery.* A login sends one unauthenticated `server/discover` POST to the
 endpoint. When its 401 carries a `WWW-Authenticate` Bearer challenge with
@@ -4991,8 +4992,8 @@ absent there, anywhere else it fails the login); response bodies within
 256 KiB; each exchange within 30 s.
 
 *Registration.* A pre-registered client is used when configured. Otherwise a
-Client ID Metadata Document client (`McpOAuthClient::MetadataDocument`, its
-HTTPS document URL and the loopback ports the document lists) is used when the
+Client ID Metadata Document client (its HTTPS document URL is the client id;
+`McpLoginOptions::with_client_id_metadata_document`) is used when the
 embedder supplies one and the authorization server sets
 `client_id_metadata_document_supported`. Otherwise the client registers
 dynamically at `registration_endpoint` as a `native` public client for exactly
@@ -5012,8 +5013,8 @@ challenge's `scope`, else the resource metadata's `scopes_supported`, else
 none, united with the scope the login it replaces requested; `offline_access`
 is added when the authorization server lists it. The redirect URI is
 `http://127.0.0.1:<port>/callback`. A local login binds the configured port,
-the Client ID Metadata Document's first free port, or an ephemeral one, and
-completes on the loopback callback, checked as chapter 04 §3.6 states. A
+else an ephemeral one, and completes on the loopback callback, checked as
+chapter 04 §3.6 states. A
 remote login chooses its port the same way but keeps nothing bound: it runs
 the device grant (with `resource=`) when the authorization server advertises
 `device_authorization_endpoint`, falls back to paste-back when that request
@@ -5028,7 +5029,9 @@ revocation endpoints. Refresh is a claimed refresh (chapter 04 §3.3) with
 the stored one and an absent one keeps it. Logout revokes (RFC 7009) the
 refresh token, else the access token, at the stored revocation endpoint and
 then retires the record; without a revocation endpoint it retires the record
-locally and says the grant may remain active.
+locally and says the grant may remain active. A revocation that fails retires
+nothing and fails the logout; an unusable login (quarantined, unreadable or
+written by a newer build) is retired locally.
 
 *Use.* At each start the transport opens the store and refuses when it holds
 no usable login or a login bound to another canonical URI, issuer or client

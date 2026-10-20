@@ -108,6 +108,7 @@ fn gate() -> HttpGate {
     HttpGate {
         bearer: Some(TOKEN.to_owned()),
         header: Some(("x-api-key".to_owned(), API_KEY.to_owned())),
+        oauth: None,
     }
 }
 

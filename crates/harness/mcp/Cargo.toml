@@ -18,6 +18,7 @@ layer = "harness"
 class = "published-internal"
 
 [dependencies]
+base64.workspace = true
 futures-util = { workspace = true, features = ["alloc"] }
 http.workspace = true
 plakous-auth = { workspace = true, features = ["http-refresh"] }
@@ -28,8 +29,9 @@ rmcp = { version = "=3.5.1", default-features = false, features = ["client", "tr
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 sse-stream = "0.2.5"
-tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
 tracing.workspace = true
+url.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]

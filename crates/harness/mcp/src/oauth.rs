@@ -5,6 +5,8 @@
 //! and refreshes it. Nothing here starts a login on its own.
 
 mod credential;
+mod exchange;
+mod login;
 
 use std::fmt;
 use std::path::PathBuf;
@@ -12,6 +14,10 @@ use std::sync::Arc;
 
 pub use credential::McpOAuthStatus;
 pub(crate) use credential::status;
+pub use login::{
+    McpDeviceLogin, McpLocalLogin, McpLocalRetirement, McpLogin, McpLoginOptions, McpLogoutOutcome,
+    McpPasteLogin, McpRemoteLogin,
+};
 
 use crate::error::{McpError, McpErrorKind};
 
@@ -22,17 +28,18 @@ pub type McpOAuthSecretResolver = Arc<
         + Sync,
 >;
 
-/// One HTTP endpoint's OAuth settings: where its login is stored and which
-/// authorization server and client it uses.
+/// One HTTP endpoint's OAuth settings: where its login is stored, which
+/// authorization server and client it uses, and its login callback port.
 ///
-/// The definition digest covers the issuer pin, the client id and whether a
-/// client secret is configured; never the store location, a secret or a
-/// token.
+/// The definition digest covers the issuer pin, the client id, whether a
+/// client secret is configured and the callback port; never the store
+/// location, a secret or a token.
 #[derive(Clone)]
 pub struct McpOAuthSettings {
     store: PathBuf,
     issuer: Option<String>,
     client: Option<PreRegisteredClient>,
+    callback_port: Option<u16>,
 }
 
 #[derive(Clone)]
@@ -50,6 +57,7 @@ impl McpOAuthSettings {
             store: store.into(),
             issuer: None,
             client: None,
+            callback_port: None,
         }
     }
 
@@ -94,6 +102,18 @@ impl McpOAuthSettings {
         Ok(self)
     }
 
+    /// Fixes the loopback callback port of a login, for a client registered
+    /// with exactly `http://127.0.0.1:<port>/callback`.
+    #[must_use]
+    pub const fn with_callback_port(mut self, port: u16) -> Self {
+        self.callback_port = Some(port);
+        self
+    }
+
+    pub(crate) const fn callback_port(&self) -> Option<u16> {
+        self.callback_port
+    }
+
     pub(crate) fn store(&self) -> &std::path::Path {
         &self.store
     }
@@ -132,6 +152,7 @@ impl McpOAuthSettings {
                 .as_ref()
                 .is_some_and(|client| client.secret.is_some()),
         )]);
+        parts.push(self.callback_port.unwrap_or(0).to_be_bytes().to_vec());
     }
 }
 
@@ -151,6 +172,7 @@ impl fmt::Debug for McpOAuthSettings {
                     .as_ref()
                     .is_some_and(|client| client.secret.is_some()),
             )
+            .field("callback_port", &self.callback_port)
             .finish_non_exhaustive()
     }
 }

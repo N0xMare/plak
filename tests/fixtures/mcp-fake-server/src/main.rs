@@ -80,6 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let gate = HttpGate {
             bearer: std::env::var("MCP_FAKE_BEARER").ok(),
             header: None,
+            oauth: None,
         };
         let fixture = serve_http(server, gate).await?;
         println!("listening on {}", fixture.url());

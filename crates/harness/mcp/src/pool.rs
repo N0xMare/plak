@@ -156,6 +156,21 @@ impl McpPool {
         Ok(lease)
     }
 
+    /// The transport client HTTP work derives from: the host's, else a
+    /// default one.
+    pub(crate) fn http_client(&self) -> Result<plakous_http::Client, McpError> {
+        match &self.inner.http {
+            Some(client) => Ok(client.clone()),
+            None => plakous_http::Client::new(plakous_http::Limits::default()).map_err(|error| {
+                McpError::with_source(
+                    McpErrorKind::Startup,
+                    "the mcp http transport could not be built",
+                    error,
+                )
+            }),
+        }
+    }
+
     /// Stops every entry and refuses later leases. Leases still held fail
     /// their calls with a closed error.
     pub async fn shutdown(&self) {

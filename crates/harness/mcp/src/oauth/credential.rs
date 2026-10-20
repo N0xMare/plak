@@ -8,8 +8,9 @@ use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use plakous_auth::{
-    AccountBinding, CredentialFence, CredentialSlotId, OfflineCredentialLifecycle,
-    PrivateCredentialStore, PrivateStoreError, SubscriptionIntegrationProfileId,
+    AccountBinding, CredentialFence, CredentialGeneration, CredentialRecord, CredentialSlotId,
+    CredentialStatus, OfflineCredentialLifecycle, PrivateCredentialStore, PrivateStoreError,
+    SecretBytes, SubscriptionIntegrationProfileId,
 };
 use plakous_model::{Digest, DigestDomain};
 use serde::{Deserialize, Serialize};
@@ -116,6 +117,23 @@ impl StoredLogin {
     /// Seconds until the access token expires, `None` without a lifetime.
     pub(crate) fn expires_in(&self, now: u64) -> Option<u64> {
         self.expires_at.map(|at| at.saturating_sub(now))
+    }
+
+    /// The credential record of this payload at `generation`.
+    pub(crate) fn record(
+        &self,
+        generation: CredentialGeneration,
+    ) -> Result<CredentialRecord, McpError> {
+        self.validate()?;
+        let payload = serde_json::to_vec(self).map_err(|_| invalid_stored())?;
+        CredentialRecord::new(
+            profile_id()?,
+            binding(&self.resource, &self.issuer, &self.client_id)?,
+            generation,
+            CredentialStatus::Ready,
+            SecretBytes::new(payload),
+        )
+        .map_err(|error| store_failed("mcp login record is invalid", error))
     }
 
     /// Decodes and validates a payload against its record's binding.
@@ -328,8 +346,6 @@ fn newer_build() -> McpError {
 mod tests {
     use std::os::unix::fs::PermissionsExt as _;
 
-    use plakous_auth::{CredentialGeneration, CredentialRecord, CredentialStatus, SecretBytes};
-
     use super::*;
 
     type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -356,19 +372,6 @@ mod tests {
         McpOAuthSettings::new(directory.join("fake").join("credential.json"))
     }
 
-    fn record(
-        login: &StoredLogin,
-        generation: u64,
-    ) -> Result<CredentialRecord, Box<dyn std::error::Error>> {
-        Ok(CredentialRecord::new(
-            profile_id()?,
-            binding(&login.resource, &login.issuer, &login.client_id)?,
-            CredentialGeneration::new(generation)?,
-            CredentialStatus::Ready,
-            SecretBytes::new(serde_json::to_vec(login)?),
-        )?)
-    }
-
     #[test]
     fn status_reads_the_login_without_contacting_anything() -> TestResult {
         let home = tempfile::tempdir()?;
@@ -379,7 +382,7 @@ mod tests {
         std::fs::create_dir(&directory)?;
         std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))?;
         let store = open_store(settings.store())?.ok_or("store")?;
-        store.initialize_selected(&record(&login(resource), 1)?)?;
+        store.initialize_selected(&login(resource).record(CredentialGeneration::new(1)?)?)?;
         let McpOAuthStatus::LoggedIn {
             expires_in,
             refreshable,
@@ -412,7 +415,7 @@ mod tests {
     #[test]
     fn a_payload_must_match_its_binding_and_a_newer_version_is_recognized() -> TestResult {
         let resource = "https://mcp.example.com/mcp";
-        let record = record(&login(resource), 1)?;
+        let record = login(resource).record(CredentialGeneration::new(1)?)?;
         let fence = record.fence();
         let encoded = serde_json::to_vec(&login(resource))?;
         assert!(StoredLogin::decode(&encoded, &fence).is_ok());
