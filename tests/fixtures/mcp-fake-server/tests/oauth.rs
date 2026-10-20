@@ -1,32 +1,42 @@
 //! MCP authorization against the scripted authorization server: discovery,
-//! registration, the local, paste-back and device logins, and logout.
+//! registration, the local, paste-back and device logins, logout, and the
+//! credentials of a running server.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use plakous_mcp::{
-    McpHttpEndpoint, McpLocalRetirement, McpLoginOptions, McpLogoutOutcome, McpOAuthSettings,
-    McpOAuthStatus, McpPool, McpRemoteLogin, McpServerSpec, SensitiveBytes,
+    McpErrorKind, McpHttpEndpoint, McpLocalRetirement, McpLoginOptions, McpLogoutOutcome,
+    McpOAuthSettings, McpOAuthStatus, McpPool, McpRemoteLogin, McpServerSpec, McpToolPack,
+    McpToolSelection, SensitiveBytes,
 };
 use plakous_mcp_fake_server::http::{HttpFixture, HttpGate, serve_http};
 use plakous_mcp_fake_server::oauth::{
     CallbackIssuer, OAuthConfig, OAuthGate, ResourceMetadataAt, ServerMetadataAt, browse,
 };
 use plakous_mcp_fake_server::{FakeServer, Style};
-use plakous_tools::McpServerName;
+use plakous_tools::{
+    FrozenToolRegistry, McpServerName, ToolOutcomeKind, ToolPack, ToolRegistryBuilder,
+    register_packs,
+};
 
-type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+mod common;
+
+use common::{TestResult, Workspace, execute, workspace};
 
 struct Setup {
     fixture: HttpFixture,
     gate: Arc<OAuthGate>,
+    calls: Arc<plakous_mcp_fake_server::Observed>,
     home: tempfile::TempDir,
 }
 
 async fn setup(config: OAuthConfig) -> TestResult<Setup> {
     let gate = Arc::new(OAuthGate::new(config));
+    let server = FakeServer::new(Style::Discover, Arc::new(|| {}));
+    let calls = server.observed();
     let fixture = serve_http(
-        FakeServer::new(Style::Discover, Arc::new(|| {})),
+        server,
         HttpGate {
             oauth: Some(Arc::clone(&gate)),
             ..HttpGate::default()
@@ -42,6 +52,7 @@ async fn setup(config: OAuthConfig) -> TestResult<Setup> {
     Ok(Setup {
         fixture,
         gate,
+        calls,
         home,
     })
 }
@@ -49,6 +60,19 @@ async fn setup(config: OAuthConfig) -> TestResult<Setup> {
 impl Setup {
     fn settings(&self) -> McpOAuthSettings {
         McpOAuthSettings::new(self.home.path().join("remote").join("credential.json"))
+            .with_login_remedy(Arc::new(|scope| match scope {
+                Some(scope) => format!("run login remote --scope \"{scope}\""),
+                None => "run login remote".to_owned(),
+            }))
+    }
+
+    /// Token requests of the refresh grant.
+    fn refreshes(&self) -> Vec<plakous_mcp_fake_server::oauth::AuthRequest> {
+        self.gate
+            .requests_to("/token")
+            .into_iter()
+            .filter(|request| request.field("grant_type") == Some("refresh_token"))
+            .collect()
     }
 
     fn spec(&self, settings: McpOAuthSettings) -> TestResult<McpServerSpec> {
@@ -389,6 +413,255 @@ async fn a_preregistered_client_authenticates_with_its_secret_only_at_its_issuer
         .ok_or("a login without any registration path started")?;
     assert!(
         refused.message().contains("offers no client registration"),
+        "{refused}"
+    );
+    Ok(())
+}
+
+async fn registry(
+    pool: &McpPool,
+    spec: McpServerSpec,
+    workspace: &Workspace,
+) -> TestResult<FrozenToolRegistry> {
+    let lease = pool.lease(spec, Arc::clone(&workspace.environment)).await?;
+    let listing = lease.freeze(&McpToolSelection::All).await?;
+    let pack: Arc<dyn ToolPack> = Arc::new(McpToolPack::new(lease, &listing));
+    let mut builder = ToolRegistryBuilder::default();
+    register_packs(&[pack], &mut builder)?;
+    Ok(builder.freeze())
+}
+
+async fn echo(
+    registry: &FrozenToolRegistry,
+    workspace: &Workspace,
+) -> TestResult<plakous_tools::ToolOutcome> {
+    execute(
+        registry,
+        Arc::clone(&workspace.environment),
+        "mcp__remote__echo",
+        r#"{"text":"hi"}"#,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn calls_carry_the_token_only_to_the_endpoint_and_refresh_it_before_expiry() -> TestResult {
+    // A token that expires within the five-minute lead refreshes before
+    // every request; each refresh spends the rotated refresh token.
+    let setup = setup(OAuthConfig {
+        access_lifetime: 60,
+        ..OAuthConfig::default()
+    })
+    .await?;
+    let spec = setup.spec(setup.settings())?;
+    let pool = McpPool::new();
+    local_login(&pool, &spec).await?;
+    let workspace = workspace()?;
+    let registry = registry(&pool, spec.clone(), &workspace).await?;
+    for _ in 0..2 {
+        assert_eq!(
+            echo(&registry, &workspace).await?.kind(),
+            ToolOutcomeKind::Success
+        );
+    }
+    assert_eq!(setup.calls.calls(), ["echo", "echo"]);
+
+    let refreshes = setup.refreshes();
+    assert!(refreshes.len() >= 3, "{}", refreshes.len());
+    let resource = setup.fixture.url();
+    let mut spent = Vec::new();
+    for request in &refreshes {
+        assert_eq!(request.field("resource"), Some(resource.as_str()));
+        let token = request.field("refresh_token").ok_or("no refresh token")?;
+        assert!(
+            !spent.contains(&token.to_owned()),
+            "a refresh token was reused"
+        );
+        spent.push(token.to_owned());
+    }
+    // Tokens reach the MCP endpoint and nothing else.
+    let observed = setup.fixture.observed();
+    assert!(observed.requests().iter().any(|request| {
+        request.refused.is_none()
+            && request
+                .header("authorization")
+                .is_some_and(|value| value.starts_with("Bearer at-"))
+    }));
+    assert!(
+        setup
+            .gate
+            .requests()
+            .iter()
+            .all(|request| request.authorization.is_none()),
+        "a token reached the authorization server"
+    );
+    assert!(matches!(
+        spec.oauth_status()?,
+        Some(McpOAuthStatus::LoggedIn { .. })
+    ));
+    pool.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_rejected_token_is_renewed_once_and_the_call_is_not_resent() -> TestResult {
+    let setup = setup(OAuthConfig::default()).await?;
+    let spec = setup.spec(setup.settings())?;
+    let pool = McpPool::new();
+    local_login(&pool, &spec).await?;
+    let workspace = workspace()?;
+    let registry = registry(&pool, spec, &workspace).await?;
+    assert!(setup.refreshes().is_empty());
+
+    setup.gate.reject_access_tokens();
+    let rejected = echo(&registry, &workspace).await?;
+    assert_eq!(rejected.kind(), ToolOutcomeKind::Failure);
+    assert_eq!(
+        rejected.joined_text(),
+        "mcp server remote: not executed: credentials were rejected and have been renewed; call again"
+    );
+    assert_eq!(
+        setup.calls.calls(),
+        Vec::<String>::new(),
+        "the call was re-sent"
+    );
+    assert_eq!(setup.refreshes().len(), 1);
+
+    assert_eq!(
+        echo(&registry, &workspace).await?.kind(),
+        ToolOutcomeKind::Success
+    );
+    assert_eq!(setup.calls.calls(), ["echo"]);
+    assert_eq!(setup.refreshes().len(), 1);
+    pool.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_start_renews_a_rejected_token_and_retries_once() -> TestResult {
+    let setup = setup(OAuthConfig::default()).await?;
+    let spec = setup.spec(setup.settings())?;
+    let pool = McpPool::new();
+    local_login(&pool, &spec).await?;
+    let workspace = workspace()?;
+    setup.gate.reject_access_tokens();
+    let lease = pool
+        .lease(spec.clone(), Arc::clone(&workspace.environment))
+        .await?;
+    assert_eq!(setup.refreshes().len(), 1);
+    drop(lease);
+    pool.shutdown().await;
+
+    // A grant the server revoked cannot renew: the login is retired and the
+    // start names the remedy.
+    let pool = McpPool::new();
+    setup.gate.reject_access_tokens();
+    setup.gate.reject_refresh_tokens();
+    let refused = pool
+        .lease(spec.clone(), Arc::clone(&workspace.environment))
+        .await
+        .err()
+        .ok_or("a revoked grant started")?;
+    // An authorization error: its text carries the one login remedy.
+    assert_eq!(refused.kind(), McpErrorKind::Authorization);
+    assert!(
+        refused.message().contains("invalid_grant")
+            && refused.message().ends_with("; run login remote"),
+        "{refused}"
+    );
+    assert_eq!(spec.oauth_status()?, Some(McpOAuthStatus::NotLoggedIn));
+    Ok(())
+}
+
+#[tokio::test]
+async fn insufficient_scope_names_the_step_up_login_and_nothing_runs() -> TestResult {
+    let setup = setup(OAuthConfig::default()).await?;
+    let spec = setup.spec(setup.settings())?;
+    let pool = McpPool::new();
+    local_login(&pool, &spec).await?;
+    let workspace = workspace()?;
+    let registry = registry(&pool, spec, &workspace).await?;
+    setup.gate.require_scope(Some("mcp:admin"));
+    let refused = echo(&registry, &workspace).await?;
+    assert_eq!(refused.kind(), ToolOutcomeKind::Failure);
+    assert_eq!(
+        refused.joined_text(),
+        "mcp server remote needs scope \"mcp:tools offline_access mcp:admin\"; \
+         run login remote --scope \"mcp:tools offline_access mcp:admin\"; the call did not run"
+    );
+    assert_eq!(setup.calls.calls(), Vec::<String>::new());
+    assert!(setup.refreshes().is_empty(), "a step-up is not a refresh");
+    pool.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_refresh_the_server_fails_keeps_the_login_for_the_next_one() -> TestResult {
+    let setup = setup(OAuthConfig {
+        access_lifetime: 60,
+        ..OAuthConfig::default()
+    })
+    .await?;
+    let spec = setup.spec(setup.settings())?;
+    let pool = McpPool::new();
+    local_login(&pool, &spec).await?;
+    let workspace = workspace()?;
+    setup.gate.fail_token_requests(1);
+    let refused = pool
+        .lease(spec.clone(), Arc::clone(&workspace.environment))
+        .await
+        .err()
+        .ok_or("a failed refresh started")?;
+    assert!(
+        refused.message().contains("could not renew its login")
+            && refused.message().contains("HTTP 503"),
+        "{refused}"
+    );
+    assert!(matches!(
+        spec.oauth_status()?,
+        Some(McpOAuthStatus::LoggedIn { .. })
+    ));
+    let registry = registry(&pool, spec, &workspace).await?;
+    assert_eq!(
+        echo(&registry, &workspace).await?.kind(),
+        ToolOutcomeKind::Success
+    );
+    pool.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_start_refuses_without_a_login_for_this_server() -> TestResult {
+    let setup = setup(OAuthConfig::default()).await?;
+    let spec = setup.spec(setup.settings())?;
+    let pool = McpPool::new();
+    let workspace = workspace()?;
+    let refused = pool
+        .lease(spec.clone(), Arc::clone(&workspace.environment))
+        .await
+        .err()
+        .ok_or("a server without a login started")?;
+    assert_eq!(refused.kind(), McpErrorKind::Authorization);
+    assert_eq!(
+        refused.message(),
+        "mcp server remote is not logged in; run login remote"
+    );
+    assert!(
+        setup.fixture.observed().requests().is_empty(),
+        "a request was sent"
+    );
+
+    local_login(&pool, &spec).await?;
+    let pinned = setup.spec(setup.settings().with_issuer("https://other.example.com")?)?;
+    let refused = pool
+        .lease(pinned, Arc::clone(&workspace.environment))
+        .await
+        .err()
+        .ok_or("another server's login was used")?;
+    assert!(
+        refused
+            .message()
+            .contains("has a login made for another URL, issuer or client"),
         "{refused}"
     );
     Ok(())

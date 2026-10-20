@@ -14,8 +14,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::stream::{self, BoxStream, Stream, StreamExt as _};
-use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
+use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, WWW_AUTHENTICATE};
 use http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri};
+use plakous_auth::oauth_workflow::parse_bearer_challenge;
 use plakous_http::{
     Bytes, CancellationToken, Client, ErrorKind, ExchangeControl, Failure, Limits, Origin, Request,
     ResponseBody, SensitiveBytes, SseDecoder, SseLimits, sensitive_header_value,
@@ -30,7 +31,7 @@ use rmcp::transport::streamable_http_client::{
 use sse_stream::Sse;
 
 use crate::error::{McpError, McpErrorKind};
-use crate::oauth::McpOAuthSettings;
+use crate::oauth::{Bearer, McpOAuthSettings, OAuthHttp, OAuthSession};
 
 /// Largest server-sent event the client accepts.
 pub const MAX_SSE_EVENT_BYTES: usize = 4 * 1024 * 1024;
@@ -270,7 +271,8 @@ impl McpHttpEndpoint {
         }
     }
 
-    /// Builds the client for one server start, resolving secrets now.
+    /// Builds the client for one server start, resolving secrets now; an
+    /// OAuth endpoint reads its login at each request.
     pub(crate) fn client(
         &self,
         server: &McpServerName,
@@ -341,6 +343,15 @@ impl McpHttpEndpoint {
             })?
             .with_address_policy(None)
             .pooled();
+        let oauth = match &self.oauth {
+            Some(settings) => Some(Arc::new(OAuthSession::new(
+                server.clone(),
+                settings.clone(),
+                self.canonical_resource()?,
+                OAuthHttp::new(base, self.is_loopback())?,
+            ))),
+            None => None,
+        };
         Ok(PlakousStreamableClient {
             inner: Arc::new(ClientState {
                 http,
@@ -348,6 +359,7 @@ impl McpHttpEndpoint {
                 path_and_query: self.path_and_query.clone(),
                 headers,
                 exchange_timeout,
+                oauth,
             }),
         })
     }
@@ -390,6 +402,7 @@ struct ClientState {
     /// sensitive and zeroized with their last clone.
     headers: HeaderMap,
     exchange_timeout: Duration,
+    oauth: Option<Arc<OAuthSession>>,
 }
 
 /// One failure of the MCP HTTP client. Never carries header values or
@@ -406,6 +419,9 @@ pub(crate) enum McpHttpError {
     Sse(plakous_http::SseError),
     /// The message could not be encoded; nothing was sent.
     Encode,
+    /// The OAuth credentials were missing or refused; the text names the
+    /// remedy, and `renewed` says a 401 renewed them.
+    Authorization { text: String, renewed: bool },
 }
 
 impl fmt::Display for McpHttpError {
@@ -416,6 +432,7 @@ impl fmt::Display for McpHttpError {
             Self::Status(status) => write!(formatter, "server answered HTTP {}", status.as_u16()),
             Self::Sse(error) => error.fmt(formatter),
             Self::Encode => formatter.write_str("the mcp message could not be encoded"),
+            Self::Authorization { text, .. } => formatter.write_str(text),
         }
     }
 }
@@ -432,6 +449,7 @@ impl PlakousStreamableClient {
         protocol_headers: HashMap<HeaderName, HeaderValue>,
         session_id: Option<&str>,
         body: Bytes,
+        bearer: Option<&Bearer>,
     ) -> HttpResult<Request> {
         for (name, value) in protocol_headers {
             // rmcp supplies the protocol version and standard request
@@ -452,6 +470,9 @@ impl PlakousStreamableClient {
         }
         for (name, value) in &self.inner.headers {
             headers.insert(name.clone(), value.clone());
+        }
+        if let Some(bearer) = bearer {
+            headers.insert(AUTHORIZATION, bearer.header.clone());
         }
         Request::new(
             self.inner.origin.clone(),
@@ -477,6 +498,52 @@ impl PlakousStreamableClient {
             .execute(request, control)
             .await
             .map_err(|failure| StreamableHttpError::Client(McpHttpError::Transport(failure)))
+    }
+
+    /// The OAuth bearer of the next request, `None` without OAuth.
+    async fn bearer(&self) -> HttpResult<Option<Bearer>> {
+        match &self.inner.oauth {
+            Some(session) => session.bearer().await.map(Some).map_err(|text| {
+                StreamableHttpError::Client(McpHttpError::Authorization {
+                    text,
+                    renewed: false,
+                })
+            }),
+            None => Ok(None),
+        }
+    }
+
+    /// Settles an OAuth endpoint's 401 or 403 and closes the response: a
+    /// 401 renews the credentials once, a 403 names the step-up login.
+    /// Nothing is re-sent. Any other response passes through.
+    async fn oauth_refusal(
+        &self,
+        response: plakous_http::Response,
+        bearer: Option<&Bearer>,
+    ) -> HttpResult<plakous_http::Response> {
+        let status = response.status();
+        let (Some(session), Some(bearer)) = (&self.inner.oauth, bearer) else {
+            return Ok(response);
+        };
+        if !matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+            return Ok(response);
+        }
+        let challenge = response
+            .headers()
+            .iter()
+            .filter(|(name, _)| **name == WWW_AUTHENTICATE)
+            .filter_map(|(_, value)| value.to_str().ok())
+            .find_map(parse_bearer_challenge);
+        let _ = response.into_body().close().await;
+        let (text, renewed) = if status == StatusCode::UNAUTHORIZED {
+            session.rejected(bearer.generation).await
+        } else {
+            (session.forbidden(challenge.as_ref()), false)
+        };
+        Err(StreamableHttpError::Client(McpHttpError::Authorization {
+            text,
+            renewed,
+        }))
     }
 }
 
@@ -519,14 +586,18 @@ impl StreamableHttpClient for PlakousStreamableClient {
             ACCEPT,
             HeaderValue::from_static("text/event-stream, application/json"),
         );
+        let bearer = self.bearer().await?;
         let request = self.request(
             Method::POST,
             headers,
             custom_headers,
             session_id.as_deref(),
             Bytes::from(body),
+            bearer.as_ref(),
         )?;
-        let response = self.execute(request).await?;
+        let response = self
+            .oauth_refusal(self.execute(request).await?, bearer.as_ref())
+            .await?;
         let status = response.status();
         if matches!(status, StatusCode::ACCEPTED | StatusCode::NO_CONTENT) {
             return Ok(StreamableHttpPostResponse::Accepted);
@@ -591,14 +662,18 @@ impl StreamableHttpClient for PlakousStreamableClient {
         _auth_header: Option<String>,
         custom_headers: HashMap<HeaderName, HeaderValue>,
     ) -> HttpResult<()> {
+        let bearer = self.bearer().await?;
         let request = self.request(
             Method::DELETE,
             HeaderMap::new(),
             custom_headers,
             Some(&session_id),
             Bytes::new(),
+            bearer.as_ref(),
         )?;
-        let response = self.execute(request).await?;
+        let response = self
+            .oauth_refusal(self.execute(request).await?, bearer.as_ref())
+            .await?;
         let status = response.status();
         let _ = response.into_body().close().await;
         if status.is_success() || status == StatusCode::METHOD_NOT_ALLOWED {
@@ -648,14 +723,18 @@ impl StreamableHttpClient for PlakousStreamableClient {
                     .map_err(|_| StreamableHttpError::Client(McpHttpError::Request))?,
             );
         }
+        let bearer = self.bearer().await?;
         let request = self.request(
             Method::GET,
             headers,
             custom_headers,
             session_id.as_deref(),
             Bytes::new(),
+            bearer.as_ref(),
         )?;
-        let response = self.execute(request).await?;
+        let response = self
+            .oauth_refusal(self.execute(request).await?, bearer.as_ref())
+            .await?;
         let status = response.status();
         if status == StatusCode::METHOD_NOT_ALLOWED {
             let _ = response.into_body().close().await;
@@ -790,10 +869,13 @@ where
 }
 
 /// How an HTTP failure settles a call.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum HttpRefusal {
     /// The server refused the credentials before running anything.
     Credentials(StatusCode),
+    /// OAuth credentials were missing or refused; nothing ran. `renewed`
+    /// says a 401 renewed them, so the same request would now be admitted.
+    Authorization { text: String, renewed: bool },
     /// The request never reached the server.
     NotSent,
     /// Any other HTTP failure: the call may have reached the server.
@@ -807,6 +889,10 @@ pub(crate) fn classify(error: &(dyn Error + 'static)) -> Option<HttpRefusal> {
         McpHttpError::Status(status @ (StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN)) => {
             HttpRefusal::Credentials(*status)
         }
+        McpHttpError::Authorization { text, renewed } => HttpRefusal::Authorization {
+            text: text.clone(),
+            renewed: *renewed,
+        },
         McpHttpError::Request | McpHttpError::Encode => HttpRefusal::NotSent,
         McpHttpError::Transport(failure)
             if failure.kind() == ErrorKind::AddressRefused

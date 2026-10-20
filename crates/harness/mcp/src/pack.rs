@@ -576,6 +576,13 @@ async fn settle_transport_error(
                 http::credentials_text(server, status)
             ));
         }
+        Some(HttpRefusal::Authorization { text, renewed }) => {
+            return failure(if renewed {
+                text
+            } else {
+                format!("{text}; the call did not run")
+            });
+        }
         Some(HttpRefusal::NotSent) => {
             return failure(format!(
                 "mcp server {server} could not be reached ({error}); the call was not sent"

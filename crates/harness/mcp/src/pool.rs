@@ -573,23 +573,41 @@ impl Connection {
                 })?
             }
         };
-        let client = endpoint.client(
-            server,
-            &base,
-            spec.call_timeout().max(spec.startup_timeout()),
-        )?;
-        let config = StreamableHttpClientTransportConfig::with_uri(endpoint.url())
-            .max_concurrent_requests(MAX_IN_FLIGHT_CALLS)
-            .max_sse_event_size(MAX_SSE_EVENT_BYTES);
-        let transport = StreamableHttpClientTransport::with_client(client, config);
         let started = within_startup(spec, async {
-            let handler = HandlerState::new(server.clone(), root);
-            let client = Handler(Arc::clone(&handler))
-                .serve_with_lifecycle(transport, lifecycle())
-                .await
-                .map_err(|error| handshake_failed(server, error))?;
-            let listing = list_tools(client.peer(), server).await?;
-            Ok((client, handler, None, listing))
+            // A 401 that renewed the credentials retries the start once:
+            // no effect has been requested yet.
+            let mut retried = false;
+            loop {
+                let client = endpoint.client(
+                    server,
+                    &base,
+                    spec.call_timeout().max(spec.startup_timeout()),
+                )?;
+                let config = StreamableHttpClientTransportConfig::with_uri(endpoint.url())
+                    .max_concurrent_requests(MAX_IN_FLIGHT_CALLS)
+                    .max_sse_event_size(MAX_SSE_EVENT_BYTES);
+                let transport = StreamableHttpClientTransport::with_client(client, config);
+                let handler = HandlerState::new(server.clone(), root);
+                match Handler(Arc::clone(&handler))
+                    .serve_with_lifecycle(transport, lifecycle())
+                    .await
+                {
+                    Ok(client) => {
+                        let listing = list_tools(client.peer(), server).await?;
+                        return Ok((client, handler, None, listing));
+                    }
+                    Err(error)
+                        if !retried
+                            && matches!(
+                                http::classify(&error),
+                                Some(HttpRefusal::Authorization { renewed: true, .. })
+                            ) =>
+                    {
+                        retried = true;
+                    }
+                    Err(error) => return Err(handshake_failed(server, error)),
+                }
+            }
         })
         .await?;
         Self::new(server, started)
@@ -684,12 +702,25 @@ async fn within_startup(
     })?
 }
 
+/// A failed start. OAuth credentials refused without renewal are an
+/// authorization error, whose text already names the login remedy.
 fn handshake_failed(server: &McpServerName, error: ClientInitializeError) -> McpError {
-    let message = match http::classify(&error) {
-        Some(HttpRefusal::Credentials(status)) => http::credentials_text(server, status),
-        _ => format!("mcp server {server} handshake failed"),
+    let (kind, message) = match http::classify(&error) {
+        Some(HttpRefusal::Credentials(status)) => (
+            McpErrorKind::Startup,
+            http::credentials_text(server, status),
+        ),
+        Some(HttpRefusal::Authorization {
+            text,
+            renewed: false,
+        }) => (McpErrorKind::Authorization, text),
+        Some(HttpRefusal::Authorization { text, .. }) => (McpErrorKind::Startup, text),
+        _ => (
+            McpErrorKind::Startup,
+            format!("mcp server {server} handshake failed"),
+        ),
     };
-    McpError::with_source(McpErrorKind::Startup, message, error)
+    McpError::with_source(kind, message, error)
 }
 
 /// Pages through `tools/list` within [`MAX_LISTED_TOOLS`] and

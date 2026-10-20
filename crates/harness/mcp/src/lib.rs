@@ -42,8 +42,9 @@ pub use listing::{
 pub use lowering::{SchemaRefusal, lower_input_schema};
 pub use naming::{MAX_EXPOSED_NAME_BYTES, exposed_tool_name};
 pub use oauth::{
-    McpDeviceLogin, McpLocalLogin, McpLocalRetirement, McpLogin, McpLoginOptions, McpLogoutOutcome,
-    McpOAuthSecretResolver, McpOAuthSettings, McpOAuthStatus, McpPasteLogin, McpRemoteLogin,
+    McpDeviceLogin, McpLocalLogin, McpLocalRetirement, McpLogin, McpLoginOptions, McpLoginRemedy,
+    McpLogoutOutcome, McpOAuthSecretResolver, McpOAuthSettings, McpOAuthStatus, McpPasteLogin,
+    McpRemoteLogin,
 };
 pub use pack::McpToolPack;
 pub use plakous_http::{HeaderName, HeaderValue, SensitiveBytes};

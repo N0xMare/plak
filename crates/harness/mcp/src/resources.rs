@@ -293,6 +293,7 @@ pub(crate) fn request_failed(server: &McpServerName, what: &str, error: &Service
         ),
         _ => match http::classify(error) {
             Some(HttpRefusal::Credentials(status)) => http::credentials_text(server, status),
+            Some(HttpRefusal::Authorization { text, .. }) => text,
             _ => format!("mcp server {server} {what} failed: {error}"),
         },
     };

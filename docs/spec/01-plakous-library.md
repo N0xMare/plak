@@ -5039,15 +5039,21 @@ id. It resolves the bearer for every request, sends it only to the endpoint
 URL (the exact-URL rule, §7.1), and never falls back to any other credential.
 Before a request whose access token expires within 5 minutes it refreshes; a
 refresh that fails or finds the record quarantined is a definite failure, the
-request not sent, naming the login remedy. A 401 runs one claimed refresh,
+request not sent, naming the login remedy. A refresh the token endpoint answers
+with 408, 429 or 5xx restores the login for the next refresh; `invalid_grant`
+retires it locally, so the next request names the login remedy; any other
+refusal, and an exchange whose outcome is unknown, leave it quarantined. A 401 runs one claimed refresh,
 bound to the generation the rejected request carried and only while the store
 still holds it, as its own task, and never re-sends the request: the call is
 a definite failure "not executed: credentials were rejected and have been
 renewed; call again", or names the login remedy when nothing could be renewed.
 A 403 whose challenge has `error="insufficient_scope"` is a definite failure
 naming the login remedy with the union of the stored requested scope and the
-challenged scope. At start, where no effect has been requested, a 401 that
-renewed retries the start once. Expired, revoked and under-scoped credentials
+challenged scope; any other 403 is a definite failure naming the login remedy.
+The remedy text is the embedder's (`McpOAuthSettings::with_login_remedy`,
+given the step-up scope), else "log in to it again". At start, where no effect has been requested, a 401 that
+renewed retries the start once; a start refused without renewal fails with
+`McpErrorKind::Authorization`, whose text already names the login remedy. Expired, revoked and under-scoped credentials
 therefore surface as tool failures that name the login; the agent never
 starts one.
 

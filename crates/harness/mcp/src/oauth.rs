@@ -7,6 +7,7 @@
 mod credential;
 mod exchange;
 mod login;
+mod session;
 
 use std::fmt;
 use std::path::PathBuf;
@@ -14,10 +15,12 @@ use std::sync::Arc;
 
 pub use credential::McpOAuthStatus;
 pub(crate) use credential::status;
+pub(crate) use exchange::OAuthHttp;
 pub use login::{
     McpDeviceLogin, McpLocalLogin, McpLocalRetirement, McpLogin, McpLoginOptions, McpLogoutOutcome,
     McpPasteLogin, McpRemoteLogin,
 };
+pub(crate) use session::{Bearer, OAuthSession};
 
 use crate::error::{McpError, McpErrorKind};
 
@@ -27,6 +30,10 @@ pub type McpOAuthSecretResolver = Arc<
         + Send
         + Sync,
 >;
+
+/// Names the login that fixes a credential failure, with the scope a
+/// step-up needs: operator text such as `run plak mcp login docs`.
+pub type McpLoginRemedy = Arc<dyn Fn(Option<&str>) -> String + Send + Sync>;
 
 /// One HTTP endpoint's OAuth settings: where its login is stored, which
 /// authorization server and client it uses, and its login callback port.
@@ -40,6 +47,7 @@ pub struct McpOAuthSettings {
     issuer: Option<String>,
     client: Option<PreRegisteredClient>,
     callback_port: Option<u16>,
+    login_remedy: Option<McpLoginRemedy>,
 }
 
 #[derive(Clone)]
@@ -58,6 +66,7 @@ impl McpOAuthSettings {
             issuer: None,
             client: None,
             callback_port: None,
+            login_remedy: None,
         }
     }
 
@@ -108,6 +117,22 @@ impl McpOAuthSettings {
     pub const fn with_callback_port(mut self, port: u16) -> Self {
         self.callback_port = Some(port);
         self
+    }
+
+    /// Sets the text credential failures name as their remedy; without it
+    /// they say to log in to the server again.
+    #[must_use]
+    pub fn with_login_remedy(mut self, remedy: McpLoginRemedy) -> Self {
+        self.login_remedy = Some(remedy);
+        self
+    }
+
+    pub(crate) fn login_remedy(&self, scope: Option<&str>) -> String {
+        match (&self.login_remedy, scope) {
+            (Some(remedy), scope) => remedy(scope),
+            (None, Some(scope)) => format!("log in to it again with scope \"{scope}\""),
+            (None, None) => "log in to it again".to_owned(),
+        }
     }
 
     pub(crate) const fn callback_port(&self) -> Option<u16> {

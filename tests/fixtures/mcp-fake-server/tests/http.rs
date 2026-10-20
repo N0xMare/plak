@@ -2,7 +2,6 @@
 //! loopback port, through the pool and the registered pack's executor.
 
 use std::io::Write;
-use std::str::FromStr;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -13,96 +12,17 @@ use plakous_mcp::{
 };
 use plakous_mcp_fake_server::http::{HttpFixture, HttpGate, SeenRequest, serve_http};
 use plakous_mcp_fake_server::{FakeServer, Style};
-use plakous_model::{
-    AttemptId, BranchId, CallId, CancellationToken, Clock, Digest, DigestDomain, FixedClock, RunId,
-    SessionId, Timestamp, ToolCorrelation, ToolName, TurnId,
-};
 use plakous_tools::{
-    EffectAuthorizationGrantSource, ExecutionEnvironment, ExecutionEnvironmentConfig,
-    ExecutionEnvironmentScope, FrozenToolRegistry, JobOutputRoot, McpServerName, ProgressSink,
-    ToolInvocationRequest, ToolOutcome, ToolOutcomeKind, ToolPack, ToolPolicyRevision,
-    ToolRegistryBuilder, register_packs,
+    FrozenToolRegistry, McpServerName, ToolOutcomeKind, ToolPack, ToolRegistryBuilder,
+    register_packs,
 };
 
-type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+mod common;
+
+use common::{TestResult, Workspace, execute, workspace};
 
 const TOKEN: &str = "tok-7f3a9c";
 const API_KEY: &str = "key-51d0e2";
-
-async fn execute(
-    registry: &FrozenToolRegistry,
-    environment: Arc<ExecutionEnvironment>,
-    tool: &str,
-    arguments: &str,
-) -> TestResult<ToolOutcome> {
-    let run = RunId::from_str("00000000-0000-0000-0000-000000000201")?;
-    let turn = TurnId::from_str("00000000-0000-0000-0000-000000000202")?;
-    let attempt = AttemptId::from_str("00000000-0000-0000-0000-000000000203")?;
-    let call = CallId::from_str("00000000-0000-0000-0000-000000000204")?;
-    let invocation = registry.prepare(ToolInvocationRequest::new(
-        run,
-        turn,
-        attempt,
-        call,
-        ToolName::new(tool)?,
-        ToolCorrelation::new(None, None, plakous_model::ToolCallerLineage::default())?,
-        Arc::<str>::from(arguments),
-    ))?;
-    let intent = Digest::sha256(DigestDomain::Snapshot, 1, &[b"mcp-http-intent"])?;
-    let claim = Digest::sha256(DigestDomain::Snapshot, 1, &[b"mcp-http-claim"])?;
-    let invocation = plakous_tools::internal::bind_effect_dispatch(invocation, intent, claim);
-    let binding = plakous_tools::internal::authorization_binding(
-        &invocation,
-        environment.descriptor().clone(),
-        ToolPolicyRevision::new("mcp-http-test", 1)?,
-    )?;
-    let grant = plakous_tools::internal::authorization_grant(
-        binding,
-        EffectAuthorizationGrantSource::Policy,
-    );
-    let clock: Arc<dyn Clock> = Arc::new(FixedClock::new(Timestamp::new(71, 0)?));
-    let (progress, _receiver) = ProgressSink::channel(8, call, Arc::clone(&clock))?;
-    let context = plakous_tools::internal::tool_context(
-        run,
-        turn,
-        attempt,
-        CancellationToken::new(),
-        None,
-        clock,
-        environment,
-        grant,
-        progress,
-    );
-    let executor = plakous_tools::internal::executor(registry, &invocation)?;
-    Ok(executor.execute(invocation, context).await?)
-}
-
-struct Workspace {
-    environment: Arc<ExecutionEnvironment>,
-    _root: tempfile::TempDir,
-    _state: tempfile::TempDir,
-}
-
-fn workspace() -> TestResult<Workspace> {
-    let workspace = tempfile::tempdir()?;
-    let state = tempfile::tempdir()?;
-    let environment = Arc::new(ExecutionEnvironment::host(
-        ExecutionEnvironmentScope::Run(RunId::from_str("00000000-0000-0000-0000-000000000200")?),
-        workspace.path(),
-        ".",
-        ExecutionEnvironmentConfig::default(),
-    )?);
-    environment.joined_process_sessions()?.bind_job_outputs(
-        JobOutputRoot::open(&state.path().join("jobs"))?,
-        SessionId::from_str("00000000-0000-0000-0000-0000000002b0")?,
-        BranchId::from_str("00000000-0000-0000-0000-0000000002c0")?,
-    );
-    Ok(Workspace {
-        environment,
-        _root: workspace,
-        _state: state,
-    })
-}
 
 fn gate() -> HttpGate {
     HttpGate {

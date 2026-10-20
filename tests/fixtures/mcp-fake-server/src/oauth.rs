@@ -157,6 +157,7 @@ struct AuthState {
     requests: Vec<AuthRequest>,
     required_scope: Option<String>,
     resource_requests: u32,
+    token_failures: u32,
 }
 
 /// The authorization server and resource gate of one fixture.
@@ -253,6 +254,16 @@ impl OAuthGate {
     /// Invalidates every access token, as a server-side revocation would.
     pub fn reject_access_tokens(&self) {
         self.lock().access.clear();
+    }
+
+    /// Invalidates every refresh token, as a revoked grant would.
+    pub fn reject_refresh_tokens(&self) {
+        self.lock().refresh.clear();
+    }
+
+    /// Answers the next `count` token requests with HTTP 503.
+    pub fn fail_token_requests(&self, count: u32) {
+        self.lock().token_failures = count;
     }
 
     /// Changes the scope MCP requests require.
@@ -500,6 +511,13 @@ impl OAuthGate {
 
     fn token(&self, field: &dyn Fn(&str) -> Option<String>, authorization: Option<&str>) -> Reply {
         let error = |code: &str| Reply::json(400, &serde_json::json!({"error": code}));
+        {
+            let mut state = self.lock();
+            if state.token_failures > 0 {
+                state.token_failures -= 1;
+                return Reply::status(503);
+            }
+        }
         if let Some((id, secret)) = &self.config.confidential_client {
             let expected = format!(
                 "Basic {}",

@@ -21,7 +21,8 @@ pub enum McpErrorKind {
     Closed,
     /// A resource or prompt request was refused, failed or exceeded a bound.
     Request,
-    /// An OAuth login, its stored credential or its discovery failed.
+    /// An OAuth login, its stored credential or its discovery failed. A
+    /// start or request refused this way names the login remedy itself.
     Authorization,
 }
 
