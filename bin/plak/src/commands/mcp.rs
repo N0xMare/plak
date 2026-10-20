@@ -6,6 +6,7 @@
 
 use std::io;
 
+use plakous::mcp::McpOAuthStatus;
 use plakous_hosted::error::{CliFailure, CliResult, ProcessOutcome};
 
 use crate::home::paths::PlakPaths;
@@ -224,7 +225,71 @@ fn server_lines(
             missing.join(", ")
         ));
     }
+    if server.resources {
+        lines.push("  resources: enabled".to_owned());
+    }
+    if let Some(login) = login_line(paths, config, id) {
+        lines.push(format!("  {login}"));
+    }
     Ok(lines)
+}
+
+/// An OAuth server's stored login, read without contacting the server;
+/// `None` for a server without `auth = "oauth"`.
+fn login_line(paths: &PlakPaths, config: &ProductConfig, id: &str) -> Option<String> {
+    let rendered = config.tool_sections.render_server(id)?;
+    let secrets = secrets::ProductNamedSecrets::shared(paths);
+    let status = plakous_hosted::mcp_binding::mcp_login_status(id, &rendered, secrets.as_ref());
+    let login = format!("run `plak mcp login {id}`");
+    let text = match status {
+        Ok(None) => return None,
+        Err(error) => format!("unreadable ({}); {login}", shown(&error)),
+        Ok(Some(McpOAuthStatus::LoggedIn {
+            expires_in,
+            refreshable,
+            scope,
+        })) => {
+            let mut text = match expires_in {
+                Some(left) if left.is_zero() => "logged in, access token expired".to_owned(),
+                Some(left) => format!(
+                    "logged in, access token expires in {}",
+                    lifetime(left.as_secs())
+                ),
+                None => "logged in".to_owned(),
+            };
+            if refreshable {
+                text.push_str(", refreshable");
+            }
+            if let Some(scope) = scope {
+                text.push_str(&format!(", scope \"{}\"", shown(&scope)));
+            }
+            text
+        }
+        Ok(Some(McpOAuthStatus::NotLoggedIn)) => format!("not logged in; {login}"),
+        Ok(Some(McpOAuthStatus::Refreshing)) => "being refreshed by another process".to_owned(),
+        Ok(Some(McpOAuthStatus::Quarantined)) => {
+            format!("quarantined: a refresh outcome is unknown; {login}")
+        }
+        Ok(Some(McpOAuthStatus::OtherServer)) => {
+            format!("stored for another URL, issuer or client; {login}")
+        }
+        Ok(Some(McpOAuthStatus::WrittenByNewerBuild)) => {
+            format!(
+                "written by a newer build; use that build, or `plak mcp logout {id} --local` first"
+            )
+        }
+        Ok(Some(_)) => format!("cannot be used; {login}"),
+    };
+    Some(format!("login: {text}"))
+}
+
+/// A token lifetime in the largest whole unit.
+fn lifetime(seconds: u64) -> String {
+    match seconds {
+        0..60 => format!("{seconds} s"),
+        60..7200 => format!("{} min", seconds / 60),
+        _ => format!("{} h", seconds / 3600),
+    }
 }
 
 const NONE_CONFIGURED: &str = "no MCP servers configured; add one with `plak mcp add <id> -- <command> [args...]` or `plak mcp add <id> --url <url>`";
@@ -266,6 +331,12 @@ fn show(paths: &PlakPaths, id: &str) -> CliResult<String> {
             "set".to_owned()
         };
         out.push_str(&format!("secret {name}: {state}\n"));
+    }
+    if definition.resources {
+        out.push_str("resources: enabled\n");
+    }
+    if let Some(login) = login_line(paths, &config, id) {
+        out.push_str(&format!("{login}\n"));
     }
     Ok(out)
 }
@@ -312,6 +383,12 @@ fn test(paths: &PlakPaths, id: &str) -> CliResult<String> {
         out.push_str(&format!(
             "warning: [mcp_servers.{id}] tools names {}, which the server does not list\n",
             shown(name)
+        ));
+    }
+    if let Some((resources, templates)) = probe.resources {
+        out.push_str(&format!(
+            "resources: {resources} listed, {templates} resource template{}\n",
+            if templates == 1 { "" } else { "s" }
         ));
     }
     Ok(out)

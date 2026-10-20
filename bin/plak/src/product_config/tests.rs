@@ -143,14 +143,14 @@ fn trusted_project_cannot_override_home_orchestration() {
     let (_temp, project, paths) = project_fixture();
     fs::write(
         paths.config_file(),
-        "[orchestration]\nsubagents = false\nmax_depth = 2\nmax_children = 3\nmax_nodes = 8\nmax_attempts = 12\ntransient_resumes = 0\nmax_concurrent_requests_per_account = 3\nrequire_review_evidence = true\n[turn]\nauto_continue = false\n",
+        "[orchestration]\nsubagents = false\nmax_depth = 2\nmax_children = 3\nmax_nodes = 8\nmax_attempts = 12\ntransient_resumes = 0\nmax_concurrent_requests_per_account = 3\nrequire_review_evidence = true\n[turn]\nauto_continue = false\n[mcp]\nclient_id_metadata_url = \"https://home.example/plak/client.json\"\n",
     )
     .unwrap();
     let home = project_home(&project);
     fs::create_dir_all(&home).unwrap();
     fs::write(
         home.join("config.toml"),
-        "[orchestration]\nsubagents = true\nmax_depth = 4\nmax_children = 8\nmax_nodes = 32\nmax_attempts = 64\ntransient_resumes = 2\nmax_concurrent_requests_per_account = 9\nrequire_review_evidence = false\n[turn]\nauto_continue = true\n[tui]\nmouse = false\n",
+        "[orchestration]\nsubagents = true\nmax_depth = 4\nmax_children = 8\nmax_nodes = 32\nmax_attempts = 64\ntransient_resumes = 2\nmax_concurrent_requests_per_account = 9\nrequire_review_evidence = false\n[turn]\nauto_continue = true\n[tui]\nmouse = false\n[mcp]\nclient_id_metadata_url = \"https://project.example/client.json\"\n",
     )
     .unwrap();
     project_trust::trust(&paths, project.path()).unwrap();
@@ -171,6 +171,7 @@ fn trusted_project_cannot_override_home_orchestration() {
     assert!(!SessionPolicy::load(&paths).unwrap().topology_enabled);
     let displayed = config.display_redacted(&paths);
     assert!(displayed.contains("[orchestration] is home-scoped and ignored here"));
+    assert!(displayed.contains("[mcp] client_id_metadata_url is home-scoped and ignored here"));
     assert!(displayed.contains("origin.orchestration.subagents = user"));
 }
 

@@ -7,9 +7,10 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use plakous::mcp::{
-    HeaderName, HeaderValue, McpHttpEndpoint, McpHttpSecret, McpHttpSecretResolver, McpPool,
-    McpSecretResolver, McpServerSpec, McpToolPack, McpToolRecord, McpToolSelection, SensitiveBytes,
-    ServiceSecretValue,
+    HeaderName, HeaderValue, McpError, McpErrorKind, McpHttpEndpoint, McpHttpSecret,
+    McpHttpSecretResolver, McpOAuthSecretResolver, McpOAuthSettings, McpOAuthStatus, McpPool,
+    McpSecretResolver, McpServerSpec, McpToolPack, McpToolRecord, McpToolSelection,
+    SensitiveBytes, ServiceSecretValue, exposed_tool_name,
 };
 use plakous::model::ToolName;
 use plakous::tools::{
@@ -19,6 +20,9 @@ use plakous::tools::{
 use serde::Deserialize;
 
 use crate::tool_plan::{SelectedTool, TemplateToolSelection};
+
+/// The MCP name of the resources tool a `resources = true` table adds.
+const READ_RESOURCE: &str = "read_resource";
 
 /// The product's named secrets (`plak secret set <name>`).
 ///
@@ -31,6 +35,14 @@ pub trait NamedSecrets: Send + Sync + 'static {
     ///
     /// Returns a one-line reason when the store refuses the read.
     fn read(&self, name: &str) -> Result<Option<NamedSecretValue>, String>;
+
+    /// Where the OAuth login of MCP server `server` is stored: a private
+    /// credential record in a directory of its own. `None`, the default, is
+    /// a product that stores no MCP logins, where `auth = "oauth"` refuses.
+    fn mcp_login_file(&self, server: &str) -> Option<std::path::PathBuf> {
+        let _ = server;
+        None
+    }
 }
 
 /// One named secret's value on its way to a server: consumed whole into a
@@ -176,10 +188,18 @@ async fn bind_on_pool(
         let spec = server_spec(&server, rendered, &secrets)?;
         let remedy =
             format!("remedy: fix the server or remove mcp:{server} from the template's tools");
+        // A refused login already names the more specific login remedy.
+        let refused = |error: McpError, remedy: &str| {
+            if error.kind() == McpErrorKind::Authorization {
+                error.to_string()
+            } else {
+                format!("{error}; {remedy}")
+            }
+        };
         let lease = pool
             .lease(spec, Arc::clone(&environment))
             .await
-            .map_err(|error| format!("{error}; {remedy}"))?;
+            .map_err(|error| refused(error, &remedy))?;
         let (records, pack) = if let Some(frozen) = frozen {
             let records = frozen
                 .iter()
@@ -187,13 +207,24 @@ async fn bind_on_pool(
                 .cloned()
                 .collect::<Vec<_>>();
             let pack = McpToolPack::from_records(lease, records.clone())
-                .map_err(|error| format!("{error}; {remedy}"))?;
+                .map_err(|error| refused(error, &remedy))?;
             (records, pack)
         } else {
-            let listing = lease
-                .freeze(&server_selection(selection, &server))
-                .await
-                .map_err(|error| format!("{error}; {remedy}"))?;
+            let listing = match lease.freeze(&server_selection(selection, &server)).await {
+                Ok(listing) => listing,
+                Err(error) => {
+                    let remedy = if lease.spec().resources()
+                        && !lease.advertises_resources().await.unwrap_or(true)
+                    {
+                        format!(
+                            "remedy: remove resources = true from [mcp_servers.{server}] or fix the server"
+                        )
+                    } else {
+                        remedy
+                    };
+                    return Err(refused(error, &remedy));
+                }
+            };
             for notice in listing.notices() {
                 tracing::warn!(%server, notice = %notice, "mcp tool omitted at bind");
             }
@@ -204,9 +235,10 @@ async fn bind_on_pool(
             )
         };
         bound.names.extend(
-            records
-                .iter()
-                .map(|record| (server.clone(), record.exposed_name().clone())),
+            pack.exposed_names()
+                .map_err(|error| refused(error, &remedy))?
+                .into_iter()
+                .map(|name| (server.clone(), name)),
         );
         bound.records.extend(records);
         bound.registrations.extend(
@@ -234,6 +266,9 @@ pub struct McpProbe {
     pub not_allowed: Vec<String>,
     /// Allowlist names the server does not list.
     pub not_listed: Vec<String>,
+    /// With `resources = true`: how many resources and resource templates
+    /// the server lists.
+    pub resources: Option<(usize, usize)>,
 }
 
 /// Starts or connects to one server exactly as a session bind does (the
@@ -279,27 +314,46 @@ pub fn probe_mcp_server(
                 .listed_tool_names()
                 .await
                 .map_err(|error| error.to_string())?;
-            Ok::<_, String>((listing, listed))
+            let resources = if lease.spec().resources() {
+                let resources = lease
+                    .list_resources()
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let templates = lease
+                    .list_resource_templates()
+                    .await
+                    .map_err(|error| error.to_string())?;
+                Some((resources.len(), templates.len()))
+            } else {
+                None
+            };
+            Ok::<_, String>((listing, listed, resources))
         }
         .await;
         pool.shutdown().await;
-        let (listing, listed) = probed?;
+        let (listing, listed, resources) = probed?;
+        let mut tools = listing
+            .records()
+            .iter()
+            .map(|record| {
+                (
+                    record.mcp_name().to_owned(),
+                    record.exposed_name().as_str().to_owned(),
+                )
+            })
+            .collect::<Vec<_>>();
+        if resources.is_some() {
+            let exposed =
+                exposed_tool_name(&server, READ_RESOURCE).map_err(|error| error.to_string())?;
+            tools.push((READ_RESOURCE.to_owned(), exposed.as_str().to_owned()));
+        }
         let allows = |name: &str| {
             allowlist
                 .as_ref()
                 .is_none_or(|names| names.iter().any(|allowed| allowed == name))
         };
         Ok(McpProbe {
-            tools: listing
-                .records()
-                .iter()
-                .map(|record| {
-                    (
-                        record.mcp_name().to_owned(),
-                        record.exposed_name().as_str().to_owned(),
-                    )
-                })
-                .collect(),
+            tools,
             unlowerable: listing.notices().to_vec(),
             not_allowed: listed
                 .iter()
@@ -312,8 +366,39 @@ pub fn probe_mcp_server(
                 .filter(|name| !listed.contains(name))
                 .cloned()
                 .collect(),
+            resources,
         })
     })
+}
+
+/// The stored OAuth login of one server, read without contacting it; `None`
+/// for a table without `auth = "oauth"`.
+///
+/// # Errors
+///
+/// Returns a one-line reason for an invalid table, a product without MCP
+/// logins, or an unreadable store.
+pub fn mcp_login_status(
+    server: &str,
+    rendered: &str,
+    secrets: &dyn NamedSecrets,
+) -> Result<Option<McpOAuthStatus>, String> {
+    let server = McpServerName::new(server.to_owned())
+        .map_err(|_| format!("{server:?} is not a valid MCP server id"))?;
+    let definition = rendered_server(&server, rendered)?;
+    let Some(settings) = oauth_settings(&server, &definition, secrets, None)? else {
+        return Ok(None);
+    };
+    let url = definition
+        .url
+        .as_deref()
+        .ok_or_else(|| invalid_definition(&server))?;
+    let endpoint = McpHttpEndpoint::new(url)
+        .and_then(|endpoint| endpoint.with_oauth(settings))
+        .map_err(|error| format!("mcp server {server}: {error}"))?;
+    McpServerSpec::http(server.clone(), endpoint)
+        .oauth_status()
+        .map_err(|error| format!("mcp server {server}: {error}"))
 }
 
 fn server_selection(selection: &TemplateToolSelection, server: &McpServerName) -> McpToolSelection {
@@ -370,7 +455,14 @@ struct RenderedServer {
     headers: BTreeMap<String, String>,
     #[serde(default)]
     secret_headers: BTreeMap<String, String>,
+    auth: Option<String>,
+    oauth_issuer: Option<String>,
+    oauth_client_id: Option<String>,
+    oauth_client_secret: Option<String>,
+    oauth_callback_port: Option<u16>,
     tools: Option<Vec<String>>,
+    #[serde(default)]
+    resources: bool,
     startup_seconds: u64,
     call_seconds: u64,
 }
@@ -387,13 +479,8 @@ pub(crate) fn server_spec(
     rendered: &str,
     secrets: &Arc<dyn NamedSecrets>,
 ) -> Result<McpServerSpec, String> {
-    let invalid = || format!("mcp server {server} has an invalid frozen definition");
-    let mut tables = crate::frozen_tables::parse::<RenderedTables>(rendered).ok_or_else(invalid)?;
-    let definition = tables
-        .mcp_servers
-        .remove(server.as_str())
-        .filter(|_| tables.mcp_servers.is_empty())
-        .ok_or_else(invalid)?;
+    let invalid = || invalid_definition(server);
+    let definition = rendered_server(server, rendered)?;
     let spec = match definition.transport.as_str() {
         "stdio" => {
             let command = definition.command.clone().ok_or_else(invalid)?;
@@ -435,6 +522,7 @@ pub(crate) fn server_spec(
         _ => return Err(invalid()),
     };
     let spec = spec
+        .with_resources(definition.resources)
         .with_startup_timeout(Duration::from_secs(definition.startup_seconds))
         .with_call_timeout(Duration::from_secs(definition.call_seconds));
     Ok(match definition.tools {
@@ -443,15 +531,70 @@ pub(crate) fn server_spec(
     })
 }
 
+fn invalid_definition(server: &McpServerName) -> String {
+    format!("mcp server {server} has an invalid frozen definition")
+}
+
+/// The one `[mcp_servers.<id>]` table of `rendered`, which carries nothing
+/// else.
+fn rendered_server(server: &McpServerName, rendered: &str) -> Result<RenderedServer, String> {
+    let mut tables = crate::frozen_tables::parse::<RenderedTables>(rendered)
+        .ok_or_else(|| invalid_definition(server))?;
+    tables
+        .mcp_servers
+        .remove(server.as_str())
+        .filter(|_| tables.mcp_servers.is_empty())
+        .ok_or_else(|| invalid_definition(server))
+}
+
+/// The OAuth settings of a table with `auth = "oauth"`: its login file,
+/// issuer pin, pre-registered client (its secret resolved by `client_secret`
+/// at each use) and callback port. Failures name `plak mcp login`.
+fn oauth_settings(
+    server: &McpServerName,
+    definition: &RenderedServer,
+    secrets: &dyn NamedSecrets,
+    client_secret: Option<McpOAuthSecretResolver>,
+) -> Result<Option<McpOAuthSettings>, String> {
+    match definition.auth.as_deref() {
+        None => return Ok(None),
+        Some("oauth") => {}
+        Some(_) => return Err(invalid_definition(server)),
+    }
+    let refused = |error: McpError| format!("mcp server {server}: {error}");
+    let store = secrets.mcp_login_file(server.as_str()).ok_or_else(|| {
+        format!("mcp server {server} uses oauth, and this product stores no MCP logins")
+    })?;
+    let login = server.clone();
+    let mut settings =
+        McpOAuthSettings::new(store).with_login_remedy(Arc::new(move |scope| match scope {
+            Some(scope) => format!("remedy: plak mcp login {login} --scope \"{scope}\""),
+            None => format!("remedy: plak mcp login {login}"),
+        }));
+    if let Some(issuer) = &definition.oauth_issuer {
+        settings = settings.with_issuer(issuer).map_err(refused)?;
+    }
+    if let Some(client) = &definition.oauth_client_id {
+        settings = settings
+            .with_client(client.clone(), client_secret)
+            .map_err(refused)?;
+    }
+    if let Some(port) = definition.oauth_callback_port {
+        settings = settings.with_callback_port(port);
+    }
+    Ok(Some(settings))
+}
+
 /// An HTTP definition: its URL, literal headers, and the bearer and header
-/// secrets resolved by name at each start. `Err(None)` is an invalid table.
+/// secrets resolved by name at each start, or its OAuth login. `Err(None)`
+/// is an invalid table.
 fn http_spec(
     server: &McpServerName,
     definition: &RenderedServer,
     secrets: &Arc<dyn NamedSecrets>,
 ) -> Result<McpServerSpec, Option<String>> {
     let url = definition.url.as_deref().ok_or(None)?;
-    let refused = |error: plakous::mcp::McpError| Some(format!("mcp server {server}: {error}"));
+    let refused = |error: McpError| Some(format!("mcp server {server}: {error}"));
     let headers = definition
         .headers
         .iter()
@@ -473,10 +616,22 @@ fn http_spec(
     for (_, secret) in &slots {
         require_secret(server, secret, secrets).map_err(Some)?;
     }
+    let client_secret = match &definition.oauth_client_secret {
+        Some(secret) => {
+            require_secret(server, secret, secrets).map_err(Some)?;
+            Some(oauth_secret_resolver(server, secret.clone(), secrets))
+        }
+        None => None,
+    };
+    let oauth =
+        oauth_settings(server, definition, secrets.as_ref(), client_secret).map_err(Some)?;
     let mut endpoint = McpHttpEndpoint::new(url)
         .map_err(refused)?
         .with_headers(headers)
         .map_err(refused)?;
+    if let Some(settings) = oauth {
+        endpoint = endpoint.with_oauth(settings).map_err(refused)?;
+    }
     if !slots.is_empty() {
         endpoint = endpoint
             .with_secret_headers(
@@ -488,7 +643,29 @@ fn http_spec(
             )
             .map_err(refused)?;
     }
-    Ok(McpServerSpec::http(server.clone(), endpoint))
+    let spec = McpServerSpec::http(server.clone(), endpoint);
+    // No usable login refuses before anything is sent.
+    if let Some(status) = spec.oauth_status().map_err(refused)?
+        && let Some(reason) = login_refusal(&status)
+    {
+        return Err(Some(format!(
+            "mcp server {server} {reason}; remedy: plak mcp login {server}"
+        )));
+    }
+    Ok(spec)
+}
+
+/// Why a stored login cannot serve a bind, `None` when it can (a login
+/// another process is refreshing included).
+fn login_refusal(status: &McpOAuthStatus) -> Option<&'static str> {
+    Some(match status {
+        McpOAuthStatus::NotLoggedIn => "is not logged in",
+        McpOAuthStatus::Quarantined => "has a login whose renewal outcome is unknown",
+        McpOAuthStatus::OtherServer => "has a login made for another URL, issuer or client",
+        McpOAuthStatus::WrittenByNewerBuild => "has a login written by a newer build",
+        McpOAuthStatus::LoggedIn { .. } | McpOAuthStatus::Refreshing => return None,
+        _ => "has a login that cannot be used",
+    })
 }
 
 fn header_resolver(
@@ -507,6 +684,20 @@ fn header_resolver(
                     .map_err(Into::into)
             })
             .collect()
+    })
+}
+
+fn oauth_secret_resolver(
+    server: &McpServerName,
+    secret: String,
+    secrets: &Arc<dyn NamedSecrets>,
+) -> McpOAuthSecretResolver {
+    let server = server.clone();
+    let secrets = Arc::clone(secrets);
+    Arc::new(move || {
+        read_secret(&server, &secret, &secrets)
+            .map(NamedSecretValue::into_header)
+            .map_err(Into::into)
     })
 }
 

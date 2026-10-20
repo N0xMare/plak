@@ -135,6 +135,15 @@ impl McpResourceContents {
 }
 
 impl McpLease {
+    /// Whether the running server advertises the resources capability.
+    ///
+    /// # Errors
+    ///
+    /// Returns the entry's start error.
+    pub async fn advertises_resources(&self) -> Result<bool, McpError> {
+        Ok(self.entry.connection().await?.resources)
+    }
+
     /// Lists the server's resources within [`MAX_LISTED_TOOLS`] entries and
     /// [`MAX_LISTING_BYTES`], each page bounded by the call timeout.
     ///

@@ -299,6 +299,29 @@ data. An `http` server is reached at its `url` (HTTPS, or plain HTTP only to
 `127.0.0.1` or `[::1]`); `bearer_secret` and `secret_headers` name stored
 secrets that are sent as `Authorization: Bearer` and as those headers.
 
+An `http` server that uses OAuth takes `auth = "oauth"` instead of a bearer
+secret, and you log in to it once with `plak mcp login <id>`. The login is
+stored in your home's secrets, never in `config.toml`, and is used only for
+that server's exact URL. A server whose authorization server needs a client
+registered in advance also names it:
+
+```toml
+[mcp_servers.docs]
+transport = "http"
+url = "https://docs.example.com/mcp"
+auth = "oauth"
+oauth_issuer = "https://auth.example.com"     # required with oauth_client_id
+oauth_client_id = "plak-docs"
+oauth_client_secret = "docs-client"           # a stored secret's name, if the client has one
+oauth_callback_port = 8976                    # only if the client allows just that redirect port
+resources = true
+```
+
+`resources = true` gives templates that list the server one more tool,
+`mcp__<id>__read_resource`, which reads one of the server's resources by URI.
+It works with either transport, and the server must offer resources. Without
+it a server's resources never reach the model.
+
 A child gets exactly its own template's tools, whatever its parent has: the
 spawn graph is the grant. A root with no optional tools can spawn a researcher
 that lists `web_search` and `fetch_url`, and a worker can spawn a template with

@@ -20,6 +20,7 @@ fn stdio(command: &str, args: &[&str]) -> McpServerConfig {
             secret_env: BTreeMap::new(),
         },
         tools: None,
+        resources: false,
         startup_seconds: DEFAULT_MCP_STARTUP_SECONDS,
         call_seconds: DEFAULT_MCP_CALL_SECONDS,
     }
@@ -89,8 +90,10 @@ fn add_refuses_what_the_load_parser_refuses_and_writes_nothing() {
             bearer_secret: None,
             headers: BTreeMap::new(),
             secret_headers: BTreeMap::new(),
+            oauth: None,
         },
         tools: None,
+        resources: false,
         startup_seconds: DEFAULT_MCP_STARTUP_SECONDS,
         call_seconds: DEFAULT_MCP_CALL_SECONDS,
     };

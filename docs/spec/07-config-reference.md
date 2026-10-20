@@ -170,7 +170,7 @@ keys: they are authored in the file, a save leaves them exactly as written, and
 | `compaction.enabled` | bool | `true` | — | Automatic transcript compaction when a session approaches its context bound. |
 | `telemetry.max_bytes` | integer | `536870912` | greater than 0; zero is refused as ambiguous. 536870912 is 512 MiB | Best-effort byte retention target for the main database, WAL and SHM; busy readers or unfinished sessions may keep it above target. |
 | `telemetry.max_age_days` | integer | `90` | greater than 0; zero is refused as ambiguous | Retention cutoff for local analytics rows, in days. |
-| `mcp.client_id_metadata_url` | string | `(unset)` | `https://` URL with a path, no query or fragment; home-scoped | The OAuth Client ID Metadata Document that identifies Plak to an MCP authorization server that supports one (spec 01 §8.5). Unset disables that registration path; the document must list Plak's pinned loopback redirect URIs. Takes effect at the next `plak mcp login`. |
+| `mcp.client_id_metadata_url` | string | `(unset)` | `https://` URL with a path, no query or fragment; home-scoped | The OAuth Client ID Metadata Document that identifies Plak to an MCP authorization server that supports one (spec 01 §8.5). Unset disables that registration path; the document lists the redirect URI `http://127.0.0.1/callback`, which a server matches on any port. Takes effect at the next `plak mcp login`. |
 
 
 ### 3.1 Bounds are closed ranges

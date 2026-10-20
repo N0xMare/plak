@@ -1244,10 +1244,12 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     # service processes, and the named-secret value type.
     ("plakous-hosted", "src/mcp_binding.rs"): {
         "mcp": {
-            "HeaderName", "HeaderValue", "McpError", "McpHttpEndpoint", "McpHttpSecret",
-            "McpHttpSecretResolver", "McpPool", "McpSecretResolver", "McpServerSpec",
-            "McpToolPack", "McpToolRecord", "McpToolSelection", "SensitiveBytes",
-            "ServiceSecretValue",
+            "HeaderName", "HeaderValue", "McpError", "McpErrorKind", "McpHttpEndpoint",
+            "McpHttpSecret", "McpHttpSecretResolver", "McpOAuthSecretResolver",
+            "McpOAuthSettings", "McpOAuthStatus", "McpPool", "McpSecretResolver", "McpServerSpec",
+            "McpToolPack",
+            "McpToolRecord", "McpToolSelection", "SensitiveBytes", "ServiceSecretValue",
+            "exposed_tool_name",
         },
         "model": {"RunId"},
         "tools": {
@@ -1255,6 +1257,8 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
             "ExecutionEnvironmentScope",
         },
     },
+    # `plak mcp list|show` report an OAuth server's stored login.
+    ("plak", "src/commands/mcp.rs"): {"mcp": {"McpOAuthStatus"}},
     # The MCP records the root's frozen tools keep in its session record.
     ("plakous-hosted", "src/frozen_tools.rs"): {"mcp": {"McpToolRecord"}},
     # The untrusted-data paragraph an MCP tool earns.

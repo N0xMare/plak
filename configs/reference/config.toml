@@ -144,6 +144,13 @@ max_bytes = 536870912
 # type: integer · default: 90 · greater than 0; zero is refused as ambiguous
 max_age_days = 90
 
+# The MCP client; servers are [mcp_servers.<id>] tables.
+[mcp]
+
+# The OAuth Client ID Metadata Document that identifies Plak to an MCP authorization server that supports one (spec 01 §8.5). Unset disables that registration path; the document lists the redirect URI http://127.0.0.1/callback, which a server matches on any port. Takes effect at the next plak mcp login.
+# type: string · default: (unset) · https:// URL with a path, no query or fragment; home-scoped
+# client_id_metadata_url = "https://plak.example/oauth/client.json"
+
 # Optional-tool options. A table enables nothing: a template enables a tool by
 # listing it in tools = [...]. A trusted project may add or replace entries by
 # name. Secrets are never values here; name one stored with `plak secret set`.

@@ -5215,7 +5215,8 @@ never retained. The server is started, or leased from the one process-wide
 pool keyed by definition and the node's workspace root, and its listing is
 frozen (chapter 01 MCP client); a startup, listing or selection failure
 refuses with the pool's line and `remedy: fix the server or remove mcp:<id>
-from the template's tools`. A tool reached only through `mcp:<id>` whose
+from the template's tools`, except an OAuth refusal (`McpErrorKind::Authorization`),
+whose line already ends with the login remedy and gets no second one. A tool reached only through `mcp:<id>` whose
 schema cannot be lowered is omitted and logged as a notice; one named
 `mcp:<id>/<tool>` refuses. An `http` table binds a streamable HTTP endpoint
 (`https://`, or `http://` to a loopback literal) with its literal headers;

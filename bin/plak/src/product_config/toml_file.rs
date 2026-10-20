@@ -35,7 +35,7 @@ use super::{
     unknown_key,
 };
 
-/// `config.toml`: eleven sections, each optional, nothing else. `[tools]` and
+/// `config.toml`: twelve sections, each optional, nothing else. `[tools]` and
 /// `[mcp_servers]` hold one named table per entry.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -49,6 +49,7 @@ struct ConfigFile {
     tui: Option<TuiSection>,
     compaction: Option<CompactionSection>,
     telemetry: Option<TelemetrySection>,
+    mcp: Option<McpSection>,
     tools: Option<ToolsSection>,
     mcp_servers: Option<BTreeMap<String, McpServerSection>>,
 }
@@ -129,6 +130,12 @@ struct CompactionSection {
 struct TelemetrySection {
     max_bytes: Entry,
     max_age_days: Entry,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct McpSection {
+    client_id_metadata_url: Entry,
 }
 
 /// One `agents/<name>.toml`: one flat object plus an optional `[env]` table.
@@ -236,6 +243,12 @@ pub(super) fn parse_config(text: &str) -> Result<ProductConfig, String> {
     if let Some(section) = &file.telemetry {
         assign("telemetry.max_bytes", &section.max_bytes)?;
         assign("telemetry.max_age_days", &section.max_age_days)?;
+    }
+    if let Some(section) = &file.mcp {
+        assign(
+            "mcp.client_id_metadata_url",
+            &section.client_id_metadata_url,
+        )?;
     }
     config.tool_sections =
         tool_sections::parse(text, file.tools.as_ref(), file.mcp_servers.as_ref())?;

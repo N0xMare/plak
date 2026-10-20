@@ -206,6 +206,17 @@ impl PlakPaths {
         self.secrets_dir().join("named")
     }
 
+    /// `secrets/mcp-oauth/<id>/credential.json`: the OAuth login of MCP
+    /// server `<id>`, a private credential record in a directory of its own.
+    /// The caller has validated `server`.
+    #[must_use]
+    pub fn mcp_login_file(&self, server: &str) -> PathBuf {
+        self.secrets_dir()
+            .join("mcp-oauth")
+            .join(server)
+            .join("credential.json")
+    }
+
     /// One named secret's file. The caller has validated `name`.
     #[must_use]
     pub fn named_secret_file(&self, name: &str) -> PathBuf {

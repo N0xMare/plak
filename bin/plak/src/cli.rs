@@ -786,12 +786,16 @@ enum McpAction {
         header: Vec<String>,
         #[arg(long = "header-secret", value_name = "NAME=SECRET_NAME")]
         header_secret: Vec<String>,
+        #[command(flatten)]
+        oauth: Box<McpOAuthFlags>,
         #[arg(long = "env", value_name = "KEY=VALUE")]
         env: Vec<String>,
         #[arg(long = "secret-env", value_name = "KEY=SECRET_NAME")]
         secret_env: Vec<String>,
         #[arg(long, value_delimiter = ',')]
         tools: Option<Vec<String>>,
+        #[arg(long, action = ArgAction::SetTrue)]
+        resources: bool,
         #[arg(long = "startup-seconds")]
         startup_seconds: Option<u16>,
         #[arg(long = "call-seconds")]
@@ -827,6 +831,21 @@ enum McpAction {
         #[arg(long)]
         template: Option<String>,
     },
+}
+
+/// `mcp add`'s OAuth flags.
+#[derive(Debug, clap::Args)]
+struct McpOAuthFlags {
+    #[arg(long, action = ArgAction::SetTrue)]
+    oauth: bool,
+    #[arg(long = "oauth-issuer", value_name = "URL")]
+    oauth_issuer: Option<String>,
+    #[arg(long = "oauth-client-id", value_name = "ID")]
+    oauth_client_id: Option<String>,
+    #[arg(long = "oauth-client-secret", value_name = "SECRET_NAME")]
+    oauth_client_secret: Option<String>,
+    #[arg(long = "oauth-callback-port", value_name = "PORT")]
+    oauth_callback_port: Option<u16>,
 }
 
 fn write_scope(
@@ -872,6 +891,7 @@ fn secret_references_are_names(
         crate::product_config::McpTransport::Http {
             bearer_secret,
             secret_headers,
+            oauth,
             ..
         } => bearer_secret
             .iter()
@@ -880,6 +900,12 @@ fn secret_references_are_names(
                 secret_headers
                     .values()
                     .map(|name| ("--header-secret", name)),
+            )
+            .chain(
+                oauth
+                    .iter()
+                    .filter_map(|oauth| oauth.client.as_ref()?.secret.as_ref())
+                    .map(|name| ("--oauth-client-secret", name)),
             )
             .collect(),
     };
@@ -915,14 +941,46 @@ impl McpAction {
                 bearer_secret,
                 header,
                 header_secret,
+                oauth,
                 env,
                 secret_env,
                 tools,
+                resources,
                 startup_seconds,
                 call_seconds,
                 replace,
                 command,
             } => {
+                let McpOAuthFlags {
+                    oauth,
+                    oauth_issuer,
+                    oauth_client_id,
+                    oauth_client_secret,
+                    oauth_callback_port,
+                } = *oauth;
+                let oauth_given = oauth_issuer.is_some()
+                    || oauth_client_id.is_some()
+                    || oauth_client_secret.is_some()
+                    || oauth_callback_port.is_some();
+                if oauth_given && !oauth {
+                    return Err("the --oauth-* flags require --oauth".to_owned());
+                }
+                // The load parser checks the rest (issuer, client and port
+                // rules) before anything is written.
+                let oauth = oauth.then(|| crate::product_config::McpOAuthConfig {
+                    issuer: oauth_issuer,
+                    client: oauth_client_id.map(|id| crate::product_config::McpOAuthClient {
+                        id,
+                        secret: oauth_client_secret.clone(),
+                    }),
+                    callback_port: oauth_callback_port,
+                });
+                if oauth
+                    .as_ref()
+                    .is_some_and(|oauth| oauth.client.is_none() && oauth_client_secret.is_some())
+                {
+                    return Err("--oauth-client-secret requires --oauth-client-id".to_owned());
+                }
                 let transport = match (url, command.split_first()) {
                     (Some(_), Some(_)) => {
                         return Err(
@@ -947,6 +1005,7 @@ impl McpAction {
                             bearer_secret,
                             headers: pairs("--header", header)?,
                             secret_headers: pairs("--header-secret", header_secret)?,
+                            oauth,
                         }
                     }
                     (None, Some((program, args))) => {
@@ -954,6 +1013,7 @@ impl McpAction {
                             ("--bearer-secret", bearer_secret.is_some()),
                             ("--header", !header.is_empty()),
                             ("--header-secret", !header_secret.is_empty()),
+                            ("--oauth", oauth.is_some()),
                         ] {
                             if given {
                                 return Err(format!("{flag} applies only to an http server"));
@@ -974,6 +1034,7 @@ impl McpAction {
                     server: crate::product_config::McpServerConfig {
                         transport,
                         tools,
+                        resources,
                         startup_seconds: startup_seconds
                             .unwrap_or(crate::product_config::DEFAULT_MCP_STARTUP_SECONDS),
                         call_seconds: call_seconds
@@ -2647,6 +2708,40 @@ mod tests {
         assert_eq!(command, "docker");
         assert_eq!(argv, ["run", "-i", "--rm", "img"]);
         assert_eq!(secret_env["GITHUB_PERSONAL_ACCESS_TOKEN"], "github");
+        let Ok(Command::Mcp(McpCommand::Add { server, .. })) = parse(args(&[
+            "mcp",
+            "add",
+            "docs",
+            "--url",
+            "https://docs.test/mcp",
+            "--oauth",
+            "--oauth-issuer",
+            "https://auth.test",
+            "--oauth-client-id",
+            "plak",
+            "--oauth-client-secret",
+            "docs-client",
+            "--oauth-callback-port",
+            "4321",
+            "--resources",
+        ])) else {
+            panic!("oauth add must parse");
+        };
+        assert!(server.resources);
+        let McpTransport::Http { oauth, .. } = server.transport else {
+            panic!("expected http");
+        };
+        assert_eq!(
+            oauth,
+            Some(crate::product_config::McpOAuthConfig {
+                issuer: Some("https://auth.test".to_owned()),
+                client: Some(crate::product_config::McpOAuthClient {
+                    id: "plak".to_owned(),
+                    secret: Some("docs-client".to_owned()),
+                }),
+                callback_port: Some(4321),
+            })
+        );
         assert!(matches!(
             parse(args(&[
                 "mcp",
@@ -2674,6 +2769,16 @@ mod tests {
             &["mcp", "add", "gh", "--bearer-secret", "s", "--", "cmd"][..],
             &["mcp", "add", "gh", "--secret-env", "NOEQUALS", "--", "cmd"][..],
             &["mcp", "enable", "gh"][..],
+            &["mcp", "add", "gh", "--oauth", "--", "cmd"][..],
+            &[
+                "mcp",
+                "add",
+                "gh",
+                "--url",
+                "https://x.test",
+                "--oauth-issuer",
+                "https://auth.test",
+            ][..],
         ] {
             assert!(parse(args(argv)).is_err(), "must reject {argv:?}");
         }
@@ -2712,6 +2817,20 @@ mod tests {
                 "--url",
                 "https://x.test",
                 "--header",
+                "ghp_Pasted_Value",
+            ][..],
+            &[
+                "mcp",
+                "add",
+                "gh",
+                "--url",
+                "https://x.test",
+                "--oauth",
+                "--oauth-issuer",
+                "https://auth.test",
+                "--oauth-client-id",
+                "plak",
+                "--oauth-client-secret",
                 "ghp_Pasted_Value",
             ][..],
         ] {

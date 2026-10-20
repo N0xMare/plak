@@ -14,8 +14,8 @@ mod tool_sections;
 
 pub use tool_sections::{
     DEFAULT_FETCH_URL_MAX_BYTES, DEFAULT_FETCH_URL_TIMEOUT_SECONDS, DEFAULT_MCP_CALL_SECONDS,
-    DEFAULT_MCP_STARTUP_SECONDS, DEFAULT_WEB_SEARCH_MAX_USES, FetchUrlOptions, McpServerConfig,
-    McpTransport, ToolSections, WebSearchOptions, XSearchOptions,
+    DEFAULT_MCP_STARTUP_SECONDS, DEFAULT_WEB_SEARCH_MAX_USES, FetchUrlOptions, McpOAuthClient,
+    McpOAuthConfig, McpServerConfig, McpTransport, ToolSections, WebSearchOptions, XSearchOptions,
 };
 
 /// Per-repository trust for `.plak/config.toml` and `.plak/agents/`.
@@ -732,6 +732,9 @@ pub struct ProductConfig {
     pub compaction_enabled: bool,
     pub telemetry_max_bytes: u64,
     pub telemetry_max_age_days: u64,
+    /// `[mcp] client_id_metadata_url`: the Client ID Metadata Document an
+    /// MCP login may register with; home-scoped.
+    pub mcp_client_id_metadata_url: Option<String>,
     /// `[tools.<name>]` and `[mcp_servers.<id>]`: options for the optional
     /// tools templates list. A trusted project replaces entries by name.
     pub tool_sections: ToolSections,
@@ -786,6 +789,7 @@ impl PartialEq for ProductConfig {
             && self.compaction_enabled == other.compaction_enabled
             && self.telemetry_max_bytes == other.telemetry_max_bytes
             && self.telemetry_max_age_days == other.telemetry_max_age_days
+            && self.mcp_client_id_metadata_url == other.mcp_client_id_metadata_url
             && self.tool_sections == other.tool_sections
     }
 }
@@ -988,9 +992,23 @@ impl ProductConfig {
         if has_config {
             let overlay = Self::load_config_file(&config_path)
                 .map_err(|error| format!("{error}; edit this file to fix it"))?;
-            if overlay.present.iter().any(|field| field.is_home_only()) {
+            if overlay
+                .present
+                .iter()
+                .any(|field| field.is_home_only() && *field != ConfigField::McpClientIdMetadataUrl)
+            {
                 self.warnings.push(format!(
                     "{}: [orchestration] is home-scoped and ignored here; set it in {}",
+                    config_path.display(),
+                    paths.config_file().display(),
+                ));
+            }
+            if overlay
+                .present
+                .contains(&ConfigField::McpClientIdMetadataUrl)
+            {
+                self.warnings.push(format!(
+                    "{}: [mcp] client_id_metadata_url is home-scoped and ignored here; set it in {}",
                     config_path.display(),
                     paths.config_file().display(),
                 ));
@@ -1083,6 +1101,9 @@ impl ProductConfig {
             }
             ConfigField::TelemetryMaxAgeDays => {
                 self.telemetry_max_age_days = source.telemetry_max_age_days;
+            }
+            ConfigField::McpClientIdMetadataUrl => {
+                self.mcp_client_id_metadata_url = source.mcp_client_id_metadata_url.clone();
             }
         }
     }
@@ -1182,6 +1203,7 @@ impl ProductConfig {
             compaction_enabled: true,
             telemetry_max_bytes: crate::telemetry_store::DEFAULT_TELEMETRY_MAX_BYTES,
             telemetry_max_age_days: crate::telemetry_store::DEFAULT_TELEMETRY_MAX_AGE_DAYS,
+            mcp_client_id_metadata_url: None,
             tool_sections: ToolSections::default(),
         }
     }
@@ -1395,7 +1417,7 @@ impl ProductConfig {
     }
 
     /// The rendered `key = value` line, or `None` for a key this config leaves
-    /// unset (only `[root] agent` can be unset).
+    /// unset (`[root] agent` and `[mcp] client_id_metadata_url`).
     fn value_line(&self, key: &ConfigKey) -> Option<String> {
         Some(format!(
             "{} = {}\n",
@@ -1405,7 +1427,7 @@ impl ProductConfig {
     }
 
     /// One key's value as `config.toml` carries it, or `None` for a key this
-    /// config leaves unset (only `[root] agent` can be unset).
+    /// config leaves unset (`[root] agent` and `[mcp] client_id_metadata_url`).
     ///
     /// One exhaustive match over [`ConfigField`]: a new key cannot render
     /// without the compiler asking for its value. The renderer, the `default:`
@@ -1456,6 +1478,9 @@ impl ProductConfig {
             }
             ConfigField::TelemetryMaxAgeDays => {
                 Value::from(saturating_toml_integer(self.telemetry_max_age_days))
+            }
+            ConfigField::McpClientIdMetadataUrl => {
+                Value::from(self.mcp_client_id_metadata_url.as_deref()?)
             }
         })
     }
@@ -1934,6 +1959,16 @@ impl ProductConfig {
             ConfigField::TelemetryMaxAgeDays => {
                 self.telemetry_max_age_days = parse_positive(key.path, value)?;
             }
+            ConfigField::McpClientIdMetadataUrl => {
+                // Empty clears it from the command line, as for [root] agent.
+                let url = value.string(key)?;
+                if matches!(value, FieldValue::Cli(_)) && url.is_empty() {
+                    self.mcp_client_id_metadata_url = None;
+                } else {
+                    check_client_id_metadata_url(url)?;
+                    self.mcp_client_id_metadata_url = Some(url.to_owned());
+                }
+            }
         }
         Ok(())
     }
@@ -2202,6 +2237,10 @@ pub const CONFIG_SECTION_DOCS: &[(&str, &str)] = &[
         "telemetry",
         "Local analytics store bounds; nothing leaves the machine.",
     ),
+    (
+        "mcp",
+        "The MCP client; servers are [mcp_servers.<id>] tables.",
+    ),
 ];
 
 /// One documented `config.toml` key.
@@ -2302,6 +2341,8 @@ pub enum ConfigField {
     TelemetryMaxBytes,
     /// `[telemetry] max_age_days`.
     TelemetryMaxAgeDays,
+    /// `[mcp] client_id_metadata_url`.
+    McpClientIdMetadataUrl,
 }
 
 impl ConfigField {
@@ -2318,6 +2359,7 @@ impl ConfigField {
                 | Self::TransientResumes
                 | Self::RequestsPerAccount
                 | Self::RequireReviewEvidence
+                | Self::McpClientIdMetadataUrl
         )
     }
 }
@@ -2342,7 +2384,7 @@ impl ConfigKey {
         }
     }
 
-    /// The literal the schema default renders, or `(unset)` for the one
+    /// The literal the schema default renders, or `(unset)` for an
     /// optional key. Derived, so a changed default cannot leave a stale
     /// comment behind in the reference file or the spec.
     #[must_use]
@@ -2623,7 +2665,38 @@ pub const CONFIG_KEYS: &[ConfigKey] = &[
         example: "90",
         scope: ConfigScope::Immediate,
     },
+    ConfigKey {
+        path: "mcp.client_id_metadata_url",
+        field: ConfigField::McpClientIdMetadataUrl,
+        kind: "string",
+        constraint: "https:// URL with a path, no query or fragment; home-scoped",
+        doc: "The OAuth Client ID Metadata Document that identifies Plak to an MCP authorization server that supports one (spec 01 §8.5). Unset disables that registration path; the document lists the redirect URI http://127.0.0.1/callback, which a server matches on any port. Takes effect at the next plak mcp login.",
+        example: "\"https://plak.example/oauth/client.json\"",
+        scope: ConfigScope::Immediate,
+    },
 ];
+
+/// A Client ID Metadata Document URL: `https://` with a path beyond `/`,
+/// no query, fragment or credentials.
+fn check_client_id_metadata_url(url: &str) -> Result<(), String> {
+    let refused = || {
+        "mcp.client_id_metadata_url must be an https:// URL with a path, without query or fragment"
+            .to_owned()
+    };
+    let rest = url.strip_prefix("https://").ok_or_else(refused)?;
+    let (authority, path) = rest.split_once('/').ok_or_else(refused)?;
+    if authority.is_empty()
+        || authority.contains('@')
+        || path.is_empty()
+        || url.contains(['?', '#'])
+        || url
+            .chars()
+            .any(|character| character.is_whitespace() || character.is_control())
+    {
+        return Err(refused());
+    }
+    Ok(())
+}
 
 /// One documented `agents/<name>.toml` field.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

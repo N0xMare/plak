@@ -1,6 +1,6 @@
 //! `mcp-fake-server [--style initialize|discover]
 //! [--tools standard|hundred|unlowerable] [--expect-env NAME=VALUE]
-//! [--call-log PATH] [--list-log PATH] [--http]`
+//! [--call-log PATH] [--list-log PATH] [--resources] [--http]`
 //! serves the scripted MCP server over stdio; the `exit` tool exits with
 //! status 3 mid-call. `unlowerable` adds `tangled`, whose `allOf` schema no
 //! portable schema can carry. `--expect-env` exits with status 4 before
@@ -10,6 +10,7 @@
 //! `Authorization: Bearer $MCP_FAKE_BEARER` when that variable is set.
 //! `--call-log` appends each called tool's name to PATH before it runs;
 //! `--list-log` appends one `list` line to PATH per `tools/list` request.
+//! `--resources` advertises and serves the scripted resources.
 
 #![forbid(unsafe_code)]
 
@@ -25,6 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut style = Style::Initialize;
     let mut hundred = false;
     let mut http = false;
+    let mut resources = false;
     let mut unlowerable = false;
     let mut call_log = None;
     let mut list_log = None;
@@ -32,6 +34,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(argument) = arguments.next() {
         if argument == "--http" {
             http = true;
+            continue;
+        }
+        if argument == "--resources" {
+            resources = true;
             continue;
         }
         match (argument.as_str(), arguments.next().as_deref()) {
@@ -69,6 +75,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             json!({"allOf": [{"type": "object"}, {"type": "object"}]}),
         ));
         server = server.with_tools(tools);
+    }
+    if resources {
+        server = server.with_resources();
     }
     if let Some(path) = call_log {
         server = server.with_call_log(path);

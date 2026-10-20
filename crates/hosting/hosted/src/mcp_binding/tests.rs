@@ -481,3 +481,132 @@ fn frozen_records_rebuild_the_same_tools_without_a_new_listing() -> TestResult {
     );
     Ok(())
 }
+
+/// `resources = true` adds the server's `read_resource` tool to every
+/// selection, on a fresh bind and on a reopen from frozen records alike; the
+/// probe reports it with the resource counts; and a server that does not
+/// advertise resources refuses the bind naming the key.
+#[test]
+fn resources_add_the_read_resource_tool_or_refuse_without_the_capability() -> TestResult {
+    let workspace = tempfile::tempdir()?;
+    let server = fixture()?;
+    let command = server.to_str().ok_or("fixture path")?;
+    let with_resources = |args: &[&str]| {
+        rendered(command, args, &[], None).replace(
+            "startup_seconds = 20\n",
+            "resources = true\nstartup_seconds = 20\n",
+        )
+    };
+    let selection = TemplateToolSelection::parse(["mcp:fake/echo"])?;
+    let table = sections(with_resources(&["--resources"]));
+    let names = |bound: &BoundMcpTools| {
+        bound
+            .names
+            .iter()
+            .map(|(_, name)| name.as_str().to_owned())
+            .collect::<Vec<_>>()
+    };
+    let created = bind_mcp_tools(&selection, &table, workspace.path(), secrets(&[]), None)?;
+    assert_eq!(
+        names(&created),
+        ["mcp__fake__echo", "mcp__fake__read_resource"]
+    );
+    assert_eq!(created.registrations.len(), 2);
+    let reopened = bind_mcp_tools(
+        &selection,
+        &table,
+        workspace.path(),
+        secrets(&[]),
+        Some(&created.records),
+    )?;
+    assert_eq!(names(&reopened), names(&created));
+
+    let probe = probe_mcp_server(
+        "fake",
+        &with_resources(&["--resources"]),
+        workspace.path(),
+        secrets(&[]),
+    )?;
+    assert_eq!(probe.resources, Some((3, 1)));
+    assert_eq!(
+        probe.tools.last(),
+        Some(&(
+            "read_resource".to_owned(),
+            "mcp__fake__read_resource".to_owned()
+        ))
+    );
+
+    let refused = bind_mcp_tools(
+        &selection,
+        &sections(with_resources(&[])),
+        workspace.path(),
+        secrets(&[]),
+        None,
+    )
+    .err()
+    .ok_or("a server without resources bound read_resource")?;
+    assert!(
+        refused
+            .ends_with("remedy: remove resources = true from [mcp_servers.fake] or fix the server"),
+        "{refused}"
+    );
+    Ok(())
+}
+
+/// A product that stores MCP logins in `directory`.
+struct LoginSecrets(PathBuf);
+
+impl NamedSecrets for LoginSecrets {
+    fn read(&self, _name: &str) -> Result<Option<NamedSecretValue>, String> {
+        Ok(None)
+    }
+
+    fn mcp_login_file(&self, server: &str) -> Option<PathBuf> {
+        Some(self.0.join(server).join("credential.json"))
+    }
+}
+
+/// An `auth = "oauth"` table binds the stored login: without one the bind
+/// refuses before connecting and names `plak mcp login`, and a product that
+/// stores no logins refuses the table.
+#[test]
+fn an_oauth_table_without_a_login_refuses_before_connecting() -> TestResult {
+    let home = tempfile::tempdir()?;
+    let table = |extra: &str| {
+        format!(
+            "[mcp_servers.fake]\ntransport = \"http\"\nurl = \"https://mcp.example/mcp\"\n\
+             headers = {{}}\nsecret_headers = {{}}\nauth = \"oauth\"\n{extra}\
+             startup_seconds = 20\ncall_seconds = 120\n"
+        )
+    };
+    let logins: Arc<dyn NamedSecrets> = Arc::new(LoginSecrets(home.path().to_path_buf()));
+    assert_eq!(
+        server_spec(&fake()?, &table(""), &logins).err().as_deref(),
+        Some("mcp server fake is not logged in; remedy: plak mcp login fake")
+    );
+    assert_eq!(
+        mcp_login_status("fake", &table(""), logins.as_ref())?,
+        Some(McpOAuthStatus::NotLoggedIn)
+    );
+    // The pre-registered client's secret is a bind check like every other.
+    let client = "oauth_issuer = \"https://auth.example\"\noauth_client_id = \"plak\"\n\
+                  oauth_client_secret = \"fake-client\"\n";
+    assert_eq!(
+        server_spec(&fake()?, &table(client), &logins)
+            .err()
+            .as_deref(),
+        Some(
+            "mcp server fake: secret \"fake-client\" is not set; remedy: plak secret set fake-client"
+        )
+    );
+    assert_eq!(
+        server_spec(&fake()?, &table(""), &secrets(&[]))
+            .err()
+            .as_deref(),
+        Some("mcp server fake uses oauth, and this product stores no MCP logins")
+    );
+    let bearer = "[mcp_servers.fake]\ntransport = \"http\"\nurl = \"https://mcp.example/mcp\"\n\
+                  headers = {}\nsecret_headers = {}\nstartup_seconds = 20\ncall_seconds = 120\n";
+    assert_eq!(mcp_login_status("fake", bearer, logins.as_ref())?, None);
+    Ok(())
+}

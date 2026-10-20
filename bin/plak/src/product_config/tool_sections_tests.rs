@@ -183,6 +183,7 @@ fn tool_sections_parse_into_typed_options() {
             bearer_secret: Some("linear".to_owned()),
             headers: BTreeMap::from([("X-Client".to_owned(), "plak".to_owned())]),
             secret_headers: BTreeMap::from([("X-Workspace".to_owned(), "linear-ws".to_owned())]),
+            oauth: None,
         }
     );
     // A standard sub-table spells the same value as an inline one.
@@ -212,6 +213,57 @@ fn tool_sections_parse_into_typed_options() {
         "{shown}"
     );
     assert!(shown.contains("secret_env = { GITHUB_PERSONAL_ACCESS_TOKEN = \"github\" }"));
+}
+
+#[test]
+fn oauth_and_resources_keys_parse_and_render_only_when_set() {
+    let text = "[mcp_servers.docs]\ntransport = \"http\"\nurl = \"https://docs.example/mcp\"\n\
+                auth = \"oauth\"\noauth_issuer = \"https://auth.example\"\noauth_client_id = \"plak-1\"\n\
+                oauth_client_secret = \"docs-client\"\noauth_callback_port = 4321\nresources = true\n";
+    let config = ProductConfig::parse(text).unwrap();
+    let docs = &config.tool_sections.mcp_servers["docs"];
+    assert!(docs.resources);
+    let McpTransport::Http { oauth, .. } = &docs.transport else {
+        panic!("expected http");
+    };
+    assert_eq!(
+        oauth.as_ref(),
+        Some(&McpOAuthConfig {
+            issuer: Some("https://auth.example".to_owned()),
+            client: Some(McpOAuthClient {
+                id: "plak-1".to_owned(),
+                secret: Some("docs-client".to_owned()),
+            }),
+            callback_port: Some(4321),
+        })
+    );
+    let rendered = config.tool_sections.render_server("docs").unwrap();
+    assert!(
+        rendered.ends_with(
+            "auth = \"oauth\"\noauth_issuer = \"https://auth.example\"\noauth_client_id = \"plak-1\"\n\
+             oauth_client_secret = \"docs-client\"\noauth_callback_port = 4321\nresources = true\n\
+             startup_seconds = 20\ncall_seconds = 120\n"
+        ),
+        "{rendered}"
+    );
+    // The canonical rendering round-trips, and a table without the keys
+    // renders exactly as before they existed.
+    assert_eq!(
+        ProductConfig::parse(&rendered).unwrap().tool_sections,
+        config.tool_sections
+    );
+    let plain = ProductConfig::parse(FULL_SECTIONS).unwrap();
+    let linear = plain.tool_sections.render_server("linear").unwrap();
+    assert_eq!(
+        linear,
+        "[mcp_servers.linear]\ntransport = \"http\"\nurl = \"https://mcp.linear.app/mcp\"\n\
+         bearer_secret = \"linear\"\nheaders = { X-Client = \"plak\" }\n\
+         secret_headers = { X-Workspace = \"linear-ws\" }\nstartup_seconds = 20\ncall_seconds = 120\n"
+    );
+    // A loopback server may name a loopback issuer.
+    let loopback = "[mcp_servers.dev]\ntransport = \"http\"\nurl = \"http://127.0.0.1:3000/mcp\"\n\
+                    auth = \"oauth\"\noauth_issuer = \"http://127.0.0.1:3001\"\n";
+    assert!(ProductConfig::parse(loopback).is_ok());
 }
 
 #[test]
@@ -316,6 +368,51 @@ fn every_tool_section_rule_is_a_located_load_error() {
         (
             format!("{stdio}call_seconds = 3601\n"),
             "[mcp_servers.github] call_seconds must be an integer in 1..=3600 (line 4, column 16)",
+        ),
+        (
+            format!("{stdio}auth = \"oauth\"\n"),
+            "[mcp_servers.github] auth does not apply to transport = \"stdio\" (line 4, column 8)",
+        ),
+        (
+            format!("{stdio}resources = \"yes\"\n"),
+            "[mcp_servers.github] resources must be true or false (line 4, column 13)",
+        ),
+        (
+            format!("{http}auth = \"basic\"\n"),
+            "[mcp_servers.linear] auth must be \"oauth\" (line 4, column 8)",
+        ),
+        (
+            format!("{http}oauth_callback_port = 8080\n"),
+            "[mcp_servers.linear] oauth_callback_port requires auth = \"oauth\" (line 4, column 23)",
+        ),
+        (
+            format!("{http}auth = \"oauth\"\nbearer_secret = \"linear\"\n"),
+            "[mcp_servers.linear] auth = \"oauth\" cannot be combined with bearer_secret; keep one (line 4, column 8)",
+        ),
+        (
+            format!("{http}auth = \"oauth\"\nsecret_headers = {{ Authorization = \"linear\" }}\n"),
+            "[mcp_servers.linear] Authorization is set by auth = \"oauth\"; remove it from secret_headers (line 5, column 18)",
+        ),
+        (
+            format!("{http}auth = \"oauth\"\noauth_client_id = \"plak\"\n"),
+            "[mcp_servers.linear] oauth_client_id requires oauth_issuer, the authorization server it is registered with (line 5, column 19)",
+        ),
+        (
+            format!("{http}auth = \"oauth\"\noauth_client_secret = \"linear\"\n"),
+            "[mcp_servers.linear] oauth_client_secret requires oauth_client_id (line 5, column 23)",
+        ),
+        (
+            format!("{http}auth = \"oauth\"\noauth_issuer = \"http://127.0.0.1:9000\"\n"),
+            "[mcp_servers.linear] oauth_issuer must be https:// without query or fragment (line 5, column 16)",
+        ),
+        (
+            format!("{http}auth = \"oauth\"\noauth_callback_port = 80\n"),
+            "[mcp_servers.linear] oauth_callback_port must be an integer in 1024..=65535 (line 5, column 23)",
+        ),
+        (
+            "[mcp_servers.linear]\ntransport = \"http\"\nurl = \"https://x.dev/mcp?team=1\"\nauth = \"oauth\"\n"
+                .to_owned(),
+            "[mcp_servers.linear] url cannot carry a query with auth = \"oauth\" (line 3, column 7)",
         ),
     ] {
         let error = ProductConfig::parse(&text).unwrap_err();

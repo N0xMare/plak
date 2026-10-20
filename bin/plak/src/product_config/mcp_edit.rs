@@ -156,10 +156,16 @@ pub fn secret_names(server: &McpServerConfig) -> Vec<String> {
         McpTransport::Http {
             bearer_secret,
             secret_headers,
+            oauth,
             ..
         } => bearer_secret
             .iter()
             .chain(secret_headers.values())
+            .chain(
+                oauth
+                    .iter()
+                    .filter_map(|oauth| oauth.client.as_ref()?.secret.as_ref()),
+            )
             .cloned()
             .collect::<Vec<_>>(),
     };
@@ -782,6 +788,7 @@ fn server_table(server: &McpServerConfig) -> Table {
             bearer_secret,
             headers,
             secret_headers,
+            oauth,
         } => {
             table.insert("transport", toml_edit::value("http"));
             table.insert("url", toml_edit::value(url.as_str()));
@@ -797,10 +804,28 @@ fn server_table(server: &McpServerConfig) -> Table {
                     toml_edit::value(inline_table(secret_headers)),
                 );
             }
+            if let Some(oauth) = oauth {
+                table.insert("auth", toml_edit::value("oauth"));
+                if let Some(issuer) = &oauth.issuer {
+                    table.insert("oauth_issuer", toml_edit::value(issuer.as_str()));
+                }
+                if let Some(client) = &oauth.client {
+                    table.insert("oauth_client_id", toml_edit::value(client.id.as_str()));
+                    if let Some(secret) = &client.secret {
+                        table.insert("oauth_client_secret", toml_edit::value(secret.as_str()));
+                    }
+                }
+                if let Some(port) = oauth.callback_port {
+                    table.insert("oauth_callback_port", toml_edit::value(i64::from(port)));
+                }
+            }
         }
     }
     if let Some(tools) = &server.tools {
         table.insert("tools", toml_edit::value(string_array(tools)));
+    }
+    if server.resources {
+        table.insert("resources", toml_edit::value(true));
     }
     if server.startup_seconds != DEFAULT_MCP_STARTUP_SECONDS {
         table.insert(

@@ -5,8 +5,9 @@
 //! how `web_search` behaves where a template lists it, and an
 //! `[mcp_servers.<id>]` table only says how to reach a server a template names
 //! as `mcp:<id>`. Secrets are never values here: `secret_env`,
-//! `bearer_secret` and `secret_headers` name a secret stored with
-//! `plak secret set`.
+//! `bearer_secret`, `secret_headers` and `oauth_client_secret` name a secret
+//! stored with `plak secret set`, and an OAuth login lives in the home's
+//! secrets, never in a table.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::{Range, RangeInclusive};
@@ -36,6 +37,8 @@ const MAX_DOMAINS: usize = 10;
 const MAX_X_HANDLES: usize = 20;
 const MCP_STARTUP_SECONDS: RangeInclusive<i64> = 1..=120;
 const MCP_CALL_SECONDS: RangeInclusive<i64> = 1..=3600;
+const MCP_OAUTH_CALLBACK_PORT: RangeInclusive<i64> = 1024..=65535;
+const MAX_OAUTH_CLIENT_ID_BYTES: usize = 255;
 const MAX_MCP_TOOL_NAME_BYTES: usize = plakous_hosted::tool_plan::MAX_MCP_TOOL_NAME_BYTES;
 
 /// `[tools.fetch_url]`.
@@ -108,7 +111,30 @@ pub enum McpTransport {
         headers: BTreeMap<String, String>,
         /// Header -> named secret.
         secret_headers: BTreeMap<String, String>,
+        /// `auth = "oauth"`: authenticate with a `plak mcp login` login.
+        oauth: Option<McpOAuthConfig>,
     },
+}
+
+/// `auth = "oauth"` and the `oauth_*` keys of one HTTP server.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct McpOAuthConfig {
+    /// `oauth_issuer`: the authorization server to use.
+    pub issuer: Option<String>,
+    /// `oauth_client_id` and `oauth_client_secret`: a client registered in
+    /// advance with `issuer`.
+    pub client: Option<McpOAuthClient>,
+    /// `oauth_callback_port`: the fixed loopback callback port.
+    pub callback_port: Option<u16>,
+}
+
+/// A pre-registered OAuth client.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct McpOAuthClient {
+    /// The client id.
+    pub id: String,
+    /// The named secret holding the client secret, when it has one.
+    pub secret: Option<String>,
 }
 
 /// `[mcp_servers.<id>]`.
@@ -118,6 +144,9 @@ pub struct McpServerConfig {
     pub transport: McpTransport,
     /// Server-level allowlist of MCP tool names; `None` is every listed tool.
     pub tools: Option<Vec<String>>,
+    /// `resources = true`: templates that list the server get its
+    /// `read_resource` tool.
+    pub resources: bool,
     /// Startup budget, in seconds.
     pub startup_seconds: u16,
     /// Hard per-call ceiling, in seconds.
@@ -274,6 +303,7 @@ fn render_mcp_server(id: &str, server: &McpServerConfig) -> String {
             bearer_secret,
             headers,
             secret_headers,
+            oauth,
         } => {
             out.push_str("transport = \"http\"\n");
             out.push_str(&format!("url = {}\n", toml_text(url)));
@@ -285,10 +315,30 @@ fn render_mcp_server(id: &str, server: &McpServerConfig) -> String {
                 "secret_headers = {}\n",
                 render_table(secret_headers)
             ));
+            // Spelled only when set, so a table without OAuth renders and
+            // digests exactly as before the keys existed.
+            if let Some(oauth) = oauth {
+                out.push_str("auth = \"oauth\"\n");
+                if let Some(issuer) = &oauth.issuer {
+                    out.push_str(&format!("oauth_issuer = {}\n", toml_text(issuer)));
+                }
+                if let Some(client) = &oauth.client {
+                    out.push_str(&format!("oauth_client_id = {}\n", toml_text(&client.id)));
+                    if let Some(secret) = &client.secret {
+                        out.push_str(&format!("oauth_client_secret = {}\n", toml_text(secret)));
+                    }
+                }
+                if let Some(port) = oauth.callback_port {
+                    out.push_str(&format!("oauth_callback_port = {port}\n"));
+                }
+            }
         }
     }
     if let Some(tools) = &server.tools {
         out.push_str(&format!("tools = {}\n", render_array(tools)));
+    }
+    if server.resources {
+        out.push_str("resources = true\n");
     }
     out.push_str(&format!("startup_seconds = {}\n", server.startup_seconds));
     out.push_str(&format!("call_seconds = {}\n", server.call_seconds));
@@ -354,7 +404,13 @@ pub(super) struct McpServerSection {
     bearer_secret: Entry,
     headers: Entry,
     secret_headers: Entry,
+    auth: Entry,
+    oauth_issuer: Entry,
+    oauth_client_id: Entry,
+    oauth_client_secret: Entry,
+    oauth_callback_port: Entry,
     tools: Entry,
+    resources: Entry,
     startup_seconds: Entry,
     call_seconds: Entry,
 }
@@ -460,15 +516,20 @@ fn parse_mcp_server(
             _ => return Err(reader.at(spanned, "transport must be \"stdio\" or \"http\"")),
         },
     };
-    let foreign: [(&str, &Entry); 4] = if transport == "stdio" {
-        [
+    let foreign: &[(&str, &Entry)] = if transport == "stdio" {
+        &[
             ("url", &section.url),
             ("bearer_secret", &section.bearer_secret),
             ("headers", &section.headers),
             ("secret_headers", &section.secret_headers),
+            ("auth", &section.auth),
+            ("oauth_issuer", &section.oauth_issuer),
+            ("oauth_client_id", &section.oauth_client_id),
+            ("oauth_client_secret", &section.oauth_client_secret),
+            ("oauth_callback_port", &section.oauth_callback_port),
         ]
     } else {
-        [
+        &[
             ("command", &section.command),
             ("args", &section.args),
             ("env", &section.env),
@@ -476,7 +537,7 @@ fn parse_mcp_server(
         ]
     };
     for (key, entry) in foreign {
-        if let Some(spanned) = entry {
+        if let Some(spanned) = *entry {
             return Err(reader.at(
                 spanned,
                 &format!("{key} does not apply to transport = \"{transport}\""),
@@ -577,11 +638,33 @@ fn parse_mcp_server(
                 "Authorization is set by bearer_secret; remove it from secret_headers",
             ));
         }
+        let oauth = parse_oauth(&reader, section, &url)?;
+        if oauth.is_some() {
+            if bearer_secret.is_some() {
+                return Err(reader.at_entry(
+                    &section.auth,
+                    "auth = \"oauth\" cannot be combined with bearer_secret; keep one",
+                ));
+            }
+            if seen.contains("authorization") {
+                return Err(reader.at_entry(
+                    &section.secret_headers,
+                    "Authorization is set by auth = \"oauth\"; remove it from secret_headers",
+                ));
+            }
+            if url.contains('?') {
+                return Err(reader.at_entry(
+                    &section.url,
+                    "url cannot carry a query with auth = \"oauth\"",
+                ));
+            }
+        }
         McpTransport::Http {
             url,
             bearer_secret,
             headers,
             secret_headers,
+            oauth,
         }
     };
     let tools = match &section.tools {
@@ -605,6 +688,9 @@ fn parse_mcp_server(
             Some(tools)
         }
     };
+    let resources = reader
+        .boolean("resources", &section.resources)?
+        .unwrap_or(false);
     let startup_seconds = reader
         .integer(
             "startup_seconds",
@@ -620,9 +706,108 @@ fn parse_mcp_server(
     Ok(McpServerConfig {
         transport,
         tools,
+        resources,
         startup_seconds,
         call_seconds,
     })
+}
+
+/// `auth` and the `oauth_*` keys of an HTTP table: `None` without
+/// `auth = "oauth"`, when no `oauth_*` key may be given either.
+fn parse_oauth(
+    reader: &Reader<'_>,
+    section: &McpServerSection,
+    url: &str,
+) -> Result<Option<McpOAuthConfig>, String> {
+    let keys: [(&str, &Entry); 4] = [
+        ("oauth_issuer", &section.oauth_issuer),
+        ("oauth_client_id", &section.oauth_client_id),
+        ("oauth_client_secret", &section.oauth_client_secret),
+        ("oauth_callback_port", &section.oauth_callback_port),
+    ];
+    match reader.string("auth", &section.auth)?.as_deref() {
+        None => {
+            if let Some((key, entry)) = keys.iter().find(|(_, entry)| entry.is_some()) {
+                return Err(reader.at_entry(entry, &format!("{key} requires auth = \"oauth\"")));
+            }
+            return Ok(None);
+        }
+        Some("oauth") => {}
+        Some(_) => return Err(reader.at_entry(&section.auth, "auth must be \"oauth\"")),
+    }
+    let issuer = reader.string("oauth_issuer", &section.oauth_issuer)?;
+    if let Some(issuer) = &issuer
+        && let Err(message) = check_issuer(issuer, url)
+    {
+        return Err(reader.at_entry(&section.oauth_issuer, &message));
+    }
+    let client_id = reader.string("oauth_client_id", &section.oauth_client_id)?;
+    let client_secret = reader.string("oauth_client_secret", &section.oauth_client_secret)?;
+    if let Some(secret) = &client_secret {
+        reader.secret_names(
+            "oauth_client_secret",
+            &section.oauth_client_secret,
+            std::iter::once(secret),
+        )?;
+    }
+    let client = match (client_id, client_secret) {
+        (None, None) => None,
+        (None, Some(_)) => {
+            return Err(reader.at_entry(
+                &section.oauth_client_secret,
+                "oauth_client_secret requires oauth_client_id",
+            ));
+        }
+        (Some(id), secret) => {
+            if id.is_empty()
+                || id.len() > MAX_OAUTH_CLIENT_ID_BYTES
+                || !id.bytes().all(|byte| byte.is_ascii_graphic())
+            {
+                return Err(reader.at_entry(
+                    &section.oauth_client_id,
+                    "oauth_client_id must be 1 to 255 bytes of visible ASCII",
+                ));
+            }
+            if issuer.is_none() {
+                return Err(reader.at_entry(
+                    &section.oauth_client_id,
+                    "oauth_client_id requires oauth_issuer, the authorization server it is registered with",
+                ));
+            }
+            Some(McpOAuthClient { id, secret })
+        }
+    };
+    let callback_port = reader
+        .integer(
+            "oauth_callback_port",
+            &section.oauth_callback_port,
+            MCP_OAUTH_CALLBACK_PORT,
+        )?
+        .map(u16::try_from)
+        .transpose()
+        .map_err(|_| reader.message("oauth_callback_port is out of range"))?;
+    Ok(Some(McpOAuthConfig {
+        issuer,
+        client,
+        callback_port,
+    }))
+}
+
+/// An issuer is `https://`, or `http://` to a loopback literal when the
+/// server's own URL is one; never with a query or fragment.
+fn check_issuer(issuer: &str, url: &str) -> Result<(), String> {
+    let rule = if url.starts_with("http://") {
+        "oauth_issuer must be https://, or http:// to a loopback literal, without query or fragment"
+    } else {
+        "oauth_issuer must be https:// without query or fragment"
+    };
+    if check_url(issuer).is_err()
+        || issuer.contains('?')
+        || (issuer.starts_with("http://") && !url.starts_with("http://"))
+    {
+        return Err(rule.to_owned());
+    }
+    Ok(())
 }
 
 /// Reads typed values out of one section, naming the section in every
@@ -686,6 +871,16 @@ impl<'a> Reader<'a> {
         match spanned.as_ref() {
             toml::Value::Integer(value) if range.contains(value) => Ok(Some(*value)),
             _ => Err(refusal()),
+        }
+    }
+
+    fn boolean(&self, key: &str, entry: &Entry) -> Result<Option<bool>, String> {
+        let Some(spanned) = entry else {
+            return Ok(None);
+        };
+        match spanned.as_ref() {
+            toml::Value::Boolean(value) => Ok(Some(*value)),
+            _ => Err(self.at(spanned, &format!("{key} must be true or false"))),
         }
     }
 

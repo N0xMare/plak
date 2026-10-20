@@ -17,7 +17,13 @@ ADD OPTIONS:
   --bearer-secret SECRET_NAME      Authorization: Bearer from a stored secret (http)
   --header NAME=VALUE       Literal header (http; repeatable)
   --header-secret NAME=SECRET_NAME Header from a stored secret (http; repeatable)
+  --oauth                   Log in with `plak mcp login <id>` instead (http)
+  --oauth-issuer URL        The authorization server to use (with --oauth)
+  --oauth-client-id ID      A client registered there in advance (needs --oauth-issuer)
+  --oauth-client-secret SECRET_NAME  That client's secret, from a stored secret
+  --oauth-callback-port N   Fixed login callback port (1024..=65535)
   --tools a,b               Server allowlist; mcp:<id> means exactly these
+  --resources               Give templates the server's read_resource tool
   --startup-seconds N       Start and list budget (1..=120, default 20)
   --call-seconds N          Per-call ceiling (1..=3600, default 120)
   --replace                 Overwrite an existing [mcp_servers.<id>]
@@ -25,11 +31,14 @@ ADD OPTIONS:
   add writes [mcp_servers.<id>] into config.toml, keeping the rest of the
   file, and refuses anything a config load would refuse. Secrets are named,
   never given: store each with `plak secret set <name>`.
-  list and show print transport, scope, the templates that enable a server
-  and any secret it names that is not stored.
+  list and show print transport, scope, the templates that enable a server,
+  any secret it names that is not stored, whether resources are enabled, and
+  an OAuth server's login state, without contacting the server.
   test starts or connects to the server the way a session does, lists the
-  tools a template would bind and the ones left out with the reason, and
-  exits non-zero with the cause when the server fails. It calls no model.
+  tools a template would bind (with read_resource when resources are
+  enabled) and the ones left out with the reason, counts its resources when
+  they are enabled, and exits non-zero with the cause when the server fails.
+  It calls no model.
   enable and disable edit only that template file's tools array (mcp:<id>,
   or mcp:<id>/<tool> per --tool). New sessions pick the change up; existing
   sessions keep the tools they froze.

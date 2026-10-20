@@ -2,7 +2,7 @@
 
 use std::fs;
 use std::io::{Read as _, Write as _};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::home::paths::PlakPaths;
 
@@ -287,6 +287,10 @@ impl plakous_hosted::mcp_binding::NamedSecrets for ProductNamedSecrets {
         Ok(read_named_secret(&self.paths, name)?.map(|secret| {
             plakous_hosted::mcp_binding::NamedSecretValue::new(secret.expose_secret().to_owned())
         }))
+    }
+
+    fn mcp_login_file(&self, server: &str) -> Option<PathBuf> {
+        Some(self.paths.mcp_login_file(server))
     }
 }
 

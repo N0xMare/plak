@@ -5118,7 +5118,7 @@ more frozen tool at bind, `mcp__<server>__read_resource` (the exposed-name
 rule applied to `read_resource`). Every selection that reaches the server
 includes it; the allowlist, which names server tools, does not apply to it.
 The bind refuses when the server does not advertise the `resources`
-capability, and when a selected server tool exposes under the same name,
+capability (`McpLease::advertises_resources` reports it), and when a selected server tool exposes under the same name,
 naming both. Its description and its closed input schema, one `uri` string of
 1 to 4096 bytes, are Plakous-owned pinned text. It follows every MCP tool rule:
 owned by `Mcp(server)`, `Mutating` and `Serial` whatever a server claims,

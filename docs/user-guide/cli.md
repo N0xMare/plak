@@ -216,18 +216,27 @@ plak mcp remove github
   `user`; `project` writes the trusted project's `.plak/config.toml`),
   `--env KEY=VALUE`, `--secret-env KEY=SECRET_NAME` (stdio), `--bearer-secret
   SECRET_NAME`, `--header NAME=VALUE`, `--header-secret NAME=SECRET_NAME` (http),
-  `--tools a,b` (the server allowlist), `--startup-seconds`, `--call-seconds`
+  `--oauth` with `--oauth-issuer <url>`, `--oauth-client-id <id>`,
+  `--oauth-client-secret SECRET_NAME` and `--oauth-callback-port <port>` (an
+  http server that you log in to instead of giving a bearer secret),
+  `--tools a,b` (the server allowlist), `--resources` (give templates the
+  server's `read_resource` tool), `--startup-seconds`, `--call-seconds`
   and `--replace` to overwrite an existing id. The table is written in place,
   keeping the rest of the file, and anything a config load would refuse is
   refused before the file changes. Secrets are named, never given; `add` tells
   you which are not stored yet.
 - `list` prints each server's transport, scope and target, the templates that
-  enable it, and the secrets it names that are not stored. `show <id>` prints
-  the full table as a session freezes it, plus the same facts.
+  enable it, the secrets it names that are not stored, whether resources are
+  enabled, and for an OAuth server whether you are logged in (with the access
+  token's remaining lifetime and scope), read without contacting the server.
+  `show <id>` prints the full table as a session freezes it, plus the same
+  facts.
 - `test <id>` starts or connects to the server the way a session does (same
-  spawn, environment and secret path), lists the tools `mcp:<id>` would bind
-  and the ones left out with the reason, then stops it. A failure exits
-  non-zero with the cause. It calls no model.
+  spawn, environment, secret and login path), lists the tools `mcp:<id>` would
+  bind (with `read_resource` when resources are enabled) and the ones left out
+  with the reason, with resources enabled says how many resources and resource
+  templates the server lists, then stops it. A failure exits non-zero with the
+  cause. It calls no model.
 - `enable <id> --template <name> [--tool <t>]...` adds `mcp:<id>` (or one
   `mcp:<id>/<t>` per `--tool`) to that template file's `tools`; `disable`
   removes every entry for the server. Only the `tools` line changes. New
