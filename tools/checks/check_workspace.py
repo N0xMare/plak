@@ -615,6 +615,8 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/runtime/events.rs"): {"warn"},
     # A wake the session store refused logs its cause class, never content.
     ("plakous-hosted", "src/runtime/host_loop/wake.rs"): {"warn"},
+    # Pending HUD diagnostics carry only source, counts and delivery status.
+    ("plakous-hosted", "src/runtime/host_loop/pending.rs"): {"debug"},
     ("plak", "src/sidecars/python_bundle.rs"): {"cfg"},
     # The sidecar's stdio loop multiplexes the client channel and the evaluator.
     # Presentation-only invariants and the per-frame tracing span.

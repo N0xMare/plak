@@ -6,12 +6,12 @@
 //! and on change. On an interactive face a pause also persists one typed
 //! notice so a restore shows the same operator line; JSONL gains nothing.
 //!
-//! Steady-state cost is one hub-map probe and one hub read: the tree store is
-//! read once per bound session, and only for a tree the hub does not hold.
+//! Reads use the live hub tree when present; otherwise store observations
+//! are limited to the existing tree observation interval.
 
 use plakous_host_protocol::PendingContinuation;
 
-use super::{HostEvent, HostLoop, commit_session_update};
+use super::{HostEvent, HostLoop, Instant, TREE_OBSERVE_INTERVAL, commit_session_update};
 use crate::runtime::topology_state::TreeRows;
 use crate::sessions::{NoticeScope, TranscriptRow};
 
@@ -74,11 +74,11 @@ impl TreeFacts {
 pub(super) struct PendingTrack {
     session_id: Option<String>,
     last: Option<PendingContinuation>,
-    /// The last tree facts read; a contended or failed hub read keeps them.
+    /// Last observed facts for deciding whether an interrupt could suppress
+    /// work. Never used as a fallback for publishing the indicator.
     tree: Option<TreeFacts>,
-    /// Facts from the tree store, read once per bound session for a tree the
-    /// hub does not hold. Only the hub's tree changes while this host runs.
-    stored: Option<TreeFacts>,
+    store_observed_at: Option<Instant>,
+    read_skipped: bool,
     /// The admitted root-turn count when this suppression episode was noted.
     /// Only an admitted user prompt ends suppression and it advances the
     /// count, so a different count is a new episode.
@@ -96,6 +96,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         }
         self.bind_pending_track();
         self.read_tree_facts()
+            .map(|(tree, _)| tree)
             .or(self.pending_track.tree)
             .is_none_or(|tree| tree.descendants)
             || self
@@ -106,10 +107,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
 
     pub(super) fn publish_pending_continuation(&mut self) {
         self.bind_pending_track();
-        let tree = self
-            .read_tree_facts()
-            .or(self.pending_track.tree)
-            .unwrap_or_default();
+        let Some((tree, source)) = self.read_tree_facts() else {
+            return;
+        };
         self.pending_track.tree = Some(tree);
         let jobs = self
             .opened
@@ -131,14 +131,18 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             tree_paused: tree.paused,
         };
         if self.pending_track.last != Some(next) {
-            let _ = self.events.send(HostEvent::PendingContinuation {
+            let sent = self.events.send(HostEvent::PendingContinuation {
                 results: next.results,
                 questions: next.questions,
                 process_exits: next.process_exits,
                 auto_continue_paused: next.auto_continue_paused,
                 tree_paused: next.tree_paused,
             });
-            self.pending_track.last = Some(next);
+            tracing::debug!(target: "plak.pending", source, results = next.results,
+                questions = next.questions, sent);
+            if sent {
+                self.pending_track.last = Some(next);
+            }
         }
         self.note_auto_continue_pause(suppressed, next.auto_continue_paused);
         self.note_tree_pause(next.tree_paused);
@@ -163,23 +167,41 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         }
     }
 
-    /// `None` when the hub holds the tree but its read failed, which is not
-    /// evidence that anything changed.
-    fn read_tree_facts(&mut self) -> Option<TreeFacts> {
+    /// A failed or not-yet-due observation is not evidence of a change.
+    fn read_tree_facts(&mut self) -> Option<(TreeFacts, &'static str)> {
         let rows = self.config.topology_rows();
-        if let Some(runtime) = self.last_tree_revision.runtime(&rows, &self.config.session) {
-            return runtime.read(TreeFacts::of).ok();
-        }
-        if self.pending_track.stored.is_none() {
-            let stored = self
-                .last_tree_revision
-                .tree_id()
-                .and_then(|tree_id| rows.tree(tree_id).ok().flatten())
-                .map(|tree| TreeFacts::of(&tree))
-                .unwrap_or_default();
-            self.pending_track.stored = Some(stored);
-        }
-        self.pending_track.stored
+        let (source, observed) =
+            if let Some(runtime) = self.last_tree_revision.runtime(&rows, &self.config.session) {
+                ("hub", runtime.read(TreeFacts::of).map_err(|_| ()))
+            } else {
+                let now = Instant::now();
+                if self
+                    .pending_track
+                    .store_observed_at
+                    .is_some_and(|last| now.duration_since(last) < TREE_OBSERVE_INTERVAL)
+                {
+                    return None;
+                }
+                self.pending_track.store_observed_at = Some(now);
+                let observed = self
+                    .last_tree_revision
+                    .tree_id()
+                    .ok_or(())
+                    .and_then(|tree_id| rows.tree(tree_id).map_err(|_| ()))
+                    .map(|tree| tree.as_ref().map(TreeFacts::of).unwrap_or_default());
+                ("store", observed)
+            };
+        let Ok(tree) = observed else {
+            if !self.pending_track.read_skipped {
+                tracing::debug!(target: "plak.pending", source = "skipped",
+                    results = ?self.pending_track.last.map(|last| last.results),
+                    questions = ?self.pending_track.last.map(|last| last.questions), sent = false);
+            }
+            self.pending_track.read_skipped = true;
+            return None;
+        };
+        self.pending_track.read_skipped = false;
+        Some((tree, source))
     }
 
     fn note_auto_continue_pause(&mut self, suppressed: bool, paused: bool) {
@@ -515,6 +537,111 @@ mod tests {
                     "result indicator did not clear: {cleared:?}"
                 );
             });
+        });
+    }
+
+    #[test]
+    fn pending_store_observations_refresh_acknowledged_results() {
+        use crate::runtime::topology_state::TreeRows;
+
+        let dir = tempfile::tempdir().unwrap();
+        let (config, _) = fresh_injected_attached_host(dir.path());
+        let mut tree = ProductAgentTree::bootstrap_root_for_test(
+            &config.session.id,
+            "root",
+            "owner",
+            config.session.workspace_root.clone(),
+            "selected-tuple",
+            WriterMode::SingleLease,
+        )
+        .unwrap();
+        let child = tree
+            .spawn_agent("root", &SpawnAgentRequest::test_review(), None)
+            .unwrap();
+        tree.submit_result(
+            &child.agent_id,
+            &SubmitResultRequest {
+                turn_token: 1,
+                output_json: r#"{"ok":true}"#.into(),
+            },
+            None,
+        )
+        .unwrap();
+        tree.record_turn_completed(&child.agent_id).unwrap();
+        tree.settle_for_test();
+        config.topology_rows().save_tree(&mut tree).unwrap();
+        let (_actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
+        let (events, observed) = crate::surface_protocol::host_event_channel::<TestExtension>();
+        let mut host = HostLoop::open(
+            config,
+            &receiver,
+            crate::runtime::Sender::over(events),
+            None,
+        )
+        .unwrap();
+        assert!(crate::topology_runtime::lookup(&host.config.session.id).is_none());
+        host.publish_pending_continuation();
+        assert_eq!(
+            snapshots(&observed).last().map(|pending| pending.results),
+            Some(1)
+        );
+        let rows = host.config.topology_rows();
+        let mut tree = rows.tree(&host.config.session.id).unwrap().unwrap();
+        let mail = tree.unread_mail("root").next().unwrap().message_id.clone();
+        tree.acknowledge_mail(&mail).unwrap();
+        rows.save_tree(&mut tree).unwrap();
+        host.pending_track.store_observed_at =
+            Instant::now().checked_sub(super::super::TREE_OBSERVE_INTERVAL);
+        host.publish_pending_continuation();
+        assert_eq!(
+            snapshots(&observed).last().map(|pending| pending.results),
+            Some(0)
+        );
+        host.release().unwrap();
+    }
+
+    #[test]
+    fn pending_refused_zero_is_resent_when_facts_are_unchanged() {
+        with_tree(1, |host, runtime, _, observed| {
+            assert_eq!(snapshots(observed).last().unwrap().results, 1);
+            runtime
+                .mutate_then_emit(false, |tree| {
+                    let id = tree.unread_mail("root").next().unwrap().message_id.clone();
+                    tree.acknowledge_mail(&id).map_err(|error| error.message)
+                })
+                .unwrap();
+            // Terminal receipts cannot be evicted to admit the zero snapshot.
+            while host.events.send(HostEvent::ModelRefusal { detail: None }) {}
+            host.publish_pending_continuation();
+            let _ = snapshots(observed);
+            host.publish_pending_continuation();
+            assert_eq!(
+                snapshots(observed).last().map(|pending| pending.results),
+                Some(0)
+            );
+        });
+    }
+
+    #[test]
+    fn pending_wake_and_run_prompt_stays_clear_across_idle_iterations() {
+        with_tree(1, |host, _, actions, observed| {
+            assert_eq!(snapshots(observed).last().unwrap().results, 1);
+            let now = Instant::now();
+            host.child_wake_prompt(now).unwrap();
+            let (text, item, echoed) = take_prompt(
+                host.child_wake_prompt(now + Duration::from_secs(2))
+                    .unwrap(),
+            );
+            host.run_prompt(text, item, echoed, None).unwrap();
+            let mut seen = snapshots(observed);
+            for _ in 0..10 {
+                actions.send(UserAction::Interrupt).unwrap();
+                let _ = host.next_prompt(None).unwrap();
+                seen.extend(snapshots(observed));
+                assert_eq!(host.pending_track.last.unwrap().results, 0);
+            }
+            assert_eq!(seen.last().map(|pending| pending.results), Some(0));
+            assert!(seen.iter().all(|pending| pending.results == 0), "{seen:?}");
         });
     }
 

@@ -98,9 +98,11 @@ drag without losing the selected text.
 While the root is idle and work is waiting, that HUD shows a steady `◆` and
 what is pending, joined by ` · `: unread child results and questions, process
 exits the next turn has not seen, `auto-continue paused`, and
-`agents paused · /tree resume`. A running turn hides the line. Esc pauses
-auto-continue until the next prompt, and so does a wake that did not fit the
-window; when auto-continue is on and a child or
+`agents paused · /tree resume`. Counts refresh from the live tree, or from
+fresh stored-tree observations when it is not live; a failed observation
+leaves the displayed line unchanged until a successful check. A running turn
+hides the line. Esc pauses auto-continue until the next prompt, and so does a
+wake that did not fit the window; when auto-continue is on and a child or
 background process could still wake the root, the HUD says so and the
 transcript keeps one `auto-continue paused until the next prompt` line. A
 paused tree leaves one `agents paused · /tree resume` line. Both lines come

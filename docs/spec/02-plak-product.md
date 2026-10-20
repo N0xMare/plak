@@ -3060,12 +3060,15 @@ paused only while suppressed, enabled for this face, and something could wake
 the root: the session's tree has a node besides the root, or the session has
 background processes. It is emitted on attach, on a session switch and on
 change, is presentation-only, and is omitted from JSONL. The composer HUD shows
-it only while idle. Each idle check reads the hub's tree once (a held tree lock
-waits; a failed read keeps the last facts, so contention never reads as
-unpaused); the tree store is read once per bound session and only for a tree
-the hub does not hold. On an interactive face, pausing auto-continue or the
-tree also writes one typed `tree` warning as a notice intent — `auto-continue
-paused until the next prompt` or `agents paused · /tree resume` — once per
+it only while idle. Each idle check recomputes the counts from the hub's tree
+(a held tree lock waits); when the hub does not hold the tree, fresh store
+reads are limited to the tree observation interval. A failed read skips the
+observation and pause-row updates rather than publishing old facts or treating
+the tree as unpaused. A refused observation is retried on the next eligible
+check, even when the facts have not changed. On an interactive face, pausing
+auto-continue or the tree also writes one typed `tree` warning as a notice
+intent — `auto-continue paused until the next prompt` or
+`agents paused · /tree resume` — once per
 pause episode; a
 JSONL face writes neither row and its output is unchanged. An auto-continue
 episode ends when a prompt is admitted (the admitted-turn count advances), a
