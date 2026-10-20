@@ -30,6 +30,7 @@ use rmcp::transport::streamable_http_client::{
 use sse_stream::Sse;
 
 use crate::error::{McpError, McpErrorKind};
+use crate::oauth::McpOAuthSettings;
 
 /// Largest server-sent event the client accepts.
 pub const MAX_SSE_EVENT_BYTES: usize = 4 * 1024 * 1024;
@@ -80,6 +81,7 @@ pub struct McpHttpEndpoint {
     headers: Vec<(HeaderName, HeaderValue)>,
     secret_slots: Vec<McpHttpSecret>,
     secrets: Option<McpHttpSecretResolver>,
+    oauth: Option<McpOAuthSettings>,
 }
 
 impl McpHttpEndpoint {
@@ -134,6 +136,7 @@ impl McpHttpEndpoint {
             headers: Vec::new(),
             secret_slots: Vec::new(),
             secrets: None,
+            oauth: None,
         })
     }
 
@@ -179,13 +182,43 @@ impl McpHttpEndpoint {
         Ok(self)
     }
 
+    /// Authenticates with OAuth under `settings` (MCP authorization)
+    /// instead of a bearer secret.
+    ///
+    /// # Errors
+    ///
+    /// Refuses a URL with a query, a [`McpHttpSecret::Bearer`] slot, and a
+    /// pre-registered client without an issuer pin.
+    pub fn with_oauth(mut self, settings: McpOAuthSettings) -> Result<Self, McpError> {
+        if self.path_and_query.contains('?') {
+            return Err(definition("url cannot carry a query with oauth"));
+        }
+        settings.check()?;
+        self.oauth = Some(settings);
+        self.check_names()?;
+        Ok(self)
+    }
+
     /// Returns the configured URL.
     #[must_use]
     pub fn url(&self) -> &str {
         &self.url
     }
 
+    pub(crate) const fn oauth(&self) -> Option<&McpOAuthSettings> {
+        self.oauth.as_ref()
+    }
+
+    /// The canonical server URI an OAuth login binds to.
+    pub(crate) fn canonical_resource(&self) -> Result<String, McpError> {
+        plakous_auth::oauth_workflow::canonical_resource_uri(&self.url)
+            .map_err(|_| definition("url is not a valid oauth resource"))
+    }
+
     fn check_names(&self) -> Result<(), McpError> {
+        if self.oauth.is_some() && self.secret_slots.contains(&McpHttpSecret::Bearer) {
+            return Err(definition("oauth cannot be combined with a bearer secret"));
+        }
         let names = self
             .headers
             .iter()
@@ -221,6 +254,9 @@ impl McpHttpEndpoint {
                 McpHttpSecret::Bearer => b"bearer".to_vec(),
                 McpHttpSecret::Header(name) => [b"header:", name.as_str().as_bytes()].concat(),
             });
+        }
+        if let Some(oauth) = &self.oauth {
+            oauth.digest_parts(parts);
         }
     }
 
@@ -321,6 +357,7 @@ impl fmt::Debug for McpHttpEndpoint {
                     .collect::<Vec<_>>(),
             )
             .field("secret_slots", &self.secret_slots)
+            .field("oauth", &self.oauth)
             .finish_non_exhaustive()
     }
 }

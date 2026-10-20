@@ -185,6 +185,22 @@ impl McpServerSpec {
         self.startup_timeout
     }
 
+    /// Reads an OAuth endpoint's stored login without contacting anything;
+    /// `None` for a definition without OAuth.
+    ///
+    /// # Errors
+    ///
+    /// Returns an authorization error when the store cannot be read.
+    pub fn oauth_status(&self) -> Result<Option<crate::McpOAuthStatus>, McpError> {
+        let Transport::Http(endpoint) = &self.transport else {
+            return Ok(None);
+        };
+        let Some(settings) = endpoint.oauth() else {
+            return Ok(None);
+        };
+        crate::oauth::status(settings, &endpoint.canonical_resource()?).map(Some)
+    }
+
     pub(crate) const fn transport(&self) -> &Transport {
         &self.transport
     }

@@ -524,9 +524,12 @@ The `secrets/mcp-oauth/` and `<id>/` directories are `0700` and are created
 on first login; the record and its locks are the Plakous private store's
 (§3.2) under the profile `plakous.mcp.oauth.compat.2026-07-28.r1`. Its
 payload (version 1) binds the server's canonical URI, the issuer and the
-client id and holds the access token, its expiry, the refresh token, the
+client id (whose digest is also the record's account binding) and holds the
+resource indicator the metadata confirmed, the token endpoint's client
+authentication method, the access token, its expiry, the refresh token, the
 requested scope, the token and revocation endpoints, and a dynamic
-registration's client id and secret when one was made. No token, client
+registration's secret when one was issued; a pre-registered client's secret
+is resolved from its named secret at each use and never stored. No token, client
 secret or registration ever enters `config.toml`, a canonical table, a
 definition digest, a frozen session record, an error line or a log.
 

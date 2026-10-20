@@ -25,6 +25,7 @@ mod http;
 mod listing;
 mod lowering;
 mod naming;
+mod oauth;
 mod pack;
 mod pool;
 mod prompts;
@@ -40,6 +41,7 @@ pub use listing::{
 };
 pub use lowering::{SchemaRefusal, lower_input_schema};
 pub use naming::{MAX_EXPOSED_NAME_BYTES, exposed_tool_name};
+pub use oauth::{McpOAuthSecretResolver, McpOAuthSettings, McpOAuthStatus};
 pub use pack::McpToolPack;
 pub use plakous_http::{HeaderName, HeaderValue, SensitiveBytes};
 pub use pool::{

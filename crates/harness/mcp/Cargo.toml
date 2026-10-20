@@ -20,6 +20,7 @@ class = "published-internal"
 [dependencies]
 futures-util = { workspace = true, features = ["alloc"] }
 http.workspace = true
+plakous-auth = { workspace = true, features = ["http-refresh"] }
 plakous-http.workspace = true
 plakous-model.workspace = true
 plakous-tools.workspace = true
@@ -29,6 +30,7 @@ serde_json.workspace = true
 sse-stream = "0.2.5"
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tracing.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 rmcp = { version = "=3.5.1", default-features = false, features = ["client", "server", "transport-async-rw", "transport-streamable-http-client"] }

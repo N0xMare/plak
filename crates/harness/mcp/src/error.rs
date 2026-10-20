@@ -21,6 +21,8 @@ pub enum McpErrorKind {
     Closed,
     /// A resource or prompt request was refused, failed or exceeded a bound.
     Request,
+    /// An OAuth login, its stored credential or its discovery failed.
+    Authorization,
 }
 
 /// One MCP client failure.

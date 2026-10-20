@@ -1592,6 +1592,7 @@ version = "0.0.1"
 dependencies = [
  "futures-util",
  "http",
+ "plakous-auth",
  "plakous-http",
  "plakous-model",
  "plakous-tools",
@@ -1601,6 +1602,7 @@ dependencies = [
  "sse-stream",
  "tokio",
  "tracing",
+ "zeroize",
 ]
 
 [[package]]
