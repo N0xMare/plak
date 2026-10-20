@@ -5932,11 +5932,9 @@ port, so offline workflow tests never launch a clipboard process.
 **MCP server logins** use the same local and remote split through the same
 terminal effects. `plak mcp login <id>` opens the authorize URL here and
 completes on its loopback callback at `http://127.0.0.1:<port>/callback`
-(the table's `oauth_callback_port`, else the first free of the ports the
-Client ID Metadata Document lists when that registration is used, else an
-ephemeral port), with nothing
-pasted; `c` re-copies the URL while it waits, it reminds at 30 s and times
-out at 120 s. `--remote` binds nothing. When the authorization server
+(the table's `oauth_callback_port`, else an ephemeral port), with nothing
+pasted; it reminds at 30 s and times out at 120 s. `--remote` binds
+nothing. When the authorization server
 advertises device authorization it shows the verification URL, the user code,
 its lifetime and the same anti-phishing rule and waits for approval;
 otherwise, or when the server refuses the device request before showing a

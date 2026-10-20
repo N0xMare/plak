@@ -2083,3 +2083,176 @@ fn unreadable_legacy_entry_is_best_effort_for_session_list_and_doctor() {
     assert!(report.contains("Result:"), "{report}");
     assert!(!stderr(&doctor).contains("could not inspect"));
 }
+
+/// The repository-only MCP fixture server. Workspace test runs build every
+/// workspace binary into the directory above the test binary's `deps`.
+fn fake_mcp_server() -> PathBuf {
+    let executable = std::env::current_exe().expect("test binary");
+    let server = executable
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("target directory")
+        .join("mcp-fake-server");
+    assert!(
+        server.is_file(),
+        "{} is missing; run the workspace tests so the fixture binary is built",
+        server.display()
+    );
+    server
+}
+
+/// One HTTP/1.1 GET standing in for the browser; returns the `Location` the
+/// authorization server redirects to.
+fn browse_to_redirect(url: &str) -> String {
+    let rest = url.strip_prefix("http://").expect("loopback http url");
+    let (authority, target) = rest.split_at(rest.find('/').expect("url path"));
+    let mut stream = std::net::TcpStream::connect(authority).expect("connect");
+    write!(
+        stream,
+        "GET {target} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\r\n"
+    )
+    .expect("request");
+    let mut response = String::new();
+    stream.read_to_string(&mut response).expect("response");
+    response
+        .lines()
+        .take_while(|line| !line.is_empty())
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("location")
+                .then(|| value.trim().to_owned())
+        })
+        .unwrap_or_else(|| panic!("no redirect in:\n{response}"))
+}
+
+/// Runs `plak mcp login fake --remote`, plays the browser on the authorize
+/// URL it prints and pastes back the redirect; returns the stderr after the
+/// URL.
+fn login_by_paste_back(home: &std::path::Path) -> String {
+    use std::io::BufRead as _;
+
+    let mut login = Command::new(plak_bin())
+        .env("PLAK_HOME", home)
+        .env("HOME", home)
+        .env_remove("SSH_CONNECTION")
+        .env_remove("SSH_CLIENT")
+        .env_remove("SSH_TTY")
+        .current_dir(home)
+        .args(["mcp", "login", "fake", "--remote"])
+        .stdin(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = login.stdin.take().unwrap();
+    let mut stderr = std::io::BufReader::new(login.stderr.take().unwrap());
+    let mut shown = String::new();
+    let authorize = loop {
+        let mut line = String::new();
+        assert!(
+            stderr.read_line(&mut line).unwrap() > 0,
+            "no authorization URL in:\n{shown}"
+        );
+        shown.push_str(&line);
+        if line.starts_with("http://") && line.contains("/authorize?") {
+            break line.trim().to_owned();
+        }
+    };
+    assert!(shown.contains("mcp server fake: authorization server http://127.0.0.1"));
+    assert!(
+        authorize.contains("code_challenge_method=S256"),
+        "{authorize}"
+    );
+    let redirect = browse_to_redirect(&authorize);
+    writeln!(stdin, "{redirect}").unwrap();
+    drop(stdin);
+    let mut rest = String::new();
+    stderr.read_to_string(&mut rest).unwrap();
+    let status = login.wait().unwrap();
+    assert!(status.success(), "stderr:\n{shown}{rest}");
+    rest
+}
+
+/// `plak mcp login --remote` against a scripted OAuth server: the pasted
+/// callback URL completes the login, `list` reports it, and `logout`
+/// revokes it. A login over SSH without `--remote`, and one for a server
+/// without `auth = "oauth"`, are refused before anything is contacted.
+#[test]
+fn mcp_login_remote_paste_back_logs_in_and_logout_revokes() {
+    use std::io::BufRead as _;
+
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path();
+    let mut server = Command::new(fake_mcp_server())
+        .args(["--http", "--oauth"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn the fixture server");
+    let mut line = String::new();
+    std::io::BufReader::new(server.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    let url = line
+        .trim()
+        .strip_prefix("listening on ")
+        .expect("fixture url")
+        .to_owned();
+    let ok = |output: &std::process::Output| {
+        assert!(
+            output.status.success(),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    ok(&run_plak(
+        home,
+        &["mcp", "add", "fake", "--url", &url, "--oauth"],
+    ));
+    ok(&run_plak(home, &["mcp", "add", "plain", "--url", &url]));
+    assert!(ok(&run_plak(home, &["mcp", "list"])).contains("not logged in"));
+    assert!(
+        ok(&run_plak(home, &["mcp", "logout", "fake"]))
+            .contains("mcp server fake is not logged in; nothing to log out")
+    );
+
+    let refused = run_plak(home, &["mcp", "login", "plain", "--remote"]);
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("mcp server plain does not use oauth"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    let mut ssh = Command::new(plak_bin());
+    let ssh = ssh
+        .env("PLAK_HOME", home)
+        .env("HOME", home)
+        .env("SSH_CONNECTION", "10.0.0.1 22 10.0.0.2 22")
+        .current_dir(home)
+        .args(["mcp", "login", "fake"])
+        .output()
+        .unwrap();
+    assert!(!ssh.status.success());
+    assert!(
+        String::from_utf8_lossy(&ssh.stderr).contains("plak mcp login fake --remote"),
+        "{}",
+        String::from_utf8_lossy(&ssh.stderr)
+    );
+
+    let rest = login_by_paste_back(home);
+    assert!(rest.contains("mcp server fake: logged in"), "{rest}");
+    assert!(
+        home.join("secrets/mcp-oauth/fake/credential.json")
+            .is_file()
+    );
+    let listed = ok(&run_plak(home, &["mcp", "list"]));
+    assert!(listed.contains("login: logged in"), "{listed}");
+
+    assert!(
+        ok(&run_plak(home, &["mcp", "logout", "fake"]))
+            .contains("logged out of mcp server fake; the authorization server revoked the grant")
+    );
+    assert!(ok(&run_plak(home, &["mcp", "list"])).contains("not logged in"));
+    server.kill().unwrap();
+    server.wait().unwrap();
+}

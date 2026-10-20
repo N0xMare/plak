@@ -6,6 +6,8 @@ USAGE:
   plak mcp list
   plak mcp show <id>
   plak mcp test <id>
+  plak mcp login <id> [--scope "<scopes>"] [--remote]
+  plak mcp logout <id> [--local]
   plak mcp remove <id> [--scope user|project] [--force]
   plak mcp enable <id> --template <name> [--tool <tool>]...
   plak mcp disable <id> --template <name>
@@ -39,6 +41,16 @@ ADD OPTIONS:
   enabled) and the ones left out with the reason, counts its resources when
   they are enabled, and exits non-zero with the cause when the server fails.
   It calls no model.
+  login runs the OAuth login of an auth = "oauth" server: it discovers the
+  server's authorization server, shows it and the scope it requests, and
+  opens the browser on this machine. --scope requests these scopes instead
+  of the discovered ones. --remote completes away from this machine: with
+  a one-time code when the authorization server offers the device grant,
+  else by pasting back the URL the browser was sent to. Over SSH, login
+  without --remote is refused. A session never starts a login; an expired,
+  revoked or under-scoped login fails the call with the command to run.
+  logout revokes the login at the authorization server and removes it here;
+  a failed revocation keeps it. --local removes it here without revoking.
   enable and disable edit only that template file's tools array (mcp:<id>,
   or mcp:<id>/<tool> per --tool). New sessions pick the change up; existing
   sessions keep the tools they froze.

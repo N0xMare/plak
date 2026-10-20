@@ -1259,6 +1259,18 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     },
     # `plak mcp list|show` report an OAuth server's stored login.
     ("plak", "src/commands/mcp.rs"): {"mcp": {"McpOAuthStatus"}},
+    ("plak", "src/commands/mcp_login.rs"): {
+        "mcp": {
+            "McpError",
+            "McpLocalRetirement",
+            "McpLoginOptions",
+            "McpLogoutOutcome",
+            "McpOAuthStatus",
+            "McpPool",
+            "McpRemoteLogin",
+            "McpServerSpec",
+        }
+    },
     # The MCP records the root's frozen tools keep in its session record.
     ("plakous-hosted", "src/frozen_tools.rs"): {"mcp": {"McpToolRecord"}},
     # The untrusted-data paragraph an MCP tool earns.

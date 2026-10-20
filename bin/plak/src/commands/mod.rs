@@ -13,6 +13,7 @@ pub mod host_config;
 pub mod login;
 pub(crate) mod login_flow;
 pub(crate) mod mcp;
+pub(crate) mod mcp_login;
 #[cfg(feature = "maintainer")]
 pub(crate) mod reload_rehearsal;
 pub(crate) mod run;

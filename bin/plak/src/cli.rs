@@ -812,6 +812,18 @@ enum McpAction {
     Test {
         id: Option<String>,
     },
+    Login {
+        id: Option<String>,
+        #[arg(long)]
+        scope: Option<String>,
+        #[arg(long, action = ArgAction::SetTrue)]
+        remote: bool,
+    },
+    Logout {
+        id: Option<String>,
+        #[arg(long, action = ArgAction::SetTrue)]
+        local: bool,
+    },
     Remove {
         id: Option<String>,
         #[arg(long, value_parser = ["user", "global", "project"])]
@@ -931,6 +943,8 @@ impl McpAction {
             Self::Add { id: None, .. }
             | Self::Show { id: None }
             | Self::Test { id: None }
+            | Self::Login { id: None, .. }
+            | Self::Logout { id: None, .. }
             | Self::Remove { id: None, .. }
             | Self::Enable { id: None, .. }
             | Self::Disable { id: None, .. } => return help(),
@@ -1046,6 +1060,15 @@ impl McpAction {
             Self::List => McpCommand::List,
             Self::Show { id: Some(id) } => McpCommand::Show { id },
             Self::Test { id: Some(id) } => McpCommand::Test { id },
+            Self::Login {
+                id: Some(id),
+                scope,
+                remote,
+            } => McpCommand::Login { id, scope, remote },
+            Self::Logout {
+                id: Some(id),
+                local,
+            } => McpCommand::Logout { id, local },
             Self::Remove {
                 id: Some(id),
                 scope,

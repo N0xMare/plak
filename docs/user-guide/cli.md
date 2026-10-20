@@ -192,7 +192,7 @@ input (the value is never an argument) and writes
 prints names only. A name matches `[a-z][a-z0-9-]{0,31}`. There is no
 environment override.
 
-### `plak mcp add|list|show|test|remove|enable|disable`
+### `plak mcp add|list|show|test|login|logout|remove|enable|disable`
 
 MCP server setup without editing `config.toml` by hand.
 
@@ -205,6 +205,9 @@ plak mcp add ghlocal --secret-env GITHUB_PERSONAL_ACCESS_TOKEN=github \
 plak mcp list
 plak mcp show github
 plak mcp test github
+plak mcp add linear --url https://mcp.linear.app/mcp --oauth
+plak mcp login linear                                  # or --remote over SSH
+plak mcp logout linear
 plak mcp enable github --template root-agent             # every allowed tool
 plak mcp enable github --template root-agent --tool get_me   # or one at a time
 plak mcp disable github --template root-agent
@@ -237,6 +240,25 @@ plak mcp remove github
   with the reason, with resources enabled says how many resources and resource
   templates the server lists, then stops it. A failure exits non-zero with the
   cause. It calls no model.
+- `login <id> [--scope "<scopes>"] [--remote]` logs in to a server added with
+  `--oauth`. It finds the server's authorization server, prints it and the
+  scope it will request, and opens the authorize URL in your browser; the
+  browser returns to `http://127.0.0.1:<port>/callback` (the table's
+  `oauth_callback_port`, else a free port). `--scope` requests these scopes
+  instead of the discovered ones, which is how you grant more when a tool
+  call says a scope is missing. `--remote` is for a browser on another
+  device, as with `plak login --remote`: when the authorization server offers
+  the device grant you enter a one-time code there, otherwise you paste back
+  the URL the browser was sent to. Over SSH, `login` without `--remote` is
+  refused with that hint. The login is stored under
+  `<PLAK_HOME>/secrets/mcp-oauth/<id>/` and used only for that server's URL.
+  A session never starts a login: when the login expires and cannot be
+  renewed, is revoked, or lacks a scope, the tool call fails and names the
+  `plak mcp login` command to run.
+- `logout <id> [--local]` revokes the login at the authorization server and
+  removes it here. When revocation fails nothing is removed; `--local`
+  removes it here without revoking, and the grant may stay active at the
+  authorization server.
 - `enable <id> --template <name> [--tool <t>]...` adds `mcp:<id>` (or one
   `mcp:<id>/<t>` per `--tool`) to that template file's `tools`; `disable`
   removes every entry for the server. Only the `tools` line changes. New

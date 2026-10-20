@@ -1,5 +1,5 @@
-//! `plak mcp add|list|show|test|remove|enable|disable`: MCP server setup
-//! without hand editing. Tables are written through
+//! `plak mcp add|list|show|test|login|logout|remove|enable|disable`: MCP
+//! server setup without hand editing. Tables are written through
 //! [`crate::product_config::mcp_edit`], so a command and a hand-written file
 //! pass the same parser; `test` starts the server through the same spawn,
 //! environment and secret path a session bind uses.
@@ -30,6 +30,15 @@ pub(crate) enum McpCommand {
     Test {
         id: String,
     },
+    Login {
+        id: String,
+        scope: Option<String>,
+        remote: bool,
+    },
+    Logout {
+        id: String,
+        local: bool,
+    },
     Remove {
         id: String,
         scope: Option<ConfigWriteScope>,
@@ -51,7 +60,10 @@ const NEW_SESSIONS: &str = "new sessions pick this up; existing sessions keep th
 pub(crate) fn run(
     paths: &PlakPaths,
     command: McpCommand,
+    stdin: &mut dyn io::BufRead,
     stdout: &mut dyn io::Write,
+    stderr: &mut dyn io::Write,
+    ui: &mut impl super::login_flow::LoginUi,
 ) -> CliResult<ProcessOutcome> {
     let mut out = String::new();
     match command {
@@ -100,6 +112,20 @@ pub(crate) fn run(
         McpCommand::List => out = list(paths)?,
         McpCommand::Show { id } => out = show(paths, &id)?,
         McpCommand::Test { id } => out = test(paths, &id)?,
+        McpCommand::Login { id, scope, remote } => {
+            return super::mcp_login::login(
+                paths,
+                &id,
+                scope.as_deref(),
+                remote,
+                stdin,
+                stderr,
+                ui,
+            );
+        }
+        McpCommand::Logout { id, local } => {
+            return super::mcp_login::logout(paths, &id, local, stdout);
+        }
         McpCommand::Remove { id, scope, force } => {
             let removed =
                 mcp_edit::remove_server(paths, scope, &id, force).map_err(CliFailure::new)?;

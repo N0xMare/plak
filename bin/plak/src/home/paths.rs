@@ -228,25 +228,24 @@ impl PlakPaths {
     /// secrets directory itself.
     pub fn ensure_named_secrets_dir(&self) -> Result<(), String> {
         self.ensure_layout()?;
-        let dir = self.named_secrets_dir();
-        match fs::symlink_metadata(&dir) {
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                create_private_directory(&dir)
-                    .or_else(|error| {
-                        if error.kind() == std::io::ErrorKind::AlreadyExists {
-                            Ok(())
-                        } else {
-                            Err(error)
-                        }
-                    })
-                    .map_err(|_| {
-                        "could not create the private named secrets directory".to_owned()
-                    })?;
-            }
-            Err(_) => return Err("could not inspect the named secrets directory".to_owned()),
-        }
-        require_private_directory(&dir, "Plak named secrets directory")
+        ensure_private_child(&self.named_secrets_dir(), "named secrets directory")
+    }
+
+    /// Creates the directory of MCP server `server`'s login record,
+    /// `secrets/mcp-oauth/<server>/`, and its parent 0700 under the private
+    /// layout, refusing either when it exists but is not private. The caller
+    /// has validated `server`.
+    pub fn ensure_mcp_login_dir(&self, server: &str) -> Result<(), String> {
+        self.ensure_layout()?;
+        let login = self.mcp_login_file(server);
+        let dir = login
+            .parent()
+            .ok_or_else(|| "the MCP login directory has no parent".to_owned())?;
+        let parent = dir
+            .parent()
+            .ok_or_else(|| "the MCP login directory has no parent".to_owned())?;
+        ensure_private_child(parent, "MCP logins directory")?;
+        ensure_private_child(dir, "MCP login directory")
     }
 
     /// Whether `secrets/named/` exists, verified private along with the
@@ -475,6 +474,26 @@ fn discover_project_root(
         }
     }
     None
+}
+
+/// Creates `dir` 0700 when it is missing, then refuses it unless private.
+fn ensure_private_child(dir: &Path, label: &str) -> Result<(), String> {
+    match fs::symlink_metadata(dir) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            create_private_directory(dir)
+                .or_else(|error| {
+                    if error.kind() == std::io::ErrorKind::AlreadyExists {
+                        Ok(())
+                    } else {
+                        Err(error)
+                    }
+                })
+                .map_err(|_| format!("could not create the private {label}"))?;
+        }
+        Err(_) => return Err(format!("could not inspect the {label}")),
+    }
+    require_private_directory(dir, &format!("Plak {label}"))
 }
 
 fn require_private_directory(path: &Path, label: &str) -> Result<(), String> {

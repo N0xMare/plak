@@ -538,6 +538,11 @@ signed-out, revoked or quarantined credential needs `plak login <account>`; a
 credential that needs a refresh names `plak refresh <account>` first. Catalog
 or token failures caused by the network say to check it and retry.
 
+## `plak mcp login` finds no authorization metadata
+
+Discovery never follows redirects: a well-known metadata URL that redirects
+counts as absent, and any other redirect fails the login.
+
 ## `model re-resolution refused: …`
 
 Codex and Grok subscription models are admitted from a catalog read that is

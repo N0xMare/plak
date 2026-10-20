@@ -1,6 +1,6 @@
 //! `mcp-fake-server [--style initialize|discover]
 //! [--tools standard|hundred|unlowerable] [--expect-env NAME=VALUE]
-//! [--call-log PATH] [--list-log PATH] [--resources] [--http]`
+//! [--call-log PATH] [--list-log PATH] [--resources] [--http [--oauth]]`
 //! serves the scripted MCP server over stdio; the `exit` tool exits with
 //! status 3 mid-call. `unlowerable` adds `tangled`, whose `allOf` schema no
 //! portable schema can carry. `--expect-env` exits with status 4 before
@@ -8,6 +8,8 @@
 //! serves streamable HTTP on a loopback port instead, prints
 //! `listening on <url>` on stdout, and requires
 //! `Authorization: Bearer $MCP_FAKE_BEARER` when that variable is set.
+//! `--oauth` protects it with the scripted OAuth authorization server's
+//! default behavior instead.
 //! `--call-log` appends each called tool's name to PATH before it runs;
 //! `--list-log` appends one `list` line to PATH per `tools/list` request.
 //! `--resources` advertises and serves the scripted resources.
@@ -17,6 +19,7 @@
 use std::sync::Arc;
 
 use plakous_mcp_fake_server::http::{HttpGate, serve_http};
+use plakous_mcp_fake_server::oauth::{OAuthConfig, OAuthGate};
 use plakous_mcp_fake_server::{FakeServer, Style, tool};
 use rmcp::ServiceExt as _;
 use serde_json::json;
@@ -27,6 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut hundred = false;
     let mut http = false;
     let mut resources = false;
+    let mut oauth = false;
     let mut unlowerable = false;
     let mut call_log = None;
     let mut list_log = None;
@@ -34,6 +38,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(argument) = arguments.next() {
         if argument == "--http" {
             http = true;
+            continue;
+        }
+        if argument == "--oauth" {
+            oauth = true;
             continue;
         }
         if argument == "--resources" {
@@ -89,7 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let gate = HttpGate {
             bearer: std::env::var("MCP_FAKE_BEARER").ok(),
             header: None,
-            oauth: None,
+            oauth: oauth.then(|| Arc::new(OAuthGate::new(OAuthConfig::default()))),
         };
         let fixture = serve_http(server, gate).await?;
         println!("listening on {}", fixture.url());

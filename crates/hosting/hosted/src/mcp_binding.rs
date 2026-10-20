@@ -401,6 +401,30 @@ pub fn mcp_login_status(
         .map_err(|error| format!("mcp server {server}: {error}"))
 }
 
+/// The definition `plak mcp login` and `logout` run against: one table with
+/// `auth = "oauth"`, whose login need not exist yet.
+///
+/// # Errors
+///
+/// Returns a one-line reason for an invalid table, a table without OAuth, a
+/// product without MCP logins, or a missing named secret.
+pub fn mcp_oauth_spec(
+    server: &str,
+    rendered: &str,
+    secrets: Arc<dyn NamedSecrets>,
+) -> Result<McpServerSpec, String> {
+    let server = McpServerName::new(server.to_owned())
+        .map_err(|_| format!("{server:?} is not a valid MCP server id"))?;
+    let definition = rendered_server(&server, rendered)?;
+    if definition.auth.as_deref() != Some("oauth") {
+        return Err(format!(
+            "mcp server {server} does not use oauth; add auth = \"oauth\" to [mcp_servers.{server}]"
+        ));
+    }
+    http_spec(&server, &definition, &secrets)
+        .map_err(|error| error.unwrap_or_else(|| invalid_definition(&server)))
+}
+
 fn server_selection(selection: &TemplateToolSelection, server: &McpServerName) -> McpToolSelection {
     let mut named = Vec::new();
     for entry in selection.entries() {
@@ -517,8 +541,21 @@ pub(crate) fn server_spec(
                 spec.with_secret_environment(variables, secret_resolver(server, names, secrets))
             }
         }
-        "http" => http_spec(server, &definition, secrets)
-            .map_err(|error| error.unwrap_or_else(invalid))?,
+        "http" => {
+            let spec = http_spec(server, &definition, secrets)
+                .map_err(|error| error.unwrap_or_else(invalid))?;
+            // No usable login refuses before anything is sent.
+            if let Some(status) = spec
+                .oauth_status()
+                .map_err(|error| format!("mcp server {server}: {error}"))?
+                && let Some(reason) = login_refusal(&status)
+            {
+                return Err(format!(
+                    "mcp server {server} {reason}; remedy: plak mcp login {server}"
+                ));
+            }
+            spec
+        }
         _ => return Err(invalid()),
     };
     let spec = spec
@@ -643,16 +680,7 @@ fn http_spec(
             )
             .map_err(refused)?;
     }
-    let spec = McpServerSpec::http(server.clone(), endpoint);
-    // No usable login refuses before anything is sent.
-    if let Some(status) = spec.oauth_status().map_err(refused)?
-        && let Some(reason) = login_refusal(&status)
-    {
-        return Err(Some(format!(
-            "mcp server {server} {reason}; remedy: plak mcp login {server}"
-        )));
-    }
-    Ok(spec)
+    Ok(McpServerSpec::http(server.clone(), endpoint))
 }
 
 /// Why a stored login cannot serve a bind, `None` when it can (a login
