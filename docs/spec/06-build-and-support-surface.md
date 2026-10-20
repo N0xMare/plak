@@ -299,7 +299,10 @@ product closure is unchanged by the split.
 `plakous` carries ten public optional features. The reviewed closure cap in
 `tools/checks/check_features.py` is **10**: the tenth is `mcp`, the MCP client,
 which no other facade feature implies and only `full` and Plak's product
-closure enable. The cap bounds the per-package subset enumeration, so the
+closure enable. `plakous-mcp` depends on `plakous-auth` with `http-refresh`
+(the private credential store and claimed refresh, for MCP OAuth), so an
+`mcp` selection reaches `plakous-auth` without exposing `plakous::auth`.
+The cap bounds the per-package subset enumeration, so the
 facade's own run is 1026 closures. Any eleventh public feature needs its own
 reviewed amendment here.
 The checker reports hits/misses and atomically caches Cargo tree/metadata
@@ -1089,7 +1092,10 @@ was already locked beside the workspace's 0.22 (through `hyper-util` and
 the duplicate is accepted under `multiple-versions = "warn"`. Not taken:
 `transport-child-process` (`process-wrap`; servers start through the execution
 backend's service-process seam), `which-command`, the `reqwest` HTTP clients,
-`auth`/`oauth2`, `macros` and `schemars`. The repository-only scripted server
+`auth`/`oauth2` (MCP OAuth is built on `plakous-auth` and `plakous-http`
+instead, adding no crate to the lock graph), `macros` and `schemars`. The
+resource and prompt requests are part of the `client` feature already
+enabled. The repository-only scripted server
 `plakous-mcp-fake-server` enables `server`, `transport-io` and
 `transport-streamable-http-server` (serving through `hyper` directly), which
 pull `schemars`, `pastey`, `dyn-clone`, `async-trait`, `rand`, `tower-service`
