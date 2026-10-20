@@ -38,7 +38,7 @@ Templates MUST NOT be authored through `plak config set`, which refuses
 | --- | --- |
 | `account`, `model`, `effort` | the bind tuple; never shown on the card unless `show_model` |
 | `fast_mode` | Codex-only fast lane (provider-native `priority` processing tier) |
-| `composition` | catalog selection for this node (`direct`, `plakous-default`, `native-ptc`, `js-ptc`, `py-ptc`) |
+| `composition` | catalog selection for this node (`direct`, `plakous-default`, `native-ptc`, `js-ptc`, `py-ptc`, or the experimental root-only `py-harness-sdk`, which a working set or `spawns` list may not name in Gate A) |
 | `protocol` | OpenRouter-only wire selection |
 | `description` | **required** for a template named in the working set or in any `spawns` list: the card text the spawner routes on |
 | `access` | edit ceiling, default `full`; `read-execute` omits file-edit tools; a higher ask is clipped, not refused |

@@ -829,7 +829,10 @@ opens another build's state directory for resume or import authority. The
 document embeds no canonical conversation items: its checkpoint and archive are
 text, so canonical-history encodings such as tool execution owners change the
 runtime format epoch, not the export version, and a test pins that an exported
-document carries no owner encoding.
+document carries no owner encoding. Named state of the experimental
+`py-harness-sdk` composition (chapter 01 §9.8.4) lives in the runtime manifest
+and is never exported or carried; the composition token itself is part of
+the binding, so admitting `py-harness-sdk` there is a document change.
 
 `plak session export <id> [--out <path>]` writes one JSON document,
 `"format": "plak-session-export", "version": 7`, and prints its path. Without
@@ -1708,7 +1711,8 @@ intersection. A Codex catalog default of `ultra` becomes no default without
 dropping the row. It withholds `ultra` as multi-agent orchestration, outside the
 single-agent reasoning contract; an explicit bind refusal remains a backstop.
 `--composition` is `direct`, `plakous-default`,
-`native-ptc`, `js-ptc`, `py-ptc`; omitting it resolves to `plakous-default`.
+`native-ptc`, `js-ptc`, `py-ptc`, `py-harness-sdk` (experimental, root-only:
+§6.5); omitting it resolves to `plakous-default`.
 `--protocol` is `auto`, `chat`,
 `responses`, `messages`, is accepted **only** with `--account openrouter`, and
 resolves once at parse time, with `auto` landing on `chat`.
@@ -4778,9 +4782,10 @@ A first turn is built in one fixed order, and each layer has one owner:
 2. **The family and composition base instruction**, owned by `plakous-prompts`
    for the three OAuth verticals' Direct and native Code Mode profiles, for
    the JavaScript and Python PTC harnesses and for the pi base that OpenRouter
-   Direct wears (§6.3). A
-   JavaScript or Python PTC composition replaces the family base outright, so
-   the family wording described below reaches Direct and native Code Mode only.
+   Direct wears (§6.3), and for the experimental neutral Python SDK (§6.5). A
+   JavaScript or Python PTC composition, or the SDK composition, replaces the
+   family base outright, so the family wording described below reaches Direct
+   and native Code Mode only.
 3. **The identity tail**, owned by `plakous-prompts`: workspace root, cwd, OS,
    `You are {model}.`, the current-turn-wins sentence, the selected reasoning
    effort where the profile names one, the execution sentence, and the commit
@@ -5240,12 +5245,28 @@ child spec produces a child.
 ### 6.5 The four composition presentations
 
 The composition selector is closed: `direct`, `plakous-default`,
-`native-ptc`, `js-ptc`, `py-ptc`, with omission meaning `plakous-default`.
-The axis is the one spec 01 §9.4 defines: `native-ptc` is the vertical's own
-programmatic tool calling system, `js-ptc` and `py-ptc` are harness PTC on
-every vertical, and `plakous-default` is the per-model recommendation. What
-the model sees differs per selection, and the nested membership is always that
-vertical's own Direct exposed names — never a renamed neutral set.
+`native-ptc`, `js-ptc`, `py-ptc`, and the experimental `py-harness-sdk`, with
+omission meaning `plakous-default`. The axis is the one spec 01 §9.4 defines:
+`native-ptc` is the vertical's own programmatic tool calling system, `js-ptc`
+and `py-ptc` are harness PTC on every vertical, and `plakous-default` is the
+per-model recommendation. What the model sees differs per selection. For
+`native-ptc`, `js-ptc` and `py-ptc` the nested membership is always that
+vertical's own Direct exposed names — never a renamed neutral set — because
+those presentations are co-designed with the vertical the model was trained
+on.
+
+`py-harness-sdk` departs from that rule on purpose. Its cell surface is one
+neutral SDK on every vertical, for three reasons:
+
+- one typed contract the model learns once, instead of one per vertical;
+- stubs that a type checker enforces before anything runs, so a misspelled
+  field or a wrong argument costs a diagnostic instead of an effect;
+- functions that map directly to canonical capabilities, so the SDK adds no
+  vertical lowering of its own.
+
+Whether neutrality beats co-design is an eval question. Until an eval decides,
+`plakous-default` never selects `py-harness-sdk`, and the other presentations
+do not change.
 
 - **`direct`** — the vertical's pack as provider-visible function tools. No
   `exec`/`wait`.
@@ -5288,7 +5309,34 @@ vertical's own Direct exposed names — never a renamed neutral set.
   yields the observation without killing the cell. Agent/process awaits
   may be called inside Python cells, just as in JavaScript.
 
-Both PTC harnesses tell the model that if the user supplies JavaScript or
+- **`py-harness-sdk`** (experimental) — the neutral Python SDK on the Monty
+  worker (spec 01 §9.8). The provider-visible set is exactly `exec`, which
+  takes a `code` string. There is no wait tool and no cell id. Each cell runs
+  to completion under a 300-second wall cap, starts with fresh globals, and is
+  type-checked before it runs. Five namespaces are pre-imported: `ctx`, `fs`,
+  `proc`, `state` and `plan`, with sixteen functions. Optional tools become
+  the namespaces `web`, `x`, `image` and `mcp.<server>`. The `exec`
+  description carries the generated `.pyi` stubs, which are also the type
+  checker's input. The stubs list `fs.Patch` first on Codex and OpenAI API
+  routes and `fs.Replace` first elsewhere. Under `access = "read-execute"`
+  the `fs` namespace is absent. In Gate A a `py-harness-sdk` node is a root
+  or single agent only: it compiles no topology tools, and a template on it
+  cannot be spawned (chapter 07 §4). Its base instruction, which replaces the
+  family base, is:
+
+  ```text
+  You work by writing Python. Your only tool is exec, which runs one cell against this workspace's SDK and returns what the cell printed and its last expression. Each cell starts with fresh globals; only what you save with state.put survives. Use Python for loops, filtering and arithmetic over exact results; print only what you need to read. Cells are type-checked against the SDK before running; a type error runs nothing. A cell has a 300-second limit: start long commands with proc.start and end your turn; you are woken when a job finishes or the user writes. Never poll. Cells cannot open files, read the environment or reach the network except through the SDK. Processes run with the user's full authority and are not sandboxed.
+  ```
+
+  Where `PromptHostFacts.host_wakes` is false, the clause from "you are
+  woken" through "Never poll." reads instead: `a finished job is reported at
+  the start of your next turn; call proc.join only when this turn needs its
+  result.` The base carries the job-completion sentence itself, so this
+  composition does not earn the process wake paragraph. It earns the
+  untrusted-data paragraph whenever an `mcp`, `web` or `x` namespace is
+  presented.
+
+All three cell harnesses tell the model that if the user supplies JavaScript or
 Python, it calls the cell tool with that source rather than echoing it as
 assistant text. An OAuth or OpenRouter PTC plan **replaces** the family Direct
 catalog with composition-specific instructions; it never prepends onto it.
@@ -5337,7 +5385,11 @@ no table here restates numbers that move with every prompt edit.
 
 Nineteen route families times four scenarios is the 76-route matrix, with the
 one documented exclusion that `native-ptc` is enrolled only for Codex Code
-Mode.
+Mode. The experimental `py-harness-sdk` renders outside that matrix, as
+single-agent roots only, because Gate A compiles no topology for it. That is
+nine routes: one each for Codex, SuperGrok, Claude, the three OpenRouter wires,
+and the OpenAI, xAI and Anthropic APIs, each held to the basic single-node
+budget.
 
 Two footprint budgets are normative, in approximate tokens, over the harness
 environment as defined above:
