@@ -6226,9 +6226,9 @@ builds its return value from that execution value, and the driver delivers it
 after the child's canonical outcome commits. Execution values exist only in
 transit between host and cell. They are never encoded in canonical history,
 the ledger, checkpoints or exports, which keep the presentation text exactly
-as for every other composition. A recovered cell (§9.8.9) receives a value
-rebuilt from the committed canonical outcome, never a stored execution
-value.
+as for every other composition, in every layer. A restored cell (§9.8.9)
+therefore never receives an execution value it did not see before the host
+stopped.
 
 **[A]** **Bounded results.** Every result that can be bounded carries
 `omitted: list[Omission]`, empty when nothing was left out. Each `Omission`
@@ -6414,9 +6414,12 @@ per-cell counters (suspensions, nested calls, compute consumed, taint and
 untrusted sources). After a crash or reopen, a cell whose newest snapshot
 names exactly the current engine identity and descriptor is restored into a
 fresh worker (`Checkout::restore`) and continues as a background cell. Each
-pending nested call is delivered from the ledger: a committed outcome as its
-value, a call proven not dispatched as `RuntimeError: not dispatched before
-the host stopped`, and an ambiguous call as `RuntimeError: outcome unknown`.
+pending nested call is delivered from the ledger as a catchable
+`RuntimeError`: a committed call as `completed before the host stopped`
+followed by its committed presentation text, a call proven not dispatched as
+`not dispatched before the host stopped`, and an ambiguous call as `outcome
+unknown`. Execution values are never persisted, so a committed call's typed
+value is not rebuilt; the cell can read the workspace again.
 No source is re-evaluated and no tool is replayed. The amendment to §9.5
 allows interpreter bytes in durable state for exactly this object; the
 amendment to §5.5 replaces abandonment with restoration for a Code Cell
