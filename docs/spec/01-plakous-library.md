@@ -6129,7 +6129,7 @@ class plan:
     class Step(NamedTuple):
         text: str
         status: Literal["pending", "in_progress", "completed"] = "pending"
-    async def update(items: builtins.list[Step], explanation: str | None = None) -> int:
+    async def update(items: builtins.list[Step]) -> int:
         """Replace the plan; returns its revision."""
 ```
 
@@ -6154,7 +6154,7 @@ docstrings is part of the stub text and is pinned with it.
 | `proc.cancel(job)` | `process_session_terminate` | mutating |
 | `proc.join(job, timeout_s)` | `process_session_poll` with `wait_for_exit` | read-only |
 | `state.get/put/list/drop` | named state (§9.8.4); not a tool | driver-owned |
-| `plan.update(items, explanation=)` | `update_plan` | mutating |
+| `plan.update(items)` | `update_plan` | mutating |
 
 **[A]** The three SDK-only capabilities are new canonical registrations,
 nested-eligible and present only in this composition's catalog:
@@ -6319,11 +6319,12 @@ terminal later arrives as a cell notice (§9.8.9).
 | Pure compute | 90 s per cell | A | Monty `max_feed_duration` (sandbox clock, excluding host suspensions), raising `TimeoutError`; monty-pool's feed-duration backstop kills a worker that misses its grace |
 | Foreground budget | 300 s | A | host timer from admission, including nested calls |
 | Background-cell slots | 0 per agent | A | host, at the foreground budget |
-| Background-cell slots | 2 per agent | B | host, at the foreground budget |
+| Background-cell slots | 2 per agent | B | host, at the foreground budget; raising the value revises the descriptor, so a session recorded under 0 slots moves by export/carry |
 | Background-cell lifetime | `[jobs] max_runtime_hours` | B | host timer, as for promoted processes |
 | Nested calls | 100 per cell | A | host, at the nested-call choke point; the 101st call stops the cell |
 | Concurrent nested calls | 16 | A | the same choke point; calls past 16 wait in order and do not fail |
 | Helper spend | 32 helper requests per agent turn | A | the same choke point (§9.8.7) |
+| Tree helper spend | 128 helper requests per root prompt | B | the same choke point, against the tree budgets of chapter 03 §10.1 |
 | Host suspensions | 1,000 per cell | A | Monty `max_suspensions` (default), raising `RuntimeError: suspension limit 1000 exceeded`. A sequential awaited call costs two suspensions (call and resolve) and a gather of n calls about n + 1; named-state calls count, constructors do not. **[B]** the host carries the count across a restore, because a restored session starts at zero |
 | Recursion | 1,000 frames | A | Monty's default |
 | Model-visible output | 16 KiB | A | host, when rendering the observation |
@@ -6369,7 +6370,12 @@ provider-reported usage are recorded in the turn's durable usage aggregate
 (§9.8.8) and shown by usage beside model rounds (chapter 02 §7.2), with an
 unknown cost shown as unknown.
 
-**[B]** A child's helper requests count against the child's own turn.
+**[B]** A child's helper requests count against the child's own turn and
+against a tree-wide ceiling of 128 helper requests per root prompt, counted
+like the tree attempt budget of chapter 03 §10.1: from the start of the
+root's current prompt, across every agent of the tree, with each prompt
+starting a fresh count. A reservation must fit both bounds; the refusal names
+the bound it met. The ceiling is fixed, not configuration.
 
 #### 9.8.8 Persisted state
 
@@ -6409,11 +6415,15 @@ again; at its lifetime it stops.
 **[B]** **Snapshot resume.** **[amends §9.5 and §5.5]** At each recorded
 suspension point where a cell awaits nested futures, the host may serialize
 the suspended interpreter (monty-pool `Checkout::dump`) and commit it as a
-`CellSnapshot` object, recording the pending nested call ids and the host's
-per-cell counters (suspensions, nested calls, compute consumed, taint and
-untrusted sources). After a crash or reopen, a cell whose newest snapshot
-names exactly the current engine identity and descriptor is restored into a
-fresh worker (`Checkout::restore`) and continues as a background cell. Each
+`CellSnapshot` object, recording the build identity, the engine identity, the
+descriptor, the pending nested call ids and the host's per-cell counters
+(suspensions, nested calls, compute consumed, taint and untrusted sources).
+A snapshot comes only from the agent's own worker through the host; no model
+input names, supplies or selects one. After a crash or reopen, a cell whose
+newest snapshot names exactly the running build, engine identity and
+descriptor, and whose bytes match their content address, is restored into a
+fresh worker (`Checkout::restore`) and continues as a background cell; any
+other snapshot is ignored and the cell is abandoned. Each
 pending nested call is delivered from the ledger as a catchable
 `RuntimeError`: a committed call as `completed before the host stopped`
 followed by its committed presentation text, a call proven not dispatched as
@@ -6426,8 +6436,10 @@ amendment to §5.5 replaces abandonment with restoration for a Code Cell
 obligation that has an admissible snapshot. A cell without one is abandoned
 as before. A snapshot is integrity-checked by the store's content address
 before restore; restoring is not authentication (chapter 04 §7). An orderly
-session exit stops background cells, as it stops promoted processes;
-restoration applies only after a crash.
+session exit stops background cells, as it stops promoted processes, and
+the next admission's notice names each stopped cell (`c<N>`, stopped by
+session exit) with its output so far; restoration applies only after a
+crash.
 
 **[B]** **The `agents` namespace** maps one function to each topology tool,
 grant-compiled exactly as chapter 03 §3 compiles the tools:

@@ -931,7 +931,8 @@ and never replayed after a crash; it is opt-in per template and no shipped
 preset enables it.
 Inside a `py-harness-sdk` cell these calls are helper requests: the
 nested-call choke point reserves each call's declared maximum against a
-fixed budget of 32 helper requests per agent turn before it dispatches, and
+fixed budget of 32 helper requests per agent turn (and, from Gate B, 128 per
+root prompt across the tree) before it dispatches, and
 never refunds a request that may have reached the provider (chapter 01
 §9.8.7). The budget bounds spend; it grants none.
 
@@ -1183,9 +1184,10 @@ bootstrap, an import of that or any other name is still
 the worker, and each call is validated and admitted host-side whether a cell
 reached it through the bootstrap's wrappers or not. From Gate B a suspended
 SDK cell may be serialized and restored into a fresh worker (chapter 01
-§9.8.9); a snapshot is restored only from the session's own runtime store
-after its content address verifies, because Monty's restore is not
-authentication. Every other call is
+§9.8.9); a snapshot comes only from the agent's own worker, never from model
+input, and is restored only on the same build and engine identity, from the
+session's own runtime store, after its content address verifies, because
+Monty's restore is not authentication. Every other call is
 refused, so the cell raises the call's own no-handler exception: filesystem paths and `open`
 (`PermissionError`), `os.getenv` and `os.environ`, `os.urandom`, and
 `time.sleep` and `asyncio.sleep`, which are configured to suspend to the host

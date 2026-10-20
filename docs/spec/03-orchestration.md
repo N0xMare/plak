@@ -2045,6 +2045,7 @@ parent alone. What paces a wide tree is the per-account request budget
 | `MAX_TREE_ATTEMPTS` | 256 per root prompt | `[orchestration] max_attempts`, 1–256, default 64 |
 | `MAX_WAIT_TARGETS` | 64 ids per `wait_agent` | — |
 | per-cell agents | 8 | — (fixed) |
+| tree helper requests | 128 per root prompt, from `py-harness-sdk` Gate B (spec 01 §9.8.7) | — (fixed) |
 
 Every configured bound is a closed `1..=ceiling` range: a value outside it is a
 load or `config set` error naming the key, never a silent clamp, and a raise
