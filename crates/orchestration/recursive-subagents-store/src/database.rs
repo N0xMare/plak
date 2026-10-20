@@ -18,7 +18,7 @@ use crate::rows::load_agent_tree;
 /// `subagents.sqlite3` starts at schema version 1. It is not the
 /// product schema's number and never follows it; both name the state
 /// directory.
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 8;
 
 const BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -432,7 +432,7 @@ mod tests {
     /// Identity golden for the unreleased t7 cohort's durable format.
     #[test]
     fn the_tree_schema_fingerprint_is_pinned() {
-        assert_eq!(SCHEMA_VERSION, 7);
+        assert_eq!(SCHEMA_VERSION, 8);
         assert_eq!(
             expected_schema_fingerprint(),
             "1c356c82ae91952bd72d6ae9a15f970ee57cfbf23d6fd96ede103f93f41d67a2"
@@ -470,7 +470,7 @@ mod tests {
     #[test]
     fn a_foreign_schema_version_is_refused_as_unsupported() {
         // Earlier cohorts have no transient-resume command or decision.
-        for foreign in [4_i64, 5, 6, 99] {
+        for foreign in [4_i64, 5, 6, 7, 99] {
             let root = tempfile::tempdir().unwrap();
             let database = root.path().join("subagents.sqlite3");
             drop(SubagentsDatabase::open(&database).unwrap());
@@ -486,7 +486,7 @@ mod tests {
             assert!(
                 error
                     .message()
-                    .contains(&format!("subagents schema {foreign}, expected 7")),
+                    .contains(&format!("subagents schema {foreign}, expected 8")),
                 "{error}"
             );
         }

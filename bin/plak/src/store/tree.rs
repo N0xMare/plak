@@ -697,7 +697,7 @@ mod tests {
         use plakous_hosted::agent_tree::ProductAgentTree;
         use plakous_hosted::agent_tree_protocol::{TemplateName, WorkingSet, WriterMode};
 
-        assert_eq!(plakous_recursive_subagents_store::SCHEMA_VERSION, 7);
+        assert_eq!(plakous_recursive_subagents_store::SCHEMA_VERSION, 8);
         let name = |name: &str| TemplateName::parse(name).unwrap();
         let card = |spawns: Vec<TemplateName>| AgentTemplate {
             account: "codex".to_owned(),

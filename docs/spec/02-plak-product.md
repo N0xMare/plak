@@ -161,11 +161,11 @@ launch directory — the cwd of the process, resolved once.
   secrets/mcp-oauth/<id>/     MCP server OAuth logins, one private record each (§2.3)
   cache/api-models/<account>-<fingerprint>.json  API model lists, 6 h TTL (§2.3), disposable
   state/
-    r25.e27.p32.t7/             this build's state (§2.5)
+    r25.e27.p33.t8/             this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
       runtime.sqlite3             Plakous semantic runtime and change feed, schema 25, epoch 27
-      product.sqlite3             Plak intents and feed-derived views, schema 32
-      subagents.sqlite3           the agent tree, schema 7
+      product.sqlite3             Plak intents and feed-derived views, schema 33
+      subagents.sqlite3           the agent tree, schema 8
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
   carry/<id>.<uuid>.json      session export documents, 0600 in 0700 (§2.5.1)
   references/<id>.json        imported archives, 0600 in 0700 (§2.5.1)
@@ -624,7 +624,7 @@ recovery authority.
 Plak does not migrate state. Each build keeps its state in
 `~/.plak/state/<key>/`, where the key names every persisted format the build
 reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree
-schema>`, for example `r25.e27.p32.t7`. The key is derived from the stores'
+schema>`, for example `r25.e27.p33.t8`. The key is derived from the stores'
 own version constants, never hand-bumped, so a format change cannot forget to
 move it. A build therefore never finds another build's files in its own
 directory, and a whole-store incompatibility never blocks startup.
@@ -1501,7 +1501,7 @@ genesis identity derived from the immutable create operation. The projector
 restores that creation join, so a committed clear remains settled even when
 its source request's anchor is still retained.
 Submissions and workflow requests carry the applied cursor at their first
-durable write (schema 32's immutable `anchor` columns). Once that anchor is
+durable write (schema 33's immutable `anchor` columns). Once that anchor is
 below `feed_retained_from`, their join settles them as consumed, both on an
 incremental pass and after view deletion. No withdrawal notice, command row
 or counter is derived, and a historical clear's successor is never treated as
@@ -3341,7 +3341,7 @@ row's own start-to-finish span; a failed wait keeps its timeout and actual
 wait. The live tool line carries the same wait facts as the persisted row. The
 projector writes rows into the product transcript
 (`transcript_rows.row`, one JSON payload per row with its ordering key,
-schema 32) by the provenance rules of §2.6; the export document carries them
+schema 33) by the provenance rules of §2.6; the export document carries them
 (§2.5.1), the host emits the same row live as one `Row` observation once the
 projector wrote it, and restore reads them as the rows of the presentation
 snapshot. Live and restored rows are the same values; the renderer maps a row

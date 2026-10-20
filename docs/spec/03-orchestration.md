@@ -1079,7 +1079,7 @@ comparison. Requested tier remains outside this identity; the existing receipt
 reports the effective tier. A missing admitted identity is recovery-required,
 never permission to reconstruct it from current state or spawn again.
 
-The tree store is schema **7**, retaining this admitted identity, the nested `spawns` roster, and grant bounds up to the 64-child and 65-node ceilings. Another schema lives
+The tree store is schema **8**, retaining this admitted identity, the nested `spawns` roster, and grant bounds up to the 64-child and 65-node ceilings. Another schema lives
 in another build's state directory (chapter 02 §2.5) and is never read; no
 migration or guessed identity is performed.
 
@@ -2257,7 +2257,7 @@ knowledge. Sharing a build cache or priming a copy is the user's hook to write.
 
 ## 14. Persistence, reopen, and recovery
 
-Product state lives in `product.sqlite3` at **schema 32**: intents and
+Product state lives in `product.sqlite3` at **schema 33**: intents and
 feed-derived views (chapter 02 §2.6). Its `submissions` bind queued commands to
 their exact bytes; the result-mail batch a root command carries is a tree
 intent. The tree lives separately in `subagents.sqlite3` at **schema 6**, owned
