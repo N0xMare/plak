@@ -249,6 +249,15 @@ async fn run(
     transport: &Fixed,
     request: &ResponsesImageRequest,
 ) -> Result<Vec<u8>, ResponsesRetrievalError> {
+    counted(transport, request)
+        .await
+        .map(|outcome| outcome.bytes)
+}
+
+async fn counted(
+    transport: &Fixed,
+    request: &ResponsesImageRequest,
+) -> Result<ResponsesImageOutcome, ResponsesRetrievalError> {
     let client =
         Client::new_http1(Limits::default()).map_err(|_| invalid_request("fixture client"))?;
     run_responses_image(
@@ -299,10 +308,10 @@ async fn a_connect_failure_and_a_rate_limit_are_retried() -> TestResult {
     ])
     .await?;
     let transport = fixed(vec![closed, peer.origin.clone()]);
-    assert_eq!(
-        run(&transport, &generation(ResponsesImageFlavor::Xai)).await?,
-        PNG
-    );
+    let outcome = counted(&transport, &generation(ResponsesImageFlavor::Xai)).await?;
+    assert_eq!(outcome.bytes, PNG);
+    // The connect failure, the refusal and the success are three requests.
+    assert_eq!(outcome.physical_requests, 3);
     assert_eq!(transport.authorized.load(Ordering::SeqCst), 3);
     Ok(())
 }

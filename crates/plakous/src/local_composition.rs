@@ -2230,6 +2230,7 @@ pub(crate) fn neutral_descriptor(
         })
         .collect::<Vec<_>>();
     Ok(LocalCompositionDescriptor {
+        helper_budget: None,
         outer_projection: exact.outer_projection().clone(),
         nested_projection: exact.nested_projection().clone(),
         nested_tools: nested_tools.into(),
@@ -2254,6 +2255,7 @@ pub(crate) fn neutral_minimal_descriptor(
         })
         .collect::<Vec<_>>();
     Ok(LocalCompositionDescriptor {
+        helper_budget: None,
         outer_projection: exact.outer_projection().clone(),
         nested_projection: exact.nested_projection().clone(),
         nested_tools: nested_tools.into(),
@@ -2280,6 +2282,7 @@ fn neutral_product_descriptor(
         })
         .collect::<Vec<_>>();
     Ok(LocalCompositionDescriptor {
+        helper_budget: None,
         outer_projection: exact.outer_projection().clone(),
         nested_projection: exact.nested_projection().clone(),
         nested_tools: nested_tools.into(),
@@ -2305,6 +2308,7 @@ fn neutral_python_descriptor(
         })
         .collect::<Vec<_>>();
     Ok(LocalCompositionDescriptor {
+        helper_budget: None,
         outer_projection: exact.outer_projection().clone(),
         nested_projection: exact.nested_projection().clone(),
         nested_tools: nested_tools.into(),

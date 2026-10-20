@@ -28,6 +28,13 @@ impl RetrievalPort for OpenRouterRetrievalPort {
         &KINDS
     }
 
+    /// One exchange within the turn retry budget: see the constant.
+    fn max_requests(&self, kind: RetrievalKind) -> Option<u32> {
+        KINDS
+            .contains(&kind)
+            .then_some(plakous_openrouter::MAX_CHAT_RETRIEVAL_PHYSICAL_REQUESTS)
+    }
+
     fn retrieve(
         &self,
         request: RetrievalRequest,
@@ -73,6 +80,7 @@ fn outcome(outcome: ChatRetrievalOutcome) -> RetrievalOutcome {
             output_tokens: outcome.usage.output_tokens,
             hosted_requests: outcome.usage.hosted_requests,
         },
+        physical_requests: Some(outcome.physical_requests),
     }
 }
 
@@ -105,7 +113,9 @@ mod tests {
                 output_tokens: 2,
                 hosted_requests: 1,
             },
+            physical_requests: 2,
         });
+        assert_eq!(mapped.physical_requests, Some(2));
         assert_eq!(mapped.text, "answer");
         assert_eq!(mapped.sources[0].url, "https://example.com/");
         assert_eq!(mapped.usage.hosted_requests, 1);

@@ -70,6 +70,8 @@ pub struct ToolOutcome {
     presentation_subject: Option<Arc<str>>,
     /// Typed value for an in-process consumer. Never part of [`Self::to_model_result`].
     execution_value: Option<Box<crate::ExecutionValue>>,
+    /// Physical helper requests the call sent. Never part of [`Self::to_model_result`].
+    helper_requests: Option<u32>,
 }
 
 impl fmt::Debug for ToolOutcome {
@@ -83,6 +85,7 @@ impl fmt::Debug for ToolOutcome {
             .field("process_telemetry", &self.process_telemetry)
             .field("presentation_subject", &self.presentation_subject)
             .field("execution_value", &self.execution_value.is_some())
+            .field("helper_requests", &self.helper_requests)
             .field("parts", &"<redacted>")
             .finish()
     }
@@ -125,6 +128,24 @@ impl ToolOutcome {
     #[must_use]
     pub fn execution_value(&self) -> Option<&crate::ExecutionValue> {
         self.execution_value.as_deref()
+    }
+
+    /// Attaches how many physical helper requests this call sent: every
+    /// paid side request to the provider, retries and continuations
+    /// included (spec 01 §9.8.7).
+    ///
+    /// Like the execution value it travels only in memory, to the driver's
+    /// helper-spend settlement, and is not part of the canonical model result.
+    #[must_use]
+    pub fn with_helper_requests(mut self, requests: u32) -> Self {
+        self.helper_requests = Some(requests);
+        self
+    }
+
+    /// The physical helper requests this call reported, when it reported a count.
+    #[must_use]
+    pub const fn helper_requests(&self) -> Option<u32> {
+        self.helper_requests
     }
 
     /// The host-only presentation subject, when one was attached.
@@ -182,6 +203,7 @@ impl ToolOutcome {
             process_telemetry: None,
             presentation_subject: None,
             execution_value: None,
+            helper_requests: None,
         })
     }
 
@@ -246,6 +268,7 @@ impl ToolOutcome {
                 process_telemetry: None,
                 presentation_subject: None,
                 execution_value: None,
+                helper_requests: None,
             },
         }
     }
@@ -278,6 +301,7 @@ impl ToolOutcome {
                 process_telemetry: None,
                 presentation_subject: None,
                 execution_value: None,
+                helper_requests: None,
             },
         }
     }

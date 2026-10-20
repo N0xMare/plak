@@ -69,6 +69,7 @@ mod composition_scheduler;
 mod continuation_reopen;
 mod descriptor_fixtures;
 mod fence_compaction;
+mod helper_spend;
 mod lease_permits;
 mod lineage;
 mod model_fixtures;

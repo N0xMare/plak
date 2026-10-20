@@ -31,6 +31,14 @@ impl RetrievalPort for AnthropicRetrievalPort {
         &KINDS
     }
 
+    /// The first exchange and its three `pause_turn` continuations, each
+    /// within the turn retry budget: see the constant.
+    fn max_requests(&self, kind: RetrievalKind) -> Option<u32> {
+        KINDS
+            .contains(&kind)
+            .then_some(plakous_anthropic::MAX_MESSAGES_RETRIEVAL_PHYSICAL_REQUESTS)
+    }
+
     fn retrieve(
         &self,
         request: RetrievalRequest,
@@ -87,6 +95,7 @@ fn outcome(outcome: MessagesRetrievalOutcome) -> RetrievalOutcome {
             output_tokens: outcome.usage.output_tokens,
             hosted_requests: outcome.usage.hosted_requests,
         },
+        physical_requests: Some(outcome.physical_requests),
     }
 }
 

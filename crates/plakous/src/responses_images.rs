@@ -3,7 +3,9 @@
 
 use std::sync::Arc;
 
-use plakous_tool_web::{ImageGenFuture, ImageGenPort, ImageGenRequest};
+use plakous_tool_web::{
+    ImageGenFuture, ImageGenOutcome, ImageGenOutcomeFuture, ImageGenPort, ImageGenRequest,
+};
 use plakous_tools::ExecutionOperationControl;
 
 #[cfg(any(feature = "openai", feature = "native-subscriptions"))]
@@ -45,6 +47,18 @@ impl ImageGenPort for OpenAiImagePort {
         request: ImageGenRequest,
         control: ExecutionOperationControl,
     ) -> ImageGenFuture {
+        uncounted(self.generate_counted(request, control))
+    }
+
+    fn max_requests(&self) -> Option<u32> {
+        Some(responses::MAX_RESPONSES_SIDE_REQUEST_PHYSICAL_REQUESTS)
+    }
+
+    fn generate_counted(
+        &self,
+        request: ImageGenRequest,
+        control: ExecutionOperationControl,
+    ) -> ImageGenOutcomeFuture {
         let images = Arc::clone(&self.0);
         Box::pin(async move {
             let request = lowered(
@@ -55,6 +69,7 @@ impl ImageGenPort for OpenAiImagePort {
             images
                 .generate(&request, control.cancellation())
                 .await
+                .map(counted)
                 .map_err(|error| error_of(&error))
         })
     }
@@ -88,6 +103,18 @@ impl ImageGenPort for CodexImagePort {
         request: ImageGenRequest,
         control: ExecutionOperationControl,
     ) -> ImageGenFuture {
+        uncounted(self.generate_counted(request, control))
+    }
+
+    fn max_requests(&self) -> Option<u32> {
+        Some(responses::MAX_RESPONSES_SIDE_REQUEST_PHYSICAL_REQUESTS)
+    }
+
+    fn generate_counted(
+        &self,
+        request: ImageGenRequest,
+        control: ExecutionOperationControl,
+    ) -> ImageGenOutcomeFuture {
         let images = Arc::clone(&self.0);
         Box::pin(async move {
             let request = lowered(
@@ -98,6 +125,7 @@ impl ImageGenPort for CodexImagePort {
             images
                 .generate(&request, control.cancellation())
                 .await
+                .map(counted)
                 .map_err(|error| error_of(&error))
         })
     }
@@ -131,6 +159,18 @@ impl ImageGenPort for XaiImagePort {
         request: ImageGenRequest,
         control: ExecutionOperationControl,
     ) -> ImageGenFuture {
+        uncounted(self.generate_counted(request, control))
+    }
+
+    fn max_requests(&self) -> Option<u32> {
+        Some(responses::MAX_RESPONSES_SIDE_REQUEST_PHYSICAL_REQUESTS)
+    }
+
+    fn generate_counted(
+        &self,
+        request: ImageGenRequest,
+        control: ExecutionOperationControl,
+    ) -> ImageGenOutcomeFuture {
         let images = Arc::clone(&self.0);
         Box::pin(async move {
             let request = lowered(
@@ -141,9 +181,21 @@ impl ImageGenPort for XaiImagePort {
             images
                 .generate(&request, control.cancellation())
                 .await
+                .map(counted)
                 .map_err(|error| error_of(&error))
         })
     }
+}
+
+fn counted(outcome: responses::ResponsesImageOutcome) -> ImageGenOutcome {
+    ImageGenOutcome {
+        bytes: outcome.bytes,
+        physical_requests: Some(outcome.physical_requests),
+    }
+}
+
+fn uncounted(generated: ImageGenOutcomeFuture) -> ImageGenFuture {
+    Box::pin(async move { generated.await.map(|outcome| outcome.bytes) })
 }
 
 fn lowered(

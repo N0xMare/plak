@@ -500,6 +500,7 @@ pub(super) fn run_driver_scheduler_scenario(scenario: DriverSchedulerScenario) -
             .collect::<Result<Vec<_>, _>>()?,
         )?;
         let composition_descriptor = LocalCompositionDescriptor {
+            helper_budget: None,
             outer_projection: exact.outer_projection().clone(),
             nested_projection: exact.nested_projection().clone(),
             nested_tools: exact

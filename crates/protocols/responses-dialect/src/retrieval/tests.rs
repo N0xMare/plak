@@ -639,7 +639,8 @@ async fn a_json_side_request_returns_its_document_after_a_retried_rate_limit() -
         limits(),
     )
     .await?;
-    assert_eq!(returned, document.as_bytes());
+    assert_eq!(returned.body, document.as_bytes());
+    assert_eq!(returned.physical_requests, 2);
     assert_eq!(transport.authorized.load(Ordering::SeqCst), 2);
     assert_eq!(
         *peer.requests.lock().map_err(|_| "poisoned")?,

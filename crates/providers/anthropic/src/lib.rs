@@ -108,12 +108,12 @@ pub use oauth::{
     parse_claude_oauth_token_grant,
 };
 pub use plakous_messages::{
-    MessagesProviderConfigurationError, compile_messages_oauth_configuration,
+    MAX_MESSAGES_RETRIEVAL_PHYSICAL_REQUESTS, MessagesRetrievalError, MessagesRetrievalErrorKind,
+    MessagesRetrievalLimits, MessagesRetrievalOutcome, MessagesRetrievalQuery,
+    MessagesRetrievalSource, MessagesRetrievalUsage,
 };
 pub use plakous_messages::{
-    MessagesRetrievalError, MessagesRetrievalErrorKind, MessagesRetrievalLimits,
-    MessagesRetrievalOutcome, MessagesRetrievalQuery, MessagesRetrievalSource,
-    MessagesRetrievalUsage,
+    MessagesProviderConfigurationError, compile_messages_oauth_configuration,
 };
 pub use request::{
     AnthropicMessagesOperationBinding, MessagesRequestTranslator, PreparedMessagesRequest,

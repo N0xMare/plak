@@ -717,6 +717,9 @@ pub(crate) struct ToolExecutionResult {
     /// Typed value for a nested composition cell. Never encoded.
     #[serde(skip)]
     pub(crate) execution_value: Option<Arc<plakous_tools::ExecutionValue>>,
+    /// Physical helper requests the executor reported. Never encoded.
+    #[serde(skip)]
+    pub(crate) helper_requests: Option<u32>,
 }
 
 impl ToolExecutionResult {
@@ -726,6 +729,7 @@ impl ToolExecutionResult {
             dispatched,
             presentation_subject: None,
             execution_value: None,
+            helper_requests: None,
         }
     }
 

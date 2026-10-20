@@ -37,8 +37,9 @@ pub use fetch::{
 };
 #[cfg(feature = "image-gen")]
 pub use image_gen::{
-    ImageGenFuture, ImageGenPack, ImageGenPort, ImageGenRequest, ImageGenSource,
-    MAX_IMAGE_EDIT_INPUT_BYTES, MAX_IMAGE_EDIT_INPUTS, MAX_IMAGE_PROMPT_BYTES,
+    ImageGenFuture, ImageGenOutcome, ImageGenOutcomeFuture, ImageGenPack, ImageGenPort,
+    ImageGenRequest, ImageGenSource, MAX_IMAGE_EDIT_INPUT_BYTES, MAX_IMAGE_EDIT_INPUTS,
+    MAX_IMAGE_PROMPT_BYTES,
 };
 pub use render::render_outcome;
 pub use text::{
@@ -390,7 +391,13 @@ fn call_result(
     outcome: Result<plakous_tools::RetrievalOutcome, plakous_tools::RetrievalError>,
 ) -> Result<ToolOutcome, ToolRuntimeError> {
     match outcome {
-        Ok(outcome) => ToolOutcome::success_text(render_outcome(presented, &outcome)),
+        Ok(outcome) => {
+            let result = ToolOutcome::success_text(render_outcome(presented, &outcome))?;
+            Ok(match outcome.physical_requests {
+                Some(requests) => result.with_helper_requests(requests),
+                None => result,
+            })
+        }
         Err(error) if error.kind() == RetrievalErrorKind::Cancelled => Err(ToolRuntimeError::new(
             ToolRuntimeErrorKind::Cancelled,
             error.message(),

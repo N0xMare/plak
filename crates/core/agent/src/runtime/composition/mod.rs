@@ -177,6 +177,8 @@ pub(super) struct LocalCompositionNestedReadOnlyCompletion {
     pub(super) edge_binding: Digest,
     pub(super) evaluation_operation: OperationId,
     pub(super) execution: IndexedToolExecution,
+    /// The helper requests reserved before the child was admitted.
+    pub(super) helper_reservation: Option<u32>,
 }
 
 pub(super) enum LocalCompositionNestedReady {

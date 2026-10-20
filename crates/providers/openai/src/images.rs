@@ -16,8 +16,9 @@ use plakous_model::CancellationToken;
 use plakous_responses_dialect::ResponsesRetrievalDispatch;
 use plakous_responses_dialect::{
     RESPONSES_IMAGE_EXCHANGE_TIMEOUT, ResponsesImageAuthorization, ResponsesImageEndpoint,
-    ResponsesImageFlavor, ResponsesImageRequest, ResponsesImageTransport, ResponsesRetrievalError,
-    ResponsesRetrievalErrorKind, ResponsesRetrievalLimits, run_responses_image,
+    ResponsesImageFlavor, ResponsesImageOutcome, ResponsesImageRequest, ResponsesImageTransport,
+    ResponsesRetrievalError, ResponsesRetrievalErrorKind, ResponsesRetrievalLimits,
+    run_responses_image,
 };
 
 use crate::OpenAiPlatformModel;
@@ -65,7 +66,8 @@ impl OpenAiImages {
         ResponsesImageRequest::new(OPENAI_IMAGE_MODEL, ResponsesImageFlavor::OpenAi, prompt)
     }
 
-    /// Runs one images request and returns the image bytes.
+    /// Runs one images request and returns the image bytes with the
+    /// physical requests it sent.
     ///
     /// # Errors
     ///
@@ -74,7 +76,7 @@ impl OpenAiImages {
         &self,
         request: &ResponsesImageRequest,
         cancellation: &CancellationToken,
-    ) -> Result<Vec<u8>, ResponsesRetrievalError> {
+    ) -> Result<ResponsesImageOutcome, ResponsesRetrievalError> {
         run_responses_image(
             self.model.client(),
             self,
@@ -137,7 +139,8 @@ impl CodexImages {
         self
     }
 
-    /// Runs one images request and returns the image bytes.
+    /// Runs one images request and returns the image bytes with the
+    /// physical requests it sent.
     ///
     /// # Errors
     ///
@@ -146,7 +149,7 @@ impl CodexImages {
         &self,
         request: &ResponsesImageRequest,
         cancellation: &CancellationToken,
-    ) -> Result<Vec<u8>, ResponsesRetrievalError> {
+    ) -> Result<ResponsesImageOutcome, ResponsesRetrievalError> {
         let transport = CodexImageRequest {
             images: self,
             cancellation: cancellation.clone(),

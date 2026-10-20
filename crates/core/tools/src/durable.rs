@@ -129,14 +129,16 @@ impl From<ToolDescriptorError> for ToolBindingError {
 /// Immutable process-local executor capabilities keyed by durable IDs.
 ///
 /// The table also carries which registered tools its host flagged
-/// [`ToolRegistration::presented_name_claimer`] and every non-local
-/// [`ToolRegistration::with_owner`]: both are host authority, never
+/// [`ToolRegistration::presented_name_claimer`], every non-local
+/// [`ToolRegistration::with_owner`] and every
+/// [`ToolRegistration::helper_requests`]: all are host authority, never
 /// persisted, so reconstruction re-takes them here.
 #[derive(Clone)]
 pub struct ToolExecutorBindings {
     by_id: BTreeMap<ToolExecutorId, BoundToolExecutor>,
     claimers: BTreeSet<RegisteredToolId>,
     owners: BTreeMap<RegisteredToolId, ToolOwnerClass>,
+    helper_requests: BTreeMap<RegisteredToolId, u32>,
 }
 
 #[derive(Clone)]
@@ -152,6 +154,7 @@ impl fmt::Debug for ToolExecutorBindings {
             .field("binding_count", &self.by_id.len())
             .field("claimers", &self.claimers)
             .field("owners", &self.owners)
+            .field("helper_requests", &self.helper_requests)
             .finish()
     }
 }
@@ -182,10 +185,19 @@ impl ToolExecutorBindings {
             .filter(|identity| *identity.owner() != ToolOwnerClass::PlakLocal)
             .map(|identity| (identity.tool_id().clone(), identity.owner().clone()))
             .collect();
+        let helper_requests = registry
+            .identities()
+            .filter_map(|identity| {
+                identity
+                    .helper_requests()
+                    .map(|max| (identity.tool_id().clone(), max))
+            })
+            .collect();
         Self {
             by_id,
             claimers,
             owners,
+            helper_requests,
         }
     }
 
@@ -208,6 +220,7 @@ pub struct ToolExecutorBindingsBuilder {
     by_id: BTreeMap<ToolExecutorId, BoundToolExecutor>,
     claimers: BTreeSet<RegisteredToolId>,
     owners: BTreeMap<RegisteredToolId, ToolOwnerClass>,
+    helper_requests: BTreeMap<RegisteredToolId, u32>,
 }
 
 impl ToolExecutorBindingsBuilder {
@@ -218,6 +231,7 @@ impl ToolExecutorBindingsBuilder {
             by_id: BTreeMap::new(),
             claimers: BTreeSet::new(),
             owners: BTreeMap::new(),
+            helper_requests: BTreeMap::new(),
         }
     }
 
@@ -233,6 +247,14 @@ impl ToolExecutorBindingsBuilder {
     /// [`ToolRegistration::with_owner`] does at registration.
     pub fn owner(&mut self, tool_id: RegisteredToolId, owner: ToolOwnerClass) -> &mut Self {
         self.owners.insert(tool_id, owner);
+        self
+    }
+
+    /// Declares the helper-request maximum of the registered tool `tool_id`
+    /// on reconstruction, as [`ToolRegistration::helper_requests`] does at
+    /// registration.
+    pub fn helper_requests(&mut self, tool_id: RegisteredToolId, max: u32) -> &mut Self {
+        self.helper_requests.insert(tool_id, max);
         self
     }
 
@@ -262,6 +284,7 @@ impl ToolExecutorBindingsBuilder {
             by_id: self.by_id,
             claimers: self.claimers,
             owners: self.owners,
+            helper_requests: self.helper_requests,
         }
     }
 }
@@ -637,6 +660,7 @@ impl FrozenToolRegistryDescriptor {
             }
             let claims = bindings.claimers.contains(&tool_id);
             let owner = bindings.owners.get(&tool_id).cloned().unwrap_or_default();
+            let helper_requests = bindings.helper_requests.get(&tool_id).copied();
             let restored = ToolRegistration::new(
                 tool_id,
                 executor_id,
@@ -645,7 +669,8 @@ impl FrozenToolRegistryDescriptor {
                 Arc::clone(&binding.executor),
             )
             .with_nested_eligibility(registration.nested_eligibility)
-            .with_owner(owner);
+            .with_owner(owner)
+            .with_helper_requests(helper_requests);
             builder
                 .register(if claims {
                     restored.presented_name_claimer()
@@ -732,6 +757,7 @@ impl FrozenToolRegistryDescriptor {
                 nested_eligibility: entry.nested_eligibility,
                 claims_presented_name: false,
                 owner: ToolOwnerClass::PlakLocal,
+                helper_requests: None,
                 provenance: Arc::clone(&provenance),
             };
             if identity_wire(&identity) != entry.identity {
@@ -789,6 +815,7 @@ impl FrozenToolRegistryDescriptor {
             nested_eligibility: entry.nested_eligibility,
             claims_presented_name: false,
             owner: ToolOwnerClass::PlakLocal,
+            helper_requests: None,
             provenance: Arc::new(crate::registry::RegistryProvenance),
         };
         Ok((identity, &entry.definition))

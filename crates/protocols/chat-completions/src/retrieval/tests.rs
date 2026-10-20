@@ -409,7 +409,9 @@ async fn a_rate_limit_is_retried_and_a_client_error_is_not() -> TestResult {
     ])
     .await?;
     let transport = fixed(vec![peer.origin.clone()]);
-    assert_eq!(run(&transport).await?.text, "Rust 1.99 shipped.");
+    let retried = run(&transport).await?;
+    assert_eq!(retried.text, "Rust 1.99 shipped.");
+    assert_eq!(retried.physical_requests, 2);
     assert_eq!(transport.authorized.load(Ordering::SeqCst), 2);
     let error = run(&transport).await.err().ok_or("400 succeeded")?;
     assert_eq!(error.kind(), ChatRetrievalErrorKind::Rejected);

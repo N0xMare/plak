@@ -46,6 +46,7 @@ mod compaction;
 mod composition;
 mod context;
 mod effects;
+mod helper_spend;
 mod model;
 pub(super) use model::completed_history_prefix;
 mod notices;
@@ -152,6 +153,11 @@ struct Driver {
     observation_budget: crate::runtime::observation::budget::ObservationBudget,
     /// The typed value of the nested child that just executed, for its cell only.
     nested_execution_value: Option<Arc<plakous_tools::ExecutionValue>>,
+    /// The helper requests the nested child that just executed reported.
+    nested_helper_requests: Option<u32>,
+    /// Helper requests reserved or spent by nested children in the active
+    /// agent turn; reset at each turn start, never persisted.
+    helper_spend: helper_spend::HelperSpend,
     accepting: Arc<AtomicBool>,
     command_nonce: Arc<AtomicU64>,
     shutdown: CancellationToken,

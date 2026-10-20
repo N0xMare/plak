@@ -265,6 +265,12 @@ pub struct RegisteredToolIdentity {
     /// Registration data like the claimer flag: in no digest and not part of
     /// identity equality; reconstruction re-takes it from the host bindings.
     pub(crate) owner: ToolOwnerClass,
+    /// The declared most physical helper requests one call can send
+    /// (spec 01 §9.8.7). Like the owner it is in no digest and not part of
+    /// identity equality; a registration that declares one binds it into its
+    /// executor binding identity, and reconstruction re-takes it from the
+    /// host bindings.
+    pub(crate) helper_requests: Option<u32>,
     pub(crate) provenance: Arc<RegistryProvenance>,
 }
 
@@ -302,6 +308,7 @@ impl fmt::Debug for RegisteredToolIdentity {
             .field("nested_eligibility", &self.nested_eligibility)
             .field("claims_presented_name", &self.claims_presented_name)
             .field("owner", &self.owner)
+            .field("helper_requests", &self.helper_requests)
             .finish_non_exhaustive()
     }
 }
@@ -379,6 +386,13 @@ impl RegisteredToolIdentity {
         self.claims_presented_name
     }
 
+    /// The most physical helper requests one call can send, when the
+    /// registration declared it.
+    #[must_use]
+    pub const fn helper_requests(&self) -> Option<u32> {
+        self.helper_requests
+    }
+
     /// Returns who executes this tool, as committed history records it.
     #[must_use]
     pub const fn owner(&self) -> &ToolOwnerClass {
@@ -428,6 +442,7 @@ pub struct ToolRegistration {
     nested_eligibility: NestedToolEligibility,
     claims_presented_name: bool,
     owner: ToolOwnerClass,
+    helper_requests: Option<u32>,
 }
 
 impl fmt::Debug for ToolRegistration {
@@ -441,6 +456,7 @@ impl fmt::Debug for ToolRegistration {
             .field("nested_eligibility", &self.nested_eligibility)
             .field("claims_presented_name", &self.claims_presented_name)
             .field("owner", &self.owner)
+            .field("helper_requests", &self.helper_requests)
             .field("executor", &"dyn ToolExecutor")
             .finish()
     }
@@ -465,7 +481,30 @@ impl ToolRegistration {
             nested_eligibility: NestedToolEligibility::DirectOnly,
             claims_presented_name: false,
             owner: ToolOwnerClass::PlakLocal,
+            helper_requests: None,
         }
+    }
+
+    /// Declares the most physical helper requests one call can send
+    /// (spec 01 §9.8.7). A composition with a helper budget reserves this
+    /// before it admits the call as a nested child. The value enters no
+    /// digest; a registration that declares one binds it into its executor
+    /// binding identity.
+    #[must_use]
+    pub fn helper_requests(mut self, max: u32) -> Self {
+        self.helper_requests = Some(max);
+        self
+    }
+
+    pub(crate) fn with_helper_requests(mut self, max: Option<u32>) -> Self {
+        self.helper_requests = max;
+        self
+    }
+
+    /// The declared most physical helper requests of one call.
+    #[must_use]
+    pub const fn declared_helper_requests(&self) -> Option<u32> {
+        self.helper_requests
     }
 
     /// Sets who executes this tool; the default is
@@ -705,6 +744,7 @@ impl ToolRegistryBuilder {
             nested_eligibility: registration.nested_eligibility,
             claims_presented_name: registration.claims_presented_name,
             owner: registration.owner,
+            helper_requests: registration.helper_requests,
             provenance: Arc::clone(&self.provenance),
         };
         self.names.insert(definition.name().clone());

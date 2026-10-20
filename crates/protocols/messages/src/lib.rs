@@ -56,13 +56,13 @@ pub use request::{
     lower_request_with_active_artifact,
 };
 pub use retrieval::{
-    MAX_MESSAGES_RETRIEVAL_CONTINUATIONS, MESSAGES_RETRIEVAL_MAX_TOKENS,
-    MESSAGES_WEB_FETCH_MAX_CONTENT_TOKENS, MESSAGES_WEB_FETCH_TOOL_TYPE,
-    MESSAGES_WEB_SEARCH_TOOL_TYPE, MessagesRetrievalAuthorization, MessagesRetrievalError,
-    MessagesRetrievalErrorKind, MessagesRetrievalLimits, MessagesRetrievalOutcome,
-    MessagesRetrievalQuery, MessagesRetrievalRequest, MessagesRetrievalSource,
-    MessagesRetrievalTransport, MessagesRetrievalUsage, classify_messages_retrieval_body,
-    run_messages_retrieval,
+    MAX_MESSAGES_RETRIEVAL_CONTINUATIONS, MAX_MESSAGES_RETRIEVAL_PHYSICAL_REQUESTS,
+    MESSAGES_RETRIEVAL_MAX_TOKENS, MESSAGES_WEB_FETCH_MAX_CONTENT_TOKENS,
+    MESSAGES_WEB_FETCH_TOOL_TYPE, MESSAGES_WEB_SEARCH_TOOL_TYPE, MessagesRetrievalAuthorization,
+    MessagesRetrievalError, MessagesRetrievalErrorKind, MessagesRetrievalLimits,
+    MessagesRetrievalOutcome, MessagesRetrievalQuery, MessagesRetrievalRequest,
+    MessagesRetrievalSource, MessagesRetrievalTransport, MessagesRetrievalUsage,
+    classify_messages_retrieval_body, run_messages_retrieval,
 };
 pub use stream::{
     MessagesStopDetails, MessagesStopDetailsKind, MessagesStopOutcome, MessagesStopReason,

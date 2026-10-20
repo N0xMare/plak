@@ -459,6 +459,7 @@ async fn pause_turn_continues_inside_the_side_request() -> TestResult {
     let transport = fixed(vec![peer.origin.clone()]);
     let outcome = run(&transport, &search()).await?;
     assert_eq!(outcome.exchanges, 2);
+    assert_eq!(outcome.physical_requests, 2);
     assert_eq!(outcome.text, "Rust 1.99 shipped.");
     assert_eq!(outcome.usage.input_tokens, 200);
     assert_eq!(outcome.usage.hosted_requests, 2);
@@ -498,6 +499,7 @@ async fn a_connect_failure_is_retried_on_a_fresh_authorization() -> TestResult {
     let transport = fixed(vec![closed, peer.origin.clone()]);
     let outcome = run(&transport, &search()).await?;
     assert_eq!(outcome.text, "Rust 1.99 shipped.");
+    assert_eq!(outcome.physical_requests, 2);
     assert_eq!(transport.authorized.load(Ordering::SeqCst), 2);
     Ok(())
 }
@@ -515,7 +517,10 @@ async fn a_rate_limit_is_retried_and_a_client_error_is_not() -> TestResult {
     ])
     .await?;
     let transport = fixed(vec![peer.origin.clone()]);
-    assert_eq!(run(&transport, &search()).await?.text, "Rust 1.99 shipped.");
+    let retried = run(&transport, &search()).await?;
+    assert_eq!(retried.text, "Rust 1.99 shipped.");
+    // The refused request and its retry are both physical requests.
+    assert_eq!((retried.exchanges, retried.physical_requests), (1, 2));
     assert_eq!(transport.authorized.load(Ordering::SeqCst), 2);
     let error = run(&transport, &search())
         .await

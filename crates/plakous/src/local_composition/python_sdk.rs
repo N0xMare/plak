@@ -231,6 +231,7 @@ fn neutral_descriptor(
         })
         .collect::<Vec<_>>();
     Ok(LocalCompositionDescriptor {
+        helper_budget: Some(exact.limits().helper_requests_per_turn),
         outer_projection: exact.outer_projection().clone(),
         nested_projection: exact.nested_projection().clone(),
         nested_tools: nested_tools.into(),

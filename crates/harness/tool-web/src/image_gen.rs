@@ -70,6 +70,21 @@ pub struct ImageGenSource {
 pub type ImageGenFuture =
     Pin<Box<dyn Future<Output = Result<Vec<u8>, RetrievalError>> + Send + 'static>>;
 
+/// One finished generation with the physical requests it sent.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ImageGenOutcome {
+    /// The image bytes.
+    pub bytes: Vec<u8>,
+    /// Physical images requests sent, retries included; `None` when the port
+    /// cannot say, which a helper budget charges as the whole declared
+    /// maximum.
+    pub physical_requests: Option<u32>,
+}
+
+/// The future [`ImageGenPort::generate_counted`] returns.
+pub type ImageGenOutcomeFuture =
+    Pin<Box<dyn Future<Output = Result<ImageGenOutcome, RetrievalError>> + Send + 'static>>;
+
 /// One route's image generation, bound to the session's exact route,
 /// account and credential.
 ///
@@ -89,6 +104,29 @@ pub trait ImageGenPort: Send + Sync {
         request: ImageGenRequest,
         control: ExecutionOperationControl,
     ) -> ImageGenFuture;
+
+    /// The most physical requests one generation can send, retries
+    /// included; `None` when the port declares no bound. A helper budget
+    /// (spec 01 §9.8.7) reserves this before the call.
+    fn max_requests(&self) -> Option<u32> {
+        None
+    }
+
+    /// Runs one generation like [`Self::generate`] and reports the physical
+    /// requests it sent. The default reports no count.
+    fn generate_counted(
+        &self,
+        request: ImageGenRequest,
+        control: ExecutionOperationControl,
+    ) -> ImageGenOutcomeFuture {
+        let generated = self.generate(request, control);
+        Box::pin(async move {
+            generated.await.map(|bytes| ImageGenOutcome {
+                bytes,
+                physical_requests: None,
+            })
+        })
+    }
 }
 
 /// The `image_gen` tool: one registration, appended after the core menu in
@@ -316,8 +354,11 @@ async fn generate(
         size: call.size.clone(),
         edit_from,
     };
-    let bytes = match port.generate(request, operation_control(context)).await {
-        Ok(bytes) => bytes,
+    let (bytes, requests) = match port
+        .generate_counted(request, operation_control(context))
+        .await
+    {
+        Ok(outcome) => (outcome.bytes, outcome.physical_requests),
         Err(error) if error.kind() == RetrievalErrorKind::Cancelled => {
             return Err(ToolRuntimeError::new(
                 ToolRuntimeErrorKind::Cancelled,
@@ -375,7 +416,11 @@ async fn generate(
             .map_err(unreturnable)?,
         ));
     }
-    ToolOutcome::success(parts)
+    let outcome = ToolOutcome::success(parts)?;
+    Ok(match requests {
+        Some(requests) => outcome.with_helper_requests(requests),
+        None => outcome,
+    })
 }
 
 /// The first slice of a workspace file of at most `max` bytes, and whether

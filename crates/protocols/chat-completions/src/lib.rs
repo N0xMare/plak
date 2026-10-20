@@ -41,8 +41,8 @@ pub use retrieval::{
     CHAT_RETRIEVAL_MAX_TOKENS, CHAT_WEB_PLUGIN_ID, CHAT_WEB_PLUGIN_MAX_RESULTS,
     ChatRetrievalAuthorization, ChatRetrievalError, ChatRetrievalErrorKind, ChatRetrievalLimits,
     ChatRetrievalOutcome, ChatRetrievalReasoning, ChatRetrievalRequest, ChatRetrievalRouting,
-    ChatRetrievalSource, ChatRetrievalTransport, ChatRetrievalUsage, classify_chat_retrieval_body,
-    run_chat_retrieval,
+    ChatRetrievalSource, ChatRetrievalTransport, ChatRetrievalUsage,
+    MAX_CHAT_RETRIEVAL_PHYSICAL_REQUESTS, classify_chat_retrieval_body, run_chat_retrieval,
 };
 pub use stream::{
     ChatFinishReason, ChatStreamError, ChatStreamErrorKind, ChatStreamExtensions, ChatStreamLimits,

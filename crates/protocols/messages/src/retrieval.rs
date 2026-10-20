@@ -40,6 +40,17 @@ pub const MESSAGES_WEB_FETCH_MAX_CONTENT_TOKENS: u32 = 20_000;
 /// `pause_turn` continuations one side request may send.
 pub const MAX_MESSAGES_RETRIEVAL_CONTINUATIONS: usize = 3;
 
+/// The most physical requests one side request can send: the first exchange
+/// and its [`MAX_MESSAGES_RETRIEVAL_CONTINUATIONS`] `pause_turn`
+/// continuations, each retried within [`RetryPolicy::TURN`]'s physical
+/// budget. A connect failure counts, since its authorization was spent.
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "the continuation bound is a small constant"
+)]
+pub const MAX_MESSAGES_RETRIEVAL_PHYSICAL_REQUESTS: u32 =
+    (MAX_MESSAGES_RETRIEVAL_CONTINUATIONS as u32 + 1) * RetryPolicy::TURN.max_physical();
+
 const ALLOWED_CALLERS: [&str; 1] = ["direct"];
 const MAX_ERROR_BODY_BYTES: usize = 64 * 1024;
 const MAX_RETAINED_CONTENT_BYTES: usize = 4 * 1024 * 1024;
@@ -333,6 +344,8 @@ pub struct MessagesRetrievalOutcome {
     pub usage: MessagesRetrievalUsage,
     /// Exchanges sent: one plus the `pause_turn` continuations.
     pub exchanges: usize,
+    /// Physical requests sent over every exchange, retries included.
+    pub physical_requests: u32,
 }
 
 /// Why a side request failed.
@@ -463,6 +476,7 @@ pub async fn run_messages_retrieval(
 ) -> Result<MessagesRetrievalOutcome, MessagesRetrievalError> {
     let mut content = Vec::<Value>::new();
     let mut usage = MessagesRetrievalUsage::default();
+    let mut physical_requests = 0_u32;
     for exchange in 0..=MAX_MESSAGES_RETRIEVAL_CONTINUATIONS {
         let body = request.body(&content)?;
         if classify_messages_retrieval_body(&body) != ReplaySafety::CostOnly {
@@ -471,8 +485,9 @@ pub async fn run_messages_retrieval(
             ));
         }
         let thinking = request.effort.is_some();
-        let finished =
+        let (finished, physical) =
             exchange_with_retry(client, transport, &body, thinking, cancellation, limits).await?;
+        physical_requests = physical_requests.saturating_add(physical);
         usage.input_tokens = usage
             .input_tokens
             .saturating_add(finished.usage.input_tokens);
@@ -495,7 +510,12 @@ pub async fn run_messages_retrieval(
         match finished.stop.as_str() {
             "pause_turn" => {}
             "end_turn" | "max_tokens" | "stop_sequence" => {
-                return assemble(&content, usage, exchange + 1);
+                return assemble(&content, usage, exchange + 1).map(|outcome| {
+                    MessagesRetrievalOutcome {
+                        physical_requests,
+                        ..outcome
+                    }
+                });
             }
             "refusal" => {
                 return Err(MessagesRetrievalError::new(
@@ -541,7 +561,7 @@ async fn exchange_with_retry(
     thinking: bool,
     cancellation: &CancellationToken,
     limits: MessagesRetrievalLimits,
-) -> Result<Finished, MessagesRetrievalError> {
+) -> Result<(Finished, u32), MessagesRetrievalError> {
     let mut physical = 0_u32;
     let mut waited = Duration::ZERO;
     loop {
@@ -552,7 +572,7 @@ async fn exchange_with_retry(
         let attempted =
             exchange_once(client, transport, body, thinking, cancellation, limits).await;
         let (point, retry_after, error) = match attempted {
-            Ok(Attempted::Done(finished)) => return Ok(finished),
+            Ok(Attempted::Done(finished)) => return Ok((finished, physical)),
             Ok(Attempted::Retry {
                 point,
                 retry_after,
@@ -1176,6 +1196,7 @@ fn assemble(
         sources,
         usage,
         exchanges,
+        physical_requests: 0,
     })
 }
 

@@ -258,6 +258,7 @@ pub(super) fn neutral_composition_descriptor(
         })
         .collect::<Vec<_>>();
     Ok(LocalCompositionDescriptor {
+        helper_budget: None,
         outer_projection: exact.outer_projection().clone(),
         nested_projection: exact.nested_projection().clone(),
         nested_tools: nested_tools.into(),

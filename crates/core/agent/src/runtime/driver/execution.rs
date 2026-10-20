@@ -304,6 +304,10 @@ async fn execute_read_only_tool(
         .and_then(plakous_tools::ToolOutcome::execution_value)
         .cloned()
         .map(Arc::new);
+    let helper_requests = execution_outcome
+        .as_ref()
+        .ok()
+        .and_then(plakous_tools::ToolOutcome::helper_requests);
     let (result, presentation_subject) = match &execution_outcome {
         Ok(outcome) => {
             let raised = tool_presentation
@@ -331,6 +335,7 @@ async fn execute_read_only_tool(
     let mut result = ToolExecutionResult::new(result, dispatched)
         .with_presentation_subject(presentation_subject);
     result.execution_value = execution_value;
+    result.helper_requests = helper_requests;
     Ok(result)
 }
 

@@ -213,6 +213,7 @@ pub(super) fn cancel_cell_python_descriptor(
         ],
     )?;
     Ok(LocalCompositionDescriptor {
+        helper_budget: None,
         outer_projection: exact.outer_projection().clone(),
         nested_projection: exact.nested_projection().clone(),
         nested_tools: exact
@@ -238,6 +239,7 @@ pub(super) fn cancel_cell_descriptor(
     exact: &plakous_compose::ProductJavaScriptCompositionDescriptorV1,
 ) -> TestResult<LocalCompositionDescriptor> {
     Ok(LocalCompositionDescriptor {
+        helper_budget: None,
         outer_projection: exact.outer_projection().clone(),
         nested_projection: exact.nested_projection().clone(),
         nested_tools: exact

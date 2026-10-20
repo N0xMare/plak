@@ -102,6 +102,11 @@ pub struct RetrievalOutcome {
     pub sources: Vec<RetrievalSource>,
     /// What the side request consumed.
     pub usage: RetrievalUsage,
+    /// Physical requests the side request sent: every exchange with the
+    /// provider, retries and `pause_turn` continuations included. `None`
+    /// when the port cannot say, which a helper budget charges as the
+    /// port's whole declared maximum.
+    pub physical_requests: Option<u32>,
 }
 
 /// Why a retrieval failed; the wrapper returns it as its tool error.
@@ -175,6 +180,16 @@ pub type RetrievalFuture =
 pub trait RetrievalPort: Send + Sync {
     /// The retrievals this port serves.
     fn kinds(&self) -> &[RetrievalKind];
+
+    /// The most physical requests one retrieval of `kind` can send,
+    /// retries and continuations included; `None` when the port declares
+    /// no bound. A helper budget (spec 01 §9.8.7) reserves this before the
+    /// call, so a wrapper over a port without a declaration cannot be
+    /// registered for a composition that spends under one.
+    fn max_requests(&self, kind: RetrievalKind) -> Option<u32> {
+        let _ = kind;
+        None
+    }
 
     /// Runs one retrieval as one isolated side request.
     fn retrieve(

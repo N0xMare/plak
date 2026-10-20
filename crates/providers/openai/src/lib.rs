@@ -100,12 +100,13 @@ pub use native_auth::{
 };
 pub use plakous_responses_dialect::ResponsesProviderConfigurationError;
 pub use plakous_responses_dialect::{
-    ResponsesImageFlavor, ResponsesImageRequest, ResponsesImageSource,
+    MAX_RESPONSES_SIDE_REQUEST_PHYSICAL_REQUESTS, ResponsesRetrievalError,
+    ResponsesRetrievalErrorKind, ResponsesRetrievalLimits, ResponsesRetrievalOutcome,
+    ResponsesRetrievalQuery, ResponsesRetrievalSource, ResponsesRetrievalUsage,
+    lowest_responses_effort,
 };
 pub use plakous_responses_dialect::{
-    ResponsesRetrievalError, ResponsesRetrievalErrorKind, ResponsesRetrievalLimits,
-    ResponsesRetrievalOutcome, ResponsesRetrievalQuery, ResponsesRetrievalSource,
-    ResponsesRetrievalUsage, lowest_responses_effort,
+    ResponsesImageFlavor, ResponsesImageOutcome, ResponsesImageRequest, ResponsesImageSource,
 };
 pub use platform_local::{OpenAiPlatformBuildError, OpenAiPlatformLocalModel, OpenAiPlatformModel};
 pub use retrieval::OpenAiRetrieval;

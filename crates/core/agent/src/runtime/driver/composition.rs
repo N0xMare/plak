@@ -14,11 +14,11 @@ use crate::runtime::composition::nested::{
 use crate::runtime::composition::projection::{
     clip_local_composition_update_text, local_composition_child_call_id,
     local_composition_nested_call_arguments, local_composition_nested_decision_unsupported,
-    local_composition_nested_execution_owner, local_composition_nested_result_value,
-    local_composition_prestart_error, local_composition_recovery_authoritative,
-    local_composition_response_cell, local_composition_response_parts,
-    local_composition_response_terminal, local_composition_started_error,
-    local_composition_wait_response,
+    local_composition_nested_execution_owner, local_composition_nested_helper_requests,
+    local_composition_nested_result_value, local_composition_prestart_error,
+    local_composition_recovery_authoritative, local_composition_response_cell,
+    local_composition_response_parts, local_composition_response_terminal,
+    local_composition_started_error, local_composition_wait_response,
 };
 use crate::runtime::composition::record::{
     DurableLocalCompositionContinuationRequestV1, DurableLocalCompositionEvaluationRequestV2,
@@ -1331,15 +1331,29 @@ impl Driver {
         };
         let runtime_call_id = pending.call.runtime_call_id.clone();
         self.nested_execution_value = None;
-        let result = Box::pin(self.execute_local_composition_nested(
-            command,
-            attempt_id,
-            state,
-            pending.call,
-            pending.request_digest,
-            pending.request_sequence,
-        ))
-        .await;
+        self.nested_helper_requests = None;
+        let result = match self.reserve_nested_helper_spend(state, &pending.call.tool_name) {
+            Err(refusal) => Err(refusal),
+            Ok(reservation) => {
+                let result = Box::pin(self.execute_local_composition_nested(
+                    command,
+                    attempt_id,
+                    state,
+                    pending.call,
+                    pending.request_digest,
+                    pending.request_sequence,
+                ))
+                .await;
+                if let Some(reserved) = reservation {
+                    let reported = self
+                        .nested_helper_requests
+                        .take()
+                        .filter(|_| result.is_ok());
+                    self.helper_spend.settle(reserved, reported);
+                }
+                result
+            }
+        };
         let execution = self
             .nested_execution_value
             .take()
@@ -1347,6 +1361,28 @@ impl Driver {
         state.finish_serial(&runtime_call_id, &result)?;
         let waiters = take_local_composition_nested_waiters(state, &runtime_call_id);
         queue_local_composition_nested_results(state, pending.responder, waiters, result, execution)
+    }
+
+    /// Reserves the callee's declared helper requests when the composition
+    /// spends under a helper budget, before anything is journaled; a
+    /// reservation that does not fit is a definite refusal the cell can catch.
+    fn reserve_nested_helper_spend(
+        &mut self,
+        state: &CompositionOwner,
+        tool_name: &str,
+    ) -> Result<Option<u32>, AgentError> {
+        let Some(budget) = state.descriptor().helper_budget else {
+            return Ok(None);
+        };
+        let Some(max) = local_composition_nested_helper_requests(
+            &self.tools,
+            &state.descriptor().nested_projection,
+            tool_name,
+        ) else {
+            return Ok(None);
+        };
+        self.helper_spend.reserve(budget, max)?;
+        Ok(Some(max))
     }
 
     #[allow(
@@ -1361,6 +1397,11 @@ impl Driver {
         pending: PendingLocalCompositionNested,
     ) -> Result<LocalCompositionNestedFuture, (PendingLocalCompositionNested, AgentError)> {
         const MAX_LOCAL_COMPOSITION_DEPTH: u16 = 1;
+        let helper_reservation =
+            match self.reserve_nested_helper_spend(state, &pending.call.tool_name) {
+                Ok(reservation) => reservation,
+                Err(refusal) => return Err((pending, refusal)),
+            };
         let nested = &pending.call;
         let prepared = async {
             if state.cell() != Some(nested.cell_id.as_str()) {
@@ -1698,10 +1739,17 @@ impl Driver {
                         edge_binding,
                         evaluation_operation,
                         execution,
+                        helper_reservation,
                     }
                 }))
             }
-            Err(error) => Err((pending, error)),
+            Err(error) => {
+                // Nothing ran, so no request reached the provider.
+                if let Some(reserved) = helper_reservation {
+                    self.helper_spend.release(reserved);
+                }
+                Err((pending, error))
+            }
         }
     }
 
@@ -1774,7 +1822,16 @@ impl Driver {
             edge_binding,
             evaluation_operation,
             execution,
+            helper_reservation,
         } = completion;
+        if let Some(reserved) = helper_reservation {
+            let reported = execution
+                .result
+                .as_ref()
+                .ok()
+                .and_then(|result| result.helper_requests);
+            self.helper_spend.settle(reserved, reported);
+        }
         if let Some(update) = execution.process_session_update {
             self.apply_process_session_update(command.turn_id, update)
                 .await?;

@@ -110,6 +110,7 @@ impl Driver {
         self.set_tool_preempt(plakous_tools::ToolPreempt::None);
         self.turn_budgets = crate::runtime::operation_record::TurnBudgets::default();
         self.pressure_folds_committed = 0;
+        self.helper_spend.reset();
         self.last_compaction_diagnostic = None;
     }
 

@@ -585,6 +585,24 @@ pub(in crate::runtime) fn local_composition_nested_execution_owner(
     Ok(owner)
 }
 
+/// The declared most physical helper requests of one nested call of the
+/// exposed `name`: the sum over the canonical operations it reaches, or
+/// `None` when none declares one (or the name is unknown, which admission
+/// refuses on its own).
+pub(in crate::runtime) fn local_composition_nested_helper_requests(
+    registry: &ToolRuntime,
+    projection: &ToolProjectionMap,
+    name: &str,
+) -> Option<u32> {
+    let name = plakous_model::ToolName::new(name).ok()?;
+    projection
+        .by_exposed(&name)?
+        .canonical_operations()
+        .values()
+        .filter_map(|identity| registry.helper_requests(identity.name()))
+        .reduce(u32::saturating_add)
+}
+
 #[cfg(test)]
 mod python_tests {
     use super::*;

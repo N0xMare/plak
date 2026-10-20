@@ -61,12 +61,13 @@ pub use native_auth::{
     subscription_model_supports_reasoning,
 };
 pub use plakous_responses_dialect::{
-    ResponsesImageFlavor, ResponsesImageRequest, ResponsesImageSource,
+    MAX_RESPONSES_SIDE_REQUEST_PHYSICAL_REQUESTS, ResponsesRetrievalError,
+    ResponsesRetrievalErrorKind, ResponsesRetrievalLimits, ResponsesRetrievalOutcome,
+    ResponsesRetrievalQuery, ResponsesRetrievalSource, ResponsesRetrievalUsage,
+    lowest_responses_effort,
 };
 pub use plakous_responses_dialect::{
-    ResponsesRetrievalError, ResponsesRetrievalErrorKind, ResponsesRetrievalLimits,
-    ResponsesRetrievalOutcome, ResponsesRetrievalQuery, ResponsesRetrievalSource,
-    ResponsesRetrievalUsage, lowest_responses_effort,
+    ResponsesImageFlavor, ResponsesImageOutcome, ResponsesImageRequest, ResponsesImageSource,
 };
 pub use platform::{
     XAI_PLATFORM_API_KEY_AUTH_PROFILE, XAI_PLATFORM_API_KEY_AUTH_REVISION,

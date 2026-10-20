@@ -6359,17 +6359,40 @@ from Gate D, each request of `decide`. It spends on the session's own route
 and credential under chapter 04 §4.3; helper spend adds a bound, not an
 authority.
 
-**[A]** Each helper capability declares, on its canonical definition, the
-most physical requests one call can make (for web search on the Messages
-routes, the first request and its three `pause_turn` continuations, times
-the turn retry budget). The nested-call choke point reserves that maximum
-against the agent turn's helper budget before it admits the child; a call
-whose reservation does not fit fails with no dispatch and raises
-`RuntimeError: helper spend limit reached (<used> of 32 requests this
-turn)`, which the cell can catch. When the child settles, its outcome
-reports how many requests it made, and the reservation is settled to that
-count. A request that may have reached the provider is never refunded; an
-outcome-unknown child consumes its whole reservation.
+**[A]** Each helper capability declares, on its canonical registration, the
+most physical requests one call can make, counting every exchange with the
+provider: retries, `pause_turn` continuations, a request after a claimed
+credential refresh, and a connect failure whose authorization was spent.
+The declaration is derived from the route's own bounds, which its retrieval
+or image port states:
+
+| Route family | Most physical requests per call | Derivation |
+| --- | --- | --- |
+| Messages (Anthropic API, Claude OAuth): `web_search`, `web_fetch` | 16 | the first exchange and its three `pause_turn` continuations, each within the turn retry budget of 4 physical requests |
+| Chat Completions (OpenRouter): `web_search` | 4 | one exchange within the turn retry budget |
+| Responses (OpenAI API, Codex, xAI API, SuperGrok): `web_search`, `x_search`, `image_gen` | 5 | the turn retry budget, plus the one request a claimed credential refresh after a 401 sends past it |
+
+A port that declares no bound cannot back a helper registration. The
+declaration enters no definition digest; a registration that carries one
+binds it into its executor binding identity, and reconstruction re-takes it
+from the live host bindings.
+
+**[A]** When the attached composition declares a helper budget, the
+nested-call choke point reserves the callee's declared maximum against the
+agent turn's count before it admits the child; a call whose reservation does
+not fit fails with no dispatch and raises `RuntimeError: helper spend limit
+reached (<used> of 32 requests this turn)`, which the cell can catch.
+`<used>` is the turn's settled requests plus its outstanding reservations.
+When the child settles, its executor reports how many physical requests it
+made, beside its result and never in it, and the reservation is settled to
+that count. A request that may have reached the provider is never refunded:
+a child that reports no count (a failure without a count, an outcome-unknown
+or a cancelled child) consumes its whole reservation. Only a call refused
+before its child was dispatched returns its reservation. The count is held
+in the driver's memory, starts at zero at each agent turn, and is not
+persisted; duplicate requests that share one child are charged once.
+Compositions without a helper budget (`native-ptc`, `js-ptc`, `py-ptc`) are
+never charged.
 
 **[A]** The budget is 32 helper requests per agent turn and is not
 configuration. On subscription routes each physical request also takes one

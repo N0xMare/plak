@@ -210,8 +210,8 @@ pub use credential::{
 pub use images::{
     RESPONSES_IMAGE_EXCHANGE_TIMEOUT, RESPONSES_IMAGE_MAX_IMAGE_BYTES,
     RESPONSES_IMAGE_MAX_RESPONSE_BYTES, ResponsesImageAuthorization, ResponsesImageEndpoint,
-    ResponsesImageFlavor, ResponsesImageRequest, ResponsesImageSource, ResponsesImageTransport,
-    decode_responses_image, run_responses_image,
+    ResponsesImageFlavor, ResponsesImageOutcome, ResponsesImageRequest, ResponsesImageSource,
+    ResponsesImageTransport, decode_responses_image, run_responses_image,
 };
 pub use model_host::{
     PreparedResponsesModelExecution, ResponsesModelBuildError, ResponsesModelErrorHook,
@@ -253,13 +253,14 @@ pub use response_host::{
     validate_output_identity_roles,
 };
 pub use retrieval::{
-    RESPONSES_RETRIEVAL_MAX_OUTPUT_TOKENS, RESPONSES_WEB_SEARCH_SOURCES_INCLUDE,
-    RESPONSES_WEB_SEARCH_TOOL_TYPE, RESPONSES_X_SEARCH_TOOL_TYPE, ResponsesCredentialRefresh,
-    ResponsesRetrievalAuthorization, ResponsesRetrievalDispatch, ResponsesRetrievalError,
-    ResponsesRetrievalErrorKind, ResponsesRetrievalFlavor, ResponsesRetrievalGuard,
-    ResponsesRetrievalLimits, ResponsesRetrievalOutcome, ResponsesRetrievalQuery,
-    ResponsesRetrievalRequest, ResponsesRetrievalSource, ResponsesRetrievalTransport,
-    ResponsesRetrievalUsage, classify_responses_retrieval_body, lowest_responses_effort,
+    MAX_RESPONSES_SIDE_REQUEST_PHYSICAL_REQUESTS, RESPONSES_RETRIEVAL_MAX_OUTPUT_TOKENS,
+    RESPONSES_WEB_SEARCH_SOURCES_INCLUDE, RESPONSES_WEB_SEARCH_TOOL_TYPE,
+    RESPONSES_X_SEARCH_TOOL_TYPE, ResponsesCredentialRefresh, ResponsesRetrievalAuthorization,
+    ResponsesRetrievalDispatch, ResponsesRetrievalError, ResponsesRetrievalErrorKind,
+    ResponsesRetrievalFlavor, ResponsesRetrievalGuard, ResponsesRetrievalLimits,
+    ResponsesRetrievalOutcome, ResponsesRetrievalQuery, ResponsesRetrievalRequest,
+    ResponsesRetrievalSource, ResponsesRetrievalTransport, ResponsesRetrievalUsage,
+    ResponsesSideDocument, classify_responses_retrieval_body, lowest_responses_effort,
     run_responses_json_side_request, run_responses_retrieval,
 };
 pub use stream_host::{

@@ -40,6 +40,10 @@ impl RetrievalPort for OpenAiRetrievalPort {
         &[RetrievalKind::WebSearch]
     }
 
+    fn max_requests(&self, kind: RetrievalKind) -> Option<u32> {
+        declared(self.kinds(), kind)
+    }
+
     fn retrieve(
         &self,
         request: RetrievalRequest,
@@ -69,6 +73,10 @@ impl CodexRetrievalPort {
 impl RetrievalPort for CodexRetrievalPort {
     fn kinds(&self) -> &[RetrievalKind] {
         &[RetrievalKind::WebSearch]
+    }
+
+    fn max_requests(&self, kind: RetrievalKind) -> Option<u32> {
+        declared(self.kinds(), kind)
     }
 
     fn retrieve(
@@ -103,6 +111,10 @@ impl RetrievalPort for XaiRetrievalPort {
         &[RetrievalKind::WebSearch, RetrievalKind::PostSearch]
     }
 
+    fn max_requests(&self, kind: RetrievalKind) -> Option<u32> {
+        declared(self.kinds(), kind)
+    }
+
     fn retrieve(
         &self,
         request: RetrievalRequest,
@@ -113,6 +125,15 @@ impl RetrievalPort for XaiRetrievalPort {
             retrieval.retrieve(query, control.cancellation()).await
         })
     }
+}
+
+/// Every Responses side request, including the Codex JSON search, runs
+/// under one retry loop: see
+/// [`responses::MAX_RESPONSES_SIDE_REQUEST_PHYSICAL_REQUESTS`].
+fn declared(kinds: &[RetrievalKind], kind: RetrievalKind) -> Option<u32> {
+    kinds
+        .contains(&kind)
+        .then_some(responses::MAX_RESPONSES_SIDE_REQUEST_PHYSICAL_REQUESTS)
 }
 
 fn run<F, Fut>(kinds: &[RetrievalKind], request: RetrievalRequest, retrieve: F) -> RetrievalFuture
@@ -182,6 +203,7 @@ fn outcome(outcome: ResponsesRetrievalOutcome) -> RetrievalOutcome {
             output_tokens: outcome.usage.output_tokens,
             hosted_requests: outcome.usage.hosted_requests,
         },
+        physical_requests: Some(outcome.physical_requests),
     }
 }
 

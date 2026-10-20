@@ -370,6 +370,17 @@ pub struct ResponsesRetrievalOutcome {
     pub sources: Vec<ResponsesRetrievalSource>,
     /// Usage of the side request.
     pub usage: ResponsesRetrievalUsage,
+    /// Physical requests sent, retries and a credential refresh included.
+    pub physical_requests: u32,
+}
+
+/// The bounded success body of a JSON side request.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResponsesSideDocument {
+    /// The success body.
+    pub body: Vec<u8>,
+    /// Physical requests sent, retries and a credential refresh included.
+    pub physical_requests: u32,
 }
 
 /// Why a side request failed.
@@ -561,6 +572,13 @@ impl Default for ResponsesRetrievalLimits {
     }
 }
 
+/// The most physical requests one side request or images request can send:
+/// [`RetryPolicy::TURN`]'s physical budget, plus the one request a claimed
+/// credential refresh after a 401 sends past it (the 401 itself counts
+/// toward the budget, so the refresh adds at most one). A connect failure
+/// counts, since its authorization was spent.
+pub const MAX_RESPONSES_SIDE_REQUEST_PHYSICAL_REQUESTS: u32 = RetryPolicy::TURN.max_physical() + 1;
+
 /// Runs one side request to its answer under the bounded retry of
 /// [`RetryPolicy::TURN`].
 ///
@@ -581,14 +599,17 @@ pub async fn run_responses_retrieval(
             "side request body is outside the hosted retrieval allowlist",
         ));
     }
-    let Received::Terminal(terminal) =
+    let (Received::Terminal(terminal), physical_requests) =
         exchange_with_retry(client, transport, &body, Reply::Sse, cancellation, limits).await?
     else {
         return Err(ResponsesRetrievalError::invalid_response(
             "side request reply was not a stream",
         ));
     };
-    assemble(&terminal, request.query.call_item())
+    assemble(&terminal, request.query.call_item()).map(|outcome| ResponsesRetrievalOutcome {
+        physical_requests,
+        ..outcome
+    })
 }
 
 /// Runs one side request whose reply is a single JSON document, under the
@@ -606,15 +627,18 @@ pub async fn run_responses_json_side_request(
     classify: fn(&[u8]) -> ReplaySafety,
     cancellation: &CancellationToken,
     limits: ResponsesRetrievalLimits,
-) -> Result<Vec<u8>, ResponsesRetrievalError> {
+) -> Result<ResponsesSideDocument, ResponsesRetrievalError> {
     if classify(body) != ReplaySafety::CostOnly {
         return Err(ResponsesRetrievalError::invalid_request(
             "side request body is outside the hosted retrieval allowlist",
         ));
     }
     match exchange_with_retry(client, transport, body, Reply::Json, cancellation, limits).await? {
-        Received::Document(document) => Ok(document),
-        Received::Terminal(_) => Err(ResponsesRetrievalError::invalid_response(
+        (Received::Document(body), physical_requests) => Ok(ResponsesSideDocument {
+            body,
+            physical_requests,
+        }),
+        (Received::Terminal(_), _) => Err(ResponsesRetrievalError::invalid_response(
             "side request reply was not a document",
         )),
     }
@@ -652,7 +676,7 @@ async fn exchange_with_retry(
     reply: Reply,
     cancellation: &CancellationToken,
     limits: ResponsesRetrievalLimits,
-) -> Result<Received, ResponsesRetrievalError> {
+) -> Result<(Received, u32), ResponsesRetrievalError> {
     let mut physical = 0_u32;
     let mut waited = Duration::ZERO;
     let mut refreshed = false;
@@ -663,7 +687,7 @@ async fn exchange_with_retry(
         physical = physical.saturating_add(1);
         let (point, retry_after, mut error) =
             match exchange_once(client, transport, body, reply, cancellation, limits).await {
-                Ok(Attempted::Done(terminal)) => return Ok(terminal),
+                Ok(Attempted::Done(terminal)) => return Ok((terminal, physical)),
                 Ok(Attempted::Rejected(mut error)) => {
                     if refreshed_after_rejection(&mut refreshed, transport.credential_rejected())
                         .await
@@ -1220,6 +1244,7 @@ fn assemble(
             output_tokens: u64_at(terminal, "/usage/output_tokens"),
             hosted_requests: calls,
         },
+        physical_requests: 0,
     })
 }
 

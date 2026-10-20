@@ -212,6 +212,8 @@ impl PreparedAgent {
             recovery_gated: false,
             observation_budget: crate::runtime::observation::budget::ObservationBudget::default(),
             nested_execution_value: None,
+            nested_helper_requests: None,
+            helper_spend: super::helper_spend::HelperSpend::default(),
             accepting: Arc::clone(&accepting),
             command_nonce: Arc::clone(&command_nonce),
             shutdown: shutdown.clone(),

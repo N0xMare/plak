@@ -293,6 +293,8 @@ pub struct ChatRetrievalOutcome {
     pub sources: Vec<ChatRetrievalSource>,
     /// Usage of the side request.
     pub usage: ChatRetrievalUsage,
+    /// Physical requests sent, retries included.
+    pub physical_requests: u32,
 }
 
 /// Why a side request failed.
@@ -406,6 +408,11 @@ impl Default for ChatRetrievalLimits {
     }
 }
 
+/// The most physical requests one side request can send: one exchange,
+/// retried within [`RetryPolicy::TURN`]'s physical budget. A connect failure
+/// counts, since its authorization was spent.
+pub const MAX_CHAT_RETRIEVAL_PHYSICAL_REQUESTS: u32 = RetryPolicy::TURN.max_physical();
+
 /// Runs one side request to its answer under the bounded retry of
 /// [`RetryPolicy::TURN`].
 ///
@@ -435,7 +442,12 @@ pub async fn run_chat_retrieval(
         physical = physical.saturating_add(1);
         let (point, retry_after, error) =
             match exchange_once(client, transport, &body, cancellation, limits).await {
-                Ok(Attempted::Done(outcome)) => return Ok(outcome),
+                Ok(Attempted::Done(outcome)) => {
+                    return Ok(ChatRetrievalOutcome {
+                        physical_requests: physical,
+                        ..outcome
+                    });
+                }
                 Ok(Attempted::Retry {
                     point,
                     retry_after,
@@ -897,6 +909,7 @@ impl Answer {
             text: self.text,
             sources: self.sources,
             usage: self.usage,
+            physical_requests: 0,
         })
     }
 }

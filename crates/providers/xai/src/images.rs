@@ -11,8 +11,9 @@ use std::sync::Arc;
 use plakous_model::CancellationToken;
 use plakous_responses_dialect::{
     RESPONSES_IMAGE_EXCHANGE_TIMEOUT, ResponsesImageAuthorization, ResponsesImageEndpoint,
-    ResponsesImageFlavor, ResponsesImageRequest, ResponsesImageTransport, ResponsesRetrievalError,
-    ResponsesRetrievalErrorKind, ResponsesRetrievalLimits, run_responses_image,
+    ResponsesImageFlavor, ResponsesImageOutcome, ResponsesImageRequest, ResponsesImageTransport,
+    ResponsesRetrievalError, ResponsesRetrievalErrorKind, ResponsesRetrievalLimits,
+    run_responses_image,
 };
 
 #[cfg(feature = "native-auth")]
@@ -80,7 +81,8 @@ impl XaiImages {
         ResponsesImageRequest::new(XAI_IMAGE_MODEL, ResponsesImageFlavor::Xai, prompt)
     }
 
-    /// Runs one images request and returns the image bytes.
+    /// Runs one images request and returns the image bytes with the
+    /// physical requests it sent.
     ///
     /// # Errors
     ///
@@ -89,7 +91,7 @@ impl XaiImages {
         &self,
         request: &ResponsesImageRequest,
         cancellation: &CancellationToken,
-    ) -> Result<Vec<u8>, ResponsesRetrievalError> {
+    ) -> Result<ResponsesImageOutcome, ResponsesRetrievalError> {
         run_responses_image(self.client(), self, request, cancellation, self.limits).await
     }
 }

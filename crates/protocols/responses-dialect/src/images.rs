@@ -274,6 +274,15 @@ fn decode_base64(encoded: &str) -> Result<Vec<u8>, ResponsesRetrievalError> {
     Ok(bytes)
 }
 
+/// One finished images request.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResponsesImageOutcome {
+    /// The image bytes.
+    pub bytes: Vec<u8>,
+    /// Physical requests sent, retries and a credential refresh included.
+    pub physical_requests: u32,
+}
+
 /// Runs one images request to its image bytes.
 ///
 /// # Errors
@@ -286,7 +295,7 @@ pub async fn run_responses_image(
     request: &ResponsesImageRequest,
     cancellation: &CancellationToken,
     limits: ResponsesRetrievalLimits,
-) -> Result<Vec<u8>, ResponsesRetrievalError> {
+) -> Result<ResponsesImageOutcome, ResponsesRetrievalError> {
     let body = request.body()?;
     let endpoint = if request.is_edit() {
         ResponsesImageEndpoint::Edits
@@ -303,7 +312,12 @@ pub async fn run_responses_image(
         physical = physical.saturating_add(1);
         let (point, retry_after, mut error) =
             match exchange_once(client, transport, endpoint, &body, cancellation, limits).await {
-                Ok(Attempted::Done(response)) => return decode_responses_image(&response),
+                Ok(Attempted::Done(response)) => {
+                    return decode_responses_image(&response).map(|bytes| ResponsesImageOutcome {
+                        bytes,
+                        physical_requests: physical,
+                    });
+                }
                 // A 401 head means the request was refused, so no image was
                 // made and sending it again under a renewed grant is safe.
                 Ok(Attempted::Rejected(mut error)) => {

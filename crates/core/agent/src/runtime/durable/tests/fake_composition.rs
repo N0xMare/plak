@@ -360,6 +360,7 @@ impl LocalCompositionIntegration for FakeComposition {
                 let exact = ProductJavaScriptCompositionV1::compile(registry, target, nested_names)
                     .map_err(|error| error.to_string())?;
                 Ok(LocalCompositionDescriptor {
+                    helper_budget: None,
                     outer_projection: exact.outer_projection().clone(),
                     nested_projection: exact.nested_projection().clone(),
                     nested_tools: exact

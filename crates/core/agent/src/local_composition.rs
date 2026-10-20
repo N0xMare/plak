@@ -85,6 +85,11 @@ pub struct LocalCompositionDescriptor {
     /// cells always run to a terminal inside the execute call.
     pub wait_name: Option<Arc<str>>,
     pub marker_executor: ToolExecutorId,
+    /// Helper requests one agent turn may spend through nested children
+    /// (spec 01 §9.8.7); `None` for a profile that spends under no helper
+    /// budget. Fixed by the profile's limits, which its identity already
+    /// binds.
+    pub helper_budget: Option<u32>,
 }
 
 impl LocalCompositionDescriptor {

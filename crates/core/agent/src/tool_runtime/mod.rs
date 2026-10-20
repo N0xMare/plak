@@ -618,6 +618,13 @@ impl ToolRuntime {
             .map(RegisteredToolIdentity::owner)
     }
 
+    /// The declared most physical helper requests of one call of `name`.
+    pub(crate) fn helper_requests(&self, name: &plakous_model::ToolName) -> Option<u32> {
+        self.registry
+            .identity(name)
+            .and_then(RegisteredToolIdentity::helper_requests)
+    }
+
     /// Reports whether one exact registered identity belongs to this executable snapshot.
     #[must_use]
     pub(crate) fn owns_registration(&self, identity: &RegisteredToolIdentity) -> bool {

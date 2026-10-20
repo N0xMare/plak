@@ -207,6 +207,7 @@ pub fn decode_codex_search_response(
             hosted_requests: 1,
             ..ResponsesRetrievalUsage::default()
         },
+        physical_requests: 0,
     })
 }
 
@@ -297,7 +298,10 @@ impl CodexRetrieval {
             self.limits,
         )
         .await?;
-        decode_codex_search_response(&document)
+        decode_codex_search_response(&document.body).map(|outcome| ResponsesRetrievalOutcome {
+            physical_requests: document.physical_requests,
+            ..outcome
+        })
     }
 }
 

@@ -91,6 +91,7 @@ pub use model::{
 pub use plakous_chat_completions::{
     ChatRetrievalError, ChatRetrievalErrorKind, ChatRetrievalLimits, ChatRetrievalOutcome,
     ChatRetrievalRequest, ChatRetrievalSource, ChatRetrievalUsage,
+    MAX_CHAT_RETRIEVAL_PHYSICAL_REQUESTS,
 };
 pub use retrieval::OpenRouterRetrieval;
 pub use route::{

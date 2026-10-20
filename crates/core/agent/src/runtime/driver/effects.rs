@@ -212,6 +212,10 @@ impl Driver {
             .and_then(plakous_tools::ToolOutcome::execution_value)
             .cloned()
             .map(Arc::new);
+        self.nested_helper_requests = outcome
+            .as_ref()
+            .ok()
+            .and_then(plakous_tools::ToolOutcome::helper_requests);
         let exact = result.map(|result| {
             ToolExecutionResult::new(result, dispatched)
                 .with_presentation_subject(presentation_subject)

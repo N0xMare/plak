@@ -284,6 +284,7 @@ pub(super) fn lineage_composition_descriptor(
         }
     };
     Ok(LocalCompositionDescriptor {
+        helper_budget: None,
         outer_projection,
         nested_projection,
         nested_tools: lineage_nested_definitions(scenario).into(),
