@@ -528,11 +528,12 @@ pub mod model {
 pub mod mcp {
     pub use plakous_mcp::{
         FrozenMcpListing, HeaderName, HeaderValue, MAX_DESCRIPTION_BYTES, MAX_EXPOSED_NAME_BYTES,
-        MAX_INLINE_TEXT_BYTES, MAX_LISTED_TOOLS, MAX_LISTING_BYTES, MAX_SSE_EVENT_BYTES, McpError,
-        McpErrorKind, McpHttpEndpoint, McpHttpSecret, McpHttpSecretResolver, McpLease, McpPool,
-        McpSecretResolver, McpServerSpec, McpServerState, McpServerStatus, McpToolPack,
-        McpToolRecord, McpToolSelection, SchemaRefusal, SensitiveBytes, exposed_tool_name,
-        untrusted_header,
+        MAX_INLINE_TEXT_BYTES, MAX_LISTED_TOOLS, MAX_LISTING_BYTES, MAX_PROMPT_TEXT_BYTES,
+        MAX_SSE_EVENT_BYTES, McpError, McpErrorKind, McpHttpEndpoint, McpHttpSecret,
+        McpHttpSecretResolver, McpLease, McpPool, McpPrompt, McpPromptArgument, McpPromptExpansion,
+        McpResource, McpResourceContents, McpResourceTemplate, McpSecretResolver, McpServerSpec,
+        McpServerState, McpServerStatus, McpToolPack, McpToolRecord, McpToolSelection,
+        SchemaRefusal, SensitiveBytes, exposed_tool_name, prompt_header, untrusted_header,
     };
     pub use plakous_tools::ServiceSecretValue;
 }

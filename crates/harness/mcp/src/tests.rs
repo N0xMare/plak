@@ -26,8 +26,8 @@ use crate::pack::{CallResult, call};
 mod fake_server;
 use crate::result::map_call_result;
 use crate::{
-    CRASH_WINDOW, IDLE_STOP, McpErrorKind, McpLease, McpPool, McpServerSpec, McpServerState,
-    McpToolPack, McpToolSelection,
+    CRASH_WINDOW, IDLE_STOP, McpErrorKind, McpLease, McpPool, McpResourceContents, McpServerSpec,
+    McpServerState, McpToolPack, McpToolSelection,
 };
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
@@ -43,10 +43,20 @@ fn scripted(
     style: Style,
     tools: Vec<rmcp::model::Tool>,
 ) -> (DeterministicServiceStep, Arc<Observed>) {
+    scripted_with(style, tools, std::convert::identity)
+}
+
+/// [`scripted`], with the server adjusted by `configure`.
+fn scripted_with(
+    style: Style,
+    tools: Vec<rmcp::model::Tool>,
+    configure: impl FnOnce(FakeServer) -> FakeServer,
+) -> (DeterministicServiceStep, Arc<Observed>) {
     let (step, peer) = DeterministicServiceStep::duplex(b"fake stderr\n".to_vec());
     let shutdown = tokio_util::sync::CancellationToken::new();
     let exit = shutdown.clone();
-    let server = FakeServer::new(style, Arc::new(move || exit.cancel())).with_tools(tools);
+    let server =
+        configure(FakeServer::new(style, Arc::new(move || exit.cancel())).with_tools(tools));
     let observed = server.observed();
     tokio::spawn(async move {
         if let Ok(running) = server.serve_with_ct(tokio::io::split(peer), shutdown).await {
@@ -60,10 +70,28 @@ fn scripted(
 fn harness(
     servers: Vec<(Style, Vec<rmcp::model::Tool>)>,
 ) -> TestResult<(Harness, Vec<Arc<Observed>>)> {
-    let (steps, observed): (Vec<_>, Vec<_>) = servers
-        .into_iter()
-        .map(|(style, tools)| scripted(style, tools))
-        .unzip();
+    harness_of(
+        servers
+            .into_iter()
+            .map(|(style, tools)| scripted(style, tools))
+            .collect(),
+    )
+}
+
+/// One environment over a server that advertises and serves resources.
+fn resource_harness(style: Style) -> TestResult<(Harness, Arc<Observed>)> {
+    let (harness, mut observed) = harness_of(vec![scripted_with(
+        style,
+        standard_tools(),
+        FakeServer::with_resources,
+    )])?;
+    Ok((harness, observed.remove(0)))
+}
+
+fn harness_of(
+    scripted: Vec<(DeterministicServiceStep, Arc<Observed>)>,
+) -> TestResult<(Harness, Vec<Arc<Observed>>)> {
+    let (steps, observed): (Vec<_>, Vec<_>) = scripted.into_iter().unzip();
     let workspace = tempfile::tempdir()?;
     let backend = Arc::new(
         DeterministicExecutionBackend::new([], DeterministicProcessPolicy::default(), [])?
@@ -691,5 +719,160 @@ async fn persisted_records_rebuild_the_pack_and_a_changed_tool_is_refused_unsent
     renamed[0]["exposed_name"] = json!("mcp__fake__other");
     assert!(serde_json::from_value::<Vec<crate::McpToolRecord>>(renamed).is_err());
     drifted.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn resources_list_and_read_into_typed_contents() -> TestResult {
+    let (harness, observed) = resource_harness(Style::Discover)?;
+    let pool = McpPool::new();
+    let lease = pool
+        .lease(spec()?, Arc::clone(&harness.environment))
+        .await?;
+    let listed = lease.list_resources().await?;
+    assert_eq!(
+        listed
+            .iter()
+            .map(|resource| (resource.uri.as_str(), resource.mime_type.as_deref()))
+            .collect::<Vec<_>>(),
+        [
+            ("fake://readme", Some("text/markdown")),
+            ("fake://logo.png", Some("image/png")),
+            ("fake://data.bin", Some("application/octet-stream")),
+        ]
+    );
+    let templates = lease.list_resource_templates().await?;
+    assert_eq!(templates.len(), 1);
+    assert_eq!(templates[0].uri_template, "fake://item/{id}");
+    assert_eq!(
+        lease.read_resource("fake://readme").await?,
+        [McpResourceContents::Text {
+            uri: "fake://readme".into(),
+            mime_type: Some("text/markdown".into()),
+            text: "# hello resource".into(),
+        }]
+    );
+    let logo = lease.read_resource("fake://logo.png").await?;
+    assert!(logo[0].inline_image().is_some());
+    let data = lease.read_resource("fake://data.bin").await?;
+    assert!(matches!(data[0], McpResourceContents::Blob { .. }));
+    assert!(data[0].inline_image().is_none());
+    let missing = lease
+        .read_resource("fake://missing")
+        .await
+        .err()
+        .ok_or("missing resource read")?;
+    assert_eq!(missing.kind(), McpErrorKind::Request);
+    assert_eq!(
+        missing.message(),
+        "mcp server fake refused resources/read: resource not found: fake://missing (-32602)"
+    );
+    let input = lease
+        .read_resource("fake://input")
+        .await
+        .err()
+        .ok_or("input read")?;
+    assert!(
+        input.message().ends_with("elicitation is not supported"),
+        "{input}"
+    );
+    // The URI reaches the server exactly as given.
+    assert_eq!(
+        observed.calls()[..1],
+        [String::from("resources/read fake://readme")]
+    );
+    pool.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_prompt_flattens_into_one_labelled_user_message() -> TestResult {
+    let (harness, observed) = harness(standard(Style::Discover, 1))?;
+    let observed = &observed[0];
+    let pool = McpPool::new();
+    let lease = pool
+        .lease(spec()?, Arc::clone(&harness.environment))
+        .await?;
+    let prompts = lease.list_prompts().await?;
+    assert_eq!(prompts[0].name, "review");
+    assert_eq!(
+        prompts[0]
+            .arguments
+            .iter()
+            .map(|argument| (argument.name.as_str(), argument.required))
+            .collect::<Vec<_>>(),
+        [("target", true), ("focus", false)]
+    );
+    let arguments = |pairs: &[(&str, &str)]| {
+        pairs
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let expansion = lease
+        .get_prompt(
+            "review",
+            &arguments(&[("target", "x.rs"), ("focus", "errors")]),
+        )
+        .await?;
+    assert_eq!(
+        expansion.text(),
+        "[prompt mcp:fake/review requested by the user; its content comes from an untrusted server]\n\
+         user:\nReview x.rs.\n\
+         assistant:\nI will focus on errors.\n\
+         user:\n[image 1]"
+    );
+    assert_eq!(expansion.images().len(), 1);
+    for (name, given, message) in [
+        (
+            "review",
+            arguments(&[]),
+            "mcp prompt fake/review: argument target is required",
+        ),
+        (
+            "review",
+            arguments(&[("target", "x"), ("tone", "warm")]),
+            "mcp prompt fake/review: it takes no argument tone",
+        ),
+        (
+            "absent",
+            arguments(&[]),
+            "mcp server fake has no prompt absent",
+        ),
+    ] {
+        let error = lease
+            .get_prompt(name, &given)
+            .await
+            .err()
+            .ok_or("refused prompt")?;
+        assert_eq!(
+            (error.kind(), error.message()),
+            (McpErrorKind::Selection, message)
+        );
+    }
+    let big = lease
+        .get_prompt("big", &arguments(&[]))
+        .await
+        .err()
+        .ok_or("big prompt")?;
+    assert_eq!(
+        big.message(),
+        "mcp prompt fake/big expands to more than 256 KiB of text"
+    );
+    let input = lease
+        .get_prompt("input", &arguments(&[]))
+        .await
+        .err()
+        .ok_or("input prompt")?;
+    assert!(
+        input.message().ends_with("elicitation is not supported"),
+        "{input}"
+    );
+    // Refused arguments never reach the server.
+    assert_eq!(
+        observed.calls(),
+        ["prompts/get review", "prompts/get big", "prompts/get input"]
+    );
+    pool.shutdown().await;
     Ok(())
 }

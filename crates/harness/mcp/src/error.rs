@@ -19,6 +19,8 @@ pub enum McpErrorKind {
     Failed,
     /// The pool is shut down.
     Closed,
+    /// A resource or prompt request was refused, failed or exceeded a bound.
+    Request,
 }
 
 /// One MCP client failure.

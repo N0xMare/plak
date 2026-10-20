@@ -319,7 +319,7 @@ pub(crate) fn freeze_listing(
     Ok(FrozenMcpListing { records, notices })
 }
 
-fn bounded_description(description: &str) -> String {
+pub(crate) fn bounded_description(description: &str) -> String {
     if description.len() <= MAX_DESCRIPTION_BYTES {
         return description.to_owned();
     }

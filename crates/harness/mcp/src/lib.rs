@@ -10,7 +10,9 @@
 //! is exposed as `mcp__<server>__<tool>` ([`exposed_tool_name`]).
 //! [`McpToolPack`] registers the frozen tools as serial, mutating tools owned
 //! by their server: a call that may have acted settles as outcome-unknown and
-//! is never replayed.
+//! is never replayed. A lease also lists and reads the server's resources
+//! ([`McpResourceContents`]) and lists and expands its prompts
+//! ([`McpPromptExpansion`]), which only a user invokes.
 //!
 //! Configuration parsing, secret storage and operator views belong to the
 //! embedding product.
@@ -25,6 +27,8 @@ mod lowering;
 mod naming;
 mod pack;
 mod pool;
+mod prompts;
+mod resources;
 mod result;
 mod spec;
 
@@ -42,6 +46,10 @@ pub use pool::{
     CRASH_WINDOW, IDLE_STOP, MAX_IN_FLIGHT_CALLS, McpLease, McpPool, McpServerState,
     McpServerStatus,
 };
+pub use prompts::{
+    MAX_PROMPT_TEXT_BYTES, McpPrompt, McpPromptArgument, McpPromptExpansion, prompt_header,
+};
+pub use resources::{McpResource, McpResourceContents, McpResourceTemplate};
 pub use result::{MAX_INLINE_TEXT_BYTES, untrusted_header};
 pub use spec::{DEFAULT_CALL_TIMEOUT, DEFAULT_STARTUP_TIMEOUT, McpSecretResolver, McpServerSpec};
 

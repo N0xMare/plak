@@ -20,8 +20,11 @@ use std::time::Duration;
 
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, DiscoverResult,
-    ErrorCode, InputRequiredResult, ListToolsResult, PaginatedRequestParams,
-    ProgressNotificationParam, ProtocolVersion, ServerCapabilities, ServerConfig, Tool,
+    ErrorCode, GetPromptRequestParams, GetPromptResponse, GetPromptResult, InputRequiredResult,
+    ListPromptsResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult,
+    PaginatedRequestParams, ProgressNotificationParam, Prompt, PromptArgument, PromptMessage,
+    ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
+    ResourceContents, ResourceTemplate, Role, ServerCapabilities, ServerConfig, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer, ServerHandler};
@@ -80,6 +83,7 @@ pub struct FakeServer {
     on_exit: Arc<dyn Fn() + Send + Sync>,
     call_log: Option<std::path::PathBuf>,
     list_log: Option<std::path::PathBuf>,
+    resources: bool,
 }
 
 impl FakeServer {
@@ -93,7 +97,16 @@ impl FakeServer {
             on_exit,
             call_log: None,
             list_log: None,
+            resources: false,
         }
+    }
+
+    /// Advertises the resources capability and serves the scripted
+    /// resources ([`scripted_resources`]).
+    #[must_use]
+    pub const fn with_resources(mut self) -> Self {
+        self.resources = true;
+        self
     }
 
     /// Appends each called tool's name as one line to `path` before the call
@@ -195,9 +208,172 @@ fn text(value: impl Into<String>) -> CallToolResponse {
     CallToolResponse::Complete(CallToolResult::success(vec![ContentBlock::text(value)]))
 }
 
+/// Eight zero bytes, base64: a tiny PNG-typed payload.
+const TINY_PNG: &str = "AAAAAAAAAAA=";
+
+/// The resources a server with resources enabled lists.
+#[must_use]
+pub fn scripted_resources() -> Vec<Resource> {
+    vec![
+        Resource::new("fake://readme", "readme").with_mime_type("text/markdown"),
+        Resource::new("fake://logo.png", "logo").with_mime_type("image/png"),
+        Resource::new("fake://data.bin", "data").with_mime_type("application/octet-stream"),
+    ]
+}
+
+impl FakeServer {
+    fn record(&self, entry: String) {
+        self.observed
+            .calls
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(entry);
+    }
+
+    fn prompt(&self, request: GetPromptRequestParams) -> Result<GetPromptResponse, ErrorData> {
+        self.record(format!("prompts/get {}", request.name));
+        let arguments = request.arguments.unwrap_or_default();
+        let argument = |name: &str| {
+            arguments
+                .get(name)
+                .and_then(Value::as_str)
+                .unwrap_or("-")
+                .to_owned()
+        };
+        let messages = match request.name.as_str() {
+            "review" => vec![
+                PromptMessage::new_text(Role::User, format!("Review {}.", argument("target"))),
+                PromptMessage::new_text(
+                    Role::Assistant,
+                    format!("I will focus on {}.", argument("focus")),
+                ),
+                PromptMessage::new(Role::User, ContentBlock::image(TINY_PNG, "image/png")),
+            ],
+            "big" => vec![PromptMessage::new_text(Role::User, "p".repeat(300 * 1024))],
+            "input" => {
+                return Ok(GetPromptResponse::InputRequired(InputRequiredResult::new(
+                    None,
+                    Some(String::from("state")),
+                )));
+            }
+            other => {
+                return Err(ErrorData::invalid_params(
+                    format!("no prompt {other}"),
+                    None,
+                ));
+            }
+        };
+        Ok(GetPromptResponse::Complete(GetPromptResult::new(messages)))
+    }
+}
+
 impl ServerHandler for FakeServer {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+        let capabilities = if self.resources {
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_prompts()
+                .enable_resources()
+                .build()
+        } else {
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_prompts()
+                .build()
+        };
+        ServerConfig::new(capabilities)
+    }
+
+    fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<ListResourcesResult, ErrorData>> + Send + '_ {
+        std::future::ready(Ok(
+            ListResourcesResult::with_all_items(scripted_resources()),
+        ))
+    }
+
+    fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<ListResourceTemplatesResult, ErrorData>> + Send + '_ {
+        std::future::ready(Ok(ListResourceTemplatesResult::with_all_items(vec![
+            ResourceTemplate::new("fake://item/{id}", "item"),
+        ])))
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        self.record(format!("resources/read {}", request.uri));
+        let blob = |mime: &str, data: &str| ResourceContents::BlobResourceContents {
+            uri: request.uri.clone(),
+            mime_type: Some(mime.to_owned()),
+            blob: data.to_owned(),
+            meta: None,
+        };
+        let text = |mime: &str, text: String| ResourceContents::TextResourceContents {
+            uri: request.uri.clone(),
+            mime_type: Some(mime.to_owned()),
+            text,
+            meta: None,
+        };
+        let contents = match request.uri.as_str() {
+            "fake://readme" => vec![text("text/markdown", String::from("# hello resource"))],
+            "fake://logo.png" => vec![blob("image/png", TINY_PNG)],
+            "fake://data.bin" => vec![blob("application/octet-stream", "AAAA")],
+            "fake://big" => vec![text("text/plain", "r".repeat(1024 * 1024))],
+            "fake://hang" => {
+                context.ct.cancelled().await;
+                self.observed.cancelled.fetch_add(1, Ordering::AcqRel);
+                return Err(ErrorData::internal_error("cancelled", None));
+            }
+            "fake://input" => {
+                return Ok(ReadResourceResponse::InputRequired(
+                    InputRequiredResult::new(None, Some(String::from("state"))),
+                ));
+            }
+            other => {
+                return Err(ErrorData::invalid_params(
+                    format!("resource not found: {other}"),
+                    None,
+                ));
+            }
+        };
+        Ok(ReadResourceResponse::Complete(ReadResourceResult::new(
+            contents,
+        )))
+    }
+
+    fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<ListPromptsResult, ErrorData>> + Send + '_ {
+        std::future::ready(Ok(ListPromptsResult::with_all_items(vec![
+            Prompt::new(
+                "review",
+                Some("Reviews a target."),
+                Some(vec![
+                    PromptArgument::new("target").with_required(true),
+                    PromptArgument::new("focus"),
+                ]),
+            ),
+            Prompt::new("big", Some("Expands to 300 KiB."), None),
+            Prompt::new("input", Some("Asks for interactive input."), None),
+        ])))
+    }
+
+    fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<GetPromptResponse, ErrorData>> + Send + '_ {
+        std::future::ready(self.prompt(request))
     }
 
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
@@ -255,10 +431,9 @@ impl ServerHandler for FakeServer {
                     .and_then(Value::as_str)
                     .unwrap_or_default(),
             ),
-            // Eight zero bytes, base64.
             "image" => {
                 CallToolResponse::Complete(CallToolResult::success(vec![ContentBlock::image(
-                    "AAAAAAAAAAA=",
+                    TINY_PNG,
                     "image/png",
                 )]))
             }

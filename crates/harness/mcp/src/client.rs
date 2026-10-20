@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use plakous_tools::{McpServerName, ProgressSink};
 use rmcp::model::{
     ClientCapabilities, ClientConfig, Implementation, ListRootsResult, ProgressNotificationParam,
-    ProgressToken, Root, RootsCapabilities,
+    ProgressToken, ResourceUpdatedNotificationParam, Root, RootsCapabilities,
 };
 use rmcp::service::{NotificationContext, RequestContext};
 use rmcp::{ClientHandler, ErrorData, RoleClient};
@@ -108,6 +108,23 @@ impl ClientHandler for Handler {
         _context: NotificationContext<RoleClient>,
     ) {
         self.0.report(&params);
+    }
+
+    async fn on_resource_list_changed(&self, _context: NotificationContext<RoleClient>) {
+        tracing::info!(server = %self.0.server, "mcp server reported a resource list change");
+    }
+
+    async fn on_resource_updated(
+        &self,
+        _params: ResourceUpdatedNotificationParam,
+        _context: NotificationContext<RoleClient>,
+    ) {
+        // Nothing subscribes; an unsolicited update is logged only.
+        tracing::info!(server = %self.0.server, "mcp server reported a resource update");
+    }
+
+    async fn on_prompt_list_changed(&self, _context: NotificationContext<RoleClient>) {
+        tracing::info!(server = %self.0.server, "mcp server reported a prompt list change");
     }
 
     async fn on_tool_list_changed(&self, _context: NotificationContext<RoleClient>) {

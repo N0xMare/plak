@@ -5134,8 +5134,8 @@ are unchanged.
 entries and 4 MiB; each with its name, title, description cut to 4 KiB and
 arguments) and gets one (`get_prompt(name, arguments)`, string arguments; a
 missing required or unlisted argument refuses before dispatch; bounded by the
-call timeout; `input_required` refuses). `flatten_prompt` turns a result into
-one user message: the line `[prompt mcp:<server>/<name> requested by the user;
+call timeout; `input_required` refuses) and returns it flattened into one
+user message, `McpPromptExpansion` (text and images): the line `[prompt mcp:<server>/<name> requested by the user;
 its content comes from an untrusted server]`, then each message as a `user:`
 or `assistant:` label line followed by its content, rendered as tool results
 are (text, embedded text resources, resource links, at most two inline images
