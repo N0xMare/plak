@@ -235,7 +235,12 @@ impl McpLease {
     /// Returns the entry's start error, or the selection's refusal.
     pub async fn freeze(&self, selection: &McpToolSelection) -> Result<FrozenMcpListing, McpError> {
         let connection = self.entry.connection().await?;
-        freeze_listing(&self.entry.spec, &connection.listing, selection)
+        freeze_listing(
+            &self.entry.spec,
+            &connection.listing,
+            connection.resources,
+            selection,
+        )
     }
 
     /// Returns the name of every tool the server lists, in listing order,
@@ -480,6 +485,8 @@ pub(crate) struct Connection {
     stderr: Mutex<String>,
     listing: Arc<[Tool]>,
     pub(crate) digests: BTreeMap<String, Digest>,
+    /// Whether the server advertised the `resources` capability.
+    pub(crate) resources: bool,
 }
 
 impl Connection {
@@ -579,7 +586,12 @@ impl Connection {
             .iter()
             .map(|tool| Ok((tool.name.to_string(), listed_tool_digest(server, tool)?)))
             .collect::<Result<BTreeMap<_, _>, McpError>>()?;
+        let resources = client
+            .peer()
+            .peer_info()
+            .is_some_and(|info| info.capabilities.resources.is_some());
         Ok(Self {
+            resources,
             peer: client.peer().clone(),
             client: tokio::sync::Mutex::new(Some(client)),
             handler,

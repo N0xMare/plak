@@ -44,6 +44,7 @@ pub struct McpServerSpec {
     startup_timeout: Duration,
     call_timeout: Duration,
     allowlist: Option<Vec<String>>,
+    resources: bool,
 }
 
 /// How a server is reached.
@@ -97,6 +98,7 @@ impl McpServerSpec {
             startup_timeout: DEFAULT_STARTUP_TIMEOUT,
             call_timeout: DEFAULT_CALL_TIMEOUT,
             allowlist: None,
+            resources: false,
         }
     }
 
@@ -149,6 +151,20 @@ impl McpServerSpec {
     pub fn with_allowlist(mut self, names: impl IntoIterator<Item = String>) -> Self {
         self.allowlist = Some(names.into_iter().collect());
         self
+    }
+
+    /// Enables the server's resources tool, `mcp__<server>__read_resource`,
+    /// which every bind then includes; off by default.
+    #[must_use]
+    pub const fn with_resources(mut self, enabled: bool) -> Self {
+        self.resources = enabled;
+        self
+    }
+
+    /// Returns whether the resources tool is enabled.
+    #[must_use]
+    pub const fn resources(&self) -> bool {
+        self.resources
     }
 
     /// Returns the configured server id.
@@ -220,6 +236,9 @@ impl McpServerSpec {
                 .flatten()
                 .map(|name| name.as_bytes().to_vec()),
         );
+        if self.resources {
+            parts.push(b"resources".to_vec());
+        }
         let parts = parts.iter().map(Vec::as_slice).collect::<Vec<_>>();
         Digest::sha256(DigestDomain::ToolDefinition, 1, &parts).map_err(|error| {
             McpError::with_source(
@@ -306,6 +325,7 @@ impl fmt::Debug for McpServerSpec {
             .field("startup_timeout", &self.startup_timeout)
             .field("call_timeout", &self.call_timeout)
             .field("allowlist", &self.allowlist)
+            .field("resources", &self.resources)
             .finish_non_exhaustive()
     }
 }
@@ -351,6 +371,7 @@ mod tests {
         let edits = [
             McpServerSpec::stdio(name.clone(), "github-mcp", ["stdio".to_owned()]),
             with_secret("one").with_allowlist(["create_issue".to_owned()]),
+            with_secret("one").with_resources(true),
             with_secret("one").with_call_timeout(Duration::from_secs(1)),
             with_secret("one").with_startup_timeout(Duration::from_secs(1)),
             with_secret("one")

@@ -17,7 +17,7 @@ use plakous_tools::{
 use rmcp::ServiceExt as _;
 use serde_json::{Value, json};
 
-use crate::pack::{CallResult, call};
+use crate::pack::{CallResult, call, map_read_result, read};
 
 /// The scripted server the repository-only `plakous-mcp-fake-server` binary
 /// serves over stdio, compiled in here to serve in process: a dev-dependency
@@ -873,6 +873,220 @@ async fn a_prompt_flattens_into_one_labelled_user_message() -> TestResult {
         observed.calls(),
         ["prompts/get review", "prompts/get big", "prompts/get input"]
     );
+    pool.shutdown().await;
+    Ok(())
+}
+
+/// Reads one resource through the resources tool's dispatch path and maps a
+/// completed result with `spill`.
+async fn read_tool(
+    lease: &McpLease,
+    uri: &str,
+    cancellation: &CancellationToken,
+    spill: &mut dyn FnMut(&[u8]) -> Option<String>,
+) -> TestResult<ToolOutcome> {
+    Ok(
+        match read(&lease.entry, uri.to_owned(), cancellation, progress()?.0).await? {
+            CallResult::Outcome(outcome) => outcome,
+            CallResult::Complete(result) => map_read_result("fake", result, spill)?,
+        },
+    )
+}
+
+#[tokio::test]
+async fn the_resources_tool_is_opt_in_and_registered_as_every_mcp_tool() -> TestResult {
+    let (off, _) = resource_harness(Style::Discover)?;
+    let pool = McpPool::new();
+    let lease = pool.lease(spec()?, Arc::clone(&off.environment)).await?;
+    let listing = lease.freeze(&McpToolSelection::All).await?;
+    let pack = McpToolPack::new(lease, &listing);
+    assert!(
+        pack.exposed_names()?
+            .iter()
+            .all(|name| name.as_str() != "mcp__fake__read_resource"),
+        "an advertised capability alone adds no tool"
+    );
+    assert_eq!(pack.pins(), &[]);
+    pool.shutdown().await;
+
+    let (on, _) = resource_harness(Style::Discover)?;
+    let pool = McpPool::new();
+    let lease = pool
+        .lease(spec()?.with_resources(true), Arc::clone(&on.environment))
+        .await?;
+    let listing = lease
+        .freeze(&McpToolSelection::Named(vec!["echo".into()]))
+        .await?;
+    let pack = McpToolPack::new(lease, &listing);
+    let names = pack
+        .exposed_names()?
+        .iter()
+        .map(|name| name.as_str().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["mcp__fake__echo", "mcp__fake__read_resource"]);
+    let menu = pack.menu(plakous_tools::CodingPresentation::Codex)?;
+    assert_eq!(
+        menu.iter()
+            .map(|entry| entry.exposed().to_owned())
+            .collect::<Vec<_>>(),
+        names
+    );
+    let registrations = pack.registrations()?;
+    let resources = registrations
+        .iter()
+        .find(|registration| registration.name().as_str() == "mcp__fake__read_resource")
+        .ok_or("resources tool registered")?;
+    let definition = resources.definition();
+    assert_eq!(definition.effect(), ToolEffect::Mutating);
+    assert_eq!(definition.concurrency(), ToolConcurrency::Serial);
+    assert_eq!(
+        resources.owner(),
+        &ToolOwnerClass::Mcp(McpServerName::new("fake")?)
+    );
+    assert_eq!(
+        resources.nested_eligibility(),
+        NestedToolEligibility::DirectOnly
+    );
+    let plakous_model::ToolInputContract::Structured(schema) = definition.input() else {
+        return Err("structured input".into());
+    };
+    assert_eq!(schema.wire_document()["required"], json!(["uri"]));
+    assert_eq!(
+        schema.wire_document()["properties"]["uri"],
+        json!({"type": "string", "minLength": 1, "maxLength": 4096})
+    );
+    assert_eq!(pack.pins().len(), 1);
+    assert_eq!(pack.pins()[0].text(), definition.description());
+    assert_eq!(plakous_tools::drifted_pins(pack.pins()), Vec::new());
+    pool.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn resources_tool_reads_are_framed_bounded_and_settle_as_calls() -> TestResult {
+    let (harness, observed) = resource_harness(Style::Discover)?;
+    let pool = McpPool::new();
+    let lease = pool
+        .lease(
+            spec()?.with_resources(true),
+            Arc::clone(&harness.environment),
+        )
+        .await?;
+    let none = &mut |_: &[u8]| None;
+    let never = CancellationToken::new();
+    let readme = read_tool(&lease, "fake://readme", &never, none).await?;
+    assert_eq!(readme.kind(), ToolOutcomeKind::Success);
+    assert_eq!(
+        readme.joined_text(),
+        format!(
+            "{}resource fake://readme (text/markdown):\n# hello resource",
+            header("read_resource")
+        )
+    );
+    let logo = read_tool(&lease, "fake://logo.png", &never, none).await?;
+    assert_eq!(logo.joined_text(), header("read_resource").trim_end());
+    assert!(
+        logo.parts()
+            .iter()
+            .any(|part| matches!(part, plakous_model::ToolResultPart::Image(_)))
+    );
+    let data = read_tool(&lease, "fake://data.bin", &never, none).await?;
+    assert_eq!(
+        data.joined_text(),
+        format!(
+            "{}[resource fake://data.bin omitted: application/octet-stream, 3 bytes]",
+            header("read_resource")
+        )
+    );
+    let mut spilled = 0;
+    let big = read_tool(&lease, "fake://big", &never, &mut |bytes| {
+        spilled = bytes.len();
+        Some(String::from("/jobs/1.out"))
+    })
+    .await?;
+    assert!(big.joined_text().ends_with("full output: /jobs/1.out"));
+    assert!(spilled > 1024 * 1024, "the full text is spilled: {spilled}");
+    let missing = read_tool(&lease, "fake://missing", &never, none).await?;
+    assert_eq!(missing.kind(), ToolOutcomeKind::Failure);
+    assert_eq!(
+        missing.joined_text(),
+        "mcp server fake refused read_resource: resource not found: fake://missing (-32602)"
+    );
+    let input = read_tool(&lease, "fake://input", &never, none).await?;
+    assert_eq!(input.kind(), ToolOutcomeKind::Failure);
+    assert_eq!(
+        input.joined_text(),
+        "server asked for interactive input; elicitation is not supported"
+    );
+    let cancellation = CancellationToken::new();
+    let cancel = cancellation.clone();
+    let observing = Arc::clone(&observed);
+    tokio::spawn(async move {
+        while !observing
+            .calls()
+            .iter()
+            .any(|call| call == "resources/read fake://hang")
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        cancel.cancel();
+    });
+    let hung = read_tool(&lease, "fake://hang", &cancellation, none).await?;
+    assert_eq!(hung.kind(), ToolOutcomeKind::OutcomeUnknown);
+    assert_eq!(
+        hung.joined_text(),
+        "mcp call fake/read_resource was cancelled after it was sent; it may have acted; nothing was retried"
+    );
+    wait_for(|| observed.cancelled() == 1).await?;
+    // Each URI reaches the server once, as given; nothing is replayed.
+    assert_eq!(
+        observed.calls(),
+        [
+            "resources/read fake://readme",
+            "resources/read fake://logo.png",
+            "resources/read fake://data.bin",
+            "resources/read fake://big",
+            "resources/read fake://missing",
+            "resources/read fake://input",
+            "resources/read fake://hang",
+        ]
+    );
+    pool.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn enabled_resources_refuse_a_bind_without_the_capability_and_a_drifted_call() -> TestResult {
+    let (harness, observed) = harness(standard(Style::Discover, 1))?;
+    let pool = McpPool::new();
+    let lease = pool
+        .lease(
+            spec()?.with_resources(true),
+            Arc::clone(&harness.environment),
+        )
+        .await?;
+    let refused = lease
+        .freeze(&McpToolSelection::All)
+        .await
+        .err()
+        .ok_or("bind without the capability")?;
+    assert_eq!(refused.kind(), McpErrorKind::Selection);
+    assert_eq!(
+        refused.message(),
+        "mcp server fake has resources enabled but does not advertise the resources capability"
+    );
+    // An exact reopen against a server that stopped advertising resources
+    // fails the call as changed, unsent.
+    let drifted = read_tool(
+        &lease,
+        "fake://readme",
+        &CancellationToken::new(),
+        &mut |_| None,
+    )
+    .await?;
+    assert_eq!(drifted.kind(), ToolOutcomeKind::Failure);
+    assert!(drifted.joined_text().starts_with("mcp tool changed"));
+    assert_eq!(observed[0].calls(), Vec::<String>::new());
     pool.shutdown().await;
     Ok(())
 }

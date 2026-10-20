@@ -12,6 +12,7 @@ use serde_json::Value;
 use crate::error::{McpError, McpErrorKind};
 use crate::lowering::lower_input_schema;
 use crate::naming::exposed_tool_name;
+use crate::resources::READ_RESOURCE;
 use crate::spec::McpServerSpec;
 
 /// Most tools one server listing may carry.
@@ -239,13 +240,24 @@ fn write_canonical(value: &Value, output: &mut Vec<u8>) {
 /// # Errors
 ///
 /// Refuses an explicit selection that names a missing, disallowed or
-/// unlowerable tool, and any two selected tools whose exposed names collide.
+/// unlowerable tool, any two selected tools whose exposed names collide, and
+/// a definition with resources enabled when the server does not advertise
+/// them or a selected tool exposes as the resources tool.
 pub(crate) fn freeze_listing(
     spec: &McpServerSpec,
     tools: &[Tool],
+    advertises_resources: bool,
     selection: &McpToolSelection,
 ) -> Result<FrozenMcpListing, McpError> {
     let server = spec.name();
+    if spec.resources() && !advertises_resources {
+        return Err(McpError::new(
+            McpErrorKind::Selection,
+            format!(
+                "mcp server {server} has resources enabled but does not advertise the resources capability"
+            ),
+        ));
+    }
     let selected: Vec<&Tool> = match selection {
         McpToolSelection::All => tools
             .iter()
@@ -275,6 +287,7 @@ pub(crate) fn freeze_listing(
     let mut records = Vec::with_capacity(selected.len());
     let mut notices = Vec::new();
     let mut exposed: BTreeMap<ToolName, Arc<str>> = BTreeMap::new();
+    let resources_tool = exposed_tool_name(server, READ_RESOURCE)?;
     for tool in selected {
         let input_schema = match lower_input_schema(&tool.input_schema) {
             Ok(schema) => schema,
@@ -289,6 +302,15 @@ pub(crate) fn freeze_listing(
         };
         let exposed_name = exposed_tool_name(server, &tool.name)?;
         let mcp_name: Arc<str> = Arc::from(tool.name.as_ref());
+        if spec.resources() && exposed_name == resources_tool {
+            return Err(McpError::new(
+                McpErrorKind::Selection,
+                format!(
+                    "mcp tool {server}/{mcp_name} and the resources tool both expose as {}",
+                    exposed_name.as_str()
+                ),
+            ));
+        }
         if let Some(previous) = exposed.insert(exposed_name.clone(), Arc::clone(&mcp_name)) {
             return Err(McpError::new(
                 McpErrorKind::Selection,
@@ -370,7 +392,7 @@ mod tests {
                 json!({"type": "object", "additionalProperties": {"type": "string"}}),
             )?,
         ];
-        let frozen = freeze_listing(&spec()?, &tools, &McpToolSelection::All)?;
+        let frozen = freeze_listing(&spec()?, &tools, false, &McpToolSelection::All)?;
         assert_eq!(frozen.records().len(), 1);
         assert_eq!(
             frozen.records()[0].exposed_name().as_str(),
@@ -386,6 +408,7 @@ mod tests {
         let named = freeze_listing(
             &spec()?,
             &tools,
+            false,
             &McpToolSelection::Named(vec!["map".into()]),
         );
         assert_eq!(
@@ -406,6 +429,7 @@ mod tests {
         let frozen = freeze_listing(
             &spec,
             &tools,
+            false,
             &McpToolSelection::Named(vec!["c".into(), "a".into()]),
         )?;
         let names = frozen
@@ -414,20 +438,26 @@ mod tests {
             .map(McpToolRecord::mcp_name)
             .collect::<Vec<_>>();
         assert_eq!(names, ["c", "a"]);
-        let all = freeze_listing(&spec, &tools, &McpToolSelection::All)?;
+        let all = freeze_listing(&spec, &tools, false, &McpToolSelection::All)?;
         assert_eq!(all.records().len(), 2);
         for (name, message) in [
             ("b", "mcp tool fake/b is not in the server's allowlist"),
             ("z", "mcp tool fake/z is not in the server's allowlist"),
         ] {
-            let error = freeze_listing(&spec, &tools, &McpToolSelection::Named(vec![name.into()]))
-                .err()
-                .ok_or("selection bound")?;
+            let error = freeze_listing(
+                &spec,
+                &tools,
+                false,
+                &McpToolSelection::Named(vec![name.into()]),
+            )
+            .err()
+            .ok_or("selection bound")?;
             assert_eq!(error.message(), message);
         }
         let open = freeze_listing(
             &self::spec()?,
             &tools,
+            false,
             &McpToolSelection::Named(vec!["z".into()]),
         )
         .err()
@@ -439,7 +469,7 @@ mod tests {
     #[test]
     fn names_colliding_after_mapping_refuse_the_bind_naming_both() -> TestResult {
         let tools = [tool("a.b", object())?, tool("a/b", object())?];
-        let error = freeze_listing(&spec()?, &tools, &McpToolSelection::All)
+        let error = freeze_listing(&spec()?, &tools, false, &McpToolSelection::All)
             .err()
             .ok_or("collision bound")?;
         assert_eq!(
@@ -450,10 +480,40 @@ mod tests {
     }
 
     #[test]
+    fn enabled_resources_need_the_capability_and_their_own_name() -> TestResult {
+        let tools = [tool("read_resource", object())?, tool("echo", object())?];
+        let enabled = spec()?.with_resources(true);
+        let missing = freeze_listing(&enabled, &tools[1..], false, &McpToolSelection::All)
+            .err()
+            .ok_or("capability bound")?;
+        assert_eq!(
+            missing.message(),
+            "mcp server fake has resources enabled but does not advertise the resources capability"
+        );
+        let collision = freeze_listing(&enabled, &tools, true, &McpToolSelection::All)
+            .err()
+            .ok_or("collision bound")?;
+        assert_eq!(
+            collision.message(),
+            "mcp tool fake/read_resource and the resources tool both expose as mcp__fake__read_resource"
+        );
+        let narrowed = freeze_listing(
+            &enabled,
+            &tools,
+            true,
+            &McpToolSelection::Named(vec!["echo".into()]),
+        )?;
+        assert_eq!(narrowed.records().len(), 1);
+        let off = freeze_listing(&spec()?, &tools, false, &McpToolSelection::All)?;
+        assert_eq!(off.records().len(), 2);
+        Ok(())
+    }
+
+    #[test]
     fn long_descriptions_are_cut_with_a_marker() -> TestResult {
         let mut long = tool("long", object())?;
         long.description = Some("\u{e9}".repeat(4000).into());
-        let frozen = freeze_listing(&spec()?, &[long], &McpToolSelection::All)?;
+        let frozen = freeze_listing(&spec()?, &[long], false, &McpToolSelection::All)?;
         let description = frozen.records()[0].description();
         assert!(description.len() <= MAX_DESCRIPTION_BYTES);
         assert!(description.ends_with(DESCRIPTION_CUT_MARKER));

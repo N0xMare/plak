@@ -6,6 +6,8 @@ use plakous_tools::{
 };
 use rmcp::model::{CallToolResult, ContentBlock, ResourceContents};
 
+use crate::resources::McpResourceContents;
+
 /// Text bytes one call keeps inline; beyond it the full text is spilled.
 pub const MAX_INLINE_TEXT_BYTES: usize = 256 * 1024;
 /// Bytes of the head and of the tail kept inline when text is spilled.
@@ -75,6 +77,32 @@ impl Pieces {
                 _ => self.push_text(String::from("[unsupported resource omitted]")),
             },
             _ => self.push_text(String::from("[unsupported content omitted]")),
+        }
+        Ok(())
+    }
+
+    /// One content of a `resources/read` result: text under a heading naming
+    /// its URI and type, an image blob inline within the image bounds, any
+    /// other blob as a placeholder.
+    pub(crate) fn push_read_contents(
+        &mut self,
+        contents: &McpResourceContents,
+    ) -> Result<(), ToolRuntimeError> {
+        let mime_type = contents.mime_type().unwrap_or(match contents {
+            McpResourceContents::Text { .. } => "text/plain",
+            McpResourceContents::Blob { .. } => OCTET_STREAM,
+        });
+        match contents {
+            McpResourceContents::Text { uri, text, .. } => {
+                self.push_text(format!("resource {uri} ({mime_type}):\n{text}"));
+            }
+            McpResourceContents::Blob { uri, data, .. } => {
+                let placeholder = format!(
+                    "[resource {uri} omitted: {mime_type}, {} bytes]",
+                    base64_decoded_len(data)
+                );
+                self.push_image(mime_type, data, placeholder)?;
+            }
         }
         Ok(())
     }
