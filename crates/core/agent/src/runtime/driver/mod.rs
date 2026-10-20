@@ -150,6 +150,8 @@ struct Driver {
     job_release_mode: Arc<Mutex<super::JobReleaseMode>>,
     recovery_gated: bool,
     observation_budget: crate::runtime::observation::budget::ObservationBudget,
+    /// The typed value of the nested child that just executed, for its cell only.
+    nested_execution_value: Option<Arc<plakous_tools::ExecutionValue>>,
     accepting: Arc<AtomicBool>,
     command_nonce: Arc<AtomicU64>,
     shutdown: CancellationToken,

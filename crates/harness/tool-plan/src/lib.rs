@@ -417,7 +417,7 @@ impl ToolExecutor for UpdatePlanTool {
                 .report("updating plan state", None, None)?;
             let snapshot = self.state.replace(replacement).await?;
             context.check_cancelled()?;
-            ToolOutcome::success_text(format_plan_snapshot(&snapshot))
+            plan_outcome(&snapshot)
         })
     }
 }
@@ -535,7 +535,7 @@ impl ToolExecutor for MergePlanTool {
                 .report("updating plan state", None, None)?;
             let snapshot = self.state.replace(replacement).await?;
             context.check_cancelled()?;
-            ToolOutcome::success_text(format_plan_snapshot(&snapshot))
+            plan_outcome(&snapshot)
         })
     }
 }
@@ -562,6 +562,16 @@ fn lock_id_steps(
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     }
+}
+
+fn plan_outcome(snapshot: &PlanSnapshot) -> Result<ToolOutcome, ToolRuntimeError> {
+    Ok(
+        ToolOutcome::success_text(format_plan_snapshot(snapshot))?.with_execution_value(
+            plakous_tools::ExecutionValue::Plan(plakous_tools::PlanValue {
+                revision: snapshot.revision(),
+            }),
+        ),
+    )
 }
 
 fn format_plan_snapshot(snapshot: &PlanSnapshot) -> String {

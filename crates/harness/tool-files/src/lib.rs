@@ -139,6 +139,7 @@ impl ToolExecutor for ReadFileTool {
                 .map_or(Ok(200), |value| exact_u64(value, "read limit is invalid"))?
                 .clamp(1, 2_000);
             let leading = read_leading_lines(&context, &args, start_line, limit).await?;
+            let revision = leading.revision;
             let (mut bytes, complete) = (leading.bytes, leading.complete);
             if bytes.iter().take(8_192).any(|byte| *byte == 0) {
                 return ToolOutcome::failure_text(PLAKOUS_TOOL_READ_BINARY);
@@ -183,6 +184,18 @@ impl ToolExecutor for ReadFileTool {
             if eof && let Some(written) = leading.write_failed_after {
                 push_incomplete_line(&mut page, written);
             }
+            let wanted = lines.len().saturating_sub(start_index).min(take);
+            let value = plakous_tools::FileReadValue {
+                path: path_display,
+                text: page.clone(),
+                first_line: start_line,
+                lines: selected as u64,
+                eof,
+                lines_cut: wanted.saturating_sub(selected) as u64,
+                clipped_lines,
+                lossy,
+                revision,
+            };
             let result = plakous_tools::WorkspaceFileReadResult {
                 content: page,
                 offset: start_line,
@@ -200,7 +213,8 @@ impl ToolExecutor for ReadFileTool {
                     &error,
                 )
             })?;
-            ToolOutcome::success_text(encoded)
+            Ok(ToolOutcome::success_text(encoded)?
+                .with_execution_value(plakous_tools::ExecutionValue::FileRead(value)))
         })
     }
 }
@@ -229,6 +243,8 @@ struct LeadingBytes {
     dropped_partial: bool,
     /// Content bytes a job output file holds when spooling to it failed.
     write_failed_after: Option<u64>,
+    /// Whole-file content identity of a workspace file.
+    revision: Option<plakous_tools::WorkspaceContentIdentity>,
 }
 
 /// Reads from the start of the file until the `limit` lines from
@@ -254,12 +270,14 @@ async fn read_leading_lines(
         .map_err(backend_runtime_error)?;
     let mut bytes = Vec::new();
     let mut newlines = 0_u64;
-    let leading = |bytes, complete| LeadingBytes {
+    let mut revision = None;
+    let leading = |bytes, complete, revision| LeadingBytes {
         bytes,
         complete,
         skipped_lines: 0,
         dropped_partial: false,
         write_failed_after: None,
+        revision,
     };
     loop {
         context.check_cancelled()?;
@@ -273,14 +291,15 @@ async fn read_leading_lines(
             .iter()
             .fold(0_u64, |count, byte| count + u64::from(*byte == b'\n'));
         bytes.extend_from_slice(slice.bytes());
+        revision.get_or_insert(slice.content());
         let Some(next) = slice.next().cloned() else {
-            return Ok(leading(bytes, true));
+            return Ok(leading(bytes, true, revision));
         };
         if newlines >= wanted_lines {
-            return Ok(leading(bytes, false));
+            return Ok(leading(bytes, false, revision));
         }
         if bytes.len() as u64 >= plakous_tools::MAX_WORKSPACE_FILE_BYTES {
-            return Ok(leading(bytes, false));
+            return Ok(leading(bytes, false, revision));
         }
         request = WorkspaceReadSliceRequest::resume(next, MAX_STANDARD_TEXT_BYTES)
             .map_err(backend_runtime_error)?;
@@ -307,6 +326,7 @@ async fn read_job_output_page(
         skipped_lines: 0,
         dropped_partial: false,
         write_failed_after: None,
+        revision: None,
     };
     let mut kept_lines = 0_u64;
     loop {
@@ -1092,6 +1112,7 @@ impl ToolExecutor for InspectImageTool {
             context
                 .progress()
                 .report("reading workspace image", None, None)?;
+            let path_display = args.path.display().to_string();
             let path = relative_workspace_path(&context, args.path)?;
             let result = context
                 .environment()
@@ -1125,10 +1146,17 @@ impl ToolExecutor for InspectImageTool {
                     .map_err(content_runtime_error)?,
             )
             .map_err(content_runtime_error)?;
-            ToolOutcome::success(vec![
+            let value = plakous_tools::ImageValue {
+                path: path_display,
+                media_type: info.media_type().to_owned(),
+                bytes: result.bytes().as_ref().to_vec(),
+                dimensions: info.dimensions(),
+            };
+            Ok(ToolOutcome::success(vec![
                 ToolResultPart::Text(metadata),
                 ToolResultPart::Image(image),
-            ])
+            ])?
+            .with_execution_value(plakous_tools::ExecutionValue::Image(value)))
         })
     }
 }

@@ -119,6 +119,8 @@ pub(super) struct LineageEvidence {
     pub(super) delivered: AtomicUsize,
     pub(super) rejected: AtomicUsize,
     pub(super) reject_reasons: Mutex<Vec<String>>,
+    /// The typed value each resolution carried, in delivery order.
+    pub(super) execution_values: Mutex<Vec<Option<plakous_tools::ExecutionValue>>>,
 }
 
 pub(super) struct LineageResponder {
@@ -135,6 +137,16 @@ impl crate::local_composition::LocalCompositionNestedResponder for LineageRespon
             self.evidence.delivered.fetch_add(1, Ordering::AcqRel);
             Ok(crate::local_composition::LocalCompositionNestedDelivery::Accepted)
         })
+    }
+
+    fn resolve_with_execution(
+        self: Box<Self>,
+        value: serde_json::Value,
+        execution: Option<Arc<plakous_tools::ExecutionValue>>,
+    ) -> LocalCompositionFuture<'static, crate::local_composition::LocalCompositionNestedDelivery>
+    {
+        lock_mutex(&self.evidence.execution_values).push(execution.map(|value| (*value).clone()));
+        self.resolve(value)
     }
 
     fn reject(
@@ -365,6 +377,7 @@ pub(super) async fn run_lineage_fixture(
     fixture: Option<LineageEffectFixture>,
 ) -> TestResult<(Vec<LineageObservation>, Arc<TestCreateStore>)> {
     let directory = tempfile::tempdir()?;
+    std::fs::write(directory.path().join("lineage.txt"), "lineage\n")?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
     let registry = if fixture == Some(LineageEffectFixture::Failed) {
         let mut registry = ToolRegistryBuilder::default();
@@ -577,6 +590,32 @@ pub(super) async fn run_lineage_fixture(
             "the pressured turn left its head needing recovery"
         );
         return Ok((observed, test_store));
+    }
+    // A nested read resolves with the executor's typed value beside its
+    // canonical text; apply_patch attaches none, and no earlier call's value
+    // leaks into a later resolution.
+    let values = lock_mutex(&evidence.execution_values).clone();
+    if matches!(scenario, LineageScenario::Read) && fixture.is_none() {
+        assert_eq!(values.len(), scenario.nested_calls());
+        let revision = plakous_tools::WorkspaceContentIdentity::from_bytes(b"lineage\n")?;
+        for value in &values {
+            let Some(plakous_tools::ExecutionValue::FileRead(read)) = value else {
+                return Err(format!("nested read delivered {values:?}").into());
+            };
+            assert_eq!(
+                (
+                    read.path.as_str(),
+                    read.text.as_str(),
+                    read.first_line,
+                    read.lines,
+                    read.eof
+                ),
+                ("lineage.txt", "lineage\n", 1, 1, true)
+            );
+            assert_eq!(read.revision, Some(revision));
+        }
+    } else if !matches!(scenario, LineageScenario::Read) {
+        assert!(values.iter().all(Option::is_none), "{values:?}");
     }
     if !matches!(scenario, LineageScenario::Read) {
         assert_eq!(

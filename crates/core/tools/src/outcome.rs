@@ -68,6 +68,8 @@ pub struct ToolOutcome {
     pub(crate) process_telemetry: Option<crate::internal::ProcessTelemetry>,
     /// Bounded, redacted label for a host surface. Never part of [`Self::to_model_result`].
     presentation_subject: Option<Arc<str>>,
+    /// Typed value for an in-process consumer. Never part of [`Self::to_model_result`].
+    execution_value: Option<Box<crate::ExecutionValue>>,
 }
 
 impl fmt::Debug for ToolOutcome {
@@ -80,6 +82,7 @@ impl fmt::Debug for ToolOutcome {
             .field("process_session_update", &self.process_session_update)
             .field("process_telemetry", &self.process_telemetry)
             .field("presentation_subject", &self.presentation_subject)
+            .field("execution_value", &self.execution_value.is_some())
             .field("parts", &"<redacted>")
             .finish()
     }
@@ -106,6 +109,22 @@ impl ToolOutcome {
     pub fn with_presentation_subject(mut self, subject: impl AsRef<str>) -> Self {
         self.presentation_subject = bound_presentation_subject(subject.as_ref());
         self
+    }
+
+    /// Attaches the typed value this call produced.
+    ///
+    /// It travels only to an in-process consumer and is not part of the
+    /// canonical model result.
+    #[must_use]
+    pub fn with_execution_value(mut self, value: crate::ExecutionValue) -> Self {
+        self.execution_value = Some(Box::new(value));
+        self
+    }
+
+    /// The typed value this call produced, when the executor attached one.
+    #[must_use]
+    pub fn execution_value(&self) -> Option<&crate::ExecutionValue> {
+        self.execution_value.as_deref()
     }
 
     /// The host-only presentation subject, when one was attached.
@@ -162,6 +181,7 @@ impl ToolOutcome {
             process_session_update: None,
             process_telemetry: None,
             presentation_subject: None,
+            execution_value: None,
         })
     }
 
@@ -225,6 +245,7 @@ impl ToolOutcome {
                 process_session_update: None,
                 process_telemetry: None,
                 presentation_subject: None,
+                execution_value: None,
             },
         }
     }
@@ -256,6 +277,7 @@ impl ToolOutcome {
                 process_session_update,
                 process_telemetry: None,
                 presentation_subject: None,
+                execution_value: None,
             },
         }
     }

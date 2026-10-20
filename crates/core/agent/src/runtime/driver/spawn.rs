@@ -211,6 +211,7 @@ impl PreparedAgent {
             process_session_cleanup_uncertainty: None,
             recovery_gated: false,
             observation_budget: crate::runtime::observation::budget::ObservationBudget::default(),
+            nested_execution_value: None,
             accepting: Arc::clone(&accepting),
             command_nonce: Arc::clone(&command_nonce),
             shutdown: shutdown.clone(),

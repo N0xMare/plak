@@ -68,6 +68,7 @@ async fn false_nested_result_delivery_requires_started_cell_recovery() {
     let resolved = deliver_local_composition_nested_result(
         Box::new(FalseCompositionResponder),
         Ok(json!({"committed": true})),
+        None,
     )
     .await
     .expect_err("false resolution delivery must fail the started cell");
@@ -79,6 +80,7 @@ async fn false_nested_result_delivery_requires_started_cell_recovery() {
             AgentErrorKind::InvalidInput,
             "definite nested rejection",
         )),
+        None,
     )
     .await
     .expect_err("false rejection delivery must fail the started cell");

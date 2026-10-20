@@ -245,7 +245,40 @@ async fn execute_regex_search(
         ));
     }
     let header = search_notes_header(&notes, result.incomplete(), clipped, advice);
-    ToolOutcome::success_text(format!("{stamp}{header}{}", output.finish()))
+    let value = search_hits_value(&result, offset, head_limit);
+    Ok(
+        ToolOutcome::success_text(format!("{stamp}{header}{}", output.finish()))?
+            .with_execution_value(plakous_tools::ExecutionValue::SearchHits(value)),
+    )
+}
+
+/// The page of matches the call asked for, independent of its display mode.
+fn search_hits_value(
+    result: &plakous_tools::RepositoryQueryResult,
+    offset: usize,
+    head_limit: usize,
+) -> plakous_tools::SearchHitsValue {
+    let hits = result
+        .matches()
+        .iter()
+        .skip(offset)
+        .take(head_limit)
+        .map(|hit| plakous_tools::SearchHit {
+            path: hit.path().to_string_lossy().into_owned(),
+            line: hit.line(),
+            text: String::from_utf8_lossy(hit.bytes()).into_owned(),
+        })
+        .collect::<Vec<_>>();
+    let hits_cut = result
+        .matches()
+        .len()
+        .saturating_sub(offset)
+        .saturating_sub(hits.len()) as u64;
+    plakous_tools::SearchHitsValue {
+        hits,
+        hits_cut,
+        incomplete: result.incomplete(),
+    }
 }
 
 fn search_narrowing_advice(exposed_name: &str) -> &'static str {

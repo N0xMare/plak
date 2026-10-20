@@ -15,7 +15,7 @@ fn queue_local_composition_nested_result(
     responder: Box<dyn crate::local_composition::LocalCompositionNestedResponder>,
     result: Result<serde_json::Value, AgentError>,
 ) -> Result<(), AgentError> {
-    queue_local_composition_nested_results(state, responder, Vec::new(), result)
+    queue_local_composition_nested_results(state, responder, Vec::new(), result, None)
 }
 
 pub(in crate::runtime) fn queue_local_composition_nested_results(
@@ -23,6 +23,7 @@ pub(in crate::runtime) fn queue_local_composition_nested_results(
     responder: Box<dyn crate::local_composition::LocalCompositionNestedResponder>,
     waiters: Vec<Box<dyn crate::local_composition::LocalCompositionNestedResponder>>,
     result: Result<serde_json::Value, AgentError>,
+    execution: Option<std::sync::Arc<plakous_tools::ExecutionValue>>,
 ) -> Result<(), AgentError> {
     let count = waiters.len().saturating_add(1);
     if state.pending_deliveries.len().saturating_add(count)
@@ -45,13 +46,14 @@ pub(in crate::runtime) fn queue_local_composition_nested_results(
             Box::pin(deliver_local_composition_nested_result(
                 waiter,
                 result.clone(),
+                execution.clone(),
             ))
         })
         .collect::<Vec<_>>();
     state
         .pending_deliveries
         .push(Box::pin(deliver_local_composition_nested_result(
-            responder, result,
+            responder, result, execution,
         )));
     for delivery in duplicates {
         state.pending_deliveries.push(delivery);
@@ -69,6 +71,7 @@ pub(in crate::runtime) fn queue_local_composition_nested_results(
 pub(in crate::runtime) async fn deliver_local_composition_nested_result(
     responder: Box<dyn crate::local_composition::LocalCompositionNestedResponder>,
     result: Result<serde_json::Value, AgentError>,
+    execution: Option<std::sync::Arc<plakous_tools::ExecutionValue>>,
 ) -> Result<NestedDeliveryReceipt, AgentError> {
     let recovery = result
         .as_ref()
@@ -76,7 +79,7 @@ pub(in crate::runtime) async fn deliver_local_composition_nested_result(
         .filter(|error| local_composition_recovery_authoritative(error))
         .cloned();
     let delivery = match result {
-        Ok(value) => responder.resolve(value).await,
+        Ok(value) => responder.resolve_with_execution(value, execution).await,
         Err(error) => responder.reject(error.message().to_owned()).await,
     };
     let receipt = match delivery {
@@ -129,10 +132,12 @@ pub(in crate::runtime) async fn deliver_local_composition_nested_results(
 ) -> Result<(), AgentError> {
     let duplicates = waiters
         .into_iter()
-        .map(|waiter| deliver_local_composition_nested_result(waiter, result.clone()))
+        .map(|waiter| deliver_local_composition_nested_result(waiter, result.clone(), None))
         .collect::<Vec<_>>();
-    let deliveries = std::iter::once(deliver_local_composition_nested_result(responder, result))
-        .chain(duplicates);
+    let deliveries = std::iter::once(deliver_local_composition_nested_result(
+        responder, result, None,
+    ))
+    .chain(duplicates);
     let mut failure = None;
     for result in futures_util::future::join_all(deliveries).await {
         if let Err(error) = result {
@@ -183,6 +188,7 @@ pub(in crate::runtime) fn fence_pending_local_composition_nested_queue(
             pending_deliveries.push(Box::pin(deliver_local_composition_nested_result(
                 responder,
                 Err(AgentError::new(AgentErrorKind::InvalidInput, reason)),
+                None,
             )));
         }
     }
@@ -615,6 +621,7 @@ mod tests {
                 "unknown tool call 7".to_owned(),
             ))),
             Ok(serde_json::json!("committed")),
+            None,
         )
         .await
         .expect("a refusal must not fail the composition");
@@ -633,6 +640,7 @@ mod tests {
             let receipt = deliver_local_composition_nested_result(
                 Box::new(FixedDelivery(delivery.clone())),
                 Ok(serde_json::json!("committed")),
+                None,
             )
             .await
             .unwrap_or_else(|error| {
@@ -650,6 +658,7 @@ mod tests {
         let error = deliver_local_composition_nested_result(
             Box::new(FixedDelivery(LocalCompositionNestedDelivery::HostLost)),
             Ok(serde_json::json!("committed")),
+            None,
         )
         .await
         .expect_err("a lost acknowledgement must require recovery");

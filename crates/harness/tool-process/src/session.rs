@@ -61,6 +61,17 @@ impl ProcessExecutionResult {
         promotion: Option<(u64, plakous_tools::ToolPreempt)>,
     ) -> Result<ToolOutcome, ToolRuntimeError> {
         let mut output = std::mem::take(&mut self.projection.output);
+        let value = plakous_tools::ProcessValue {
+            status: self.status.to_owned(),
+            exit_code: self.projection.exit_code,
+            session_id: self.projection.session_id,
+            output: output.clone(),
+            truncated: self.truncated || self.skipped != 0,
+            full_output: self
+                .sessions
+                .job_output_file(JoinedProcessSessions::job_number(self.session_id))
+                .map(|file| file.path),
+        };
         if self.first_promotion || self.truncated {
             append_output_file(&mut output, &self.sessions, self.session_id);
         }
@@ -86,7 +97,8 @@ impl ProcessExecutionResult {
                     "canonical process result could not be encoded",
                     &error,
                 )
-            })?)?;
+            })?)?
+            .with_execution_value(plakous_tools::ExecutionValue::Process(value));
         let outcome = if self.first_promotion {
             if let Some((hint_ms, preempt)) = promotion {
                 plakous_tools::internal::with_process_telemetry(

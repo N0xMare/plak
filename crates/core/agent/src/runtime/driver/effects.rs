@@ -206,6 +206,12 @@ impl Driver {
             tool_terminal_status(&outcome, self.shutdown.is_cancelled()),
             output_bytes,
         );
+        self.nested_execution_value = outcome
+            .as_ref()
+            .ok()
+            .and_then(plakous_tools::ToolOutcome::execution_value)
+            .cloned()
+            .map(Arc::new);
         let exact = result.map(|result| {
             ToolExecutionResult::new(result, dispatched)
                 .with_presentation_subject(presentation_subject)

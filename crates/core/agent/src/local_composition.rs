@@ -236,6 +236,17 @@ pub trait LocalCompositionNestedResponder: Send + Sync {
         self: Box<Self>,
         value: Value,
     ) -> LocalCompositionFuture<'static, LocalCompositionNestedDelivery>;
+    /// Resolves with the committed canonical value and, when the executor
+    /// produced one, the typed execution value of the same call. A responder
+    /// that presents only canonical values keeps this default.
+    fn resolve_with_execution(
+        self: Box<Self>,
+        value: Value,
+        execution: Option<Arc<plakous_tools::ExecutionValue>>,
+    ) -> LocalCompositionFuture<'static, LocalCompositionNestedDelivery> {
+        let _ = execution;
+        self.resolve(value)
+    }
     fn reject(
         self: Box<Self>,
         reason: String,

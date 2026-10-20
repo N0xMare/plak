@@ -714,6 +714,9 @@ pub(crate) struct ToolExecutionResult {
     /// Omitted from the operation-evidence encoding when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) presentation_subject: Option<String>,
+    /// Typed value for a nested composition cell. Never encoded.
+    #[serde(skip)]
+    pub(crate) execution_value: Option<Arc<plakous_tools::ExecutionValue>>,
 }
 
 impl ToolExecutionResult {
@@ -722,6 +725,7 @@ impl ToolExecutionResult {
             result,
             dispatched,
             presentation_subject: None,
+            execution_value: None,
         }
     }
 

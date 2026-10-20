@@ -298,6 +298,12 @@ async fn execute_read_only_tool(
         .ok()
         .and_then(plakous_tools::internal::process_session_update);
     *lock_mutex(&process_session_update_slot) = process_session_update;
+    let execution_value = execution_outcome
+        .as_ref()
+        .ok()
+        .and_then(plakous_tools::ToolOutcome::execution_value)
+        .cloned()
+        .map(Arc::new);
     let (result, presentation_subject) = match &execution_outcome {
         Ok(outcome) => {
             let raised = tool_presentation
@@ -322,10 +328,10 @@ async fn execute_read_only_tool(
     if let Some(error) = dispatch_observer.take_error() {
         return Err(error);
     }
-    Ok(
-        ToolExecutionResult::new(result, dispatched)
-            .with_presentation_subject(presentation_subject),
-    )
+    let mut result = ToolExecutionResult::new(result, dispatched)
+        .with_presentation_subject(presentation_subject);
+    result.execution_value = execution_value;
+    Ok(result)
 }
 
 #[allow(

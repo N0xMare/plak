@@ -1327,6 +1327,7 @@ impl Driver {
             return Ok(());
         };
         let runtime_call_id = pending.call.runtime_call_id.clone();
+        self.nested_execution_value = None;
         let result = Box::pin(self.execute_local_composition_nested(
             command,
             attempt_id,
@@ -1336,9 +1337,13 @@ impl Driver {
             pending.request_sequence,
         ))
         .await;
+        let execution = self
+            .nested_execution_value
+            .take()
+            .filter(|_| result.is_ok());
         state.finish_serial(&runtime_call_id, &result)?;
         let waiters = take_local_composition_nested_waiters(state, &runtime_call_id);
-        queue_local_composition_nested_results(state, pending.responder, waiters, result)
+        queue_local_composition_nested_results(state, pending.responder, waiters, result, execution)
     }
 
     #[allow(
@@ -1746,6 +1751,7 @@ impl Driver {
                         pending.responder,
                         waiters,
                         Err(error),
+                        None,
                     )?;
                 }
             }
@@ -1777,8 +1783,10 @@ impl Driver {
         )?;
         self.transition_operation(command.turn_id, execution.operation_id, terminal)
             .await?;
+        let mut execution_value = None;
         let result = match execution.result {
-            Ok(result) => {
+            Ok(mut result) => {
+                execution_value = result.execution_value.take();
                 // A nested composition child's own result goes to the cell,
                 // not the model, so the observation budget passes it through
                 // unclipped; the composed answer is clipped and announced once
@@ -1839,7 +1847,14 @@ impl Driver {
             },
         );
         let waiters = take_local_composition_nested_waiters(state, &pending.call.runtime_call_id);
-        queue_local_composition_nested_results(state, pending.responder, waiters, result)
+        let execution_value = execution_value.filter(|_| result.is_ok());
+        queue_local_composition_nested_results(
+            state,
+            pending.responder,
+            waiters,
+            result,
+            execution_value,
+        )
     }
 
     async fn execute_local_composition_nested(
