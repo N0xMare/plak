@@ -8,9 +8,9 @@ use std::time::Duration;
 
 use plakous::mcp::{
     HeaderName, HeaderValue, McpError, McpErrorKind, McpHttpEndpoint, McpHttpSecret,
-    McpHttpSecretResolver, McpOAuthSecretResolver, McpOAuthSettings, McpOAuthStatus, McpPool,
-    McpSecretResolver, McpServerSpec, McpToolPack, McpToolRecord, McpToolSelection,
-    SensitiveBytes, ServiceSecretValue, exposed_tool_name,
+    McpHttpSecretResolver, McpLease, McpOAuthSecretResolver, McpOAuthSettings, McpOAuthStatus,
+    McpPool, McpPrompt, McpPromptExpansion, McpSecretResolver, McpServerSpec, McpToolPack,
+    McpToolRecord, McpToolSelection, SensitiveBytes, ServiceSecretValue, exposed_tool_name,
 };
 use plakous::model::ToolName;
 use plakous::tools::{
@@ -292,6 +292,125 @@ pub fn probe_mcp_server(
     let allowlist = crate::frozen_tables::parse::<RenderedTables>(rendered)
         .and_then(|mut tables| tables.mcp_servers.remove(server.as_str()))
         .and_then(|definition| definition.tools);
+    let (listing, listed, resources) = on_probe_lease(spec, workspace_root, async |lease| {
+        let listing = lease
+            .freeze(&McpToolSelection::All)
+            .await
+            .map_err(|error| error.to_string())?;
+        let listed = lease
+            .listed_tool_names()
+            .await
+            .map_err(|error| error.to_string())?;
+        let resources = if lease.spec().resources() {
+            let resources = lease
+                .list_resources()
+                .await
+                .map_err(|error| error.to_string())?;
+            let templates = lease
+                .list_resource_templates()
+                .await
+                .map_err(|error| error.to_string())?;
+            Some((resources.len(), templates.len()))
+        } else {
+            None
+        };
+        Ok((listing, listed, resources))
+    })?;
+    let mut tools = listing
+        .records()
+        .iter()
+        .map(|record| {
+            (
+                record.mcp_name().to_owned(),
+                record.exposed_name().as_str().to_owned(),
+            )
+        })
+        .collect::<Vec<_>>();
+    if resources.is_some() {
+        let exposed =
+            exposed_tool_name(&server, READ_RESOURCE).map_err(|error| error.to_string())?;
+        tools.push((READ_RESOURCE.to_owned(), exposed.as_str().to_owned()));
+    }
+    let allows = |name: &str| {
+        allowlist
+            .as_ref()
+            .is_none_or(|names| names.iter().any(|allowed| allowed == name))
+    };
+    Ok(McpProbe {
+        tools,
+        unlowerable: listing.notices().to_vec(),
+        not_allowed: listed
+            .iter()
+            .filter(|name| !allows(name))
+            .cloned()
+            .collect(),
+        not_listed: allowlist
+            .iter()
+            .flatten()
+            .filter(|name| !listed.contains(name))
+            .cloned()
+            .collect(),
+        resources,
+    })
+}
+
+/// The prompts one server lists, from a pool of its own started the way a
+/// session bind starts it.
+///
+/// # Errors
+///
+/// Returns the one-line cause a session bind would report, or the server's
+/// refusal of `prompts/list`.
+pub fn list_mcp_prompts(
+    server: &str,
+    rendered: &str,
+    workspace_root: &std::path::Path,
+    secrets: Arc<dyn NamedSecrets>,
+) -> Result<Vec<McpPrompt>, String> {
+    let server = McpServerName::new(server.to_owned())
+        .map_err(|_| format!("{server:?} is not a valid MCP server id"))?;
+    let spec = server_spec(&server, rendered, &secrets)?;
+    on_probe_lease(spec, workspace_root, async |lease| {
+        lease
+            .list_prompts()
+            .await
+            .map_err(|error| error.to_string())
+    })
+}
+
+/// One server prompt with `arguments`, flattened into the user message a
+/// prompt invocation sends, from a pool of its own.
+///
+/// # Errors
+///
+/// As [`list_mcp_prompts`], and an unknown prompt, a wrong argument, or a
+/// refused, failed or oversized expansion.
+pub fn get_mcp_prompt(
+    server: &str,
+    rendered: &str,
+    workspace_root: &std::path::Path,
+    secrets: Arc<dyn NamedSecrets>,
+    prompt: &str,
+    arguments: &BTreeMap<String, String>,
+) -> Result<McpPromptExpansion, String> {
+    let server = McpServerName::new(server.to_owned())
+        .map_err(|_| format!("{server:?} is not a valid MCP server id"))?;
+    let spec = server_spec(&server, rendered, &secrets)?;
+    on_probe_lease(spec, workspace_root, async |lease| {
+        lease
+            .get_prompt(prompt, arguments)
+            .await
+            .map_err(|error| error.to_string())
+    })
+}
+
+/// Runs `work` on a lease of `spec` from a pool of its own, then stops the
+/// server.
+fn on_probe_lease<T>(
+    spec: McpServerSpec,
+    workspace_root: &std::path::Path,
+    work: impl AsyncFnOnce(&McpLease) -> Result<T, String>,
+) -> Result<T, String> {
     let environment = Arc::new(service_environment(workspace_root)?);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -301,73 +420,16 @@ pub fn probe_mcp_server(
         .map_err(|_| "mcp server executor could not be started".to_owned())?;
     let pool = McpPool::new().running_on(runtime.handle().clone());
     runtime.block_on(async {
-        let probed = async {
+        let outcome = async {
             let lease = pool
                 .lease(spec, environment)
                 .await
                 .map_err(|error| error.to_string())?;
-            let listing = lease
-                .freeze(&McpToolSelection::All)
-                .await
-                .map_err(|error| error.to_string())?;
-            let listed = lease
-                .listed_tool_names()
-                .await
-                .map_err(|error| error.to_string())?;
-            let resources = if lease.spec().resources() {
-                let resources = lease
-                    .list_resources()
-                    .await
-                    .map_err(|error| error.to_string())?;
-                let templates = lease
-                    .list_resource_templates()
-                    .await
-                    .map_err(|error| error.to_string())?;
-                Some((resources.len(), templates.len()))
-            } else {
-                None
-            };
-            Ok::<_, String>((listing, listed, resources))
+            work(&lease).await
         }
         .await;
         pool.shutdown().await;
-        let (listing, listed, resources) = probed?;
-        let mut tools = listing
-            .records()
-            .iter()
-            .map(|record| {
-                (
-                    record.mcp_name().to_owned(),
-                    record.exposed_name().as_str().to_owned(),
-                )
-            })
-            .collect::<Vec<_>>();
-        if resources.is_some() {
-            let exposed =
-                exposed_tool_name(&server, READ_RESOURCE).map_err(|error| error.to_string())?;
-            tools.push((READ_RESOURCE.to_owned(), exposed.as_str().to_owned()));
-        }
-        let allows = |name: &str| {
-            allowlist
-                .as_ref()
-                .is_none_or(|names| names.iter().any(|allowed| allowed == name))
-        };
-        Ok(McpProbe {
-            tools,
-            unlowerable: listing.notices().to_vec(),
-            not_allowed: listed
-                .iter()
-                .filter(|name| !allows(name))
-                .cloned()
-                .collect(),
-            not_listed: allowlist
-                .iter()
-                .flatten()
-                .filter(|name| !listed.contains(name))
-                .cloned()
-                .collect(),
-            resources,
-        })
+        outcome
     })
 }
 

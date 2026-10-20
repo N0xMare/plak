@@ -824,6 +824,12 @@ enum McpAction {
         #[arg(long, action = ArgAction::SetTrue)]
         local: bool,
     },
+    Prompts {
+        id: Option<String>,
+        prompt: Option<String>,
+        #[arg(long = "arg", value_name = "NAME=VALUE")]
+        arg: Vec<String>,
+    },
     Remove {
         id: Option<String>,
         #[arg(long, value_parser = ["user", "global", "project"])]
@@ -945,6 +951,7 @@ impl McpAction {
             | Self::Test { id: None }
             | Self::Login { id: None, .. }
             | Self::Logout { id: None, .. }
+            | Self::Prompts { id: None, .. }
             | Self::Remove { id: None, .. }
             | Self::Enable { id: None, .. }
             | Self::Disable { id: None, .. } => return help(),
@@ -1069,6 +1076,20 @@ impl McpAction {
                 id: Some(id),
                 local,
             } => McpCommand::Logout { id, local },
+            Self::Prompts {
+                id: Some(id),
+                prompt,
+                arg,
+            } => {
+                if prompt.is_none() && !arg.is_empty() {
+                    return Err("mcp prompts --arg needs a prompt name".to_owned());
+                }
+                McpCommand::Prompts {
+                    id,
+                    prompt,
+                    arguments: pairs("--arg", arg)?,
+                }
+            }
             Self::Remove {
                 id: Some(id),
                 scope,

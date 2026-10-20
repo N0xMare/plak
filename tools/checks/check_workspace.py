@@ -1244,10 +1244,10 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
     # service processes, and the named-secret value type.
     ("plakous-hosted", "src/mcp_binding.rs"): {
         "mcp": {
-            "HeaderName", "HeaderValue", "McpError", "McpErrorKind", "McpHttpEndpoint",
-            "McpHttpSecret", "McpHttpSecretResolver", "McpOAuthSecretResolver",
-            "McpOAuthSettings", "McpOAuthStatus", "McpPool", "McpSecretResolver", "McpServerSpec",
-            "McpToolPack",
+            "HeaderName", "HeaderValue", "McpError", "McpErrorKind", "McpHttpEndpoint", "McpHttpSecret",
+            "McpHttpSecretResolver", "McpLease", "McpOAuthSecretResolver", "McpOAuthSettings",
+            "McpOAuthStatus", "McpPool", "McpPrompt", "McpPromptExpansion", "McpSecretResolver",
+            "McpServerSpec", "McpToolPack",
             "McpToolRecord", "McpToolSelection", "SensitiveBytes", "ServiceSecretValue",
             "exposed_tool_name",
         },

@@ -2256,3 +2256,63 @@ fn mcp_login_remote_paste_back_logs_in_and_logout_revokes() {
     server.kill().unwrap();
     server.wait().unwrap();
 }
+
+/// `plak mcp prompts` lists a server's prompts and prints one expansion as
+/// the single user message an invocation sends: the untrusted banner, then
+/// each server message under its role label, the assistant one included.
+#[test]
+fn mcp_prompts_list_and_expand_into_one_labelled_user_message() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path();
+    let server = fake_mcp_server();
+    let ok = |output: std::process::Output| {
+        assert!(
+            output.status.success(),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    ok(run_plak(
+        home,
+        &["mcp", "add", "fake", "--", server.to_str().unwrap()],
+    ));
+    let listed = ok(run_plak(home, &["mcp", "prompts", "fake"]));
+    assert!(
+        listed.starts_with("mcp server fake: 3 prompts\n"),
+        "{listed}"
+    );
+    assert!(
+        listed.contains(
+            "  review: Reviews a target.\n    --arg target=… (required)\n    --arg focus=…\n"
+        ),
+        "{listed}"
+    );
+    let expanded = ok(run_plak(
+        home,
+        &[
+            "mcp",
+            "prompts",
+            "fake",
+            "review",
+            "--arg",
+            "target=main",
+            "--arg",
+            "focus=tests",
+        ],
+    ));
+    assert_eq!(
+        expanded,
+        "[prompt mcp:fake/review requested by the user; its content comes from an untrusted server]\n\
+         user:\nReview main.\nassistant:\nI will focus on tests.\nuser:\n[image 1]\n\
+         (1 image attached, not shown here)\n"
+    );
+    let refused = run_plak(home, &["mcp", "prompts", "fake", "review"]);
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("argument target is required"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+}

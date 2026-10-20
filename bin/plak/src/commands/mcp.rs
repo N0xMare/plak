@@ -1,5 +1,5 @@
-//! `plak mcp add|list|show|test|login|logout|remove|enable|disable`: MCP
-//! server setup without hand editing. Tables are written through
+//! `plak mcp add|list|show|test|login|logout|prompts|remove|enable|disable`:
+//! MCP server setup without hand editing. Tables are written through
 //! [`crate::product_config::mcp_edit`], so a command and a hand-written file
 //! pass the same parser; `test` starts the server through the same spawn,
 //! environment and secret path a session bind uses.
@@ -38,6 +38,11 @@ pub(crate) enum McpCommand {
     Logout {
         id: String,
         local: bool,
+    },
+    Prompts {
+        id: String,
+        prompt: Option<String>,
+        arguments: std::collections::BTreeMap<String, String>,
     },
     Remove {
         id: String,
@@ -126,6 +131,14 @@ pub(crate) fn run(
         McpCommand::Logout { id, local } => {
             return super::mcp_login::logout(paths, &id, local, stdout);
         }
+        McpCommand::Prompts {
+            id, prompt: None, ..
+        } => out = prompts(paths, &id)?,
+        McpCommand::Prompts {
+            id,
+            prompt: Some(prompt),
+            arguments,
+        } => out = expand_prompt(paths, &id, &prompt, &arguments)?,
         McpCommand::Remove { id, scope, force } => {
             let removed =
                 mcp_edit::remove_server(paths, scope, &id, force).map_err(CliFailure::new)?;
@@ -373,11 +386,7 @@ fn shown(text: &str) -> String {
 }
 
 fn test(paths: &PlakPaths, id: &str) -> CliResult<String> {
-    let config = load(paths)?;
-    server(&config, id)?;
-    let rendered = config.tool_sections.render_server(id).unwrap_or_default();
-    let workspace =
-        std::env::current_dir().map_err(|_| CliFailure::new("working directory is unavailable"))?;
+    let (rendered, workspace) = probe_inputs(paths, id)?;
     let probe = plakous_hosted::mcp_binding::probe_mcp_server(
         id,
         &rendered,
@@ -418,6 +427,84 @@ fn test(paths: &PlakPaths, id: &str) -> CliResult<String> {
         ));
     }
     Ok(out)
+}
+
+/// `plak mcp prompts <id>`: the server's prompts and their arguments.
+fn prompts(paths: &PlakPaths, id: &str) -> CliResult<String> {
+    let (rendered, workspace) = probe_inputs(paths, id)?;
+    let prompts = plakous_hosted::mcp_binding::list_mcp_prompts(
+        id,
+        &rendered,
+        &workspace,
+        secrets::ProductNamedSecrets::shared(paths),
+    )
+    .map_err(|error| CliFailure::new(format!("mcp server {id} failed: {}", shown(&error))))?;
+    let mut out = format!(
+        "mcp server {id}: {} prompt{}\n",
+        prompts.len(),
+        if prompts.len() == 1 { "" } else { "s" }
+    );
+    for prompt in &prompts {
+        let mut line = format!("  {}", shown(&prompt.name));
+        if let Some(title) = &prompt.title {
+            line.push_str(&format!(" ({})", shown(title)));
+        }
+        if let Some(description) = &prompt.description {
+            line.push_str(&format!(": {}", shown(description)));
+        }
+        out.push_str(&format!("{line}\n"));
+        for argument in &prompt.arguments {
+            let mut line = format!("    --arg {}=…", shown(&argument.name));
+            if argument.required {
+                line.push_str(" (required)");
+            }
+            if let Some(description) = &argument.description {
+                line.push_str(&format!(": {}", shown(description)));
+            }
+            out.push_str(&format!("{line}\n"));
+        }
+    }
+    Ok(out)
+}
+
+/// `plak mcp prompts <id> <prompt>`: the user message the prompt expands
+/// to, exactly as an invocation would send it, terminal-safe.
+fn expand_prompt(
+    paths: &PlakPaths,
+    id: &str,
+    prompt: &str,
+    arguments: &std::collections::BTreeMap<String, String>,
+) -> CliResult<String> {
+    let (rendered, workspace) = probe_inputs(paths, id)?;
+    let expansion = plakous_hosted::mcp_binding::get_mcp_prompt(
+        id,
+        &rendered,
+        &workspace,
+        secrets::ProductNamedSecrets::shared(paths),
+        prompt,
+        arguments,
+    )
+    .map_err(|error| CliFailure::new(format!("mcp server {id} failed: {}", shown(&error))))?;
+    let mut out = crate::cli_output::safe_terminal_block(expansion.text());
+    out.push('\n');
+    let images = expansion.images().len();
+    if images > 0 {
+        out.push_str(&format!(
+            "({images} image{} attached, not shown here)\n",
+            if images == 1 { "" } else { "s" }
+        ));
+    }
+    Ok(out)
+}
+
+/// The frozen table and workspace a probe of `id` starts the server with.
+fn probe_inputs(paths: &PlakPaths, id: &str) -> CliResult<(String, std::path::PathBuf)> {
+    let config = load(paths)?;
+    server(&config, id)?;
+    let rendered = config.tool_sections.render_server(id).unwrap_or_default();
+    let workspace =
+        std::env::current_dir().map_err(|_| CliFailure::new("working directory is unavailable"))?;
+    Ok((rendered, workspace))
 }
 
 /// The TUI's read-only `/mcp` view: the configured servers, which of them

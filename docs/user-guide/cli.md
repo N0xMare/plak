@@ -192,7 +192,7 @@ input (the value is never an argument) and writes
 prints names only. A name matches `[a-z][a-z0-9-]{0,31}`. There is no
 environment override.
 
-### `plak mcp add|list|show|test|login|logout|remove|enable|disable`
+### `plak mcp add|list|show|test|login|logout|prompts|remove|enable|disable`
 
 MCP server setup without editing `config.toml` by hand.
 
@@ -208,6 +208,8 @@ plak mcp test github
 plak mcp add linear --url https://mcp.linear.app/mcp --oauth
 plak mcp login linear                                  # or --remote over SSH
 plak mcp logout linear
+plak mcp prompts github                                # the server's prompts
+plak mcp prompts github review --arg target=main       # what one expands to
 plak mcp enable github --template root-agent             # every allowed tool
 plak mcp enable github --template root-agent --tool get_me   # or one at a time
 plak mcp disable github --template root-agent
@@ -259,6 +261,14 @@ plak mcp remove github
   removes it here. When revocation fails nothing is removed; `--local`
   removes it here without revoking, and the grant may stay active at the
   authorization server.
+- `prompts <id>` starts the server the way `test` does and lists its prompts
+  with their arguments. `prompts <id> <prompt> [--arg NAME=VALUE]...` gets one
+  prompt and prints the single user message it expands to: a first line
+  naming the prompt and marking its content as coming from an untrusted
+  server, then each of the server's messages under a `user:` or `assistant:`
+  label. A required argument that is missing, or one the prompt does not
+  take, is refused before the server is asked. It calls no model; only you
+  invoke prompts, never the model.
 - `enable <id> --template <name> [--tool <t>]...` adds `mcp:<id>` (or one
   `mcp:<id>/<t>` per `--tool`) to that template file's `tools`; `disable`
   removes every entry for the server. Only the `tools` line changes. New

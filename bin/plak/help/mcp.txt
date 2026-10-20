@@ -8,6 +8,7 @@ USAGE:
   plak mcp test <id>
   plak mcp login <id> [--scope "<scopes>"] [--remote]
   plak mcp logout <id> [--local]
+  plak mcp prompts <id> [<prompt> [--arg NAME=VALUE]...]
   plak mcp remove <id> [--scope user|project] [--force]
   plak mcp enable <id> --template <name> [--tool <tool>]...
   plak mcp disable <id> --template <name>
@@ -51,6 +52,10 @@ ADD OPTIONS:
   revoked or under-scoped login fails the call with the command to run.
   logout revokes the login at the authorization server and removes it here;
   a failed revocation keeps it. --local removes it here without revoking.
+  prompts lists the server's prompts and their arguments; with a prompt
+  name it gets that prompt with the --arg values and prints the one user
+  message it expands to, exactly what invoking it would send. It calls no
+  model, and the model can never invoke a prompt.
   enable and disable edit only that template file's tools array (mcp:<id>,
   or mcp:<id>/<tool> per --tool). New sessions pick the change up; existing
   sessions keep the tools they froze.
