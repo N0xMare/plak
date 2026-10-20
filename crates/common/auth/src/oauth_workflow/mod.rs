@@ -1,4 +1,5 @@
-//! Shared pure OAuth workflow helpers for subscription dialects.
+//! Shared pure OAuth workflow helpers for subscription dialects and for
+//! clients of OAuth-protected resources (MCP authorization).
 //!
 //! Credential-free math and string construction only: form encoding, authorize
 //! URL building, device poll schedules, callback query parsing, access-token
@@ -17,6 +18,7 @@ mod error;
 mod form;
 mod http11_get;
 mod http11_response;
+mod resource;
 
 pub use authorize::{AuthorizeUrlRequest, build_authorization_url};
 pub use callback::{
@@ -34,4 +36,15 @@ pub use form::{
 pub use http11_get::{Http11GetRequest, is_http_token_byte, parse_http11_get_request};
 pub use http11_response::{
     LoopbackCallbackOutcome, LoopbackCallbackPage, format_http11_text_response,
+};
+pub use resource::{
+    AuthorizationServerMetadata, BearerChallenge, DeviceAuthorization, DynamicRegistration,
+    MAX_RESOURCE_OAUTH_RESPONSE_BYTES, ProtectedResourceMetadata, ResourceAuthorizeRequest,
+    ResourceTokenResponse, authorization_server_metadata_urls, build_resource_authorization_url,
+    canonical_resource_uri, check_callback_issuer, device_authorization_form, device_token_form,
+    dynamic_registration_request, oauth_error_code, parse_authorization_server_metadata,
+    parse_bearer_challenge, parse_device_authorization, parse_dynamic_registration,
+    parse_protected_resource_metadata, parse_resource_token_response,
+    protected_resource_metadata_urls, resource_refresh_form, resource_token_form, revocation_form,
+    take_issuer_parameter, union_scopes,
 };

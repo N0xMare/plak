@@ -30,4 +30,16 @@ pub enum OAuthWorkflowError {
     /// A form body, field set, or interval value was invalid.
     #[error("oauth invalid form")]
     InvalidForm,
+    /// Protected-resource metadata names another resource.
+    #[error("oauth resource metadata names another resource")]
+    ResourceMismatch,
+    /// An issuer differs from the one expected.
+    #[error("oauth issuer mismatch")]
+    IssuerMismatch,
+    /// The authorization server does not advertise PKCE S256.
+    #[error("oauth server does not advertise PKCE S256")]
+    PkceUnsupported,
+    /// Required metadata is absent.
+    #[error("oauth metadata is missing")]
+    MissingMetadata,
 }
