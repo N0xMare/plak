@@ -606,17 +606,6 @@ recovery authority.
 
 ### 2.5 Versioned state
 
-Projector reads are planned only for records on the product session's followed
-lineage (or its initial creation record); sibling-branch facts advance the
-cursor without loading their checkpoint contents. Missing required reads still
-refuse the whole page. Fork and rebind catch-up projections observe interrupts
-between pages, each committed under the cursor CAS. Partial ancestor pages preserve the successor's recorded branch binding until
-its own head is projected. The source publication
-settles the canonical receipt before stopping successor catch-up: the source
-stays attached and any saved successor remains available through `/resume`.
-The TUI acknowledges Escape for these workflows as stopping an operation,
-not cancelling a model turn.
-
 Plak does not migrate state. Each build keeps its state in
 `~/.plak/state/<key>/`, where the key names every persisted format the build
 reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree
@@ -1117,6 +1106,16 @@ It prints one summary line `reclaimed <n> checkpoints, <n> objects, <n> bytes
 command.
 
 ### 2.6 Intents, views, and the projector
+
+Projector reads are planned only for records on the product session's followed
+lineage (or its initial creation record); sibling-branch facts advance the
+cursor without loading their checkpoint contents. Missing required reads still
+refuse the whole page. Fork and rebind catch-up projections observe interrupts
+between pages, each committed under the cursor CAS. Partial ancestor pages
+preserve the successor's recorded branch binding until its own head is
+projected. The source publication settles the canonical receipt before
+stopping successor catch-up: the source stays attached and any saved successor
+remains available through `/resume`.
 
 Plakous is the only authority for what an agent did (chapter 01 §5.11). The
 product store holds exactly two kinds of state:
@@ -2893,7 +2892,7 @@ What the argument-taking ones do:
 | --- | --- |
 | `/resume` | bare opens the cwd-scoped picker; a uuid resumes exactly |
 | `/agents` | bare opens the Agents tab; `<profile>` resolves the name against the product's list (an exact id, then an alias the list shows) and asks whether to use that profile now or save it for the next new `plak` |
-| `/fork` | takes no argument. Forks on the current binding with the source's history, recompiling the session's current configuration for the same target: the `AGENTS.md` files as they are now, harness settings and tool presentation (chapter 01 §5.6). A fork whose tool authority changed since the session started is refused with `cannot fork: this session's tools changed; start a new session`. When any `AGENTS.md` differs from the source's, the transcript note names each by scope as changed, added, or removed, also when the fork is saved without attaching. Recovery of an interrupted fork first reads its receipt before anything opens: a recorded fork becomes current; otherwise the source opens and the fork recompiles the same way, with the same note. A recovered fork that is refused outright (another target, changed tool authority, an operation published with other semantics, storage pressure) is abandoned: the session opens unchanged with the abandoned-fork note and the refusal, and does not retry it. A different profile is `/agents <profile>`. If the canonical fork lands but its session cannot attach, the fork is saved as its own resumable session, the workflow resolves, and this session stays attached and promptable; the note names the saved session |
+| `/fork` | takes no argument. Forks on the current binding with the source's history, recompiling the session's current configuration for the same target: the `AGENTS.md` files as they are now, harness settings and tool presentation (chapter 01 §5.6). A fork whose tool authority changed since the session started is refused with `cannot fork: this session's tools changed; start a new session`. When any `AGENTS.md` differs from the source's, the transcript note names each by scope as changed, added, or removed, also when the fork is saved without attaching. Recovery of an interrupted fork first reads its receipt before anything opens: a recorded fork becomes current; otherwise the source opens and the fork recompiles the same way, with the same note. A recovered fork that is refused outright (another target, changed tool authority, an operation published with other semantics, storage pressure) is abandoned: the session opens unchanged with the abandoned-fork note and the refusal, and does not retry it. A different profile is `/agents <profile>`. If the canonical fork lands but its session cannot attach, the fork is saved as its own resumable session, the workflow resolves, and this session stays attached and promptable; the note names the saved session. A stop before canonical dispatch leaves the exact source unchanged; a stop during successor projection says `fork stopped; saved as session X` and offers `/resume X` with the source still attached |
 | `/fork-then-compact` | takes no argument. Forks on the current binding, then compacts only the new session. If compaction fails, the fork stands and `/compact` retries it |
 | `/stop-all` | the whole-tree verb (chapter 03), sent only from the destructive confirmation pop-up (§5.7) |
 
@@ -3095,26 +3094,33 @@ exactly-once acknowledgement across reopen.
 
 `Esc` is the interrupt key and **`Esc` never quits.** In precedence order: a
 modal, dropdown, secret field, search, history shelf, or selection consumes it
-first; an agent transcript consumes it next: it goes back to Activity > Agents at that agent, however the transcript was opened
-(§5.7), so it never stops the turn; mid-turn it opens the destructive
-confirmation pop-up (§5.7) titled `Stop this turn?`: it says the root turn is
-cancelled and its work in flight lost, and that the host-reported running
-descendants are interrupted, resumable. Its buttons are `[ Cancel ]`,
-`[ Stop turn ]` (the interrupt: the turn and agents only) and, with running
-background processes, `[ Stop turn + processes ]`, which also requests
-user-attributed process stops through the host action channel; the pop-up
-then says `N background processes keep running unless you stop them too`.
-It follows the pop-up's rules (§5.7): focus starts on `[ Stop turn ]`, `Enter`
-presses the focused button at once, `Esc` cancels, and over the composer a
-printable key closes it into the draft instead of confirming. Background
-processes never stop just because the pop-up opened.
-The pop-up closes if the turn settles first, and loses its `+ processes`
-button when none runs. Focus that sat on the dropped button clamps to the
-last button that remains, so it stays on `[ Stop turn ]` rather than moving
-to `Cancel` or past the end. A second Esc
-during an in-flight cancel is a no-op rather than an escalation; idle with a draft, the first press arms and a second within
-800 ms clears the draft, recoverably by one undo; idle with an empty draft it
-does nothing. No dialog anywhere offers "Esc again to quit".
+first; an agent transcript consumes it next: it goes back to Activity > Agents
+at that agent, however the transcript was opened (§5.7), so it never stops the
+turn; mid-turn it opens the destructive confirmation pop-up (§5.7) titled
+`Stop this turn?`: it says the root turn is cancelled and its work in flight
+lost, and that the host-reported running descendants are interrupted,
+resumable. Its buttons are `[ Cancel ]`, `[ Stop turn ]` (the interrupt: the
+turn and agents only) and, with running background processes,
+`[ Stop turn + processes ]`, which also requests user-attributed process stops
+through the host action channel; the pop-up then says
+`N background processes keep running unless you stop them too`. It follows the
+pop-up's rules (§5.7): focus starts on `[ Stop turn ]`, `Enter` presses the
+focused button at once, `Esc` cancels, and over the composer a printable key
+closes it into the draft instead of confirming. Background processes never
+stop just because the pop-up opened. The pop-up closes if the turn settles
+first, and loses its `+ processes` button when none runs. Focus that sat on
+the dropped button clamps to the last button that remains, so it stays on
+`[ Stop turn ]` rather than moving to `Cancel` or past the end. A second Esc
+during an in-flight cancel is a no-op rather than an escalation; idle with a
+draft, the first press arms and a second within 800 ms clears the draft,
+recoverably by one undo; idle with an empty draft it does nothing. No dialog
+anywhere offers "Esc again to quit".
+
+During fork or rebind, busy `Esc` instead opens `Stop this operation?` with
+`[ Cancel ]` and `[ Stop operation ]`. It says `Stops before the fork attaches
+when possible; any saved fork stays resumable.` The HUD shows `cancelling…`
+while the stop is pending. A stop after attachment cannot undo the fork; the
+notice says that it attached before the stop could be applied.
 
 `Ctrl+C` is a ladder: a non-empty draft is cleared and that is all; an empty
 draft with a turn running opens the same `Stop this turn?` pop-up as a busy
@@ -4350,50 +4356,51 @@ composer commands act there (`Ctrl+T`, `Ctrl+X`, `Ctrl+O`, `Ctrl+B`, `Ctrl+Q`;
 root draft is never typed into, edited, pasted into or sent, and no queued
 prompt is dropped. A paste never reaches a draft under the pop-up or a dialog.
 
-**The destructive confirmation pop-up.** Stopping the root turn (busy `Esc`,
-§5.3), interrupting or closing an agent, stopping every agent, resuming a
-restored-paused tree, stopping one or all background processes, and quitting
-over running processes are sent only from one pop-up, shared by the root view
-(busy `Esc` and the busy `Ctrl+C`), Activity > Agents (`i`, `c`, `s`, `r`),
-the agent view (`i`, `c`), `/stop-all`, the Processes tab (`s`, `S`), `Ctrl+Q`,
-the confirmed `Ctrl+C` and `/quit` (§5.3), `Alt+A`/`Alt+D` on an open effect
-decision (§5.2), the Menu's profile dialog (§5.5), and Settings `d`
-(`Reset <label>?`, `[ Reset ]`, binding that row's key and writing the live
-draft at confirm). Interrupt and close never target the root row. It is
-centred over a scrim and says what will happen: its title names the target
-(`Stop this turn?`, `Interrupt #c3?`, `Close #c3?`, `Stop all agents?`,
-`Resume all agents?`, `Stop this process?`, `Stop all processes?`, `Quit
-plak?`, `Allow <tool>?`, `Deny <tool>?`, `Reset <label>?`), its lines the agent id or the count of open agents (or processes, or
-the process's owner and command), that running turns are cancelled and work in
-flight is lost, and for stop-all that no new agents start until the next
-prompt. Lines wrap at narrow widths rather than clip, and buttons that do not
-fit one row stack right-aligned. `[ Cancel ]` comes first, then the action
-(`[ Stop turn ]` and `[ Stop turn + processes ]`, `[ Interrupt ]`,
-`[ Close ]`, `[ Stop all ]`, `[ Resume all ]`, `[ Stop ]`, `[ Quit ]`,
-`[ Allow ]`, `[ Deny ]`, `[ Reset ]`);
-focus starts on the primary action, and a dim `Enter confirms · Esc cancels`
-under the lines says how to confirm. Focus is absolute and moves the moment a
-key arrives: `←` and `→` move it one button without wrapping, and `Tab` moves
-right while `Shift+Tab` moves left, so a held or repeated arrow walks the
-buttons at once. `Enter` presses the focused button the moment it arrives, so
-the pop-up opens already confirmable and a `←` then `Enter` cancels. Over
-the composer a printable key or `Backspace` closes the pop-up and is typed
-into the draft; in a full-page view it does nothing and is not typed into
-the draft. A
-click on a button presses it (a hovered button brightens).
-`Esc`, a `Ctrl` or `Alt` chord or a click outside cancels; the wheel and a
-paste do nothing. Wherever a modal owns input and confirms on `Enter` (this
-pop-up, the resume picker, Menu with its dialogs, the help overlay), an `Alt`
-chord is that modal's `Esc`: a legacy terminal delivers `Esc` coalesced with
-the next key as one `Alt` chord (`Esc Enter` as `Alt+Enter`), and it closes or
-declines, never confirms or resumes. The pop-up binds its exact intent when it opens (an agent id, not a
-selection), so snapshots do not retarget it; it closes when its target stops
-being active (the turn settles, the agent settles, the process exits, the tree
-is no longer paused, no agent or process is left) and a session switch closes
-it. The painted controls that open it (the Agents footer's `r resumes`,
-`i interrupt`, `c close`, `s stop all`, the agent view's controls, the
-Processes footer's `s stop`, `S stop all`, and their short forms on a narrow
-footer) are clickable, so it is reachable and usable by mouse alone.
+**The destructive confirmation pop-up.** Stopping the root turn or a
+fork/rebind operation (busy `Esc`, §5.3), interrupting or closing an agent,
+stopping every agent, resuming a restored-paused tree, stopping one or all
+background processes, and quitting over running processes are sent only from
+one pop-up, shared by the root view (busy `Esc` and the busy `Ctrl+C`),
+Activity > Agents (`i`, `c`, `s`, `r`), the agent view (`i`, `c`),
+`/stop-all`, the Processes tab (`s`, `S`), `Ctrl+Q`, the confirmed `Ctrl+C`
+and `/quit` (§5.3), `Alt+A`/`Alt+D` on an open effect decision (§5.2), the
+Menu's profile dialog (§5.5), and Settings `d` (`Reset <label>?`, `[ Reset ]`,
+binding that row's key and writing the live draft at confirm). Interrupt and
+close never target the root row. It is centred over a scrim and says what will
+happen: its title names the target (`Stop this turn?`, `Stop this operation?`,
+`Interrupt #c3?`, `Close #c3?`, `Stop all agents?`, `Resume all agents?`,
+`Stop this process?`, `Stop all processes?`, `Quit plak?`, `Allow <tool>?`,
+`Deny <tool>?`, `Reset <label>?`), its lines the agent id or the count of open
+agents (or processes, or the process's owner and command), that running turns
+are cancelled and work in flight is lost, and for stop-all that no new agents
+start until the next prompt. Lines wrap at narrow widths rather than clip, and
+buttons that do not fit one row stack right-aligned. `[ Cancel ]` comes first,
+then the action (`[ Stop turn ]` and `[ Stop turn + processes ]`,
+`[ Stop operation ]`, `[ Interrupt ]`, `[ Close ]`, `[ Stop all ]`,
+`[ Resume all ]`, `[ Stop ]`, `[ Quit ]`, `[ Allow ]`, `[ Deny ]`,
+`[ Reset ]`); focus starts on the primary action, and a dim
+`Enter confirms · Esc cancels` under the lines says how to confirm. Focus is
+absolute and moves the moment a key arrives: `←` and `→` move it one button
+without wrapping, and `Tab` moves right while `Shift+Tab` moves left, so a
+held or repeated arrow walks the buttons at once. `Enter` presses the focused
+button the moment it arrives, so the pop-up opens already confirmable and a
+`←` then `Enter` cancels. Over the composer a printable key or `Backspace`
+closes the pop-up and is typed into the draft; in a full-page view it does
+nothing and is not typed into the draft. A click on a button presses it (a
+hovered button brightens). `Esc`, a `Ctrl` or `Alt` chord or a click outside
+cancels; the wheel and a paste do nothing. Wherever a modal owns input and
+confirms on `Enter` (this pop-up, the resume picker, Menu with its dialogs,
+the help overlay), an `Alt` chord is that modal's `Esc`: a legacy terminal
+delivers `Esc` coalesced with the next key as one `Alt` chord (`Esc Enter` as
+`Alt+Enter`), and it closes or declines, never confirms or resumes. The pop-up
+binds its exact intent when it opens (an agent id, not a selection), so
+snapshots do not retarget it; it closes when its target stops being active
+(the turn settles, the agent settles, the process exits, the tree is no longer
+paused, no agent or process is left) and a session switch closes it. The
+painted controls that open it (the Agents footer's `r resumes`, `i interrupt`,
+`c close`, `s stop all`, the agent view's controls, the Processes footer's
+`s stop`, `S stop all`, and their short forms on a narrow footer) are
+clickable, so it is reachable and usable by mouse alone.
 
 The quit pop-up names what stops: `The root turn is cancelled; its work in
 flight is lost.` while a turn runs, `N running agents are interrupted,

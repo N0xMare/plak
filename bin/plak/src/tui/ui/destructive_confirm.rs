@@ -336,7 +336,10 @@ impl App {
         if matches!(self.phase.as_str(), "fork" | "rebind") {
             self.open_confirm(
                 "Stop this operation?".to_owned(),
-                vec!["The source stays attached; any saved fork remains resumable.".to_owned()],
+                vec![
+                    "Stops before the fork attaches when possible; any saved fork stays resumable."
+                        .to_owned(),
+                ],
                 vec![("[ Stop operation ]", UserAction::Interrupt)],
             );
             return;

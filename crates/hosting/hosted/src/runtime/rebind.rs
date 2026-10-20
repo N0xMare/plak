@@ -553,6 +553,11 @@ pub(super) fn complete_rebind<P: plakous_host_protocol::ProtocolExtension>(
             if config.store.load(&target_id).is_err() {
                 return Err(error);
             }
+            if watch.interrupted() {
+                return Err(CliFailure::new(format!(
+                    "fork stopped; saved as session {target_id}; this session stays attached; /resume {target_id} opens it"
+                )));
+            }
             return Err(CliFailure::new(format!(
                 "the fork was saved as session {target_id} but could not project ({}); this session stays attached, and /resume {target_id} opens the fork",
                 error.message(),
@@ -1122,15 +1127,25 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
                 .save(&mut config.session)
                 .map_err(CliFailure::new)?;
         }
-        executor
-            .block_on(super::projection::project_to_tail(
+        run_watched(
+            executor,
+            watch,
+            super::projection::project_to_tail_interruptible(
                 opened.sessions(),
                 &config.store,
                 &config.session.id,
                 attached_locator,
-            ))
-            .map_err(|_| CliFailure::new("application execution failed"))?
-            .map_err(CliFailure::new)?;
+                || watch.observe_now(),
+            ),
+        )
+        .map_err(|_| CliFailure::new("application execution failed"))?
+        .map_err(|error| {
+            if watch.interrupted() {
+                interrupted_before_dispatch("rebind")
+            } else {
+                CliFailure::new(error)
+            }
+        })?;
         let intents = config
             .store
             .load_intents(&config.session.id)

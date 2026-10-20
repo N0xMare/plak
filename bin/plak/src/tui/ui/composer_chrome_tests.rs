@@ -1103,6 +1103,9 @@ fn workflow_escape_offers_operation_stop_not_turn_loss() {
         let text = render_to_string(&mut app, 120, 24);
         assert!(text.contains("Stop this operation?"), "{text}");
         assert!(!text.contains("work in flight is lost"), "{text}");
+        assert!(text.contains("when possible"), "{text}");
         assert_eq!(confirm_action(&mut app), Some(UserAction::Interrupt));
+        app.cancel_pending = true;
+        assert_eq!(app.turn_status_label().as_deref(), Some("cancelling…"));
     }
 }

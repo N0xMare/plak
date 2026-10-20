@@ -198,6 +198,9 @@ impl App {
         if self.phase == "interrupted" {
             return Some("interrupted".to_owned());
         }
+        if self.busy && self.cancel_pending {
+            return Some("cancelling…".to_owned());
+        }
         if self.phase == "rebind" {
             return Some("switching model…".to_owned());
         }
@@ -213,7 +216,7 @@ impl App {
         if !self.busy {
             return None;
         }
-        if self.cancel_pending || self.phase == "interrupting" {
+        if self.phase == "interrupting" {
             return Some("cancelling…".to_owned());
         }
         if self.phase == "compacting" {

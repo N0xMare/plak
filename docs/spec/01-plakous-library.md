@@ -1143,18 +1143,17 @@ publishes the snapshot before acknowledging a mutation, including after an error
 that may have followed a committed transaction. SQLite's page cache is 64 MiB.
 The actor also keeps a validated-checkpoint LRU with a 64 MiB accounted-byte
 budget. Hits still probe the checkpoint's primary-key row and verify its
-relational integrity seal; `Pruned` and `NotFound` never come from cache state.
-A repeated branch-head load needs only the session, branch and checkpoint row
-probes, independent of its object closure. Prune and delete clear the cache,
-including on failure. An oversized entry is retained alone, evicting every
-other entry; the next insert displaces it under the same LRU policy. Retention
-is bounded by the validated graph limits (1 GiB encoded objects and the
-checkpoint object-count limit), even when it exceeds the cache budget.
-Accounting charges
-twice the encoded object/edge bytes plus object and entry overhead, not process
-RSS. Read-only inspections and cold loads still validate the full object graph.
-Disabled durability does not open SQLite. Initial `BestEffort` truthfully uses
-the same stronger synchronous boundary.
+relational integrity seal; `Pruned` and `NotFound` never come from cache
+state. A repeated branch-head load needs only the session, branch and
+checkpoint row probes, independent of its object closure. Prune and delete
+clear the cache, including on failure. An oversized entry is retained alone,
+evicting every other entry; the next insert displaces it under the same LRU
+policy. Retention is bounded by the validated graph limits (1 GiB encoded
+objects and the checkpoint object-count limit), even when it exceeds the cache
+budget. Accounting charges twice the encoded object/edge bytes plus object and
+entry overhead, not process RSS. Read-only inspections and cold loads still
+validate the full object graph. Disabled durability does not open SQLite.
+Initial `BestEffort` truthfully uses the same stronger synchronous boundary.
 
 Default SQLite aggregate retention is bounded to **4 GiB of accounted object
 bytes**, **4,194,304 objects**, and **524,288 checkpoints** across the database,

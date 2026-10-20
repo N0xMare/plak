@@ -2491,5 +2491,13 @@ async fn sibling_records_need_no_reads_and_match_fully_loaded_views() -> TestRes
     // These synthetic checkpoints do not exist: any planned read fails closed.
     let actual = run(&sessions, &views, &feed.intents, &feed.records).await?;
     assert_eq!(actual.views, expected);
+    let own = run(
+        &sessions,
+        &SessionViews::empty(),
+        &feed.intents,
+        &feed.records,
+    )
+    .await;
+    assert!(matches!(own, Err(RunError::Read(_))));
     Ok(())
 }

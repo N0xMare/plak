@@ -49,7 +49,13 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
             .save(&mut config.session)
             .map_err(CliFailure::new)?;
     }
-    project_fork_source(executor, watch, config, opened, false)?;
+    project_fork_source(executor, watch, config, opened, false).map_err(|error| {
+        if watch.interrupted() {
+            interrupted_before_dispatch("fork")
+        } else {
+            error
+        }
+    })?;
     let intents = config
         .store
         .load_intents(&config.session.id)
@@ -211,6 +217,11 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
         Ok(target) => target,
         Err(error) => {
             restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
+            if watch.interrupted() {
+                return Err(CliFailure::new(format!(
+                    "fork stopped; saved as session {target_id}; this session stays attached; /resume {target_id} opens it"
+                )));
+            }
             return Err(CliFailure::new(format!(
                 "the fork was saved as session {target_id} but could not project ({}); this session stays attached, and /resume {target_id} opens the fork",
                 error.message(),
@@ -279,11 +290,9 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
     send_last_user_prompt_at(events, opened);
     note_reread_instructions(events, instructions_before, opened);
     if watch.observe_now() {
-        // The canonical fork was already dispatched when the intent arrived.
-        // Saying so is the only truthful option: no terminal is undone here.
         let _ = events.notice(TranscriptRow::info(
             NoticeScope::Session,
-            "interrupt arrived after the canonical fork was dispatched; the fork completed",
+            "fork attached before the stop could be applied; source remains resumable",
         ));
     }
     let _ = events.notice(TranscriptRow::info(
@@ -384,6 +393,192 @@ mod tests {
     use crate::runtime::test_support::*;
     use plakous::application::ApplicationExecutor;
     use std::cell::RefCell;
+
+    #[test]
+    fn interrupt_at_canonical_return_saves_resumable_fork_and_allows_another_fork() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        let root = tempfile::tempdir().unwrap();
+        let executor = ApplicationExecutor::new().unwrap();
+        let (mut config, injection) = fresh_injected_attached_host(root.path());
+        let mut opened = executor
+            .block_on(super::super::startup::build_session_from_config(
+                &mut config,
+                &mut Vec::new(),
+            ))
+            .unwrap()
+            .unwrap();
+        config
+            .session
+            .bind_plakous_locator(opened.locator())
+            .unwrap();
+        config.store.save(&mut config.session).unwrap();
+        let source_id = config.session.id.clone();
+        let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
+        let sent = AtomicBool::new(false);
+        config.test_injection = Some(Arc::new(crate::runtime::TestHostInjection {
+            runtime: Arc::clone(&injection.runtime),
+            rebind_target: injection.rebind_target.clone(),
+            observe: Arc::new(move |workflow, boundary| {
+                if workflow == TestHostWorkflow::Fork
+                    && boundary == TestHostBoundary::RuntimeReturned
+                    && !sent.swap(true, Ordering::SeqCst)
+                {
+                    actions.send(UserAction::Interrupt).unwrap();
+                }
+            }),
+            child_runtime: None,
+            rebind_builds: std::sync::Mutex::new(Vec::new()),
+        }));
+        let state = RefCell::new(InterruptWatchState::default());
+        let watch = InterruptWatch::new(&receiver, &state);
+        let (events, _rx) = host_event_sink();
+        let error = handle_fork(
+            &executor,
+            watch,
+            &mut config,
+            &mut opened,
+            &mut Vec::new(),
+            &events,
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            error.message().contains("fork stopped; saved as session"),
+            "{error:?}"
+        );
+        assert!(!error.message().contains("could not project"));
+        assert_eq!(config.session.id, source_id);
+        assert!(opened.agent().is_some());
+        let request = config
+            .store
+            .load_intents(&source_id)
+            .unwrap()
+            .workflow_requests[0]
+            .clone();
+        let views = config.store.load_views(&source_id).unwrap().unwrap();
+        assert!(
+            views.state.workflows[&request.operation_id]
+                .settled
+                .is_some()
+        );
+        let target = config.store.load(&request.successor_product_id()).unwrap();
+        handle_fork(
+            &executor,
+            watch,
+            &mut config,
+            &mut opened,
+            &mut Vec::new(),
+            &events,
+            None,
+        )
+        .unwrap();
+        assert_ne!(config.session.id, source_id);
+        executor.block_on(opened.release()).unwrap().unwrap();
+        config.session = target;
+        let resumed = executor
+            .block_on(super::super::startup::build_session_from_config(
+                &mut config,
+                &mut Vec::new(),
+            ))
+            .unwrap()
+            .unwrap();
+        assert_eq!(config.session.id, request.successor_product_id());
+        assert!(resumed.agent().is_some());
+        executor.block_on(resumed.release()).unwrap().unwrap();
+    }
+
+    #[test]
+    fn interrupted_source_projection_is_pre_dispatch_for_fork_and_rebind() {
+        for rebind in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let executor = ApplicationExecutor::new().unwrap();
+            let (mut config, _) = fresh_injected_attached_host(root.path());
+            config.ready_catalog = plakous_host_protocol::views::ReadyCatalog::new(vec![
+                plakous_host_protocol::views::ProviderSection {
+                    account: "codex".into(),
+                    label: "Codex".into(),
+                    ready: true,
+                    entries: vec![plakous_host_protocol::views::ModelEntry {
+                        id: "offline-loopback-v2".into(),
+                        tag: "offline".into(),
+                        reasoning: true,
+                        effort_options: vec!["medium".into()],
+                        extras: Vec::new(),
+                        unavailable_reason: None,
+                    }],
+                },
+            ]);
+            let mut opened = executor
+                .block_on(super::super::startup::build_session_from_config(
+                    &mut config,
+                    &mut Vec::new(),
+                ))
+                .unwrap()
+                .unwrap();
+            config
+                .session
+                .bind_plakous_locator(opened.locator())
+                .unwrap();
+            config.store.save(&mut config.session).unwrap();
+            let (actions, receiver) =
+                crate::surface_protocol::user_action_channel::<TestExtension>();
+            super::super::projection::probe::after_next_write(
+                config.session.id.clone(),
+                move || {
+                    actions.send(UserAction::Interrupt).unwrap();
+                },
+            );
+            let state = RefCell::new(InterruptWatchState::default());
+            let (events, _rx) = host_event_sink();
+            let watch = InterruptWatch::new(&receiver, &state);
+            let error = if rebind {
+                super::super::rebind::handle_rebind(
+                    &executor,
+                    watch,
+                    &mut config,
+                    &mut opened,
+                    &mut Vec::new(),
+                    &events,
+                    "codex",
+                    "offline-loopback-v2",
+                    Some("medium"),
+                    None,
+                    None,
+                    None,
+                    &crate::orchestration::RosterInput::unpinned("offline-loopback-v2"),
+                )
+                .unwrap_err()
+            } else {
+                handle_fork(
+                    &executor,
+                    watch,
+                    &mut config,
+                    &mut opened,
+                    &mut Vec::new(),
+                    &events,
+                    None,
+                )
+                .unwrap_err()
+            };
+            assert!(
+                error.message().contains("before its canonical dispatch"),
+                "{error:?}"
+            );
+            assert!(opened.agent().is_some());
+            assert_eq!(
+                config
+                    .store
+                    .load_intents(&config.session.id)
+                    .unwrap()
+                    .workflow_requests,
+                [] as [sessions::projector::WorkflowRequest; 0]
+            );
+            executor.block_on(opened.release()).unwrap().unwrap();
+        }
+    }
 
     #[test]
     fn live_fork_refuses_without_withdrawing_another_pending_request() {

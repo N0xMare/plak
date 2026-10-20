@@ -772,7 +772,7 @@ fn fork_and_rebind_interrupt_between_pages_keep_source_and_resumable_target() {
         };
         assert!(watch.interrupted(), "rebind={rebind}: {error:?}");
         assert!(
-            error.message().contains("projection interrupted"),
+            error.message().contains("fork stopped; saved as session"),
             "{error:?}"
         );
         assert!(error.message().contains("/resume"), "{error:?}");

@@ -426,8 +426,10 @@ to run, and `plak doctor` names each such role. Choosing a profile writes
 `{name}-root`, `{name}-worker`, `{name}-reviewer`, and `{name}-researcher`
 under `~/.plak/agents/` (a file you already have under one of those names is
 kept as it is) and points the root and the working set at those files. With **Next session** that happens
-right away; with **Fork now** it happens once the fork has landed, so a refused
-fork changes nothing. Fork now branches the current session onto that profile,
+right away; with **Fork now** it happens once the fork attaches. A refusal
+before dispatch changes nothing. A stop after publication can leave a saved,
+resumable successor without attaching it or applying the profile files; the
+notice names that session and its `/resume` command. Fork now branches the current session onto that profile,
 briefs the new session as that profile with its own sub-agent cards, and
 returns to the transcript; the previous session keeps its own cards. See
 [the TUI guide](tui.md#agent-profiles).
