@@ -56,6 +56,10 @@ pub(crate) struct StoredLogin {
     pub(crate) access_token: String,
     /// Unix seconds; `None` when the server gave no lifetime.
     pub(crate) expires_at: Option<u64>,
+    /// Original access-token lifetime, not the remaining time.
+    pub(crate) lifetime: Option<u64>,
+    /// This generation was issued by recovery from HTTP 401.
+    pub(crate) renewed_after_rejection: bool,
     pub(crate) refresh_token: Option<String>,
     /// The scope the login requested.
     pub(crate) scope: Option<String>,
@@ -121,6 +125,12 @@ impl StoredLogin {
     /// Seconds until the access token expires, `None` without a lifetime.
     pub(crate) fn expires_in(&self, now: u64) -> Option<u64> {
         self.expires_at.map(|at| at.saturating_sub(now))
+    }
+
+    /// Refresh at most halfway through a short lifetime, or five minutes early.
+    pub(crate) fn refresh_due(&self, now: u64) -> bool {
+        let lead = self.lifetime.map_or(0, |seconds| 300.min(seconds / 2));
+        self.expires_in(now).is_some_and(|left| left <= lead)
     }
 
     /// The credential record of this payload at `generation`.
@@ -365,6 +375,8 @@ mod tests {
             token_endpoint_auth: TokenEndpointAuth::None,
             access_token: "access-1".to_owned(),
             expires_at: Some(unix_now() + 3600),
+            lifetime: Some(3600),
+            renewed_after_rejection: false,
             refresh_token: Some("refresh-1".to_owned()),
             scope: Some("files:read".to_owned()),
             token_endpoint: "https://auth.example.com/token".to_owned(),
@@ -374,6 +386,19 @@ mod tests {
 
     fn settings(directory: &Path) -> McpOAuthSettings {
         McpOAuthSettings::new(directory.join("fake").join("credential.json"))
+    }
+
+    #[test]
+    fn proactive_refresh_uses_the_original_lifetime() {
+        for (lifetime, lead) in [(60, 30), (120, 60), (600, 300), (3600, 300)] {
+            let mut stored = login("https://mcp.example.com/mcp");
+            stored.lifetime = Some(lifetime);
+            stored.expires_at = Some(1000 + lifetime);
+            assert!(!stored.refresh_due(1000));
+            assert!(!stored.refresh_due(1000 + lifetime - lead - 1));
+            assert!(stored.refresh_due(1000 + lifetime - lead));
+            assert!(stored.refresh_due(1000 + lifetime));
+        }
     }
 
     #[test]

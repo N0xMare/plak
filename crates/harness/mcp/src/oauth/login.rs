@@ -273,6 +273,12 @@ impl McpPool {
         let Ok(stored) = read_ready(&store, &fence) else {
             return retire(&store, McpLocalRetirement::Unusable);
         };
+        if !stored.belongs_to(&LoginExpectation::of(
+            settings,
+            &endpoint.canonical_resource()?,
+        )) {
+            return retire(&store, McpLocalRetirement::DefinitionChanged);
+        }
         let Some(endpoint_url) = stored.revocation_endpoint.clone() else {
             return retire(&store, McpLocalRetirement::NoRevocationEndpoint);
         };
@@ -319,6 +325,8 @@ pub enum McpLocalRetirement {
     Requested,
     /// The authorization server offers no revocation endpoint.
     NoRevocationEndpoint,
+    /// The definition no longer names this login's URL, issuer or client.
+    DefinitionChanged,
     /// The stored login was not usable, so nothing could be revoked.
     Unusable,
 }
@@ -773,19 +781,24 @@ pub(crate) fn client_secret(
         return Ok(Some(Zeroizing::new(secret.as_bytes().to_vec())));
     }
     match settings.client() {
-        Some(client) if client.id == stored.client_id => client
-            .secret
-            .as_ref()
-            .map(|resolve| {
-                resolve()
-                    .map(|secret| Zeroizing::new(secret.into_bytes().to_vec()))
-                    .map_err(|error| {
-                        authorization(&format!(
-                            "oauth client secret could not be resolved: {error}"
-                        ))
-                    })
-            })
-            .transpose(),
+        Some(client)
+            if client.id == stored.client_id
+                && settings.issuer() == Some(stored.issuer.as_str()) =>
+        {
+            client
+                .secret
+                .as_ref()
+                .map(|resolve| {
+                    resolve()
+                        .map(|secret| Zeroizing::new(secret.into_bytes().to_vec()))
+                        .map_err(|error| {
+                            authorization(&format!(
+                                "oauth client secret could not be resolved: {error}"
+                            ))
+                        })
+                })
+                .transpose()
+        }
         _ => Ok(None),
     }
 }
@@ -1030,6 +1043,8 @@ fn persist(
             .map(|secret| String::from_utf8_lossy(secret).into_owned()),
         token_endpoint_auth: client.method,
         access_token: tokens.access_token.expose_secret().to_owned(),
+        lifetime: tokens.expires_in,
+        renewed_after_rejection: false,
         expires_at: tokens
             .expires_in
             .map(|seconds| unix_now().saturating_add(seconds)),

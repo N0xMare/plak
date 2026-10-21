@@ -241,6 +241,9 @@ impl GateState {
                 return reply_response(reply);
             }
             if let Err(reply) = oauth.check(PATH, authorization.as_deref()) {
+                if reply.status == 401 {
+                    oauth.wait_for_rejection().await;
+                }
                 seen.refused = Some(reply.status);
                 self.observed.record(seen);
                 return reply_response(reply);

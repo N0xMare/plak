@@ -35,10 +35,6 @@ use super::login::client_secret;
 use crate::McpOAuthStatus;
 use crate::error::{McpError, McpErrorKind};
 
-/// A request whose access token expires within this many seconds refreshes
-/// first.
-const REFRESH_LEAD_SECONDS: u64 = 300;
-
 /// The OAuth state of one server start.
 pub(crate) struct OAuthSession {
     server: McpServerName,
@@ -74,7 +70,7 @@ impl OAuthSession {
     }
 
     /// The bearer for the next request, refreshed first when it expires
-    /// within five minutes.
+    /// within the lesser of five minutes and half its issued lifetime.
     ///
     /// # Errors
     ///
@@ -84,10 +80,7 @@ impl OAuthSession {
         let store = self.store()?;
         let due = {
             let (_, stored) = self.ready(&store)?;
-            stored.refresh_token.is_some()
-                && stored
-                    .expires_in(unix_now())
-                    .is_some_and(|left| left <= REFRESH_LEAD_SECONDS)
+            stored.refresh_token.is_some() && stored.refresh_due(unix_now())
         };
         if due {
             self.refresh(&store, None).await.map_err(|error| {
@@ -258,8 +251,6 @@ enum Answered {
     NotYet,
     /// `invalid_grant`: the grant is gone and the login is retired.
     InvalidGrant,
-    /// 408, 429 or 5xx: nothing was issued; the login can refresh again.
-    Retryable,
     Otherwise,
 }
 
@@ -303,13 +294,15 @@ impl ClaimedRefreshHooks for RefreshHooks<'_> {
         if !stored.belongs_to(&self.session.expectation()) {
             return Err(authorization("the login belongs to another server"));
         }
+        if self.rejected.is_some() && stored.renewed_after_rejection {
+            return Err(authorization(
+                "the renewed credentials were rejected; a new login is required",
+            ));
+        }
         if stored.refresh_token.is_none() {
             return Err(authorization("the login has no refresh token"));
         }
-        let due = self.rejected.is_some()
-            || stored
-                .expires_in(unix_now())
-                .is_some_and(|left| left <= REFRESH_LEAD_SECONDS);
+        let due = self.rejected.is_some() || stored.refresh_due(unix_now());
         Ok(due.then_some(fence))
     }
 
@@ -369,8 +362,6 @@ impl ClaimedRefreshHooks for RefreshHooks<'_> {
             self.answered =
                 if status == StatusCode::BAD_REQUEST && code.as_deref() == Some("invalid_grant") {
                     Answered::InvalidGrant
-                } else if matches!(status.as_u16(), 408 | 429) || status.is_server_error() {
-                    Answered::Retryable
                 } else {
                     Answered::Otherwise
                 };
@@ -392,6 +383,8 @@ impl ClaimedRefreshHooks for RefreshHooks<'_> {
             .access_token
             .expose_secret()
             .clone_into(&mut stored.access_token);
+        stored.lifetime = tokens.expires_in;
+        stored.renewed_after_rejection = self.rejected.is_some();
         stored.expires_at = tokens
             .expires_in
             .map(|seconds| unix_now().saturating_add(seconds));
@@ -439,18 +432,6 @@ impl ClaimedRefreshHooks for RefreshHooks<'_> {
             Answered::InvalidGrant => {
                 if let Err(error) = store.logout_local() {
                     tracing::warn!(server = %self.session.server, %error, "mcp login was not retired after invalid_grant");
-                }
-            }
-            Answered::Retryable => {
-                let restored = store
-                    .load()
-                    .ok()
-                    .flatten()
-                    .filter(|fence| fence.status() == CredentialStatus::RefreshOutcomeUnknown);
-                if let Some(fence) = restored
-                    && let Err(error) = store.restore_unknown_to_ready(&fence)
-                {
-                    tracing::warn!(server = %self.session.server, %error, "mcp login was not restored after a refused refresh");
                 }
             }
             Answered::NotYet | Answered::Otherwise => {}

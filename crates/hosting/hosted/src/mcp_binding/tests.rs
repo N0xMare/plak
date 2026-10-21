@@ -591,6 +591,8 @@ fn an_oauth_table_without_a_login_refuses_before_connecting() -> TestResult {
     // The pre-registered client's secret is a bind check like every other.
     let client = "oauth_issuer = \"https://auth.example\"\noauth_client_id = \"plak\"\n\
                   oauth_client_secret = \"fake-client\"\n";
+    // Login/logout definitions resolve client secrets only when sending them.
+    assert!(mcp_oauth_spec("fake", &table(client), Arc::clone(&logins)).is_ok());
     assert_eq!(
         server_spec(&fake()?, &table(client), &logins)
             .err()

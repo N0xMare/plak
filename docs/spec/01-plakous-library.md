@@ -5030,31 +5030,36 @@ the full callback URL the browser was sent to.
 
 *Tokens.* A token response commits as a new Ready generation whose payload
 binds the canonical server URI, the issuer and the client id, with the access
-token, its expiry, the refresh token, the requested scope and the token and
-revocation endpoints. Refresh is a claimed refresh (chapter 04 §3.3) with
+token, its expiry and original lifetime, whether it was renewed after a 401,
+the refresh token, the requested scope and the token and revocation endpoints. Refresh is a claimed refresh (chapter 04 §3.3) with
 `grant_type=refresh_token` and `resource=`; a returned refresh token replaces
 the stored one and an absent one keeps it. Logout revokes (RFC 7009) the
 refresh token, else the access token, at the stored revocation endpoint and
 then retires the record; without a revocation endpoint it retires the record
-locally and says the grant may remain active. A revocation that fails retires
-nothing and fails the logout; an unusable login (quarantined, unreadable or
+locally and says the grant may remain active. A changed definition also retires
+locally without sending credentials to the old issuer. Client secrets are
+resolved lazily for remote revocation only; local logout needs no secret.
+A revocation that fails retires nothing and fails the logout; an unusable login (quarantined, unreadable or
 written by a newer build) is retired locally.
 
 *Use.* At each start the transport opens the store and refuses when it holds
 no usable login or a login bound to another canonical URI, issuer or client
 id. It resolves the bearer for every request, sends it only to the endpoint
 URL (the exact-URL rule, §7.1), and never falls back to any other credential.
-Before a request whose access token expires within 5 minutes it refreshes; a
-refresh that fails or finds the record quarantined is a definite failure, the
+Before a request whose access token expires within the lesser of 300 seconds
+and half its original issued lifetime it refreshes; a refresh that fails or finds the record quarantined is a definite failure, the
 request not sent, naming the login remedy. A refresh the token endpoint answers
-with 408, 429 or 5xx restores the login for the next refresh; `invalid_grant`
-retires it locally, so the next request names the login remedy; any other
-refusal, and an exchange whose outcome is unknown, leave it quarantined. A 401 runs one claimed refresh,
+with 408, 429 or 5xx leaves the login quarantined: the server may already
+have rotated the token. `invalid_grant` retires it locally, so the next
+request names the login remedy; any other refusal, and an exchange whose
+outcome is unknown, also leave it quarantined. A 401 runs one claimed refresh,
 bound to the generation the rejected request carried and only while the store
 still holds it, as its own task, and never re-sends the request: the call is
 a definite failure "not executed: credentials were rejected and have been
 renewed; call again", or names the login remedy when nothing could be renewed.
-A 403 whose challenge has `error="insufficient_scope"` is a definite failure
+A 401 on a generation issued by 401 recovery fails with the login remedy,
+without another refresh, including across processes. A 403 whose challenge
+has `error="insufficient_scope"` is a definite failure
 naming the login remedy with the union of the stored requested scope and the
 challenged scope; any other 403 is a definite failure naming the login remedy.
 The remedy text is the embedder's (`McpOAuthSettings::with_login_remedy`,

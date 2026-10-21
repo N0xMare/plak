@@ -464,12 +464,14 @@ pub fn mcp_login_status(
 }
 
 /// The definition `plak mcp login` and `logout` run against: one table with
-/// `auth = "oauth"`, whose login need not exist yet.
+/// `auth = "oauth"`, whose login need not exist yet. A configured client
+/// secret is resolved only when authentication needs it, never while
+/// building the definition for a local logout.
 ///
 /// # Errors
 ///
-/// Returns a one-line reason for an invalid table, a table without OAuth, a
-/// product without MCP logins, or a missing named secret.
+/// Returns a one-line reason for an invalid table, a table without OAuth,
+/// or a product without MCP logins.
 pub fn mcp_oauth_spec(
     server: &str,
     rendered: &str,
@@ -604,6 +606,9 @@ pub(crate) fn server_spec(
             }
         }
         "http" => {
+            if let Some(secret) = &definition.oauth_client_secret {
+                require_secret(server, secret, secrets)?;
+            }
             let spec = http_spec(server, &definition, secrets)
                 .map_err(|error| error.unwrap_or_else(invalid))?;
             // No usable login refuses before anything is sent.
@@ -715,13 +720,10 @@ fn http_spec(
     for (_, secret) in &slots {
         require_secret(server, secret, secrets).map_err(Some)?;
     }
-    let client_secret = match &definition.oauth_client_secret {
-        Some(secret) => {
-            require_secret(server, secret, secrets).map_err(Some)?;
-            Some(oauth_secret_resolver(server, secret.clone(), secrets))
-        }
-        None => None,
-    };
+    let client_secret = definition
+        .oauth_client_secret
+        .as_ref()
+        .map(|secret| oauth_secret_resolver(server, secret.clone(), secrets));
     let oauth =
         oauth_settings(server, definition, secrets.as_ref(), client_secret).map_err(Some)?;
     let mut endpoint = McpHttpEndpoint::new(url)

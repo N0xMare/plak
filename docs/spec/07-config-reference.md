@@ -307,6 +307,12 @@ reach the server; it starts nothing until a template that lists it binds.
 | `startup_seconds` | integer | `20` | 1..=120 | Budget to start the server and list its tools. |
 | `call_seconds` | integer | `120` | 1..=3600 | Hard per-call ceiling; progress does not extend it. |
 
+Release-note compatibility notice: configuration using `[mcp]`, `auth`,
+`oauth_*` or `resources` does not load in earlier builds (unknown sections or
+keys). Live testing uses a separate `PLAK_HOME` so the installed build's
+configuration stays readable. This is configuration forward-incompatibility,
+independent of session export/import.
+
 A key of the other transport is a load error, and so is an `oauth_*` key
 without `auth = "oauth"` or `auth` beside `bearer_secret`. The canonical
 rendering a session freezes spells out `auth`, the `oauth_*` keys and

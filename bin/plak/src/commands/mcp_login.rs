@@ -210,7 +210,12 @@ pub(crate) fn logout(
                 McpLocalRetirement::NoRevocationEndpoint => {
                     "not revoked: its authorization server offers no revocation"
                 }
-                McpLocalRetirement::Unusable => "not revoked: this build cannot use the login",
+                McpLocalRetirement::Unusable => {
+                    "not revoked: the login is not usable (quarantined, expired or unreadable)"
+                }
+                McpLocalRetirement::DefinitionChanged => {
+                    "not revoked: the server definition changed"
+                }
                 _ => "not revoked",
             };
             format!("retired the login of mcp server {id} here, {why}; {remains}")

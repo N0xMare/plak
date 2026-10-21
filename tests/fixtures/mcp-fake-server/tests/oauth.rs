@@ -85,6 +85,38 @@ impl Setup {
     }
 }
 
+/// Advances this test login to its proactive-refresh boundary without waiting
+/// on wall time. The original lifetime remains intact.
+fn age_login(setup: &Setup) -> TestResult {
+    use plakous_auth::{
+        CredentialRecord, CredentialSlotId, CredentialStatus, PrivateCredentialStore, SecretBytes,
+        SubscriptionIntegrationProfileId,
+    };
+    let store = PrivateCredentialStore::open_slot(
+        setup.home.path().join("remote").join("credential.json"),
+        SubscriptionIntegrationProfileId::new("plakous.mcp.oauth.compat.2026-07-28.r1")?,
+        CredentialSlotId::new("mcp-oauth")?,
+    )?;
+    let fence = store.load()?.ok_or("no login")?;
+    let mut payload: serde_json::Value = store
+        .inspect_payload(|bytes| serde_json::from_slice(bytes.expose_secret()))?
+        .ok_or("no payload")??;
+    let lifetime = payload["lifetime"].as_u64().ok_or("no lifetime")?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    payload["expires_at"] = (now + 300.min(lifetime / 2)).into();
+    let replacement = CredentialRecord::new(
+        fence.profile_id().clone(),
+        fence.account_binding().clone(),
+        fence.generation().next()?,
+        CredentialStatus::Ready,
+        SecretBytes::new(serde_json::to_vec(&payload)?),
+    )?;
+    store.replace(fence.generation(), &replacement)?;
+    Ok(())
+}
+
 /// Runs a local login to completion, the scripted browser following the
 /// authorization redirect to the loopback callback.
 async fn local_login(pool: &McpPool, spec: &McpServerSpec) -> TestResult<McpOAuthStatus> {
@@ -412,6 +444,21 @@ async fn a_preregistered_client_authenticates_with_its_secret_only_at_its_issuer
         refused.message().contains("offers no client registration"),
         "{refused}"
     );
+    let missing_secret = setup.spec(
+        setup
+            .settings()
+            .with_issuer(&setup.gate.issuer())?
+            .with_client(
+                "client-9",
+                Some(Arc::new(|| {
+                    panic!("local logout must not resolve a deleted secret")
+                })),
+            )?,
+    )?;
+    assert_eq!(
+        pool.logout(&missing_secret, true).await?,
+        McpLogoutOutcome::RetiredLocally(McpLocalRetirement::Requested)
+    );
     Ok(())
 }
 
@@ -443,8 +490,7 @@ async fn echo(
 
 #[tokio::test]
 async fn calls_carry_the_token_only_to_the_endpoint_and_refresh_it_before_expiry() -> TestResult {
-    // A token that expires within the five-minute lead refreshes before
-    // every request; each refresh spends the rotated refresh token.
+    // Short-lived tokens are not immediately due again after issue.
     let setup = setup(OAuthConfig {
         access_lifetime: 60,
         ..OAuthConfig::default()
@@ -464,7 +510,20 @@ async fn calls_carry_the_token_only_to_the_endpoint_and_refresh_it_before_expiry
     assert_eq!(setup.calls.calls(), ["echo", "echo"]);
 
     let refreshes = setup.refreshes();
-    assert!(refreshes.len() >= 3, "{}", refreshes.len());
+    assert!(refreshes.is_empty());
+    age_login(&setup)?;
+    assert_eq!(
+        echo(&registry, &workspace).await?.kind(),
+        ToolOutcomeKind::Success
+    );
+    assert_eq!(setup.refreshes().len(), 1);
+    for _ in 0..2 {
+        assert_eq!(
+            echo(&registry, &workspace).await?.kind(),
+            ToolOutcomeKind::Success
+        );
+    }
+    let refreshes = setup.refreshes();
     let resource = setup.fixture.url();
     let mut spent = Vec::new();
     for request in &refreshes {
@@ -552,6 +611,7 @@ async fn a_start_renews_a_rejected_token_and_retries_once() -> TestResult {
     // A grant the server revoked cannot renew: the login is retired and the
     // start names the remedy.
     let pool = McpPool::new();
+    local_login(&pool, &spec).await?;
     setup.gate.reject_access_tokens();
     setup.gate.reject_refresh_tokens();
     let refused = pool
@@ -567,6 +627,13 @@ async fn a_start_renews_a_rejected_token_and_retries_once() -> TestResult {
         "{refused}"
     );
     assert_eq!(spec.oauth_status()?, Some(McpOAuthStatus::NotLoggedIn));
+    let next = pool
+        .lease(spec, Arc::clone(&workspace.environment))
+        .await
+        .err()
+        .ok_or("retired login started")?;
+    assert_eq!(next.message().matches("run login remote").count(), 1);
+    assert!(next.message().contains("not logged in"));
     Ok(())
 }
 
@@ -593,37 +660,38 @@ async fn insufficient_scope_names_the_step_up_login_and_nothing_runs() -> TestRe
 }
 
 #[tokio::test]
-async fn a_refresh_the_server_fails_keeps_the_login_for_the_next_one() -> TestResult {
-    let setup = setup(OAuthConfig {
-        access_lifetime: 60,
-        ..OAuthConfig::default()
-    })
-    .await?;
-    let spec = setup.spec(setup.settings())?;
-    let pool = McpPool::new();
-    local_login(&pool, &spec).await?;
-    let workspace = workspace()?;
-    setup.gate.fail_token_requests(1);
-    let refused = pool
-        .lease(spec.clone(), Arc::clone(&workspace.environment))
-        .await
-        .err()
-        .ok_or("a failed refresh started")?;
-    assert!(
-        refused.message().contains("could not renew its login")
-            && refused.message().contains("HTTP 503"),
-        "{refused}"
-    );
-    assert!(matches!(
-        spec.oauth_status()?,
-        Some(McpOAuthStatus::LoggedIn { .. })
-    ));
-    let registry = registry(&pool, spec, &workspace).await?;
-    assert_eq!(
-        echo(&registry, &workspace).await?.kind(),
-        ToolOutcomeKind::Success
-    );
-    pool.shutdown().await;
+async fn a_refresh_the_server_fails_quarantines_the_login() -> TestResult {
+    for status in [408, 429, 500, 503] {
+        let setup = setup(OAuthConfig {
+            access_lifetime: 60,
+            ..OAuthConfig::default()
+        })
+        .await?;
+        let spec = setup.spec(setup.settings())?;
+        let pool = McpPool::new();
+        local_login(&pool, &spec).await?;
+        let workspace = workspace()?;
+        setup.gate.fail_token_requests_with_status(1, status);
+        setup.gate.reject_access_tokens();
+        let refused = pool
+            .lease(spec.clone(), Arc::clone(&workspace.environment))
+            .await
+            .err()
+            .ok_or("a failed refresh started")?;
+        assert!(
+            refused.message().contains("could not be renewed")
+                && refused.message().contains(&format!("HTTP {status}")),
+            "{refused}"
+        );
+        assert_eq!(spec.oauth_status()?, Some(McpOAuthStatus::Quarantined));
+        assert!(
+            pool.lease(spec, Arc::clone(&workspace.environment))
+                .await
+                .is_err()
+        );
+        assert_eq!(setup.refreshes().len(), 1, "a quarantined token was reused");
+        pool.shutdown().await;
+    }
     Ok(())
 }
 
@@ -702,5 +770,173 @@ async fn hostile_scopes_never_reach_a_step_up_command() -> TestResult {
         assert_eq!(setup.calls.calls(), Vec::<String>::new());
         pool.shutdown().await;
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn short_lifetimes_refresh_once_and_fresh_tokens_are_not_immediately_due() -> TestResult {
+    for lifetime in [120, 600] {
+        let setup = setup(OAuthConfig {
+            access_lifetime: lifetime,
+            ..OAuthConfig::default()
+        })
+        .await?;
+        let spec = setup.spec(setup.settings())?;
+        let pool = McpPool::new();
+        local_login(&pool, &spec).await?;
+        let workspace = workspace()?;
+        let registry = registry(&pool, spec, &workspace).await?;
+        for _ in 0..3 {
+            assert_eq!(
+                echo(&registry, &workspace).await?.kind(),
+                ToolOutcomeKind::Success
+            );
+        }
+        assert!(setup.refreshes().is_empty());
+        for expected_refreshes in 1..=2 {
+            age_login(&setup)?;
+            for _ in 0..3 {
+                assert_eq!(
+                    echo(&registry, &workspace).await?.kind(),
+                    ToolOutcomeKind::Success
+                );
+            }
+            assert_eq!(setup.refreshes().len(), expected_refreshes);
+        }
+        pool.shutdown().await;
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_second_rejected_generation_requires_login_without_another_refresh() -> TestResult {
+    let setup = setup(OAuthConfig::default()).await?;
+    let spec = setup.spec(setup.settings())?;
+    let pool = McpPool::new();
+    local_login(&pool, &spec).await?;
+    let workspace = workspace()?;
+    let registry = registry(&pool, spec.clone(), &workspace).await?;
+    setup.gate.reject_access_tokens();
+    echo(&registry, &workspace).await?;
+    pool.shutdown().await;
+    // A fresh pool must enforce the stored renewal-origin marker too.
+    let pool = McpPool::new();
+    let registry = self::registry(&pool, spec, &workspace).await?;
+    setup.gate.reject_access_tokens();
+    for _ in 0..2 {
+        let refused = echo(&registry, &workspace).await?;
+        assert_eq!(refused.kind(), ToolOutcomeKind::Failure);
+        assert_eq!(refused.joined_text().matches("run login remote").count(), 1);
+    }
+    assert_eq!(setup.refreshes().len(), 1);
+    assert_eq!(setup.calls.calls(), Vec::<String>::new());
+    pool.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn concurrent_rejected_calls_share_one_refresh() -> TestResult {
+    let setup = setup(OAuthConfig::default()).await?;
+    let spec = setup.spec(setup.settings())?;
+    let pool = McpPool::new();
+    local_login(&pool, &spec).await?;
+    let workspace = workspace()?;
+    let registry = registry(&pool, spec, &workspace).await?;
+    setup.gate.reject_access_tokens_together(2);
+    let (first, second) = tokio::join!(echo(&registry, &workspace), echo(&registry, &workspace));
+    let first = first?;
+    let second = second?;
+    assert_eq!(first.kind(), ToolOutcomeKind::Failure);
+    assert_eq!(second.kind(), ToolOutcomeKind::Failure);
+    assert_eq!(setup.refreshes().len(), 1);
+    assert_eq!(
+        echo(&registry, &workspace).await?.kind(),
+        ToolOutcomeKind::Success
+    );
+    pool.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn logout_after_an_issuer_change_retires_without_resolving_the_secret() -> TestResult {
+    let setup = setup(OAuthConfig {
+        registration: false,
+        confidential_client: Some(("client-9".to_owned(), "s3cret".to_owned())),
+        ..OAuthConfig::default()
+    })
+    .await?;
+    let settings = setup
+        .settings()
+        .with_issuer(&setup.gate.issuer())?
+        .with_client(
+            "client-9",
+            Some(Arc::new(|| Ok(SensitiveBytes::new(b"s3cret".to_vec())))),
+        )?;
+    let spec = setup.spec(settings)?;
+    let pool = McpPool::new();
+    local_login(&pool, &spec).await?;
+    let changed = setup
+        .settings()
+        .with_issuer("https://different.example.com")?
+        .with_client(
+            "client-9",
+            Some(Arc::new(|| {
+                panic!("must not resolve a different issuer's secret")
+            })),
+        )?;
+    let changed = setup.spec(changed)?;
+    assert_eq!(
+        pool.logout(&changed, false).await?,
+        McpLogoutOutcome::RetiredLocally(McpLocalRetirement::DefinitionChanged)
+    );
+    assert!(setup.gate.requests_to("/revoke").is_empty());
+    assert_eq!(spec.oauth_status()?, Some(McpOAuthStatus::NotLoggedIn));
+    Ok(())
+}
+
+#[tokio::test]
+async fn failed_revocation_retires_nothing_and_local_logout_needs_no_secret() -> TestResult {
+    let setup = setup(OAuthConfig::default()).await?;
+    let spec = setup.spec(setup.settings())?;
+    let pool = McpPool::new();
+    local_login(&pool, &spec).await?;
+    setup.gate.fail_revocation(true);
+    let refused = pool
+        .logout(&spec, false)
+        .await
+        .err()
+        .ok_or("failed revocation succeeded")?;
+    assert!(refused.message().contains("login was not retired"));
+    assert_eq!(spec.oauth_status()?, Some(McpOAuthStatus::Quarantined));
+    assert_eq!(
+        pool.logout(&spec, true).await?,
+        McpLogoutOutcome::RetiredLocally(McpLocalRetirement::Requested)
+    );
+    assert_eq!(spec.oauth_status()?, Some(McpOAuthStatus::NotLoggedIn));
+    Ok(())
+}
+
+#[tokio::test]
+async fn invalid_grant_retires_the_login_and_each_call_has_one_remedy() -> TestResult {
+    let setup = setup(OAuthConfig::default()).await?;
+    let spec = setup.spec(setup.settings())?;
+    let pool = McpPool::new();
+    local_login(&pool, &spec).await?;
+    let workspace = workspace()?;
+    let registry = registry(&pool, spec.clone(), &workspace).await?;
+    setup.gate.reject_access_tokens();
+    setup.gate.reject_refresh_tokens();
+    let refused = echo(&registry, &workspace).await?;
+    assert_eq!(refused.kind(), ToolOutcomeKind::Failure);
+    assert!(refused.joined_text().contains("invalid_grant"));
+    assert_eq!(refused.joined_text().matches("run login remote").count(), 1);
+    assert_eq!(spec.oauth_status()?, Some(McpOAuthStatus::NotLoggedIn));
+    let next = echo(&registry, &workspace).await?;
+    assert_eq!(next.kind(), ToolOutcomeKind::Failure);
+    assert!(next.joined_text().contains("not logged in"));
+    assert_eq!(next.joined_text().matches("run login remote").count(), 1);
+    assert_eq!(setup.refreshes().len(), 1);
+    assert_eq!(setup.calls.calls(), Vec::<String>::new());
+    pool.shutdown().await;
     Ok(())
 }

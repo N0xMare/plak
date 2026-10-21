@@ -523,10 +523,11 @@ state, one private credential record per server id:
 The `secrets/mcp-oauth/` and `<id>/` directories are `0700` and are created
 on first login; the record and its locks are the Plakous private store's
 (§3.2) under the profile `plakous.mcp.oauth.compat.2026-07-28.r1`. Its
-payload (version 1) binds the server's canonical URI, the issuer and the
-client id (whose digest is also the record's account binding) and holds the
+payload (version 1) binds the server's
+canonical URI, the issuer and the client id (whose digest is also the record's account binding) and holds the
 resource indicator the metadata confirmed, the token endpoint's client
-authentication method, the access token, its expiry, the refresh token, the
+authentication method, the access token, its expiry and original lifetime,
+whether it was renewed after a 401, the refresh token, the
 requested scope, the token and revocation endpoints, and a dynamic
 registration's secret when one was issued; a pre-registered client's secret
 is resolved from its named secret at each use and never stored. No token, client
@@ -659,8 +660,9 @@ stored format changes.
 An MCP server login is versioned the same way: the envelope by its
 `format_version` (2), the payload by its `version` (1), and the profile id by
 date then revision. Its refresh is the same claimed refresh: a definite
-rejection (`invalid_grant`) retires it as login-required, an outcome that may
-have reached the token endpoint quarantines it, and a returned refresh token
+rejection (`invalid_grant`) retires it locally, an outcome that may
+have reached the token endpoint (including HTTP 408, 429 or 5xx) quarantines it,
+and a returned refresh token
 replaces the stored one in the claimed generation, so a rotated token is
 never sent twice. A quarantined or login-required MCP login fails that
 server's calls without sending them and names `plak mcp login <id>`.
@@ -734,7 +736,8 @@ credential material never crosses it.
 
 An MCP server login is used only by the server id it was stored for, and
 only while the record's canonical URI, issuer and client id equal what the
-server's current definition and discovery name; a definition that moved to
+server's current definition requires (URL and any issuer/client pin); runtime
+use does not rediscover metadata. A definition that moved to
 another URL, issuer or client reads the login as belonging to another server
 and refuses, naming `plak mcp login <id>`. Its access token is sent only to
 that exact endpoint URL, never on a redirect (there is none) and never
@@ -842,7 +845,9 @@ user code is shown only to the operator, with the anti-phishing line.
 `plak mcp logout <id>` revokes at the authorization server when it advertised
 a revocation endpoint, and retires locally (saying the grant may remain)
 otherwise or with `--local`; as with `plak logout`, a revocation that fails
-retires nothing.
+retires nothing. A changed URL, issuer or client retires locally with a reason,
+without releasing a configured client secret to the old issuer. Local logout
+never requires that secret.
 
 Logout is local retirement or, where the provider offers one, a remote
 revocation. Where no remote revoke exists, logout retires the local credential

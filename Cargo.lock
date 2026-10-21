@@ -4309,6 +4309,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "plakous-auth",
  "plakous-http",
  "plakous-mcp",
  "plakous-model",

@@ -158,6 +158,9 @@ struct AuthState {
     required_scope: Option<String>,
     resource_requests: u32,
     token_failures: u32,
+    token_failure_status: Option<u16>,
+    revocation_failure: bool,
+    rejection_barrier: Option<(std::sync::Arc<tokio::sync::Barrier>, usize)>,
 }
 
 /// The authorization server and resource gate of one fixture.
@@ -256,6 +259,36 @@ impl OAuthGate {
         self.lock().access.clear();
     }
 
+    /// Rejects the current tokens, withholding the first responses until all
+    /// `parties` requests have presented the rejected generation.
+    pub fn reject_access_tokens_together(&self, parties: usize) {
+        let mut state = self.lock();
+        state.access.clear();
+        state.rejection_barrier = Some((
+            std::sync::Arc::new(tokio::sync::Barrier::new(parties)),
+            parties,
+        ));
+    }
+
+    pub(crate) async fn wait_for_rejection(&self) {
+        let barrier = {
+            let mut state = self.lock();
+            if let Some((barrier, remaining)) = state.rejection_barrier.as_mut() {
+                let barrier = std::sync::Arc::clone(barrier);
+                *remaining -= 1;
+                if *remaining == 0 {
+                    state.rejection_barrier = None;
+                }
+                Some(barrier)
+            } else {
+                None
+            }
+        };
+        if let Some(barrier) = barrier {
+            barrier.wait().await;
+        }
+    }
+
     /// Invalidates every refresh token, as a revoked grant would.
     pub fn reject_refresh_tokens(&self) {
         self.lock().refresh.clear();
@@ -263,7 +296,19 @@ impl OAuthGate {
 
     /// Answers the next `count` token requests with HTTP 503.
     pub fn fail_token_requests(&self, count: u32) {
-        self.lock().token_failures = count;
+        self.fail_token_requests_with_status(count, 503);
+    }
+
+    /// Answers token requests with a chosen failure status.
+    pub fn fail_token_requests_with_status(&self, count: u32, status: u16) {
+        let mut state = self.lock();
+        state.token_failures = count;
+        state.token_failure_status = Some(status);
+    }
+
+    /// Makes revocation fail before it changes any grant.
+    pub fn fail_revocation(&self, fail: bool) {
+        self.lock().revocation_failure = fail;
     }
 
     /// Changes the scope MCP requests require.
@@ -433,6 +478,9 @@ impl OAuthGate {
                 }),
             ),
             ("POST", "/revoke") => {
+                if self.lock().revocation_failure {
+                    return Some(Reply::status(503));
+                }
                 if let Some(token) = field("token") {
                     let mut state = self.lock();
                     state.refresh.remove(&token);
@@ -516,7 +564,7 @@ impl OAuthGate {
             let mut state = self.lock();
             if state.token_failures > 0 {
                 state.token_failures -= 1;
-                return Reply::status(503);
+                return Reply::status(state.token_failure_status.unwrap_or(503));
             }
         }
         if let Some((id, secret)) = &self.config.confidential_client {
