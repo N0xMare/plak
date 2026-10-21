@@ -74,8 +74,8 @@ GROWTH_CALL_LINES = 20
 # lines and 2.0 for the digit lines, so 40 digit lines cost about what 20
 # base64 lines do per call (~29k tokens) and the page math is unchanged.
 CLAUDE_GROWTH_CALL_LINES = 40
-# `OPENROUTER_CUSTOM_MAX_PROJECTED_INPUT` in crates/hosting/hosted/src/openrouter.rs.
-OPENROUTER_CUSTOM_INPUT = 65_536
+# Conservative test-sizing fallback for unknown routes, not a product limit.
+UNKNOWN_WINDOW_PAGE = PAGE_TOKENS
 _DIGITS_PER_GROUP = 5
 # The pre-compaction fact is a neutral code word. "Read token.txt ... do not
 # print it ... write the token from memory" read like secret handling, and
@@ -117,10 +117,10 @@ def catalog_window(model: str) -> int | None:
 
     Spec 01 §6.7 and the user guide: `grok-4.7` is 256k, `grok-4.6` is 500k,
     Claude is 1M, OpenAI and Codex rows are 272k except `gpt-6.1-sol`, whose
-    Codex catalog row reports `context_length=500000`. DeepSeek reports 1M, but
-    Plak's OpenRouter custom route projects at most 65,536 input tokens
-    (`OPENROUTER_CUSTOM_MAX_PROJECTED_INPUT`), which is the window that
-    compacts. Other OpenRouter models are not in that list.
+    Codex catalog row reports `context_length=500000`. OpenRouter's admitted
+    ceiling depends on authenticated endpoint limits and the output reservation;
+    the live operator supplies the admitted figure in PLAK_LIVE_INPUT_CEILING
+    rather than substituting a model window or a hidden fixed cap.
     """
     if model == "grok-4.7":
         return 256_000
@@ -128,8 +128,17 @@ def catalog_window(model: str) -> int | None:
         return 500_000
     if model == "gpt-6.1-sol":
         return 500_000
-    if model.startswith("deepseek/"):
-        return OPENROUTER_CUSTOM_INPUT
+    if "/" in model:
+        raw = os.environ.get("PLAK_LIVE_INPUT_CEILING", "").strip()
+        if not raw:
+            return None
+        try:
+            ceiling = int(raw)
+        except ValueError as error:
+            raise ScenarioFailure(HARNESS, "PLAK_LIVE_INPUT_CEILING must be a positive admitted token count") from error
+        if ceiling <= 0:
+            raise ScenarioFailure(HARNESS, "PLAK_LIVE_INPUT_CEILING must be positive")
+        return ceiling
     if model.startswith("claude-"):
         return 1_000_000
     if model.startswith("gpt-"):
@@ -226,7 +235,7 @@ def child_pages(window: int | None, pack: str, call_lines: int,
 
     The margin is `GROWTH_EXTRA_READS` sequential reads, at least one page.
     """
-    window = window or OPENROUTER_CUSTOM_INPUT
+    window = window or UNKNOWN_WINDOW_PAGE
     page_lines = child_page_lines(pack, call_lines)
     per_page = int(page_lines * LINE_BYTES / child_page_bytes_per_token(pack))
     extra = max(1, GROWTH_EXTRA_READS * call_lines // page_lines)
@@ -310,7 +319,7 @@ def growth_call_lines(pack: str, window: int | None = None) -> int:
 
     On a small window one call stays near an eighth of it (one token per byte
     is the observation measure), so a fold leaves room below the trigger: 20
-    base64 lines are 29k bytes, nearly half of a 65,536 window.
+    base64 lines are 29k bytes; sizing uses the admitted window.
     """
     lines = CLAUDE_GROWTH_CALL_LINES if pack == "claude" else GROWTH_CALL_LINES
     if small_window(window):
@@ -436,7 +445,7 @@ def overflow_plan(window: int | None, pack: str, line_count: int,
     `OVERFLOW_EXTRA_ROUNDS` so a late batch lands on an almost full window.
     An unknown window is planned as the smallest one the driver knows.
     """
-    window = window or OPENROUTER_CUSTOM_INPUT
+    window = window or UNKNOWN_WINDOW_PAGE
     budget = int(round_cap_bytes(window) * OVERFLOW_CAP_SHARE)
     lines = max(1, budget // OVERFLOW_BATCH_CALLS // LINE_BYTES)
     per_round = OVERFLOW_BATCH_CALLS * lines
@@ -506,7 +515,7 @@ def growth_reads(window: int | None, pack: str, call_lines: int, line_count: int
 
     Bounded by the file.
     """
-    window = window or OPENROUTER_CUSTOM_INPUT
+    window = window or UNKNOWN_WINDOW_PAGE
     per_read = call_lines * LINE_BYTES / bulk_bytes_per_token(pack)
     reads = -(-compaction_trigger(window, model) // int(per_read)) + GROWTH_EXTRA_READS
     return max(1, min(reads, line_count // call_lines))
@@ -1169,6 +1178,8 @@ class LongSession:
                              else random.Random(env.fixture_seed).randbytes)
         self.pages = growth_pages(route)
         self.window = catalog_window(route.model)
+        if "/" in route.model and self.window is None:
+            raise ScenarioFailure(HARNESS, "set PLAK_LIVE_INPUT_CEILING to this OpenRouter session's admitted ceiling")
         self.call_lines = growth_call_lines(pack_of(route), self.window)
 
     def repo(self, name: str, token: str, bulk: bool) -> tuple[Path, int]:

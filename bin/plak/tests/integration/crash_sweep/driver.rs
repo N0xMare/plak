@@ -517,6 +517,21 @@ fn cut_after_kill(
     reopened.send(&quit_frame());
     let first = reopened.finish();
     assert!(first.status.success(), "follow-up failed: {}", first.stderr);
+    if shape == "non_stop_finish_length"
+        && before.original_answers == 0
+        && recovered.original_answers == 1
+    {
+        use plak::store::session_records::SessionRecordStore as _;
+        let store = plak::store::session_records::SqliteSessionStore::new(summary::paths(fixture));
+        let views = store.load_views(session).unwrap().unwrap();
+        assert!(
+            views.rows.values().any(|row| matches!(row,
+                plakous_hosted::sessions::TranscriptRow::Notice(notice)
+                    if notice.text.contains("answer truncated at its")
+            )),
+            "recovered Length answer must retain its canonical warning"
+        );
+    }
     let stable = summary::read_converged(fixture);
     invariants::quiescent(&stable);
     assert_eq!(

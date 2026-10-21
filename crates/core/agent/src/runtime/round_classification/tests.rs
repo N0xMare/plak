@@ -213,7 +213,7 @@ fn round_classifier_output_limit_uses_prepared_wire_bound() -> TestResult {
             classify_round(RoundClassificationInput {
                 response: &response,
                 history: &ConversationView::default(),
-                over_budget: true,
+                over_budget: false,
                 wire_output_limit,
             })
         else {
@@ -365,6 +365,10 @@ fn round_classifier_driver_adapter_rows() {
             RoundClassificationError::InvalidDisposition(model_error()),
             false,
         ),
+        (
+            RoundClassificationError::NonRetryableOutput(model_error()),
+            false,
+        ),
         (RoundClassificationError::RoundLimit, false),
     ] {
         let action = round_failure_action(&error);
@@ -374,22 +378,46 @@ fn round_classifier_driver_adapter_rows() {
 }
 
 #[test]
-fn round_classifier_length_without_calls_is_output_limit_with_wire_bound() -> TestResult {
-    let response = response(FinishReason::Length, vec![], false)?;
-    let bound = NonZeroU32::new(4096).ok_or("bound")?;
+fn round_classifier_length_visible_text_is_terminal_even_over_budget() -> TestResult {
     for over_budget in [false, true] {
-        let Err(RoundClassificationError::IncompleteOutput(error)) =
-            classify_round(RoundClassificationInput {
-                response: &response,
-                history: &ConversationView::default(),
-                over_budget,
-                wire_output_limit: Some(bound),
-            })
-        else {
-            return Err("truncated text accepted as completion".into());
+        assert!(matches!(
+            classify(&response(FinishReason::Length, vec![], false)?, over_budget),
+            Ok(HostedRoundDisposition::Terminal)
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn round_classifier_empty_length_and_hosted_effects_never_replay_wrap_up() -> TestResult {
+    let plan = digest(DigestDomain::RequestPlan)?;
+    for hosted_effect in [false, true] {
+        let output = if hosted_effect {
+            vec![item(vec![call(1, hosted()?, ToolCallState::Completed)?])?]
+        } else {
+            vec![]
         };
-        assert_eq!(error.kind(), ModelErrorKind::OutputLimit);
-        assert_eq!(error.wire_output_limit(), Some(bound));
+        let response = ModelResponse::new(
+            output,
+            FinishDetails::new(FinishReason::Length, None),
+            None,
+            None,
+            plan,
+        );
+        for over_budget in [false, true] {
+            let Err(error) = classify(&response, over_budget) else {
+                return Err("empty Length is not successful".into());
+            };
+            assert_eq!(
+                round_failure_action(&error).retry_output_limit,
+                !hosted_effect && !over_budget
+            );
+            assert!(matches!(
+                error,
+                RoundClassificationError::IncompleteOutput(_)
+                    | RoundClassificationError::NonRetryableOutput(_)
+            ));
+        }
     }
     Ok(())
 }

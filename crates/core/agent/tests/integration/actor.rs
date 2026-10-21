@@ -258,6 +258,17 @@ fn text_finish_scenario(
     let plan = descriptor.validate_request(request.clone(), ValidationMode::Strict)?;
     let digest = plan.digest();
     if text.is_empty() {
+        let item = ConversationItem::new(
+            id::<EntryId>(entry)?,
+            Actor::Assistant,
+            vec![ContentBlock::Reasoning(ReasoningBlock::new(
+                ReasoningVisibility::Summary,
+                Some("thinking".to_owned()),
+                None,
+            )?)],
+            Provenance::ModelOutput,
+        )?;
+        let location = OutputLocation::new(0, 0);
         return Ok(plakous_test_support::ModelScenario::new(
             plakous_test_support::ExpectedRequest::Any,
             start,
@@ -265,9 +276,25 @@ fn text_finish_scenario(
                 plakous_test_support::ScenarioStep::Emit(ModelEvent::ResponseStarted(
                     ResponseStarted::new(None, digest),
                 )),
+                plakous_test_support::ScenarioStep::Emit(ModelEvent::BlockStarted(
+                    BlockStarted::new(
+                        item.id(),
+                        location,
+                        BlockStart::Reasoning {
+                            visibility: ReasoningVisibility::Summary,
+                            replay: None,
+                        },
+                    ),
+                )),
+                plakous_test_support::ScenarioStep::Emit(ModelEvent::ReasoningDelta(
+                    ReasoningDelta::new(location, b"thinking"),
+                )),
+                plakous_test_support::ScenarioStep::Emit(ModelEvent::BlockCompleted(
+                    BlockCompleted::new(location),
+                )),
                 plakous_test_support::ScenarioStep::Emit(ModelEvent::ResponseCompleted(
                     ModelResponse::new(
-                        vec![],
+                        vec![item],
                         FinishDetails::new(finish, None),
                         None,
                         None,
@@ -1516,59 +1543,99 @@ async fn budget_wrap_up_preserves_origin(instruction: bool) -> TestResult {
 
 #[tokio::test]
 async fn length_without_call_retries_then_completes_or_fails() -> TestResult {
-    for text in ["", "truncated answer"] {
-        for second_length in [false, true] {
-            let descriptor = descriptor(false, false)?;
-            let expected = request(&descriptor, 5, 7, vec![user_item()?], Vec::new())?;
-            let first = any_request_scenario(&text_finish_scenario(
-                &descriptor,
-                expected.clone(),
-                100,
-                text,
-                plakous_test_support::ScenarioStart::Immediate,
-                FinishReason::Length,
-            )?);
-            let second = any_request_scenario(&text_finish_scenario(
-                &descriptor,
-                expected,
-                101,
-                if second_length { text } else { "done" },
-                plakous_test_support::ScenarioStart::Immediate,
-                if second_length {
-                    FinishReason::Length
-                } else {
-                    FinishReason::Stop
-                },
-            )?);
-            let model = Arc::new(scripted_model(descriptor, [first, second])?);
-            let (_directory, workspace) = workspace()?;
-            let (clock, ids) = identity_sources()?;
-            let agent = agent_builder(
-                Arc::clone(&model),
-                ToolRegistryBuilder::default().freeze(),
-                workspace,
-            )?
-            .identity_sources(clock, ids)
-            .build()?;
-            let result = agent.prompt(PROMPT).await?.result().await?;
+    let text = "";
+    for second_length in [false, true] {
+        let descriptor = descriptor(false, false)?;
+        let expected = request(&descriptor, 5, 7, vec![user_item()?], Vec::new())?;
+        let first = any_request_scenario(&text_finish_scenario(
+            &descriptor,
+            expected.clone(),
+            100,
+            text,
+            plakous_test_support::ScenarioStart::Immediate,
+            FinishReason::Length,
+        )?);
+        let second = any_request_scenario(&text_finish_scenario(
+            &descriptor,
+            expected,
+            101,
+            if second_length { text } else { "done" },
+            plakous_test_support::ScenarioStart::Immediate,
             if second_length {
-                assert_eq!(
-                    result
-                        .error()
-                        .ok_or("missing output-limit failure")?
-                        .model_kind(),
-                    Some(plakous_model::ModelErrorKind::OutputLimit)
-                );
+                FinishReason::Length
             } else {
-                assert_completed(&result, "done")?;
-            }
-            assert_eq!(model.captured_plans().len(), 2);
-            assert!(
-                !request_text(model.captured_plans()[1].request()).contains("truncated answer")
+                FinishReason::Stop
+            },
+        )?);
+        let model = Arc::new(scripted_model(descriptor, [first, second])?);
+        let (_directory, workspace) = workspace()?;
+        let (clock, ids) = identity_sources()?;
+        let agent = agent_builder(
+            Arc::clone(&model),
+            ToolRegistryBuilder::default().freeze(),
+            workspace,
+        )?
+        .identity_sources(clock, ids)
+        .build()?;
+        let result = agent.prompt(PROMPT).await?.result().await?;
+        if second_length {
+            assert_eq!(
+                result
+                    .error()
+                    .ok_or("missing output-limit failure")?
+                    .model_kind(),
+                Some(plakous_model::ModelErrorKind::OutputLimit)
             );
-            agent.shutdown().await?;
+        } else {
+            assert_completed(&result, "done")?;
         }
+        assert_eq!(model.captured_plans().len(), 2);
+        assert!(
+            result
+                .conversation()
+                .items()
+                .iter()
+                .flat_map(ConversationItem::blocks)
+                .all(|block| !matches!(block, ContentBlock::Reasoning(_)))
+        );
+        agent.shutdown().await?;
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn visible_length_answer_is_committed_without_retry() -> TestResult {
+    let descriptor = descriptor(false, false)?;
+    let expected = request(&descriptor, 5, 7, vec![user_item()?], Vec::new())?;
+    let scenario = any_request_scenario(&text_finish_scenario(
+        &descriptor,
+        expected,
+        100,
+        "truncated answer",
+        plakous_test_support::ScenarioStart::Immediate,
+        FinishReason::Length,
+    )?);
+    let wire = NonZeroU32::new(64).ok_or("wire bound")?;
+    let model = Arc::new(scripted_model(descriptor, [scenario])?.with_prepared_output_limit(wire));
+    let (_directory, workspace) = workspace()?;
+    let (clock, ids) = identity_sources()?;
+    let agent = agent_builder(
+        Arc::clone(&model),
+        ToolRegistryBuilder::default().freeze(),
+        workspace,
+    )?
+    .identity_sources(clock, ids)
+    .build()?;
+    let result = agent.prompt(PROMPT).await?.result().await?;
+    assert_completed(&result, "truncated answer")?;
+    assert_eq!(result.wire_output_limit(), Some(wire));
+    let TurnResultOutcome::Completed(response) = result.outcome() else {
+        return Err("not completed".into());
+    };
+    assert_eq!(response.finish().reason(), FinishReason::Length);
+    assert!(result.conversation().items().iter().flat_map(ConversationItem::blocks).any(|block| matches!(block, ContentBlock::Text(text) if text.text() == "truncated answer")));
+    assert_eq!(model.captured_plans().len(), 1);
+    agent.shutdown().await?;
     Ok(())
 }
 

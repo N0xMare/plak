@@ -967,8 +967,8 @@ def committed_compactions(records: list[dict]) -> int:
 # The summary text is at most 8_192 tokens inside a 16_384 output bound, so
 # 10_000 tokens of older tool text (bytes/4) stays larger than that summary.
 # The read must also fit one turn's observation allowance, which charges one
-# token per wire byte (spec 01 §10.3): an OpenRouter custom route caps projected
-# input at 65_536, and a larger read is clipped and ends the turn ContextLimit.
+# token per wire byte (spec 01 §10.3). OpenRouter's admitted input depends on
+# endpoint context/prompt limits and the output reservation, not a fixed 64K cap.
 COMPACTION_FOLD_TOKENS = 10_000
 _FOLD_LINE = b"padding line for compaction fold; not a fact.\n"
 

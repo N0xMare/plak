@@ -2388,7 +2388,7 @@ mod tests {
         let bound = openrouter_output_bound(&evidence, wire, true).unwrap();
         assert_eq!(bound.get(), 32_768);
         let input = openrouter_maximum_projected_input(&evidence, wire, true, bound).unwrap();
-        assert_eq!(input, 65_536);
+        assert_eq!(input, 131_072);
         assert!(input + u64::from(bound.get()) <= evidence.context_length());
     }
 
@@ -2451,6 +2451,7 @@ mod tests {
         Equal,
         Changed,
         ToolOmitting,
+        PreviousEnvelope,
     }
 
     async fn pi_hub_local_route_evidence(
@@ -2801,6 +2802,14 @@ mod tests {
             .map_err(|e| format!("behavior: {}", e.message()))?;
             let max_input = openrouter_maximum_projected_input(evidence, wire, false, bound)
                 .map_err(|e| format!("input: {}", e.message()))?;
+            // Reconstruct the previous release's admitted input envelope; no
+            // production importer or compatibility path is introduced.
+            let max_input =
+                if drift == Some(CatalogDrift::PreviousEnvelope) && !spec.opening_durable_session {
+                    max_input.min(65_536)
+                } else {
+                    max_input
+                };
             let contract = pi_hub_context_contract(&route, evidence.context_length(), max_input);
             let configured =
                 plakous_openrouter::OpenRouterChatLanguageModel::configured_gateway_managed_behavior(
@@ -2884,7 +2893,11 @@ mod tests {
             requests.len(),
             match drift {
                 None => 2,
-                Some(CatalogDrift::Changed | CatalogDrift::ToolOmitting) => 4,
+                Some(
+                    CatalogDrift::Changed
+                    | CatalogDrift::ToolOmitting
+                    | CatalogDrift::PreviousEnvelope,
+                ) => 4,
                 Some(CatalogDrift::Equal) => 5,
             }
         );
@@ -2970,6 +2983,23 @@ mod tests {
                 result.expect("equal admission reopens and resumes");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn previous_openrouter_input_envelope_refuses_exact_reopen() {
+        use crate::agent::SessionToolFence;
+        use crate::agent_tree_tools::TopologyVocabulary;
+        let error = pi_hub_local(
+            CompositionSelection::Direct,
+            false,
+            TopologyVocabulary::WaitStop,
+            TopologyVocabulary::WaitStop,
+            SessionToolFence::Full,
+            Some(CatalogDrift::PreviousEnvelope),
+        )
+        .await
+        .expect_err("old input contract must not be silently replaced");
+        assert!(error.starts_with("reopen [Revalidation]"), "{error}");
     }
 
     #[tokio::test]

@@ -2352,6 +2352,14 @@ mod tests {
                     .gateway_maximum_projected_input(protocol, false, bound)
                     .is_err()
             );
+            let mut constrained = base.clone();
+            constrained.context_length = 1_000_000;
+            constrained.endpoints[0].max_prompt_tokens = Some(100_000);
+            constrained.endpoints[0].context_length = Some(100_000);
+            assert_eq!(
+                constrained.gateway_maximum_projected_input(protocol, false, bound)?,
+                67_232
+            );
             let mut large = base.clone();
             large.context_length = 1_000_000;
             large.endpoints[0].max_prompt_tokens = None;
@@ -2491,9 +2499,9 @@ mod tests {
         assert_eq!(
             identities,
             [
-                "a134bd5e2289d9eb769763a1c9e89176a022d3868beac960041fa0213c26d3c9",
-                "b0f7e177a2314798b479106260c1b6948b6a94a69601e801c1c379a0f8f246ca",
-                "4f21925f4b5bf9659f898e61bfd318d49427fd1329a187db715f868f563a1a13"
+                "f314755328e541f9c39e5826b03b3395270d9415fc8fb6f4596a347bac5d5a98",
+                "e4b2fb777f9be495f723d05ecee0fb7a76b32a29962453fcc9eab4336fe867f2",
+                "de12dc9d0dc7dad4a12e61abf43ea5db8172101dc6e72b134824ce31068c61f8"
             ]
         );
         Ok(())

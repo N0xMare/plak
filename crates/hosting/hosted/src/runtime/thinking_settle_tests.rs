@@ -406,3 +406,72 @@ fn quit_grace_fixture(deaf: bool, quit: QuitIntent, stuck_child: bool) {
         })
         .unwrap();
 }
+
+/// Consume the same admission-created Content view as TurnDrive, without a
+/// canonical projector replacing the live transcript after the turn.
+#[test]
+fn real_content_view_settles_thinking_before_tools_and_discards_terminal_length() {
+    use crate::runtime::test_support::{fresh_injected_attached_host, host_event_sink};
+    use crate::runtime::{HostRows, ToolSubjectStash, TreeSnapshotPush, TurnProjection, events};
+    use plakous::agent::AgentEventKind;
+    use plakous::sessions::{
+        AgentSessions, CreateSessionOutcome, CreateSessionRequest, SessionBackend,
+        SessionOperationId,
+    };
+    use plakous_offline_crash_harness::protocol::CrashBoundary;
+    use plakous_offline_crash_harness::{BoundaryController, scripted_runtime_binding};
+    for length in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let (mut config, _) = fresh_injected_attached_host(root.path());
+        let plan = if length {
+            script(serde_json::json!([
+                {"stream": [{"reasoning": "discard one"}], "output": "reasoning_only", "finish": "length"},
+                {"stream": [{"reasoning": "discard two"}], "output": "reasoning_only", "finish": "length"}
+            ]))
+        } else {
+            script(serde_json::json!([
+                {"stream": [{"reasoning": "before tool"}], "output": {"tool": {"name": "loopback_effect", "arguments": {}}}, "finish": "tool_calls"},
+                {"output": {"text": "done"}}
+            ]))
+        };
+        let executor = plakous::application::ApplicationExecutor::new().unwrap();
+        executor.block_on(async {
+            let controller = BoundaryController::quiet_from_evidence_path(CrashBoundary::None, root.path().join("events.jsonl")).unwrap();
+            let runtime = scripted_runtime_binding(&config.cwd, controller, plan).unwrap();
+            let sessions = AgentSessions::new(SessionBackend::sqlite(root.path().join("runtime.sqlite3")).unwrap()).unwrap();
+            let CreateSessionOutcome::Created { session, .. } = sessions.create(CreateSessionRequest::new(SessionOperationId::new("thinking:create").unwrap(), runtime)).await.unwrap() else { panic!("created"); };
+            let mut turn = session.agent().prompt("think").await.unwrap();
+            let mut content = turn.take_events().unwrap();
+            let (sender, _receiver) = host_event_sink();
+            let rows = HostRows::new(&config.state_roots, config.store.as_ref());
+            let id = config.session.id.clone();
+            let mut assistant = String::new();
+            let mut delta = String::new();
+            let mut last_flush = std::time::Instant::now();
+            let mut subjects = ToolSubjectStash::new();
+            let mut projection = TurnProjection::<TestExtension>::default();
+            let mut tree = TreeSnapshotPush::default();
+            let mut compacted = false;
+            let mut peak = 0;
+            let mut settled = 0;
+            while let Ok(event) = content.recv().await {
+                assert!(!matches!(event.kind(), AgentEventKind::Model { event: Some(model), .. } if matches!(model.as_ref(), plakous::model::ModelEvent::ResponseCompleted(_))), "the real Content view never exposes aggregate responses");
+                if matches!(event.kind(), AgentEventKind::ResponseSettled { .. }) { settled += 1; }
+                events::apply_event(&event, &config.state_roots, &rows, config.store.as_ref(), &config.home, &mut config.session, &sender, &mut assistant, &mut delta, &mut last_flush, &mut subjects, &mut projection, None, &id, &mut tree, &mut compacted, &mut peak);
+                if matches!(event.kind(), AgentEventKind::ToolStarted { .. }) {
+                    assert_eq!(activity_rows(&config.session), ["think:before tool", "tool:loopback_effect"]);
+                }
+            }
+            let result = turn.result().await.unwrap();
+            events::settle_live_thinking(&mut projection, &mut config.session, &sender);
+            assert_eq!(settled, 2);
+            if length {
+                assert_eq!(result.error().unwrap().model_kind(), Some(plakous::model::ModelErrorKind::OutputLimit));
+                assert_eq!(activity_rows(&config.session), Vec::<String>::new());
+            } else {
+                assert_eq!(activity_rows(&config.session), ["think:before tool", "tool:loopback_effect"]);
+            }
+            session.release().await.unwrap();
+        }).unwrap();
+    }
+}

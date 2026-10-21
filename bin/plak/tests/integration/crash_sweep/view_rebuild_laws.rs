@@ -10,6 +10,7 @@ const SHAPES: &[&str] = &[
     "promoted_background_job",
     "sealed_family_artifacts",
     "non_stop_finish_length",
+    "empty_length_retry",
     "non_stop_finish_refusal",
     "steer_accepted_mid_turn",
     "scheduled_compaction_in_turn",

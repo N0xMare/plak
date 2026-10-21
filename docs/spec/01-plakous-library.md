@@ -454,8 +454,9 @@ A Responses family artifact binds the stable prefix with tool selection left
 out, so the wrap-up round still continues the artifact the last ordinary round
 produced, and the next turn's first round continues the artifact the wrap-up
 produced: both keep bound replay and cache affinity (§6.1), and only the wire's
-`tool_choice` changes. Text from that round completes
-the turn normally. The note stays in canonical history for the model, and the
+`tool_choice` changes. Visible text from that round completes the turn, retaining
+a Length finish and warning when truncated (§5.5). An empty Length fails
+immediately with OutputLimit; the wrap-up never gets another retry. The note stays in canonical history for the model, and the
 runtime publishes the spent budget as its own observation at the same moment,
 because canonical history is not what a surface reads: that observation is what
 puts the reason in the transcript and the session log. Only a wrap-up round that still
@@ -1598,6 +1599,31 @@ or that recovery cannot complete itself:
 | `RetryContentFilter` | an incomplete content-filter refusal while `content_filter_retry_spent` is false | the guidance note |
 | `OverflowFold` | a provider context-overflow refusal while overflow recovery is available | `overflow_recovery_taken`; the fold's own workflow (§10.5) prepares in a later commit |
 
+**Length classification.** With no local call, a `Length` response with visible
+non-whitespace text is a terminal answer carrying `FinishReason::Length`, even
+at the route maximum. The host commits the text and publishes a turn warning:
+"answer truncated at its N-token output limit; ask to continue". `plak run`
+prints this committed answer but exits 5 (`turn_failed:output-limit`); agent
+and JSONL surfaces show a truncation notice. It is not silently retried.
+
+With no visible text (including reasoning/opaque-only output), Length instead
+means typed `OutputLimit`. It reuses `RetryOutputLimit` once at the same admitted
+bound, discarding that response and its reasoning projection; a second
+consecutive empty Length fails the turn. A successful classified round resets
+the guard. An incomplete local call also uses the existing output-limit path
+and never dispatches. Neither a wrap-up round nor a response with
+provider-hosted ToolCall/ToolResult blocks may retry: visible tool-free Length
+still commits its answer, while empty Length fails immediately. A completed
+aggregate may be empty for Length so the driver can classify this failure;
+it remains invalid as an ordinary successful Stop response. An interrupted
+retry never promotes the discarded response into canonical history or saved
+thinking activity. The content-free `ResponseSettled { discardable }` event
+reaches Content views before tool activity: a kept response settles its thinking
+at that boundary, while a discarded Length response drops it even when no retry
+is possible. `TurnResult::wire_output_limit` reads the terminal response's exact prepared receipt,
+including after recovery, so truncation warnings prefer the wire maximum over
+the product bound.
+
 `TurnBudgets` is the per-root-turn guard state: `output_limit_retry_taken`,
 `content_filter_retry_spent`, `overflow_recovery_taken`, `paid_fold_spent`,
 `pressure_fold_spent` and the admitted round count. Hosted continuation and
@@ -2719,6 +2745,9 @@ host-authored history shape as wake instructions, so
 retained or seeded history lowers on every protocol family. The failure's
 retryability still records possible duplicate inference or billing; a possible
 provider-hosted effect suppresses the guided retry and requires reconciliation.
+Likewise, a Length aggregate carrying provider-hosted ToolCall/ToolResult blocks
+is never re-dispatched: keep visible final text, or fail empty output with
+OutputLimit (§5.5).
 When the model error carries retry-delay advice, the host waits before retrying,
 with cancellation and shutdown still active. The Responses hosts attach none to
 this error: it arrives on an accepted HTTP 200 stream, whose head `Retry-After`
@@ -3063,17 +3092,15 @@ answer, and a budget sized for a visible answer alone is spent before it reaches
 one.
 
 OpenRouter's projected input ceiling is the discovered context window minus the
-reserved output bound, lowered by every eligible endpoint's prompt guarantee
-(or its context window minus that output reservation). There is no hidden
-fixed input or cost cap.
+reserved output bound, lowered by both every eligible endpoint's prompt guarantee
+and its context window minus that output reservation whenever each is reported. There is no hidden
+fixed input or cost cap. The admission identity uses `wire-admission-v3` to bind
+this derivation. Sessions pinned to the previous admission identity refuse exact
+reopen with typed Revalidation; create a new session (or export/import as a new
+session) rather than silently adopting a different admission contract.
 
-Every `Length` finish is an `OutputLimit` outcome, including a response with no
-local tool call and either empty or non-empty truncated final text. Such text
-is discarded, never promoted as a successful final answer. It enters the same
-`RetryOutputLimit` path as an incomplete local call; a second consecutive
-truncation fails the turn with typed `OutputLimit`, including when a non-empty
-answer truncates at the route maximum. The existing retry keeps the admitted
-session output bound and does not change the session's provider configuration.
+The provider-neutral Length classification and retry law is in §5.5. It applies
+to OpenRouter as to every other route.
 
 A Responses terminal with `status: incomplete` and
 `incomplete_details.reason: max_output_tokens` is accepted as a length finish
@@ -7032,7 +7059,8 @@ prompt's turn will send.
 
 ### 11.1 Events
 
-Event-kind schema version **11** carries the exact `workflow_id` on active-turn
+Event-kind schema version **12** adds the content-free `ResponseSettled`
+presentation boundary; the existing fields carry the exact `workflow_id` on active-turn
 `CompactionStarted` and `CompactionFinished`, matching `WorkflowAdmitted` and
 `WorkflowSettled` in the change feed. The started and finished observations
 name the same workflow even when no compaction row is yet present in a live

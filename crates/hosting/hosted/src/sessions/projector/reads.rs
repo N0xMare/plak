@@ -182,7 +182,9 @@ pub enum CallRead {
 pub enum TerminalRead {
     /// The terminal's operator-facing failure text.
     Failed(String),
-    /// A terminal without a failure.
+    /// A committed Length answer's exact prepared wire bound, when recorded.
+    Truncated(Option<std::num::NonZeroU32>),
+    /// A terminal without a failure or truncation.
     Other,
     /// Not retained.
     NotRetained,
@@ -358,7 +360,11 @@ pub fn plan_reads(record: &FeedRecord) -> Vec<ReadRequest> {
             } => reads.extend(operation_read(*operation_id, kind, *state).map(call)),
             FeedFact::TurnTerminal {
                 turn_id,
-                outcome: FeedTurnOutcome::Failed { .. },
+                outcome:
+                    FeedTurnOutcome::Failed { .. }
+                    | FeedTurnOutcome::Completed {
+                        finish: plakous::model::FinishReason::Length,
+                    },
                 ..
             } => reads.push(ReadRequest::Terminal {
                 branch,
@@ -388,89 +394,94 @@ pub async fn load_reads(
         if cache.read(&request).is_some() {
             continue;
         }
-        let value =
-            match request {
-                ReadRequest::Items {
-                    branch,
-                    checkpoint,
-                    first_ordinal,
-                    count,
-                    first_entry,
-                    last_entry,
-                } => ReadValue::Items(
-                    match sessions
-                        .feed_items(FeedItemsRequest {
-                            session,
-                            branch,
-                            checkpoint,
-                            first_ordinal,
-                            count,
-                            first_entry,
-                            last_entry,
-                        })
-                        .await?
-                    {
-                        FeedItemsOutcome::Items { items, .. } => {
-                            Some(items.iter().map(read_item).collect())
-                        }
-                        _ => None,
-                    },
-                ),
-                ReadRequest::Call {
-                    branch,
-                    checkpoint,
-                    target,
-                } => ReadValue::Call(
-                    match sessions
-                        .feed_call(FeedCallRequest {
-                            session,
-                            branch,
-                            checkpoint,
-                            call: match target {
-                                CallTarget::Operation(operation) => {
-                                    FeedCallTarget::Operation(operation)
-                                }
-                                CallTarget::Call(call_id) => FeedCallTarget::Call(call_id),
-                            },
-                        })
-                        .await?
-                    {
-                        FeedCallOutcome::Call { call, .. } => call_read(call),
-                        _ => CallRead::NotRetained,
-                    },
-                ),
-                ReadRequest::Terminal {
-                    branch,
-                    checkpoint,
-                    turn_id,
-                } => ReadValue::Terminal(
-                    match sessions
-                        .feed_terminal(FeedTerminalRequest {
-                            session,
-                            branch,
-                            checkpoint,
-                            turn_id,
-                        })
-                        .await?
-                    {
-                        FeedTerminalOutcome::Terminal(terminal) => terminal
-                            .result()
-                            .error()
-                            .map_or(TerminalRead::Other, |error| {
-                                TerminalRead::Failed(
-                                    crate::runtime::events::operator_facing_agent_error(
-                                        "agent turn failed",
-                                        error,
-                                    ),
-                                )
-                            }),
-                        _ => TerminalRead::NotRetained,
-                    },
-                ),
-            };
+        let value = match request {
+            ReadRequest::Items {
+                branch,
+                checkpoint,
+                first_ordinal,
+                count,
+                first_entry,
+                last_entry,
+            } => ReadValue::Items(
+                match sessions
+                    .feed_items(FeedItemsRequest {
+                        session,
+                        branch,
+                        checkpoint,
+                        first_ordinal,
+                        count,
+                        first_entry,
+                        last_entry,
+                    })
+                    .await?
+                {
+                    FeedItemsOutcome::Items { items, .. } => {
+                        Some(items.iter().map(read_item).collect())
+                    }
+                    _ => None,
+                },
+            ),
+            ReadRequest::Call {
+                branch,
+                checkpoint,
+                target,
+            } => ReadValue::Call(
+                match sessions
+                    .feed_call(FeedCallRequest {
+                        session,
+                        branch,
+                        checkpoint,
+                        call: match target {
+                            CallTarget::Operation(operation) => {
+                                FeedCallTarget::Operation(operation)
+                            }
+                            CallTarget::Call(call_id) => FeedCallTarget::Call(call_id),
+                        },
+                    })
+                    .await?
+                {
+                    FeedCallOutcome::Call { call, .. } => call_read(call),
+                    _ => CallRead::NotRetained,
+                },
+            ),
+            ReadRequest::Terminal {
+                branch,
+                checkpoint,
+                turn_id,
+            } => ReadValue::Terminal(
+                match sessions
+                    .feed_terminal(FeedTerminalRequest {
+                        session,
+                        branch,
+                        checkpoint,
+                        turn_id,
+                    })
+                    .await?
+                {
+                    FeedTerminalOutcome::Terminal(terminal) => terminal_read(terminal.result()),
+                    _ => TerminalRead::NotRetained,
+                },
+            ),
+        };
         cache.insert(request, value);
     }
     Ok(())
+}
+
+fn terminal_read(result: &plakous::agent::TurnResult) -> TerminalRead {
+    if let Some(error) = result.error() {
+        return TerminalRead::Failed(crate::runtime::events::operator_facing_agent_error(
+            "agent turn failed",
+            error,
+        ));
+    }
+    if result
+        .response()
+        .is_some_and(|response| response.finish().reason() == plakous::model::FinishReason::Length)
+    {
+        return TerminalRead::Truncated(result.wire_output_limit());
+    }
+    TerminalRead::Other
 }
 
 /// Read-only SQLite twin of [`load_reads`], using the same presentation
@@ -488,86 +499,75 @@ pub fn load_reads_sqlite(
         if cache.read(&request).is_some() {
             continue;
         }
-        let value =
-            match request {
-                ReadRequest::Items {
-                    branch,
-                    checkpoint,
-                    first_ordinal,
-                    count,
-                    first_entry,
-                    last_entry,
-                } => ReadValue::Items(
-                    match AgentSessions::inspect_feed_items_sqlite(
-                        path,
-                        &FeedItemsRequest {
-                            session,
-                            branch,
-                            checkpoint,
-                            first_ordinal,
-                            count,
-                            first_entry,
-                            last_entry,
-                        },
-                    )? {
-                        FeedItemsOutcome::Items { items, .. } => {
-                            Some(items.iter().map(read_item).collect())
-                        }
-                        _ => None,
+        let value = match request {
+            ReadRequest::Items {
+                branch,
+                checkpoint,
+                first_ordinal,
+                count,
+                first_entry,
+                last_entry,
+            } => ReadValue::Items(
+                match AgentSessions::inspect_feed_items_sqlite(
+                    path,
+                    &FeedItemsRequest {
+                        session,
+                        branch,
+                        checkpoint,
+                        first_ordinal,
+                        count,
+                        first_entry,
+                        last_entry,
                     },
-                ),
-                ReadRequest::Call {
-                    branch,
-                    checkpoint,
-                    target,
-                } => ReadValue::Call(
-                    match AgentSessions::inspect_feed_call_sqlite(
-                        path,
-                        &FeedCallRequest {
-                            session,
-                            branch,
-                            checkpoint,
-                            call: match target {
-                                CallTarget::Operation(operation) => {
-                                    FeedCallTarget::Operation(operation)
-                                }
-                                CallTarget::Call(call_id) => FeedCallTarget::Call(call_id),
-                            },
+                )? {
+                    FeedItemsOutcome::Items { items, .. } => {
+                        Some(items.iter().map(read_item).collect())
+                    }
+                    _ => None,
+                },
+            ),
+            ReadRequest::Call {
+                branch,
+                checkpoint,
+                target,
+            } => ReadValue::Call(
+                match AgentSessions::inspect_feed_call_sqlite(
+                    path,
+                    &FeedCallRequest {
+                        session,
+                        branch,
+                        checkpoint,
+                        call: match target {
+                            CallTarget::Operation(operation) => {
+                                FeedCallTarget::Operation(operation)
+                            }
+                            CallTarget::Call(call_id) => FeedCallTarget::Call(call_id),
                         },
-                    )? {
-                        FeedCallOutcome::Call { call, .. } => call_read(call),
-                        _ => CallRead::NotRetained,
                     },
-                ),
-                ReadRequest::Terminal {
-                    branch,
-                    checkpoint,
-                    turn_id,
-                } => ReadValue::Terminal(
-                    match AgentSessions::inspect_feed_terminal_sqlite(
-                        path,
-                        &FeedTerminalRequest {
-                            session,
-                            branch,
-                            checkpoint,
-                            turn_id,
-                        },
-                    )? {
-                        FeedTerminalOutcome::Terminal(terminal) => terminal
-                            .result()
-                            .error()
-                            .map_or(TerminalRead::Other, |error| {
-                                TerminalRead::Failed(
-                                    crate::runtime::events::operator_facing_agent_error(
-                                        "agent turn failed",
-                                        error,
-                                    ),
-                                )
-                            }),
-                        _ => TerminalRead::NotRetained,
+                )? {
+                    FeedCallOutcome::Call { call, .. } => call_read(call),
+                    _ => CallRead::NotRetained,
+                },
+            ),
+            ReadRequest::Terminal {
+                branch,
+                checkpoint,
+                turn_id,
+            } => ReadValue::Terminal(
+                match AgentSessions::inspect_feed_terminal_sqlite(
+                    path,
+                    &FeedTerminalRequest {
+                        session,
+                        branch,
+                        checkpoint,
+                        turn_id,
                     },
-                ),
-            };
+                )? {
+                    FeedTerminalOutcome::Terminal(terminal) => terminal_read(terminal.result()),
+                    _ => TerminalRead::NotRetained,
+                },
+            ),
+        };
         cache.insert(request, value);
     }
     Ok(())

@@ -245,8 +245,8 @@ class LongSessionOracleTests(unittest.TestCase):
         self.assertEqual(pages["api-xai"], 6)
         self.assertEqual(pages["api-anthropic"], 16)
         self.assertEqual(pages["claude-sonnet55-low"], 16)
-        self.assertEqual(pages["deepseek"], 2)
-        self.assertEqual(pages["deepseek-messages"], 2)
+        self.assertEqual(pages["deepseek"], 6)
+        self.assertEqual(pages["deepseek-messages"], 6)
         self.assertEqual(pages["grok-46"], 8)
         self.assertTrue(all(1 <= value <= long_session.MAX_GROWTH_PAGES for value in pages.values()))
         self.assertEqual(long_session.growth_timeout(6), 900)
@@ -254,9 +254,21 @@ class LongSessionOracleTests(unittest.TestCase):
         self.assertGreater(long_session.growth_timeout(16), 900)
         self.assertGreater(long_session.child_timeout(16), 1500)
 
+    def test_openrouter_window_comes_from_explicit_admitted_ceiling(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(long_session.catalog_window("deepseek/model"))
+        for ceiling in (32_768, 131_072, 967_232):
+            with patch.dict(os.environ, {"PLAK_LIVE_INPUT_CEILING": str(ceiling)}):
+                self.assertEqual(long_session.catalog_window("deepseek/model"), ceiling)
+        for value in ("0", "-1", "invalid"):
+            with patch.dict(os.environ, {"PLAK_LIVE_INPUT_CEILING": value}):
+                with self.assertRaises(live.ScenarioFailure):
+                    long_session.catalog_window("deepseek/model")
+
     def test_a_small_window_takes_small_calls_and_a_window_step_bar(self):
-        window = long_session.catalog_window("deepseek/deepseek-v4.1-flash")
-        self.assertEqual(window, long_session.OPENROUTER_CUSTOM_INPUT)
+        with patch.dict(os.environ, {"PLAK_LIVE_INPUT_CEILING": "65536"}):
+            window = long_session.catalog_window("deepseek/deepseek-v4.1-flash")
+        self.assertEqual(window, 65_536)
         self.assertTrue(long_session.small_window(window))
         self.assertFalse(long_session.small_window(long_session.catalog_window("grok-4.7")))
         lines = long_session.growth_call_lines("pi", window)
@@ -617,6 +629,7 @@ class LongSessionOracleTests(unittest.TestCase):
         self.assertNotIn("2000", long_session.growth_prompt(40))
         self.assertNotIn("2000", long_session.overflow_prompt(20, [[1, 21]]))
 
+    @patch.dict(os.environ, {"PLAK_LIVE_INPUT_CEILING": "131072"})
     def test_overflow_rounds_stay_under_the_round_cap_and_reach_the_trigger(self):
         """No batch is clipped by the observation cap, and together they pass the trigger."""
         for name in ("codex", "grok", "claude-sonnet55-low", "deepseek", "grok-46"):

@@ -583,6 +583,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                         && matches!(
                             &terminal,
                             Ok(super::super::oneshot::OneShotOutcome::Completed { .. }
+                                | super::super::oneshot::OneShotOutcome::Truncated { .. }
                                 | super::super::oneshot::OneShotOutcome::Refused { .. })
                         ))
                 {

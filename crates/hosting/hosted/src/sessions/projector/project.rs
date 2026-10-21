@@ -1200,6 +1200,18 @@ impl Applier<'_> {
         });
         let anchor = self.seq();
         match outcome {
+            FeedTurnOutcome::Completed {
+                finish: plakous::model::FinishReason::Length,
+            } => {
+                let bound = match self.terminal_read(turn_id)? {
+                    TerminalRead::Truncated(bound) => bound,
+                    _ => None,
+                };
+                self.push(TranscriptRow::warning(
+                    NoticeScope::Turn,
+                    crate::runtime::truncation_note(bound),
+                ));
+            }
             FeedTurnOutcome::Failed { context, .. } => {
                 let text = match self.terminal_read(turn_id)? {
                     TerminalRead::Failed(error) => error,

@@ -149,6 +149,7 @@ mod tools;
 mod topology_state;
 mod tree;
 mod turn;
+pub(crate) use turn::truncation_note;
 mod turn_drive;
 use turn_drive::{TurnHost, drive_one_turn};
 mod usage;
@@ -971,17 +972,7 @@ enum TurnHostOutcome {
         assistant: String,
         finish_reason: plakous::model::FinishReason,
         finish_detail: Option<String>,
-        /// Provider-reported reasoning tokens for the turn.
-        ///
-        /// Carried so an empty completion can say *why* it was empty. A turn
-        /// that stops at `Length` having spent its whole output budget on
-        /// reasoning looks identical, from the text alone, to a provider that
-        /// returned nothing.
-        reasoning_tokens: u64,
-        /// Provider-reported output tokens for the turn.
-        output_tokens: u64,
-        /// Tool calls the turn made, which distinguish silence from inaction.
-        tool_calls: usize,
+        wire_output_limit: Option<std::num::NonZeroU32>,
     },
     ContextCapacity {
         source_checkpoint: plakous::model::CheckpointId,

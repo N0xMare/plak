@@ -1822,7 +1822,7 @@ requires the reopen alone to converge before the harness checks idempotence.
   it.
 
 The opt-in live-fact pilots cover `non_stop_finish_length`,
-`non_stop_finish_refusal`, `steer_accepted_mid_turn`,
+`empty_length_retry`, `non_stop_finish_refusal`, `steer_accepted_mid_turn`,
 `scheduled_compaction_in_turn`, `scheduled_compaction_workflow`,
 `code_mode_cell_nested_then_final` and `code_mode_cell_final`. They assert
 the committed provider finish, durable accepted/applied steering, finalized
@@ -1831,7 +1831,10 @@ JavaScript cell/nested-call parentage respectively. The workflow pilot seeds
 foldable prior turns and explicitly requests the product compact workflow;
 the in-turn pilot crosses the scheduled fence. Cell-final uses a text-only
 cell, while nested-then-final joins a real nested process call. These shapes
-do not widen the durability subset. Follow-up plans retain each shape's
+do not widen the durability subset. `non_stop_finish_length` commits a visible
+Length answer and emits its truncation warning; `empty_length_retry` makes two
+dispatches, records P1 as RetryOutputLimit and commits only the successful answer,
+never the discarded reasoning. Both run through strict commit-cut sweeps. Follow-up plans retain each shape's
 descriptor and ScriptPlan dials, replacing only its assistant steps.
 Requeued originals rerun their shape's lifecycle before the follow-up; each
 must publish its answer once and the follow-up once. Durable answer markers

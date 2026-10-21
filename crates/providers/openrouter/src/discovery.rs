@@ -633,15 +633,15 @@ impl OpenRouterChatModelEvidence {
             {
                 return Err(OpenRouterChatBuildError::UnprovenCompletionBound);
             }
-            let prompt = endpoint
-                .max_prompt_tokens
-                .or_else(|| {
-                    endpoint
-                        .context_length
-                        .and_then(|context| context.checked_sub(output))
-                })
-                .filter(|bound| *bound > 0)
-                .ok_or(OpenRouterChatBuildError::UnprovenPromptBound)?;
+            let context_input = endpoint
+                .context_length
+                .map(|context| context.saturating_sub(output));
+            let prompt = match (endpoint.max_prompt_tokens, context_input) {
+                (Some(prompt), Some(context)) => prompt.min(context),
+                (Some(prompt), None) => prompt,
+                (None, Some(context)) => context,
+                (None, None) => return Err(OpenRouterChatBuildError::UnprovenPromptBound),
+            };
             safe_input = safe_input.min(prompt);
         }
         (safe_input > 0)
@@ -678,7 +678,7 @@ impl OpenRouterChatModelEvidence {
         Ok(Digest::sha256(
             DigestDomain::ProviderSemanticEvidence,
             1,
-            &[b"plakous-openrouter/wire-admission-v2", &facts],
+            &[b"plakous-openrouter/wire-admission-v3", &facts],
         )?)
     }
 

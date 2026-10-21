@@ -983,9 +983,14 @@ impl ModelResponse {
     ///
     /// # Errors
     ///
-    /// Returns an invalid-event error for an empty non-refusal or foreign-shaped output.
+    /// Returns an invalid-event error for empty output other than refusal/length, or foreign-shaped output.
     pub fn validate_for_commit(&self) -> Result<(), ModelError> {
-        if self.output.is_empty() && self.finish.reason() != FinishReason::Refusal {
+        if self.output.is_empty()
+            && !matches!(
+                self.finish.reason(),
+                FinishReason::Refusal | FinishReason::Length
+            )
+        {
             return Err(invalid_event(
                 "successful model response contains no assistant output",
             ));
@@ -3290,6 +3295,31 @@ mod tests {
         let response = ModelResponse::new(
             Vec::new(),
             FinishDetails::new(FinishReason::Refusal, None),
+            None,
+            None,
+            digest,
+        );
+        response.validate_for_commit()?;
+        let decoded: ModelResponse = serde_json::from_value(serde_json::to_value(&response)?)?;
+        assert_eq!(decoded, response);
+        let mut assembler = ModelResponseAssembler::new(digest)?;
+        assembler.push(ModelEvent::ResponseStarted(ResponseStarted::new(
+            None, digest,
+        )))?;
+        assert_eq!(
+            assembler.push(ModelEvent::ResponseCompleted(response.clone()))?,
+            Some(response)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn empty_length_is_valid_for_output_limit_classification()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let digest = plan_digest()?;
+        let response = ModelResponse::new(
+            Vec::new(),
+            FinishDetails::new(FinishReason::Length, None),
             None,
             None,
             digest,

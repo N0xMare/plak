@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use plakous::agent::{
     AgentEvent, AgentEventKind, CompactionEventOutcome, CompactionEventReason,
-    EffectDecisionResolution, NormalizedModelEventKind, ToolCallObservation, TurnControl,
+    EffectDecisionResolution, ToolCallObservation, TurnControl,
 };
 use plakous::model::ModelEvent;
 
@@ -1261,13 +1261,13 @@ pub(super) fn apply_event<P: plakous_host_protocol::ProtocolExtension>(
 ) {
     let call_id_str = event.call_id().map(|id| id.as_uuid().to_string());
     match event.kind() {
-        // A Content view withholds the response aggregate and keeps its kind.
-        AgentEventKind::Model {
-            kind: NormalizedModelEventKind::ResponseCompleted,
-            event: None,
-        } => {
-            settle_model_response(projection, session, events, delta_buf, last_flush);
-            projection.settled_assistant_len = assistant.len();
+        AgentEventKind::ResponseSettled { discardable } => {
+            if *discardable {
+                discard_response_reasoning(projection, events);
+            } else {
+                settle_model_response(projection, session, events, delta_buf, last_flush);
+                projection.settled_assistant_len = assistant.len();
+            }
         }
         AgentEventKind::Model {
             event: Some(model_event),
@@ -1320,7 +1320,6 @@ pub(super) fn apply_event<P: plakous_host_protocol::ProtocolExtension>(
                 ModelEvent::ResponseCompleted(response) => {
                     // One model operation ends here, whether or not the turn
                     // that contains it ever reaches a terminal result.
-                    settle_model_response(projection, session, events, delta_buf, last_flush);
                     // Some providers deliver final text only on completed output
                     // (no/partial TextDelta). Harvest so the TUI is not blank.
                     if assistant.is_empty() {
@@ -2258,7 +2257,11 @@ pub(super) fn apply_event<P: plakous_host_protocol::ProtocolExtension>(
                 OPERATION_BUDGET_EXHAUSTED_NOTE.to_owned(),
             ));
         }
+        AgentEventKind::ModelStarted => {
+            settle_live_thinking(projection, session, events);
+        }
         AgentEventKind::OutputLimitRetry { bound } => {
+            discard_response_reasoning(projection, events);
             flush_assistant_delta(delta_buf, last_flush, events, true);
             let note = output_limit_retry_note(*bound);
             log_event(
@@ -3797,6 +3800,30 @@ mod tests {
             .map(|activity| activity.text)
             .collect::<Vec<_>>();
         assert_eq!(thinking, ["replayed"]);
+    }
+
+    #[test]
+    fn output_limit_discard_then_interrupted_retry_does_not_save_old_thinking() {
+        use plakous::model::{OutputLocation, ReasoningDelta, ReasoningVisibility};
+        let root = tempfile::tempdir().unwrap();
+        let mut session = SessionRecord::new(root.path().to_path_buf());
+        let (events, _rx) = host_event_sink();
+        let location = OutputLocation::new(0, 0);
+        let mut projection = TurnProjection::<TestExtension>::default();
+        projection.observe_block_start(&reasoning_block(location, ReasoningVisibility::Visible));
+        projection.observe_reasoning_delta(&ReasoningDelta::new(location, b"discarded thought"));
+        seal_reasoning_block(&mut projection, &events, location);
+        discard_response_reasoning(&mut projection, &events);
+        // The retry is interrupted before it emits anything. The ordinary
+        // terminal flush must not resurrect the discarded response.
+        settle_live_thinking(&mut projection, &mut session, &events);
+        assert!(
+            session
+                .transcript
+                .rows()
+                .into_iter()
+                .all(|(line, _)| line.as_thinking().is_none())
+        );
     }
 
     /// A pending location's buffer is released only by an admitting bound.

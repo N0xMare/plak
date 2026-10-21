@@ -269,10 +269,51 @@ pub fn inspect_provider_owners(
         .collect())
 }
 
-/// Reads committed scripted provider responses for live-fact pilot assertions.
+/// Reads durable provider decisions for live-fact pilot assertions.
 ///
 /// # Errors
 /// Returns typed store or evidence-integrity failures, without opening a writer.
+pub fn inspect_provider_decisions(
+    database: &Path,
+    head: SessionLocator,
+) -> Result<Vec<String>, plakous_agent::internal::SessionStoreError> {
+    let loaded = SqliteSessionStore::inspect_branch(
+        database,
+        SessionRef::new(head.session_id(), head.branch_id()),
+    )?;
+    let mut decisions = Vec::new();
+    for op in loaded
+        .checkpoint()
+        .checkpoint()
+        .manifest()
+        .ledger()
+        .operations()
+    {
+        if !matches!(op.kind(), Kind::Provider { .. }) {
+            continue;
+        }
+        let (State::Completed(evidence) | State::Finalized(evidence)) = op.state() else {
+            continue;
+        };
+        let (tag, value): (String, serde_json::Value) = serde_json::from_slice(evidence.bytes())
+            .map_err(|_| plakous_agent::internal::SessionStoreError::corrupt())?;
+        if tag == "provider-outcome-v2" {
+            decisions.push(
+                value
+                    .get("decision")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(plakous_agent::internal::SessionStoreError::corrupt)?
+                    .to_owned(),
+            );
+        }
+    }
+    Ok(decisions)
+}
+
+/// Reads committed scripted provider responses for live-fact pilot assertions.
+///
+/// # Errors
+/// Returns typed store or evidence-integrity failures without opening a writer.
 pub fn inspect_provider_responses(
     database: &Path,
     head: SessionLocator,

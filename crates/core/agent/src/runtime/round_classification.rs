@@ -2,8 +2,8 @@
 
 use crate::runtime::operation_record::collect_local_calls;
 use plakous_model::{
-    ConversationView, FinishReason, ModelError, ModelErrorKind, ModelErrorPhase, ModelResponse,
-    ToolCallBlock,
+    ContentBlock, ConversationView, FinishReason, ModelError, ModelErrorKind, ModelErrorPhase,
+    ModelResponse, ToolCallBlock,
 };
 use std::num::NonZeroU32;
 
@@ -40,6 +40,7 @@ pub(super) enum RoundClassificationError {
     InvalidCalls(ModelError),
     /// Only this response-validation failure enters the output-limit retry path.
     IncompleteOutput(ModelError),
+    NonRetryableOutput(ModelError),
     RoundLimit,
     InvalidDisposition(ModelError),
 }
@@ -71,7 +72,16 @@ pub(super) fn classify_round(
     let response = input.response;
     let calls = collect_local_calls(response, input.history)
         .map_err(RoundClassificationError::InvalidCalls)?;
-    if response.finish().reason() == FinishReason::Length {
+    let visible_text = response
+        .output()
+        .iter()
+        .flat_map(plakous_model::ConversationItem::blocks)
+        .any(|block| matches!(block, ContentBlock::Text(text) if !text.text().trim().is_empty()));
+    let hosted_effect = response.output().iter().flat_map(plakous_model::ConversationItem::blocks).any(
+        |block| matches!(block, ContentBlock::ToolCall(call) if matches!(call.owner(), plakous_model::ToolExecutionOwner::ProviderHosted { .. }))
+            || matches!(block, ContentBlock::ToolResult(_)),
+    );
+    if response.finish().reason() == FinishReason::Length && (!calls.is_empty() || !visible_text) {
         let mut error = ModelError::new(
             ModelErrorKind::OutputLimit,
             "response reached its output bound before completion",
@@ -79,7 +89,11 @@ pub(super) fn classify_round(
         if let Some(tokens) = input.wire_output_limit {
             error.fill_missing_wire_output_limit(tokens);
         }
-        return Err(RoundClassificationError::IncompleteOutput(error));
+        return Err(if hosted_effect || input.over_budget {
+            RoundClassificationError::NonRetryableOutput(error)
+        } else {
+            RoundClassificationError::IncompleteOutput(error)
+        });
     }
     if !calls.is_empty() && response.finish().reason() != FinishReason::ToolCalls {
         let error = ModelError::new(

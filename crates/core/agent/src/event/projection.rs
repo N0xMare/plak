@@ -747,6 +747,7 @@ fn event_context_shape_is_valid(event: &AgentEvent) -> bool {
             event.turn_id.is_some() && event.attempt_id.is_none() && event.call_id.is_none()
         }
         AgentEventKind::ModelStarted
+        | AgentEventKind::ResponseSettled { .. }
         | AgentEventKind::ModelDispatchStarted
         | AgentEventKind::RequestPrepared { .. }
         | AgentEventKind::Model { .. } => {
@@ -969,6 +970,7 @@ fn plan_transition(
             })
         }
         AgentEventKind::ModelDispatchStarted
+        | AgentEventKind::ResponseSettled { .. }
         | AgentEventKind::Model { .. }
         | AgentEventKind::RequestPrepared { .. } => {
             let turn_id = event.turn_id.ok_or(TransitionError::Invalid)?;

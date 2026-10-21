@@ -72,7 +72,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 .collect::<Vec<_>>();
             let pending = !notices.is_empty() || !mail.is_empty();
             let live = !running.is_empty() || !children.is_empty();
-            let completed = matches!(state.result, Some(Ok(OneShotOutcome::Completed { .. })));
+            let completed = matches!(
+                state.result,
+                Some(Ok(
+                    OneShotOutcome::Completed { .. } | OneShotOutcome::Truncated { .. }
+                ))
+            );
             let resuming = self.pending_resume.is_some();
             // A deadline interrupt can race an already complete final turn.
             let interrupted = interrupted && (!timeout || !completed || pending || live);
@@ -159,6 +164,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     let assistant = match state.result.take() {
                         Some(Ok(
                             OneShotOutcome::Completed { assistant }
+                            | OneShotOutcome::Truncated { assistant }
                             | OneShotOutcome::Interrupted { assistant }
                             | OneShotOutcome::Refused { assistant, .. },
                         )) => assistant,
@@ -180,7 +186,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     ));
                     state.result = Some(Ok(OneShotOutcome::Bounded { assistant, bound }));
                 } else if interrupted && completed {
-                    if let Some(Ok(OneShotOutcome::Completed { assistant })) = state.result.take() {
+                    if let Some(Ok(
+                        OneShotOutcome::Completed { assistant }
+                        | OneShotOutcome::Truncated { assistant },
+                    )) = state.result.take()
+                    {
                         state.result = Some(Ok(OneShotOutcome::Interrupted { assistant }));
                     }
                 }
@@ -210,7 +220,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 )
                 .map_err(CliFailure::new)?;
                 if !self.fit_child_wake(&command)? {
-                    if let Some(Ok(OneShotOutcome::Completed { assistant })) = state.result.take() {
+                    if let Some(Ok(
+                        OneShotOutcome::Completed { assistant }
+                        | OneShotOutcome::Truncated { assistant },
+                    )) = state.result.take()
+                    {
                         state.result = Some(Ok(OneShotOutcome::Interrupted { assistant }));
                     }
                     continue;

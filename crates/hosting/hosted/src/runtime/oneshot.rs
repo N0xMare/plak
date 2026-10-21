@@ -31,6 +31,8 @@ impl Default for RunBounds {
 pub enum OneShotOutcome {
     /// The root turn completed with its canonical visible text.
     Completed { assistant: String },
+    /// A committed visible answer stopped at its output limit.
+    Truncated { assistant: String },
     /// The provider refused; its canonical terminal was published and released.
     Refused {
         assistant: String,
@@ -199,6 +201,13 @@ pub(super) fn terminal(drive: &Result<TurnHostOutcome, String>) -> CliResult<One
         }) => Ok(OneShotOutcome::Refused {
             assistant: assistant.clone(),
             detail: finish_detail.clone(),
+        }),
+        Ok(TurnHostOutcome::Completed {
+            assistant,
+            finish_reason: plakous::model::FinishReason::Length,
+            ..
+        }) => Ok(OneShotOutcome::Truncated {
+            assistant: assistant.clone(),
         }),
         Ok(TurnHostOutcome::Completed { assistant, .. }) => Ok(OneShotOutcome::Completed {
             assistant: assistant.clone(),

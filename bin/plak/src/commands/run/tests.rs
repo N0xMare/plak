@@ -772,62 +772,86 @@ fn one_shot_terminal_error_is_returned_once_and_keeps_failure_guidance() {
 }
 
 #[test]
-fn one_shot_output_limit_is_agent_failure_not_success() {
-    let fixture = Fixture::new(Script::Effect);
-    let mut config = fixture.host_config();
-    let workspace = config.cwd.clone();
-    let controller = BoundaryController::quiet_from_evidence_path(
-        CrashBoundary::None,
-        workspace.join("terminal-events.jsonl"),
-    )
-    .unwrap();
-    let kind = plakous::model::ModelErrorKind::OutputLimit;
-    let target = plakous_offline_crash_harness::terminal_failure_runtime_binding(
-        &workspace,
-        controller.clone(),
-        kind,
-    )
-    .unwrap()
-    .target_binding();
-    config.test_injection = Some(Arc::new(TestHostInjection {
-        runtime: Arc::new(move |_| {
-            plakous_offline_crash_harness::terminal_failure_runtime_binding(
-                &workspace,
-                controller.clone(),
-                kind,
-            )
-            .map_err(|error| error.to_string())
-        }),
-        rebind_target: target,
-        observe: Arc::new(|_, _| {}),
-        child_runtime: None,
-        rebind_builds: std::sync::Mutex::new(Vec::new()),
-    }));
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-    let failure = run_config(
-        &ApplicationExecutor::new().unwrap(),
-        config,
-        "terminal fixture".into(),
-        false,
-        false,
-        face::ChildAgents::Available,
-        TerminalMode::Piped,
-        &mut stdout,
-        &mut stderr,
-        plakous_hosted::runtime::RunBounds::default(),
-    )
-    .unwrap_err();
-    assert_eq!(failure.exit_code(), 5);
-    assert_eq!(stdout, [] as [u8; 0]);
-    let notes = String::from_utf8(stderr).unwrap();
-    assert!(!notes.contains(failure.message()));
-    assert!(
-        notes.contains(
-            "turn failed definitively; the durable session remains available for a new prompt"
-        ),
-        "{notes}"
-    );
+fn one_shot_length_outputs_text_or_retries_empty_then_exits_five() {
+    for visible in [false, true] {
+        let fixture = Fixture::new(Script::Effect);
+        let mut config = fixture.host_config();
+        let workspace = config.cwd.clone();
+        let evidence = workspace.join("length-events.jsonl");
+        let controller =
+            BoundaryController::quiet_from_evidence_path(CrashBoundary::None, evidence.clone())
+                .unwrap();
+        let steps = if visible {
+            serde_json::json!([{"output": {"text": "truncated answer"}, "finish": "length"}])
+        } else {
+            serde_json::json!([
+                {"output": "reasoning_only", "finish": "length"},
+                {"output": "reasoning_only", "finish": "length"}
+            ])
+        };
+        let plan: plakous_offline_crash_harness::script::ScriptPlan =
+            serde_json::from_value(serde_json::json!({"version": 1, "steps": steps})).unwrap();
+        let plan = Arc::new(plan);
+        let target = plakous_offline_crash_harness::scripted_runtime_binding(
+            &workspace,
+            controller.clone(),
+            Arc::clone(&plan),
+        )
+        .unwrap()
+        .target_binding();
+        config.test_injection = Some(Arc::new(TestHostInjection {
+            runtime: Arc::new(move |_| {
+                plakous_offline_crash_harness::scripted_runtime_binding(
+                    &workspace,
+                    controller.clone(),
+                    Arc::clone(&plan),
+                )
+                .map_err(|e| e.to_string())
+            }),
+            rebind_target: target,
+            observe: Arc::new(|_, _| {}),
+            child_runtime: None,
+            rebind_builds: std::sync::Mutex::new(Vec::new()),
+        }));
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let failure = run_config(
+            &ApplicationExecutor::new().unwrap(),
+            config,
+            "length fixture".into(),
+            false,
+            false,
+            face::ChildAgents::Available,
+            TerminalMode::Piped,
+            &mut stdout,
+            &mut stderr,
+            plakous_hosted::runtime::RunBounds::default(),
+        )
+        .unwrap_err();
+        assert_eq!(failure.exit_code(), 5);
+        let events = std::fs::read_to_string(evidence).unwrap();
+        assert_eq!(
+            events
+                .lines()
+                .filter(|line| line.contains("provider_dispatched"))
+                .count(),
+            if visible { 1 } else { 2 }
+        );
+        if visible {
+            assert_eq!(
+                String::from_utf8(stdout).unwrap().trim(),
+                "truncated answer"
+            );
+            assert!(
+                String::from_utf8(stderr)
+                    .unwrap()
+                    .contains("answer truncated at its")
+            );
+            assert_eq!(failure.message(), "turn_failed:output-limit");
+        } else {
+            assert_eq!(stdout, [] as [u8; 0]);
+        }
+    }
 }
 
 const HOSTILE: &str = "ok\u{1b}]52;c;cGF5bG9hZA==\u{7}\u{1b}[2J\tdone";

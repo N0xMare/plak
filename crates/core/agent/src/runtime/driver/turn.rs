@@ -89,7 +89,7 @@ const OUTPUT_LIMIT_RETRY_HEAD: &str = "[harness] Your previous response reached 
 const OUTPUT_LIMIT_RETRY_TAIL: &str = concat!(
     " before completion, so the response was discarded and no tool call ran. ",
     "Retry with a shorter answer or less output per call: split a large file or ",
-    "patch into several smaller writes or edits."
+    "patch into several smaller writes or edits, or reason more briefly."
 );
 const OUTPUT_LIMIT_UNKNOWN: &str = "the provider's output limit";
 const OUTPUT_LIMIT_KNOWN_HEAD: &str = "its output limit of ";
@@ -921,19 +921,28 @@ impl Driver {
                     provider_plan.request().stable_prefix().clone(),
                 ));
             }
-            let disposition = match classify_round(RoundClassificationInput {
+            let classification = classify_round(RoundClassificationInput {
                 response: &response,
                 history: &self.conversation(),
                 over_budget,
                 wire_output_limit,
-            }) {
+            });
+            let _ = command.shared.events.publish(
+                EventContext::attempt(command.turn_id, attempt_id),
+                AgentEventKind::ResponseSettled {
+                    discardable: response.finish().reason() == plakous_model::FinishReason::Length
+                        && classification.is_err(),
+                },
+            );
+            let disposition = match classification {
                 Ok(disposition) => disposition,
                 Err(classification_error) => {
                     let action = round_failure_action(&classification_error);
                     let error = match classification_error {
                         RoundClassificationError::InvalidCalls(error)
                         | RoundClassificationError::InvalidDisposition(error)
-                        | RoundClassificationError::IncompleteOutput(error) => {
+                        | RoundClassificationError::IncompleteOutput(error)
+                        | RoundClassificationError::NonRetryableOutput(error) => {
                             self.project_model_error(error, action.phase)
                         }
                         RoundClassificationError::RoundLimit => AgentError::new(

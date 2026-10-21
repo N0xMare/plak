@@ -450,7 +450,7 @@ pub enum NoticeScope {
     Retry,
     /// A tool observation was clipped before the model saw it.
     Clipped,
-    /// Turn outcome guidance: empty stream, reasoning-only, budget exhausted,
+    /// Turn outcome guidance: empty stream, truncated answer, budget exhausted,
     /// context limit, definite failure, refusal.
     Turn,
     /// Queue and delivery state: a prompt remains queued, already ran, send-now.

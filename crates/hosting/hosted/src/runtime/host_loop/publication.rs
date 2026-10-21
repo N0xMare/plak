@@ -46,7 +46,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 assistant,
                 finish_reason,
                 finish_detail,
-                ..
+                wire_output_limit,
             }) => {
                 let transcript_line = super::super::turn::completed_turn_row(&assistant);
                 match commit_session_update(
@@ -69,6 +69,12 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                 TestHostWorkflow::SendNow,
                                 TestHostBoundary::ProductCommitted,
                             );
+                        }
+                        if finish_reason == plakous::model::FinishReason::Length {
+                            let _ = self.events.send(HostEvent::Row(TranscriptRow::warning(
+                                NoticeScope::Turn,
+                                super::super::turn::truncation_note(wire_output_limit),
+                            )));
                         }
                         if assistant.is_empty()
                             && finish_reason != plakous::model::FinishReason::Refusal
@@ -667,9 +673,7 @@ mod tests {
                 assistant: assistant.clone(),
                 finish_reason: FinishReason::Stop,
                 finish_detail: None,
-                reasoning_tokens: 0,
-                output_tokens: 0,
-                tool_calls: 0,
+                wire_output_limit: None,
             }),
             super::Instant::now(),
             super::TerminalErrorPresentation::Events,

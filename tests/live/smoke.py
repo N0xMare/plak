@@ -349,7 +349,7 @@ class Smoke:
         committed = 0
         if capacity_recovered:
             window = long_session.catalog_window(self.route.model)
-            if window is not None and window > long_session.OPENROUTER_CUSTOM_INPUT:
+            if window is not None and window > long_session.PAGE_TOKENS:
                 agent.quit()
                 raise ScenarioFailure(HARNESS, "context limit on a large catalog window")
 

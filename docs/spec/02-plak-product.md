@@ -1485,6 +1485,12 @@ pass inline. A refused or unfinished pass is projection debt, recorded as a
 cursor CAS keeps it safe and the next pass or open applies it. Passes before
 the product first stores the session refuse on its missing row and change
 nothing.
+A visible Length terminal derives one truncation-warning row from `TurnTerminal`
+and its exact `feed_terminal` receipt, including catch-up after a quiescent
+reopen. Live and recovered publication may show the same warning immediately,
+but do not persist it as a separate operator notice; the canonical projector
+owns its single saved row. The warning names the prepared wire limit when known.
+
 The live path has no shortcut: a terminal shown live is the projector's row,
 streamed previews are observation until the projector replaces them.
 Finished tool observations are replaced by the committed tool row, including

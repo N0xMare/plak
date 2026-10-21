@@ -81,15 +81,21 @@ fn safe_finish_detail(detail: &str) -> String {
     plakous::model::SafeDiagnostic::new(printable).to_string()
 }
 
+pub(crate) fn truncation_note(bound: Option<std::num::NonZeroU32>) -> String {
+    let limit = bound.map_or_else(
+        || "output limit".to_owned(),
+        |bound| format!("{bound}-token output limit"),
+    );
+    format!("answer truncated at its {limit}; ask to continue")
+}
+
 pub(super) fn terminal_turn_outcome(result: &TurnResult) -> TurnHostOutcome {
     match result.outcome() {
         TurnResultOutcome::Completed(response) => TurnHostOutcome::Completed {
             assistant: super::tools::joined_assistant_text(response),
             finish_reason: response.finish().reason(),
             finish_detail: response.finish().detail().map(safe_finish_detail),
-            reasoning_tokens: result.usage().model().reasoning_tokens(),
-            output_tokens: result.usage().model().output_tokens(),
-            tool_calls: result.tool_calls(),
+            wire_output_limit: result.wire_output_limit(),
         },
         TurnResultOutcome::Cancelled(_) => TurnHostOutcome::Interrupted {
             assistant: String::new(),
@@ -266,7 +272,7 @@ pub(super) fn publish_recovered_turn_outcome<P: plakous_host_protocol::ProtocolE
             assistant,
             finish_reason,
             finish_detail,
-            ..
+            wire_output_limit,
         } => {
             let transcript_line = completed_turn_row(&assistant);
             let saved = commit_session_update(store, home, session, |candidate| {
@@ -278,6 +284,12 @@ pub(super) fn publish_recovered_turn_outcome<P: plakous_host_protocol::ProtocolE
             });
             if saved.is_err() {
                 return true;
+            }
+            if finish_reason == plakous::model::FinishReason::Length {
+                let _ = events.send(HostEvent::Row(TranscriptRow::warning(
+                    NoticeScope::Turn,
+                    truncation_note(wire_output_limit),
+                )));
             }
             if assistant.is_empty() && finish_reason != plakous::model::FinishReason::Refusal {
                 let _ = events.notice(TranscriptRow::info(
@@ -884,9 +896,7 @@ mod tests {
                 assistant: "authoritative restored output".into(),
                 finish_reason: plakous::model::FinishReason::Stop,
                 finish_detail: None,
-                reasoning_tokens: 0,
-                output_tokens: 8,
-                tool_calls: 0,
+                wire_output_limit: None,
             },
             &crate::session_store::MemoryStore::new(),
             &SessionHome::new(root.path().join("sessions")),
@@ -910,6 +920,31 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn recovered_length_warns_with_prepared_wire_limit() {
+        let root = tempfile::tempdir().unwrap();
+        let mut session = SessionRecord::new(root.path().to_path_buf());
+        let (tx, rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
+        let events = Sender::over(tx);
+        assert!(!publish_recovered_turn_outcome(
+            TurnHostOutcome::Completed {
+                assistant: "truncated".to_owned(),
+                finish_reason: plakous::model::FinishReason::Length,
+                finish_detail: None,
+                wire_output_limit: std::num::NonZeroU32::new(64_000),
+            },
+            &crate::session_store::MemoryStore::new(),
+            &SessionHome::new(root.path().join("sessions")),
+            &mut session,
+            &events,
+        ));
+        let observed = rx.try_iter().collect::<Vec<_>>();
+        assert!(observed.iter().any(|event| matches!(event,
+            HostEvent::Row(TranscriptRow::Notice(notice))
+                if notice.text == "answer truncated at its 64000-token output limit; ask to continue"
+        )));
     }
 
     #[test]
@@ -1610,6 +1645,7 @@ mod tests {
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod reasoning_only_tests {
     use super::{TurnHostOutcome, terminal_turn_outcome};
+    use std::sync::Arc;
 
     #[test]
     fn terminal_overflow_uses_the_canonical_remedy_even_without_a_capacity_tuple() {
@@ -1763,7 +1799,7 @@ mod reasoning_only_tests {
                     SessionOperationId,
                 };
                 use plakous_offline_crash_harness::{
-                    BoundaryController, text_runtime_binding_with_finish,
+                    BoundaryController, script::ScriptPlan, scripted_runtime_binding,
                 };
                 let workspace = root.path().join("workspace");
                 std::fs::create_dir_all(&workspace).unwrap();
@@ -1781,12 +1817,19 @@ mod reasoning_only_tests {
                         SessionOperationId::new("reasoning-only:create").unwrap(),
                         // Empty prefix and empty terminal: the model thinks and
                         // emits nothing visible.
-                        text_runtime_binding_with_finish(
+                        scripted_runtime_binding(
                             &workspace,
                             controller.clone(),
-                            "",
-                            "",
-                            plakous::model::FinishReason::Length,
+                            Arc::new(
+                                serde_json::from_value::<ScriptPlan>(serde_json::json!({
+                                    "version": 1,
+                                    "steps": [
+                                        {"output": "reasoning_only", "finish": "length"},
+                                        {"output": "reasoning_only", "finish": "length"}
+                                    ]
+                                }))
+                                .unwrap(),
+                            ),
                         )
                         .unwrap(),
                     ))
@@ -1808,11 +1851,24 @@ mod reasoning_only_tests {
                     .result()
                     .await
                     .unwrap();
-                let outcome = terminal_turn_outcome(&result);
                 live.release().await.unwrap();
-                outcome
+                result
             })
             .unwrap();
-        assert!(matches!(result, TurnHostOutcome::Failed { .. }));
+        assert_eq!(
+            result.error().unwrap().model_kind(),
+            Some(plakous::model::ModelErrorKind::OutputLimit)
+        );
+        let events =
+            std::fs::read_to_string(root.path().join("reasoning-only-events.jsonl")).unwrap();
+        assert_eq!(
+            events
+                .lines()
+                .filter(|line| line.contains("provider_dispatched"))
+                .count(),
+            2
+        );
+        let lifecycle = super::turn_lifecycle(&result);
+        assert_eq!(lifecycle.model_error_kind.as_deref(), Some("OutputLimit"));
     }
 }

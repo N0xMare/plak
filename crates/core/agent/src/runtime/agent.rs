@@ -1047,6 +1047,37 @@ impl TurnResult {
         &self.checkpoint
     }
 
+    /// Returns the terminal response's prepared wire output limit, including
+    /// after recovery. This is the provider's receipt, not the product bound.
+    /// Returns `None` without a completed response or a recorded output limit.
+    #[must_use]
+    pub fn wire_output_limit(&self) -> Option<std::num::NonZeroU32> {
+        let plan = self.response()?.plan_digest();
+        let prepared = self
+            .checkpoint
+            .manifest()
+            .ledger()
+            .operations()
+            .into_iter()
+            .rev()
+            .filter(|record| {
+                matches!(record.kind(), crate::DurableOperationKind::Provider {
+                root: plakous_model::ModelOperationRoot::Turn(turn), ..
+            } if *turn == self.turn_id)
+            })
+            .filter_map(|record| {
+                serde_json::from_slice::<plakous_model::PreparedCallRecord>(
+                    record.request().bytes(),
+                )
+                .ok()
+            })
+            .find(|prepared| prepared.projection().plan() == plan)?;
+        prepared
+            .projection()
+            .output_limit()
+            .map(plakous_model::PreparedOutputLimit::tokens)
+    }
+
     /// Returns the final canonical model aggregate for a completed turn.
     #[must_use]
     pub const fn response(&self) -> Option<&ModelResponse> {

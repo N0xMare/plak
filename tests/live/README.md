@@ -248,9 +248,12 @@ round cap, so the 272k trigger is six pages (ten for 500k) instead of dozens of 
 count follows the route's catalog window: 6 for the 256k–272k grok-4.7 and
 Codex/OpenAI rows, 8 for 500k `grok-4.6` and `gpt-6.1-sol` (`codex-sol`), 16 for the 1M Claude rows, and 6
 when this driver does not know the window. DeepSeek reports 1M, but Plak's
-OpenRouter custom route projects at most 65,536 input tokens, so the driver
-sizes it as that window: 2 pages, read 5 lines per call (about an eighth of
-the window), so a fold leaves room below the trigger. `PLAK_LIVE_GROWTH_PAGES`
+OpenRouter input admission uses the discovered window minus output and all
+endpoint limits. Set `PLAK_LIVE_INPUT_CEILING` to the session's admitted input
+ceiling (from its Context view) for OpenRouter long-session runs; the driver
+sizes it with `pages_for_window`: ceil(window / 65,536) pages, at least 2 for
+windows up to two pages and at least 6 otherwise, capped at 28. Per-call read
+sizes also follow the admitted window, so a fold leaves room below the trigger. `PLAK_LIVE_GROWTH_PAGES`
 (1..=28) overrides that. 28 pages are 7 MiB, under the 8 MiB capture cap.
 The pre-compaction fact is a neutral code word (`ZEBRA-` and six digits) that lives only in `codeword.txt`; prompts call it a code word and ask for it from memory, because "token" wording drew Codex refusals ("I can't write the previously disclosed token into another file"). A pass does not accept
 the model's own claim that it compacted or remembered. Reports name

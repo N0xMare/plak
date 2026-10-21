@@ -21,7 +21,7 @@ use thiserror::Error;
 
 pub(super) const EVENT_SCHEMA_VERSION: u32 = 3;
 pub(super) const PROJECTION_REVISION: u32 = 6;
-pub(super) const EVENT_KIND_VERSION: u32 = 11;
+pub(super) const EVENT_KIND_VERSION: u32 = 12;
 const EVENT_ENVELOPE_BYTES: usize = 512;
 pub(super) const MAX_LIFETIME_IDENTITIES: usize = 1 << 13;
 pub(crate) const MAX_EVENT_DEBT_BYTES: usize = 256 * 1024;
@@ -1116,6 +1116,12 @@ pub enum AgentEventKind {
     /// The admitted provider request is about to receive its first poll.
     /// Preparation and authority revalidation have completed.
     ModelDispatchStarted,
+    /// A classified response reached its presentation boundary, before any
+    /// tool rows. Content views receive this without the response aggregate.
+    ResponseSettled {
+        /// The response must not contribute saved presentation activity.
+        discardable: bool,
+    },
     /// Measured parts and configured tool names of the request just prepared.
     RequestPrepared {
         /// Measured byte partitions of the lowered request, when available.
@@ -1513,6 +1519,9 @@ impl AgentEventKind {
             Self::TurnStarted => Self::TurnStarted,
             Self::ModelStarted => Self::ModelStarted,
             Self::ModelDispatchStarted => Self::ModelDispatchStarted,
+            Self::ResponseSettled { discardable } => Self::ResponseSettled {
+                discardable: *discardable,
+            },
             Self::RequestPrepared {
                 input_parts,
                 occupied_tokens,
@@ -1685,6 +1694,7 @@ impl AgentEventKind {
             | Self::OutputBoundRederived { .. }
             | Self::TurnStarted
             | Self::ModelStarted
+            | Self::ResponseSettled { .. }
             | Self::ModelDispatchStarted
             | Self::Model { event: None, .. }
             | Self::SteeringQueued { .. }
@@ -1917,6 +1927,9 @@ impl fmt::Debug for AgentEventKind {
             Self::TurnStarted => event.field("kind", &"turn_started"),
             Self::ModelStarted => event.field("kind", &"model_started"),
             Self::ModelDispatchStarted => event.field("kind", &"model_dispatch_started"),
+            Self::ResponseSettled { discardable } => event
+                .field("kind", &"response_settled")
+                .field("discardable", discardable),
             Self::RequestPrepared { tool_names, .. } => event
                 .field("kind", &"request_prepared")
                 .field("tool_count", &tool_names.len()),
@@ -2226,6 +2239,7 @@ impl AgentEvent {
             | AgentEventKind::OutputBoundRederived { .. }
             | AgentEventKind::TurnStarted
             | AgentEventKind::ModelStarted
+            | AgentEventKind::ResponseSettled { .. }
             | AgentEventKind::ModelDispatchStarted
             | AgentEventKind::RequestPrepared { .. }
             | AgentEventKind::Model { .. }
@@ -2403,7 +2417,9 @@ pub enum EventDelivery {
 
 pub(super) fn event_metadata(kind: &AgentEventKind) -> (EventOrigin, DataClassification) {
     match kind {
-        AgentEventKind::ModelStarted | AgentEventKind::ModelDispatchStarted => {
+        AgentEventKind::ModelStarted
+        | AgentEventKind::ModelDispatchStarted
+        | AgentEventKind::ResponseSettled { .. } => {
             (EventOrigin::Model, DataClassification::Public)
         }
         AgentEventKind::RequestPrepared { .. } | AgentEventKind::Model { .. } => {

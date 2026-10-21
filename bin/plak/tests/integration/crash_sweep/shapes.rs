@@ -212,6 +212,16 @@ pub(super) const REGISTRY: &[Shape] = &[
         assert_live: assert_length,
     },
     Shape {
+        name: "empty_length_retry",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: empty_length_retry,
+        configure: no_configure,
+        setup: no_setup,
+        lifecycle: prompt_then_quit,
+        assert_live: assert_empty_length_retry,
+    },
+    Shape {
         name: "non_stop_finish_refusal",
         subset: false,
         terminal: ExpectedTerminal::Answer,
@@ -479,6 +489,37 @@ fn non_stop_length() -> Value {
     non_stop("length")
 }
 
+fn empty_length_retry() -> Value {
+    json!({"version": 1, "steps": [
+        {"output": "reasoning_only", "finish": "length"},
+        {"output": {"text": ANSWER}, "finish": "stop"}
+    ]})
+}
+
+fn assert_empty_length_retry(fixture: &Fixture, outcome: &AgentOutcome, state: &summary::Summary) {
+    assert_live(fixture, outcome, state, 0, 2);
+    let decisions = plakous_offline_crash_harness::ledger_signature::inspect_provider_decisions(
+        &summary::paths(fixture).runtime_database(),
+        state.head.parse().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(decisions, ["RetryOutputLimit", "Terminal"]);
+    let responses = plakous_offline_crash_harness::ledger_signature::inspect_provider_responses(
+        &summary::paths(fixture).runtime_database(),
+        state.head.parse().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        responses.len(),
+        1,
+        "discarded Length is not a committed response"
+    );
+    assert_eq!(
+        responses[0].finish().reason(),
+        plakous::model::FinishReason::Stop
+    );
+}
+
 fn non_stop_refusal() -> Value {
     non_stop("refusal")
 }
@@ -507,6 +548,12 @@ fn assert_finish(
 }
 
 fn assert_length(fixture: &Fixture, outcome: &AgentOutcome, state: &summary::Summary) {
+    assert!(
+        outcome
+            .records()
+            .iter()
+            .any(|row| row.to_string().contains("answer truncated at its"))
+    );
     assert_finish(
         fixture,
         outcome,
@@ -861,6 +908,7 @@ fn followup_preserves_descriptor_and_script_dials() {
 fn live_fact_pilots() {
     for name in [
         "non_stop_finish_length",
+        "empty_length_retry",
         "non_stop_finish_refusal",
         "steer_accepted_mid_turn",
         "scheduled_compaction_in_turn",

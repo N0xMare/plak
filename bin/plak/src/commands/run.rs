@@ -668,6 +668,13 @@ pub(crate) fn run_config(
         product_host::OneShotOutcome::Completed { assistant } => {
             (assistant, Ok(ProcessOutcome::Success))
         }
+        product_host::OneShotOutcome::Truncated { assistant } => (
+            assistant,
+            Err(CliFailure::classified(
+                CliFailureKind::Agent,
+                "turn_failed:output-limit",
+            )),
+        ),
         product_host::OneShotOutcome::Refused { assistant, detail } => (
             assistant,
             Err(CliFailure::classified(

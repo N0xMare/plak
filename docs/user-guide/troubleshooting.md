@@ -318,7 +318,12 @@ This is the same for `/recover`, the next prompt's in-place recovery, and reopen
 after a crash; a saved result's notice never gets a second fallback line.
 
 A saved text-only answer also completes when the provider stopped for length
-or refusal. A length-truncated local call never runs: recovery fails it as an
+or refusal. A visible Length answer is kept with a truncation warning; ask to
+continue. `plak run` prints it but exits 5 (output-limit), rather than claiming a
+complete answer. An empty or reasoning-only Length retries once at the same
+bound and then fails with OutputLimit if still empty; wrap-up and provider-hosted
+work never get this retry. Discarded reasoning is not saved by an interrupted
+retry. A length-truncated local call never runs: recovery fails it as an
 output-limit error only if the turn already took the retry for this truncation;
 a successful round resets that retry evidence. Otherwise it abandons
 the turn without retrying. An existing terminal answer is never replaced by a
@@ -925,3 +930,8 @@ Diagnostics omit user information, query and fragment.
 For live MCP testing, use a dedicated `PLAK_HOME` (mode 0700). New `[mcp]`,
 `auth`, `oauth_*` and `resources` configuration keys do not load in earlier
 builds; keep the installed build's home and any running session unchanged.
+
+OpenRouter sessions bound to the older wire-admission identity refuse exact
+reopen with Revalidation after the input-admission derivation changes. Start a
+new session, or export/import as a new session; do not expect an exact reopen
+to change its admitted contract silently.
