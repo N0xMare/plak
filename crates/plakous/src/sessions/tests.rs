@@ -7778,7 +7778,7 @@ async fn attached_context_status_uses_driver_authority_without_store_reads() -> 
 }
 
 #[tokio::test]
-async fn attached_context_status_refuses_expired_taken_over_and_archived_owners() -> TestResult {
+async fn attached_context_status_revives_expired_but_refuses_taken_over_and_archived_owners() -> TestResult {
     struct AdvancingClock(std::sync::atomic::AtomicU64);
     impl LeaseClock for AdvancingClock {
         fn now(&self) -> Result<LeaseInstant, SessionStoreError> {
@@ -7789,7 +7789,7 @@ async fn attached_context_status_refuses_expired_taken_over_and_archived_owners(
             )
         }
     }
-    for archived in [false, true] {
+    for disposition in ["revive", "takeover", "archive"] {
         let directory = tempfile::tempdir()?;
         let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
         let clock = Arc::new(AdvancingClock(std::sync::atomic::AtomicU64::new(1)));
@@ -7801,20 +7801,28 @@ async fn attached_context_status_refuses_expired_taken_over_and_archived_owners(
         let CreateSessionOutcome::Created { session, .. } = sessions
             .create(CreateSessionRequest::new(
                 SessionOperationId::new("create:lost-owner-context")?,
-                runtime_binding_for(workspace, descriptor()?, b"lost-owner-context")?,
+                runtime_binding_for(
+                    Arc::clone(&workspace),
+                    crate::test_model::with_shared_window_context_contract(
+                        descriptor_without_context_contract("test.route", "test.model")?,
+                        timestamp()?,
+                        80,
+                    )?,
+                    b"lost-owner-context",
+                )?,
             ))
             .await?;
         let locator = session.locator();
         let loaded = store.load_branch(locator.session_ref()).await?;
         clock.0.store(10_000, Ordering::Release);
-        if archived {
+        if disposition == "archive" {
             store
                 .archive(ArchiveSession::new(
                     locator.session_id(),
                     loaded.session().revision(),
                 ))
                 .await?;
-        } else {
+        } else if disposition == "takeover" {
             store
                 .acquire(AcquireBranch::new(
                     locator.session_ref(),
@@ -7830,12 +7838,38 @@ async fn attached_context_status_refuses_expired_taken_over_and_archived_owners(
                 ContextQuery::Current,
             ))
             .await?;
-        assert!(matches!(
-            status.kind(),
-            SessionContextStatusKind::Unavailable(_)
-        ));
-        // The old owner cannot release the successor's lease.
-        drop(session);
+        if disposition == "revive" {
+            assert!(matches!(status.kind(), SessionContextStatusKind::Available(_)));
+            let pending = "pending after suspend";
+            let preflight = sessions.context_status(ContextStatusRequest::new(
+                SessionOperationId::new("status:pending-after-suspend")?,
+                locator,
+                ContextQuery::WithPendingUserInput(pending.to_owned().into()),
+            )).await?;
+            assert!(matches!(preflight.kind(), SessionContextStatusKind::Available(status)
+                if matches!(status.kind(), ContextStatusKind::WouldOverflow(_) | ContextStatusKind::ProtectedOverflow(_))));
+            let outcome = sessions.compact(CompactSessionRequest::new(
+                SessionOperationId::new("compact:after-suspend")?,
+                locator,
+                CompactReason::Scheduled,
+                compaction_runtime_binding_for(
+                    workspace,
+                    crate::test_model::with_shared_window_context_contract(
+                        descriptor_without_context_contract("test.route", "test.model")?,
+                        timestamp()?,
+                        80,
+                    )?,
+                    b"lost-owner-context",
+                    LocalDurabilityDisposition::Ephemeral,
+                )?,
+            ).with_pending_user_input(pending.to_owned().into())).await?;
+            assert!(matches!(outcome, CompactSessionOutcome::NoEligibleRange { .. }));
+            session.release().await?;
+        } else {
+            assert!(matches!(status.kind(), SessionContextStatusKind::Unavailable(_)));
+            // The old owner cannot release the successor's lease.
+            drop(session);
+        }
     }
     Ok(())
 }

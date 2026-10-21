@@ -1443,6 +1443,9 @@ The facade privately registers each created or verified-open session/branch
 driver's typed command endpoint. Attached context-status queries go straight
 to that owner, using its in-memory canonical context accounting and exact
 session/branch/checkpoint locator check without loading the persisted head.
+If store-clock expiry precedes the heartbeat after suspend, inspection renews
+the same owner under the lease gate before measuring. A failed heartbeat,
+shutdown, takeover or archive remains unavailable.
 Without an attached owner, context-status loads the exact checkpoint only to
 report recovery requirements or unavailability. High-level compact
 workflows also route through the owner; exact open, resume, recover, fork, and

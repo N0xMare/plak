@@ -19,7 +19,12 @@ impl Driver {
     ) -> Result<ContextStatus, AgentSessionEndpointError> {
         self.authority
             .check_heartbeat()
-            .and_then(|()| self.start_authority().check())
+            .map_err(|_| AgentSessionEndpointError::Unavailable)?;
+        // Store-clock expiry can precede the monotonic heartbeat after suspend.
+        // Admission revives only the same owner, under the shared lease gate.
+        self.start_authority()
+            .admit()
+            .await
             .map_err(|_| AgentSessionEndpointError::Unavailable)?;
         let checkpoint = self.authority.checkpoint();
         let manifest = checkpoint.manifest();
