@@ -1121,7 +1121,9 @@ composition-only closure reaches the converter.
 
 - crates.io is the only allowed registry; unknown registries and unknown Git
   sources are denied;
-- wildcard dependency requirements are denied;
+- wildcard dependency requirements are denied, except a versionless path
+  dependency on a repository-only package, which never reaches a published
+  manifest;
 - a Git dependency requires an immutable revision, a provenance entry, and an
   entry in §7.3;
 - yanked and known-vulnerable dependencies fail the supply-chain gate;
@@ -1133,7 +1135,8 @@ composition-only closure reaches the converter.
   production dependencies.
 
 `deny.toml` enforces the mechanical half: `advisories.yanked = "deny"`;
-`bans.wildcards = "deny"` with `multiple-versions = "warn"`;
+`bans.wildcards = "deny"` with `allow-wildcard-paths = true` and
+`multiple-versions = "warn"`;
 `sources.unknown-registry` and `unknown-git` both denied with crates.io as the
 only allowed registry and no allowed Git source.
 Run it when dependencies change:
