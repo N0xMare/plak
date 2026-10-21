@@ -718,8 +718,13 @@ impl CheckpointObjectBundle {
     /// Unconditionally forgets ancestral CAS membership before a store sweep.
     /// Unlike amortized trimming, this must run even below the size/depth
     /// thresholds: an old address may be reconstructed after pruning removed it.
-    /// Only use after publication is acknowledged, never on a pending delta.
-    pub(crate) fn current_root_closure(&self) -> Result<Self, CheckpointBundleError> {
+    /// The returned closure is loaded/published state, never a pending
+    /// publication delta. Retain the original delta until acknowledgement.
+    ///
+    /// # Errors
+    /// Returns a typed error if the root closure is missing objects or exceeds bounds.
+    #[doc(hidden)]
+    pub fn current_root_closure(&self) -> Result<Self, CheckpointBundleError> {
         let mut closure = BTreeMap::new();
         let mut pending = vec![self.root];
         while let Some(address) = pending.pop() {

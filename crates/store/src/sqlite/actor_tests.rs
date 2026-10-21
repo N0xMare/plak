@@ -1080,3 +1080,59 @@ fn polling_readers_queue_one_read_each_behind_a_long_critical_job() -> TestResul
         Ok(())
     })
 }
+
+#[tokio::test]
+async fn committed_head_is_warm_without_a_cold_load() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
+    let request = seed()?;
+    let prior = request.initial().clone();
+    let created = store.create(request).await?;
+    let next = next_checkpoint(&created, &prior, 1)?;
+    let receipt = store
+        .commit(CommitCheckpoint::new(
+            created.lease().clone(),
+            created.branch(),
+            next.checkpoint().clone(),
+        ))
+        .await?;
+    let before = store.dispatch_read(|b| Ok(b.checkpoint_decodes)).await?;
+    let (_, statements, objects) = traced_branch_load(&store, receipt.head().session()).await?;
+    let after = store.dispatch_read(|b| Ok(b.checkpoint_decodes)).await?;
+    assert_eq!(after, before, "post-commit load performs zero decodes");
+    assert!(!objects, "post-commit load must not decode object payloads");
+    assert!(statements <= 4, "{statements}");
+    let warm = store.load_branch(receipt.head().session()).await?;
+    store.dispatch( |b| { b.checkpoints.clear(); Ok(()) }).await?;
+    let cold = store.load_branch(receipt.head().session()).await?;
+    assert_eq!(warm.checkpoint().bundle(), cold.checkpoint().bundle());
+    Ok(())
+}
+
+#[test]
+fn forked_head_is_warm_under_the_existing_cache_budget() -> TestResult {
+    for budget in [CHECKPOINT_CACHE_BYTES, 1] {
+        let directory = tempfile::tempdir()?;
+        let mut backend = gc_tests::backend(&directory.path().join("runtime.sqlite3"))?;
+        backend.checkpoints = CheckpointCache::new(budget);
+        let request = gc_tests::seed(100_000)?;
+        let bundle = request.initial().clone();
+        let created = create(&mut backend, &request)?;
+        let source = gc_tests::Branch {
+            head: created.branch(),
+            lease: created.lease().clone(),
+            bundle,
+            value: 1,
+        };
+        let mut graph = BTreeMap::new();
+        let forked = gc_tests::fork_branch(&source, &mut backend, &mut graph, 200_000)?;
+        let before = backend.checkpoint_decodes;
+        let loaded = backend.load_branch(forked.head.session())?;
+        assert_eq!(loaded.head(), forked.head);
+        assert_eq!(backend.checkpoint_decodes, before);
+        backend.checkpoints.clear();
+        let cold = backend.load_branch(forked.head.session())?;
+        assert_eq!(loaded.checkpoint().bundle(), cold.checkpoint().bundle());
+    }
+    Ok(())
+}

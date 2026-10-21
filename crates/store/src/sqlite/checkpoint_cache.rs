@@ -94,8 +94,8 @@ pub(super) fn weight(checkpoint: &StoredCheckpoint) -> usize {
         .saturating_add(
             checkpoint
                 .bundle()
-                .supplied_objects()
-                .len()
+                .stats()
+                .object_count()
                 .saturating_mul(size_of::<super::RuntimeObject>()),
         )
         .saturating_add(size_of::<Entry>())

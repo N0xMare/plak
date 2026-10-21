@@ -1142,7 +1142,10 @@ reads a shared counter snapshot without dispatching an actor job. The actor
 publishes the snapshot before acknowledging a mutation, including after an error
 that may have followed a committed transaction. SQLite's page cache is 64 MiB.
 The actor also keeps a validated-checkpoint LRU with a 64 MiB accounted-byte
-budget. Hits still probe the checkpoint's primary-key row and verify its
+budget. Successful commit and fork seed this same cache from the already
+validated publication's exact current-root closure, discarding ancestral CAS
+membership and charging only that closure, under the same budget and LRU policy. Hits still probe
+the checkpoint's primary-key row and verify its
 relational integrity seal; `Pruned` and `NotFound` never come from cache
 state. A repeated branch-head load needs only the session, branch and
 checkpoint row probes, independent of its object closure. Prune and delete

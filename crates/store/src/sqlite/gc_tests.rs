@@ -494,3 +494,59 @@ fn capacity_retry_reclaims_one_batch_before_refusing() -> TestResult {
     );
     Ok(())
 }
+
+#[test]
+fn shrinking_successor_charges_only_its_closure_across_sessions() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let mut b = backend(&directory.path().join("runtime.sqlite3"))?;
+    let root_request = seed(810_000)?;
+    let root = create(&mut b, &root_request)?;
+    let child_request = seed(820_000)?;
+    let child = create(&mut b, &child_request)?;
+    let mut branch = Branch {
+        head: child.branch(),
+        lease: child.lease().clone(),
+        bundle: child_request.initial().clone(),
+        value: 1,
+    };
+    let mut graph = BTreeMap::new();
+    advance_branch_with_payload(
+        &mut branch,
+        &mut b,
+        &mut graph,
+        830_000,
+        &"x".repeat(100_000),
+    )?;
+    let ancestral_bytes = branch.bundle.stats().retained_bytes();
+    b.checkpoints.clear();
+    let warm_root = b.load_branch(root.branch().session())?;
+    let root_weight = checkpoint_cache::weight(warm_root.checkpoint());
+    // Reset history to one small item, analogous to a compaction fold.
+    branch.value = 0;
+    advance_branch(&mut branch, &mut b, &mut graph, 840_000)?;
+    let warm_child = b.load_branch(branch.head.session())?;
+    assert!(warm_child.checkpoint().bundle().stats().retained_bytes() < ancestral_bytes / 2);
+    let child_weight = checkpoint_cache::weight(warm_child.checkpoint());
+    b.checkpoints = CheckpointCache::new(root_weight + child_weight * 3);
+    b.load_branch(root.branch().session())?;
+    for identity in [850_000, 860_000, 870_000, 880_000] {
+        // Keep the warm root newer than the prior child's head.
+        let before = b.checkpoint_decodes;
+        b.load_branch(root.branch().session())?;
+        assert_eq!(b.checkpoint_decodes, before);
+        branch.value = 0;
+        advance_branch(&mut branch, &mut b, &mut graph, identity)?;
+        let before = b.checkpoint_decodes;
+        let loaded_root = b.load_branch(root.branch().session())?;
+        assert_eq!(loaded_root.checkpoint(), warm_root.checkpoint());
+        assert_eq!(
+            b.checkpoint_decodes, before,
+            "child publication evicted the warm root"
+        );
+    }
+    let warm = b.load_branch(branch.head.session())?;
+    b.checkpoints.clear();
+    let cold = b.load_branch(branch.head.session())?;
+    assert_eq!(warm.checkpoint().bundle(), cold.checkpoint().bundle());
+    Ok(())
+}

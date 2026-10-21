@@ -583,6 +583,8 @@ struct Backend {
     wal_pending: bool,
     checkpoints: CheckpointCache,
     #[cfg(test)]
+    checkpoint_decodes: usize,
+    #[cfg(test)]
     job_hook: Option<Box<dyn FnMut(ExecutedJob) + Send>>,
 }
 
@@ -1269,6 +1271,8 @@ impl Backend {
             wal_pending: vacuum_pending,
             checkpoints: CheckpointCache::new(CHECKPOINT_CACHE_BYTES),
             #[cfg(test)]
+            checkpoint_decodes: 0,
+            #[cfg(test)]
             job_hook: None,
         })
     }
@@ -1320,6 +1324,10 @@ impl Backend {
                 return Err(SessionStoreError::corrupt());
             }
             return Ok(checkpoint);
+        }
+        #[cfg(test)]
+        {
+            self.checkpoint_decodes += 1;
         }
         let checkpoint = load_checkpoint_contents(&self.connection, id, row)?;
         self.checkpoints.insert(checkpoint.clone());
@@ -4030,6 +4038,8 @@ fn commit_impl(
     backend.require_open()?;
     let reference = bundle_ref(request.checkpoint());
     let candidate = candidate(request.checkpoint())?;
+    let cached = StoredCheckpoint::from_store(reference, request.checkpoint().current_root_closure().map_err(bundle_error)?)
+        .map_err(bundle_error)?;
     #[cfg(feature = "perf-instrumentation")]
     let transaction_started = observed.then(Instant::now);
     let tx = backend
@@ -4168,6 +4178,7 @@ fn commit_impl(
     tx.commit().map_err(map_sqlite)?;
     #[cfg(test)]
     test_crash_cut("async-in-commit");
+    backend.checkpoints.insert(cached);
     #[cfg(feature = "perf-instrumentation")]
     let execution = CommitExecution {
         transaction_begin_count: 1,
@@ -4283,6 +4294,8 @@ fn fork(b: &mut Backend, r: &ForkBranch) -> Result<ForkReceipt, SessionStoreErro
     super::validate_fork_semantic_request(r)?;
     let reference = bundle_ref(r.target());
     let x = candidate(r.target())?;
+    let cached =
+        StoredCheckpoint::from_store(reference, r.target().current_root_closure().map_err(bundle_error)?).map_err(bundle_error)?;
     let target = SessionRef::new(r.source().session().session_id(), r.target_branch());
     let tx = b
         .connection
@@ -4462,6 +4475,7 @@ fn fork(b: &mut Backend, r: &ForkBranch) -> Result<ForkReceipt, SessionStoreErro
     )?;
     meta(&tx, 0, 1)?;
     commit_claimed(tx, &mut b.holders, target, lease_fence)?;
+    b.checkpoints.insert(cached);
     Ok(receipt)
 }
 fn recover_fork(b: &Backend, r: &RecoverFork) -> Result<ForkReceipt, SessionStoreError> {
