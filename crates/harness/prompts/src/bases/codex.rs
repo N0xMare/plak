@@ -145,7 +145,7 @@ mod tests {
                 "736a3caf6a63c19b830f02c9cc31f166015844cb3bc7b56d7c3b2c4ed2d61bbd",
             ),
         ];
-        assert!(drifted_pins(&pins).is_empty());
+        assert_eq!(drifted_pins(&pins), []);
         assert!(GPT6_NATIVE.contains(GPT6_EDIT_BULLET));
         assert!(GPT6_DIRECT.contains(GPT6_EDIT_BULLET));
     }
