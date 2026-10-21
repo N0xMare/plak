@@ -589,6 +589,15 @@ The built-in OpenRouter Chat dialect is pinned the same way: from its expiry
 (2026-11-20T00:00:00Z for this build) OpenRouter sessions refuse with `OpenRouter Chat
 compatibility profile is not currently admissible`. Build a newer plak.
 
+`plak doctor` and both forms of `plak status` warn 14 days before any compiled
+review expires, naming the surface and UTC expiry, including API-route reviews
+and accounts you have not configured. Expired reviews continue to warn. Install
+a newly reviewed build; neither a warning nor a new login extends the old
+build's review window. Publication dry runs and uploads refuse a build with
+21 days or less remaining on any compiled review; this check is not part of
+the development qualification gates; their package step only reports remaining
+days.
+
 ## `native subscription storage is unsafe: <path> …`
 
 The credential store under your XDG state directory refused a path that breaks

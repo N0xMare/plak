@@ -3126,6 +3126,10 @@ Offline fixtures use an instant within that surface's own review window and
 test expired-pin refusal explicitly. Supported builds always use the system
 clock for compiled review expiry and credential time checks.
 
+Compiled expiry metadata is available for local product warnings and
+maintainer packaging checks (chapters 02 and 06); it confers no credential or
+route authority.
+
 Chat lowering refuses a function name exposed twice. One canonical tool may be
 exposed under several names (pi's `edit` and `write` over the patch tool); such
 a canonical name maps to no single exposure, so a specific tool choice cannot

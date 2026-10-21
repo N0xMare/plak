@@ -3,12 +3,13 @@
 # Usage: scripts/publish.sh [--gate | --execute]
 #   (none)     dry run: refuse a dirty tree or one without passing `just full`
 #              evidence, then package and verify every publishable crate
-#   --gate     the gate's `package` group: package and verify, no preconditions
+#   --gate     package and verify without clean-tree/full-evidence preconditions
 #   --execute  the dry run, then `cargo publish` each crate in dependency order
 #              with CARGO_REGISTRY_TOKEN, waiting for each to appear in the
 #              index before its dependents; crates already indexed are skipped
 # PLAK_PUBLISH_INDEX (default https://index.crates.io) and PLAK_PUBLISH_TIMEOUT
 # (seconds per crate, default 600) shape the index wait.
+# Publication modes require more than 21 days remaining on every compiled review.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$root"
@@ -18,7 +19,7 @@ case "${1:-}" in
   '') ;;
   --gate) mode=gate; shift ;;
   --execute) mode=execute; shift ;;
-  -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+  -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
 esac
 if [[ $# -gt 0 ]]; then echo "unknown argument: $1" >&2; exit 2; fi
 
@@ -28,6 +29,13 @@ case "$target_dir" in
   *) target_dir="$root/$target_dir" ;;
 esac
 refuse() { echo "publish: $*" >&2; exit 1; }
+
+# Qualification reports dates without a time-dependent gate; publication refuses stale windows.
+if [[ "$mode" == gate ]]; then
+  python3 tools/release/review_expiry.py --note
+else
+  python3 tools/release/review_expiry.py
+fi
 
 if [[ "$mode" != gate ]]; then
   if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then

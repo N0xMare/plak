@@ -23,6 +23,7 @@ pub(crate) type TelemetrySinkFactory = fn() -> Option<Arc<dyn ExtraTelemetrySink
 
 /// Handles every product command shares for the life of the process.
 pub(crate) struct Services {
+    clock: Arc<dyn plakous::model::Clock>,
     home: Home,
     session_records: OnceLock<Arc<crate::store::session_records::SqliteSessionStore>>,
     telemetry_sink_factory: Option<TelemetrySinkFactory>,
@@ -33,6 +34,7 @@ impl Services {
     #[cfg(test)]
     pub(crate) fn for_home(paths: PlakPaths) -> Self {
         Self {
+            clock: crate::commands::application::test_clock(),
             home: Home::explicit(paths.clone(), paths.home().join("test-state")),
             session_records: OnceLock::new(),
             telemetry_sink_factory: None,
@@ -59,6 +61,7 @@ impl Services {
             crate::product_doctor::install_credential_state_home(state.to_path_buf());
         }
         Self {
+            clock: Arc::new(plakous::model::SystemClock),
             home,
             session_records: OnceLock::new(),
             telemetry_sink_factory,
@@ -68,6 +71,10 @@ impl Services {
 
     pub(crate) const fn home(&self) -> &Home {
         &self.home
+    }
+
+    pub(crate) fn now_unix_seconds(&self) -> u64 {
+        self.clock.now().seconds()
     }
 
     /// The product home layout, or the one resolution failure.

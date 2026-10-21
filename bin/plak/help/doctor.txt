@@ -4,3 +4,5 @@ USAGE:
   plak doctor
 
   When an OpenRouter key and default model are set, probes catalog keys via discovery GETs only (no inference).
+
+  Warns when a compiled provider review expires within 14 days or is already expired.

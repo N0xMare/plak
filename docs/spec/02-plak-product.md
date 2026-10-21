@@ -1655,7 +1655,7 @@ version. There is no top-level prompt positional.
 | --- | --- |
 | `login [<codex\|grok\|claude>] [--remote]` | `grok` and `supergrok` name the SuperGrok vertical; bare `xai` is refused as ambiguous; `--remote` is the device-code flow for `codex` and a pasted code for `grok` and `claude` (§8.3) |
 | `logout [<account>] [--local]` | revokes a usable credential, retires an unusable one locally; `--local` never contacts the provider |
-| `status [<account>]` | credential readiness; bare form reports every vertical |
+| `status [<account>]` | credential readiness; bare form reports every vertical; compiled review warnings within 14 days of expiry |
 | `refresh [<account>]` | rotate one refreshable credential |
 | `key set\|clear <openai\|xai-api\|anthropic\|openrouter>`, `key status [<account>]` | `set` and `clear` refuse an account that is not an API-key account |
 | `secret set\|rm <name>`, `secret list` | named secrets config.toml refers to by name (spec 04 §3.1); `set` prompts with masked input, `list` prints names only |
@@ -1664,7 +1664,7 @@ version. There is no top-level prompt positional.
 | `agent [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>] [--resume-tree]` | the long-lived JSONL host client |
 | `resume [<session>]` | the TUI picker, or an exact id |
 | `config show\|set <key> <value> [--scope user\|project]\|edit\|init\|trust\|untrust` | product configuration |
-| `doctor` | local health diagnosis; no arguments and no flags |
+| `doctor` | local health diagnosis and compiled review warnings within 14 days of expiry; no arguments and no flags |
 | `usage [--account <id>] [--session <uuid>]` | the two options conflict |
 | `session list`, `session show <id>[.cN]`, `session log <id>[.cN] [--kind <k>] [--tail <n>] [--json]`, `session recover <id>`, `session export <id> [--out <path>]`, `session import <path>`, `session reference <path-or-session> [--search <text>] [--tail <n>]`, `session delete <id> [--yes] [--abandon-children]`, `session gc <id> \| --all` | log `--tail` defaults to 100; reference `--tail` defaults to 20; both must be at least 1; `recover` opens the session, abandons an unfinished turn once, and releases it; `export`, `import`, and `reference` implement the cross-build session reference (§2.5.1); `delete` removes a session and its retained history (§2.5.2); `gc` reclaims superseded history (§2.5.3) |
 | `state prune-legacy [--yes] [--forget-missing-launches] [--prune-orphaned-references]` | Confirm and delete unused non-current state; retain session references unless explicitly selected; refuse locks or unsafe paths (§2.5). |
@@ -5847,6 +5847,10 @@ when the read itself fails; a record a run would refuse is a failure, and FIX is
 that classification's remedy. DETAIL keeps the record's raw status, generation
 and age and the last refresh telemetry.
 
+Doctor also prints the compiled-review warnings described in §8.6, regardless
+of configured accounts. These local warnings count in its summary and do not
+change credential classification or independently create a blocking failure.
+
 The report ends with a count of passes, warnings, and failures, and a pointer
 to `plak status` for provider credentials — doctor is not the credential
 authority. Warnings alone exit 0; one or more failures exit 5.
@@ -6117,6 +6121,15 @@ removes it in their provider account. The product says that plainly rather than
 implying the grant is gone.
 
 ### 8.6 Status
+
+Both status forms and doctor warn when any compiled review expires within
+14 days (inclusive), or has already expired, naming the surface and exact UTC
+expiry. The seven surfaces are Codex OAuth, OpenRouter Chat, xAI Platform API,
+OpenAI Platform API, Grok OAuth, Claude OAuth and Anthropic API. Warnings are
+independent of configured accounts and credentials, require no network call,
+and advise installing a newly reviewed build. They neither extend an expiry
+nor admit a stale route. Product command tests inject a fixed clock; warning
+boundary tests supply time explicitly.
 
 `plak status` is offline and says so: it prints local credential state in
 Ready and Setup needed, over the three OAuth verticals and the four API-key

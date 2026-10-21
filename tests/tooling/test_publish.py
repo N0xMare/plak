@@ -32,6 +32,7 @@ def load(name: str):
 
 publish_plan = load("publish_plan")
 publish_shape = load("publish_shape")
+review_expiry = load("review_expiry")
 
 ORDER = ["plakous-zeta", "plakous-mid", "plak"]
 
@@ -81,9 +82,18 @@ class PublishScriptTests(unittest.TestCase):
         self.index = base / "index"
         self.log = base / "cargo.jsonl"
         for relative in ("scripts/publish.sh", "tools/release/publish_plan.py",
-                         "tools/release/publish_shape.py"):
+                         "tools/release/publish_shape.py", "tools/release/review_expiry.py"):
             (self.repo / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, self.repo / relative)
+        # Freeze only this copied fixture's invocation, never the maintainer CLI.
+        checker = self.repo / "tools/release/review_expiry.py"
+        source = checker.read_text()
+        assert source.count("sys.exit(main(note=args.note))") == 1
+        checker.write_text(source.replace("sys.exit(main(note=args.note))", "sys.exit(main(now=1_000, note=args.note))"))
+        for _, relative, constant in review_expiry.SURFACES:
+            source = self.repo / "crates/providers" / relative
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text(f"const {constant}: u64 = 1_000 + 30 * 86_400;\n")
         files = {
             "Cargo.toml": (
                 "[workspace]\nresolver = \"2\"\nmembers = [\"crates/zeta\", \"crates/mid\", "
@@ -202,6 +212,25 @@ class PublishScriptTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assert_packaged_in_order(calls[0])
         self.assertEqual(calls[0]["offline"], "true")
+
+    def test_publication_refuses_expiring_pins_before_packaging(self) -> None:
+        source = self.repo / "crates/providers/openai/src/oauth_pins.rs"
+        source.write_text("const expires_at_unix: u64 = 1_000 + 21 * 86_400;\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "expiry boundary")
+        self.record_evidence(self.git("rev-parse", "HEAD^{tree}"))
+        self.env["CARGO_REGISTRY_TOKEN"] = "fixture-token"
+        for mode in [(), ("--execute",)]:
+            with self.subTest(mode=mode):
+                result, calls = self.publish(*mode)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("Codex OAuth review expires", result.stderr)
+                self.assertIn("more than 21 days remaining", result.stderr)
+                self.assertEqual(calls, [])
+        result, calls = self.publish("--gate")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("21 days remaining (informational)", result.stdout)
+        self.assertEqual(len(calls), 1)
 
     def test_packaging_drops_unpacked_cohort_copies_from_earlier_runs(self) -> None:
         # Cargo reuses an unpacked name-version directory, so a stale copy of a

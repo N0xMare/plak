@@ -304,7 +304,9 @@ closure enable. `plakous-mcp` depends on `plakous-auth` with `http-refresh`
 `mcp` selection reaches `plakous-auth` without exposing `plakous::auth`.
 The cap bounds the per-package subset enumeration, so the
 facade's own run is 1026 closures. Any eleventh public feature needs its own
-reviewed amendment here.
+reviewed amendment here. Hidden repository-only `test-clock` is not public,
+is excluded from this subset enumeration, and never enters `full` or the
+product default/maintainer release closures.
 The checker reports hits/misses and atomically caches Cargo tree/metadata
 outputs in `${CARGO_TARGET_DIR:-$ROOT/target}/feature-closure-cache.json` by a
 SHA-256 of `cargo --version`, Cargo.lock, tracked Cargo.toml files,
@@ -975,9 +977,18 @@ selection and is roughly 20 GB.
 
 | Invocation | Preconditions | Effect |
 | --- | --- | --- |
-| `scripts/publish.sh` | Clean git tree; `<target>/gate-evidence/full` names `HEAD^{tree}` | Package and verify; nothing uploaded |
-| `scripts/publish.sh --gate` | None | The same packaging and verification; the full tier's `package` group runs it with `CARGO_NET_OFFLINE=true` |
+| `scripts/publish.sh` | More than 21 days on every compiled review; clean git tree; `<target>/gate-evidence/full` names `HEAD^{tree}` | Package and verify; nothing uploaded |
+| `scripts/publish.sh --gate` | None (review time is informational) | The same packaging and verification; the full tier's `package` group runs it with `CARGO_NET_OFFLINE=true` |
 | `scripts/publish.sh --execute` | The dry run's, plus `CARGO_REGISTRY_TOKEN` | After packaging, `cargo publish --locked --no-verify -p NAME` per crate in order; before each, a crate already in the index at its version is skipped, and after each the script polls the sparse index (`PLAK_PUBLISH_INDEX`, default `https://index.crates.io`) until the version appears, failing after `PLAK_PUBLISH_TIMEOUT` seconds (default 600). A rerun resumes |
+
+Publication dry runs and `--execute` use `tools/release/review_expiry.py` to
+read all seven compiled provider expiries and refuse any with 21 days or less
+remaining, failing closed on unreadable source. The `--gate` package group
+prints remaining days as a non-failing informational note instead. Neither
+`just check` nor `just full` has a time-dependent review-window precondition.
+The hidden `test-clock` feature is excluded from supported feature closures
+and inventory, and checked absent from default, maintainer and release builds;
+only dev-dependencies or repository `test-hooks` enable it.
 
 The evidence file is written only by a passing `just full` that began and
 ended on the same clean tree (chapter 05 §1), so an upload always follows a

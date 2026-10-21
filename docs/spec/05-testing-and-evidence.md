@@ -3537,3 +3537,7 @@ silently replace their callback coverage. Only offline parser and
 redaction self-tests run in the tooling group; no gate starts Docker, a
 browser, or these authorization servers. Linux runs use tars0 (not tars1);
 macOS requires Docker Desktop host networking for the loopback URL identities.
+
+Compiled-review time is never a qualification precondition: `just full`'s
+package group reports remaining days without failing. Publication dry runs
+and uploads separately require more than 21 days remaining (chapter 06).

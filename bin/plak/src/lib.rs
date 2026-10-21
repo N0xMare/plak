@@ -57,6 +57,7 @@ mod composition_tests;
 mod config;
 mod diagnostics;
 mod lookup_status;
+mod review_expiry;
 pub(crate) mod surface_protocol;
 /// Terminal-only application adapters.
 pub(crate) mod terminal_application;
@@ -820,6 +821,8 @@ fn execute_command(
 ) -> CliResult<ProcessOutcome> {
     match command {
         Command::AuthStatus(provider) => {
+            review_expiry::write_warnings(stdout, services.now_unix_seconds())
+                .map_err(|_| CliFailure::new("stdout failed"))?;
             auth_status(backend, provider, services.paths().ok(), stdout)
         }
         Command::AuthLogin { provider, mode } => {
@@ -981,6 +984,8 @@ fn execute_command(
                 credential: String,
             }
 
+            review_expiry::write_warnings(stdout, services.now_unix_seconds())
+                .map_err(|_| CliFailure::new("stdout failed"))?;
             let mut rows = Vec::with_capacity(7);
             for provider in [
                 NativeProvider::Codex,

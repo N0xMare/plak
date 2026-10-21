@@ -70,7 +70,9 @@ cache inputs, the workspace and feature structure checkers, clippy -D warnings),
 `rustdoc`, `tests-parallel`, `tests-serial`, `tests-durability`, `contracts`
 (public compile contracts), `tooling` (Python self-tests) and `package` (the
 offline publish dry run: `scripts/publish.sh --gate` packages and verifies the
-cohort). Check runs all but rustdoc, durability and package; platform runs
+cohort; compiled review expiry is informational here, while publication dry
+runs and uploads require more than 21 days remaining). Check runs all but
+rustdoc, durability and package; platform runs
 static without the platform-independent structure checkers, builds and the
 three lanes; full runs every group, and a full pass on a clean tree records that
 tree as the evidence `just publish` requires.

@@ -5,3 +5,5 @@ USAGE:
 
   The SuperGrok subscription account answers to `grok` and `supergrok`.
   Bare `xai` is ambiguous and refused; use grok or xai-api.
+
+  Warns when a compiled provider review expires within 14 days or is already expired.

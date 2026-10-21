@@ -228,11 +228,13 @@ pub(crate) fn run_doctor(
         .map_err(|_| CliFailure::new("stdout failed"))?;
     let legacy_warnings = home::state::report_legacy_state(paths, stdout)
         .map_err(|_| CliFailure::new("stdout failed"))?;
+    let expiry_warnings = crate::review_expiry::write_warnings(stdout, services.now_unix_seconds())
+        .map_err(|_| CliFailure::new("stdout failed"))?;
     writeln!(
         stdout,
         "\nResult: {} passed · {} warnings · {} failures\nProvider credentials: run `plak status`",
         report.summary.ok,
-        report.summary.warnings + legacy_warnings,
+        report.summary.warnings + legacy_warnings + expiry_warnings,
         report.summary.errors
     )
     .map_err(|_| CliFailure::new("stdout failed"))?;

@@ -125,8 +125,11 @@ unknown refresh outcome still requires credential recovery rather than replay.
 
 ### `plak status [account]`
 
-Local credential readiness, with no provider request and no secrets. Bare
-`plak status` groups every account:
+Local credential readiness, with no provider request and no secrets. Both
+status forms warn when any compiled provider review expires within 14 days,
+or is already expired, naming the surface and UTC date even if that account
+is not configured. Install a newly reviewed build before expiry; the warning
+does not extend a route's lifetime. Bare `plak status` groups every account:
 
 ```
 $ plak status
@@ -444,7 +447,9 @@ short id Plak prints when you quit. `plak --resume [uuid]` is the same command.
 
 Local health checks. Everything is offline except one OpenRouter probe: when a
 key and a default model are both set, Plak probes catalog keys with discovery
-GETs only, never inference.
+GETs only, never inference. Compiled provider reviews within 14 days of expiry
+(or already expired) produce local warnings naming the surface and UTC date.
+They count in the warning total; warnings alone do not change the exit code.
 
 ```
 $ plak doctor
