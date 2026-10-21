@@ -5616,7 +5616,9 @@ or interpreter loss after admission does not roll back effects or authorize
 replay. The engine contract names Monty `1.2.0` and includes
 `plakous.monty-python-adapter.v7`. Exact reopen requires the current engine,
 adapter, profile and presentation identities. Cross-build session transfer
-uses export/carry; there is no migration.
+uses export/carry; there is no migration. The incompatible evaluator refusal
+names the recovery commands: `plak session export <id>` then
+`plak session import <file>`.
 
 Each nested result carries a per-call acceptance receipt. A feed-queue handoff
 is not acceptance: the exact batch must pass the pinned wire validators,

@@ -1008,7 +1008,7 @@ pub(crate) fn restore_stored_artifact(
     let refused = || {
         AgentError::new(
             AgentErrorKind::IncompatibleSession,
-            "recorded evaluator path, bytes or contract is unavailable or inconsistent; no inference was dispatched",
+            "recorded evaluator path, bytes or contract is unavailable or inconsistent; no inference was dispatched; recover with `plak session export <id>` then `plak session import <file>`",
         )
     };
     let (prefix, label) = if stored.host.starts_with(b"rquickjs-host") {
@@ -2453,6 +2453,8 @@ mod monty_upgrade_tests {
             return Err("a previous-contract record must not reopen".into());
         };
         assert_eq!(refusal.kind(), AgentErrorKind::IncompatibleSession);
+        assert!(refusal.message().contains("plak session export <id>"));
+        assert!(refusal.message().contains("plak session import <file>"));
         assert!(
             refusal.message().contains("no inference was dispatched"),
             "{}",

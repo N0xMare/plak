@@ -286,8 +286,8 @@ This build runs Monty 1.2.0 under adapter `plakous.monty-python-adapter.v7`. It
 refuses to reopen py-ptc roots and children recorded under the Monty 1.1.0
 engine contract, adapter v4 or v5 (Monty 0.0.21) or v6, profile
 `plakous.python-ptc-profile.v2`, or presentation
-`plakous.python-ptc-presentation.v3`. There is no migration; use session
-carry/export to reference them.
+`plakous.python-ptc-presentation.v3`. There is no migration; recover with
+`plak session export <id>` then `plak session import <file>`.
 
 `js-ptc` and `py-ptc` are one Plak-owned harness class: custom, non-default, one
 engine per agent. `exec_js` takes a JSON field `source` (an async module; emit
