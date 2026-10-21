@@ -5122,7 +5122,11 @@ failures; a terminal `isError` result is a definite failure with its content.
 These failures reach the model, or reject the nested call inside a composition
 cell, without fencing the turn. A bare HTTP failure is not such a terminal MCP
 response: other than 401/403 or a request proven unsent, it remains
-`OutcomeUnknown` as specified above. Text and embedded text
+`OutcomeUnknown` as specified above. An HTTP 4xx or 5xx (except 401/403) with
+`application/json` and a well-formed JSON-RPC error whose id exactly matches
+the posted request is a definite tool failure carrying the error's message
+and code. A missing, null or different id, malformed body or success-shaped
+body on an HTTP failure does not establish a terminal call outcome. Text and embedded text
 resources are text, the first two PNG, JPEG, WebP or GIF images within
 196,608 bytes are images, other media and blobs become one-line placeholders,
 resource links are `resource <uri> (<name>)`, and structured content without

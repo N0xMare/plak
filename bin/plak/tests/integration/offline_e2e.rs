@@ -8765,3 +8765,70 @@ fn a_cli_image_prompt_on_a_model_without_image_input_is_refused_naming_the_route
     assert!(run.stderr.contains("missing.png"), "{}", run.stderr);
 }
 
+#[test]
+fn http_rpc_refusal_is_a_definite_tool_failure() {
+    let fixture = Fixture::new(&json!({"version":1,"steps":[
+        {"output":{"tool":{"name":"mcp__fake__rpc_error","arguments":{}}},"finish":"tool_calls"},
+        {"output":{"text":"continued after HTTP refusal"}}
+    ]}));
+    let mut server = Command::new(fake_mcp_server())
+        .arg("--http")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    BufReader::new(server.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    let url = line.trim().strip_prefix("listening on ").unwrap();
+    let config = fixture.home().join("config.toml");
+    let mut body = std::fs::read_to_string(&config).unwrap();
+    write!(
+        body,
+        "\n[mcp_servers.fake]\ntransport = \"http\"\nurl = {url:?}\n"
+    )
+    .unwrap();
+    write_private(&config, &body);
+    let lead = fixture.home().join("agents/lead.toml");
+    let mut body = std::fs::read_to_string(&lead).unwrap();
+    body.push_str("tools = [\"mcp:fake\"]\n");
+    write_private(&lead, &body);
+    let outcome = run_cli(
+        &fixture,
+        &[
+            "run",
+            "--account",
+            "codex",
+            "--model",
+            "offline-loopback-v1",
+            "--effort",
+            "medium",
+            "--print-session-id",
+            "--",
+            "call the tool",
+        ],
+    );
+    let _ = server.kill();
+    let _ = server.wait();
+    assert!(outcome.status.success(), "{}", outcome.stderr);
+    assert!(outcome.stdout.contains("continued after HTTP refusal"));
+    let log = run_cli(
+        &fixture,
+        &[
+            "session",
+            "log",
+            &outcome.session_id(),
+            "--kind",
+            "tool",
+            "--json",
+        ],
+    );
+    assert!(
+        log.stdout.contains("scripted RPC refusal"),
+        "{}",
+        log.stdout
+    );
+    assert!(log.stdout.contains("-32021"), "{}", log.stdout);
+}
+

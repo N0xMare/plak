@@ -313,3 +313,113 @@ fn http_failures_classify_by_what_the_server_can_have_done() -> TestResult {
     );
     Ok(())
 }
+
+#[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one HTTP error correlation and content-type matrix"
+)]
+async fn http_400_accepts_only_a_correlated_json_rpc_error() -> TestResult {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    for (status, content_type, session) in [
+        (400, "application/json", None),
+        (500, "application/json", None),
+        (400, "Application/JSON; charset=utf-8", None),
+        (400, "text/plain", None),
+        (404, "application/json", Some("existing-session")),
+        (404, "text/plain", Some("existing-session")),
+    ] {
+        for (reply, definite) in [
+            (
+                serde_json::json!({"jsonrpc":"2.0","id":42,"error":{"code":-32021,"message":"elicitation capability missing"}}),
+                true,
+            ),
+            (
+                serde_json::json!({"jsonrpc":"2.0","id":43,"error":{"code":-32021,"message":"wrong request"}}),
+                false,
+            ),
+            (
+                serde_json::json!({"jsonrpc":"2.0","id":null,"error":{"code":-32021,"message":"uncorrelated"}}),
+                false,
+            ),
+            (
+                serde_json::json!({"jsonrpc":"2.0","id":42,"result":{}}),
+                false,
+            ),
+            (
+                serde_json::json!({"jsonrpc":"2.0","error":{"code":-32021,"message":"missing id"}}),
+                false,
+            ),
+            (
+                serde_json::json!({"jsonrpc":"2.0","id":42,"result":{},"error":{"code":-32021,"message":"ambiguous envelope"}}),
+                false,
+            ),
+            (serde_json::json!({"error":"malformed"}), false),
+        ] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+            let url = format!("http://{}/mcp", listener.local_addr()?);
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await?;
+                let mut request = Vec::new();
+                loop {
+                    let mut byte = [0];
+                    socket.read_exact(&mut byte).await?;
+                    request.push(byte[0]);
+                    if request.ends_with(b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let head = String::from_utf8_lossy(&request);
+                let length: usize = head
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length:")
+                            .map(str::trim)
+                            .map(str::to_owned)
+                    })
+                    .ok_or_else(|| std::io::Error::other("missing length"))?
+                    .parse()
+                    .map_err(std::io::Error::other)?;
+                let mut body = vec![0; length];
+                socket.read_exact(&mut body).await?;
+                let reply = reply.to_string();
+                socket.write_all(format!("HTTP/1.1 {status} Error\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}", reply.len()).as_bytes()).await
+            });
+            let client = McpHttpEndpoint::new(&url)?.client(
+                &McpServerName::new("remote")?,
+                &Client::new(Limits::default())?,
+                Duration::from_secs(5),
+            )?;
+            let message = serde_json::from_value(serde_json::json!({
+                "jsonrpc":"2.0","id":42,"method":"tools/call","params":{"name":"rpc_error","arguments":{}}
+            }))?;
+            let answer = client
+                .post_message(
+                    url.into(),
+                    message,
+                    session.map(Into::into),
+                    None,
+                    HashMap::new(),
+                )
+                .await;
+            if definite && content_type != "text/plain" {
+                let StreamableHttpPostResponse::Json(ServerJsonRpcMessage::Error(error), _) =
+                    answer?
+                else {
+                    return Err("expected correlated JSON-RPC error".into());
+                };
+                assert_eq!(error.error.message, "elicitation capability missing");
+            } else if status == 404 && session.is_some() {
+                assert!(matches!(answer, Err(StreamableHttpError::SessionExpired)));
+            } else {
+                assert!(
+                    answer.is_err(),
+                    "uncertain HTTP response must remain unknown"
+                );
+            }
+            server.await??;
+        }
+    }
+    Ok(())
+}

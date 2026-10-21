@@ -76,6 +76,39 @@ async fn registry(
 }
 
 #[tokio::test]
+async fn a_json_rpc_refusal_over_http_is_definite_and_keeps_its_message() -> TestResult {
+    for style in [Style::Initialize, Style::Discover] {
+        let fixture = serve_http(FakeServer::new(style, Arc::new(|| {})), gate()).await?;
+        let workspace = workspace()?;
+        let pool = McpPool::new();
+        let registry = registry(
+            &pool,
+            spec(&fixture, Arc::new(Mutex::new(TOKEN)))?,
+            &workspace,
+        )
+        .await?;
+        let refused = execute(
+            &registry,
+            Arc::clone(&workspace.environment),
+            "mcp__remote__rpc_error",
+            "{}",
+        )
+        .await?;
+        assert_eq!(
+            refused.kind(),
+            ToolOutcomeKind::Failure,
+            "{style:?}: {refused:?}"
+        );
+        assert!(
+            refused.joined_text().contains("scripted RPC refusal"),
+            "{refused:?}"
+        );
+        assert!(refused.joined_text().contains("-32021"), "{refused:?}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn both_lifecycle_styles_serve_calls_over_http_with_their_sessions() -> TestResult {
     for style in [Style::Initialize, Style::Discover] {
         let server = FakeServer::new(style, Arc::new(|| {}));

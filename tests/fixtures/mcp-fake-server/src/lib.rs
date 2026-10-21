@@ -447,7 +447,13 @@ impl ServerHandler for FakeServer {
             "fail" => CallToolResponse::Complete(CallToolResult::error(vec![ContentBlock::text(
                 "scripted failure",
             )])),
-            "rpc_error" => return Err(ErrorData::invalid_params("scripted RPC refusal", None)),
+            "rpc_error" => {
+                return Err(ErrorData::new(
+                    ErrorCode(-32021),
+                    "scripted RPC refusal",
+                    None,
+                ));
+            }
             "escaped_result" => text("\0".repeat(200_000)),
             "slow" => {
                 let steps = arguments

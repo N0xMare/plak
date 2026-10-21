@@ -609,9 +609,6 @@ impl StreamableHttpClient for PlakousStreamableClient {
         if matches!(status, StatusCode::ACCEPTED | StatusCode::NO_CONTENT) {
             return Ok(StreamableHttpPostResponse::Accepted);
         }
-        if status == StatusCode::NOT_FOUND && session_id.is_some() {
-            return Err(StreamableHttpError::SessionExpired);
-        }
         let content_type = response
             .headers()
             .get(&CONTENT_TYPE)
@@ -624,12 +621,31 @@ impl StreamableHttpClient for PlakousStreamableClient {
             .map(ToOwned::to_owned);
         let mut body = response.into_body();
         if !status.is_success() {
-            if session_id.is_none()
-                && status.is_client_error()
+            if (status.is_client_error() || status.is_server_error())
                 && !matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN)
-                && let Some(rejection) = discover_rejection(&message, status, &mut body).await
             {
-                return Ok(rejection);
+                let bytes = collect(&mut body).await?;
+                if content_type.as_deref().is_some_and(|value| {
+                    value
+                        .split(';')
+                        .next()
+                        .is_some_and(|kind| kind.trim().eq_ignore_ascii_case(JSON))
+                }) && let Some(error) = correlated_error(&message, &bytes)
+                {
+                    return Ok(StreamableHttpPostResponse::Json(
+                        ServerJsonRpcMessage::Error(error),
+                        new_session,
+                    ));
+                }
+                if status.is_client_error()
+                    && session_id.is_none()
+                    && let Some(rejection) = discover_rejection(&message, status, &bytes)
+                {
+                    return Ok(rejection);
+                }
+            }
+            if status == StatusCode::NOT_FOUND && session_id.is_some() {
+                return Err(StreamableHttpError::SessionExpired);
             }
             return Err(StreamableHttpError::Client(McpHttpError::Status(status)));
         }
@@ -770,13 +786,32 @@ impl StreamableHttpClient for PlakousStreamableClient {
     }
 }
 
+// HTTP status alone cannot settle a mutating request. Only its own terminal
+// JSON-RPC error can do so; a success-shaped body on an error status cannot.
+fn correlated_error(
+    message: &ClientJsonRpcMessage,
+    bytes: &[u8],
+) -> Option<rmcp::model::JsonRpcError> {
+    let ClientJsonRpcMessage::Request(request) = message else {
+        return None;
+    };
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    if value.get("result").is_some() {
+        return None;
+    }
+    let ServerJsonRpcMessage::Error(error) = serde_json::from_value(value).ok()? else {
+        return None;
+    };
+    (error.id.as_ref() == Some(&request.id)).then_some(error)
+}
+
 /// A sessionless `server/discover` that a legacy server rejects with a 4xx
 /// becomes the JSON-RPC error the lifecycle classifies, so discovery falls
 /// back to `initialize`.
-async fn discover_rejection(
+fn discover_rejection(
     message: &ClientJsonRpcMessage,
     status: StatusCode,
-    body: &mut ResponseBody,
+    body: &[u8],
 ) -> Option<StreamableHttpPostResponse> {
     let ClientJsonRpcMessage::Request(request) = message else {
         return None;
@@ -784,12 +819,10 @@ async fn discover_rejection(
     if !matches!(request.request, ClientRequest::DiscoverRequest(_)) {
         return None;
     }
-    let error = match collect(body)
-        .await
-        .ok()
-        .map(|bytes| serde_json::from_slice::<ServerJsonRpcMessage>(&bytes))
-    {
-        Some(Ok(ServerJsonRpcMessage::Error(error))) => error.error,
+    let error = match serde_json::from_slice::<ServerJsonRpcMessage>(body) {
+        Ok(ServerJsonRpcMessage::Error(error)) if error.id.as_ref() == Some(&request.id) => {
+            error.error
+        }
         _ => ErrorData::invalid_request(
             format!("server/discover rejected with HTTP {}", status.as_u16()),
             None,
