@@ -667,7 +667,11 @@ impl Applier<'_> {
                     None => None,
                 };
                 if let Some(text) = text {
-                    let sent_at_ms = Some(self.committed_at());
+                    let sent_at_ms = Some(
+                        self.intents
+                            .submission(command_id)
+                            .map_or_else(|| self.committed_at(), |item| item.submitted_at_ms),
+                    );
                     self.push(TranscriptRow::Steer { text, sent_at_ms });
                 }
             }

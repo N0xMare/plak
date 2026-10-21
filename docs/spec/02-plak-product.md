@@ -1326,7 +1326,7 @@ start and finish timestamps rather than time spent qualifying the operation.
 | user | text | (b) the turn's prompt item, through `feed_items` of the `HistoryAppended` that commits it |
 | user | `sent_at_ms` | (c) the `submitted_at_ms` of the submission whose command id the turn's `CommandAccepted` names, including source submissions inherited along fork/rebind ancestry on the same runtime session; clear/import stop that ancestry. Absent when no submission names it (a child, an imported row) |
 | steer | the row and its text | (a) `CommandAccepted` of the steer, (b) its command text through `feed_call` of the command operation id that fact names; derived at acceptance, so an accepted steer that never applied still has its row |
-| steer | `sent_at_ms` | (a) `committed_at_ms` of that `CommandAccepted` record, the acceptance the live row has always stamped |
+| steer | `sent_at_ms` | (c) the matching submission's `submitted_at_ms` for a queued prompt sent now; otherwise (a) `committed_at_ms` of that `CommandAccepted` record |
 | assistant | text | (b) the text blocks of the response `HistoryAppended` commits, through `feed_items`; a model round's prose and thinking are keyed at the record of the round's provider decision (`OperationAdvanced` of its provider attempt, `Completed`), ahead of the round's tool rows, as they streamed live |
 | assistant | the partial text an interrupted turn streamed | (e) live only; a rebuild shows only the interrupted marker, and no outcome record carries partial output |
 | thinking | location key and text | (b) reasoning parts with display text, through `feed_items` |

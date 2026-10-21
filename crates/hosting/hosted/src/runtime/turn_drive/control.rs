@@ -24,6 +24,16 @@ const QUIT_CANCEL_GRACE: Duration = Duration::from_millis(300);
 const QUIT_RESULT_JOIN: Duration = Duration::from_millis(100);
 
 impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
+    pub(super) fn publish_live_steer_row(&mut self, text: String, sent_at_ms: u64) {
+        // Live only: the projector derives the stored row from its acceptance fact.
+        let row = TranscriptRow::Steer {
+            text,
+            sent_at_ms: Some(sent_at_ms),
+        };
+        self.host.session.append_transcript(row.clone());
+        let _ = self.host.events.notice(row);
+    }
+
     pub(super) async fn poll_actions(
         &mut self,
         #[cfg(any(test, feature = "test-support"))] prompt: &str,
@@ -203,14 +213,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                         match self.control.steer(input).await {
                             Ok(_) => {
                                 accept_draft(self.host.events, action);
-                                // Live only: the projector derives the
-                                // stored steer row from its acceptance fact.
-                                let row = TranscriptRow::Steer {
-                                    text: row_text,
-                                    sent_at_ms: Some(plakous::model::now_unix_millis()),
-                                };
-                                self.host.session.append_transcript(row.clone());
-                                let _ = self.host.events.notice(row);
+                                self.publish_live_steer_row(
+                                    row_text,
+                                    plakous::model::now_unix_millis(),
+                                );
                                 let _ = self.host.events.send(HostEvent::Status {
                                     phase: "running".into(),
                                     queue_len: self.host.session.pending_queue.len(),

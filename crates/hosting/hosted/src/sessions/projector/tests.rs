@@ -1048,6 +1048,46 @@ fn the_steer_row_reads_its_text_and_stamps_its_acceptance() {
 }
 
 #[test]
+fn a_send_now_steer_keeps_its_submission_time_on_rebuild() {
+    let (mut feed, _) = single_turn(End::Completed, true, true);
+    let command_id = feed
+        .records
+        .iter()
+        .flat_map(FeedRecord::facts)
+        .find_map(|fact| match fact {
+            FeedFact::CommandAccepted {
+                command_id,
+                kind: FeedCommandKind::Steer,
+                ..
+            } => Some(command_id.as_str().to_owned()),
+            _ => None,
+        })
+        .unwrap();
+    feed.intents.submissions.push(Submission {
+        command_id,
+        kind: SubmissionKind::SendNowSteer,
+        queue_item_id: "queued-steer".into(),
+        queue_item_revision: 1,
+        target_turn_id: None,
+        canonical_command: "steer".into(),
+        submitted_at_ms: 17,
+    });
+    let views = project_all(&feed).views;
+    let steers: Vec<_> = rows(&views)
+        .into_iter()
+        .filter(|row| matches!(row, TranscriptRow::Steer { .. }))
+        .collect();
+    assert_eq!(steers.len(), 1);
+    assert!(matches!(
+        steers[0],
+        TranscriptRow::Steer {
+            sent_at_ms: Some(17),
+            ..
+        }
+    ));
+}
+
+#[test]
 fn a_failed_turn_shows_the_terminal_record_error_once() {
     let (_, views) = single_turn(End::Failed, true, false);
     let errors: Vec<_> = rows(&views)

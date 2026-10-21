@@ -1698,6 +1698,50 @@ fn queue_chords_select_reorder_edit_steer_and_drop_follow_ups() {
     terminal.quit();
 }
 
+#[test]
+fn a_queued_prompt_sent_now_shows_its_steer_row_while_the_turn_runs() {
+    assert_queued_send_now_shows_live_steer(b"\r");
+}
+
+#[test]
+fn a_focused_queue_ctrl_s_shows_its_steer_row_while_the_turn_runs() {
+    assert_queued_send_now_shows_live_steer(b"\x13");
+}
+
+fn assert_queued_send_now_shows_live_steer(chord: &[u8]) {
+    let fixture = Fixture::new(&stalled_then_answers(QUEUE_STALL_MS));
+    let mut terminal = Terminal::spawn_ready(&fixture);
+    terminal.send(b"slow prompt\r");
+    fixture.wait_for_provider_dispatch();
+    terminal.wait_screen("waiting for model");
+    terminal.send(b"queued alpha\r");
+    terminal.wait_screen("#1 queued alpha");
+    terminal.send(b"\t");
+    terminal.wait_screen("queue · focused");
+    terminal.send(chord);
+    let live = terminal.wait_where("the live send-now steer row", |frame| {
+        frame
+            .lines()
+            .any(|line| line.contains("queued alpha") && line.contains("steer"))
+            && !frame.contains("#1 queued alpha")
+    });
+    assert!(
+        live.contains("waiting for model")
+            && !live.contains("the stalled answer")
+            && !live.contains("the answer after the stall"),
+        "the steer must be visible before the running turn answers:\n{live}"
+    );
+    let settled = terminal.wait_where("the steered turn settled", |frame| {
+        frame.contains("the answer after the stall") && !frame.contains("waiting for model")
+    });
+    assert_eq!(settled.matches("queued alpha").count(), 1, "{settled}");
+    assert!(
+        row_of(&settled, "queued alpha") < row_of(&settled, "the answer after the stall"),
+        "the single steer row must precede its answer:\n{settled}"
+    );
+    terminal.quit();
+}
+
 /// Two send-nows in one turn: the first steer's delivery is settled when it
 /// is acknowledged, so the second is admitted rather than refused as an
 /// unsaved queue change.

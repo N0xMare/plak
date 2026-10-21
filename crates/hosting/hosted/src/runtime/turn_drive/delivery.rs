@@ -36,6 +36,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
             self.note_queue_projection_wait();
             return true;
         }
+        let row_text = sessions::with_image_chips(
+            &item.text,
+            item.images.iter().map(sessions::draft_image_chip),
+        );
+        let submitted_at_ms = item.submitted_at_ms;
         let was_pending = existing.is_some();
         let intent = existing.unwrap_or_else(|| Submission {
             command_id: format!("plak.send-now.{id}.{revision}"),
@@ -244,6 +249,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
             let _ = self.host.events.notice(TranscriptRow::error(NoticeScope::Queue,
                 "send-now was rejected; the exact queue item was retained and automatic drain paused"));
         } else {
+            self.publish_live_steer_row(row_text, submitted_at_ms);
             let _ = self.host.events.send(HostEvent::Status {
                 phase: "running".into(),
                 queue_len: self.host.session.pending_queue.len(),

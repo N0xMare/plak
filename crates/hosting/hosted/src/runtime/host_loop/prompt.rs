@@ -977,10 +977,13 @@ mod tests {
             .unwrap()
             .target_binding();
         injection.runtime = Arc::new(binding);
+        let inject_once = AtomicBool::new(true);
         injection.observe = Arc::new(move |workflow, boundary| {
             if workflow == TestHostWorkflow::RootDelivery
                 && boundary == TestHostBoundary::RuntimeReturned
+                && inject_once.swap(false, Ordering::SeqCst)
             {
+                // Later auto-drained roots must not re-arm the recovered fault.
                 arm.store(true, Ordering::SeqCst);
                 hold_after_ack.store(true, Ordering::SeqCst);
             }
@@ -1144,6 +1147,14 @@ mod tests {
             })
             .unwrap();
         next(&|event| matches!(event, HostEvent::QueueEditRefused { id } if id == &item.id));
+        let submitted_at_ms = durable
+            .load(&id)
+            .unwrap()
+            .pending_queue
+            .iter()
+            .find(|queued| queued.id == edited.id)
+            .unwrap()
+            .submitted_at_ms;
         actions
             .send(UserAction::SendQueuedNow {
                 id: edited.id,
@@ -1151,18 +1162,43 @@ mod tests {
             })
             .unwrap();
         let response = next(&|event| match event {
+            HostEvent::Row(TranscriptRow::Steer { .. }) => true,
             HostEvent::Status { detail, .. } => detail.as_deref() == Some("steering..."),
             HostEvent::Row(TranscriptRow::Notice(notice)) => {
                 notice.text == "queue changed; refreshed from host snapshot"
             }
             _ => false,
         });
+        assert!(
+            matches!(response, HostEvent::Row(TranscriptRow::Steer { text, sent_at_ms })
+                if text == "edited send-now" && sent_at_ms == Some(submitted_at_ms)),
+            "the live steer with its submit time must precede steering status"
+        );
+        next(&|event| {
+            matches!(event, HostEvent::Status { detail, .. }
+            if detail.as_deref() == Some("steering..."))
+        });
+        gate.release();
+        let HostEvent::PresentationSnapshot(snapshot) = next(&|event| {
+            matches!(event, HostEvent::PresentationSnapshot(snapshot)
+                if snapshot.rows.iter().any(|row| matches!(row,
+                    TranscriptRow::Steer { text, .. } if text == "edited send-now")))
+        }) else {
+            unreachable!()
+        };
+        let steers: Vec<_> = snapshot
+            .rows
+            .iter()
+            .filter(|row| {
+                matches!(row,
+            TranscriptRow::Steer { text, .. } if text == "edited send-now")
+            })
+            .collect();
+        assert_eq!(steers.len(), 1);
+        assert!(matches!(steers[0], TranscriptRow::Steer { sent_at_ms, .. }
+            if *sent_at_ms == Some(submitted_at_ms)));
         actions.send(UserAction::Quit).unwrap();
         worker.join().unwrap().unwrap();
-        assert!(
-            matches!(response, HostEvent::Status { .. }),
-            "a fresh item must steer after projection catches up, not be rejected until idle: {response:?}"
-        );
     }
 
     impl crate::runtime::fault_store::StoreFaults for SubmissionFailure {
