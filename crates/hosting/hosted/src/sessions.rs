@@ -1089,6 +1089,7 @@ mod tests {
                     target,
                     published_seq: plakous::sessions::feed::FeedSeq::new(1),
                     created_at_unix: source.updated_at_unix,
+                    seed: None,
                 },
             )
             .unwrap()

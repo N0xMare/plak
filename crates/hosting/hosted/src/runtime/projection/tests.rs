@@ -28,6 +28,9 @@ mod one_entry;
 #[cfg(test)]
 mod terminal_usage;
 
+#[cfg(test)]
+mod perf_cold;
+
 #[test]
 fn an_intent_written_during_the_feed_read_is_joined_to_that_page() {
     let root = tempfile::tempdir().unwrap();
@@ -669,6 +672,27 @@ fn fork_and_rebind_interrupt_between_pages_keep_source_and_resumable_target() {
         let source = opened.locator();
         config.session.bind_plakous_locator(source).unwrap();
         config.store.save(&mut config.session).unwrap();
+        executor
+            .block_on(super::project_session(
+                opened.sessions(),
+                &config.store,
+                &config.session,
+            ))
+            .unwrap()
+            .unwrap();
+        // Make the source seed-ineligible so the target genuinely owes pages.
+        let previous = config
+            .store
+            .load_views(&config.session.id)
+            .unwrap()
+            .unwrap();
+        let mut retained = previous.clone();
+        retained.state.retained_from = Some(1);
+        let writes = crate::sessions::projector::ViewWrites::between(&previous, &retained);
+        config
+            .store
+            .commit_projection_views(&config.session.id, &writes, &retained)
+            .unwrap();
         let source_id = config.session.id.clone();
         let store = Arc::clone(&config.store);
         let observed_source = source_id.clone();
@@ -801,7 +825,7 @@ fn fork_and_rebind_interrupt_between_pages_keep_source_and_resumable_target() {
             .seq;
         assert!(
             partial.cursor < tail,
-            "the saved target still owes another page"
+            "the interrupted target must still owe at least one page"
         );
         executor.block_on(opened.release()).unwrap().unwrap();
         config.session = config.store.load(&target_id).unwrap();

@@ -607,6 +607,20 @@ impl ProductStore {
                     }
                 }
                 write_import_intents(&tx, &target.id, &intents.imported)?;
+                let has_cursor: bool = tx
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM projector_cursors WHERE session_id=?1)",
+                        [&target.id],
+                        |row| row.get(0),
+                    )
+                    .map_err(unavailable)?;
+                if let Some(seed) = &successor.seed
+                    && !has_cursor
+                {
+                    let writes = ViewWrites::between(&SessionViews::empty(), seed);
+                    // A pre-existing target cursor wins; never rewind it.
+                    let _ = commit_views(&tx, &target.id, &writes, seed)?;
+                }
             }
         }
         match tx.commit() {
@@ -1778,6 +1792,7 @@ mod tests {
             target: target_views.state.head.unwrap(),
             published_seq: source_views.cursor,
             created_at_unix: 42,
+            seed: Some(target_views.clone()),
         });
         let target_id = request.successor_product_id();
         store.connection.execute_batch(&format!(
@@ -1793,6 +1808,20 @@ mod tests {
         store
             .connection
             .execute_batch("DROP TRIGGER refuse_successor")
+            .unwrap();
+        store.connection.execute_batch(&format!(
+            "CREATE TEMP TRIGGER refuse_seed BEFORE INSERT ON session_views WHEN NEW.session_id='{target_id}' BEGIN SELECT RAISE(ABORT, 'seed cut'); END;"
+        )).unwrap();
+        assert!(
+            store
+                .commit_projection_views(&id, &writes, &source_views)
+                .is_err()
+        );
+        assert!(store.load_views(&id).unwrap().is_none());
+        assert!(store.load(&target_id).is_err());
+        store
+            .connection
+            .execute_batch("DROP TRIGGER refuse_seed")
             .unwrap();
         assert_eq!(
             store
@@ -1813,7 +1842,10 @@ mod tests {
             Some(id.as_str())
         );
 
-        assert!(store.load_views(&target_id).unwrap().is_none());
+        assert_eq!(
+            store.load_views(&target_id).unwrap().as_ref(),
+            Some(&target_views)
+        );
         let notices = store.load_intents(&target_id).unwrap().notices;
         assert_eq!(notices.len(), 1);
         assert_eq!(notices[0].anchor, 2);
@@ -1824,12 +1856,77 @@ mod tests {
                 .unwrap(),
             ProjectionCommit::Applied
         );
-        assert!(store.load_views(&target_id).unwrap().is_none());
+        assert_eq!(
+            store.load_views(&target_id).unwrap().as_ref(),
+            Some(&target_views)
+        );
         assert_eq!(store.load_intents(&target_id).unwrap().notices, notices);
         assert_eq!(
             store.load(&target_id).unwrap().store_revision,
             target.store_revision
         );
+    }
+
+    #[test]
+    fn successor_publication_skips_an_existing_target_cursor_even_at_zero() {
+        use plakous::sessions::feed::{FeedBranchTransition, FeedLocator};
+        use plakous_hosted::sessions::projector::Successor;
+        let root = tempdir().unwrap();
+        let (mut store, id) = store_with_session(root.path());
+        let source = SessionLocator::new(
+            uuid(1).parse().unwrap(),
+            uuid(2).parse().unwrap(),
+            uuid(3).parse().unwrap(),
+        );
+        let mut record = store.load(&id).unwrap();
+        record.bind_plakous_locator(source).unwrap();
+        store.commit(&mut record).unwrap();
+        let request = WorkflowRequest {
+            operation_id: "plak:fork:existing-cursor".into(),
+            source_locator: source,
+            kind: SessionWorkflowKind::Fork,
+        };
+        store
+            .submit_workflow_request(&mut record, &request)
+            .unwrap();
+        let target_id = request.successor_product_id();
+        // Model a target cursor already installed by another projection path.
+        let state = serde_json::to_string(&SessionViews::empty().state).unwrap();
+        store.connection.execute_batch(&format!(
+            "CREATE TEMP TRIGGER existing_cursor AFTER INSERT ON sessions WHEN NEW.id='{target_id}' BEGIN INSERT INTO projector_cursors(session_id,runtime_session_id,applied_seq) VALUES(NEW.id,'',0); INSERT INTO session_views(session_id,head_locator,root_turn_count,tool_call_count,compaction_count,state) VALUES(NEW.id,NULL,0,0,0,'{state}'); END;"
+        )).unwrap();
+        let source_views = views_at(5, &[]);
+        let mut seed = source_views.clone();
+        seed.state.head = Some(FeedLocator {
+            session_id: source.session_id(),
+            branch_id: uuid(4).parse().unwrap(),
+            checkpoint_id: uuid(5).parse().unwrap(),
+        });
+        let mut writes = ViewWrites::between(&SessionViews::empty(), &source_views);
+        writes.successors.push(Successor {
+            operation_id: Some(request.operation_id),
+            transition: FeedBranchTransition::Fork,
+            target: seed.state.head.unwrap(),
+            published_seq: seed.cursor,
+            created_at_unix: 42,
+            seed: Some(seed),
+        });
+        assert_eq!(
+            store
+                .commit_projection_views(&id, &writes, &source_views)
+                .unwrap(),
+            ProjectionCommit::Applied
+        );
+        let cursor: i64 = store
+            .connection
+            .query_row(
+                "SELECT applied_seq FROM projector_cursors WHERE session_id=?1",
+                [&target_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(cursor, 0);
+        assert!(store.load(&target_id).is_ok());
     }
 
     fn writes(from: &SessionViews, to: &SessionViews) -> ViewWrites {

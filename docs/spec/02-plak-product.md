@@ -1185,7 +1185,7 @@ view, and nothing is both.
 | State | Class | Identity or source | Rule |
 | --- | --- | --- | --- |
 | Session record of a created, cleared or imported session: id, create operation id, workspace, creation time, title, lineage (`source_session_id`, `source_operation_id`, carry-forward link) | intent | `plak:create:<id>` | written when the operator creates, clears or imports |
-| Session record of a fork or rebind successor | view | the `Branched` record that published it, joined with the fork or rebind request intent | written by the source projector: identities derived from the request's operation id, locator from the branch record; the successor projector independently derives its views from its own lineage |
+| Session record of a fork or rebind successor | view | the `Branched` record that published it, joined with the fork or rebind request intent | written by the source projector: identities derived from the request's operation id, locator from the branch record; when eligible it also writes seeded successor views/cursor at the branch sequence, otherwise the successor rebuilds from its own lineage |
 | Frozen root tools: when the session was created on its `[root] agent` template's tuple, the template's name, account, model and tools list, the canonical tables they reach, and the MCP tool records listed then; otherwise none (chapter 03 §3) | intent | `plak:create:<id>` | written once, with the locator, by the first runtime creation of a created, imported or cleared session; successors copy the source's; never rewritten |
 | `updated_at` | intent | — | stamped by the host on each operator action that writes an intent of the session |
 | `first_prompt` | not stored | — | a read projection of the first user row of the transcript view, for pickers and lists |
@@ -1324,9 +1324,18 @@ releases under one twenty-second deadline.
 Rebind submits one immutable `workflow_requests` row before canonical dispatch;
 it has no product workflow journal or receipt reconciliation. `Branched` joined
 with that operation's request materializes the successor record, selection,
-copied notices and import intents in the source cursor-CAS transaction, without
-writing successor views or a successor cursor. The successor's
-product id is the UUID-shaped first 128 bits of the length-prefixed SHA-256
+copied notices and import intents in the source cursor-CAS transaction. The
+same transaction seeds the successor views and cursor from the source projection
+at the branch sequence, with the branch record applied on the target lineage.
+A source rebuilt behind retention or carrying an intent-only compaction pause
+uses the ordinary successor rebuild instead. A seed projection refusal also
+falls back to that rebuild without refusing source publication. An existing
+successor cursor is never overwritten by seeding. Clear joins owned by source intents
+are not inherited. Seeded views equal a rebuild from empty over that lineage;
+later source records never enter the seed. Deleting successor views still permits the ordinary feed
+rebuild. Fork preparation reports `preparing fork: N/M` between catch-up
+pages, where N is the applied feed sequence and M is the observed feed tail.
+The successor's product id is the UUID-shaped first 128 bits of the length-prefixed SHA-256
 digest of `plak:successor` and the immutable workflow operation id (the same
 derivation as fork). Its creation
 timestamp is the branch publication's `committed_at_ms`. A replay never rewinds
@@ -1438,10 +1447,12 @@ unavailable product store. A record for another branch
 advances the cursor without changing the views, except a `Branched` record
 whose source is this session's branch, which settles the matching fork or
 rebind request and writes the successor session's record and inherited intents
-in the same transaction. It carries only the published branch locator and
-sequence, never cloned source views. The successor's ordinary projector follows
-its own lineage and builds its views independently; live fork and rebind run
-that same target pass before loading their target snapshot. A retained rebuild
+in the same transaction. An eligible source projection also supplies the exact
+view seed at that published sequence, with the target branch record applied;
+source work after the branch cannot enter it. The successor's ordinary projector
+follows its own lineage, continuing the seed or rebuilding from empty to the
+same views (§2.6 above). Live fork and rebind run that same target pass before
+loading their target snapshot. A retained rebuild
 seeds canonical prose and its history frontier from that branch's own head,
 never the source's post-branch head or frontier. A successor's product UUID is derived from its
 immutable workflow operation id, under the `plak:successor` digest namespace; its create operation is

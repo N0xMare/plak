@@ -373,6 +373,7 @@ mod contract {
                 created_at_unix: 42,
                 target: target_views.state.head.unwrap(),
                 published_seq: source_views.cursor,
+                seed: None,
             };
             let mut writes = ViewWrites::between(&SessionViews::empty(), &source_views);
             let mut invalid = successor.clone();

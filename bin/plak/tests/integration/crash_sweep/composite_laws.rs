@@ -574,3 +574,175 @@ fn post_release_timeout_is_benign_and_plain_open_preserves_all_three_sqlite_laws
     finish(opened);
     all_laws(&fixture, &[id], "post-release timeout", &script);
 }
+
+fn publish_fork(fixture: &Fixture, source: &str) -> String {
+    use plakous::sessions::{ForkSessionOutcome, ForkSessionRequest, SessionOperationId};
+    use plakous_hosted::sessions::{SessionWorkflowKind, projector::WorkflowRequest};
+    let store = SqliteSessionStore::new(summary::paths(fixture));
+    let mut record = store.load(source).unwrap();
+    let request = WorkflowRequest {
+        operation_id: format!("plak:fork:{}", uuid::Uuid::new_v4()),
+        source_locator: record.plakous_locator.unwrap(),
+        kind: SessionWorkflowKind::Fork,
+    };
+    store
+        .submit_workflow_request(&mut record, &request)
+        .unwrap();
+    let sessions = runtime_sessions(fixture);
+    let executor = plakous::application::ApplicationExecutor::new().unwrap();
+    let outcome = executor
+        .block_on(sessions.fork(ForkSessionRequest::new(
+            SessionOperationId::new(&request.operation_id).unwrap(),
+            request.source_locator,
+        )))
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(outcome, ForkSessionOutcome::Forked { .. }),
+        "{outcome:?}"
+    );
+    project(fixture, &[source.to_owned()]);
+    request.successor_product_id()
+}
+
+#[test]
+fn composite_fork_of_fork_obeys_all_three_sqlite_laws() {
+    let script = text_script();
+    let fixture = Fixture::new(&script);
+    let (mut agent, source) = ready(&fixture);
+    agent.send(&prompt_frame("shared before two forks"));
+    agent.wait_for_completed_turns(1);
+    finish(agent);
+    let first = publish_fork(&fixture, &source);
+    let second = publish_fork(&fixture, &first);
+    let store = SqliteSessionStore::new(summary::paths(&fixture));
+    assert!(store.load_views(&first).unwrap().is_some());
+    assert!(store.load_views(&second).unwrap().is_some());
+    all_laws(&fixture, &[source, first, second], "fork of fork", &script);
+}
+
+fn record_failed_scheduled_compaction(fixture: &Fixture, source: &str, script: &Value) {
+    use plakous::sessions::{
+        CompactReason, CompactSessionOutcome, CompactSessionRequest, OpenSessionOutcome,
+        OpenSessionRequest, SessionOperationId,
+    };
+    use plakous_hosted::sessions::{
+        ProductCompactReason, SessionWorkflowKind, projector::WorkflowRequest,
+    };
+    let store = SqliteSessionStore::new(summary::paths(fixture));
+    let mut record = store.load(source).unwrap();
+    let request = WorkflowRequest {
+        operation_id: format!("plak:compact:{}", uuid::Uuid::new_v4()),
+        source_locator: record.plakous_locator.unwrap(),
+        kind: SessionWorkflowKind::Compact(ProductCompactReason::Scheduled),
+    };
+    store
+        .submit_workflow_request(&mut record, &request)
+        .unwrap();
+    let controller = plakous_offline_crash_harness::BoundaryController::quiet_from_evidence_path(
+        plakous_offline_crash_harness::protocol::CrashBoundary::None,
+        fixture.root.join("scheduled-fork-evidence.jsonl"),
+    )
+    .unwrap();
+    let plan = Arc::new(serde_json::from_value(script.clone()).unwrap());
+    let normal = plakous_offline_crash_harness::scripted_runtime_binding(
+        &fixture.workspace(),
+        controller.clone(),
+        Arc::clone(&plan),
+    )
+    .unwrap();
+    let runtime = plakous_offline_crash_harness::scripted_compaction_runtime_binding(
+        &fixture.workspace(),
+        controller,
+        &plan,
+        None,
+        None,
+        Vec::new(),
+    )
+    .unwrap();
+    let sessions = runtime_sessions(fixture);
+    let executor = plakous::application::ApplicationExecutor::new().unwrap();
+    let opened = executor
+        .block_on(sessions.open(OpenSessionRequest::new(
+            SessionOperationId::new("open:scheduled-fork").unwrap(),
+            request.source_locator,
+            normal,
+        )))
+        .unwrap()
+        .unwrap();
+    let OpenSessionOutcome::Opened { session, .. } = opened else {
+        panic!("open: {opened:?}")
+    };
+    let outcome = executor
+        .block_on(
+            sessions.compact(
+                CompactSessionRequest::new(
+                    SessionOperationId::new(&request.operation_id).unwrap(),
+                    request.source_locator,
+                    CompactReason::Scheduled,
+                    runtime,
+                )
+                .with_pending_user_input("pending protected prompt ".repeat(200).into()),
+            ),
+        )
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(outcome, CompactSessionOutcome::Failed { .. }),
+        "{outcome:?}"
+    );
+    executor.block_on(session.release()).unwrap().unwrap();
+    project(fixture, &[source.to_owned()]);
+}
+
+fn scheduled_compact_then_fork(turn_after: bool) {
+    let mut script = text_script();
+    script["scheduled_compaction"] = json!(true);
+    script["fold"] = json!("fail");
+    script["steps"][0]["output"]["text"] = json!("eligible history ".repeat(500));
+    let fixture = Fixture::new(&script);
+    let (mut agent, source) = ready(&fixture);
+    for (index, prompt) in ["eligible earlier intent", "protected latest intent"]
+        .iter()
+        .enumerate()
+    {
+        agent.send(&prompt_frame(prompt));
+        agent.wait_for_completed_turns(index + 1);
+    }
+    finish(agent);
+    record_failed_scheduled_compaction(&fixture, &source, &script);
+    let store = SqliteSessionStore::new(summary::paths(&fixture));
+    if turn_after {
+        let mut command = fixture.command();
+        command.args(["agent", "--session", &source]);
+        let mut agent = AgentProcess::start_command(command, true);
+        agent.wait_for("ready", |row| row["kind"] == "ready");
+        agent.send(&prompt_frame(
+            "a turn clears the scheduled-compaction pause",
+        ));
+        agent.wait_for_completed_turns(1);
+        finish(agent);
+    }
+    let target = publish_fork(&fixture, &source);
+    assert_eq!(
+        store.load_views(&target).unwrap().is_some(),
+        turn_after,
+        "only the source with a later turn is seed-eligible"
+    );
+    all_laws(
+        &fixture,
+        &[source, target],
+        "scheduled compact then fork",
+        &script,
+    );
+}
+
+#[test]
+fn composite_scheduled_compaction_then_turn_then_fork_uses_seed_and_obeys_all_laws() {
+    scheduled_compact_then_fork(true);
+}
+
+#[test]
+fn composite_scheduled_compaction_then_fork_rebuilds_and_obeys_all_laws() {
+    scheduled_compact_then_fork(false);
+}

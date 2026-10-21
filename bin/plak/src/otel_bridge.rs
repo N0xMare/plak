@@ -1591,10 +1591,10 @@ mod tests {
                             .await
                             .unwrap();
                     }
-                    // A source-only background pass publishes the target, without ever projecting it.
+                    // A source-only pass publishes the projection seed, but must not export inherited usage.
                     project_session(&sessions, &records, &source).await.unwrap();
                     let successor = product.load(&request.successor_product_id()).unwrap();
-                    assert!(product.load_views(&successor.id).unwrap().is_none());
+                    assert!(product.load_views(&successor.id).unwrap().is_some());
                     for _ in 0..2 {
                         project_session(&sessions, &records, &successor)
                             .await

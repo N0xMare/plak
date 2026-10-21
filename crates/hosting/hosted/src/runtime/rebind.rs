@@ -525,6 +525,7 @@ pub(super) fn complete_rebind<P: plakous_host_protocol::ProtocolExtension>(
                 &request.successor_product_id(),
                 target_locator,
                 || watch.observe_now(),
+                |_, _| {},
             ),
         )
         .map_err(|_| CliFailure::new("application execution failed"))?
@@ -1137,6 +1138,7 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
                 &config.session.id,
                 attached_locator,
                 || watch.observe_now(),
+                |_, _| {},
             ),
         )
         .map_err(|_| CliFailure::new("application execution failed"))?

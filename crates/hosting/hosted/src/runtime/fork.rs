@@ -49,7 +49,7 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
             .save(&mut config.session)
             .map_err(CliFailure::new)?;
     }
-    project_fork_source(executor, watch, config, opened, false).map_err(|error| {
+    project_fork_source(executor, watch, config, opened, events, false).map_err(|error| {
         if watch.interrupted() {
             interrupted_before_dispatch("fork")
         } else {
@@ -121,7 +121,7 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
     );
     if watch.observe_now() {
         restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
-        discard_unstarted_fork(executor, watch, config, opened, &operation_id)?;
+        discard_unstarted_fork(executor, watch, config, opened, events, &operation_id)?;
         return Err(interrupted_before_dispatch("fork"));
     }
     stderr_buf.clear();
@@ -129,13 +129,13 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
         Ok(runtime) => runtime,
         Err(error) => {
             restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
-            discard_unstarted_fork(executor, watch, config, opened, &operation_id)?;
+            discard_unstarted_fork(executor, watch, config, opened, events, &operation_id)?;
             return Err(error);
         }
     };
     if watch.observe_now() {
         restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
-        discard_unstarted_fork(executor, watch, config, opened, &operation_id)?;
+        discard_unstarted_fork(executor, watch, config, opened, events, &operation_id)?;
         return Err(interrupted_before_dispatch("fork"));
     }
     let outcome = match run_watched(executor, watch, opened.fork(facade_operation, runtime)) {
@@ -151,7 +151,7 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
             ) =>
         {
             restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
-            discard_unstarted_fork(executor, watch, config, opened, &operation_id)?;
+            discard_unstarted_fork(executor, watch, config, opened, events, &operation_id)?;
             if let Some(refusal) = fork_refusal(error.kind(), &error.to_string()) {
                 return Err(CliFailure::new(refusal));
             }
@@ -185,20 +185,23 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
         } if exact_source == source_locator => target,
         _ => {
             restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
-            discard_unstarted_fork(executor, watch, config, opened, &operation_id)?;
+            discard_unstarted_fork(executor, watch, config, opened, events, &operation_id)?;
             return Err(CliFailure::new(request.withdrawal_note()));
         }
     };
     // The branch fact and request, not this runtime receipt, publish the
     // successor and settle the source atomically under the projector cursor.
     // Finish that publication before honouring an interrupt on successor catch-up.
-    if let Err(error) = project_fork_source(executor, watch, config, opened, true) {
+    if let Err(error) = project_fork_source(executor, watch, config, opened, events, true) {
         restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
-        return Err(error);
+        return Err(CliFailure::new(format!(
+            "fork committed but could not publish its product views ({}); this session stays attached",
+            error.message()
+        )));
     }
     let target_id = request.successor_product_id();
     let target_result = (|| {
-        run_watched(
+        let projected = run_watched(
             executor,
             watch,
             super::projection::project_to_tail_interruptible(
@@ -207,10 +210,13 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
                 &target_id,
                 target_locator,
                 || watch.observe_now(),
+                |applied, tail| fork_progress(events, applied, tail),
             ),
-        )
-        .map_err(|_| CliFailure::new("application execution failed"))?
-        .map_err(CliFailure::new)?;
+        );
+        end_fork_progress(events);
+        projected
+            .map_err(|_| CliFailure::new("application execution failed"))?
+            .map_err(CliFailure::new)?;
         config.store.load(&target_id).map_err(CliFailure::new)
     })();
     let target = match target_result {
@@ -343,14 +349,33 @@ pub(super) fn fork_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
         .map_err(|_| CliFailure::new("application execution failed"))?
 }
 
+fn fork_progress<P: plakous_host_protocol::ProtocolExtension>(
+    events: &Sender<P>,
+    applied: plakous::sessions::feed::FeedSeq,
+    tail: plakous::sessions::feed::FeedSeq,
+) {
+    let _ = events.send(crate::surface_protocol::HostEvent::Activity {
+        label: format!("preparing fork: {}/{}", applied.get(), tail.get()),
+        active: applied < tail,
+    });
+}
+
+fn end_fork_progress<P: plakous_host_protocol::ProtocolExtension>(events: &Sender<P>) {
+    let _ = events.send(crate::surface_protocol::HostEvent::Activity {
+        label: "preparing fork".into(),
+        active: false,
+    });
+}
+
 fn project_fork_source<P: plakous_host_protocol::ProtocolExtension>(
     executor: &ApplicationExecutor,
     watch: InterruptWatch<'_, P>,
     config: &HostConfig<P>,
     opened: &AttachedCodingSession,
+    events: &Sender<P>,
     finish_publication: bool,
 ) -> CliResult<()> {
-    run_watched(
+    let result = run_watched(
         executor,
         watch,
         super::projection::project_to_tail_interruptible(
@@ -359,11 +384,13 @@ fn project_fork_source<P: plakous_host_protocol::ProtocolExtension>(
             &config.session.id,
             opened.locator(),
             || !finish_publication && watch.observe_now(),
+            |applied, tail| fork_progress(events, applied, tail),
         ),
     )
-    .map_err(|_| CliFailure::new("application execution failed"))?
-    .map(|_| ())
-    .map_err(CliFailure::new)
+    .map_err(|_| CliFailure::new("application execution failed"))
+    .and_then(|result| result.map(|_| ()).map_err(CliFailure::new));
+    end_fork_progress(events);
+    result
 }
 
 fn discard_unstarted_fork<P: plakous_host_protocol::ProtocolExtension>(
@@ -371,9 +398,10 @@ fn discard_unstarted_fork<P: plakous_host_protocol::ProtocolExtension>(
     watch: InterruptWatch<'_, P>,
     config: &mut HostConfig<P>,
     opened: &AttachedCodingSession,
+    events: &Sender<P>,
     operation: &str,
 ) -> CliResult<()> {
-    project_fork_source(executor, watch, config, opened, true)?;
+    project_fork_source(executor, watch, config, opened, events, true)?;
     config
         .store
         .discard_unadmitted_workflow(&mut config.session, operation)
@@ -393,6 +421,22 @@ mod tests {
     use crate::runtime::test_support::*;
     use plakous::application::ApplicationExecutor;
     use std::cell::RefCell;
+
+    #[test]
+    fn fork_progress_reports_applied_and_tail_sequences() {
+        use plakous::sessions::feed::FeedSeq;
+        let (events, observed) = host_event_sink();
+        fork_progress(&events, FeedSeq::new(2), FeedSeq::new(5));
+        assert!(
+            matches!(observed.try_recv().unwrap(), HostEvent::Activity { label, active: true }
+            if label == "preparing fork: 2/5")
+        );
+        end_fork_progress(&events);
+        assert!(matches!(
+            observed.try_recv().unwrap(),
+            HostEvent::Activity { active: false, .. }
+        ));
+    }
 
     #[test]
     fn interrupt_at_canonical_return_saves_resumable_fork_and_allows_another_fork() {

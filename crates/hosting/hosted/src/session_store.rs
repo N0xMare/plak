@@ -1145,6 +1145,9 @@ mod memory {
                     continue;
                 }
                 commit_locked(&mut next, &mut target)?;
+                if let Some(seed) = &successor.seed {
+                    next.views.insert(target.id.clone(), seed.clone());
+                }
                 next.intents.entry(target.id.clone()).or_default().notices = intents
                     .notices
                     .iter()
@@ -1237,13 +1240,17 @@ mod memory {
                 target: target_views.state.head.unwrap(),
                 published_seq: views.cursor,
                 created_at_unix: 42,
+                seed: Some(target_views.clone()),
             });
             store
                 .commit_projection_views(&source.id, &writes, &views)
                 .unwrap();
             let target = request.successor_product_id();
             assert_eq!(store.load(&target).unwrap().created_at_unix, 42);
-            assert!(store.load_views(&target).unwrap().is_none());
+            assert_eq!(
+                store.load_views(&target).unwrap().as_ref(),
+                Some(&target_views)
+            );
             {
                 let mut state = store.state.lock().unwrap();
                 state.records.remove(&target);

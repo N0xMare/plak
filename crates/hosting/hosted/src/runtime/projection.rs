@@ -184,8 +184,18 @@ pub(super) async fn project_to_tail_interruptible(
     product_id: &str,
     followed: plakous::sessions::SessionLocator,
     interrupted: impl Fn() -> bool,
+    progress: impl Fn(FeedSeq, FeedSeq),
 ) -> Result<SessionViews, ReadFailure> {
-    project_to_tail_controlled(sessions, store, product_id, followed, None, interrupted).await
+    project_to_tail_controlled(
+        sessions,
+        store,
+        product_id,
+        followed,
+        None,
+        interrupted,
+        progress,
+    )
+    .await
 }
 
 async fn project_to_tail_cached(
@@ -195,7 +205,16 @@ async fn project_to_tail_cached(
     followed: plakous::sessions::SessionLocator,
     cached: Option<SessionViews>,
 ) -> Result<SessionViews, ReadFailure> {
-    project_to_tail_controlled(sessions, store, product_id, followed, cached, || false).await
+    project_to_tail_controlled(
+        sessions,
+        store,
+        product_id,
+        followed,
+        cached,
+        || false,
+        |_, _| {},
+    )
+    .await
 }
 
 async fn project_to_tail_controlled(
@@ -205,6 +224,7 @@ async fn project_to_tail_controlled(
     followed: plakous::sessions::SessionLocator,
     cached: Option<SessionViews>,
     interrupted: impl Fn() -> bool,
+    progress: impl Fn(FeedSeq, FeedSeq),
 ) -> Result<SessionViews, ReadFailure> {
     #[cfg(test)]
     let _entry = probe::enter(product_id);
@@ -248,6 +268,11 @@ async fn project_to_tail_controlled(
                 })
         })
         .await?;
+        let tail = match &page {
+            FeedPage::Records { tail, .. } | FeedPage::BehindRetention { tail, .. } => *tail,
+            _ => return Err("the projector read an unknown feed page".to_owned().into()),
+        };
+        progress(views.cursor, tail);
         let (mut next, writes, terminal_usages) = match page {
             FeedPage::Records {
                 records,
@@ -396,6 +421,7 @@ async fn project_to_tail_controlled(
             ProjectionCommit::Applied => views = next,
             ProjectionCommit::CursorMoved => views = load_views(store, product_id).await?,
         }
+        progress(views.cursor, tail);
     }
     Ok(views)
 }

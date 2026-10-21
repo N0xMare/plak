@@ -151,6 +151,8 @@ pub struct Successor {
     pub published_seq: FeedSeq,
     /// The branch commit's timestamp, not the projector's clock.
     pub created_at_unix: u64,
+    /// Exact target views at the branch record, for atomic publication.
+    pub seed: Option<SessionViews>,
 }
 
 /// One projector run's result.
@@ -415,6 +417,38 @@ impl Applier<'_> {
                 operation_id = Some(id.clone());
             }
         }
+        // Retention seeds and intent-only pause joins are not a complete
+        // fact-derived prefix for the successor's independently owned intents.
+        let can_seed = self.views.state.retained_from.is_none()
+            && !matches!(
+                &self.views.state.pause,
+                Some(Anchored {
+                    value: Some(PauseCause::CompactionNotApplied { .. }),
+                    ..
+                })
+            );
+        let seed = if can_seed {
+            let mut inherited = self.views.clone();
+            for request in &self.intents.workflow_requests {
+                if request.kind == crate::sessions::SessionWorkflowKind::Clear {
+                    inherited.state.workflows.remove(&request.operation_id);
+                }
+            }
+            inherited.state.lineage.push(LineageStep {
+                branch_id: header.branch_id,
+                from_seq: header.seq.get(),
+            });
+            project(
+                &inherited,
+                self.intents,
+                std::slice::from_ref(self.record),
+                self.reads,
+            )
+            .ok()
+            .map(|run| run.views)
+        } else {
+            None
+        };
         Ok(Successor {
             operation_id,
             transition,
@@ -425,6 +459,7 @@ impl Applier<'_> {
             },
             published_seq: header.seq,
             created_at_unix: header.committed_at_ms / 1_000,
+            seed,
         })
     }
 

@@ -210,6 +210,10 @@ fn refused_successor_projection_keeps_live_fork_source_promptable() {
         .as_str()
         .or_else(|| answer["message"].as_str())
         .unwrap();
+    assert!(
+        detail.contains("fork committed but could not publish"),
+        "{answer}"
+    );
     assert!(detail.contains("this session stays attached"), "{answer}");
     connection
         .execute_batch("DROP TRIGGER refuse_target_views")
@@ -225,7 +229,15 @@ fn refused_successor_projection_keeps_live_fork_source_promptable() {
         store.load(&successor).is_ok(),
         "committed fork remains resumable"
     );
-    project(&fixture, &[source, successor]);
+    project(&fixture, &[source, successor.clone()]);
+    let paths = summary::paths(&fixture);
+    let seeded = store.load_views(&successor).unwrap().unwrap();
+    plak::store::ProductStore::open(&paths)
+        .unwrap()
+        .delete_views(&successor)
+        .unwrap();
+    project(&fixture, std::slice::from_ref(&successor));
+    assert_eq!(store.load_views(&successor).unwrap().unwrap(), seeded);
 }
 
 #[test]

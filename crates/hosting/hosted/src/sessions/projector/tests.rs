@@ -889,8 +889,26 @@ proptest! {
         before in prop::collection::vec(step(), 1..5),
         after in prop::collection::vec(step(), 0..4),
         rebind in any::<bool>(),
+        source_moves in any::<bool>(),
+        source_clear_join in any::<bool>(),
+        fork_of_fork in any::<bool>(),
     ) {
         let mut feed = feed_of(&before);
+        let mut source_initial = SessionViews::empty();
+        if fork_of_fork {
+            let ancestor = feed.branch;
+            append_test_branch(&mut feed, false, "plak:fork:ancestor");
+            source_initial = SessionViews::empty_with_lineage(vec![
+                LineageStep { branch_id: ancestor, from_seq: 0 },
+                LineageStep { branch_id: feed.branch, from_seq: feed.seq },
+            ]);
+            feed.intents = ProductIntents {
+                submissions: feed.intents.submissions.clone(),
+                notices: feed.intents.notices.iter().filter(|notice| notice.anchor < feed.seq).cloned().collect(),
+                imported: feed.intents.imported.clone(),
+                ..ProductIntents::default()
+            };
+        }
         let source = SessionLocator::new(feed.session, feed.branch, feed.head);
         let target_branch: BranchId = id(feed.fresh());
         let target: CheckpointId = id(feed.fresh());
@@ -932,13 +950,33 @@ proptest! {
             Reads::default(),
         );
         let branched_at = feed.seq;
-        // Work continues on the successor's branch only.
-        feed.branch = target_branch;
-        feed.head = target;
+        // Delayed source publication must not leak later source work into
+        // the seed; the alternative arm continues on the target branch.
+        if !source_moves {
+            feed.branch = target_branch;
+            feed.head = target;
+        }
         for step in &after {
             apply_step(&mut feed, step);
         }
-        let source_run = project_all(&feed);
+        let mut source_prefix = project(
+            &source_initial, &feed.intents,
+            &feed.records.iter().filter(|record| record.header().seq.get() < branched_at).cloned().collect::<Vec<_>>(),
+            &feed.reads,
+        ).unwrap().views;
+        if source_clear_join {
+            let clear = "plak:clear:source-joined".to_owned();
+            feed.intents.workflow_requests.push(WorkflowRequest {
+                operation_id: clear.clone(), source_locator: source,
+                kind: SessionWorkflowKind::Clear,
+            });
+            source_prefix.state.workflows.insert(clear, WorkflowCompletion {
+                admitted_at: Some(1), settled: Some(WorkflowSettlement::Published {
+                    target: FeedLocator { session_id: id(9001), branch_id: id(9002), checkpoint_id: id(9003) },
+                }),
+            });
+        }
+        let source_run = project(&source_prefix, &feed.intents, &feed.records, &feed.reads).unwrap();
         prop_assert_eq!(source_run.writes.successors.len(), 1);
         let successor = &source_run.writes.successors[0];
         prop_assert_eq!(successor.operation_id.as_deref(), Some(operation_id.as_str()));
@@ -946,21 +984,35 @@ proptest! {
         prop_assert_eq!(successor.published_seq, FeedSeq::new(branched_at));
         prop_assert_eq!(successor.target, target_locator);
         prop_assert!(source_run.views.state.workflows[&operation_id].settled.is_some());
-        let initial = SessionViews::empty_with_lineage(vec![
-            LineageStep { branch_id: source.branch_id(), from_seq: 0 },
-            LineageStep { branch_id: target_branch, from_seq: branched_at },
-        ]);
+        let mut lineage = source_initial.state.lineage.clone();
+        if lineage.is_empty() {
+            lineage.push(LineageStep { branch_id: source.branch_id(), from_seq: 0 });
+        }
+        lineage.push(LineageStep { branch_id: target_branch, from_seq: branched_at });
+        let initial = SessionViews::empty_with_lineage(lineage);
+        let target_intents = ProductIntents {
+            submissions: feed.intents.submissions.clone(),
+            notices: feed.intents.notices.iter().filter(|notice| notice.anchor < branched_at).cloned().collect(),
+            imported: feed.intents.imported.clone(),
+            ..ProductIntents::default()
+        };
         let prefix = project(
             &initial,
-            &feed.intents,
+            &target_intents,
             &feed.records.iter().filter(|record| record.header().seq.get() <= branched_at).cloned().collect::<Vec<_>>(),
             &feed.reads,
         ).unwrap().views;
         prop_assert_eq!(prefix.cursor, FeedSeq::new(branched_at));
         prop_assert_eq!(prefix.state.head, Some(target_locator));
+        let eligible = source_prefix.state.retained_from.is_none()
+            && !matches!(&source_prefix.state.pause, Some(Anchored { value: Some(PauseCause::CompactionNotApplied { .. }), .. }));
+        prop_assert_eq!(successor.seed.is_some(), eligible);
+        if let Some(seed) = &successor.seed {
+            prop_assert_eq!(seed, &prefix);
+        }
         let continued = project(
             &prefix,
-            &feed.intents,
+            &target_intents,
             &feed.records,
             &feed.reads,
         )
@@ -968,7 +1020,7 @@ proptest! {
         .views;
         let rebuilt = project(
             &initial,
-            &feed.intents,
+            &target_intents,
             &feed.records,
             &feed.reads,
         )
@@ -976,9 +1028,56 @@ proptest! {
         .views;
         prop_assert_eq!(&rebuilt, &continued);
         // The source applies nothing of the successor's branch.
-        let source_rows = project_all(&feed_of(&before)).views.rows;
-        prop_assert_eq!(&source_run.views.rows, &source_rows);
+        if !source_moves {
+            let source_rows = source_prefix.rows;
+            prop_assert_eq!(&source_run.views.rows, &source_rows);
+        }
     }
+}
+
+fn append_test_branch(feed: &mut Feed, rebind: bool, operation: &str) {
+    let source = SessionLocator::new(feed.session, feed.branch, feed.head);
+    let target_branch: BranchId = id(feed.fresh());
+    let target: CheckpointId = id(feed.fresh());
+    let workflow_id = SessionWorkflowRootId::new([8; 32]).unwrap();
+    let kind = if rebind {
+        FeedWorkflowKind::Rebind
+    } else {
+        FeedWorkflowKind::Fork
+    };
+    feed.push(target_branch, serde_json::json!({"branched": {
+        "source": { "session_id": source.session_id().to_string(), "branch_id": source.branch_id().to_string(), "checkpoint_id": source.checkpoint_id().to_string() },
+        "target": target.to_string(), "revision": 4, "transition": if rebind { "rebind" } else { "fork" },
+    }}), target, vec![
+        FeedFact::WorkflowAdmitted { workflow_id, operation_id: Some(operation.to_owned()), kind },
+        FeedFact::WorkflowSettled { workflow_id, operation_id: Some(operation.to_owned()), kind,
+            outcome: FeedWorkflowOutcome::Published { target: FeedLocator { session_id: feed.session, branch_id: target_branch, checkpoint_id: target } } },
+    ], Reads::default());
+    feed.branch = target_branch;
+    feed.head = target;
+}
+
+#[test]
+fn successor_with_a_read_requiring_branch_fact_falls_back_without_sticking_source() {
+    let mut feed = Feed::new();
+    append_test_branch(&mut feed, false, "plak:fork:read-required");
+    let branch = feed.records.pop().unwrap();
+    let mut facts = branch.facts().to_vec();
+    facts.push(FeedFact::HistoryAppended {
+        turn_id: None,
+        segment: HistorySegmentKind::Conversation,
+        first_ordinal: 0,
+        count: 1,
+        first_entry: id(700),
+        last_entry: id(700),
+        tool_results: Vec::new(),
+    });
+    feed.records
+        .push(FeedRecord::from_store(*branch.header(), facts));
+    let source = project_all(&feed);
+    assert_eq!(source.views.cursor, FeedSeq::new(feed.seq));
+    assert_eq!(source.writes.successors.len(), 1);
+    assert!(source.writes.successors[0].seed.is_none());
 }
 
 fn single_turn(end: End, submitted: bool, steer: bool) -> (Feed, SessionViews) {
