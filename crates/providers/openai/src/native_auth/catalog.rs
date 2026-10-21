@@ -799,13 +799,16 @@ pub(super) fn catalog_service_tiers(
     let mut ids = BTreeSet::new();
     let mut tiers = Vec::with_capacity(model.service_tiers.len());
     for tier in &model.service_tiers {
+        if tier.id != "priority" {
+            continue;
+        }
         validate_identifier(&tier.id, MAX_SERVICE_TIER_ID_BYTES)
             .map_err(|_| NativeCodexAuthError::Catalog)?;
         validate_oauth_value(&tier.name, MAX_SERVICE_TIER_NAME_BYTES)
             .map_err(|_| NativeCodexAuthError::Catalog)?;
         validate_oauth_value(&tier.description, MAX_SERVICE_TIER_DESCRIPTION_BYTES)
             .map_err(|_| NativeCodexAuthError::Catalog)?;
-        if tier.id != "priority" || !ids.insert(tier.id.as_str()) {
+        if !ids.insert(tier.id.as_str()) {
             return Err(NativeCodexAuthError::Catalog);
         }
         tiers.push(CodexCatalogServiceTier {
@@ -817,11 +820,15 @@ pub(super) fn catalog_service_tiers(
     if model
         .default_service_tier
         .as_ref()
-        .is_some_and(|default| !ids.contains(default.as_str()))
+        .is_some_and(|default| !model.service_tiers.iter().any(|tier| tier.id == *default))
     {
         return Err(NativeCodexAuthError::Catalog);
     }
-    Ok((tiers, model.default_service_tier.clone()))
+    let default = model
+        .default_service_tier
+        .clone()
+        .filter(|id| ids.contains(id.as_str()));
+    Ok((tiers, default))
 }
 
 pub(super) fn catalog_enum_fingerprint(

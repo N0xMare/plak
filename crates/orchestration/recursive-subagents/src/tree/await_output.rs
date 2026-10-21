@@ -453,6 +453,7 @@ mod tests {
 
     fn mail(id: &str, from: &str, purpose: MessagePurpose, bytes: usize) -> InboxMail {
         InboxMail {
+            body_bytes: bytes,
             message_id: id.to_owned(),
             from: from.to_owned(),
             purpose,

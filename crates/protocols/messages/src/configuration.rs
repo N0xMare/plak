@@ -92,7 +92,11 @@ fn compile_messages_configuration_inner(
         beta_header,
         stream: true,
         thinking: if adaptive_api { "adaptive" } else { "disabled" },
-        cache: "disabled",
+        cache: if adaptive_api {
+            "ephemeral-1h-breakpoints"
+        } else {
+            "disabled"
+        },
         storage: "stateless-omitted-route-contract",
         aggregate_continuation: if hosted_artifact {
             "messages-hosted-artifact-v1"
@@ -162,7 +166,7 @@ fn validate_messages_behavior(
         behavior.reasoning_include,
         ReasoningIncludeDisposition::Omit
     ) && matches!(behavior.replay, ReplayDisposition::StrictEncrypted)
-        && matches!(behavior.cache, CachePolicy::Disabled)
+        && (adaptive_api || matches!(behavior.cache, CachePolicy::Disabled))
         && matches!(
             behavior.parallel_tools,
             ParallelToolDisposition::Enabled | ParallelToolDisposition::Disabled
@@ -506,6 +510,22 @@ mod tests {
             first.effective().identity(),
             compile(durable)?.effective().identity()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn adaptive_api_admits_required_and_preferred_caching() -> TestResult {
+        for requirement in [
+            CapabilityRequirement::Required,
+            CapabilityRequirement::Preferred,
+        ] {
+            let mut value = behavior()?;
+            value.reasoning_effort =
+                ReasoningEffortDisposition::Enabled(plakous_model::ReasoningEffort::Low);
+            value.context_evidence_requirement = ContextAdmissionRequirement::AnyBounded;
+            value.cache = CachePolicy::Enabled { requirement };
+            validate_messages_api_behavior(&value)?;
+        }
         Ok(())
     }
 

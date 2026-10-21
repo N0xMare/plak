@@ -43,6 +43,7 @@ fn resolved() -> TestResult<ResolvedAnthropicMessages> {
         CapabilitySet::new(
             BTreeMap::from([
                 (Capability::Streaming, support.clone()),
+                (Capability::Tools, support.clone()),
                 (Capability::Caching, support),
             ]),
             BTreeMap::new(),
@@ -581,7 +582,7 @@ fn hosted_surfaces_are_rejected_for_platform_direct_and_claude_oauth() -> TestRe
 }
 
 #[test]
-fn cache_write_request_is_rejected_by_messages_lowering_before_transport() -> TestResult {
+fn api_key_cache_write_request_is_admitted_and_emitted() -> TestResult {
     let resolved = resolved()?;
     let selected: SelectedProviderConfigurationId =
         serde_json::from_value(serde_json::to_value(Digest::sha256(
@@ -618,12 +619,14 @@ fn cache_write_request_is_rejected_by_messages_lowering_before_transport() -> Te
     let plan = resolved
         .descriptor()
         .validate_request(request, ValidationMode::Strict)?;
-    let Err(error) =
-        MessagesRequestTranslator::new(resolved).translate(&plan, ToolOwnership::default())
-    else {
-        return Err("Messages cache write unexpectedly lowered".into());
-    };
-    assert_eq!(error.kind(), AnthropicErrorKind::UnsupportedSemantic);
+    let prepared =
+        MessagesRequestTranslator::new(resolved).translate(&plan, ToolOwnership::default())?;
+    let body: serde_json::Value = serde_json::from_slice(prepared.body())?;
+    assert_eq!(
+        body["messages"][0]["content"][0]["cache_control"],
+        serde_json::json!({"type":"ephemeral","ttl":"1h"})
+    );
+    assert!(body.get("cache_control").is_none());
     Ok(())
 }
 
@@ -1994,4 +1997,157 @@ fn with_betas_claude_oauth_dialect_keeps_the_baseline_header() {
         dialect.beta_header().as_deref(),
         Some(plakous_anthropic::CLAUDE_OAUTH_BASELINE_BETAS)
     );
+}
+
+#[test]
+fn api_key_rolling_last_message_marks_only_the_latest_text_block() -> TestResult {
+    let resolved = resolved()?;
+    let selected: SelectedProviderConfigurationId =
+        serde_json::from_value(serde_json::to_value(Digest::sha256(
+            DigestDomain::SelectedProviderConfiguration,
+            5,
+            &[b"api-key-rolling-selected"],
+        )?)?)?;
+    let effective: EffectiveProviderConfigurationId =
+        serde_json::from_value(serde_json::to_value(Digest::sha256(
+            DigestDomain::EffectiveProviderConfiguration,
+            5,
+            &[b"api-key-rolling-effective"],
+        )?)?)?;
+    let request = ModelRequest::builder(
+        selected,
+        effective,
+        ConversationView::from_items(vec![
+            ConversationItem::new(
+                EntryId::try_from(Uuid::from_u128(41))?,
+                Actor::User,
+                vec![ContentBlock::Text(TextBlock::new("first", None)?)],
+                Provenance::UserInput,
+            )?,
+            ConversationItem::new(
+                EntryId::try_from(Uuid::from_u128(42))?,
+                Actor::User,
+                vec![ContentBlock::Text(TextBlock::new("second", None)?)],
+                Provenance::UserInput,
+            )?,
+        ])?,
+        RequestMetadata::for_turn(
+            RunId::try_from(Uuid::from_u128(43))?,
+            TurnId::try_from(Uuid::from_u128(44))?,
+            AttemptId::try_from(Uuid::from_u128(45))?,
+            Timestamp::new(2, 0)?,
+        ),
+    )
+    .instructions(vec![InstructionBlock::new(
+        InstructionSource::Profile,
+        "Stable cached instruction",
+    )?])
+    .build()?;
+    let plan = resolved
+        .descriptor()
+        .validate_request(request, ValidationMode::Strict)?;
+    let prepared =
+        MessagesRequestTranslator::new(resolved).translate(&plan, ToolOwnership::default())?;
+    let body: serde_json::Value = serde_json::from_slice(prepared.body())?;
+    let system = body["system"].as_array().ok_or("system blocks")?;
+    assert_eq!(
+        system[0]["cache_control"],
+        serde_json::json!({"type":"ephemeral","ttl":"1h"})
+    );
+    let messages = body["messages"].as_array().ok_or("messages")?;
+    assert_eq!(messages.len(), 1);
+    let content = messages[0]["content"].as_array().ok_or("merged content")?;
+    assert_eq!(content.len(), 2);
+    assert_eq!(content[0]["text"], "first");
+    assert!(content[0].get("cache_control").is_none());
+    assert_eq!(content[1]["text"], "second");
+    assert_eq!(
+        content[1]["cache_control"],
+        serde_json::json!({"type":"ephemeral","ttl":"1h"})
+    );
+    Ok(())
+}
+
+#[test]
+fn api_key_last_customer_tool_emits_one_hour_cache_control() -> TestResult {
+    let resolved = resolved()?;
+    let selected: SelectedProviderConfigurationId =
+        serde_json::from_value(serde_json::to_value(Digest::sha256(
+            DigestDomain::SelectedProviderConfiguration,
+            5,
+            &[b"api-key-tool-selected"],
+        )?)?)?;
+    let effective: EffectiveProviderConfigurationId =
+        serde_json::from_value(serde_json::to_value(Digest::sha256(
+            DigestDomain::EffectiveProviderConfiguration,
+            5,
+            &[b"api-key-tool-effective"],
+        )?)?)?;
+    let tool = ConfiguredTool::new(
+        ToolDefinition::new(
+            ToolName::new("lookup")?,
+            "1.0.0",
+            "Look up one value",
+            ToolInputContract::structured(serde_json::json!({
+                "$schema":"https://json-schema.org/draft/2020-12/schema",
+                "type":"object",
+                "properties":{"q":{"type":"string"}},
+                "required":["q"],
+                "additionalProperties":false
+            }))?,
+            ToolOutputContract::portable_model_content(),
+            ToolConcurrency::Parallel,
+            ToolEffect::ReadOnly,
+        )?,
+        ToolExecutionDisposition::Local,
+        ToolCallerDisposition::DirectOnly,
+    );
+    let request = ModelRequest::builder(
+        selected,
+        effective,
+        ConversationView::from_items(vec![ConversationItem::new(
+            EntryId::try_from(Uuid::from_u128(51))?,
+            Actor::User,
+            vec![ContentBlock::Text(TextBlock::new("use lookup", None)?)],
+            Provenance::UserInput,
+        )?])?,
+        RequestMetadata::for_turn(
+            RunId::try_from(Uuid::from_u128(52))?,
+            TurnId::try_from(Uuid::from_u128(53))?,
+            AttemptId::try_from(Uuid::from_u128(54))?,
+            Timestamp::new(2, 0)?,
+        ),
+    )
+    .instructions(vec![InstructionBlock::new(
+        InstructionSource::Profile,
+        "Stable cached instruction",
+    )?])
+    .tools(vec![tool])
+    .build()?;
+    let plan = resolved
+        .descriptor()
+        .validate_request(request, ValidationMode::Strict)?;
+    let prepared =
+        MessagesRequestTranslator::new(resolved).translate(&plan, ToolOwnership::default())?;
+    let body: serde_json::Value = serde_json::from_slice(prepared.body())?;
+    assert_eq!(
+        body["tools"][0]["cache_control"],
+        serde_json::json!({"type":"ephemeral","ttl":"1h"})
+    );
+    assert_eq!(
+        body["system"][0]["cache_control"],
+        serde_json::json!({"type":"ephemeral","ttl":"1h"})
+    );
+    assert_eq!(
+        body["messages"][0]["content"][0]["cache_control"],
+        serde_json::json!({"type":"ephemeral","ttl":"1h"})
+    );
+    assert!(body.get("cache_control").is_none());
+    assert_eq!(
+        serde_json::to_string(&body)?
+            .matches("cache_control")
+            .count(),
+        3
+    );
+    Ok(())
 }

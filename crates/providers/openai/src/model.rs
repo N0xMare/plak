@@ -66,7 +66,7 @@ use crate::{
 const DEFAULT_OPENAI_OPERATION_TIMEOUT: Duration = Duration::from_secs(120);
 const DEFAULT_OPENAI_EVENT_CHANNEL_CAPACITY: usize = 64;
 #[cfg(feature = "native-auth")]
-const CODEX_RESPONSES_PREFLIGHT_REVISION: u32 = 1;
+const CODEX_RESPONSES_PREFLIGHT_REVISION: u32 = 2;
 #[cfg(feature = "native-auth")]
 const CODEX_RESPONSES_FINAL_AUTHORIZATION_REVISION: u32 = 1;
 #[cfg(feature = "native-auth")]

@@ -441,6 +441,7 @@ fn derived_capabilities(
     let mut features = BTreeMap::new();
     features.insert(Capability::Streaming, native(None, "streaming"));
     features.insert(Capability::Tools, native(None, "client-tools"));
+    features.insert(Capability::Caching, native(None, "prompt-caching-1h"));
     // Every current Claude model accepts base64 image blocks (Anthropic vision docs).
     features.insert(Capability::ImageInput, native(None, "image-input"));
     if profile == AnthropicPlatformCapabilityProfile::HostedProgrammaticTools {
@@ -576,8 +577,9 @@ mod tests {
         );
         let target = resolver.resolve(config()?)?;
         let features = target.descriptor().capabilities().features();
-        assert_eq!(features.len(), 4);
+        assert_eq!(features.len(), 5);
         assert!(features.contains_key(&Capability::ImageInput));
+        assert_eq!(features[&Capability::Caching].support(), Support::Native);
         for support in features.values() {
             assert_eq!(support.support(), Support::Native);
             assert_eq!(support.provenance().source(), FactSource::BuiltIn);
@@ -597,7 +599,6 @@ mod tests {
             Capability::ParallelTools,
             Capability::StructuredOutput,
             Capability::Continuation,
-            Capability::Caching,
             Capability::NativeOptions,
         ] {
             assert!(features.get(&capability).is_none());
@@ -616,7 +617,8 @@ mod tests {
     }
 
     #[test]
-    fn minimal_profile_advertises_only_reviewed_streaming_client_tools_and_images() -> TestResult {
+    fn minimal_profile_advertises_reviewed_streaming_client_tools_images_and_caching() -> TestResult
+    {
         let resolver = AnthropicPlatformModelResolver::with_runtime(
             AnthropicPlatformRoute::new(AnthropicApiKey::new("sk-ant-minimal-profile")?)?,
             Arc::new(FixedClock::new(Timestamp::new(
@@ -632,16 +634,16 @@ mod tests {
             AnthropicPlatformCapabilityProfile::TextAndClientTools,
         )?)?;
         let features = target.descriptor().capabilities().features();
-        assert_eq!(features.len(), 3);
+        assert_eq!(features.len(), 4);
         assert!(features.contains_key(&Capability::Streaming));
         assert!(features.contains_key(&Capability::Tools));
         assert!(features.contains_key(&Capability::ImageInput));
+        assert_eq!(features[&Capability::Caching].support(), Support::Native);
         for capability in [
             Capability::Reasoning,
             Capability::ParallelTools,
             Capability::StructuredOutput,
             Capability::Continuation,
-            Capability::Caching,
             Capability::NativeOptions,
         ] {
             assert!(!features.contains_key(&capability));

@@ -57,26 +57,18 @@ impl ProductAgentTree {
         let mut settled = !newly_settled.is_empty()
             || (matches!(agents, AwaitAgents::Named(_))
                 && targets.iter().all(|id| self.delivered_to(caller_id, id)));
-        let mut mail: Vec<_> = self
-            .inbox_for(caller_id, false)
-            .into_iter()
-            .filter(|mail| {
-                targets.contains(&mail.from) && !self.delivery_claims.contains(&mail.message_id)
-            })
-            .map(|mut preview| {
-                if let Some(record) = self.messages.get(&preview.message_id) {
-                    preview.body.clone_from(&record.body);
-                }
-                preview
-            })
-            .collect();
-        mail.reverse();
-        let row_wake = settled;
-        // a wait also returns when a watched child sends mail. A
-        // child blocked on a question it asked its parent used to sit there
-        // for the whole timeout while the parent sat in the wait.
+        let mail = self.wait_mail(caller_id, &targets);
+        let row_wake = settled
+            || (*agents == AwaitAgents::Pending
+                && targets.iter().all(|id| self.delivered_to(caller_id, id)));
         if !settled {
-            settled = !mail.is_empty();
+            settled = row_wake
+                || mail.iter().any(|mail| {
+                    matches!(
+                        mail.purpose,
+                        MessagePurpose::Question | MessagePurpose::Reply
+                    ) || mail.priority == MessagePriority::Urgent
+                });
         }
         if settled {
             let woke_by = if row_wake {
@@ -115,14 +107,14 @@ impl ProductAgentTree {
             Ok(output)
         } else {
             let grant = self.grant(caller_id)?;
-            let mut rows = self
-                .wait_targets(grant, caller_id, agents)?
+            let targets = self.wait_targets(grant, caller_id, agents)?;
+            let mut rows = targets
                 .iter()
                 .map(|id| self.wait_row(id))
                 .collect::<Result<Vec<_>, _>>()?;
             self.drop_delivered_outputs(caller_id, agents, &mut rows);
             Ok(AwaitOutput {
-                mail: Vec::new(),
+                mail: self.wait_mail(caller_id, &targets),
                 woke_by: WaitWakeReason::Timeout,
                 agents: rows,
                 timed_out: true,
@@ -132,6 +124,24 @@ impl ProductAgentTree {
                 newly_settled: Vec::new(),
             })
         }
+    }
+
+    fn wait_mail(&self, caller_id: &str, targets: &[String]) -> Vec<InboxMail> {
+        let mut mail: Vec<_> = self
+            .inbox_for(caller_id, false)
+            .into_iter()
+            .filter(|mail| {
+                targets.contains(&mail.from) && !self.delivery_claims.contains(&mail.message_id)
+            })
+            .map(|mut preview| {
+                if let Some(record) = self.messages.get(&preview.message_id) {
+                    preview.body.clone_from(&record.body);
+                }
+                preview
+            })
+            .collect();
+        mail.reverse();
+        mail
     }
 
     /// The rows a timed-out wait would return, for out-of-crate render
@@ -198,10 +208,7 @@ impl ProductAgentTree {
     pub(crate) fn delivered_to(&self, caller_id: &str, id: &str) -> bool {
         self.delivered
             .get(&(caller_id.to_owned(), id.to_owned()))
-            .is_some_and(|delivered| {
-                self.wait_row(id)
-                    .is_ok_and(|row| *delivered == DeliveredRow::of(&row))
-            })
+            .is_some_and(|delivered| self.wait_row(id).is_ok_and(|row| delivered.matches(&row)))
             || self.current_result_mail(id).is_some_and(|mail| {
                 mail.to == caller_id && mail.durable == MailDurableState::Acknowledged
             })
@@ -218,8 +225,8 @@ impl ProductAgentTree {
         })
     }
 
-    /// Whether `caller_id` has unread, unclaimed mail from `id`: a wait over
-    /// `id` would return it at once. Reads every inbound id, not the capped
+    /// Whether `caller_id` has unread, unclaimed mail from `id` to carry on
+    /// the next return. Reads every inbound id, not the capped
     /// [`Self::unread_mail`] view, so a sender whose envelope sits past the
     /// mailbox cap is still watched.
     fn has_unread_mail_from(&self, caller_id: &str, id: &str) -> bool {
@@ -1131,7 +1138,15 @@ impl ProductAgentTree {
                     purpose: mail.purpose,
                     priority: mail.priority,
                     in_reply_to: mail.in_reply_to.clone(),
-                    body: bounded_text(&mail.body, INBOX_BODY_BYTES),
+                    body_bytes: mail.body.len(),
+                    body: bounded_text(
+                        &mail.body,
+                        if mail.durable == MailDurableState::Accepted {
+                            INBOX_BODY_BYTES
+                        } else {
+                            160
+                        },
+                    ),
                     attempt_id: field("attempt_id"),
                     status: field("status"),
                     candidate: field("candidate"),
@@ -1154,6 +1169,156 @@ mod tests {
     use crate::tree::test_support::*;
     use crate::tree::vcs_fixtures::*;
     use crate::tree::*;
+
+    #[test]
+    fn wait_mail_wake_set_and_deferred_delivery() {
+        for purpose in [MessagePurpose::Finding, MessagePurpose::Coordinate] {
+            let (_tmp, mut tree) = tree();
+            let child = tree.spawn_agent("root", &spawn_req(), None).unwrap();
+            let mut request = mail("root", "deferred finding");
+            request.purpose = Some(purpose);
+            let sent = tree
+                .send_agent_message(&child.agent_id, &request, None)
+                .unwrap();
+            let named = wait_for(&child.agent_id);
+            assert!(tree.poll_wait("root", &named).unwrap().is_none());
+            assert!(
+                tree.poll_wait("root", &AwaitAgents::Pending)
+                    .unwrap()
+                    .is_none()
+            );
+            let timeout = tree.timeout_wait("root", &named).unwrap();
+            assert_eq!(timeout.woke_by, WaitWakeReason::Timeout);
+            assert_eq!(timeout.mail[0].message_id, sent.message_id);
+            assert_eq!(
+                tree.mail(&sent.message_id).unwrap().durable,
+                MailDurableState::Accepted
+            );
+            tree.record_turn_completed(&child.agent_id).unwrap();
+            tree.settle_for_test();
+            let output = tree.poll_wait("root", &named).unwrap().unwrap();
+            assert_eq!(output.woke_by, WaitWakeReason::Settled);
+            assert_eq!(output.mail[0].message_id, sent.message_id);
+        }
+    }
+
+    #[test]
+    fn urgent_coordinate_and_deferred_reply_wake_waits() {
+        let (_tmp, mut tree) = tree();
+        let child = tree.spawn_agent("root", &spawn_req(), None).unwrap();
+        let mut request = mail("root", "urgent coordination");
+        request.priority = Some(MessagePriority::Urgent);
+        tree.send_agent_message(&child.agent_id, &request, None)
+            .unwrap();
+        let output = tree
+            .poll_wait("root", &wait_for(&child.agent_id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(output.woke_by, WaitWakeReason::Mail);
+        tree.acknowledge_wait_mail("root", &output);
+        let mut question = mail(&child.agent_id, "question for child");
+        question.purpose = Some(MessagePurpose::Question);
+        let asked = tree.send_agent_message("root", &question, None).unwrap();
+        let mut reply = mail("root", "answer");
+        reply.purpose = Some(MessagePurpose::Reply);
+        reply.in_reply_to = Some(asked.message_id);
+        tree.send_agent_message(&child.agent_id, &reply, None)
+            .unwrap();
+        let output = tree
+            .poll_wait("root", &wait_for(&child.agent_id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(output.woke_by, WaitWakeReason::Mail);
+        assert_eq!(output.mail[0].purpose, MessagePurpose::Reply);
+    }
+
+    #[test]
+    fn bare_wait_returns_only_deferred_mail_without_parking() {
+        let (_tmp, mut tree) = tree();
+        let child = tree.spawn_agent("root", &spawn_req(), None).unwrap();
+        tree.submit_result(
+            &child.agent_id,
+            &SubmitResultRequest {
+                turn_token: 1,
+                output_json: r#"{"ok":true}"#.into(),
+            },
+            None,
+        )
+        .unwrap();
+        tree.record_turn_completed(&child.agent_id).unwrap();
+        tree.settle_for_test();
+        tree.attempt_mut_for_test(&child.agent_id).status = AttemptStatus::Submitted;
+        let output = tree
+            .poll_wait("root", &AwaitAgents::Pending)
+            .unwrap()
+            .unwrap();
+        assert!(output.agents[0].output_json.is_some());
+        tree.mark_wait_delivered("root", &output);
+        tree.attempt_mut_for_test(&child.agent_id).status = AttemptStatus::Completed;
+        let output = tree
+            .poll_wait("root", &AwaitAgents::Pending)
+            .unwrap()
+            .unwrap();
+        assert!(output.agents[0].output_json.is_none());
+        tree.acknowledge_wait_mail("root", &output);
+        let sent = tree
+            .send_agent_message(&child.agent_id, &mail("root", "later finding"), None)
+            .unwrap();
+        let output = tree
+            .poll_wait("root", &AwaitAgents::Pending)
+            .unwrap()
+            .unwrap();
+        assert_eq!(output.woke_by, WaitWakeReason::Settled);
+        assert_eq!(output.mail[0].message_id, sent.message_id);
+        assert!(output.agents[0].output_json.is_none());
+        let reread = tree
+            .poll_wait("root", &wait_for(&child.agent_id))
+            .unwrap()
+            .unwrap();
+        assert!(reread.agents[0].output_json.is_some());
+    }
+
+    #[test]
+    fn delivered_output_class_excludes_failed_and_recovery_required() {
+        let (_tmp, mut tree) = tree();
+        let child = tree.spawn_agent("root", &spawn_req(), None).unwrap();
+        tree.submit_result(
+            &child.agent_id,
+            &SubmitResultRequest {
+                turn_token: 1,
+                output_json: r#"{"ok":true}"#.into(),
+            },
+            None,
+        )
+        .unwrap();
+        tree.set_node_status_for_test(&child.agent_id, NodeStatus::Completed);
+        let mut row = tree.wait_row(&child.agent_id).unwrap();
+        let delivered = DeliveredRow::of(&row);
+        for status in [
+            AttemptStatus::Submitted,
+            AttemptStatus::Completed,
+            AttemptStatus::Adopted,
+        ] {
+            row.attempt = status;
+            assert!(delivered.matches(&row));
+        }
+        tree.delivered
+            .insert(("root".into(), child.agent_id.clone()), delivered.clone());
+        for status in [AttemptStatus::Failed, AttemptStatus::RecoveryRequired] {
+            row.attempt = status;
+            assert!(!delivered.matches(&row));
+            tree.attempt_mut_for_test(&child.agent_id).status = status;
+            let output = tree
+                .poll_wait("root", &AwaitAgents::Pending)
+                .unwrap()
+                .unwrap();
+            assert_eq!(output.newly_settled, std::slice::from_ref(&child.agent_id));
+            assert!(output.agents[0].output_json.is_some());
+        }
+        row.attempt = AttemptStatus::Completed;
+        row.attempt_id = None;
+        assert!(!delivered.matches(&row));
+    }
 
     #[test]
     fn omitted_priority_steers_only_a_running_direct_child() {
@@ -1204,8 +1369,7 @@ mod tests {
             .unwrap();
         assert_eq!(tree.inbox_for("root", false)[0].body.len(), 2048);
         assert_eq!(
-            tree.poll_wait("root", &wait_for(&child.agent_id))
-                .unwrap()
+            tree.timeout_wait("root", &wait_for(&child.agent_id))
                 .unwrap()
                 .mail[0]
                 .body,
@@ -1559,8 +1723,7 @@ mod tests {
             .send_agent_message(&child.agent_id, &mail("root", &body), None)
             .unwrap();
         let output = tree
-            .poll_wait("root", &wait_for(&child.agent_id))
-            .unwrap()
+            .timeout_wait("root", &wait_for(&child.agent_id))
             .unwrap();
         assert_eq!(output.mail[0].message_id, first.message_id);
         assert_eq!(output.mail[0].body, body);
@@ -1595,10 +1758,10 @@ mod tests {
             .unwrap();
         assert_eq!(history.inbox.len(), 2);
         assert_eq!(history.inbox[0].message_id, second.message_id);
-        assert_eq!(history.inbox[1].body, body);
+        assert_eq!(history.inbox[1].body, bounded_text(&body, 160));
+        assert_eq!(history.inbox[1].body_bytes, body.len());
         let next = tree
-            .poll_wait("root", &wait_for(&child.agent_id))
-            .unwrap()
+            .timeout_wait("root", &wait_for(&child.agent_id))
             .unwrap();
         assert_eq!(next.mail.len(), 1);
         tree.acknowledge_wait_mail("root", &next);
@@ -1925,8 +2088,7 @@ mod tests {
             TopologyErrorCode::BoundExceeded
         );
         let output = tree
-            .poll_wait("root", &wait_for(&child.agent_id))
-            .unwrap()
+            .timeout_wait("root", &wait_for(&child.agent_id))
             .unwrap();
         assert_eq!(output.mail[0].message_id, first.message_id);
         assert_eq!(output.mail[0].body.as_bytes(), exact.as_bytes());

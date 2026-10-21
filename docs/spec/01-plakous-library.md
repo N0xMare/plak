@@ -2451,11 +2451,15 @@ The runtime owns opaque branch cache affinity. Exact retry and resume retain
 it; fork, successful paid compaction, and rebind rotate it at
 their defined fences. Offline passes preserve affinity and its epoch.
 Dialects lower that identity per their route: Codex OAuth
-`prompt_cache_key`, SuperGrok `x-grok-conv-id`, Claude OAuth Messages
+`prompt_cache_key` and the identical Plak-owned `session-id` request header,
+SuperGrok `x-grok-conv-id`, Anthropic Messages (OAuth and API key)
 `cache_control` (last tool, last product system, last message, `ttl: 1h`), and
 OpenRouter `session_id` on every wire. Chat and Responses omit
 `prompt_cache_key` and top-level `cache_control`; Messages uses breakpoints.
 Cached-token usage is observational and is never subtracted from admission.
+Anthropic API-key capability profiles advertise native `Caching`, so required
+caching is admitted through the production resolver and executor as well as
+emitted on the wire. This adds no beta header.
 
 ### 6.2 Capabilities and catalogs
 
@@ -2612,16 +2616,28 @@ every field Plak pins (tool mode, reasoning levels, windows, truncation,
 Responses Lite, parallel calls, service tiers). The reference client also sends
 `x-codex-beta-features: remote_compaction_v2` on ordinary turns; Plak sends that
 header only on a remote-compaction request, because it claims a capability
-only that request uses. Its compiled compatibility
+only that request uses. Ordinary and remote-compaction requests send
+`session-id` equal to the body's `prompt_cache_key`, bound exactly to physical
+dispatch. The backend keys prompt caching on this header, not the body field.
+A missing, non-string, or header-invalid key is refused. This Plak-owned affinity
+does not borrow client identity: `originator=plak` and the truthful Plak user
+agent remain unchanged. Its compiled compatibility
 profile was reviewed on 2026-10-14 and expires at 2026-11-13T23:59:59Z; an
 acceptance recorded before the review date is not current, so the operator
 accepts the notice again without a new login (§7.2). Authenticated catalog
 `use_responses_lite` evidence selects the request mode and binds its identity.
 No Codex request carries a top-level `instructions` string: instructions travel
 as a developer message prepended to the input, identified as `msg_` plus a
-digest of the session's cache affinity and the instruction text, so retries and
-reopened sessions keep the same item identity. Ordinary requests keep top-level
-`tools`. Lite requests additionally prepend a developer `additional_tools` item
+hyphenated RFC 9562 v8 UUID derived from the first 16 SHA-256 digest bytes of
+the session's cache affinity and instruction text (with the existing domain
+preimage). The Lite `additional_tools` item uses `at_` plus the same UUID shape,
+derived from its existing tools-domain preimage, affinity and serialized tools.
+UUID version and variant bits are set by `uuid::Builder::from_custom_bytes`.
+Retries and reopened sessions keep the same item identity. Bare-hex
+client-minted item ids select a degraded backend path; server-issued history
+ids are unchanged. Responses request-policy execution revision is **11**.
+Ordinary requests keep top-level `tools`. Lite requests additionally prepend a
+developer `additional_tools` item
 (client tools under `functions`, omitted when there are no client tools) before
 that message, omit top-level `tools`, set `parallel_tool_calls=false`, use
 `reasoning.context=all_turns` and low text verbosity, and bind the exact
@@ -2862,7 +2878,10 @@ Processing tier is an independent identity-bearing dimension: `Standard` or one
 exact provider-named id. `Standard` never means "use a discovered provider
 default." Codex OAuth MAY explicitly admit a catalog-advertised `priority` row,
 lowered exactly as top-level Responses `service_tier: "priority"`; Standard
-omits the field. Every other policy must explicitly lower or reject a named
+omits the field. Unknown catalog tier ids are ignored without hiding the
+model or offering those tiers; an advertised unknown default becomes no
+default. Duplicate priority tiers, malformed priority metadata and defaults
+absent from the advertised tiers still reject the row. Every other policy must explicitly lower or reject a named
 tier. Codex OAuth offers `low` through `max`, intersected with each catalog row.
 Ultra is withheld from offered efforts; an ultra catalog default becomes no
 default without dropping the model row. Explicit binding still refuses it. Pro
@@ -4501,12 +4520,19 @@ abnormal-end trailers), `read {path, offset?, limit?}` (text only: an image
 path is refused with typed text in the lowering, before any effect; the result
 is the selected lines as they are, with clipping, lossy and
 `[Showing lines A-B. Use offset=N to continue.]` notes; a `limit` above 2,000
-reads the 2,000-line canonical page), `edit {path, edits: [{oldText, newText}]}`
+reads the 2,000-line page, bounded additionally to 50 KiB (50 * 1024 bytes),
+whichever comes first; other packs retain their page limits), `edit {path, edits: [{oldText, newText}]}`
 and `write {path, content}`. `edit` lowers onto the canonical `apply_patch`
 `edits` list: every `old_string` must be non-empty and match exactly once in the
 original file, edits must not overlap, and all of them apply in one replacement
 or none does, and a refusal names the offending `edits[i]` (both indices for an
-overlap). Canonical `apply_patch` has exactly three forms, which do not
+overlap). A Codex `*** Begin Patch` envelope supports `*** Move to: destination`
+immediately after an Update File header, with or without content hunks. It
+applies the hunks at the source, creates the destination and deletes the source
+in the same all-file transaction as the rest of the patch. The destination must
+not exist, and both paths obey the same path policy as other writes.
+Git-style rename remains refused. Canonical `apply_patch` has exactly three
+forms, which do not
 combine: `patch`; `file_path` with `old_string`/`new_string`/`replace_all`;
 `file_path` with `edits`. `edits` without `file_path` or beside `patch` or the
 single-replacement fields is a definite tool failure before any effect. Pi adds `wait {ids?, timeout_ms?}`

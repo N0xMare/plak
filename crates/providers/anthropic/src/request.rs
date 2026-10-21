@@ -414,6 +414,10 @@ fn policy_for(
         target.dialect().api_version(),
         target.dialect().beta_header().unwrap_or_default(),
     );
+    policy = policy
+        .with_prompt_cache(true)
+        .with_top_level_prompt_cache(false)
+        .with_prompt_cache_ttl(Some("1h"));
     if target.dialect().is_claude_oauth() {
         // Claude Code sends the clear-thinking edit only while thinking is
         // not disabled (`thinking.type !== "disabled"`).
@@ -461,9 +465,6 @@ fn policy_for(
             .with_system_prefix(crate::CLAUDE_OAUTH_IDENTITY)
             .with_serialized_body_transform(crate::attest_claude_oauth_cch)
             .with_metadata_user_id(metadata)
-            .with_prompt_cache(true)
-            .with_top_level_prompt_cache(false)
-            .with_prompt_cache_ttl(Some("1h"))
             .with_thinking_display(MessagesThinkingDisplay::Updates)
             // An explicit disabled-reasoning request with ToolChoice::None
             // emits `thinking: disabled`; ordinary OAuth turns omit it.

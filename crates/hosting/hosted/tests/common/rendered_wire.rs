@@ -513,7 +513,7 @@ pub(crate) mod suite {
                     spec.model,
                     plakous_anthropic::ANTHROPIC_API_ADAPTIVE_PROFILE_ID,
                     family,
-                    false,
+                    true,
                 );
                 let plan = descriptor
                     .validate_request(request, ValidationMode::Strict)
@@ -535,7 +535,10 @@ pub(crate) mod suite {
                     None,
                     "2023-06-01",
                     "",
-                );
+                )
+                .with_prompt_cache(true)
+                .with_top_level_prompt_cache(false)
+                .with_prompt_cache_ttl(Some("1h"));
                 let lowered =
                     plakous_messages::lower_request(&plan, &policy, ToolOwnership::default())
                         .unwrap_or_else(|error| {
@@ -599,6 +602,10 @@ pub(crate) mod suite {
                 headers.push(("authorization".into(), REDACTED.into()));
                 headers.push(("chatgpt-account-id".into(), REDACTED.into()));
                 headers.push(("originator".into(), "plak".into()));
+                headers.push((
+                    "session-id".into(),
+                    affinity_digest(&spec.file_stem).to_string(),
+                ));
                 headers.push(("user-agent".into(), PLAK_USER_AGENT.into()));
             }
             prompts::ProviderKind::Grok => {

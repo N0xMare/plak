@@ -1,8 +1,7 @@
 //! Codex `*** Begin Patch` envelope parser (pin `c4f2746c43a3ab87c2978657d7f2c274546e97fe`).
 //!
 //! This is the identity-exact mutate presentation for Codex OAuth. It lowers to
-//! the same workspace mutator as git-style `apply_patch`. Rename/`Move to` is
-//! rejected: the canonical mutator has no rename operation.
+//! the same transactional workspace mutator as git-style `apply_patch`.
 
 use std::path::PathBuf;
 
@@ -21,10 +20,10 @@ pub const CODEX_PATCH_ENVELOPE_REGISTERED_TOOL_ID: &str = "plakous.codex.patch-e
 /// Maximum raw patch envelope bytes accepted on the Codex OAuth wire.
 pub const CODEX_PATCH_ENVELOPE_MAX_BYTES: u32 = 1_048_576;
 
-/// Exact Codex CLI 0.153.x Lark grammar for Direct/custom `apply_patch`.
+/// Codex CLI 0.153.x Lark grammar adapted to the accepted Update File forms.
 ///
-/// Reproduced from OpenAI Codex (Apache-2.0); see the README License section.
-pub const CODEX_APPLY_PATCH_GRAMMAR_V1: &str = "start: begin_patch hunk+ end_patch\nbegin_patch: \"*** Begin Patch\" LF\nend_patch: \"*** End Patch\" LF?\n\nhunk: add_hunk | delete_hunk | update_hunk\nadd_hunk: \"*** Add File: \" filename LF add_line+\ndelete_hunk: \"*** Delete File: \" filename LF\nupdate_hunk: \"*** Update File: \" filename LF change_move? change?\n\nfilename: /(.+)/\nadd_line: \"+\" /(.*)/ LF -> line\n\nchange_move: \"*** Move to: \" filename LF\nchange: (change_context | change_line)+ eof_line?\nchange_context: (\"@@\" | \"@@ \" /(.+)/) LF\nchange_line: (\"+\" | \"-\" | \" \") /(.*)/ LF\neof_line: \"*** End of File\" LF\n\n%import common.LF\n";
+/// Adapted from OpenAI Codex (Apache-2.0); see the README License section.
+pub const CODEX_APPLY_PATCH_GRAMMAR_V1: &str = "start: begin_patch hunk+ end_patch\nbegin_patch: \"*** Begin Patch\" LF\nend_patch: \"*** End Patch\" LF?\n\nhunk: add_hunk | delete_hunk | update_hunk\nadd_hunk: \"*** Add File: \" filename LF add_line+\ndelete_hunk: \"*** Delete File: \" filename LF\nupdate_hunk: \"*** Update File: \" filename LF (change_move change? | change)\n\nfilename: /(.+)/\nadd_line: \"+\" /(.*)/ LF -> line\n\nchange_move: \"*** Move to: \" filename LF\nchange: (change_context | change_line)+ eof_line?\nchange_context: (\"@@\" | \"@@ \" /(.+)/) LF\nchange_line: (\"+\" | \"-\" | \" \") /(.*)/ LF\neof_line: \"*** End of File\" LF\n\n%import common.LF\n";
 
 /// Builds the Utf8 canonical definition bound to Codex OAuth custom `apply_patch`.
 ///
@@ -75,6 +74,7 @@ pub(crate) enum CodexPatchOp {
     },
     Update {
         path: PathBuf,
+        move_to: Option<PathBuf>,
         chunks: Vec<CodexUpdateChunk>,
     },
 }
@@ -139,6 +139,9 @@ pub(crate) fn apply_codex_update_chunks(
     original: &str,
     chunks: &[CodexUpdateChunk],
 ) -> Result<String, ToolRuntimeError> {
+    if chunks.is_empty() {
+        return Ok(original.to_owned());
+    }
     let crlf = original.contains("\r\n");
     let final_newline = original.is_empty() || original.ends_with('\n');
     let mut lines: Vec<String> = original
@@ -191,14 +194,16 @@ fn parse_update_file(
     path: &str,
     lines: &mut std::iter::Peekable<std::str::Lines<'_>>,
 ) -> Result<CodexPatchOp, ToolRuntimeError> {
-    if lines
+    let move_to = if let Some(path) = lines
         .peek()
-        .is_some_and(|line| line.trim_start().starts_with("*** Move to:"))
+        .and_then(|line| line.strip_prefix("*** Move to: "))
     {
-        return Err(patch_error(
-            "patch rename/move operations are unsupported; add and delete the file separately",
-        ));
-    }
+        let path = patch_path(path)?;
+        let _ = lines.next();
+        Some(path)
+    } else {
+        None
+    };
     let mut chunks = Vec::new();
     while let Some(line) = lines.peek().copied() {
         let trimmed = line.trim_end();
@@ -222,11 +227,14 @@ fn parse_update_file(
         }
         return Err(patch_error("update hunks must start with @@"));
     }
-    if chunks.is_empty() {
-        return Err(patch_error("update file is missing hunks"));
+    if chunks.is_empty() && move_to.is_none() {
+        return Err(patch_error(
+            "update file is missing hunks or a move destination",
+        ));
     }
     Ok(CodexPatchOp::Update {
         path: patch_path(path)?,
+        move_to,
         chunks,
     })
 }
@@ -538,11 +546,26 @@ mod tests {
     }
 
     #[test]
-    fn rejects_move_to() {
-        let error = parse_codex_patch(
-            "*** Begin Patch\n*** Update File: a.txt\n*** Move to: b.txt\n@@\n-a\n+b\n*** End Patch\n",
-        )
-        .expect_err("move");
-        assert_eq!(error.kind(), ToolRuntimeErrorKind::InvalidArguments);
+    fn parses_move_with_and_without_changes() {
+        assert_eq!(
+            apply_codex_update_chunks("mixed", "a\r\nb\n", &[]).expect("unchanged"),
+            "a\r\nb\n"
+        );
+        for changes in ["", "@@\n-a\n+b\n"] {
+            let ops = parse_codex_patch(&format!(
+                "*** Begin Patch\n*** Update File: a.txt\n*** Move to: b.txt\n{changes}*** End Patch\n"
+            )).expect("move");
+            let CodexPatchOp::Update {
+                move_to, chunks, ..
+            } = &ops[0]
+            else {
+                panic!("update")
+            };
+            assert_eq!(move_to.as_deref(), Some(std::path::Path::new("b.txt")));
+            assert_eq!(
+                apply_codex_update_chunks("a.txt", "a\n", chunks).expect("apply"),
+                if changes.is_empty() { "a\n" } else { "b\n" }
+            );
+        }
     }
 }

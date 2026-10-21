@@ -287,6 +287,117 @@ async fn production_api_executes_sonnet_and_opus_5_family_low_medium_through_age
 }
 
 struct Rotating(std::sync::Mutex<&'static str>);
+
+#[tokio::test]
+async fn production_api_key_admits_required_caching_and_emits_three_one_hour_breakpoints()
+-> TestResult {
+    let (client, origin, peer) = tls_exchange(vec![Some(response(SUCCESS_SSE))], false).await?;
+    let attempt = AttemptId::try_from(uuid::Uuid::from_u128(4))?;
+    let tool = ConfiguredTool::new(
+        ToolDefinition::new(
+            ToolName::new("lookup")?,
+            "1.0.0",
+            "Look up one value",
+            ToolInputContract::structured(serde_json::json!({
+                "$schema":"https://json-schema.org/draft/2020-12/schema",
+                "type":"object", "properties":{}, "required":[], "additionalProperties":false
+            }))?,
+            ToolOutputContract::portable_model_content(),
+            ToolConcurrency::Parallel,
+            ToolEffect::ReadOnly,
+        )?,
+        ToolExecutionDisposition::Local,
+        ToolCallerDisposition::DirectOnly,
+    );
+    let mut policy = behavior()?;
+    policy.cache = CachePolicy::Enabled {
+        requirement: CapabilityRequirement::Required,
+    };
+    policy.tools = vec![tool.clone()];
+    let binding = AnthropicLanguageModel::build(
+        Arc::new(crate::AnthropicApiKey::new("offline-api-key-cache")?),
+        "api-key-cache-account",
+        &crate::AnthropicApiModel::bundled(crate::CLAUDE_SONNET_5_MODEL_ID)?,
+        b"api-key-cache-facts",
+        policy,
+        NonZeroU64::new(64_000).ok_or("input bound")?,
+        client,
+        Some(origin),
+    )?
+    .0;
+    let descriptor = binding.registered().descriptor();
+    assert_eq!(
+        descriptor
+            .capabilities()
+            .get(Capability::Caching)
+            .ok_or("caching")?
+            .support(),
+        Support::Native
+    );
+    let now = SystemClock.now();
+    let request = ModelRequest::builder(
+        binding.configuration().selected().identity(),
+        binding.configuration().effective().identity(),
+        ConversationView::from_items(vec![ConversationItem::new(
+            EntryId::try_from(uuid::Uuid::from_u128(1))?,
+            Actor::User,
+            vec![ContentBlock::Text(TextBlock::new("hello", None)?)],
+            Provenance::UserInput,
+        )?])?,
+        RequestMetadata::for_turn(
+            RunId::try_from(uuid::Uuid::from_u128(2))?,
+            TurnId::try_from(uuid::Uuid::from_u128(3))?,
+            attempt,
+            now,
+        ),
+    )
+    .instructions(vec![InstructionBlock::new(
+        InstructionSource::Profile,
+        "Stable instruction",
+    )?])
+    .tools(vec![tool])
+    .cache(CachePolicy::Enabled {
+        requirement: CapabilityRequirement::Required,
+    })
+    .reasoning(ReasoningPolicy::Enabled {
+        effort: Some(ReasoningEffort::Low),
+        requirement: CapabilityRequirement::Required,
+    })
+    .limits(GenerationLimits::new(NonZeroU32::new(64), vec![])?)
+    .build()?;
+    let plan = descriptor.validate_request(request, ValidationMode::Strict)?;
+    let prepared = binding.model().prepare_call(
+        plan,
+        ModelPreparationContext::new(binding.initial_authority().clone(), now),
+    )?;
+    let mut stream = prepared
+        .start(ModelCallContext::new(
+            attempt,
+            CancellationToken::new(),
+            None,
+        ))
+        .await?;
+    while let Some(event) = stream.next().await {
+        event?;
+    }
+    let wire = String::from_utf8(timeout(Duration::from_secs(5), peer).await???.remove(0))?;
+    let (head, body) = wire.split_once("\r\n\r\n").ok_or("request framing")?;
+    assert!(!head.to_ascii_lowercase().contains("anthropic-beta:"));
+    let body: serde_json::Value = serde_json::from_str(body)?;
+    let marker = serde_json::json!({"type":"ephemeral","ttl":"1h"});
+    assert_eq!(body["tools"][0]["cache_control"], marker);
+    assert_eq!(body["system"][0]["cache_control"], marker);
+    assert_eq!(body["messages"][0]["content"][0]["cache_control"], marker);
+    assert!(body.get("cache_control").is_none());
+    assert_eq!(
+        serde_json::to_string(&body)?
+            .matches("cache_control")
+            .count(),
+        3
+    );
+    Ok(())
+}
+
 impl AnthropicApiKeySource for Rotating {
     fn current_key(&self) -> Result<crate::AnthropicApiKey, AnthropicError> {
         crate::AnthropicApiKey::new(*self.0.lock().unwrap())

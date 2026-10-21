@@ -703,7 +703,9 @@ pub struct InboxMail {
     pub priority: MessagePriority,
     /// The message this one answers, when it answers one.
     pub in_reply_to: Option<String>,
-    /// The first `INBOX_BODY_BYTES` of the body.
+    /// Full body size before preview truncation.
+    pub body_bytes: usize,
+    /// Body preview: 2048 bytes unread, 160 bytes acknowledged.
     pub body: String,
     /// `result` envelope: the attempt that finished.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1268,6 +1270,18 @@ pub(super) struct DeliveredRow {
 }
 
 impl DeliveredRow {
+    fn matches(&self, row: &WaitAgentRow) -> bool {
+        let output_status = |status| {
+            matches!(
+                status,
+                AttemptStatus::Submitted | AttemptStatus::Completed | AttemptStatus::Adopted
+            )
+        };
+        self.attempt_id == row.attempt_id
+            && ((output_status(self.attempt) && output_status(row.attempt))
+                || (self.status == row.status && self.attempt == row.attempt))
+    }
+
     fn of(row: &WaitAgentRow) -> Self {
         Self {
             attempt_id: row.attempt_id.clone(),

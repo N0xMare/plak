@@ -74,7 +74,7 @@ async fn cancelled_topology_wait_does_not_acknowledge_ready_mail() {
             &SendAgentMessageRequest {
                 agent_id: "root".into(),
                 message: "synthetic finding".into(),
-                purpose: None,
+                purpose: Some(MessagePurpose::Question),
                 priority: None,
                 in_reply_to: None,
                 output_schema_json: None,
@@ -541,8 +541,8 @@ async fn five_hundred_waits_across_committed_turns_keep_receipts_bounded() {
                 "c1",
                 &SendAgentMessageRequest {
                     agent_id: "root".into(),
-                    message: format!("finding {turn}"),
-                    purpose: None,
+                    message: format!("question {turn}"),
+                    purpose: Some(MessagePurpose::Question),
                     priority: None,
                     in_reply_to: None,
                     output_schema_json: None,
@@ -592,7 +592,7 @@ async fn committed_child_completion_retires_only_its_own_wait_receipts() {
             &SendAgentMessageRequest {
                 agent_id: recipient.into(),
                 message: "question".into(),
-                purpose: None,
+                purpose: Some(MessagePurpose::Question),
                 priority: None,
                 in_reply_to: None,
                 output_schema_json: None,
@@ -655,7 +655,7 @@ async fn child_receipts_retire_by_terminal_kind_and_never_at_followup() {
                 &SendAgentMessageRequest {
                     agent_id: "c1".into(),
                     message: wait.into(),
-                    purpose: None,
+                    purpose: Some(MessagePurpose::Question),
                     priority: None,
                     in_reply_to: None,
                     output_schema_json: None,

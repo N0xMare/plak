@@ -2103,7 +2103,7 @@ fn codex_instructions_are_an_identified_input_developer_message() -> TestResult 
     assert_eq!(input[0]["role"], "developer");
     assert_eq!(input[0]["content"][0]["text"], "Be precise.");
     let message_id = input[0]["id"].as_str().ok_or("message id")?;
-    assert!(message_id.starts_with("msg_") && message_id.len() == 36);
+    assert_codex_item_uuid(message_id, "msg_")?;
     assert_eq!(input[1]["role"], "user");
     assert_eq!(
         lower(&with_tools, codex)?.body()["input"][0]["id"],
@@ -2115,6 +2115,7 @@ fn codex_instructions_are_an_identified_input_developer_message() -> TestResult 
     let lite = lower(&with_tools, lite_policy)?;
     let lite_input = lite.body()["input"].as_array().ok_or("lite input")?;
     assert_eq!(lite_input[0]["type"], "additional_tools");
+    assert_codex_item_uuid(lite_input[0]["id"].as_str().ok_or("tool id")?, "at_")?;
     assert_eq!(lite_input[1]["role"], "developer");
     assert_eq!(lite_input[1]["id"], input[0]["id"]);
     let toolless = lower(&build(Vec::new())?, lite_policy)?;
@@ -2135,6 +2136,73 @@ fn codex_instructions_are_an_identified_input_developer_message() -> TestResult 
         top_level.execution_identity()?,
         "instruction placement binds the request policy identity"
     );
+    Ok(())
+}
+
+fn assert_codex_item_uuid(id: &str, prefix: &str) -> TestResult {
+    let suffix = id.strip_prefix(prefix).ok_or("item id prefix")?;
+    let uuid = Uuid::parse_str(suffix)?;
+    assert_eq!(uuid.get_version_num(), 8);
+    assert_eq!(uuid.get_variant(), uuid::Variant::RFC4122);
+    assert_eq!(suffix, uuid.hyphenated().to_string());
+    Ok(())
+}
+
+#[test]
+fn codex_client_item_ids_are_never_bare_hex_and_are_stable() -> TestResult {
+    let (protocol, family, model) = target_values()?;
+    let request = crate::test_support::model_request_builder(
+        ConversationView::from_items(vec![user(10, "Find the answer.")?])?,
+        metadata()?,
+    )
+    .instructions(vec![InstructionBlock::new(
+        InstructionSource::Developer,
+        "Be precise.",
+    )?])
+    .tools(vec![tool("lookup", false)?])
+    .reasoning(ReasoningPolicy::Enabled {
+        effort: Some(ReasoningEffort::Medium),
+        requirement: CapabilityRequirement::Required,
+    })
+    .build()?;
+    let affinity = Digest::sha256(DigestDomain::CacheAffinity, 1, &[b"codex-item-ids"])?;
+    for policy in [
+        ResponsesRequestPolicy::openai_codex(false, true, "reasoning.encrypted_content"),
+        ResponsesRequestPolicy::openai_codex_lite("reasoning.encrypted_content"),
+    ] {
+        let lower = || {
+            lower_responses_request(
+                &request,
+                ResponsesRequestConfig::new(&protocol, Some(&family), &model, policy, None)
+                    .with_cache_affinity(Some(&affinity)),
+            )
+        };
+        let first = lower()?;
+        assert_eq!(
+            first.body(),
+            lower()?.body(),
+            "retry/reopen lowering is stable"
+        );
+        let input = first.body()["input"].as_array().ok_or("input")?;
+        let mut count = 0;
+        for item in input {
+            let Some(id) = item.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            count += 1;
+            let (prefix, suffix) = id.split_once('_').ok_or("item id separator")?;
+            assert!(!suffix.bytes().all(|byte| byte.is_ascii_hexdigit()), "{id}");
+            assert_codex_item_uuid(id, &format!("{prefix}_"))?;
+        }
+        assert_eq!(
+            count,
+            if policy.is_codex_responses_lite() {
+                2
+            } else {
+                1
+            }
+        );
+    }
     Ok(())
 }
 

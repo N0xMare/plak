@@ -30,7 +30,7 @@ use plakous_model::{
 use std::{fmt, num::NonZeroU64, sync::Arc};
 
 const WIRE_DOMAIN: &[u8] = b"plakous-anthropic/platform-messages-wire-v1";
-const LOWERING_REVISION: &str = "anthropic.platform.lowering.v1";
+const LOWERING_REVISION: &str = "anthropic.platform.lowering.v2";
 const PROJECTION_REVISION: &str = "messages.projection.v3";
 const ACCOUNTING_REVISION: &str = "messages.accounting.v1";
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
@@ -764,10 +764,9 @@ fn validate_descriptor(
             ));
         }
     }
-    let cache_ok = resolved.dialect().is_claude_oauth()
-        && capabilities
-            .get(Capability::Caching)
-            .is_some_and(|support| support.support() == Support::Native);
+    let cache_ok = capabilities
+        .get(Capability::Caching)
+        .is_some_and(|support| support.support() == Support::Native);
     if !cache_ok
         && capabilities
             .get(Capability::Caching)

@@ -2359,3 +2359,182 @@ async fn apply_patch_edits_beside_a_patch_are_refused_not_dropped() -> TestResul
     assert_eq!(fs::read(workspace.path().join("seed.txt"))?, b"alpha\n");
     Ok(())
 }
+
+#[tokio::test]
+async fn codex_moves_apply_content_and_share_the_all_file_transaction() -> TestResult {
+    let workspace = tempfile::tempdir()?;
+    let outside = tempfile::tempdir()?;
+    let registry = registry(Arc::new(InMemoryPlanState::new()))?;
+    let environment = Arc::new(ExecutionEnvironment::host(
+        ExecutionEnvironmentScope::Run(ids(0xb1)?.run),
+        workspace.path(),
+        ".",
+        ExecutionEnvironmentConfig::default(),
+    )?);
+    for (call, hunks) in [(0xb1, ""), (0xb2, "@@\n-before\n+after\n")] {
+        fs::write(workspace.path().join("source.txt"), b"before\n")?;
+        let destination = format!("nested/moved{call}.txt");
+        let patch = format!(
+            "*** Begin Patch\n*** Update File: source.txt\n*** Move to: {destination}\n{hunks}*** End Patch\n"
+        );
+        let outcome = execute(
+            &registry,
+            Arc::clone(&environment),
+            ids(call)?,
+            "apply_patch",
+            &serde_json::json!({"patch":patch}).to_string(),
+        )
+        .await?;
+        assert_eq!(
+            outcome.kind(),
+            ToolOutcomeKind::Success,
+            "{}",
+            text(&outcome)?
+        );
+        assert!(!workspace.path().join("source.txt").exists());
+        assert_eq!(
+            fs::read_to_string(workspace.path().join(destination))?,
+            if hunks.is_empty() {
+                "before\n"
+            } else {
+                "after\n"
+            }
+        );
+    }
+    fs::write(workspace.path().join("source.txt"), b"before\n")?;
+    fs::write(workspace.path().join("existing.txt"), b"keep\n")?;
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(outside.path(), workspace.path().join("outside-link"))?;
+    let escaped = outside.path().join("escaped.txt").display().to_string();
+    for (call, destination) in (0xb4..).zip([
+        "existing.txt",
+        escaped.as_str(),
+        "../escaped.txt",
+        "outside-link/escaped.txt",
+    ]) {
+        let patch = format!(
+            "*** Begin Patch\n*** Add File: unrelated.txt\n+must roll back\n*** Update File: source.txt\n*** Move to: {destination}\n@@\n-before\n+after\n*** End Patch\n"
+        );
+        let outcome = execute(
+            &registry,
+            Arc::clone(&environment),
+            ids(call)?,
+            "apply_patch",
+            &serde_json::json!({"patch":patch}).to_string(),
+        )
+        .await?;
+        assert_eq!(outcome.kind(), ToolOutcomeKind::Failure, "{destination}");
+        assert_eq!(fs::read(workspace.path().join("source.txt"))?, b"before\n");
+        assert_eq!(fs::read(workspace.path().join("existing.txt"))?, b"keep\n");
+        assert!(!workspace.path().join("unrelated.txt").exists());
+        assert!(!outside.path().join("escaped.txt").exists());
+    }
+    let patch = "*** Begin Patch\n*** Update File: source.txt\n*** Move to: moved.txt\n*** Update File: existing.txt\n@@\n-not present\n+bad\n*** End Patch\n";
+    let outcome = execute(
+        &registry,
+        environment,
+        ids(0xb9)?,
+        "apply_patch",
+        &serde_json::json!({"patch":patch}).to_string(),
+    )
+    .await?;
+    assert_eq!(outcome.kind(), ToolOutcomeKind::Failure);
+    assert_eq!(fs::read(workspace.path().join("source.txt"))?, b"before\n");
+    assert!(!workspace.path().join("moved.txt").exists());
+    Ok(())
+}
+
+#[tokio::test]
+async fn pi_read_pages_at_two_thousand_lines_or_fifty_kib() -> TestResult {
+    use plakous_compose::CodingPresentationExt as _;
+    let workspace = tempfile::tempdir()?;
+    let mut builder = ToolRegistryBuilder::default();
+    plakous_tools::register_packs(
+        &plakous_compose::standard_coding_packs_in_memory()?,
+        &mut builder,
+    )?;
+    let registry = builder.freeze();
+    let effective = serde_json::from_value(serde_json::to_value(Digest::sha256(
+        DigestDomain::EffectiveProviderConfiguration,
+        5,
+        &[b"pi-read-page"],
+    )?)?)?;
+    let target = plakous_tools::ProviderModelProjectionIdentityV2::new(
+        plakous_model::IntegrationClass::Standard,
+        "openrouter",
+        "openrouter",
+        "pi",
+        "chat-completions-family",
+        "test",
+        "test",
+        effective,
+        1,
+    )?;
+    let projection = plakous_tools::CodingPresentation::Pi.projection_map(
+        plakous_tools::JobConfig::default(),
+        registry.clone(),
+        target,
+    )?;
+    let environment = Arc::new(ExecutionEnvironment::host(
+        ExecutionEnvironmentScope::Run(ids(0xc1)?.run),
+        workspace.path(),
+        ".",
+        ExecutionEnvironmentConfig::default(),
+    )?);
+    for (call, (line, shown)) in (0xc1..).zip([
+        ("x\n".to_owned(), 2000),
+        (format!("{}\n", "x".repeat(1023)), 50),
+    ]) {
+        fs::write(workspace.path().join("page.txt"), line.repeat(2001))?;
+        let ids = ids(call)?;
+        let (invocation, receipt) = projection
+            .prepare(ToolInvocationRequest::new(
+                ids.run,
+                ids.turn,
+                ids.attempt,
+                ids.call,
+                ToolName::new("read")?,
+                ToolCorrelation::new(None, None, plakous_model::ToolCallerLineage::default())?,
+                r#"{"path":"page.txt"}"#,
+            ))?
+            .into_parts();
+        let outcome = execute_invocation(
+            &registry,
+            Arc::clone(&environment),
+            ids,
+            invocation,
+            CancellationToken::new(),
+        )
+        .await?;
+        let raw: serde_json::Value = serde_json::from_str(text(&outcome)?)?;
+        assert_eq!(raw["content"], line.repeat(shown));
+        assert_eq!(raw["lines"], shown);
+        let raised = projection.raise(&receipt.ok_or("missing read receipt")?, outcome)?;
+        let presented: serde_json::Value = serde_json::from_str(text(&raised)?)?;
+        assert_eq!(
+            presented["result"],
+            format!(
+                "{}\n[Showing lines 1-{shown}. Use offset={} to continue.]",
+                line.repeat(shown),
+                shown + 1
+            )
+        );
+    }
+    let canonical = execute(
+        &registry,
+        environment,
+        ids(0xc4)?,
+        "read_file",
+        r#"{"path":"page.txt","limit":200}"#,
+    )
+    .await?;
+    let canonical: serde_json::Value = serde_json::from_str(text(&canonical)?)?;
+    assert!(
+        canonical["content"]
+            .as_str()
+            .ok_or("missing content")?
+            .len()
+            > 50 * 1024
+    );
+    Ok(())
+}

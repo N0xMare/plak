@@ -43,12 +43,23 @@ use crate::response_host::{ResponsesHostDecodeError, parse_output_item};
 const MAX_REPLAY_KIND_BYTES: usize = 256;
 const MAX_REPLAY_PREFIX_BINDINGS: usize = 4_096;
 const MAX_RESPONSE_ID_BYTES: usize = 1_024;
+
+// Bare-hex client item ids select a degraded Codex backend path.
+fn codex_item_uuid(parts: &[&[u8]]) -> uuid::fmt::Hyphenated {
+    let digest = plakous_model::sha256_bytes(parts);
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    uuid::Builder::from_custom_bytes(bytes)
+        .into_uuid()
+        .hyphenated()
+}
+
 /// Canonical Responses family-policy schema revision.
 pub const RESPONSES_FAMILY_POLICY_SCHEMA_REVISION: u32 = 1;
 /// Selected-policy compiler revision.
 pub const RESPONSES_FAMILY_POLICY_COMPILER_REVISION: u32 = 1;
 /// Closed Responses request-policy execution revision.
-pub const RESPONSES_REQUEST_POLICY_EXECUTION_REVISION: u32 = 10;
+pub const RESPONSES_REQUEST_POLICY_EXECUTION_REVISION: u32 = 11;
 
 /// Requires the exact Responses family-policy revisions implemented by this release.
 ///
@@ -385,10 +396,8 @@ impl ResponsesRequestPolicy {
     ///
     /// Codex is stateless, omits `max_output_tokens`, sends function `strict: false`, and
     /// retains OpenAI custom tools and the explicit `tool_choice` field. It
-    /// asks for `reasoning.summary: "auto"` exactly as the official client's
-    /// default (`ReasoningSummary::Auto`, sent for every catalog model that
-    /// admits the parameter): that is the only wire the summaries the TUI
-    /// renders as thought blocks arrive on.
+    /// asks for `reasoning.summary: "auto"` to obtain the summaries the TUI
+    /// renders as thought blocks; the Codex catalog default is `"none"`.
     #[must_use]
     pub const fn openai_codex(
         image_input: bool,
@@ -683,7 +692,7 @@ impl ResponsesRequestPolicy {
             DigestDomain::ModelBinding,
             1,
             &[
-                b"responses-request-policy-execution-v6",
+                b"responses-request-policy-execution-v7",
                 service_tier_kind,
                 service_tier_name.as_bytes(),
                 max_output,
@@ -1558,14 +1567,14 @@ pub fn lower_responses_request(
         if !tools.is_empty() {
             let tool_bytes =
                 serde_json::to_vec(&tools).map_err(|_| ResponsesRequestError::Serialization)?;
-            let tool_id = plakous_model::sha256_hex(&[
+            let tool_id = codex_item_uuid(&[
                 b"codex-responses-lite-tools-v1",
                 &affinity_bytes()?,
                 &tool_bytes,
             ]);
             prefix.push(json!({
                 "type": "additional_tools",
-                "id": format!("at_{}", &tool_id[..32]),
+                "id": format!("at_{tool_id}"),
                 "role": "developer",
                 "tools": [{
                     "type": "namespace",
@@ -1577,13 +1586,13 @@ pub fn lower_responses_request(
         }
     }
     if codex_instructions && let Some(instructions) = instruction_text {
-        let instruction_id = plakous_model::sha256_hex(&[
+        let instruction_id = codex_item_uuid(&[
             b"codex-responses-lite-instructions-v1",
             &affinity_bytes()?,
             instructions.as_bytes(),
         ]);
         let mut message = message_item("developer", vec![input_text_part(&instructions)]);
-        message["id"] = json!(format!("msg_{}", &instruction_id[..32]));
+        message["id"] = json!(format!("msg_{instruction_id}"));
         prefix.push(message);
     }
     if let Some(Value::Array(input)) = body.get_mut("input") {

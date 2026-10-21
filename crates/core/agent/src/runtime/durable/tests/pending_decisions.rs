@@ -496,7 +496,7 @@ async fn maximum_read_pages_raise_commit_and_reopen_on_every_direct_read_present
             );
         }
         assert!(
-            texts[0].len() > 200_000,
+            texts[0].len() > if tool == "read" { 48_000 } else { 200_000 },
             "{tool}: the bulk page is near the bound ({} bytes)",
             texts[0].len()
         );

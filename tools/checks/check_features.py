@@ -252,7 +252,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-prompts": "4b261e3a2cd88cf47288cc7b421cbcd9658d5fc1be1314aff475e5f3981c8c5d",
     "plakous-openrouter": "ff80c88e66868de6511fab5bbd3057d6e426b580b3c826935b6326db92e1bf5e",
     "plakous-responses": "cf874bcd1be23eeb902f935d6c2670143eb20a6daf49d66833601115af3d3eb6",
-    "plakous-responses-dialect": "8110c49c502e1bad0da2b9c7ca7f83abf0d1c6dab19124f8e6dbb7093d0c635e",
+    "plakous-responses-dialect": "c60dda8a982974de77f55189742ea78879b38d11081c37a4207d3b53b6d34625",
     "plakous-store": "7643688df7e4ee1a01645ee787d6a861966372ba7488e54468d09be806eae028",
     "plakous-tools": "fa0e86d3d11d23f674a352a4e6b7960ac2e54392cfc21a4da529d71db2fa52bb",
     "plakous-xai": "b2079c91019bcabac85d4436b3eb1aa5bd9a0df15b6b9520f6f6022979dee39c",

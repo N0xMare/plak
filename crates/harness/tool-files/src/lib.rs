@@ -138,6 +138,14 @@ impl ToolExecutor for ReadFileTool {
                 .limit
                 .map_or(Ok(200), |value| exact_u64(value, "read limit is invalid"))?
                 .clamp(1, 2_000);
+            let page_bytes = if invocation
+                .exposure()
+                .is_some_and(|binding| binding.exposed_name().as_str() == "read")
+            {
+                50 * 1024
+            } else {
+                READ_RESPONSE_BYTES
+            };
             let leading = read_leading_lines(&context, &args, start_line, limit).await?;
             let (mut bytes, complete) = (leading.bytes, leading.complete);
             if bytes.iter().take(8_192).any(|byte| *byte == 0) {
@@ -171,7 +179,10 @@ impl ToolExecutor for ReadFileTool {
                 let line_number =
                     start_line.saturating_add(u64::try_from(selected).unwrap_or(u64::MAX));
                 presented = presented.saturating_add(presented_line_bytes(&line, line_number));
-                if selected != 0 && presented > READ_PAGE_PRESENTED_BYTES {
+                if selected != 0
+                    && (presented > READ_PAGE_PRESENTED_BYTES
+                        || page.len() + line.len() > page_bytes)
+                {
                     break;
                 }
                 page.push_str(&line);
@@ -915,7 +926,11 @@ async fn codex_patch_mutations(
                     })?,
                 );
             }
-            CodexPatchOp::Update { path, chunks } => {
+            CodexPatchOp::Update {
+                path,
+                move_to,
+                chunks,
+            } => {
                 let target = relative_workspace_path(context, path)?;
                 let read = read_patch_target(context, &target).await?;
                 let original = std::str::from_utf8(read.bytes()).map_err(|_| {
@@ -925,11 +940,25 @@ async fn codex_patch_mutations(
                     )
                 })?;
                 let next = apply_codex_update_chunks(&target.to_string_lossy(), original, &chunks)?;
+                let replacement = if let Some(destination) = move_to {
+                    let destination = relative_workspace_path(context, destination)?;
+                    changes.push(
+                        WorkspaceMutation::new(
+                            destination,
+                            WorkspaceExpectedFileState::Missing,
+                            WorkspaceReplacement::content(next.into_bytes()),
+                        )
+                        .map_err(backend_runtime_error)?,
+                    );
+                    WorkspaceReplacement::Missing
+                } else {
+                    WorkspaceReplacement::content(next.into_bytes())
+                };
                 changes.push(
                     WorkspaceMutation::new(
                         target,
                         WorkspaceExpectedFileState::Content(read.content()),
-                        WorkspaceReplacement::content(next.into_bytes()),
+                        replacement,
                     )
                     .map_err(|error| {
                         ToolRuntimeError::new(
@@ -1254,7 +1283,7 @@ mod tests {
 // ---------------------------------------------------------------------------
 
 // Adapted from pi 1.1.0's file tool descriptions (MIT); see the README License section.
-const PI_READ_DESCRIPTION: &str = "Read the contents of a text file; images and binary files are refused. Output is truncated to 2000 lines or 256 KiB (whichever is hit first) and lines longer than 2000 characters are clipped. Use offset/limit for large files. When you need the full file, continue with offset until complete. path is relative to the workspace or absolute under it, or exactly a path a bash result or completion notice named on its `full output:` line.";
+const PI_READ_DESCRIPTION: &str = "Read the contents of a text file; images and binary files are refused. Output is truncated to 2000 lines or 50 KiB (50 * 1024 bytes), whichever is hit first, and lines longer than 2000 characters are clipped. Use offset/limit for large files. When you need the full file, continue with offset until complete. path is relative to the workspace or absolute under it, or exactly a path a bash result or completion notice named on its `full output:` line.";
 const PI_EDIT_DESCRIPTION: &str = "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes. The edits apply together or not at all.";
 const PI_WRITE_DESCRIPTION: &str = "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.";
 const CLAUDE_READ_DESCRIPTION: &str = "Reads a file from the local filesystem.\n\n- Reads up to 2000 lines by default.\n- If you already know which part of the file to read, only read that part. This is important for larger files/context efficiency.\n- `offset` is the 1-indexed first line (omit to start at line 1). `limit` is how many lines to return (default 2000, max 2000).\n- The result is cat -n text: a 6-character file line number, a tab, then the line. Numbers are the file's real line numbers (offset 10 starts at line 10).\n- If truncated, a last line `... more lines; next_offset=N` means call again with that offset.\n- Lines longer than 2000 characters are clipped.\n- Text files only: binary files, images and PDFs are refused (there is no `pages` parameter).\n- `file_path` is an absolute path under the workspace root, a workspace-relative path without `..`, or exactly a path a Bash result or completion notice named on its `full output:` line; other paths are refused, as is a `full output:` path issued by an earlier process (before a restart or reload) or another agent.\n- A read of an output file whose writing failed ends with `[output file incomplete: write failed after N bytes]`; the file stops there.\n- An empty file succeeds with an empty body, missing file/directory returns an error.";
@@ -1614,7 +1643,7 @@ static FILES_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "files.apply_patch",
         PLAKOUS_TOOL_APPLY_PATCH_DESCRIPTION,
-        "cb25774962dfede33bb342df9f1ad13ba32a06bd975b6d6610eccc021e6c62d9",
+        "ff1efc37d9bb186332d8d5ea81fde8a4b87bf80eb4d4ce413667617129cffb0c",
     ),
     PromptPin::new(
         "files.inspect_image",
@@ -1624,7 +1653,7 @@ static FILES_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "files.codex.apply_patch",
         PLAKOUS_CODEX_APPLY_PATCH_FREEFORM_DESCRIPTION,
-        "eb737a50bb07bf1278f2c4f89f28e45afadac8ce1a0b25629a5c48de4e895096",
+        "0b70e9f33c3f169a4189336e2af8180b566a736274703d48fd75d04ba3dc0af9",
     ),
     PromptPin::new(
         "files.grok.read_file",
@@ -1644,7 +1673,7 @@ static FILES_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "files.pi.read",
         PI_READ_DESCRIPTION,
-        "c460b305783eb51b6fbcdb96cab67b76d45d1974f416917bceb8c18c76bce810",
+        "18782c69b7f8d7cd197a8128d81f7f6d4640e47ac2aa8fe381f4e6698e959bce",
     ),
     PromptPin::new(
         "files.pi.edit",

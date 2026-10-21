@@ -97,8 +97,8 @@ pub(crate) fn codex_responses_preflight<'a>(
         let body: serde_json::Value = serde_json::from_slice(&request.body())
             .map_err(|_| ResponsesDispatchRejection::Binding)?;
         // `reasoning.summary` is either absent (no effort on the wire) or the
-        // official client's default `"auto"`; any other summary mode is not
-        // the reviewed Codex request and fails closed here.
+        // Plak-selected `"auto"` for TUI thought blocks (the catalog default
+        // is `"none"`); other modes are not the reviewed Plak request.
         let summary_is_official = body.get("reasoning").is_none_or(|reasoning| {
             reasoning
                 .get("summary")
@@ -129,6 +129,7 @@ pub(crate) fn codex_responses_preflight<'a>(
         {
             return Err(ResponsesDispatchRejection::Binding);
         }
+        let session_header = codex_session_header(&body)?;
         let input_liability = u64::try_from(request.body().len())
             .ok()
             .and_then(crate::model::codex_complete_input_token_upper_bound)
@@ -193,6 +194,10 @@ pub(crate) fn codex_responses_preflight<'a>(
         if let Some((name, value)) = remote_compaction_v2_header(&body) {
             headers.insert(name.clone(), value.clone());
         }
+        headers.insert(
+            HeaderName::from_static("session-id"),
+            session_header.clone(),
+        );
         if responses_lite {
             headers.insert(
                 HeaderName::from_static("x-openai-internal-codex-responses-lite"),
@@ -262,6 +267,10 @@ pub(crate) fn codex_responses_preflight<'a>(
                 value: b"true".to_vec(),
             });
         }
+        header_bindings.push(ResponsesHeaderBinding::PublicExact {
+            name: HeaderName::from_static("session-id"),
+            value: session_header.as_bytes().to_vec(),
+        });
         Ok(ResponsesPreparedPhysicalRequest::new(
             physical,
             wire,
@@ -273,6 +282,16 @@ pub(crate) fn codex_responses_preflight<'a>(
             },
         ))
     })
+}
+
+pub(super) fn codex_session_header(
+    body: &serde_json::Value,
+) -> Result<HeaderValue, ResponsesDispatchRejection> {
+    let key = body
+        .get("prompt_cache_key")
+        .and_then(serde_json::Value::as_str)
+        .ok_or(ResponsesDispatchRejection::Binding)?;
+    HeaderValue::from_str(key).map_err(|_| ResponsesDispatchRejection::Binding)
 }
 
 /// Authorizes one physical Codex search side request carrying `body` with

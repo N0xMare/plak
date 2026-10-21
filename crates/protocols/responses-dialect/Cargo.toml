@@ -30,6 +30,7 @@ serde_json = { workspace = true, features = ["raw_value"] }
 sha2 = { version = "0.11", default-features = false }
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "sync", "time"] }
+uuid.workspace = true
 
 [dev-dependencies]
 plakous-http = { workspace = true, features = ["fault-injection"] }
@@ -37,7 +38,6 @@ rcgen = { version = "0.14", default-features = false, features = ["crypto", "rin
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "test-util", "time"] }
 tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
-uuid.workspace = true
 
 [lints]
 workspace = true

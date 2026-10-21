@@ -97,6 +97,27 @@ async fn run_codex_model_operation(
 }
 
 #[test]
+fn session_header_requires_a_header_safe_string_cache_key() {
+    for body in [
+        serde_json::json!({}),
+        serde_json::json!({"prompt_cache_key": 1}),
+        serde_json::json!({"prompt_cache_key": "bad\r\nheader"}),
+    ] {
+        assert!(matches!(
+            dispatch::codex_session_header(&body),
+            Err(ResponsesDispatchRejection::Binding)
+        ));
+    }
+    assert_eq!(
+        dispatch::codex_session_header(&serde_json::json!({
+            "prompt_cache_key": "plak-owned-key"
+        }))
+        .expect("valid key"),
+        "plak-owned-key"
+    );
+}
+
+#[test]
 fn remote_compaction_v2_header_is_present_only_with_compaction_trigger() {
     assert!(
         remote_compaction_v2_header(&serde_json::json!({
@@ -1460,17 +1481,47 @@ async fn codex_0159_reference_gpt_61_sol_row_resolves_with_priority_tier() -> Te
 }
 
 #[tokio::test]
+async fn catalog_ignores_unknown_tiers_without_hiding_models() -> TestResult {
+    for with_priority in [false, true] {
+        for default in [None, Some("future-tier")] {
+            let mut model = catalog_model_value("gpt-6.1-sol");
+            let mut tiers = vec![serde_json::json!({
+                "id": "future-tier", "name": "Future", "description": "unknown tier"
+            })];
+            if with_priority {
+                tiers.push(serde_json::json!({
+                    "id": "priority", "name": "Fast", "description": "known tier"
+                }));
+            }
+            model["service_tiers"] = serde_json::json!(tiers);
+            model["default_service_tier"] = serde_json::json!(default);
+            let (_directory, resolver, catalog) =
+                resolver_for_catalog_values("account-future-tiers", vec![model]).await?;
+            let entry = catalog
+                .entries()
+                .first()
+                .ok_or("model hidden by unknown tier")?;
+            assert_eq!(entry.service_tiers().len(), usize::from(with_priority));
+            assert!(
+                entry
+                    .service_tiers()
+                    .iter()
+                    .all(|tier| tier.id() == "priority")
+            );
+            assert_eq!(entry.default_service_tier(), None);
+            resolver.resolve("gpt-6.1-sol")?;
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn executable_catalog_rows_fail_closed_on_invalid_service_tiers_and_defaults() -> TestResult {
     let mut duplicate = catalog_model_value("gpt-5.6-luna");
     duplicate["tool_mode"] = serde_json::json!("code_mode_only");
     duplicate["service_tiers"] = serde_json::json!([
         {"id":"priority","name":"Fast","description":"first"},
         {"id":"priority","name":"Faster","description":"second"}
-    ]);
-    let mut unknown = catalog_model_value("gpt-5.6-luna");
-    unknown["tool_mode"] = serde_json::json!("code_mode_only");
-    unknown["service_tiers"] = serde_json::json!([
-        {"id":"future-tier","name":"Future","description":"unknown executable tier"}
     ]);
     let mut malformed = catalog_model_value("gpt-5.5");
     malformed["service_tiers"] = serde_json::json!([
@@ -1490,7 +1541,6 @@ async fn executable_catalog_rows_fail_closed_on_invalid_service_tiers_and_defaul
         "account-invalid-service-tiers",
         vec![
             duplicate,
-            unknown,
             malformed,
             dangling_default,
             unknown_reasoning_default,
@@ -3488,6 +3538,13 @@ async fn codex_prepare_seals_exact_wire_and_is_inert_until_first_poll() -> TestR
         .position(|window| window == b"\r\n\r\n")
         .ok_or("prepared request omitted its HTTP head boundary")?
         + 4;
+    let head = std::str::from_utf8(&inference[..head_end])?;
+    let body: serde_json::Value = serde_json::from_slice(&inference[head_end..])?;
+    assert!(head.contains(&format!(
+        "session-id: {}\r\n",
+        body["prompt_cache_key"].as_str().ok_or("cache key")?
+    )));
+    assert!(!head.contains("x-openai-internal-codex-responses-lite:"));
     let wire = &inference[head_end..];
     let expected = include_bytes!("../../tests/fixtures/request_codex_prepared_golden.json")
         .strip_suffix(b"\n")
@@ -4095,6 +4152,15 @@ async fn content_filtered_compaction_is_single_dispatch_terminal_policy() -> Tes
     );
     let (requests, unexpected) = server.await??;
     assert_eq!(requests.len(), 2);
+    let wire = std::str::from_utf8(&requests[1])?;
+    let (head, body) = wire.split_once("\r\n\r\n").ok_or("request framing")?;
+    let body: serde_json::Value = serde_json::from_str(body)?;
+    assert!(head.contains(&format!(
+        "session-id: {}\r\n",
+        body["prompt_cache_key"].as_str().ok_or("cache key")?
+    )));
+    assert!(head.contains("x-codex-beta-features: remote_compaction_v2"));
+
     assert!(!unexpected);
     assert_eq!(
         gate.snapshot()?
@@ -4763,6 +4829,10 @@ async fn device_jwks_userinfo_catalog_and_lite_inference_are_exact() -> TestResu
     let expected_cache_key =
         serde_json::Value::String(test_cache_affinity()?.identity().to_string());
     assert_eq!(body.get("prompt_cache_key"), Some(&expected_cache_key));
+    assert!(head.contains(&format!(
+        "session-id: {}\r\n",
+        body["prompt_cache_key"].as_str().ok_or("cache key")?
+    )));
     assert_eq!(body.get("previous_response_id"), None);
     // ChatGPT Codex /backend-api/codex/responses rejects max_output_tokens;
     // the dialect omits it on the subscription access mode.
@@ -4780,6 +4850,12 @@ async fn device_jwks_userinfo_catalog_and_lite_inference_are_exact() -> TestResu
         second_body.get("prompt_cache_key"),
         Some(&expected_cache_key)
     );
+    assert!(second_head.contains(&format!(
+            "session-id: {}\r\n",
+            second_body["prompt_cache_key"]
+                .as_str()
+                .ok_or("cache key")?
+        )));
     let second_input = second_body["input"]
         .as_array()
         .ok_or("reopened artifact request input was not an array")?;

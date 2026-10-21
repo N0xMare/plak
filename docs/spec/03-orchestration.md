@@ -497,12 +497,13 @@ Arguments, optional booleans: `include_self`, `include_completed`, `include_read
 
 Receipt: `{ revision, agents: [...], inbox: [...] }`. Each `inbox[]` row
 carries `message_id`, `from`, `purpose`, `priority`, `in_reply_to`, the first
-`INBOX_BODY_BYTES` = 2048 bytes of `body`, and — for a host-authored `result`
-only — `attempt_id`, `status`, and `candidate`.
+`INBOX_BODY_BYTES` = 2048 bytes of unread `body`, its full `body_bytes`, and —
+for a host-authored `result` only — `attempt_id`, `status`, and `candidate`.
 
 By default `inbox[]` contains only unacknowledged mail. `include_read=true`
-adds the newest 64 acknowledged records per recipient, newest first, with
-unread records still bounded to `MAX_MAILBOX_RECORDS` rows. Listing does not
+adds the newest 64 acknowledged header records per recipient, newest first:
+`message_id`, `from`, `purpose`, `priority`, `in_reply_to`, `body_bytes` and a
+UTF-8-safe 160-byte `body` preview, with unread records still bounded to `MAX_MAILBOX_RECORDS` rows. Listing does not
 acknowledge mail. Model-authored mail admits up to 16 KiB, independently of
 these previews, and reaches recipients in full through steer, followup,
 ordinary session delivery and `wait_agent` pending mail.
@@ -707,11 +708,9 @@ whole). When anything is withheld the receipt adds
 `omitted: { outputs: [agent_id], rereads: [agent_id], mail: N, job_output: [id], note }`;
 it is absent otherwise.
 
-A mail-settled wait returns its
-exact unread envelopes in arrival order in `mail[]`: `message_id`, `from`,
-`purpose`,
-`in_reply_to`, full `body` up to `MAX_MESSAGE_BYTES`, and the inbox envelope
-metadata. A Result envelope whose attempt is in `agents[]` is acknowledged
+Any wait return may carry its unread envelopes in arrival order in `mail[]`:
+`message_id`, `from`, `purpose`, `priority`, `in_reply_to`, `body_bytes`, full
+`body` up to `MAX_MESSAGE_BYTES`, and the inbox envelope metadata. A Result envelope whose attempt is in `agents[]` is acknowledged
 but rendered only as `{message_id, purpose: "result", attempt_id}` to avoid
 duplicating the result body. Only successfully returned mail is acknowledged;
 later waits do not
@@ -731,8 +730,10 @@ rolled up:
 | `usage` | `elapsed_ms`, `turns`, `tool_calls`, `input_tokens`, `output_tokens` |
 | `waiting_on` | while the child is parked (§5.2), or waiting for a transient continuation: `network: true` names live route readiness; otherwise `{ processes: ["p3"], agents: ["c2"] }`, its own running processes and its children that are still live work; both lists empty is the explicit parked marker (an arrival already woke it, or a resume holds it for its reopen wake); absent while a wake is admitted or the attempt is ending; process-local |
 
-A wait returns when a watched child **settles, seals, asks a question, or sends
-mail**, including urgent mail. A node that is still `sealing`
+A wait returns when a watched child **settles, asks a question, replies, or
+sends urgent mail**. Deferred finding/coordinate mail does not wake it; it
+remains unread and rides any later return (settlement, waking mail, timeout,
+steer or process), under the same budget order. A node that is still `sealing`
 has **not** settled, so the wait holds through the seal — which is also when a
 candidate can be named. An interrupted node does settle a wait but produces no
 result for it. A timeout is not cancellation: `timed_out: true` means call
@@ -740,9 +741,15 @@ again. When the waiting agent's own turn is interrupted or settles while it
 waits, the wait is abandoned with `wait_caller_settled`; nothing about the
 watched children changed.
 
-A **bare** wait (no `agent_ids`) delivers each settled row once. Once a wait
+A **bare** wait (no `agent_ids`) delivers each settled row once. `Submitted`,
+`Completed` and `Adopted` of the same `attempt_id` match one delivered output;
+other transitions are new. Named waits still re-read output. A bare wait whose
+only pending items are non-waking mail returns that mail immediately rather
+than parking, with `woke_by=settled` (only waking mail returns `woke_by=mail`).
+Once a wait
 has returned a child's settled row, later bare waits by the same caller leave
-that child out until its row changes (a follow-up attempt, a new status), so a
+that child out until its row changes (a follow-up attempt, a new status outside
+the output-bearing class), so a
 wave of children comes back one settlement at a time and the parent never
 busy-loops on a child it already read; a delivered child with unread mail for
 the caller stays watched until that mail is read, and such a row comes back
@@ -1712,7 +1719,11 @@ observation cadence. When `[turn] auto_continue` is true
 start one host-originated turn after a 2 s quiet window. Near-simultaneous
 arrivals coalesce. No root turn, admission, or delivery may be in flight,
 and no live queued user prompt may be about to drain. Findings, coordinate
-mail, and replies never wake the root; they ride the next admission.
+mail, and replies never wake the root; they ride the next admission. This
+idle-root rule is distinct from the watched-mail await rule (§4.4): a question
+or urgent mail wakes a wait, and a reply also wakes a wait. Deferred
+finding/coordinate mail never ends a wait by itself unless it is the only
+pending item of a bare wait.
 
 A submitted or queued user prompt always takes precedence. User interrupt or
 cancel disables waking until the next user prompt. Recovery fences,
