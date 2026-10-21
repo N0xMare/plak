@@ -1234,7 +1234,7 @@ async fn commit_cache_seed_is_lazy_and_first_hit_equals_cold() -> TestResult {
 }
 
 #[test]
-fn forked_head_is_warm_under_the_existing_cache_budget() -> TestResult {
+fn forked_head_seed_respects_the_existing_cache_budget() -> TestResult {
     for budget in [CHECKPOINT_CACHE_BYTES, 1] {
         let directory = tempfile::tempdir()?;
         let mut backend = gc_tests::backend(&directory.path().join("runtime.sqlite3"))?;
@@ -1253,9 +1253,12 @@ fn forked_head_is_warm_under_the_existing_cache_budget() -> TestResult {
         let before = backend.checkpoint_decodes;
         assert_eq!(backend.checkpoints.normalizations, 0);
         let loaded = backend.load_branch(forked.head.session())?;
-        assert_eq!(backend.checkpoints.normalizations, 1);
+        assert_eq!(backend.checkpoints.normalizations, usize::from(budget > 1));
         assert_eq!(loaded.head(), forked.head);
-        assert_eq!(backend.checkpoint_decodes, before);
+        assert_eq!(
+            backend.checkpoint_decodes,
+            before + usize::from(budget == 1)
+        );
         backend.checkpoints.clear();
         let cold = backend.load_branch(forked.head.session())?;
         assert_eq!(loaded.checkpoint(), cold.checkpoint());
@@ -1793,5 +1796,51 @@ async fn measure_lazy_cache_seeding_small_delta_commits() -> TestResult {
                 .await?;
         }
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn delete_drops_pending_seed_without_normalizing_it() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
+    let request = seed()?;
+    let prior = request.initial().clone();
+    let created = store.create(request).await?;
+    let next = next_checkpoint(&created, &prior, 1)?;
+    store
+        .commit(CommitCheckpoint::new(
+            created.lease().clone(),
+            created.branch(),
+            next.checkpoint().clone(),
+        ))
+        .await?;
+    let selector = created.branch().session();
+    store
+        .dispatch_read("pending_before_delete", move |b| {
+            assert!(b.checkpoints.has_pending(selector));
+            assert_eq!(b.checkpoints.normalizations, 0);
+            Ok(())
+        })
+        .await?;
+    store.release(created.lease().clone()).await?;
+    let archived = store
+        .archive(ArchiveSession::new(
+            created.session().session_id(),
+            created.session().revision(),
+        ))
+        .await?;
+    store
+        .delete(DeleteSession::new(
+            archived.session().session_id(),
+            archived.session().revision(),
+        ))
+        .await?;
+    store
+        .dispatch_read("pending_after_delete", move |b| {
+            assert!(!b.checkpoints.has_pending(selector));
+            assert_eq!(b.checkpoints.normalizations, 0);
+            Ok(())
+        })
+        .await?;
     Ok(())
 }

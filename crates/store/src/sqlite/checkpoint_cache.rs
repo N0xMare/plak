@@ -26,6 +26,8 @@ pub(super) struct CheckpointCache {
     pub(super) normalizations: usize,
     #[cfg(test)]
     pub(super) seed_enabled: bool,
+    #[cfg(test)]
+    pub(super) fail_normalization: bool,
     bytes: usize,
     limit: usize,
     clock: u64,
@@ -41,6 +43,8 @@ impl CheckpointCache {
             normalizations: 0,
             #[cfg(test)]
             seed_enabled: true,
+            #[cfg(test)]
+            fail_normalization: false,
             bytes: 0,
             limit,
             clock: 0,
@@ -61,36 +65,43 @@ impl CheckpointCache {
     }
 
     pub(super) fn get(&mut self, id: CheckpointId) -> Option<StoredCheckpoint> {
-        if matches!(self.entries.get(&id)?.value, Value::Pending { .. }) {
-            let entry = self.entries.remove(&id)?;
-            self.recency.remove(&entry.age);
-            self.bytes -= entry.bytes;
-            let Value::Pending {
+        let entry = self.entries.remove(&id)?;
+        self.recency.remove(&entry.age);
+        self.bytes -= entry.bytes;
+        match entry.value {
+            Value::Ready(checkpoint) => {
+                let age = self.next_age();
+                self.bytes += entry.bytes;
+                self.recency.insert(age, id);
+                self.entries.insert(
+                    id,
+                    Entry {
+                        value: Value::Ready(checkpoint.clone()),
+                        bytes: entry.bytes,
+                        age,
+                    },
+                );
+                Some(checkpoint)
+            }
+            Value::Pending {
                 branch,
                 reference,
                 bundle,
-            } = entry.value
-            else {
-                unreachable!();
-            };
-            self.pending.remove(&branch);
-            #[cfg(test)]
-            {
-                self.normalizations += 1;
+            } => {
+                self.pending.remove(&branch);
+                #[cfg(test)]
+                {
+                    self.normalizations += 1;
+                    if self.fail_normalization {
+                        return None;
+                    }
+                }
+                // Failure discards this optional seed; the caller performs a cold load.
+                let closure = bundle.current_root_closure().ok()?;
+                let checkpoint = StoredCheckpoint::from_store(reference, closure).ok()?;
+                self.insert(checkpoint.clone());
+                Some(checkpoint)
             }
-            // Failure discards this optional seed; the caller performs a cold load.
-            let closure = bundle.current_root_closure().ok()?;
-            let checkpoint = StoredCheckpoint::from_store(reference, closure).ok()?;
-            self.insert(checkpoint);
-        }
-        let age = self.next_age();
-        let entry = self.entries.get_mut(&id)?;
-        self.recency.remove(&entry.age);
-        entry.age = age;
-        self.recency.insert(age, id);
-        match &entry.value {
-            Value::Ready(checkpoint) => Some(checkpoint.clone()),
-            Value::Pending { .. } => unreachable!(),
         }
     }
 
@@ -107,6 +118,35 @@ impl CheckpointCache {
         if let Some(id) = self.pending.get(&branch).copied() {
             self.remove(id);
         }
+        let bytes = bundle_weight(bundle).saturating_add(size_of::<(SessionRef, CheckpointId)>());
+        let ready_bytes: usize = self
+            .entries
+            .values()
+            .filter(|entry| matches!(entry.value, Value::Ready(_)))
+            .map(|entry| entry.bytes)
+            .sum();
+        // Optional publication seeds must never displace validated read results.
+        if bytes > self.limit.saturating_sub(ready_bytes)
+            || matches!(
+                self.entries
+                    .get(&reference.checkpoint_id())
+                    .map(|e| &e.value),
+                Some(Value::Ready(_))
+            )
+        {
+            return;
+        }
+        while self.bytes > self.limit.saturating_sub(bytes) {
+            let oldest = self.recency.values().copied().find(|id| {
+                self.entries
+                    .get(id)
+                    .is_some_and(|entry| matches!(entry.value, Value::Pending { .. }))
+            });
+            let Some(oldest) = oldest else {
+                return;
+            };
+            self.remove(oldest);
+        }
         self.insert_value(
             reference.checkpoint_id(),
             Value::Pending {
@@ -114,7 +154,7 @@ impl CheckpointCache {
                 reference,
                 bundle: bundle.clone(),
             },
-            bundle_weight(bundle).saturating_add(size_of::<(SessionRef, CheckpointId)>()),
+            bytes,
         );
         self.pending.insert(branch, reference.checkpoint_id());
     }
@@ -186,6 +226,44 @@ pub(super) fn bundle_weight(bundle: &CheckpointObjectBundle) -> usize {
 mod tests {
     use super::super::{bundle_ref, gc_tests};
     use super::*;
+
+    #[test]
+    fn pending_seed_never_displaces_ready_entries() -> Result<(), Box<dyn std::error::Error>> {
+        let a = gc_tests::seed(1_190_000)?;
+        let b = gc_tests::seed(1_200_000)?;
+        let ready = StoredCheckpoint::from_store(
+            bundle_ref(a.initial()),
+            a.initial().current_root_closure()?,
+        )?;
+        let ready_weight = weight(&ready);
+        let pending_weight = bundle_weight(b.initial()) + size_of::<(SessionRef, CheckpointId)>();
+        let mut cache = CheckpointCache::new(ready_weight + pending_weight - 1);
+        cache.insert(ready.clone());
+        cache.seed(b.session(), bundle_ref(b.initial()), b.initial());
+        assert!(!cache.has_pending(b.session()));
+        assert_eq!(cache.bytes, ready_weight);
+        assert_eq!(cache.get(ready.reference().checkpoint_id()), Some(ready));
+        assert_eq!(cache.normalizations, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn failed_normalization_releases_all_accounted_bytes() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let request = gc_tests::seed(1_180_000)?;
+        let reference = bundle_ref(request.initial());
+        let mut cache = CheckpointCache::new(usize::MAX);
+        cache.seed(request.session(), reference, request.initial());
+        cache.fail_normalization = true;
+        assert!(cache.bytes > 0);
+        assert!(cache.get(reference.checkpoint_id()).is_none());
+        assert_eq!(cache.bytes, 0);
+        assert!(!cache.has_pending(request.session()));
+        assert_eq!(cache.normalizations, 1);
+        assert!(cache.get(reference.checkpoint_id()).is_none());
+        assert_eq!(cache.normalizations, 1);
+        Ok(())
+    }
 
     #[test]
     fn pending_entries_share_the_budget_and_lru_without_normalizing()

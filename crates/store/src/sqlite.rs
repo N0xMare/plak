@@ -1549,7 +1549,6 @@ impl Backend {
     }
 
     fn reclaim(&mut self, mode: StoreReclaimMode) -> Result<StoreReclaimReport, SessionStoreError> {
-        self.checkpoints.clear();
         self.require_open()?;
         let mut objects = 0;
         let mut bytes = 0;
@@ -1819,7 +1818,10 @@ impl SessionStore for SqliteSessionStore {
         Box::pin(async move { snapshot })
     }
     fn reclaim(&self, mode: StoreReclaimMode) -> StoreFuture<'_, StoreReclaimReport> {
-        self.dispatch("reclaim", move |b| b.reclaim(mode))
+        self.dispatch("reclaim", move |b| {
+            b.checkpoints.clear();
+            b.reclaim(mode)
+        })
     }
     fn archive(&self, r: ArchiveSession) -> StoreFuture<'_, ArchiveReceipt> {
         self.dispatch("archive", move |b| {

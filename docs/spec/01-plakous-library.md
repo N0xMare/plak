@@ -1155,7 +1155,8 @@ crash or uncertain transaction), it retains Arc clones of the already-validated
 publication as a pending seed, replacing the previous pending seed for that
 branch. Post-publication seeding does not walk the closure or build a CAS
 index. Pending entries charge all retained ancestral objects conservatively under the same
-budget and LRU eviction policy. On the first read hit, the actor normalizes the
+budget. They evict only other pending entries, in LRU order; a seed that cannot
+fit alongside ready entries is skipped. On the first read hit, the actor normalizes the
 seed with `current_root_closure()`: base root is absent, ancestral CAS membership
 is discarded, and stats and weight cover only the current-root closure. This
 first hit traverses the closure and rebuilds its CAS index, costing
@@ -1165,8 +1166,9 @@ discards the optional seed and falls back to a cold load. Hits still probe the
 checkpoint's primary-key row and verify its relational integrity seal; `Pruned` and `NotFound` never come from cache
 state. A repeated branch-head load needs only the session, branch and
 checkpoint row probes, independent of its object closure. Prune and delete
-clear both ready and pending cache entries, including on failure; reclaim does
-the same. An oversized entry is retained alone, evicting every other entry; the next insert displaces it under the same LRU
+clear both ready and pending cache entries, including on failure; explicit reclaim does
+the same. Background GC and capacity-retry reclamation retain the cache. An oversized
+ready entry is retained alone, evicting every other entry; the next ready insert displaces it under the same LRU
 policy. Retention is bounded by the validated graph limits (1 GiB encoded
 objects and the checkpoint object-count limit), even when it exceeds the cache
 budget. Accounting charges twice the encoded object/edge bytes plus object and

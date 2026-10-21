@@ -229,6 +229,24 @@ pub(super) fn fork_branch(
     graph: &mut BTreeMap<RuntimeObjectAddress, RuntimeObject>,
     identity: u128,
 ) -> TestResult<Branch> {
+    let request = fork_request(source, b, identity)?;
+    let bundle = request.target().clone();
+    graph.extend(
+        bundle
+            .supplied_objects()
+            .iter()
+            .map(|o| (o.address(), o.clone())),
+    );
+    let receipt = fork(b, &request)?;
+    Ok(Branch {
+        head: receipt.target(),
+        lease: receipt.lease().clone(),
+        bundle,
+        value: source.value,
+    })
+}
+
+fn fork_request(source: &Branch, b: &Backend, identity: u128) -> TestResult<ForkBranch> {
     let selector = source.head.session();
     let target_branch = fixture::id(identity + 6)?;
     let lineage = ForkLineage {
@@ -264,17 +282,11 @@ pub(super) fn fork_branch(
         context,
     )?;
     let bundle = fixture::bundle(&checkpoint, Some(&source.bundle))?;
-    graph.extend(
-        bundle
-            .supplied_objects()
-            .iter()
-            .map(|o| (o.address(), o.clone())),
-    );
     let revision = session_head(&b.connection, selector.session_id())?
         .ok_or("session")?
         .revision();
     let semantic = Digest::sha256(DigestDomain::RequestPlan, 1, &[b"oracle fork"])?;
-    let request = ForkBranch::new(
+    Ok(ForkBranch::new(
         workflow(identity)?,
         semantic,
         source.lease.clone(),
@@ -283,15 +295,8 @@ pub(super) fn fork_branch(
         target_branch,
         fixture::id(identity + 9)?,
         NonZeroU64::new(3600).ok_or("lease")?,
-        bundle.clone(),
-    );
-    let receipt = fork(b, &request)?;
-    Ok(Branch {
-        head: receipt.target(),
-        lease: receipt.lease().clone(),
         bundle,
-        value: source.value,
-    })
+    ))
 }
 
 fn interleavings(operations: &[(u8, u8)]) -> TestResult {
@@ -527,9 +532,7 @@ fn shrinking_successor_charges_only_its_closure_across_sessions() -> TestResult 
     let warm_child = b.load_branch(branch.head.session())?;
     assert!(warm_child.checkpoint().bundle().stats().retained_bytes() < ancestral_bytes / 2);
     let child_weight = checkpoint_cache::weight(warm_child.checkpoint());
-    // Pending seeds conservatively reserve ancestry until their first read.
-    let pending_weight = checkpoint_cache::bundle_weight(&branch.bundle);
-    b.checkpoints = CheckpointCache::new(root_weight + pending_weight + child_weight * 3);
+    b.checkpoints = CheckpointCache::new(root_weight + child_weight * 3);
     b.load_branch(root.branch().session())?;
     for identity in [850_000, 860_000, 870_000, 880_000] {
         // Keep the warm root newer than the prior child's head.
@@ -578,5 +581,240 @@ fn fresh_commits_replace_pending_seeds_without_closure_work() -> TestResult {
     assert_eq!(b.checkpoints.normalizations, 1);
     b.load_branch(branch.head.session())?;
     assert_eq!(b.checkpoints.normalizations, 1);
+    Ok(())
+}
+
+fn cache_branch(b: &mut Backend, identity: u128) -> TestResult<Branch> {
+    let request = seed(identity)?;
+    let created = create(b, &request)?;
+    Ok(Branch {
+        head: created.branch(),
+        lease: created.lease().clone(),
+        bundle: request.initial().clone(),
+        value: 1,
+    })
+}
+
+fn successor_request(branch: &Branch, identity: u128) -> TestResult<CommitCheckpoint> {
+    let checkpoint = fixture::checkpoint(
+        fixture::topology(
+            branch.head.session().session_id(),
+            branch.head.session().branch_id(),
+            fixture::id(identity)?,
+            Some(branch.bundle.checkpoint_id()),
+            branch.head.revision().get() + 1,
+            None,
+            branch.lease.fence().get(),
+        )?,
+        branch.value + 1,
+        RuntimeDurability::Required,
+    )?;
+    Ok(CommitCheckpoint::new(
+        branch.lease.clone(),
+        branch.head,
+        fixture::bundle(&checkpoint, Some(&branch.bundle))?,
+    ))
+}
+
+fn assert_no_seed(b: &Backend, branch: SessionRef) {
+    assert!(!b.checkpoints.has_pending(branch));
+    assert_eq!(b.checkpoints.normalizations, 0);
+}
+
+#[test]
+fn background_reclaim_preserves_pending_seed() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let mut b = backend(&directory.path().join("runtime.sqlite3"))?;
+    let source = cache_branch(&mut b, 970_000)?;
+    let receipt = commit(&mut b, &successor_request(&source, 980_000)?)?;
+    b.gc_pending = true;
+    assert!(b.background_step());
+    assert!(b.checkpoints.has_pending(source.head.session()));
+    let before = b.checkpoint_decodes;
+    assert_eq!(b.load_branch(source.head.session())?.head(), receipt.head());
+    assert_eq!(b.checkpoint_decodes, before);
+    Ok(())
+}
+
+#[test]
+fn failed_normalization_drops_seed_and_cold_load_inserts_ready() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let mut b = backend(&directory.path().join("runtime.sqlite3"))?;
+    let source = cache_branch(&mut b, 990_000)?;
+    let receipt = commit(&mut b, &successor_request(&source, 1_000_000)?)?;
+    b.checkpoints.fail_normalization = true;
+    assert!(
+        b.checkpoints
+            .get(receipt.head().checkpoint().checkpoint_id())
+            .is_none()
+    );
+    assert!(!b.checkpoints.has_pending(source.head.session()));
+    assert_eq!(b.checkpoints.normalizations, 1);
+    assert!(
+        b.checkpoints
+            .get(receipt.head().checkpoint().checkpoint_id())
+            .is_none()
+    );
+    let before = b.checkpoint_decodes;
+    b.load_branch(source.head.session())?;
+    assert_eq!(b.checkpoint_decodes, before + 1);
+    b.load_branch(source.head.session())?;
+    assert_eq!(b.checkpoint_decodes, before + 1);
+    assert_eq!(b.checkpoints.normalizations, 1);
+    Ok(())
+}
+
+#[test]
+fn commit_replays_and_refusals_do_not_seed() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let mut b = backend(&directory.path().join("runtime.sqlite3"))?;
+    let source = cache_branch(&mut b, 1_010_000)?;
+    let request = successor_request(&source, 1_020_000)?;
+    let receipt = commit(&mut b, &request)?;
+    b.checkpoints.clear();
+    assert_eq!(commit(&mut b, &request)?, receipt);
+    assert_no_seed(&b, source.head.session());
+    let collision = CommitCheckpoint::new(
+        source.lease.clone(),
+        receipt.head(),
+        request.checkpoint().clone(),
+    );
+    assert_eq!(
+        commit(&mut b, &collision),
+        Err(SessionStoreError::IdentityConflict)
+    );
+    assert_no_seed(&b, source.head.session());
+    assert_eq!(
+        commit(&mut b, &successor_request(&source, 1_030_000)?),
+        Err(SessionStoreError::Conflict)
+    );
+    assert_no_seed(&b, source.head.session());
+    release(&mut b, &source.lease)?;
+    assert_eq!(
+        commit(&mut b, &successor_request(&source, 1_040_000)?),
+        Err(SessionStoreError::FenceSuperseded)
+    );
+    assert_no_seed(&b, source.head.session());
+    Ok(())
+}
+
+#[test]
+fn fork_replays_and_refusals_do_not_seed() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let mut b = backend(&directory.path().join("runtime.sqlite3"))?;
+    let source = cache_branch(&mut b, 1_050_000)?;
+    let request = fork_request(&source, &b, 1_060_000)?;
+    let receipt = fork(&mut b, &request)?;
+    b.checkpoints.clear();
+    let target = receipt.target().session();
+    assert_eq!(fork(&mut b, &request)?, receipt);
+    assert_no_seed(&b, target);
+    let conflict = fork_request(&source, &b, 1_070_000)?;
+    fork(&mut b, &conflict)?;
+    b.checkpoints.clear();
+    // Reusing a workflow with the newer session revision changes its exact request.
+    let collision = fork_request(&source, &b, 1_060_000)?;
+    assert_eq!(
+        fork(&mut b, &collision),
+        Err(SessionStoreError::IdentityConflict)
+    );
+    assert_no_seed(&b, target);
+    let stale_revision = fork_request(&source, &b, 1_080_000)?;
+    let intervening = fork_request(&source, &b, 1_090_000)?;
+    fork(&mut b, &intervening)?;
+    b.checkpoints.clear();
+    assert_eq!(
+        fork(&mut b, &stale_revision),
+        Err(SessionStoreError::Conflict)
+    );
+    assert_no_seed(
+        &b,
+        SessionRef::new(
+            source.head.session().session_id(),
+            stale_revision.target_branch(),
+        ),
+    );
+    let stale_fence = fork_request(&source, &b, 1_100_000)?;
+    release(&mut b, &source.lease)?;
+    assert_eq!(
+        fork(&mut b, &stale_fence),
+        Err(SessionStoreError::FenceSuperseded)
+    );
+    assert_no_seed(
+        &b,
+        SessionRef::new(
+            source.head.session().session_id(),
+            stale_fence.target_branch(),
+        ),
+    );
+    Ok(())
+}
+
+#[test]
+fn fork_target_pending_seed_survives_source_commit() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let mut b = backend(&directory.path().join("runtime.sqlite3"))?;
+    let source = cache_branch(&mut b, 1_110_000)?;
+    let request = fork_request(&source, &b, 1_120_000)?;
+    let target = fork(&mut b, &request)?.target();
+    commit(&mut b, &successor_request(&source, 1_130_000)?)?;
+    assert!(b.checkpoints.has_pending(target.session()));
+    assert!(b.checkpoints.has_pending(source.head.session()));
+    let before = b.checkpoint_decodes;
+    assert_eq!(b.load_branch(target.session())?.head(), target);
+    assert_eq!(b.checkpoint_decodes, before);
+    assert!(!b.checkpoints.has_pending(target.session()));
+    assert!(b.checkpoints.has_pending(source.head.session()));
+    Ok(())
+}
+
+#[test]
+fn capacity_retry_publications_preserve_other_sessions_ready_roots() -> TestResult {
+    for forking in [false, true] {
+        let directory = tempfile::tempdir()?;
+        let mut b = backend(&directory.path().join("runtime.sqlite3"))?;
+        let warm = cache_branch(&mut b, 1_140_000)?;
+        b.load_branch(warm.head.session())?;
+        let source = cache_branch(&mut b, 1_150_000)?;
+        let commit_request = successor_request(&source, 1_160_000)?;
+        let fork_request = fork_request(&source, &b, 1_170_000)?;
+        let target = if forking {
+            SessionRef::new(
+                source.head.session().session_id(),
+                fork_request.target_branch(),
+            )
+        } else {
+            source.head.session()
+        };
+        let limits = b.limits;
+        b.limits = MemoryStoreLimits::new(
+            nonzero(1024),
+            nonzero(1024),
+            nonzero(2),
+            nonzero(4_194_304),
+            nonzero(4 * 1024 * 1024 * 1024),
+            nonzero(256),
+        );
+        let mut attempts = 0;
+        b.retry_after_reclaim(|b| {
+            attempts += 1;
+            let result = if forking {
+                fork(b, &fork_request).map(|_| ())
+            } else {
+                commit(b, &commit_request).map(|_| ())
+            };
+            if attempts == 1 {
+                assert!(matches!(result, Err(SessionStoreError::Capacity(_))));
+                assert_no_seed(b, target);
+                b.limits = limits;
+            }
+            result
+        })?;
+        assert_eq!(attempts, 2);
+        assert!(b.checkpoints.has_pending(target));
+        let before = b.checkpoint_decodes;
+        b.load_branch(warm.head.session())?;
+        assert_eq!(b.checkpoint_decodes, before);
+    }
     Ok(())
 }
