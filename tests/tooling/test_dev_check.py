@@ -493,11 +493,11 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.assertIn('--test-threads=1', self.lanes(calls)[0]['args'])
         self.assertEqual([c['args'][0] for c in calls if c['args'][0] != 'nextest'], ['test'])
 
-    def test_package_group_runs_the_offline_publish_dry_run_in_a_git_tree(self):
+    def test_package_group_delegates_prefetch_and_offline_verification_in_a_git_tree(self):
         self.commit_fixture()
         result, calls, _ = self.run_gate('--steps', 'package')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.publish_calls(), [dict(publish=['--gate'], offline='true')])
+        self.assertEqual(self.publish_calls(), [dict(publish=['--gate'], offline=None)])
         self.assertEqual([c['args'] for c in calls], [['nextest', '--version']])
 
     def test_package_group_is_skipped_outside_a_git_work_tree(self):

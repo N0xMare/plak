@@ -220,8 +220,8 @@ run_group() {
         echo "skip package: not a git work tree (the dry run stages tracked files)"
         return 0
       fi
-      echo "== publish dry run: package and verify the cohort offline =="
-      CARGO_NET_OFFLINE=true scripts/publish.sh --gate ;;
+      echo "== publish dry run: prefetch inputs, then verify the cohort offline =="
+      scripts/publish.sh --gate ;;
     *) echo "unimplemented step group: $1" >&2; exit 2 ;;
   esac
 }

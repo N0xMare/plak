@@ -85,8 +85,18 @@ for entry in "${order[@]}"; do
     if [[ -d "$unpacked" ]]; then rm -rf -- "$unpacked"; fi
   done
 done
-echo "== cargo package --locked =="
-cargo package --locked "${selection[@]}"
+# Resolve the actual archive graphs, which do not inherit workspace patches.
+# Preparation never compiles or uploads; verification below stays offline.
+echo "== package verification inputs (offline first) =="
+cargo package --locked --offline --no-verify "${selection[@]}" \
+  || cargo package --locked --no-verify "${selection[@]}"
+archives=()
+for entry in "${order[@]}"; do
+  archives+=("$CARGO_TARGET_DIR/package/${entry%% *}-${entry#* }.crate")
+done
+python3 "$root/tools/release/prefetch_packages.py" "$scratch/inputs" "${archives[@]}"
+echo "== cargo package --locked (offline verification) =="
+CARGO_NET_OFFLINE=true cargo package --locked "${selection[@]}"
 
 if [[ "$mode" != execute ]]; then
   echo "== ok: $mode packaged and verified ${#order[@]} crates; nothing uploaded =="

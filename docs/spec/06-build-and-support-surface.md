@@ -979,15 +979,23 @@ would be verified in place of the tree being packaged.
 A packaged crate resolves its registry dependencies without the root
 `[patch]` table, so verifying `plakous-py-worker` needs the upstream
 `monty-typeshed` (§6.1), which `Cargo.lock` does not name and `cargo fetch`
-does not download. The offline `package` gate therefore needs a Cargo cache
-warmed by one networked dry run (`scripts/publish.sh --gate` or `just
-publish`); the verification target directory holds a debug build per crate
-selection and is roughly 20 GB.
+does not download. The `package` group therefore prepares the archives with
+`cargo package --locked --no-verify`, offline first and online only if cache
+inputs are missing. It extracts precisely those archives into disposable
+scratch directories and fetches each archive's dependency graph with the same
+offline-first policy. Only the cohort siblings are substituted with their
+extracted archives during fetch, so unpublished siblings resolve without
+restoring the workspace's third-party patches. Fetch may update the disposable
+locks for those local substitutions; verification uses the original archives
+and their locks. The final `cargo package --locked` builds and verifies strictly
+offline. An explicit `CARGO_NET_OFFLINE=true` remains authoritative during
+prefetch as well. No separate warm-up is needed. The verification target directory holds
+a debug build per crate selection and is roughly 20 GB.
 
 | Invocation | Preconditions | Effect |
 | --- | --- | --- |
 | `scripts/publish.sh` | More than 21 days on every compiled review; clean git tree; `<target>/gate-evidence/full` names `HEAD^{tree}` | Package and verify; nothing uploaded |
-| `scripts/publish.sh --gate` | None (review time is informational) | The same packaging and verification; the full tier's `package` group runs it with `CARGO_NET_OFFLINE=true` |
+| `scripts/publish.sh --gate` | None (review time is informational) | Offline-first verification-input prefetch, then strictly offline packaging and verification |
 | `scripts/publish.sh --execute` | The dry run's, plus `CARGO_REGISTRY_TOKEN` | After packaging, `cargo publish --locked --no-verify -p NAME` per crate in order; before each, a crate already in the index at its version is skipped, and after each the script polls the sparse index (`PLAK_PUBLISH_INDEX`, default `https://index.crates.io`) until the version appears, failing after `PLAK_PUBLISH_TIMEOUT` seconds (default 600). A rerun resumes |
 
 Publication dry runs and `--execute` use `tools/release/review_expiry.py` to
@@ -1285,9 +1293,10 @@ settings have been changed.
 Dependency updates are manual: a maintainer raises a version and the change is
 verified by `just full` and `cargo deny` before it lands. There is no
 automated update service. Routine checks are deterministic and offline except
-for advisory acquisition, which refreshes advisory data, and the static group's
-locked dependency fetch before the structure checkers: it tries offline first
-and goes online only for missing cache inputs.
+for advisory acquisition, which refreshes advisory data, the static group's
+locked dependency fetch before the structure checkers, and the package group's
+archive verification-input prefetch (§6.5). Both dependency preparation paths
+try offline first and go online only for missing cache inputs.
 
 ## 9. Change requirements
 

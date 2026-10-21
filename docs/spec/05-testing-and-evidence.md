@@ -465,7 +465,7 @@ scripts/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these gro
 | `tests-durability` | nextest profile `durability`: crash matrices and the sqlite SIGKILL campaign, one test thread |
 | `contracts` | Positive/negative public compile contracts |
 | `tooling` | Python tooling self-tests |
-| `package` | Offline publish dry run, `scripts/publish.sh --gate`: package and verify every publishable crate from the staged published tree (chapter 06 §6.5); skipped outside a git work tree |
+| `package` | Publish dry run, `scripts/publish.sh --gate`: prefetch archive verification inputs offline first, online only for missing cache inputs, then package and verify every publishable crate strictly offline from the staged published tree (chapter 06 §6.5); skipped outside a git work tree |
 
 | Tier | Groups |
 | --- | --- |

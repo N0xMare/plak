@@ -3,7 +3,7 @@
 The fixture is a three-crate cohort (`plakous-zeta` <- `plakous-mid` <- `plak`,
 alphabetical order differing from dependency order) plus a repository-only
 harness, in its own git repository. Real `cargo metadata` derives the order; a
-`cargo` shim records `package` and `publish` and plays the registry by writing
+`cargo` shim records `package`, `fetch` and `publish` and plays the registry by writing
 the sparse index entry a real upload would produce.
 """
 
@@ -37,7 +37,7 @@ review_expiry = load("review_expiry")
 ORDER = ["plakous-zeta", "plakous-mid", "plak"]
 
 CARGO_SHIM = r'''
-import json, os, sys
+import io, json, os, sys, tarfile, tomllib
 from pathlib import Path
 args = sys.argv[1:]
 if args[:1] == ["metadata"]:
@@ -50,6 +50,25 @@ with open(os.environ["FAKE_CARGO_LOG"], "a") as log:
         token=os.environ.get("CARGO_REGISTRY_TOKEN"),
         test_hooks="test-hooks" in manifest.read_text() if manifest.exists() else None,
     )) + "\n")
+if args[:1] == ["package"] and "--no-verify" in args:
+    if os.environ.get("FAKE_PACKAGE_COLD") == "1" and ("--offline" in args or os.environ.get("CARGO_NET_OFFLINE") == "true"):
+        sys.exit(1)
+    directory = Path(os.environ["CARGO_TARGET_DIR"]) / "package"
+    directory.mkdir(parents=True, exist_ok=True)
+    for name in os.environ["FAKE_NAMES"].split(","):
+        with tarfile.open(directory / f"{name}-0.0.1.crate", "w:gz") as archive:
+            data = f"[package]\nname = '{name}'\nversion = '0.0.1'\n".encode()
+            member = tarfile.TarInfo(f"{name}-0.0.1/Cargo.toml")
+            member.size = len(data)
+            archive.addfile(member, io.BytesIO(data))
+if args[:1] == ["fetch"]:
+    fetched = tomllib.loads(Path(args[args.index("--manifest-path") + 1]).read_text())
+    assert set(fetched["patch"]["crates-io"]) == set(os.environ["FAKE_NAMES"].split(","))
+    assert all(Path(value["path"]).is_dir() for value in fetched["patch"]["crates-io"].values())
+    if os.environ.get("FAKE_FETCH_FAIL") == "1":
+        sys.exit(2)
+    if ("--offline" in args or os.environ.get("CARGO_NET_OFFLINE") == "true") and os.environ.get("FAKE_FETCH_COLD") == "1":
+        sys.exit(1)
 if args[:1] == ["publish"]:
     name = args[args.index("-p") + 1]
     if name not in os.environ.get("FAKE_UNINDEXED", "").split(","):
@@ -82,7 +101,8 @@ class PublishScriptTests(unittest.TestCase):
         self.index = base / "index"
         self.log = base / "cargo.jsonl"
         for relative in ("scripts/publish.sh", "tools/release/publish_plan.py",
-                         "tools/release/publish_shape.py", "tools/release/review_expiry.py"):
+                         "tools/release/publish_shape.py", "tools/release/review_expiry.py",
+                         "tools/release/prefetch_packages.py"):
             (self.repo / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, self.repo / relative)
         # Freeze only this copied fixture's invocation, never the maintainer CLI.
@@ -162,7 +182,10 @@ class PublishScriptTests(unittest.TestCase):
         )
         lines = self.log.read_text().splitlines() if self.log.exists() else []
         self.log.unlink(missing_ok=True)
-        return result, [json.loads(line) for line in lines]
+        all_calls = [json.loads(line) for line in lines]
+        self.prefetch_calls = [call for call in all_calls if call["args"][0] == "fetch"
+                               or (call["args"][0] == "package" and "--no-verify" in call["args"])]
+        return result, [call for call in all_calls if call not in self.prefetch_calls]
 
     def index_entry(self, name: str) -> None:
         entry = self.index / publish_plan.index_path(name)
@@ -232,6 +255,38 @@ class PublishScriptTests(unittest.TestCase):
         self.assertIn("21 days remaining (informational)", result.stdout)
         self.assertEqual(len(calls), 1)
 
+    def test_verification_graph_prefetch_is_offline_first(self) -> None:
+        result, calls = self.publish("--gate")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.prefetch_calls), 4)
+        self.assertTrue(all("--offline" in call["args"] or call["offline"] == "true"
+                            for call in self.prefetch_calls))
+        self.assertEqual(calls[0]["offline"], "true")
+
+    def test_cold_archive_graph_fetches_online_then_verifies_offline(self) -> None:
+        self.env.update(FAKE_FETCH_COLD="1", FAKE_PACKAGE_COLD="1")
+        result, calls = self.publish("--gate")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.prefetch_calls), 8)
+        for offline, online in zip(self.prefetch_calls[::2], self.prefetch_calls[1::2]):
+            self.assertTrue("--offline" in offline["args"] or offline["offline"] == "true")
+            self.assertIsNone(online["offline"])
+        self.assertEqual(calls[0]["offline"], "true")
+
+    def test_explicit_offline_mode_does_not_get_overridden_by_prefetch(self) -> None:
+        self.env.update(FAKE_FETCH_COLD="1", CARGO_NET_OFFLINE="true")
+        result, calls = self.publish("--gate")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(calls, [])
+        self.assertTrue(all(call["offline"] == "true" for call in self.prefetch_calls))
+
+    def test_prefetch_failure_never_starts_verification(self) -> None:
+        self.env["FAKE_FETCH_FAIL"] = "1"
+        result, calls = self.publish("--gate")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(calls, [])
+        self.assertEqual(len(self.prefetch_calls), 3)
+
     def test_packaging_drops_unpacked_cohort_copies_from_earlier_runs(self) -> None:
         # Cargo reuses an unpacked name-version directory, so a stale copy of a
         # cohort crate would be verified instead of the tree being packaged.
@@ -273,6 +328,7 @@ class PublishScriptTests(unittest.TestCase):
             [call["args"] for call in calls[1:]],
             [["publish", "--locked", "--no-verify", "-p", name] for name in ORDER[1:]],
         )
+        self.assertTrue(all(call["offline"] is None for call in calls[1:]))
         self.assertIn("plakous-zeta 0.0.1: already in the index, skipped", result.stdout)
         for name in ORDER:
             self.assertTrue(publish_plan.indexed(self.index.as_uri(), name, "0.0.1"))
