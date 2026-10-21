@@ -27,6 +27,9 @@
           "value": "fixture-only",
           "temporary": false
         }
+      ],
+      "realmRoles": [
+        "offline_access"
       ]
     }
   ],
@@ -55,13 +58,22 @@
       "attributes": {
         "include.in.token.scope": "true"
       }
+    },
+    {
+      "name": "offline_access",
+      "protocol": "openid-connect",
+      "attributes": {
+        "consent.screen.text": "offline access",
+        "display.on.consent.screen": "true"
+      }
     }
   ],
   "defaultDefaultClientScopes": [
     "read"
   ],
   "defaultOptionalClientScopes": [
-    "write"
+    "write",
+    "offline_access"
   ],
   "clients": [
     {
@@ -79,12 +91,38 @@
         "read"
       ],
       "optionalClientScopes": [
-        "write"
+        "write",
+        "offline_access"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
         "oauth2.device.authorization.grant.enabled": "true",
-        "exclude.issuer.from.auth.response": "false"
+        "exclude.issuer.from.auth.response": "false",
+        "exclude.session.state.from.auth.response": "true"
+      }
+    },
+    {
+      "clientId": "device-confidential",
+      "secret": "fixture-client-secret",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "consentRequired": true,
+      "redirectUris": [
+        "http://127.0.0.1:18765/callback"
+      ],
+      "defaultClientScopes": [
+        "read"
+      ],
+      "optionalClientScopes": [
+        "write",
+        "offline_access"
+      ],
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "true",
+        "exclude.issuer.from.auth.response": "false",
+        "exclude.session.state.from.auth.response": "true"
       }
     }
   ],
@@ -96,7 +134,7 @@
           {
             "executor": "pkce-enforcer",
             "configuration": {
-              "code-challenge-method": "S256"
+              "auto-configure": true
             }
           }
         ]
@@ -110,8 +148,12 @@
         "enabled": true,
         "conditions": [
           {
-            "condition": "any-client",
-            "configuration": {}
+            "condition": "client-access-type",
+            "configuration": {
+              "type": [
+                "public"
+              ]
+            }
           }
         ],
         "profiles": [
@@ -119,5 +161,20 @@
         ]
       }
     ]
-  }
+  },
+  "roles": {
+    "realm": [
+      {
+        "name": "offline_access"
+      }
+    ]
+  },
+  "scopeMappings": [
+    {
+      "clientScope": "offline_access",
+      "roles": [
+        "offline_access"
+      ]
+    }
+  ]
 }

@@ -3523,7 +3523,7 @@ log assertions and independent AS dispatch/MCP audience and effect witnesses.
 Browser URLs, authorization codes, device codes, tokens and client secrets
 are not retained in the report. Teardown removes the home, test grants and
 Compose resources, including on failure. A state-key carry scenario requires
-an explicitly supplied second MCP-capable binary with a different state key;
+an explicitly supplied second test-hooks binary with a different state key;
 missing evidence is reported as blocked, never a pass. Resource-matching
 expectations are external JSON data so the lane can follow the owning MCP
 specification without changing its fixture logic. Only offline parser and

@@ -19,7 +19,8 @@ The recipe builds a `test-hooks` release binary. Direct Python invocation
 requires one already built **from this checkout**. No sidecars are needed for
 the scripted direct composition. The driver refuses a non-test-hooks binary;
 the offline selector cannot fall back to a provider. `PLAK_TEST_FAULTS` injects
-revocation 503; the MCP fixture injects a real HTTP 401 at `tools/call` so its
+revocation 503 and a calibrated `tools/call` 401; a separate MCP fixture injects
+a real HTTP 401 at `tools/call` so its
 request log can prove no resend. Inherited credentials, SSH markers, proxy
 settings and subscription state are not passed to Plak. A browser opener shim
 hands local authorize URLs to Playwright. Remote login captures the failed
@@ -40,7 +41,8 @@ A failed teardown is a failing run. Reports are overwritten by default; use
 The matrix includes Keycloak and strict-AS DCR loopback login, remote
 paste-back and device login, confidential client + issuer pin, 60-second TTL
 cadence, rotation/predecessor reuse, forced 401 (one refresh/no automatic
-resend), cross-process refresh, safe/hostile 403 step-up, admin revocation,
+resend), cross-process refresh (an in-flight contender may fail closed, then explicitly
+retry without a second refresh), safe/hostile 403 step-up, admin revocation,
 logout (remote, 503 quarantine, local), wrong audience, same-origin tenant
 metadata, callback issuer mismatch, Keycloak restart, and state-key carry.
 `FAIL` is an unmet product/AS expectation pending triage; `HARNESS` is a driver
@@ -52,7 +54,15 @@ Keycloak does not implement RFC 8707. Its realm has a fixed audience mapper;
 only node-oidc-provider proves exact `resource`/JWT audience binding. The strict
 AS has ephemeral runtime-generated signing keys and in-memory grants: its own
 restart is not a persistence claim. The restart scenario uses Keycloak's real
-persisted realm. The AS proxies count actual token/revocation requests and keep
+persisted realm. Keycloak's raw DCR login retains its default `session_state`
+callback parameter. The pre-registered client disables that optional parameter
+using Keycloak's native client attribute (never browser callback rewriting),
+so other rows can qualify independently if Plak rejects that extension.
+The confidential, revocation and restart rows use that client. Device uses a
+separate confidential client without an auth-code PKCE requirement (RFC 8628
+does not send a PKCE challenge); public DCR and confidential auth-code clients
+require S256.
+The AS proxies count actual token/revocation requests and keep
 only a predecessor refresh token in process memory for the explicit AS reuse
 probe. The MCP server verifies JWKS signature, issuer, audience and expiry
 before SDK dispatch, with per-tool scope enforcement outside the SDK.
@@ -62,9 +72,13 @@ Resource-rule policy is `resource-rules.json`, overridable with
 current spec requires `refuse`. This keeps the parallel interoperability
 branch's resource-rule changes out of fixture implementation.
 
-State-key carry requires `--previous-binary` with MCP OAuth support and a
+State-key carry requires `--previous-binary` with test-hooks and a
 *different* state key. It uses the public session export/import commands, not
-SQLite edits or moving a state directory. Without that binary the row is
+SQLite edits or moving a state directory. The older build creates/exports a
+plain scripted session with an older-compatible config; the new build restores
+the MCP template, imports the session and calls MCP using the pre-existing
+home-scoped login. The older build need not implement MCP OAuth. Without that
+binary the row is
 `BLOCKED` and the complete matrix exits nonzero. Same-key import is not evidence
 for a state-key move.
 
@@ -73,3 +87,5 @@ Offline tooling tests (no Docker/browser):
 ```sh
 python3 -m unittest tests/tooling/test_mcp_oauth_e2e.py -v
 ```
+
+Known product failures and their independent witnesses are in [FINDINGS.md](FINDINGS.md).
