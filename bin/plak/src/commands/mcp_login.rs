@@ -193,7 +193,7 @@ pub(crate) fn logout(
         .block_on(McpPool::new().logout(&spec, local))
         .map_err(|error| {
             CliFailure::new(format!(
-                "mcp server {id}: {error}; the login is kept; `plak mcp logout {id} --local` retires it here without revoking"
+                "mcp server {id}: {error}; the login was not retired and may be quarantined if revocation was attempted; `plak mcp logout {id} --local` retires it here without revoking"
             ))
         })?;
     let remains = "the grant may remain active at the authorization server";

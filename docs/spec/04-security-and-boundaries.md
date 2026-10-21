@@ -524,7 +524,8 @@ The `secrets/mcp-oauth/` and `<id>/` directories are `0700` and are created
 on first login; the record and its locks are the Plakous private store's
 (§3.2) under the profile `plakous.mcp.oauth.compat.2026-07-28.r1`. Its
 payload (version 1) binds the server's
-canonical URI, the issuer and the client id (whose digest is also the record's account binding) and holds the
+canonical URI, the issuer and the client id (whose digest is also the record's
+account binding) and holds the
 resource indicator the metadata confirmed, the token endpoint's client
 authentication method, the access token, its expiry and original lifetime,
 whether it was renewed after a 401, the refresh token, the
@@ -828,11 +829,18 @@ credential is validated, fenced and committed exactly like a browser login
 holds no lock and writes nothing, so cancellation or expiry before approval
 leaves no credential and no login-recovery marker.
 
+MCP protected-resource metadata must publish a resource byte-identical to the
+configured endpoint URL. This deliberately narrows RFC 9728: root-fallback
+origin resources do not cover path endpoints, and host-case or trailing-slash
+differences are refused. The mismatch diagnostic includes a bounded published
+URL with user information, query and fragment removed.
+
 MCP server logins follow the same surface rules. `plak mcp login <id>` is
 CLI-only and never started by an agent or a tool: an expired, revoked or
 under-scoped login is a tool failure naming the command. Scope ingestion uses
 the conservative RFC 6749 token alphabet (letters, digits and `._:/+-`);
-remedy commands single-quote validated scope lists and omit unsafe scopes.
+remedy commands single-quote validated scope lists and omit unsafe scopes or
+unions exceeding 1 KiB. Explicit scope input normalizes whitespace first.
 Login output uses the terminal-safe display path. Locally it binds the
 loopback callback port (a configured one, else ephemeral) and completes on
 the callback, checked against the redirect it sent exactly as above. `--remote`
@@ -844,8 +852,9 @@ login over SSH is refused with the hint to re-run with `--remote`. A device
 user code is shown only to the operator, with the anti-phishing line.
 `plak mcp logout <id>` revokes at the authorization server when it advertised
 a revocation endpoint, and retires locally (saying the grant may remain)
-otherwise or with `--local`; as with `plak logout`, a revocation that fails
-retires nothing. A changed URL, issuer or client retires locally with a reason,
+otherwise or with `--local`. A dispatched revocation failure, including a
+non-2xx answer, quarantines the login without retiring it: the server may
+already have changed the grant. Failure before dispatch restores Ready. A changed URL, issuer or client retires locally with a reason,
 without releasing a configured client secret to the old issuer. Local logout
 never requires that secret.
 

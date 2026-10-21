@@ -525,6 +525,13 @@ impl PlakousStreamableClient {
         let (Some(session), Some(bearer)) = (&self.inner.oauth, bearer) else {
             return Ok(response);
         };
+        if status.is_success()
+            && let Err(error) = session.accepted(bearer.generation).await
+        {
+            // The request succeeded; a local store failure must not report
+            // that a potentially mutating call did not run.
+            tracing::warn!(%error, "mcp login confirmation was not stored");
+        }
         if !matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
             return Ok(response);
         }

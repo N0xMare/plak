@@ -612,3 +612,19 @@ fn an_oauth_table_without_a_login_refuses_before_connecting() -> TestResult {
     assert_eq!(mcp_login_status("fake", bearer, logins.as_ref())?, None);
     Ok(())
 }
+
+#[test]
+fn login_remedy_single_quotes_validated_scopes_and_supports_scope_less_fallback() -> TestResult {
+    let login = McpServerName::new("docs")?;
+    let scope = "mcp:tools offline_access";
+    assert!(plakous::auth::oauth_workflow::valid_scope_list(scope));
+    assert_eq!(
+        mcp_login_remedy(&login, Some(scope)),
+        "remedy: plak mcp login docs --scope 'mcp:tools offline_access'"
+    );
+    assert_eq!(
+        mcp_login_remedy(&login, None),
+        "remedy: plak mcp login docs"
+    );
+    Ok(())
+}

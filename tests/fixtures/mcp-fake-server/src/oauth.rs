@@ -84,7 +84,7 @@ pub struct OAuthConfig {
     pub scopes_supported: Vec<String>,
     /// A scope every MCP request's token must carry, else 403.
     pub required_scope: Option<String>,
-    /// Seconds an access token lives.
+    /// Seconds an access token lives; zero omits `expires_in`.
     pub access_lifetime: u64,
     /// Whether a refresh returns a new refresh token.
     pub rotate_refresh: bool,
@@ -633,6 +633,11 @@ impl OAuthGate {
             "expires_in": self.config.access_lifetime,
             "scope": scope,
         });
+        if self.config.access_lifetime == 0
+            && let Some(body) = body.as_object_mut()
+        {
+            body.remove("expires_in");
+        }
         if new_refresh {
             let refresh = format!("rt-{}", state.counter);
             state.refresh.insert(refresh.clone(), scope);

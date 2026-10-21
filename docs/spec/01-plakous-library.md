@@ -4977,7 +4977,9 @@ endpoint. When its 401 carries a `WWW-Authenticate` Bearer challenge with
 `/.well-known/oauth-protected-resource<path>` and then
 `/.well-known/oauth-protected-resource` on the endpoint's origin, in that
 order. The protected-resource metadata's `resource` MUST equal the requested
-server URI byte-for-byte, not a broader same-origin prefix.
+server URI byte-for-byte, not a broader same-origin prefix. This deliberately
+narrows RFC 9728: origin-resource metadata obtained by root fallback is refused
+for a path endpoint, as are host-case and trailing-slash differences.
 The published value is sent byte-for-byte as `resource=` (including a bare
 trailing slash), and its `authorization_servers` MUST name one; the pinned
 issuer is used and must be listed, else the first listed. Authorization-server metadata is
@@ -5017,7 +5019,9 @@ is added when the authorization server lists it. Scope tokens at every input
 (challenge, metadata and explicit scope) are restricted to RFC 6749 tokens
 using letters, digits and `._:/+-`; unsafe metadata tokens are dropped and
 unsafe explicit scopes and challenges are refused. Step-up commands use POSIX
-single quotes only for validated scope lists; otherwise they omit scopes.
+single quotes only for validated scope lists no longer than 1 KiB; otherwise
+they omit scopes, including an oversized stored-and-challenged union. Explicit
+scope input normalizes whitespace before validation.
 The redirect URI is
 `http://127.0.0.1:<port>/callback`. A local login binds the configured port,
 else an ephemeral one, and completes on the loopback callback, checked as
@@ -5031,7 +5035,8 @@ the full callback URL the browser was sent to.
 *Tokens.* A token response commits as a new Ready generation whose payload
 binds the canonical server URI, the issuer and the client id, with the access
 token, its expiry and original lifetime, whether it was renewed after a 401,
-the refresh token, the requested scope and the token and revocation endpoints. Refresh is a claimed refresh (chapter 04 §3.3) with
+the refresh token, the requested scope and the token and revocation endpoints.
+Refresh is a claimed refresh (chapter 04 §3.3) with
 `grant_type=refresh_token` and `resource=`; a returned refresh token replaces
 the stored one and an absent one keeps it. Logout revokes (RFC 7009) the
 refresh token, else the access token, at the stored revocation endpoint and
@@ -5039,15 +5044,19 @@ then retires the record; without a revocation endpoint it retires the record
 locally and says the grant may remain active. A changed definition also retires
 locally without sending credentials to the old issuer. Client secrets are
 resolved lazily for remote revocation only; local logout needs no secret.
-A revocation that fails retires nothing and fails the logout; an unusable login (quarantined, unreadable or
-written by a newer build) is retired locally.
+A dispatched revocation that fails, including a definite non-2xx answer,
+quarantines the login and fails the logout without retiring it: even an error
+answer cannot prove the server made no change. Failure before dispatch restores
+Ready. An unusable login (quarantined, unreadable or written by a newer build)
+is retired locally.
 
 *Use.* At each start the transport opens the store and refuses when it holds
 no usable login or a login bound to another canonical URI, issuer or client
 id. It resolves the bearer for every request, sends it only to the endpoint
 URL (the exact-URL rule, §7.1), and never falls back to any other credential.
 Before a request whose access token expires within the lesser of 300 seconds
-and half its original issued lifetime it refreshes; a refresh that fails or finds the record quarantined is a definite failure, the
+and half its original issued lifetime it refreshes; a refresh that fails or
+finds the record quarantined is a definite failure, the
 request not sent, naming the login remedy. A refresh the token endpoint answers
 with 408, 429 or 5xx leaves the login quarantined: the server may already
 have rotated the token. `invalid_grant` retires it locally, so the next
@@ -5057,8 +5066,11 @@ bound to the generation the rejected request carried and only while the store
 still holds it, as its own task, and never re-sends the request: the call is
 a definite failure "not executed: credentials were rejected and have been
 renewed; call again", or names the login remedy when nothing could be renewed.
-A 401 on a generation issued by 401 recovery fails with the login remedy,
-without another refresh, including across processes. A 403 whose challenge
+The first successful HTTP response for a 401-recovered generation clears its
+rejection marker in one fenced store write. Until then, another 401 retires
+that generation and fails with the login remedy without another refresh,
+including across processes. A later rejection after success may renew again,
+including when the authorization server omits `expires_in`. A 403 whose challenge
 has `error="insufficient_scope"` is a definite failure
 naming the login remedy with the union of the stored requested scope and the
 challenged scope; any other 403 is a definite failure naming the login remedy.

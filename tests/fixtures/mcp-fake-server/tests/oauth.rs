@@ -250,7 +250,9 @@ async fn discovery_refuses_another_resource_and_a_server_without_pkce() -> TestR
         .err()
         .ok_or("another resource was accepted")?;
     assert!(
-        refused.message().contains("names another resource"),
+        refused.message().contains("publishes resource")
+            && refused.message().contains("/mcp/elsewhere")
+            && refused.message().contains("set url exactly as published"),
         "{refused}"
     );
 
@@ -490,9 +492,9 @@ async fn echo(
 
 #[tokio::test]
 async fn calls_carry_the_token_only_to_the_endpoint_and_refresh_it_before_expiry() -> TestResult {
-    // Short-lived tokens are not immediately due again after issue.
+    // Long lifetimes avoid wall-clock races; age_login reaches the boundary.
     let setup = setup(OAuthConfig {
-        access_lifetime: 60,
+        access_lifetime: 86400,
         ..OAuthConfig::default()
     })
     .await?;
@@ -663,7 +665,7 @@ async fn insufficient_scope_names_the_step_up_login_and_nothing_runs() -> TestRe
 async fn a_refresh_the_server_fails_quarantines_the_login() -> TestResult {
     for status in [408, 429, 500, 503] {
         let setup = setup(OAuthConfig {
-            access_lifetime: 60,
+            access_lifetime: 86400,
             ..OAuthConfig::default()
         })
         .await?;
@@ -757,6 +759,11 @@ async fn hostile_scopes_never_reach_a_step_up_command() -> TestResult {
         local_login(&pool, &spec).await?;
         let workspace = workspace()?;
         let registry = registry(&pool, spec, &workspace).await?;
+        if hostile.contains('\x1b') {
+            // HTTP header validation rejects ESC before challenge parsing.
+            pool.shutdown().await;
+            continue;
+        }
         setup.gate.require_scope(Some(hostile));
         let refused = echo(&registry, &workspace).await?;
         assert_eq!(refused.kind(), ToolOutcomeKind::Failure);
@@ -818,18 +825,48 @@ async fn a_second_rejected_generation_requires_login_without_another_refresh() -
     let registry = registry(&pool, spec.clone(), &workspace).await?;
     setup.gate.reject_access_tokens();
     echo(&registry, &workspace).await?;
-    pool.shutdown().await;
+    // Keep the first transport open: a successful DELETE during shutdown
+    // would legitimately confirm the recovered generation.
+    let first_pool = pool;
     // A fresh pool must enforce the stored renewal-origin marker too.
     let pool = McpPool::new();
-    let registry = self::registry(&pool, spec, &workspace).await?;
     setup.gate.reject_access_tokens();
+    assert!(
+        self::registry(&pool, spec.clone(), &workspace)
+            .await
+            .is_err()
+    );
+    assert_eq!(spec.oauth_status()?, Some(McpOAuthStatus::NotLoggedIn));
+    assert!(self::registry(&pool, spec, &workspace).await.is_err());
+    assert_eq!(setup.refreshes().len(), 1);
+    first_pool.shutdown().await;
+    pool.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn successful_generations_allow_two_expiry_rejections_without_expires_in() -> TestResult {
+    let setup = setup(OAuthConfig {
+        access_lifetime: 0,
+        ..OAuthConfig::default()
+    })
+    .await?;
+    let spec = setup.spec(setup.settings())?;
+    let pool = McpPool::new();
+    local_login(&pool, &spec).await?;
+    let workspace = workspace()?;
+    let registry = registry(&pool, spec, &workspace).await?;
+
     for _ in 0..2 {
+        setup.gate.reject_access_tokens();
         let refused = echo(&registry, &workspace).await?;
         assert_eq!(refused.kind(), ToolOutcomeKind::Failure);
-        assert_eq!(refused.joined_text().matches("run login remote").count(), 1);
+        assert_eq!(
+            echo(&registry, &workspace).await?.kind(),
+            ToolOutcomeKind::Success
+        );
     }
-    assert_eq!(setup.refreshes().len(), 1);
-    assert_eq!(setup.calls.calls(), Vec::<String>::new());
+    assert_eq!(setup.refreshes().len(), 2);
     pool.shutdown().await;
     Ok(())
 }
@@ -895,7 +932,7 @@ async fn logout_after_an_issuer_change_retires_without_resolving_the_secret() ->
 }
 
 #[tokio::test]
-async fn failed_revocation_retires_nothing_and_local_logout_needs_no_secret() -> TestResult {
+async fn failed_revocation_quarantines_until_explicit_local_logout() -> TestResult {
     let setup = setup(OAuthConfig::default()).await?;
     let spec = setup.spec(setup.settings())?;
     let pool = McpPool::new();
@@ -937,6 +974,30 @@ async fn invalid_grant_retires_the_login_and_each_call_has_one_remedy() -> TestR
     assert_eq!(next.joined_text().matches("run login remote").count(), 1);
     assert_eq!(setup.refreshes().len(), 1);
     assert_eq!(setup.calls.calls(), Vec::<String>::new());
+    pool.shutdown().await;
+    Ok(())
+}
+
+#[test]
+fn explicit_scope_normalizes_whitespace_before_validation() -> TestResult {
+    McpLoginOptions::new().with_scope("  mcp:tools\t offline_access\n")?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn oversized_step_up_union_omits_the_scope_remedy() -> TestResult {
+    let setup = setup(OAuthConfig::default()).await?;
+    let spec = setup.spec(setup.settings())?;
+    let pool = McpPool::new();
+    local_login(&pool, &spec).await?;
+    let workspace = workspace()?;
+    let registry = registry(&pool, spec, &workspace).await?;
+    let scope = "a".repeat(1024);
+    setup.gate.require_scope(Some(&scope));
+    let refused = echo(&registry, &workspace).await?;
+    assert_eq!(refused.kind(), ToolOutcomeKind::Failure);
+    assert!(!refused.joined_text().contains("--scope"));
+    assert!(!refused.joined_text().contains(&scope));
     pool.shutdown().await;
     Ok(())
 }

@@ -670,11 +670,8 @@ fn oauth_settings(
         format!("mcp server {server} uses oauth, and this product stores no MCP logins")
     })?;
     let login = server.clone();
-    let mut settings =
-        McpOAuthSettings::new(store).with_login_remedy(Arc::new(move |scope| match scope {
-            Some(scope) => format!("remedy: plak mcp login {login} --scope '{scope}'"),
-            None => format!("remedy: plak mcp login {login}"),
-        }));
+    let mut settings = McpOAuthSettings::new(store)
+        .with_login_remedy(Arc::new(move |scope| mcp_login_remedy(&login, scope)));
     if let Some(issuer) = &definition.oauth_issuer {
         settings = settings.with_issuer(issuer).map_err(refused)?;
     }
@@ -687,6 +684,13 @@ fn oauth_settings(
         settings = settings.with_callback_port(port);
     }
     Ok(Some(settings))
+}
+
+fn mcp_login_remedy(login: &McpServerName, scope: Option<&str>) -> String {
+    match scope {
+        Some(scope) => format!("remedy: plak mcp login {login} --scope '{scope}'"),
+        None => format!("remedy: plak mcp login {login}"),
+    }
 }
 
 /// An HTTP definition: its URL, literal headers, and the bearer and header

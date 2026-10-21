@@ -886,3 +886,16 @@ capacity returns. A lost acknowledgement is settled by reopening the session,
 which learns from the runtime whether the prompt was recorded and otherwise
 sends the same queued item again under its own identity, exactly once; do not
 resubmit it as a new prompt.
+
+## MCP Resource Mismatch
+
+OAuth discovery requires `url` to match the server's published `resource`
+exactly, including host case and trailing slash. Set `url` exactly as the
+server publishes it; origin-wide root-fallback metadata does not cover a path
+endpoint. If the server publishes only an origin resource, ask its operator
+for endpoint-specific metadata or configure its published origin endpoint.
+Diagnostics omit user information, query and fragment.
+
+For live MCP testing, use a dedicated `PLAK_HOME` (mode 0700). New `[mcp]`,
+`auth`, `oauth_*` and `resources` configuration keys do not load in earlier
+builds; keep the installed build's home and any running session unchanged.

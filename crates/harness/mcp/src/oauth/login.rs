@@ -47,7 +47,7 @@ use crate::pool::McpPool;
 use crate::spec::{McpServerSpec, Transport};
 
 const OFFLINE_ACCESS: &str = "offline_access";
-const MAX_SCOPE_BYTES: usize = 1024;
+pub(super) const MAX_SCOPE_BYTES: usize = 1024;
 const DEFAULT_CLIENT_NAME: &str = "Plakous";
 const DISCOVER_PROTOCOL_VERSION: &str = "2026-07-28";
 const DEVICE_MAX_INTERVAL: Duration = Duration::from_secs(60);
@@ -88,15 +88,16 @@ impl McpLoginOptions {
     /// Refuses an empty scope, one over 1 KiB, or one with characters
     /// outside the conservative scope-token alphabet.
     pub fn with_scope(mut self, scope: &str) -> Result<Self, McpError> {
-        if scope.trim().is_empty()
+        let scope = scope.split_whitespace().collect::<Vec<_>>().join(" ");
+        if scope.is_empty()
             || scope.len() > MAX_SCOPE_BYTES
-            || !plakous_auth::oauth_workflow::valid_scope_list(scope)
+            || !plakous_auth::oauth_workflow::valid_scope_list(&scope)
         {
             return Err(authorization(
                 "an oauth scope is 1 to 1024 bytes of space-separated tokens using letters, digits and ._:/+-",
             ));
         }
-        self.scope = Some(scope.split_whitespace().collect::<Vec<_>>().join(" "));
+        self.scope = Some(scope);
         Ok(self)
     }
 
@@ -863,6 +864,33 @@ async fn probe(http: &OAuthHttp, endpoint: &McpHttpEndpoint) -> Result<BearerCha
     })
 }
 
+/// Show only a bounded URL without user information, query or fragment.
+fn published_resource(body: &[u8]) -> String {
+    let value = serde_json::from_slice::<serde_json::Value>(body).ok();
+    let resource = value
+        .as_ref()
+        .and_then(|value| value.get("resource"))
+        .and_then(serde_json::Value::as_str);
+    let Some(mut url) = resource.and_then(|resource| url::Url::parse(resource).ok()) else {
+        return "<invalid>".to_owned();
+    };
+    if !matches!(url.scheme(), "https" | "http") {
+        return "<invalid>".to_owned();
+    }
+    let has_user_info = !url.username().is_empty() || url.password().is_some();
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.set_query(None);
+    url.set_fragment(None);
+    let display = resource.filter(|_| !has_user_info);
+    display
+        .map_or(url.as_str(), redact_query)
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(512)
+        .collect()
+}
+
 async fn protected_resource(
     http: &OAuthHttp,
     server: &McpServerName,
@@ -873,8 +901,9 @@ async fn protected_resource(
         parse_protected_resource_metadata(body, resource).map_err(|error| {
             authorization(&match error {
                 OAuthWorkflowError::ResourceMismatch => format!(
-                    "the resource metadata at {} names another resource than {resource}",
-                    redact_query(url)
+                    "the resource metadata at {} publishes resource {} instead of {resource}; set url exactly as published",
+                    redact_query(url),
+                    published_resource(body)
                 ),
                 OAuthWorkflowError::MissingMetadata => format!(
                     "the resource metadata at {} names no authorization server",
@@ -1280,5 +1309,28 @@ impl ClaimedRevokeHooks for RevokeHooks<'_> {
         _generation: CredentialGeneration,
     ) -> Result<Self::Output, Self::Error> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::published_resource;
+
+    #[test]
+    fn mismatch_resource_preserves_published_spelling_without_sensitive_parts() {
+        assert_eq!(
+            published_resource(br#"{"resource":"https://EXAMPLE.com/Path/?private=yes#secret"}"#),
+            "https://EXAMPLE.com/Path/"
+        );
+        assert_eq!(
+            published_resource(
+                br#"{"resource":"https://user:secret@example.com/path?private=yes"}"#
+            ),
+            "https://example.com/path"
+        );
+        assert_eq!(
+            published_resource(br#"{"resource":"invalid"}"#),
+            "<invalid>"
+        );
     }
 }

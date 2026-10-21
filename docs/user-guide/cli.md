@@ -258,7 +258,9 @@ plak mcp remove github
   renewed, is revoked, or lacks a scope, the tool call fails and names the
   `plak mcp login` command to run.
 - `logout <id> [--local]` revokes the login at the authorization server and
-  removes it here. When revocation fails nothing is removed; `--local`
+  removes it here. When a dispatched revocation fails (including HTTP 503), the login is
+  quarantined because the server may already have changed the grant; calls
+  refuse it until a new login or local logout. No record is removed; `--local`
   removes it here without revoking, and the grant may stay active at the
   authorization server.
 - `prompts <id>` starts the server the way `test` does and lists its prompts

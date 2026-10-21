@@ -309,8 +309,7 @@ reach the server; it starts nothing until a template that lists it binds.
 
 Release-note compatibility notice: configuration using `[mcp]`, `auth`,
 `oauth_*` or `resources` does not load in earlier builds (unknown sections or
-keys). Live testing uses a separate `PLAK_HOME` so the installed build's
-configuration stays readable. This is configuration forward-incompatibility,
+keys). This is configuration forward-incompatibility,
 independent of session export/import.
 
 A key of the other transport is a load error, and so is an `oauth_*` key

@@ -167,12 +167,33 @@ impl OAuthSession {
         {
             return self.refusal("needs additional scope", None);
         }
-        let scope = union_scopes([stored.as_deref(), challenged]);
+        let scope = union_scopes([stored.as_deref(), challenged])
+            .filter(|scope| scope.len() <= super::login::MAX_SCOPE_BYTES);
         let needed = scope.as_deref().map_or_else(
             || "needs more scope".to_owned(),
             |scope| format!("needs scope \"{scope}\""),
         );
         self.refusal(&needed, scope.as_deref())
+    }
+
+    /// A successful response proves this generation is usable. Clear its
+    /// rejection marker once, fenced against concurrent refresh or logout.
+    pub(crate) async fn accepted(&self, generation: CredentialGeneration) -> Result<(), String> {
+        let _flight = self.refresh.lock().await;
+        let store = self.store()?;
+        let (fence, mut stored) = self.ready(&store)?;
+        if fence.generation() != generation || !stored.renewed_after_rejection {
+            return Ok(());
+        }
+        stored.renewed_after_rejection = false;
+        let next = generation.next().map_err(|error| error.to_string())?;
+        let record = stored.record(next).map_err(|error| error.to_string())?;
+        match store.replace(generation, &record) {
+            Ok(()) | Err(PrivateStoreError::StaleWriter) => Ok(()),
+            Err(error) => {
+                Err(self.refusal(&format!("could not confirm its login ({error})"), None))
+            }
+        }
     }
 
     fn store(&self) -> Result<PrivateCredentialStore, String> {
@@ -295,6 +316,9 @@ impl ClaimedRefreshHooks for RefreshHooks<'_> {
             return Err(authorization("the login belongs to another server"));
         }
         if self.rejected.is_some() && stored.renewed_after_rejection {
+            self.store
+                .logout(fence.generation())
+                .map_err(|error| store_failed("mcp rejected login could not be retired", error))?;
             return Err(authorization(
                 "the renewed credentials were rejected; a new login is required",
             ));
