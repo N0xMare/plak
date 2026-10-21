@@ -1155,8 +1155,10 @@ crash or uncertain transaction), it retains Arc clones of the already-validated
 publication as a pending seed, replacing the previous pending seed for that
 branch. Post-publication seeding does not walk the closure or build a CAS
 index. Pending entries charge all retained ancestral objects conservatively under the same
-budget. They evict only other pending entries, in LRU order; a seed that cannot
-fit alongside ready entries is skipped. On the first read hit, the actor normalizes the
+budget. They evict other pending entries in LRU order. A commit seed may also
+evict the ready entry of the head it supersedes on its own branch; a fork seed
+cannot evict its source head. Other ready entries remain protected, and a seed
+that cannot fit alongside them is skipped. On the first read hit, the actor normalizes the
 seed with `current_root_closure()`: base root is absent, ancestral CAS membership
 is discarded, and stats and weight cover only the current-root closure. This
 first hit traverses the closure and rebuilds its CAS index, costing

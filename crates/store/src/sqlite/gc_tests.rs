@@ -531,8 +531,9 @@ fn shrinking_successor_charges_only_its_closure_across_sessions() -> TestResult 
     advance_branch(&mut branch, &mut b, &mut graph, 840_000)?;
     let warm_child = b.load_branch(branch.head.session())?;
     assert!(warm_child.checkpoint().bundle().stats().retained_bytes() < ancestral_bytes / 2);
-    let child_weight = checkpoint_cache::weight(warm_child.checkpoint());
-    b.checkpoints = CheckpointCache::new(root_weight + child_weight * 3);
+    let pending_weight =
+        checkpoint_cache::bundle_weight(&branch.bundle) + size_of::<(SessionRef, CheckpointId)>();
+    b.checkpoints = CheckpointCache::new(root_weight + pending_weight * 2);
     b.load_branch(root.branch().session())?;
     for identity in [850_000, 860_000, 870_000, 880_000] {
         // Keep the warm root newer than the prior child's head.
@@ -541,7 +542,12 @@ fn shrinking_successor_charges_only_its_closure_across_sessions() -> TestResult 
         assert_eq!(b.checkpoint_decodes, before);
         branch.value = 0;
         advance_branch(&mut branch, &mut b, &mut graph, identity)?;
+        assert!(b.checkpoints.has_pending(branch.head.session()));
         let before = b.checkpoint_decodes;
+        let normalizations = b.checkpoints.normalizations;
+        b.load_branch(branch.head.session())?;
+        assert_eq!(b.checkpoints.normalizations, normalizations + 1);
+        assert_eq!(b.checkpoint_decodes, before);
         let loaded_root = b.load_branch(root.branch().session())?;
         assert_eq!(loaded_root.checkpoint(), warm_root.checkpoint());
         assert_eq!(
@@ -622,17 +628,71 @@ fn assert_no_seed(b: &Backend, branch: SessionRef) {
 }
 
 #[test]
-fn background_reclaim_preserves_pending_seed() -> TestResult {
+fn background_reclaim_preserves_ready_and_pending_over_real_candidates() -> TestResult {
     let directory = tempfile::tempdir()?;
     let mut b = backend(&directory.path().join("runtime.sqlite3"))?;
+    let doomed = cache_branch(&mut b, 950_000)?;
+    release(&mut b, &doomed.lease)?;
+    let session =
+        session_head(&b.connection, doomed.head.session().session_id())?.ok_or("session")?;
+    let archived = archive(
+        &mut b,
+        ArchiveSession::new(session.session_id(), session.revision()),
+    )?;
+    delete(
+        &mut b,
+        DeleteSession::new(session.session_id(), archived.session().revision()),
+    )?;
+    let warm = cache_branch(&mut b, 960_000)?;
+    let ready = b.load_branch(warm.head.session())?;
     let source = cache_branch(&mut b, 970_000)?;
     let receipt = commit(&mut b, &successor_request(&source, 980_000)?)?;
-    b.gc_pending = true;
-    assert!(b.background_step());
+    let reclaimed = read_stats(&b.connection)?.reclaimed_objects();
+    for _ in 0..100 {
+        if read_stats(&b.connection)?.reclaimed_objects() > reclaimed {
+            break;
+        }
+        assert!(b.background_step());
+    }
+    assert!(read_stats(&b.connection)?.reclaimed_objects() > reclaimed);
     assert!(b.checkpoints.has_pending(source.head.session()));
     let before = b.checkpoint_decodes;
+    assert_eq!(b.load_branch(warm.head.session())?, ready);
+    let normalizations = b.checkpoints.normalizations;
     assert_eq!(b.load_branch(source.head.session())?.head(), receipt.head());
+    assert_eq!(b.checkpoints.normalizations, normalizations + 1);
     assert_eq!(b.checkpoint_decodes, before);
+    b.checkpoints.clear();
+    assert_eq!(b.load_branch(warm.head.session())?, ready);
+    Ok(())
+}
+
+#[test]
+fn commit_seed_replaces_ready_head_above_half_budget() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let mut b = backend(&directory.path().join("runtime.sqlite3"))?;
+    let source = cache_branch(&mut b, 1_210_000)?;
+    let request = successor_request(&source, 1_220_000)?;
+    let pending_weight = checkpoint_cache::bundle_weight(request.checkpoint())
+        + size_of::<(SessionRef, CheckpointId)>();
+    b.checkpoints = CheckpointCache::new(pending_weight);
+    let ready = b.load_branch(source.head.session())?;
+    assert!(checkpoint_cache::weight(ready.checkpoint()) > pending_weight / 2);
+    let before = b.checkpoint_decodes;
+    let receipt = commit(&mut b, &request)?;
+    assert!(b.checkpoints.has_pending(source.head.session()));
+    assert!(
+        b.checkpoints
+            .get(source.head.checkpoint().checkpoint_id())
+            .is_none()
+    );
+    assert_eq!(b.checkpoints.normalizations, 0);
+    let warm = b.load_branch(source.head.session())?;
+    assert_eq!(warm.head(), receipt.head());
+    assert_eq!(b.checkpoint_decodes, before);
+    assert_eq!(b.checkpoints.normalizations, 1);
+    b.checkpoints.clear();
+    assert_eq!(b.load_branch(source.head.session())?, warm);
     Ok(())
 }
 

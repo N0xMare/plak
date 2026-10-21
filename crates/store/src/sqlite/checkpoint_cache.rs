@@ -110,6 +110,7 @@ impl CheckpointCache {
         branch: SessionRef,
         reference: CheckpointObjectRef,
         bundle: &CheckpointObjectBundle,
+        superseded: Option<CheckpointId>,
     ) {
         #[cfg(test)]
         if !self.seed_enabled {
@@ -121,11 +122,13 @@ impl CheckpointCache {
         let bytes = bundle_weight(bundle).saturating_add(size_of::<(SessionRef, CheckpointId)>());
         let ready_bytes: usize = self
             .entries
-            .values()
-            .filter(|entry| matches!(entry.value, Value::Ready(_)))
-            .map(|entry| entry.bytes)
+            .iter()
+            .filter(|(id, entry)| {
+                Some(**id) != superseded && matches!(entry.value, Value::Ready(_))
+            })
+            .map(|(_, entry)| entry.bytes)
             .sum();
-        // Optional publication seeds must never displace validated read results.
+        // Only this branch's superseded head may yield its ready slot to a seed.
         if bytes > self.limit.saturating_sub(ready_bytes)
             || matches!(
                 self.entries
@@ -135,6 +138,9 @@ impl CheckpointCache {
             )
         {
             return;
+        }
+        if let Some(id) = superseded {
+            self.remove(id);
         }
         while self.bytes > self.limit.saturating_sub(bytes) {
             let oldest = self.recency.values().copied().find(|id| {
@@ -239,7 +245,7 @@ mod tests {
         let pending_weight = bundle_weight(b.initial()) + size_of::<(SessionRef, CheckpointId)>();
         let mut cache = CheckpointCache::new(ready_weight + pending_weight - 1);
         cache.insert(ready.clone());
-        cache.seed(b.session(), bundle_ref(b.initial()), b.initial());
+        cache.seed(b.session(), bundle_ref(b.initial()), b.initial(), None);
         assert!(!cache.has_pending(b.session()));
         assert_eq!(cache.bytes, ready_weight);
         assert_eq!(cache.get(ready.reference().checkpoint_id()), Some(ready));
@@ -253,7 +259,7 @@ mod tests {
         let request = gc_tests::seed(1_180_000)?;
         let reference = bundle_ref(request.initial());
         let mut cache = CheckpointCache::new(usize::MAX);
-        cache.seed(request.session(), reference, request.initial());
+        cache.seed(request.session(), reference, request.initial(), None);
         cache.fail_normalization = true;
         assert!(cache.bytes > 0);
         assert!(cache.get(reference.checkpoint_id()).is_none());
@@ -275,9 +281,9 @@ mod tests {
         let a_weight = bundle_weight(a.initial()) + size_of::<(SessionRef, CheckpointId)>();
         let b_weight = bundle_weight(b.initial()) + size_of::<(SessionRef, CheckpointId)>();
         let mut cache = CheckpointCache::new(a_weight.max(b_weight));
-        cache.seed(a.session(), a_ref, a.initial());
+        cache.seed(a.session(), a_ref, a.initial(), None);
         assert_eq!(cache.bytes, a_weight);
-        cache.seed(b.session(), b_ref, b.initial());
+        cache.seed(b.session(), b_ref, b.initial(), None);
         assert_eq!(cache.bytes, b_weight);
         assert!(!cache.has_pending(a.session()));
         assert!(cache.get(a_ref.checkpoint_id()).is_none());
@@ -290,11 +296,11 @@ mod tests {
         assert!(!cache.has_pending(b.session()));
         assert_eq!(cache.normalizations, 1);
         cache.clear();
-        cache.seed(a.session(), a_ref, a.initial());
+        cache.seed(a.session(), a_ref, a.initial(), None);
         cache.remove(a_ref.checkpoint_id());
         assert!(!cache.has_pending(a.session()));
         assert_eq!(cache.bytes, 0);
-        cache.seed(b.session(), b_ref, b.initial());
+        cache.seed(b.session(), b_ref, b.initial(), None);
         cache.clear();
         assert!(!cache.has_pending(b.session()));
         assert_eq!(cache.bytes, 0);

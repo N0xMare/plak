@@ -4374,6 +4374,7 @@ fn commit_impl(
         request.expected().session(),
         reference,
         request.checkpoint(),
+        Some(request.expected().checkpoint().checkpoint_id()),
     );
     #[cfg(feature = "perf-instrumentation")]
     let execution = CommitExecution {
@@ -4669,7 +4670,7 @@ fn fork(b: &mut Backend, r: &ForkBranch) -> Result<ForkReceipt, SessionStoreErro
     )?;
     meta(&tx, 0, 1)?;
     commit_claimed(tx, &mut b.holders, target, lease_fence)?;
-    b.checkpoints.seed(target, reference, r.target());
+    b.checkpoints.seed(target, reference, r.target(), None);
     Ok(receipt)
 }
 fn recover_fork(b: &Backend, r: &RecoverFork) -> Result<ForkReceipt, SessionStoreError> {

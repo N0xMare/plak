@@ -1655,6 +1655,49 @@ async fn prune_drops_pending_seed_without_normalizing_it() -> TestResult {
 }
 
 #[tokio::test]
+async fn explicit_reclaim_clears_ready_and_pending_entries() -> TestResult {
+    for mode in [StoreReclaimMode::Bounded, StoreReclaimMode::Drain] {
+        let directory = tempfile::tempdir()?;
+        let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
+        let request = seed()?;
+        let prior = request.initial().clone();
+        let created = store.create(request).await?;
+        let next = next_checkpoint(&created, &prior, 1)?;
+        store
+            .commit(CommitCheckpoint::new(
+                created.lease().clone(),
+                created.branch(),
+                next.checkpoint().clone(),
+            ))
+            .await?;
+        let old = created.branch().checkpoint();
+        store.load_checkpoint(old.checkpoint_id()).await?;
+        let branch = created.branch().session();
+        store
+            .dispatch_read("check_ready_and_pending", move |b| {
+                assert!(b.checkpoints.has_pending(branch));
+                assert!(b.checkpoints.get(old.checkpoint_id()).is_some());
+                Ok(())
+            })
+            .await?;
+        store.reclaim(mode).await?;
+        store
+            .dispatch_read("reclaim_cleared_ready_and_pending", move |b| {
+                assert!(!b.checkpoints.has_pending(branch));
+                assert!(b.checkpoints.get(old.checkpoint_id()).is_none());
+                assert!(
+                    b.checkpoints
+                        .get(next.checkpoint().checkpoint_id())
+                        .is_none()
+                );
+                Ok(())
+            })
+            .await?;
+    }
+    Ok(())
+}
+
+#[tokio::test]
 #[ignore = "opt-in release-profile small-delta cache-seeding measurement"]
 #[allow(
     clippy::too_many_lines,
@@ -1662,6 +1705,8 @@ async fn prune_drops_pending_seed_without_normalizing_it() -> TestResult {
 )]
 async fn measure_lazy_cache_seeding_small_delta_commits() -> TestResult {
     use crate::integrity_fixture as fixture;
+    // F1 defaults below; F2: HISTORY=4080, PAYLOAD=64, GENERATIONS=4.
+    // Load each published head, as bootstrap and terminal-result paths do.
     let history_len =
         std::env::var("PLAK_MEASURE_HISTORY").map_or(Ok(3098), |value| value.parse::<u32>())?;
     let payload_len =
@@ -1723,7 +1768,7 @@ async fn measure_lazy_cache_seeding_small_delta_commits() -> TestResult {
                 prior = bundle;
             }
             eprintln!(
-                "f9 fixture rep={rep} enabled={enabled} objects={} bytes={}",
+                "f11 fixture rep={rep} enabled={enabled} objects={} bytes={}",
                 prior.stats().object_count(),
                 prior.stats().retained_bytes()
             );
@@ -1734,6 +1779,16 @@ async fn measure_lazy_cache_seeding_small_delta_commits() -> TestResult {
                     Ok(())
                 })
                 .await?;
+            store.load_branch(head.session()).await?;
+            store
+                .dispatch("reset_measure_counters", |b| {
+                    b.checkpoint_decodes = 0;
+                    b.checkpoints.normalizations = 0;
+                    Ok(())
+                })
+                .await?;
+            let mut commits = Vec::new();
+            let mut reads = Vec::new();
             for index in 0..40 {
                 let revision = generations + index + 1;
                 let checkpoint = fixture::checkpoint_with_payload(
@@ -1770,14 +1825,29 @@ async fn measure_lazy_cache_seeding_small_delta_commits() -> TestResult {
                     .head();
                 let commit_us = started.elapsed().as_micros();
                 eprintln!(
-                    "f9 commit rep={rep} enabled={enabled} index={index} delta={delta} us={commit_us}"
+                    "f11 commit rep={rep} enabled={enabled} index={index} delta={delta} us={commit_us}"
                 );
+                commits.push(commit_us);
+                let started = Instant::now();
+                let loaded = store.load_branch(head.session()).await?;
+                let read_us = started.elapsed().as_micros();
+                reads.push(read_us);
+                eprintln!(
+                    "f11 post_commit_first rep={rep} enabled={enabled} index={index} us={read_us}"
+                );
+                assert_eq!(loaded.head(), head);
                 prior = bundle;
             }
+            commits.sort_unstable();
+            reads.sort_unstable();
+            eprintln!(
+                "f11 summary history={history_len} generations={generations} rep={rep} enabled={enabled} commit_median_us={} commit_p90_us={} first_read_median_us={} first_read_p90_us={}",
+                commits[20], commits[35], reads[20], reads[35]
+            );
             let started = Instant::now();
             let first = store.load_branch(head.session()).await?;
             eprintln!(
-                "f9 first rep={rep} enabled={enabled} us={}",
+                "f11 first rep={rep} enabled={enabled} us={}",
                 started.elapsed().as_micros()
             );
             for index in 0..40 {
@@ -1785,12 +1855,12 @@ async fn measure_lazy_cache_seeding_small_delta_commits() -> TestResult {
                 let warm = store.load_branch(head.session()).await?;
                 let us = started.elapsed().as_micros();
                 assert_eq!(warm.checkpoint(), first.checkpoint());
-                eprintln!("f9 warm rep={rep} enabled={enabled} index={index} us={us}");
+                eprintln!("f11 warm rep={rep} enabled={enabled} index={index} us={us}");
             }
             store
                 .dispatch_read("measure_seed_arm_counters", move |b| {
-                    assert_eq!(b.checkpoint_decodes, usize::from(!enabled));
-                    assert_eq!(b.checkpoints.normalizations, usize::from(enabled));
+                    assert_eq!(b.checkpoint_decodes, 40 * usize::from(!enabled));
+                    assert_eq!(b.checkpoints.normalizations, 40 * usize::from(enabled));
                     Ok(())
                 })
                 .await?;
