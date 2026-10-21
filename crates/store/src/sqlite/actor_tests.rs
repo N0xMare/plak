@@ -1180,7 +1180,7 @@ fn polling_readers_queue_one_read_each_behind_a_long_critical_job() -> TestResul
 }
 
 #[tokio::test]
-async fn committed_head_is_warm_without_a_cold_load() -> TestResult {
+async fn commit_cache_seed_is_lazy_and_first_hit_equals_cold() -> TestResult {
     let directory = tempfile::tempdir()?;
     let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
     let request = seed()?;
@@ -1194,18 +1194,30 @@ async fn committed_head_is_warm_without_a_cold_load() -> TestResult {
             next.checkpoint().clone(),
         ))
         .await?;
+    store
+        .dispatch_read("commit_does_not_normalize_cache_seed", |b| {
+            assert_eq!(b.checkpoints.normalizations, 0);
+            Ok(())
+        })
+        .await?;
     let before = store
-        .dispatch_read("committed_head_is_warm_without_a_cold_load", |b| {
+        .dispatch_read("commit_cache_seed_is_lazy_and_first_hit_equals_cold", |b| {
             Ok(b.checkpoint_decodes)
         })
         .await?;
     let (_, statements, objects) = traced_branch_load(&store, receipt.head().session()).await?;
     let after = store
-        .dispatch_read("committed_head_is_warm_without_a_cold_load", |b| {
+        .dispatch_read("commit_cache_seed_is_lazy_and_first_hit_equals_cold", |b| {
             Ok(b.checkpoint_decodes)
         })
         .await?;
     assert_eq!(after, before, "post-commit load performs zero decodes");
+    store
+        .dispatch_read("first_hit_normalizes_cache_seed_once", |b| {
+            assert_eq!(b.checkpoints.normalizations, 1);
+            Ok(())
+        })
+        .await?;
     assert!(!objects, "post-commit load must not decode object payloads");
     assert!(statements <= 4, "{statements}");
     let warm = store.load_branch(receipt.head().session()).await?;
@@ -1239,7 +1251,9 @@ fn forked_head_is_warm_under_the_existing_cache_budget() -> TestResult {
         let mut graph = BTreeMap::new();
         let forked = gc_tests::fork_branch(&source, &mut backend, &mut graph, 200_000)?;
         let before = backend.checkpoint_decodes;
+        assert_eq!(backend.checkpoints.normalizations, 0);
         let loaded = backend.load_branch(forked.head.session())?;
+        assert_eq!(backend.checkpoints.normalizations, 1);
         assert_eq!(loaded.head(), forked.head);
         assert_eq!(backend.checkpoint_decodes, before);
         backend.checkpoints.clear();
@@ -1565,6 +1579,219 @@ async fn abandoned_read_waiters_release_all_admission_capacity() -> TestResult {
             sender.activity.read_space.available_permits(),
             sender.capacity
         );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn prune_drops_pending_seed_without_normalizing_it() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
+    let request = seed()?;
+    let prior = request.initial().clone();
+    let created = store.create(request).await?;
+    let next = next_checkpoint(&created, &prior, 1)?;
+    let receipt = store
+        .commit(CommitCheckpoint::new(
+            created.lease().clone(),
+            created.branch(),
+            next.checkpoint().clone(),
+        ))
+        .await?;
+    let old_head = receipt.head();
+    let second = next_checkpoint(&created, next.checkpoint(), 2)?;
+    let head = store
+        .commit(CommitCheckpoint::new(
+            created.lease().clone(),
+            old_head,
+            second.checkpoint().clone(),
+        ))
+        .await?
+        .head();
+    store
+        .dispatch_read("pending_seed_replaced", move |b| {
+            assert!(
+                b.checkpoints
+                    .get(old_head.checkpoint().checkpoint_id())
+                    .is_none()
+            );
+            assert_eq!(b.checkpoints.normalizations, 0);
+            Ok(())
+        })
+        .await?;
+    store
+        .dispatch_read("pending_before_prune", move |b| {
+            assert!(b.checkpoints.has_pending(head.session()));
+            assert_eq!(b.checkpoints.normalizations, 0);
+            Ok(())
+        })
+        .await?;
+    store
+        .prune(PruneBranch::new(
+            created.lease().clone(),
+            head,
+            BTreeSet::new(),
+            1,
+        ))
+        .await?;
+    store
+        .dispatch_read("pending_after_prune", move |b| {
+            assert!(!b.checkpoints.has_pending(head.session()));
+            assert_eq!(b.checkpoints.normalizations, 0);
+            assert!(
+                b.checkpoints
+                    .get(head.checkpoint().checkpoint_id())
+                    .is_none()
+            );
+            Ok(())
+        })
+        .await?;
+    let cold = store.load_branch(head.session()).await?;
+    assert_eq!(cold.head(), head);
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "opt-in release-profile small-delta cache-seeding measurement"]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the opt-in paired measurement keeps untimed fixture construction and timed probes together"
+)]
+async fn measure_lazy_cache_seeding_small_delta_commits() -> TestResult {
+    use crate::integrity_fixture as fixture;
+    let history_len =
+        std::env::var("PLAK_MEASURE_HISTORY").map_or(Ok(3098), |value| value.parse::<u32>())?;
+    let payload_len =
+        std::env::var("PLAK_MEASURE_PAYLOAD").map_or(Ok(7600), |value| value.parse::<usize>())?;
+    let generations =
+        std::env::var("PLAK_MEASURE_GENERATIONS").map_or(Ok(1), |value| value.parse::<u64>())?;
+    for rep in 0..4 {
+        let arms = if rep % 2 == 0 {
+            [false, true]
+        } else {
+            [true, false]
+        };
+        for enabled in arms {
+            let directory = tempfile::tempdir()?;
+            let store = SqliteSessionStore::open_with_clock(
+                directory.path().join("runtime.sqlite3"),
+                Arc::new(FixedClock(SystemLeaseClock::new()?.now()?)),
+            )?;
+            let request = seed()?;
+            let mut prior = request.initial().clone();
+            let created = store.create(request).await?;
+            let mut head = created.branch();
+            let mut payload = String::new();
+            for generation in 1..=generations {
+                payload = if generations == 1 {
+                    "x".repeat(payload_len)
+                } else {
+                    format!("generation {generation}:{}", "x".repeat(payload_len))
+                };
+                let checkpoint = fixture::checkpoint_with_payload(
+                    fixture::topology(
+                        head.session().session_id(),
+                        head.session().branch_id(),
+                        fixture::id(91_010 + u128::from(generation))?,
+                        Some(prior.checkpoint_id()),
+                        generation,
+                        None,
+                        created.lease().fence().get(),
+                    )?,
+                    history_len,
+                    RuntimeDurability::Required,
+                    prior
+                        .validated_checkpoint()?
+                        .manifest()
+                        .canonical()
+                        .context()
+                        .clone(),
+                    &payload,
+                )?;
+                let bundle = fixture::bundle(&checkpoint, Some(&prior))?;
+                head = store
+                    .commit(CommitCheckpoint::new(
+                        created.lease().clone(),
+                        head,
+                        bundle.clone(),
+                    ))
+                    .await?
+                    .head();
+                prior = bundle;
+            }
+            eprintln!(
+                "f9 fixture rep={rep} enabled={enabled} objects={} bytes={}",
+                prior.stats().object_count(),
+                prior.stats().retained_bytes()
+            );
+            store
+                .dispatch("measure_seed_arm", move |b| {
+                    b.checkpoints.clear();
+                    b.checkpoints.seed_enabled = enabled;
+                    Ok(())
+                })
+                .await?;
+            for index in 0..40 {
+                let revision = generations + index + 1;
+                let checkpoint = fixture::checkpoint_with_payload(
+                    fixture::topology(
+                        head.session().session_id(),
+                        head.session().branch_id(),
+                        fixture::id(91_010 + u128::from(revision))?,
+                        Some(prior.checkpoint_id()),
+                        revision,
+                        None,
+                        created.lease().fence().get(),
+                    )?,
+                    history_len,
+                    RuntimeDurability::Required,
+                    prior
+                        .validated_checkpoint()?
+                        .manifest()
+                        .canonical()
+                        .context()
+                        .clone(),
+                    &payload,
+                )?;
+                let bundle = fixture::bundle(&checkpoint, Some(&prior))?;
+                let delta = bundle.supplied_objects().len();
+                assert!(delta <= 16, "measurement must use a small object delta");
+                let started = Instant::now();
+                head = store
+                    .commit(CommitCheckpoint::new(
+                        created.lease().clone(),
+                        head,
+                        bundle.clone(),
+                    ))
+                    .await?
+                    .head();
+                let commit_us = started.elapsed().as_micros();
+                eprintln!(
+                    "f9 commit rep={rep} enabled={enabled} index={index} delta={delta} us={commit_us}"
+                );
+                prior = bundle;
+            }
+            let started = Instant::now();
+            let first = store.load_branch(head.session()).await?;
+            eprintln!(
+                "f9 first rep={rep} enabled={enabled} us={}",
+                started.elapsed().as_micros()
+            );
+            for index in 0..40 {
+                let started = Instant::now();
+                let warm = store.load_branch(head.session()).await?;
+                let us = started.elapsed().as_micros();
+                assert_eq!(warm.checkpoint(), first.checkpoint());
+                eprintln!("f9 warm rep={rep} enabled={enabled} index={index} us={us}");
+            }
+            store
+                .dispatch_read("measure_seed_arm_counters", move |b| {
+                    assert_eq!(b.checkpoint_decodes, usize::from(!enabled));
+                    assert_eq!(b.checkpoints.normalizations, usize::from(enabled));
+                    Ok(())
+                })
+                .await?;
+        }
     }
     Ok(())
 }

@@ -527,7 +527,9 @@ fn shrinking_successor_charges_only_its_closure_across_sessions() -> TestResult 
     let warm_child = b.load_branch(branch.head.session())?;
     assert!(warm_child.checkpoint().bundle().stats().retained_bytes() < ancestral_bytes / 2);
     let child_weight = checkpoint_cache::weight(warm_child.checkpoint());
-    b.checkpoints = CheckpointCache::new(root_weight + child_weight * 3);
+    // Pending seeds conservatively reserve ancestry until their first read.
+    let pending_weight = checkpoint_cache::bundle_weight(&branch.bundle);
+    b.checkpoints = CheckpointCache::new(root_weight + pending_weight + child_weight * 3);
     b.load_branch(root.branch().session())?;
     for identity in [850_000, 860_000, 870_000, 880_000] {
         // Keep the warm root newer than the prior child's head.
@@ -548,5 +550,33 @@ fn shrinking_successor_charges_only_its_closure_across_sessions() -> TestResult 
     b.checkpoints.clear();
     let cold = b.load_branch(branch.head.session())?;
     assert_eq!(warm.checkpoint().bundle(), cold.checkpoint().bundle());
+    Ok(())
+}
+
+#[test]
+fn fresh_commits_replace_pending_seeds_without_closure_work() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let mut b = backend(&directory.path().join("runtime.sqlite3"))?;
+    let request = seed(910_000)?;
+    let created = create(&mut b, &request)?;
+    let mut branch = Branch {
+        head: created.branch(),
+        lease: created.lease().clone(),
+        bundle: request.initial().clone(),
+        value: 1,
+    };
+    let mut graph = BTreeMap::new();
+    for identity in [920_000, 930_000, 940_000] {
+        let previous = branch.head.checkpoint().checkpoint_id();
+        advance_branch(&mut branch, &mut b, &mut graph, identity)?;
+        assert!(b.checkpoints.has_pending(branch.head.session()));
+        assert!(b.checkpoints.get(previous).is_none());
+        assert_eq!(b.checkpoints.normalizations, 0, "commit walked the closure");
+        assert_eq!(b.checkpoint_decodes, 0);
+    }
+    b.load_branch(branch.head.session())?;
+    assert_eq!(b.checkpoints.normalizations, 1);
+    b.load_branch(branch.head.session())?;
+    assert_eq!(b.checkpoints.normalizations, 1);
     Ok(())
 }

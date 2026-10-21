@@ -1549,6 +1549,7 @@ impl Backend {
     }
 
     fn reclaim(&mut self, mode: StoreReclaimMode) -> Result<StoreReclaimReport, SessionStoreError> {
+        self.checkpoints.clear();
         self.require_open()?;
         let mut objects = 0;
         let mut bytes = 0;
@@ -4367,7 +4368,11 @@ fn commit_impl(
     tx.commit().map_err(map_sqlite)?;
     #[cfg(test)]
     test_crash_cut("async-in-commit");
-    seed_checkpoint_cache(&mut backend.checkpoints, reference, request.checkpoint());
+    backend.checkpoints.seed(
+        request.expected().session(),
+        reference,
+        request.checkpoint(),
+    );
     #[cfg(feature = "perf-instrumentation")]
     let execution = CommitExecution {
         transaction_begin_count: 1,
@@ -4471,21 +4476,6 @@ fn commit_matches(
         && v.operation().expected() == r.expected()
         && v.operation().checkpoint() == x
         && v.operation().checkpoint_commit_identity() == checkpoint_commit_identity
-}
-
-// Cache seeding is optional and must never turn an acknowledged publication
-// into a failure. Do this only after a fresh transaction has committed.
-fn seed_checkpoint_cache(
-    cache: &mut CheckpointCache,
-    reference: CheckpointObjectRef,
-    bundle: &CheckpointObjectBundle,
-) {
-    if let Ok(cached) = bundle
-        .current_root_closure()
-        .and_then(|closure| StoredCheckpoint::from_store(reference, closure))
-    {
-        cache.insert(cached);
-    }
 }
 
 // Keeping the full transaction linear makes its validate-then-publish boundary auditable.
@@ -4677,7 +4667,7 @@ fn fork(b: &mut Backend, r: &ForkBranch) -> Result<ForkReceipt, SessionStoreErro
     )?;
     meta(&tx, 0, 1)?;
     commit_claimed(tx, &mut b.holders, target, lease_fence)?;
-    seed_checkpoint_cache(&mut b.checkpoints, reference, r.target());
+    b.checkpoints.seed(target, reference, r.target());
     Ok(receipt)
 }
 fn recover_fork(b: &Backend, r: &RecoverFork) -> Result<ForkReceipt, SessionStoreError> {

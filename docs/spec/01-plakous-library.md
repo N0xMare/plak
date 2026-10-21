@@ -1150,18 +1150,23 @@ reads a shared counter snapshot without dispatching an actor job. The actor
 publishes the snapshot before acknowledging a mutation, including after an error
 that may have followed a committed transaction. SQLite's page cache is 64 MiB.
 The actor also keeps a validated-checkpoint LRU with a 64 MiB accounted-byte
-budget. Successful commit and fork seed this same cache from the already
-validated publication's exact current-root closure only after a fresh insert
-commits (not refusals or idempotent replays); a seeding error skips the cache
-without failing the committed write. Seeding traverses the current-root closure
-and costs O(current-root closure) additional memory, discarding ancestral CAS
-membership and charging only that closure, under the same budget and LRU policy. Hits still probe
-the checkpoint's primary-key row and verify its
-relational integrity seal; `Pruned` and `NotFound` never come from cache
+budget. Only after a fresh successful commit or fork (not a refusal, replay,
+crash or uncertain transaction), it retains Arc clones of the already-validated
+publication as a pending seed, replacing the previous pending seed for that
+branch. Post-publication seeding does not walk the closure or build a CAS
+index. Pending entries charge all retained ancestral objects conservatively under the same
+budget and LRU eviction policy. On the first read hit, the actor normalizes the
+seed with `current_root_closure()`: base root is absent, ancestral CAS membership
+is discarded, and stats and weight cover only the current-root closure. This
+first hit traverses the closure and rebuilds its CAS index, costing
+O(current-root closure) additional memory; subsequent hits reuse the normalized
+entry. Pending bundles are never served to readers; a normalization error
+discards the optional seed and falls back to a cold load. Hits still probe the
+checkpoint's primary-key row and verify its relational integrity seal; `Pruned` and `NotFound` never come from cache
 state. A repeated branch-head load needs only the session, branch and
 checkpoint row probes, independent of its object closure. Prune and delete
-clear the cache, including on failure. An oversized entry is retained alone,
-evicting every other entry; the next insert displaces it under the same LRU
+clear both ready and pending cache entries, including on failure; reclaim does
+the same. An oversized entry is retained alone, evicting every other entry; the next insert displaces it under the same LRU
 policy. Retention is bounded by the validated graph limits (1 GiB encoded
 objects and the checkpoint object-count limit), even when it exceeds the cache
 budget. Accounting charges twice the encoded object/edge bytes plus object and
@@ -1841,9 +1846,10 @@ does not authorize recovery or turn an unknown effect into a completed one.
 A fork starts a new branch from an exact safe checkpoint and leaves the source
 branch unchanged and resumable. Partial output and unresolved working state are
 not forkable. History sharing is copy-on-write, so persisted object writes are
-proportional to new branch data rather than retained history. Validation and optional cache
-seeding still traverse the current-root closure and cost O(current-root closure)
-additional memory (§5.2).
+proportional to new branch data rather than retained history. Validation may
+traverse the current-root closure. Post-publication cache seeding only retains
+Arc clones; closure traversal and O(current-root closure) additional memory
+are deferred to the first read hit (§5.2), never the fork commit path.
 
 An ordinary fork preserves the binding and the runtime configuration exactly
 (`ForkSessionRequest::new`; the store refuses an ordinary fork that changes
