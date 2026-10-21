@@ -379,6 +379,45 @@ async fn nested_endpoint_coverage_is_bound_to_the_published_resources_location()
 }
 
 #[tokio::test]
+async fn metadata_issuer_mismatch_names_both_values_without_secrets() -> TestResult {
+    for actual in [
+        "https://auth.example",
+        "https://user:secret@auth.example/issuer?private=yes#hidden",
+    ] {
+        let setup = setup(OAuthConfig {
+            metadata_issuer: Some(actual.to_owned()),
+            ..OAuthConfig::default()
+        })
+        .await?;
+        let error = McpPool::new()
+            .login(&setup.spec(setup.settings())?, McpLoginOptions::new())
+            .await
+            .err()
+            .ok_or("mismatched issuer accepted")?;
+        let message = error.message();
+        assert!(message.contains("metadata found at"), "{message}");
+        assert!(
+            message.contains("its issuer https://auth.example"),
+            "{message}"
+        );
+        assert!(
+            message.contains(&format!(
+                "differs from expected issuer {}",
+                setup.gate.issuer()
+            )),
+            "{message}"
+        );
+        for private in ["user:", "secret", "private", "hidden"] {
+            assert!(!message.contains(private), "{message}");
+        }
+        assert!(!message.contains("no usable metadata"));
+        assert!(setup.gate.requests_to("/register").is_empty());
+        assert!(setup.gate.requests_to("/token").is_empty());
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn an_issuer_mismatch_discards_the_callback_before_any_token_request() -> TestResult {
     for (issuer, advertised) in [
         (CallbackIssuer::Wrong, false),

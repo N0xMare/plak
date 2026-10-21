@@ -926,12 +926,16 @@ async fn probe(http: &OAuthHttp, endpoint: &McpHttpEndpoint) -> Result<BearerCha
 }
 
 /// Show only a bounded URL without user information, query or fragment.
-fn published_resource(body: &[u8]) -> String {
+fn published_metadata_url(body: &[u8], field: &str) -> String {
     let value = serde_json::from_slice::<serde_json::Value>(body).ok();
     let resource = value
         .as_ref()
-        .and_then(|value| value.get("resource"))
+        .and_then(|value| value.get(field))
         .and_then(serde_json::Value::as_str);
+    sanitized_url(resource)
+}
+
+fn sanitized_url(resource: Option<&str>) -> String {
     let Some(mut url) = resource.and_then(|resource| url::Url::parse(resource).ok()) else {
         return "<invalid>".to_owned();
     };
@@ -964,7 +968,7 @@ async fn protected_resource(
                 OAuthWorkflowError::ResourceMismatch => format!(
                     "the resource metadata at {} publishes resource {} which does not cover endpoint {resource}; check the resource origin and path; a strict path prefix covers the endpoint only when served at the published resource's own RFC 9728 well-known location",
                     redact_query(url),
-                    published_resource(body)
+                    published_metadata_url(body, "resource")
                 ),
                 OAuthWorkflowError::MissingMetadata => format!(
                     "the resource metadata at {} names no authorization server",
@@ -1018,6 +1022,7 @@ pub(super) async fn authorization_server(
             "authorization server {issuer} is outside the transport policy"
         )));
     }
+    let mut issuer_mismatch = None;
     for url in &urls {
         let answer = http.get(url).await?;
         if answer.status != StatusCode::OK {
@@ -1025,6 +1030,14 @@ pub(super) async fn authorization_server(
         }
         match parse_authorization_server_metadata(&answer.body, issuer) {
             Ok(metadata) => return Ok(metadata),
+            Err(OAuthWorkflowError::IssuerMismatch) => {
+                issuer_mismatch.get_or_insert_with(|| authorization(&format!(
+                    "authorization server metadata found at {} but its issuer {} differs from expected issuer {}; refusing to log in",
+                    sanitized_url(Some(url)),
+                    published_metadata_url(&answer.body, "issuer"),
+                    sanitized_url(Some(issuer)),
+                )));
+            }
             Err(OAuthWorkflowError::PkceUnsupported) => {
                 return Err(authorization(&format!(
                     "authorization server {issuer} does not advertise PKCE S256; refusing to log in"
@@ -1033,9 +1046,11 @@ pub(super) async fn authorization_server(
             Err(_) => {}
         }
     }
-    Err(authorization(&format!(
-        "authorization server {issuer} publishes no usable metadata"
-    )))
+    Err(issuer_mismatch.unwrap_or_else(|| {
+        authorization(&format!(
+            "authorization server {issuer} publishes no usable metadata"
+        ))
+    }))
 }
 
 /// Checks a callback against the attempt: its issuer first (a mismatch
@@ -1386,7 +1401,29 @@ impl ClaimedRevokeHooks for RevokeHooks<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::published_resource;
+    fn published_resource(body: &[u8]) -> String {
+        super::published_metadata_url(body, "resource")
+    }
+
+    #[test]
+    fn mismatch_issuer_values_are_sanitized_and_bounded() {
+        assert_eq!(
+            super::published_metadata_url(
+                br#"{"issuer":"https://user:secret@auth.example/path?private=yes#secret"}"#,
+                "issuer"
+            ),
+            "https://auth.example/path"
+        );
+        assert_eq!(
+            super::sanitized_url(Some("https://AUTH.example/")),
+            "https://AUTH.example/"
+        );
+        assert_eq!(super::sanitized_url(Some("invalid\nissuer")), "<invalid>");
+        assert!(
+            super::sanitized_url(Some(&format!("https://auth.example/{}", "a".repeat(1024)))).len()
+                <= 512
+        );
+    }
 
     #[test]
     fn mismatch_resource_preserves_published_spelling_without_sensitive_parts() {

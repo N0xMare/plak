@@ -543,6 +543,16 @@ or token failures caused by the network say to check it and retry.
 Discovery never follows redirects: a well-known metadata URL that redirects
 counts as absent, and any other redirect fails the login.
 
+## MCP Metadata Issuer Mismatch
+
+`authorization server metadata found … but its issuer … differs from expected
+issuer …` means discovery found a document, but its `issuer` is not identical
+to the issuer listed in protected-resource metadata (including a trailing
+slash). Ask the server operator to align those values; Plak will not send
+registration or token requests using that document. This is not missing
+metadata or a resource-path mismatch. Diagnostic URLs omit user information,
+query and fragment.
+
 ## `model re-resolution refused: …`
 
 Codex and Grok subscription models are admitted from a catalog read that is

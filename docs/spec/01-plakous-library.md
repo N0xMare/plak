@@ -4994,7 +4994,8 @@ issuer is used and must be listed, else the first listed. Authorization-server m
 fetched from the RFC 8414 URL and then the OpenID Connect discovery URLs, in
 the order the MCP specification gives for issuers with and without a path. A
 document whose `issuer` is not identical to the issuer the URL was built from
-is not used, and one whose `code_challenge_methods_supported` is absent or
+is not used; when no valid document is found, a mismatch diagnostic names the
+found document and both sanitized issuer values. A document whose `code_challenge_methods_supported` is absent or
 lacks `S256` refuses the login. Discovery, registration, token, device and
 revocation requests go through the pool's `plakous-http` transport client: an
 `https://` origin, or plain HTTP to a loopback literal only when the endpoint

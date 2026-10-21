@@ -66,6 +66,8 @@ pub struct OAuthConfig {
     pub resource: Option<String>,
     /// The issuer's path after the origin, such as `/tenant`.
     pub issuer_path: String,
+    /// Override the issuer published in server metadata.
+    pub metadata_issuer: Option<String>,
     /// Where the server metadata lives.
     pub server_metadata: ServerMetadataAt,
     /// Whether `S256` is advertised.
@@ -105,6 +107,7 @@ impl Default for OAuthConfig {
             resource_metadata: ResourceMetadataAt::Challenge,
             resource: None,
             issuer_path: String::new(),
+            metadata_issuer: None,
             server_metadata: ServerMetadataAt::OAuth,
             pkce: true,
             advertise_iss: true,
@@ -563,7 +566,7 @@ impl OAuthGate {
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         let mut document = serde_json::json!({
-            "issuer": published_issuer.as_deref().unwrap_or(&issuer),
+            "issuer": published_issuer.as_deref().or(self.config.metadata_issuer.as_deref()).unwrap_or(&issuer),
             "authorization_endpoint": format!("{issuer}/authorize"),
             "token_endpoint": format!("{endpoints}/token"),
             "scopes_supported": self.config.scopes_supported,
