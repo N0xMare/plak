@@ -298,7 +298,14 @@ impl McpPool {
             .map_err(|error| {
                 McpError::with_source(
                     McpErrorKind::Authorization,
-                    format!("{error}; the login was not retired"),
+                    match store.load() {
+                        Ok(Some(record))
+                            if record.status() == CredentialStatus::RefreshOutcomeUnknown =>
+                        {
+                            format!("{error}; the login is quarantined and was not retired")
+                        }
+                        _ => format!("{error}; the login was not retired"),
+                    },
                     error,
                 )
             })?;

@@ -2253,6 +2253,31 @@ fn mcp_login_remote_paste_back_logs_in_and_logout_revokes() {
             .contains("logged out of mcp server fake; the authorization server revoked the grant")
     );
     assert!(ok(&run_plak(home, &["mcp", "list"])).contains("not logged in"));
+    login_by_paste_back(home);
+    let failed = Command::new(plak_bin())
+        .env("PLAK_HOME", home)
+        .env("HOME", home)
+        .env(
+            "PLAK_TEST_FAULTS",
+            "host=127.0.0.1,path=/revoke,nth=1,fault=503",
+        )
+        .current_dir(home)
+        .args(["mcp", "logout", "fake"])
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    let error = String::from_utf8_lossy(&failed.stderr);
+    assert!(
+        error.contains("the login is quarantined and was not retired"),
+        "{error}"
+    );
+    assert_eq!(error.matches("not retired").count(), 1, "{error}");
+    assert!(!error.contains("may be quarantined"), "{error}");
+    let shown = ok(&run_plak(home, &["mcp", "show", "fake"]));
+    assert!(shown.contains("quarantined"), "{shown}");
+    assert!(!shown.contains("a refresh outcome is unknown"), "{shown}");
+    assert!(shown.contains("refresh or revocation"), "{shown}");
+    ok(&run_plak(home, &["mcp", "logout", "fake", "--local"]));
     server.kill().unwrap();
     server.wait().unwrap();
 }

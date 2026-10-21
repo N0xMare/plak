@@ -858,6 +858,12 @@ already have changed the grant. Failure before dispatch restores Ready. A change
 without releasing a configured client secret to the old issuer. Local logout
 never requires that secret.
 
+MCP's stored quarantine status is shared by unsafe refresh and revocation
+outcomes; status presentation names both possible operations rather than
+asserting a refresh caused a failed revocation. A failed logout reports
+retirement once and states that the login is quarantined when the stored
+status confirms it, retaining the explicit `--local` retirement remedy.
+
 Logout is local retirement or, where the provider offers one, a remote
 revocation. Where no remote revoke exists, logout retires the local credential
 and the grant stays live upstream until the user removes it in their provider

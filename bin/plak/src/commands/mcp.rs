@@ -307,7 +307,7 @@ fn login_line(paths: &PlakPaths, config: &ProductConfig, id: &str) -> Option<Str
         Ok(Some(McpOAuthStatus::NotLoggedIn)) => format!("not logged in; {login}"),
         Ok(Some(McpOAuthStatus::Refreshing)) => "being refreshed by another process".to_owned(),
         Ok(Some(McpOAuthStatus::Quarantined)) => {
-            format!("quarantined: a refresh outcome is unknown; {login}")
+            format!("quarantined: a refresh or revocation did not complete safely; {login}")
         }
         Ok(Some(McpOAuthStatus::OtherServer)) => {
             format!("stored for another URL, issuer or client; {login}")

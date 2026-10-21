@@ -208,7 +208,7 @@ pub enum McpOAuthStatus {
     },
     /// A process is refreshing it now.
     Refreshing,
-    /// A refresh outcome is unknown; a new login is required.
+    /// A refresh or revocation did not complete safely; a new login is required.
     Quarantined,
     /// The stored login cannot be used; a new login is required.
     LoginRequired,

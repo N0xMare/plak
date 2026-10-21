@@ -943,7 +943,13 @@ async fn failed_revocation_quarantines_until_explicit_local_logout() -> TestResu
         .await
         .err()
         .ok_or("failed revocation succeeded")?;
-    assert!(refused.message().contains("login was not retired"));
+    assert!(
+        refused
+            .message()
+            .contains("the login is quarantined and was not retired"),
+        "{refused}"
+    );
+    assert_eq!(refused.message().matches("not retired").count(), 1);
     assert_eq!(spec.oauth_status()?, Some(McpOAuthStatus::Quarantined));
     assert_eq!(
         pool.logout(&spec, true).await?,
