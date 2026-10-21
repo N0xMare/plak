@@ -19,8 +19,6 @@ use super::codex_vendor::CODEX_VENDOR_BASE;
 use super::legacy;
 use super::variant::PromptVariant;
 
-const CODE_MODE_PROCESS_OBSERVATION_EXAMPLE: &str = "exec_command returns JSON text; parse it before reading fields, for example: const r = JSON.parse(await tools.exec_command({cmd: \"pwd\"})); text(r.output).";
-
 /// The vendored sections, then the Plakous Direct tool paragraph.
 ///
 /// The tool paragraph's own opening sentence is dropped here. On the legacy
@@ -42,10 +40,9 @@ static CODEX_PARITY_DIRECT: LazyLock<String> = LazyLock::new(|| {
 /// same reason, and the sentence that follows it names the composition.
 static CODEX_PARITY_CODE_MODE_TEMPLATE: LazyLock<String> = LazyLock::new(|| {
     format!(
-        "{}\n\n{} {}",
+        "{}\n\n{}",
         CODEX_VENDOR_BASE.trim_end(),
-        legacy::codex_code_mode_tool_paragraph(),
-        CODE_MODE_PROCESS_OBSERVATION_EXAMPLE
+        legacy::codex_code_mode_tool_paragraph()
     )
 });
 
@@ -110,11 +107,9 @@ mod tests {
         assert!(template.contains(CODEX_VENDOR_BASE.trim_end()));
         assert!(template.contains("{names}"));
         assert!(template.contains(legacy::codex_code_mode_tool_paragraph()));
-        assert!(template.ends_with(CODE_MODE_PROCESS_OBSERVATION_EXAMPLE));
+        assert!(template.ends_with(legacy::codex_code_mode_tool_paragraph()));
         assert!(template.contains("The complete provider-visible tool set is exec and wait."));
-        assert!(template.contains(
-            "const r = JSON.parse(await tools.exec_command({cmd: \"pwd\"})); text(r.output)."
-        ));
+        assert!(!template.contains("JSON.parse"));
         assert_eq!(template.matches("You are Codex").count(), 1);
         assert!(!template.contains("You are a precise and proficient coding agent"));
     }
@@ -151,12 +146,11 @@ mod tests {
         let parity = render_codex_code_mode_base_instructions_for(PromptVariant::Parity, &nested);
         let legacy_render =
             render_codex_code_mode_base_instructions_for(PromptVariant::Legacy, &nested);
-        assert!(parity.contains("JSON.parse(await tools.exec_command"));
+        assert!(!parity.contains("JSON.parse(await tools.exec_command"));
         assert!(!legacy_render.contains("JSON.parse(await tools.exec_command"));
         assert!(parity.len() > legacy_render.len());
         // The parity render preserves the legacy tool paragraph after dropping
-        // its opening identity sentence, then adds only the new observation
-        // example.
+        // its opening identity sentence, without an observation parsing example.
         assert!(
             parity.contains(
                 legacy_render

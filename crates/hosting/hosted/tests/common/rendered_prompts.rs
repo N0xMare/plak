@@ -1439,51 +1439,51 @@ pub(crate) mod suite {
         ),
         (
             "codex.native-ptc.root.single-agent",
-            "16f6b8f82f373d156ec06894a4df503d5fc69a562b0a4642617f13db8ef09834",
+            "cb94c503fd3e8e0c16fa260bf0e745b262194dafc4f8d51f4da8accf82dc4b6b",
         ),
         (
             "codex.native-ptc.root",
-            "f3af26e964a6230e0ceb3c51fa9e0875c7f4e10cd2be57ae66898a08fc118971",
+            "38ff183e774e42edb209e627568201199f01b7f1b05ee1b0b41b126345c98619",
         ),
         (
             "codex.native-ptc.nested-parent",
-            "d8d13eaf2583ef894e15b6616f7b8d056b5840ff1145a78c6e948387b1720dab",
+            "5e89040867c229897def91bc2d3fbbb1b1dfb70bde178c6b567ec79663cf0f47",
         ),
         (
             "codex.native-ptc.child",
-            "2c5f108ecbb5c1b6cfbd2d5415fae972d2b5abc6b2b23d9591ede5d486a6b2ba",
+            "1758a176c68a8b7a134bc1c1518407c989f034e0707c6b5480cca7a2e06d9490",
         ),
         (
             "codex.js-ptc.root.single-agent",
-            "d729b4e726e675d960ef77d679b32c1319368717e0bb5ef8bc3e880081c6bf43",
+            "a99c553fec6a7ce6fcdf12147d540ad43cbfdca8adae55a5f38d2692ffbb9982",
         ),
         (
             "codex.js-ptc.root",
-            "3e7d5ef62d1ccfd0ec2295fd5d7a9e8efe5790f2ad220baa3ebc85180a6e2781",
+            "5e08f2dd49998b1c1164c28438840bba24fc7a4146b2e1203efe30a0cd2cfae3",
         ),
         (
             "codex.js-ptc.nested-parent",
-            "45f14d2f79e0dc4823cd316656cf2a709f1aa5fad67fa4c197c158cfc5e9ddb1",
+            "d388eb4b158de770dfe218f781f00973bdf604fb68c00d2ab615c7f7af632c18",
         ),
         (
             "codex.js-ptc.child",
-            "59703169bda473363dabe85d5132b7e458071d54e6f7f4b245edd74c8f038dc5",
+            "f850e7906fd060dccd6f72d2fe33e752cf1c45fc2b1a58aa0c135f06fe86e9ee",
         ),
         (
             "codex.py-ptc.root.single-agent",
-            "ec0220de6a8a9e3415e83ea3406e26de3ca58e8d627637f93218aa3b59f555b2",
+            "ace7ccd06cc47bd7306b02a0b6eded4642298ceda7811397ce93a85ca6d69ce7",
         ),
         (
             "codex.py-ptc.root",
-            "a7b99ccae4df0fc4a4e1a1a2b1d19a0b6a13d447a57bdb94315d887d127dbf2f",
+            "1870da535a5f5fc6f63f6528e4542dd1150b09c16a66fd993138f8fb9b9ed607",
         ),
         (
             "codex.py-ptc.nested-parent",
-            "8cd7e4f97fbe0679d4630d4a6787b6cd7a10fdeca06eb6d260809366230c15b8",
+            "63b5af705a140a6e59605b4249cfe07ba3e739a428e96251df6171a72a0fd6f4",
         ),
         (
             "codex.py-ptc.child",
-            "be4ba345ef23bccaac38d1d5a974e42baf19daea0573c62f6b3411ca55a0addc",
+            "bcd7ae3251f4990bcf56a97fcc2059650978f1c1dbe7d09ee160c75a944571ad",
         ),
         (
             "grok.direct.root.single-agent",
@@ -1731,15 +1731,15 @@ pub(crate) mod suite {
         ),
         (
             "openai-api.native-ptc.root.single-agent",
-            "ddf5e4619add4c24df4182f8a2ea7ea8ec1d8bde1079cfc7356985b31d0f9b78",
+            "1184151e44360b94fcd4a727f580435e514c5b03f44d36978e5a93620b6fedcd",
         ),
         (
             "openai-api.js-ptc.root.single-agent",
-            "dd2dd2dbb03aba077cee43de18377d194fa413c9ddf592f39cd0d1a979f00dab",
+            "a841cbe8d0d8cbce657a68d76f9646634ce250416f754b158c537b31c2c6beb6",
         ),
         (
             "openai-api.py-ptc.root.single-agent",
-            "4e41a42ea20b964835ed7c1090b71998eb02e5f61e0c06da0ca3cd6f04833735",
+            "4fe433a18b6b37121d04df8a619229d444fb4257bed49f272329bcc4bd2ff39c",
         ),
         (
             "xai-api.direct.root.single-agent",

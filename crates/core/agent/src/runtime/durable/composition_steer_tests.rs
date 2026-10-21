@@ -200,9 +200,7 @@ fn steer_neither_promotes_a_nested_process_nor_preempts_its_empty_poll() -> Test
                     .ok_or("nested result absent")?
                     .2
                     .clone();
-                let encoded: serde_json::Value = serde_json::from_str(&delivered)?;
-                let process_result: serde_json::Value =
-                    serde_json::from_str(encoded.as_str().ok_or("nested result was not text")?)?;
+                let process_result: serde_json::Value = serde_json::from_str(&delivered)?;
                 assert_eq!(
                     process_result["exit_code"],
                     json!(7),

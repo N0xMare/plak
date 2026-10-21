@@ -5328,12 +5328,10 @@ vertical's own Direct exposed names — never a renamed neutral set.
   named in the instruction text, which also says that direct calls to nested
   names are unavailable, that `wait` only resumes a yielded cell, and that no
   nested effect may be claimed successful unless its returned result proves it.
-  The nested process projection preserves `exec_command` results as JSON text,
-  so the instruction includes the shortest complete observation example:
-  `const r = JSON.parse(await tools.exec_command({cmd: "pwd"})); text(r.output)`.
-  Reading `r.output` before parsing reads a property from a string and loses the
-  observation as `undefined`; stringifying that same string only repeats its
-  JSON envelope.
+  Nested `exec_command` and `write_stdin` return process objects, so cells read
+  `r.output` directly without `JSON.parse`. The same applies when js-ptc or
+  py-ptc selects those projections (a dictionary in Python); Direct results
+  and other vocabularies are unchanged (chapter 01 §9.2).
   Explicit `native-ptc` fails closed wherever nothing is enrolled — Grok,
   Claude, OpenRouter, the Anthropic and xAI APIs, Codex Direct-only rows and
   OpenAI API models not enrolled as `CodeModeOnly` — and the refusal names the

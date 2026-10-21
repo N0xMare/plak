@@ -5576,7 +5576,16 @@ does not count; a file with a NUL byte in its first 8 KiB is refused as binary. 
 closing note for clipped lines and lossy decoding.
 
 Nested delivery inspects the committed canonical tool result kind. Successful
-results preserve their existing values, including exact UTF-8 strings. Ordinary
+results preserve their existing values, including exact UTF-8 strings, except
+that the `exec_command` and `write_stdin` process projections deliver their
+raised JSON as objects (Python dictionaries), not JSON-encoded strings. This
+applies to native Code Mode and to js-ptc/py-ptc catalogs selecting those same
+projections; other vocabularies and provider-native Direct results do not change.
+The object has `output`, optional `exit_code` when joined, optional `session_id`
+while running, and optional abnormal `status`. The field names follow Codex
+`rust-v0.163.0`'s `ExecCommandToolOutput::code_mode_result`; upstream-only
+chunk/timing/token metadata is not fabricated. Nonzero process exits are still
+successful tool results with an exit code. Ordinary
 tool failures reject JavaScript promises and raise catchable Python exceptions
 with the committed result's diagnostic text. An uncaught failure fails the cell;
 catching it permits explicit recovery in the same cell. This applies to both
@@ -5585,6 +5594,15 @@ cell does not prove every nested tool succeeded, and failure does not roll back
 already committed effects. Driver, protocol, host-loss and recovery-authoritative
 failures retain their existing termination and joined-cleanup requirements;
 catching an interpreter rejection cannot suppress their authoritative failure.
+`apply_patch` retains its diagnostic text on success and catchable rejection on
+failure: unlike a process observation it has no raised structured result contract.
+Upstream `rust-v0.163.0` returns an empty object for a successful patch; Plakous
+keeps the useful existing text rather than inventing fields or discarding it for
+superficial uniformity. The conversion happens only at interpreter delivery,
+after committing the unchanged canonical text result. Canonical history,
+checkpoint and export encodings do not change. The incarnation-local delivery
+replay cache retains the converted value and never redispatches the child; the
+cache is not persisted.
 
 ### 9.3 Native Code Mode
 

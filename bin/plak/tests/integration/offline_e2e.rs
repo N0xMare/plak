@@ -4345,11 +4345,13 @@ fn code_mode_owned_script() -> Value {
 ///
 /// The program runs as an async module: no top-level return, and visible output
 /// goes through `text(..)`. Nested tools are reached only through the global
-/// `tools` object and return UTF-8 strings.
+/// `tools` object and return process result objects.
 const TWO_NESTED_CALLS: &str = r#"
 const one = await tools.exec_command({ cmd: "printf nested-one" });
 const two = await tools.exec_command({ cmd: "printf nested-two" });
-text(one + "|" + two);
+if (one.output !== "nested-one" || one.exit_code !== 0 || one.session_id !== undefined) throw new Error("bad first process object");
+if (two.output !== "nested-two" || two.exit_code !== 0) throw new Error("bad second process object");
+text(one.output + "|" + two.output);
 "#;
 
 /// A Code Mode turn whose cell makes two nested calls, on the JSONL face.
@@ -4406,6 +4408,51 @@ fn a_code_mode_cell_runs_two_nested_calls_on_the_jsonl_face() {
         nested.len(),
         2,
         "expected two nested calls, saw {nested:?}; stream:\n{}",
+        outcome.lines.join("\n")
+    );
+}
+
+/// Exercise both process return paths, polls and catchable tool errors in one
+/// real sidecar cell, without timing-dependent process completion.
+#[test]
+fn code_mode_process_objects_support_nested_polls_and_errors() {
+    let source = r#"
+const running = await tools.exec_command({cmd: "read line; printf '%s' \"$line\"; exit 7", yield_time_ms: 0});
+if (typeof running.session_id !== "number" || running.exit_code !== undefined || typeof running.output !== "string") throw new Error("bad running object");
+const polled = await tools.exec_command({session_id: running.session_id, yield_time_ms: 0});
+if (polled.session_id !== running.session_id || typeof polled.output !== "string") throw new Error("bad poll object");
+const joined = await tools.write_stdin({session_id: running.session_id, chars: "observed\n", yield_time_ms: 1000});
+if (joined.exit_code !== 7 || joined.output !== "observed" || joined.session_id !== undefined) throw new Error("bad joined object");
+let rejected = false;
+try { await tools.write_stdin({session_id: 999999, chars: ""}); }
+catch (error) { if (!String(error).length) throw error; rejected = true; }
+if (!rejected) throw new Error("missing process rejection");
+text("process-object-contract-ok");
+"#;
+    let fixture = Fixture::new(&code_mode_script(&json!([
+        {"output": {"cell": source}, "finish": "tool_calls"},
+        {"output": {"text": "checked process objects"}}
+    ])));
+    let mut agent = AgentProcess::start(&fixture, &[]);
+    agent.wait_for("ready", |record| record["kind"] == "ready");
+    agent.send(&prompt_frame("check process results"));
+    agent.wait_for("assistant_done", |record| {
+        record["kind"] == "assistant_done"
+    });
+    agent.send(&quit_frame());
+    let outcome = agent.finish();
+    assert!(outcome.status.success(), "{}", outcome.stderr);
+    outcome.assert_exactly_one_terminal_record();
+    let records = outcome.records();
+    let result = records
+        .iter()
+        .find(|record| {
+            record["kind"] == "tool" && record["name"] == "exec" && record["state"] == "done"
+        })
+        .expect("completed cell");
+    assert!(
+        result.to_string().contains("process-object-contract-ok"),
+        "{}",
         outcome.lines.join("\n")
     );
 }
@@ -4945,7 +4992,7 @@ fn a_code_mode_session_written_by_an_earlier_process_reopens() {
     // rather than merely accepted. A script that only answered with text would
     // pass even if the composition attachment had been lost.
     fixture.write_script(&code_mode_script(&json!([
-        {"output": {"cell": "const again = await tools.exec_command({ cmd: \"printf reopened\" });\ntext(again);\n"}, "finish": "tool_calls"},
+        {"output": {"cell": "const again = await tools.exec_command({ cmd: \"printf reopened\" });\nif (again.output !== \"reopened\" || again.exit_code !== 0) throw new Error(\"bad reopened process object\"); text(again.output);\n"}, "finish": "tool_calls"},
         {"output": {"text": "answered after the reopen"}}
     ])));
     let mut resumed = AgentProcess::start(&fixture, &["--session", &session]);

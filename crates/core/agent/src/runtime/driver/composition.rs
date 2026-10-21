@@ -1789,7 +1789,15 @@ impl Driver {
                     &mut self.observation_budget,
                 )?;
                 self.record_nested_committed_observation(&item);
-                local_composition_nested_result_value(&item)
+                local_composition_nested_result_value(
+                    &item,
+                    state
+                        .descriptor()
+                        .nested_projection
+                        .entries()
+                        .iter()
+                        .find(|entry| entry.exposed_name().as_str() == pending.call.tool_name),
+                )
             }
             Err(error) => Err(error),
         };
@@ -2185,7 +2193,15 @@ impl Driver {
             AgentError::new(AgentErrorKind::Internal, "nested tool result is absent")
         })?;
         self.record_nested_committed_observation(item);
-        let value = local_composition_nested_result_value(item);
+        let value = local_composition_nested_result_value(
+            item,
+            state
+                .descriptor()
+                .nested_projection
+                .entries()
+                .iter()
+                .find(|entry| entry.exposed_name() == call.exposed_name()),
+        );
         let evidence = runtime_component(
             RuntimeComponentKind::Operation,
             serde_json::to_vec(&(

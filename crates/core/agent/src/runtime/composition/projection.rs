@@ -407,6 +407,7 @@ pub(in crate::runtime) fn clip_local_composition_update_text(
 
 pub(in crate::runtime) fn local_composition_nested_result_value(
     item: &ConversationItem,
+    projection: Option<&plakous_tools::ToolProjectionExposureV2>,
 ) -> Result<serde_json::Value, AgentError> {
     let result = item
         .blocks()
@@ -440,6 +441,22 @@ pub(in crate::runtime) fn local_composition_nested_result_value(
                 .as_str()
                 .map_or_else(|| value.to_string(), str::to_owned),
         ));
+    }
+    if projection
+        .is_some_and(plakous_tools::ToolProjectionExposureV2::local_programmatic_returns_object)
+    {
+        let text = value.as_str().ok_or_else(|| {
+            AgentError::new(
+                AgentErrorKind::Internal,
+                "nested process result is not text",
+            )
+        })?;
+        return serde_json::from_str(text).map_err(|_| {
+            AgentError::new(
+                AgentErrorKind::Internal,
+                "nested process result is not JSON",
+            )
+        });
     }
     Ok(value)
 }

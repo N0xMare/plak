@@ -758,7 +758,7 @@ fn nested_canonical_failure_is_catchable_and_success_strings_are_exact() -> Test
             vec![ContentBlock::ToolResult(result)],
             Provenance::ToolExecution,
         )?;
-        let delivered = local_composition_nested_result_value(&item);
+        let delivered = local_composition_nested_result_value(&item, None);
         if kind == ToolResultKind::Success {
             assert_eq!(delivered?, json!(body));
         } else {
@@ -774,8 +774,103 @@ fn nested_canonical_failure_is_catchable_and_success_strings_are_exact() -> Test
         vec![ContentBlock::Text(TextBlock::new("missing result", None)?)],
         Provenance::ModelOutput,
     )?;
-    let error = local_composition_nested_result_value(&malformed)
+    let error = local_composition_nested_result_value(&malformed, None)
         .expect_err("missing canonical tool result is an infrastructure failure");
     assert!(local_composition_recovery_authoritative(&error));
+    Ok(())
+}
+
+#[test]
+fn nested_process_objects_are_projected_from_unchanged_persisted_text() -> TestResult {
+    let registry = fake_process_projection_registry()?;
+    let configuration = serde_json::from_value(serde_json::to_value(Digest::sha256(
+        DigestDomain::EffectiveProviderConfiguration,
+        5,
+        &[b"nested-process-object-delivery"],
+    )?)?)?;
+    let target = ProviderModelProjectionIdentityV2::new(
+        plakous_model::IntegrationClass::Standard,
+        "test.responses",
+        "test.route",
+        "test.profile.r1",
+        "responses-family",
+        "exact-model",
+        "exact-model",
+        configuration,
+        2,
+    )?;
+    let projection = ProcessToolProjectionKind::CodexUnifiedExec.projection_map(
+        plakous_tools::JobConfig::default(),
+        registry,
+        target,
+    )?;
+    for name in ["exec_command", "write_stdin"] {
+        let entry = projection
+            .by_exposed(&ToolName::new(name)?)
+            .ok_or("process entry")?;
+        for (kind, body) in [
+            (
+                ToolResultKind::Success,
+                r#"{"output":"exact\r\ntext","exit_code":7}"#,
+            ),
+            (ToolResultKind::Success, r#"{"output":"","session_id":42}"#),
+            (ToolResultKind::Failure, "unknown process session"),
+        ] {
+            let result = ToolResultBlock::new(
+                CallId::try_from(uuid::Uuid::from_u128(7))?,
+                ToolExecutionOwner::Local,
+                kind,
+                vec![ToolResultPart::Text(TextBlock::new(body, None)?)],
+                ToolCorrelation::new(None, None, plakous_model::ToolCallerLineage::Direct)?,
+            )?;
+            let item = ConversationItem::new(
+                EntryId::try_from(uuid::Uuid::from_u128(8))?,
+                Actor::Tool,
+                vec![ContentBlock::ToolResult(result)],
+                Provenance::ToolExecution,
+            )?;
+            let encoded = serde_json::to_vec(&item)?;
+            let restored: ConversationItem = serde_json::from_slice(&encoded)?;
+            let delivered = local_composition_nested_result_value(&restored, Some(entry));
+            if kind == ToolResultKind::Success {
+                let value = delivered?;
+                assert_eq!(value, serde_json::from_str::<serde_json::Value>(body)?);
+                let request =
+                    Digest::sha256(DigestDomain::ProviderOperation, 3, &[b"process-request"])?;
+                let replay = crate::runtime::composition::LocalCompositionNestedReplay {
+                    request_digest: request,
+                    request_sequence: 1,
+                    disposition:
+                        crate::runtime::composition::LocalCompositionNestedDisposition::Resolved(
+                            value.clone(),
+                        ),
+                    waiters: Vec::new(),
+                };
+                assert_eq!(
+                    crate::runtime::composition::nested::local_composition_nested_replay(
+                        Some(&replay),
+                        request
+                    )?,
+                    Some(value),
+                );
+                assert_eq!(
+                    local_composition_nested_result_value(&restored, None)?,
+                    json!(body)
+                );
+            } else {
+                assert_eq!(
+                    delivered
+                        .expect_err("failure rejects, not a JSON parse error")
+                        .message(),
+                    body
+                );
+            }
+            assert_eq!(
+                serde_json::to_vec(&restored)?,
+                encoded,
+                "delivery must not mutate persisted history"
+            );
+        }
+    }
     Ok(())
 }

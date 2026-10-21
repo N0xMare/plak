@@ -985,10 +985,8 @@ fn ordered_nested_catalog(
 const EXEC_DECLARATION_HEADER: &str =
     "Nested tool declarations, all members of `declare const tools`:";
 
-// The local composition bridge delivers a single ToolResultPart::Text as a
-// string, including the JSON-encoded process result. Do not advertise fields
-// on the unparsed value: `result.output` silently evaluates to undefined.
-const PROCESS_TOOL_RESULT_TYPE: &str = "Promise<string>";
+pub(crate) const PROCESS_TOOL_RESULT_TYPE: &str =
+    "Promise<{ output: string; exit_code?: number; session_id?: number; status?: string }>";
 
 fn build_exec_description(tools: &[CodexCodeModeNestedToolV1], exact_reference: bool) -> String {
     let template = if exact_reference {

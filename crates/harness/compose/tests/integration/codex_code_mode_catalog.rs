@@ -443,7 +443,9 @@ fn nested_catalog_is_exact_ordered_collision_free_and_non_recursive() -> Result<
         );
     }
     assert!(descriptor.exec_description().contains("exec_command(args:"));
-    assert!(descriptor.exec_description().contains("Promise<string>;"));
+    assert!(descriptor.exec_description().contains(
+        "Promise<{ output: string; exit_code?: number; session_id?: number; status?: string }>;"
+    ));
     assert!(!descriptor.exec_description().contains("Promise<{ status:"));
     Ok(())
 }

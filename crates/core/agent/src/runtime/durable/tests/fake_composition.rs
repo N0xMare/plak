@@ -1101,18 +1101,7 @@ impl LocalCompositionEventReceiver for FakeEvents {
                                 .find(|(identity, accepted, _)| identity == "SLEEP" && *accepted)
                                 .map(|(_, _, value)| value.clone());
                             if let Some(delivered) = delivered {
-                                let encoded: serde_json::Value = serde_json::from_str(&delivered)
-                                    .map_err(|error| {
-                                    LocalCompositionSessionLoss::ProtocolViolation(
-                                        error.to_string(),
-                                    )
-                                })?;
-                                let result: serde_json::Value =
-                                    serde_json::from_str(encoded.as_str().ok_or_else(|| {
-                                        LocalCompositionSessionLoss::ProtocolViolation(
-                                            "nested process result was not text".to_owned(),
-                                        )
-                                    })?)
+                                let result: serde_json::Value = serde_json::from_str(&delivered)
                                     .map_err(|error| {
                                         LocalCompositionSessionLoss::ProtocolViolation(
                                             error.to_string(),

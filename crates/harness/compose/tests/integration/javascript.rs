@@ -690,3 +690,31 @@ fn a_numeric_wait_js_cell_id_is_accepted_and_normalised_to_its_string_form() -> 
     );
     Ok(())
 }
+
+#[test]
+fn process_object_signatures_follow_the_selected_projection() -> Result<(), TestError> {
+    let mut builder = ToolRegistryBuilder::default();
+    plakous_tools::register_packs(
+        &plakous_compose::standard_coding_packs_in_memory()?,
+        &mut builder,
+    )?;
+    ProductJavaScriptCompositionV1::register_markers_into(&mut builder)?;
+    let descriptor = ProductJavaScriptCompositionV1::compile_for_kind(
+        plakous_tools::JobConfig::default(),
+        builder.freeze(),
+        target(IntegrationClass::Standard, b"process-object-signature")?,
+        plakous_tools::CodingPresentation::Codex,
+        [
+            ToolName::new("exec_command")?,
+            ToolName::new("write_stdin")?,
+            ToolName::new("apply_patch")?,
+        ],
+    )?;
+    assert_eq!(descriptor.run_description().matches("Promise<{ output: string; exit_code?: number; session_id?: number; status?: string }>").count(), 2);
+    assert!(
+        descriptor
+            .run_description()
+            .contains("tools.apply_patch(input: string): Promise<string>")
+    );
+    Ok(())
+}

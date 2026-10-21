@@ -46,7 +46,7 @@ const MAX_CATALOG_TOOLS: usize = 64;
 const CUSTOM_RUN_GRAMMAR: &str = "start: /(?s).+/";
 
 /// Closed result grammar for local Python cell observations.
-pub const PYTHON_PTC_RESULT_GRAMMAR_V1: &str = "tool_result := status_line \"\\n\" output; status_line := \"Python cell running with cell ID \" cell_id | \"Python cell terminated\" | \"Python cell completed\" | \"Python cell failed\" | \"Python interpreter reset\"; output := bounded_utf8; nested_success := utf8; nested_failure := python_exception; uncaught_exception := sanitized_utf8_failure; reset := typed_generation_change_without_source_replay";
+pub const PYTHON_PTC_RESULT_GRAMMAR_V1: &str = "tool_result := status_line \"\\n\" output; status_line := \"Python cell running with cell ID \" cell_id | \"Python cell terminated\" | \"Python cell completed\" | \"Python cell failed\" | \"Python interpreter reset\"; output := bounded_utf8; nested_success := utf8 | process_object; nested_failure := python_exception; uncaught_exception := sanitized_utf8_failure; reset := typed_generation_change_without_source_replay";
 
 /// Exact provider-visible outer representation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -156,7 +156,7 @@ impl PythonPtcV1 {
         let nested_projection = nested_projection(&registry, &target, &nested_names)?;
         let nested_tools = ordered_nested_catalog(&nested_projection, &nested_names)?;
         validate_nested_catalog(&nested_tools)?;
-        let authoring_contract = build_authoring_contract(&nested_tools);
+        let authoring_contract = build_authoring_contract(&nested_tools, &nested_projection);
         let outer_projection =
             outer_projection(registry, target, presentation, authoring_contract.clone())?;
         let limits_identity = component_identity(
@@ -243,7 +243,7 @@ impl PythonPtcV1 {
         )?;
         let nested_tools = ordered_nested_catalog(&nested_projection, &nested_names)?;
         validate_nested_catalog(&nested_tools)?;
-        let authoring_contract = build_authoring_contract(&nested_tools);
+        let authoring_contract = build_authoring_contract(&nested_tools, &nested_projection);
         let outer_projection =
             outer_projection(registry, target, presentation, authoring_contract.clone())?;
         let limits_identity = component_identity(
@@ -636,19 +636,32 @@ fn registered_marker(
         .ok_or_else(|| registration_error("exact local Python outer marker is missing"))
 }
 
-fn build_authoring_contract(tools: &[PythonPtcNestedToolV1]) -> String {
+fn build_authoring_contract(
+    tools: &[PythonPtcNestedToolV1],
+    projection: &ToolProjectionMap,
+) -> String {
     let catalog = tools
         .iter()
         .map(|tool| {
+            let result_type = if projection.by_exposed(&tool.canonical_name).is_some_and(
+                plakous_tools::ToolProjectionExposureV2::local_programmatic_returns_object,
+            ) {
+                "dict"
+            } else {
+                "str"
+            };
             let signature = if tool.string_input {
-                format!("async def {}(arguments: str) -> str", tool.python_name)
+                format!(
+                    "async def {}(arguments: str) -> {result_type}",
+                    tool.python_name
+                )
             } else {
                 let arguments = tool.input_schema.as_ref().map_or_else(
                     || "dict".to_owned(),
                     |nested_schema| render_python_type(nested_schema.document().value()),
                 );
                 format!(
-                    "async def {}(arguments: {arguments}) -> str",
+                    "async def {}(arguments: {arguments}) -> {result_type}",
                     tool.python_name
                 )
             };

@@ -324,7 +324,9 @@ fn fold_script() -> Value {
 const TWO_NESTED_CALLS: &str = r#"
 const one = await tools.exec_command({ cmd: "printf nested-one" });
 const two = await tools.exec_command({ cmd: "printf nested-two" });
-text(one + "|" + two);
+if (one.output !== "nested-one" || one.exit_code !== 0) throw new Error("bad first process object");
+if (two.output !== "nested-two" || two.exit_code !== 0) throw new Error("bad second process object");
+text(one.output + "|" + two.output);
 "#;
 
 fn code_mode_script() -> Value {

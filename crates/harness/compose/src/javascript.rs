@@ -101,7 +101,7 @@ impl ProductJavaScriptCompositionV1 {
         let nested_projection = nested_projection(&registry, &target, &nested_names)?;
         let nested_tools = ordered_nested_catalog(&nested_projection, &nested_names)?;
         validate_nested_catalog(&nested_tools)?;
-        let run_description = build_run_description(&nested_tools);
+        let run_description = build_run_description(&nested_tools, &nested_projection);
         let outer_projection = outer_projection(registry, target, run_description.clone())?;
         let identity = descriptor_identity(
             &outer_projection,
@@ -155,7 +155,7 @@ impl ProductJavaScriptCompositionV1 {
         )?;
         let nested_tools = ordered_nested_catalog(&nested_projection, &nested_names)?;
         validate_nested_catalog(&nested_tools)?;
-        let run_description = build_run_description(&nested_tools);
+        let run_description = build_run_description(&nested_tools, &nested_projection);
         let outer_projection = outer_projection(registry, target, run_description.clone())?;
         let identity = descriptor_identity(
             &outer_projection,
@@ -499,20 +499,30 @@ fn descriptor_identity(
     })
 }
 
-fn build_run_description(tools: &[ProductJavaScriptNestedToolV1]) -> String {
+fn build_run_description(
+    tools: &[ProductJavaScriptNestedToolV1],
+    projection: &ToolProjectionMap,
+) -> String {
     let catalog = tools
         .iter()
         .map(|tool| {
             let name = tool.exposed_name.as_str();
             let function = normalize_javascript_identifier(name);
+            let result_type = if projection.by_exposed(&tool.exposed_name).is_some_and(
+                plakous_tools::ToolProjectionExposureV2::local_programmatic_returns_object,
+            ) {
+                crate::codex_code_mode::PROCESS_TOOL_RESULT_TYPE
+            } else {
+                "Promise<string>"
+            };
             let signature = if tool.string_input {
-                format!("tools.{function}(input: string): Promise<string>")
+                format!("tools.{function}(input: string): {result_type}")
             } else {
                 let input = tool.input_schema.as_ref().map_or_else(
                     || "unknown".to_owned(),
                     |schema| render_schema_type(schema.document().value()),
                 );
-                format!("tools.{function}(args: {input}): Promise<string>")
+                format!("tools.{function}(args: {input}): {result_type}")
             };
             format!("- `{name}`: {}\n  `{signature}`", tool.description)
         })

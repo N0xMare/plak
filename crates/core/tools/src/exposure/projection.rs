@@ -583,6 +583,15 @@ impl ToolProjectionExposureV2 {
     pub const fn raising(&self) -> ToolProjectionRaisingV2 {
         self.raising
     }
+    /// Whether local programmatic callers receive the raised JSON object.
+    /// Direct provider calls retain their text result representation.
+    #[must_use]
+    pub const fn local_programmatic_returns_object(&self) -> bool {
+        matches!(
+            self.lowering,
+            ToolProjectionLoweringV2::CodexExecCommand | ToolProjectionLoweringV2::CodexWriteStdin
+        )
+    }
     /// Exact provider/model target.
     #[must_use]
     pub const fn target(&self) -> &ProviderModelProjectionIdentityV2 {

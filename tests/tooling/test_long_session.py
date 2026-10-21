@@ -707,8 +707,8 @@ class LongSessionOracleTests(unittest.TestCase):
         prompt = long_session.child_prompt("codex", 20)
         child = json.loads(prompt.split("Give the child exactly this prompt: ", 1)[1]
                            .split("\nWait for the child", 1)[0])
-        self.assertIn('{cmd: "python3 page.py k 1"})); notify(a.output);\n', child)
-        self.assertIn('{cmd: "python3 page.py k 2"})); text(b.output);', child)
+        self.assertIn('{cmd: "python3 page.py k 1"}); notify(a.output);\n', child)
+        self.assertIn('{cmd: "python3 page.py k 2"}); text(b.output);', child)
         self.assertIn("which page is next", child)
         self.assertNotIn(str(pages), child.split("Then write")[0].split("acknowledged.txt.", 1)[1])
         self.assertNotIn("earlier turn", child)

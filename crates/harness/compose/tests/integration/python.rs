@@ -566,6 +566,7 @@ fn python_signatures_preserve_freeform_and_structured_input_kinds() -> Result<()
             .authoring_contract()
             .contains("async def exec_command(arguments: ")
     );
+    assert!(descriptor.authoring_contract().contains(") -> dict"));
     Ok(())
 }
 
