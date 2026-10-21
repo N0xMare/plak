@@ -141,7 +141,18 @@ impl ProductStore {
     /// schema or session authority.
     pub fn inspect_session_read_only(paths: &PlakPaths, id: &str) -> Result<SessionRecord, String> {
         sessions::canonical_product_session_id(id)?;
-        Self::read_only_snapshot(paths, |snapshot| load_record(snapshot, id))
+        if matches!(std::fs::symlink_metadata(paths.product_database()), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+        {
+            return Err(crate::home::state::incompatible_session_refusal(paths, id)
+                .unwrap_or_else(|| "session not found".to_owned()));
+        }
+        Self::read_only_snapshot(paths, |snapshot| load_record(snapshot, id)).map_err(|error| {
+            if error == "session not found" {
+                crate::home::state::incompatible_session_refusal(paths, id).unwrap_or(error)
+            } else {
+                error
+            }
+        })
     }
 
     /// Lists the ids of one workspace's sessions under the same read-only

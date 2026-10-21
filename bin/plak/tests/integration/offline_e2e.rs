@@ -4520,6 +4520,40 @@ fn a_code_mode_cell_calls_a_template_mcp_tool_as_a_nested_call() {
 }
 
 #[test]
+fn every_session_command_names_a_foreign_build_instead_of_not_found() {
+    let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
+    let id = "00000000-0000-4000-8000-000000000042";
+    let foreign = fixture.home().join("state/r1.e1.p1.t1/sessions");
+    std::fs::create_dir_all(&foreign).unwrap();
+    write_private(&foreign.join(format!("{id}.events.jsonl")), "");
+    for args in [
+        vec!["run", "--session", id, "--", "continue"],
+        vec!["session", "recover", id],
+        vec!["session", "show", id],
+        vec!["session", "log", id],
+        vec!["session", "export", id],
+        vec!["session", "reference", id],
+        vec!["session", "gc", id],
+        vec!["run", "--session", "00000000", "--", "continue"],
+    ] {
+        let refused = run_cli(&fixture, &args);
+        assert!(!refused.status.success(), "{args:?}");
+        assert!(
+            refused
+                .stderr
+                .contains("incompatible plak build (state r1.e1.p1.t1)"),
+            "{args:?}: {}",
+            refused.stderr
+        );
+        assert!(
+            refused.stderr.contains("plak session export"),
+            "{}",
+            refused.stderr
+        );
+    }
+}
+
+#[test]
 fn uncertain_mcp_call_recovers_across_three_cli_runs() {
     use plak::store::session_records::SessionRecordStore as _;
 
@@ -8832,3 +8866,42 @@ fn http_rpc_refusal_is_a_definite_tool_failure() {
     assert!(log.stdout.contains("-32021"), "{}", log.stdout);
 }
 
+#[test]
+fn current_store_ambiguity_is_not_hidden_by_a_foreign_session() {
+    use plak::store::session_records::SessionRecordStore as _;
+
+    let fixture = Fixture::new(&json!({"version":1,"steps":[]}));
+    let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
+    let store = plak::store::session_records::SqliteSessionStore::new(paths);
+    for id in [
+        "00000000-0000-4000-8000-000000000041",
+        "00000000-0000-4000-8000-000000000042",
+    ] {
+        let mut record = plak::store::sessions::SessionRecord::new(fixture.workspace());
+        record.id = id.to_owned();
+        record.create_operation_id = format!("plak:create:{id}");
+        store.save(&mut record).unwrap();
+    }
+    let foreign = fixture.home().join("state/r1.e1.p1.t1/sessions");
+    std::fs::create_dir_all(&foreign).unwrap();
+    write_private(
+        &foreign.join("00000000-0000-4000-8000-000000000043.events.jsonl"),
+        "",
+    );
+    for args in [
+        vec!["run", "--session", "00000000", "--", "continue"],
+        vec!["session", "show", "00000000"],
+    ] {
+        let refusal = run_cli(&fixture, &args);
+        assert!(
+            refusal.stderr.contains("matches 2 sessions"),
+            "{}",
+            refusal.stderr
+        );
+        assert!(
+            !refusal.stderr.contains("incompatible plak build"),
+            "{}",
+            refusal.stderr
+        );
+    }
+}

@@ -1160,7 +1160,11 @@ fn execute_command(
             Ok(ProcessOutcome::Success)
         }
         Command::SessionRecover { id } => {
-            let record = load_exact_product_session(services.session_records()?.as_ref(), &id)?;
+            let record = load_exact_product_session(
+                services.paths()?,
+                services.session_records()?.as_ref(),
+                &id,
+            )?;
             // Opening the session is what recovers it; the explicit action then
             // reports it, or that there was nothing to recover.
             run_attached_action(
@@ -1209,14 +1213,23 @@ fn execute_command(
                         ),
                     )
                 })?;
+                let paths = services.paths()?;
                 carry::read_retained_archive(
-                    services.paths()?,
+                    paths,
                     &session_id,
                     search.as_deref(),
                     tail,
                     destination,
                 )
-                .map_err(CliFailure::new)?
+                .map_err(|error| {
+                    let archive = paths.home().join("references").join(format!("{session_id}.json"));
+                    if matches!(std::fs::symlink_metadata(archive), Err(ref failure) if failure.kind() == io::ErrorKind::NotFound)
+                        && let Err(current) = store::ProductStore::inspect_session_read_only(paths, &session_id)
+                    {
+                        return CliFailure::new(current);
+                    }
+                    CliFailure::new(error)
+                })?
             };
             write!(stdout, "{rendered}").map_err(|_| CliFailure::new("stdout failed"))?;
             Ok(ProcessOutcome::Success)
@@ -1301,8 +1314,11 @@ fn execute_command(
             confirmed,
         } => {
             confirm_session_mutation("fork", &session_id, confirmed, stdin, stderr)?;
-            let record =
-                load_exact_product_session(services.session_records()?.as_ref(), &session_id)?;
+            let record = load_exact_product_session(
+                services.paths()?,
+                services.session_records()?.as_ref(),
+                &session_id,
+            )?;
             run_attached_action(
                 services,
                 record,
@@ -1319,8 +1335,11 @@ fn execute_command(
             confirmed,
         } => {
             confirm_session_mutation("compact", &session_id, confirmed, stdin, stderr)?;
-            let record =
-                load_exact_product_session(services.session_records()?.as_ref(), &session_id)?;
+            let record = load_exact_product_session(
+                services.paths()?,
+                services.session_records()?.as_ref(),
+                &session_id,
+            )?;
             run_attached_action(
                 services,
                 record,
@@ -1334,8 +1353,11 @@ fn execute_command(
             session_id,
         } => {
             if let Some(session_id) = session_id {
-                let record =
-                    load_exact_product_session(services.session_records()?.as_ref(), &session_id)?;
+                let record = load_exact_product_session(
+                    services.paths()?,
+                    services.session_records()?.as_ref(),
+                    &session_id,
+                )?;
                 let account = record.account.clone();
                 run_attached_action(
                     services,

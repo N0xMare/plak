@@ -22,9 +22,10 @@ pub(crate) fn rehearse(paths: &PlakPaths, id: &str, output: &mut dyn Write) -> C
     if !uuid::Uuid::parse_str(id).is_ok_and(|value| value.hyphenated().to_string() == id) {
         return Err(CliFailure::new("rehearsal requires a full session UUID"));
     }
+    crate::store::ProductStore::inspect_session_read_only(paths, id).map_err(CliFailure::new)?;
     let (workspace, recorded, intents, views) =
         crate::store::ProductStore::inspect_projection_read_only(paths, id)
-            .map_err(|_| CliFailure::new("rehearsal refused: product_session_unavailable"))?;
+            .map_err(CliFailure::new)?;
     let probe_paths = PlakPaths::for_workspace(paths.home().to_path_buf(), &workspace);
     let probe = crate::carry::reload_probe(&probe_paths);
     writeln!(

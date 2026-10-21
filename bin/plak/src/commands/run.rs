@@ -284,7 +284,11 @@ impl PlakousApplication {
         if run_expired(limits) {
             return run_timeout(stderr);
         }
-        let session = load_exact_product_session(self.session_records()?.as_ref(), session_id)?;
+        let session = load_exact_product_session(
+            self.product_paths()?,
+            self.session_records()?.as_ref(),
+            session_id,
+        )?;
         // The repository gate's offline model; see `crate::test_hooks`. A
         // resume reopens the persisted record on the scripted binding.
         #[cfg(feature = "test-hooks")]

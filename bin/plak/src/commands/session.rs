@@ -293,12 +293,23 @@ fn show_child_recovery_status_with(
 }
 
 pub fn load_exact_product_session(
+    paths: &crate::home::paths::PlakPaths,
     store: &dyn crate::store::session_records::SessionRecordStore,
     session_id: &str,
 ) -> CliResult<product_sessions::SessionRecord> {
     let cwd = env::current_dir().map_err(|_| CliFailure::new("cwd unavailable"))?;
-    let session_id = resolve_workspace_session_id(store, session_id)?;
-    let record = store.load(&session_id).map_err(CliFailure::from)?;
+    let record = (|| {
+        let resolved = resolve_workspace_session_id(store, session_id)?;
+        store.load(&resolved).map_err(CliFailure::from)
+    })()
+    .map_err(|error| {
+        if session_absent(error.message()) {
+            crate::home::state::incompatible_session_refusal(paths, session_id)
+                .map_or(error, CliFailure::new)
+        } else {
+            error
+        }
+    })?;
     let requested = std::fs::canonicalize(&cwd).unwrap_or(cwd);
     let recorded = std::fs::canonicalize(&record.workspace_root)
         .unwrap_or_else(|_| record.workspace_root.clone());
@@ -338,6 +349,20 @@ pub(crate) fn resolve_read_only_session_id(
     resolve_session_id(requested, |cwd| {
         crate::store::ProductStore::session_ids_for_workspace_read_only(paths, cwd)
     })
+    .map_err(|error| {
+        if session_absent(error.message()) {
+            crate::home::state::incompatible_session_refusal(paths, requested)
+                .map_or(error, CliFailure::new)
+        } else {
+            error
+        }
+    })
+}
+
+/// Only absence in current authority permits a foreign-session lookup.
+pub(crate) fn session_absent(message: &str) -> bool {
+    message == "session not found"
+        || message.starts_with("no session in this workspace starts with `")
 }
 
 fn resolve_session_id(
@@ -502,7 +527,7 @@ pub(crate) fn delete_session(
     stdout: &mut dyn io::Write,
 ) -> CliResult<()> {
     let paths = services.paths()?;
-    let record = load_exact_product_session(services.session_records()?.as_ref(), id)?;
+    let record = load_exact_product_session(paths, services.session_records()?.as_ref(), id)?;
     let locator = record
         .plakous_locator
         .ok_or_else(|| CliFailure::new("session has no exact canonical Plakous locator"))?;
@@ -954,7 +979,7 @@ pub(crate) fn gc_sessions(
     let mut tally = GcTally::default();
     let records = services.session_records()?;
     let targets: Vec<product_sessions::SessionRecord> = if let Some(id) = id {
-        let record = load_exact_product_session(records.as_ref(), id)?;
+        let record = load_exact_product_session(paths, records.as_ref(), id)?;
         if record.plakous_locator.is_none() {
             return Err(CliFailure::new(
                 "session has no exact canonical Plakous locator",
@@ -1145,7 +1170,7 @@ pub(crate) fn export_session(
     stdout: &mut dyn io::Write,
 ) -> CliResult<()> {
     let paths = services.paths()?;
-    let record = load_exact_product_session(services.session_records()?.as_ref(), id)?;
+    let record = load_exact_product_session(paths, services.session_records()?.as_ref(), id)?;
     let document = crate::carry::export_session(paths, &record).map_err(|refusal| {
         CliFailure::new(format!(
             "session {} cannot be exported: {refusal}",

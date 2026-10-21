@@ -638,6 +638,13 @@ own version constants, never hand-bumped, so a format change cannot forget to
 move it. A build therefore never finds another build's files in its own
 directory, and a whole-store incompatibility never blocks startup.
 
+Commands that cannot carry a foreign session automatically, including
+`run --session`, recovery, inspection and export, use the same incompatible-build refusal for an id (or uniquely
+matching prefix) recorded only under another state key. It does not present
+that session as missing or open its foreign store as current authority.
+Current-store ambiguity, integrity and storage failures are never replaced by
+a foreign-session lookup.
+
 When `state/` holds anything besides this build's directory — another key, or
 the flat files of a build from before keyed directories — the first stateful
 command of a process prints one notice and starts fresh:

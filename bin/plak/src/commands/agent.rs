@@ -195,10 +195,7 @@ fn run_agent_after_admission(
     let cwd = env::current_dir().map_err(|_| CliFailure::new("cwd unavailable"))?;
     let (record, resume_tree) = if let Some(session_id) = session_id {
         (
-            load_exact_product_session(store.as_ref(), &session_id).map_err(|error| {
-                crate::home::state::incompatible_session_refusal(paths, &session_id)
-                    .map_or(error, CliFailure::new)
-            })?,
+            load_exact_product_session(paths, store.as_ref(), &session_id)?,
             resume_tree,
         )
     } else {
