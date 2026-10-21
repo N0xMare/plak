@@ -17,6 +17,10 @@ impl Driver {
         active: Option<&PromptCommand>,
         request: AgentContextStatusRequest,
     ) -> Result<ContextStatus, AgentSessionEndpointError> {
+        self.authority
+            .check_heartbeat()
+            .and_then(|()| self.start_authority().check())
+            .map_err(|_| AgentSessionEndpointError::Unavailable)?;
         let checkpoint = self.authority.checkpoint();
         let manifest = checkpoint.manifest();
         let topology = manifest.topology();

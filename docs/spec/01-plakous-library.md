@@ -1440,8 +1440,12 @@ operation.
 ### 5.4 Exact resume
 
 The facade privately registers each created or verified-open session/branch
-driver's typed command endpoint. High-level context-status and compact
-workflows route through that owner; exact open, resume, recover, fork, and
+driver's typed command endpoint. Attached context-status queries go straight
+to that owner, using its in-memory canonical context accounting and exact
+session/branch/checkpoint locator check without loading the persisted head.
+Without an attached owner, context-status loads the exact checkpoint only to
+report recovery requirements or unavailability. High-level compact
+workflows also route through the owner; exact open, resume, recover, fork, and
 rebind remain facade workflows rather than caller-assembled store
 operations. The registry is a locator only: it holds no provider loop, history,
 planner, or checkpoint authority, and its absence is a typed unavailable
@@ -2107,7 +2111,9 @@ That error does not prove no admission or settlement: a model call or commit may
 have occurred, and the change feed remains authoritative. Fork and rebind are
 joined runtime calls, and clear creates a new session through the same facade;
 their unknown runtime errors likewise retain `OutcomeUnknown`, not a definitive
-pre-admission refusal. Read-only context inspection's `Unavailable` carries no
+pre-admission refusal. Attached read-only context inspection checks heartbeat and lease liveness before
+using driver authority; an archived or lost-lease owner returns `Unavailable`.
+Read-only context inspection's `Unavailable` carries no
 workflow-admission claim.
 A workflow is settled only by a commit: an admitted
 workflow whose owner was lost is settled by the next open's closure commit

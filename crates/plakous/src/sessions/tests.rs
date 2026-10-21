@@ -1796,6 +1796,7 @@ struct CrashCutStore {
     marker: Option<PathBuf>,
     oracle: Option<CrashOracle>,
     commits: Arc<AtomicUsize>,
+    branch_loads: Arc<AtomicUsize>,
 }
 
 #[cfg(all(unix, feature = "sessions-sqlite"))]
@@ -1814,6 +1815,7 @@ impl CrashCutStore {
             marker: Some(marker),
             oracle: Some(oracle),
             commits: Arc::new(AtomicUsize::new(0)),
+            branch_loads: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -1826,6 +1828,7 @@ impl CrashCutStore {
             marker: None,
             oracle: None,
             commits: Arc::new(AtomicUsize::new(0)),
+            branch_loads: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -1843,6 +1846,7 @@ impl CrashCutStore {
             marker: Some(marker),
             oracle: Some(oracle),
             commits: Arc::new(AtomicUsize::new(0)),
+            branch_loads: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -1905,6 +1909,7 @@ impl SessionStore for CrashCutStore {
         &self,
         session: SessionRef,
     ) -> plakous_agent::internal::StoreFuture<'_, LoadedBranch> {
+        self.branch_loads.fetch_add(1, Ordering::AcqRel);
         self.inner.load_branch(session)
     }
 
@@ -7714,5 +7719,123 @@ async fn recompiling_fork_source_derived_fork_identity_equals_builder_identity()
         return Err("the fork's rebind identity differs from its builder's own target".into());
     };
     assert_eq!((recorded_source, recorded_target), (source, target));
+    Ok(())
+}
+
+#[cfg(all(unix, feature = "sessions-sqlite"))]
+#[tokio::test]
+async fn attached_context_status_uses_driver_authority_without_store_reads() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+    let store = CrashCutStore::observing(SqliteSessionStore::open(
+        directory.path().join("context-status.sqlite3"),
+    )?);
+    let sessions = AgentSessions::new(SessionBackend::from_store(
+        Arc::new(store.clone()),
+        RuntimeDurability::Required,
+    ))?;
+    let CreateSessionOutcome::Created { session, .. } = sessions
+        .create(CreateSessionRequest::new(
+            SessionOperationId::new("create:driver-context")?,
+            durable_runtime_binding_for(workspace, descriptor()?, b"driver-context")?,
+        ))
+        .await?;
+    let locator = session.locator();
+    let before = store.branch_loads.load(Ordering::Acquire);
+    let status = sessions
+        .context_status(ContextStatusRequest::new(
+            SessionOperationId::new("status:driver-context")?,
+            locator,
+            ContextQuery::Current,
+        ))
+        .await?;
+    assert!(matches!(
+        status.kind(),
+        SessionContextStatusKind::Available(_)
+    ));
+    let stale = SessionLocator::new(
+        locator.session_id(),
+        locator.branch_id(),
+        CheckpointId::try_from(Uuid::from_u128(999))?,
+    );
+    let error = sessions
+        .context_status(ContextStatusRequest::new(
+            SessionOperationId::new("status:driver-context-stale")?,
+            stale,
+            ContextQuery::Current,
+        ))
+        .await
+        .expect_err("driver must reject a stale locator");
+    assert_eq!(error.kind(), AgentSessionsErrorKind::StaleLocator);
+    assert_eq!(error.current_locator(), Some(locator));
+    assert_eq!(
+        store.branch_loads.load(Ordering::Acquire),
+        before,
+        "context status must not load or decode the canonical head"
+    );
+    session.release().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn attached_context_status_refuses_expired_taken_over_and_archived_owners() -> TestResult {
+    struct AdvancingClock(std::sync::atomic::AtomicU64);
+    impl LeaseClock for AdvancingClock {
+        fn now(&self) -> Result<LeaseInstant, SessionStoreError> {
+            LeaseInstant::new(
+                LeaseDomain::new([1; 16], [2; 32]),
+                self.0.load(Ordering::Acquire),
+                0,
+            )
+        }
+    }
+    for archived in [false, true] {
+        let directory = tempfile::tempdir()?;
+        let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
+        let clock = Arc::new(AdvancingClock(std::sync::atomic::AtomicU64::new(1)));
+        let store = MemorySessionStore::with_clock(MemoryStoreLimits::default(), clock.clone())?;
+        let sessions = AgentSessions::new(SessionBackend::from_store(
+            Arc::new(store.clone()),
+            RuntimeDurability::Disabled,
+        ))?;
+        let CreateSessionOutcome::Created { session, .. } = sessions
+            .create(CreateSessionRequest::new(
+                SessionOperationId::new("create:lost-owner-context")?,
+                runtime_binding_for(workspace, descriptor()?, b"lost-owner-context")?,
+            ))
+            .await?;
+        let locator = session.locator();
+        let loaded = store.load_branch(locator.session_ref()).await?;
+        clock.0.store(10_000, Ordering::Release);
+        if archived {
+            store
+                .archive(ArchiveSession::new(
+                    locator.session_id(),
+                    loaded.session().revision(),
+                ))
+                .await?;
+        } else {
+            store
+                .acquire(AcquireBranch::new(
+                    locator.session_ref(),
+                    RunId::try_from(Uuid::from_u128(0x9876))?,
+                    NonZeroU64::new(30).ok_or("lease duration")?,
+                ))
+                .await?;
+        }
+        let status = sessions
+            .context_status(ContextStatusRequest::new(
+                SessionOperationId::new("status:lost-owner-context")?,
+                locator,
+                ContextQuery::Current,
+            ))
+            .await?;
+        assert!(matches!(
+            status.kind(),
+            SessionContextStatusKind::Unavailable(_)
+        ));
+        // The old owner cannot release the successor's lease.
+        drop(session);
+    }
     Ok(())
 }

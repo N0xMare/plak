@@ -1411,14 +1411,14 @@ impl AgentSessions {
         &self,
         request: ContextStatusRequest,
     ) -> Result<SessionContextStatus, AgentSessionsError> {
-        let exact = self.load_exact(request.locator).await?;
-        let recovery = exact.recovery_report();
         let pending_user_input = match request.query {
             ContextQuery::Current => None,
             ContextQuery::WithPendingUserInput(input) => Some(input),
         };
         let branch = SessionBranchKey::new(request.locator.session_id, request.locator.branch_id);
         let Some(endpoint) = self.drivers.endpoint(branch) else {
+            let exact = self.load_exact(request.locator).await?;
+            let recovery = exact.recovery_report();
             return Ok(SessionContextStatus {
                 operation_id: request.operation_id,
                 locator: request.locator,
