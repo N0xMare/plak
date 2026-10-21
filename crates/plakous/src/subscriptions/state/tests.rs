@@ -131,7 +131,7 @@ fn xai_inference_phase_budget_is_the_streaming_idle_bound() {
     assert_eq!(limits.resolution_timeout, defaults.resolution_timeout);
     assert_eq!(limits.connect_timeout, Duration::from_secs(10));
     assert_eq!(limits.tls_timeout, defaults.tls_timeout);
-    assert_eq!(limits.request_write_timeout, Duration::from_secs(30));
+    assert_eq!(limits.request_write_idle_timeout, Duration::from_secs(30));
     assert_eq!(defaults.response_head_timeout, Duration::from_secs(30));
     assert_eq!(defaults.response_body_timeout, Duration::from_secs(30));
 }
@@ -157,7 +157,7 @@ fn native_inference_configs_match_product_budget_without_changing_api_defaults()
     assert_eq!(limits.response_head_timeout, Duration::from_secs(180));
     assert_eq!(limits.response_body_timeout, Duration::from_secs(180));
     assert_eq!(limits.connect_timeout, Duration::from_secs(10));
-    assert_eq!(limits.request_write_timeout, Duration::from_secs(30));
+    assert_eq!(limits.request_write_idle_timeout, Duration::from_secs(30));
 }
 
 use super::super::*;

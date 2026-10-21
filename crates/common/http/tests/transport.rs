@@ -854,7 +854,7 @@ async fn stalled_request_write_after_body_poll_keeps_write_deadline() -> TestRes
         Ok::<_, TestError>(())
     });
     let limits = Limits {
-        request_write_timeout: Duration::from_millis(200),
+        request_write_idle_timeout: Duration::from_millis(200),
         response_head_timeout: Duration::from_secs(5),
         ..Limits::default()
     };
@@ -880,6 +880,160 @@ async fn stalled_request_write_after_body_poll_keeps_write_deadline() -> TestRes
 }
 
 #[tokio::test]
+async fn steady_request_write_outlives_idle_bound() -> TestResult {
+    let Endpoint {
+        acceptor,
+        client_config,
+        ..
+    } = make_endpoint(&[b"http/1.1"]).await?;
+    // A small receive window keeps loopback from buffering the entire request.
+    let socket = tokio::net::TcpSocket::new_v4()?;
+    socket.set_recv_buffer_size(32 * 1024)?;
+    socket.bind("127.0.0.1:0".parse()?)?;
+    let listener = socket.listen(1)?;
+    let origin = Origin::parse(&format!("https://{}", listener.local_addr()?))?;
+    let limits = Limits {
+        request_write_idle_timeout: Duration::from_millis(300),
+        response_head_timeout: Duration::from_millis(500),
+        ..Limits::default()
+    };
+    let length = limits.max_request_body_bytes;
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await?;
+        let mut stream = acceptor.accept(stream).await?;
+        let mut head = Vec::new();
+        while !head.ends_with(b"\r\n\r\n") {
+            head.push(stream.read_u8().await?);
+        }
+        let first_body_read = Instant::now();
+        let mut left = length;
+        let mut chunk = [0; 16 * 1024];
+        while left > 0 {
+            let read = stream.read(&mut chunk[..left.min(16 * 1024)]).await?;
+            if read == 0 {
+                return Err(io::Error::other("request ended early").into());
+            }
+            left -= read;
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        // Exclude setup/handshake time: the paced body alone spans several
+        // idle periods, and exceeds the head budget if eagerly buffered.
+        assert!(first_body_read.elapsed() > Duration::from_secs(1));
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+            .await?;
+        stream.shutdown().await?;
+        Ok::<_, TestError>(())
+    });
+    let client = make_client(client_config, limits.clone())?;
+    let request = make_request(
+        origin,
+        Method::POST,
+        "/steady-write",
+        HeaderMap::new(),
+        Bytes::from(vec![b'x'; length]),
+        &limits,
+    )?;
+    let start = Instant::now();
+    let response = client
+        .execute(
+            request,
+            ExchangeControl::new(start + Duration::from_secs(15)),
+        )
+        .await?;
+    assert!(start.elapsed() > limits.request_write_idle_timeout);
+    let mut body = response.into_body();
+    assert_eq!(required_chunk(&mut body).await?, "ok");
+    assert!(body.next_chunk().await.is_none());
+    server.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn http2_steady_and_stalled_body_consumption_obey_idle_bound() -> TestResult {
+    use http_body_util::BodyExt as _;
+    for stalled in [false, true] {
+        let Endpoint {
+            listener,
+            acceptor,
+            client_config,
+            origin,
+        } = make_endpoint(&[b"h2"]).await?;
+        let (release, released) = oneshot::channel();
+        let released = Arc::new(tokio::sync::Mutex::new(Some(released)));
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await?;
+            let stream = acceptor.accept(stream).await?;
+            let service = service_fn(move |request: hyper::Request<hyper::body::Incoming>| {
+                let released = Arc::clone(&released);
+                async move {
+                    let mut body = request.into_body();
+                    if stalled {
+                        if let Some(released) = released.lock().await.take() {
+                            let _ = released.await;
+                        }
+                    } else {
+                        while let Some(frame) = body.frame().await {
+                            let _ = frame?;
+                            tokio::time::sleep(Duration::from_millis(20)).await;
+                        }
+                    }
+                    Ok::<_, hyper::Error>(hyper::Response::new(Full::new(Bytes::from_static(
+                        b"ok",
+                    ))))
+                }
+            });
+            let _ = hyper::server::conn::http2::Builder::new(TokioExecutor::new())
+                .initial_stream_window_size(16 * 1024)
+                .initial_connection_window_size(16 * 1024)
+                .serve_connection(TokioIo::new(stream), service)
+                .await;
+            Ok::<_, TestError>(())
+        });
+        let limits = Limits {
+            request_write_idle_timeout: Duration::from_millis(500),
+            response_head_timeout: if stalled {
+                Duration::from_secs(5)
+            } else {
+                Duration::from_secs(1)
+            },
+            ..Limits::default()
+        };
+        let client = make_client(client_config, limits.clone())?;
+        let request = make_request(
+            origin,
+            Method::POST,
+            "/h2-write",
+            HeaderMap::new(),
+            Bytes::from(vec![b'x'; 1024 * 1024]),
+            &limits,
+        )?;
+        let start = Instant::now();
+        let result = client
+            .execute(
+                request,
+                ExchangeControl::new(start + Duration::from_secs(10)),
+            )
+            .await;
+        let _ = release.send(());
+        if stalled {
+            assert!(start.elapsed() < Duration::from_secs(2));
+            let failure = result.err().ok_or("stalled H2 request succeeded")?;
+            assert_eq!(failure.phase(), Phase::RequestWriteOrResponseHead);
+            assert_eq!(failure.kind(), ErrorKind::DeadlineExceeded);
+            assert_eq!(failure.transmission(), TransmissionFact::MayHaveTransmitted);
+        } else {
+            assert!(start.elapsed() > limits.request_write_idle_timeout);
+            let mut body = result?.into_body();
+            assert_eq!(required_chunk(&mut body).await?, "ok");
+            assert!(body.next_chunk().await.is_none());
+        }
+        timeout(Duration::from_secs(2), server).await???;
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn slow_allowed_write_does_not_spend_response_head_budget() -> TestResult {
     let Endpoint {
         listener,
@@ -900,7 +1054,7 @@ async fn slow_allowed_write_does_not_spend_response_head_budget() -> TestResult 
         Ok::<_, TestError>(request.len())
     });
     let limits = Limits {
-        request_write_timeout: Duration::from_secs(5),
+        request_write_idle_timeout: Duration::from_secs(5),
         response_head_timeout: Duration::from_millis(500),
         ..Limits::default()
     };
@@ -942,7 +1096,7 @@ async fn asymmetric_write_and_head_timeouts_are_sequential() -> TestResult {
         Ok::<_, TestError>(())
     });
     let limits = Limits {
-        request_write_timeout: Duration::from_millis(30),
+        request_write_idle_timeout: Duration::from_millis(30),
         response_head_timeout: Duration::from_millis(500),
         ..Limits::default()
     };

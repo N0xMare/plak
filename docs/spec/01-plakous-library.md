@@ -8056,11 +8056,18 @@ never `Authorization`; any other 403 keeps `Authorization`. The product renders
 
 Connect, response-head, stream-idle, per-attempt, tool, approval, cleanup,
 store, and shutdown deadlines are distinct and reported by phase. A timeout
-never detaches unbounded work. HTTP/1 request-write time includes flushing the
-complete request through TLS; body consumption alone does not start the response-head
-clock. A deadline reports `RequestWrite` before that flush and `ResponseHead`
-afterwards, without implying provider acceptance. Ambiguous I/O and HTTP/2
-retain the combined write/response-head phase.
+never detaches unbounded work. The request-write bound is a no-progress
+(idle) timeout, restarting on each positive HTTP/1 stream-accepted write
+(TLS, or plain TCP for loopback HTTP origins) or HTTP/2 body-consumption
+advance, while remaining capped by the exchange absolute deadline. Late
+progress cannot revive an expired idle budget. The final HTTP/1 flush must
+finish within the idle bound measured from the last accepted write; body
+consumption alone does not start the response-head clock. A deadline reports
+`RequestWrite` before that flush and `ResponseHead` afterwards, without
+implying provider acceptance. Ambiguous I/O and HTTP/2 retain the combined
+write/response-head phase. HTTP/2 consumption hands over bounded frames paced
+by peer flow control and the h2 send buffer and may run ahead of transmission;
+the unsent tail is bounded by the combined phase's response-head deadline.
 
 **A streaming model exchange has a head deadline and a body idle bound, never
 an absolute cap on a stream that is making progress.** Every inference route
@@ -8098,8 +8105,9 @@ Paid compaction likewise carries no hard body deadline: its context supplies
 deadline still bounds preparation and stream start. Its single-dispatch
 semantics are unchanged; a billed body may outlive that start budget.
 Cancellation stops a stream at once; the single-dispatch paid-compaction
-workflow is unchanged. Connect and write bounds remain 10 and 30 seconds;
-auth, catalog, discovery and other REST exchanges keep 30-second stalls and a
+workflow is unchanged. Connect remains bounded by 10 seconds; request-write
+idle is 30 seconds. Auth, catalog, discovery and other REST exchanges keep
+30-second stalls and a
 whole-exchange deadline (`ExchangeControl::new`), including their bodies.
 Read-only model lookup GETs additionally use the bounded retry in §6.2;
 OAuth, refresh, profile and key-usage exchanges do not inherit it.

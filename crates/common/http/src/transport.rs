@@ -45,7 +45,7 @@ mod pool;
 use pool::{ConnectionSettings, IdleConnection, Pool, PoolKey};
 
 const HTTP1_MINIMUM_BUFFER_BYTES: usize = 8_192;
-const TRANSPORT_BEHAVIOR_REVISION: u32 = 3;
+const TRANSPORT_BEHAVIOR_REVISION: u32 = 4;
 /// How long a cleanly finished exchange waits for its HTTP/1.1 connection to
 /// accept another request before giving up on keeping it.
 const RELEASE_READY_BOUND: Duration = Duration::from_secs(1);
@@ -73,8 +73,11 @@ pub struct Limits {
     pub connect_timeout: Duration,
     /// Maximum TLS and HTTP connection negotiation time.
     pub tls_timeout: Duration,
-    /// Maximum H1 request write/flush time; H2 bounds body consumption.
-    pub request_write_timeout: Duration,
+    /// Maximum time without H1 stream-accepted writes or H2 body consumption.
+    /// H1 uses TLS, or plain TCP for loopback HTTP origins. The final flush must
+    /// finish within the idle bound measured from the last accepted write.
+    /// Further capped by the exchange deadline.
+    pub request_write_idle_timeout: Duration,
     /// Maximum time from H1 request flush (H2 consumption) to a complete response head.
     pub response_head_timeout: Duration,
     /// Maximum idle time for each caller-driven response-body pull.
@@ -168,7 +171,7 @@ impl Default for Limits {
             resolution_timeout: Duration::from_secs(5),
             connect_timeout: Duration::from_secs(10),
             tls_timeout: Duration::from_secs(10),
-            request_write_timeout: Duration::from_secs(30),
+            request_write_idle_timeout: Duration::from_secs(30),
             response_head_timeout: Duration::from_secs(30),
             response_body_timeout: Duration::from_secs(30),
         }
@@ -202,7 +205,7 @@ impl Limits {
             || self.resolution_timeout.is_zero()
             || self.connect_timeout.is_zero()
             || self.tls_timeout.is_zero()
-            || self.request_write_timeout.is_zero()
+            || self.request_write_idle_timeout.is_zero()
             || self.response_head_timeout.is_zero()
             || self.response_body_timeout.is_zero()
         {
@@ -1170,7 +1173,7 @@ fn transport_behavior_identity(
         limits.resolution_timeout,
         limits.connect_timeout,
         limits.tls_timeout,
-        limits.request_write_timeout,
+        limits.request_write_idle_timeout,
         limits.response_head_timeout,
         limits.response_body_timeout,
     ] {
@@ -1738,19 +1741,18 @@ async fn establish(
 }
 
 fn response_wait_deadline(
-    request_started: Instant,
+    last_write_progress: Instant,
     completed: Option<Instant>,
     http2: bool,
     absolute: Instant,
-    limits: &Limits,
+    write_idle: Duration,
+    response_head_timeout: Duration,
 ) -> (tokio::time::Instant, Phase) {
-    let write_deadline =
-        fixed_phase_deadline(absolute, request_started, limits.request_write_timeout);
-    let timely_completion =
-        completed.filter(|completed| http2 || *completed <= write_deadline.into_std());
+    let write_deadline = fixed_phase_deadline(absolute, last_write_progress, write_idle);
+    let timely_completion = completed.filter(|completed| *completed <= write_deadline.into_std());
     match timely_completion {
         Some(completed) => (
-            fixed_phase_deadline(absolute, completed, limits.response_head_timeout),
+            fixed_phase_deadline(absolute, completed, response_head_timeout),
             if http2 {
                 Phase::RequestWriteOrResponseHead
             } else {
@@ -1768,19 +1770,6 @@ fn response_wait_deadline(
     }
 }
 
-fn expired_response_deadline(
-    request_started: Instant,
-    completed: Option<Instant>,
-    http2: bool,
-    absolute: Instant,
-    limits: &Limits,
-    now: Instant,
-) -> Option<Phase> {
-    let (deadline, phase) =
-        response_wait_deadline(request_started, completed, http2, absolute, limits);
-    (now >= deadline.into_std()).then_some(phase)
-}
-
 async fn wait_response<F>(
     response: F,
     mut connection: ConnectionTask,
@@ -1792,19 +1781,13 @@ where
     F: Future<Output = Result<WireResponse<Incoming>, hyper::Error>>,
 {
     tokio::pin!(response);
-    let request_phase_started = tokio::time::Instant::now().into_std();
+    progress.start_write_clock(limits.request_write_idle_timeout);
     loop {
         // Register before reading completion so its notification cannot be lost.
         let completed = progress.completed.notified();
         tokio::pin!(completed);
         let complete = progress.is_complete();
-        let (deadline, deadline_phase) = response_wait_deadline(
-            request_phase_started,
-            progress.complete.get().copied(),
-            progress.http2,
-            control.deadline(),
-            limits,
-        );
+        let (deadline, deadline_phase) = progress.response_deadline(control.deadline(), limits);
         let cancellation = control.cancellation().clone();
         tokio::select! {
             () = cancellation.cancelled() => {
@@ -1816,16 +1799,10 @@ where
                 ));
             }
             () = tokio::time::sleep_until(deadline) => {
-                // A timely flush may race the old write timer while this task
-                // is unscheduled. Its recorded time, not select ordering, owns
-                // the phase transition. A late flush cannot extend the budget.
-                if response_wait_deadline(
-                    request_phase_started,
-                    progress.complete.get().copied(),
-                    progress.http2,
-                    control.deadline(),
-                    limits,
-                ) != (deadline, deadline_phase) {
+                // Progress or a timely flush may race the old idle timer.
+                // Recorded times, not select ordering, own the deadline.
+                // Progress after an expired idle budget cannot revive it.
+                if progress.response_deadline(control.deadline(), limits) != (deadline, deadline_phase) {
                     continue;
                 }
                 connection.abort_and_join().await?;
@@ -1840,14 +1817,8 @@ where
                 // A response becoming ready cannot revive an expired phase.
                 // Re-read the flush timestamp: the old write timer may have
                 // raced either a timely flush or this response's publication.
-                if let Some(phase) = expired_response_deadline(
-                    request_phase_started,
-                    progress.complete.get().copied(),
-                    progress.http2,
-                    control.deadline(),
-                    limits,
-                    tokio::time::Instant::now().into_std(),
-                ) {
+                let (deadline, phase) = progress.response_deadline(control.deadline(), limits);
+                if tokio::time::Instant::now() >= deadline {
                     connection.abort_and_join().await?;
                     return Err(Failure::new(
                         phase,
@@ -2009,6 +1980,7 @@ struct RequestProgress {
     peer_rejected_record: AtomicBool,
     complete: OnceLock<Instant>,
     completed: Notify,
+    write_clock: Mutex<Option<(Instant, Duration)>>,
 }
 
 impl RequestProgress {
@@ -2022,6 +1994,56 @@ impl RequestProgress {
             consumed: AtomicBool::new(consumed),
             complete: OnceLock::new(),
             completed: Notify::new(),
+            write_clock: Mutex::new(None),
+        }
+    }
+
+    fn start_write_clock(&self, idle: Duration) {
+        *self
+            .write_clock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) =
+            Some((tokio::time::Instant::now().into_std(), idle));
+    }
+
+    fn response_deadline(
+        &self,
+        absolute: Instant,
+        limits: &Limits,
+    ) -> (tokio::time::Instant, Phase) {
+        let mut clock = self
+            .write_clock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let (last, idle) = *clock.get_or_insert_with(|| {
+            (
+                tokio::time::Instant::now().into_std(),
+                limits.request_write_idle_timeout,
+            )
+        });
+        response_wait_deadline(
+            last,
+            self.complete.get().copied(),
+            self.http2,
+            absolute,
+            idle,
+            limits.response_head_timeout,
+        )
+    }
+
+    fn record_write_progress(&self) {
+        let mut clock = self
+            .write_clock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if !self.is_complete()
+            && let Some((last, idle)) = clock.as_mut()
+        {
+            let now = tokio::time::Instant::now().into_std();
+            // Once expired, freeze the clock even if this task runs before the waiter.
+            if now.saturating_duration_since(*last) < *idle {
+                *last = now;
+            }
         }
     }
 
@@ -2033,6 +2055,10 @@ impl RequestProgress {
     }
 
     fn mark_complete(&self) {
+        let _clock = self
+            .write_clock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         if self
             .complete
             .set(tokio::time::Instant::now().into_std())
@@ -2060,6 +2086,9 @@ impl RequestProgress {
     }
 
     fn record_accepted(&self, bytes: usize) {
+        if bytes > 0 && !self.http2 {
+            self.record_write_progress();
+        }
         self.accepted
             .fetch_add(u64::try_from(bytes).unwrap_or(u64::MAX), Ordering::AcqRel);
     }
@@ -2311,10 +2340,24 @@ impl Body for RequestBody {
         mut self: Pin<&mut Self>,
         _context: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        if let Some(bytes) = self.bytes.take() {
-            self.length = 0;
-            self.progress.mark_consumed();
-            Poll::Ready(Some(Ok(Frame::data(bytes))))
+        if let Some(mut bytes) = self.bytes.take() {
+            // H2 polls the body as flow-control capacity becomes available.
+            // Bounded frames expose that progress instead of consuming the whole
+            // request in one poll before it has left the dispatcher.
+            let frame = if self.progress.http2 {
+                let frame = bytes.split_to(bytes.len().min(16 * 1024));
+                self.progress.record_write_progress();
+                frame
+            } else {
+                bytes.split_to(bytes.len())
+            };
+            self.length -= u64::try_from(frame.len()).unwrap_or(u64::MAX);
+            if bytes.is_empty() {
+                self.progress.mark_consumed();
+            } else {
+                self.bytes = Some(bytes);
+            }
+            Poll::Ready(Some(Ok(Frame::data(frame))))
         } else {
             self.progress.mark_consumed();
             Poll::Ready(None)
@@ -2807,12 +2850,208 @@ fn fixed_phase_deadline(
     reason = "unit tests may assert with expect/unwrap"
 )]
 mod tests {
-    use super::{expired_response_deadline, response_wait_deadline};
+    #[tokio::test(start_paused = true)]
+    async fn steady_h1_and_h2_progress_outlives_whole_write_budget() {
+        use http_body::Body;
+        use std::{
+            pin::Pin,
+            sync::Arc,
+            task::{Context, Waker},
+        };
+        for http2 in [false, true] {
+            let limits = Limits {
+                request_write_idle_timeout: Duration::from_millis(100),
+                ..Limits::default()
+            };
+            let progress = Arc::new(super::RequestProgress::new(false, http2, 64 * 1024));
+            let mut body =
+                super::RequestBody::new(vec![b'x'; 64 * 1024].into(), Arc::clone(&progress));
+            let start = tokio::time::Instant::now();
+            let absolute = (start + Duration::from_secs(1)).into_std();
+            progress.start_write_clock(limits.request_write_idle_timeout);
+            for _ in 0..4 {
+                tokio::time::advance(Duration::from_millis(60)).await;
+                if http2 {
+                    let mut cx = Context::from_waker(Waker::noop());
+                    assert!(Pin::new(&mut body).poll_frame(&mut cx).is_ready());
+                } else {
+                    progress.record_accepted(16 * 1024);
+                }
+                let (deadline, _) = progress.response_deadline(absolute, &limits);
+                assert!(deadline > tokio::time::Instant::now());
+            }
+            assert!(tokio::time::Instant::now() - start > limits.request_write_idle_timeout);
+            if !http2 {
+                progress.mark_consumed();
+                progress.mark_complete();
+            }
+            let (deadline, phase) = progress.response_deadline(absolute, &limits);
+            assert_eq!(deadline.into_std(), absolute);
+            assert_eq!(
+                phase,
+                if http2 {
+                    Phase::RequestWriteOrResponseHead
+                } else {
+                    Phase::ResponseHead
+                }
+            );
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn late_progress_and_flush_cannot_revive_idle_write() {
+        for http2 in [false, true] {
+            let limits = Limits {
+                request_write_idle_timeout: Duration::from_millis(100),
+                ..Limits::default()
+            };
+            let progress = super::RequestProgress::new(false, http2, 100);
+            let start = tokio::time::Instant::now();
+            let absolute = (start + Duration::from_secs(5)).into_std();
+            progress.start_write_clock(limits.request_write_idle_timeout);
+            tokio::time::advance(Duration::from_millis(60)).await;
+            if http2 {
+                progress.record_write_progress();
+            } else {
+                progress.record_accepted(10);
+            }
+            let mut waiter_limits = limits.clone();
+            waiter_limits.request_write_idle_timeout = Duration::from_secs(5);
+            let expected = progress.response_deadline(absolute, &waiter_limits);
+            assert_eq!(expected.0, start + Duration::from_millis(160));
+            tokio::time::advance(Duration::from_millis(101)).await;
+            if http2 {
+                progress.record_write_progress();
+            } else {
+                progress.record_accepted(10);
+            }
+            progress.mark_consumed();
+            progress.mark_complete();
+            assert_eq!(
+                progress.response_deadline(absolute, &waiter_limits),
+                expected
+            );
+            assert_eq!(
+                expected.1,
+                if http2 {
+                    Phase::RequestWriteOrResponseHead
+                } else {
+                    Phase::RequestWrite
+                }
+            );
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn absolute_deadline_caps_steady_h1_and_h2_write() {
+        for http2 in [false, true] {
+            let limits = Limits {
+                request_write_idle_timeout: Duration::from_millis(100),
+                ..Limits::default()
+            };
+            let progress = super::RequestProgress::new(false, http2, 100);
+            let start = tokio::time::Instant::now();
+            let absolute = (start + Duration::from_millis(180)).into_std();
+            progress.start_write_clock(limits.request_write_idle_timeout);
+            for _ in 0..3 {
+                tokio::time::advance(Duration::from_millis(60)).await;
+                if http2 {
+                    progress.record_write_progress();
+                } else {
+                    progress.record_accepted(10);
+                }
+            }
+            assert_eq!(
+                progress.response_deadline(absolute, &limits).0.into_std(),
+                absolute
+            );
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stalled_and_absolute_write_failures_keep_phase_and_transmission() {
+        use std::sync::Arc;
+        for http2 in [false, true] {
+            for absolute_wins in [false, true] {
+                let limits = Limits {
+                    request_write_idle_timeout: Duration::from_millis(100),
+                    ..Limits::default()
+                };
+                let progress = Arc::new(super::RequestProgress::new(false, http2, 100));
+                let writer = Arc::clone(&progress);
+                let start = tokio::time::Instant::now();
+                let absolute = start
+                    + if absolute_wins {
+                        Duration::from_millis(180)
+                    } else {
+                        Duration::from_secs(5)
+                    };
+                let waiting = tokio::spawn(async move {
+                    let connection =
+                        ConnectionTask::new(tokio::spawn(std::future::pending()), None);
+                    super::wait_response(
+                        std::future::pending(),
+                        connection,
+                        progress,
+                        &ExchangeControl::new(absolute.into_std()),
+                        &limits,
+                    )
+                    .await
+                });
+                tokio::task::yield_now().await;
+                for _ in 0..2 {
+                    tokio::time::advance(Duration::from_millis(60)).await;
+                    if http2 {
+                        writer.record_write_progress();
+                    } else {
+                        writer.record_accepted(10);
+                    }
+                }
+                let failure = waiting.await.unwrap().err().unwrap();
+                assert_eq!(
+                    tokio::time::Instant::now(),
+                    start + Duration::from_millis(if absolute_wins { 180 } else { 220 })
+                );
+                assert_eq!(
+                    failure.phase(),
+                    if http2 {
+                        Phase::RequestWriteOrResponseHead
+                    } else {
+                        Phase::RequestWrite
+                    }
+                );
+                assert_eq!(failure.kind(), ErrorKind::DeadlineExceeded);
+                assert_eq!(failure.transmission(), TransmissionFact::MayHaveTransmitted);
+            }
+        }
+    }
+
+    use super::response_wait_deadline;
+
+    fn expired_response_deadline(
+        last_write_progress: Instant,
+        completed: Option<Instant>,
+        http2: bool,
+        absolute: Instant,
+        limits: &Limits,
+        now: Instant,
+    ) -> Option<Phase> {
+        let (deadline, phase) = response_wait_deadline(
+            last_write_progress,
+            completed,
+            http2,
+            absolute,
+            limits.request_write_idle_timeout,
+            limits.response_head_timeout,
+        );
+        (now >= deadline.into_std()).then_some(phase)
+    }
+
     #[test]
     fn ready_response_cannot_revive_expired_write_or_head_budget() {
         let start = Instant::now();
         let limits = Limits {
-            request_write_timeout: Duration::from_millis(150),
+            request_write_idle_timeout: Duration::from_millis(150),
             response_head_timeout: Duration::from_secs(5),
             ..Limits::default()
         };
@@ -2856,12 +3095,19 @@ mod tests {
     fn recorded_flush_time_owns_write_to_head_deadline_transition() {
         let start = Instant::now();
         let limits = Limits {
-            request_write_timeout: Duration::from_millis(150),
+            request_write_idle_timeout: Duration::from_millis(150),
             response_head_timeout: Duration::from_secs(5),
             ..Limits::default()
         };
         let absolute = start + Duration::from_secs(10);
-        let before = response_wait_deadline(start, None, false, absolute, &limits);
+        let before = response_wait_deadline(
+            start,
+            None,
+            false,
+            absolute,
+            limits.request_write_idle_timeout,
+            limits.response_head_timeout,
+        );
         assert_eq!(
             before,
             (
@@ -2876,7 +3122,8 @@ mod tests {
             Some(start + Duration::from_millis(140)),
             false,
             absolute,
-            &limits,
+            limits.request_write_idle_timeout,
+            limits.response_head_timeout,
         );
         assert_eq!(
             timely,
@@ -2890,7 +3137,8 @@ mod tests {
             Some(start + Duration::from_millis(160)),
             false,
             absolute,
-            &limits,
+            limits.request_write_idle_timeout,
+            limits.response_head_timeout,
         );
         assert_eq!(
             late, before,
@@ -2901,7 +3149,8 @@ mod tests {
             Some(start + Duration::from_millis(140)),
             false,
             start + Duration::from_millis(200),
-            &limits,
+            limits.request_write_idle_timeout,
+            limits.response_head_timeout,
         );
         assert_eq!(
             capped,
@@ -3041,7 +3290,10 @@ mod tests {
         assert_eq!(super::STREAMING_IDLE_TIMEOUT, Duration::from_secs(180));
         assert_eq!(limits.connect_timeout, defaults.connect_timeout);
         assert_eq!(limits.tls_timeout, defaults.tls_timeout);
-        assert_eq!(limits.request_write_timeout, defaults.request_write_timeout);
+        assert_eq!(
+            limits.request_write_idle_timeout,
+            defaults.request_write_idle_timeout
+        );
         assert_eq!(defaults.response_body_timeout, Duration::from_secs(30));
     }
 
