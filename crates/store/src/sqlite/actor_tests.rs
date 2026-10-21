@@ -1216,6 +1216,7 @@ async fn committed_head_is_warm_without_a_cold_load() -> TestResult {
         })
         .await?;
     let cold = store.load_branch(receipt.head().session()).await?;
+    assert_eq!(warm.checkpoint(), cold.checkpoint());
     assert_eq!(warm.checkpoint().bundle(), cold.checkpoint().bundle());
     Ok(())
 }
@@ -1243,6 +1244,7 @@ fn forked_head_is_warm_under_the_existing_cache_budget() -> TestResult {
         assert_eq!(backend.checkpoint_decodes, before);
         backend.checkpoints.clear();
         let cold = backend.load_branch(forked.head.session())?;
+        assert_eq!(loaded.checkpoint(), cold.checkpoint());
         assert_eq!(loaded.checkpoint().bundle(), cold.checkpoint().bundle());
     }
     Ok(())
