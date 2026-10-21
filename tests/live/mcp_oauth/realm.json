@@ -1,0 +1,123 @@
+{
+  "realm": "mcp",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "accessTokenLifespan": 60,
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+  "oauth2DeviceCodeLifespan": 120,
+  "oauth2DevicePollingInterval": 1,
+  "eventsEnabled": true,
+  "adminEventsEnabled": true,
+  "eventsListeners": [
+    "jboss-logging"
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Fixture",
+      "email": "alice@example.invalid",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "fixture-only",
+          "temporary": false
+        }
+      ]
+    }
+  ],
+  "clientScopes": [
+    {
+      "name": "read",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "resource-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "http://127.0.0.1:18082/mcp/keycloak",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "name": "write",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true"
+      }
+    }
+  ],
+  "defaultDefaultClientScopes": [
+    "read"
+  ],
+  "defaultOptionalClientScopes": [
+    "write"
+  ],
+  "clients": [
+    {
+      "clientId": "confidential",
+      "secret": "fixture-client-secret",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "consentRequired": true,
+      "redirectUris": [
+        "http://127.0.0.1:18765/callback"
+      ],
+      "defaultClientScopes": [
+        "read"
+      ],
+      "optionalClientScopes": [
+        "write"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "oauth2.device.authorization.grant.enabled": "true",
+        "exclude.issuer.from.auth.response": "false"
+      }
+    }
+  ],
+  "clientProfiles": {
+    "profiles": [
+      {
+        "name": "s256",
+        "executors": [
+          {
+            "executor": "pkce-enforcer",
+            "configuration": {
+              "code-challenge-method": "S256"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "clientPolicies": {
+    "policies": [
+      {
+        "name": "s256",
+        "enabled": true,
+        "conditions": [
+          {
+            "condition": "any-client",
+            "configuration": {}
+          }
+        ],
+        "profiles": [
+          "s256"
+        ]
+      }
+    ]
+  }
+}

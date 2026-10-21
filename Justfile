@@ -323,3 +323,8 @@ deny:
 # Opt-in indexed SQLite crash-point sweep of the real offline binary.
 crash-sweep *ARGS:
     python3 scripts/crash-sweep.py {{ARGS}}
+
+# Opt-in local authorization servers + browser. No accounts or inference; no gate.
+mcp-oauth-e2e *ARGS:
+    cargo build --release --locked -p plak --features plak/test-hooks
+    python3 tests/live/mcp_oauth/run.py {{ARGS}}

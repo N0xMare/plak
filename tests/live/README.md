@@ -609,3 +609,12 @@ It sends schema-valid efforts that are often unsupported (`minimal`, then
 names the model is that model's ladder and costs nothing; a 200 means that
 value is supported. The doc page stays the source of the table. `--models-dev` is a
 report-only cross-check. Offline: `--fixture tests/tooling/fixtures/api_model_census`.
+
+## MCP OAuth (No Accounts)
+
+`just mcp-oauth-e2e` runs the opt-in [MCP OAuth lane](mcp_oauth/README.md):
+Keycloak, strict node-oidc-provider resource indicators, an official-SDK MCP
+server and Playwright login. It uses a private disposable home and Plak's
+scripted model, never a provider account or paid inference. It is separate
+from smoke/soak and every gate tier. Run on tars0, never tars1, or on Docker
+Desktop with host networking enabled. Only its parser self-tests enter tooling.

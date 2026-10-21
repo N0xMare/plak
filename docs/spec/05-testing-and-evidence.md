@@ -3508,3 +3508,25 @@ restored headroom admits the turn.
 The opt-in `perf_store --large-store-admission` scenario reports admission and
 actor `queue_wait_ns` over a 200-session/2,000-checkpoint store. Timing is
 informational and never determines gate success.
+
+### Opt-In MCP OAuth Interoperability
+
+`just mcp-oauth-e2e` (`tests/live/mcp_oauth/`) is a local, zero-inference
+interoperability lane, not a gate or a substitute for owner-account/provider
+qualification. Digest-pinned Compose images run Keycloak 26, strict
+node-oidc-provider RFC 8707 resource indicators, an official-SDK streamable
+HTTP MCP fixture, and pinned Playwright browser approval with disposable test
+users. Plak is built with `test-hooks` and driven by `PLAK_TEST_SCRIPT` in an
+isolated private home; no operator subscription store is inherited. The JSON
+report binds the binary hash and source revision to per-scenario CLI/session
+log assertions and independent AS dispatch/MCP audience and effect witnesses.
+Browser URLs, authorization codes, device codes, tokens and client secrets
+are not retained in the report. Teardown removes the home, test grants and
+Compose resources, including on failure. A state-key carry scenario requires
+an explicitly supplied second MCP-capable binary with a different state key;
+missing evidence is reported as blocked, never a pass. Resource-matching
+expectations are external JSON data so the lane can follow the owning MCP
+specification without changing its fixture logic. Only offline parser and
+redaction self-tests run in the tooling group; no gate starts Docker, a
+browser, or these authorization servers. Linux runs use tars0 (not tars1);
+macOS requires Docker Desktop host networking for the loopback URL identities.

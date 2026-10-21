@@ -1,0 +1,1 @@
+{"name":"plak-mcp-oauth-e2e","private":true,"type":"module","dependencies":{"@modelcontextprotocol/sdk":"1.32.1","jose":"6.0.11","oidc-provider":"9.12.2","playwright":"1.58.2"}}

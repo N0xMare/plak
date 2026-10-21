@@ -1,0 +1,42 @@
+# Host networking is intentional: issuer/resource/callback URLs stay byte-identical.
+# Docker Desktop: enable Settings > Resources > Network > host networking.
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.2.5@sha256:4883630ef9db14031cde3e60700c9a9a8eaf1b5c24db1589d6a2d43de38ba2a9
+    network_mode: host
+    command: [start-dev, --import-realm, --http-host=127.0.0.1, --http-port=18080, --hostname=http://127.0.0.1:18081]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: fixture-admin
+    volumes:
+      - ./realm.json:/opt/keycloak/data/import/mcp.json:ro
+  node:
+    image: node:22.16.0-bookworm-slim@sha256:048ed02c5fd52e86fda6fbd2f6a76cf0d4492fd6c6fee9e2c463ed5108da0e34
+    network_mode: host
+    working_dir: /harness
+    volumes:
+      - ./package.json:/harness/package.json:ro
+      - ./package-lock.json:/harness/package-lock.json:ro
+      - ./server.mjs:/harness/server.mjs:ro
+      - ./browser.mjs:/harness/browser.mjs:ro
+      - dependencies:/harness/node_modules
+    profiles: [driver]
+  services:
+    extends: node
+    profiles: []
+    command: [node, server.mjs]
+  browser:
+    image: mcr.microsoft.com/playwright:v1.58.2-noble@sha256:6446946a1d9fd62d9ae501312a2d76a43ee688542b21622056a372959b65d63d
+    network_mode: host
+    working_dir: /harness
+    volumes:
+      - ./package.json:/harness/package.json:ro
+      - ./package-lock.json:/harness/package-lock.json:ro
+      - ./server.mjs:/harness/server.mjs:ro
+      - ./browser.mjs:/harness/browser.mjs:ro
+      - dependencies:/harness/node_modules
+    profiles: [driver]
+    environment:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+volumes:
+  dependencies:
