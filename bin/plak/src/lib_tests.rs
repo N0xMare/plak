@@ -2729,8 +2729,8 @@ fn local_compatibility_notice_exposes_exact_compiled_facts_for_each_provider() {
                 "secondary_source_revision=none\n",
                 "notice_revision=openai.codex.compat.notice.2026-07-31.r1\n",
                 "provenance=pinned_compatibility\n",
-                "reviewed_at=1791936000\n",
-                "expires_at=1794614399\n",
+                "reviewed_at={reviewed_at}\n",
+                "expires_at={expires_at}\n",
                 "kill_switch_revision=openai.codex.compat.kill.2026-07-31.r1\n",
                 "killed=false\n",
             ),
@@ -2752,6 +2752,10 @@ fn local_compatibility_notice_exposes_exact_compiled_facts_for_each_provider() {
         ),
     ];
     for (provider, expected) in cases {
+        let notice = plakous::subscriptions::NativeSubscriptions::notice(provider);
+        let expected = expected
+            .replace("{reviewed_at}", &notice.reviewed_at().to_string())
+            .replace("{expires_at}", &notice.expires_at().to_string());
         let mut output = Vec::new();
         assert_eq!(print_compatibility_notice(provider, &mut output), Ok(()));
         assert_eq!(output, expected.as_bytes());

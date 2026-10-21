@@ -2648,7 +2648,13 @@ The Codex OAuth reference client is `0.162.1`; the authenticated catalog request
 sends `client_version=0.162.1`. Its catalog contract is the `rust-v0.162.1`
 source revision's `models.json`, which is unchanged from `rust-v0.160.0` in
 every field Plak pins (tool mode, reasoning levels, windows, truncation,
-Responses Lite, parallel calls, service tiers). The reference client also sends
+Responses Lite, parallel calls, service tiers). The 2026-10-21 re-review against
+stable `rust-v0.163.0` (revision
+`83086188ae0614bd882818ff1aa23f3194962012`) found no change to pinned facts;
+`rust-v0.164.0-alpha.9` was spot-checked. The reviewed `models.json` SHA-256 is
+`943ca7fe1d19ed019054158303f0dbbd80b3bef43b3aa425a71aa7cb3fb52c2b`.
+OAuth client, scopes, endpoints, callback and originator/header contract are
+unchanged; Plak retains its pinned reference version and truthful identity. The reference client also sends
 `x-codex-beta-features: remote_compaction_v2` on ordinary turns; Plak sends that
 header only on a remote-compaction request, because it claims a capability
 only that request uses. Ordinary and remote-compaction requests send
@@ -2657,9 +2663,17 @@ dispatch. The backend keys prompt caching on this header, not the body field.
 A missing, non-string, or header-invalid key is refused. This Plak-owned affinity
 does not borrow client identity: `originator=plak` and the truthful Plak user
 agent remain unchanged. Its compiled compatibility
-profile was reviewed on 2026-10-14 and expires at 2026-11-13T23:59:59Z; an
+profile was reviewed on 2026-10-21 and expires at 2026-11-20T23:59:59Z; an
 acceptance recorded before the review date is not current, so the operator
-accepts the notice again without a new login (§7.2). Authenticated catalog
+accepts the notice again without a new login (§7.2).
+The hidden, non-default `test-clock` feature alone exposes the Codex manager
+and `NativeSubscriptions` clock seams for offline fixtures; it is not a
+supported facade API. Consent, catalog, side requests and token time checks
+share that test clock. Refresh-lead fixtures advance from a fixed review
+epoch using monotonic elapsed time. Production constructors remain clock-free
+and use the system clock. OpenAI and xAI Platform fixtures use each surface's
+own review window; Anthropic hosted clock coverage is deferred to CLOCK2.
+Authenticated catalog
 `use_responses_lite` evidence selects the request mode and binds its identity.
 No Codex request carries a top-level `instructions` string: instructions travel
 as a developer message prepended to the input, identified as `msg_` plus a
@@ -2849,6 +2863,15 @@ facts digest (`anthropic.api-model-facts.v2`) binds the id, family, effort
 ladder and output limit only. `AnthropicApiKey::fingerprint` is the first 16 hex digits of a
 domain-separated SHA-256 of the key, for keying a cache: not a credential, but
 a candidate key can be checked against it, so it stays in owner-only files.
+
+The OpenAI Platform manifest and xAI Platform binding were re-reviewed on
+2026-10-21 against their official model, Responses, tool-calling, reasoning and
+storage documentation. Neither review changed pinned facts. Their existing
+90-day windows end at
+2027-01-19T00:00:00Z; construction and runtime revalidation still refuse stale
+facts without fallback. Each surface derives its expiry from one review-date
+constant, as do the Codex and OpenRouter Chat pins. Re-dating changes no
+profile, request, or persisted encoding.
 
 **xAI API-key model catalog.** `plakous::xai` lists models with one bounded
 authenticated `GET /v1/models` on `https://api.x.ai` (the same API key,
@@ -3090,29 +3113,18 @@ final usage chunk that repeats `finish_reason`, `reasoning` and
 `reasoning_details`, tool calls, and the pre-commit JSON and mid-stream
 `error` shapes were last reviewed against the public
 [OpenRouter docs](https://openrouter.ai/docs/api_reference/streaming) on
-2026-10-14, and the pin expires at 2026-11-13T00:00:00Z. The expiry is enforced
+2026-10-21, with no change to pinned facts. The pin expires at
+2026-11-20T00:00:00Z. The expiry is enforced
 at runtime exactly like a compiled subscription profile's: target construction
 and every runtime-authority revalidation at or after it refuse the route with
 "OpenRouter Chat compatibility profile is not currently admissible"
 (`RuntimeModelAuthorityError::Stale` on revalidation), and every authority it
 issues expires no later than the pin. Continuing needs a build with a renewed
-review. The route clock is injectable and is shared by discovery, target
-construction, side retrieval and runtime revalidation; production uses the
-system clock. Offline fixtures use a fixed instant within the review window,
-and test expired-pin refusal explicitly. Codex credential-manager admission
-and catalog resolution likewise share an injected clock in offline tests.
-Codex token time checks use that clock too: signature, issuer, audience and
-required claims remain library-validated, while the existing stricter
-expiration, issued-at and not-before checks use the injected instant.
-Production retains the system clock and the same fail-closed checks.
-`NativeSubscriptions::with_clock` supplies consent time and the clock passed
-to Codex construction; product CLI fixtures use that seam too. Consent
-receipt tests inject a fixed review-window clock at the facade state seam;
-refresh-lead tests advance from a fixed review epoch using monotonic elapsed
-time, never the wall clock. OpenAI and xAI Platform API fixtures use the
-existing builder/executor clock ports, and hosted API construction passes its
-clock explicitly. Fixture instants follow the compiled review window, so a
-release-cut re-date does not require rewriting fixture dates.
+review. The test-only `test-clock` feature permits a route clock shared by
+discovery, target construction, side retrieval and runtime revalidation.
+Offline fixtures use an instant within that surface's own review window and
+test expired-pin refusal explicitly. Supported builds always use the system
+clock for compiled review expiry and credential time checks.
 
 Chat lowering refuses a function name exposed twice. One canonical tool may be
 exposed under several names (pi's `edit` and `write` over the patch tool); such

@@ -1,5 +1,8 @@
 use plakous_auth::oauth_pins::{CompatibilityProfilePins, SubscriptionOAuthPins};
 
+// Review date is the single release-cut input; the compatibility contract is unchanged.
+const CODEX_REVIEWED_AT_UNIX: u64 = 1_792_540_800;
+
 const CODEX_LOOPBACK_PORTS: &[u16] = &[1455, 1457];
 
 pub(crate) const CODEX_OAUTH: SubscriptionOAuthPins = SubscriptionOAuthPins {
@@ -28,14 +31,14 @@ pub(crate) const CODEX_PROFILE: CompatibilityProfilePins = CompatibilityProfileP
     source_locator: None,
     notice_revision: "openai.codex.compat.notice.2026-07-31.r1",
     kill_switch_revision: "openai.codex.compat.kill.2026-07-31.r1",
-    reviewed_at_unix: 1_791_936_000,
-    expires_at_unix: 1_794_614_399,
+    reviewed_at_unix: CODEX_REVIEWED_AT_UNIX,
+    expires_at_unix: CODEX_REVIEWED_AT_UNIX + 30 * 86_400 + 86_399,
     killed: false,
 };
 
 #[cfg(test)]
 mod tests {
-    use super::{CODEX_OAUTH, CODEX_PROFILE};
+    use super::{CODEX_OAUTH, CODEX_PROFILE, CODEX_REVIEWED_AT_UNIX};
     use plakous_auth::oauth_pins::{CompatibilityProfilePins, SubscriptionOAuthPins};
 
     #[test]
@@ -70,8 +73,8 @@ mod tests {
                 source_locator: None,
                 notice_revision: "openai.codex.compat.notice.2026-07-31.r1",
                 kill_switch_revision: "openai.codex.compat.kill.2026-07-31.r1",
-                reviewed_at_unix: 1_791_936_000,
-                expires_at_unix: 1_794_614_399,
+                reviewed_at_unix: CODEX_REVIEWED_AT_UNIX,
+                expires_at_unix: CODEX_REVIEWED_AT_UNIX + 30 * 86_400 + 86_399,
                 killed: false,
             }
         );

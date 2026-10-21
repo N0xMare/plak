@@ -296,8 +296,8 @@ changes, Plak prints a notice on stderr and asks once:
 ```
 codex uses an experimental revision-pinned compatibility integration.
 profile: <profile id>
-reviewed: 2026-10-14 UTC
-expires: 2026-11-13 UTC; after that this build refuses codex until a newer build replaces the profile
+reviewed: 2026-10-21 UTC
+expires: 2026-11-20 UTC; after that this build refuses codex until a newer build replaces the profile
 Continue? [y/N]
 ```
 

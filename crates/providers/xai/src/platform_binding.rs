@@ -24,7 +24,9 @@ pub const XAI_PLATFORM_GROK_46_PROFILE: &str = "xai.platform.grok-4.6.custom-env
 pub const XAI_PLATFORM_EXECUTION_REVISION: &str = "xai-platform-responses-2026-09-14-v1";
 pub(crate) const PROJECTION: &str = "responses-canonical-xai-platform-v1";
 pub(crate) const ACCOUNTING: &str = "responses-wire-bytes-xai-platform-v1";
-pub(crate) const REVIEWED: u64 = 1_789_344_000;
+// Reviewed 2026-10-21: docs.x.ai/developers/models/grok-4.6,
+// developers/model-capabilities/text/generate-text and developers/tools/function-calling.
+pub(crate) const REVIEWED: u64 = 1_792_540_800;
 pub(crate) const EXPIRES: u64 = REVIEWED + 90 * 86_400;
 
 /// Redaction-safe Platform construction or credential-source failure.
