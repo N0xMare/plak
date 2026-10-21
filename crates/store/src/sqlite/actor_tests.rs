@@ -1502,3 +1502,33 @@ async fn dispatch_reports_the_explicit_running_label() -> TestResult {
         .await?;
     Ok(())
 }
+
+#[tokio::test(start_paused = true)]
+async fn abandoned_read_waiters_release_all_admission_capacity() -> TestResult {
+    for timed_out in [false, true] {
+        let (sender, receiver) = actor_queue(1);
+        sender.send(Lane::Read, Box::new(|_| {}))?;
+        let mut waiting = sender.send_read(Box::new(|_| {}));
+        assert!(waiting.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
+        if timed_out {
+            tokio::time::advance(READ_QUEUE_TIMEOUT).await;
+            assert_eq!(waiting.await, Err(SessionStoreError::BackendBusy));
+            drop(receiver.read.try_recv()?);
+            sender.activity.read_space.add_permits(1);
+        } else {
+            // Cancel after the waiter was assigned the newly available permit,
+            // but before it can publish its job.
+            drop(receiver.read.try_recv()?);
+            sender.activity.read_space.add_permits(1);
+            drop(waiting);
+        }
+        assert_eq!(sender.activity.read_space.available_permits(), sender.capacity);
+        let mut next = sender.send_read(Box::new(|_| {}));
+        assert!(matches!(next.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(Ok(()))));
+        drop(next);
+        drop(receiver.read.try_recv()?);
+        sender.activity.read_space.add_permits(1);
+        assert_eq!(sender.activity.read_space.available_permits(), sender.capacity);
+    }
+    Ok(())
+}
