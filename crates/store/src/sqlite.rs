@@ -293,7 +293,6 @@ impl ActorSender {
                     return Err(SessionStoreError::BackendUnavailable);
                 }
                 tokio::sync::TryAcquireError::NoPermits => {
-                    self.overflowed(Lane::Read);
                     match tokio::time::timeout(
                         READ_QUEUE_TIMEOUT,
                         self.activity.read_space.acquire(),
@@ -332,7 +331,7 @@ impl ActorSender {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .record(Instant::now());
         if let Some(overflows) = overflows {
-            let running = self
+            let running = *self
                 .activity
                 .running
                 .lock()

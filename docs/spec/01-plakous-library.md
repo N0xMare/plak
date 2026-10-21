@@ -1133,7 +1133,8 @@ Capacity is released at dequeue. Waiting does not consume
 critical capacity or enlarge either queue. Queue pressure logs a content-free
 WARN under target `plakous_store::sqlite_actor`: lane, capacity, both lane
 depths, the running job's static label and elapsed milliseconds, and overflows
-since the last such line (first event, then at most one per lane every 10 s).
+since the last such line (first refusal, then at most one per lane every 10 s).
+Only refused admissions count as overflows, not reads that wait successfully.
 Jobs taking at least 250 ms also log a WARN with static label, lane, elapsed
 milliseconds and both lane depths. A request the exited actor can no longer
 take, or whose reply it dropped, returns `BackendUnavailable` and logs a WARN
