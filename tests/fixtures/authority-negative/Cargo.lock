@@ -1744,6 +1744,7 @@ dependencies = [
  "rusqlite",
  "rustix",
  "sysctl",
+ "tokio",
  "tracing",
 ]
 

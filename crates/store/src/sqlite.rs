@@ -7,6 +7,7 @@ use std::io::Read as _;
 use std::num::{NonZeroU64, NonZeroUsize};
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -65,6 +66,8 @@ pub const BUNDLED_SQLITE_REQUIRED_COMPILE_OPTIONS: [&str; 4] = [
     "USE_URI",
 ];
 const DEFAULT_QUEUE_CAPACITY: usize = 64;
+const READ_QUEUE_TIMEOUT: Duration = Duration::from_secs(1);
+const SLOW_JOB_THRESHOLD: Duration = Duration::from_millis(250);
 const BUSY_TIMEOUT: Duration = Duration::from_secs(15);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const BACKGROUND_VACUUM_PAGES: u32 = 1024;
@@ -122,6 +125,54 @@ impl OverflowLog {
     }
 }
 
+struct ActorActivity {
+    stopped: AtomicBool,
+    depths: [AtomicUsize; 2],
+    running: Mutex<Option<(&'static str, Instant)>>,
+    read_space: tokio::sync::Semaphore,
+}
+
+impl Default for ActorActivity {
+    fn default() -> Self {
+        Self {
+            stopped: AtomicBool::new(false),
+            depths: Default::default(),
+            running: Mutex::new(None),
+            read_space: tokio::sync::Semaphore::new(0),
+        }
+    }
+}
+
+impl ActorActivity {
+    fn start(&self, label: &'static str) -> Instant {
+        let started = Instant::now();
+        *self
+            .running
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((label, started));
+        started
+    }
+
+    fn finish(&self, lane: &'static str, label: &'static str, started: Instant) {
+        let elapsed = started.elapsed();
+        *self
+            .running
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        if elapsed >= SLOW_JOB_THRESHOLD {
+            tracing::warn!(
+                target: "plakous_store::sqlite_actor",
+                lane,
+                job = label,
+                elapsed_ms = elapsed.as_millis(),
+                critical_depth = self.depths[0].load(Ordering::Relaxed),
+                read_depth = self.depths[1].load(Ordering::Relaxed),
+                "SQLite store actor job is slow"
+            );
+        }
+    }
+}
+
 #[derive(Clone)]
 struct ActorSender {
     critical: mpsc::SyncSender<Job>,
@@ -129,15 +180,21 @@ struct ActorSender {
     wake: mpsc::SyncSender<()>,
     capacity: usize,
     overflow: Arc<[Mutex<OverflowLog>; 2]>,
+    activity: Arc<ActorActivity>,
 }
 
 struct ActorReceiver {
     critical: mpsc::Receiver<Job>,
     read: mpsc::Receiver<Job>,
     wake: mpsc::Receiver<()>,
+    activity: Arc<ActorActivity>,
 }
 
 fn actor_queue(capacity: usize) -> (ActorSender, ActorReceiver) {
+    let activity = Arc::new(ActorActivity {
+        read_space: tokio::sync::Semaphore::new(capacity),
+        ..ActorActivity::default()
+    });
     let (critical_tx, critical_rx) = mpsc::sync_channel(capacity);
     let (read_tx, read_rx) = mpsc::sync_channel(capacity);
     let (wake_tx, wake_rx) = mpsc::sync_channel(1);
@@ -148,40 +205,126 @@ fn actor_queue(capacity: usize) -> (ActorSender, ActorReceiver) {
             wake: wake_tx,
             capacity,
             overflow: Arc::default(),
+            activity: Arc::clone(&activity),
         },
         ActorReceiver {
             critical: critical_rx,
             read: read_rx,
             wake: wake_rx,
+            activity,
         },
     )
 }
 
 impl ActorSender {
-    fn send(&self, lane: Lane, job: Job) -> Result<(), SessionStoreError> {
+    fn enqueue(&self, lane: Lane, job: Job) -> Result<(), mpsc::TrySendError<Job>> {
+        if self.activity.stopped.load(Ordering::Acquire) {
+            return Err(mpsc::TrySendError::Disconnected(job));
+        }
         let sender = match lane {
             Lane::Critical => &self.critical,
             Lane::Read => &self.read,
         };
-        sender.try_send(job).map_err(|error| match error {
-            mpsc::TrySendError::Full(_) => {
-                self.overflowed(lane);
-                SessionStoreError::BackendBusy
-            }
-            mpsc::TrySendError::Disconnected(_) => {
-                actor_lost(lane, "disconnected");
-                SessionStoreError::BackendUnavailable
-            }
-        })?;
-        // Coalesce wakeups: queued jobs, not tokens, are the source of truth.
+        // Count before publication: the actor may consume the job immediately.
+        self.activity.depths[lane as usize].fetch_add(1, Ordering::Relaxed);
+        if let Err(error) = sender.try_send(job) {
+            self.activity.depths[lane as usize].fetch_sub(1, Ordering::Relaxed);
+            return Err(error);
+        }
         let _ = self.wake.try_send(());
         Ok(())
+    }
+
+    fn send(&self, lane: Lane, job: Job) -> Result<(), SessionStoreError> {
+        let permit = if matches!(lane, Lane::Read) {
+            Some(
+                self.activity
+                    .read_space
+                    .try_acquire()
+                    .map_err(|error| match error {
+                        tokio::sync::TryAcquireError::Closed => {
+                            SessionStoreError::BackendUnavailable
+                        }
+                        tokio::sync::TryAcquireError::NoPermits => {
+                            self.overflowed(lane);
+                            SessionStoreError::BackendBusy
+                        }
+                    })?,
+            )
+        } else {
+            None
+        };
+        self.enqueue(lane, job)
+            .map(|()| {
+                if let Some(permit) = permit {
+                    permit.forget();
+                }
+            })
+            .map_err(|error| match error {
+                mpsc::TrySendError::Full(_) => {
+                    self.overflowed(lane);
+                    SessionStoreError::BackendBusy
+                }
+                mpsc::TrySendError::Disconnected(_) => {
+                    actor_lost(lane, "disconnected");
+                    SessionStoreError::BackendUnavailable
+                }
+            })
+    }
+
+    fn send_read(&self, job: Job) -> StoreFuture<'_, ()> {
+        let first = match self.activity.read_space.try_acquire() {
+            Ok(permit) => {
+                let result = self.enqueue(Lane::Read, job).map_err(|_| {
+                    actor_lost(Lane::Read, "disconnected");
+                    SessionStoreError::BackendUnavailable
+                });
+                if result.is_ok() {
+                    permit.forget();
+                }
+                return Box::pin(async move { result });
+            }
+            Err(error) => error,
+        };
+        Box::pin(async move {
+            let permit = match first {
+                tokio::sync::TryAcquireError::Closed => {
+                    actor_lost(Lane::Read, "disconnected");
+                    return Err(SessionStoreError::BackendUnavailable);
+                }
+                tokio::sync::TryAcquireError::NoPermits => {
+                    self.overflowed(Lane::Read);
+                    match tokio::time::timeout(
+                        READ_QUEUE_TIMEOUT,
+                        self.activity.read_space.acquire(),
+                    )
+                    .await
+                    {
+                        Ok(Ok(permit)) => permit,
+                        Ok(Err(_)) => {
+                            actor_lost(Lane::Read, "disconnected");
+                            return Err(SessionStoreError::BackendUnavailable);
+                        }
+                        Err(_) => {
+                            self.overflowed(Lane::Read);
+                            return Err(SessionStoreError::BackendBusy);
+                        }
+                    }
+                }
+            };
+            self.enqueue(Lane::Read, job).map_err(|_| {
+                actor_lost(Lane::Read, "disconnected");
+                SessionStoreError::BackendUnavailable
+            })?;
+            // Queue capacity becomes available at dequeue, not at job completion.
+            permit.forget();
+            Ok(())
+        })
     }
 }
 
 impl ActorSender {
-    /// A full lane refuses its job as busy; the refusal reaches the caller,
-    /// and this warning makes the cause visible in the log.
+    /// Queue pressure is visible without logging session or request content.
     fn overflowed(&self, lane: Lane) {
         let log = &self.overflow[lane as usize];
         let overflows = log
@@ -189,12 +332,24 @@ impl ActorSender {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .record(Instant::now());
         if let Some(overflows) = overflows {
+            let running = self
+                .activity
+                .running
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let (running_job, running_ms) =
+                running.map_or(("idle", 0), |(label, at)| (label, at.elapsed().as_millis()));
             tracing::warn!(
                 target: "plakous_store::sqlite_actor",
                 lane = lane.label(),
                 capacity = self.capacity,
                 overflows,
-                "SQLite store request lane is full; requests refused as busy"
+                critical_depth = self.activity.depths[0].load(Ordering::Relaxed),
+                read_depth = self.activity.depths[1].load(Ordering::Relaxed),
+                running_job,
+                running_ms,
+                "SQLite store request lane is full"
+
             );
         }
     }
@@ -211,21 +366,44 @@ fn actor_lost(lane: Lane, reason: &'static str) {
     );
 }
 
+impl Drop for ActorReceiver {
+    fn drop(&mut self) {
+        self.activity.stopped.store(true, Ordering::Release);
+        self.activity.read_space.close();
+    }
+}
+
 impl ActorReceiver {
+    fn background_step(&self, backend: &mut Backend) -> bool {
+        let started = self.activity.start("background_step");
+        let pending = backend.background_step();
+        self.activity
+            .finish("background", "background_step", started);
+        pending
+    }
+
     fn run(&self, backend: &mut Backend) {
         let mut foreground_jobs = 0;
         loop {
             if foreground_jobs >= BACKGROUND_JOB_INTERVAL {
-                backend.background_step();
+                self.background_step(backend);
                 foreground_jobs = 0;
             }
-            let job = self.critical.try_recv().or_else(|_| self.read.try_recv());
-            if let Ok(job) = job {
+            let job = self
+                .critical
+                .try_recv()
+                .map(|job| (Lane::Critical, job))
+                .or_else(|_| self.read.try_recv().map(|job| (Lane::Read, job)));
+            if let Ok((lane, job)) = job {
+                self.activity.depths[lane as usize].fetch_sub(1, Ordering::Relaxed);
+                if matches!(lane, Lane::Read) {
+                    self.activity.read_space.add_permits(1);
+                }
                 job(backend);
                 foreground_jobs += 1;
                 continue;
             }
-            if backend.background_step() {
+            if self.background_step(backend) {
                 foreground_jobs = 0;
                 continue;
             }
@@ -901,36 +1079,43 @@ impl SqliteSessionStore {
 
     /// Reads local counters without changing authority.
     pub fn stats(&self) -> StoreFuture<'_, SqliteStoreStats> {
-        self.dispatch_read(|backend| {
+        self.dispatch_read("stats", |backend| {
             backend.require_open()?;
             read_stats(&backend.connection)
         })
     }
 
-    fn dispatch<T, F>(&self, operation: F) -> StoreFuture<'_, T>
+    fn dispatch<T, F>(&self, label: &'static str, operation: F) -> StoreFuture<'_, T>
     where
         T: Send + 'static,
         F: FnOnce(&mut Backend) -> Result<T, SessionStoreError> + Send + 'static,
     {
-        self.dispatch_lane(Lane::Critical, operation)
+        self.dispatch_lane(Lane::Critical, label, operation)
     }
 
-    fn dispatch_read<T, F>(&self, operation: F) -> StoreFuture<'_, T>
+    fn dispatch_read<T, F>(&self, label: &'static str, operation: F) -> StoreFuture<'_, T>
     where
         T: Send + 'static,
         F: FnOnce(&mut Backend) -> Result<T, SessionStoreError> + Send + 'static,
     {
-        self.dispatch_lane(Lane::Read, operation)
+        self.dispatch_lane(Lane::Read, label, operation)
     }
 
-    fn dispatch_lane<T, F>(&self, lane: Lane, operation: F) -> StoreFuture<'_, T>
+    fn dispatch_lane<T, F>(
+        &self,
+        lane: Lane,
+        label: &'static str,
+        operation: F,
+    ) -> StoreFuture<'_, T>
     where
         T: Send + 'static,
         F: FnOnce(&mut Backend) -> Result<T, SessionStoreError> + Send + 'static,
     {
         let (reply, response) = oneshot::channel();
         let snapshot = Arc::clone(&self.usage_snapshot);
+        let activity = Arc::clone(&self.sender.activity);
         let job: Job = Box::new(move |backend| {
+            let started = activity.start(label);
             #[cfg(test)]
             if let Some(hook) = &mut backend.job_hook {
                 hook(match lane {
@@ -950,11 +1135,18 @@ impl SqliteSessionStore {
             }
             #[cfg(feature = "commit-trace")]
             drop(settle);
+            activity.finish(lane.label(), label, started);
             let _ = reply.send(result);
         });
-        let queued = self.sender.send(lane, job);
+        let queued = match lane {
+            Lane::Critical => {
+                let queued = self.sender.send(lane, job);
+                Box::pin(async move { queued }) as StoreFuture<'_, ()>
+            }
+            Lane::Read => self.sender.send_read(job),
+        };
         Box::pin(async move {
-            queued?;
+            queued.await?;
             response.await.map_err(|_| {
                 actor_lost(lane, "reply_dropped");
                 SessionStoreError::BackendUnavailable
@@ -1491,7 +1683,7 @@ impl SessionStore for SqliteSessionStore {
     }
 
     fn create(&self, r: CreateSession) -> StoreFuture<'_, CreateReceipt> {
-        self.dispatch(move |b| {
+        self.dispatch("create", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("create");
             let receipt = b.retry_after_reclaim(|b| create(b, &r))?;
@@ -1500,14 +1692,14 @@ impl SessionStore for SqliteSessionStore {
         })
     }
     fn recover_create(&self, r: CreateSession) -> StoreFuture<'_, CreateReceipt> {
-        self.dispatch(move |b| {
+        self.dispatch("recover_create", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("recover_create");
             recover_create(&b.connection, &r)
         })
     }
     fn load_branch(&self, s: SessionRef) -> StoreFuture<'_, LoadedBranch> {
-        self.dispatch_read(move |b| {
+        self.dispatch_read("load_branch", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("load_branch");
             b.require_open()?;
@@ -1515,35 +1707,35 @@ impl SessionStore for SqliteSessionStore {
         })
     }
     fn load_checkpoint(&self, c: CheckpointId) -> StoreFuture<'_, StoredCheckpoint> {
-        self.dispatch_read(move |b| {
+        self.dispatch_read("load_checkpoint", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("load_checkpoint");
             b.load_checkpoint(c)
         })
     }
     fn acquire(&self, r: AcquireBranch) -> StoreFuture<'_, BranchLease> {
-        self.dispatch(move |b| {
+        self.dispatch("acquire", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("acquire");
             acquire(b, r)
         })
     }
     fn renew(&self, l: BranchLease) -> StoreFuture<'_, BranchLease> {
-        self.dispatch(move |b| {
+        self.dispatch("renew", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("renew");
             renew(b, &l)
         })
     }
     fn revive(&self, l: BranchLease) -> StoreFuture<'_, BranchLease> {
-        self.dispatch(move |b| {
+        self.dispatch("revive", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("revive");
             revive(b, &l)
         })
     }
     fn release(&self, l: BranchLease) -> StoreFuture<'_, ()> {
-        self.dispatch(move |b| {
+        self.dispatch("release", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("release");
             release(b, &l)?;
@@ -1552,7 +1744,7 @@ impl SessionStore for SqliteSessionStore {
         })
     }
     fn release_many(&self, leases: Vec<BranchLease>) -> StoreFuture<'_, ()> {
-        self.dispatch(move |b| {
+        self.dispatch("release_many", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("release_many");
             release_many(b, &leases)
@@ -1562,7 +1754,7 @@ impl SessionStore for SqliteSessionStore {
         #[cfg(feature = "perf-instrumentation")]
         if let Some(collector) = self.trace.clone() {
             let queued_at = Instant::now();
-            return self.dispatch(move |b| {
+            return self.dispatch("commit", move |b| {
                 #[cfg(feature = "commit-trace")]
                 let _label = crate::commit_trace::label("commit");
                 let queue_wait_ns = elapsed_ns(queued_at);
@@ -1580,7 +1772,7 @@ impl SessionStore for SqliteSessionStore {
                 Ok(receipt)
             });
         }
-        self.dispatch(move |b| {
+        self.dispatch("commit", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("commit");
             let receipt = b.retry_after_reclaim(|b| commit(b, &r))?;
@@ -1589,14 +1781,14 @@ impl SessionStore for SqliteSessionStore {
         })
     }
     fn recover_commit(&self, c: CheckpointId) -> StoreFuture<'_, CommittedCheckpoint> {
-        self.dispatch(move |b| {
+        self.dispatch("recover_commit", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("recover_commit");
             recover_commit(&b.connection, c)
         })
     }
     fn fork(&self, r: ForkBranch) -> StoreFuture<'_, ForkReceipt> {
-        self.dispatch(move |b| {
+        self.dispatch("fork", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("fork");
             let receipt = b.retry_after_reclaim(|b| fork(b, &r))?;
@@ -1605,14 +1797,14 @@ impl SessionStore for SqliteSessionStore {
         })
     }
     fn recover_fork(&self, r: RecoverFork) -> StoreFuture<'_, ForkReceipt> {
-        self.dispatch(move |b| {
+        self.dispatch("recover_fork", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("recover_fork");
             recover_fork(b, &r)
         })
     }
     fn list(&self, q: SessionQuery) -> StoreFuture<'_, Page<SessionSummary>> {
-        self.dispatch_read(move |b| {
+        self.dispatch_read("list", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("list");
             b.require_open()?;
@@ -1627,10 +1819,10 @@ impl SessionStore for SqliteSessionStore {
         Box::pin(async move { snapshot })
     }
     fn reclaim(&self, mode: StoreReclaimMode) -> StoreFuture<'_, StoreReclaimReport> {
-        self.dispatch(move |b| b.reclaim(mode))
+        self.dispatch("reclaim", move |b| b.reclaim(mode))
     }
     fn archive(&self, r: ArchiveSession) -> StoreFuture<'_, ArchiveReceipt> {
-        self.dispatch(move |b| {
+        self.dispatch("archive", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("archive");
             let receipt = archive(b, r)?;
@@ -1639,7 +1831,7 @@ impl SessionStore for SqliteSessionStore {
         })
     }
     fn delete(&self, r: DeleteSession) -> StoreFuture<'_, DeleteReceipt> {
-        self.dispatch(move |b| {
+        self.dispatch("delete", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("delete");
             let result = delete(b, r);
@@ -1648,14 +1840,14 @@ impl SessionStore for SqliteSessionStore {
         })
     }
     fn recover_delete(&self, r: DeleteSession) -> StoreFuture<'_, DeleteReceipt> {
-        self.dispatch(move |b| {
+        self.dispatch("recover_delete", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("recover_delete");
             load_delete(&b.connection, r)
         })
     }
     fn prune(&self, r: PruneBranch) -> StoreFuture<'_, PruneReceipt> {
-        self.dispatch(move |b| {
+        self.dispatch("prune", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("prune");
             let receipt = prune(b, &r);
@@ -1671,7 +1863,7 @@ impl SessionStore for SqliteSessionStore {
         after: FeedSeq,
         max_records: NonZeroUsize,
     ) -> StoreFuture<'_, FeedPage> {
-        self.dispatch_read(move |b| {
+        self.dispatch_read("read_feed", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("read_feed");
             let snapshot = b.connection.transaction().map_err(map_sqlite)?;
@@ -1679,14 +1871,14 @@ impl SessionStore for SqliteSessionStore {
         })
     }
     fn feed_tail(&self, session_id: SessionId) -> StoreFuture<'_, FeedTail> {
-        self.dispatch_read(move |b| {
+        self.dispatch_read("feed_tail", move |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("feed_tail");
             feed::tail(&b.connection, session_id)
         })
     }
     fn flush(&self) -> StoreFuture<'_, DurabilityReport> {
-        self.dispatch(|b| {
+        self.dispatch("flush", |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("flush");
             b.require_open()?;
@@ -1695,7 +1887,7 @@ impl SessionStore for SqliteSessionStore {
         })
     }
     fn shutdown(&self) -> StoreFuture<'_, DurabilityReport> {
-        self.dispatch(|b| {
+        self.dispatch("shutdown", |b| {
             #[cfg(feature = "commit-trace")]
             let _label = crate::commit_trace::label("shutdown");
             if let Some(r) = b.shutdown_report {
@@ -4038,8 +4230,14 @@ fn commit_impl(
     backend.require_open()?;
     let reference = bundle_ref(request.checkpoint());
     let candidate = candidate(request.checkpoint())?;
-    let cached = StoredCheckpoint::from_store(reference, request.checkpoint().current_root_closure().map_err(bundle_error)?)
-        .map_err(bundle_error)?;
+    let cached = StoredCheckpoint::from_store(
+        reference,
+        request
+            .checkpoint()
+            .current_root_closure()
+            .map_err(bundle_error)?,
+    )
+    .map_err(bundle_error)?;
     #[cfg(feature = "perf-instrumentation")]
     let transaction_started = observed.then(Instant::now);
     let tx = backend
@@ -4294,8 +4492,11 @@ fn fork(b: &mut Backend, r: &ForkBranch) -> Result<ForkReceipt, SessionStoreErro
     super::validate_fork_semantic_request(r)?;
     let reference = bundle_ref(r.target());
     let x = candidate(r.target())?;
-    let cached =
-        StoredCheckpoint::from_store(reference, r.target().current_root_closure().map_err(bundle_error)?).map_err(bundle_error)?;
+    let cached = StoredCheckpoint::from_store(
+        reference,
+        r.target().current_root_closure().map_err(bundle_error)?,
+    )
+    .map_err(bundle_error)?;
     let target = SessionRef::new(r.source().session().session_id(), r.target_branch());
     let tx = b
         .connection
@@ -6889,7 +7090,11 @@ mod tests {
             trace: None,
         };
         assert_eq!(
-            full.dispatch(|_| Ok::<_, SessionStoreError>(())).await,
+            full.dispatch(
+                "actor_dispatch_reports_full_and_failed_workers_without_waiting",
+                |_| Ok::<_, SessionStoreError>(())
+            )
+            .await,
             Err(SessionStoreError::BackendBusy)
         );
         drop(full_receiver);
@@ -6912,7 +7117,12 @@ mod tests {
             trace: None,
         };
         assert_eq!(
-            failed.dispatch(|_| Ok::<_, SessionStoreError>(())).await,
+            failed
+                .dispatch(
+                    "actor_dispatch_reports_full_and_failed_workers_without_waiting",
+                    |_| Ok::<_, SessionStoreError>(())
+                )
+                .await,
             Err(SessionStoreError::BackendUnavailable)
         );
     }

@@ -9,7 +9,7 @@ async fn schema_25_separates_metadata_payloads_and_persistent_gc_queue() -> Test
     let directory = tempfile::tempdir()?;
     let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
     store.create(seed()?).await?;
-    store.dispatch_read(|b| {
+    store.dispatch_read("schema_25_separates_metadata_payloads_and_persistent_gc_queue", |b| {
         let version: i64 = b.connection.pragma_query_value(None, "user_version", |r| r.get(0)).map_err(map_sqlite)?;
         assert_eq!(version, 25);
         let sql: String = b.connection.query_row("SELECT sql FROM sqlite_schema WHERE name='runtime_objects'", [], |r| r.get(0)).map_err(map_sqlite)?;
@@ -37,17 +37,20 @@ async fn background_gc_publishes_usage_before_the_next_step() -> TestResult {
     let (entered_tx, entered_rx) = mpsc::sync_channel(1);
     let (release_tx, release_rx) = mpsc::sync_channel(1);
     store
-        .dispatch(move |b| {
-            let mut steps = 0;
-            b.job_hook = Some(Box::new(move |kind| {
-                if kind == ExecutedJob::Background && steps < 2 {
-                    steps += 1;
-                    assert!(entered_tx.send(()).is_ok());
-                    assert!(release_rx.recv().is_ok());
-                }
-            }));
-            Ok(())
-        })
+        .dispatch(
+            "background_gc_publishes_usage_before_the_next_step",
+            move |b| {
+                let mut steps = 0;
+                b.job_hook = Some(Box::new(move |kind| {
+                    if kind == ExecutedJob::Background && steps < 2 {
+                        steps += 1;
+                        assert!(entered_tx.send(()).is_ok());
+                        assert!(release_rx.recv().is_ok());
+                    }
+                }));
+                Ok(())
+            },
+        )
         .await?;
     store
         .delete(DeleteSession::new(
@@ -78,7 +81,7 @@ impl LeaseClock for FixedClock {
 fn park(store: &SqliteSessionStore) -> (StoreFuture<'_, ()>, mpsc::SyncSender<()>) {
     let (entered_tx, entered_rx) = mpsc::sync_channel(1);
     let (release_tx, release_rx) = mpsc::sync_channel(1);
-    let parked = store.dispatch(move |_| {
+    let parked = store.dispatch("park", move |_| {
         entered_tx
             .send(())
             .map_err(|_| SessionStoreError::BackendUnavailable)?;
@@ -97,7 +100,7 @@ async fn critical_jobs_overtake_queued_reads() -> TestResult {
     let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
     let (parked, release) = park(&store);
     let read = store.stats();
-    let critical = store.dispatch(|b| {
+    let critical = store.dispatch("critical_jobs_overtake_queued_reads", |b| {
         b.connection
             .execute("UPDATE store_meta SET semantic_mutations=1 WHERE id=1", [])
             .map_err(map_sqlite)?;
@@ -133,18 +136,27 @@ async fn actor_lanes_have_independent_bounded_capacity() -> TestResult {
         SqliteStoreOptions::new(MemoryStoreLimits::default(), NonZeroUsize::MIN),
     )?;
     let (parked, release) = park(&store);
-    let critical = store.dispatch(|_| Ok(()));
+    let critical = store.dispatch("actor_lanes_have_independent_bounded_capacity", |_| Ok(()));
     let read = store.stats();
     assert_eq!(
-        store.dispatch(|_| Ok(())).await,
+        store
+            .dispatch("actor_lanes_have_independent_bounded_capacity", |_| Ok(()))
+            .await,
         Err(SessionStoreError::BackendBusy)
     );
-    assert_eq!(store.stats().await, Err(SessionStoreError::BackendBusy));
+    let mut backpressured = store.stats();
+    assert!(
+        backpressured
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
     assert!(store.usage().await.is_ok());
     release.send(())?;
     parked.await?;
     critical.await?;
     read.await?;
+    backpressured.await?;
     Ok(())
 }
 
@@ -157,25 +169,35 @@ async fn background_aging_runs_one_step_after_32_foreground_jobs() -> TestResult
     let (entered_tx, entered_rx) = mpsc::sync_channel(1);
     let (release_tx, release_rx) = mpsc::sync_channel(1);
     store
-        .dispatch(move |b| {
-            let mut first = true;
-            b.job_hook = Some(Box::new(move |kind| {
-                if let Ok(mut log) = log.lock() {
-                    log.push(kind);
-                }
-                if kind == ExecutedJob::Background && first {
-                    first = false;
-                    assert!(entered_tx.send(()).is_ok());
-                    assert!(release_rx.recv().is_ok());
-                }
-            }));
-            b.wal_pending = true;
-            b.vacuum_pending = true;
-            Ok(())
-        })
+        .dispatch(
+            "background_aging_runs_one_step_after_32_foreground_jobs",
+            move |b| {
+                let mut first = true;
+                b.job_hook = Some(Box::new(move |kind| {
+                    if let Ok(mut log) = log.lock() {
+                        log.push(kind);
+                    }
+                    if kind == ExecutedJob::Background && first {
+                        first = false;
+                        assert!(entered_tx.send(()).is_ok());
+                        assert!(release_rx.recv().is_ok());
+                    }
+                }));
+                b.wal_pending = true;
+                b.vacuum_pending = true;
+                Ok(())
+            },
+        )
         .await?;
     entered_rx.recv()?;
-    let jobs: Vec<_> = (0..40).map(|_| store.dispatch(|_| Ok(()))).collect();
+    let jobs: Vec<_> = (0..40)
+        .map(|_| {
+            store.dispatch(
+                "background_aging_runs_one_step_after_32_foreground_jobs",
+                |_| Ok(()),
+            )
+        })
+        .collect();
     release_tx.send(())?;
     for job in jobs {
         job.await?;
@@ -253,22 +275,25 @@ async fn queued_renew_and_commit_run_before_next_background_step() -> TestResult
     let (entered_tx, entered_rx) = mpsc::sync_channel(1);
     let (release_tx, release_rx) = mpsc::sync_channel(1);
     store
-        .dispatch(move |b| {
-            let mut first = true;
-            b.job_hook = Some(Box::new(move |kind| {
-                if let Ok(mut log) = log.lock() {
-                    log.push(kind);
-                }
-                if kind == ExecutedJob::Background && first {
-                    first = false;
-                    assert!(entered_tx.send(()).is_ok());
-                    assert!(release_rx.recv().is_ok());
-                }
-            }));
-            b.wal_pending = true;
-            b.vacuum_pending = true;
-            Ok(())
-        })
+        .dispatch(
+            "queued_renew_and_commit_run_before_next_background_step",
+            move |b| {
+                let mut first = true;
+                b.job_hook = Some(Box::new(move |kind| {
+                    if let Ok(mut log) = log.lock() {
+                        log.push(kind);
+                    }
+                    if kind == ExecutedJob::Background && first {
+                        first = false;
+                        assert!(entered_tx.send(()).is_ok());
+                        assert!(release_rx.recv().is_ok());
+                    }
+                }));
+                b.wal_pending = true;
+                b.vacuum_pending = true;
+                Ok(())
+            },
+        )
         .await?;
     entered_rx.recv()?;
     let read = store.stats();
@@ -299,7 +324,10 @@ async fn usage_snapshot_is_published_before_mutation_acknowledgment() -> TestRes
     assert_eq!(store.usage().await?.bounds()[0].used(), 0);
     store.create(seed()?).await?;
     let expected = store
-        .dispatch_read(|b| usage(&b.connection, b.limits))
+        .dispatch_read(
+            "usage_snapshot_is_published_before_mutation_acknowledgment",
+            |b| usage(&b.connection, b.limits),
+        )
         .await?;
     assert_eq!(expected.bounds()[0].used(), 1);
     assert_eq!(store.usage().await?, expected);
@@ -313,16 +341,19 @@ async fn sqlite_page_cache_is_64_mib_and_default_auto_checkpoint_is_enabled() ->
     let directory = tempfile::tempdir()?;
     let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
     let pragmas = store
-        .dispatch_read(|b| {
-            Ok((
-                b.connection
-                    .pragma_query_value(None, "cache_size", |r| r.get::<_, i64>(0))
-                    .map_err(map_sqlite)?,
-                b.connection
-                    .pragma_query_value(None, "wal_autocheckpoint", |r| r.get::<_, i64>(0))
-                    .map_err(map_sqlite)?,
-            ))
-        })
+        .dispatch_read(
+            "sqlite_page_cache_is_64_mib_and_default_auto_checkpoint_is_enabled",
+            |b| {
+                Ok((
+                    b.connection
+                        .pragma_query_value(None, "cache_size", |r| r.get::<_, i64>(0))
+                        .map_err(map_sqlite)?,
+                    b.connection
+                        .pragma_query_value(None, "wal_autocheckpoint", |r| r.get::<_, i64>(0))
+                        .map_err(map_sqlite)?,
+                ))
+            },
+        )
         .await?;
     assert_eq!(pragmas, (-65536, 1000));
     Ok(())
@@ -334,10 +365,13 @@ async fn usage_snapshot_catches_mutations_that_commit_before_an_error() -> TestR
     let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
     let request = seed()?;
     let result = store
-        .dispatch(move |b| {
-            create(b, &request)?;
-            Err::<(), _>(SessionStoreError::BackendUnavailable)
-        })
+        .dispatch(
+            "usage_snapshot_catches_mutations_that_commit_before_an_error",
+            move |b| {
+                create(b, &request)?;
+                Err::<(), _>(SessionStoreError::BackendUnavailable)
+            },
+        )
         .await;
     assert_eq!(result, Err(SessionStoreError::BackendUnavailable));
     assert_eq!(store.usage().await?.bounds()[0].used(), 1);
@@ -349,7 +383,7 @@ async fn vacuum_background_step_frees_at_most_1024_pages() -> TestResult {
     let directory = tempfile::tempdir()?;
     let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
     let (before, after) = store
-        .dispatch(|b| {
+        .dispatch("vacuum_background_step_frees_at_most_1024_pages", |b| {
             b.connection
                 .execute_batch(
                     "CREATE TABLE housekeeping_test(payload BLOB);
@@ -408,45 +442,54 @@ async fn shutdown_with_pending_vacuum_runs_only_one_checkpoint() -> TestResult {
     let directory = tempfile::tempdir()?;
     let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
     let before = store
-        .dispatch(|b| {
-            b.connection
-                .execute_batch(
-                    "CREATE TABLE housekeeping_test(payload BLOB);
+        .dispatch(
+            "shutdown_with_pending_vacuum_runs_only_one_checkpoint",
+            |b| {
+                b.connection
+                    .execute_batch(
+                        "CREATE TABLE housekeeping_test(payload BLOB);
              INSERT INTO housekeeping_test VALUES(zeroblob(8388608));
              DROP TABLE housekeeping_test;",
-                )
-                .map_err(map_sqlite)?;
-            b.connection
-                .trace_v2(TraceEventCodes::SQLITE_TRACE_STMT, Some(count_statement));
-            WAL_CHECKPOINTS.with(|count| count.set(0));
-            VACUUM_STEPS.with(|count| count.set(0));
-            b.connection
-                .pragma_query_value(None, "freelist_count", |r| r.get::<_, i64>(0))
-                .map_err(map_sqlite)
-        })
+                    )
+                    .map_err(map_sqlite)?;
+                b.connection
+                    .trace_v2(TraceEventCodes::SQLITE_TRACE_STMT, Some(count_statement));
+                WAL_CHECKPOINTS.with(|count| count.set(0));
+                VACUUM_STEPS.with(|count| count.set(0));
+                b.connection
+                    .pragma_query_value(None, "freelist_count", |r| r.get::<_, i64>(0))
+                    .map_err(map_sqlite)
+            },
+        )
         .await?;
     let (parked, release) = park(&store);
-    let pending = store.dispatch(|b| {
-        b.vacuum_pending = true;
-        b.wal_pending = true;
-        Ok(())
-    });
+    let pending = store.dispatch(
+        "shutdown_with_pending_vacuum_runs_only_one_checkpoint",
+        |b| {
+            b.vacuum_pending = true;
+            b.wal_pending = true;
+            Ok(())
+        },
+    );
     let shutdown = store.shutdown();
     release.send(())?;
     parked.await?;
     pending.await?;
     shutdown.await?;
     let (after, wal, vacuum) = store
-        .dispatch_read(|b| {
-            b.connection.trace_v2(TraceEventCodes::empty(), None);
-            Ok((
-                b.connection
-                    .pragma_query_value(None, "freelist_count", |r| r.get::<_, i64>(0))
-                    .map_err(map_sqlite)?,
-                WAL_CHECKPOINTS.with(std::cell::Cell::get),
-                VACUUM_STEPS.with(std::cell::Cell::get),
-            ))
-        })
+        .dispatch_read(
+            "shutdown_with_pending_vacuum_runs_only_one_checkpoint",
+            |b| {
+                b.connection.trace_v2(TraceEventCodes::empty(), None);
+                Ok((
+                    b.connection
+                        .pragma_query_value(None, "freelist_count", |r| r.get::<_, i64>(0))
+                        .map_err(map_sqlite)?,
+                    WAL_CHECKPOINTS.with(std::cell::Cell::get),
+                    VACUUM_STEPS.with(std::cell::Cell::get),
+                ))
+            },
+        )
         .await?;
     assert!(before > i64::from(BACKGROUND_VACUUM_PAGES));
     assert_eq!(
@@ -462,41 +505,47 @@ async fn shutdown_with_pending_gc_leaves_candidates_and_counters_unchanged() -> 
     let directory = tempfile::tempdir()?;
     let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
     let (parked, release_gate) = park(&store);
-    let pending = store.dispatch(|b| {
-        let created = create(b, &seed().map_err(|_| SessionStoreError::corrupt())?)?;
-        release(b, created.lease())?;
-        let archived = archive(
-            b,
-            ArchiveSession::new(created.session().session_id(), created.session().revision()),
-        )?;
-        delete(
-            b,
-            DeleteSession::new(
-                archived.session().session_id(),
-                archived.session().revision(),
-            ),
-        )?;
-        b.connection
-            .trace_v2(TraceEventCodes::SQLITE_TRACE_STMT, Some(count_statement));
-        WAL_CHECKPOINTS.with(|count| count.set(0));
-        VACUUM_STEPS.with(|count| count.set(0));
-        Ok(read_stats(&b.connection)?.objects())
-    });
+    let pending = store.dispatch(
+        "shutdown_with_pending_gc_leaves_candidates_and_counters_unchanged",
+        |b| {
+            let created = create(b, &seed().map_err(|_| SessionStoreError::corrupt())?)?;
+            release(b, created.lease())?;
+            let archived = archive(
+                b,
+                ArchiveSession::new(created.session().session_id(), created.session().revision()),
+            )?;
+            delete(
+                b,
+                DeleteSession::new(
+                    archived.session().session_id(),
+                    archived.session().revision(),
+                ),
+            )?;
+            b.connection
+                .trace_v2(TraceEventCodes::SQLITE_TRACE_STMT, Some(count_statement));
+            WAL_CHECKPOINTS.with(|count| count.set(0));
+            VACUUM_STEPS.with(|count| count.set(0));
+            Ok(read_stats(&b.connection)?.objects())
+        },
+    );
     let shutdown = store.shutdown();
     release_gate.send(())?;
     parked.await?;
     let before = pending.await?;
     shutdown.await?;
     let (after, queued, wal, vacuum) = store
-        .dispatch_read(|b| {
-            b.connection.trace_v2(TraceEventCodes::empty(), None);
-            Ok((
-                read_stats(&b.connection)?.objects(),
-                gc::pending(&b.connection)?,
-                WAL_CHECKPOINTS.with(std::cell::Cell::get),
-                VACUUM_STEPS.with(std::cell::Cell::get),
-            ))
-        })
+        .dispatch_read(
+            "shutdown_with_pending_gc_leaves_candidates_and_counters_unchanged",
+            |b| {
+                b.connection.trace_v2(TraceEventCodes::empty(), None);
+                Ok((
+                    read_stats(&b.connection)?.objects(),
+                    gc::pending(&b.connection)?,
+                    WAL_CHECKPOINTS.with(std::cell::Cell::get),
+                    VACUUM_STEPS.with(std::cell::Cell::get),
+                ))
+            },
+        )
         .await?;
     assert!(before > 0);
     assert_eq!(after, before);
@@ -511,7 +560,7 @@ async fn vacuum_backlog_is_scheduled_again_on_open() -> TestResult {
     let path = directory.path().join("runtime.sqlite3");
     let store = SqliteSessionStore::open(&path)?;
     store
-        .dispatch(|b| {
+        .dispatch("vacuum_backlog_is_scheduled_again_on_open", |b| {
             b.connection
                 .execute_batch(
                     "CREATE TABLE housekeeping_test(payload BLOB);
@@ -557,7 +606,7 @@ async fn traced_branch_load(
     selector: SessionRef,
 ) -> Result<(LoadedBranch, usize, bool), Box<dyn std::error::Error>> {
     store
-        .dispatch_read(|b| {
+        .dispatch_read("traced_branch_load", |b| {
             b.connection
                 .trace_v2(TraceEventCodes::SQLITE_TRACE_STMT, Some(count_statement));
             STATEMENTS.with(|count| count.set(0));
@@ -567,7 +616,7 @@ async fn traced_branch_load(
         .await?;
     let loaded = store.load_branch(selector).await?;
     let (count, read_objects) = store
-        .dispatch_read(|b| {
+        .dispatch_read("traced_branch_load", |b| {
             b.connection.trace_v2(TraceEventCodes::empty(), None);
             Ok((
                 STATEMENTS.with(std::cell::Cell::get),
@@ -604,10 +653,13 @@ async fn validated_checkpoint_cache_bounds_second_branch_load_to_four_statements
         let selector = request.session();
         store.create(request).await?;
         store
-            .dispatch(|b| {
-                b.checkpoints = CheckpointCache::new(1);
-                Ok(())
-            })
+            .dispatch(
+                "validated_checkpoint_cache_bounds_second_branch_load_to_four_statements",
+                |b| {
+                    b.checkpoints = CheckpointCache::new(1);
+                    Ok(())
+                },
+            )
             .await?;
         let (cold, cold_count, cold_objects) = traced_branch_load(&store, selector).await?;
         let (cached, cached_count, cached_objects) = traced_branch_load(&store, selector).await?;
@@ -705,10 +757,13 @@ async fn validated_checkpoint_cache_keeps_pruned_and_deleted_lookups_exact() -> 
         let directory = tempfile::tempdir()?;
         let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
         store
-            .dispatch(move |b| {
-                b.checkpoints = CheckpointCache::new(budget);
-                Ok(())
-            })
+            .dispatch(
+                "validated_checkpoint_cache_keeps_pruned_and_deleted_lookups_exact",
+                move |b| {
+                    b.checkpoints = CheckpointCache::new(budget);
+                    Ok(())
+                },
+            )
             .await?;
         let (created, head, checkpoints) = checkpoint_chain(&store).await?;
         let pruned_id = checkpoints[1].reference().checkpoint_id();
@@ -717,18 +772,29 @@ async fn validated_checkpoint_cache_keeps_pruned_and_deleted_lookups_exact() -> 
         store.load_checkpoint(pruned_id).await?;
         assert!(
             store
-                .dispatch_read(move |b| Ok(b.checkpoints.get(pruned_id).is_some()))
+                .dispatch_read(
+                    "validated_checkpoint_cache_keeps_pruned_and_deleted_lookups_exact",
+                    move |b| Ok(b.checkpoints.get(pruned_id).is_some())
+                )
                 .await?
         );
         if bypass_eviction {
             // Leave a stale entry deliberately: even a hit must probe authority.
-            store.dispatch(move |b| prune(b, &request)).await?;
+            store
+                .dispatch(
+                    "validated_checkpoint_cache_keeps_pruned_and_deleted_lookups_exact",
+                    move |b| prune(b, &request),
+                )
+                .await?;
         } else {
             store.prune(request).await?;
             assert!(
                 store
-                    .dispatch_read(move |b| Ok(b.checkpoints.get(head_id).is_none()
-                        && b.checkpoints.get(pruned_id).is_none()))
+                    .dispatch_read(
+                        "validated_checkpoint_cache_keeps_pruned_and_deleted_lookups_exact",
+                        move |b| Ok(b.checkpoints.get(head_id).is_none()
+                            && b.checkpoints.get(pruned_id).is_none())
+                    )
                     .await?
             );
         }
@@ -754,12 +820,20 @@ async fn validated_checkpoint_cache_keeps_pruned_and_deleted_lookups_exact() -> 
             archived.session().revision(),
         );
         if bypass_eviction {
-            store.dispatch(move |b| delete(b, request)).await?;
+            store
+                .dispatch(
+                    "validated_checkpoint_cache_keeps_pruned_and_deleted_lookups_exact",
+                    move |b| delete(b, request),
+                )
+                .await?;
         } else {
             store.delete(request).await?;
             assert!(
                 store
-                    .dispatch_read(move |b| Ok(b.checkpoints.get(head_id).is_none()))
+                    .dispatch_read(
+                        "validated_checkpoint_cache_keeps_pruned_and_deleted_lookups_exact",
+                        move |b| Ok(b.checkpoints.get(head_id).is_none())
+                    )
                     .await?
             );
         }
@@ -784,25 +858,34 @@ async fn validated_checkpoint_cache_hit_still_verifies_checkpoint_row_seal() -> 
         let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
         let created = store.create(seed()?).await?;
         store
-            .dispatch(move |b| {
-                b.checkpoints = CheckpointCache::new(budget);
-                Ok(())
-            })
+            .dispatch(
+                "validated_checkpoint_cache_hit_still_verifies_checkpoint_row_seal",
+                move |b| {
+                    b.checkpoints = CheckpointCache::new(budget);
+                    Ok(())
+                },
+            )
             .await?;
         store.load_branch(created.branch().session()).await?;
         let head_id = created.branch().checkpoint().checkpoint_id();
         assert!(
             store
-                .dispatch_read(move |b| Ok(b.checkpoints.get(head_id).is_some()))
+                .dispatch_read(
+                    "validated_checkpoint_cache_hit_still_verifies_checkpoint_row_seal",
+                    move |b| Ok(b.checkpoints.get(head_id).is_some())
+                )
                 .await?
         );
         store
-            .dispatch(|b| {
-                b.connection
-                    .execute("UPDATE checkpoints SET validation_seal=zeroblob(32)", [])
-                    .map_err(map_sqlite)?;
-                Ok(())
-            })
+            .dispatch(
+                "validated_checkpoint_cache_hit_still_verifies_checkpoint_row_seal",
+                |b| {
+                    b.connection
+                        .execute("UPDATE checkpoints SET validation_seal=zeroblob(32)", [])
+                        .map_err(map_sqlite)?;
+                    Ok(())
+                },
+            )
             .await?;
         assert_eq!(
             store.load_branch(created.branch().session()).await.err(),
@@ -903,7 +986,11 @@ fn a_full_lane_warns_with_its_name_capacity_and_count() -> TestResult {
     assert!(
         logged[0].contains("lane=\"read\"")
             && logged[0].contains("capacity=1")
-            && logged[0].contains("overflows=1"),
+            && logged[0].contains("overflows=1")
+            && logged[0].contains("critical_depth=0")
+            && logged[0].contains("read_depth=1")
+            && logged[0].contains("running_job=")
+            && logged[0].contains("running_ms="),
         "{logged:?}"
     );
     assert!(logged[1].contains("lane=\"critical\""), "{logged:?}");
@@ -931,12 +1018,15 @@ fn a_send_to_a_gone_actor_warns_and_refuses_as_unavailable() {
 fn a_reply_lost_with_the_actor_warns_and_refuses_as_unavailable() -> TestResult {
     let directory = tempfile::tempdir()?;
     let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
-    let runtime = tokio::runtime::Builder::new_current_thread().build()?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()?;
     let warnings = Warnings::of(ACTOR_TARGET);
     let lost = tracing::subscriber::with_default(warnings.clone(), || {
-        runtime.block_on(store.dispatch_read(|_| -> Result<(), SessionStoreError> {
-            panic!("the actor job panics before replying")
-        }))
+        runtime.block_on(store.dispatch_read(
+            "a_reply_lost_with_the_actor_warns_and_refuses_as_unavailable",
+            |_| -> Result<(), SessionStoreError> { panic!("the actor job panics before replying") },
+        ))
     });
     assert_eq!(lost.err(), Some(SessionStoreError::BackendUnavailable));
     let join = store
@@ -1027,7 +1117,9 @@ fn polling_readers_queue_one_read_each_behind_a_long_critical_job() -> TestResul
     const READERS: usize = 27;
     let directory = tempfile::tempdir()?;
     let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
-    let runtime = tokio::runtime::Builder::new_current_thread().build()?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()?;
     let (parked, release) = park(&store);
     let issued = AtomicUsize::new(0);
     let stop = AtomicBool::new(false);
@@ -1036,6 +1128,7 @@ fn polling_readers_queue_one_read_each_behind_a_long_critical_job() -> TestResul
             .map(|_| {
                 scope.spawn(|| -> Result<(), SessionStoreError> {
                     let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_time()
                         .build()
                         .map_err(|_| SessionStoreError::BackendUnavailable)?;
                     while !stop.load(Ordering::SeqCst) {
@@ -1056,18 +1149,23 @@ fn polling_readers_queue_one_read_each_behind_a_long_critical_job() -> TestResul
         // Many cadence ticks pass while the critical job holds the actor.
         thread::sleep(Duration::from_millis(100));
         assert_eq!(issued.load(Ordering::SeqCst), READERS);
-        let mut probes = Vec::new();
-        loop {
-            let mut probe = store.stats();
-            match probe.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
-                Poll::Pending => probes.push(probe),
-                Poll::Ready(result) => {
-                    assert_eq!(result.err(), Some(SessionStoreError::BackendBusy));
-                    break;
-                }
+        // Even reads beyond the bounded queue wait in their caller futures.
+        let mut probes: Vec<_> = (0..DEFAULT_QUEUE_CAPACITY).map(|_| store.stats()).collect();
+        {
+            let _entered = runtime.enter();
+            for probe in &mut probes {
+                assert!(
+                    probe
+                        .as_mut()
+                        .poll(&mut Context::from_waker(Waker::noop()))
+                        .is_pending()
+                );
             }
         }
-        assert_eq!(probes.len(), DEFAULT_QUEUE_CAPACITY - READERS);
+        assert_eq!(
+            store.sender.activity.depths[Lane::Read as usize].load(Ordering::Relaxed),
+            DEFAULT_QUEUE_CAPACITY
+        );
         stop.store(true, Ordering::SeqCst);
         release.send(())?;
         runtime.block_on(parked)?;
@@ -1096,14 +1194,27 @@ async fn committed_head_is_warm_without_a_cold_load() -> TestResult {
             next.checkpoint().clone(),
         ))
         .await?;
-    let before = store.dispatch_read(|b| Ok(b.checkpoint_decodes)).await?;
+    let before = store
+        .dispatch_read("committed_head_is_warm_without_a_cold_load", |b| {
+            Ok(b.checkpoint_decodes)
+        })
+        .await?;
     let (_, statements, objects) = traced_branch_load(&store, receipt.head().session()).await?;
-    let after = store.dispatch_read(|b| Ok(b.checkpoint_decodes)).await?;
+    let after = store
+        .dispatch_read("committed_head_is_warm_without_a_cold_load", |b| {
+            Ok(b.checkpoint_decodes)
+        })
+        .await?;
     assert_eq!(after, before, "post-commit load performs zero decodes");
     assert!(!objects, "post-commit load must not decode object payloads");
     assert!(statements <= 4, "{statements}");
     let warm = store.load_branch(receipt.head().session()).await?;
-    store.dispatch( |b| { b.checkpoints.clear(); Ok(()) }).await?;
+    store
+        .dispatch("clear_cache", |b| {
+            b.checkpoints.clear();
+            Ok(())
+        })
+        .await?;
     let cold = store.load_branch(receipt.head().session()).await?;
     assert_eq!(warm.checkpoint().bundle(), cold.checkpoint().bundle());
     Ok(())
@@ -1134,5 +1245,252 @@ fn forked_head_is_warm_under_the_existing_cache_budget() -> TestResult {
         let cold = backend.load_branch(forked.head.session())?;
         assert_eq!(loaded.checkpoint().bundle(), cold.checkpoint().bundle());
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_turn_boundary_read_flood_waits_then_completes() -> TestResult {
+    const READS: usize = DEFAULT_QUEUE_CAPACITY * 4;
+    let directory = tempfile::tempdir()?;
+    let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
+    let (parked, release) = park(&store);
+    let mut reads: Vec<_> = (0..READS).map(|_| store.stats()).collect();
+    for read in &mut reads {
+        assert!(
+            read.as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+        );
+    }
+    assert_eq!(
+        store.sender.activity.depths[1].load(Ordering::Relaxed),
+        DEFAULT_QUEUE_CAPACITY
+    );
+    // Critical work keeps independent capacity and runs ahead of the read burst.
+    let critical = store.dispatch("a_turn_boundary_read_flood_waits_then_completes", |b| {
+        b.connection
+            .execute("UPDATE store_meta SET semantic_mutations=1 WHERE id=1", [])
+            .map_err(map_sqlite)?;
+        Ok(())
+    });
+    let started = Instant::now();
+    release.send(())?;
+    parked.await?;
+    critical.await?;
+    for read in reads {
+        assert_eq!(read.await?.semantic_mutations(), 1);
+    }
+    eprintln!(
+        "read-burst: reads={READS} capacity={DEFAULT_QUEUE_CAPACITY} busy=0 elapsed_us={}",
+        started.elapsed().as_micros()
+    );
+    Ok(())
+}
+
+#[test]
+fn slow_actor_jobs_warn_with_content_free_labels_and_depths() -> TestResult {
+    let warnings = Warnings::of(ACTOR_TARGET);
+    let activity = ActorActivity::default();
+    let started = Instant::now()
+        .checked_sub(SLOW_JOB_THRESHOLD)
+        .ok_or("monotonic clock")?;
+    tracing::subscriber::with_default(warnings.clone(), || {
+        activity.finish("read", "load_branch", started);
+    });
+    let logged = warnings.lines();
+    assert_eq!(logged.len(), 1, "{logged:?}");
+    assert!(
+        logged[0].contains("job=\"load_branch\"")
+            && logged[0].contains("elapsed_ms=")
+            && logged[0].contains("critical_depth=0")
+            && logged[0].contains("read_depth=0"),
+        "{logged:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "opt-in large synthetic turn-boundary measurement"]
+async fn measure_large_session_turn_boundary_reads() -> TestResult {
+    use crate::integrity_fixture as fixture;
+    const READS: usize = DEFAULT_QUEUE_CAPACITY * 4;
+    let directory = tempfile::tempdir()?;
+    let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
+    let request = seed()?;
+    let prior = request.initial().clone();
+    let created = store.create(request).await?;
+    let next = next_checkpoint(&created, &prior, 1)?;
+    let checkpoint = fixture::checkpoint_with_payload(
+        next.checkpoint()
+            .validated_checkpoint()?
+            .manifest()
+            .topology(),
+        3098,
+        RuntimeDurability::Required,
+        prior
+            .validated_checkpoint()?
+            .manifest()
+            .canonical()
+            .context()
+            .clone(),
+        &"x".repeat(7600),
+    )?;
+    let bundle = fixture::bundle(&checkpoint, Some(&prior))?;
+    let bytes = bundle.stats().retained_bytes();
+    let objects = bundle.stats().object_count();
+    let head = store
+        .commit(CommitCheckpoint::new(
+            created.lease().clone(),
+            created.branch(),
+            bundle,
+        ))
+        .await?
+        .head();
+    let before = store
+        .dispatch_read("measure_large_session_turn_boundary_reads", |b| {
+            Ok(b.checkpoint_decodes)
+        })
+        .await?;
+    let started = Instant::now();
+    store.load_branch(head.session()).await?;
+    let warm_us = started.elapsed().as_micros();
+    let after = store
+        .dispatch_read("measure_large_session_turn_boundary_reads", |b| {
+            Ok(b.checkpoint_decodes)
+        })
+        .await?;
+    assert_eq!(before, after);
+    store
+        .dispatch("measure_large_session_turn_boundary_reads", |b| {
+            b.checkpoints.clear();
+            Ok(())
+        })
+        .await?;
+    let started = Instant::now();
+    store.load_branch(head.session()).await?;
+    let cold_us = started.elapsed().as_micros();
+    let cold_decodes = store
+        .dispatch_read("measure_large_session_turn_boundary_reads", |b| {
+            Ok(b.checkpoint_decodes)
+        })
+        .await?;
+    assert_eq!(cold_decodes, after + 1);
+    let (parked, release) = park(&store);
+    let mut reads: Vec<_> = (0..READS)
+        .map(|_| store.load_branch(head.session()))
+        .collect();
+    for read in &mut reads {
+        assert!(
+            read.as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+        );
+    }
+    let started = Instant::now();
+    release.send(())?;
+    parked.await?;
+    for read in reads {
+        assert_eq!(read.await?.head(), head);
+    }
+    let burst_us = started.elapsed().as_micros();
+    assert_eq!(
+        store
+            .dispatch_read("measure_large_session_turn_boundary_reads", |b| Ok(
+                b.checkpoint_decodes
+            ))
+            .await?,
+        cold_decodes
+    );
+    eprintln!(
+        "large-session: bytes={bytes} objects={objects} post_commit_us={warm_us} post_commit_decodes=0 cold_us={cold_us} cold_decodes=1 burst_reads={READS} capacity={DEFAULT_QUEUE_CAPACITY} burst_busy=0 burst_decodes=0 burst_us={burst_us}"
+    );
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
+async fn read_lane_deadline_refuses_a_stalled_actor() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let store = SqliteSessionStore::open_with_clock_and_options(
+        directory.path().join("runtime.sqlite3"),
+        Arc::new(SystemLeaseClock::new()?),
+        SqliteStoreOptions::new(MemoryStoreLimits::default(), NonZeroUsize::MIN),
+    )?;
+    let (parked, release) = park(&store);
+    let queued = store.stats();
+    let mut excess = store.stats();
+    assert!(
+        excess
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+    tokio::time::advance(READ_QUEUE_TIMEOUT).await;
+    assert_eq!(excess.await, Err(SessionStoreError::BackendBusy));
+    release.send(())?;
+    parked.await?;
+    queued.await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_waiting_read_observes_actor_exit_as_unavailable() -> TestResult {
+    let (sender, receiver) = actor_queue(1);
+    sender.send(Lane::Read, Box::new(|_| {}))?;
+    let mut waiting = sender.send_read(Box::new(|_| {}));
+    assert!(
+        waiting
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+    drop(receiver);
+    assert_eq!(waiting.await, Err(SessionStoreError::BackendUnavailable));
+    Ok(())
+}
+
+#[tokio::test]
+async fn read_admission_is_fifo_under_saturation() -> TestResult {
+    let (sender, receiver) = actor_queue(1);
+    sender.send(Lane::Read, Box::new(|_| {}))?;
+    let mut first = sender.send_read(Box::new(|_| {}));
+    let mut second = sender.send_read(Box::new(|_| {}));
+    let mut context = Context::from_waker(Waker::noop());
+    assert!(first.as_mut().poll(&mut context).is_pending());
+    assert!(second.as_mut().poll(&mut context).is_pending());
+    drop(receiver.read.try_recv()?);
+    sender.activity.read_space.add_permits(1);
+    let mut newcomer = sender.send_read(Box::new(|_| {}));
+    assert!(newcomer.as_mut().poll(&mut context).is_pending());
+    assert!(second.as_mut().poll(&mut context).is_pending());
+    first.await?;
+    drop(receiver.read.try_recv()?);
+    sender.activity.read_space.add_permits(1);
+    assert!(newcomer.as_mut().poll(&mut context).is_pending());
+    second.await?;
+    drop(receiver.read.try_recv()?);
+    sender.activity.read_space.add_permits(1);
+    newcomer.await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn dispatch_reports_the_explicit_running_label() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
+    let activity = Arc::clone(&store.sender.activity);
+    store
+        .dispatch("explicit_dispatch_label", move |_| {
+            assert_eq!(
+                activity
+                    .running
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .as_ref()
+                    .map(|v| v.0),
+                Some("explicit_dispatch_label")
+            );
+            Ok(())
+        })
+        .await?;
     Ok(())
 }

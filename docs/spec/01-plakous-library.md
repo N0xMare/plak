@@ -1124,11 +1124,18 @@ content-addressed objects. Async runtime workers never perform SQLite work.
 The single actor has separately bounded critical and read queues (the configured
 queue capacity applies to each). Authority changes, recovery, flush and shutdown
 are critical; branch/checkpoint/feed loads, listing and stats are reads. Critical
-jobs run before queued reads. A full lane returns `BackendBusy` without blocking
-the caller or consuming capacity in the other lane, and logs a WARN under target
-`plakous_store::sqlite_actor` naming the lane, its capacity and the overflows
-since the last such line: the first overflow, then at most one line per lane
-every 10 s, with no session content. A request the exited actor can no longer
+jobs run before queued reads. A full critical lane returns `BackendBusy`
+immediately. A full read lane applies asynchronous backpressure: the caller
+retains its job and waits FIFO for a slot for at most 1 s, within the default 30 s
+store-call deadline, then receives `BackendBusy`. The 1 s window bounds only
+admission wait, not execution, and is not sized for cold checkpoint decodes.
+Capacity is released at dequeue. Waiting does not consume
+critical capacity or enlarge either queue. Queue pressure logs a content-free
+WARN under target `plakous_store::sqlite_actor`: lane, capacity, both lane
+depths, the running job's static label and elapsed milliseconds, and overflows
+since the last such line (first event, then at most one per lane every 10 s).
+Jobs taking at least 250 ms also log a WARN with static label, lane, elapsed
+milliseconds and both lane depths. A request the exited actor can no longer
 take, or whose reply it dropped, returns `BackendUnavailable` and logs a WARN
 under the same target naming the lane and `reason=disconnected|reply_dropped`.
 Every failed SQLite operation logs a content-free WARN under

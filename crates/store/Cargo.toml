@@ -20,11 +20,12 @@ class = "published-internal"
 
 [features]
 default = []
-sqlite = ["dep:futures-channel", "dep:rusqlite", "dep:tracing"]
+sqlite = ["dep:futures-channel", "dep:rusqlite", "dep:tracing", "dep:tokio"]
 commit-trace = ["sqlite", "rusqlite/hooks", "nix/signal", "dep:serde_json"]
 perf-instrumentation = ["sqlite"]
 
 [dependencies]
+tokio = { workspace = true, optional = true, features = ["sync", "time"] }
 serde_json = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 futures-channel = { workspace = true, optional = true }
@@ -43,7 +44,7 @@ rusqlite = { workspace = true, features = ["hooks", "trace"] }
 tempfile.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 serde_json = { workspace = true, features = ["raw_value"] }
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 
 [[test]]
 name = "integration"
