@@ -172,6 +172,10 @@ keys: they are authored in the file, a save leaves them exactly as written, and
 | `telemetry.max_age_days` | integer | `90` | greater than 0; zero is refused as ambiguous | Retention cutoff for local analytics rows, in days. |
 | `mcp.client_id_metadata_url` | string | `(unset)` | `https://` URL with a path, no query or fragment; home-scoped | The OAuth Client ID Metadata Document that identifies Plak to an MCP authorization server that supports one (spec 01 §8.5). Unset disables that registration path; the document lists the redirect URI `http://127.0.0.1/callback`, which a server matches on any port. Takes effect at the next `plak mcp login`. |
 
+OpenRouter input admission uses the discovered context window minus the reserved
+output bound, lowered by eligible endpoint limits. It has no fixed 65,536-token
+input ceiling or implicit cost cap; `api.full_window` applies only to the direct
+API routes named above.
 
 ### 3.1 Bounds are closed ranges
 

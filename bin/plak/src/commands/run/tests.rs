@@ -771,6 +771,65 @@ fn one_shot_terminal_error_is_returned_once_and_keeps_failure_guidance() {
     );
 }
 
+#[test]
+fn one_shot_output_limit_is_agent_failure_not_success() {
+    let fixture = Fixture::new(Script::Effect);
+    let mut config = fixture.host_config();
+    let workspace = config.cwd.clone();
+    let controller = BoundaryController::quiet_from_evidence_path(
+        CrashBoundary::None,
+        workspace.join("terminal-events.jsonl"),
+    )
+    .unwrap();
+    let kind = plakous::model::ModelErrorKind::OutputLimit;
+    let target = plakous_offline_crash_harness::terminal_failure_runtime_binding(
+        &workspace,
+        controller.clone(),
+        kind,
+    )
+    .unwrap()
+    .target_binding();
+    config.test_injection = Some(Arc::new(TestHostInjection {
+        runtime: Arc::new(move |_| {
+            plakous_offline_crash_harness::terminal_failure_runtime_binding(
+                &workspace,
+                controller.clone(),
+                kind,
+            )
+            .map_err(|error| error.to_string())
+        }),
+        rebind_target: target,
+        observe: Arc::new(|_, _| {}),
+        child_runtime: None,
+        rebind_builds: std::sync::Mutex::new(Vec::new()),
+    }));
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let failure = run_config(
+        &ApplicationExecutor::new().unwrap(),
+        config,
+        "terminal fixture".into(),
+        false,
+        false,
+        face::ChildAgents::Available,
+        TerminalMode::Piped,
+        &mut stdout,
+        &mut stderr,
+        plakous_hosted::runtime::RunBounds::default(),
+    )
+    .unwrap_err();
+    assert_eq!(failure.exit_code(), 5);
+    assert_eq!(stdout, [] as [u8; 0]);
+    let notes = String::from_utf8(stderr).unwrap();
+    assert!(!notes.contains(failure.message()));
+    assert!(
+        notes.contains(
+            "turn failed definitively; the durable session remains available for a new prompt"
+        ),
+        "{notes}"
+    );
+}
+
 const HOSTILE: &str = "ok\u{1b}]52;c;cGF5bG9hZA==\u{7}\u{1b}[2J\tdone";
 
 #[test]

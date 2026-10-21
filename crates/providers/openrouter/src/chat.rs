@@ -2294,7 +2294,7 @@ mod tests {
         ] {
             assert_eq!(
                 base.gateway_maximum_projected_input(protocol, false, output)?,
-                65_536
+                98_304
             );
             for parameter in ["tools", "max_tokens", "reasoning", "tool_choice"] {
                 let mut changed = base.clone();
@@ -2305,7 +2305,7 @@ mod tests {
                     output,
                 );
                 if parameter == "tool_choice" && protocol == OPENROUTER_CHAT_PROTOCOL_ID {
-                    assert_eq!(result?, 65_536, "Chat uses the automatic gateway default");
+                    assert_eq!(result?, 98_304, "Chat uses the automatic gateway default");
                 } else {
                     assert!(
                         matches!(result, Err(OpenRouterChatBuildError::UnboundedAdmission)),
@@ -2319,7 +2319,7 @@ mod tests {
             if protocol == crate::OPENROUTER_MESSAGES_PROTOCOL_ID {
                 assert!(result.is_err());
             } else {
-                assert_eq!(result?, 65_536);
+                assert_eq!(result?, 98_304);
             }
         }
         assert!(
@@ -2342,15 +2342,34 @@ mod tests {
             assert_eq!(bound.get(), 32_768);
             let mut unknown = base.clone();
             unknown.endpoints[0].max_completion_tokens = None;
-            assert_eq!(unknown.gateway_output_bound(protocol, false)?.get(), 4_096);
+            assert_eq!(unknown.gateway_output_bound(protocol, false)?.get(), 16_384);
+            let mut plain = unknown.clone();
+            plain.endpoints[0].supported_parameters.remove("reasoning");
+            assert_eq!(plain.gateway_output_bound(protocol, false)?.get(), 4_096);
             assert_eq!(unknown.gateway_output_bound(protocol, true)?.get(), 16_384);
             assert!(
                 unknown
                     .gateway_maximum_projected_input(protocol, false, bound)
                     .is_err()
             );
+            let mut large = base.clone();
+            large.context_length = 1_000_000;
+            large.endpoints[0].max_prompt_tokens = None;
+            large.endpoints[0].context_length = Some(1_000_000);
+            assert_eq!(
+                large.gateway_maximum_projected_input(protocol, false, bound)?,
+                967_232
+            );
             let mut small = base.clone();
             small.context_length = 16_384;
+            assert_eq!(
+                small.gateway_maximum_projected_input(
+                    protocol,
+                    false,
+                    NonZeroU32::new(8_192).ok_or("output")?
+                )?,
+                8_192
+            );
             assert_eq!(small.gateway_output_bound(protocol, false)?.get(), 8_192);
             small.context_length = 3_000;
             assert_eq!(small.gateway_output_bound(protocol, false)?.get(), 4_096);
@@ -2472,9 +2491,9 @@ mod tests {
         assert_eq!(
             identities,
             [
-                "b7e67caf8df07098f00bc66f1edc5d7b08348bffba33015cb911120f15231916",
-                "f02732b10dfacdb6e3550ae4dcef82765035f601cf7dfb2d99d894aa7badf53b",
-                "23878e639d2904c78db8f13b392cfbee85e2bf70e64dfbdd5810db0759dc3045"
+                "a134bd5e2289d9eb769763a1c9e89176a022d3868beac960041fa0213c26d3c9",
+                "b0f7e177a2314798b479106260c1b6948b6a94a69601e801c1c379a0f8f246ca",
+                "4f21925f4b5bf9659f898e61bfd318d49427fd1329a187db715f868f563a1a13"
             ]
         );
         Ok(())

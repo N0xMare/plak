@@ -39,7 +39,7 @@ impl HostedRoundDisposition {
 pub(super) enum RoundClassificationError {
     InvalidCalls(ModelError),
     /// Only this response-validation failure enters the output-limit retry path.
-    IncompleteLocalCall(ModelError),
+    IncompleteOutput(ModelError),
     RoundLimit,
     InvalidDisposition(ModelError),
 }
@@ -53,7 +53,7 @@ pub(super) struct RoundFailureAction {
 pub(super) fn round_failure_action(error: &RoundClassificationError) -> RoundFailureAction {
     RoundFailureAction {
         phase: ModelErrorPhase::Terminal,
-        retry_output_limit: matches!(error, RoundClassificationError::IncompleteLocalCall(_)),
+        retry_output_limit: matches!(error, RoundClassificationError::IncompleteOutput(_)),
     }
 }
 
@@ -71,23 +71,22 @@ pub(super) fn classify_round(
     let response = input.response;
     let calls = collect_local_calls(response, input.history)
         .map_err(RoundClassificationError::InvalidCalls)?;
+    if response.finish().reason() == FinishReason::Length {
+        let mut error = ModelError::new(
+            ModelErrorKind::OutputLimit,
+            "response reached its output bound before completion",
+        );
+        if let Some(tokens) = input.wire_output_limit {
+            error.fill_missing_wire_output_limit(tokens);
+        }
+        return Err(RoundClassificationError::IncompleteOutput(error));
+    }
     if !calls.is_empty() && response.finish().reason() != FinishReason::ToolCalls {
-        let error = if response.finish().reason() == FinishReason::Length {
-            let mut error = ModelError::new(
-                ModelErrorKind::OutputLimit,
-                "response reached its output bound before its tool call was complete",
-            );
-            if let Some(tokens) = input.wire_output_limit {
-                error.fill_missing_wire_output_limit(tokens);
-            }
-            error
-        } else {
-            ModelError::new(
-                ModelErrorKind::IncompleteResponse,
-                "model proposed a local tool call without a complete tool-call finish",
-            )
-        };
-        return Err(RoundClassificationError::IncompleteLocalCall(error));
+        let error = ModelError::new(
+            ModelErrorKind::IncompleteResponse,
+            "model proposed a local tool call without a complete tool-call finish",
+        );
+        return Err(RoundClassificationError::IncompleteOutput(error));
     }
     let disposition = if calls.is_empty() {
         match response.finish().reason() {

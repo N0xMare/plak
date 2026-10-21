@@ -46,9 +46,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 assistant,
                 finish_reason,
                 finish_detail,
-                reasoning_tokens,
-                output_tokens,
-                tool_calls,
+                ..
             }) => {
                 let transcript_line = super::super::turn::completed_turn_row(&assistant);
                 match commit_session_update(
@@ -72,25 +70,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                 TestHostBoundary::ProductCommitted,
                             );
                         }
-                        // An empty turn that stopped at its output bound with
-                        // no tool call did not fail to answer: it spent the
-                        // whole budget thinking. Two tasks stopped at exactly
-                        // the bound
-                        // with one token left for visible text, and both read
-                        // as "empty stream — try again", which is the wrong
-                        // advice. No retry either way; the operator is told
-                        // which of the two happened.
-                        let reasoning_only = spent_budget_on_reasoning(
-                            assistant.is_empty(),
-                            tool_calls,
-                            finish_reason,
-                        );
-                        if reasoning_only {
-                            let _ = self.events.notice(TranscriptRow::warning(
-                                NoticeScope::Turn,
-                                reasoning_only_note(reasoning_tokens, output_tokens),
-                            ));
-                        } else if assistant.is_empty()
+                        if assistant.is_empty()
                             && finish_reason != plakous::model::FinishReason::Refusal
                         {
                             let _ = self.events.notice(TranscriptRow::warning(NoticeScope::Turn,
@@ -101,14 +81,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             log_ev(
                                 self.log.as_ref(),
                                 &self.config,
-                                if reasoning_only {
-                                    SessionEvent::new("turn.assistant_reasoning_only")
-                                        .u64("chars", 0)
-                                        .u64("reasoning_tokens", reasoning_tokens)
-                                        .u64("output_tokens", output_tokens)
-                                } else {
-                                    SessionEvent::new("turn.assistant_empty").u64("chars", 0)
-                                },
+                                SessionEvent::new("turn.assistant_empty").u64("chars", 0),
                             );
                         } else {
                             log_ev(
@@ -460,40 +433,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
 pub(crate) const RECOVERY_PENDING_NOTE: &str = "the turn's outcome is uncertain; the \
      next prompt (or /recover) records that and continues";
 
-/// True when an empty turn stopped because it thought until the budget ran out.
-///
-/// All three conditions matter. Empty text alone is the ordinary empty-stream
-/// case. A turn that made tool calls did work, whatever it printed. And a
-/// finish other than `Length` did not hit the bound, so whatever silenced it
-/// was not the budget.
-pub(in crate::runtime) const fn spent_budget_on_reasoning(
-    assistant_is_empty: bool,
-    tool_calls: usize,
-    finish_reason: plakous::model::FinishReason,
-) -> bool {
-    assistant_is_empty
-        && tool_calls == 0
-        && matches!(finish_reason, plakous::model::FinishReason::Length)
-}
-
-/// What the operator sees when a turn spends its whole output budget thinking.
-///
-/// `output_tokens` is the budget here, not merely a count: the completion
-/// stopped at `Length`, so the provider emitted exactly the bound it was given
-/// and the reasoning share is what is left of it. Saying "try again" would be
-/// wrong advice — the same prompt will do the same thing — so the note names
-/// the cause and leaves the decision to the reader.
-pub(super) fn reasoning_only_note(reasoning_tokens: u64, output_tokens: u64) -> String {
-    format!(
-        "empty completion: the model spent its output budget on reasoning; \
-         {reasoning_tokens} reasoning tokens of a {output_tokens}-token budget"
-    )
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
-    use super::{reasoning_only_note, spent_budget_on_reasoning};
     use plakous::model::FinishReason;
 
     #[test]
@@ -833,50 +775,6 @@ mod tests {
             assert_eq!(host.config.session.plakous_locator, Some(head));
             host.release().unwrap();
         }
-    }
-
-    /// `deepseek-v4-flash` lost two tasks,
-    /// each stopping at exactly 4096 output tokens with 4095 of them reasoning
-    /// and one token left for visible text. Both surfaced as "empty stream —
-    /// try again", which is the wrong advice: the same prompt does the same
-    /// thing. All three conditions are required, so an ordinary empty stream
-    /// and a turn that did tool work keep the old note.
-    #[test]
-    fn only_an_empty_toolless_length_stop_is_a_reasoning_only_completion() {
-        assert!(spent_budget_on_reasoning(true, 0, FinishReason::Length));
-        assert!(
-            !spent_budget_on_reasoning(false, 0, FinishReason::Length),
-            "visible text is not an empty completion"
-        );
-        assert!(
-            !spent_budget_on_reasoning(true, 1, FinishReason::Length),
-            "a turn that called a tool did work, whatever it printed"
-        );
-        for finish in [
-            FinishReason::Stop,
-            FinishReason::ToolCalls,
-            FinishReason::Refusal,
-        ] {
-            assert!(
-                !spent_budget_on_reasoning(true, 0, finish),
-                "{finish:?} did not hit the output bound"
-            );
-        }
-    }
-
-    /// The note names the cause and the numbers, and does not say "try again".
-    #[test]
-    fn the_reasoning_only_note_names_the_budget_it_spent() {
-        let note = reasoning_only_note(4_095, 4_096);
-        assert_eq!(
-            note,
-            "empty completion: the model spent its output budget on reasoning; \
-             4095 reasoning tokens of a 4096-token budget"
-        );
-        assert!(
-            !note.contains("try again"),
-            "the same prompt will do the same thing"
-        );
     }
 }
 

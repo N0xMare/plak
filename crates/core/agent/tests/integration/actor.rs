@@ -244,13 +244,44 @@ fn text_scenario(
     text: &str,
     start: plakous_test_support::ScenarioStart,
 ) -> TestResult<plakous_test_support::ModelScenario> {
+    text_finish_scenario(descriptor, request, entry, text, start, FinishReason::Stop)
+}
+
+fn text_finish_scenario(
+    descriptor: &ResolvedModelDescriptor,
+    request: ModelRequest,
+    entry: u128,
+    text: &str,
+    start: plakous_test_support::ScenarioStart,
+    finish: FinishReason,
+) -> TestResult<plakous_test_support::ModelScenario> {
     let plan = descriptor.validate_request(request.clone(), ValidationMode::Strict)?;
     let digest = plan.digest();
+    if text.is_empty() {
+        return Ok(plakous_test_support::ModelScenario::new(
+            plakous_test_support::ExpectedRequest::Any,
+            start,
+            vec![
+                plakous_test_support::ScenarioStep::Emit(ModelEvent::ResponseStarted(
+                    ResponseStarted::new(None, digest),
+                )),
+                plakous_test_support::ScenarioStep::Emit(ModelEvent::ResponseCompleted(
+                    ModelResponse::new(
+                        vec![],
+                        FinishDetails::new(finish, None),
+                        None,
+                        None,
+                        digest,
+                    ),
+                )),
+            ],
+        ));
+    }
     let item = assistant_text_item(entry, text)?;
     let location = OutputLocation::new(0, 0);
     let response = ModelResponse::new(
         vec![item.clone()],
-        FinishDetails::new(FinishReason::Stop, None),
+        FinishDetails::new(finish, None),
         None,
         None,
         digest,
@@ -1280,7 +1311,7 @@ async fn length_stopped_tool_proposal_retries_once_without_dispatch_or_commit() 
     assert!(matches!(
         items[1].blocks(),
         [ContentBlock::Text(text)]
-            if text.text().contains("call was discarded and nothing ran")
+            if text.text().contains("response was discarded and no tool call ran")
                 && text.text().contains("128 tokens")
     ));
     assert_failure_note(&items[2]);
@@ -1480,6 +1511,64 @@ async fn budget_wrap_up_preserves_origin(instruction: bool) -> TestResult {
         "the transcript must show why the turn stopped"
     );
     agent.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn length_without_call_retries_then_completes_or_fails() -> TestResult {
+    for text in ["", "truncated answer"] {
+        for second_length in [false, true] {
+            let descriptor = descriptor(false, false)?;
+            let expected = request(&descriptor, 5, 7, vec![user_item()?], Vec::new())?;
+            let first = any_request_scenario(&text_finish_scenario(
+                &descriptor,
+                expected.clone(),
+                100,
+                text,
+                plakous_test_support::ScenarioStart::Immediate,
+                FinishReason::Length,
+            )?);
+            let second = any_request_scenario(&text_finish_scenario(
+                &descriptor,
+                expected,
+                101,
+                if second_length { text } else { "done" },
+                plakous_test_support::ScenarioStart::Immediate,
+                if second_length {
+                    FinishReason::Length
+                } else {
+                    FinishReason::Stop
+                },
+            )?);
+            let model = Arc::new(scripted_model(descriptor, [first, second])?);
+            let (_directory, workspace) = workspace()?;
+            let (clock, ids) = identity_sources()?;
+            let agent = agent_builder(
+                Arc::clone(&model),
+                ToolRegistryBuilder::default().freeze(),
+                workspace,
+            )?
+            .identity_sources(clock, ids)
+            .build()?;
+            let result = agent.prompt(PROMPT).await?.result().await?;
+            if second_length {
+                assert_eq!(
+                    result
+                        .error()
+                        .ok_or("missing output-limit failure")?
+                        .model_kind(),
+                    Some(plakous_model::ModelErrorKind::OutputLimit)
+                );
+            } else {
+                assert_completed(&result, "done")?;
+            }
+            assert_eq!(model.captured_plans().len(), 2);
+            assert!(
+                !request_text(model.captured_plans()[1].request()).contains("truncated answer")
+            );
+            agent.shutdown().await?;
+        }
+    }
     Ok(())
 }
 
@@ -1745,7 +1834,7 @@ async fn length_stopped_tool_call_persists_the_prepared_wire_limit() -> TestResu
         items[1].blocks(),
         [ContentBlock::Text(text)]
             if text.text().contains("its output limit of 64 tokens")
-                && text.text().contains("call was discarded and nothing ran")
+                && text.text().contains("response was discarded and no tool call ran")
                 && !text.text().contains("128")
     ));
     assert_failure_note(&items[2]);

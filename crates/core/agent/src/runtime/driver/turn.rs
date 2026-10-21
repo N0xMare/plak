@@ -70,9 +70,9 @@ pub const OPERATION_BUDGET_WRAP_UP_NOTE: &str = concat!(
 );
 
 /// The note the harness injects after discarding a response that reached its
-/// output bound in the middle of a local tool call.
+/// output bound before completion.
 ///
-/// The truncated call never ran and its response is not in the conversation,
+/// No truncated call ran and the response is not in the conversation,
 /// so without this the model would not know its last attempt failed, and would
 /// most likely repeat it. It names the prepared wire maximum when the provider
 /// recorded one, and otherwise the request's product bound, so the model can
@@ -87,9 +87,9 @@ pub(super) fn output_limit_retry_note(bound: Option<NonZeroU32>) -> String {
 
 const OUTPUT_LIMIT_RETRY_HEAD: &str = "[harness] Your previous response reached ";
 const OUTPUT_LIMIT_RETRY_TAIL: &str = concat!(
-    " before its tool call was complete, so the call was discarded and nothing ran. ",
-    "Retry with less output per call: split a large file or patch into several ",
-    "smaller writes or edits."
+    " before completion, so the response was discarded and no tool call ran. ",
+    "Retry with a shorter answer or less output per call: split a large file or ",
+    "patch into several smaller writes or edits."
 );
 const OUTPUT_LIMIT_UNKNOWN: &str = "the provider's output limit";
 const OUTPUT_LIMIT_KNOWN_HEAD: &str = "its output limit of ";
@@ -933,7 +933,7 @@ impl Driver {
                     let error = match classification_error {
                         RoundClassificationError::InvalidCalls(error)
                         | RoundClassificationError::InvalidDisposition(error)
-                        | RoundClassificationError::IncompleteLocalCall(error) => {
+                        | RoundClassificationError::IncompleteOutput(error) => {
                             self.project_model_error(error, action.phase)
                         }
                         RoundClassificationError::RoundLimit => AgentError::new(

@@ -438,7 +438,6 @@ const REASONING_OUTPUT_DEFAULT: u32 = 16_384;
 const OUTPUT_CEILING: u32 = 32_768;
 const OUTPUT_FLOOR: u32 = 4_096;
 const OUTPUT_RUNGS: [u32; 4] = [4_096, 8_192, 16_384, 32_768];
-const INPUT_CEILING: u64 = 65_536;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum AdmissionWire {
@@ -543,7 +542,11 @@ impl OpenRouterChatModelEvidence {
             .iter()
             .filter(|endpoint| wire.eligible(endpoint, reasoning, tools))
             .collect();
-        let output_default = if reasoning {
+        let output_default = if reasoning
+            || endpoints
+                .iter()
+                .any(|endpoint| endpoint.supported_parameters.contains("reasoning"))
+        {
             REASONING_OUTPUT_DEFAULT
         } else {
             OUTPUT_DEFAULT
@@ -609,7 +612,7 @@ impl OpenRouterChatModelEvidence {
             output_floor: OUTPUT_FLOOR,
             output_rungs: OUTPUT_RUNGS,
             output_bound,
-            input_ceiling: INPUT_CEILING,
+            input_ceiling: self.context_length().saturating_sub(output_bound),
             maximum_projected_input: safe_input,
         }
     }
@@ -622,10 +625,7 @@ impl OpenRouterChatModelEvidence {
         if endpoints.is_empty() {
             return Err(OpenRouterChatBuildError::UnboundedAdmission);
         }
-        let mut safe_input = self
-            .context_length()
-            .saturating_sub(output)
-            .min(INPUT_CEILING);
+        let mut safe_input = self.context_length().saturating_sub(output);
         for endpoint in endpoints {
             if endpoint
                 .max_completion_tokens

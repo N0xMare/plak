@@ -118,10 +118,9 @@ fn classify(
 }
 
 #[test]
-fn round_classifier_terminal_finishes_stop_length_refusal_policy() -> TestResult {
+fn round_classifier_terminal_finishes_stop_refusal_policy() -> TestResult {
     for finish in [
         FinishReason::Stop,
-        FinishReason::Length,
         FinishReason::Refusal,
         FinishReason::Policy,
     ] {
@@ -210,7 +209,7 @@ fn round_classifier_output_limit_uses_prepared_wire_bound() -> TestResult {
         false,
     )?;
     for wire_output_limit in [None, NonZeroU32::new(4096)] {
-        let Err(RoundClassificationError::IncompleteLocalCall(error)) =
+        let Err(RoundClassificationError::IncompleteOutput(error)) =
             classify_round(RoundClassificationInput {
                 response: &response,
                 history: &ConversationView::default(),
@@ -244,7 +243,7 @@ fn round_classifier_incomplete_local_call_precedes_budget_and_pause() -> TestRes
             )?],
             false,
         )?;
-        let Err(RoundClassificationError::IncompleteLocalCall(error)) = classify(&response, true)
+        let Err(RoundClassificationError::IncompleteOutput(error)) = classify(&response, true)
         else {
             return Err("wrong incomplete-call priority".into());
         };
@@ -359,7 +358,7 @@ fn round_classifier_driver_adapter_rows() {
     for (error, retry_output_limit) in [
         (RoundClassificationError::InvalidCalls(model_error()), false),
         (
-            RoundClassificationError::IncompleteLocalCall(model_error()),
+            RoundClassificationError::IncompleteOutput(model_error()),
             true,
         ),
         (
@@ -372,4 +371,25 @@ fn round_classifier_driver_adapter_rows() {
         assert_eq!(action.phase, ModelErrorPhase::Terminal);
         assert_eq!(action.retry_output_limit, retry_output_limit);
     }
+}
+
+#[test]
+fn round_classifier_length_without_calls_is_output_limit_with_wire_bound() -> TestResult {
+    let response = response(FinishReason::Length, vec![], false)?;
+    let bound = NonZeroU32::new(4096).ok_or("bound")?;
+    for over_budget in [false, true] {
+        let Err(RoundClassificationError::IncompleteOutput(error)) =
+            classify_round(RoundClassificationInput {
+                response: &response,
+                history: &ConversationView::default(),
+                over_budget,
+                wire_output_limit: Some(bound),
+            })
+        else {
+            return Err("truncated text accepted as completion".into());
+        };
+        assert_eq!(error.kind(), ModelErrorKind::OutputLimit);
+        assert_eq!(error.wire_output_limit(), Some(bound));
+    }
+    Ok(())
 }

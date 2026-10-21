@@ -3057,9 +3057,23 @@ derivation and hosted input proof include every tool-omitting endpoint as well
 as every tool-bearing endpoint. When no eligible endpoint attests a completion
 bound the route falls back to a documented default
 that depends on the wire, and a wire carrying reasoning never falls back to the
-plain-output figure: a reasoning model spends output on thinking before it can
+plain-output figure, including when an eligible OpenRouter endpoint lists `reasoning`
+even if the request omits reasoning controls: a reasoning model spends output on thinking before it can
 answer, and a budget sized for a visible answer alone is spent before it reaches
 one.
+
+OpenRouter's projected input ceiling is the discovered context window minus the
+reserved output bound, lowered by every eligible endpoint's prompt guarantee
+(or its context window minus that output reservation). There is no hidden
+fixed input or cost cap.
+
+Every `Length` finish is an `OutputLimit` outcome, including a response with no
+local tool call and either empty or non-empty truncated final text. Such text
+is discarded, never promoted as a successful final answer. It enters the same
+`RetryOutputLimit` path as an incomplete local call; a second consecutive
+truncation fails the turn with typed `OutputLimit`, including when a non-empty
+answer truncates at the route maximum. The existing retry keeps the admitted
+session output bound and does not change the session's provider configuration.
 
 A Responses terminal with `status: incomplete` and
 `incomplete_details.reason: max_output_tokens` is accepted as a length finish

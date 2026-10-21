@@ -206,15 +206,16 @@ mod tests {
         assert_eq!(
             output_limit_retry_note(NonZeroU32::new(8_192)),
             "[harness] Your previous response reached its output limit of 8192 tokens before \
-             its tool call was complete, so the call was discarded and nothing ran. Retry with \
-             less output per call: split a large file or patch into several smaller writes or \
-             edits."
+             completion, so the response was discarded and no tool call ran. Retry with a \
+             shorter answer or less output per call: split a large file or patch into several \
+             smaller writes or edits."
         );
         assert_eq!(
             output_limit_retry_note(None),
-            "[harness] Your previous response reached the provider's output limit before its \
-             tool call was complete, so the call was discarded and nothing ran. Retry with less \
-             output per call: split a large file or patch into several smaller writes or edits."
+            "[harness] Your previous response reached the provider's output limit before \
+             completion, so the response was discarded and no tool call ran. Retry with a \
+             shorter answer or less output per call: split a large file or patch into several \
+             smaller writes or edits."
         );
         let lookalike = output_limit_retry_note(None).replace("provider's", "model's");
         let history = history(vec![

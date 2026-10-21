@@ -1299,7 +1299,7 @@ mod tests {
                 )
                 .unwrap();
                 let mut results = Vec::new();
-                for name in ["completed", "refused", "failed"] {
+                for name in ["completed", "refused", "failed", "output-limit"] {
                     let workspace = root.path().join(name);
                     std::fs::create_dir_all(&workspace).unwrap();
                     let binding = match name {
@@ -1322,7 +1322,11 @@ mod tests {
                         _ => terminal_failure_runtime_binding(
                             &workspace,
                             controller.clone(),
-                            plakous::model::ModelErrorKind::RateLimited,
+                            if name == "output-limit" {
+                                plakous::model::ModelErrorKind::OutputLimit
+                            } else {
+                                plakous::model::ModelErrorKind::RateLimited
+                            },
                         )
                         .unwrap(),
                     };
@@ -1367,6 +1371,10 @@ mod tests {
                 ("failed", TurnResultOutcome::Failed(_)) => {
                     assert_eq!(lifecycle.phase, TurnPhase::Failed);
                     assert_eq!(lifecycle.model_error_kind.as_deref(), Some("RateLimited"));
+                }
+                ("output-limit", TurnResultOutcome::Failed(_)) => {
+                    assert_eq!(lifecycle.phase, TurnPhase::Failed);
+                    assert_eq!(lifecycle.model_error_kind.as_deref(), Some("OutputLimit"));
                 }
                 (name, outcome) => panic!("{name} produced an unexpected outcome: {outcome:?}"),
             }
@@ -1602,7 +1610,6 @@ mod tests {
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod reasoning_only_tests {
     use super::{TurnHostOutcome, terminal_turn_outcome};
-    use crate::runtime::host_loop::publication::spent_budget_on_reasoning;
 
     #[test]
     fn terminal_overflow_uses_the_canonical_remedy_even_without_a_capacity_tuple() {
@@ -1744,15 +1751,9 @@ mod reasoning_only_tests {
         );
     }
 
-    /// A budget-exhausted completion reaches the host as the shape the
-    /// reasoning-only branch keys on.
-    ///
-    /// Drives the offline loopback provider end to end: empty visible text, no
-    /// tool call, `FinishReason::Length`, and provider-reported counts showing
-    /// the whole output bound spent on reasoning. This shape can prevent
-    /// a task from completing.
+    /// A reasoning-only Length round must fail after its bounded retry.
     #[test]
-    fn a_budget_exhausted_completion_arrives_as_empty_toolless_and_length() {
+    fn a_budget_exhausted_completion_arrives_as_typed_failure() {
         let root = tempfile::tempdir().unwrap();
         let executor = plakous::application::ApplicationExecutor::new().unwrap();
         let result = executor
@@ -1812,25 +1813,6 @@ mod reasoning_only_tests {
                 outcome
             })
             .unwrap();
-        let TurnHostOutcome::Completed {
-            assistant,
-            finish_reason,
-            reasoning_tokens,
-            output_tokens,
-            tool_calls,
-            ..
-        } = result
-        else {
-            panic!("expected a completed turn");
-        };
-        assert!(assistant.is_empty(), "no visible text: {assistant:?}");
-        assert_eq!(tool_calls, 0);
-        assert_eq!(finish_reason, plakous::model::FinishReason::Length);
-        assert_eq!(reasoning_tokens, 4_095);
-        assert_eq!(output_tokens, 4_096);
-        assert!(
-            spent_budget_on_reasoning(assistant.is_empty(), tool_calls, finish_reason),
-            "the host must classify this as budget-exhausted, not an empty stream"
-        );
+        assert!(matches!(result, TurnHostOutcome::Failed { .. }));
     }
 }

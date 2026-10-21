@@ -2412,10 +2412,10 @@ pub(super) const OPERATION_BUDGET_EXHAUSTED_NOTE: &str =
 
 fn output_limit_retry_note(bound: Option<std::num::NonZeroU32>) -> String {
     bound.map_or_else(
-        || "response reached the provider output limit during a tool call; retrying with a smaller call".to_owned(),
+        || "response reached the provider output limit before completion; retrying with less output".to_owned(),
         |bound| {
             format!(
-                "response reached its {}-token output limit during a tool call; retrying with a smaller call",
+                "response reached its {}-token output limit before completion; retrying with less output",
                 bound.get()
             )
         },
