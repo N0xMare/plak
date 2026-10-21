@@ -155,6 +155,100 @@ impl HistorySegment {
         Self::freeze(kind, items, true)
     }
 
+    /// Decodes exact canonical segment content, proving canonicality once.
+    ///
+    /// # Errors
+    /// Returns an error for invalid semantic content or noncanonical bytes.
+    /// A malformed canonical envelope is an integrity mismatch; malformed item
+    /// JSON and invalid model content retain their serialization/semantic errors.
+    pub fn from_canonical(bytes: &[u8]) -> Result<Self, HistoryError> {
+        if bytes.len() > MAX_SEGMENT_BYTES {
+            return Err(HistoryError::LimitExceeded {
+                field: "history segment bytes",
+                maximum: MAX_SEGMENT_BYTES,
+            });
+        }
+        let noncanonical = || HistoryError::IntegrityMismatch {
+            field: "history segment canonical bytes",
+        };
+        // JCS orders `items` before `kind`. Decode items directly from that
+        // envelope and retain their consumed slices, rather than parsing a
+        // Value tree and then deserializing it a second time.
+        let mut remaining = bytes
+            .strip_prefix(b"{\"items\":[")
+            .ok_or_else(noncanonical)?;
+        let mut items = Vec::new();
+        let mut item_bytes = Vec::new();
+        if !remaining.starts_with(b"]") {
+            loop {
+                if items.len() == MAX_SEGMENT_ITEMS {
+                    return Err(HistoryError::LimitExceeded {
+                        field: "history segment items",
+                        maximum: MAX_SEGMENT_ITEMS,
+                    });
+                }
+                let mut stream =
+                    serde_json::Deserializer::from_slice(remaining).into_iter::<ConversationItem>();
+                let item = stream
+                    .next()
+                    .ok_or_else(noncanonical)?
+                    .map_err(|error| HistoryError::Serialization(error.to_string()))?;
+                let consumed = stream.byte_offset();
+                item_bytes.push(&remaining[..consumed]);
+                items.push(item);
+                remaining = &remaining[consumed..];
+                if let Some(rest) = remaining.strip_prefix(b",") {
+                    remaining = rest;
+                } else {
+                    break;
+                }
+            }
+        }
+        let kind_bytes = remaining
+            .strip_prefix(b"],\"kind\":")
+            .and_then(|rest| rest.strip_suffix(b"}"))
+            .ok_or_else(noncanonical)?;
+        let kind: HistorySegmentKind = serde_json::from_slice(kind_bytes)
+            .map_err(|error| HistoryError::Serialization(error.to_string()))?;
+        validate_segment(kind, &items)?;
+        let value = serde_json::to_value(HistorySegmentContent {
+            kind,
+            items: &items,
+        })
+        .map_err(|error| HistoryError::Serialization(error.to_string()))?;
+        let canonical = canonicalize_prevalidated(&value, MAX_SEGMENT_BYTES)
+            .map_err(|error| HistoryError::Serialization(error.to_string()))?;
+        if canonical != bytes {
+            return Err(noncanonical());
+        }
+        // Each consumed item slice inherits the one whole-content proof.
+        let item_identities = item_bytes
+            .into_iter()
+            .map(|bytes| {
+                Digest::sha256(
+                    DigestDomain::HistoryProjection,
+                    4,
+                    &[b"plakous-model/semantic-projection-item", bytes],
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let identity = Digest::sha256(
+            DigestDomain::CanonicalHistorySegment,
+            2,
+            &[&[kind.tag()], bytes],
+        )?;
+        Ok(Self {
+            inner: Arc::new(HistorySegmentInner {
+                kind,
+                items: items.into(),
+                identity,
+                canonical_bytes: bytes.into(),
+                item_identities: item_identities.into(),
+                model_visible_complete: true,
+            }),
+        })
+    }
+
     fn inferred(items: Vec<ConversationItem>) -> Result<Self, HistoryError> {
         if items.is_empty() {
             return Err(HistoryError::EmptySegment);
@@ -4779,6 +4873,215 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(retained.len(), 1);
         assert!(retained[0].shares_storage_with(&latest));
+    }
+
+    #[test]
+    fn canonical_decode_preserves_segment_and_item_identities() {
+        let segment = HistorySegment::new(
+            HistorySegmentKind::Conversation,
+            vec![
+                text(1, Actor::Assistant, "canonical item"),
+                text(2, Actor::Assistant, "escaped \"item\"\n"),
+            ],
+        )
+        .expect("canonical segment");
+        let decoded =
+            HistorySegment::from_canonical(segment.canonical_bytes()).expect("canonical segment");
+        assert_eq!(decoded, segment);
+        let mut padded = segment.canonical_bytes().to_vec();
+        padded.push(b' ');
+        assert!(HistorySegment::from_canonical(&padded).is_err());
+    }
+
+    fn media_segment(bytes: Vec<u8>) -> HistorySegment {
+        let source = crate::MediaSource::bytes(bytes).expect("media");
+        HistorySegment::new(
+            HistorySegmentKind::Conversation,
+            vec![
+                entry(
+                    1,
+                    Actor::User,
+                    ContentBlock::Image(
+                        crate::ImageBlock::new("image/png", source.clone()).expect("image"),
+                    ),
+                ),
+                entry(
+                    2,
+                    Actor::User,
+                    ContentBlock::Document(
+                        crate::DocumentBlock::new("application/pdf", source.clone())
+                            .expect("document"),
+                    ),
+                ),
+                entry(
+                    3,
+                    Actor::User,
+                    ContentBlock::Audio(
+                        crate::AudioBlock::new("audio/wav", source).expect("audio"),
+                    ),
+                ),
+            ],
+        )
+        .expect("media segment")
+    }
+
+    fn auxiliary_segment(content: &str) -> HistorySegment {
+        let replay = crate::ReplayEnvelope::new(
+            crate::ProtocolId::new("test.protocol").expect("protocol"),
+            None,
+            crate::ReplayScope::Protocol,
+            crate::ReplayKindId::new("test.replay").expect("kind"),
+            1,
+            crate::DataClassification::Public,
+            serde_json::value::RawValue::from_string(
+                serde_json::to_string(content).expect("payload"),
+            )
+            .expect("raw payload"),
+        )
+        .expect("replay");
+        let citation = crate::CitationBlock::new(
+            crate::CitationTarget::new(EntryId::try_from(Uuid::from_u128(1)).expect("id"), 0),
+            crate::CitationSource::new("source", "annotation", None, Some(content.to_owned()))
+                .expect("source"),
+            Some(
+                crate::CitationRange::new(0, content.len() as u64, crate::CitationUnit::Utf8Byte)
+                    .expect("range"),
+            ),
+        );
+        HistorySegment::new(
+            HistorySegmentKind::ReasoningReplay,
+            vec![
+                entry(
+                    1,
+                    Actor::Assistant,
+                    ContentBlock::Opaque(
+                        crate::OpaqueBlock::new(
+                            replay,
+                            crate::OpaqueFallback::SemanticSummary(content.to_owned()),
+                        )
+                        .expect("opaque"),
+                    ),
+                ),
+                entry(2, Actor::Assistant, ContentBlock::Citation(citation)),
+            ],
+        )
+        .expect("auxiliary segment")
+    }
+
+    fn exchange_with_update() -> HistorySegment {
+        let mut items = complete_exchange(1).items().to_vec();
+        items.insert(
+            1,
+            entry(
+                4,
+                Actor::Tool,
+                ContentBlock::ToolResultUpdate(
+                    crate::ToolResultUpdateBlock::new(
+                        CallId::try_from(Uuid::from_u128(1)).expect("call"),
+                        ToolExecutionOwner::Local,
+                        TextBlock::new("progress", None).expect("text"),
+                        ToolCorrelation::default(),
+                    )
+                    .expect("update"),
+                ),
+            ),
+        );
+        HistorySegment::new(HistorySegmentKind::ToolExchange, items).expect("exchange with update")
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn canonical_segments_roundtrip_content_and_projection_identities(
+            content in ".{1,128}", bytes in proptest::collection::vec(proptest::prelude::any::<u8>(), 1..64),
+            variant in 0_u8..8,
+        ) {
+            let segment = match variant {
+                0 => HistorySegment::new(HistorySegmentKind::Conversation, vec![text(1, Actor::Assistant, &content)]).expect("text"),
+                1 => complete_exchange(1),
+                2 => reasoning(1),
+                3 => compaction_summary(1, &content),
+                4 => media_segment(bytes),
+                6 => auxiliary_segment(&content),
+                7 => exchange_with_update(),
+                _ => HistorySegment::new(HistorySegmentKind::Conversation, vec![entry(1, Actor::Assistant,
+                    ContentBlock::Refusal(crate::RefusalBlock::new(content).expect("refusal")))]).expect("refusal segment"),
+            };
+            let decoded = HistorySegment::from_canonical(segment.canonical_bytes()).expect("decode");
+            proptest::prop_assert_eq!(&decoded, &segment);
+            for (item, identity) in segment.items().iter().zip(decoded.inner.item_identities.iter()) {
+                proptest::prop_assert_eq!(projection_item_identity(item).expect("item identity"), *identity);
+            }
+        }
+    }
+
+    #[test]
+    fn canonical_segment_refuses_alternate_json_encodings() {
+        let segment = HistorySegment::new(
+            HistorySegmentKind::Conversation,
+            vec![text(1, Actor::User, "A/\u{e9}\u{1f680}")],
+        )
+        .expect("segment");
+        let canonical = std::str::from_utf8(segment.canonical_bytes()).expect("utf8");
+        let value: serde_json::Value = serde_json::from_str(canonical).expect("value");
+        let items = serde_json::to_string(&value["items"]).expect("items");
+        let kind = serde_json::to_string(&value["kind"]).expect("kind");
+        for alternative in [
+            canonical.replace("A/", r"\u0041/"),
+            canonical.replace("A/", r"A\/"),
+            canonical.replace('\u{1f680}', r"\ud83d\ude80"),
+            format!("{{\"kind\":{kind},\"items\":{items}}}"),
+            format!("{{\"items\":{items},\"kind\":{kind},\"kind\":{kind}}}"),
+            format!("{{\"items\":{items},\"kind\":{kind},\"unknown\":0}}"),
+            canonical.replace(
+                "\"actor\":\"User\"",
+                "\"actor\":\"User\",\"actor\":\"User\"",
+            ),
+            canonical.replacen("{\"actor\":", "{\"unknown\":0,\"actor\":", 1),
+            format!(
+                "{{\"items\":[{{\"blocks\":{},\"actor\":{},\"id\":{},\"provenance\":{}}}],\"kind\":{kind}}}",
+                value["items"][0]["blocks"],
+                value["items"][0]["actor"],
+                value["items"][0]["id"],
+                value["items"][0]["provenance"]
+            ),
+            format!("{{\"items\":[],\"kind\":{kind}}}"),
+        ] {
+            assert_ne!(alternative.as_bytes(), segment.canonical_bytes());
+            assert!(
+                HistorySegment::from_canonical(alternative.as_bytes()).is_err(),
+                "{alternative}"
+            );
+        }
+        let decoded = HistorySegment::from_canonical(segment.canonical_bytes()).expect("unicode");
+        assert_eq!(
+            decoded.inner.item_identities[0],
+            projection_item_identity(&segment.items()[0]).expect("identity")
+        );
+        // Envelope refusals deliberately use the integrity class, even for garbage.
+        assert!(matches!(
+            HistorySegment::from_canonical(b"garbage"),
+            Err(HistoryError::IntegrityMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn canonical_media_refuses_noninteger_and_out_of_range_byte_numbers() {
+        let segment = media_segment(vec![1, 0, 255]);
+        let canonical = std::str::from_utf8(segment.canonical_bytes()).expect("utf8");
+        for number in ["1.0", "1e0", "-0", "9007199254740993"] {
+            let alternative = canonical.replacen("[1,0,255]", &format!("[{number},0,255]"), 1);
+            assert_ne!(alternative, canonical);
+            assert!(HistorySegment::from_canonical(alternative.as_bytes()).is_err());
+        }
+        let decoded =
+            HistorySegment::from_canonical(segment.canonical_bytes()).expect("media decode");
+        for (item, identity) in segment
+            .items()
+            .iter()
+            .zip(decoded.inner.item_identities.iter())
+        {
+            assert_eq!(projection_item_identity(item).expect("identity"), *identity);
+        }
     }
 
     #[test]

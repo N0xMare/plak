@@ -1233,24 +1233,15 @@ fn decode_history_segment(
     bytes: &[u8],
     identity: Digest,
 ) -> Result<HistorySegment, RuntimeManifestError> {
-    let mut value: serde_json::Value =
-        serde_json::from_slice(bytes).map_err(|_| RuntimeManifestError::InvalidModelComponent)?;
-    let object = value
-        .as_object_mut()
-        .ok_or(RuntimeManifestError::InvalidModelComponent)?;
-    if object
-        .insert(
-            "identity".to_owned(),
-            serde_json::to_value(identity)
-                .map_err(|_| RuntimeManifestError::InvalidModelComponent)?,
-        )
-        .is_some()
-    {
-        return Err(RuntimeManifestError::InvalidModelComponent);
-    }
-    let segment: HistorySegment =
-        serde_json::from_value(value).map_err(|_| RuntimeManifestError::InvalidModelComponent)?;
-    if segment.identity() != identity || segment.canonical_bytes() != bytes {
+    // Envelope/canonicality refusals are integrity errors; item syntax and
+    // semantic refusals remain invalid model components.
+    let segment = HistorySegment::from_canonical(bytes).map_err(|error| match error {
+        plakous_model::HistoryError::IntegrityMismatch { .. } => {
+            RuntimeManifestError::IntegrityMismatch
+        }
+        _ => RuntimeManifestError::InvalidModelComponent,
+    })?;
+    if segment.identity() != identity {
         return Err(RuntimeManifestError::IntegrityMismatch);
     }
     Ok(segment)
@@ -1402,5 +1393,25 @@ fn digest_domain(tag: u8) -> Result<DigestDomain, RuntimeManifestError> {
             field: "digest domain",
             tag,
         }),
+    }
+}
+
+#[cfg(test)]
+mod canonical_segment_error_tests {
+    use super::*;
+
+    #[test]
+    fn envelope_integrity_and_item_syntax_refusals_remain_distinct()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let identity = Digest::sha256(DigestDomain::CanonicalHistorySegment, 2, &[b"test"])?;
+        assert!(matches!(
+            decode_history_segment(b"garbage", identity),
+            Err(RuntimeManifestError::IntegrityMismatch)
+        ));
+        assert!(matches!(
+            decode_history_segment(br#"{"items":[garbage],"kind":"Conversation"}"#, identity),
+            Err(RuntimeManifestError::InvalidModelComponent)
+        ));
+        Ok(())
     }
 }

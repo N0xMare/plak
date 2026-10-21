@@ -1936,6 +1936,7 @@ fn an_operation_reference_to_non_operation_evidence_fails_closed() -> TestResult
     })?;
     let address = builder.insert(RuntimeObjectKind::OperationRecord, wire.encode()?, children)?;
     let index = ObjectIndex {
+        decoded: BTreeMap::new(),
         objects: builder
             .objects
             .iter()
@@ -2413,5 +2414,175 @@ fn foreign_or_noncanonical_operation_record_bytes_fail_closed() -> TestResult {
             "{name}"
         );
     }
+    Ok(())
+}
+
+#[test]
+fn cold_load_hashes_each_object_and_decodes_each_segment_once() -> TestResult {
+    let checkpoint = fixture(8, 9001, false)?;
+    let bundle = RuntimeCheckpointCodec::bundle(&checkpoint, None)?;
+    let segment_count = bundle
+        .supplied_objects()
+        .iter()
+        .filter(|object| object.address().kind() == RuntimeObjectKind::HistorySegment)
+        .count();
+    SEGMENT_DECODES.set(0);
+    SEGMENT_HASHES.set(0);
+    ADDRESS_VALIDATIONS.set(0);
+    let objects = bundle
+        .supplied_objects()
+        .iter()
+        .map(|object| {
+            RuntimeObject::from_store(
+                object.address(),
+                object.canonical_bytes().to_vec(),
+                object.children().to_vec(),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(ADDRESS_VALIDATIONS.get(), bundle.supplied_objects().len());
+    let loaded = CheckpointObjectBundle::from_store(
+        bundle.checkpoint_id(),
+        bundle.checkpoint_integrity(),
+        bundle.root(),
+        objects,
+    )?;
+    assert_eq!(SEGMENT_DECODES.get(), segment_count);
+    assert_eq!(SEGMENT_HASHES.get(), segment_count);
+    assert_eq!(ADDRESS_VALIDATIONS.get(), bundle.supplied_objects().len());
+    let materialized = loaded.validated_checkpoint()?;
+    assert_eq!(*materialized, checkpoint);
+    Ok(())
+}
+
+#[test]
+fn trusted_builder_validates_only_new_history_segment_payloads() -> TestResult {
+    let checkpoint = fixture(64, 1, false)?;
+    let history = checkpoint
+        .manifest()
+        .canonical()
+        .history()
+        .append(history_segment(64)?)?;
+    let prior = RuntimeCheckpointCodec::bundle(&checkpoint, None)?;
+    let next = fixture_with_history(history, 2, false)?;
+    SEGMENT_DECODES.set(0);
+    let delta = RuntimeCheckpointCodec::advance(&next, &prior)?;
+    assert_eq!(
+        delta
+            .supplied_objects()
+            .iter()
+            .filter(|object| object.address().kind() == RuntimeObjectKind::HistorySegment)
+            .count(),
+        1
+    );
+    assert_eq!(SEGMENT_DECODES.get(), 1);
+    let mut builder = BundleBuilder {
+        objects: BTreeMap::new(),
+        visited: 0,
+    };
+    assert!(
+        builder
+            .insert(
+                RuntimeObjectKind::HistorySegment,
+                b"unvalidated".to_vec(),
+                Vec::new()
+            )
+            .is_err()
+    );
+    Ok(())
+}
+
+#[test]
+fn trusted_publication_refuses_a_lossy_segment_roundtrip() -> TestResult {
+    let citation = plakous_model::CitationBlock::new(
+        plakous_model::CitationTarget::new(id(1)?, 0),
+        plakous_model::CitationSource::new("source", "annotation", None, None)?,
+        Some(plakous_model::CitationRange::new(
+            0,
+            9_007_199_254_740_993,
+            plakous_model::CitationUnit::Utf8Byte,
+        )?),
+    );
+    let segment = HistorySegment::new(
+        HistorySegmentKind::Conversation,
+        vec![ConversationItem::new(
+            id(1)?,
+            Actor::Assistant,
+            vec![ContentBlock::Citation(citation)],
+            Provenance::ModelOutput,
+        )?],
+    )?;
+    let mut builder = BundleBuilder {
+        objects: BTreeMap::new(),
+        visited: 0,
+    };
+    assert!(matches!(
+        builder.segment(&segment),
+        Err(CheckpointBundleError::NonCanonical)
+    ));
+    Ok(())
+}
+
+#[test]
+fn builder_just_addressed_segment_is_roundtripped_without_rehashing() -> TestResult {
+    let segment = history_segment(0)?;
+    let mut builder = BundleBuilder {
+        objects: BTreeMap::new(),
+        visited: 0,
+    };
+    OBJECT_HASHES.set(0);
+    ADDRESS_VALIDATIONS.set(0);
+    SEGMENT_DECODES.set(0);
+    builder.segment(&segment)?;
+    assert_eq!(OBJECT_HASHES.get(), 1);
+    assert_eq!(ADDRESS_VALIDATIONS.get(), 0);
+    assert_eq!(SEGMENT_DECODES.get(), 1);
+    Ok(())
+}
+
+#[test]
+fn history_and_working_materializers_share_the_decoded_segment() -> TestResult {
+    let checkpoint = fixture(1, 9200, false)?;
+    let bundle = RuntimeCheckpointCodec::bundle(&checkpoint, None)?;
+    let segment = checkpoint
+        .manifest()
+        .canonical()
+        .history()
+        .segments()
+        .iter()
+        .next()
+        .ok_or("segment")?
+        .clone();
+    let working = WorkingProjection::new(vec![segment], WorkingProjection::default().limits())?;
+    let mut builder = BundleBuilder {
+        objects: BTreeMap::new(),
+        visited: 0,
+    };
+    let working_address = builder.working(&working)?;
+    SEGMENT_DECODES.set(0);
+    let mut index = ObjectIndex::validate(&bundle)?;
+    let decoded = SEGMENT_DECODES.get();
+    index.objects.insert(
+        working_address,
+        builder
+            .objects
+            .get(&working_address)
+            .ok_or("working object")?,
+    );
+    let history = materialize_history(
+        &index,
+        1,
+        bundle.reuse.as_ref().ok_or("reuse")?.history_head,
+    )?;
+    let working = materialize_working(&index, working_address)?;
+    assert!(
+        history
+            .segments()
+            .iter()
+            .next()
+            .ok_or("history segment")?
+            .shares_storage_with(&working.segments()[0])
+    );
+    assert_eq!(SEGMENT_DECODES.get(), decoded);
     Ok(())
 }

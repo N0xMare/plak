@@ -202,14 +202,43 @@ impl fmt::Debug for RuntimeObjectAddress {
 }
 
 /// One exact immutable object and its indexed ordered child mirror.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct RuntimeObject {
     address: RuntimeObjectAddress,
     canonical_bytes: Arc<[u8]>,
+    addressed_bytes: Arc<[u8]>,
     children: Arc<[RuntimeObjectAddress]>,
+    decoded_segment: Option<HistorySegment>,
 }
 
+impl PartialEq for RuntimeObject {
+    fn eq(&self, other: &Self) -> bool {
+        self.address == other.address
+            && self.canonical_bytes == other.canonical_bytes
+            && self.children == other.children
+    }
+}
+
+impl Eq for RuntimeObject {}
+
 impl RuntimeObject {
+    // Only BundleBuilder may bypass reconstruction: it just encoded these
+    // bytes and their ordered edges and computed their address.
+    fn new_trusted(
+        address: RuntimeObjectAddress,
+        canonical_bytes: Vec<u8>,
+        children: Vec<RuntimeObjectAddress>,
+    ) -> Self {
+        let canonical_bytes: Arc<[u8]> = canonical_bytes.into();
+        Self {
+            address,
+            addressed_bytes: Arc::clone(&canonical_bytes),
+            canonical_bytes,
+            children: children.into(),
+            decoded_segment: None,
+        }
+    }
+
     /// Reconstructs one object read from normalized backend rows.
     ///
     /// This validates the address against the exact canonical bytes. The closed
@@ -231,20 +260,34 @@ impl RuntimeObject {
             address.codec_revision,
             address.digest,
         )?;
+        #[cfg(test)]
+        ADDRESS_VALIDATIONS.update(|count| count + 1);
         if object_address(address.kind, &canonical_bytes)? != address {
             return Err(CheckpointBundleError::InvalidAddress);
         }
-        let expected_children = canonical_child_specs(address.kind, &canonical_bytes)?
-            .into_iter()
-            .map(|(child, _)| child)
-            .collect::<Vec<_>>();
+        let decoded_segment = if address.kind == RuntimeObjectKind::HistorySegment {
+            Some(canonical_history_segment(&canonical_bytes)?)
+        } else {
+            None
+        };
+        let expected_children = if decoded_segment.is_some() {
+            Vec::new()
+        } else {
+            canonical_child_specs(address.kind, &canonical_bytes)?
+        }
+        .into_iter()
+        .map(|(child, _)| child)
+        .collect::<Vec<_>>();
         if expected_children != ordered_children {
             return Err(CheckpointBundleError::NonCanonical);
         }
+        let canonical_bytes: Arc<[u8]> = canonical_bytes.into();
         Ok(Self {
             address,
-            canonical_bytes: canonical_bytes.into(),
+            addressed_bytes: Arc::clone(&canonical_bytes),
+            canonical_bytes,
             children: ordered_children.into(),
+            decoded_segment,
         })
     }
 
@@ -282,7 +325,7 @@ impl fmt::Debug for RuntimeObject {
             .field("address", &self.address)
             .field("canonical_bytes_len", &self.canonical_bytes.len())
             .field("children", &self.children)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -939,7 +982,9 @@ impl RuntimeCheckpointCodec {
         })
     }
 
-    /// Recomputes every address and materializes the exact semantic checkpoint.
+    /// Validates the graph and materializes the exact semantic checkpoint.
+    /// Object reconstruction has already verified each immutable byte allocation
+    /// against its address; materialization does not hash it again.
     ///
     /// # Errors
     ///
@@ -1537,11 +1582,20 @@ impl BundleBuilder {
         &mut self,
         segment: &HistorySegment,
     ) -> Result<RuntimeObjectAddress, CheckpointBundleError> {
-        self.insert(
+        let address = self.insert(
             RuntimeObjectKind::HistorySegment,
             encode_bundle_history_segment(segment)?,
             Vec::new(),
-        )
+        )?;
+        let object = self
+            .objects
+            .get_mut(&address)
+            .ok_or(CheckpointBundleError::MissingObject)?;
+        if object.decoded_segment.as_ref() != Some(segment) {
+            return Err(CheckpointBundleError::NonCanonical);
+        }
+        object.decoded_segment = Some(segment.clone());
+        Ok(address)
     }
 
     fn component(
@@ -1895,12 +1949,20 @@ impl BundleBuilder {
     ) -> Result<RuntimeObjectAddress, CheckpointBundleError> {
         self.visited = self.visited.saturating_add(1);
         let address = object_address(kind, &canonical_bytes)?;
-        let candidate = RuntimeObject::from_store(address, canonical_bytes, children)?;
+        let mut candidate = RuntimeObject::new_trusted(address, canonical_bytes, children);
         if let Some(existing) = self.objects.get(&address) {
             if existing != &candidate {
                 return Err(CheckpointBundleError::AddressConflict);
             }
             return Ok(address);
+        }
+        if kind == RuntimeObjectKind::HistorySegment {
+            // Newly encoded segments still cross the model's validation boundary.
+            let segment = canonical_history_segment(&candidate.canonical_bytes)?;
+            if encode_bundle_history_segment(&segment)? != candidate.canonical_bytes.as_ref() {
+                return Err(CheckpointBundleError::NonCanonical);
+            }
+            candidate.decoded_segment = Some(segment);
         }
         self.objects.insert(address, candidate);
         if self.objects.len() > MAX_CHECKPOINT_OBJECTS {
@@ -1910,10 +1972,25 @@ impl BundleBuilder {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    static OBJECT_HASHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static ADDRESS_VALIDATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static SEGMENT_DECODES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static SEGMENT_HASHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn object_address(
     kind: RuntimeObjectKind,
     canonical_bytes: &[u8],
 ) -> Result<RuntimeObjectAddress, CheckpointBundleError> {
+    #[cfg(test)]
+    {
+        OBJECT_HASHES.update(|count| count + 1);
+        if kind == RuntimeObjectKind::HistorySegment {
+            SEGMENT_HASHES.update(|count| count + 1);
+        }
+    }
     let codec_revision = RUNTIME_FORMAT_EPOCH;
     let digest = Digest::sha256(
         DigestDomain::Blob,
@@ -2107,6 +2184,7 @@ fn canonical_child_specs(
 
 struct ObjectIndex<'a> {
     objects: BTreeMap<RuntimeObjectAddress, &'a RuntimeObject>,
+    decoded: BTreeMap<RuntimeObjectAddress, HistorySegment>,
 }
 
 impl<'a> ObjectIndex<'a> {
@@ -2137,7 +2215,10 @@ impl<'a> ObjectIndex<'a> {
                 {
                     return Err(CheckpointBundleError::UnsupportedRevision);
                 }
-                if object_address(object.address.kind, &object.canonical_bytes)? != object.address {
+                // Both fields are construction-only: constructors either hash
+                // these bytes or receive the builder's freshly computed address.
+                // Pointer equality detects test-only byte replacement, not a memo.
+                if !Arc::ptr_eq(&object.addressed_bytes, &object.canonical_bytes) {
                     return Err(CheckpointBundleError::InvalidAddress);
                 }
                 if objects.insert(object.address, object).is_some() {
@@ -2149,7 +2230,18 @@ impl<'a> ObjectIndex<'a> {
         if objects.len() > MAX_CHECKPOINT_OBJECTS {
             return Err(CheckpointBundleError::BoundExceeded);
         }
-        let index = Self { objects };
+        let decoded = objects
+            .iter()
+            .filter(|(address, _)| address.kind == RuntimeObjectKind::HistorySegment)
+            .map(|(address, object)| {
+                let segment = match &object.decoded_segment {
+                    Some(segment) => segment.clone(),
+                    None => canonical_history_segment(&object.canonical_bytes)?,
+                };
+                Ok((*address, segment))
+            })
+            .collect::<Result<_, CheckpointBundleError>>()?;
+        let index = Self { objects, decoded };
         index.object(bundle.root, RuntimeObjectKind::CheckpointRoot)?;
         for object in bundle.objects.iter() {
             let expected = index.expected_children(object)?;
@@ -2194,6 +2286,9 @@ impl<'a> ObjectIndex<'a> {
         &self,
         object: &RuntimeObject,
     ) -> Result<Vec<RuntimeObjectAddress>, CheckpointBundleError> {
+        if self.decoded.contains_key(&object.address) {
+            return Ok(Vec::new());
+        }
         let child_specs = canonical_child_specs(object.address.kind, &object.canonical_bytes)?;
         for (address, kind) in &child_specs {
             self.object(*address, *kind)?;
@@ -2327,8 +2422,13 @@ fn materialize_history(
         if node.count != expected || expected == 0 {
             return Err(CheckpointBundleError::InvalidTopology);
         }
-        let segment = index.object(node.value, RuntimeObjectKind::HistorySegment)?;
-        reverse.push(canonical_history_segment(&segment.canonical_bytes)?);
+        reverse.push(
+            index
+                .decoded
+                .get(&node.value)
+                .ok_or(CheckpointBundleError::MissingObject)?
+                .clone(),
+        );
         head = node.previous;
         expected = expected.saturating_sub(1);
     }
@@ -2349,8 +2449,11 @@ fn materialize_working(
         .segments
         .into_iter()
         .map(|address| {
-            let object = index.object(address, RuntimeObjectKind::HistorySegment)?;
-            canonical_history_segment(&object.canonical_bytes)
+            index
+                .decoded
+                .get(&address)
+                .cloned()
+                .ok_or(CheckpointBundleError::MissingObject)
         })
         .collect::<Result<Vec<_>, _>>()?;
     WorkingProjection::new(segments, spec.limits)
@@ -2614,12 +2717,11 @@ canonical_value!(
     decode_bundle_stable_prefix,
     encode_bundle_stable_prefix
 );
-canonical_value!(
-    canonical_history_segment,
-    HistorySegment,
-    decode_bundle_history_segment,
-    encode_bundle_history_segment
-);
+fn canonical_history_segment(bytes: &[u8]) -> Result<HistorySegment, CheckpointBundleError> {
+    #[cfg(test)]
+    SEGMENT_DECODES.update(|count| count + 1);
+    Ok(decode_bundle_history_segment(bytes)?)
+}
 canonical_value!(
     canonical_component,
     ReconstructiveComponent,
