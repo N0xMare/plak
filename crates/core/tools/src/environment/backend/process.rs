@@ -266,6 +266,7 @@ struct JoinedSession {
     shared: Arc<Mutex<JoinedSessionShared>>,
     consumer_cursor: Arc<Mutex<JoinedProcessOutputCursor>>,
     consumer_pending_utf8: Arc<Mutex<Vec<u8>>>,
+    consumer_quiet_polls: Arc<Mutex<crate::internal::ProcessQuietPollState>>,
     promoted: Arc<AtomicU8>,
     consumed: AtomicBool,
     foreground_control: ExecutionOperationControl,
@@ -335,6 +336,7 @@ impl JoinedSession {
             })),
             consumer_cursor: Arc::new(Mutex::new(JoinedProcessOutputCursor::new(0))),
             consumer_pending_utf8: Arc::new(Mutex::new(Vec::new())),
+            consumer_quiet_polls: Arc::default(),
             consumed: AtomicBool::new(false),
             promoted: Arc::new(AtomicU8::new(PROMOTED)),
             foreground_control: ExecutionOperationControl::new(CancellationToken::new()),
@@ -469,6 +471,8 @@ struct JoinedProcessServiceInner {
     queue_limit: usize,
     state: Mutex<JoinedProcessServiceState>,
     terminal_changes: tokio::sync::watch::Sender<u64>,
+    notice_delivery_available: AtomicBool,
+    unread_mail_pending: AtomicBool,
     agent: Mutex<String>,
     host_capacity: Mutex<Option<JoinedProcessHostCapacity>>,
     job_observer: Mutex<Option<JobObserver>>,
@@ -584,6 +588,26 @@ impl JoinedProcessSessions {
             }
         }
         Ok(())
+    }
+
+    pub(crate) fn set_unread_mail_pending(&self, pending: bool) {
+        self.inner
+            .unread_mail_pending
+            .store(pending, Ordering::Release);
+    }
+
+    pub(crate) fn unread_mail_pending(&self) -> bool {
+        self.inner.unread_mail_pending.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn set_notice_delivery_available(&self, available: bool) {
+        self.inner
+            .notice_delivery_available
+            .store(available, Ordering::Release);
+    }
+
+    pub(crate) fn notice_delivery_available(&self) -> bool {
+        self.inner.notice_delivery_available.load(Ordering::Acquire)
     }
 
     /// Captures terminal transitions already observed for this service's jobs.
@@ -1342,6 +1366,7 @@ impl JoinedProcessSessions {
         Ok((
             Arc::clone(&session.consumer_cursor),
             Arc::clone(&session.consumer_pending_utf8),
+            Arc::clone(&session.consumer_quiet_polls),
         ))
     }
 
@@ -1396,6 +1421,8 @@ impl JoinedProcessSessions {
                 job_observer: Mutex::new(None),
                 outputs: Mutex::new(None),
                 terminal_changes: tokio::sync::watch::channel(0).0,
+                notice_delivery_available: AtomicBool::new(true),
+                unread_mail_pending: AtomicBool::new(false),
                 state: Mutex::new(JoinedProcessServiceState {
                     next: 1,
                     terminal_jobs: Vec::new(),
@@ -2383,6 +2410,7 @@ fn start_joined_pipes_process(
         shared,
         consumer_cursor: Arc::new(Mutex::new(JoinedProcessOutputCursor::new(0))),
         consumer_pending_utf8: Arc::new(Mutex::new(Vec::new())),
+        consumer_quiet_polls: Arc::default(),
         consumed: AtomicBool::new(false),
         promoted,
         foreground_control,
@@ -2685,6 +2713,7 @@ fn start_joined_pty_process(
         shared,
         consumer_cursor: Arc::new(Mutex::new(JoinedProcessOutputCursor::new(0))),
         consumer_pending_utf8: Arc::new(Mutex::new(Vec::new())),
+        consumer_quiet_polls: Arc::default(),
         consumed: AtomicBool::new(false),
         promoted,
         foreground_control,

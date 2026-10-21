@@ -246,6 +246,44 @@ impl Agent {
         })?
     }
 
+    /// Marks unread host information that must not be hidden by repeat quiet holds.
+    /// The host clears this transient flag when the sole consumer has read the mail.
+    pub fn set_unread_mail_pending(&self, pending: bool) {
+        plakous_tools::internal::set_process_unread_mail_pending(&self.inner.job_sessions, pending);
+    }
+
+    /// Reports whether a repeat quiet process observation is currently held.
+    #[must_use]
+    pub fn has_repeat_process_observation(&self) -> bool {
+        self.inner
+            .job_sessions
+            .active_session_ids()
+            .iter()
+            .any(|id| {
+                plakous_tools::internal::process_session_projection_state(
+                    &self.inner.job_sessions,
+                    *id,
+                )
+                .is_ok_and(|(_, _, state)| {
+                    state
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .repeat_observers
+                        != 0
+                })
+            })
+    }
+
+    /// Sets the host's current availability to deliver completion notices.
+    /// Call before admitting a turn. The process pack must also opt in.
+    /// This transient host guarantee is not persisted or cancellation authority.
+    pub fn set_notice_delivery_available(&self, available: bool) {
+        plakous_tools::internal::set_process_notice_delivery_available(
+            &self.inner.job_sessions,
+            available,
+        );
+    }
+
     /// Returns live and terminal-but-unconsumed session-owned processes.
     #[must_use]
     pub fn jobs(&self) -> Vec<plakous_tools::JobView> {

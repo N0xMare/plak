@@ -248,7 +248,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-openai": "e1c6c7ce1480d0220dbb8f7bbdb06d06bb35abfa50c97786c2ddb172cc47af98",
     "plakous-tool-files": "245d58f34202ec359f9fe87ccc085e91efa63046e333ae36f67bc5e825f75d52",
     "plakous-tool-plan": "a24834c174bad9b4b590be0c70a60cc8a740263333db483cc8023f2064e89145",
-    "plakous-tool-process": "8e36e8dcfd2c98ede2659e0ad7ed3210b7bbd88c5a8dae75b94f9d03f10f9776",
+    "plakous-tool-process": "6c307e8dad5d8292712032596e663a96eb63ae9642a5bdd6548f760170dc2524",
     "plakous-tool-search": "3c88883a60c39cdd710cb36ca592394f1bf9f0a9f5c070c104020530f6cc3c11",
     "plakous-tool-web": "9698ba8d94bd1214f20ba42a536e7a6e69eceadf9b80338f52deec5d79505e47",
     "plakous-compose": "56b469cc34f94f867749eb7335c23e4985127d80b7468677855cd5bb3df1e11b",

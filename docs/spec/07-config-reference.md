@@ -191,7 +191,11 @@ resume rather than falling back to today's policy.
 Explicit process-start
 observation hints on every route clamp to 0..600 seconds (first observation at
 least 250 ms), independently of `[jobs].foreground_seconds`. Empty Codex
-`write_stdin` polls use 5..300 seconds; nonempty writes use 250 ms..30 seconds.
+`write_stdin` polls first use 5..300 seconds. When completion notices are
+earned, consecutive quiet repeats hold up to 900 seconds, interruptible by
+output, exit, steer, another own promoted job's terminal or a host notice
+(chapter 01 §8.5). Without notices every poll retains 5..300 seconds.
+Nonempty writes use 250 ms..30 seconds.
 Grok output awaits, pi `wait` and Claude blocking output waits cap at one hour. Ctrl+B and
 JSONL `background` are one-shot actions, not configuration or future-call defaults.
 

@@ -121,6 +121,8 @@ pub(crate) mod job_events;
 mod logging;
 mod models;
 pub mod network_watch;
+#[cfg(test)]
+mod notice_tests;
 mod oneshot;
 mod projection;
 #[cfg(test)]

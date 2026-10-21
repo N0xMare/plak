@@ -187,16 +187,26 @@ and a nested terminal read that preserves the unconsumed row through its
 enclosing composition close. Projection fixtures distinguish empty-poll
 5..300-second hints from nonempty-input 250 ms..30-second hints and verify
 that zero selects the 250 ms first observation on every process vocabulary.
+Paused-clock quiet-poll fixtures prove the 900-second ceiling, prompt wakes
+with elapsed-time assertions distinct from that ceiling, cancellation during
+a hold, nonempty/Close/cursor reset rules, and exclusion of inline foreground
+terminals. Hosted fixtures prove unread mail re-signals later polls, stale
+in-band job joins do not preempt the next Bash, and driver-owned terminal
+notices deduplicate per turn. Nested cell and parallel read-only observer
+fixtures prove in-band exits do not spuriously yield computing cells or sibling
+waits. Repeated-mail fixtures bound forced yields per batch and pin the fixed
+model-visible end-turn reason. Automatic notices are gated on earned host wakes.
 Cell wait contract fixtures pin the shared 600-second schema ceiling and
 pre-validation hint clamp without changing cell-id normalization or invalid
 hint shapes. Driver fixtures steer during the initial cell observation and
 an outer wait, then resume the same un-joined cell to completion. A nested
-mutation fixture proves steer leaves its preempt carrier unset, waits for
-settlement and one accepted result delivery, then yields; the exact yielded
+mutation fixture proves steer never injects the Steer/Background variants
+into nested work, waits for non-waiting settlement and one accepted result
+delivery, then yields; the exact yielded
 checkpoint is checked by the Code Cell abandonment fold. A process-local crash
 snapshot reopens or reconciles that exact prefix without replaying the mutation.
-Real nested process fixtures prove steer neither promotes a start nor shortens
-an empty poll; a top-level read-only group fixture pins whole-group closes or
+Real nested process fixtures prove steer forwards Notice to promote a waiting
+start or shorten an empty poll without killing its process; a top-level read-only group fixture pins whole-group closes or
 whole-group dispatch.
 Mixed-mode fixtures keep a live cell's lineage marker while a top-level process
 observes steer and a prepared top-level read-only group closes without dispatch.

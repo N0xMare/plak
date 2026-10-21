@@ -24,6 +24,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
             return;
         }
         self.queue_refresh_at = Instant::now() + Duration::from_millis(250);
+        self.poll_mail_notice();
         if let Some(live) = self.host.live_projector.as_mut() {
             live.tick(self.host.live_target.clone());
         }
@@ -39,6 +40,55 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                     super::super::projection::queue_join(&store, &id).await
                 }),
             });
+        }
+    }
+
+    fn poll_mail_notice(&mut self) {
+        if !self.host.host_wakes || self.host.session.child_wake_suppressed {
+            self.host.job_agent.set_unread_mail_pending(false);
+            return;
+        }
+        if let Some(reply) = self.notice_reply.as_mut() {
+            match reply.try_recv() {
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => return,
+                _ => self.notice_reply = None,
+            }
+        }
+        let checkpoint = self.host.job_agent.checkpoint_id();
+        let tree_id =
+            super::super::topology_state::durable_tree_id(self.host.rows, self.host.session);
+        let Some(runtime) = crate::topology_runtime::lookup(&tree_id) else {
+            return;
+        };
+        let Ok(ids) = runtime.read(|tree| {
+            tree.unread_mail(&tree.root_agent_id)
+                .map(|mail| mail.message_id.clone())
+                .collect::<Vec<_>>()
+        }) else {
+            return;
+        };
+        self.host.job_agent.set_unread_mail_pending(!ids.is_empty());
+        if ids.is_empty() {
+            return;
+        }
+        let repeat = self.host.job_agent.has_repeat_process_observation();
+        if self.mail_batch_notified && (!repeat || self.mail_repeat_notified) {
+            return;
+        }
+        let identity = checkpoint.to_string();
+        if self.noticed_mail_checkpoint.as_ref() == Some(&identity)
+            && ids.iter().all(|id| self.noticed_mail.contains(id))
+        {
+            return;
+        }
+        if let Ok(reply) = self.control.notice_at(checkpoint) {
+            self.notice_reply = Some(reply);
+            self.noticed_mail_checkpoint = Some(identity);
+            self.noticed_mail = ids;
+            if self.mail_batch_notified {
+                self.mail_repeat_notified = true;
+            }
+            self.mail_batch_notified = true;
         }
     }
 

@@ -16,6 +16,13 @@ use super::{
     ToolRuntimeErrorKind, Value, fmt, json, text, tool_name,
 };
 
+/// Host guarantees that enable coalescing repeated quiet observations.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ProcessPackConfig {
+    /// The host reports process completion without another model poll.
+    pub completion_notices: bool,
+}
+
 /// The one exclusive-resource executor: joined process sessions, their four
 /// canonical operations, and the per-vocabulary shell tool that drives them.
 #[derive(Clone, Default)]

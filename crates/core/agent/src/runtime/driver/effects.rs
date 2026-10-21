@@ -114,15 +114,19 @@ impl Driver {
             let (preempt, guard) = self.dispatch_preempt();
             (control.with_preempt(preempt), Some(guard))
         } else {
-            (control, None)
+            let (preempt, guard) = self.nested_notice_preempt();
+            (control.with_preempt(preempt), Some(guard))
         };
         let tools = self.tools.clone();
         let mut execution = Box::pin(tools.execute_claimed(claimed, control));
         let mut progress_open = true;
         let mut controls_open = true;
         let mut boundary_error = None;
+        let mut job_changes = self.job_sessions.job_terminal_changes();
+        job_changes.mark_changed();
         let report = loop {
             tokio::select! {
+                biased;
                 () = self.authority.lease_lost(), if boundary_error.is_none() => {
                     command.cancellation.cancel();
                     boundary_error = Some(self.authority.heartbeat_failure());
@@ -154,6 +158,7 @@ impl Driver {
                     }
                 }
                 report = &mut execution => break report,
+                _ = job_changes.changed() => self.preempt_for_job_terminals(),
             }
         };
         progress_guard.close();
@@ -812,6 +817,7 @@ impl Driver {
                             return Self::project_resolved_effect_decision(call, resolved);
                         }
                         other @ (ActorControl::Command { .. }
+                        | ActorControl::Notice { .. }
                         | ActorControl::Background { .. }
                         | ActorControl::ContextStatus { .. }
                         | ActorControl::CompactSession { .. }) => {

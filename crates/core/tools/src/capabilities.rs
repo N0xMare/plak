@@ -33,7 +33,7 @@ pub const CLAUDE_BASH_OBSERVATION_BYTES: usize = 30_000;
 /// Canonical standard-tool pack semantic revision.
 pub const STANDARD_CODING_TOOL_VERSION: &str = "3.0.0";
 /// Exact process-tool projection catalog revision.
-pub const PROCESS_TOOL_PROJECTION_REVISION: u32 = 13;
+pub const PROCESS_TOOL_PROJECTION_REVISION: u32 = 14;
 /// Canonical provider-neutral process-session start operation name.
 pub const PROCESS_SESSION_CAPABILITY_NAME: &str = "process_session_start";
 /// Canonical process-session write operation name.

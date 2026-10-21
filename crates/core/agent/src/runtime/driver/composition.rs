@@ -1,9 +1,9 @@
 //! Drive interpreter cells and nested tool dispatch in the actor pump.
 
 use crate::local_composition::{
-    LocalCompositionEvent, LocalCompositionExecuteRequest, LocalCompositionResponse,
-    LocalCompositionSessionLoss, LocalCompositionShutdownResult, LocalCompositionTerminateResult,
-    LocalCompositionWaitOutcome, LocalCompositionWaitRequest,
+    LocalCompositionContentItem, LocalCompositionEvent, LocalCompositionExecuteRequest,
+    LocalCompositionResponse, LocalCompositionSessionLoss, LocalCompositionShutdownResult,
+    LocalCompositionTerminateResult, LocalCompositionWaitOutcome, LocalCompositionWaitRequest,
 };
 use crate::manifest::InterpreterObservation;
 use crate::runtime::cleanup::{emit_shutdown_child_exit, error_with_cleanup_disposition};
@@ -210,6 +210,10 @@ impl Driver {
         result_entry_id: EntryId,
         execution: AdmittedToolExecution,
     ) -> Result<LocalCompositionOuterExecution, AgentError> {
+        if (*self.tool_preempt.borrow()).is_notice() {
+            self.tool_preempt
+                .send_replace(plakous_tools::ToolPreempt::None);
+        }
         let AdmittedToolExecution::ReadOnly {
             invocation,
             projection_receipt,
@@ -789,9 +793,14 @@ impl Driver {
         tokio::pin!(response_deadline);
         let mut steer_settlement_started = false;
         let mut nested_was_settled = true;
+        let mut job_changes = self.job_sessions.job_terminal_changes();
+        job_changes.mark_changed();
         let result: Result<LocalCompositionResponse, AgentError> = loop {
             let steer_pending = state.integration().runtime_contract().supports_yield
-                && *self.tool_preempt.borrow() == plakous_tools::ToolPreempt::Steer;
+                && matches!(
+                    *self.tool_preempt.borrow(),
+                    plakous_tools::ToolPreempt::Steer | plakous_tools::ToolPreempt::Notice(_)
+                );
             let executions_settled = nested_executions.is_empty()
                 && !state.has_active_nested()
                 && state.completed_is_empty();
@@ -833,9 +842,10 @@ impl Driver {
                     && executions_settled && state.deliveries_are_empty() => {
                     break Ok(LocalCompositionResponse::Yielded {
                         cell_id: started.cell_id.clone(),
-                        items: Vec::new(),
+                        items: self.tool_preempt.borrow().notice_reason().map(|reason| LocalCompositionContentItem::Text(reason.to_owned())).into_iter().collect(),
                     });
                 }
+                _ = job_changes.changed() => self.preempt_for_job_terminals(),
                 delivery = state.next_delivery(), if !state.deliveries_are_empty() => {
                     // Every receipt is the same instruction to the driver:
                     // carry on. A refusal means the cell no longer owns that
@@ -1012,9 +1022,14 @@ impl Driver {
             tokio::pin!(response_deadline);
             let mut steer_settlement_started = false;
             let mut nested_was_settled = true;
+            let mut job_changes = self.job_sessions.job_terminal_changes();
+            job_changes.mark_changed();
             loop {
                 let steer_pending = state.integration().runtime_contract().supports_yield
-                    && *self.tool_preempt.borrow() == plakous_tools::ToolPreempt::Steer;
+                    && matches!(
+                        *self.tool_preempt.borrow(),
+                        plakous_tools::ToolPreempt::Steer | plakous_tools::ToolPreempt::Notice(_)
+                    );
                 let executions_settled = nested_executions.is_empty()
                     && !state.has_active_nested()
                     && state.completed_is_empty();
@@ -1065,10 +1080,11 @@ impl Driver {
                         && executions_settled && state.deliveries_are_empty() => {
                         break Ok(LocalCompositionResponse::Yielded {
                             cell_id: cell.clone(),
-                            items: Vec::new(),
+                            items: self.tool_preempt.borrow().notice_reason().map(|reason| LocalCompositionContentItem::Text(reason.to_owned())).into_iter().collect(),
                         });
                     }
-                    delivery = state.next_delivery(), if !state.deliveries_are_empty() => {
+                    _ = job_changes.changed() => self.preempt_for_job_terminals(),
+                delivery = state.next_delivery(), if !state.deliveries_are_empty() => {
                     // Every receipt is the same instruction to the driver:
                     // carry on. A refusal means the cell no longer owns that
                     // request and a proved non-delivery means it never saw it,
@@ -1627,6 +1643,7 @@ impl Driver {
             );
             let dispatch_witness = Arc::new(AtomicBool::new(false));
             let process_session_update = Arc::new(Mutex::new(None));
+            let (notice_preempt, notice_guard) = self.nested_notice_preempt();
             let request = IndexedReadOnlyRequest {
                 authority: self.start_authority(),
                 operation_id: tool_operation,
@@ -1642,8 +1659,8 @@ impl Driver {
                 result_entry_id,
                 cancellation: command.cancellation.clone(),
                 shutdown: self.shutdown.clone(),
-                preempt: tokio::sync::watch::channel(plakous_tools::ToolPreempt::None).1,
-                preempt_guard: None,
+                preempt: notice_preempt,
+                preempt_guard: Some(notice_guard),
                 clock: Arc::clone(&self.clock),
                 progress_capacity: self.config.tool_progress_capacity,
                 events: command.shared.events.clone(),

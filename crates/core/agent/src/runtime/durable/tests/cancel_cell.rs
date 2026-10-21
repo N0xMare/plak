@@ -69,7 +69,9 @@ pub(super) struct CancelCellEvidence {
     pub(super) panic_cleanup_lifecycle: AtomicBool,
     pub(super) panic_terminate: AtomicBool,
     pub(super) terminal_poll: AtomicBool,
+    pub(super) continue_after_terminal: AtomicBool,
     pub(super) empty_poll: AtomicBool,
+    pub(super) repeat_poll: AtomicBool,
     pub(super) deliveries: Mutex<Vec<(String, bool, String)>>,
 }
 
@@ -100,16 +102,18 @@ impl plakous_tools::ToolExecutor for CancelCellTool {
                             .nested_deadline_fixture
                             .load(Ordering::Acquire)
                     {
-                        assert_eq!(
+                        assert!(!matches!(
                             *context.preempt().borrow(),
-                            plakous_tools::ToolPreempt::None
-                        );
+                            plakous_tools::ToolPreempt::Steer
+                                | plakous_tools::ToolPreempt::Background
+                        ));
                         wait_for_scheduler_fact(&self.evidence.release_block).await;
                         assert!(!context.cancellation().is_cancelled());
-                        assert_eq!(
+                        assert!(!matches!(
                             *context.preempt().borrow(),
-                            plakous_tools::ToolPreempt::None
-                        );
+                            plakous_tools::ToolPreempt::Steer
+                                | plakous_tools::ToolPreempt::Background
+                        ));
                         self.evidence.block_joined.store(true, Ordering::Release);
                         return ToolOutcome::success_text("nested mutation settled once");
                     }
@@ -365,7 +369,9 @@ pub(super) fn cancel_cell_builder(
 ) -> TestResult<(AgentBuilder, Arc<ArtifactModel>)> {
     let workspace = Arc::new(WorkspacePolicy::host(directory, ".")?);
     let registry = if mode.codex_process_catalog() {
-        neutral_composition_test_registry()?
+        neutral_composition_test_registry_with_notices(
+            evidence.repeat_poll.load(Ordering::Acquire),
+        )?
     } else {
         cancel_cell_registry(Arc::clone(&evidence))?
     };

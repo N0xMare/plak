@@ -223,6 +223,12 @@ pub(super) fn neutral_composition_test_descriptor() -> TestResult<ResolvedModelD
 }
 
 pub(super) fn neutral_composition_test_registry() -> TestResult<FrozenToolRegistry> {
+    neutral_composition_test_registry_with_notices(false)
+}
+
+pub(super) fn neutral_composition_test_registry_with_notices(
+    completion_notices: bool,
+) -> TestResult<FrozenToolRegistry> {
     let mut builder = ToolRegistryBuilder::default();
     // A fixed plan authority, as a product binds a durable one: the
     // process-local default would make every reopen see a different registry.
@@ -232,7 +238,10 @@ pub(super) fn neutral_composition_test_registry() -> TestResult<FrozenToolRegist
     plakous_tools::register_packs(
         &plakous_compose::standard_coding_packs(
             Arc::new(plan_state),
-            Arc::new(ProcessSessionTools::posix_sh()?),
+            Arc::new(
+                ProcessSessionTools::posix_sh()?
+                    .with_config(plakous_tool_process::ProcessPackConfig { completion_notices }),
+            ),
         ),
         &mut builder,
     )?;

@@ -430,6 +430,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 user_text.clone(),
                 super::super::TurnHost {
                     job_agent: agent,
+                    host_wakes: self.config.prompt_host_facts().host_wakes
+                        && !self.config.session.child_wake_suppressed,
                     quit_started_at: &mut self.quit_started_at,
                     quit_abandoned_turn: &mut self.quit_abandoned_turn,
                     quit_job_stops: &mut self.quit_job_stops,

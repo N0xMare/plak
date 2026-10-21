@@ -1653,10 +1653,8 @@ impl Driver {
                 let (preempt, guard) = self.dispatch_preempt();
                 (preempt, Some(guard))
             } else {
-                (
-                    tokio::sync::watch::channel(plakous_tools::ToolPreempt::None).1,
-                    None,
-                )
+                let (preempt, guard) = self.nested_notice_preempt();
+                (preempt, Some(guard))
             };
             executions.push(Box::pin(execute_indexed_read_only(
                 IndexedReadOnlyRequest {
@@ -1695,8 +1693,11 @@ impl Driver {
         let mut completed = (0..items.len()).map(|_| None).collect::<Vec<_>>();
         let mut dispatched = 0_usize;
 
+        let mut job_changes = self.job_sessions.job_terminal_changes();
+        job_changes.mark_changed();
         while !executions.is_empty() {
             tokio::select! {
+                biased;
                 () = self.authority.lease_lost(), if boundary_error.is_none() => {
                     command.cancellation.cancel();
                     boundary_error = Some(self.authority.heartbeat_failure());
@@ -1753,6 +1754,7 @@ impl Driver {
                     let index = execution.index;
                     completed[index] = Some(execution);
                 }
+                _ = job_changes.changed() => self.preempt_for_job_terminals(),
             }
         }
         if boundary_error.is_none()

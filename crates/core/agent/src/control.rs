@@ -743,6 +743,12 @@ impl CompactionSummary {
 }
 
 pub(crate) enum ActorControl {
+    Notice {
+        turn_id: TurnId,
+        observed_checkpoint: Option<CheckpointId>,
+        unread_mail: bool,
+        reply: oneshot::Sender<Result<(), ControlError>>,
+    },
     Background {
         turn_id: TurnId,
         reply: oneshot::Sender<Result<(), ControlError>>,
@@ -1053,6 +1059,64 @@ impl TurnControl {
             ActorCommandEffect::Steer(status) => Ok(status),
             _ => Err(command_reply_error(&reply)),
         }
+    }
+
+    /// Yields waiting tools so host information can be observed.
+    ///
+    /// This is not cancellation or steering and does not supersede undispatched calls.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed ingress failure or an error if this turn is no longer active.
+    pub async fn notice(&self) -> Result<(), ControlError> {
+        let (reply, receiver) = oneshot::channel();
+        self.controls
+            .try_send(ActorControl::Notice {
+                turn_id: self.turn_id,
+                observed_checkpoint: None,
+                unread_mail: false,
+                reply,
+            })
+            .map_err(|error| match error {
+                mpsc::error::TrySendError::Full(_) => ControlError::new(
+                    ControlErrorKind::Backpressure,
+                    "agent command ingress is full",
+                ),
+                mpsc::error::TrySendError::Closed(_) => control_shutdown(),
+            })?;
+        receiver.await.map_err(|_| {
+            ControlError::new(
+                ControlErrorKind::OutcomeUnknown,
+                "notice acknowledgement was lost",
+            )
+        })?
+    }
+
+    /// Queues a host notice observed at an exact checkpoint without waiting for admission.
+    /// A boundary that advanced since observation makes this notice stale.
+    ///
+    /// # Errors
+    /// Returns a typed ingress failure; the receiver carries the actor acknowledgement.
+    pub fn notice_at(
+        &self,
+        checkpoint: CheckpointId,
+    ) -> Result<oneshot::Receiver<Result<(), ControlError>>, ControlError> {
+        let (reply, receiver) = oneshot::channel();
+        self.controls
+            .try_send(ActorControl::Notice {
+                turn_id: self.turn_id,
+                observed_checkpoint: Some(checkpoint),
+                unread_mail: true,
+                reply,
+            })
+            .map_err(|error| match error {
+                mpsc::error::TrySendError::Full(_) => ControlError::new(
+                    ControlErrorKind::Backpressure,
+                    "agent command ingress is full",
+                ),
+                mpsc::error::TrySendError::Closed(_) => control_shutdown(),
+            })?;
+        Ok(receiver)
     }
 
     /// Backgrounds top-level process calls already in flight in this turn.

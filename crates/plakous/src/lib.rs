@@ -1147,7 +1147,8 @@ pub mod tools {
         PlanStateFuture, PlanToolPack, plan_restoration_note,
     };
     pub use plakous_tool_process::{
-        PROCESS_PROJECTION_FAMILY, ProcessSessionTools, ProcessToolPack, ProcessToolProjectionKind,
+        PROCESS_PROJECTION_FAMILY, ProcessPackConfig, ProcessSessionTools, ProcessToolPack,
+        ProcessToolProjectionKind,
     };
     pub use plakous_tool_search::SearchToolPack;
 

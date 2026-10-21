@@ -34,7 +34,13 @@ fn update_dispatch_preempt(
     preempt: plakous_tools::ToolPreempt,
 ) {
     sender.send_if_modified(|current| {
-        if *current == plakous_tools::ToolPreempt::Background || *current == preempt {
+        if *current == plakous_tools::ToolPreempt::Background
+            || *current == preempt
+            || (matches!(*current, plakous_tools::ToolPreempt::Notice(true))
+                && matches!(preempt, plakous_tools::ToolPreempt::Notice(false)))
+            || ((*current).is_notice() && preempt == plakous_tools::ToolPreempt::None)
+            || (*current == plakous_tools::ToolPreempt::Steer && preempt.is_notice())
+        {
             return false;
         }
         *current = preempt;
@@ -63,7 +69,16 @@ impl Driver {
         watch::Receiver<plakous_tools::ToolPreempt>,
         DispatchPreemptGuard,
     ) {
-        let (sender, receiver) = watch::channel(*self.tool_preempt.borrow());
+        let current = *self.tool_preempt.borrow();
+        if current.is_notice() {
+            self.tool_preempt
+                .send_replace(plakous_tools::ToolPreempt::None);
+        }
+        let (sender, receiver) = watch::channel(if current.is_notice() {
+            plakous_tools::ToolPreempt::None
+        } else {
+            current
+        });
         let mut dispatches = self
             .dispatch_preempts
             .lock()
@@ -77,6 +92,62 @@ impl Driver {
                 sender,
             },
         )
+    }
+
+    pub(super) fn nested_notice_preempt(
+        &self,
+    ) -> (
+        watch::Receiver<plakous_tools::ToolPreempt>,
+        DispatchPreemptGuard,
+    ) {
+        let (sender, receiver) = watch::channel(
+            if *self.tool_preempt.borrow() == plakous_tools::ToolPreempt::Steer {
+                plakous_tools::ToolPreempt::Notice(false)
+            } else {
+                plakous_tools::ToolPreempt::None
+            },
+        );
+        let mut dispatches = self
+            .nested_notice_preempts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        dispatches.retain(|sender| sender.receiver_count() != 0);
+        dispatches.push(sender.clone());
+        (
+            receiver,
+            DispatchPreemptGuard {
+                senders: Arc::clone(&self.nested_notice_preempts),
+                sender,
+            },
+        )
+    }
+
+    pub(super) fn preempt_nested_waits(&self) {
+        for sender in self
+            .nested_notice_preempts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+        {
+            update_dispatch_preempt(sender, plakous_tools::ToolPreempt::Notice(false));
+        }
+    }
+
+    pub(super) fn raise_tool_notice(&self, unread_mail: bool) {
+        let current = *self.tool_preempt.borrow();
+        if current != plakous_tools::ToolPreempt::Steer
+            && (unread_mail || current.notice_reason().is_none())
+        {
+            self.set_tool_preempt(plakous_tools::ToolPreempt::Notice(unread_mail));
+        }
+        for sender in self
+            .nested_notice_preempts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+        {
+            update_dispatch_preempt(sender, plakous_tools::ToolPreempt::Notice(unread_mail));
+        }
     }
 
     pub(super) fn set_tool_preempt(&self, preempt: plakous_tools::ToolPreempt) {
@@ -192,6 +263,38 @@ impl Driver {
         control: ActorControl,
     ) {
         match control {
+            ActorControl::Notice {
+                turn_id,
+                observed_checkpoint,
+                unread_mail,
+                reply,
+            } => {
+                let result = if active.is_some_and(|root| root.turn_id == turn_id) {
+                    if observed_checkpoint.is_some()
+                        && !plakous_tools::internal::process_notice_delivery_available(
+                            &self.job_sessions,
+                        )
+                    {
+                        Ok(())
+                    } else if observed_checkpoint
+                        .is_some_and(|checkpoint| checkpoint != self.authority.checkpoint().id())
+                    {
+                        Err(ControlError::new(
+                            ControlErrorKind::Stale,
+                            "notice observation precedes a committed boundary",
+                        ))
+                    } else {
+                        self.raise_tool_notice(unread_mail);
+                        Ok(())
+                    }
+                } else {
+                    Err(ControlError::new(
+                        ControlErrorKind::WrongPhase,
+                        "notice is valid only for the active exact turn",
+                    ))
+                };
+                let _ = reply.send(result);
+            }
             ActorControl::Background { turn_id, reply } => {
                 let result = if active.is_some_and(|root| root.turn_id == turn_id) {
                     // Each in-flight dispatch owns its latch. New dispatches subscribe
@@ -585,6 +688,7 @@ impl Driver {
             operation_id,
         });
         self.set_tool_preempt(plakous_tools::ToolPreempt::Steer);
+        self.preempt_nested_waits();
         if let Some(root) = active {
             let _ = root.shared.events.publish(
                 EventContext::turn(turn_id),
@@ -1331,6 +1435,9 @@ impl Driver {
             {
                 return Err(error);
             }
+            if (*self.tool_preempt.borrow()).is_notice() {
+                self.set_tool_preempt(plakous_tools::ToolPreempt::None);
+            }
             return Ok(false);
         }
         // Each steer's application is its history promotion: one commit
@@ -1400,6 +1507,19 @@ mod dispatch_tests {
             sender,
         });
         assert!(senders.lock().is_ok_and(|senders| senders.is_empty()));
+    }
+    #[test]
+    fn notice_latches_until_dispatch_exit_but_never_overrides_steer() {
+        use plakous_tools::ToolPreempt;
+        let (sender, receiver) = watch::channel(ToolPreempt::Notice(false));
+        update_dispatch_preempt(&sender, ToolPreempt::None);
+        assert_eq!(*receiver.borrow(), ToolPreempt::Notice(false));
+        update_dispatch_preempt(&sender, ToolPreempt::Steer);
+        update_dispatch_preempt(&sender, ToolPreempt::Notice(false));
+        assert_eq!(*receiver.borrow(), ToolPreempt::Steer);
+        update_dispatch_preempt(&sender, ToolPreempt::Background);
+        update_dispatch_preempt(&sender, ToolPreempt::Notice(false));
+        assert_eq!(*receiver.borrow(), ToolPreempt::Background);
     }
     #[test]
     fn background_dispatch_latch_survives_turn_resets_and_steer() {

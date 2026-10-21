@@ -41,12 +41,15 @@ pub(crate) enum ObservationWait {
     PromotionHint,
     Hint,
     Output,
+    ExitOrOutput,
 }
 
 impl ObservationWait {
     pub(crate) fn preempted(self, preempt: plakous_tools::ToolPreempt) -> bool {
-        preempt == plakous_tools::ToolPreempt::Steer
-            || (self == Self::PromotionHint && preempt == plakous_tools::ToolPreempt::Background)
+        matches!(
+            preempt,
+            plakous_tools::ToolPreempt::Steer | plakous_tools::ToolPreempt::Notice(_)
+        ) || (self == Self::PromotionHint && preempt == plakous_tools::ToolPreempt::Background)
     }
 }
 
@@ -75,7 +78,10 @@ impl ProcessExecutionResult {
             && let Some((hint, preempted)) = promotion
         {
             canonical["foreground_hint_ms"] = json!(hint);
-            canonical["preempted"] = json!(preempted == plakous_tools::ToolPreempt::Steer);
+            canonical["preempted"] = json!(matches!(
+                preempted,
+                plakous_tools::ToolPreempt::Steer | plakous_tools::ToolPreempt::Notice(_)
+            ));
             canonical["backgrounded_by_user"] =
                 json!(preempted == plakous_tools::ToolPreempt::Background);
         }
@@ -127,6 +133,7 @@ impl ProcessExecutionResult {
 /// The numeric handle is only a bounded projection of an allocation-local
 /// opaque `JoinedProcessSessionId`; it is never an OS PID or durable authority.
 pub struct ProcessSessionTools {
+    pub(crate) config: super::ProcessPackConfig,
     pub(crate) shell: JoinedProcessShellProfile,
     pub(crate) login_shell: JoinedProcessShellProfile,
 }
@@ -137,6 +144,38 @@ pub(crate) struct BoundProcessSession {
     pub(crate) sessions: JoinedProcessSessions,
     pub(crate) cursor: Arc<Mutex<JoinedProcessOutputCursor>>,
     pub(crate) pending_utf8: Arc<Mutex<Vec<u8>>>,
+    pub(crate) quiet_polls: Arc<Mutex<plakous_tools::internal::ProcessQuietPollState>>,
+}
+
+pub(crate) struct ProcessObservationGuard {
+    state: Arc<Mutex<plakous_tools::internal::ProcessQuietPollState>>,
+    repeat: bool,
+}
+
+impl ProcessObservationGuard {
+    pub(crate) fn enter(session: &BoundProcessSession, repeat: bool) -> Self {
+        let mut state = session
+            .quiet_polls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.observers += 1;
+        state.repeat_observers += u32::from(repeat);
+        Self {
+            state: Arc::clone(&session.quiet_polls),
+            repeat,
+        }
+    }
+}
+
+impl Drop for ProcessObservationGuard {
+    fn drop(&mut self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.observers -= 1;
+        state.repeat_observers -= u32::from(self.repeat);
+    }
 }
 
 fn active_process_result(
@@ -288,7 +327,11 @@ impl ToolExecutor for ProcessSessionTools {
             match result {
                 Ok(process_result) => {
                     let yielded = !process_result.joined
-                        && *preempt.borrow() == plakous_tools::ToolPreempt::Steer;
+                        && matches!(
+                            *preempt.borrow(),
+                            plakous_tools::ToolPreempt::Steer
+                                | plakous_tools::ToolPreempt::Notice(_)
+                        );
                     process_result
                         .into_outcome_with_promotion(
                             promotion_hint.map(|hint| (hint, *preempt.borrow())),
@@ -342,7 +385,18 @@ impl ProcessSessionTools {
     /// Binds the canonical service to exact non-login and login shell profiles.
     #[must_use]
     pub fn new(shell: JoinedProcessShellProfile, login_shell: JoinedProcessShellProfile) -> Self {
-        Self { shell, login_shell }
+        Self {
+            shell,
+            login_shell,
+            config: super::ProcessPackConfig::default(),
+        }
+    }
+
+    /// Configures host-backed completion observation.
+    #[must_use]
+    pub fn with_config(mut self, config: super::ProcessPackConfig) -> Self {
+        self.config = config;
+        self
     }
 
     /// Snapshots or awaits the caller's own jobs by number, exactly as the
@@ -636,7 +690,7 @@ impl ProcessSessionTools {
             .ok_or_else(unknown)?;
         let number = u32::try_from(handle).map_err(|_| unknown())?;
         let id = sessions.session_for_number(number).ok_or_else(unknown)?;
-        let (cursor, pending_utf8) =
+        let (cursor, pending_utf8, quiet_polls) =
             plakous_tools::internal::process_session_projection_state(&sessions, id)
                 .map_err(backend_runtime_error)?;
         Ok(BoundProcessSession {
@@ -644,6 +698,7 @@ impl ProcessSessionTools {
             sessions,
             cursor,
             pending_utf8,
+            quiet_polls,
         })
     }
 
@@ -687,7 +742,8 @@ impl ProcessSessionTools {
     /// model polling a long test run could never catch up with.
     #[allow(
         clippy::too_many_arguments,
-        reason = "the observation binds independent output and wait bounds"
+        clippy::too_many_lines,
+        reason = "one observation coordinates output draining, quiet holds and wake attribution"
     )]
     pub(crate) async fn observe_summarized(
         environment: &plakous_tools::ExecutionEnvironment,
@@ -698,7 +754,37 @@ impl ProcessSessionTools {
         wait: ObservationWait,
         control: &ExecutionOperationControl,
     ) -> Result<ProcessExecutionResult, ToolRuntimeError> {
-        let deadline = std::time::Instant::now()
+        let session = Self::session(environment, handle)?;
+        let starting_cursor = cursor.get();
+        let repeat = wait == ObservationWait::Output && {
+            let state = session
+                .quiet_polls
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            state.completion_notices
+                && state.quiet_polls >= 1
+                && plakous_tools::internal::process_notice_delivery_available(&session.sessions)
+                && !plakous_tools::internal::process_unread_mail_pending(&session.sessions)
+        };
+        let _observer = ProcessObservationGuard::enter(&session, repeat);
+        let wait = if repeat {
+            ObservationWait::ExitOrOutput
+        } else {
+            wait
+        };
+        let yield_time_ms = if repeat { 900_000 } else { yield_time_ms };
+        let mut terminals = session.sessions.job_terminal_changes();
+        let generation = session.sessions.job_terminal_generation();
+        let another_job_terminal = || {
+            session
+                .sessions
+                .terminal_jobs_since(generation)
+                .iter()
+                .any(|id| id != &format!("p{handle}"))
+        };
+        terminals.borrow_and_update();
+        let mut other_terminal = false;
+        let deadline = tokio::time::Instant::now()
             .checked_add(std::time::Duration::from_millis(yield_time_ms))
             .ok_or_else(|| {
                 ToolRuntimeError::new(
@@ -709,7 +795,6 @@ impl ProcessSessionTools {
         let mut page = HeadTailPage::new(max_bytes);
         let mut cursor = cursor;
         let mut drained_after_deadline = 0_usize;
-        let session = Self::session(environment, handle)?;
         let mut changes =
             plakous_tools::internal::process_session_changes(&session.sessions, session.id)
                 .map_err(backend_runtime_error)?;
@@ -718,14 +803,14 @@ impl ProcessSessionTools {
             changes.borrow_and_update();
             let remaining = u64::try_from(
                 deadline
-                    .saturating_duration_since(std::time::Instant::now())
+                    .saturating_duration_since(tokio::time::Instant::now())
                     .as_millis(),
             )
             .unwrap_or(u64::MAX);
             let result = Self::observe_bounded_with_update(
                 environment,
                 handle,
-                remaining,
+                if repeat { 0 } else { remaining },
                 PROCESS_OBSERVATION_BYTES,
                 256,
                 cursor,
@@ -740,19 +825,61 @@ impl ProcessSessionTools {
             // backlog (bounded by the session window) before returning.
             let full = result.projection.output.len() + 4 >= PROCESS_OBSERVATION_BYTES;
             page.push(&result.projection.output);
-            if std::time::Instant::now() >= deadline {
+            if tokio::time::Instant::now() >= deadline {
                 drained_after_deadline += 1;
             }
             if result.joined
-                || (wait == ObservationWait::Output && !empty && !full)
+                || (matches!(
+                    wait,
+                    ObservationWait::Output | ObservationWait::ExitOrOutput
+                ) && !empty
+                    && !full)
+                || (repeat && (other_terminal || another_job_terminal()))
                 || wait.preempted(*control.preempt().borrow())
-                || (std::time::Instant::now() >= deadline
+                || (tokio::time::Instant::now() >= deadline
                     && (!full || drained_after_deadline > MAX_DRAIN_READS))
             {
                 let truncated = page.omitted != 0;
+                let mut output = page.finish();
+                let mut state = session
+                    .quiet_polls
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if result.joined
+                    || !output.is_empty()
+                    || state.output_cursor != result.cursor
+                    || result.cursor != starting_cursor
+                {
+                    state.quiet_polls = 0;
+                } else if matches!(
+                    wait,
+                    ObservationWait::Output | ObservationWait::ExitOrOutput
+                ) {
+                    if tokio::time::Instant::now() >= deadline
+                        || other_terminal
+                        || another_job_terminal()
+                    {
+                        state.quiet_polls = state.quiet_polls.saturating_add(1);
+                    }
+                    if repeat {
+                        output = format!(
+                            "No new output; process {handle} is still running. Its exit is reported automatically."
+                        );
+                    }
+                }
+                if let Some(reason) = control.preempt().borrow().notice_reason().or_else(|| {
+                    (!result.joined
+                        && plakous_tools::internal::process_unread_mail_pending(&session.sessions))
+                    .then_some("New messages are waiting; end this turn to receive them.")
+                }) {
+                    if !output.is_empty() {
+                        output.push('\n');
+                    }
+                    output.push_str(reason);
+                }
                 return Ok(ProcessExecutionResult {
                     projection: ProcessProjectionResult {
-                        output: page.finish(),
+                        output,
                         ..result.projection
                     },
                     skipped: 0,
@@ -762,14 +889,18 @@ impl ProcessSessionTools {
             }
             cursor = JoinedProcessOutputCursor::new(result.cursor);
             if empty {
-                await_process_change(&mut changes, &mut preempt, deadline, control).await;
+                tokio::select! {
+                    () = await_process_change(&mut changes, &mut preempt, deadline, control) => {}
+                    _ = terminals.changed(), if repeat => { other_terminal = another_job_terminal(); }
+                }
             }
         }
     }
 
     #[allow(
         clippy::too_many_arguments,
-        reason = "the closed poll contract carries exact independent bounds"
+        clippy::too_many_lines,
+        reason = "one observer owns output cursor, joined proof and cancellation through the bounded poll"
     )]
     pub(crate) async fn observe_bounded_with_update(
         environment: &plakous_tools::ExecutionEnvironment,
@@ -783,11 +914,12 @@ impl ProcessSessionTools {
         control: &ExecutionOperationControl,
     ) -> Result<ProcessExecutionResult, ToolRuntimeError> {
         let session = Self::session(environment, handle)?;
+        let _observer = ProcessObservationGuard::enter(&session, false);
         let mut changes =
             plakous_tools::internal::process_session_changes(&session.sessions, session.id)
                 .map_err(backend_runtime_error)?;
         let mut preempt = control.preempt().clone();
-        let deadline = std::time::Instant::now()
+        let deadline = tokio::time::Instant::now()
             .checked_add(std::time::Duration::from_millis(yield_time_ms))
             .ok_or_else(|| {
                 ToolRuntimeError::new(
@@ -830,9 +962,24 @@ impl ProcessSessionTools {
             };
             cursor = poll.next_cursor();
             *lock_process_cursor(&session.cursor) = cursor;
+            {
+                let mut state = session
+                    .quiet_polls
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if state.output_cursor != cursor.get() {
+                    state.quiet_polls = 0;
+                    state.output_cursor = cursor.get();
+                }
+            }
             if may_join && terminal {
                 let backend = session.sessions.clone();
                 let status = process_backend(move || backend.join(id)).await?;
+                session
+                    .quiet_polls
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .joined = true;
                 return Ok(ProcessExecutionResult {
                     skipped,
                     projection: ProcessProjectionResult {
@@ -851,11 +998,14 @@ impl ProcessSessionTools {
             }
             control.check_cancelled().map_err(backend_runtime_error)?;
             if wait.preempted(*control.preempt().borrow())
-                || (wait == ObservationWait::Output && !output.is_empty())
+                || (matches!(
+                    wait,
+                    ObservationWait::Output | ObservationWait::ExitOrOutput
+                ) && !output.is_empty())
                 || output.len() == max_bytes
                 || buffered_without_text_progress
                 || !may_join
-                || (!poll.status().is_terminal() && std::time::Instant::now() >= deadline)
+                || (!poll.status().is_terminal() && tokio::time::Instant::now() >= deadline)
             {
                 let mut active = active_process_result(session, handle, output, cursor);
                 active.skipped = skipped;

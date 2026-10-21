@@ -412,6 +412,8 @@ impl Driver {
                 operation_id: steering.operation_id,
             })
             .collect();
+        self.noticed_job_terminals.clear();
+        self.observed_job_terminals.clear();
         self.set_tool_preempt(if self.steering.is_empty() {
             plakous_tools::ToolPreempt::None
         } else {
@@ -513,6 +515,8 @@ impl Driver {
         reason = "fenced refresh, ambiguous-commit recovery, and receipt hydration form one ordered recovery transaction"
     )]
     async fn run_turn(&mut self, command: &PromptCommand) -> Result<TurnResult, AgentError> {
+        self.noticed_job_terminals.clear();
+        self.observed_job_terminals.clear();
         self.run_in_memory_turn(command).await
     }
 

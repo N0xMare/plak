@@ -125,12 +125,7 @@ async fn steer_closes_or_runs_the_entire_read_only_group() -> TestResult {
 }
 
 #[test]
-fn steer_neither_promotes_a_nested_process_nor_preempts_its_empty_poll() -> TestResult {
-    // The whole scenario and each nested-process wait are liveness bounds.
-    // A cold loaded lane has exceeded the 10s scenario budget and the 3s
-    // observation waits; neither number is the behavior under test. The
-    // 100ms check below stays: it asserts that a steer does not shorten
-    // the observation.
+fn steer_notifies_nested_process_starts_and_empty_polls() -> TestResult {
     run_cancel_cell_scenario_with_timeout(
         RUNTIME_EXECUTOR_STACK_BYTES,
         Duration::from_secs(45),
@@ -167,25 +162,13 @@ fn steer_neither_promotes_a_nested_process_nor_preempts_its_empty_poll() -> Test
                 })
                 .await??;
                 turn.control().steer("new instruction").await?;
-                let premature = tokio::time::timeout(
-                    Duration::from_millis(100),
-                    wait_for_scheduler_count(&evidence.wait_count, 1),
-                )
-                .await;
-                assert!(premature.is_err(), "steer shortened a nested observation");
-                std::fs::write(directory.path().join("ready"), b"ready")?;
+
                 tokio::time::timeout(
                     Duration::from_secs(15),
                     wait_for_scheduler_count(&evidence.wait_count, 1),
                 )
                 .await?;
                 assert_eq!(evidence.counters.terminates.load(Ordering::Acquire), 0);
-                if !empty_poll {
-                    assert!(
-                        agent.checkpoint().manifest().jobs().rows().is_empty(),
-                        "steer promoted a nested process"
-                    );
-                }
                 let identity = if empty_poll { "TERMINAL" } else { "SLEEP" };
                 assert_eq!(
                     lock_mutex(&evidence.deliveries)
@@ -201,11 +184,12 @@ fn steer_neither_promotes_a_nested_process_nor_preempts_its_empty_poll() -> Test
                     .2
                     .clone();
                 let process_result: serde_json::Value = serde_json::from_str(&delivered)?;
-                assert_eq!(
-                    process_result["exit_code"],
-                    json!(7),
-                    "steer returned a nonterminal nested observation"
+                assert!(
+                    process_result["session_id"].is_number(),
+                    "steer must yield a truthful running partial: {process_result}"
                 );
+                assert!(process_result["exit_code"].is_null());
+                std::fs::write(directory.path().join("ready"), b"ready")?;
                 evidence.release_cell.store(true, Ordering::Release);
                 let result = turn.result().await?;
                 assert!(
@@ -1097,4 +1081,161 @@ fn reopen_closes_a_stalled_cell_head_whose_settled_child_names_the_evaluation() 
         reopened.shutdown().await?;
         Ok(())
     })
+}
+
+#[test]
+fn nested_repeat_quiet_poll_suspends_execute_deadline_and_yields_on_notice() -> TestResult {
+    run_cancel_cell_scenario_with_timeout(
+        RUNTIME_EXECUTOR_STACK_BYTES,
+        Duration::from_secs(1800),
+        || async {
+            let directory = tempfile::tempdir()?;
+            let evidence = Arc::new(CancelCellEvidence::default());
+            evidence.steer_fixture.store(true, Ordering::Release);
+            evidence.terminal_poll.store(true, Ordering::Release);
+            evidence.empty_poll.store(true, Ordering::Release);
+            evidence.repeat_poll.store(true, Ordering::Release);
+            let (builder, _) = cancel_cell_builder(
+                CancelCellMode::ProcessYield,
+                evidence.clone(),
+                directory.path(),
+            )?;
+            let sessions = DurableSessionRuntime::current(
+                Arc::new(TestCreateStore::default()),
+                RuntimeDurability::Required,
+                NonZeroU64::new(30).ok_or("lease")?,
+            )?;
+            let agent = sessions
+                .create(
+                    "create:repeat-poll",
+                    builder.config(
+                        AgentConfig::default()
+                            .with_model_operation_timeout(Duration::from_secs(30)),
+                    ),
+                )
+                .await?;
+            let mut turn = agent.prompt("nested repeat poll").await?;
+            let mut events = turn.take_events()?;
+            let mut polls = Vec::new();
+            while polls.len() < 2 {
+                let event = events.recv().await?;
+                if matches!(event.kind(), AgentEventKind::ToolStarted { identity, .. } if identity.canonical_name().as_str() == "process_session_write")
+                    && !polls.contains(&event.call_id())
+                {
+                    polls.push(event.call_id());
+                }
+            }
+            assert!(
+                lock_mutex(&evidence.deliveries)
+                    .iter()
+                    .any(|(id, ok, _)| id == "TERMINAL" && *ok),
+                "first poll not settled: {:?}",
+                lock_mutex(&evidence.deliveries)
+            );
+            tokio::time::pause();
+            tokio::time::advance(Duration::from_secs(301)).await;
+            for _ in 0..32 {
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(evidence.counters.terminates.load(Ordering::Acquire), 0);
+            assert!(
+                !lock_mutex(&evidence.deliveries)
+                    .iter()
+                    .any(|(id, _, _)| id == "REPEAT")
+            );
+            turn.control().notice().await?;
+            // Real process polling and durable settlement run on the blocking pool.
+            tokio::time::resume();
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if lock_mutex(&evidence.deliveries)
+                        .iter()
+                        .any(|(id, ok, value)| {
+                            id == "REPEAT"
+                                && *ok
+                                && value.contains("Its exit is reported automatically.")
+                        })
+                    {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .map_err(|error| {
+                format!(
+                    "notice delivery: {error}; deliveries: {:?}; terminates: {}",
+                    lock_mutex(&evidence.deliveries),
+                    evidence.counters.terminates.load(Ordering::Acquire)
+                )
+            })?;
+            assert_eq!(evidence.counters.terminates.load(Ordering::Acquire), 0);
+            turn.control().cancel().await?;
+            turn.result().await?;
+            agent.shutdown().await?;
+            Ok(())
+        },
+    )
+}
+
+#[test]
+fn a_nested_terminal_poll_does_not_yield_its_computing_cell() -> TestResult {
+    run_cancel_cell_scenario_with_timeout(
+        RUNTIME_EXECUTOR_STACK_BYTES,
+        Duration::from_secs(45),
+        || async {
+            let directory = tempfile::tempdir()?;
+            let evidence = Arc::new(CancelCellEvidence::default());
+            evidence.terminal_poll.store(true, Ordering::Release);
+            evidence
+                .continue_after_terminal
+                .store(true, Ordering::Release);
+            // Enable completion notices for this registry without scheduling a repeat.
+            evidence.repeat_poll.store(true, Ordering::Release);
+            let (builder, _) = cancel_cell_builder(
+                CancelCellMode::ProcessYield,
+                evidence.clone(),
+                directory.path(),
+            )?;
+            let sessions = DurableSessionRuntime::current(
+                Arc::new(TestCreateStore::default()),
+                RuntimeDurability::Required,
+                NonZeroU64::new(30).ok_or("lease")?,
+            )?;
+            let agent = sessions
+                .create("create:nested-observed-terminal", builder)
+                .await?;
+            let turn = agent.prompt("observe and continue computing").await?;
+            let mut result = Box::pin(turn.result());
+            tokio::time::timeout(Duration::from_secs(15), async {
+                loop {
+                    if lock_mutex(&evidence.deliveries)
+                        .iter()
+                        .any(|(id, ok, _)| id == "TERMINAL" && *ok)
+                    {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await?;
+            for _ in 0..128 {
+                tokio::task::yield_now().await;
+            }
+            assert!(
+                futures_util::poll!(result.as_mut()).is_pending(),
+                "observed job terminal yielded the computing cell"
+            );
+            assert_eq!(
+                evidence.wait_count.load(Ordering::Acquire),
+                0,
+                "cell unexpectedly yielded into an outer wait"
+            );
+            evidence.release_cell.store(true, Ordering::Release);
+            let settled = result.await?;
+            assert!(matches!(settled.outcome(), TurnResultOutcome::Completed(_)));
+            agent.shutdown().await?;
+            Ok(())
+        },
+    )
 }

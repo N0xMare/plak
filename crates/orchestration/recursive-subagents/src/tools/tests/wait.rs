@@ -1080,6 +1080,31 @@ async fn steer_wakes_wait_without_mail_or_a_durable_receipt() {
 }
 
 #[tokio::test]
+async fn notice_wakes_wait_without_mail_or_a_durable_receipt() {
+    let root = tempfile::tempdir().unwrap();
+    let mut tree = bootstrap_tree("notice-no-write", root.path());
+    tree.spawn_agent("root", &spawn_request(), None).unwrap();
+    let driver = driver_on(tree, Arc::new(FailingStore));
+    let waiter = wait_tool(driver.clone());
+    let (sender, receiver) = tokio::sync::watch::channel(plakous::tools::ToolPreempt::None);
+    let arguments = json!({"timeout_ms": 300_000});
+    let mut pending =
+        Box::pin(waiter.wait_operation_preempt("notice-wait", &arguments, Some(receiver)));
+    assert!(futures_util::poll!(pending.as_mut()).is_pending());
+    sender
+        .send(plakous::tools::ToolPreempt::Notice(false))
+        .unwrap();
+    let result = tokio::time::timeout(std::time::Duration::from_secs(2), pending)
+        .await
+        .unwrap()
+        .unwrap();
+    let output = outcome_json(&result);
+    assert_eq!(output["woke_by"], "notice");
+    assert_eq!(output["mail"], json!([]));
+    assert!(driver.tree.lock().unwrap().operations().is_empty());
+}
+
+#[tokio::test]
 async fn parked_hub_wait_is_the_only_consumer_of_a_child_question() {
     let root = tempfile::tempdir().unwrap();
     let (store, mut tree) = persist_fixture(&root);
@@ -1327,4 +1352,37 @@ async fn wait_returns_full_mail_and_blocks_again_until_new_mail() {
         assert_eq!(output["mail"][0]["message_id"], next.message_id);
         assert_eq!(output["timed_out"], false);
     }
+}
+
+#[tokio::test]
+async fn a_process_terminal_takes_precedence_over_a_notice_wake() {
+    let root = tempfile::tempdir().unwrap();
+    let mut tree = bootstrap_tree("process-and-notice", root.path());
+    tree.spawn_agent("root", &spawn_request(), None).unwrap();
+    let driver = driver_on(tree, Arc::new(FailingStore));
+    let (jobs, _opened) = install_running_job(&driver, "root", root.path()).await;
+    let waiter = wait_tool(driver.clone());
+    let arguments = json!({"timeout_ms": 300_000});
+    let (sender, receiver) = tokio::sync::watch::channel(plakous::tools::ToolPreempt::None);
+    let mut pending = Box::pin(waiter.wait_operation_preempt(
+        "process-and-notice-wait",
+        &arguments,
+        Some(receiver),
+    ));
+    assert!(futures_util::poll!(pending.as_mut()).is_pending());
+    jobs.stop_jobs(
+        plakous::tools::JobStopReason::Model,
+        std::time::Duration::from_millis(250),
+    )
+    .unwrap();
+    sender
+        .send(plakous::tools::ToolPreempt::Notice(false))
+        .unwrap();
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(2), pending)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(outcome_json(&outcome)["woke_by"], "process");
+    assert_eq!(outcome_json(&outcome)["processes"], json!(["p1"]));
+    assert!(driver.tree.lock().unwrap().operations().is_empty());
 }

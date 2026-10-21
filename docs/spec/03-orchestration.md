@@ -605,17 +605,22 @@ Mail is **not a second spawn** and is not how a prompt is assigned.
 | `timeout_ms` | optional integer ≥ 1; default 300 000, **clamped** (not refused) to 3 600 000 |
 
 Receipt: `{ agents: [...], mail: [...], timed_out, woke_by }`, where `woke_by`
-is `settled`, `mail`, `timeout`, `steer`, or `process`. The receipt has no
+is `settled`, `mail`, `timeout`, `steer`, `notice`, or `process`. The receipt has no
 presentation subject. The await attaches a host-only presentation subject to
 its tool outcome: the comma-joined `agent_id`s, bounded to 240 bytes (complete
 ids; a single longer id is clipped with one trailing `…`), omitted when
 `agents` names none. That subject is not model-visible. A restored bare wait
 reads it from the result observation, not from the 2 KiB preview. A human or unwatched-parent
-steer returns no steer text. Watched urgent mail still returns `mail` with its
+steer returns no steer text. `ToolPreempt::Notice` likewise returns early with
+`woke_by=notice`, the current agent/job rows and no notice text; host information
+keeps its existing consumer. Like a steer-only wake, a notice-only wake saves
+no durable receipt. Newly terminal process ids are always retained in
+`processes`; a process wake takes precedence over a simultaneous Notice
+(not over consumed mail or a steer). Watched urgent mail still returns `mail` with its
 body through the sole mail consumer. A process wake adds `processes: ["p3"]`:
 only terminal transitions of the caller's own jobs after wait admission wake it,
 using an allocation-local terminal generation. Previously terminal jobs do not
-wake a new wait. Neither non-mail early wake saves a durable receipt. The grant
+wake a new wait. No non-mail early wake saves a durable receipt. The grant
 is unchanged: agents only, roots and hubs, never leaves; process ids are not
 wait targets. Process tools refuse ids outside the caller's live session,
 including imported or forked history, with typed `not in this session` errors.

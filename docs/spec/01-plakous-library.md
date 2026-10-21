@@ -353,9 +353,49 @@ only if no newer accepted steer remains queued, and is reset at root-turn
 startup; restored pending steering restores the flag. Dispatch origin, not
 the presence of a lineage parent, identifies a top-level model batch: a live
 cell's marker can parent a top-level call without making it nested. Nested tool
-dispatches receive no preempt flag. An operator approval, live or restored,
+dispatches receive neither Steer nor Background; Notice uses a separate signal.
+An operator approval, live or restored,
 rechecks steering before admitting the approved effect and closes it as
 superseded if steering is pending.
+
+`TurnControl::notice()` requests `ToolPreempt::Notice` when host information
+is ready. It never cancels work, supersedes undispatched calls or consumes
+mail. Waiting tools, including a 600-second Bash foreground observation and
+repeat quiet process holds, yield an ordinary successful partial result:
+running status, the issued session id, and output observed so far (the fixed
+quiet line in §8.5 when applicable). Terminal results remain terminal. A
+process start promotes before returning its running handle. Non-waiting work
+finishes normally; model streams and provider-hosted operations are unchanged.
+Nested waits receive Notice but not the Steer or Background variants; an
+accepted steer forwards Notice to their active receivers and seeds it for
+nested dispatch while steering remains pending. An outer cell yields
+only after nested settlement; its observation deadline stays suspended during
+the nested hold. Host mail signals name the checkpoint at observation; a
+boundary or consumer commit advancing that checkpoint makes the signal stale.
+Only existing dispatches latch Notice; later foreground tools do not inherit
+it. Unread mail signals at most once per model tool batch, plus one additional
+signal if a repeat quiet hold is active. While that mail remains unread,
+repeat holds are disabled and ordinary poll windows remain in force; this
+avoids both a 900-second blind hold and repeated 250 ms forced yields.
+Mail-origin `ToolPreempt::Notice(true)` carries the fixed reason:
+`New messages are waiting; end this turn to receive them.`
+Waiting tool partials retain their running status, session id and output and
+append that reason; cell/topology yields carry it as observation text/data.
+Other host notices and forwarded steer use `Notice(false)`. Job-terminal
+signals originate in the driver, only for terminal, unconsumed promoted rows
+not already pending consumption, once per job per turn. Active in-band
+observers suppress those notices for their own sessions. A joined session or
+any JobTerminal result observed by the driver is excluded even during a live
+cell, without consuming the nested result's completion notice. They are enabled only
+by the process pack's earned completion-notice flag and the host's current
+`Agent::set_notice_delivery_available` guarantee. Hosted roots set that
+transient guarantee from `prompt_host_facts().host_wakes` before admission;
+turning notices off or suppressing child wakes also disables repeat holds
+for already-running jobs. Notice clears at the next
+safe boundary, new dispatch or turn startup;
+in-flight dispatch latches survive that reset until they finish. Steer and
+Background take precedence over Notice. The host owns information delivery
+through the existing single consumer, independently of this yield signal.
 
 Local cell observations (`exec`, `exec_js`, and their non-terminating outer waits) return an
 ordinary successful yield on steer at a nested-quiescent boundary. They never
@@ -367,8 +407,11 @@ is admitted while steer is pending; queued requests remain with the cell for
 its next wait. The delay is the remaining running nested calls' own execution
 budget plus durable settlement and delivery, not a new steer deadline. For a
 nested process start the foreground hint is at most 600 seconds; a nested empty
-`write_stdin` poll retains its 5..300-second window. Other non-promotable tools
-retain their own operation bounds. Steer does not shorten these nested budgets.
+`write_stdin` poll retains its first 5..300-second window, or its repeat quiet
+hold of up to 900 seconds when completion notices are enabled (§8.5). Other non-promotable tools
+retain their own operation bounds. Steer forwards Notice to nested waiting
+tools, shortening process observations without cancellation; non-waiting
+mutations still settle under their own budgets.
 Outer execute and wait observation deadlines suspend during dispatched nested
 execution and durable settlement, for both serial mutating calls and parallel
 read-only calls, with or without steer. On the transition to nested quiescence
@@ -4488,12 +4531,14 @@ have no stdin-input operation and always use null stdin. A canonical start
 that explicitly requests open stdin retains its writable pipe; supplied initial
 input is delivered through a pipe before closing it when no further input is
 requested. Each start races completion against its foreground hint,
-cancellation and, for top-level calls only, the turn's preempt flag. Completion
+cancellation and the preempt flag (Background only for top-level calls;
+Steer reaches nested waits as Notice, as do host notices). Completion
 answers inline. Hint or preemption produces a handle and irrevocably promotes
 the process to session ownership, detaching dispatch cancellation. Nested code
-cell starts promote on their hint, never on steer. An outer cell observation
+cell starts promote on their hint or Notice, including a forwarded steer. An outer cell observation
 waits for an in-flight nested process call to settle before yielding on steer
-(§3.2); a nested empty `write_stdin` poll is likewise not preempted. Cancellation before
+(§3.2); a nested empty `write_stdin` poll observes the forwarded Notice too.
+Notice yields either observation without killing its process. Cancellation before
 promotion still kills the foreground process. Promotion and the supervisor share
 one atomic foreground/promoted/cancelling decision; a cancellation winner
 refuses promotion and the call reports cancellation, never a running handle. The default foreground budget is
@@ -4534,11 +4579,29 @@ the Grok and Claude text presentations end with `[exit N]` for a nonzero exit
 or a line naming the abnormal end. `write_stdin` writes and then returns the
 output that follows and `max_output_tokens`. Nonempty writes retain the
 250 ms..30 s observation window. Empty polls wait for exit or new output,
-clamped to 5..300 seconds; exactly `\u0003`, with or without a PTY, stops the
+clamped to 5..300 seconds on the first consecutive quiet poll. When
+`ProcessPackConfig::completion_notices` is true (the hosted node has earned
+`host_wakes`), the second and subsequent consecutive quiet empty polls hold
+until exit, new output, steer, another own job's terminal change, host notice,
+or a 900-second ceiling. Another own job means a newly terminal promoted job
+since admission, excluding the observed session and inline foreground exits.
+The hold applies to Codex `write_stdin`, `exec_command(session_id)` and the
+canonical plain single-id `process_session_poll`, top-level and nested.
+Grok `get_command_or_subagent_output`, pi `wait`, canonical
+`read_so_far`/`wait_for_exit` and Claude Bash starts retain
+their own observation windows; they gain Notice preemption, not repeat holds.
+Output (including cursor progress in another observation), nonempty writes,
+stdin Close or exit reset the per-process counter. A preempted first poll
+does not earn a repeat hold: quiet counts advance only at the deadline,
+ceiling or another promoted job's terminal wake. A repeat hold returning
+without output while still running reports its session id and exactly:
+`No new output; process N is still running. Its exit is reported automatically.`
+With completion notices disabled every empty poll keeps the 5..300-second
+window. The end-the-turn instruction remains in force. Exactly `\u0003`, with or without a PTY, stops the
 job. The canonical write schema admits empty-poll hints through 300 seconds;
 nonempty-input execution still enforces 30 seconds. A zero start hint in every
 process vocabulary selects the 250 ms first observation, not the default
-foreground budget. The process projection revision is **13** and canonical
+foreground budget. The process projection revision is **14** and canonical
 process capability revision is **8**; these also bind validated single/multi-id
 poll forms and bounded terminal tombstone observations. Canonical start lowering carries the
 neutral hint source (`default`, `model_hint`, `background`); the process adapter
@@ -6053,7 +6116,10 @@ observation deadline is the clamped requested yield plus a five-second settle
 margin, not the model-operation deadline. Nested execution and settlement
 suspend that observation deadline; nested quiescence re-arms the same window
 from now, including delivery acknowledgements. Steer settlement instead re-arms
-the model-operation timeout (§3.2).
+the model-operation timeout (§3.2). Accepted steer forwards Notice to active
+nested waits; a repeat quiet process poll can therefore yield before its
+900-second ceiling. The outer deadline remains suspended through nested
+settlement and delivery. Host Notice uses the same quiescent-yield path.
 Before emitting a synthetic steer yield the driver polls an eligible response
 once: a ready terminal result takes precedence. A later JavaScript wait drains
 an already-buffered engine response before resuming the evaluator. Both JS
@@ -7477,7 +7543,7 @@ are hints, never delivery authority; waking is host policy.
 live work, not a notice. The driver rechecks the ledger at admission. L0 does
 not schedule idle wake, auto-continuation or post-cancel suppression.
 `JobConfig` binds foreground and hard runtime budgets. `ToolContext::preempt()` carries a
-turn-scoped watch receiver (`None`, `Steer`, `Background`), distinct from the
+turn-scoped watch receiver (`None`, `Steer`, `Notice`, `Background`), distinct from the
 kill token; the host/driver owns setting it.
 `AgentSessions::created_job_config` reads these construction bounds from an
 exact stored checkpoint before the host compiles tool descriptors or local

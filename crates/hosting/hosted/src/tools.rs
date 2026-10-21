@@ -40,6 +40,12 @@ impl ProductToolExtensions {
         Self::default()
     }
 
+    pub(crate) fn process_config(&self) -> plakous::tools::ProcessPackConfig {
+        plakous::tools::ProcessPackConfig {
+            completion_notices: self.host_facts.host_wakes,
+        }
+    }
+
     pub(crate) fn with_host_facts(mut self, facts: plakous_host_protocol::PromptHostFacts) -> Self {
         self.host_facts = facts;
         self

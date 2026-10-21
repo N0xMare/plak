@@ -772,6 +772,8 @@ pub enum WaitWakeReason {
     Mail,
     /// A steer superseded this observation; its text remains driver-owned.
     Steer,
+    /// Host information is ready; its delivery remains host-owned.
+    Notice,
     /// An owned process became terminal after wait admission.
     Process,
     /// No new mail or settlement arrived before the ceiling.

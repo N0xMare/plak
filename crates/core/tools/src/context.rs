@@ -399,8 +399,29 @@ pub enum ToolPreempt {
     None,
     /// A queued instruction must reach the model.
     Steer,
+    /// Host information is ready at the next safe boundary.
+    /// The bool is true for unread mail, which earns a fixed end-turn reason.
+    Notice(bool),
     /// Explicit edge-triggered request to background in-flight processes.
     Background,
+}
+
+impl ToolPreempt {
+    /// Reports a cooperative host-notice yield, with either information reason.
+    #[must_use]
+    pub const fn is_notice(self) -> bool {
+        matches!(self, Self::Notice(_))
+    }
+
+    /// Model-visible reason when unread host mail caused this partial result.
+    #[must_use]
+    pub const fn notice_reason(self) -> Option<&'static str> {
+        if matches!(self, Self::Notice(true)) {
+            Some("New messages are waiting; end this turn to receive them.")
+        } else {
+            None
+        }
+    }
 }
 
 /// Owned, cloneable context supplied to an executing tool.

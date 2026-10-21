@@ -22,6 +22,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
 ) -> Result<DrivenTurn, DriveTurnError> {
     let TurnHost {
         job_agent,
+        host_wakes,
         quit_started_at,
         quit_abandoned_turn,
         quit_job_stops,
@@ -52,6 +53,8 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
         #[cfg(any(test, feature = "test-support"))]
         test_injection,
     } = host;
+    job_agent.set_unread_mail_pending(false);
+    job_agent.set_notice_delivery_available(host_wakes && !session.child_wake_suppressed);
     let runtime_session = session
         .plakous_locator
         .ok_or_else(|| "root mail projector has no runtime session".to_owned())?
@@ -502,6 +505,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
             turn.control(),
             TurnHost {
                 job_agent,
+                host_wakes,
                 quit_started_at,
                 quit_abandoned_turn,
                 quit_job_stops,

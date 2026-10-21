@@ -12,6 +12,56 @@ const BATCH_BYTES: usize = 16 * 1024;
 pub(super) const OUTCOME_UNKNOWN: &str = "Plak stopped unexpectedly while this command was running. It may still be running outside Plak and may hold locks or ports; the runtime cap no longer applies. Check before relying on its effects.";
 
 impl Driver {
+    pub(super) fn preempt_for_job_terminals(&mut self) {
+        if !plakous_tools::internal::process_notice_delivery_available(&self.job_sessions) {
+            return;
+        }
+        let jobs = self.job_sessions.jobs();
+        let numbers = self
+            .authority
+            .checkpoint()
+            .manifest()
+            .jobs()
+            .rows()
+            .iter()
+            .filter(|row| {
+                !self.pending_job_consumptions.contains(&row.number)
+                    && !self.observed_job_terminals.contains(&row.number)
+                    && !self.noticed_job_terminals.contains(&row.number)
+            })
+            .filter(|row| {
+                jobs.iter().any(|job| {
+                    job.number == row.number
+                        && job.session_id == row.session_id.as_bytes()
+                        && job.owner_generation == row.owner_generation.get()
+                        && job.status != JobStatus::Running
+                })
+            })
+            .filter(|row| {
+                self.job_sessions
+                    .session_for_number(row.number)
+                    .and_then(|id| {
+                        plakous_tools::internal::process_session_projection_state(
+                            &self.job_sessions,
+                            id,
+                        )
+                        .ok()
+                    })
+                    .is_some_and(|(_, _, state)| {
+                        let state = state
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        state.completion_notices && state.observers == 0 && !state.joined
+                    })
+            })
+            .map(|row| row.number)
+            .collect::<Vec<_>>();
+        if !numbers.is_empty() {
+            self.noticed_job_terminals.extend(numbers);
+            self.raise_tool_notice(false);
+        }
+    }
+
     pub(super) fn process_notices(
         &mut self,
     ) -> Result<Option<(HistorySegment, Vec<u32>)>, AgentError> {

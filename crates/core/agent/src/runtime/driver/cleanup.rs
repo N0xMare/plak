@@ -192,6 +192,9 @@ impl Driver {
                 return Ok(());
             }
             plakous_tools::internal::ProcessSessionUpdate::JobTerminal { number } => {
+                if !self.observed_job_terminals.contains(&number) {
+                    self.observed_job_terminals.push(number);
+                }
                 if !self.local_composition.is_in_flight()
                     && !self.pending_job_consumptions.contains(&number)
                 {
@@ -200,6 +203,11 @@ impl Driver {
                 return Ok(());
             }
             plakous_tools::internal::ProcessSessionUpdate::JobTerminals { numbers } => {
+                for number in &numbers {
+                    if !self.observed_job_terminals.contains(number) {
+                        self.observed_job_terminals.push(*number);
+                    }
+                }
                 if !self.local_composition.is_in_flight() {
                     for number in numbers {
                         if !self.pending_job_consumptions.contains(&number) {

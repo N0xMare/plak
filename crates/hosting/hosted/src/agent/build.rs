@@ -1168,7 +1168,8 @@ pub(crate) fn coding_tool_registry_with_extensions(
         .map_err(|_| CliFailure::new("plan-state authority identity is invalid"))?;
     let process = Arc::new(
         ProcessSessionTools::posix_sh()
-            .map_err(|_| CliFailure::new("process-session tools could not be initialized"))?,
+            .map_err(|_| CliFailure::new("process-session tools could not be initialized"))?
+            .with_config(extensions.process_config()),
     );
     // Every executor is a pack's own registration: the four coding packs and
     // the product extension pack. Composition markers below are enrollment for

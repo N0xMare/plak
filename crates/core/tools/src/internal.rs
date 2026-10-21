@@ -241,10 +241,40 @@ pub fn process_session_update(outcome: &ToolOutcome) -> Option<ProcessSessionUpd
     outcome.process_session_update()
 }
 
+#[derive(Default)]
+pub struct ProcessQuietPollState {
+    pub completion_notices: bool,
+    pub quiet_polls: u32,
+    pub output_cursor: u64,
+    pub observers: u32,
+    pub repeat_observers: u32,
+    pub joined: bool,
+}
+
 pub type ProcessSessionProjectionState = (
     Arc<std::sync::Mutex<crate::JoinedProcessOutputCursor>>,
     Arc<std::sync::Mutex<Vec<u8>>>,
+    Arc<std::sync::Mutex<ProcessQuietPollState>>,
 );
+
+pub fn set_process_unread_mail_pending(sessions: &crate::JoinedProcessSessions, pending: bool) {
+    sessions.set_unread_mail_pending(pending);
+}
+
+pub fn process_unread_mail_pending(sessions: &crate::JoinedProcessSessions) -> bool {
+    sessions.unread_mail_pending()
+}
+
+pub fn set_process_notice_delivery_available(
+    sessions: &crate::JoinedProcessSessions,
+    available: bool,
+) {
+    sessions.set_notice_delivery_available(available);
+}
+
+pub fn process_notice_delivery_available(sessions: &crate::JoinedProcessSessions) -> bool {
+    sessions.notice_delivery_available()
+}
 
 pub fn process_session_projection_state(
     sessions: &crate::JoinedProcessSessions,

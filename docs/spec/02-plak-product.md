@@ -3114,6 +3114,24 @@ confirms interruption of that turn as usual and disables auto-continue until the
 A wake whose turn ends at the context window disables it the same way, as a
 failed wake preflight does, so the mail it returned to unread waits for the
 next prompt (chapter 03 §8). Recovery fences, paused restored queues, and shutdown also prevent waking.
+During an active root turn, only when `prompt_host_facts().host_wakes` is
+true and `session.child_wake_suppressed` is false, unread child mail requests `ToolPreempt::Notice` through an exact-turn,
+checkpoint-qualified, nonblocking control. A snapshot preceding a consumer or
+boundary commit is ignored. The live runtime supplies unread ids, not cloned
+mail bodies. Own promoted-job terminals are observed by the driver, not a
+host snapshot, and only when completion notices are earned. Waiting tools yield
+honest partial observations without cancellation, so a quiet poll or long
+Bash foreground hint cannot hide the mail for its entire wait. This signal
+does not acknowledge mail or author a user instruction; existing mail
+selection and delivery remain the sole consumers. Unread mail signals at
+most once per model tool batch and once more for an active repeat hold. While
+mail stays unread, subsequent polls retain their ordinary bounded windows
+rather than holding for 900 seconds. Their partials carry the fixed reason
+`New messages are waiting; end this turn to receive them.` This bounds forced
+yields even if a model keeps polling instead of ending the turn.
+A job terminal signals once per turn, excluding in-band terminal observations
+already pending consumption. Notices-off hosts emit neither automatic signal. Hosted process packs enable repeat quiet holds only
+where `host_wakes` is earned (chapter 01 §8.5).
 Child-wake suppression is an intent-backed product view (§2.6), with no wake
 counter. It is set by the cancel of a running wake turn or a wake's
 context-capacity terminal (feed facts), or by a `wake_suppression` intent the

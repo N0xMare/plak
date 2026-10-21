@@ -323,7 +323,7 @@ pub(crate) async fn process_backend<T: Send + 'static>(
 pub(crate) async fn await_process_change(
     changes: &mut tokio::sync::watch::Receiver<u64>,
     preempt: &mut tokio::sync::watch::Receiver<plakous_tools::ToolPreempt>,
-    deadline: std::time::Instant,
+    deadline: tokio::time::Instant,
     control: &ExecutionOperationControl,
 ) {
     // Some callers deliberately have no preempt sender. A closed watch must
@@ -333,7 +333,7 @@ pub(crate) async fn await_process_change(
         _ = changes.changed() => {}
         _ = preempt.changed(), if preempt_open => {}
         () = control.cancellation().cancelled() => {}
-        () = tokio::time::sleep_until(deadline.into()) => {}
+        () = tokio::time::sleep_until(deadline) => {}
     }
 }
 
@@ -438,8 +438,13 @@ impl ProcessSessionTools {
             )
         })
         .await?;
-        let handle = u64::from(JoinedProcessSessions::job_number(id));
         let mut guard = StartedProcessGuard::new(sessions.clone(), id);
+        let handle = u64::from(JoinedProcessSessions::job_number(id));
+        Self::session(environment, handle)?
+            .quiet_polls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .completion_notices = self.config.completion_notices;
         let result = async {
             let yield_time_ms = args
                 .yield_time_ms
@@ -552,10 +557,15 @@ impl ProcessSessionTools {
             )
         })
         .await?;
-        let handle = u64::from(JoinedProcessSessions::job_number(id));
         let mut guard = StartedProcessGuard::new(sessions.clone(), id);
+        let handle = u64::from(JoinedProcessSessions::job_number(id));
+        Self::session(environment, handle)?
+            .quiet_polls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .completion_notices = self.config.completion_notices;
         let result = async {
-            let observed_at = std::time::Instant::now();
+            let observed_at = tokio::time::Instant::now();
             let mut result = Self::observe_summarized(
                 environment,
                 handle,
@@ -662,6 +672,15 @@ impl ProcessSessionTools {
             && !request.input.is_empty()
         {
             return Err(exited_session_refusal(request.session_id, status));
+        }
+        if !request.input.is_empty()
+            || matches!(request.disposition, CanonicalProcessInputDisposition::Close)
+        {
+            session
+                .quiet_polls
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .quiet_polls = 0;
         }
         // Empty input with `keep_open` only polls; `close` still closes.
         if !request.input.is_empty()
@@ -846,13 +865,18 @@ impl ProcessSessionTools {
             .into_iter()
             .map(|handle| (handle, Self::session(environment, handle)))
             .collect::<Vec<_>>();
+        let _observers = sessions
+            .iter()
+            .filter_map(|(_, session)| session.as_ref().ok())
+            .map(|session| super::session::ProcessObservationGuard::enter(session, false))
+            .collect::<Vec<_>>();
         let mut changes = environment
             .joined_process_sessions()
             .map_err(backend_runtime_error)?
             .job_terminal_changes();
         let mut preempt = control.preempt().clone();
         let deadline =
-            std::time::Instant::now() + std::time::Duration::from_millis(request.yield_time_ms);
+            tokio::time::Instant::now() + std::time::Duration::from_millis(request.yield_time_ms);
         loop {
             changes.borrow_and_update();
             control.check_cancelled().map_err(backend_runtime_error)?;
@@ -885,8 +909,11 @@ impl ProcessSessionTools {
                 None => sessions.iter().all(terminal),
             };
             if settled
-                || std::time::Instant::now() >= deadline
-                || *control.preempt().borrow() == plakous_tools::ToolPreempt::Steer
+                || tokio::time::Instant::now() >= deadline
+                || matches!(
+                    *control.preempt().borrow(),
+                    plakous_tools::ToolPreempt::Steer | plakous_tools::ToolPreempt::Notice(_)
+                )
             {
                 break;
             }
@@ -923,6 +950,13 @@ impl ProcessSessionTools {
             })
             .await?;
             let status = poll.status();
+            if status.is_terminal() || !poll.records().is_empty() {
+                session
+                    .quiet_polls
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .quiet_polls = 0;
+            }
             let mut bytes = Vec::new();
             for record in poll.records() {
                 bytes.extend_from_slice(record.bytes());
@@ -935,6 +969,11 @@ impl ProcessSessionTools {
                     let backend = session.sessions.clone();
                     process_backend(move || backend.join(id)).await?;
                 }
+                session
+                    .quiet_polls
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .joined = true;
                 if session.sessions.is_promoted(session.id) {
                     terminals.push(u32::try_from(handle).map_err(projection_arguments)?);
                 }
@@ -944,6 +983,14 @@ impl ProcessSessionTools {
             if truncated {
                 append_output_file(&mut output, &session.sessions, session.id);
             }
+            if !status.is_terminal()
+                && let Some(reason) = control.preempt().borrow().notice_reason()
+            {
+                if !output.is_empty() {
+                    output.push('\n');
+                }
+                output.push_str(reason);
+            }
             let mut task = json!({"task_id":format!("p{handle}"), "status":process_status_label(status), "output":output});
             if let Some(code) = status_exit_code(status) {
                 task["exit_code"] = json!(code);
@@ -951,7 +998,10 @@ impl ProcessSessionTools {
             tasks.push(task);
         }
         let yielded = tasks.iter().any(|task| task["status"] == "running")
-            && *control.preempt().borrow() == plakous_tools::ToolPreempt::Steer;
+            && matches!(
+                *control.preempt().borrow(),
+                plakous_tools::ToolPreempt::Steer | plakous_tools::ToolPreempt::Notice(_)
+            );
         let outcome = ToolOutcome::success_text(
             serde_json::to_string(&json!({"tasks":tasks})).map_err(projection_arguments)?,
         )?;

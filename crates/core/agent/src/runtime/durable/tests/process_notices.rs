@@ -319,3 +319,176 @@ async fn process_notice_does_not_extend_final_answer_and_child_instruction_admit
     fixture.agent.shutdown().await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn a_host_notice_observed_before_a_consumer_boundary_is_stale() -> TestResult {
+    let fixture = NoticeFixture::new(1, &[]).await?;
+    let observed = fixture.agent.checkpoint().id();
+    let turn = fixture
+        .agent
+        .prompt("consume a tool result before host notification")
+        .await?;
+    fixture.held().await?;
+    assert_ne!(fixture.agent.checkpoint().id(), observed);
+    let reply = turn.control().notice_at(observed)?.await?;
+    assert_eq!(
+        reply.expect_err("stale host snapshot was accepted").kind(),
+        ControlErrorKind::Stale
+    );
+    fixture.release.notify_one();
+    turn.result().await?;
+    fixture.agent.shutdown().await?;
+    Ok(())
+}
+
+struct ObservedJobSiblingTool {
+    setup: Arc<SessionUpdateTool>,
+    calls: AtomicUsize,
+    joined: AtomicBool,
+    release: AtomicBool,
+    sibling_preempted: AtomicBool,
+}
+
+impl plakous_tools::ToolExecutor for ObservedJobSiblingTool {
+    fn execute(
+        self: Arc<Self>,
+        invocation: ToolInvocation,
+        context: plakous_tools::ToolContext,
+    ) -> plakous_tools::ToolFuture {
+        Box::pin(async move {
+            match self.calls.fetch_add(1, Ordering::AcqRel) {
+                0 => {
+                    let outcome = Arc::clone(&self.setup).execute(invocation, context).await?;
+                    let sessions = lock_mutex(&self.setup.sessions).clone().ok_or_else(|| {
+                        ToolRuntimeError::new(
+                            ToolRuntimeErrorKind::Execution,
+                            "missing process service",
+                        )
+                    })?;
+                    let id = sessions.session_for_number(1).ok_or_else(|| {
+                        ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, "missing process")
+                    })?;
+                    let (_, _, state) =
+                        plakous_tools::internal::process_session_projection_state(&sessions, id)
+                            .map_err(plakous_tools::backend_runtime_error)?;
+                    state
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .completion_notices = true;
+                    Ok(outcome)
+                }
+                1 => {
+                    let result = ProcessSessionTools::await_jobs(&context, &[1], 600_000).await?;
+                    self.joined.store(true, Ordering::Release);
+                    Ok(result)
+                }
+                _ => {
+                    while !self.release.load(Ordering::Acquire) {
+                        if *context.preempt().borrow() != plakous_tools::ToolPreempt::None {
+                            self.sibling_preempted.store(true, Ordering::Release);
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                    ToolOutcome::success_text("sibling finished without a spurious notice")
+                }
+            }
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_parallel_observer_join_does_not_preempt_its_waiting_sibling() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let descriptor = durable_test_descriptor("test.route")?;
+    let mut fixture = ArtifactModel::new(
+        descriptor.clone(),
+        artifact_authority(&descriptor, 1)?,
+        0,
+        94_950,
+        false,
+    )
+    .with_scripted_tool_calls([(0, "probe", "{}".into()), (1, "probe", "{}".into())])
+    .with_second_direct_tool()?;
+    fixture.secondary_tool_on = Some(1);
+    let model = Arc::new(fixture);
+    let tool = Arc::new(ObservedJobSiblingTool {
+        setup: Arc::new(SessionUpdateTool::new(SessionUpdateFixtureMode::Promoted)),
+        calls: AtomicUsize::new(0),
+        joined: AtomicBool::new(false),
+        release: AtomicBool::new(false),
+        sibling_preempted: AtomicBool::new(false),
+    });
+    let mut registry = ToolRegistryBuilder::default();
+    registry.register(ToolRegistration::new(
+        RegisteredToolId::new("observed-job-sibling.probe")?, ToolExecutorId::new("observed-job-sibling.executor")?,
+        plakous_tools::ToolExecutorBindingIdentity::new(1, &[b"observed-job-sibling"] )?,
+        ToolDefinition::new(ToolName::new("probe")?, "1.0.0", "Observe a process or await a sibling.",
+            ToolInputContract::structured(json!({"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{},"required":[],"additionalProperties":false}))?,
+            ToolOutputContract::model_content(128, 1_048_576)?, ToolConcurrency::Parallel, ToolEffect::ReadOnly)?, tool.clone(),
+    ))?;
+    let sessions = DurableSessionRuntime::current(
+        Arc::new(TestCreateStore::default()),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("lease")?,
+    )?;
+    let agent = sessions
+        .create(
+            "create:observed-job-sibling",
+            session_update_builder(
+                Arc::new(WorkspacePolicy::host(directory.path(), ".")?),
+                model,
+                registry.freeze(),
+            )?,
+        )
+        .await?;
+    let turn = agent
+        .prompt("join the job without waking its sibling")
+        .await?;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if tool.calls.load(Ordering::Acquire) >= 3 {
+                let service = lock_mutex(&tool.setup.sessions)
+                    .clone()
+                    .ok_or("missing service")?;
+                let id = service.session_for_number(1).ok_or("missing session")?;
+                let (_, _, state) =
+                    plakous_tools::internal::process_session_projection_state(&service, id)?;
+                if state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .observers
+                    > 0
+                {
+                    service.write_stdin(
+                        id,
+                        b"finish\n",
+                        plakous_tools::JoinedProcessInputDisposition::KeepOpen,
+                    )?;
+                    break;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+        Ok::<_, Box<dyn std::error::Error>>(())
+    })
+    .await??;
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        wait_for_scheduler_fact(&tool.joined),
+    )
+    .await?;
+    for _ in 0..128 {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        !tool.sibling_preempted.load(Ordering::Acquire),
+        "an in-band join preempted its read-only sibling"
+    );
+    tool.release.store(true, Ordering::Release);
+    assert!(matches!(
+        turn.result().await?.outcome(),
+        TurnResultOutcome::Completed(_)
+    ));
+    agent.shutdown().await?;
+    Ok(())
+}

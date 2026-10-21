@@ -4,7 +4,7 @@ use super::*;
 
 /// Leaves the facts the host reads from an await's whole result at the tool
 /// boundary, never from the bounded preview a fan-out wait outgrows, and
-/// reports whether a steer woke it.
+/// reports whether a steer or host notice yielded it.
 pub(super) fn leave_wait_facts(operation_id: &str, outcome: &ToolOutcome) -> bool {
     let result = outcome.parts().iter().find_map(|part| match part {
         plakous::model::ToolResultPart::Text(text) => {
@@ -12,9 +12,12 @@ pub(super) fn leave_wait_facts(operation_id: &str, outcome: &ToolOutcome) -> boo
         }
         _ => None,
     });
-    let yielded = result
-        .as_ref()
-        .is_some_and(|value| value.get("woke_by").and_then(Value::as_str) == Some("steer"));
+    let yielded = result.as_ref().is_some_and(|value| {
+        matches!(
+            value.get("woke_by").and_then(Value::as_str),
+            Some("steer" | "notice")
+        )
+    });
     if let Some(result) = result {
         crate::call_facts::leave(
             operation_id,
@@ -137,9 +140,14 @@ impl TopologyTool {
         };
         let deadline =
             tokio::time::Instant::now() + std::time::Duration::from_millis(request.timeout_ms);
-        let steered =
+        let preempted =
             |preempt: Option<&tokio::sync::watch::Receiver<plakous::tools::ToolPreempt>>| {
-                preempt.is_some_and(|flag| *flag.borrow() == plakous::tools::ToolPreempt::Steer)
+                preempt.is_some_and(|flag| {
+                    matches!(
+                        *flag.borrow(),
+                        plakous::tools::ToolPreempt::Steer | plakous::tools::ToolPreempt::Notice(_)
+                    )
+                })
             };
         loop {
             let jobs = self.driver.job_service(&caller);
@@ -185,7 +193,7 @@ impl TopologyTool {
             let processes = jobs
                 .as_ref()
                 .map_or_else(Vec::new, |service| service.terminal_jobs_since(generation));
-            if steered(preempt.as_ref())
+            if preempted(preempt.as_ref())
                 || !processes.is_empty()
                 || named_job_settled(jobs.as_ref(), &request.processes)
             {
@@ -198,16 +206,23 @@ impl TopologyTool {
                         ToolRuntimeError::new(ToolRuntimeErrorKind::Execution, error.message)
                     })?;
                 // Recheck under the lock: mail may have arrived after the first poll.
+                output.processes = processes;
                 if output.woke_by == crate::tree::WaitWakeReason::Timeout {
                     output.timed_out = false;
-                    output.woke_by = if steered(preempt.as_ref()) {
+                    output.woke_by = if preempt
+                        .as_ref()
+                        .is_some_and(|flag| *flag.borrow() == plakous::tools::ToolPreempt::Steer)
+                    {
                         crate::tree::WaitWakeReason::Steer
+                    } else if !output.processes.is_empty() {
+                        crate::tree::WaitWakeReason::Process
+                    } else if preempted(preempt.as_ref()) {
+                        crate::tree::WaitWakeReason::Notice
                     } else {
-                        output.processes = processes;
                         crate::tree::WaitWakeReason::Process
                     };
                 }
-                return self.finish_await(
+                let outcome = self.finish_await(
                     &mut tree,
                     &caller,
                     operation_id,
@@ -216,6 +231,29 @@ impl TopologyTool {
                     jobs.as_ref(),
                     output,
                 );
+                return outcome.and_then(|outcome| {
+                    if let Some(reason) = preempt
+                        .as_ref()
+                        .and_then(|flag| flag.borrow().notice_reason())
+                    {
+                        let mut value: Value = serde_json::from_str(&outcome.joined_text())
+                            .map_err(|error| {
+                                ToolRuntimeError::new(
+                                    ToolRuntimeErrorKind::Execution,
+                                    error.to_string(),
+                                )
+                            })?;
+                        value["notice"] = json!(reason);
+                        let mut result = ToolOutcome::success_text(value.to_string())?
+                            .with_wait_observation(true);
+                        if let Some(subject) = outcome.presentation_subject() {
+                            result = result.with_presentation_subject(subject);
+                        }
+                        Ok(result)
+                    } else {
+                        Ok(outcome)
+                    }
+                });
             }
             if tokio::time::Instant::now() >= deadline {
                 let mut tree = self.driver.tree.lock().map_err(|_| {

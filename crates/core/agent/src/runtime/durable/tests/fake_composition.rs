@@ -657,6 +657,35 @@ impl LocalCompositionSession for FakeSession {
                                 })
                             })
                         }
+                        CancelCellMode::ProcessYield
+                            if fixture
+                                .evidence
+                                .continue_after_terminal
+                                .load(Ordering::Acquire) =>
+                        {
+                            let evidence = Arc::clone(&fixture.evidence);
+                            Box::pin(async move {
+                                loop {
+                                    if lock_mutex(&evidence.deliveries)
+                                        .iter()
+                                        .any(|(id, ok, _)| id == "TERMINAL" && *ok)
+                                    {
+                                        break;
+                                    }
+                                    tokio::task::yield_now().await;
+                                }
+                                // Stay computing beyond nested settlement: a spurious Notice
+                                // would yield here before the cell's next user-visible result.
+                                wait_for_scheduler_fact(&evidence.release_cell).await;
+                                Ok(LocalCompositionResponse::Result {
+                                    cell_id: "cancel-cell".to_owned(),
+                                    items: vec![LocalCompositionContentItem::Text(
+                                        "continued after terminal observation".to_owned(),
+                                    )],
+                                    error: None,
+                                })
+                            })
+                        }
                         CancelCellMode::ExecInFlight
                         | CancelCellMode::ProcessInFlight
                         | CancelCellMode::ProcessYield => Box::pin(std::future::pending()),
@@ -1094,7 +1123,11 @@ impl LocalCompositionEventReceiver for FakeEvents {
                     wait_for_scheduler_fact(&fixture.evidence.wait_started).await;
                 }
                 if let Some(input) = fixture.mode.process_input() {
-                    if fixture.next == 1 && fixture.evidence.terminal_poll.load(Ordering::Acquire) {
+                    if (fixture.next == 1
+                        || (fixture.next == 2
+                            && fixture.evidence.repeat_poll.load(Ordering::Acquire)))
+                        && fixture.evidence.terminal_poll.load(Ordering::Acquire)
+                    {
                         let handle = loop {
                             let delivered = lock_mutex(&fixture.evidence.deliveries)
                                 .iter()
@@ -1111,18 +1144,34 @@ impl LocalCompositionEventReceiver for FakeEvents {
                             }
                             tokio::task::yield_now().await;
                         };
+                        let identity = if fixture.next == 2 {
+                            "REPEAT"
+                        } else {
+                            "TERMINAL"
+                        };
+                        if fixture.next == 2 {
+                            loop {
+                                if lock_mutex(&fixture.evidence.deliveries)
+                                    .iter()
+                                    .any(|(id, ok, _)| id == "TERMINAL" && *ok)
+                                {
+                                    break;
+                                }
+                                tokio::task::yield_now().await;
+                            }
+                        }
                         fixture.next += 1;
                         return Ok(Some(LocalCompositionEvent::NestedCall {
                             call: crate::local_composition::LocalCompositionNestedCall {
                                 cell_id: "cancel-cell".to_owned(),
-                                runtime_call_id: "TERMINAL".to_owned(),
+                                runtime_call_id: identity.to_owned(),
                                 tool_name: "write_stdin".to_owned(),
                                 input: Some(json!({"session_id": handle,
                                                     "chars": if fixture.evidence.empty_poll.load(Ordering::Acquire) { "" } else { "finish\n" },
                                                     "yield_time_ms": if fixture.evidence.empty_poll.load(Ordering::Acquire) { 5000 } else { 1000 }})),
                             },
                             responder: Box::new(CancelCellResponder {
-                                identity: "TERMINAL".to_owned(),
+                                identity: identity.to_owned(),
                                 evidence: Arc::clone(&fixture.evidence),
                             }),
                         }));

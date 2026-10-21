@@ -29,6 +29,7 @@ use super::{
 
 pub(super) struct TurnHost<'a, P: plakous_host_protocol::ProtocolExtension> {
     pub(super) job_agent: &'a Agent,
+    pub(super) host_wakes: bool,
     pub(super) quit_started_at: &'a mut Option<Instant>,
     pub(super) quit_abandoned_turn: &'a mut bool,
     pub(super) quit_job_stops: &'a mut Option<tokio::task::JoinHandle<Result<(), String>>>,
@@ -117,6 +118,11 @@ struct TurnDrive<'a, P: plakous_host_protocol::ProtocolExtension> {
     queue_refresh_at: Instant,
     queue_refresh: Option<queue_projection::QueueRefresh>,
     queue_wait_noted: bool,
+    mail_batch_notified: bool,
+    mail_repeat_notified: bool,
+    noticed_mail: Vec<String>,
+    noticed_mail_checkpoint: Option<String>,
+    notice_reply: Option<tokio::sync::oneshot::Receiver<Result<(), plakous::agent::ControlError>>>,
 }
 
 mod admission;
@@ -159,6 +165,11 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
             queue_refresh_at: Instant::now(),
             queue_refresh: None,
             queue_wait_noted: false,
+            mail_batch_notified: false,
+            mail_repeat_notified: false,
+            noticed_mail: Vec::new(),
+            noticed_mail_checkpoint: None,
+            notice_reply: None,
         }
     }
 
@@ -265,6 +276,8 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
                                     true
                                 }
                                 AgentEventKind::ModelDispatchStarted => {
+                                    self.mail_batch_notified = false;
+                                    self.mail_repeat_notified = false;
                                     let _ = self.host.events.send(HostEvent::ModelRequestStarted);
                                     false
                                 }

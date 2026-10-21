@@ -18,6 +18,8 @@ mod output;
 mod pack;
 mod pi;
 mod projection;
+#[cfg(all(test, unix))]
+mod quiet_poll;
 mod session;
 mod text;
 
@@ -27,7 +29,7 @@ pub use text::{
     PLAKOUS_TOOL_WRITE_STDIN_DESCRIPTION, output_omitted_marker,
 };
 
-pub use pack::ProcessToolPack;
+pub use pack::{ProcessPackConfig, ProcessToolPack};
 pub use projection::{
     PROCESS_PROJECTION_FAMILY, ProcessProjectionResult, ProcessToolProjectionKind,
     ProjectedProcessTool,
