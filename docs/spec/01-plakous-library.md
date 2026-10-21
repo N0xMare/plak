@@ -1150,7 +1150,10 @@ publishes the snapshot before acknowledging a mutation, including after an error
 that may have followed a committed transaction. SQLite's page cache is 64 MiB.
 The actor also keeps a validated-checkpoint LRU with a 64 MiB accounted-byte
 budget. Successful commit and fork seed this same cache from the already
-validated publication's exact current-root closure, discarding ancestral CAS
+validated publication's exact current-root closure only after a fresh insert
+commits (not refusals or idempotent replays); a seeding error skips the cache
+without failing the committed write. Seeding costs O(current-root closure)
+time and memory, discarding ancestral CAS
 membership and charging only that closure, under the same budget and LRU policy. Hits still probe
 the checkpoint's primary-key row and verify its
 relational integrity seal; `Pruned` and `NotFound` never come from cache
@@ -1836,8 +1839,9 @@ does not authorize recovery or turn an unknown effect into a completed one.
 
 A fork starts a new branch from an exact safe checkpoint and leaves the source
 branch unchanged and resumable. Partial output and unresolved working state are
-not forkable. History sharing is copy-on-write, so cost is proportional to new
-branch data rather than retained history.
+not forkable. History sharing is copy-on-write, so persisted object writes are proportional
+to new branch data rather than retained history. Validation and optional cache
+seeding still cost O(current-root closure) time and memory (§5.2).
 
 An ordinary fork preserves the binding and the runtime configuration exactly
 (`ForkSessionRequest::new`; the store refuses an ordinary fork that changes

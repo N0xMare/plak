@@ -4230,14 +4230,6 @@ fn commit_impl(
     backend.require_open()?;
     let reference = bundle_ref(request.checkpoint());
     let candidate = candidate(request.checkpoint())?;
-    let cached = StoredCheckpoint::from_store(
-        reference,
-        request
-            .checkpoint()
-            .current_root_closure()
-            .map_err(bundle_error)?,
-    )
-    .map_err(bundle_error)?;
     #[cfg(feature = "perf-instrumentation")]
     let transaction_started = observed.then(Instant::now);
     let tx = backend
@@ -4376,7 +4368,7 @@ fn commit_impl(
     tx.commit().map_err(map_sqlite)?;
     #[cfg(test)]
     test_crash_cut("async-in-commit");
-    backend.checkpoints.insert(cached);
+    seed_checkpoint_cache(&mut backend.checkpoints, reference, request.checkpoint());
     #[cfg(feature = "perf-instrumentation")]
     let execution = CommitExecution {
         transaction_begin_count: 1,
@@ -4482,6 +4474,20 @@ fn commit_matches(
         && v.operation().checkpoint_commit_identity() == checkpoint_commit_identity
 }
 
+// Cache seeding is optional and must never turn an acknowledged publication
+// into a failure. Do this only after a fresh transaction has committed.
+fn seed_checkpoint_cache(
+    cache: &mut CheckpointCache,
+    reference: CheckpointObjectRef,
+    bundle: &CheckpointObjectBundle,
+) {
+    if let Ok(cached) = bundle.current_root_closure()
+        .and_then(|closure| StoredCheckpoint::from_store(reference, closure))
+    {
+        cache.insert(cached);
+    }
+}
+
 // Keeping the full transaction linear makes its validate-then-publish boundary auditable.
 #[allow(
     clippy::too_many_lines,
@@ -4492,11 +4498,6 @@ fn fork(b: &mut Backend, r: &ForkBranch) -> Result<ForkReceipt, SessionStoreErro
     super::validate_fork_semantic_request(r)?;
     let reference = bundle_ref(r.target());
     let x = candidate(r.target())?;
-    let cached = StoredCheckpoint::from_store(
-        reference,
-        r.target().current_root_closure().map_err(bundle_error)?,
-    )
-    .map_err(bundle_error)?;
     let target = SessionRef::new(r.source().session().session_id(), r.target_branch());
     let tx = b
         .connection
@@ -4676,7 +4677,7 @@ fn fork(b: &mut Backend, r: &ForkBranch) -> Result<ForkReceipt, SessionStoreErro
     )?;
     meta(&tx, 0, 1)?;
     commit_claimed(tx, &mut b.holders, target, lease_fence)?;
-    b.checkpoints.insert(cached);
+    seed_checkpoint_cache(&mut b.checkpoints, reference, r.target());
     Ok(receipt)
 }
 fn recover_fork(b: &Backend, r: &RecoverFork) -> Result<ForkReceipt, SessionStoreError> {

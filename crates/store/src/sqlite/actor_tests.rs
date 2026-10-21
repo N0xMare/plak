@@ -1320,12 +1320,16 @@ async fn measure_large_session_turn_boundary_reads() -> TestResult {
     let prior = request.initial().clone();
     let created = store.create(request).await?;
     let next = next_checkpoint(&created, &prior, 1)?;
+    let history_len = std::env::var("PLAK_MEASURE_HISTORY")
+        .map_or(Ok(3098), |value| value.parse::<u32>())?;
+    let payload_len = std::env::var("PLAK_MEASURE_PAYLOAD")
+        .map_or(Ok(7600), |value| value.parse::<usize>())?;
     let checkpoint = fixture::checkpoint_with_payload(
         next.checkpoint()
             .validated_checkpoint()?
             .manifest()
             .topology(),
-        3098,
+        history_len,
         RuntimeDurability::Required,
         prior
             .validated_checkpoint()?
@@ -1333,11 +1337,12 @@ async fn measure_large_session_turn_boundary_reads() -> TestResult {
             .canonical()
             .context()
             .clone(),
-        &"x".repeat(7600),
+        &"x".repeat(payload_len),
     )?;
     let bundle = fixture::bundle(&checkpoint, Some(&prior))?;
     let bytes = bundle.stats().retained_bytes();
     let objects = bundle.stats().object_count();
+    let commit_started = Instant::now();
     let head = store
         .commit(CommitCheckpoint::new(
             created.lease().clone(),
@@ -1346,6 +1351,7 @@ async fn measure_large_session_turn_boundary_reads() -> TestResult {
         ))
         .await?
         .head();
+    let commit_us = commit_started.elapsed().as_micros();
     let before = store
         .dispatch_read("measure_large_session_turn_boundary_reads", |b| {
             Ok(b.checkpoint_decodes)
@@ -1402,7 +1408,7 @@ async fn measure_large_session_turn_boundary_reads() -> TestResult {
         cold_decodes
     );
     eprintln!(
-        "large-session: bytes={bytes} objects={objects} post_commit_us={warm_us} post_commit_decodes=0 cold_us={cold_us} cold_decodes=1 burst_reads={READS} capacity={DEFAULT_QUEUE_CAPACITY} burst_busy=0 burst_decodes=0 burst_us={burst_us}"
+        "large-session: bytes={bytes} objects={objects} commit_us={commit_us} post_commit_us={warm_us} post_commit_decodes=0 cold_us={cold_us} cold_decodes=1 burst_reads={READS} capacity={DEFAULT_QUEUE_CAPACITY} burst_busy=0 burst_decodes=0 burst_us={burst_us}"
     );
     Ok(())
 }
