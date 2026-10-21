@@ -160,6 +160,9 @@ def cached_workspace(root: Path = ROOT) -> Workspace:
 
 
 REQUIRED_DEPENDENCY_FEATURE_EDGES = {
+    ("plakous", "test-clock", "plakous-openai?/test-clock"),
+    ("plakous", "test-clock", "plakous-openrouter?/test-clock"),
+    ("plak", "test-hooks", "plakous/test-clock"),
     ("plakous", "native-subscriptions", "plakous-anthropic/native-auth"),
     ("plakous", "native-subscriptions", "plakous-auth/http-refresh"),
     ("plakous", "native-subscriptions", "plakous-openai/native-auth"),
@@ -228,7 +231,7 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
 EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-py-worker": "8d89be2d61b38520db99c47b40eb2d2b57754595c5ae17d838c64a1015b61530",
     "plakous-js-runtime": "a0c51be262dd767d2f906c29ab16c5037bfc7dce1e3c722bf64cd5aaf0191136",
-    "plakous": "76d063d8fb4257164ce57d78bcda4f679664e9f98cfeae347a07cb5bd475c04c",
+    "plakous": "0baf3d486012bca55bf581763b9220e1a576de9c081e08e27964c711c50db9b9",
     "plakous-agent": "1d87242cbe6b58656abd87d498e9f9cc27bea0c01cbaa4253a2e0c76910d2619",
     "plakous-anthropic": "19ec6c294346445213d4248b2487df97d661518f0f9e5ed24f1df89274893553",
     "plakous-attempt": "87a0bece47ad17a768ac1eb58a4e6ff9712e6f53008fd524fae3fd4055282f6b",
@@ -242,7 +245,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-mcp": "65eaa32854288a0150a1ae8f1f4d413c0762e3de9bbff4a592fb0dd93edf1cb5",
     "plakous-messages": "09a984f9e1df12b505500d55bde11d777405c4be1d27b471682570e0fe2be7b8",
     "plakous-model": "b292beea53bde3bb93436217d68d237e1341d72b5239eaa66cc5c6c996123a07",
-    "plakous-openai": "ab7f9c90fceec8b6aaead0aadcde44387831c9a881a0c28bc4ddbfd40c6f00b9",
+    "plakous-openai": "e1c6c7ce1480d0220dbb8f7bbdb06d06bb35abfa50c97786c2ddb172cc47af98",
     "plakous-tool-files": "245d58f34202ec359f9fe87ccc085e91efa63046e333ae36f67bc5e825f75d52",
     "plakous-tool-plan": "a24834c174bad9b4b590be0c70a60cc8a740263333db483cc8023f2064e89145",
     "plakous-tool-process": "8e36e8dcfd2c98ede2659e0ad7ed3210b7bbd88c5a8dae75b94f9d03f10f9776",
@@ -250,7 +253,7 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
     "plakous-tool-web": "9698ba8d94bd1214f20ba42a536e7a6e69eceadf9b80338f52deec5d79505e47",
     "plakous-compose": "56b469cc34f94f867749eb7335c23e4985127d80b7468677855cd5bb3df1e11b",
     "plakous-prompts": "4b261e3a2cd88cf47288cc7b421cbcd9658d5fc1be1314aff475e5f3981c8c5d",
-    "plakous-openrouter": "ff80c88e66868de6511fab5bbd3057d6e426b580b3c826935b6326db92e1bf5e",
+    "plakous-openrouter": "b32851bb1f8bf9f391377189705bc27c98423faabbcb7a4ecbd12bea7ce34d35",
     "plakous-responses": "cf874bcd1be23eeb902f935d6c2670143eb20a6daf49d66833601115af3d3eb6",
     "plakous-responses-dialect": "c60dda8a982974de77f55189742ea78879b38d11081c37a4207d3b53b6d34625",
     "plakous-store": "093dc646a52555bd7ac957359d3c23efd31e70cf87eb9eb3bce9adeabf58e4fe",
@@ -297,6 +300,9 @@ EXCLUDED_CLOSURE_PACKAGES = {
 TEST_ONLY_DEPENDENCY_FEATURES = {
     ("plak", "test-hooks"): (
         ("plakous-http", "fault-injection"),
+        ("plakous", "test-clock"),
+        ("plakous-openai", "test-clock"),
+        ("plakous-openrouter", "test-clock"),
         ("plakous-store", "commit-trace"),
         ("plakous-recursive-subagents-store", "commit-trace"),
     ),
@@ -337,6 +343,10 @@ def validate_test_only_dependency_features() -> list[str]:
                     )
             if feature not in resolved_dependency_features(package, (gate,), dependency):
                 errors.append(f"{package} [{gate}]: no longer enables {dependency}/{feature}")
+    for package in ("plakous", "plakous-openai", "plakous-openrouter"):
+        for profile in ((), ("full",)) if package == "plakous" else ((),):
+            if "test-clock" in resolved_dependency_features(package, profile, package):
+                errors.append(f"{package} [{','.join(profile) or 'default'}]: test-clock is test-only")
     return errors
 
 
@@ -610,7 +620,7 @@ def optional_features(manifest: dict[str, object]) -> list[str]:
     features = manifest.get("features", {})
     if not isinstance(features, dict):
         return []
-    return sorted(name for name in features if name not in {"default", "full"})
+    return sorted(name for name in features if name not in {"default", "full", "test-clock"})
 
 
 def workspace_package_names(root: Path = ROOT) -> set[str]:

@@ -3096,7 +3096,23 @@ and every runtime-authority revalidation at or after it refuse the route with
 "OpenRouter Chat compatibility profile is not currently admissible"
 (`RuntimeModelAuthorityError::Stale` on revalidation), and every authority it
 issues expires no later than the pin. Continuing needs a build with a renewed
-review.
+review. The route clock is injectable and is shared by discovery, target
+construction, side retrieval and runtime revalidation; production uses the
+system clock. Offline fixtures use a fixed instant within the review window,
+and test expired-pin refusal explicitly. Codex credential-manager admission
+and catalog resolution likewise share an injected clock in offline tests.
+Codex token time checks use that clock too: signature, issuer, audience and
+required claims remain library-validated, while the existing stricter
+expiration, issued-at and not-before checks use the injected instant.
+Production retains the system clock and the same fail-closed checks.
+`NativeSubscriptions::with_clock` supplies consent time and the clock passed
+to Codex construction; product CLI fixtures use that seam too. Consent
+receipt tests inject a fixed review-window clock at the facade state seam;
+refresh-lead tests advance from a fixed review epoch using monotonic elapsed
+time, never the wall clock. OpenAI and xAI Platform API fixtures use the
+existing builder/executor clock ports, and hosted API construction passes its
+clock explicitly. Fixture instants follow the compiled review window, so a
+release-cut re-date does not require rewriting fixture dates.
 
 Chat lowering refuses a function name exposed twice. One canonical tool may be
 exposed under several names (pi's `edit` and `write` over the patch tool); such

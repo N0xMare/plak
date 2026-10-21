@@ -35,8 +35,8 @@ use plakous_model::{
     ProtocolId, ProviderAuthorityClassId, ProviderBehaviorConfiguration, ProviderProfileRevisionId,
     ProviderRouteSelection, ProviderSemanticEvidence, ResolvedModelDescriptor,
     ResolvedProviderAuthorityBinding, RuntimeModelAuthority, RuntimeModelAuthorityError,
-    RuntimeModelAuthorityOperation, SelectedProviderConfiguration, Support, SystemClock,
-    SystemIdGenerator, Timestamp, ValidatedRequestPlan,
+    RuntimeModelAuthorityOperation, SelectedProviderConfiguration, Support, SystemIdGenerator,
+    Timestamp, ValidatedRequestPlan,
 };
 use thiserror::Error;
 
@@ -105,7 +105,7 @@ impl OpenRouterMessagesTarget {
         if route.identity().retention_policy().is_none() {
             return Err(OpenRouterMessagesBuildError::MissingRetentionPolicy);
         }
-        validate_evidence(&route, &evidence, &context_contract, SystemClock.now())?;
+        validate_evidence(&route, &evidence, &context_contract, route.clock.now())?;
         let descriptor = ResolvedModelDescriptor::new_custom(
             ProtocolId::new(OPENROUTER_MESSAGES_PROTOCOL_ID)?,
             route.identity().route_id().clone(),
@@ -303,7 +303,7 @@ impl OpenRouterMessagesLanguageModel {
         {
             return Err(OpenRouterMessagesBuildError::InvalidPolicy);
         }
-        let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+        let clock = Arc::clone(&target.route.clock);
         let runtime = target.runtime_authority(clock.now())?;
         let configuration = compile_configuration(&target, selected, &runtime)?;
         Ok(Self {
@@ -1289,7 +1289,11 @@ mod tests {
             source,
             OpenRouterOrigin::new("https://127.0.0.1:18443")?,
             OpenRouterRetentionPolicy::strict(),
-        )?)
+        )?
+        .with_clock(Arc::new(plakous_model::FixedClock::new(Timestamp::new(
+            crate::chat::OPENROUTER_CHAT_REVIEWED_AT + 60,
+            0,
+        )?))))
     }
 
     fn context(
@@ -1349,7 +1353,11 @@ mod tests {
         observed_offset: u64,
         expiry_offset: u64,
     ) -> Result<OpenRouterChatModelEvidence, Box<dyn std::error::Error>> {
-        let now = SystemClock.now();
+        let now = plakous_model::FixedClock::new(Timestamp::new(
+            crate::chat::OPENROUTER_CHAT_REVIEWED_AT + 60,
+            0,
+        )?)
+        .now();
         OpenRouterChatModelEvidence::from_authenticated_discovery(
             plakous_model::ModelId::new("vendor/dynamic-model")?,
             route.identity(),
@@ -1432,7 +1440,11 @@ mod tests {
         let route = OpenRouterChatRoute::new_local_fixture(
             source,
             OpenRouterOrigin::new("https://127.0.0.1:18443")?,
-        )?;
+        )?
+        .with_clock(Arc::new(plakous_model::FixedClock::new(Timestamp::new(
+            crate::chat::OPENROUTER_CHAT_REVIEWED_AT + 60,
+            0,
+        )?)));
         let Err(error) = OpenRouterMessagesTarget::gateway_managed(
             route.clone(),
             evidence(&route, 2, 3_600)?,

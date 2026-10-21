@@ -144,6 +144,7 @@ pub(crate) async fn construct_platform_runtime(
         spec,
         observer,
         &PlatformAdmission::default(),
+        tests::review_clock_for(provider),
     )
     .await
 }
@@ -154,6 +155,7 @@ pub(crate) async fn construct_platform_runtime_with(
     spec: &ApiRuntimeSpec<'_>,
     observer: Option<Arc<dyn plakous::exchange_observation::ExchangeObserver>>,
     admission: &PlatformAdmission,
+    clock: Arc<dyn plakous::model::Clock>,
 ) -> CliResult<plakous::sessions::SessionRuntimeBinding> {
     if provider.account() != spec.account || provider.protocol() != spec.wire {
         return Err(CliFailure::new(
@@ -232,6 +234,7 @@ pub(crate) async fn construct_platform_runtime_with(
                 PlatformStoragePolicy::Stateless,
                 PlatformProjectPolicy::DefaultProject,
             )
+            .clock(Arc::clone(&clock))
             .context_envelope(maximum)
             .admitted_facts(row.binding_evidence_for(provider, window))
             .seal()
@@ -287,11 +290,8 @@ pub(crate) async fn construct_platform_runtime_with(
                 exact_route_retention(&provisional),
             )
             .map_err(api_error)?;
-            plakous::xai::XaiPlatformModel::preflight_configuration(
-                &selected,
-                &plakous::model::SystemClock,
-            )
-            .map_err(api_error)?;
+            plakous::xai::XaiPlatformModel::preflight_configuration(&selected, clock.as_ref())
+                .map_err(api_error)?;
             let authority = source.grant().map_err(api_error)?.authority().clone();
             let model = Arc::new(
                 plakous::xai::XaiPlatformModel::with_admitted_facts(
@@ -299,7 +299,7 @@ pub(crate) async fn construct_platform_runtime_with(
                     source,
                     maximum,
                     selected,
-                    Arc::new(plakous::model::SystemClock),
+                    Arc::clone(&clock),
                     observer,
                     &row.binding_evidence_for(provider, window),
                 )
@@ -316,7 +316,7 @@ pub(crate) async fn construct_platform_runtime_with(
             model.configured().await.map_err(api_error)?
         }
     };
-    crate::api_runtime::runtime_binding(spec, configured, registry)
+    crate::api_runtime::runtime_binding(spec, configured, registry, clock)
 }
 
 /// The credential reference the OpenAI API route resolves its key under, for

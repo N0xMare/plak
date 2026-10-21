@@ -56,6 +56,7 @@ pub(crate) fn runtime_binding(
     spec: &ApiRuntimeSpec<'_>,
     configured: ConfiguredLanguageModel,
     registry: plakous::tools::FrozenToolRegistry,
+    clock: Arc<dyn plakous::model::Clock>,
 ) -> CliResult<SessionRuntimeBinding> {
     let _binding_span = tracing::info_span!(
         "api_runtime_binding",
@@ -78,6 +79,7 @@ pub(crate) fn runtime_binding(
     // Maintained Platform and gateway Custom routes share the same product
     // projection admission boundary and exact session effect policy.
     let mut builder = AgentBuilder::new(configured, registry.clone(), Arc::clone(&workspace))
+        .identity_sources(clock, Arc::new(plakous::model::SystemIdGenerator))
         .projection_admission(Arc::new(crate::coding_routes::ProductProjectionAdmission))
         .post_compaction_note(Arc::new(plakous::tools::plan_restoration_note))
         .tool_policy(session_tool_policy(spec.tool_fence))

@@ -419,7 +419,7 @@ fn a_profile_changed_record_reads_as_a_state_beside_its_acceptance() {
     std::fs::write(&record, bytes).unwrap();
     std::fs::set_permissions(&record, std::fs::Permissions::from_mode(0o600)).unwrap();
 
-    let mut app = PlakousApplication::for_accounts(state).unwrap();
+    let mut app = PlakousApplication::for_test_accounts(state).unwrap();
     let status = AccountOps::offline_status(&mut app, NativeProvider::Claude).unwrap();
     assert_eq!(
         status,
@@ -502,7 +502,7 @@ fn status_prints_every_provider_when_one_credential_cannot_be_read() {
     let services = Services::for_home(product_paths::PlakPaths::explicit(
         root.path().join("product"),
     ));
-    let mut app = PlakousApplication::for_accounts(state).unwrap();
+    let mut app = PlakousApplication::for_test_accounts(state).unwrap();
     // An earlier-build login leaves the acceptance receipt plus a cleared
     // recovery marker and epoch. Without them a ready-capable record is
     // quarantined, which is the fail-closed rule, not this row.
@@ -618,7 +618,7 @@ fn run_offline_status(
     product: PathBuf,
 ) -> (CliResult<ProcessOutcome>, String, String) {
     let services = Services::for_home(product_paths::PlakPaths::explicit(product));
-    let mut app = PlakousApplication::for_accounts(state).unwrap();
+    let mut app = PlakousApplication::for_test_accounts(state).unwrap();
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let result = execute_command(
@@ -3258,7 +3258,7 @@ fn concrete_run_declined_compatibility_cannot_open_a_product_session() {
     let home = tempfile::tempdir().unwrap();
     let paths = product_paths::PlakPaths::explicit(home.path().join("product"));
     let services = Services::for_home(paths.clone());
-    let mut app = PlakousApplication::for_accounts(home.path().join("state")).unwrap();
+    let mut app = PlakousApplication::for_test_accounts(home.path().join("state")).unwrap();
     let mut output = Vec::new();
     let result = execute_application_command(
         Command::Run {

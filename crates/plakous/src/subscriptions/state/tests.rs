@@ -524,11 +524,13 @@ async fn claude_foreign_profile_is_retired_by_logout_or_replaced_by_login()
         plakous_auth::SecretBytes::new(b"old-opaque-credential".to_vec()),
     )?)?;
     let notice = NativeSubscriptions::notice(NativeProvider::Claude);
-    let now = unix_now()?;
+    let now = test_now();
     store_acceptance(&paths, notice, now)?;
     let acceptance = load_acceptance_exact(&paths, notice, now)?;
     arm_login_recovery(&paths, NativeProvider::Claude, &acceptance.generation)?;
-    let subscriptions = NativeSubscriptions::new(paths.clone());
+    let subscriptions = NativeSubscriptions::new(paths.clone()).with_clock(Arc::new(
+        plakous_model::FixedClock::new(Timestamp::new(test_now(), 0)?),
+    ));
     assert_eq!(
         subscriptions.status(NativeProvider::Claude).await,
         Err(NativeSubscriptionError::CredentialProfileChanged)
@@ -571,7 +573,7 @@ async fn xai_retired_payload_reads_as_profile_changed_and_local_logout_repairs_i
     let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
     paths.prepare()?;
     let notice = NativeSubscriptions::notice(provider);
-    let now = unix_now()?;
+    let now = test_now();
     store_acceptance(&paths, notice, now)?;
     let profile = plakous_auth::SubscriptionIntegrationProfileId::new(notice.profile_id())?;
     let store = plakous_auth::PrivateCredentialStore::open_slot(
@@ -598,7 +600,9 @@ async fn xai_retired_payload_reads_as_profile_changed_and_local_logout_repairs_i
         plakous_auth::CredentialStatus::Ready,
         plakous_auth::SecretBytes::new(retired),
     )?)?;
-    let subscriptions = NativeSubscriptions::new(paths.clone());
+    let subscriptions = NativeSubscriptions::new(paths.clone()).with_clock(Arc::new(
+        plakous_model::FixedClock::new(Timestamp::new(test_now(), 0)?),
+    ));
     // Offline status refuses the record exactly as refresh does; neither
     // reports it Ready, and neither contacts the provider.
     assert_eq!(
@@ -665,7 +669,7 @@ fn seed_newer_state(
 ) -> Result<SeededFiles, Box<dyn Error>> {
     use std::os::unix::fs::PermissionsExt as _;
     let notice = NativeSubscriptions::notice(provider);
-    let now = unix_now()?;
+    let now = test_now();
     store_acceptance(paths, notice, now)?;
     let current = notice.profile_id();
     let (prefix, _) = current.rsplit_once(".compat.").ok_or("profile grammar")?;
@@ -779,7 +783,9 @@ async fn newer_build_state_is_refused_untouched_until_a_confirmed_replacement()
             let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
             paths.prepare()?;
             let files = seed_newer_state(&paths, provider, shape)?;
-            let subscriptions = NativeSubscriptions::new(paths.clone());
+            let subscriptions = NativeSubscriptions::new(paths.clone()).with_clock(Arc::new(
+                plakous_model::FixedClock::new(Timestamp::new(test_now(), 0)?),
+            ));
             let untouched = || -> Result<(), Box<dyn Error>> {
                 for (path, bytes) in &files {
                     assert_eq!(&fs::read(path)?, bytes, "{label}: {}", path.display());
@@ -887,7 +893,9 @@ async fn local_logout_retires_a_newer_build_record_without_a_prompt() -> Result<
             let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
             paths.prepare()?;
             seed_newer_state(&paths, provider, shape)?;
-            let subscriptions = NativeSubscriptions::new(paths.clone());
+            let subscriptions = NativeSubscriptions::new(paths.clone()).with_clock(Arc::new(
+                plakous_model::FixedClock::new(Timestamp::new(test_now(), 0)?),
+            ));
             let status = subscriptions.logout_local(provider).await?;
             assert!(
                 matches!(
@@ -943,12 +951,14 @@ async fn explicit_login_retires_armed_recovery_before_starting_a_fresh_attempt()
         let root = unique_test_root(&format!("logout-empty-recovery-{provider:?}"))?;
         let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
         let notice = NativeSubscriptions::notice(provider);
-        let now = unix_now()?;
+        let now = test_now();
         store_acceptance(&paths, notice, now)?;
         let acceptance = load_acceptance_exact(&paths, notice, now)?;
         arm_login_recovery(&paths, provider, &acceptance.generation)?;
 
-        let subscriptions = NativeSubscriptions::new(paths.clone());
+        let subscriptions = NativeSubscriptions::new(paths.clone()).with_clock(Arc::new(
+            plakous_model::FixedClock::new(Timestamp::new(test_now(), 0)?),
+        ));
         assert!(!paths.provider_record(provider).exists());
         assert_eq!(
             subscriptions.status(provider).await?,
@@ -1002,7 +1012,9 @@ async fn subscription_usage_dispatches_native_providers_without_unqualified_clau
 -> Result<(), Box<dyn Error>> {
     let root = unique_test_root("usage-provider-dispatch")?;
     let paths = SubscriptionPaths::from_xdg_state_home(&root)?;
-    let subscriptions = NativeSubscriptions::new(paths);
+    let subscriptions = NativeSubscriptions::new(paths).with_clock(Arc::new(
+        plakous_model::FixedClock::new(Timestamp::new(test_now(), 0)?),
+    ));
     for provider in [
         NativeProvider::Xai,
         NativeProvider::Claude,
@@ -1034,7 +1046,9 @@ async fn subscription_usage_reports_busy_while_a_sibling_holds_the_compatibility
     paths.prepare()?;
     let held =
         acquire_private_filesystem_lock(&paths.compatibility_lock_path(NativeProvider::Codex))?;
-    let subscriptions = NativeSubscriptions::new(paths);
+    let subscriptions = NativeSubscriptions::new(paths).with_clock(Arc::new(
+        plakous_model::FixedClock::new(Timestamp::new(test_now(), 0)?),
+    ));
     assert!(matches!(
         subscriptions.subscription_usage(NativeProvider::Xai).await,
         SubscriptionUsageRead::Unavailable {
@@ -1306,6 +1320,10 @@ async fn pending_login_revalidates_exact_consent_before_and_after_completion()
     assert_eq!(calls.load(AtomicOrdering::SeqCst), 1);
     assert!(login_recovery_required(&paths, notice.provider())?);
     let recovery_status = NativeSubscriptions::new(paths.clone())
+        .with_clock(Arc::new(plakous_model::FixedClock::new(Timestamp::new(
+            test_now(),
+            0,
+        )?)))
         .status(notice.provider())
         .await?;
     assert_eq!(recovery_status.credential(), NativeAuthStatus::Quarantined);
@@ -1525,6 +1543,10 @@ async fn recovery_v2_rejects_ambiguous_clear_deletion_and_stale_replay_across_in
         read_login_recovery_marker(&clear_paths, provider)?.ok_or("armed marker must remain")?;
     assert_eq!(restored.0, operation.marker);
     let second = NativeSubscriptions::new(clear_paths.clone())
+        .with_clock(Arc::new(plakous_model::FixedClock::new(Timestamp::new(
+            test_now(),
+            0,
+        )?)))
         .status(provider)
         .await?;
     assert_eq!(second.credential(), NativeAuthStatus::Quarantined);
@@ -1560,6 +1582,10 @@ async fn recovery_v2_rejects_ambiguous_clear_deletion_and_stale_replay_across_in
         Err(NativeSubscriptionError::UnsafeStorage)
     );
     let second = NativeSubscriptions::new(restoration_paths.clone())
+        .with_clock(Arc::new(plakous_model::FixedClock::new(Timestamp::new(
+            test_now(),
+            0,
+        )?)))
         .status(provider)
         .await?;
     assert_eq!(second.credential(), NativeAuthStatus::Quarantined);
@@ -1577,6 +1603,10 @@ async fn recovery_v2_rejects_ambiguous_clear_deletion_and_stale_replay_across_in
     );
     write_private_atomic(&replay_paths.login_recovery_path(provider), &old_cleared)?;
     let replayed = NativeSubscriptions::new(replay_paths.clone())
+        .with_clock(Arc::new(plakous_model::FixedClock::new(Timestamp::new(
+            test_now(),
+            0,
+        )?)))
         .status(provider)
         .await?;
     assert_eq!(replayed.credential(), NativeAuthStatus::Quarantined);
@@ -1587,6 +1617,10 @@ async fn recovery_v2_rejects_ambiguous_clear_deletion_and_stale_replay_across_in
     let deleted = arm_login_recovery(&deletion_paths, provider, &deletion_generation)?;
     fs::remove_file(deletion_paths.login_recovery_path(provider))?;
     let deleted_status = NativeSubscriptions::new(deletion_paths.clone())
+        .with_clock(Arc::new(plakous_model::FixedClock::new(Timestamp::new(
+            test_now(),
+            0,
+        )?)))
         .status(provider)
         .await?;
     assert_eq!(deleted_status.credential(), NativeAuthStatus::Quarantined);
@@ -1601,6 +1635,10 @@ async fn recovery_v2_rejects_ambiguous_clear_deletion_and_stale_replay_across_in
     );
     clear_quarantine(&LOGIN_RECOVERY_QUARANTINE, &deletion_key)?;
     let still_quarantined = NativeSubscriptions::new(deletion_paths.clone())
+        .with_clock(Arc::new(plakous_model::FixedClock::new(Timestamp::new(
+            test_now(),
+            0,
+        )?)))
         .status(provider)
         .await?;
     assert_eq!(
@@ -1850,7 +1888,7 @@ fn install_ready_login_fixture(
 ) -> Result<String, Box<dyn Error>> {
     paths.prepare()?;
     let notice = NativeSubscriptions::notice(provider);
-    let now = unix_now()?;
+    let now = test_now();
     store_acceptance(paths, notice, now)?;
     let acceptance = load_acceptance_exact(paths, notice, now)?;
     let profile = plakous_auth::SubscriptionIntegrationProfileId::new(notice.profile_id())?;
@@ -1938,7 +1976,9 @@ async fn in_flight_refresh_reads_refreshing_and_leaves_no_sticky_quarantine()
         let ready = store.load()?.ok_or("missing ready fixture")?;
         let claim = store.begin_refresh(&ready)?.start();
 
-        let subscriptions = NativeSubscriptions::new(paths.clone());
+        let subscriptions = NativeSubscriptions::new(paths.clone()).with_clock(Arc::new(
+            plakous_model::FixedClock::new(Timestamp::new(test_now(), 0)?),
+        ));
         let during = subscriptions.status(provider).await?;
         assert_eq!(
             during.credential(),
@@ -2292,8 +2332,13 @@ async fn status_on_absent_storage_is_signed_out_and_creates_nothing() -> Result<
 {
     let root = unique_test_root("absent-status")?;
     let state_home = root.join("missing").join("state");
-    let subscriptions =
-        NativeSubscriptions::new(SubscriptionPaths::from_xdg_state_home(&state_home)?);
+    let subscriptions = NativeSubscriptions::new(SubscriptionPaths::from_xdg_state_home(
+        &state_home,
+    )?)
+    .with_clock(Arc::new(plakous_model::FixedClock::new(Timestamp::new(
+        test_now(),
+        0,
+    )?)));
     for provider in [
         NativeProvider::Codex,
         NativeProvider::Xai,
@@ -2322,7 +2367,11 @@ async fn status_on_absent_storage_is_signed_out_and_creates_nothing() -> Result<
 
     let linked = root.join("linked");
     symlink(&state_home, &linked)?;
-    let through_link = NativeSubscriptions::new(SubscriptionPaths::from_xdg_state_home(&linked)?);
+    let through_link = NativeSubscriptions::new(SubscriptionPaths::from_xdg_state_home(&linked)?)
+        .with_clock(Arc::new(plakous_model::FixedClock::new(Timestamp::new(
+            test_now(),
+            0,
+        )?)));
     assert_eq!(
         through_link.status(NativeProvider::Codex).await,
         Err(NativeSubscriptionError::UnsafeStorage)
@@ -2358,7 +2407,7 @@ async fn a_profile_re_review_requires_acceptance_and_keeps_the_ready_login()
         receipt["expires_at"] = serde_json::Value::from(notice.expires_at() - 864_000);
         write_private_atomic(&receipt_path, &serde_json::to_vec(&receipt)?)?;
         assert_eq!(
-            load_acceptance_exact(&paths, notice, unix_now()?).err(),
+            load_acceptance_exact(&paths, notice, test_now()).err(),
             Some(NativeSubscriptionError::AcceptanceRequired)
         );
 
@@ -2374,7 +2423,9 @@ async fn a_profile_re_review_requires_acceptance_and_keeps_the_ready_login()
             "{provider:?}: a stale acceptance must not fence the stored login"
         );
 
-        let subscriptions = NativeSubscriptions::new(paths.clone());
+        let subscriptions = NativeSubscriptions::new(paths.clone()).with_clock(Arc::new(
+            plakous_model::FixedClock::new(Timestamp::new(test_now(), 0)?),
+        ));
         if provider == NativeProvider::Codex {
             // The fixture's opaque secret is not a Codex token, so Codex reads
             // it as login-required; what matters is that it is not fenced.
@@ -2391,7 +2442,7 @@ async fn a_profile_re_review_requires_acceptance_and_keeps_the_ready_login()
         subscriptions
             .acknowledge_exact(provider, notice.notice_revision())
             .await?;
-        let accepted = load_acceptance_exact(&paths, notice, unix_now()?)?;
+        let accepted = load_acceptance_exact(&paths, notice, test_now())?;
         assert_ne!(accepted.generation, consent_generation);
         assert!(
             !login_recovery_required_for_status(
@@ -2404,6 +2455,10 @@ async fn a_profile_re_review_requires_acceptance_and_keeps_the_ready_login()
         );
         if provider == NativeProvider::Codex {
             let current = NativeSubscriptions::new(paths.clone())
+                .with_clock(Arc::new(plakous_model::FixedClock::new(Timestamp::new(
+                    test_now(),
+                    0,
+                )?)))
                 .status(provider)
                 .await?;
             assert_eq!(
@@ -2432,9 +2487,11 @@ async fn accepting_a_notice_does_not_rebind_a_login_from_another_consent()
     let operation = arm_login_recovery(&paths, provider, &consent_generation)?;
     clear_login_recovery(&paths, provider, &operation, 5)?;
     let notice = NativeSubscriptions::notice(provider);
-    store_acceptance(&paths, notice, unix_now()?)?;
+    store_acceptance(&paths, notice, test_now())?;
 
-    let subscriptions = NativeSubscriptions::new(paths.clone());
+    let subscriptions = NativeSubscriptions::new(paths.clone()).with_clock(Arc::new(
+        plakous_model::FixedClock::new(Timestamp::new(test_now(), 0)?),
+    ));
     subscriptions
         .acknowledge_exact(provider, notice.notice_revision())
         .await?;
@@ -2506,4 +2563,17 @@ async fn model_catalog_outer_deadline_reports_only_charged_dispatches() {
             cause: "operation deadline"
         })
     ));
+}
+
+fn test_now() -> u64 {
+    [
+        NativeProvider::Codex,
+        NativeProvider::Xai,
+        NativeProvider::Claude,
+    ]
+    .into_iter()
+    .map(|provider| NativeSubscriptions::notice(provider).reviewed_at())
+    .max()
+    .expect("compiled profiles")
+        + 60
 }

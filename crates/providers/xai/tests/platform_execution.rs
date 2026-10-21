@@ -56,7 +56,11 @@ fn with_imported_reference(request: &ModelRequest) -> TestResult<ModelRequest> {
 }
 
 fn now() -> Timestamp {
-    Timestamp::new(1_789_344_060, 0).unwrap()
+    Timestamp::new(
+        XAI_PLATFORM_REVIEW_EXPIRES_AT_UNIX_SECONDS - 90 * 86_400 + 60,
+        0,
+    )
+    .unwrap()
 }
 fn clock() -> Arc<dyn Clock> {
     Arc::new(FixedClock::new(now()))
@@ -889,7 +893,7 @@ fn unsupported_behavior_and_stale_context_refuse_before_credentials() -> TestRes
     }
     let source = Arc::new(Source::new());
     let stale = Arc::new(FixedClock::new(Timestamp::new(
-        1_789_344_000 + 91 * 86_400,
+        XAI_PLATFORM_REVIEW_EXPIRES_AT_UNIX_SECONDS + 86_400,
         0,
     )?));
     let preflight_then_grant = || {

@@ -390,6 +390,13 @@ impl PlakousApplication {
         Self::new(state_home, None, None)
     }
 
+    #[cfg(test)]
+    pub(crate) fn for_test_accounts(state_home: PathBuf) -> CliResult<Self> {
+        let mut application = Self::for_accounts(state_home)?;
+        application.subscriptions = application.subscriptions.with_clock(test_clock());
+        Ok(application)
+    }
+
     /// A facade failure with its remedy, for `account` when it is known.
     pub(crate) fn subscription_failure(
         &self,
@@ -736,6 +743,23 @@ impl PresentationBackend for PlakousApplication {
     fn models(&mut self, provider: NativeProvider) -> CliResult<Vec<CliModelSummary>> {
         AccountOps::models(self, provider)
     }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "compiled review-window fixture")]
+pub(crate) fn test_clock() -> Arc<dyn plakous::model::Clock> {
+    let reviewed_at = [
+        NativeProvider::Codex,
+        NativeProvider::Xai,
+        NativeProvider::Claude,
+    ]
+    .into_iter()
+    .map(|provider| NativeSubscriptions::notice(provider).reviewed_at())
+    .max()
+    .expect("compiled notices");
+    Arc::new(plakous::model::FixedClock::new(
+        plakous::model::Timestamp::new(reviewed_at + 60, 0).expect("review time"),
+    ))
 }
 
 #[cfg(test)]

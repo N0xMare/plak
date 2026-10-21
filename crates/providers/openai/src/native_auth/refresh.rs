@@ -15,10 +15,9 @@ use super::{
     ResolvedModelDescriptor, RuntimeModelAuthority, RuntimeModelAuthorityError, Serialize,
     StatusCode, StoredCredential, SubscriptionRequestClass, SubscriptionRequestPermit, TOKEN_PATH,
     Timestamp, access_needs_refresh, claimed_request, credential_selection_epoch, json_headers,
-    local_logout, network_failure, now_unix_secs, parse_stored, parse_strict_json,
-    pull_claimed_body, pull_claimed_body_cancellable, run_blocking, run_claimed_refresh,
-    run_claimed_revoke, stored_record, validate_exact_scopes, validate_profile,
-    validate_profile_at,
+    local_logout, network_failure, parse_stored, parse_strict_json, pull_claimed_body,
+    pull_claimed_body_cancellable, run_blocking, run_claimed_refresh, run_claimed_revoke,
+    stored_record, validate_exact_scopes, validate_profile, validate_profile_at,
 };
 
 #[derive(Serialize)]
@@ -121,7 +120,7 @@ impl ClaimedRefreshHooks for CodexRefreshHooks<'_> {
             self.check_expected(&initial, &credential)?;
             let fresh = !access_needs_refresh(
                 credential.access_expires_at,
-                now_unix_secs(),
+                self.manager.clock.now().seconds(),
                 ACCESS_REFRESH_SKEW,
             );
             drop(credential);
@@ -144,7 +143,7 @@ impl ClaimedRefreshHooks for CodexRefreshHooks<'_> {
             self.check_expected(&current, &credential)?;
             let fresh = !access_needs_refresh(
                 credential.access_expires_at,
-                now_unix_secs(),
+                self.manager.clock.now().seconds(),
                 ACCESS_REFRESH_SKEW,
             );
             drop(credential);
@@ -297,7 +296,7 @@ impl ClaimedRefreshHooks for CodexRefreshHooks<'_> {
             self.detail.reason = Some(CredentialRefreshFailureReason::TokenShape);
         })?;
         self.detail = CredentialRefreshDetail::from_response(
-            now_unix_secs(),
+            self.manager.clock.now().seconds(),
             None,
             tokens.id_token.as_deref(),
             MAX_TOKEN_BYTES,
@@ -333,7 +332,10 @@ impl ClaimedRefreshHooks for CodexRefreshHooks<'_> {
 
     async fn recheck_profile_before_complete(&mut self) -> Result<(), Self::Error> {
         self.manager.validate_profile_admission()?;
-        validate_profile_at(self.manager.acceptance.accepted_at, now_unix_secs())
+        validate_profile_at(
+            self.manager.acceptance.accepted_at,
+            self.manager.clock.now().seconds(),
+        )
     }
 
     async fn map_claimed_http_error(
@@ -474,7 +476,10 @@ impl ClaimedRevokeHooks for CodexRevokeHooks<'_> {
 
     async fn recheck_profile_before_complete(&mut self) -> Result<(), Self::Error> {
         self.manager.validate_profile_admission()?;
-        validate_profile_at(self.manager.acceptance.accepted_at, now_unix_secs())
+        validate_profile_at(
+            self.manager.acceptance.accepted_at,
+            self.manager.clock.now().seconds(),
+        )
     }
 
     async fn map_claimed_http_error(
@@ -898,7 +903,12 @@ impl CodexSubscriptionCredentialManager {
         if lease.fence() != expected_fence
             || stored_epoch != expected_selection_epoch
             || credential.account_id != expected_fence.account_binding().as_str()
-            || credential.access_expires_at <= now_unix_secs().saturating_add(ACCESS_REFRESH_SKEW)
+            || credential.access_expires_at
+                <= self
+                    .clock
+                    .now()
+                    .seconds()
+                    .saturating_add(ACCESS_REFRESH_SKEW)
             || validate_exact_scopes(&credential.scopes.join(" ")).is_err()
         {
             return Err(NativeCodexAuthError::Unavailable);

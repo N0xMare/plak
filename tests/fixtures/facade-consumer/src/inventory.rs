@@ -344,7 +344,7 @@ pub(crate) fn exact_supported_root_inventory_is_importable() {
     };
     use plakous::model::{
         CompiledToolProjectionV2, HostedTool, LanguageModel, ModelDiagnostic, ModelEvent,
-        PortableToolSchemaV2, ToolCallerDisposition, ToolCallerLineage,
+        PortableToolSchemaV2, SystemIdGenerator, ToolCallerDisposition, ToolCallerLineage,
     };
     use plakous::profiles::{claude, grok, neutral_coding};
     use plakous::tools::{
@@ -357,6 +357,14 @@ pub(crate) fn exact_supported_root_inventory_is_importable() {
     fn hold<T: ?Sized>(_: &T) {}
     hold(&std::any::type_name::<Agent>());
     hold(&std::any::type_name::<AgentBuilder>());
+    hold(&std::any::type_name::<SystemIdGenerator>());
+    fn with_clock(
+        builder: AgentBuilder,
+        clock: std::sync::Arc<dyn plakous::model::Clock>,
+    ) -> AgentBuilder {
+        builder.identity_sources(clock, std::sync::Arc::new(SystemIdGenerator))
+    }
+    hold(&with_clock);
     hold(&std::any::type_name::<AgentConfig>());
     hold(&std::any::type_name::<AgentError>());
     hold(&std::any::type_name::<AgentErrorKind>());

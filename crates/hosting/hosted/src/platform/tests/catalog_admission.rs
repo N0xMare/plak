@@ -67,6 +67,7 @@ async fn exact_reopen_from_stored_evidence_keeps_window_and_refuses_moved_facts(
         &spec(directory.path(), &workers, &extensions, false),
         None,
         &created_admission,
+        review_clock_for(PlatformProvider::Anthropic),
     )
     .await
     .unwrap();
@@ -101,6 +102,7 @@ async fn exact_reopen_from_stored_evidence_keeps_window_and_refuses_moved_facts(
         &spec(directory.path(), &workers, &extensions, true),
         None,
         &reopen_admission,
+        review_clock_for(PlatformProvider::Anthropic),
     )
     .await
     .unwrap();
@@ -143,6 +145,7 @@ async fn exact_reopen_from_stored_evidence_keeps_window_and_refuses_moved_facts(
         &spec(directory.path(), &workers, &extensions, true),
         None,
         &reopen_admission,
+        review_clock_for(PlatformProvider::Anthropic),
     )
     .await
     else {
@@ -302,6 +305,7 @@ async fn every_admitted_model_effort_constructs_on_its_route() {
                     &spec,
                     None,
                     &PlatformAdmission::default(),
+                    review_clock_for(provider),
                 )
                 .await;
                 match built {

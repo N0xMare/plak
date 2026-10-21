@@ -1074,6 +1074,7 @@ impl fmt::Debug for OpenRouterChatRouteIdentity {
 /// Exact dynamic OpenRouter route shared by catalog and family dialects.
 #[derive(Clone)]
 pub struct OpenRouterChatRoute {
+    pub(crate) clock: Arc<dyn plakous_model::Clock>,
     identity: Box<OpenRouterChatRouteIdentity>,
     key_source: Arc<dyn OpenRouterApiKeySource>,
 }
@@ -1151,7 +1152,17 @@ impl OpenRouterChatRoute {
         Ok(Self {
             identity: Box::new(identity),
             key_source,
+            clock: Arc::new(plakous_model::SystemClock),
         })
+    }
+
+    /// Uses one clock for discovery, admission, and runtime revalidation.
+    #[must_use]
+    #[cfg(any(test, feature = "test-clock"))]
+    #[doc(hidden)]
+    pub fn with_clock(mut self, clock: Arc<dyn plakous_model::Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Returns the immutable route identity.
@@ -1293,6 +1304,7 @@ impl fmt::Debug for OpenRouterChatRoute {
         formatter
             .debug_struct("OpenRouterChatRoute")
             .field("identity", &self.identity)
+            .field("clock", &"<injected clock>")
             .field("key_source", &"<redacted credential source>")
             .finish()
     }

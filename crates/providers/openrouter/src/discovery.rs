@@ -9,7 +9,7 @@ use plakous_http::{
     Client, HeaderMap, HeaderName, HeaderValue, Method, Origin, Request, SensitiveBytes,
     StatusCode, sensitive_header_value,
 };
-use plakous_model::{Clock as _, Digest, DigestDomain, ModelId, SystemClock, Timestamp};
+use plakous_model::{Digest, DigestDomain, ModelId, Timestamp};
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
@@ -145,7 +145,7 @@ impl OpenRouterChatRoute {
         .await?;
         let endpoints_value = parse_unique_json(&endpoints)?;
         let candidates = validate_endpoints_document(&endpoints_value, literal)?;
-        let observed_at = SystemClock.now();
+        let observed_at = self.clock.now();
         let expires_at = Timestamp::new(
             observed_at
                 .seconds()
@@ -411,6 +411,9 @@ pub(crate) fn catalog_snapshot_identity(
         ],
     )?)
 }
+
+#[cfg(test)]
+use plakous_model::Clock as _;
 
 #[cfg(test)]
 fn snapshot_from_facts(
@@ -1297,7 +1300,11 @@ mod tests {
             source,
             OpenRouterOrigin::new("https://127.0.0.1:18443")?,
             OpenRouterRetentionPolicy::strict(),
-        )?)
+        )?
+        .with_clock(Arc::new(plakous_model::FixedClock::new(Timestamp::new(
+            crate::chat::OPENROUTER_CHAT_REVIEWED_AT + 60,
+            0,
+        )?))))
     }
 
     fn selected_for(
@@ -2062,7 +2069,11 @@ mod tests {
     #[test]
     fn chat_configuration_rejects_explicit_tool_choice() -> Result<(), Box<dyn std::error::Error>> {
         let route = test_route()?;
-        let now = SystemClock.now();
+        let now = plakous_model::FixedClock::new(Timestamp::new(
+            crate::chat::OPENROUTER_CHAT_REVIEWED_AT + 60,
+            0,
+        )?)
+        .now();
         let evidence = OpenRouterChatModelEvidence::from_authenticated_discovery(
             ModelId::new("vendor/model")?,
             route.identity(),
@@ -2127,7 +2138,11 @@ mod tests {
             supports_implicit_caching: false,
         }];
         let parameters = BTreeSet::from(["tools".to_owned()]);
-        let now = SystemClock.now();
+        let now = plakous_model::FixedClock::new(Timestamp::new(
+            crate::chat::OPENROUTER_CHAT_REVIEWED_AT + 60,
+            0,
+        )?)
+        .now();
         let first_observed = Timestamp::new(now.seconds().saturating_sub(20), now.nanoseconds())?;
         let second_observed = Timestamp::new(now.seconds().saturating_sub(10), now.nanoseconds())?;
         let first_expiry = Timestamp::new(now.seconds() + 3600, now.nanoseconds())?;
@@ -2216,7 +2231,11 @@ mod tests {
             context_length: 4096,
             image_input: false,
         };
-        let now = SystemClock.now();
+        let now = plakous_model::FixedClock::new(Timestamp::new(
+            crate::chat::OPENROUTER_CHAT_REVIEWED_AT + 60,
+            0,
+        )?)
+        .now();
         let mut identities = Vec::new();
         let mut snapshots = Vec::new();
         for document in [&document, &added, &document] {
@@ -2257,7 +2276,11 @@ mod tests {
     fn discovery_constrains_but_does_not_own_custom_context()
     -> Result<(), Box<dyn std::error::Error>> {
         let route = test_route()?;
-        let now = SystemClock.now();
+        let now = plakous_model::FixedClock::new(Timestamp::new(
+            crate::chat::OPENROUTER_CHAT_REVIEWED_AT + 60,
+            0,
+        )?)
+        .now();
         let evidence = OpenRouterChatModelEvidence::from_authenticated_discovery(
             ModelId::new("vendor/model")?,
             route.identity(),
@@ -2298,7 +2321,11 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let route = test_route()?;
         let context = custom_context(&route, 2048)?;
-        let now = SystemClock.now();
+        let now = plakous_model::FixedClock::new(Timestamp::new(
+            crate::chat::OPENROUTER_CHAT_REVIEWED_AT + 60,
+            0,
+        )?)
+        .now();
         let candidate = OpenRouterChatEndpointCandidate {
             endpoint: "provider/model".to_owned(),
             provider_name: "Provider".to_owned(),
@@ -2337,6 +2364,25 @@ mod tests {
             Timestamp::new(now.seconds().saturating_sub(1), now.nanoseconds())?,
             expiry,
         )?;
+        let past_review = Timestamp::new(crate::chat::OPENROUTER_CHAT_REVIEW_EXPIRES_AT + 1, 0)?;
+        let future_route = route
+            .clone()
+            .with_clock(Arc::new(plakous_model::FixedClock::new(past_review)));
+        let future_evidence = OpenRouterChatModelEvidence::from_authenticated_discovery(
+            ModelId::new("vendor/model")?,
+            future_route.identity(),
+            fresh.endpoints().to_vec(),
+            BTreeSet::new(),
+            None,
+            4096,
+            false,
+            past_review,
+            Timestamp::new(past_review.seconds() + 60, 0)?,
+        )?;
+        assert!(matches!(
+            OpenRouterChatTarget::gateway_managed(future_route, future_evidence, context.clone()),
+            Err(OpenRouterChatBuildError::ProfileNotCurrent)
+        ));
         let target = OpenRouterChatTarget::gateway_managed(route, fresh, context)?;
         let selected = selected_for(&target)?;
         let model = Arc::new(OpenRouterChatLanguageModel::new(
@@ -2421,7 +2467,11 @@ mod tests {
             source,
             OpenRouterOrigin::new(origin_text)?,
             OpenRouterRetentionPolicy::strict(),
-        )?;
+        )?
+        .with_clock(Arc::new(plakous_model::FixedClock::new(Timestamp::new(
+            crate::chat::OPENROUTER_CHAT_REVIEWED_AT + 60,
+            0,
+        )?)));
         let evidence = route
             .discover_chat_model(
                 &client,

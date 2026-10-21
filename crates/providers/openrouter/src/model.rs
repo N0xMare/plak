@@ -4,12 +4,12 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use plakous_model::{
-    Capability, CapabilityConstraints, CapabilitySet, Clock as _, CompiledProviderConfiguration,
+    Capability, CapabilityConstraints, CapabilitySet, CompiledProviderConfiguration,
     ContextContract, ContextEvidenceClass, Digest, DigestDomain, FactProvenance, FactSource,
     FeatureSupport, ModelAdapterProfileId, ModelFamilyId, ModelImplementationIdentity, NamespaceId,
     ProtocolId, ProviderSemanticEvidence, ResolvedModelDescriptor,
     ResolvedProviderAuthorityBinding, RuntimeModelAuthority, SelectedProviderConfiguration,
-    Support, SystemClock, Timestamp,
+    Support, Timestamp,
 };
 use plakous_responses_dialect::{
     ResponsesProviderConfigurationError, ResponsesRouterPolicy,
@@ -76,7 +76,7 @@ impl OpenRouterResponsesTarget {
         evidence: OpenRouterChatModelEvidence,
         context_contract: ContextContract,
     ) -> Result<Self, OpenRouterResponsesBuildError> {
-        if !evidence.validates(route.identity(), SystemClock.now()) {
+        if !evidence.validates(route.identity(), route.clock.now()) {
             return Err(OpenRouterResponsesBuildError::StaleEvidence);
         }
         if !matches!(
@@ -331,7 +331,7 @@ mod tests {
     use plakous_model::{
         CapacityCertificate, CapacityRule, Clock, ContextEvidenceSource, CountCertificateKind,
         EvidenceFreshness, IntegrationClass, MeasurementCertificate, RuntimeModelAuthority,
-        SystemClock, Timestamp,
+        Timestamp,
     };
 
     use super::*;
@@ -349,7 +349,11 @@ mod tests {
         Ok(OpenRouterChatRoute::new_local_fixture(
             source,
             OpenRouterOrigin::new("https://127.0.0.1:18443")?,
-        )?)
+        )?
+        .with_clock(Arc::new(plakous_model::FixedClock::new(Timestamp::new(
+            crate::chat::OPENROUTER_CHAT_REVIEWED_AT + 60,
+            0,
+        )?))))
     }
 
     fn context(route: &OpenRouterChatRoute) -> Result<ContextContract, Box<dyn std::error::Error>> {
@@ -400,7 +404,11 @@ mod tests {
     fn time_only_refresh_preserves_dynamic_custom_gateway_target()
     -> Result<(), Box<dyn std::error::Error>> {
         let route = route()?;
-        let now = SystemClock.now();
+        let now = plakous_model::FixedClock::new(Timestamp::new(
+            crate::chat::OPENROUTER_CHAT_REVIEWED_AT + 60,
+            0,
+        )?)
+        .now();
         let model = plakous_model::ModelId::new("vendor/dynamic-model")?;
         let endpoints = vec![OpenRouterChatEndpointCandidate {
             endpoint: "provider/dynamic-model".to_owned(),

@@ -18,6 +18,7 @@ layer = "provider"
 class = "published-internal"
 
 [features]
+test-clock = []
 default = []
 native-auth = [
     "dep:base64",

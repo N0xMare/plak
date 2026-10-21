@@ -18,7 +18,7 @@ use plakous_model::{
     ProviderAuthorityClassId, ProviderBehaviorConfiguration, ProviderProfileRevisionId,
     ProviderRouteSelection, ReasoningEffortDisposition, ReasoningPolicy, ResolvedModelDescriptor,
     RuntimeModelAuthorityError, RuntimeModelAuthorityOperation, SelectedProviderConfiguration,
-    SystemClock, Timestamp, ValidatedRequestPlan,
+    Timestamp, ValidatedRequestPlan,
 };
 use plakous_responses::{
     CanonicalIdSources, ResponsesSemanticRevisions, ResponsesStorageMode, ResponsesStreamLimits,
@@ -163,7 +163,7 @@ impl OpenRouterResponsesLanguageModel {
         )?;
         // Name the failing fact: the shared-host constructor below folds every
         // target and compile refusal into one construction error.
-        let runtime = target.runtime_authority(SystemClock.now())?;
+        let runtime = target.runtime_authority(target.route().clock.now())?;
         compile_openrouter_responses_configuration(&selected, &target, &runtime)?;
         let model = Arc::new(
             Self::new(target, selected, client)
@@ -200,7 +200,7 @@ impl OpenRouterResponsesLanguageModel {
         }
         let route = target.route();
         let descriptor = target.descriptor().clone();
-        let checked_at = SystemClock.now();
+        let checked_at = target.route().clock.now();
         let generation = route
             .current_credential_generation_grant()
             .map_err(|_| OpenRouterResponsesLanguageModelConfigError::Configuration)?;
@@ -276,6 +276,7 @@ impl OpenRouterResponsesLanguageModel {
             ResponsesAttemptService::new(client, execution, attempt_data.clone(), authorization)
                 .map_err(|_| OpenRouterResponsesLanguageModelConfigError::SharedBinding)?,
         );
+        let clock = Arc::clone(&target.route().clock);
         Ok(Self {
             probe,
             target,
@@ -284,7 +285,7 @@ impl OpenRouterResponsesLanguageModel {
             service,
             descriptor,
             configuration,
-            clock: Arc::new(SystemClock),
+            clock,
         })
     }
 
@@ -604,7 +605,7 @@ fn openrouter_preflight<'a>(
         }
         dialect
             .target
-            .runtime_authority(SystemClock.now())
+            .runtime_authority(dialect.target.route().clock.now())
             .map_err(|_| ResponsesDispatchRejection::Binding)?;
         let route = dialect.target.route();
         let body: serde_json::Value = serde_json::from_slice(request.body_bytes())
@@ -705,7 +706,7 @@ fn revalidate_openrouter(
     }
     dialect
         .target
-        .runtime_authority(SystemClock.now())
+        .runtime_authority(dialect.target.route().clock.now())
         .map_err(|_| ResponsesDispatchRejection::Binding)?;
     let route = dialect.target.route();
     let generation = request.response_head_guard_mut().generation;

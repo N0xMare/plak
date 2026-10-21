@@ -9,9 +9,9 @@ use super::{
     OPENAI_CODEX_OAUTH_SCOPES, StatusCode, StoredCredential, USER_INFO_PATH, Validation,
     base_headers, bearer_headers, capped_login_deadline, constant_time_value_eq, decode,
     decode_header, execute_bounded, generate_selection_epoch, login_account_verification_or,
-    login_signing_keys_or, login_token_response_or, now_unix_secs, parse_cache_control_max_age,
-    parse_strict_json, remaining_login_time, require_json_media_type, require_status,
-    scheduled_access_expiry, validate_identifier,
+    login_signing_keys_or, login_token_response_or, parse_cache_control_max_age, parse_strict_json,
+    remaining_login_time, require_json_media_type, require_status, scheduled_access_expiry,
+    validate_identifier,
 };
 use base64::Engine as _;
 use plakous_auth::oauth_orchestrator::CredentialRefreshFailureReason;
@@ -163,7 +163,7 @@ impl CodexSubscriptionCredentialManager {
         // signed ID-token expiry is a conservative fallback for an opaque
         // access token; this timing hint never supplies identity authority.
         let access_expires_at =
-            scheduled_access_expiry(&tokens.access_token, claims.exp, now_unix_secs())
+            scheduled_access_expiry(&tokens.access_token, claims.exp, self.clock.now().seconds())
                 .map_err(|error| login_token_response_or(login, error))?;
         Ok(StoredCredential {
             access_token: std::mem::take(&mut tokens.access_token),
@@ -238,7 +238,7 @@ impl CodexSubscriptionCredentialManager {
             self.validate_user_info(&old.access_token, &old.subject, false, deadline)
                 .await?;
             remaining_login_time(deadline, NativeCodexAuthError::Transport(None))?;
-            let now = now_unix_secs();
+            let now = self.clock.now().seconds();
             let fallback = replacement_id_expiry.unwrap_or(
                 now.checked_add(DEFAULT_ACCESS_TOKEN_LIFETIME)
                     .ok_or(NativeCodexAuthError::Validation)?,
@@ -289,7 +289,9 @@ impl CodexSubscriptionCredentialManager {
         validation.set_issuer(&[OPENAI_AUTH_ORIGIN.trim_end_matches('/')]);
         validation.set_required_spec_claims(&["exp", "iss", "aud", "sub"]);
         validation.leeway = 30;
-        validation.reject_tokens_expiring_in_less_than = ACCESS_REFRESH_SKEW;
+        // The checks below enforce exp/iat/nbf against the injected clock,
+        // including the stricter access-refresh lead, not jsonwebtoken's wall clock.
+        validation.validate_exp = false;
         let claims = decode::<IdTokenClaims>(id_token, &key, &validation)
             .map_err(|error| invalid(reason, jwt_failure_reason(&error)))?
             .claims;
@@ -299,7 +301,7 @@ impl CodexSubscriptionCredentialManager {
                 values.len() == 1 && values[0] == OPENAI_CODEX_NATIVE_CLIENT_ID
             }
         };
-        let now = now_unix_secs();
+        let now = self.clock.now().seconds();
         let failed = if claims.iss != OPENAI_AUTH_ORIGIN.trim_end_matches('/') {
             Some(CredentialRefreshFailureReason::IdTokenIss)
         } else if !audience_is_exact {

@@ -36,6 +36,10 @@
 mod api_models;
 mod cch;
 mod config;
+
+/// Hard UTC expiry of the compiled Platform API admission review.
+pub const ANTHROPIC_PLATFORM_ADMISSION_EXPIRES_AT_UNIX_SECONDS: u64 =
+    config::ANTHROPIC_PLATFORM_ADMISSION_EXPIRES_AT_SECONDS;
 mod dialect;
 mod error;
 mod hosted_support;

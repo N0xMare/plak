@@ -14,7 +14,7 @@ use plakous_model::{
     ProviderStorageDisposition, ReasoningEffortDisposition, ReasoningIncludeDisposition,
     ReasoningSummaryDisposition, ReplayDisposition, RequestMetadata, ResponseStateDisposition,
     RetentionDisposition, RouteId, RunId, SelectedProviderConfiguration,
-    SelectedProviderConfigurationId, SystemClock, TextBlock, ToolChoice, TurnId, ValidationMode,
+    SelectedProviderConfigurationId, TextBlock, ToolChoice, TurnId, ValidationMode,
 };
 use plakous_openai::{
     AuthError, CredentialAuthorityId, CredentialReference, EndpointOrigin,
@@ -186,7 +186,7 @@ fn request_with_options(
             RunId::from_str("00000000-0000-4000-8000-000000000101")?,
             TurnId::from_str("00000000-0000-4000-8000-000000000102")?,
             AttemptId::from_str("00000000-0000-4000-8000-000000000103")?,
-            SystemClock.now(),
+            review_clock()?.now(),
         ),
     )
     .limits(GenerationLimits::new(output_bound, stop_sequences)?)
@@ -310,6 +310,7 @@ async fn missing_context_contract_rejects_before_openai_tls_or_key_resolution() 
         PlatformStoragePolicy::Stateless,
         PlatformProjectPolicy::Project(OpenAiProjectId::new("proj_local_fixture")?),
     )
+    .clock(Arc::new(review_clock()?))
     .seal_local_fixture(EndpointOrigin::parse(&origin)?)?;
     assert!(authority.descriptor().context_contract().is_none());
     let descriptor = authority.descriptor().clone();
@@ -384,7 +385,7 @@ async fn missing_context_contract_rejects_before_openai_tls_or_key_resolution() 
     )?;
     let runtime = model
         .clone()
-        .revalidate_runtime_authority(SystemClock.now())
+        .revalidate_runtime_authority(review_clock()?.now())
         .await?;
     let generation_before_rejections = source.generation_grants.load(Ordering::SeqCst);
     for variant in variant_selections {
@@ -398,7 +399,7 @@ async fn missing_context_contract_rejects_before_openai_tls_or_key_resolution() 
                 .clone()
                 .prepare_call(
                     plan,
-                    ModelPreparationContext::new(runtime.clone(), SystemClock.now()),
+                    ModelPreparationContext::new(runtime.clone(), review_clock()?.now()),
                 )
                 .is_err()
         );
@@ -414,7 +415,7 @@ async fn missing_context_contract_rejects_before_openai_tls_or_key_resolution() 
             .clone()
             .prepare_call(
                 behavior_drift,
-                ModelPreparationContext::new(runtime.clone(), SystemClock.now()),
+                ModelPreparationContext::new(runtime.clone(), review_clock()?.now()),
             )
             .is_err()
     );
@@ -432,7 +433,7 @@ async fn missing_context_contract_rejects_before_openai_tls_or_key_resolution() 
             .clone()
             .prepare_call(
                 same_ids_stop_drift,
-                ModelPreparationContext::new(runtime.clone(), SystemClock.now()),
+                ModelPreparationContext::new(runtime.clone(), review_clock()?.now()),
             )
             .is_err()
     );
@@ -458,7 +459,7 @@ async fn missing_context_contract_rejects_before_openai_tls_or_key_resolution() 
     assert_eq!(accepted_connections.load(Ordering::SeqCst), 0);
     let result = model.clone().prepare_call(
         plan,
-        ModelPreparationContext::new(runtime, SystemClock.now()),
+        ModelPreparationContext::new(runtime, review_clock()?.now()),
     );
     assert!(matches!(
         result,
@@ -480,6 +481,7 @@ fn local_authority_rejects_production_and_unported_origins() -> TestResult {
         PlatformStoragePolicy::Stateless,
         PlatformProjectPolicy::DefaultProject,
     )
+    .clock(Arc::new(review_clock()?))
     .seal()?;
     assert!(production.descriptor().context_contract().is_none());
     assert_eq!(
@@ -495,9 +497,20 @@ fn local_authority_rejects_production_and_unported_origins() -> TestResult {
             PlatformStoragePolicy::Stateless,
             PlatformProjectPolicy::DefaultProject,
         )
+        .clock(Arc::new(review_clock()?))
         .seal_local_fixture(EndpointOrigin::parse(origin)?);
         assert!(result.is_err());
         assert_eq!(source.secret_resolutions.load(Ordering::SeqCst), 0);
     }
     Ok(())
+}
+
+fn review_clock() -> TestResult<plakous_model::FixedClock> {
+    Ok(plakous_model::FixedClock::new(
+        plakous_model::Timestamp::new(
+            plakous_openai::OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS - 90 * 86_400
+                + 60,
+            0,
+        )?,
+    ))
 }

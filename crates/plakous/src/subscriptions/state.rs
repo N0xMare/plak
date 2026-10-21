@@ -13,13 +13,14 @@ use std::os::unix::fs::FileTypeExt as _;
 #[cfg(all(unix, test))]
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use plakous_auth::RecordAge;
 
 use super::{
     CompatibilityNotice, CompatibilityStatus, NativeAuthStatus, NativeModelCatalog,
     NativeModelSummary, NativeProvider, NativeSubscriptionError, catalog, fmt, run_blocking,
+    unix_now,
 };
 mod filesystem;
 mod locks;
@@ -486,6 +487,7 @@ fn valid_generation(value: &str) -> bool {
 
 #[derive(Clone)]
 pub(super) struct SubscriptionState {
+    clock: Option<Arc<dyn plakous_model::Clock>>,
     paths: SubscriptionPaths,
 }
 
@@ -516,8 +518,27 @@ impl SubscriptionState {
 }
 
 impl SubscriptionState {
+    #[cfg(any(test, feature = "test-clock"))]
+    pub(super) fn clock(&self) -> Arc<dyn plakous_model::Clock> {
+        self.clock
+            .clone()
+            .unwrap_or_else(|| Arc::new(plakous_model::SystemClock))
+    }
+
+    #[cfg(any(test, feature = "test-clock"))]
+    pub(super) fn with_clock(mut self, clock: Arc<dyn plakous_model::Clock>) -> Self {
+        self.clock = Some(clock);
+        self
+    }
+
+    pub(super) fn now(&self) -> Result<u64, NativeSubscriptionError> {
+        self.clock
+            .as_ref()
+            .map_or_else(unix_now, |clock| Ok(clock.now().seconds()))
+    }
+
     pub(super) const fn new(paths: SubscriptionPaths) -> Self {
-        Self { paths }
+        Self { paths, clock: None }
     }
 }
 

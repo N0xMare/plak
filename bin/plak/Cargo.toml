@@ -78,6 +78,7 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std"
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSData", "NSString"] }
 
 [dev-dependencies]
+plakous = { workspace = true, features = ["test-clock"] }
 rustix = { workspace = true, features = ["pty", "termios"] }
 plakous-hosted = { workspace = true, features = ["test-support"] }
 plakous-offline-crash-harness = { path = "../../tests/harnesses/offline-crash" }
@@ -112,6 +113,7 @@ test-support = []
 # `PLAK_TEST_SCRIPT` instead of a provider, so the spawned binary's own
 # lifecycles are testable. Never in `default`, never in a release build.
 test-hooks = [
+    "plakous/test-clock",
     "dep:plakous-offline-crash-harness",
     "plakous-hosted/test-support",
     "plakous-recursive-subagents-store/commit-trace",

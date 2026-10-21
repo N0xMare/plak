@@ -14,7 +14,7 @@ use super::{
     Zeroizing, authorization_code_token_form, bind_loopback_listener, build_authorization_url,
     capped_login_deadline, constant_time_value_eq, endpoint_url, execute_bounded, fmt, form_body,
     form_headers, generate_oauth_correlation_token, json_headers, map_oauth_workflow_error,
-    now_unix_secs, parse_http11_get_request, parse_loopback_callback_target, parse_strict_json,
+    parse_http11_get_request, parse_loopback_callback_target, parse_strict_json,
     remaining_login_time, require_json_media_type, require_status, run_blocking,
     run_browser_loopback_session, stored_record, validate_oauth_value, validate_profile_at,
     validate_user_code,
@@ -454,8 +454,9 @@ impl CodexSubscriptionCredentialManager {
         remaining_login_time(deadline, NativeCodexAuthError::LoginPersistence)?;
         let store = Arc::clone(&self.store);
         let accepted_at = self.acceptance.accepted_at;
+        let clock = Arc::clone(&self.clock);
         let (account, committed) = run_blocking(move || {
-            validate_profile_at(accepted_at, now_unix_secs())?;
+            validate_profile_at(accepted_at, clock.now().seconds())?;
             remaining_login_time(deadline, NativeCodexAuthError::LoginPersistence)?;
             let account = AccountBinding::new(&credential.account_id)
                 .map_err(|_| NativeCodexAuthError::LoginPersistence)?;

@@ -10,7 +10,7 @@ use plakous_model::{
     ProviderRouteSelection, ProviderStorageDisposition, ReasoningEffortDisposition,
     ReasoningIncludeDisposition, ReasoningSummaryDisposition, ReplayDisposition, RequestMetadata,
     ResponseStateDisposition, RetentionDisposition, RouteId, RunId, SelectedProviderConfiguration,
-    SelectedProviderConfigurationId, SystemClock, TextBlock, ToolChoice, TurnId, ValidationMode,
+    SelectedProviderConfigurationId, TextBlock, ToolChoice, TurnId, ValidationMode,
 };
 use plakous_openai::{
     CredentialAuthorityId, CredentialReference, OPENAI_PLATFORM_AUTH_PROFILE_ID,
@@ -177,7 +177,7 @@ fn request_with_options(
             RunId::from_str("00000000-0000-4000-8000-000000000101")?,
             TurnId::from_str("00000000-0000-4000-8000-000000000102")?,
             AttemptId::from_str("00000000-0000-4000-8000-000000000103")?,
-            SystemClock.now(),
+            review_clock()?.now(),
         ),
     )
     .reasoning(plakous_model::ReasoningPolicy::Enabled {
@@ -308,6 +308,7 @@ fn authority_with_key(
         PlatformStoragePolicy::Stateless,
         PlatformProjectPolicy::Project(OpenAiProjectId::new("proj_test")?),
     )
+    .clock(Arc::new(review_clock()?))
     .context_envelope(std::num::NonZeroU64::new(65536).ok_or("nonzero")?)
     .seal()?)
 }
@@ -348,11 +349,11 @@ async fn start_model(
     let model = configured.model();
     let runtime = model
         .clone()
-        .revalidate_runtime_authority(SystemClock.now())
+        .revalidate_runtime_authority(review_clock()?.now())
         .await?;
     let prepared = model.prepare_call(
         plan,
-        ModelPreparationContext::new(runtime, SystemClock.now()),
+        ModelPreparationContext::new(runtime, review_clock()?.now()),
     )?;
     let stream = prepared
         .start(ModelCallContext::new(
@@ -477,6 +478,7 @@ async fn production_http_rejection_never_becomes_completion() -> TestResult {
             PlatformStoragePolicy::Stateless,
             PlatformProjectPolicy::DefaultProject,
         )
+        .clock(Arc::new(review_clock()?))
         .context_envelope(std::num::NonZeroU64::new(65536).ok_or("nonzero")?)
         .seal()?;
         let selected = selected_configuration(&authority, ReasoningEffort::Low)?;
@@ -627,9 +629,9 @@ async fn execute_request(
     let model = configured.model();
     let runtime = model
         .clone()
-        .revalidate_runtime_authority(SystemClock.now())
+        .revalidate_runtime_authority(review_clock()?.now())
         .await?;
-    let mut context = ModelPreparationContext::new(runtime, SystemClock.now());
+    let mut context = ModelPreparationContext::new(runtime, review_clock()?.now());
     if let Some(active) = active {
         context = context.with_active_family_artifact(active);
     }
@@ -677,7 +679,7 @@ fn tool_request(
             RunId::from_str("00000000-0000-4000-8000-000000000101")?,
             TurnId::from_str("00000000-0000-4000-8000-000000000102")?,
             AttemptId::from_str(&format!("00000000-0000-4000-8000-{ordinal:012}"))?,
-            SystemClock.now(),
+            review_clock()?.now(),
         ),
     )
     .tools(vec![tool()?])
@@ -936,6 +938,7 @@ async fn generation_rotation_and_cancellation_reject_before_secret_or_connection
             PlatformStoragePolicy::Stateless,
             PlatformProjectPolicy::DefaultProject,
         )
+        .clock(Arc::new(review_clock()?))
         .context_envelope(std::num::NonZeroU64::new(65536).ok_or("bound")?)
         .seal()?;
         let selected = selected_configuration(&authority, ReasoningEffort::Low)?;
@@ -957,18 +960,18 @@ async fn generation_rotation_and_cancellation_reject_before_secret_or_connection
         let model = configured.model();
         let runtime = model
             .clone()
-            .revalidate_runtime_authority(SystemClock.now())
+            .revalidate_runtime_authority(review_clock()?.now())
             .await?;
         let prepared = model.clone().prepare_call(
             plan,
-            ModelPreparationContext::new(runtime, SystemClock.now()),
+            ModelPreparationContext::new(runtime, review_clock()?.now()),
         )?;
         let cancellation = plakous_model::CancellationToken::new();
         if rotate {
             source.rotated.store(true, Ordering::SeqCst);
             assert!(
                 model
-                    .revalidate_runtime_authority(SystemClock.now())
+                    .revalidate_runtime_authority(review_clock()?.now())
                     .await
                     .is_err()
             );
@@ -1015,6 +1018,7 @@ async fn release_only_caller_envelope_refuses_before_credential_refresh_or_prepa
         PlatformStoragePolicy::Stateless,
         PlatformProjectPolicy::DefaultProject,
     )
+    .clock(Arc::new(review_clock()?))
     .context_envelope(std::num::NonZeroU64::new(65536).ok_or("bound")?)
     .seal()?;
     assert_eq!(
@@ -1054,6 +1058,7 @@ async fn disabled_reasoning_refuses_before_credential_refresh_or_preparation() -
         PlatformStoragePolicy::Stateless,
         PlatformProjectPolicy::DefaultProject,
     )
+    .clock(Arc::new(review_clock()?))
     .context_envelope(std::num::NonZeroU64::new(65536).ok_or("bound")?)
     .seal()?;
     assert_eq!(
@@ -1094,6 +1099,7 @@ async fn reconstruction_binds_exact_key_generation_without_resolving_bearer() ->
             PlatformStoragePolicy::Stateless,
             PlatformProjectPolicy::DefaultProject,
         )
+        .clock(Arc::new(review_clock()?))
         .context_envelope(std::num::NonZeroU64::new(65536).ok_or("bound")?)
         .seal()?;
         let selected = selected_configuration(&authority, ReasoningEffort::Low)?;
@@ -1119,7 +1125,7 @@ async fn reconstruction_binds_exact_key_generation_without_resolving_bearer() ->
     assert!(
         first
             .model()
-            .revalidate_runtime_authority(SystemClock.now())
+            .revalidate_runtime_authority(review_clock()?.now())
             .await
             .is_err()
     );
@@ -1165,11 +1171,11 @@ async fn accepted_stream_cancellation_closes_transport_without_terminal_completi
     let model = configured.model();
     let runtime = model
         .clone()
-        .revalidate_runtime_authority(SystemClock.now())
+        .revalidate_runtime_authority(review_clock()?.now())
         .await?;
     let prepared = model.prepare_call(
         plan,
-        ModelPreparationContext::new(runtime, SystemClock.now()),
+        ModelPreparationContext::new(runtime, review_clock()?.now()),
     )?;
     let cancellation = plakous_model::CancellationToken::new();
     let mut stream = prepared
@@ -1251,7 +1257,7 @@ async fn semantic_compaction_workflow_retains_source_configuration_and_tools() -
             RunId::from_str("00000000-0000-4000-8000-000000000712")?,
             plakous_model::SessionWorkflowRootId::new([7; 32])?,
             AttemptId::from_str("00000000-0000-4000-8000-000000000713")?,
-            SystemClock.now(),
+            review_clock()?.now(),
         ),
     )
     .tools(vec![tool()?])
@@ -1318,7 +1324,7 @@ async fn expired_route_authority_rejects_before_rereading_credentials() -> TestR
     }
     let clock = Arc::new(ExpiringClock {
         expired: AtomicBool::new(false),
-        fresh: SystemClock.now(),
+        fresh: review_clock()?.now(),
         stale: plakous_model::Timestamp::new(
             plakous_openai::OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS,
             0,
@@ -1408,4 +1414,14 @@ async fn web_search_side_request_uses_the_session_key_project_and_model() -> Tes
     );
     assert_eq!(body["store"], false);
     Ok(())
+}
+
+fn review_clock() -> TestResult<plakous_model::FixedClock> {
+    Ok(plakous_model::FixedClock::new(
+        plakous_model::Timestamp::new(
+            plakous_openai::OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS - 90 * 86_400
+                + 60,
+            0,
+        )?,
+    ))
 }

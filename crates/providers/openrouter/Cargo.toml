@@ -17,6 +17,9 @@ exclude.workspace = true
 layer = "provider"
 class = "published-internal"
 
+[features]
+test-clock = []
+
 [dependencies]
 plakous-attempt.workspace = true
 plakous-chat-completions.workspace = true

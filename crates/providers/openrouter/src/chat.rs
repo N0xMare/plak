@@ -37,7 +37,7 @@ use plakous_model::{
     ProviderProfileRevisionId, ProviderRouteSelection, ProviderSemanticEvidence,
     ResolvedModelDescriptor, ResolvedProviderAuthorityBinding, RuntimeModelAuthority,
     RuntimeModelAuthorityError, RuntimeModelAuthorityOperation, SelectedProviderConfiguration,
-    Support, SystemClock, SystemIdGenerator, Timestamp, ValidatedRequestPlan,
+    Support, SystemIdGenerator, Timestamp, ValidatedRequestPlan,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -447,7 +447,7 @@ impl OpenRouterChatTarget {
         if !context_within_discovery(&context_contract, evidence.context_length) {
             return Err(OpenRouterChatBuildError::ContextExceedsDiscovery);
         }
-        let now = SystemClock.now();
+        let now = route.clock.now();
         if !evidence.validates(route.identity(), now) {
             return Err(OpenRouterChatBuildError::StaleEvidence);
         }
@@ -801,7 +801,7 @@ impl OpenRouterChatLanguageModel {
         {
             return Err(OpenRouterChatBuildError::MissingRetentionPolicy);
         }
-        let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+        let clock = Arc::clone(&target.route.clock);
         let runtime = target.runtime_authority(clock.now())?;
         let configuration = compile_chat_configuration(&target, selected, &runtime)?;
         Ok(Self {
@@ -1912,8 +1912,14 @@ mod tests {
             )?),
             crate::OpenRouterOrigin::new("https://127.0.0.1:18443")?,
             OpenRouterRetentionPolicy::strict(),
-        )?;
-        let now = SystemClock.now();
+        )?
+        .with_clock(Arc::new(plakous_model::FixedClock::new(Timestamp::new(
+            OPENROUTER_CHAT_REVIEWED_AT + 60,
+            0,
+        )?)));
+        let now =
+            plakous_model::FixedClock::new(Timestamp::new(OPENROUTER_CHAT_REVIEWED_AT + 60, 0)?)
+                .now();
         Ok(OpenRouterChatModelEvidence::from_authenticated_discovery(
             ModelId::new("vendor/model")?,
             route.identity(),
@@ -2401,8 +2407,14 @@ mod tests {
             )?),
             crate::OpenRouterOrigin::new("https://127.0.0.1:18443")?,
             OpenRouterRetentionPolicy::strict(),
-        )?;
-        let now = SystemClock.now();
+        )?
+        .with_clock(Arc::new(plakous_model::FixedClock::new(Timestamp::new(
+            OPENROUTER_CHAT_REVIEWED_AT + 60,
+            0,
+        )?)));
+        let now =
+            plakous_model::FixedClock::new(Timestamp::new(OPENROUTER_CHAT_REVIEWED_AT + 60, 0)?)
+                .now();
         assert!(evidence.validates(route.identity(), now));
         let identity = evidence.admission_identity(AdmissionWire::Chat)?;
         assert_ne!(identity, evidence.catalog_snapshot_identity);
@@ -2419,7 +2431,11 @@ mod tests {
             )?),
             crate::OpenRouterOrigin::new("https://127.0.0.1:18443")?,
             OpenRouterRetentionPolicy::strict(),
-        )?;
+        )?
+        .with_clock(Arc::new(plakous_model::FixedClock::new(Timestamp::new(
+            OPENROUTER_CHAT_REVIEWED_AT + 60,
+            0,
+        )?)));
         assert!(!evidence.validates(foreign.identity(), now));
         let moved = OpenRouterChatRoute::new_local_fixture_with_retention(
             Arc::new(crate::StaticOpenRouterApiKeySource::new(
@@ -2429,7 +2445,11 @@ mod tests {
             )?),
             crate::OpenRouterOrigin::new("https://127.0.0.1:18444")?,
             OpenRouterRetentionPolicy::strict(),
-        )?;
+        )?
+        .with_clock(Arc::new(plakous_model::FixedClock::new(Timestamp::new(
+            OPENROUTER_CHAT_REVIEWED_AT + 60,
+            0,
+        )?)));
         assert!(!evidence.validates(moved.identity(), now));
         Ok(())
     }

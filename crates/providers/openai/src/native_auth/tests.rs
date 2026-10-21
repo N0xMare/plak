@@ -635,12 +635,30 @@ fn private_slot() -> TestResult<(TempDir, PathBuf)> {
     Ok((directory, path))
 }
 
+// Wall-clock-independent epoch; elapsed time remains real for refresh-lead tests.
+struct ReviewClock;
+
+fn now_unix_secs() -> u64 {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    PROFILE_REVIEWED_AT + 60 + START.get_or_init(Instant::now).elapsed().as_secs()
+}
+
+fn review_timestamp() -> Timestamp {
+    Timestamp::new(now_unix_secs(), 0).expect("review time")
+}
+
+impl Clock for ReviewClock {
+    fn now(&self) -> Timestamp {
+        review_timestamp()
+    }
+}
+
 fn acceptance() -> Result<CodexCompatibilityAcceptance, NativeCodexAuthError> {
     CodexCompatibilityAcceptance::accept_exact(
         OPENAI_CODEX_COMPATIBILITY_PROFILE_ID,
         OPENAI_CODEX_SOURCE_REVISION,
         OPENAI_CODEX_COMPATIBILITY_NOTICE_REVISION,
-        system_timestamp(),
+        review_timestamp(),
     )
 }
 
@@ -963,6 +981,7 @@ fn manager_for_endpoint(
                 chatgpt_origin: endpoint.origin.clone(),
                 loopback_ports: TEST_LOOPBACK_PORTS,
             },
+            Arc::new(ReviewClock),
         )?,
     ))
 }
@@ -982,6 +1001,7 @@ fn manager_for_endpoint_with_gate(
                 chatgpt_origin: endpoint.origin.clone(),
                 loopback_ports: TEST_LOOPBACK_PORTS,
             },
+            Arc::new(ReviewClock),
         )?
         .with_subscription_request_gate(gate),
     ))
@@ -1075,7 +1095,7 @@ fn metadata(attempt_id: &str) -> TestResult<RequestMetadata> {
         "00000000-0000-7000-8000-000000000201".parse::<RunId>()?,
         "00000000-0000-7000-8000-000000000202".parse::<TurnId>()?,
         attempt_id.parse::<AttemptId>()?,
-        system_timestamp(),
+        review_timestamp(),
     ))
 }
 
@@ -2180,7 +2200,7 @@ async fn resolved_evidence_fixture_with_access(
             "",
         )],
     );
-    let observed_at = system_timestamp();
+    let observed_at = review_timestamp();
     let resolver = CodexModelResolver::new_for_test(
         Arc::clone(&manager),
         client,
@@ -5838,7 +5858,7 @@ async fn offline_admin_survives_expiry_and_kill_without_network() -> TestResult 
             endpoint.client.clone(),
             acceptance()?,
             endpoints.clone(),
-            PROFILE_EXPIRES_AT,
+            PROFILE_EXPIRES_AT + 1,
             false,
         ),
         Err(NativeCodexAuthError::ProfileNotCurrent)
@@ -6691,7 +6711,7 @@ async fn another_manager_refreshing_the_shared_store_renews_the_running_receipt(
     )
     .await?;
     let before = Arc::clone(&fixture.model)
-        .revalidate_runtime_authority(system_timestamp())
+        .revalidate_runtime_authority(review_timestamp())
         .await?;
     // Another process's 401 recovery claims the next generation.
     peers[0].refresh_after_rejection().await?;
@@ -6705,7 +6725,7 @@ async fn another_manager_refreshing_the_shared_store_renews_the_running_receipt(
     .await?;
     assert_ne!(response.output(), []);
     let after = Arc::clone(&fixture.model)
-        .revalidate_runtime_authority(system_timestamp())
+        .revalidate_runtime_authority(review_timestamp())
         .await?;
     assert_eq!(after.credential_generation(), 3);
     assert_eq!(after.account_binding(), before.account_binding());
@@ -6806,7 +6826,7 @@ async fn a_new_login_fails_the_running_receipt_closed_before_any_dispatch() -> T
             )
             .await?;
         let error = Arc::clone(&fixture.model)
-            .revalidate_runtime_authority(system_timestamp())
+            .revalidate_runtime_authority(review_timestamp())
             .await
             .err()
             .ok_or("a new login renewed the running receipt")?;
@@ -6919,7 +6939,7 @@ async fn a_renewal_cancelled_during_its_catalog_fetch_installs_nothing() -> Test
     peer.refresh_after_rejection().await?;
     let moved = manager.load_fence().await?;
 
-    let mut renewing = Arc::clone(&model).revalidate_runtime_authority(system_timestamp());
+    let mut renewing = Arc::clone(&model).revalidate_runtime_authority(review_timestamp());
     tokio::select! {
         result = &mut renewing => {
             return Err(format!("renewal finished during a stalled catalog: {result:?}").into());
@@ -6934,7 +6954,7 @@ async fn a_renewal_cancelled_during_its_catalog_fetch_installs_nothing() -> Test
     // Nothing was installed: the receipt is still the stale one.
     assert!(
         Arc::clone(&model)
-            .revalidate_runtime_authority(system_timestamp())
+            .revalidate_runtime_authority(review_timestamp())
             .await
             .is_err()
     );
@@ -6972,7 +6992,7 @@ async fn two_managers_renew_concurrently_to_the_same_generation() -> TestResult 
         models.push(resolver.resolve_with_evidence(RENEW_MODEL)?.0);
     }
     refresher.refresh_after_rejection().await?;
-    let checked_at = system_timestamp();
+    let checked_at = review_timestamp();
     let (left, right, again) = tokio::join!(
         Arc::clone(&models[0]).revalidate_runtime_authority(checked_at),
         Arc::clone(&models[1]).revalidate_runtime_authority(checked_at),
@@ -7094,7 +7114,7 @@ async fn a_fresh_resolution_after_a_rollover_keeps_the_login_selection_and_bindi
     )
     .await?;
     let before = Arc::clone(&fixture.model)
-        .revalidate_runtime_authority(system_timestamp())
+        .revalidate_runtime_authority(review_timestamp())
         .await?;
     peers[0].refresh_after_rejection().await?;
     // The host's prompt-boundary re-resolution: a new catalog and model.
@@ -7106,7 +7126,7 @@ async fn a_fresh_resolution_after_a_rollover_keeps_the_login_selection_and_bindi
         fixture.evidence.credential_selection_epoch()
     );
     let after = fresh
-        .revalidate_runtime_authority(system_timestamp())
+        .revalidate_runtime_authority(review_timestamp())
         .await?;
     let descriptor = catalog_descriptor(&fixture.resolver, RENEW_MODEL)?;
     assert_eq!(
@@ -7374,7 +7394,7 @@ async fn a_renewal_restores_another_login_found_under_its_claim() -> TestResult 
         SecretBytes::new(serde_json::to_vec(&other)?),
     )?;
     let result = Arc::clone(&fixture.model)
-        .revalidate_runtime_authority(system_timestamp())
+        .revalidate_runtime_authority(review_timestamp())
         .await;
     assert_eq!(
         result.err(),
@@ -7408,7 +7428,7 @@ async fn a_running_model_refuses_an_earlier_build_record_without_any_dispatch() 
         legacy_payload(account)?,
     )?;
     let result = Arc::clone(&fixture.model)
-        .revalidate_runtime_authority(system_timestamp())
+        .revalidate_runtime_authority(review_timestamp())
         .await;
     assert_eq!(
         result.err(),
@@ -7449,7 +7469,7 @@ async fn a_renewal_refuses_a_changed_catalog_row_before_inference() -> TestResul
     .await?;
     peers[0].refresh_after_rejection().await?;
     let result = Arc::clone(&fixture.model)
-        .revalidate_runtime_authority(system_timestamp())
+        .revalidate_runtime_authority(review_timestamp())
         .await;
     assert_eq!(
         result.err(),
@@ -7483,7 +7503,7 @@ async fn a_renewed_authority_is_capped_by_access_expiry_and_the_admitted_window(
     .await?;
     peers[0].refresh_after_rejection().await?;
     let authority = Arc::clone(&fixture.model)
-        .revalidate_runtime_authority(system_timestamp())
+        .revalidate_runtime_authority(review_timestamp())
         .await?;
     let valid_until = authority.valid_until().ok_or("no expiry")?;
     assert!(valid_until.seconds() <= now_unix_secs() + 3_600 - ACCESS_REFRESH_SKEW + 2);
@@ -7553,7 +7573,7 @@ async fn a_dropped_revalidation_lets_its_claimed_refresh_complete() -> TestResul
     resolver.refresh_catalog().await?;
     let (model, _) = resolver.resolve_with_evidence(RENEW_MODEL)?;
     tokio::time::sleep(Duration::from_secs(3)).await;
-    let mut revalidating = Arc::clone(&model).revalidate_runtime_authority(system_timestamp());
+    let mut revalidating = Arc::clone(&model).revalidate_runtime_authority(review_timestamp());
     tokio::select! {
         result = &mut revalidating => {
             return Err(format!("revalidation finished before its refresh POST: {result:?}").into());

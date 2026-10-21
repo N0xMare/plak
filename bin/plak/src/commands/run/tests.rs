@@ -8,7 +8,7 @@ use plakous_offline_crash_harness::{BoundaryController, text_runtime_binding};
 #[test]
 fn expired_run_timeout_precedes_authentication_preparation() {
     let home = tempfile::tempdir().unwrap();
-    let mut app = PlakousApplication::for_accounts(home.path().join("state")).unwrap();
+    let mut app = PlakousApplication::for_test_accounts(home.path().join("state")).unwrap();
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let outcome = app
@@ -837,7 +837,7 @@ fn run_refuses_an_invalid_config_before_any_account_or_session_work() {
         },
     ];
     for command in commands {
-        let mut app = PlakousApplication::for_accounts(home.path().join("state")).unwrap();
+        let mut app = PlakousApplication::for_test_accounts(home.path().join("state")).unwrap();
         let mut stdin = io::Cursor::new(b"y\n".to_vec());
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
@@ -877,7 +877,7 @@ fn run_with_a_signed_out_subscription_exits_3_naming_plak_login() {
     let home = tempfile::tempdir().unwrap();
     let paths = crate::home::paths::PlakPaths::explicit(home.path().join("product"));
     let services = crate::shell::services::Services::for_home(paths.clone());
-    let mut app = PlakousApplication::for_accounts(home.path().join("state")).unwrap();
+    let mut app = PlakousApplication::for_test_accounts(home.path().join("state")).unwrap();
     let failure = crate::execute_application_command(
         crate::command::Command::Run {
             limits: plakous_hosted::runtime::RunBounds::default(),
@@ -909,7 +909,7 @@ fn run_with_a_signed_out_subscription_exits_3_naming_plak_login() {
 fn resolution_failures_keep_usage_auth_and_internal_classes_apart() {
     use plakous::subscriptions::NativeSubscriptionError as E;
     let home = tempfile::tempdir().unwrap();
-    let app = PlakousApplication::for_accounts(home.path().join("state")).unwrap();
+    let app = PlakousApplication::for_test_accounts(home.path().join("state")).unwrap();
     for (error, exit) in [
         (E::ModelUnavailable, 2),
         (E::ProviderConfigurationRejected, 2),

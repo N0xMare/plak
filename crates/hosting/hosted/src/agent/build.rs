@@ -2816,6 +2816,7 @@ async fn api_session_runtime_binding_with_owner(
                 },
                 parent.state_roots.exchange_observer(),
                 &admission,
+                Arc::new(plakous::model::SystemClock),
             ))
             .await?;
             Ok(PreparedApiRuntime {

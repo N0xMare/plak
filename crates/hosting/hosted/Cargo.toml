@@ -37,7 +37,7 @@ tempfile = { workspace = true, optional = true }
 
 [dev-dependencies]
 plakous-recursive-subagents-store = { workspace = true, features = ["test-support"], default-features = true }
-plakous = { workspace = true, features = ["auth"] }
+plakous = { workspace = true, features = ["auth", "test-clock"] }
 plakous-tools.workspace = true
 plakous-host-protocol = { workspace = true, features = ["test-support"] }
 plakous-recursive-subagents = { workspace = true, features = ["test-support"] }
@@ -49,7 +49,7 @@ plakous-model.workspace = true
 plakous-offline-crash-harness = { path = "../../../tests/harnesses/offline-crash" }
 plakous-http.workspace = true
 plakous-openai.workspace = true
-plakous-openrouter.workspace = true
+plakous-openrouter = { workspace = true, features = ["test-clock"] }
 plakous-responses-dialect.workspace = true
 proptest = { workspace = true, features = ["std"] }
 rusqlite.workspace = true

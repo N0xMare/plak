@@ -51,6 +51,9 @@
 )]
 
 mod chat;
+
+/// Hard UTC expiry of the compiled Chat Completions review.
+pub const OPENROUTER_CHAT_REVIEW_EXPIRES_AT: u64 = chat::OPENROUTER_CHAT_REVIEW_EXPIRES_AT;
 mod dialect;
 mod discovery;
 mod execution;

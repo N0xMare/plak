@@ -73,6 +73,7 @@ async fn runtime_with_source(
                 PlatformStoragePolicy::Stateless,
                 PlatformProjectPolicy::DefaultProject,
             )
+            .clock(review_clock_for(provider))
             .context_envelope(maximum)
             .seal()
             .unwrap();
@@ -102,7 +103,7 @@ async fn runtime_with_source(
                     source,
                     maximum,
                     selected,
-                    Arc::new(plakous::model::SystemClock),
+                    review_clock_for(provider),
                     client,
                     origin,
                 )
@@ -119,7 +120,8 @@ async fn runtime_with_source(
         .binding_digest()
         .unwrap();
     (
-        crate::api_runtime::runtime_binding(spec, configured, registry).unwrap(),
+        crate::api_runtime::runtime_binding(spec, configured, registry, review_clock_for(provider))
+            .unwrap(),
         descriptor,
     )
 }

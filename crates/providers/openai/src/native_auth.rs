@@ -91,7 +91,6 @@ use plakous_model::{
     ProviderConfigurationError, ProviderSemanticEvidence, ReasoningEffort, ResolvedModelDescriptor,
     RouteId, RuntimeModelAuthority, RuntimeModelAuthorityError, SubscriptionUsageCredentialState,
     SubscriptionUsageRead, SubscriptionUsageUnavailable, Support, SystemClock, Timestamp,
-    now_unix_secs,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
@@ -511,6 +510,7 @@ impl fmt::Debug for CodexSubscriptionLocalAdmin {
 
 /// Plak-owned credential manager for one explicit selected-account slot.
 pub struct CodexSubscriptionCredentialManager {
+    clock: Arc<dyn Clock>,
     store: Arc<PrivateCredentialStore>,
     client: Client,
     endpoints: ProfileEndpoints,
@@ -542,6 +542,24 @@ impl CodexSubscriptionCredentialManager {
             client,
             acceptance,
             ProfileEndpoints::production(),
+            Arc::new(SystemClock),
+        )
+    }
+
+    #[cfg(any(test, feature = "test-clock"))]
+    #[doc(hidden)]
+    pub fn new_with_clock(
+        slot_path: impl Into<PathBuf>,
+        client: Client,
+        acceptance: CodexCompatibilityAcceptance,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Self, NativeCodexAuthError> {
+        Self::new_with_endpoints(
+            &slot_path.into(),
+            client,
+            acceptance,
+            ProfileEndpoints::production(),
+            clock,
         )
     }
 
@@ -550,15 +568,18 @@ impl CodexSubscriptionCredentialManager {
         client: Client,
         acceptance: CodexCompatibilityAcceptance,
         endpoints: ProfileEndpoints,
+        clock: Arc<dyn Clock>,
     ) -> Result<Self, NativeCodexAuthError> {
-        Self::new_with_endpoints_and_policy(
+        let mut manager = Self::new_with_endpoints_and_policy(
             slot_path,
             client,
             acceptance,
             endpoints,
-            now_unix_secs(),
+            clock.now().seconds(),
             PROFILE_KILLED,
-        )
+        )?;
+        manager.clock = clock;
+        Ok(manager)
     }
 
     fn new_with_endpoints_and_policy(
@@ -601,6 +622,7 @@ impl CodexSubscriptionCredentialManager {
             store,
             client,
             endpoints,
+            clock: Arc::new(SystemClock),
             acceptance,
             selected: Mutex::new(selected),
             lifecycle: AsyncMutex::new(()),
@@ -699,7 +721,7 @@ impl CodexSubscriptionCredentialManager {
     pub async fn subscription_usage(&self) -> SubscriptionUsageRead {
         let deadline = Instant::now() + AUTH_REQUEST_CAP;
         let unavailable = |reason| SubscriptionUsageRead::Unavailable {
-            observed_at: Timestamp::new(now_unix_secs(), 0)
+            observed_at: Timestamp::new(self.clock.now().seconds(), 0)
                 .unwrap_or_else(|_| unreachable!("system epoch is a valid timestamp")),
             reason,
         };
@@ -751,7 +773,7 @@ impl CodexSubscriptionCredentialManager {
                 ));
             }
         };
-        if credential.access_expires_at <= now_unix_secs() {
+        if credential.access_expires_at <= self.clock.now().seconds() {
             return unavailable(SubscriptionUsageUnavailable::CredentialState(
                 SubscriptionUsageCredentialState::RefreshRequired,
             ));
@@ -799,7 +821,7 @@ impl CodexSubscriptionCredentialManager {
             }
             Err(_) => return unavailable(SubscriptionUsageUnavailable::Transport(None)),
         };
-        let observed_at = Timestamp::new(now_unix_secs(), 0)
+        let observed_at = Timestamp::new(self.clock.now().seconds(), 0)
             .unwrap_or_else(|_| unreachable!("system epoch is a valid timestamp"));
         let reason = match reply.status.as_u16() {
             401 | 403 => Some(SubscriptionUsageUnavailable::Unauthorized),
@@ -847,7 +869,7 @@ impl CodexSubscriptionCredentialManager {
     }
 
     pub(crate) fn validate_profile_admission(&self) -> Result<(), NativeCodexAuthError> {
-        validate_profile(&self.acceptance, now_unix_secs())
+        validate_profile(&self.acceptance, self.clock.now().seconds())
     }
 
     pub(crate) fn validate_route_resolution(&self) -> Result<(), NativeCodexAuthError> {
@@ -2585,6 +2607,7 @@ impl CodexModelResolver {
         let route = CodexSubscriptionRouteConfig::new(origin)
             .resolve_native(Arc::clone(&manager))
             .map_err(|_| NativeCodexAuthError::Unavailable)?;
+        let clock = Arc::clone(&manager.clock);
         Ok(Self {
             catalog_retries: true,
             manager,
@@ -2593,7 +2616,7 @@ impl CodexModelResolver {
             inference_observer: None,
             config,
             catalog: Mutex::new(None),
-            clock: Arc::new(SystemClock),
+            clock,
         })
     }
 
@@ -2618,6 +2641,8 @@ impl CodexModelResolver {
 
     /// Replaces the clock used for catalog provenance and resolved-target expiry.
     #[must_use]
+    #[cfg(any(test, feature = "test-clock"))]
+    #[doc(hidden)]
     pub fn clock(mut self, clock: Arc<dyn Clock>) -> Self {
         self.clock = clock;
         self
@@ -2634,6 +2659,7 @@ impl CodexModelResolver {
             Arc::clone(&manager),
         )
         .map_err(|_| NativeCodexAuthError::Unavailable)?;
+        let clock = Arc::clone(&manager.clock);
         Ok(Self {
             catalog_retries: true,
             manager,
@@ -2642,7 +2668,7 @@ impl CodexModelResolver {
             inference_observer: None,
             config,
             catalog: Mutex::new(None),
-            clock: Arc::new(SystemClock),
+            clock,
         })
     }
 
@@ -2896,7 +2922,12 @@ impl CodexCatalogSource {
         }
         let lease = self.manager.acquire_ready_lease(fence.clone()).await?;
         let credential = parse_stored(lease.payload())?;
-        if credential.access_expires_at <= now_unix_secs().saturating_add(ACCESS_REFRESH_SKEW)
+        if credential.access_expires_at
+            <= self
+                .clock
+                .now()
+                .seconds()
+                .saturating_add(ACCESS_REFRESH_SKEW)
             || credential.account_id != fence.account_binding().as_str()
         {
             return Err(NativeCodexAuthError::Unavailable);
@@ -3275,11 +3306,6 @@ impl fmt::Debug for CodexModelResolver {
             .field("clock", &"<injected clock>")
             .finish()
     }
-}
-
-#[cfg(test)]
-fn system_timestamp() -> Timestamp {
-    SystemClock.now()
 }
 
 #[cfg(test)]

@@ -18,6 +18,7 @@ layer = "facade"
 class = "supported"
 
 [features]
+test-clock = ["plakous-openai?/test-clock", "plakous-openrouter?/test-clock"]
 default = []
 # Provider protocol crates on the facade are provider internals (not TUI surface).
 # Enabling openai/xai/openrouter/anthropic re-exports those crates as plakous::*.
@@ -111,7 +112,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 [dev-dependencies]
 futures-core.workspace = true
 futures-util.workspace = true
-plakous-openai = { workspace = true, features = ["test-support"] }
+plakous-openai = { workspace = true, features = ["test-support", "test-clock"] }
 plakous-test-support = { path = "../../tests/support/plakous-test-support" }
 rusqlite.workspace = true
 rustix = { workspace = true, features = ["pty", "termios"] }

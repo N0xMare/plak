@@ -1470,6 +1470,15 @@ impl NativeSubscriptions {
         }
     }
 
+    /// Test-only replacement for compatibility and credential time.
+    #[cfg(any(test, feature = "test-clock"))]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_clock(mut self, clock: Arc<dyn plakous_model::Clock>) -> Self {
+        self.state = self.state.with_clock(clock);
+        self
+    }
+
     /// Uses single-attempt model lookups for background refresh or child binding
     /// while a session is already attached. Receipt renewals are always single-attempt.
     #[must_use]
@@ -1531,7 +1540,7 @@ impl NativeSubscriptions {
             if paths.receipt_written_by_newer_build(notice)? {
                 return Err(NativeSubscriptionError::CredentialWrittenByNewerBuild);
             }
-            let now = unix_now()?;
+            let now = paths.now()?;
             let previous = paths.stored_acceptance_generation(provider)?;
             let next = paths.store_acceptance(notice, now)?;
             if let Some(previous) = previous {
@@ -1559,7 +1568,7 @@ impl NativeSubscriptions {
             return Ok(NativeSubscriptionStatus {
                 compatibility: SubscriptionState::absent_compatibility(
                     Self::notice(provider),
-                    unix_now()?,
+                    self.state.now()?,
                 ),
                 credential: NativeAuthStatus::SignedOut,
             });
@@ -1585,7 +1594,7 @@ impl NativeSubscriptions {
         if !run_blocking(move || paths.layout_exists()).await?? {
             return Ok(SubscriptionState::absent_compatibility(
                 Self::notice(provider),
-                unix_now()?,
+                self.state.now()?,
             ));
         }
         let lock = self.acquire_compatibility_lock(provider).await?;
@@ -1601,7 +1610,7 @@ impl NativeSubscriptions {
     /// occurs.
     pub async fn subscription_usage(&self, provider: NativeProvider) -> SubscriptionUsageRead {
         let unavailable = |reason| SubscriptionUsageRead::Unavailable {
-            observed_at: Timestamp::new(unix_now().unwrap_or(0), 0)
+            observed_at: Timestamp::new(self.state.now().unwrap_or(0), 0)
                 .unwrap_or_else(|_| unreachable!("Unix epoch is a valid timestamp")),
             reason,
         };
@@ -1699,7 +1708,7 @@ impl NativeSubscriptions {
             Ok(_) | Err(_) => match self.fenced_credential_reason(provider).await {
                 SubscriptionUsageUnavailable::LocalState => rejected,
                 reason => SubscriptionUsageRead::Unavailable {
-                    observed_at: Timestamp::new(unix_now().unwrap_or(0), 0)
+                    observed_at: Timestamp::new(self.state.now().unwrap_or(0), 0)
                         .unwrap_or_else(|_| unreachable!("Unix epoch is a valid timestamp")),
                     reason,
                 },
@@ -1868,7 +1877,7 @@ impl NativeSubscriptions {
         let notice = Self::notice(provider);
         let paths = self.state.clone();
         let consent_generation = run_blocking(move || {
-            let now = unix_now()?;
+            let now = paths.now()?;
             match paths.load_acceptance_exact(notice, now) {
                 Ok(acceptance) => Ok(Some(acceptance.generation)),
                 // A stale or inactive acceptance is reported as compatibility;
@@ -2213,7 +2222,7 @@ impl NativeSubscriptions {
             let consent = {
                 let paths = self.state.clone();
                 let notice = Self::notice(provider);
-                let now = unix_now()?;
+                let now = self.state.now()?;
                 run_blocking(move || paths.load_acceptance_exact(notice, now)).await??
             };
             let consent_generation = consent.generation.clone();
@@ -3454,7 +3463,7 @@ impl NativeSubscriptions {
         let paths = self.state.clone();
         let notice = Self::notice(provider);
         match run_blocking(move || {
-            let now = unix_now()?;
+            let now = paths.now()?;
             paths.load_acceptance(notice, now)
         })
         .await?
@@ -3482,7 +3491,7 @@ impl NativeSubscriptions {
     ) -> Result<CodexOnline, NativeSubscriptionError> {
         let paths = self.state.clone();
         let notice = Self::notice(NativeProvider::Codex);
-        let now = unix_now()?;
+        let now = self.state.now()?;
         run_blocking(move || paths.prepare()).await??;
         // Checked before anything else is read or claimed, so no online path
         // writes over a newer build's state.
@@ -3520,6 +3529,8 @@ impl NativeSubscriptions {
                 return Err(NativeSubscriptionError::CredentialUnavailable);
             }
         }
+        #[cfg(any(test, feature = "test-clock"))]
+        let clock = self.state.clock();
         run_blocking(move || {
             let timestamp =
                 Timestamp::new(accepted_at, 0).map_err(|_| NativeSubscriptionError::Internal)?;
@@ -3535,12 +3546,22 @@ impl NativeSubscriptions {
             // an OAuth POST cannot be retried safely after an H2 stream reset.
             let client = plakous_http::Client::new_http1(plakous_http::Limits::default())
                 .map_err(|_| NativeSubscriptionError::Internal)?;
-            let mut manager = plakous_openai::CodexSubscriptionCredentialManager::new(
+            #[cfg(any(test, feature = "test-clock"))]
+            let manager = plakous_openai::CodexSubscriptionCredentialManager::new_with_clock(
+                path,
+                client.clone(),
+                provider_acceptance,
+                clock,
+            )
+            .map_err(map_codex_error)?;
+            #[cfg(not(any(test, feature = "test-clock")))]
+            let manager = plakous_openai::CodexSubscriptionCredentialManager::new(
                 path,
                 client.clone(),
                 provider_acceptance,
             )
             .map_err(map_codex_error)?;
+            let mut manager = manager;
             if let Some(gate) = request_gate {
                 manager = manager.with_subscription_request_gate(gate);
             }
@@ -3576,7 +3597,7 @@ impl NativeSubscriptions {
     ) -> Result<XaiOnline, NativeSubscriptionError> {
         let paths = self.state.clone();
         let notice = Self::notice(NativeProvider::Xai);
-        let now = unix_now()?;
+        let now = self.state.now()?;
         run_blocking(move || paths.prepare()).await??;
         // Checked before anything else is read or claimed, so no online path
         // writes over a newer build's state.
@@ -3688,7 +3709,7 @@ impl NativeSubscriptions {
     ) -> Result<ClaudeOnline, NativeSubscriptionError> {
         let paths = self.state.clone();
         let notice = Self::notice(NativeProvider::Claude);
-        let now = unix_now()?;
+        let now = self.state.now()?;
         run_blocking(move || paths.prepare()).await??;
         // Checked before anything else is read or claimed, so no online path
         // writes over a newer build's state.

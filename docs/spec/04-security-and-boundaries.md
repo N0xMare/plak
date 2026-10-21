@@ -1395,3 +1395,8 @@ same fence, and only when the branch still names exactly that lease as active,
 its last granted fence is unchanged, the store still holds the host-local claim
 it took with the lease, and the clock domain is unchanged; a reboot, any
 intervening acquire, or a store reopened since refuses (chapter 01 §5.1).
+
+Compiled review expiry and credential time checks always use the system clock
+in supported builds. Hidden clock injection is restricted to the non-default
+`test-clock` feature for offline fixtures; default, maintainer and release
+closures must not enable it. It is not an embedder-supported authority override.

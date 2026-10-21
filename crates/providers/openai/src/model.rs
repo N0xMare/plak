@@ -799,8 +799,14 @@ impl OpenAiLanguageModel {
         deadline: Instant,
         cancellation: &plakous_model::CancellationToken,
     ) -> Result<(plakous_http::Request, CodexDispatchGuard), &'static str> {
+        let checked_at = self
+            .current_target()
+            .map_err(|_| "Codex admission is no longer current")?
+            .target
+            .clock()
+            .now();
         Arc::clone(self)
-            .revalidate_runtime_authority(SystemClock.now())
+            .revalidate_runtime_authority(checked_at)
             .await
             .map_err(|_| "Codex admission is no longer current")?;
         let current = self

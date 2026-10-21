@@ -161,7 +161,13 @@ pub(crate) async fn construct_openrouter_runtime_with_fence(
     spec.topology_extensions.connect_retrieval(Some(Arc::new(
         plakous::openrouter::OpenRouterRetrievalPort::new(prepared.retrieval),
     )))?;
-    let runtime = openrouter_runtime_binding(&spec, prepared.configured, prepared.registry, fence)?;
+    let runtime = openrouter_runtime_binding(
+        &spec,
+        prepared.configured,
+        prepared.registry,
+        fence,
+        Arc::new(plakous::model::SystemClock),
+    )?;
     let target = runtime.target_binding();
     Ok(ProductOpenRouterRuntime {
         runtime,
@@ -335,6 +341,7 @@ fn api_compaction_runtime_binding(
         source.clone(),
         registry.clone(),
         crate::agent::occupancy_session_fence(spec.occupancy_tier),
+        Arc::new(plakous::model::SystemClock),
     )?
     .with_compaction_output_limit()
     .map_err(|_| CliFailure::new("compaction generation policy is invalid"))
@@ -660,6 +667,7 @@ fn openrouter_runtime_binding(
     configured: ConfiguredLanguageModel,
     registry: plakous::tools::FrozenToolRegistry,
     fence: crate::agent::SessionToolFence,
+    clock: Arc<dyn plakous::model::Clock>,
 ) -> CliResult<SessionRuntimeBinding> {
     crate::api_runtime::runtime_binding(
         &crate::api_runtime::ApiRuntimeSpec {
@@ -684,6 +692,7 @@ fn openrouter_runtime_binding(
         },
         configured,
         registry,
+        clock,
     )
 }
 
@@ -791,6 +800,15 @@ fn key_usage_failure(error: &plakous::openrouter::OpenRouterKeyUsageError, label
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit fixtures fail fast")]
 mod tests {
+    fn chat_review_clock() -> Arc<dyn plakous::model::Clock> {
+        let now = plakous::model::Timestamp::new(
+            plakous::openrouter::OPENROUTER_CHAT_REVIEW_EXPIRES_AT - 30 * 86_400 + 60,
+            0,
+        )
+        .unwrap();
+        Arc::new(plakous::model::FixedClock::new(now))
+    }
+
     use super::*;
 
     #[test]
@@ -1269,7 +1287,8 @@ mod tests {
             OpenRouterOrigin::new(origin).expect("origin"),
             OpenRouterRetentionPolicy::strict(),
         )
-        .expect("route");
+        .expect("route")
+        .with_clock(chat_review_clock());
         let evidence = route
             .discover_chat_model(&client, MODEL, OpenRouterChatDiscoveryConfig::default())
             .await
@@ -2619,7 +2638,8 @@ mod tests {
             OpenRouterOrigin::new(origin).expect("origin"),
             OpenRouterRetentionPolicy::strict(),
         )
-        .expect("route");
+        .expect("route")
+        .with_clock(chat_review_clock());
         let evidence = route
             .discover_chat_model(&client, MODEL, OpenRouterChatDiscoveryConfig::default())
             .await
@@ -2791,7 +2811,7 @@ mod tests {
                     client.pooled(),
                 )
                 .map_err(|e| format!("configured: {e}"))?;
-            openrouter_runtime_binding(spec, configured, registry, fence)
+            openrouter_runtime_binding(spec, configured, registry, fence, chat_review_clock())
                 .map_err(|e| format!("binding: {}", e.message()))
         };
         let sessions = AgentSessions::new(

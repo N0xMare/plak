@@ -656,6 +656,7 @@ async fn pre_pack_openai_api_direct_session_reopen_fails_closed() {
             PlatformStoragePolicy::Stateless,
             PlatformProjectPolicy::DefaultProject,
         )
+        .clock(review_clock_for(PlatformProvider::OpenAi))
         .context_envelope(maximum)
         .seal()
         .unwrap();
@@ -937,7 +938,7 @@ async fn pre_w3_b_grok_session_reopen_fails_closed() {
                 source,
                 maximum,
                 selected,
-                Arc::new(plakous::model::SystemClock),
+                review_clock_for(PlatformProvider::Xai),
                 None,
             )
             .unwrap(),
@@ -1464,4 +1465,18 @@ async fn pre_w3_b_grok_ptc_session_reopen_fails_closed() {
             "{composition:?}: {error}"
         );
     }
+}
+
+pub(super) fn review_clock_for(provider: PlatformProvider) -> Arc<dyn plakous::model::Clock> {
+    let expiry = match provider {
+        // CLOCK2: Anthropic hosted fixtures still use wall time, outside H1.
+        PlatformProvider::Anthropic => return Arc::new(plakous::model::SystemClock),
+        PlatformProvider::OpenAi => {
+            plakous::openai::OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS
+        }
+        PlatformProvider::Xai => plakous::xai::XAI_PLATFORM_REVIEW_EXPIRES_AT_UNIX_SECONDS,
+    };
+    Arc::new(plakous::model::FixedClock::new(
+        plakous::model::Timestamp::new(expiry - 90 * 86_400 + 60, 0).unwrap(),
+    ))
 }

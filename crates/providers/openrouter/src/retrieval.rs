@@ -19,7 +19,7 @@ use plakous_http::{
     Client, HeaderMap, HeaderName, HeaderValue, Method, Origin, Request, SensitiveBytes,
     sensitive_header_value,
 };
-use plakous_model::{CancellationToken, Clock, Digest, DigestDomain, SystemClock};
+use plakous_model::{CancellationToken, Clock, Digest, DigestDomain};
 
 use crate::chat::{OPENROUTER_CHAT_COMPLETIONS_PATH, insert_attribution, reviewed_until};
 use crate::{
@@ -54,7 +54,7 @@ impl OpenRouterRetrieval {
         evidence: OpenRouterChatModelEvidence,
         client: Client,
     ) -> Result<Self, OpenRouterChatBuildError> {
-        let now = SystemClock.now();
+        let now = route.clock.now();
         if !evidence.validates(route.identity(), now) {
             return Err(OpenRouterChatBuildError::StaleEvidence);
         }
@@ -62,13 +62,14 @@ impl OpenRouterRetrieval {
         let generation = route.current_credential_generation_grant()?;
         let dial_origin = Origin::parse(route.identity().origin().as_str())
             .map_err(|_| OpenRouterChatBuildError::Configuration)?;
+        let clock = Arc::clone(&route.clock);
         Ok(Self {
             route,
             evidence,
             generation,
             client,
             dial_origin,
-            clock: Arc::new(SystemClock),
+            clock,
             limits: ChatRetrievalLimits::default(),
         })
     }

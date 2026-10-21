@@ -38,6 +38,7 @@ TEST_HOOKS_FEATURE = (
     "# `PLAK_TEST_SCRIPT` instead of a provider, so the spawned binary's own\n"
     "# lifecycles are testable. Never in `default`, never in a release build.\n"
     "test-hooks = [\n"
+    '    "plakous/test-clock",\n'
     f'    "dep:{HARNESS}",\n'
     '    "plakous-hosted/test-support",\n'
     '    "plakous-recursive-subagents-store/commit-trace",\n'

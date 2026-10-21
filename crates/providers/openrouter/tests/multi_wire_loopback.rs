@@ -1,4 +1,5 @@
 //! Offline end-to-end evidence for the three configured `OpenRouter` wire lanes.
+#![cfg(feature = "test-clock")]
 
 use std::error::Error;
 use std::io;
@@ -20,10 +21,10 @@ use plakous_model::{
     Provenance, ProviderBehaviorConfiguration, ProviderProfileRevisionId,
     ProviderStorageDisposition, ReasoningEffortDisposition, ReasoningIncludeDisposition,
     ReasoningSummaryDisposition, ReplayDisposition, RequestMetadata, ResponseStateDisposition,
-    RetentionDisposition, RunId, RuntimeModelAuthority, SequenceIdGenerator, SystemClock,
-    TextBlock, Timestamp, ToolCallBlock, ToolCallState, ToolCallerLineage, ToolChoice,
-    ToolCorrelation, ToolExecutionOwner, ToolName, ToolPresentationMode, ToolResultBlock,
-    ToolResultKind, ToolResultPart, TurnId, ValidationMode,
+    RetentionDisposition, RunId, RuntimeModelAuthority, SequenceIdGenerator, TextBlock, Timestamp,
+    ToolCallBlock, ToolCallState, ToolCallerLineage, ToolChoice, ToolCorrelation,
+    ToolExecutionOwner, ToolName, ToolPresentationMode, ToolResultBlock, ToolResultKind,
+    ToolResultPart, TurnId, ValidationMode,
 };
 use plakous_openrouter::{
     CHAT_COMPLETIONS_FAMILY_ID, MESSAGES_FAMILY_ID, OPENROUTER_CHAT_COMPLETIONS_PATH,
@@ -92,7 +93,8 @@ async fn key_usage_distinguishes_invalid_key_from_forbidden_access() -> TestResu
             source,
             OpenRouterOrigin::new(origin)?,
             plakous_openrouter::OpenRouterRetentionPolicy::strict(),
-        )?;
+        )?
+        .with_clock(Arc::new(review_clock()));
         let error = route
             .key_usage(&client)
             .await
@@ -249,14 +251,14 @@ fn request_rooted(
             run,
             plakous_model::SessionWorkflowRootId::new([7; 32])?,
             attempt,
-            SystemClock.now(),
+            review_clock().now(),
         )
     } else {
         RequestMetadata::for_turn(
             run,
             TurnId::from_str(&format!("00000000-0000-4000-8000-{:012}", ordinal + 30))?,
             attempt,
-            SystemClock.now(),
+            review_clock().now(),
         )
     };
     let input = ConversationItem::new(
@@ -351,7 +353,7 @@ fn request_with_retired_responses_exec(
             RunId::from_str(&format!("00000000-0000-4000-8000-{:012}", ordinal + 20))?,
             TurnId::from_str(&format!("00000000-0000-4000-8000-{:012}", ordinal + 30))?,
             AttemptId::from_str(&format!("00000000-0000-4000-8000-{:012}", ordinal + 40))?,
-            SystemClock.now(),
+            review_clock().now(),
         ),
     )
     .tool_choice(ToolChoice::None)
@@ -376,11 +378,11 @@ async fn execute_request(
         .validate_request(request, ValidationMode::Strict)?;
     let authority = model
         .clone()
-        .revalidate_runtime_authority(SystemClock.now())
+        .revalidate_runtime_authority(review_clock().now())
         .await?;
     let prepared = model.prepare_call(
         plan,
-        ModelPreparationContext::new(authority, SystemClock.now()),
+        ModelPreparationContext::new(authority, review_clock().now()),
     )?;
     let mut stream = prepared
         .start(ModelCallContext::new(
@@ -412,16 +414,16 @@ async fn execute_to_terminal(
         .validate_request(request, ValidationMode::Strict)?;
     let authority = model
         .clone()
-        .revalidate_runtime_authority(SystemClock.now())
+        .revalidate_runtime_authority(review_clock().now())
         .await?;
     let prepared = model.prepare_call(
         plan,
-        ModelPreparationContext::new(authority, SystemClock.now()),
+        ModelPreparationContext::new(authority, review_clock().now()),
     )?;
     let cancellation = plakous_model::CancellationToken::new();
     let deadline = match deadline {
         Some(after) => {
-            let now = SystemClock.now();
+            let now = review_clock().now();
             let at = Duration::new(now.seconds(), now.nanoseconds()) + after;
             Some(Timestamp::new(at.as_secs(), at.subsec_nanos())?)
         }
@@ -651,7 +653,8 @@ async fn catalog_drift_preserves_all_wire_bindings_and_refuses_changed_facts() -
         )?),
         OpenRouterOrigin::new(origin)?,
         plakous_openrouter::OpenRouterRetentionPolicy::strict(),
-    )?;
+    )?
+    .with_clock(Arc::new(review_clock()));
     let mut catalogs = Vec::new();
     for _ in 0..3 {
         catalogs.push(
@@ -1081,7 +1084,8 @@ async fn physical_terminal_case(case: TerminalCase, ordinal: u128) -> TestResult
         source,
         OpenRouterOrigin::new(origin)?,
         plakous_openrouter::OpenRouterRetentionPolicy::strict(),
-    )?;
+    )?
+    .with_clock(Arc::new(review_clock()));
     let evidence = route
         .discover_chat_model(
             &client,
@@ -1286,7 +1290,8 @@ async fn configured_lanes_case(attributed: bool) -> TestResult {
         source,
         OpenRouterOrigin::new(origin)?,
         plakous_openrouter::OpenRouterRetentionPolicy::strict(),
-    )?;
+    )?
+    .with_clock(Arc::new(review_clock()));
     let route = if attributed {
         route.with_plak_attribution()?
     } else {
@@ -1504,7 +1509,8 @@ async fn discovered_chat_model(
         source,
         OpenRouterOrigin::new(origin)?,
         plakous_openrouter::OpenRouterRetentionPolicy::strict(),
-    )?;
+    )?
+    .with_clock(Arc::new(review_clock()));
     let evidence = route
         .discover_chat_model(
             &client,
@@ -1584,7 +1590,7 @@ async fn unadvertised_chat_tool_call_becomes_an_unknown_tool_result_and_the_turn
                 .with_generation_limits(GenerationLimits::new(NonZeroU32::new(64), Vec::new())?),
         )
         .identity_sources(
-            Arc::new(SystemClock),
+            Arc::new(review_clock()),
             Arc::new(SequenceIdGenerator::new(
                 (100_u128..=400).map(Uuid::from_u128),
             )?),
@@ -1686,7 +1692,7 @@ async fn an_in_band_gateway_overload_is_replayed_for_the_turn() -> TestResult {
                     GenerationLimits::new(NonZeroU32::new(64), Vec::new())?,
                 ))
                 .identity_sources(
-                    Arc::new(SystemClock),
+                    Arc::new(review_clock()),
                     Arc::new(SequenceIdGenerator::new(
                         (100_u128..=400).map(Uuid::from_u128),
                     )?),
@@ -1732,7 +1738,7 @@ async fn a_stream_cut_after_a_local_tool_call_delta_is_replayed() -> TestResult 
                 .with_generation_limits(GenerationLimits::new(NonZeroU32::new(64), Vec::new())?),
         )
         .identity_sources(
-            Arc::new(SystemClock),
+            Arc::new(review_clock()),
             Arc::new(SequenceIdGenerator::new(
                 (100_u128..=400).map(Uuid::from_u128),
             )?),
@@ -1807,7 +1813,7 @@ async fn chat_replay_wait_gets_a_fresh_generation_head_budget() -> TestResult {
                 .with_generation_limits(GenerationLimits::new(NonZeroU32::new(64), Vec::new())?),
         )
         .identity_sources(
-            Arc::new(SystemClock),
+            Arc::new(review_clock()),
             Arc::new(SequenceIdGenerator::new(
                 (100_u128..=400).map(Uuid::from_u128),
             )?),
@@ -1885,7 +1891,7 @@ async fn an_in_band_401_is_post_acceptance_and_never_redispatched() -> TestResul
                 .with_generation_limits(GenerationLimits::new(NonZeroU32::new(64), Vec::new())?),
         )
         .identity_sources(
-            Arc::new(SystemClock),
+            Arc::new(review_clock()),
             Arc::new(SequenceIdGenerator::new(
                 (100_u128..=400).map(Uuid::from_u128),
             )?),
@@ -1960,7 +1966,7 @@ async fn a_pre_stream_gateway_refusal_is_definite_and_keeps_the_session() -> Tes
                     GenerationLimits::new(NonZeroU32::new(64), Vec::new())?,
                 ))
                 .identity_sources(
-                    Arc::new(SystemClock),
+                    Arc::new(review_clock()),
                     Arc::new(SequenceIdGenerator::new(
                         (100_u128..=400).map(Uuid::from_u128),
                     )?),
@@ -2018,7 +2024,7 @@ async fn first_turn_error(
                 .with_generation_limits(GenerationLimits::new(NonZeroU32::new(64), Vec::new())?),
         )
         .identity_sources(
-            Arc::new(SystemClock),
+            Arc::new(review_clock()),
             Arc::new(SequenceIdGenerator::new(
                 (100_u128..=400).map(Uuid::from_u128),
             )?),
@@ -2125,7 +2131,7 @@ async fn a_refused_connection_is_retried_and_the_turn_completes() -> TestResult 
                 .with_generation_limits(GenerationLimits::new(NonZeroU32::new(64), Vec::new())?),
         )
         .identity_sources(
-            Arc::new(SystemClock),
+            Arc::new(review_clock()),
             Arc::new(SequenceIdGenerator::new(
                 (100_u128..=400).map(Uuid::from_u128),
             )?),
@@ -2176,7 +2182,7 @@ async fn injected_stream_faults_are_replayed_and_the_turn_completes() -> TestRes
                     GenerationLimits::new(NonZeroU32::new(64), Vec::new())?,
                 ))
                 .identity_sources(
-                    Arc::new(SystemClock),
+                    Arc::new(review_clock()),
                     Arc::new(SequenceIdGenerator::new(
                         (100_u128..=400).map(Uuid::from_u128),
                     )?),
@@ -2236,7 +2242,7 @@ async fn chat_terminal_retry_advice_and_quota_bodies_never_replay() -> TestResul
                     GenerationLimits::new(NonZeroU32::new(64), Vec::new())?,
                 ))
                 .identity_sources(
-                    Arc::new(SystemClock),
+                    Arc::new(review_clock()),
                     Arc::new(SequenceIdGenerator::new(
                         (100_u128..=400).map(Uuid::from_u128),
                     )?),
@@ -2289,7 +2295,7 @@ async fn chat_terminal_retry_advice_and_quota_on_success_heads_suppress_stream_r
                     GenerationLimits::new(NonZeroU32::new(64), Vec::new())?,
                 ))
                 .identity_sources(
-                    Arc::new(SystemClock),
+                    Arc::new(review_clock()),
                     Arc::new(SequenceIdGenerator::new(
                         (100_u128..=400).map(Uuid::from_u128),
                     )?),
@@ -2394,11 +2400,11 @@ async fn execute_workflow_with_retry_revocation(
     let model = configured.model();
     let authority = model
         .clone()
-        .revalidate_runtime_authority(SystemClock.now())
+        .revalidate_runtime_authority(review_clock().now())
         .await?;
     let prepared = model.prepare_call(
         plan,
-        ModelPreparationContext::new(authority, SystemClock.now()),
+        ModelPreparationContext::new(authority, review_clock().now()),
     )?;
     let mut stream = prepared
         .start(ModelCallContext::new(
@@ -2461,7 +2467,8 @@ async fn workflow_unsent_retry_revalidates_authorization_on_every_wire() -> Test
                 source.clone(),
                 OpenRouterOrigin::new(origin)?,
                 plakous_openrouter::OpenRouterRetentionPolicy::strict(),
-            )?;
+            )?
+            .with_clock(Arc::new(review_clock()));
             let evidence = route
                 .discover_chat_model(
                     &client,
@@ -2564,4 +2571,15 @@ async fn workflow_unsent_retry_revalidates_authorization_on_every_wire() -> Test
         }
     }
     Ok(())
+}
+
+#[allow(clippy::expect_used, reason = "fixed review-window fixture")]
+fn review_clock() -> plakous_model::FixedClock {
+    plakous_model::FixedClock::new(
+        Timestamp::new(
+            plakous_openrouter::OPENROUTER_CHAT_REVIEW_EXPIRES_AT - 30 * 86_400 + 60,
+            0,
+        )
+        .expect("review time"),
+    )
 }

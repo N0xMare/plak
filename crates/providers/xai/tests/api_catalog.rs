@@ -72,7 +72,13 @@ fn every_catalog_effort_constructs_on_the_xai_platform_route() {
                         Arc::new(Source),
                         NonZeroU64::new(200_000).unwrap(),
                         selection,
-                        Arc::new(FixedClock::new(Timestamp::new(1_789_344_060, 0).unwrap())),
+                        Arc::new(FixedClock::new(
+                            Timestamp::new(
+                                XAI_PLATFORM_REVIEW_EXPIRES_AT_UNIX_SECONDS - 90 * 86_400 + 60,
+                                0,
+                            )
+                            .unwrap(),
+                        )),
                     )
                 });
             if let Err(error) = built {
@@ -122,7 +128,13 @@ fn an_envelope_over_the_shared_context_is_refused() {
                 Arc::new(Source),
                 NonZeroU64::new(input).unwrap(),
                 selection,
-                Arc::new(FixedClock::new(Timestamp::new(1_789_344_060, 0).unwrap())),
+                Arc::new(FixedClock::new(
+                    Timestamp::new(
+                        XAI_PLATFORM_REVIEW_EXPIRES_AT_UNIX_SECONDS - 90 * 86_400 + 60,
+                        0,
+                    )
+                    .unwrap(),
+                )),
             )
         });
         assert_eq!(
@@ -139,7 +151,13 @@ fn an_envelope_over_the_shared_context_is_refused() {
             Arc::new(Source),
             NonZeroU64::new(1).unwrap(),
             selection,
-            Arc::new(FixedClock::new(Timestamp::new(1_789_344_060, 0).unwrap())),
+            Arc::new(FixedClock::new(
+                Timestamp::new(
+                    XAI_PLATFORM_REVIEW_EXPIRES_AT_UNIX_SECONDS - 90 * 86_400 + 60,
+                    0,
+                )
+                .unwrap(),
+            )),
         )
     });
     assert!(matches!(built, Err(XaiPlatformBuildError::Configuration)));

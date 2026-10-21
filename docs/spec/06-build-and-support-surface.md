@@ -390,6 +390,12 @@ the checker's approved-symbol inventory, without exposing private runtime author
 Hosted usage also names the facade's existing `openrouter::OpenRouterKeyUsageError`
 to distinguish HTTP 401 and 403 and attach product-supplied safe key-source labels
 and remedies; the error is enrolled in the same inventory.
+
+API and gateway agent construction pair an explicit clock with the supported
+`model::SystemIdGenerator`. The provider facade expiry constants expose
+read-only compiled review metadata, never credential or runtime authority.
+Both are pinned by the external facade inventory fixture and permitted by the
+checker for their host/product consumers.
 The facade reexports `openrouter::OPENROUTER_CHAT_PROTOCOL_ID`,
 `openrouter::OPENROUTER_RESPONSES_PROTOCOL_ID`, and
 `openrouter::OPENROUTER_MESSAGES_PROTOCOL_ID`; hosted admission uses these

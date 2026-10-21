@@ -1,4 +1,11 @@
 pub fn surface_is_nameable() {
+    let review_expiries: [u64; 4] = [
+        plakous::openai::OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS,
+        plakous::xai::XAI_PLATFORM_REVIEW_EXPIRES_AT_UNIX_SECONDS,
+        plakous::openrouter::OPENROUTER_CHAT_REVIEW_EXPIRES_AT,
+        plakous::anthropic::ANTHROPIC_PLATFORM_ADMISSION_EXPIRES_AT_UNIX_SECONDS,
+    ];
+    assert!(review_expiries.into_iter().all(|expiry| expiry > 0));
     use plakous::anthropic::{AnthropicMessagesDialect, AnthropicPlatformModelConfig};
     use plakous::openai::{CodexSubscriptionRouteConfig, OpenAiLanguageModel};
     use plakous::openrouter::{OpenRouterChatClient, OpenRouterRetentionPolicy};

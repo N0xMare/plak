@@ -29,7 +29,11 @@ fn route(retention: OpenRouterRetentionPolicy) -> TestResult<OpenRouterChatRoute
         OpenRouterOrigin::new("https://127.0.0.1:18443")?,
         retention,
     )?
-    .with_plak_attribution()?)
+    .with_plak_attribution()?
+    .with_clock(Arc::new(plakous_model::FixedClock::new(Timestamp::new(
+        crate::chat::OPENROUTER_CHAT_REVIEWED_AT + 60,
+        0,
+    )?))))
 }
 
 fn facts(efforts: &[&str], default_enabled: bool, mandatory: bool) -> OpenRouterReasoningFacts {
@@ -47,7 +51,7 @@ fn evidence(
     reasoning: Option<OpenRouterReasoningFacts>,
 ) -> TestResult<OpenRouterChatModelEvidence> {
     let parameters = BTreeSet::from(["max_tokens", "reasoning"].map(str::to_owned));
-    let now = SystemClock.now();
+    let now = route.clock.now();
     Ok(OpenRouterChatModelEvidence::from_authenticated_discovery(
         ModelId::new("vendor/model")?,
         route.identity(),
