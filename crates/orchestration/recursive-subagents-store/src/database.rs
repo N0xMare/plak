@@ -390,13 +390,6 @@ impl SubagentsDatabase {
                 "tree store schema fingerprint does not match its exact revision".to_owned(),
             );
         }
-        let integrity: String = self
-            .connection
-            .query_row("PRAGMA integrity_check(1)", [], |row| row.get(0))
-            .map_err(|_| "could not inspect tree store integrity".to_owned())?;
-        if integrity != "ok" {
-            return Err("tree store integrity check failed".to_owned());
-        }
         Ok(())
     }
 }

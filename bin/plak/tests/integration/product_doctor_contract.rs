@@ -564,3 +564,107 @@ fn oauth_doctor_reports_the_same_verdict_as_status() {
     assert_eq!(grok.severity, Severity::Error);
     assert!(grok.detail.contains("Unsafe storage"), "{}", grok.detail);
 }
+
+#[test]
+fn state_database_corruption_is_an_error_with_a_remedy() {
+    use plakous_recursive_subagents_store::SCHEMA_VERSION;
+    use plakous_recursive_subagents_store::database::SubagentsDatabase;
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("subagents.sqlite3");
+    drop(SubagentsDatabase::open(&path).unwrap());
+    assert_eq!(
+        product_doctor::inspect_state_database(&path, SCHEMA_VERSION),
+        DatabaseStatus::Available
+    );
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection.execute_batch("PRAGMA foreign_keys=OFF; INSERT INTO agent_feed_cursors VALUES ('missing','missing',0);").unwrap();
+    drop(connection);
+    let before = fs::read(&path).unwrap();
+    let status = product_doctor::inspect_state_database(&path, SCHEMA_VERSION);
+    assert!(matches!(status, DatabaseStatus::Corrupt(_)));
+    assert_eq!(fs::read(&path).unwrap(), before);
+    assert!(SubagentsDatabase::open(&path).is_ok());
+    for kind in [CheckKind::ProductDatabase, CheckKind::SubagentsDatabase] {
+        let fixture = TempDir::new().unwrap();
+        let mut inputs = input(&fixture);
+        if kind == CheckKind::ProductDatabase {
+            inputs.product_database = status.clone();
+        } else {
+            inputs.subagents_database = status.clone();
+        }
+        let report = diagnose(inputs);
+        let check = report
+            .checks
+            .iter()
+            .find(|check| check.kind == kind)
+            .unwrap();
+        assert_eq!(check.severity, Severity::Error);
+        assert_eq!(check.result, "corrupt");
+        assert!(check.remediation.is_some());
+    }
+}
+
+#[test]
+fn doctor_detects_index_desynchronization_that_quick_check_misses() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("product.sqlite3");
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection.execute_batch("PRAGMA user_version=1; CREATE TABLE entries(value TEXT); CREATE INDEX entries_value ON entries(value); INSERT INTO entries VALUES ('indexed');").unwrap();
+    let page_size: i64 = connection
+        .query_row("PRAGMA page_size", [], |row| row.get(0))
+        .unwrap();
+    let root: i64 = connection
+        .query_row(
+            "SELECT rootpage FROM sqlite_schema WHERE name='entries_value'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let page_size = usize::try_from(page_size).unwrap();
+    let root = usize::try_from(root).unwrap();
+    drop(connection);
+    let mut bytes = fs::read(&path).unwrap();
+    let page = &mut bytes[(root - 1) * page_size..root * page_size];
+    // Preserve valid structure and entry counts, but desynchronize the indexed value.
+    let value = page
+        .windows(b"indexed".len())
+        .position(|bytes| bytes == b"indexed")
+        .unwrap();
+    page[value] = b'j';
+    fs::write(&path, bytes).unwrap();
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    let quick: String = connection
+        .query_row("PRAGMA quick_check(1)", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(quick, "ok");
+    drop(connection);
+    assert!(matches!(
+        product_doctor::inspect_state_database(&path, 1),
+        DatabaseStatus::Corrupt(_)
+    ));
+}
+
+#[test]
+fn doctor_reports_non_database_bytes_as_corrupt_and_lock_contention_as_unavailable() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("product.sqlite3");
+    fs::write(&path, b"not a SQLite database").unwrap();
+    assert!(matches!(
+        product_doctor::inspect_state_database(&path, 1),
+        DatabaseStatus::Corrupt(_)
+    ));
+    fs::remove_file(&path).unwrap();
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute_batch("PRAGMA user_version=1; CREATE TABLE entries(value TEXT); BEGIN EXCLUSIVE;")
+        .unwrap();
+    assert!(matches!(
+        product_doctor::inspect_state_database(&path, 1),
+        DatabaseStatus::Unavailable(_)
+    ));
+    connection.execute_batch("ROLLBACK;").unwrap();
+    assert_eq!(
+        product_doctor::inspect_state_database(&path, 1),
+        DatabaseStatus::Available
+    );
+}

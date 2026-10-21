@@ -163,6 +163,7 @@ pub enum DatabaseStatus {
     Available,
     /// Written under a schema this build does not read.
     Incompatible,
+    Corrupt(String),
     Unavailable(String),
 }
 
@@ -575,8 +576,7 @@ pub fn inspect_config(path: &Path, parse: impl FnOnce(&str) -> Result<(), String
     }
 }
 
-/// Reads a product or tree database's schema version without opening it for
-/// writing. A missing or empty file is `Missing`.
+/// Checks a product or tree database's version, pages and foreign keys read-only. A missing or empty file is `Missing`.
 pub fn inspect_state_database(path: &Path, current: i64) -> DatabaseStatus {
     use rusqlite::{Connection, OpenFlags};
 
@@ -588,16 +588,47 @@ pub fn inspect_state_database(path: &Path, current: i64) -> DatabaseStatus {
         Ok(metadata) if metadata.file_type().is_file() => {}
         Ok(_) => return DatabaseStatus::Unavailable("not a regular file".to_owned()),
     }
-    let version = Connection::open_with_flags(
+    let connection = match Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-    )
-    .and_then(|connection| connection.query_row("PRAGMA user_version", [], |row| row.get(0)));
-    match version {
-        Ok(0) => DatabaseStatus::Missing,
-        Ok(version) if version == current => DatabaseStatus::Available,
-        Ok(_) => DatabaseStatus::Incompatible,
-        Err(error) => DatabaseStatus::Unavailable(error.to_string()),
+    ) {
+        Ok(connection) => connection,
+        Err(error) => return state_database_error(error),
+    };
+    if let Err(error) = connection.busy_timeout(std::time::Duration::from_millis(250)) {
+        return state_database_error(error);
+    }
+    match connection.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)) {
+        Ok(0) => return DatabaseStatus::Missing,
+        Ok(version) if version == current => {}
+        Ok(_) => return DatabaseStatus::Incompatible,
+        Err(error) => return state_database_error(error),
+    }
+    let checks = (|| -> rusqlite::Result<Option<String>> {
+        let integrity: String =
+            connection.query_row("PRAGMA integrity_check(1)", [], |row| row.get(0))?;
+        if integrity != "ok" {
+            return Ok(Some(integrity));
+        }
+        let mut statement = connection.prepare("PRAGMA foreign_key_check")?;
+        if statement.query([])?.next()?.is_some() {
+            return Ok(Some("foreign key check failed".to_owned()));
+        }
+        Ok(None)
+    })();
+    match checks {
+        Ok(None) => DatabaseStatus::Available,
+        Ok(Some(reason)) => DatabaseStatus::Corrupt(reason),
+        Err(error) => state_database_error(error),
+    }
+}
+
+fn state_database_error(error: rusqlite::Error) -> DatabaseStatus {
+    match error.sqlite_error_code() {
+        Some(rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase) => {
+            DatabaseStatus::Corrupt(error.to_string())
+        }
+        _ => DatabaseStatus::Unavailable(error.to_string()),
     }
 }
 
@@ -1150,6 +1181,14 @@ fn database_check(kind: CheckKind, path: &Path, status: DatabaseStatus) -> Docto
             "incompatible",
             path.display().to_string(),
             Some("written by an incompatible plak build; move it aside to start fresh"),
+        ),
+        DatabaseStatus::Corrupt(error) => DoctorCheck::new(
+            kind,
+            "storage",
+            Severity::Error,
+            "corrupt",
+            error,
+            Some("restore the database from a trusted backup or move it aside to start fresh"),
         ),
         DatabaseStatus::Unavailable(error) => DoctorCheck::new(
             kind,

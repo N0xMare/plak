@@ -5788,6 +5788,14 @@ the result `missing` and the remedy that state is created by the first stateful
 command (for the config file, `plak config init`). Doctor reads the configured
 locations (`PLAK_HOME`, `XDG_STATE_HOME`) without creating them.
 
+The product and subagents database rows run read-only `PRAGMA integrity_check(1)`
+and `PRAGMA foreign_key_check`. A failed check is `ERROR corrupt`, with a remedy
+to restore a trusted backup or move the database aside to start fresh. Ordinary
+store open checks version, exact shape and fingerprint, not integrity
+scans. Doctor uses a bounded busy timeout; only SQLite corruption and
+not-a-database errors are `corrupt`, while other query failures are
+`unavailable`. Runtime writer admission still validates its accounting counters.
+
 Twenty-one checks are always emitted, in a fixed order, grouped as product,
 storage, config, environment, terminal, composition, provider, and OAuth:
 version; the home; the config file; the product and runtime databases; the
@@ -5816,7 +5824,7 @@ spawn is refused); and the three OAuth verticals.
 Each row prints a check name, a severity of `OK`, `WARNING`, or `ERROR`, a
 detail that leads with a closed result token — `available`, `missing`,
 `unavailable`, `unsafe type`, `permissions`, `valid`, `invalid`, `unreadable`,
-`incompatible`, `terminal`, `not a terminal`, and the provider- and
+`incompatible`, `corrupt`, `terminal`, `not a terminal`, and the provider- and
 template-specific words — and a remedy, or `—` where none applies. Every remedy
 is a command or an action the operator can actually take, and the composition
 row names the two environment variables that locate the out-of-process engines:

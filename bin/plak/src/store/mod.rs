@@ -1368,22 +1368,6 @@ fn validate_schema_revision(
             "product store schema fingerprint does not match its exact revision".to_owned(),
         );
     }
-    let integrity: String = connection
-        .query_row("PRAGMA integrity_check(1)", [], |row| row.get(0))
-        .map_err(|_| "could not inspect product store integrity".to_owned())?;
-    if integrity != "ok" {
-        return Err("product store integrity check failed".to_owned());
-    }
-    if connection
-        .query_row("SELECT 1 FROM pragma_foreign_key_check LIMIT 1", [], |_| {
-            Ok(())
-        })
-        .optional()
-        .map_err(|_| "could not inspect product store foreign keys".to_owned())?
-        .is_some()
-    {
-        return Err("product store foreign key check failed".to_owned());
-    }
     Ok(())
 }
 
@@ -1500,6 +1484,53 @@ mod tests {
         Delivery, SessionViews, Submission, SubmissionKind, ViewWrites,
     };
     use tempfile::tempdir;
+
+    #[test]
+    fn doctor_reports_foreign_key_violation_but_open_admits_schema() {
+        let root = tempdir().unwrap();
+        let paths = PlakPaths::explicit(root.path().join("home"));
+        drop(ProductStore::open(&paths).unwrap());
+        let path = product_sqlite_path(&paths).unwrap();
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "PRAGMA foreign_keys=OFF; INSERT INTO prompt_history VALUES ('missing',0,'test');",
+            )
+            .unwrap();
+        drop(connection);
+        assert!(ProductStore::open(&paths).is_ok());
+        assert!(matches!(
+            crate::product_doctor::inspect_state_database(&path, SCHEMA_VERSION),
+            crate::product_doctor::DatabaseStatus::Corrupt(_)
+        ));
+    }
+
+    #[test]
+    fn doctor_reports_corrupt_pages_and_store_open_returns_an_error() {
+        use plakous_recursive_subagents_store::database::SubagentsDatabase;
+        let root = tempdir().unwrap();
+        let paths = PlakPaths::explicit(root.path().join("home"));
+        drop(ProductStore::open(&paths).unwrap());
+        let product = product_sqlite_path(&paths).unwrap();
+        let tree = root.path().join("subagents.sqlite3");
+        drop(SubagentsDatabase::open(&tree).unwrap());
+        for (path, version) in [
+            (&product, SCHEMA_VERSION),
+            (&tree, plakous_recursive_subagents_store::SCHEMA_VERSION),
+        ] {
+            let mut bytes = std::fs::read(path).unwrap();
+            // Damage the sqlite_schema b-tree, leaving the database header intact.
+            bytes[100] = 0xff;
+            std::fs::write(path, bytes).unwrap();
+            let status = crate::product_doctor::inspect_state_database(path, version);
+            assert!(
+                matches!(status, crate::product_doctor::DatabaseStatus::Corrupt(_)),
+                "{status:?}"
+            );
+        }
+        assert!(ProductStore::open(&paths).is_err());
+        assert!(SubagentsDatabase::open(&tree).is_err());
+    }
 
     #[cfg(feature = "test-hooks")]
     #[test]

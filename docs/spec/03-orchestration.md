@@ -2293,6 +2293,11 @@ fingerprint**, not the version integer alone, so a store written by an earlier
 build of the same version number is refused too. The refusal message still
 reads as an ordinary version mismatch rather than naming the fingerprint drift.
 
+Ordinary tree-store open validates version, exact shape and DDL
+fingerprint, without scanning page integrity or foreign keys. Plak doctor owns
+the read-only integrity and foreign-key diagnostics (chapter 02 §7.3); writes
+still enforce foreign keys.
+
 ### 14.1 Reopen
 
 A pending child Resume is re-derived from its immutable decision and the exact
