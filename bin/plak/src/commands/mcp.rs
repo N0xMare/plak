@@ -381,7 +381,7 @@ fn show(paths: &PlakPaths, id: &str) -> CliResult<String> {
 }
 
 /// Text a server chose (tool names, refusal notices), made safe to print.
-fn shown(text: &str) -> String {
+pub(super) fn shown(text: &str) -> String {
     crate::cli_output::safe_terminal_text(text, 512)
 }
 

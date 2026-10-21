@@ -128,6 +128,7 @@ impl McpOAuthSettings {
     }
 
     pub(crate) fn login_remedy(&self, scope: Option<&str>) -> String {
+        let scope = scope.filter(|scope| plakous_auth::oauth_workflow::valid_scope_list(scope));
         match (&self.login_remedy, scope) {
             (Some(remedy), scope) => remedy(scope),
             (None, Some(scope)) => format!("log in to it again with scope \"{scope}\""),

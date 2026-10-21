@@ -827,10 +827,14 @@ leaves no credential and no login-recovery marker.
 
 MCP server logins follow the same surface rules. `plak mcp login <id>` is
 CLI-only and never started by an agent or a tool: an expired, revoked or
-under-scoped login is a tool failure naming the command. Locally it binds the
+under-scoped login is a tool failure naming the command. Scope ingestion uses
+the conservative RFC 6749 token alphabet (letters, digits and `._:/+-`);
+remedy commands single-quote validated scope lists and omit unsafe scopes.
+Login output uses the terminal-safe display path. Locally it binds the
 loopback callback port (a configured one, else ephemeral) and completes on
 the callback, checked against the redirect it sent exactly as above. `--remote`
-binds nothing: it runs the device grant only when the authorization server
+binds and releases a port transiently to choose an ephemeral redirect, but
+keeps no listener: it runs the device grant only when the authorization server
 advertises one, and otherwise, or when that request is refused before a code
 is shown, takes the pasted callback URL under the paste rules above. A local
 login over SSH is refused with the hint to re-run with `--remote`. A device

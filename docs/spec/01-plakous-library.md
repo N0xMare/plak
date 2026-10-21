@@ -4976,10 +4976,11 @@ endpoint. When its 401 carries a `WWW-Authenticate` Bearer challenge with
 `resource_metadata`, the client fetches that URL; otherwise it tries
 `/.well-known/oauth-protected-resource<path>` and then
 `/.well-known/oauth-protected-resource` on the endpoint's origin, in that
-order. The protected-resource metadata's `resource` MUST equal the canonical
-server URI or be a same-origin prefix of it ending on a path-segment boundary,
-and its `authorization_servers` MUST name one; the pinned issuer is used and
-must be listed, else the first listed. Authorization-server metadata is
+order. The protected-resource metadata's `resource` MUST equal the requested
+server URI byte-for-byte, not a broader same-origin prefix.
+The published value is sent byte-for-byte as `resource=` (including a bare
+trailing slash), and its `authorization_servers` MUST name one; the pinned
+issuer is used and must be listed, else the first listed. Authorization-server metadata is
 fetched from the RFC 8414 URL and then the OpenID Connect discovery URLs, in
 the order the MCP specification gives for issuers with and without a path. A
 document whose `issuer` is not identical to the issuer the URL was built from
@@ -5004,14 +5005,20 @@ and kept, with any secret it returned, in that login's credential payload.
 *Authorization.* Authorization code with PKCE S256 and a random `state`;
 `resource=` carries the resource value the metadata confirmed, on both the
 authorize and the token request. The issuer is recorded with the verifier
-before the browser opens. The callback's `iss` is compared to it by simple
+before the browser opens. Callback `state` is compared with plakous-auth's
+bounded constant-time verifier. The callback's `iss` is compared to it by simple
 string comparison when present, and its absence refuses the response when the
 metadata sets `authorization_response_iss_parameter_supported`; on a mismatch
 the response, error fields included, is discarded and no token endpoint is
 contacted. The requested scope is the login's explicit scope, else the
 challenge's `scope`, else the resource metadata's `scopes_supported`, else
 none, united with the scope the login it replaces requested; `offline_access`
-is added when the authorization server lists it. The redirect URI is
+is added when the authorization server lists it. Scope tokens at every input
+(challenge, metadata and explicit scope) are restricted to RFC 6749 tokens
+using letters, digits and `._:/+-`; unsafe metadata tokens are dropped and
+unsafe explicit scopes and challenges are refused. Step-up commands use POSIX
+single quotes only for validated scope lists; otherwise they omit scopes.
+The redirect URI is
 `http://127.0.0.1:<port>/callback`. A local login binds the configured port,
 else an ephemeral one, and completes on the loopback callback, checked as
 chapter 04 §3.6 states. A
@@ -5116,7 +5123,10 @@ the result image bounds. These are embedder and operator operations and work
 whatever the definition says. A definition with resources enabled gets one
 more frozen tool at bind, `mcp__<server>__read_resource` (the exposed-name
 rule applied to `read_resource`). Every selection that reaches the server
-includes it; the allowlist, which names server tools, does not apply to it.
+includes it, including narrowed `mcp:<id>/<tool>` named selections;
+the allowlist, which names server tools, does not apply to it. Enabling
+resources therefore grants reads to all templates that reach that server,
+not only templates that explicitly name `read_resource`.
 The bind refuses when the server does not advertise the `resources`
 capability (`McpLease::advertises_resources` reports it), and when a selected server tool exposes under the same name,
 naming both. Its description and its closed input schema, one `uri` string of

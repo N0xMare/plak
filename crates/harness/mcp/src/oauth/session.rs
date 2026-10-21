@@ -167,6 +167,13 @@ impl OAuthSession {
             .ok()
             .and_then(|store| self.ready(&store).ok())
             .and_then(|(_, stored)| stored.scope.clone());
+        if [stored.as_deref(), challenged]
+            .into_iter()
+            .flatten()
+            .any(|scope| !plakous_auth::oauth_workflow::valid_scope_list(scope))
+        {
+            return self.refusal("needs additional scope", None);
+        }
         let scope = union_scopes([stored.as_deref(), challenged]);
         let needed = scope.as_deref().map_or_else(
             || "needs more scope".to_owned(),

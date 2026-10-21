@@ -340,11 +340,12 @@ impl OAuthGate {
         if let Some(required) = state.required_scope.clone()
             && !scope.split(' ').any(|granted| granted == required)
         {
+            let quoted = required.replace('\\', "\\\\").replace('"', "\\\"");
             return Err(Reply {
                 status: 403,
                 headers: vec![(
                     "www-authenticate",
-                    format!("Bearer error=\"insufficient_scope\", scope=\"{required}\""),
+                    format!("Bearer error=\"insufficient_scope\", scope=\"{quoted}\""),
                 )],
                 body: String::new(),
             });

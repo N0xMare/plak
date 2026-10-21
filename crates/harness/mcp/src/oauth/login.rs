@@ -86,14 +86,14 @@ impl McpLoginOptions {
     /// # Errors
     ///
     /// Refuses an empty scope, one over 1 KiB, or one with characters
-    /// outside visible ASCII and spaces.
+    /// outside the conservative scope-token alphabet.
     pub fn with_scope(mut self, scope: &str) -> Result<Self, McpError> {
         if scope.trim().is_empty()
             || scope.len() > MAX_SCOPE_BYTES
-            || !scope.bytes().all(|byte| (0x20..=0x7e).contains(&byte))
+            || !plakous_auth::oauth_workflow::valid_scope_list(scope)
         {
             return Err(authorization(
-                "an oauth scope is 1 to 1024 bytes of visible ASCII and spaces",
+                "an oauth scope is 1 to 1024 bytes of space-separated tokens using letters, digits and ._:/+-",
             ));
         }
         self.scope = Some(scope.split_whitespace().collect::<Vec<_>>().join(" "));
@@ -186,7 +186,7 @@ impl McpPool {
         let http = OAuthHttp::new(&self.http_client()?, endpoint.is_loopback())?;
         let (baseline, replaced_scope) = baseline(settings, &resource)?;
         let challenge = probe(&http, endpoint).await?;
-        let protected = protected_resource(&http, &server, &resource, &challenge).await?;
+        let protected = protected_resource(&http, &server, endpoint.url(), &challenge).await?;
         let issuer = match settings.issuer() {
             Some(pinned) => {
                 if !protected
@@ -964,12 +964,20 @@ fn accept_callback(
     .map_err(|_| refused())?;
     match outcome {
         OAuthCallbackOutcome::AuthorizationCode { code, state }
-            if state.as_str() == attempt.state.expose_secret() =>
+            if plakous_auth::verify_callback_state(
+                attempt.state.expose_secret(),
+                state.as_str(),
+            )
+            .is_ok() =>
         {
             Ok(code)
         }
         OAuthCallbackOutcome::ProviderError { state }
-            if state.as_str() == attempt.state.expose_secret() =>
+            if plakous_auth::verify_callback_state(
+                attempt.state.expose_secret(),
+                state.as_str(),
+            )
+            .is_ok() =>
         {
             Err(authorization("the authorization server refused the login"))
         }

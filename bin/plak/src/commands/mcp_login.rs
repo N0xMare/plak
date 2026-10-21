@@ -63,12 +63,20 @@ pub(crate) fn login(
         .block_on(McpPool::new().login(&spec, options))
         .map_err(failure)?;
     // What the login trusts, shown before the user approves anything.
-    writeln!(stderr, "{label}: authorization server {}", login.issuer())
-        .and_then(|()| match login.scope() {
-            Some(scope) => writeln!(stderr, "{label}: requesting scope \"{scope}\""),
-            None => writeln!(stderr, "{label}: requesting no scope"),
-        })
-        .map_err(|_| stderr_failed())?;
+    writeln!(
+        stderr,
+        "{label}: authorization server {}",
+        super::mcp::shown(login.issuer())
+    )
+    .and_then(|()| match login.scope() {
+        Some(scope) => writeln!(
+            stderr,
+            "{label}: requesting scope \"{}\"",
+            super::mcp::shown(scope)
+        ),
+        None => writeln!(stderr, "{label}: requesting no scope"),
+    })
+    .map_err(|_| stderr_failed())?;
     paths.ensure_mcp_login_dir(id).map_err(CliFailure::new)?;
     let status = if remote {
         match runtime.block_on(login.remote()).map_err(failure)? {
@@ -163,7 +171,12 @@ pub(crate) fn login(
             ))
         })?
     };
-    writeln!(stderr, "{label}: {}", logged_in(&status)).map_err(|_| stderr_failed())?;
+    writeln!(
+        stderr,
+        "{label}: {}",
+        super::mcp::shown(&logged_in(&status))
+    )
+    .map_err(|_| stderr_failed())?;
     Ok(ProcessOutcome::Success)
 }
 

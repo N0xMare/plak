@@ -72,7 +72,8 @@ pub fn parse_bearer_challenge(value: &str) -> Option<BearerChallenge> {
                 }
                 match name.as_str() {
                     "resource_metadata" => challenge.resource_metadata = Some(value),
-                    "scope" => challenge.scope = Some(value),
+                    "scope" if valid_scope_list(&value) => challenge.scope = Some(value),
+                    "scope" => return None,
                     "error" => challenge.error = Some(value),
                     _ => {}
                 }
@@ -226,7 +227,7 @@ pub fn protected_resource_metadata_urls(resource: &str) -> Result<Vec<String>, O
 /// The protected-resource metadata fields a client uses.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProtectedResourceMetadata {
-    /// The resource identifier the metadata confirmed, canonicalized: the
+    /// The resource identifier exactly as published by the metadata: the
     /// `resource=` value of every authorization and token request.
     pub resource: String,
     /// The authorization server issuers it lists, in order.
@@ -244,11 +245,11 @@ struct ProtectedResourceWire {
     scopes_supported: Vec<String>,
 }
 
-/// Parses protected-resource metadata for `canonical`.
+/// Parses protected-resource metadata for the exact requested resource URI.
 ///
-/// The metadata's `resource` must be `canonical` or a same-origin prefix of
-/// it ending on a path-segment boundary, and it must list an authorization
-/// server.
+/// The metadata's resource must exactly equal the requested identifier, not
+/// a broader prefix, and it must list an authorization server. The published
+/// value is retained byte-for-byte for resource indicators.
 ///
 /// # Errors
 ///
@@ -258,43 +259,25 @@ struct ProtectedResourceWire {
 /// [`OAuthWorkflowError::MissingMetadata`] without an authorization server.
 pub fn parse_protected_resource_metadata(
     body: &[u8],
-    canonical: &str,
+    resource_uri: &str,
 ) -> Result<ProtectedResourceMetadata, OAuthWorkflowError> {
     let wire: ProtectedResourceWire = decode_json_bounded(body, MAX_RESOURCE_OAUTH_RESPONSE_BYTES)?;
-    let resource =
-        canonical_resource_uri(&wire.resource).map_err(|_| OAuthWorkflowError::ResourceMismatch)?;
-    if !resource_covers(&resource, canonical) {
+    canonical_resource_uri(&wire.resource).map_err(|_| OAuthWorkflowError::ResourceMismatch)?;
+    if wire.resource != resource_uri {
         return Err(OAuthWorkflowError::ResourceMismatch);
     }
     if wire.authorization_servers.is_empty() {
         return Err(OAuthWorkflowError::MissingMetadata);
     }
     Ok(ProtectedResourceMetadata {
-        resource,
+        resource: wire.resource,
         authorization_servers: wire.authorization_servers,
-        scopes_supported: wire.scopes_supported,
+        scopes_supported: wire
+            .scopes_supported
+            .into_iter()
+            .filter(|scope| valid_scope_token(scope))
+            .collect(),
     })
-}
-
-/// Whether canonical resource `resource` names `canonical` or a same-origin
-/// path-segment prefix of it.
-fn resource_covers(resource: &str, canonical: &str) -> bool {
-    if resource == canonical {
-        return true;
-    }
-    let (Ok(prefix), Ok(full)) = (Url::parse(resource), Url::parse(canonical)) else {
-        return false;
-    };
-    if prefix.origin() != full.origin() {
-        return false;
-    }
-    let prefix_path = prefix.path().trim_end_matches('/');
-    let full_path = full.path();
-    prefix_path.is_empty()
-        || full_path == prefix_path
-        || full_path
-            .strip_prefix(prefix_path)
-            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 /// The authorization-server metadata URLs to try for `issuer`, in the MCP
@@ -407,7 +390,11 @@ pub fn parse_authorization_server_metadata(
         registration_endpoint: wire.registration_endpoint,
         revocation_endpoint: wire.revocation_endpoint,
         device_authorization_endpoint: wire.device_authorization_endpoint,
-        scopes_supported: wire.scopes_supported,
+        scopes_supported: wire
+            .scopes_supported
+            .into_iter()
+            .filter(|scope| valid_scope_token(scope))
+            .collect(),
         token_endpoint_auth_methods_supported: wire.token_endpoint_auth_methods_supported,
         authorization_response_iss_parameter_supported: wire
             .authorization_response_iss_parameter_supported,
@@ -663,7 +650,7 @@ pub fn parse_resource_token_response(
         access_token: SecretString::new(std::mem::take(&mut wire.access_token)),
         expires_in: wire.expires_in,
         refresh_token: wire.refresh_token.take().map(SecretString::new),
-        scope: wire.scope.take().filter(|scope| !scope.is_empty()),
+        scope: wire.scope.take().filter(|scope| valid_scope_list(scope)),
     })
 }
 
@@ -807,6 +794,20 @@ pub fn parse_dynamic_registration(body: &[u8]) -> Result<DynamicRegistration, OA
     })
 }
 
+/// Whether a scope list contains only RFC 6749 scope tokens in the
+/// conservative display alphabet (letters, digits and `._:/+-`).
+#[must_use]
+pub fn valid_scope_list(scope: &str) -> bool {
+    !scope.is_empty() && scope.split(' ').all(valid_scope_token)
+}
+
+fn valid_scope_token(token: &str) -> bool {
+    !token.is_empty()
+        && token.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'/' | b'+' | b'-')
+        })
+}
+
 /// The union of space-separated scope lists, each scope once, in first-seen
 /// order; `None` when empty.
 #[must_use]
@@ -828,6 +829,42 @@ pub fn union_scopes<'a>(scopes: impl IntoIterator<Item = Option<&'a str>>) -> Op
 )]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scope_ingestion_rejects_shell_and_control_characters() {
+        for hostile in [
+            "$(id)", "`id`", "a;id", "a'quote", "a\"quote", "a\x1b", "a\nb", "a\tb", "a\u{85}",
+        ] {
+            assert!(!valid_scope_list(hostile));
+            let quoted = hostile.replace('\\', "\\\\").replace('"', "\\\"");
+            let challenge = format!("Bearer error=\"insufficient_scope\", scope=\"{quoted}\"");
+            assert!(parse_bearer_challenge(&challenge).is_none());
+            let body = serde_json::json!({
+                "resource": "https://mcp.example.com/",
+                "authorization_servers": ["https://auth.example.com"],
+                "scopes_supported": ["files:read", hostile],
+            })
+            .to_string();
+            let prm =
+                parse_protected_resource_metadata(body.as_bytes(), "https://mcp.example.com/")
+                    .unwrap();
+            assert_eq!(prm.resource, "https://mcp.example.com/");
+            assert_eq!(prm.scopes_supported, ["files:read"]);
+            let body = serde_json::json!({
+                "issuer": "https://auth.example.com",
+                "authorization_endpoint": "https://auth.example.com/auth",
+                "token_endpoint": "https://auth.example.com/token",
+                "code_challenge_methods_supported": ["S256"],
+                "scopes_supported": ["offline_access", hostile],
+            })
+            .to_string();
+            let metadata =
+                parse_authorization_server_metadata(body.as_bytes(), "https://auth.example.com")
+                    .unwrap();
+            assert_eq!(metadata.scopes_supported, ["offline_access"]);
+        }
+        assert!(valid_scope_list("a._:/+-Z9 files:read"));
+    }
 
     #[test]
     fn bearer_challenges_are_found_among_others_and_quoted_values_unescape() {
@@ -918,7 +955,7 @@ mod tests {
     }
 
     #[test]
-    fn resource_metadata_must_name_this_resource_or_a_segment_prefix() {
+    fn resource_metadata_must_name_exactly_this_resource() {
         let metadata = |resource: &str| {
             parse_protected_resource_metadata(
                 serde_json::json!({
@@ -935,10 +972,10 @@ mod tests {
             Ok(String::from("https://mcp.example.com/v1/mcp"))
         );
         assert_eq!(
-            metadata("https://MCP.example.com/v1").map(|found| found.resource),
-            Ok(String::from("https://mcp.example.com/v1"))
+            metadata("https://MCP.example.com/v1/mcp").err(),
+            Some(OAuthWorkflowError::ResourceMismatch)
         );
-        assert!(metadata("https://mcp.example.com/").is_ok());
+        assert!(metadata("https://mcp.example.com/").is_err());
         for other in [
             "https://mcp.example.com/v1/mc",
             "https://mcp.example.com/v1/mcp/x",

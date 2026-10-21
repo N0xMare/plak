@@ -46,5 +46,5 @@ pub use resource::{
     parse_bearer_challenge, parse_device_authorization, parse_dynamic_registration,
     parse_protected_resource_metadata, parse_resource_token_response,
     protected_resource_metadata_urls, resource_refresh_form, resource_token_form, revocation_form,
-    take_issuer_parameter, union_scopes,
+    take_issuer_parameter, union_scopes, valid_scope_list,
 };

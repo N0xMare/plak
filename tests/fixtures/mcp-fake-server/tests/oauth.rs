@@ -61,7 +61,7 @@ impl Setup {
     fn settings(&self) -> McpOAuthSettings {
         McpOAuthSettings::new(self.home.path().join("remote").join("credential.json"))
             .with_login_remedy(Arc::new(|scope| match scope {
-                Some(scope) => format!("run login remote --scope \"{scope}\""),
+                Some(scope) => format!("run login remote --scope '{scope}'"),
                 None => "run login remote".to_owned(),
             }))
     }
@@ -238,20 +238,17 @@ async fn discovery_refuses_another_resource_and_a_server_without_pkce() -> TestR
     );
     assert!(no_pkce.gate.requests_to("/register").is_empty());
 
-    // A resource metadata naming a path-segment prefix of the server is
-    // accepted, and its value is the resource indicator.
+    // An origin-wide audience must not widen a path-specific server.
     let prefix = setup(OAuthConfig {
         resource: Some("/".to_owned()),
         ..OAuthConfig::default()
     })
     .await?;
-    let spec = prefix.spec(prefix.settings())?;
-    let pool = McpPool::new();
-    assert!(logged_in(&local_login(&pool, &spec).await?));
-    let indicator = prefix.fixture.url().trim_end_matches("/mcp").to_owned();
-    assert_eq!(
-        prefix.gate.requests_to("/token")[0].field("resource"),
-        Some(indicator.as_str())
+    assert!(
+        McpPool::new()
+            .login(&prefix.spec(prefix.settings())?, McpLoginOptions::new())
+            .await
+            .is_err()
     );
     Ok(())
 }
@@ -587,7 +584,7 @@ async fn insufficient_scope_names_the_step_up_login_and_nothing_runs() -> TestRe
     assert_eq!(
         refused.joined_text(),
         "mcp server remote needs scope \"mcp:tools offline_access mcp:admin\"; \
-         run login remote --scope \"mcp:tools offline_access mcp:admin\"; the call did not run"
+         run login remote --scope 'mcp:tools offline_access mcp:admin'; the call did not run"
     );
     assert_eq!(setup.calls.calls(), Vec::<String>::new());
     assert!(setup.refreshes().is_empty(), "a step-up is not a refresh");
@@ -664,5 +661,46 @@ async fn a_start_refuses_without_a_login_for_this_server() -> TestResult {
             .contains("has a login made for another URL, issuer or client"),
         "{refused}"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn hostile_scopes_never_reach_a_step_up_command() -> TestResult {
+    for hostile in ["$(id)", "`id`", "a;id", "a'quote", "a\"quote", "a\x1b"] {
+        assert!(McpLoginOptions::new().with_scope(hostile).is_err());
+        let metadata_setup = setup(OAuthConfig {
+            scopes_supported: vec![
+                "mcp:tools".to_owned(),
+                hostile.to_owned(),
+                "offline_access".to_owned(),
+            ],
+            ..OAuthConfig::default()
+        })
+        .await?;
+        let metadata_spec = metadata_setup.spec(metadata_setup.settings())?;
+        let login = McpPool::new()
+            .login(&metadata_spec, McpLoginOptions::new())
+            .await?;
+        assert_eq!(login.scope(), Some("mcp:tools offline_access"));
+        drop(login);
+        let setup = setup(OAuthConfig::default()).await?;
+        let spec = setup.spec(setup.settings())?;
+        let pool = McpPool::new();
+        local_login(&pool, &spec).await?;
+        let workspace = workspace()?;
+        let registry = registry(&pool, spec, &workspace).await?;
+        setup.gate.require_scope(Some(hostile));
+        let refused = echo(&registry, &workspace).await?;
+        assert_eq!(refused.kind(), ToolOutcomeKind::Failure);
+        assert!(
+            !refused.joined_text().contains(hostile),
+            "{}",
+            refused.joined_text()
+        );
+        assert!(!refused.joined_text().contains("--scope"));
+        assert_eq!(refused.joined_text().matches("run login remote").count(), 1);
+        assert_eq!(setup.calls.calls(), Vec::<String>::new());
+        pool.shutdown().await;
+    }
     Ok(())
 }

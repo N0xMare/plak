@@ -92,6 +92,10 @@ impl StoredLogin {
             || !bounded(&self.access_token)
             || !bounded(&self.token_endpoint)
             || self
+                .scope
+                .as_deref()
+                .is_some_and(|scope| !plakous_auth::oauth_workflow::valid_scope_list(scope))
+            || self
                 .refresh_token
                 .as_deref()
                 .is_some_and(|token| !bounded(token))

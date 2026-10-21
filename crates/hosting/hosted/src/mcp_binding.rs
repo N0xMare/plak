@@ -667,7 +667,7 @@ fn oauth_settings(
     let login = server.clone();
     let mut settings =
         McpOAuthSettings::new(store).with_login_remedy(Arc::new(move |scope| match scope {
-            Some(scope) => format!("remedy: plak mcp login {login} --scope \"{scope}\""),
+            Some(scope) => format!("remedy: plak mcp login {login} --scope '{scope}'"),
             None => format!("remedy: plak mcp login {login}"),
         }));
     if let Some(issuer) = &definition.oauth_issuer {

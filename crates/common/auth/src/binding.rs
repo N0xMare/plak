@@ -300,6 +300,19 @@ fn valid_token(value: &str, minimum: usize, maximum: usize) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~'))
 }
 
+/// Verifies an OAuth callback state in constant time over bounded buffers.
+///
+/// # Errors
+///
+/// Returns `CallbackMismatch` for empty, oversized or mismatched state.
+pub fn verify_callback_state(expected: &str, returned: &str) -> Result<(), BindingError> {
+    if constant_time_bounded_eq(expected.as_bytes(), returned.as_bytes()) & !expected.is_empty() {
+        Ok(())
+    } else {
+        Err(BindingError::CallbackMismatch)
+    }
+}
+
 fn constant_time_bounded_eq(expected: &[u8], returned: &[u8]) -> bool {
     let mut expected_padded = [0_u8; MAX_CALLBACK_VALUE_LENGTH];
     let mut returned_padded = [0_u8; MAX_CALLBACK_VALUE_LENGTH];
@@ -330,6 +343,17 @@ fn constant_time_bounded_eq(expected: &[u8], returned: &[u8]) -> bool {
     reason = "unit tests may assert with expect/unwrap"
 )]
 mod tests {
+    #[test]
+    fn callback_state_verification_is_bounded_and_exact() {
+        assert!(verify_callback_state("random-state", "random-state").is_ok());
+        for returned in ["", "random-stat", "random-state-extra", "wrong-state"] {
+            assert!(verify_callback_state("random-state", returned).is_err());
+        }
+        assert!(verify_callback_state("", "").is_err());
+        let oversized = "a".repeat(MAX_CALLBACK_VALUE_LENGTH + 1);
+        assert!(verify_callback_state(&oversized, &oversized).is_err());
+    }
+
     #[test]
     fn login_selection_epoch_has_one_encoding() {
         let first = generate_login_selection_epoch().unwrap();
