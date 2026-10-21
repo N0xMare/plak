@@ -5002,15 +5002,30 @@ itself is loopback; no proxy; no redirect (a 3xx at a well-known URL counts as
 absent there, anywhere else it fails the login); response bodies within
 256 KiB; each exchange within 30 s.
 
+Client secrets (pre-registered or dynamically issued) are sent only to token,
+device authorization and revocation endpoints advertised by the metadata fetched
+from the pinned or registering issuer's own well-known location whose `issuer`
+exactly matches that issuer. Split-origin endpoints are allowed, subject to the
+same transport policy. Secret-bearing refresh and revocation re-verify that the
+stored endpoint remains advertised; failed verification sends no secret.
+Logout then refuses without retiring the login and names local logout as the
+remedy (`plak mcp logout <id> --local`, which may leave the remote grant active).
+
 *Registration.* A pre-registered client is used when configured. Otherwise a
 Client ID Metadata Document client (its HTTPS document URL is the client id;
 `McpLoginOptions::with_client_id_metadata_document`) is used when the
 embedder supplies one and the authorization server sets
 `client_id_metadata_document_supported`. Otherwise the client registers
 dynamically at `registration_endpoint` as a `native` public client for exactly
-the redirect URI this login uses. With none of these the login refuses and
+the redirect URI this login uses. Registration requests `authorization_code`
+and `refresh_token`, plus `urn:ietf:params:oauth:grant-type:device_code` when
+this is a remote attempt and `device_authorization_endpoint` is present and
+admitted by transport policy. With none of these the login refuses and
 names the pre-registration settings. A dynamic registration is made per login
 and kept, with any secret it returned, in that login's credential payload.
+A secret returned by registration does not guarantee device-grant use: the
+device endpoint is rechecked against policy after registration and can still be
+skipped with the paste-back notice.
 
 *Authorization.* Authorization code with PKCE S256 and a random `state`;
 `resource=` carries the resource value the metadata confirmed, on both the
@@ -5036,8 +5051,10 @@ else an ephemeral one, and completes on the loopback callback, checked as
 chapter 04 §3.6 states. A
 remote login chooses its port the same way but keeps nothing bound: it runs
 the device grant (with `resource=`) when the authorization server advertises
-`device_authorization_endpoint`, falls back to paste-back when that request
-is refused before a code is shown, and otherwise is paste-back, which accepts
+`device_authorization_endpoint` and policy admits it, falls back to paste-back
+with a notice when policy skips an advertised endpoint or when that request
+is refused before a code is shown (with a one-line notice naming the
+paste-back fallback), and otherwise is paste-back, which accepts
 the full callback URL the browser was sent to.
 
 *Tokens.* A token response commits as a new Ready generation whose payload

@@ -285,10 +285,28 @@ impl McpPool {
         };
         let http = OAuthHttp::new(&self.http_client()?, endpoint.is_loopback())?;
         let secret = client_secret(settings, &stored)?;
+        let verified = if secret.is_some() {
+            let metadata = authorization_server(&http, spec.name(), &stored.issuer)
+                .await
+                .map_err(|error| {
+                    authorization(&format!(
+                        "{error}; the login was not retired; use local logout to retire it here"
+                    ))
+                })?;
+            if metadata.revocation_endpoint.as_deref() != Some(endpoint_url.as_str()) {
+                return Err(authorization(
+                    "the stored revocation endpoint is not in verified issuer metadata; the login was not retired; use local logout to retire it here",
+                ));
+            }
+            Some(metadata)
+        } else {
+            None
+        };
         let mut hooks = RevokeHooks {
             http: &http,
             fence,
             endpoint: endpoint_url,
+            verified,
             secret,
         };
         // A failed revocation never falls back to local retirement: the
@@ -386,7 +404,7 @@ impl McpLogin {
                 error,
             )
         })?;
-        let attempt = Attempt::start(&self.plan, port).await?;
+        let attempt = Attempt::start(&self.plan, port, false).await?;
         Ok(McpLocalLogin {
             plan: self.plan,
             listener,
@@ -407,9 +425,16 @@ impl McpLogin {
             Some(port) => port,
             None => ephemeral_port().await?,
         };
-        let attempt = Attempt::start(&self.plan, port).await?;
+        let attempt = Attempt::start(&self.plan, port, true).await?;
+        let mut device_refusal_status = None;
+        let device_skipped_by_policy = self
+            .plan
+            .metadata
+            .device_authorization_endpoint
+            .as_ref()
+            .is_some_and(|endpoint| !self.plan.http.admits(endpoint));
         if let Some(endpoint) = self.plan.metadata.device_authorization_endpoint.clone()
-            && self.plan.http.admits(&endpoint)
+            && !device_skipped_by_policy
         {
             let fields = device_authorization_form(
                 &attempt.client.id,
@@ -440,10 +465,13 @@ impl McpLogin {
                     answer.status.as_u16()
                 )));
             }
+            device_refusal_status = Some(answer.status.as_u16());
         }
         Ok(McpRemoteLogin::Paste(McpPasteLogin {
             plan: self.plan,
             attempt,
+            device_refusal_status,
+            device_skipped_by_policy,
         }))
     }
 }
@@ -598,6 +626,8 @@ impl McpDeviceLogin {
 pub struct McpPasteLogin {
     plan: Plan,
     attempt: Attempt,
+    device_refusal_status: Option<u16>,
+    device_skipped_by_policy: bool,
 }
 
 impl std::fmt::Debug for McpPasteLogin {
@@ -610,6 +640,20 @@ impl std::fmt::Debug for McpPasteLogin {
 }
 
 impl McpPasteLogin {
+    /// Whether an advertised device endpoint was skipped by transport or
+    /// client-secret metadata policy, without making a device request.
+    #[must_use]
+    pub fn device_skipped_by_policy(&self) -> bool {
+        self.device_skipped_by_policy
+    }
+
+    /// The device authorization refusal's HTTP status when this login fell
+    /// back to paste-back; absent when no device request was made.
+    #[must_use]
+    pub fn device_refusal_status(&self) -> Option<u16> {
+        self.device_refusal_status
+    }
+
     /// Returns the authorization URL to open in a browser.
     #[must_use]
     pub fn authorization_url(&self) -> &str {
@@ -664,9 +708,15 @@ impl RegisteredClient {
 }
 
 impl Attempt {
-    async fn start(plan: &Plan, port: u16) -> Result<Self, McpError> {
+    async fn start(plan: &Plan, port: u16, remote: bool) -> Result<Self, McpError> {
         let redirect_uri = format!("http://127.0.0.1:{port}/callback");
-        let client = register(plan, &redirect_uri).await?;
+        let device = remote
+            && plan
+                .metadata
+                .device_authorization_endpoint
+                .as_ref()
+                .is_some_and(|endpoint| plan.http.admits(endpoint));
+        let client = register(plan, &redirect_uri, device).await?;
         let pkce = PkceS256::generate().map_err(|_| authorization("randomness is unavailable"))?;
         let state = generate_oauth_correlation_token()
             .map_err(|_| authorization("randomness is unavailable"))?;
@@ -693,7 +743,11 @@ impl Attempt {
 /// The client a login uses: the pre-registered one, else a Client ID
 /// Metadata Document client the server supports, else a dynamic
 /// registration for exactly `redirect_uri`.
-async fn register(plan: &Plan, redirect_uri: &str) -> Result<RegisteredClient, McpError> {
+async fn register(
+    plan: &Plan,
+    redirect_uri: &str,
+    device: bool,
+) -> Result<RegisteredClient, McpError> {
     if let Some(client) = plan.settings.client() {
         let secret = client
             .secret
@@ -727,7 +781,7 @@ async fn register(plan: &Plan, redirect_uri: &str) -> Result<RegisteredClient, M
         .http
         .post_json(
             endpoint,
-            dynamic_registration_request(&plan.client_name, redirect_uri),
+            dynamic_registration_request(&plan.client_name, redirect_uri, device),
             HeaderMap::new(),
         )
         .await?;
@@ -949,7 +1003,7 @@ async fn protected_resource(
     )))
 }
 
-async fn authorization_server(
+pub(super) async fn authorization_server(
     http: &OAuthHttp,
     server: &McpServerName,
     issuer: &str,
@@ -1229,6 +1283,7 @@ struct RevokeHooks<'a> {
     http: &'a OAuthHttp,
     fence: CredentialFence,
     endpoint: String,
+    verified: Option<AuthorizationServerMetadata>,
     secret: Option<Zeroizing<Vec<u8>>>,
 }
 
@@ -1258,6 +1313,16 @@ impl ClaimedRevokeHooks for RevokeHooks<'_> {
             Some(token) => (token.as_str(), "refresh_token"),
             None => (stored.access_token.as_str(), "access_token"),
         };
+        if self.secret.is_some()
+            && !self.verified.as_ref().is_some_and(|metadata| {
+                metadata.issuer == stored.issuer
+                    && metadata.revocation_endpoint.as_deref() == Some(self.endpoint.as_str())
+            })
+        {
+            return Err(BuildRequestFailure::Restore(authorization(
+                "the revocation endpoint is not in verified issuer metadata",
+            )));
+        }
         let fields = revocation_form(token, hint, &stored.client_id);
         let method = if self.secret.is_some() {
             stored.token_endpoint_auth

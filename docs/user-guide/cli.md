@@ -251,7 +251,10 @@ plak mcp remove github
   call says a scope is missing. `--remote` is for a browser on another
   device, as with `plak login --remote`: when the authorization server offers
   the device grant you enter a one-time code there, otherwise you paste back
-  the URL the browser was sent to. Over SSH, `login` without `--remote` is
+  the URL the browser was sent to. A refused device request prints its HTTP
+  status and says it is falling back to paste-back. An advertised device endpoint
+  skipped by policy prints a policy-skip notice and uses paste-back without
+  sending a device request. Over SSH, `login` without `--remote` is
   refused with that hint. The login is stored under
   `<PLAK_HOME>/secrets/mcp-oauth/<id>/` and used only for that server's URL.
   A session never starts a login: when the login expires and cannot be

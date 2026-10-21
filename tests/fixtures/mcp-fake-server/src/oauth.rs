@@ -78,6 +78,12 @@ pub struct OAuthConfig {
     pub registration: bool,
     /// Whether the device grant is offered.
     pub device: bool,
+    /// Whether the device endpoint refuses even a registered device client.
+    pub refuse_device: bool,
+    /// Override the advertised device URL, for policy refusal tests.
+    pub device_endpoint: Option<String>,
+    /// Override the advertised revocation URL, for policy refusal tests.
+    pub revocation_endpoint: Option<String>,
     /// Whether revocation is offered.
     pub revocation: bool,
     /// `scopes_supported` of both documents.
@@ -105,6 +111,9 @@ impl Default for OAuthConfig {
             callback_issuer: CallbackIssuer::Correct,
             registration: true,
             device: false,
+            refuse_device: false,
+            device_endpoint: None,
+            revocation_endpoint: None,
             revocation: true,
             scopes_supported: vec!["mcp:tools".to_owned(), "offline_access".to_owned()],
             required_scope: None,
@@ -154,6 +163,7 @@ struct AuthState {
     access: HashMap<String, String>,
     refresh: HashMap<String, String>,
     device_polls: u32,
+    device_clients: std::collections::HashSet<String>,
     requests: Vec<AuthRequest>,
     required_scope: Option<String>,
     resource_requests: u32,
@@ -167,6 +177,8 @@ struct AuthState {
 pub struct OAuthGate {
     config: OAuthConfig,
     origin: OnceLock<String>,
+    endpoint_origin: Mutex<Option<String>>,
+    published_issuer: Mutex<Option<String>>,
     state: Mutex<AuthState>,
 }
 
@@ -212,6 +224,8 @@ impl OAuthGate {
         Self {
             config,
             origin: OnceLock::new(),
+            endpoint_origin: Mutex::new(None),
+            published_issuer: Mutex::new(None),
             state: Mutex::new(AuthState {
                 required_scope,
                 ..AuthState::default()
@@ -221,6 +235,22 @@ impl OAuthGate {
 
     pub(crate) fn set_origin(&self, origin: String) {
         let _ = self.origin.set(origin);
+    }
+
+    /// Advertise token, device and revocation endpoints on another listener.
+    pub fn advertise_endpoint_origin(&self, origin: String) {
+        *self
+            .endpoint_origin
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(origin);
+    }
+
+    /// Replace the metadata issuer to exercise re-verification on stored logins.
+    pub fn publish_issuer(&self, issuer: String) {
+        *self
+            .published_issuer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(issuer);
     }
 
     fn origin(&self) -> &str {
@@ -447,35 +477,35 @@ impl OAuthGate {
         let endpoint = path.strip_prefix(issuer_path.as_str()).unwrap_or(path);
         Some(match (method, endpoint) {
             ("GET", "/authorize") => self.authorize(&field),
-            ("POST", "/register") => {
-                let request: serde_json::Value = serde_json::from_slice(body).unwrap_or_default();
-                self.record(
-                    "POST",
-                    "/register-body",
-                    &[(
-                        "redirect_uris".to_owned(),
-                        request["redirect_uris"].to_string(),
-                    )],
-                    None,
-                );
-                let id = {
-                    let mut state = self.lock();
-                    state.counter += 1;
-                    format!("dyn-{}", state.counter)
-                };
-                Reply::json(201, &serde_json::json!({"client_id": id}))
-            }
+            ("POST", "/register") => self.register(body),
             ("POST", "/token") => self.token(&field, authorization),
-            ("POST", "/device") => Reply::json(
-                200,
-                &serde_json::json!({
-                    "device_code": "device-1",
-                    "user_code": "WDJB-MJHT",
-                    "verification_uri": format!("{}/device-verify", self.issuer()),
-                    "expires_in": 600,
-                    "interval": 1,
-                }),
-            ),
+            ("POST", "/device") => {
+                if self.config.refuse_device
+                    || !field("client_id").is_some_and(|id| {
+                        self.lock().device_clients.contains(&id)
+                            || self
+                                .config
+                                .confidential_client
+                                .as_ref()
+                                .is_some_and(|(client, _)| client == &id)
+                    })
+                {
+                    return Some(Reply::json(
+                        400,
+                        &serde_json::json!({"error": "unauthorized_client"}),
+                    ));
+                }
+                Reply::json(
+                    200,
+                    &serde_json::json!({
+                        "device_code": "device-1",
+                        "user_code": "WDJB-MJHT",
+                        "verification_uri": format!("{}/device-verify", self.issuer()),
+                        "expires_in": 600,
+                        "interval": 1,
+                    }),
+                )
+            }
             ("POST", "/revoke") => {
                 if self.lock().revocation_failure {
                     return Some(Reply::status(503));
@@ -491,12 +521,51 @@ impl OAuthGate {
         })
     }
 
+    fn register(&self, body: &[u8]) -> Reply {
+        let request: serde_json::Value = serde_json::from_slice(body).unwrap_or_default();
+        self.record(
+            "POST",
+            "/register-body",
+            &[
+                (
+                    "redirect_uris".to_owned(),
+                    request["redirect_uris"].to_string(),
+                ),
+                ("grant_types".to_owned(), request["grant_types"].to_string()),
+            ],
+            None,
+        );
+        let id = {
+            let mut state = self.lock();
+            state.counter += 1;
+            let id = format!("dyn-{}", state.counter);
+            if request["grant_types"].as_array().is_some_and(|grants| {
+                grants
+                    .iter()
+                    .any(|grant| grant == "urn:ietf:params:oauth:grant-type:device_code")
+            }) {
+                state.device_clients.insert(id.clone());
+            }
+            id
+        };
+        Reply::json(201, &serde_json::json!({"client_id": id}))
+    }
+
     fn server_metadata(&self) -> serde_json::Value {
         let issuer = self.issuer();
+        let endpoint_origin = self
+            .endpoint_origin
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let endpoints = endpoint_origin.as_deref().unwrap_or(&issuer);
+        let published_issuer = self
+            .published_issuer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let mut document = serde_json::json!({
-            "issuer": issuer,
+            "issuer": published_issuer.as_deref().unwrap_or(&issuer),
             "authorization_endpoint": format!("{issuer}/authorize"),
-            "token_endpoint": format!("{issuer}/token"),
+            "token_endpoint": format!("{endpoints}/token"),
             "scopes_supported": self.config.scopes_supported,
             "authorization_response_iss_parameter_supported": self.config.advertise_iss,
             "token_endpoint_auth_methods_supported": ["none", "client_secret_basic"],
@@ -508,10 +577,25 @@ impl OAuthGate {
             document["registration_endpoint"] = format!("{issuer}/register").into();
         }
         if self.config.device {
-            document["device_authorization_endpoint"] = format!("{issuer}/device").into();
+            document["device_authorization_endpoint"] = self
+                .config
+                .device_endpoint
+                .clone()
+                .unwrap_or_else(|| format!("{endpoints}/device"))
+                .into();
+            document["grant_types_supported"] = serde_json::json!([
+                "authorization_code",
+                "refresh_token",
+                "urn:ietf:params:oauth:grant-type:device_code"
+            ]);
         }
         if self.config.revocation {
-            document["revocation_endpoint"] = format!("{issuer}/revoke").into();
+            document["revocation_endpoint"] = self
+                .config
+                .revocation_endpoint
+                .clone()
+                .unwrap_or_else(|| format!("{endpoints}/revoke"))
+                .into();
         }
         document
     }

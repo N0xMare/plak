@@ -291,7 +291,12 @@ async fn resource_prefix_matching_requires_the_resources_own_well_known_location
             .await?;
             let spec = setup.spec(setup.settings())?;
             if matches!(resource, "" | "/") && source != ResourceMetadataAt::RootWellKnown {
-                assert!(McpPool::new().login(&spec, McpLoginOptions::new()).await.is_err());
+                assert!(
+                    McpPool::new()
+                        .login(&spec, McpLoginOptions::new())
+                        .await
+                        .is_err()
+                );
                 assert!(setup.gate.requests_to("/register").is_empty());
                 continue;
             }
@@ -401,6 +406,154 @@ async fn an_issuer_mismatch_discards_the_callback_before_any_token_request() -> 
 }
 
 #[tokio::test]
+async fn device_registration_is_remote_and_policy_bound() -> TestResult {
+    for (remote, endpoint, expected_device) in [
+        (false, None, false),
+        (true, None, true),
+        (true, Some("http://localhost/device"), false),
+    ] {
+        let setup = setup(OAuthConfig {
+            device: true,
+            device_endpoint: endpoint.map(str::to_owned),
+            ..OAuthConfig::default()
+        })
+        .await?;
+        let login = McpPool::new()
+            .login(&setup.spec(setup.settings())?, McpLoginOptions::new())
+            .await?;
+        if remote {
+            match login.remote().await? {
+                McpRemoteLogin::Device(_) => assert!(expected_device),
+                McpRemoteLogin::Paste(paste) => {
+                    assert!(!expected_device);
+                    assert!(paste.device_skipped_by_policy());
+                }
+            }
+        } else {
+            drop(login.local().await?);
+        }
+        let registrations = setup.gate.requests_to("/register-body");
+        assert_eq!(registrations.len(), 1);
+        let grants = registrations[0].field("grant_types").ok_or("no grants")?;
+        assert_eq!(grants.contains("device_code"), expected_device);
+        assert_eq!(
+            !setup.gate.requests_to("/device").is_empty(),
+            expected_device
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn confidential_split_origin_endpoints_require_verified_metadata() -> TestResult {
+    let setup = setup(OAuthConfig {
+        device: true,
+        confidential_client: Some(("client-9".to_owned(), "s3cret".to_owned())),
+        ..OAuthConfig::default()
+    })
+    .await?;
+    let other = serve_http(
+        FakeServer::new(Style::Discover, Arc::new(|| {})),
+        HttpGate {
+            oauth: Some(Arc::clone(&setup.gate)),
+            ..HttpGate::default()
+        },
+    )
+    .await?;
+    let origin = other
+        .url()
+        .strip_suffix("/mcp")
+        .ok_or("unexpected fixture path")?
+        .to_owned();
+    assert_ne!(origin, setup.gate.issuer());
+    setup.gate.advertise_endpoint_origin(origin.clone());
+    let settings = setup
+        .settings()
+        .with_issuer(&setup.gate.issuer())?
+        .with_client(
+            "client-9",
+            Some(Arc::new(|| Ok(SensitiveBytes::new(b"s3cret".to_vec())))),
+        )?;
+    let spec = setup.spec(settings)?;
+    let pool = McpPool::new();
+    let McpRemoteLogin::Device(device) = pool
+        .login(&spec, McpLoginOptions::new())
+        .await?
+        .remote()
+        .await?
+    else {
+        return Err("split-origin device endpoint was skipped".into());
+    };
+    assert!(logged_in(&device.complete().await?));
+    assert!(setup.gate.requests_to("/device")[0].authorization.is_some());
+    assert!(setup.gate.requests_to("/token")[0].authorization.is_some());
+    // Even valid issuer metadata must still advertise the stored endpoint.
+    setup.gate.advertise_endpoint_origin(setup.gate.issuer());
+    assert!(pool.logout(&spec, false).await.is_err());
+    assert!(setup.gate.requests_to("/revoke").is_empty());
+    age_login(&setup)?;
+    let workspace = workspace()?;
+    assert!(
+        pool.lease(spec.clone(), Arc::clone(&workspace.environment))
+            .await
+            .is_err()
+    );
+    assert!(setup.refreshes().is_empty());
+    setup.gate.advertise_endpoint_origin(origin);
+    // A stored endpoint is not sufficient authority after metadata stops verifying.
+    setup
+        .gate
+        .publish_issuer("https://wrong.example".to_owned());
+    let refusal = pool
+        .logout(&spec, false)
+        .await
+        .err()
+        .ok_or("unverified revocation admitted")?;
+    assert!(refusal.message().contains("local logout"));
+    assert!(setup.gate.requests_to("/revoke").is_empty());
+    assert!(logged_in(&spec.oauth_status()?.ok_or("login was retired")?));
+    age_login(&setup)?;
+    assert!(
+        pool.lease(spec.clone(), Arc::clone(&workspace.environment))
+            .await
+            .is_err()
+    );
+    assert_eq!(setup.refreshes().len(), 0);
+    setup.gate.publish_issuer(setup.gate.issuer());
+    pool.logout(&spec, false).await?;
+    assert!(setup.gate.requests_to("/revoke")[0].authorization.is_some());
+    pool.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_refused_device_request_reports_the_paste_back_fallback() -> TestResult {
+    let setup = setup(OAuthConfig {
+        device: true,
+        refuse_device: true,
+        ..OAuthConfig::default()
+    })
+    .await?;
+    let McpRemoteLogin::Paste(login) = McpPool::new()
+        .login(&setup.spec(setup.settings())?, McpLoginOptions::new())
+        .await?
+        .remote()
+        .await?
+    else {
+        return Err("refused device request did not fall back".into());
+    };
+    assert_eq!(login.device_refusal_status(), Some(400));
+    assert_eq!(setup.gate.requests_to("/register").len(), 1);
+    assert_eq!(setup.gate.requests_to("/device").len(), 1);
+    assert!(setup.gate.requests_to("/token").is_empty());
+    let (_, location) = browse(login.authorization_url()).await?;
+    assert!(logged_in(
+        &login.complete(&location.ok_or("no callback")?).await?
+    ));
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_remote_login_takes_the_pasted_callback_url_or_the_device_grant() -> TestResult {
     let paste = setup(OAuthConfig::default()).await?;
     let spec = paste.spec(paste.settings())?;
@@ -413,6 +566,7 @@ async fn a_remote_login_takes_the_pasted_callback_url_or_the_device_grant() -> T
     else {
         return Err("a server without the device grant offered it".into());
     };
+    assert_eq!(login.device_refusal_status(), None);
     let (_, location) = browse(login.authorization_url()).await?;
     let location = location.ok_or("no redirect")?;
     // The redirect is not served: nothing listens on a remote login's port.
@@ -486,7 +640,7 @@ async fn logout_revokes_the_refresh_token_or_retires_locally() -> TestResult {
 }
 
 #[tokio::test]
-async fn a_preregistered_client_authenticates_with_its_secret_only_at_its_issuer() -> TestResult {
+async fn a_preregistered_client_authenticates_at_verified_issuer_endpoints() -> TestResult {
     let setup = setup(OAuthConfig {
         registration: false,
         confidential_client: Some(("client-9".to_owned(), "s3cret".to_owned())),

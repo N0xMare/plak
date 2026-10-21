@@ -802,13 +802,22 @@ pub fn parse_device_authorization(body: &[u8]) -> Result<DeviceAuthorization, OA
 }
 
 /// The RFC 7591 registration request of a native public client for exactly
-/// `redirect_uri`.
+/// `redirect_uri`, including the device grant only when the caller admits it
+/// for this attempt.
 #[must_use]
-pub fn dynamic_registration_request(client_name: &str, redirect_uri: &str) -> Vec<u8> {
+pub fn dynamic_registration_request(
+    client_name: &str,
+    redirect_uri: &str,
+    device_grant: bool,
+) -> Vec<u8> {
+    let mut grants = vec!["authorization_code", "refresh_token"];
+    if device_grant {
+        grants.push("urn:ietf:params:oauth:grant-type:device_code");
+    }
     serde_json::json!({
         "client_name": client_name,
         "redirect_uris": [redirect_uri],
-        "grant_types": ["authorization_code", "refresh_token"],
+        "grant_types": grants,
         "response_types": ["code"],
         "token_endpoint_auth_method": "none",
         "application_type": "native",
@@ -1367,6 +1376,7 @@ mod tests {
         let request: serde_json::Value = serde_json::from_slice(&dynamic_registration_request(
             "Plak",
             "http://127.0.0.1:1/callback",
+            false,
         ))
         .unwrap();
         assert_eq!(
@@ -1380,6 +1390,23 @@ mod tests {
         .unwrap();
         assert_eq!(device.user_code, "ABCD-EFGH");
         assert_eq!(device.interval, Some(5));
+    }
+
+    #[test]
+    fn registration_requests_the_device_grant_only_when_the_caller_admits_it() {
+        for device in [false, true] {
+            let request: serde_json::Value = serde_json::from_slice(&dynamic_registration_request(
+                "Plak",
+                "http://127.0.0.1:1/callback",
+                device,
+            ))
+            .unwrap();
+            let mut expected = vec!["authorization_code", "refresh_token"];
+            if device {
+                expected.push("urn:ietf:params:oauth:grant-type:device_code");
+            }
+            assert_eq!(request["grant_types"], serde_json::json!(expected));
+        }
     }
 
     #[test]

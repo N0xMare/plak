@@ -188,9 +188,14 @@ published resource's own RFC 9728 §3.1 well-known URL (§3.6). The authorizatio
 be identical to the issuer its URL was built from, PKCE S256 must be
 advertised, and the callback's `iss` must match the recorded issuer before any
 code reaches a token endpoint. A pre-registered client requires an issuer pin,
-so a configured client secret is only ever sent to the token endpoint of the
-issuer the operator named. No address policy applies to these server-named
-URLs (§9).
+so a client secret (configured or dynamically registered) is sent only to the
+token, device authorization and revocation endpoints advertised by metadata
+fetched from that issuer's own well-known location whose `issuer` exactly
+matches the pinned or registering issuer. Split-origin endpoints are allowed;
+each still obeys the transport policy. Stored endpoints are re-verified before
+secret-bearing refresh or revocation; failed verification sends no secret.
+Logout refuses without retiring the login and names local logout as the remedy.
+No address policy applies to these server-named URLs (§9).
 
 A terminal provider refusal can revoke provisional streamed output before any
 local effect is admitted. Messages discards the refused response's client-tool
@@ -843,6 +848,15 @@ query or fragment, and exact-endpoint token delivery remain required. The
 published audience is sent byte-for-byte; endpoint credential binding is not
 widened. The mismatch diagnostic includes a bounded published URL with user
 information, query and fragment removed.
+
+MCP client secrets, whether pre-registered or dynamically issued, go only to
+token, device authorization and revocation endpoints from metadata fetched at
+the pinned or registering issuer's own well-known location, with an exactly
+matching `issuer`. Endpoints may be split across origins but remain subject to
+the transport policy. A stored endpoint alone is not authority: refresh and
+revocation re-verify metadata before sending a secret. Failed logout verification
+sends no credentials and leaves the login intact; `plak mcp logout <id> --local`
+retires it locally (the remote grant may remain active).
 
 MCP server logins follow the same surface rules. `plak mcp login <id>` is
 CLI-only and never started by an agent or a tool: an expired, revoked or

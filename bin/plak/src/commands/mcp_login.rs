@@ -92,6 +92,14 @@ pub(crate) fn login(
                 runtime.block_on(device.complete()).map_err(failure)?
             }
             McpRemoteLogin::Paste(paste) => {
+                if paste.device_skipped_by_policy() {
+                    writeln!(stderr, "{label}: advertised device endpoint skipped by transport or client-secret origin policy; falling back to paste-back login")
+                        .map_err(|_| stderr_failed())?;
+                }
+                if let Some(status) = paste.device_refusal_status() {
+                    writeln!(stderr, "{label}: device authorization refused (HTTP {status}); falling back to paste-back login")
+                        .map_err(|_| stderr_failed())?;
+                }
                 ui.present_url(stderr, paste.authorization_url(), &label, true)
                     .map_err(|_| stderr_failed())?;
                 writeln!(stderr)

@@ -31,7 +31,7 @@ use super::credential::{
     unix_now,
 };
 use super::exchange::{ClientAuth, EXCHANGE_TIMEOUT, OAuthHttp};
-use super::login::client_secret;
+use super::login::{authorization_server, client_secret};
 use crate::McpOAuthStatus;
 use crate::error::{McpError, McpErrorKind};
 
@@ -261,6 +261,7 @@ impl OAuthSession {
             store,
             rejected,
             answered: Answered::NotYet,
+            verified_token: None,
         };
         run_claimed_refresh(store, self.http.client(), &mut hooks).await
     }
@@ -280,6 +281,7 @@ struct RefreshHooks<'a> {
     store: &'a PrivateCredentialStore,
     rejected: Option<CredentialGeneration>,
     answered: Answered,
+    verified_token: Option<(String, String)>,
 }
 
 #[allow(
@@ -327,6 +329,17 @@ impl ClaimedRefreshHooks for RefreshHooks<'_> {
             return Err(authorization("the login has no refresh token"));
         }
         let due = self.rejected.is_some() || stored.refresh_due(unix_now());
+        if due && client_secret(&self.session.settings, &stored)?.is_some() {
+            let metadata =
+                authorization_server(&self.session.http, &self.session.server, &stored.issuer)
+                    .await?;
+            if metadata.token_endpoint != stored.token_endpoint {
+                return Err(authorization(
+                    "the stored token endpoint is not in verified issuer metadata; log out locally and log in again",
+                ));
+            }
+            self.verified_token = Some((metadata.issuer, metadata.token_endpoint));
+        }
         Ok(due.then_some(fence))
     }
 
@@ -342,6 +355,18 @@ impl ClaimedRefreshHooks for RefreshHooks<'_> {
             .map_err(BuildRequestFailure::LeaveQuarantined)?;
         let secret =
             client_secret(&self.session.settings, &stored).map_err(BuildRequestFailure::Restore)?;
+        if secret.is_some()
+            && self
+                .verified_token
+                .as_ref()
+                .is_none_or(|(issuer, endpoint)| {
+                    issuer != &stored.issuer || endpoint != &stored.token_endpoint
+                })
+        {
+            return Err(BuildRequestFailure::Restore(authorization(
+                "the token endpoint is not in verified issuer metadata; log out locally and log in again",
+            )));
+        }
         let request = {
             let refresh_token = stored.refresh_token.as_deref().ok_or_else(|| {
                 BuildRequestFailure::Restore(authorization("the login has no refresh token"))
