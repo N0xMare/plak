@@ -1313,54 +1313,76 @@ fn slow_actor_jobs_warn_with_content_free_labels_and_depths() -> TestResult {
 
 #[tokio::test]
 #[ignore = "opt-in large synthetic turn-boundary measurement"]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the opt-in measurement keeps fixture setup, timed commit and warm/cold probes together"
+)]
 async fn measure_large_session_turn_boundary_reads() -> TestResult {
     use crate::integrity_fixture as fixture;
     const READS: usize = DEFAULT_QUEUE_CAPACITY * 4;
     let directory = tempfile::tempdir()?;
     let store = SqliteSessionStore::open(directory.path().join("runtime.sqlite3"))?;
     let request = seed()?;
-    let prior = request.initial().clone();
+    let mut prior = request.initial().clone();
     let created = store.create(request).await?;
-    let next = next_checkpoint(&created, &prior, 1)?;
-    let history_len = std::env::var("PLAK_MEASURE_HISTORY")
-        .map_or(Ok(3098), |value| value.parse::<u32>())?;
-    let payload_len = std::env::var("PLAK_MEASURE_PAYLOAD")
-        .map_or(Ok(7600), |value| value.parse::<usize>())?;
-    let checkpoint = fixture::checkpoint_with_payload(
-        next.checkpoint()
-            .validated_checkpoint()?
-            .manifest()
-            .topology(),
-        history_len,
-        RuntimeDurability::Required,
-        prior
-            .validated_checkpoint()?
-            .manifest()
-            .canonical()
-            .context()
-            .clone(),
-        &"x".repeat(payload_len),
-    )?;
-    let bundle = fixture::bundle(&checkpoint, Some(&prior))?;
-    let bytes = bundle.stats().retained_bytes();
-    let objects = bundle.stats().object_count();
-    let commit_started = Instant::now();
-    let head = store
-        .commit(CommitCheckpoint::new(
-            created.lease().clone(),
-            created.branch(),
-            bundle,
-        ))
-        .await?
-        .head();
-    let commit_us = commit_started.elapsed().as_micros();
+    let history_len =
+        std::env::var("PLAK_MEASURE_HISTORY").map_or(Ok(3098), |value| value.parse::<u32>())?;
+    let payload_len =
+        std::env::var("PLAK_MEASURE_PAYLOAD").map_or(Ok(7600), |value| value.parse::<usize>())?;
+    let generations =
+        std::env::var("PLAK_MEASURE_GENERATIONS").map_or(Ok(1), |value| value.parse::<u64>())?;
+    assert!(generations > 0);
+    let mut head = created.branch();
+    let mut commit_us = 0;
+    for generation in 1..=generations {
+        let payload = if generations == 1 {
+            "x".repeat(payload_len)
+        } else {
+            format!("generation {generation}:{}", "x".repeat(payload_len))
+        };
+        let checkpoint = fixture::checkpoint_with_payload(
+            fixture::topology(
+                head.session().session_id(),
+                head.session().branch_id(),
+                fixture::id(91_010 + u128::from(generation))?,
+                Some(prior.checkpoint_id()),
+                generation,
+                None,
+                created.lease().fence().get(),
+            )?,
+            history_len,
+            RuntimeDurability::Required,
+            prior
+                .validated_checkpoint()?
+                .manifest()
+                .canonical()
+                .context()
+                .clone(),
+            &payload,
+        )?;
+        let bundle = fixture::bundle(&checkpoint, Some(&prior))?;
+        let commit_started = Instant::now();
+        head = store
+            .commit(CommitCheckpoint::new(
+                created.lease().clone(),
+                head,
+                bundle.clone(),
+            ))
+            .await?
+            .head();
+        commit_us = commit_started.elapsed().as_micros();
+        prior = bundle;
+    }
+    let bytes = prior.stats().retained_bytes();
+    let objects = prior.stats().object_count();
     let before = store
         .dispatch_read("measure_large_session_turn_boundary_reads", |b| {
             Ok(b.checkpoint_decodes)
         })
         .await?;
     let started = Instant::now();
-    store.load_branch(head.session()).await?;
+    let warm = store.load_branch(head.session()).await?;
+    let current_objects = warm.checkpoint().bundle().stats().object_count();
     let warm_us = started.elapsed().as_micros();
     let after = store
         .dispatch_read("measure_large_session_turn_boundary_reads", |b| {
@@ -1410,7 +1432,7 @@ async fn measure_large_session_turn_boundary_reads() -> TestResult {
         cold_decodes
     );
     eprintln!(
-        "large-session: bytes={bytes} objects={objects} commit_us={commit_us} post_commit_us={warm_us} post_commit_decodes=0 cold_us={cold_us} cold_decodes=1 burst_reads={READS} capacity={DEFAULT_QUEUE_CAPACITY} burst_busy=0 burst_decodes=0 burst_us={burst_us}"
+        "large-session: bytes={bytes} objects={objects} current_objects={current_objects} generations={generations} commit_us={commit_us} post_commit_us={warm_us} post_commit_decodes=0 cold_us={cold_us} cold_decodes=1 burst_reads={READS} capacity={DEFAULT_QUEUE_CAPACITY} burst_busy=0 burst_decodes=0 burst_us={burst_us}"
     );
     Ok(())
 }
@@ -1509,7 +1531,12 @@ async fn abandoned_read_waiters_release_all_admission_capacity() -> TestResult {
         let (sender, receiver) = actor_queue(1);
         sender.send(Lane::Read, Box::new(|_| {}))?;
         let mut waiting = sender.send_read(Box::new(|_| {}));
-        assert!(waiting.as_mut().poll(&mut Context::from_waker(Waker::noop())).is_pending());
+        assert!(
+            waiting
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+        );
         if timed_out {
             tokio::time::advance(READ_QUEUE_TIMEOUT).await;
             assert_eq!(waiting.await, Err(SessionStoreError::BackendBusy));
@@ -1522,13 +1549,22 @@ async fn abandoned_read_waiters_release_all_admission_capacity() -> TestResult {
             sender.activity.read_space.add_permits(1);
             drop(waiting);
         }
-        assert_eq!(sender.activity.read_space.available_permits(), sender.capacity);
+        assert_eq!(
+            sender.activity.read_space.available_permits(),
+            sender.capacity
+        );
         let mut next = sender.send_read(Box::new(|_| {}));
-        assert!(matches!(next.as_mut().poll(&mut Context::from_waker(Waker::noop())), Poll::Ready(Ok(()))));
+        assert!(matches!(
+            next.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Ready(Ok(()))
+        ));
         drop(next);
         drop(receiver.read.try_recv()?);
         sender.activity.read_space.add_permits(1);
-        assert_eq!(sender.activity.read_space.available_permits(), sender.capacity);
+        assert_eq!(
+            sender.activity.read_space.available_permits(),
+            sender.capacity
+        );
     }
     Ok(())
 }

@@ -2856,7 +2856,49 @@ mod tests {
     }
 
     #[test]
-    fn wake_preflight_compaction_error_parks_instead_of_deferring() {
+    fn runtime_shutdown_during_wake_compaction_parks_instead_of_deferring() {
+        with_fixture(1, true, |host, _, _, observed| {
+            let agent = host.opened.agent().unwrap().clone();
+            let injection = Arc::get_mut(host.config.test_injection.as_mut().unwrap()).unwrap();
+            let runtime = Arc::clone(&injection.runtime);
+            let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let observed_stop = Arc::clone(&stopped);
+            injection.runtime = Arc::new(move |role| {
+                if role == crate::runtime::TestRuntimeRole::Compact {
+                    // Stop after the pending-context read, before the compact
+                    // endpoint is called: this is not a failed read.
+                    plakous::application::ApplicationExecutor::new()
+                        .unwrap()
+                        .block_on(agent.shutdown())
+                        .unwrap()
+                        .unwrap();
+                    stopped.store(true, std::sync::atomic::Ordering::Release);
+                }
+                runtime(role)
+            });
+            let now = Instant::now();
+            host.child_wake_prompt(now).unwrap();
+            assert!(matches!(
+                host.child_wake_prompt(now + QUIET_WINDOW).unwrap(),
+                HostStep::Continue
+            ));
+            assert!(observed_stop.load(std::sync::atomic::Ordering::Acquire));
+            assert!(host.config.session.child_wake_suppressed);
+            assert!(host.child_wake.retry.is_none());
+            assert_eq!(
+                submissions(host),
+                [] as [crate::sessions::projector::Submission; 0]
+            );
+            let events: Vec<_> = observed.try_iter().collect();
+            assert!(events.iter().any(|event| matches!(event,
+                HostEvent::Row(TranscriptRow::Notice(plakous_host_protocol::views::transcript::NoticeRow { text, .. }))
+                if text.starts_with("Sub-agent auto-continue") && text.contains("paused until the next prompt")
+            )), "{events:?}");
+        });
+    }
+
+    #[test]
+    fn wake_preflight_attempts_compaction_before_preparing_delivery() {
         with_fixture(1, true, |host, runtime, _, observed| {
             let now = Instant::now();
             host.child_wake_prompt(now).unwrap();
@@ -2873,7 +2915,10 @@ mod tests {
                 [] as [crate::sessions::queue::QueueItem; 0]
             );
             assert!(host.config.session.child_wake_suppressed);
-            assert!(host.child_wake.retry.is_none(), "compaction errors must park, not defer");
+            assert!(
+                host.child_wake.retry.is_none(),
+                "compaction errors must park, not defer"
+            );
             let events: Vec<_> = observed.try_iter().collect();
             assert!(
                 events.iter().any(|event| matches!(

@@ -7777,8 +7777,10 @@ async fn attached_context_status_uses_driver_authority_without_store_reads() -> 
     Ok(())
 }
 
+#[cfg(feature = "native-subscriptions")]
 #[tokio::test]
-async fn attached_context_status_revives_expired_but_refuses_taken_over_and_archived_owners() -> TestResult {
+async fn attached_context_status_revives_expired_but_refuses_taken_over_and_archived_owners()
+-> TestResult {
     struct AdvancingClock(std::sync::atomic::AtomicU64);
     impl LeaseClock for AdvancingClock {
         fn now(&self) -> Result<LeaseInstant, SessionStoreError> {
@@ -7839,34 +7841,52 @@ async fn attached_context_status_revives_expired_but_refuses_taken_over_and_arch
             ))
             .await?;
         if disposition == "revive" {
-            assert!(matches!(status.kind(), SessionContextStatusKind::Available(_)));
+            assert!(matches!(
+                status.kind(),
+                SessionContextStatusKind::Available(_)
+            ));
             let pending = "pending after suspend";
-            let preflight = sessions.context_status(ContextStatusRequest::new(
-                SessionOperationId::new("status:pending-after-suspend")?,
-                locator,
-                ContextQuery::WithPendingUserInput(pending.to_owned().into()),
-            )).await?;
-            assert!(matches!(preflight.kind(), SessionContextStatusKind::Available(status)
-                if matches!(status.kind(), ContextStatusKind::WouldOverflow(_) | ContextStatusKind::ProtectedOverflow(_))));
-            let outcome = sessions.compact(CompactSessionRequest::new(
-                SessionOperationId::new("compact:after-suspend")?,
-                locator,
-                CompactReason::Scheduled,
-                compaction_runtime_binding_for(
-                    workspace,
-                    crate::test_model::with_shared_window_context_contract(
-                        descriptor_without_context_contract("test.route", "test.model")?,
-                        timestamp()?,
-                        80,
-                    )?,
-                    b"lost-owner-context",
-                    LocalDurabilityDisposition::Ephemeral,
-                )?,
-            ).with_pending_user_input(pending.to_owned().into())).await?;
-            assert!(matches!(outcome, CompactSessionOutcome::NoEligibleRange { .. }));
+            let preflight = sessions
+                .context_status(ContextStatusRequest::new(
+                    SessionOperationId::new("status:pending-after-suspend")?,
+                    locator,
+                    ContextQuery::WithPendingUserInput(pending.to_owned().into()),
+                ))
+                .await?;
+            assert!(
+                matches!(preflight.kind(), SessionContextStatusKind::Available(status)
+                if matches!(status.kind(), ContextStatusKind::WouldOverflow(_) | ContextStatusKind::ProtectedOverflow(_)))
+            );
+            let outcome = sessions
+                .compact(
+                    CompactSessionRequest::new(
+                        SessionOperationId::new("compact:after-suspend")?,
+                        locator,
+                        CompactReason::Scheduled,
+                        compaction_runtime_binding_for(
+                            workspace,
+                            crate::test_model::with_shared_window_context_contract(
+                                descriptor_without_context_contract("test.route", "test.model")?,
+                                timestamp()?,
+                                80,
+                            )?,
+                            b"lost-owner-context",
+                            LocalDurabilityDisposition::Ephemeral,
+                        )?,
+                    )
+                    .with_pending_user_input(pending.to_owned().into()),
+                )
+                .await?;
+            assert!(matches!(
+                outcome,
+                CompactSessionOutcome::NoEligibleRange { .. }
+            ));
             session.release().await?;
         } else {
-            assert!(matches!(status.kind(), SessionContextStatusKind::Unavailable(_)));
+            assert!(matches!(
+                status.kind(),
+                SessionContextStatusKind::Unavailable(_)
+            ));
             // The old owner cannot release the successor's lease.
             drop(session);
         }

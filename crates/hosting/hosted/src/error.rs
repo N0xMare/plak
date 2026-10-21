@@ -184,7 +184,10 @@ impl From<crate::agent_tree::TreeRuntimeError> for CliFailure {
 
 impl CliFailure {
     /// A read/preflight refusal, retaining its typed source and retry class.
-    pub(crate) fn session_read(context: &str, error: plakous::sessions::AgentSessionsError) -> Self {
+    pub(crate) fn session_read(
+        context: &str,
+        error: plakous::sessions::AgentSessionsError,
+    ) -> Self {
         let refusal = StoreRefusal::of(&error);
         let mut failure = Self::from(error).with_context(context);
         failure.refusal = refusal;

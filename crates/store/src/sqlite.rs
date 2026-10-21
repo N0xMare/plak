@@ -4480,7 +4480,8 @@ fn seed_checkpoint_cache(
     reference: CheckpointObjectRef,
     bundle: &CheckpointObjectBundle,
 ) {
-    if let Ok(cached) = bundle.current_root_closure()
+    if let Ok(cached) = bundle
+        .current_root_closure()
         .and_then(|closure| StoredCheckpoint::from_store(reference, closure))
     {
         cache.insert(cached);
