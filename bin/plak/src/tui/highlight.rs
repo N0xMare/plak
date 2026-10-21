@@ -171,6 +171,11 @@ thread_local! {
     static MEMO: RefCell<VecDeque<Memo>> = const { RefCell::new(VecDeque::new()) };
 }
 
+#[cfg(test)]
+pub(crate) fn clear_memo() {
+    MEMO.with(|memo| memo.borrow_mut().clear());
+}
+
 /// Highlight `source` as `language`, one vector of spans per source line.
 ///
 /// `language` is a fence info token (`javascript`, `python`, `rust`, …).
@@ -244,6 +249,30 @@ pub fn lines(
         memo.truncate(MEMO_ENTRIES);
     });
     rows
+}
+
+/// A fence-local cursor. Completed rows are owned by the renderer, not cloned
+/// back out of the shared whole-source highlight cache on each frame.
+#[derive(Clone, Debug)]
+pub(crate) struct LineHighlighter {
+    highlight: HighlightState,
+    parse: ParseState,
+}
+
+impl LineHighlighter {
+    pub(crate) fn new(language: &str) -> Self {
+        let syntax = syntax_for_token(&assets().syntaxes, language);
+        let (highlight, parse) = HighlightLines::new(syntax, syntax_theme()).state();
+        Self { highlight, parse }
+    }
+
+    pub(crate) fn line(&mut self, text: &str, styles: &HighlightStyles) -> Vec<Span<'static>> {
+        let mut highlighter =
+            HighlightLines::from_state(syntax_theme(), self.highlight.clone(), self.parse.clone());
+        let row = highlight_line(&mut highlighter, text, &assets().syntaxes, styles);
+        (self.highlight, self.parse) = highlighter.state();
+        row
+    }
 }
 
 fn highlight_line(

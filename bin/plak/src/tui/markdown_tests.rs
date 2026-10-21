@@ -1,7 +1,8 @@
 //! Focused contract tests for the staged terminal Markdown module.
 
 use crate::tui::markdown::{
-    MarkdownTheme, StreamingMarkdown, render_markdown, render_markdown_streaming,
+    MarkdownTheme, StreamingMarkdown, render_markdown, render_markdown_rows,
+    render_markdown_streaming,
 };
 
 #[test]
@@ -140,6 +141,13 @@ const STREAMED_DOCUMENTS: &[&str] = &[
     "- item\n\n  ```\n  code\n\nnot in the list\n  ```\n\ntrailing",
     "   ```\nindented fence\n\nstill fenced\n   ```\n\nafter",
     "src/main.rs\nsrc/lib.rs\n\nCargo.toml\nREADME.md\n\nline one\nline two",
+    "```javascript\r\nconst x = 1;\r\n\r\n\tcall(x);\r\n```\r\n",
+    "~~~\n\nhello\n\n~~~\nTail",
+    "```rust\n\n\n",
+    "Code follows:\n```rust\nlet x = 1;\n```\nDone",
+    "- list item\n```rust\nlet x = 1;\n```",
+    "```r&#117;st\nlet x = 1;\n```",
+    "```rust\nlet x = 1;\rlet y = 2;\n```",
     "crlf one\r\n\r\ncrlf two\r\n\r\n- crlf list\r\n",
     "Unicode 界界界 wide text that wraps around the narrow width several times over.\n\nNext 界.\n",
 ];
@@ -166,10 +174,18 @@ fn streaming_render_equals_a_full_render_at_every_prefix() {
     for document in STREAMED_DOCUMENTS {
         for width in [12_u16, 40, 100] {
             let mut memo = StreamingMarkdown::default();
+            let mut previous = Vec::new();
             for end in (0..=document.len()).filter(|end| document.is_char_boundary(*end)) {
                 let prefix = &document[..end];
-                let streamed =
-                    render_markdown_streaming(prefix, width, &theme, &mut memo).into_text();
+                let streamed = render_markdown_streaming(prefix, width, &theme, &mut memo);
+                assert!(streamed.settled_kept <= previous.len());
+                assert_eq!(
+                    &streamed.settled[..streamed.settled_kept],
+                    &previous[..streamed.settled_kept]
+                );
+                previous = streamed.settled.to_vec();
+                let streamed = streamed.into_text();
+                crate::tui::highlight::clear_memo();
                 let full = render_markdown(prefix, width, &theme);
                 assert_eq!(
                     plain_lines(&streamed),
@@ -213,4 +229,115 @@ fn a_streamed_answer_settles_its_earlier_blocks() {
         0,
         "a reference definition disables the split"
     );
+}
+
+#[test]
+fn fence_streaming_matches_fresh_rows_and_copy_after_every_edit() {
+    let documents = [
+        "```rust\n/* comment\ncontinued */\n\n\nlet x = 1;\n```\n\nDone.",
+        "~~~\n\n\nhello\n\n~~~\nTail",
+        "Before.\n\n```\n\n\ntext\n\n```\n\nAfter.",
+        "```javascript\r\nconst x = 1;\r\n\r\n\tcall(x);\r\n```\r\n",
+        "```\n\n\n",
+        "```rust\n\n\n",
+        "```rust\nlet x = 1;\n",
+        "```rust\nx\n \n\t\nq\n   \n```",
+        "> ```rust\n> fn main() {}\n> ```",
+    ];
+    let mut memo = StreamingMarkdown::default();
+    for document in documents {
+        let mut colored = MarkdownTheme::default();
+        colored.syntax.keyword = ratatui::style::Style::default().fg(ratatui::style::Color::Red);
+        for width in [8, 40] {
+            for theme in [MarkdownTheme::default(), colored] {
+                for end in (0..=document.len()).filter(|at| document.is_char_boundary(*at)) {
+                    let source = &document[..end];
+                    let streamed = render_markdown_streaming(source, width, &theme, &mut memo);
+                    let mut copy = streamed.settled_copy.to_vec();
+                    copy.extend(streamed.rest_copy.clone());
+                    crate::tui::highlight::clear_memo();
+                    let (rows, full_copy) = render_markdown_rows(source, width, &theme);
+                    assert_eq!(
+                        streamed.into_text().lines,
+                        rows,
+                        "{source:?}, width {width}"
+                    );
+                    assert_eq!(copy, full_copy, "copy: {source:?}");
+                }
+                // Resize/retheme the same completed source, then restore it.
+                for (changed_width, changed_theme) in [(width + 1, colored), (width, theme)] {
+                    let streamed = render_markdown_streaming(
+                        document,
+                        changed_width,
+                        &changed_theme,
+                        &mut memo,
+                    )
+                    .into_text();
+                    assert_eq!(
+                        streamed,
+                        render_markdown(document, changed_width, &changed_theme)
+                    );
+                }
+            }
+        }
+    }
+    // Replacing an already complete language line must invalidate both caches.
+    for source in [
+        "```rust\nlet x = 1;\n",
+        "```python\nlet x = 1;\n",
+        "```python\nlet x = 1;\n```",
+    ] {
+        let theme = MarkdownTheme::default();
+        let streamed = render_markdown_streaming(source, 40, &theme, &mut memo).into_text();
+        assert_eq!(streamed, render_markdown(source, 40, &theme));
+    }
+}
+
+#[test]
+fn open_fence_work_only_visits_new_lines() {
+    let theme = MarkdownTheme::default();
+    let mut memo = StreamingMarkdown::default();
+    let mut source = String::from("```rust\n");
+    for index in 0..2000 {
+        source.push_str("let x = ");
+        let before = memo.work();
+        let streamed = render_markdown_streaming(&source, 80, &theme, &mut memo);
+        assert!(streamed.rest.len() <= 1);
+        source.push_str("1;\n");
+        let streamed = render_markdown_streaming(&source, 80, &theme, &mut memo);
+        assert_eq!(streamed.settled.len(), index + 2);
+        let work = memo.work() - before;
+        assert!(work <= 5, "frame {index}: visited {work} lines");
+    }
+    assert_eq!(
+        memo.settled_bytes(),
+        0,
+        "the source prefix is still inside a fence"
+    );
+    source.push_str("```\n");
+    let before = memo.work();
+    let streamed = render_markdown_streaming(&source, 80, &theme, &mut memo).into_text();
+    assert!(memo.work() - before <= 2, "closing seals the cached rows");
+    assert_eq!(streamed, render_markdown(&source, 80, &theme));
+}
+
+#[test]
+fn blank_crlf_fence_rows_are_cached_even_when_the_lf_hides_them() {
+    let theme = MarkdownTheme::default();
+    let mut memo = StreamingMarkdown::default();
+    let mut source = String::from("```rust\r\n");
+    for _ in 0..2000 {
+        let before = memo.work();
+        source.push('\r');
+        let streamed = render_markdown_streaming(&source, 80, &theme, &mut memo);
+        assert!(streamed.rest.len() <= 1);
+        source.push('\n');
+        let streamed = render_markdown_streaming(&source, 80, &theme, &mut memo);
+        assert_eq!(streamed.settled.len(), 1);
+        assert_eq!(streamed.rest.len(), 0);
+        assert!(memo.work() - before <= 5);
+    }
+    source.push_str("let x = 1;\r\n```\r\n");
+    let streamed = render_markdown_streaming(&source, 80, &theme, &mut memo).into_text();
+    assert_eq!(streamed, render_markdown(&source, 80, &theme));
 }

@@ -119,7 +119,7 @@ struct LogicalLine {
 ///
 /// `decoration` is the width of a leading quote rail or code rail. List
 /// markers and table rails are content and stay at zero.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct RowCopy {
     pub(crate) decoration: u16,
     /// Unclipped code body. Copy uses it when the selection runs through the
@@ -228,9 +228,21 @@ pub struct StreamingMarkdown {
     theme: Option<MarkdownTheme>,
     lines: Vec<Line<'static>>,
     copy: Vec<RowCopy>,
+    source: String,
+    scan: BoundaryScan,
+    open: Option<OpenFence>,
+    fence_prefix: bool,
+    visible_rows: usize,
+    #[cfg(test)]
+    work: usize,
 }
 
 impl StreamingMarkdown {
+    #[cfg(test)]
+    pub(crate) fn work(&self) -> usize {
+        self.work
+    }
+
     /// Bytes of settled prefix the last call reused or rendered.
     #[cfg(test)]
     pub(crate) fn settled_bytes(&self) -> usize {
@@ -275,10 +287,12 @@ impl StreamedMarkdown<'_> {
 )]
 ///
 /// The text is cut at its last top-level block boundary (see
-/// [`settled_boundary`]). The part before it is the settled prefix: it renders
+/// `BoundaryScan`). The part before it is the settled prefix: it renders
 /// once, and when the boundary moves on, only the text between the old and the
 /// new boundary renders and is appended. Only the part after the boundary
-/// renders on every call. `settled` followed by `rest` equals
+/// renders on every call. Within a column-zero open fence, completed body
+/// rows settle too; only new lines and the unfinished last line are highlighted.
+/// `settled` followed by `rest` equals
 /// `render_markdown(markdown, width, theme)`.
 pub fn render_markdown_streaming<'m>(
     markdown: &str,
@@ -286,7 +300,69 @@ pub fn render_markdown_streaming<'m>(
     theme: &MarkdownTheme,
     memo: &'m mut StreamingMarkdown,
 ) -> StreamedMarkdown<'m> {
-    let boundary = settled_boundary(markdown).unwrap_or(0);
+    let previous_settled = memo.visible_rows;
+    let valid = memo.width == width
+        && memo.theme.as_ref() == Some(theme)
+        && markdown.starts_with(&memo.source);
+    if !valid {
+        memo.scan = BoundaryScan::default();
+    }
+    let mut scan = memo.scan.clone();
+    for line in markdown[memo.scan.offset..].split_inclusive('\n') {
+        scan.line(line);
+        #[cfg(test)]
+        {
+            memo.work += 1;
+        }
+        if line.ends_with('\n') {
+            memo.scan = scan.clone();
+        }
+    }
+    // A completed closing line seals the cached body without parsing it again.
+    if valid
+        && !scan.disabled
+        && let Some((start, close_start, close_end)) = scan.closed
+        && markdown[..close_end].ends_with('\n')
+        && memo.open.as_ref().is_some_and(|open| open.start == start)
+        && let Some(mut open) = memo.open.take()
+    {
+        let (_, _, _, visited) = open.render(
+            &markdown[..close_start],
+            width,
+            theme,
+            &mut memo.lines,
+            &mut memo.copy,
+        );
+        #[cfg(test)]
+        {
+            memo.work += visited;
+        }
+        #[cfg(not(test))]
+        let _ = visited;
+        memo.lines.truncate(open.complete_rows);
+        memo.copy.truncate(open.complete_rows);
+        markdown[..close_end].clone_into(&mut memo.prefix);
+        memo.fence_prefix = true;
+    }
+    if (!valid || memo.open.as_ref().map(|open| open.start) != scan.open)
+        && let Some(open) = memo.open.take()
+    {
+        memo.lines.truncate(open.base_rows);
+        memo.copy.truncate(open.base_rows);
+    }
+    if valid {
+        memo.source.push_str(&markdown[memo.source.len()..]);
+    } else {
+        markdown.clone_into(&mut memo.source);
+    }
+    let boundary =
+        scan.boundary
+            .unwrap_or(0)
+            .max(if valid && memo.fence_prefix && !scan.disabled {
+                memo.prefix.len()
+            } else {
+                0
+            });
     let (prefix, suffix) = markdown.split_at(boundary);
     // The memoized prefix is reusable when this text extends it and it still
     // ends on a boundary here: its bytes are the same, so only the line that
@@ -294,12 +370,13 @@ pub fn render_markdown_streaming<'m>(
     let extends = memo.width == width
         && memo.theme.as_ref() == Some(theme)
         && prefix.starts_with(memo.prefix.as_str())
-        && (memo.prefix.is_empty()
+        && (memo.fence_prefix
+            || memo.prefix.is_empty()
             || markdown[memo.prefix.len()..]
                 .lines()
                 .next()
                 .is_some_and(starts_top_level_block));
-    let settled_kept = if extends {
+    let mut settled_kept = if extends {
         let kept = memo.lines.len();
         let delta = &prefix[memo.prefix.len()..];
         if !delta.is_empty() {
@@ -319,6 +396,7 @@ pub fn render_markdown_streaming<'m>(
         } else {
             render_markdown_rows(prefix, width, theme)
         };
+        memo.fence_prefix = false;
         memo.lines = lines;
         memo.copy = copy;
         prefix.clone_into(&mut memo.prefix);
@@ -326,6 +404,65 @@ pub fn render_markdown_streaming<'m>(
         memo.theme = Some(*theme);
         0
     };
+    if let Some(start) = scan.open
+        && let Some((marker, length)) = scan.fence
+        && let Some(header_end) = markdown[start..].find('\n').map(|at| start + at + 1)
+    {
+        if memo.open.is_none() {
+            let language = Parser::new(&markdown[start..header_end])
+                .find_map(|event| {
+                    if let Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) = event {
+                        Some(info.split_whitespace().next().unwrap_or("").to_owned())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default();
+            let header = format!("{}\n", char::from(marker).to_string().repeat(length));
+            let base_rows = memo.lines.len();
+            let (rows, copy) = render_markdown_rows(&markdown[start..header_end], width, theme);
+            let gap = !memo.lines.is_empty() && rows.is_empty();
+            if !memo.lines.is_empty() && !rows.is_empty() {
+                memo.lines.push(Line::default());
+                memo.copy.push(RowCopy::default());
+            }
+            memo.lines.extend(rows);
+            memo.copy.extend(copy);
+            let complete_rows = memo.lines.len();
+            if gap {
+                memo.lines.push(Line::default());
+                memo.copy.push(RowCopy::default());
+            }
+            memo.open = Some(OpenFence {
+                start,
+                header,
+                offset: header_end,
+                base_rows,
+                complete_rows,
+                highlight: crate::tui::highlight::LineHighlighter::new(&language),
+            });
+        } else {
+            settled_kept = previous_settled;
+        }
+        if let Some(open) = memo.open.as_mut() {
+            let (rest, rest_copy, visible_rows, visited) =
+                open.render(markdown, width, theme, &mut memo.lines, &mut memo.copy);
+            #[cfg(test)]
+            {
+                memo.work += visited;
+            }
+            #[cfg(not(test))]
+            let _ = visited;
+            memo.visible_rows = visible_rows;
+            return StreamedMarkdown {
+                settled: &memo.lines[..visible_rows],
+                settled_copy: &memo.copy[..visible_rows],
+                settled_kept: settled_kept.min(previous_settled).min(visible_rows),
+                rest,
+                rest_copy,
+            };
+        }
+    }
     let (mut rest, mut rest_copy) = render_markdown_rows(suffix, width, theme);
     // Every top-level block ends with one blank row, and a render trims only
     // the trailing ones, so the prefix's last block owes the suffix that row.
@@ -333,65 +470,177 @@ pub fn render_markdown_streaming<'m>(
         rest.insert(0, Line::default());
         rest_copy.insert(0, RowCopy::default());
     }
+    memo.visible_rows = memo.lines.len();
     StreamedMarkdown {
         settled: &memo.lines,
         settled_copy: &memo.copy,
-        settled_kept,
+        settled_kept: settled_kept.min(previous_settled),
         rest,
         rest_copy,
     }
 }
 
-/// The byte offset of the last line that is certain to open a new top-level
-/// block whatever follows it, so the text before it renders the same alone as
-/// it does in the whole.
+/// Resumable search for the last certain top-level block boundary. Only
+/// complete lines commit scan state; a partial line is reconsidered next frame.
 ///
 /// That line starts in column 0 with a character that cannot continue a list,
 /// a quote, a table or indented code, follows a blank line, and sits outside
-/// any fence. Constructs that can reach back across a blank line end the
+/// any fence. A column-zero fence also interrupts a paragraph without a blank.
+/// Constructs that can reach back across a blank line end the
 /// search: raw HTML blocks and indented fences stop it where they start, and a
 /// link reference definition anywhere disables the split, because it changes
 /// how earlier text renders.
-fn settled_boundary(markdown: &str) -> Option<usize> {
-    let mut boundary = None;
-    let mut fence: Option<(u8, usize)> = None;
-    let mut after_blank = false;
-    let mut offset = 0;
-    for line in markdown.split_inclusive('\n') {
-        let start = offset;
-        offset += line.len();
+#[derive(Clone, Debug, Default)]
+struct BoundaryScan {
+    offset: usize,
+    boundary: Option<usize>,
+    fence: Option<(u8, usize)>,
+    after_blank: bool,
+    stopped: bool,
+    disabled: bool,
+    open: Option<usize>,
+    closed: Option<(usize, usize, usize)>,
+}
+
+impl BoundaryScan {
+    fn line(&mut self, line: &str) {
+        let start = self.offset;
+        self.offset += line.len();
         let text = line.trim_end_matches(['\n', '\r']);
         let indent = text.len() - text.trim_start_matches(' ').len();
         let body = &text[indent..];
-        if is_reference_definition(body) {
-            return None;
+        if is_reference_definition(body) || text.contains('\r') {
+            self.disabled = true;
+            self.boundary = None;
+            self.open = None;
         }
-        if let Some((marker, length)) = fence {
+        if self.stopped || self.disabled {
+            return;
+        }
+        if let Some((marker, length)) = self.fence {
             if indent <= 3 && closes_fence(body, marker, length) {
-                fence = None;
+                self.closed = self.open.map(|open| (open, start, self.offset));
+                self.fence = None;
+                self.open = None;
             }
-            after_blank = false;
-            continue;
+            self.after_blank = false;
+            return;
         }
         if body.trim().is_empty() {
-            after_blank = true;
-            continue;
+            self.after_blank = true;
+            return;
         }
         let opens = opens_fence(body);
         if (indent > 0 && (opens.is_some() || indent <= 3 && body.starts_with('<')))
             || (indent == 0 && body.starts_with('<'))
         {
-            break;
+            self.stopped = true;
+            return;
         }
-        if after_blank && indent == 0 && starts_top_level_block(body) {
-            boundary = Some(start);
+        if self.after_blank && indent == 0 && starts_top_level_block(body) {
+            self.boundary = Some(start);
         }
-        after_blank = false;
-        fence = opens;
+        self.after_blank = false;
+        self.fence = opens;
+        if opens.is_some() && indent == 0 {
+            self.open = Some(start);
+            // A column-zero fence interrupts a paragraph, even without a blank.
+            if start > 0 {
+                self.boundary = Some(start);
+            }
+        }
     }
-    // The prefix must end in the blank line before the boundary, never be the
-    // whole text.
-    boundary.filter(|at| *at > 0)
+}
+
+#[derive(Clone, Debug)]
+struct OpenFence {
+    start: usize,
+    header: String,
+    offset: usize,
+    base_rows: usize,
+    complete_rows: usize,
+    highlight: crate::tui::highlight::LineHighlighter,
+}
+
+impl OpenFence {
+    fn render(
+        &mut self,
+        markdown: &str,
+        width: u16,
+        theme: &MarkdownTheme,
+        lines: &mut Vec<Line<'static>>,
+        copy_rows: &mut Vec<RowCopy>,
+    ) -> (Vec<Line<'static>>, Vec<RowCopy>, usize, usize) {
+        // Cache blank rows too, but expose them only when later content makes
+        // them visible. In particular, a partial CR may disappear on the LF.
+        let mut visited = 0;
+        let mut rest = Vec::new();
+        let mut rest_copy = Vec::new();
+        let mut visible_rows = self.complete_rows;
+        for raw in markdown[self.offset..].split_inclusive('\n') {
+            let complete = raw.ends_with('\n');
+            let source = raw.strip_suffix('\n').unwrap_or(raw);
+            let source = if complete {
+                source.strip_suffix('\r').unwrap_or(source)
+            } else {
+                source
+            };
+            // Let the parser decide which whitespace-only EOF lines it
+            // withholds. Probe only this new line, never the preceding body.
+            let content = if source.trim_matches([' ', '\t', '\r']).is_empty() {
+                let probe = format!("{}{raw}", self.header);
+                Parser::new(&probe).any(|event| {
+                    matches!(event, Event::Text(text) if !text.trim_end_matches('\n').is_empty())
+                })
+            } else {
+                true
+            };
+            // Withheld blanks become empty interior lines when content follows.
+            let source = if complete && !content { "" } else { source };
+            let clean = sanitize(source);
+            let spans = if complete {
+                self.highlight.line(&clean, &theme.syntax)
+            } else {
+                self.highlight.clone().line(&clean, &theme.syntax)
+            };
+            visited += 1;
+            let (row, copy) = code_row(spans, source, width, theme);
+            if complete {
+                self.offset += raw.len();
+                lines.push(row);
+                copy_rows.push(copy);
+                if content {
+                    self.complete_rows = lines.len();
+                }
+                visible_rows = self.complete_rows;
+            } else if content {
+                visible_rows = lines.len();
+                rest.push(row);
+                rest_copy.push(copy);
+            }
+        }
+        (rest, rest_copy, visible_rows, visited)
+    }
+}
+
+fn code_row(
+    spans: Vec<Span<'static>>,
+    source: &str,
+    width: u16,
+    theme: &MarkdownTheme,
+) -> (Line<'static>, RowCopy) {
+    let mut renderer = Renderer::new(theme, usize::from(width.max(1)));
+    renderer.ensure_code_rail();
+    renderer.current.no_reflow = true;
+    renderer.current.code_source = Some(code_copy_line(source));
+    for span in spans {
+        if !span.content.is_empty() {
+            renderer.push_clean(span.content.into_owned(), span.style);
+        }
+    }
+    let mut rows = Vec::new();
+    wrap_line(&renderer.current, renderer.width, &mut rows);
+    rows.remove(0)
 }
 
 fn starts_top_level_block(line: &str) -> bool {
