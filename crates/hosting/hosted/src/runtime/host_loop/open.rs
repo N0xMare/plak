@@ -460,6 +460,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             &executor,
             &opened,
             &events,
+            "on open",
             config
                 .target
                 .native_provider()

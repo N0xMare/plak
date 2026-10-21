@@ -48,6 +48,7 @@ fn report_rebind_context<P: plakous_host_protocol::ProtocolExtension>(
         executor,
         opened,
         events,
+        "after rebind",
         config
             .target
             .native_provider()

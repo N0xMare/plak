@@ -4187,6 +4187,14 @@ time; a 429 does not renew freshness, and a dropped read clears loading.
 
 ### 5.6 The context gauge
 
+Context-meter refreshes use the attached driver's descriptor-bound in-memory
+canonical accounting, not a cold store reconstruction. The driver still checks
+the exact session, branch and checkpoint locator. A surviving store `Busy`
+refusal makes only that refresh unavailable and logs a content-free WARN under
+`plak.context` with its refresh stage; it does not add a red transcript row.
+Other refresh failures retain a stage-specific transcript error. Wake and
+compaction preflight queries retain their typed refusal and retry semantics.
+
 The composer's upper-left border carries `XX%/YYYk`. The percent is display
 occupancy over the model's **total context window** — never the admitted
 input ceiling under it — and without a known window the meter reads

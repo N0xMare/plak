@@ -143,6 +143,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             &self.executor,
                             &self.opened,
                             &self.events,
+                            "after turn publication",
                             self.config
                                 .target
                                 .native_provider()
@@ -247,6 +248,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                                 &self.executor,
                                 &self.opened,
                                 &self.events,
+                                "after compaction",
                                 native,
                                 self.config.session.context_counters(),
                             ) {

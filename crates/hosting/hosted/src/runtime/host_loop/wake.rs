@@ -2492,7 +2492,9 @@ mod tests {
                 }
             }
             let metadata = event.metadata();
-            if *metadata.level() == tracing::Level::WARN && metadata.target() == "plak.wake" {
+            if *metadata.level() == tracing::Level::WARN
+                && matches!(metadata.target(), "plak.wake" | "plak.context")
+            {
                 let mut fields = Fields(String::new());
                 event.record(&mut fields);
                 self.0.lock().unwrap().push(fields.0);
@@ -2517,6 +2519,70 @@ mod tests {
             with_host(results, |host, runtime, _, observed| {
                 test(host, runtime, observed, &captured);
             });
+        });
+    }
+
+    #[test]
+    fn busy_context_meter_refresh_is_quiet_and_unavailable() {
+        use crate::error::{StoreRefusal, read_faults};
+        with_wake_warnings(1, |host, _, observed, warnings| {
+            let _ = observed.try_iter().count();
+            let _ = warnings.take();
+            read_faults::inject(
+                super::super::super::usage::CONTEXT_QUERY_FAILED,
+                Some(StoreRefusal::Busy),
+                1,
+            );
+            let result = super::super::report_context(
+                &host.executor,
+                &host.opened,
+                &host.events,
+                "after turn publication",
+                false,
+                host.config.session.context_counters(),
+            )
+            .unwrap();
+            assert_eq!(
+                result.disposition(),
+                crate::context::ContextDisposition::Unavailable
+            );
+            let events: Vec<_> = observed.try_iter().collect();
+            assert!(
+                events
+                    .iter()
+                    .any(|event| matches!(event, HostEvent::Usage(_)))
+            );
+            assert!(
+                !events
+                    .iter()
+                    .any(|event| matches!(event, HostEvent::Row(_))),
+                "{events:?}"
+            );
+            let logged = warnings.take();
+            assert_eq!(logged.len(), 1, "{logged:?}");
+            assert!(
+                logged[0].contains("refusal=\"busy\"")
+                    && logged[0].contains("stage=\"after turn publication\""),
+                "{logged:?}"
+            );
+        });
+    }
+
+    #[test]
+    fn nontransient_context_meter_failure_keeps_a_stage_specific_error() {
+        use crate::error::read_faults;
+        with_host(1, |host, _, _, _| {
+            read_faults::inject(super::super::super::usage::CONTEXT_QUERY_FAILED, None, 1);
+            let error = super::super::report_context(
+                &host.executor,
+                &host.opened,
+                &host.events,
+                "after recovery",
+                false,
+                host.config.session.context_counters(),
+            )
+            .unwrap_err();
+            assert!(error.message().contains("context meter after recovery:"));
         });
     }
 

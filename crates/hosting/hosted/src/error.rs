@@ -162,6 +162,7 @@ impl std::fmt::Display for CliFailure {
 impl From<plakous::sessions::AgentSessionsError> for CliFailure {
     fn from(error: plakous::sessions::AgentSessionsError) -> Self {
         let mut failure = Self::new(error.to_string());
+        failure.refusal = StoreRefusal::of(&error);
         failure.source = Some(Box::new(LookupFailure::Recovery(error)));
         failure
     }
@@ -222,6 +223,11 @@ impl CliFailure {
         if self.kind == CliFailureKind::Internal {
             self.kind = kind;
         }
+        self
+    }
+
+    pub(crate) fn with_context(mut self, context: impl std::fmt::Display) -> Self {
+        self.message = format!("{context}: {}", self.message);
         self
     }
 
@@ -347,6 +353,22 @@ mod tests {
         assert_eq!(parts.release.as_ref().unwrap().kind, CliFailureKind::Agent);
         assert_eq!(parts.cleanup.as_ref().unwrap().message(), "cleanup");
         assert!(failure.message().contains("cleanup") && failure.message().contains("canonical"));
+    }
+
+    #[test]
+    fn context_preserves_the_typed_session_error() {
+        let source = plakous::sessions::SessionOperationId::new("").unwrap_err();
+        let failure = CliFailure::from(source.clone()).with_context("context meter after recovery");
+        let retained = std::error::Error::source(&failure)
+            .unwrap()
+            .downcast_ref::<plakous::sessions::AgentSessionsError>()
+            .unwrap();
+        assert_eq!(retained, &source);
+        assert!(
+            failure
+                .message()
+                .starts_with("context meter after recovery:")
+        );
     }
 
     #[test]

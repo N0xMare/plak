@@ -691,6 +691,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             &self.executor,
                             &self.opened,
                             &self.events,
+                            "on idle refresh",
                             self.config
                                 .target
                                 .native_provider()

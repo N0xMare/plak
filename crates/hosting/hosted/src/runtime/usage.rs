@@ -130,12 +130,7 @@ pub(super) fn query_context(
     let report = executor
         .block_on(opened.context_status(operation, query))
         .map_err(|_| CliFailure::new("application execution failed"))?
-        .map_err(|error| {
-            CliFailure::from(crate::error::ReadFailure::store(
-                CONTEXT_QUERY_FAILED,
-                &error,
-            ))
-        })?;
+        .map_err(|error| CliFailure::from(error).with_context(CONTEXT_QUERY_FAILED))?;
     if report.locator() != opened.locator() {
         return Err(CliFailure::new(
             "canonical context report locator does not match the attached session",
@@ -646,10 +641,26 @@ pub(super) fn report_context<P: plakous_host_protocol::ProtocolExtension>(
     executor: &ApplicationExecutor,
     opened: &AttachedCodingSession,
     events: &Sender<P>,
+    stage: &'static str,
     native_compact_facet: bool,
     counters: sessions::ContextCounters,
 ) -> CliResult<ContextProjection> {
-    let projection = query_context(executor, opened, ContextQuery::Current)?;
+    let projection = match query_context(executor, opened, ContextQuery::Current) {
+        Ok(projection) => projection,
+        Err(error) if error.store_refusal() == Some(crate::error::StoreRefusal::Busy) => {
+            tracing::warn!(
+                target: "plak.context",
+                stage,
+                refusal = "busy",
+                "context meter unavailable for this refresh"
+            );
+            emit_unavailable_context(events);
+            return Ok(ContextProjection::unavailable());
+        }
+        Err(error) => {
+            return Err(error.with_context(format!("context meter {stage}")));
+        }
+    };
     emit_context_projection(
         events,
         &projection,

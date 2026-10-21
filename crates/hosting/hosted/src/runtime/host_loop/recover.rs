@@ -119,6 +119,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             &self.executor,
             &self.opened,
             &self.events,
+            "after recovery",
             self.config
                 .target
                 .native_provider()

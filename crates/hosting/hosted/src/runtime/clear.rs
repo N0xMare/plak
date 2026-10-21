@@ -138,6 +138,7 @@ pub fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
         executor,
         opened,
         events,
+        "after clear",
         config
             .target
             .native_provider()
@@ -429,6 +430,7 @@ fn switch_onto_session<P: plakous_host_protocol::ProtocolExtension>(
         executor,
         opened,
         events,
+        "after session switch",
         config
             .target
             .native_provider()
