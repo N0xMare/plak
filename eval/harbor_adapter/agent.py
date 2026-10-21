@@ -10,6 +10,7 @@ import json
 import shutil
 import shlex
 import tempfile
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -20,9 +21,11 @@ from harbor.agents.installed.base import (
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
-from harbor_adapter.artifact_identity import plak_artifact_record
-from harbor_adapter.preflight import probe_executable
+from harbor_adapter.cell_prep import prepare_cell, record_cell
+from harbor_adapter.artifact_identity import plak_artifact_record, require_plak_provenance
+from harbor_adapter.preflight import probe_executable, task_budgets
 from harbor_adapter.lifecycle import sample_cell
+from harbor_adapter.hygiene import harvest_command
 from harbor_adapter.arch import (
     installed_root,
     platform_record_command,
@@ -39,11 +42,10 @@ from harbor_adapter.arguments import (
 )
 from harbor_adapter.credentials import (
     remote_state_acl_command,
-    require_ready_oauth,
+    trial_oauth,
     require_ready_openrouter_key,
 )
 from harbor_adapter.tuples import (
-    DEFAULT_COMPOSITION,
     REMOTE_BINARY,
     REMOTE_HOME,
     REMOTE_JS_HOST,
@@ -90,9 +92,8 @@ class PlakAgent(BaseInstalledAgent):
         self._model = str(kwargs.pop("model", "gpt-5.6-luna"))
         self._effort = str(kwargs.pop("effort", "low"))
         require_tuple(self._account, self._model, self._effort)
-        self._composition = kwargs.pop("composition", None)
-        if self._composition is not None:
-            self._composition = str(self._composition)
+        if kwargs.pop("composition", None) is not None:
+            raise ValueError("scored Plak arms use the shipped composition, not an override")
         xdg = kwargs.pop("xdg_state_home", None)
         self._xdg_state_home = Path(xdg) if xdg else None
         plak_home = kwargs.pop("plak_home", None)
@@ -110,42 +111,49 @@ class PlakAgent(BaseInstalledAgent):
         return f"{REMOTE_BINARY} version"
 
     async def install(self, environment: BaseEnvironment) -> None:
+        await prepare_cell(self, environment, self._arch)
         if not self._binary_path.is_file():
             raise RuntimeError(
                 f"missing Harbor agent binary {self._binary_path}; "
                 f"run `just build-harbor-agent` with HARBOR_ARCH={self._arch}"
             )
         require_elf_arch(self._binary_path, self._arch, "frozen plak")
-        composition = self._composition or DEFAULT_COMPOSITION[self._account]
-        require_js_host(self._js_host_path, composition)
-        js_host = self._js_host_path.is_file()
-        if js_host:
-            require_elf_arch(self._js_host_path, self._arch, "frozen plakous-js-host")
+        provenance = require_plak_provenance(self._binary_path, self._js_host_path)
+        require_js_host(self._js_host_path)
+        require_elf_arch(self._js_host_path, self._arch, "frozen plakous-js-host")
         # Copy once: the digest and upload must refer to the same bytes even if
         # a local build replaces the installed binary during a trial.
         with tempfile.TemporaryDirectory(prefix="plak-harbor-upload-") as directory:
             frozen = Path(directory) / "plak"
             shutil.copyfile(self._binary_path, frozen)
-            frozen_js = Path(directory) / "plakous-js-host" if js_host else None
-            if frozen_js is not None:
-                shutil.copyfile(self._js_host_path, frozen_js)
+            frozen_js = Path(directory) / "plakous-js-host"
+            shutil.copyfile(self._js_host_path, frozen_js)
             self._artifact = plak_artifact_record(frozen, frozen_js, arch=self._arch)
+            if any(entry["sha256"] != provenance["binaries"][name]["sha256"]
+                   for name, entry in self._artifact["binaries"].items()):
+                raise ValueError("Plak build changed during frozen upload")
+            self._artifact["source"] = provenance["source"]
+            self._artifact["build"] = {key: provenance[key] for key in ("features", "toolchain")}
             await environment.upload_file(str(frozen), REMOTE_BINARY)
-            if frozen_js is not None:
-                await environment.upload_file(str(frozen_js), REMOTE_JS_HOST)
+            await environment.upload_file(str(frozen_js), REMOTE_JS_HOST)
+        for name, remote in (("plak", REMOTE_BINARY), ("plakous-js-host", REMOTE_JS_HOST)):
+            entry = self._artifact["binaries"].get(name)
+            if entry:
+                line = shlex.quote(entry["sha256"] + "  " + remote)
+                await self.exec_as_root(environment, command=f"printf '%s\\n' {line} | sha256sum -c - >/dev/null")
         await self.exec_as_root(
             environment, command=f"chmod 0755 {shlex.quote(REMOTE_BINARY)}"
         )
         uploaded = [REMOTE_BINARY, REMOTE_HOME, REMOTE_XDG]
-        if js_host:
-            await self.exec_as_root(
-                environment,
-                command=f"chmod 0755 {shlex.quote(REMOTE_JS_HOST)}",
-            )
-            uploaded.append(REMOTE_JS_HOST)
+        await self.exec_as_root(
+            environment, command=f"chmod 0755 {shlex.quote(REMOTE_JS_HOST)}"
+        )
+        uploaded.append(REMOTE_JS_HOST)
+        await environment.upload_file(
+            str(Path(__file__).with_name("observed_config.py")), "/tmp/plak-observed-config.py"
+        )
         await probe_executable(environment, REMOTE_BINARY)
-        if js_host:
-            await probe_executable(environment, REMOTE_JS_HOST, version_argument=None)
+        await probe_executable(environment, REMOTE_JS_HOST, version_argument=None)
         await self.exec_as_root(
             environment,
             command=(
@@ -173,24 +181,25 @@ class PlakAgent(BaseInstalledAgent):
             await environment.upload_file(str(key.resolve()), REMOTE_OPENROUTER_KEY)
             uploaded.append(REMOTE_OPENROUTER_KEY)
         else:
-            oauth_dir = require_ready_oauth(
-                self._account, xdg_state_home=self._xdg_state_home
-            )
-            remote_sub = (
-                f"{REMOTE_XDG}/plak/subscriptions/{oauth_dir.name}"
-            )
-            await environment.upload_dir(str(oauth_dir), remote_sub)
-            catalog = oauth_dir.parent / "catalog"
-            if catalog.is_dir():
-                await environment.upload_dir(
-                    str(catalog), f"{REMOTE_XDG}/plak/subscriptions/catalog"
+            agent_timeout, verifier_timeout = task_budgets(environment)
+            with trial_oauth(self._account, agent_timeout=agent_timeout,
+                             verifier_timeout=verifier_timeout,
+                             xdg_state_home=self._xdg_state_home) as oauth_dir:
+                remote_sub = (
+                    f"{REMOTE_XDG}/plak/subscriptions/{oauth_dir.name}"
                 )
-            compatibility = oauth_dir.parent / "compatibility"
-            if compatibility.is_dir():
-                await environment.upload_dir(
-                    str(compatibility),
-                    f"{REMOTE_XDG}/plak/subscriptions/compatibility",
-                )
+                await environment.upload_dir(str(oauth_dir), remote_sub)
+                catalog = oauth_dir.parent / "catalog"
+                if catalog.is_dir():
+                    await environment.upload_dir(
+                        str(catalog), f"{REMOTE_XDG}/plak/subscriptions/catalog"
+                    )
+                compatibility = oauth_dir.parent / "compatibility"
+                if compatibility.is_dir():
+                    await environment.upload_dir(
+                        str(compatibility),
+                        f"{REMOTE_XDG}/plak/subscriptions/compatibility",
+                    )
         await self.exec_as_root(
             environment,
             command=remote_state_acl_command(environment.default_user, *uploaded),
@@ -205,12 +214,12 @@ class PlakAgent(BaseInstalledAgent):
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
+        await record_cell(self, environment)
         argv = run_arguments(
             account=self._account,
             model=self._model,
             effort=self._effort,
             prompt=instruction,
-            composition=self._composition,
         )
         env = self._run_env()
         quoted = " ".join(shlex.quote(part) for part in argv)
@@ -219,8 +228,8 @@ class PlakAgent(BaseInstalledAgent):
         exit_path = "/logs/agent/plak-exit.txt"
         # Do not `plak refresh` in the cell. Refresh rotates the provider
         # refresh token and invalidates every other copy (host, sibling
-        # trials, vendor Codex/Grok). Host refreshes once per arm before
-        # `harbor run`; cells use the uploaded Ready credentials as-is.
+        # trials, vendor Codex/Grok). Host refreshes under the per-trial
+        # upload lock; cells use the uploaded Ready credentials as-is.
         command = _plak_run_command(
             quoted, stdout_path, stderr_path, exit_path
         )
@@ -244,8 +253,20 @@ class PlakAgent(BaseInstalledAgent):
                 )
             except OSError:
                 pass
-            await self._record_termination(environment, env, exception_type)
-            await self._capture_usage(environment, context)
+            primary_error = sys.exc_info()[0]
+            try:
+                try:
+                    await self._record_termination(environment, env, exception_type)
+                    await self._capture_usage(environment, context)
+                    await self.exec_as_agent(environment, command=(
+                        "python3 /tmp/plak-observed-config.py /tmp/plak-cell/home/wire-captures "
+                        "/logs/agent/observed-config.json"
+                    ))
+                finally:
+                    await self.exec_as_root(environment, command=harvest_command())
+            except Exception:
+                if primary_error is None:
+                    raise
 
     def _run_env(self) -> dict[str, str]:
         return run_env(

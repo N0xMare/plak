@@ -96,7 +96,7 @@ pmux_harvest() {{
   cp -a {pool}/transcripts/. /logs/agent/claude-transcripts/ 2>/dev/null || true
   cp -a {pool}/stateful/*/root/projects/*/*.jsonl /logs/agent/claude-transcripts/ 2>/dev/null || true
 }}
-trap 'pmux_harvest; kill "$daemon" 2>/dev/null || true' EXIT
+trap 'pmux_harvest' EXIT
 ok=0
 for _ in $(seq 1 80); do
   if [ -S {socket} ]; then ok=1; break; fi

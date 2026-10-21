@@ -67,11 +67,18 @@ case "$cmd" in
       echo "eval: Docker is required to build the $platform Harbor agent on $(uname -s)" >&2
       exit 2
     fi
+    source_commit="$(git rev-parse HEAD)"
+    source_dirty=false
+    if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
+      source_dirty=true
+    fi
     # Always bookworm. Host Ubuntu 24.04 bins need GLIBC 2.38/2.39; Harbor
     # ubuntu cells do not have that. Same rule as just fetch-harbor-pmux.
     docker buildx build \
       --platform "$platform" \
       -f eval/harbor_adapter/Dockerfile \
+      --build-arg "SOURCE_COMMIT=$source_commit" \
+      --build-arg "SOURCE_DIRTY=$source_dirty" \
       --target artifact \
       --output "type=local,dest=$installed" \
       "$root"
@@ -163,15 +170,8 @@ print("eval: frozen pmux for linux/" + bins.arch + " from pseudomux " + bins.com
     # neither Harbor's build compose template nor the task Dockerfiles name a
     # platform. DOCKER_DEFAULT_PLATFORM is the only thing that makes those cells
     # the selected architecture instead of the daemon's; compose honours it for
-    # `build` and `up` alike, so it also covers the --force-build rebuild path.
+    # `build` and `up` alike; task images are campaign-bound by ID.
     export DOCKER_DEFAULT_PLATFORM="$platform"
-    # Prebuilt TB 4.0 task images are published for linux/amd64 only. Off
-    # amd64, --force-build makes Harbor rebuild each cell from the task's own
-    # Dockerfile on the daemon platform.
-    force_build=()
-    if [[ "$arch" != "amd64" ]]; then
-      force_build=(--force-build)
-    fi
     # ARM is a separate lane: the suffix goes on the job name inside jobs/, the
     # way rung-a and rung-b spell it. amd64 keeps its existing bare jobs/ path
     # so archived runs and `harbor.sh view` stay valid.
@@ -191,8 +191,8 @@ print("eval: frozen pmux for linux/" + bins.arch + " from pseudomux " + bins.com
     if [[ "$has_include" -eq 0 ]]; then
       echo "eval: harbor.sh eval with no --include-task-name runs all 66 TB 4.0 tasks" >&2
     fi
+    PYTHONPATH="$root/eval" python3 -m harbor_adapter.campaign
     exec uv run --project "$root/eval" harbor run --config "$config" --jobs-dir "$jobs_dir" \
-      ${force_build[@]+"${force_build[@]}"} \
       --dataset "$dataset" "$@" </dev/null
     ;;
   view)
@@ -211,7 +211,7 @@ fetch-pmux builds Full-cell pmux companions from PMUX_SRC (default ../pseudomux)
 HARBOR_ARCH selects the cell architecture (amd64|arm64); unset it follows the
 Docker daemon. Artifacts land in .plak/installed/<arch>/ and never mix.
 eval exports DOCKER_DEFAULT_PLATFORM so compose-built cells are that
-architecture, passes --force-build off amd64, and suffixes the arm64 job name.
+architecture, uses frozen image IDs, and suffixes the arm64 job name.
 EOF
     ;;
   *)

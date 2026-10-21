@@ -213,17 +213,6 @@ def turn_failed_class(text: str) -> str:
     return f"{CLASS_TURN_FAILED}:{classify_failure_kind(text)}"
 
 
-# A Harbor exception whose name or message is itself typed provider evidence
-# is a turn failure, not an unexplained harness death. `AgentTimeoutError` and
-# a compose failure are not: nothing says the provider refused the turn.
-_EXCEPTION_FAILURE_KINDS = (
-    KIND_CREDENTIAL,
-    KIND_CONTEXT_CAPACITY,
-    KIND_PROVIDER_RATE_LIMIT,
-    KIND_PROVIDER_REJECTION,
-)
-
-
 def harness_exception_class(exception_type: str) -> str:
     """Names the exception in the class, the way pmux names its own deaths."""
     return (
@@ -234,9 +223,7 @@ def harness_exception_class(exception_type: str) -> str:
 
 
 def classify_harness_exception(exception_type: str, exception_message: str) -> str:
-    kind = classify_failure_kind(f"{exception_type} {exception_message}")
-    if kind in _EXCEPTION_FAILURE_KINDS:
-        return f"{CLASS_TURN_FAILED}:{kind}"
+    # Harbor regex exception subtypes can be triggered by tool output.
     return harness_exception_class(exception_type)
 
 
@@ -414,9 +401,9 @@ def classify_plak(
         record.termination_class = turn_failed_class(str(failure.get("msg") or ""))
         return record
     diagnostic = _plak_stderr_diagnostic(stderr)
-    if diagnostic and has_turn_failure(stderr):
+    if diagnostic and has_turn_failure(diagnostic):
         record.detail = diagnostic
-        record.termination_class = turn_failed_class(stderr)
+        record.termination_class = turn_failed_class(diagnostic)
         return record
     if exit_code is None:
         record.termination_class = (
@@ -478,10 +465,43 @@ def _vendor_jsonl_tail(text: str) -> tuple[bool, str]:
         if not isinstance(record, dict):
             continue
         kind = record.get("type") or record.get("kind") or ""
-        if kind == "error":
+        if kind == "event_msg" and isinstance(record.get("payload"), dict):
+            payload = record["payload"]
+            if payload.get("type") in ("error", "turn_aborted"):
+                ended_in_error = True
+                last_error = str(payload.get("message") or payload.get("reason") or "turn aborted")
+            elif payload.get("type") == "task_complete":
+                ended_in_error = False
+            continue
+        message = record.get("message")
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            stop = message.get("stopReason")
+            if stop == "error":
+                ended_in_error = True
+                last_error = str(message.get("errorMessage") or "")
+            elif stop in ("stop", "toolUse", "length"):
+                ended_in_error = False
+            continue
+        if kind == "result" and (record.get("is_error") is True or
+                                 str(record.get("subtype", "")).startswith("error")):
             ended_in_error = True
-            last_error = str(record.get("message") or record.get("error") or "")
-        elif kind:
+            last_error = str(record.get("error") or record.get("errors") or
+                             record.get("result") or record.get("subtype"))
+        elif kind in ("error", "turn.failed", "turn.aborted"):
+
+            ended_in_error = True
+            error = record.get("error")
+            if isinstance(error, dict):
+                data = error.get("data") if isinstance(error.get("data"), dict) else {}
+                last_error = str(error.get("message") or data.get("message") or "")
+                if type(data.get("statusCode")) is int:
+                    last_error += f" HTTP {data['statusCode']}"
+            else:
+                last_error = str(record.get("message") or error or "")
+        elif kind == "step_finish" and isinstance(record.get("part"), dict):
+            if record["part"].get("reason") in ("stop", "end_turn"):
+                ended_in_error = False
+        elif kind in ("turn.completed", "result", "completed"):
             ended_in_error = False
     return ended_in_error, last_error
 
@@ -493,13 +513,12 @@ def classify_vendor(
     exception_type: str = "",
     exception_message: str = "",
     exit_code: int | None = None,
+    pmux_log_text: str | None = None,
 ) -> TerminationRecord:
     """Classifies a vendor arm from what its logs allow.
 
-    Vendor CLIs do not record a typed termination, so only two things can be
-    read back: the process exit (through Harbor's exception) and an error the
-    CLI printed. Anything else is reported as `completed`, which means "the
-    CLI exited and said nothing about failing", not "the model tried".
+    First-party terminal records take precedence over Harbor's transcript
+    regex. `completed` describes a clean process, not verifier success.
     """
     record = TerminationRecord(
         harness=harness,
@@ -508,10 +527,16 @@ def classify_vendor(
         exception_type=exception_type,
     )
     ended_in_error, last_error = _vendor_jsonl_tail(log_text)
+    if harness == "pmux":
+        diagnostic = log_text if pmux_log_text is None else pmux_log_text
+        if any(marker in diagnostic for marker in ("NeedsLogin", "DaemonLost", "RmuxUnavailable")):
+            record.termination_class = ("infra:daemon-loss" if "NeedsLogin" not in diagnostic
+                                        else "turn_failed:credential")
+            return record
     if exception_type == AGENT_EXIT_EXCEPTION or (
         exit_code is not None and exit_code != 0
     ):
-        evidence = " ".join(filter(None, (last_error, exception_message)))
+        evidence = last_error
         record.detail = _first_line(last_error or exception_message)
         record.termination_class = (
             turn_failed_class(evidence)
@@ -519,15 +544,15 @@ def classify_vendor(
             else CLASS_AGENT_EXIT_NONZERO
         )
         return record
+    if ended_in_error:
+        record.termination_class = turn_failed_class(last_error)
+        record.detail = _first_line(last_error)
+        return record
     if exception_type:
         record.termination_class = classify_harness_exception(
             exception_type, exception_message
         )
         record.detail = _first_line(exception_message) or exception_type
-        return record
-    if ended_in_error:
-        record.termination_class = turn_failed_class(last_error)
-        record.detail = _first_line(last_error)
         return record
     return record
 
@@ -613,9 +638,14 @@ def classify_trial_dir(trial_dir: Path) -> TerminationRecord:
     log_text = ""
     for name in VENDOR_LOGS.get(harness, ()):
         log_text += read_text(agent_dir / name)
+    pmux_log_text = log_text
+    for directory in ("sessions", "claude-transcripts"):
+        for path in sorted((agent_dir / directory).rglob("*.jsonl")):
+            log_text += "\n" + read_text(path)
     record = classify_vendor(
         harness=harness,
         log_text=log_text,
+        pmux_log_text=pmux_log_text,
         exception_type=exception_type,
         exception_message=exception_message,
     )

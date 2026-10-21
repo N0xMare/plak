@@ -3,8 +3,41 @@
 from __future__ import annotations
 
 import asyncio
+import functools
+import json
+import sys
 from datetime import datetime, timezone
 from typing import Any
+
+from harbor_adapter.hygiene import harvest_command
+
+
+def observe_run(run):
+    """Identical non-mutating process samples, even on timeout or failure."""
+    @functools.wraps(run)
+    async def observed(self, instruction, environment, context):
+        from harbor_adapter.cell_prep import record_cell
+        await record_cell(self, environment)
+        samples = [await sample_cell(environment, "before_agent_run")]
+        try:
+            return await run(self, instruction, environment, context)
+        finally:
+            primary_error = sys.exc_info()[0]
+            samples.append(await sample_cell(environment, "after_agent_run"))
+            try:
+                (self.logs_dir / "lifecycle.json").write_text(
+                    json.dumps({"schema_version": 1, "samples": samples}, indent=2) + "\n"
+                )
+            except Exception:
+                if primary_error is None:
+                    raise
+            finally:
+                try:
+                    await self.exec_as_root(environment, command=harvest_command())
+                except Exception:
+                    if primary_error is None:
+                        raise
+    return observed
 
 
 SAMPLE_COMMAND = (

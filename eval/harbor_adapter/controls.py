@@ -56,7 +56,7 @@ class ControlError(ValueError):
 def vendor_effort_ak(agent: str, effort: str) -> tuple[str, ...]:
     """Harbor `--ak` strings that pin the same effort Plak named."""
     if effort == "none":
-        return ()
+        raise ControlError("omitted effort is not a comparison; OpenRouter arms are disabled")
     if effort not in PLAQUOUS_EFFORTS:
         raise ControlError(f"unknown effort {effort!r}")
     if agent == "codex":

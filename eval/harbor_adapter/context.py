@@ -79,6 +79,15 @@ def main() -> None:
         repeat_block=os.environ.get("HARBOR_REPEAT_BLOCK") or None,
         prompt_variant=args.prompt_variant,
     )
+    from harbor_adapter.campaign import load_campaign
+    campaign = load_campaign()
+    if args.arm not in campaign["arms"]:
+        raise ValueError("arm is not in the frozen campaign")
+    record["campaign_sha256"] = os.environ["HARBOR_CAMPAIGN_SHA256"]
+    record["campaign_canonical_sha256"] = hashlib.sha256(
+        json.dumps(campaign, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    record["campaign"] = campaign
     record["input_sha256"] = {
         relative: hashlib.sha256((args.root / relative).read_bytes()).hexdigest()
         for relative in (

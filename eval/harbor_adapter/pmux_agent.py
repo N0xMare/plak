@@ -19,6 +19,9 @@ from harbor.agents.installed.base import (
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
+from harbor_adapter.lifecycle import observe_run
+from harbor_adapter.preflight import task_budgets
+from harbor_adapter.cell_prep import prepare_cell
 from harbor_adapter.credentials import (
     remote_claude_securestorage_acl_command,
     refuse_stripped_env,
@@ -114,9 +117,8 @@ class FrozenPmux(BaseInstalledAgent):
         )
         self._model = str(kwargs.pop("model", "claude-sonnet-5"))
         self._effort = str(kwargs.pop("effort", "low"))
-        self._turn_timeout_ms = int(
-            kwargs.pop("turn_timeout_ms", 900_000)
-        )
+        if "turn_timeout_ms" in kwargs:
+            raise ValueError("pmux turn budget comes from the task, not an arm override")
         self._last_usage: UsageTotals | None = None
         self._harness_termination = TERMINATION_NOT_RUN
         self._artifact: dict[str, Any] = {}
@@ -126,6 +128,7 @@ class FrozenPmux(BaseInstalledAgent):
         return "claude --version"
 
     async def install(self, environment: BaseEnvironment) -> None:
+        await prepare_cell(self, environment, self._arch)
         artifacts = require_frozen_artifacts(
             "claude", self._vendor_root, self._arch
         )
@@ -189,6 +192,7 @@ class FrozenPmux(BaseInstalledAgent):
                 f"frozen Claude Code reported {reported!r}, pin is {pinned}"
             )
 
+    @observe_run
     async def run(
         self,
         instruction: str,
@@ -229,7 +233,7 @@ class FrozenPmux(BaseInstalledAgent):
             quoted,
             stdout_path,
             stderr_path,
-            turn_timeout_ms=self._turn_timeout_ms,
+            turn_timeout_ms=int((task_budgets(environment)[0] - 5) * 1000),
         )
         try:
             try:

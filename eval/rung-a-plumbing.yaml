@@ -1,8 +1,8 @@
 jobs_dir: .plak/harbor/jobs
 n_attempts: 1
-n_concurrent_trials: 3
+n_concurrent_trials: 1
 environment:
-  type: docker
+  import_path: harbor_adapter.docker_retry:RetryingDocker
 datasets:
   - path: eval/datasets/rung-a-plumbing
     task_names:

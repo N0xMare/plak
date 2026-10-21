@@ -14,15 +14,9 @@ export HARBOR_ARCH="$arch"
 # neither Harbor's build compose template nor the task Dockerfiles name a
 # platform. DOCKER_DEFAULT_PLATFORM is the only thing that makes those cells the
 # selected architecture instead of the daemon's; compose honours it for `build`
-# and `up` alike, so it also covers the --force-build rebuild path.
+# and `up` alike; task images are campaign-bound by ID.
 export DOCKER_DEFAULT_PLATFORM="$platform"
-# Prebuilt Terminal-Bench task images are published for linux/amd64 only.
-# Off amd64, --force-build makes Harbor rebuild each cell from the task's own
-# Dockerfile on the daemon platform.
-force_build=()
-if [[ "$arch" != "amd64" ]]; then
-  force_build=(--force-build)
-fi
+# Task images must already be frozen by ID in the reviewed campaign.
 dataset='terminal-bench/terminal-bench@4.0.0'
 # ARM is a separate lane, so the suffix goes on the job name inside jobs/ the
 # way rung-a and rung-b spell it. amd64 keeps its existing bare jobs/ path so
@@ -32,7 +26,7 @@ jobs_dir="$root/.plak/harbor/jobs${job_suffix:+/smoke$job_suffix}"
 # separate `harbor run` jobs and may overlap. Do not overlap two arms that
 # share one OAuth refresh token (Plak Codex vs vendor Codex; Plak Grok vs
 # grok-build only if a cell refreshes).
-n_concurrent="${HARBOR_N_CONCURRENT:-5}"
+n_concurrent="1"
 tasks=(
   terminal-bench/photonic-waveguide-routing
   terminal-bench/music-harmony
@@ -49,6 +43,7 @@ harbor_bin() {
   command -v uv >/dev/null || { echo "eval smoke: install uv" >&2; exit 2; }
   # Harbor's TUI restores the terminal on exit. With no TTY, leftover stdin
   # is executed by this shell (`opencode-grok: command not found`, exit 127).
+  PYTHONPATH="$root/eval" python3 -m harbor_adapter.campaign
   uv run --project "$root/eval" harbor "$@" </dev/null
 }
 
@@ -75,23 +70,10 @@ fi
 
 arm="${1:-all}"
 
-host_refresh_plak() {
-  local account="$1"
-  if [[ "${PLAK_HOST_REFRESH:-1}" != "1" ]]; then
-    return 0
-  fi
-  if ! command -v plak >/dev/null; then
-    echo "eval smoke: plak is not on PATH; cannot refresh $account before Harbor" >&2
-    exit 2
-  fi
-  plak refresh "$account"
-}
 
 run_plak() {
   local account="$1" model="$2" effort="$3"
-  host_refresh_plak "$account"
   harbor_bin run --config "$root/eval/terminal-bench.yaml" --jobs-dir "$jobs_dir" \
-    ${force_build[@]+"${force_build[@]}"} \
     --dataset "$dataset" \
     --agent harbor_adapter.agent:PlakAgent \
     --model "$model" \
@@ -127,9 +109,8 @@ run_vendor() {
   done < <(vendor_ak "$named" "$effort")
   # Stock vendor agents validate their kwargs, so arch travels in HARBOR_ARCH.
   harbor_bin run --jobs-dir "$jobs_dir" --dataset "$dataset" \
-    ${force_build[@]+"${force_build[@]}"} \
     --agent "$agent" --model "$model" \
-    --n-attempts 1 --n-concurrent "$n_concurrent" --env docker \
+    --n-attempts 1 --n-concurrent "$n_concurrent" --env harbor_adapter.docker_retry:RetryingDocker \
     "${aks[@]}" \
     "$@" \
     "${include[@]}"
@@ -171,6 +152,7 @@ else:
 
 run_named_arm() {
   local named="$1"
+  export HARBOR_ARM="$named"
   case "$named" in
     plak-codex) run_plak codex gpt-5.6-luna low ;;
     plak-grok) run_plak grok grok-4.6 low ;;
@@ -252,7 +234,7 @@ case "$arm" in
 usage: eval/scripts/smoke.sh [plak-codex|codex|plak-grok|grok-build|pi-codex|pi-grok|opencode-codex|opencode-grok|all]
 
 HARBOR_ARCH selects the cell architecture (amd64|arm64); unset it follows the
-Docker daemon. arm64 reads .plak/installed/arm64/ and passes --force-build.
+Docker daemon. arm64 reads .plak/installed/arm64/ and uses frozen image IDs.
 EOF
     ;;
   *)

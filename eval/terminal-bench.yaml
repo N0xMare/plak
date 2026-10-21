@@ -2,7 +2,7 @@
 # Dataset slug: terminal-bench/terminal-bench@4.0.0
 jobs_dir: .plak/harbor/jobs
 n_attempts: 1
-n_concurrent_trials: 5
+n_concurrent_trials: 1
 
 agents:
   - import_path: harbor_adapter.agent:PlakAgent
@@ -15,7 +15,7 @@ agents:
       effort: low
 
 environment:
-  type: docker
+  import_path: harbor_adapter.docker_retry:RetryingDocker
 
 datasets:
   - name: terminal-bench/terminal-bench

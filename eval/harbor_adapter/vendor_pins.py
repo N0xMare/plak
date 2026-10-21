@@ -17,8 +17,11 @@ Missing or mismatched artifacts fail closed. An unpinned latest tag is not a pin
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
+
+from harbor_adapter.campaign import load_campaign, sha256
 
 from harbor_adapter.arch import (
     NODE_ARCH_SUFFIXES,
@@ -202,6 +205,12 @@ def require_frozen_artifacts(
             require_elf_arch(archive, selected, "frozen grok")
         except RuntimeError as exc:
             raise VendorArtifactError(str(exc)) from exc
+    if os.environ.get("HARBOR_CAMPAIGN"):
+        pins = load_campaign()["artifact_sha256"]
+        for path in ([node_file, archive] if cli in NODE_CLIS else [archive]):
+            key = f".plak/installed/{selected}/vendor/{path.name}"
+            if pins.get(key) != sha256(path):
+                raise VendorArtifactError("vendor archive does not match the reviewed campaign pin table")
     return FrozenArtifacts(
         root=base,
         node_tarball=node_file,

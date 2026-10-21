@@ -35,6 +35,10 @@ from harbor.agents.installed.opencode import OpenCode
 from harbor.agents.installed.pi import Pi
 from harbor.environments.base import BaseEnvironment
 
+from harbor_adapter.hygiene import harvest_command
+from harbor_adapter.lifecycle import observe_run
+from harbor_adapter.cell_prep import prepare_cell
+from harbor_adapter.campaign import sha256
 from harbor_adapter.credentials import (
     CredentialError,
     opencode_auth_provider,
@@ -58,6 +62,7 @@ from harbor_adapter.arch import (
 )
 from harbor_adapter.vendor_install import grok_install_command, node_cli_install_command
 from harbor_adapter.native_usage import extract_agent_usage
+from harbor_adapter.observed_config import archived_config
 from harbor_adapter.vendor_pins import (
     CLI_PINS,
     REMOTE_VENDOR,
@@ -113,6 +118,10 @@ async def _install_node_cli(
     await environment.upload_file(
         str(artifacts.cli_archive.resolve()), f"{REMOTE_VENDOR}/{cli}.tar.gz"
     )
+    for path, remote in ((artifacts.node_tarball, f"{REMOTE_VENDOR}/node.tar.gz"),
+                         (artifacts.cli_archive, f"{REMOTE_VENDOR}/{cli}.tar.gz")):
+        line = shlex.quote(sha256(path) + "  " + remote)
+        await agent.exec_as_root(environment, command=f"printf '%s\\n' {line} | sha256sum -c - >/dev/null")
     await agent.exec_as_root(environment, command=node_cli_install_command(cli))
 
 
@@ -171,7 +180,7 @@ async def _record_executable_identity(
         if result.return_code != 0 or len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha) or size <= 0:
             raise VendorArtifactError(f"frozen {cli} cell identity probe is incomplete")
         binaries[name] = {"sha256": sha, "bytes": size}
-    record = artifact_record(harness=cli, binaries=binaries, arch=arch)
+    record = artifact_record(harness="grok-build" if cli == "grok" else cli, binaries=binaries, arch=arch)
     record["version"] = CLI_PINS[cli]
     if prerequisites:
         record["prerequisites"] = prerequisites
@@ -220,10 +229,16 @@ class _CanonicalNativeUsage:
 
     _native_harness: str
 
+    @observe_run
+    async def run(self, instruction, environment, context):
+        return await super().run(instruction, environment, context)
+
     def populate_context_post_run(self, context: AgentContext) -> None:
         try:
             super().populate_context_post_run(context)
         finally:
+            observed = archived_config(Path(self.logs_dir), self._native_harness)
+            (Path(self.logs_dir) / "observed-config.json").write_text(json.dumps(observed, indent=2) + "\n")
             usage = extract_agent_usage(Path(self.logs_dir), self._native_harness)
             record = usage.as_dict()
             (Path(self.logs_dir) / "native-usage.json").write_text(
@@ -250,10 +265,63 @@ class FrozenCodex(_CanonicalNativeUsage, Codex):
         _force_pin("codex", kwargs)
         super().__init__(*args, **kwargs)
 
+    async def run(self, instruction, environment, context):
+        path = self._resolve_auth_json_path()
+        if path is None:
+            raise CredentialError("Codex native-home requires its own OAuth file")
+        self._codex_auth_path = Path(path)
+        self._codex_auth_snapshot = self._codex_auth_path.read_bytes()
+        self._codex_writeback_error = False
+        self._codex_harvest_error = False
+        try:
+            return await super().run(instruction, environment, context)
+        finally:
+            primary_error = sys.exc_info()[0]
+            if self._codex_writeback_error or self._codex_harvest_error:
+                try:
+                    (self.logs_dir / "adapter-validity.json").write_text(
+                        json.dumps({"codex_writeback_failed": self._codex_writeback_error,
+                                    "codex_harvest_failed": self._codex_harvest_error}) + "\n"
+                    )
+                except OSError:
+                    if primary_error is None:
+                        raise
+                if primary_error is None and self._codex_writeback_error:
+                    raise CredentialError("Codex OAuth write-back failed")
+
+    async def exec_as_agent(self, environment, command, **kwargs):
+        # Harbor 0.23 deletes CODEX_HOME in its run() finally. Intercept that
+        # exact cleanup before it destroys the only rotated refresh token.
+        secrets = self._REMOTE_CODEX_SECRETS_DIR.as_posix()
+        cleanup = f'rm -rf {shlex.quote(secrets)} "$CODEX_HOME"'
+        if command == cleanup:
+            try:
+                await self.exec_as_root(environment, command=harvest_command())
+            except Exception:
+                self._codex_harvest_error = True
+            try:
+                await self._persist_codex_auth(environment)
+            except Exception:
+                self._codex_writeback_error = True
+        return await super().exec_as_agent(environment, command=command, **kwargs)
+
+    async def _persist_codex_auth(self, environment):
+        from harbor_adapter.credentials import replace_codex_auth
+        path = self._codex_auth_path
+        remote = "/tmp/codex-refresh-candidate.json"
+        await self.exec_as_root(environment, command=(
+            "umask 077; cp -- /tmp/codex-home/auth.json " + remote
+        ))
+        with tempfile.TemporaryDirectory(prefix=".codex-cell-", dir=path.parent) as directory:
+            candidate = Path(directory) / "auth.json"
+            await environment.download_file(remote, str(candidate))
+            replace_codex_auth(path, candidate, self._codex_auth_snapshot)
+        await self.exec_as_root(environment, command="rm -f -- " + remote)
+
     async def install(self, environment: BaseEnvironment) -> None:
+        await prepare_cell(self, environment, self._arch)
         artifacts = require_frozen_artifacts("codex", self._vendor_root, self._arch)
         await _install_node_cli(self, environment, artifacts)
-        await self.ensure_system_dependencies(environment, ("ripgrep",))
         ca_bundle = await _ensure_codex_ca_bundle(self, environment)
         await self.exec_as_root(
             environment, command=platform_record_command(self._arch)
@@ -271,9 +339,11 @@ class FrozenGrokBuild(_CanonicalNativeUsage, GrokBuild):
         self._arch, self._vendor_root = _vendor_selection(kwargs)
         _reject_host_overlays("grok", kwargs)
         _force_pin("grok", kwargs)
+        kwargs["kill_leftover_processes"] = False
         super().__init__(*args, **kwargs)
 
     async def install(self, environment: BaseEnvironment) -> None:
+        await prepare_cell(self, environment, self._arch)
         artifacts = require_frozen_artifacts("grok", self._vendor_root, self._arch)
         await self.exec_as_root(
             environment, command=f"mkdir -p {shlex.quote(REMOTE_VENDOR)}"
@@ -291,6 +361,7 @@ class FrozenGrokBuild(_CanonicalNativeUsage, GrokBuild):
     _REMOTE_GROK_SECRETS_DIR = "/tmp/grok-secrets"
 
     @with_prompt_template
+    @observe_run
     async def run(
         self,
         instruction: str,
@@ -428,6 +499,7 @@ class FrozenPi(_CanonicalNativeUsage, Pi):
         super().__init__(*args, **kwargs)
 
     async def install(self, environment: BaseEnvironment) -> None:
+        await prepare_cell(self, environment, self._arch)
         artifacts = require_frozen_artifacts("pi", self._vendor_root, self._arch)
         await _install_node_cli(self, environment, artifacts)
         await self.ensure_system_dependencies(environment, ("coreutils",))
@@ -534,6 +606,7 @@ class FrozenOpenCode(_CanonicalNativeUsage, OpenCode):
         super().__init__(*args, **kwargs)
 
     async def install(self, environment: BaseEnvironment) -> None:
+        await prepare_cell(self, environment, self._arch)
         artifacts = require_frozen_artifacts("opencode", self._vendor_root, self._arch)
         await _install_node_cli(self, environment, artifacts)
         await self.ensure_system_dependencies(environment, ("coreutils",))

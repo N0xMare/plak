@@ -11,6 +11,10 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+from harbor_adapter.campaign import trial_gate, campaign_health, validate_campaign
+from harbor_adapter.observed_config import archived_config, resolved_composition
+from harbor_adapter.paired import paired_reports
+from harbor_adapter.outcomes import failure_class
 from harbor_adapter.pricing import RATE_CARD_PATH, from_harbor_context, resolve_model_key
 from harbor_adapter.native_usage import extract_agent_usage
 from harbor_adapter.usage import read_archived_plak_usage
@@ -272,7 +276,7 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
     if incomplete_usage:
         implied = type(implied)(None, "unresolved_usage", implied.card_id, implied.model_key, implied.basis)
     phases = trial_phases(result)
-    reward = summary.reward if loaded.ok and exception is None else None
+    reward = summary.reward if loaded.ok else None
     verifier_evidence = inspect_verifier(
         path, dataset=context.get("dataset"), slice_name=context.get("slice"),
         task=task_name, task_ref=task_ref, task_checksum=task_checksum,
@@ -282,32 +286,17 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
     setup = result.get("agent_setup")
     execution = result.get("agent_execution")
     verifier = result.get("verifier")
-    if not loaded.ok:
-        outcome = "unreadable_result"
-    elif exception == "AgentTimeoutError":
-        outcome = "agent_timeout"
-    elif exception:
-        lowered = exception.lower()
-        if "verif" in lowered:
-            outcome = "verifier_error"
-        elif "setup" in lowered or "build" in lowered or "environment" in lowered:
-            outcome = "setup_infrastructure_error"
-        elif "provider" in lowered or "rate" in lowered or termination.startswith("turn_failed:provider"):
-            outcome = "provider_error"
-        else:
-            outcome = "harness_error" if termination.startswith("harness_exception") else "agent_error"
-    elif termination.startswith("turn_failed:provider"):
-        outcome = "provider_error"
-    elif termination != CLASS_COMPLETED:
-        outcome = "harness_error" if termination.startswith("harness_exception") else "agent_error"
+    attribution = failure_class(termination, exception)
+    if loaded.status != RESULT_OK:
+        attribution = "infra"
+    if attribution != "agent":
+        outcome = attribution
     elif reward is None:
         outcome = "verifier_missing"
     elif not assertions_verified:
         outcome = "verifier_unverified"
     else:
         outcome = "verifier_pass" if reward > 0 else "verifier_fail"
-    # A repaired document is useful for diagnosis, but it is not immutable
-    # evidence of the result Harbor wrote and must not enter a score.
     eligible = loaded.status == RESULT_OK and outcome in ("verifier_pass", "verifier_fail")
     context_bindings = {key: context.get(key) for key in (
         "arm", "slice", "account", "model", "effort", "arch", "cohort",
@@ -318,6 +307,7 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
     )} if context else None
     if context_bindings is not None:
         context_bindings["input_sha256"] = context.get("input_sha256")
+        context_bindings["campaign_sha256"] = context.get("campaign_sha256")
     context_mismatches = []
     if context:
         card_pin = (context.get("input_sha256") or {}).get("eval/harbor_adapter/rate_card.json")
@@ -337,7 +327,7 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
                 context_mismatches.append("effort")
         expected_account = context.get("account")
         actual_account = _safe_part(kwargs.get("account")) or {
-            "codex": "codex", "grok": "grok", "pi": (
+            "codex": "codex", "grok-build": "grok", "pi": (
                 "codex" if model and model.startswith("openai/") else
                 "openrouter" if model and model.startswith("openrouter/") else None),
             "opencode": "openrouter", "pmux": "claude",
@@ -348,6 +338,25 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
             _safe_part(kwargs.get("prompt_variant")) or "default"
         ):
             context_mismatches.append("prompt_variant")
+    observed = archived_config(path / "agent", summary.record.harness)
+    evidence = load_json(path / "agent/cell-preflight.json").data
+    evidence.update(load_json(path / "agent/harvest.json").data)
+    adapter_validity = load_json(path / "agent/adapter-validity.json").data
+    if (evidence.get("generic_secret_pattern_hits")
+            or adapter_validity.get("codex_writeback_failed")
+            or adapter_validity.get("codex_harvest_failed")):
+        attribution, outcome, eligible = "unknown", "unknown", False
+    evidence.update({"observed_config": observed, "checksum": task_checksum, "artifact": summary.artifact,
+                     "resolved_composition": resolved_composition(
+                         (path / "agent/plak-stderr.log").read_text(errors="replace")
+                         if (path / "agent/plak-stderr.log").is_file() else "")})
+    plan = context.get("campaign")
+    validity = trial_gate(plan, context.get("arm"), task_name, evidence) if plan else ["campaign_missing"]
+    if plan:
+        validity.extend("campaign:" + reason for reason in validate_campaign(plan))
+        canonical = hashlib.sha256(json.dumps(plan, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        if canonical != context.get("campaign_canonical_sha256"):
+            validity.append("campaign_binding_mismatch")
     return {
         "arm": context.get("arm") or job.parent.name, "job": str(job), "trial": summary.trial,
         "slice": context.get("slice") if context else None,
@@ -355,6 +364,8 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
         "repeat_block": context.get("repeat_block") if context else None,
         "comparison_context": context_bindings,
         "context_mismatches": context_mismatches,
+        "observed_config": observed, "validity_failures": validity,
+        "campaign_sha256": context.get("campaign_sha256"),
         "comparison_context_sha256": _sha(context_path) if context else None,
         "task": task_name, "source": source, "task_ref": task_ref,
         "task_checksum": task_checksum,
@@ -367,13 +378,13 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
         "reported_agent_version": _safe_part(agent_info.get("version")),
         "pinned_agent_version": (_safe_part(metadata.get("claude_pin"))
                                  if summary.record.harness == "pmux" else None),
-        "environment_image_digest": image if image and "@sha256:" in image else None,
+        "environment_image_digest": evidence.get("image"),
         "artifact": summary.artifact,
         "result_status": loaded.status, "result_sha256": _sha(path / "result.json"),
-        "outcome": outcome, "termination": termination,
+        "outcome": outcome, "termination": termination, "failure_class": attribution,
         "eligible_pass_rate": eligible,
         "pass": (reward > 0 if loaded.status == RESULT_OK and reward is not None
-                 and termination == CLASS_COMPLETED else None),
+                 and eligible else None),
         "reward": reward if eligible else None, "raw_reward": summary.reward,
         "verifier_evidence": verifier_evidence,
         "exception_type": exception,
@@ -412,6 +423,7 @@ def _complete_total(rows: list[dict[str, Any]], getter, complete=lambda row: Tru
 
 def _arm(name: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
     eligible = [r for r in rows if r["eligible_pass_rate"]]
+    scored = [r for r in eligible if not r.get("validity_failures")]
     eligible_passed = [r for r in eligible if r["pass"] is True]
     passed = [r for r in rows if r["pass"] is True]
     cost = _complete_total(rows, lambda r: r["cost"]["implied_usd"])
@@ -437,6 +449,10 @@ def _arm(name: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
         "passes": len(passed), "outcomes": dict(sorted(Counter(r["outcome"] for r in rows).items())),
         "pass_at_1": len(eligible_passed) / len(eligible) if eligible else None,
         "pass_at_1_ci95_wilson": _wilson(len(eligible_passed), len(eligible)),
+        "primary_scored_attempts": len(scored),
+        "primary_pass_rate": sum(r["pass"] is True for r in scored) / len(scored) if scored else None,
+        "infra_rate": sum(r["failure_class"] == "infra" for r in rows) / len(rows) if rows else None,
+        "unknown_rate": sum(r["failure_class"] == "unknown" for r in rows) / len(rows) if rows else None,
         "operational_pass_per_attempt": len(passed) / len(rows) if rows else None,
         "operational_pass_per_attempt_ci95_wilson": _wilson(len(passed), len(rows)),
         "implied_cost_usd": cost, "implied_cost_per_attempt_usd": per_attempt(cost),
@@ -614,7 +630,7 @@ def build_report(jobs: list[Path], selection: Path | None = None,
         context_consistent = not any(r["context_mismatches"] for entries in groups.values() for r in entries)
         equal_control_keys = ("arch", "dataset", "concurrency", "attempts_per_task", "input_sha256",
                               "timeout_policy", "adapter_task_retries",
-                              "native_internal_retries", "effort_semantics")
+                              "native_internal_retries", "effort_semantics", "campaign_sha256")
         if not prompt_ablation:
             equal_control_keys += ("prompt_variant",)
         control_mismatches = [key for key in equal_control_keys if known_controls and
@@ -625,9 +641,15 @@ def build_report(jobs: list[Path], selection: Path | None = None,
             for arm, control in controls.items()
         ):
             control_mismatches.append("planned_original_attempts")
+        validity_failures = sorted({reason for entries in originals.values() for r in entries
+                                    for reason in r.get("validity_failures", [])})
+        if known_controls and any(control.get("effort_semantics") == "omit effort override"
+                                  for control in controls.values()):
+            validity_failures.append("omitted_effort")
+        reasons.extend("validity:" + reason for reason in validity_failures)
         comparison_eligible = (status == "matched" and known_controls and clean and
                                len(commits) == 1 and context_consistent and not control_mismatches
-                               and artifact_complete)
+                               and artifact_complete and not validity_failures)
         if not known_controls: reasons.append("comparison_context_missing")
         elif not clean: reasons.append("dirty_eval_source")
         elif len(commits) != 1: reasons.append("eval_source_mismatch")
@@ -677,7 +699,7 @@ def build_report(jobs: list[Path], selection: Path | None = None,
                              "status": loaded.status, "binding": loaded.data})
     planned = sum(binding["binding"].get("planned_trials", 0)
                   for binding in contexts if isinstance(binding["binding"].get("planned_trials"), int))
-    method = "offline observed original attempts; repairs shown separately; selected Rung A A/B conditional verifier rates require asserted CTRF tests; unverified raw scores remain in operational counts; Wilson 95% intervals assume independent attempts and do not account for repeated tasks; no broad coding population or causal ranking claim"
+    method = "offline observed original attempts; repairs and historical unverified campaigns are diagnostic only; selected Rung A A/B verifier rates require asserted CTRF tests; primary paired estimates require campaign and trial validity gates and at least three aligned scored trials per task/arm; diagnostic per-arm Wilson intervals assume independent attempts; no broad coding population or causal ranking claim"
     if prompt_ablation:
         method += "; prompt ablation admits only an executed legacy/parity variant delta on the same Plak artifact"
     return {"schemaVersion": 1, "method": method,
@@ -687,7 +709,8 @@ def build_report(jobs: list[Path], selection: Path | None = None,
             "rate_card_sha256": _sha(RATE_CARD_PATH), "trials": rows,
             "arms": [_arm(arm_label(name), group) for name, group in sorted(original_arms.items(), key=lambda item: str(item[0]))],
             "repair_arms": [_arm(arm_label(name), group) for name, group in sorted(repair_arms.items(), key=lambda item: str(item[0])) if group],
-            "pairs": pairs,
+            "pairs": pairs, "paired_estimates": paired_reports(rows, pairs),
+            "campaign_blockers": campaign_health(rows),
             "warnings": (["Task/source/repeat mismatches make paired comparisons incomplete."]
                          if any(p["status"] != "matched" for p in pairs) else [])}
 
@@ -727,6 +750,11 @@ def render_markdown(report: dict[str, Any], output_dir: Path) -> str:
         differences = ", ".join(f"{item['arms'][0]}−{item['arms'][1]}: {shown(item['seconds'])}"
                                 for item in diff) if diff else "—"
         lines.append(f"| {pair['task']} | {pair['status']} | {', '.join(pair['reasons']) or '—'} | {differences} |")
+    lines += ["", "## Paired Estimates", "",
+              "Task-weighted scored pass-rate differences; two-stage and fixed-task percentile bootstrap intervals. At least three aligned scored trials per task and arm. No multiplicity-adjusted claim."]
+    for paired in report.get("paired_estimates", []):
+        result = paired["primary"]
+        lines.append(f"{paired['arms'][0]} - {paired['arms'][1]}: {shown(result['difference'])}; tasks={result['tasks']}; task-population CI={result['task_population_ci95']}; fixed-task CI={result['fixed_tasks_ci95']}")
     lines += ["", "## Trial drilldown", "", "| Arm | Task | Trial | Outcome | Verifier evidence | Termination | Raw reward | Qualified reward | Implied USD | Reported USD | Agent s | Result |",
               "| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |"]
     for trial in report["trials"]:

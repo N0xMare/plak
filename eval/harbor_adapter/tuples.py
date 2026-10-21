@@ -13,8 +13,8 @@ ACCOUNT_SUBSCRIPTION_DIR = {
 }
 
 OPENROUTER_MODEL = "deepseek/deepseek-v4-flash"
-# "none" means omit --effort / vendor thinking-variant. This Chat model attests
-# no reasoning-effort enumeration; passing --effort medium fails closed.
+# Historical diagnostics only. No OpenRouter tuple is admitted: omitted effort
+# is not comparable across harnesses, and this model has no shared effort enum.
 OPENROUTER_EFFORT = "none"
 
 # The Pi Codex arm is intentionally one strict same-model cell. Pi names the
@@ -46,21 +46,12 @@ QUALIFIED = {
     ("claude", "claude-sonnet-5", "medium"),
     ("claude", "claude-opus-5", "low"),
     ("claude", "claude-opus-5", "medium"),
-    ("openrouter", OPENROUTER_MODEL, OPENROUTER_EFFORT),
 }
 
 SMOKE_CODEX = ("codex", "gpt-5.6-luna", "low")
 SMOKE_GROK = ("grok", "grok-4.6", "low")
 SMOKE_CLAUDE = ("claude", "claude-sonnet-5", "low")
 SMOKE_OPENROUTER = ("openrouter", OPENROUTER_MODEL, OPENROUTER_EFFORT)
-
-# Follow-catalog: Codex CodeModeOnly → native-ptc; Grok/Claude/OpenRouter → direct.
-DEFAULT_COMPOSITION = {
-    "codex": "native-ptc",
-    "grok": "direct",
-    "claude": "direct",
-    "openrouter": "direct",
-}
 
 # The Rust side reads exactly this variable to select the system-prompt
 # shape. It is named once here so the ablation arms, the adapter, and the
@@ -90,8 +81,8 @@ STRIP_ENV = (
 
 REMOTE_BINARY = "/installed-agent/plak"
 REMOTE_JS_HOST = "/installed-agent/plakous-js-host"
-REMOTE_HOME = "/logs/agent/plak-home"
-REMOTE_XDG = "/logs/agent/xdg"
+REMOTE_HOME = "/tmp/plak-cell/home"
+REMOTE_XDG = "/tmp/plak-cell/xdg"
 REMOTE_WORKSPACE = "/app"
 REMOTE_OPENROUTER_KEY = f"{REMOTE_HOME}/secrets/openrouter.key"
 REMOTE_PMUX = "/installed-agent/pmux"
@@ -109,7 +100,7 @@ REMOTE_PMUX_TRIAL = f"{REMOTE_PMUX_RUNTIME}/trial.sh"
 # Overlay temp, not the pmuxd runtime and not Harbor /logs. Sharing TMPDIR
 # with --runtime-parent makes Claude's file-store refresh NeedsLogin.
 REMOTE_PMUX_TMPDIR = "/tmp/pmux-tmp"
-REMOTE_CLAUDE_SECURESTORAGE = "/installed-agent/claude-securestorage"
+REMOTE_CLAUDE_SECURESTORAGE = "/tmp/claude-secrets"
 
 DATASET_TB4 = "terminal-bench/terminal-bench@4.0.0"
 DATASET_TB21 = "terminal-bench/terminal-bench-2-1@6"
@@ -143,19 +134,6 @@ RUNG_A_AB_TASKS = (
     "terminal-bench/configure-git-webserver",
 )
 
-# Prebuilt Harbor task images (task.toml docker_image). Pre-pull before A/B
-# so compose up does not depend on a live Docker Hub handshake.
-RUNG_A_AB_DOCKER_IMAGES = (
-    "alexgshaw/openssl-selfsigned-cert:20251031",
-    "alexgshaw/fix-git:20260403",
-    "alexgshaw/nginx-request-logging:20251031",
-    "alexgshaw/sqlite-db-truncate:20251031",
-    "alexgshaw/cancel-async-tasks:20251031",
-    "alexgshaw/log-summary-date-ranges:20251031",
-    "alexgshaw/regex-log:20251031",
-    "alexgshaw/configure-git-webserver:20251031",
-)
-
 # A separate, broader frozen slice for less frequent measurements. It is a
 # strict superset of cheap A/B so results can still be inspected by task.
 RUNG_A_EXPANDED_TASKS = RUNG_A_AB_TASKS + (
@@ -167,17 +145,6 @@ RUNG_A_EXPANDED_TASKS = RUNG_A_AB_TASKS + (
     "terminal-bench/dna-insert",
     "terminal-bench/extract-elf",
     "terminal-bench/git-multibranch",
-)
-
-RUNG_A_EXPANDED_DOCKER_IMAGES = RUNG_A_AB_DOCKER_IMAGES + (
-    "alexgshaw/break-filter-js-from-html:20251031",
-    "alexgshaw/build-cython-ext:20251031",
-    "alexgshaw/cobol-modernization:20251031",
-    "alexgshaw/count-dataset-tokens:20251031",
-    "alexgshaw/db-wal-recovery:20251031",
-    "alexgshaw/dna-insert:20251031",
-    "alexgshaw/extract-elf:20251031",
-    "alexgshaw/git-multibranch:20251031",
 )
 
 HARBOR_OPENROUTER_MODEL = f"openrouter/{OPENROUTER_MODEL}"

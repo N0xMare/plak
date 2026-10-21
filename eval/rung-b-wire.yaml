@@ -16,7 +16,7 @@ agents:
       effort: low
 
 environment:
-  type: docker
+  import_path: harbor_adapter.docker_retry:RetryingDocker
 
 datasets:
   - name: terminal-bench/terminal-bench

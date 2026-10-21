@@ -6,7 +6,6 @@ from pathlib import Path
 
 from harbor_adapter.tuples import (
     ACCOUNTS,
-    DEFAULT_COMPOSITION,
     PROMPT_VARIANT_ENV,
     PROMPT_VARIANTS,
     QUALIFIED,
@@ -32,8 +31,8 @@ def require_tuple(account: str, model: str, effort: str) -> None:
         )
 
 
-def require_js_host(path: Path, composition: str) -> None:
-    if composition in {"native-ptc", "js-ptc"} and not path.is_file():
+def require_js_host(path: Path) -> None:
+    if not path.is_file():
         raise ArgumentError(
             f"missing JavaScript host {path}; run `just build-harbor-agent`"
         )
@@ -68,6 +67,7 @@ def run_env(
     env["XDG_STATE_HOME"] = REMOTE_XDG
     env["PLAK_JS_HOST"] = REMOTE_JS_HOST
     env["PLAK_LOG"] = "1"
+    env.pop("PLAK_TEST_EXCHANGE_CAPTURE_DIR", None)
     # The ablation switch reaches the plak binary only. Vendor arms run their
     # own prompts and never see it.
     variant = require_prompt_variant(prompt_variant)
@@ -82,12 +82,10 @@ def run_arguments(
     model: str,
     effort: str,
     prompt: str,
-    composition: str | None = None,
 ) -> list[str]:
     require_tuple(account, model, effort)
     if not prompt.strip():
         raise ArgumentError("prompt is empty")
-    resolved = composition or DEFAULT_COMPOSITION[account]
     argv = [
         REMOTE_BINARY,
         "run",
@@ -101,8 +99,6 @@ def run_arguments(
         argv.extend(["--effort", effort])
     argv.extend(
         [
-            "--composition",
-            resolved,
             "--print-session-id",
             "--",
             prompt,

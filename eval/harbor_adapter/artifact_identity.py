@@ -14,6 +14,8 @@ statement about the bytes that ran, not about what is on disk now.
 from __future__ import annotations
 
 import hashlib
+import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -120,6 +122,25 @@ def plak_artifact_record(
     if js_host is not None:
         items.append(("plakous-js-host", Path(js_host)))
     return artifact_record(harness="plak", binaries=digest_all(items), arch=arch)
+
+
+def require_plak_provenance(binary: Path, js_host: Path) -> dict[str, Any]:
+    """No source-less or dirty maintainer snapshot may enter a scored run."""
+    try:
+        manifest = json.loads(binary.with_name("plak-build.json").read_text())
+        source = manifest["source"]
+        if (source.get("repo") != "plak" or source.get("dirty") is not False
+                or not re.fullmatch(r"[0-9a-f]{40}", source.get("commit", ""))
+                or manifest.get("features") != ["maintainer"]
+                or not manifest.get("toolchain", "").startswith("rustc 1.99.0")):
+            raise ValueError
+        for path in (binary, js_host):
+            digest = digest_file(path)
+            if digest is None or digest.sha256 != manifest["binaries"][path.name]["sha256"]:
+                raise ValueError
+        return manifest
+    except (OSError, ValueError, TypeError, KeyError):
+        raise ValueError("Plak build provenance missing, dirty, or mismatched; rebuild frozen agent") from None
 
 
 def short_digest(record: dict[str, Any], name: str) -> str:

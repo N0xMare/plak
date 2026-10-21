@@ -74,7 +74,8 @@ class PiCodexContractTests(unittest.TestCase):
         self.assertIn("require_frozen_cli pi", arm)
         self.assertIn("require_host_auth pi openai-codex", arm)
         self.assertIn("unset OPENAI_API_KEY XAI_API_KEY OPENROUTER_API_KEY", arm)
-        self.assertIn("HARBOR_N_CONCURRENT=1", arm)
+        vendor = script.split("run_vendor() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("concurrent=1", vendor)
         self.assertIn("openai/gpt-6-luna", arm)
         self.assertIn("pi low", arm)
         self.assertNotIn("subscription_dir", arm)

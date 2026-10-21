@@ -4,11 +4,26 @@ from __future__ import annotations
 
 import asyncio
 import shlex
+from pathlib import Path
 from typing import Any
 
 
 class PreflightError(RuntimeError):
     pass
+
+
+def task_budgets(environment: Any) -> tuple[float, float]:
+    """Read the same pinned task timeout source Harbor uses (no CLI override)."""
+    import tomllib
+    try:
+        task = tomllib.loads((Path(environment.environment_dir).parent / "task.toml").read_text())
+        agent = float(task.get("agent", {}).get("timeout_sec", 600))
+        verifier = float(task.get("verifier", {}).get("timeout_sec", 600))
+    except (OSError, ValueError, TypeError, AttributeError):
+        raise PreflightError("task timeout source unavailable") from None
+    if not (10 < agent < 86400 and 0 < verifier < 86400):
+        raise PreflightError("task timeout outside bounded eval policy")
+    return agent, verifier
 
 
 async def probe_executable(

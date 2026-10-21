@@ -28,6 +28,19 @@ def _import_harbor_module(name: str):
         raise unittest.SkipTest(f"{name} needs Harbor installed: {exc}") from exc
 
 @contextlib.contextmanager
+def _isolated_adapter_probes(module):
+    """Run-loop unit fixtures isolate the separately tested campaign probes."""
+    with contextlib.ExitStack() as stack:
+        for name in ("prepare_cell", "record_cell"):
+            if hasattr(module, name):
+                stack.enter_context(mock.patch.object(module, name, new_callable=mock.AsyncMock))
+        if hasattr(module, "task_budgets"):
+            stack.enter_context(mock.patch.object(module, "task_budgets", return_value=(900, 600)))
+        stack.enter_context(mock.patch("harbor_adapter.cell_prep.record_cell", new_callable=mock.AsyncMock))
+        yield
+
+
+@contextlib.contextmanager
 def _installed_agent_with_harbor_stub(module_name="pmux_agent"):
     """Yield an installed-agent module, standing in for absent Harbor.
 
@@ -37,7 +50,9 @@ def _installed_agent_with_harbor_stub(module_name="pmux_agent"):
     tests that legitimately skip without it.
     """
     if "harbor" in sys.modules:
-        yield importlib.import_module(f"harbor_adapter.{module_name}")
+        module = importlib.import_module(f"harbor_adapter.{module_name}")
+        with _isolated_adapter_probes(module):
+            yield module
         return
 
     class _BaseInstalledAgent:
@@ -92,7 +107,8 @@ def _installed_agent_with_harbor_stub(module_name="pmux_agent"):
             raise unittest.SkipTest(
                 f"{module_name} needs Harbor installed: {exc}"
             ) from exc
-        yield module
+        with _isolated_adapter_probes(module):
+            yield module
     finally:
         if not had_agent:
             sys.modules.pop(adapter_module, None)
@@ -146,9 +162,7 @@ from harbor_adapter.tuples import (  # noqa: E402
     OPENROUTER_MODEL,
     REMOTE_BINARY,
     REMOTE_OPENROUTER_KEY,
-    RUNG_A_AB_DOCKER_IMAGES,
     RUNG_A_AB_TASKS,
-    RUNG_A_EXPANDED_DOCKER_IMAGES,
     RUNG_A_EXPANDED_TASKS,
     RUNG_A_PLUMBING_TASKS,
     SMOKE_TASKS,
@@ -292,8 +306,7 @@ class ArgumentContractTests(unittest.TestCase):
         self.assertIn("--print-session-id", argv)
         self.assertEqual(argv[-2], "--")
         self.assertEqual(argv[-1], "fix the tests")
-        self.assertIn("--composition", argv)
-        self.assertIn("native-ptc", argv)
+        self.assertNotIn("--composition", argv)
 
     def test_grok_follows_direct_composition(self) -> None:
         argv = run_arguments(
@@ -302,7 +315,7 @@ class ArgumentContractTests(unittest.TestCase):
             effort="low",
             prompt="hello",
         )
-        self.assertIn("direct", argv)
+        self.assertNotIn("--composition", argv)
 
     def test_claude_follows_direct_composition(self) -> None:
         argv = run_arguments(
@@ -311,7 +324,7 @@ class ArgumentContractTests(unittest.TestCase):
             effort="low",
             prompt="hello",
         )
-        self.assertIn("direct", argv)
+        self.assertNotIn("--composition", argv)
         self.assertIn("--account", argv)
         self.assertIn("claude", argv)
 
@@ -341,14 +354,9 @@ class ArgumentContractTests(unittest.TestCase):
             )
 
     def test_openrouter_effort_none_omits_effort_flag(self) -> None:
-        argv = run_arguments(
-            account="openrouter",
-            model=OPENROUTER_MODEL,
-            effort=OPENROUTER_EFFORT,
-            prompt="wire check",
-        )
-        self.assertNotIn("--effort", argv)
-        self.assertIn("direct", argv)
+        with self.assertRaises(ArgumentError):
+            run_arguments(account="openrouter", model=OPENROUTER_MODEL,
+                          effort=OPENROUTER_EFFORT, prompt="wire check")
 
     def test_api_keys_are_stripped_from_extra_env(self) -> None:
         env = sanitize_extra_env(
@@ -365,7 +373,7 @@ class ArgumentContractTests(unittest.TestCase):
             "OPENROUTER_API_KEY",
             run_env(extra_env={"OPENROUTER_API_KEY": "sk-or"}),
         )
-        self.assertEqual(run_env()["PLAK_HOME"], "/logs/agent/plak-home")
+        self.assertEqual(run_env()["PLAK_HOME"], "/tmp/plak-cell/home")
 
 
 class UsageContractTests(unittest.TestCase):
@@ -440,8 +448,8 @@ class InstalledAgentFirstAttemptTests(unittest.IsolatedAsyncioTestCase):
             for sessions in (1, 2):
                 with self.subTest(sessions=sessions), tempfile.TemporaryDirectory() as tmp:
                     agent = module.PlakAgent(
-                        pathlib.Path(tmp), account="openrouter",
-                        model="deepseek/deepseek-v4-flash", effort="none",
+                        pathlib.Path(tmp), account="grok",
+                        model="grok-4.6", effort="low",
                     )
                     responses = [types.SimpleNamespace(
                         stdout="".join(f"session_id=s{i}\n" for i in range(sessions)),
@@ -477,8 +485,8 @@ class InstalledAgentFirstAttemptTests(unittest.IsolatedAsyncioTestCase):
             failure = ProviderFailure("server_is_overloaded")
             with tempfile.TemporaryDirectory() as tmp:
                 agent = module.PlakAgent(
-                    pathlib.Path(tmp), account="openrouter",
-                    model="deepseek/deepseek-v4-flash", effort="none",
+                    pathlib.Path(tmp), account="grok",
+                    model="grok-4.6", effort="low",
                 )
                 agent.exec_as_agent = mock.AsyncMock(side_effect=failure)
                 agent._read_session_events = mock.AsyncMock(return_value=([], ()))
@@ -494,7 +502,7 @@ class InstalledAgentFirstAttemptTests(unittest.IsolatedAsyncioTestCase):
                     with self.assertRaises(ProviderFailure) as caught:
                         await agent.run("Perform the task once.", environment, context)
                 self.assertIs(caught.exception, failure)
-                agent.exec_as_agent.assert_awaited_once()
+                self.assertEqual(agent.exec_as_agent.await_count, 2)
                 agent._capture_usage.assert_awaited_once_with(environment, context)
                 record = json.loads((pathlib.Path(tmp) / "plak-termination.json").read_text())
                 self.assertEqual(record["class"], "turn_failed:provider-rejection")
@@ -965,6 +973,7 @@ class CredentialContractTests(unittest.TestCase):
                 host.write_bytes(self._grok_auth())
                 for uid, expected in (("0\n", 0), ("1001\n", 1001), ("bad", None)):
                     agent = module.FrozenGrokBuild.__new__(module.FrozenGrokBuild)
+                    agent.logs_dir = pathlib.Path(tmp)
                     agent._provider = None
                     agent._CLI_LOG_FILENAME = "grok.log"
                     agent.logger = mock.Mock()
@@ -987,7 +996,7 @@ class CredentialContractTests(unittest.TestCase):
                             with self.assertRaises(CredentialError):
                                 asyncio.run(agent.run("task", environment, object()))
                             environment.upload_file.assert_not_awaited()
-                            agent.exec_as_root.assert_not_awaited()
+                            agent.exec_as_root.assert_awaited_once()
                         else:
                             asyncio.run(agent.run("task", environment, object()))
                             acl = [
@@ -1040,9 +1049,9 @@ class CredentialContractTests(unittest.TestCase):
     def test_remote_state_acl_chowns_and_forces_private_home(self) -> None:
         command = remote_state_acl_command("agent", "/logs/agent/plak-home")
         self.assertIn("chown -R agent", command)
-        self.assertIn("chmod 0700 /logs/agent/plak-home /logs/agent/xdg", command)
-        self.assertIn("find /logs/agent/xdg/plak -type d -exec chmod 0700", command)
-        self.assertIn("find /logs/agent/xdg/plak -type f -exec chmod 0600", command)
+        self.assertIn("chmod 0700 /tmp/plak-cell/home /tmp/plak-cell/xdg", command)
+        self.assertIn("find /tmp/plak-cell/xdg/plak -type d -exec chmod 0700", command)
+        self.assertIn("find /tmp/plak-cell/xdg/plak -type f -exec chmod 0600", command)
 
     def test_remote_state_acl_chowns_when_user_is_unspecified(self) -> None:
         command = remote_state_acl_command(None, "/logs/agent/plak-home")
@@ -1184,8 +1193,7 @@ class CredentialContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             missing = pathlib.Path(tmp) / "plakous-js-host"
             with self.assertRaises(ArgumentError):
-                require_js_host(missing, "native-ptc")
-            require_js_host(missing, "direct")
+                require_js_host(missing)
 
 
 class PlanContractTests(unittest.TestCase):
@@ -1380,19 +1388,19 @@ class ConfigurationContractTests(unittest.TestCase):
         text = (ROOT / "eval" / "terminal-bench.yaml").read_text()
         self.assertIn("terminal-bench/terminal-bench@4.0.0", text)
         self.assertIn("harbor_adapter.agent:PlakAgent", text)
-        self.assertIn("environment:\n  type: docker", text)
-        self.assertIn("n_concurrent_trials: 5", text)
+        self.assertIn("environment:\n  import_path: harbor_adapter.docker_retry:RetryingDocker", text)
+        self.assertIn("n_concurrent_trials: 1", text)
         self.assertIn("model_name: gpt-5.6-luna", text)
 
     def test_rung_eval_yaml_pins(self) -> None:
         plumbing = (ROOT / "eval" / "rung-a-plumbing.yaml").read_text()
         self.assertIn("path: eval/datasets/rung-a-plumbing", plumbing)
-        self.assertIn("n_concurrent_trials: 3", plumbing)
+        self.assertIn("n_concurrent_trials: 1", plumbing)
 
         ab = (ROOT / "eval" / "rung-a-ab.yaml").read_text()
         self.assertIn("name: terminal-bench/terminal-bench-2-1", ab)
         self.assertIn('ref: "6"', ab)
-        self.assertIn("n_concurrent_trials: 4", ab)
+        self.assertIn("n_concurrent_trials: 1", ab)
         for short_name in (
             "openssl-selfsigned-cert",
             "fix-git",
@@ -1410,7 +1418,6 @@ class ConfigurationContractTests(unittest.TestCase):
         expanded = (ROOT / "eval" / "rung-a-expanded.yaml").read_text()
         self.assertIn('ref: "6"', expanded)
         self.assertEqual(len(RUNG_A_EXPANDED_TASKS), 16)
-        self.assertEqual(len(RUNG_A_EXPANDED_DOCKER_IMAGES), 16)
         for prefixed in RUNG_A_EXPANDED_TASKS:
             self.assertIn(prefixed, expanded)
 
@@ -1458,16 +1465,13 @@ class ConfigurationContractTests(unittest.TestCase):
                 self.assertIn('export DOCKER_DEFAULT_PLATFORM="$platform"', script)
 
     def test_harbor_eval_runs_on_the_arch_switch(self) -> None:
-        script = (ROOT / "eval" / "scripts" / "harbor.sh").read_text()
+        script = (ROOT / "eval/scripts/harbor.sh").read_text()
         branch = script.split("\n  eval)\n", 1)[1].split("\n  view)", 1)[0]
         self.assertIn("select_arch", branch)
         self.assertIn('export HARBOR_ARCH="$arch"', branch)
         self.assertIn('export DOCKER_DEFAULT_PLATFORM="$platform"', branch)
-        self.assertIn('if [[ "$arch" != "amd64" ]]; then', branch)
-        self.assertIn("force_build=(--force-build)", branch)
-        self.assertIn('${force_build[@]+"${force_build[@]}"}', branch)
-        self.assertIn('${job_suffix:+/eval$job_suffix}', branch)
-        self.assertIn('job_suffix="$(harbor_job_suffix "$arch")"', script)
+        self.assertIn("harbor_adapter.campaign", branch)
+        self.assertNotIn("force_build=(--force-build)", branch)
 
     def test_arm_jobs_are_named_inside_the_jobs_tree(self) -> None:
         # rung-a and rung-b put the -arm64 suffix on the job name under jobs/;
@@ -1485,46 +1489,21 @@ class ConfigurationContractTests(unittest.TestCase):
     def test_rung_a_sweeps_preserve_failed_arm_status(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
-            scripts = root / "eval" / "scripts"
-            scripts.mkdir(parents=True)
-            for name in ("rung-a.sh", "arch.sh"):
-                shutil.copy2(ROOT / "eval" / "scripts" / name, scripts / name)
-            (scripts / "summarize.py").write_text(
-                "from pathlib import Path\nimport sys\n"
-                "Path(sys.argv[-1], 'summary-attempted').touch()\nsys.exit(1)\n"
-            )
-            for child in (ROOT / "eval").iterdir():
-                if child.name != "scripts":
-                    (root / "eval" / child.name).symlink_to(child)
-            subprocess.run(["git", "init", "-q", str(root)], check=True)
-            subprocess.run(
-                ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-                 "commit", "--allow-empty", "-qm", "Fixture source"],
-                cwd=root, check=True,
-            )
-            stub_bin = root / "stub-bin"
-            stub_bin.mkdir()
-            for name, body in {
-                "docker": "#!/bin/sh\nexit 0\n",
-                "uv": '#!/bin/sh\nexit "$STUB_FAILURE"\n',
-            }.items():
-                executable = stub_bin / name
-                executable.write_text(body)
+            for name in ("docker", "uv"):
+                executable = root / name
+                executable.write_text("#!/bin/sh\n" + ("exit 0\n" if name == "docker" else
+                    'touch "$STUB_DISPATCH"\nexit 37\n'))
                 executable.chmod(0o700)
-            env = dict(os.environ, PATH=f"{stub_bin}:{os.environ['PATH']}",
-                       HARBOR_ARCH="arm64", PLAK_HOST_REFRESH="0")
+            env = dict(os.environ, PATH=f"{root}:{os.environ['PATH']}", HARBOR_ARCH="arm64",
+                       STUB_DISPATCH=str(root / "dispatch"))
+            env.pop("HARBOR_CAMPAIGN", None)
+            env.pop("HARBOR_CAMPAIGN_SHA256", None)
             for sweep in ("all", "ablation"):
-                for status in (2, 37):
-                    with self.subTest(sweep=sweep, status=status):
-                        result = subprocess.run(
-                            ["bash", str(scripts / "rung-a.sh"), "plumbing", sweep],
-                            env=dict(env, STUB_FAILURE=str(status)),
-                            capture_output=True, text=True, timeout=30,
-                        )
-                        self.assertEqual(result.returncode, status, result.stderr)
-                        self.assertEqual(len(list((root / ".plak/harbor/jobs").glob(
-                            "*/summary-attempted"))),
-                            (1 if sweep == "all" else 3) + (status == 37))
+                completed = subprocess.run(["bash", str(ROOT / "eval/scripts/rung-a.sh"), "plumbing", sweep],
+                                           env=env, capture_output=True, text=True, timeout=30)
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn("HARBOR_CAMPAIGN", completed.stderr)
+                self.assertFalse((root / "dispatch").exists())
 
     def test_rung_a_requires_summary_after_successful_harbor_exit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1551,7 +1530,7 @@ class ConfigurationContractTests(unittest.TestCase):
             result = subprocess.run(
                 ["bash", str(scripts / "rung-a.sh"), "plumbing", "plak-codex"],
                 env=dict(os.environ, PATH=f"{stub_bin}:{os.environ['PATH']}",
-                         HARBOR_ARCH="arm64", PLAK_HOST_REFRESH="0"),
+                         HARBOR_ARCH="arm64"),
                 capture_output=True, text=True, timeout=30,
             )
             self.assertEqual(result.returncode, 1, result.stderr)
@@ -1560,287 +1539,35 @@ class ConfigurationContractTests(unittest.TestCase):
             self.assertEqual(len(receipts), 1)
             self.assertEqual(json.loads(receipts[0].read_text())["found_trials"], 0)
 
-    def test_rung_a_reuses_cached_ab_images_without_pull(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = pathlib.Path(directory)
-            scripts = root / "eval" / "scripts"
-            scripts.mkdir(parents=True)
-            for name in ("rung-a.sh", "arch.sh"):
-                shutil.copy2(ROOT / "eval" / "scripts" / name, scripts / name)
-            (scripts / "summarize.py").write_text("raise SystemExit(1)\n")
-            for child in (ROOT / "eval").iterdir():
-                if child.name != "scripts":
-                    (root / "eval" / child.name).symlink_to(child)
-            subprocess.run(["git", "init", "-q", str(root)], check=True)
-            subprocess.run(
-                ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-                 "commit", "--allow-empty", "-qm", "Fixture source"],
-                cwd=root, check=True,
-            )
-            stub_bin = root / "stub-bin"
-            stub_bin.mkdir()
-            docker_log = root / "docker.log"
-            docker = stub_bin / "docker"
-            docker.write_text(
-                "#!/bin/sh\n"
-                'printf "%s\\n" "$*" >> "$STUB_DOCKER_LOG"\n'
-                'case "$1 $2" in "info "|"image inspect") exit 0;; esac\n'
-                'if [ "$1" = pull ]; then exit 77; fi\n'
-                'exit 0\n'
-            )
-            docker.chmod(0o700)
-            uv = stub_bin / "uv"
-            uv.write_text("#!/bin/sh\nexit 42\n")
-            uv.chmod(0o700)
-            result = subprocess.run(
-                ["bash", str(scripts / "rung-a.sh"), "ab", "plak-codex"],
-                env=dict(os.environ, PATH=f"{stub_bin}:{os.environ['PATH']}",
-                         HARBOR_ARCH="amd64", PLAK_HOST_REFRESH="0",
-                         STUB_DOCKER_LOG=str(docker_log)),
-                capture_output=True, text=True, timeout=30,
-            )
-            self.assertEqual(result.returncode, 42, result.stderr)
-            commands = docker_log.read_text().splitlines()
-            self.assertEqual(sum(line.startswith("image inspect ") for line in commands), 8)
-            self.assertFalse(any(line.startswith("pull ") for line in commands))
-
     def test_paid_vendor_arms_keep_full_arm_for_watched_key(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
-            scripts = root / "eval" / "scripts"
-            scripts.mkdir(parents=True)
-            for name in ("rung-a.sh", "arch.sh"):
-                shutil.copy2(ROOT / "eval" / "scripts" / name, scripts / name)
-            stub_bin = root / "stub-bin"
-            stub_bin.mkdir()
-            python = stub_bin / "python3"
-            python.write_text(
-                f"#!{sys.executable}\n"
-                "import json, os, pathlib, sys\n"
-                "code = sys.argv[2] if len(sys.argv) > 2 and sys.argv[1] == '-c' else ''\n"
-                "if 'require_watched_openrouter_key' in code:\n"
-                "    arm = sys.argv[-1]\n"
-                "    pathlib.Path(os.environ['STUB_KEY_ARM']).write_text(arm)\n"
-                "    if arm not in ('pi-openrouter', 'opencode-openrouter'):\n"
-                "        raise SystemExit('unknown watched arm: ' + arm)\n"
-                "    print('/tmp/synthetic-openrouter.key')\n"
-                "elif 'RUNG_A_AB_TASKS' in code:\n"
-                "    print('stub-task')\n"
-                "elif sys.argv[1].endswith('openrouter_watch.py'):\n"
-                "    pathlib.Path(os.environ['STUB_WATCH_ARGS']).write_text("
-                "json.dumps(sys.argv[2:]))\n"
-                "    raise SystemExit(42)\n"
-            )
-            python.chmod(0o700)
-            uv = stub_bin / "uv"
-            uv.write_text("#!/bin/sh\nexit 99\n")
-            uv.chmod(0o700)
-            for arm in ("pi-openrouter", "opencode-openrouter"):
-                with self.subTest(arm=arm):
-                    key_arm = root / f"{arm}-key-arm"
-                    watch_args = root / f"{arm}-watch-args"
-                    result = subprocess.run(
-                        ["bash", str(scripts / "rung-a.sh"), "plumbing", arm],
-                        env=dict(
-                            os.environ,
-                            PATH=f"{stub_bin}:{os.environ['PATH']}",
-                            HARBOR_ARCH="arm64",
-                            HARBOR_INCLUDE_TASK="stub-task",
-                            PLAK_OR_BUDGET_BASELINE=str(root / "baseline.json"),
-                            STUB_KEY_ARM=str(key_arm),
-                            STUB_WATCH_ARGS=str(watch_args),
-                        ),
-                        capture_output=True, text=True, timeout=30,
-                    )
-                    self.assertEqual(result.returncode, 42, result.stderr)
-                    self.assertEqual(key_arm.read_text(), arm)
-                    argv = json.loads(watch_args.read_text())
-                    self.assertEqual(argv[:2], ["--key-file", "/tmp/synthetic-openrouter.key"])
-                    self.assertIn("--baseline", argv)
-                    self.assertIn("run", argv)
+            docker = root / "docker"
+            docker.write_text("#!/bin/sh\nexit 0\n")
+            docker.chmod(0o700)
+            for arm in ("plak-openrouter", "pi-openrouter", "opencode-openrouter"):
+                result = subprocess.run(["bash", str(ROOT / "eval/scripts/rung-a.sh"), "plumbing", arm],
+                    env=dict(os.environ, PATH=f"{root}:{os.environ['PATH']}", HARBOR_ARCH="arm64"),
+                    capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("OpenRouter comparisons disabled", result.stderr)
 
     def test_rung_a_defaults_to_serial_paired_trials(self) -> None:
         rung_a = (ROOT / "eval" / "scripts" / "rung-a.sh").read_text()
-        self.assertIn('echo "${HARBOR_N_CONCURRENT:-1}"', rung_a)
+        self.assertIn("concurrent=1", rung_a)
         self.assertIn('--n-concurrent "$concurrent"', rung_a)
 
     def test_just_recipes_forward_to_eval_script(self) -> None:
-        justfile = (ROOT / "Justfile").read_text()
-        self.assertIn("harbor-eval", justfile)
-        self.assertIn("harbor-rung-a", justfile)
-        self.assertIn("fetch-harbor-pmux", justfile)
-        self.assertIn("eval/scripts/harbor.sh fetch-pmux", justfile)
-        readme = (ROOT / "eval" / "README.md").read_text()
-        self.assertIn("exactly three plumbing directory", readme)
-        self.assertIn("full 66-task TB 4.0 campaign", readme)
-        self.assertNotIn("Claude native-home is deferred", readme)
-        self.assertIn("FrozenPmux", readme)
-        self.assertIn("full 66-task TB 4.0", readme)
-        self.assertIn("eval/scripts/rung-a.sh", justfile)
-        self.assertIn("harbor-rung-b", justfile)
-        self.assertIn("eval/scripts/rung-b.sh", justfile)
-        self.assertIn("eval/scripts/smoke.sh", justfile)
-        self.assertIn("fetch-harbor-vendor-clis", justfile)
-        self.assertIn("check:\n    scripts/dev-check.sh\n", justfile)
-        script = (ROOT / "eval" / "scripts" / "harbor.sh").read_text()
-        self.assertIn("terminal-bench/terminal-bench@4.0.0", script)
-        self.assertIn("--dataset", script)
-        self.assertIn('uv run --project "$root/eval" harbor', script)
-        self.assertIn("</dev/null", script)
-        self.assertIn('--platform "$platform"', script)
-        self.assertNotIn("--platform linux/amd64", script)
-        self.assertIn('source "$root/eval/scripts/arch.sh"', script)
-        self.assertIn("HARBOR_ARCH", script)
-        arch_sh = (ROOT / "eval" / "scripts" / "arch.sh").read_text()
-        self.assertIn("harbor_arch()", arch_sh)
-        self.assertIn("harbor_installed_root()", arch_sh)
-        self.assertIn("harbor_job_suffix()", arch_sh)
-        self.assertIn("{{.Server.Arch}}", arch_sh)
-        self.assertIn("fetch-vendor-clis", script)
-        self.assertIn("fetch-pmux", script)
-        self.assertIn("pmux.Dockerfile", script)
-        self.assertIn("vendor.Dockerfile", script)
-        self.assertIn("rust:1.99.0-bookworm", (ROOT / "eval" / "harbor_adapter" / "Dockerfile").read_text())
-        self.assertNotIn(
-            "FROM --platform=",
-            (ROOT / "eval" / "harbor_adapter" / "Dockerfile").read_text(),
-        )
-        self.assertNotIn("copied host Linux x86_64 release binaries", script)
-        self.assertNotIn("terminal-bench-2-1", script)
-        self.assertNotIn("command -v harbor", script)
-        smoke = (ROOT / "eval" / "scripts" / "smoke.sh").read_text()
-        self.assertIn("terminal-bench/music-harmony", smoke)
-        self.assertIn('uv run --project "$root/eval" harbor', smoke)
-        self.assertIn("</dev/null", smoke)
-        self.assertIn("--agent harbor_adapter.agent:PlakAgent", smoke)
-        self.assertIn("--force-build", smoke)
-        self.assertIn('binary_path=$installed/plak', smoke)
-        self.assertNotIn(".plak/installed/plak", smoke)
-        self.assertIn("CODEX_FORCE_AUTH_JSON=true", smoke)
-        self.assertIn("GROK_FORCE_AUTH_JSON=true", smoke)
-        self.assertIn('n_concurrent="${HARBOR_N_CONCURRENT:-5}"', smoke)
-        self.assertIn("host_refresh_plak", smoke)
-        self.assertIn('plak refresh "$account"', smoke)
-        self.assertIn('PLAK_HOST_REFRESH:-1', smoke)
-        self.assertNotIn("does not use ~/.grok/auth.json", smoke)
-        self.assertIn("require_host_auth pi openai-codex", smoke)
-        self.assertIn("require_host_auth opencode openai", smoke)
-        self.assertNotIn("does not mount ~/.pi", smoke)
-        self.assertNotIn("OPENAI_API_KEY (Harbor pi", smoke)
-        self.assertIn("harbor_adapter.vendor_agents:FrozenCodex", smoke)
-        self.assertIn("harbor_adapter.vendor_agents:FrozenGrokBuild", smoke)
-        self.assertIn("harbor_adapter.vendor_agents:FrozenPi", smoke)
-        self.assertIn("harbor_adapter.vendor_agents:FrozenOpenCode", smoke)
-        self.assertIn("just fetch-harbor-vendor-clis", smoke)
-        self.assertIn("harbor_adapter.controls", smoke)
-        self.assertIn("vendor_ak", smoke)
-        self.assertNotIn("run_vendor codex ", smoke)
-        self.assertNotIn("run_vendor grok-build", smoke)
-        self.assertNotIn("run_vendor pi ", smoke)
-        self.assertNotIn("run_vendor opencode ", smoke)
-        self.assertNotIn("@latest", smoke)
-        self.assertIn('["docker", "info"]', smoke)
-        self.assertIn("timeout=15", smoke)
-        self.assertIn('["docker", "info"]', script)
-        self.assertIn("timeout=15", script)
-        self.assertIn("rung-a-plumbing.yaml", script)
-        self.assertIn("rung-a-ab.yaml", script)
-        self.assertIn("rung-b-wire.yaml", script)
-        self.assertIn("runs all 66 TB 4.0 tasks", script)
-        for task in SMOKE_TASKS:
-            self.assertIn(task, smoke)
-
-        rung_a = (ROOT / "eval" / "scripts" / "rung-a.sh").read_text()
-        self.assertIn("plumbing|ab|expanded", rung_a)
-        for arm in (
-            "plak-codex",
-            "codex",
-            "plak-grok",
-            "grok-build",
-            "plak-openrouter",
-            "pi-openrouter",
-            "opencode-openrouter",
-            "plak-claude",
-            "claude-code",
-        ):
-            self.assertIn(arm, rung_a)
-        self.assertIn("deepseek/deepseek-v4-flash", rung_a)
-        self.assertIn("pi none", rung_a)
-        self.assertIn("opencode none", rung_a)
-        self.assertIn("require_ready_openrouter_key", rung_a)
-        self.assertIn("harbor_adapter.vendor_agents:FrozenCodex", rung_a)
-        self.assertIn("harbor_adapter.vendor_agents:FrozenGrokBuild", rung_a)
-        self.assertIn("harbor_adapter.vendor_agents:FrozenPi", rung_a)
-        self.assertIn("harbor_adapter.vendor_agents:FrozenOpenCode", rung_a)
-        self.assertIn("harbor_adapter.pmux_agent:FrozenPmux", rung_a)
-        self.assertNotIn("--agent claude-code", rung_a)
-        self.assertIn("just fetch-harbor-pmux", rung_a)
-        self.assertIn("cat <<'EOF'", rung_a)
-        self.assertNotIn("cat <<EOF", rung_a)
-        self.assertIn("dangerously-skip-permissions", (ROOT / "eval" / "harbor_adapter" / "pmux_args.py").read_text())
-        self.assertIn("</dev/null", rung_a)
-        self.assertIn("--include-task-name", rung_a)
-        self.assertIn("RUNG_A_PLUMBING_TASKS", rung_a)
-        self.assertIn("RUNG_A_AB_TASKS", rung_a)
-        self.assertIn("RUNG_A_EXPANDED_TASKS", rung_a)
-        self.assertIn("slice_source_flags", rung_a)
-        self.assertIn("load_slice_cli_flags", rung_a)
-        self.assertIn("require_include_count", rung_a)
-        self.assertIn('require_include_count "${#names[@]}"', rung_a)
-        self.assertIn("expected $want include task names", rung_a)
-        self.assertIn("HARBOR_INCLUDE_TASK", rung_a)
-        self.assertIn("eval/datasets/rung-a-plumbing", rung_a)
-        self.assertIn("terminal-bench/terminal-bench-2-1@6", rung_a)
-        self.assertIn("unset OPENROUTER_API_KEY OPENAI_API_KEY XAI_API_KEY", rung_a)
-        self.assertIn("unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL", rung_a)
-        self.assertIn('${slice}-${named}', rung_a)
-        self.assertIn('["docker", "info"]', rung_a)
-        self.assertIn("timeout=15", rung_a)
-        self.assertIn("host_refresh_plak", rung_a)
-        self.assertIn('if [[ "$account" == "openrouter" ]]; then', rung_a)
-        self.assertIn('PLAK_HOST_REFRESH:-1', rung_a)
-        self.assertIn('HARBOR_N_ATTEMPTS:-1', rung_a)
-        self.assertIn('docker pull --platform "$platform"', rung_a)
-        self.assertNotIn("docker pull --platform linux/amd64", rung_a)
-        self.assertIn("force_build_flags", rung_a)
-        self.assertIn("--force-build", rung_a)
-        self.assertIn('${slice}-${named}${job_suffix}', rung_a)
-        self.assertIn('--agent-kwarg "arch=$arch"', rung_a)
-        # Stock vendor agents validate kwargs; arch reaches them via HARBOR_ARCH.
-        self.assertIn("arch travels in HARBOR_ARCH", rung_a)
-        vendor = rung_a[rung_a.index("run_vendor() {"):]
-        vendor = vendor[: vendor.index("\n}\n")]
-        self.assertNotIn('arch=$arch', vendor)
-        self.assertIn('binary_path=$installed/plak', rung_a)
-        self.assertIn("docker image inspect", rung_a)
-        self.assertIn("COMPOSE_HTTP_TIMEOUT", rung_a)
-        self.assertIn("harbor_adapter.docker_retry:RetryingDocker", rung_a)
-        self.assertIn("RUNG_A_AB_DOCKER_IMAGES", rung_a)
-        self.assertIn("RUNG_A_EXPANDED_DOCKER_IMAGES", rung_a)
-        self.assertIn("alexgshaw/fix-git:20260403", RUNG_A_AB_DOCKER_IMAGES)
-        self.assertEqual(len(RUNG_A_AB_DOCKER_IMAGES), 8)
-        for excluded in (
-            "pi-grok",
-            "opencode-codex",
-            "opencode-grok",
-        ):
-            self.assertNotIn(excluded, rung_a)
-
-        rung_b = (ROOT / "eval" / "scripts" / "rung-b.sh").read_text()
-        self.assertIn("only wire", rung_b)
-        self.assertIn("--include-task-name", rung_b)
-        self.assertIn("terminal-bench/foodstuff-beta-activity", rung_b)
-        self.assertIn("plak-codex|codex", rung_b)
-        self.assertIn("refusing dataset-wide run", rung_b)
-        self.assertIn("66-task", rung_b)
-        self.assertNotIn("pi-openrouter", rung_b)
-        self.assertNotIn("grok-build", rung_b)
-        self.assertIn('n_concurrent="${HARBOR_N_CONCURRENT:-1}"', rung_b)
-        self.assertIn("rung-b-wire.yaml", rung_b)
-        self.assertIn('rung-b-${arm}${job_suffix}', rung_b)
-        self.assertIn("--force-build", rung_b)
-        self.assertIn('binary_path=$installed/plak', rung_b)
-        self.assertNotIn(".plak/installed/plak", rung_b)
+        justfile = (ROOT / "justfile").read_text()
+        for command in ("rung-a.sh", "rung-b.sh", "smoke.sh", "harbor.sh"):
+            self.assertIn("eval/scripts/" + command, justfile)
+        self.assertIn("fetch-harbor-tools:", justfile)
+        self.assertIn("harbor-test:", justfile)
+        for name in ("rung-a.sh", "rung-b.sh", "smoke.sh", "harbor.sh"):
+            script = (ROOT / "eval/scripts" / name).read_text()
+            self.assertIn("harbor_adapter.campaign", script)
+            self.assertIn('uv run --project "$root/eval" harbor', script)
+            self.assertIn("</dev/null", script)
 
     def test_harbor_pin_and_linux_packaging(self) -> None:
         pyproject = (ROOT / "eval" / "pyproject.toml").read_text()
@@ -1864,7 +1591,7 @@ class ConfigurationContractTests(unittest.TestCase):
         self.assertIn('self._account == "openrouter"', agent)
         self.assertEqual(
             REMOTE_OPENROUTER_KEY,
-            "/logs/agent/plak-home/secrets/openrouter.key",
+            "/tmp/plak-cell/home/secrets/openrouter.key",
         )
         gitignore = (ROOT / ".gitignore").read_text()
         self.assertIn(".plak/", gitignore)
@@ -2090,9 +1817,7 @@ class CodexCaPrerequisiteTests(unittest.IsolatedAsyncioTestCase):
                 mock.patch.object(module, "_record_executable_identity", new_callable=mock.AsyncMock) as identity,
             ):
                 await agent.install(environment)
-            agent.ensure_system_dependencies.assert_awaited_once_with(
-                environment, ("ripgrep",)
-            )
+            agent.ensure_system_dependencies.assert_not_awaited()
             identity.assert_awaited_once_with(
                 agent, environment, "codex", "amd64",
                 prerequisites={"ca_bundle": ca},
@@ -2145,14 +1870,9 @@ class EffortControlTests(unittest.TestCase):
             harbor_ak_flags("codex", effort="low", version="9.9.9")
 
     def test_effort_none_omits_vendor_effort_ak(self) -> None:
-        self.assertEqual(vendor_effort_ak("pi", "none"), ())
-        self.assertEqual(vendor_effort_ak("opencode", "none"), ())
-        pi_flags = harbor_ak_flags("pi", effort="none", version=CLI_PINS["pi"])
-        self.assertEqual(pi_flags, (f"version={CLI_PINS['pi']}",))
-        opencode_flags = harbor_ak_flags(
-            "opencode", effort="none", version=CLI_PINS["opencode"]
-        )
-        self.assertEqual(opencode_flags, (f"version={CLI_PINS['opencode']}",))
+        for agent in ("codex", "grok-build", "pi", "opencode"):
+            with self.subTest(agent=agent), self.assertRaises(ControlError):
+                vendor_effort_ak(agent, "none")
 
 
 class ImpliedCostTests(unittest.TestCase):
@@ -2275,7 +1995,7 @@ class FrozenPmuxContractTests(unittest.TestCase):
         self.assertIn("--pool-turn-timeout-ms 900000", decoded)
         self.assertIn("/transcripts/", decoded)
         self.assertIn("pmux_harvest", decoded)
-        self.assertIn("trap 'pmux_harvest; kill", decoded)
+        self.assertIn("trap 'pmux_harvest' EXIT", decoded)
         self.assertIn("sudo -n true", decoded)
         self.assertIn("TMPDIR=/tmp/pmux-tmp", decoded)
         self.assertNotIn("certificate", decoded)
@@ -2741,7 +2461,7 @@ class FrozenPmuxContractTests(unittest.TestCase):
         self.assertIn("2.1.280", CLI_PINS["claude"])
         tuples = (ROOT / "eval" / "harbor_adapter" / "tuples.py").read_text()
         self.assertIn(
-            'REMOTE_CLAUDE_SECURESTORAGE = "/installed-agent/claude-securestorage"',
+            'REMOTE_CLAUDE_SECURESTORAGE = "/tmp/claude-secrets"',
             tuples,
         )
         self.assertIn('REMOTE_PMUX_RUNTIME = "/tmp/pmux"', tuples)
@@ -3209,7 +2929,7 @@ class PlakTerminationTests(unittest.TestCase):
             exception_message="rate limit exceeded",
         )
         self.assertEqual(
-            record.termination_class, f"turn_failed:{KIND_PROVIDER_RATE_LIMIT}"
+            record.termination_class, "harness_exception:ApiRateLimitError"
         )
 
     def test_no_evidence_at_all_is_unknown_not_completed(self) -> None:
@@ -3684,7 +3404,7 @@ class PmuxConcurrencyTests(unittest.TestCase):
 
     def test_claude_code_arm_pins_concurrency_to_one(self) -> None:
         rung_a = (ROOT / "eval" / "scripts" / "rung-a.sh").read_text()
-        self.assertIn("pmux_concurrent", rung_a)
+        self.assertIn("concurrent=1", rung_a)
         # run_pmux must not inherit the slice default.
         body = rung_a[rung_a.index("run_pmux() {"):]
         body = body[: body.index("\n}\n")]

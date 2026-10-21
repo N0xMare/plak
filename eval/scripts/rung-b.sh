@@ -15,25 +15,21 @@ export HARBOR_ARCH="$arch"
 # neither Harbor's build compose template nor the task Dockerfiles name a
 # platform. DOCKER_DEFAULT_PLATFORM is the only thing that makes those cells the
 # selected architecture instead of the daemon's; compose honours it for `build`
-# and `up` alike, so it also covers the --force-build rebuild path.
+# and `up` alike; task images are campaign-bound by ID.
 export DOCKER_DEFAULT_PLATFORM="$platform"
-# Prebuilt Terminal-Bench task images are published for linux/amd64 only.
-# Off amd64, --force-build makes Harbor rebuild each cell from the task's own
-# Dockerfile on the daemon platform.
-force_build=()
-if [[ "$arch" != "amd64" ]]; then
-  force_build=(--force-build)
-fi
+# Task images must already be frozen by ID in the reviewed campaign.
 config="$root/eval/rung-b-wire.yaml"
 dataset='terminal-bench/terminal-bench@4.0.0'
 cmd="${1:-wire}"
 arm="${2:-plak-codex}"
+export HARBOR_ARM="$arm"
 task="${3:-terminal-bench/foodstuff-beta-activity}"
-n_concurrent="${HARBOR_N_CONCURRENT:-1}"
+n_concurrent="1"
 jobs_dir="$root/.plak/harbor/jobs/rung-b-${arm}${job_suffix}"
 
 harbor_bin() {
   command -v uv >/dev/null || { echo "eval rung-b: install uv" >&2; exit 2; }
+  PYTHONPATH="$root/eval" python3 -m harbor_adapter.campaign
   uv run --project "$root/eval" harbor "$@" </dev/null
 }
 
@@ -61,22 +57,11 @@ One TB 4.0 task. Does not run the 66-task dataset. Prefer plumbing/Rung A for
 weekly capability signal.
 
 HARBOR_ARCH selects the cell architecture (amd64|arm64); unset it follows the
-Docker daemon. arm64 reads .plak/installed/arm64/, passes --force-build and
+Docker daemon. arm64 reads .plak/installed/arm64/, uses frozen image IDs and
 suffixes the job name with -arm64.
 EOF
 }
 
-host_refresh_plak() {
-  local account="$1"
-  if [[ "${PLAK_HOST_REFRESH:-1}" != "1" ]]; then
-    return 0
-  fi
-  if ! command -v plak >/dev/null; then
-    echo "eval rung-b: plak is not on PATH; cannot refresh $account before Harbor" >&2
-    exit 2
-  fi
-  plak refresh "$account"
-}
 
 case "$cmd" in
   -h|--help)
@@ -104,9 +89,7 @@ fi
 
 case "$arm" in
   plak-codex)
-    host_refresh_plak codex
     harbor_bin run --config "$config" --jobs-dir "$jobs_dir" \
-      ${force_build[@]+"${force_build[@]}"} \
       --dataset "$dataset" \
       --agent harbor_adapter.agent:PlakAgent \
       --model gpt-5.6-luna \
@@ -134,11 +117,10 @@ require_frozen_artifacts("codex")' || {
     export CODEX_FORCE_AUTH_JSON=true
     # Stock vendor agents validate their kwargs, so arch travels in HARBOR_ARCH.
     harbor_bin run --config "$config" --jobs-dir "$jobs_dir" \
-      ${force_build[@]+"${force_build[@]}"} \
       --dataset "$dataset" \
       --agent harbor_adapter.vendor_agents:FrozenCodex \
       --model openai/gpt-5.6-luna \
-      --n-attempts 1 --n-concurrent "$n_concurrent" --env docker \
+      --n-attempts 1 --n-concurrent "$n_concurrent" --env harbor_adapter.docker_retry:RetryingDocker \
       --ak version="$(PYTHONPATH="$root/eval" python3 -c 'from harbor_adapter.vendor_pins import CLI_PINS; print(CLI_PINS["codex"])')" \
       --ak reasoning_effort=low \
       --include-task-name "$task"

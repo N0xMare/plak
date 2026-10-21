@@ -7,6 +7,10 @@ import json
 import os
 import shlex
 import sys
+import fcntl
+import subprocess
+import time
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -146,6 +150,120 @@ def require_ready_oauth(account: str, *, xdg_state_home: Path | None = None) -> 
             f"missing {credential}; run `plak login {account}` on the host first"
         )
     return directory
+
+
+def oauth_expiry(path: Path, account: str) -> float:
+    """Read expiry metadata only; errors must never include decoded credentials."""
+    try:
+        document = json.loads(path.read_text())
+        payload = json.loads(base64.b64decode(document["payload"], validate=True))
+        expiry = payload["access_expires_at" if account == "codex" else "expires_at"]
+        if type(expiry) not in (int, float) or not 0 < expiry < 1e12:
+            raise ValueError
+        return float(expiry)
+    except (OSError, ValueError, KeyError, TypeError):
+        raise CredentialError("OAuth expiry metadata unavailable") from None
+
+
+def native_oauth_expiry(path: Path, harness: str, provider: str | None = None) -> float:
+    """Read pinned native-store expiry metadata without exposing token claims."""
+    try:
+        payload = json.loads(path.read_text())
+        if harness == "codex":
+            token = payload["tokens"]["access_token"]
+            segment = token.split(".")[1]
+            expiry = json.loads(base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4)))["exp"]
+        elif harness == "grok-build":
+            _, entry = validate_grok_auth(path.read_bytes())
+            return datetime.fromisoformat(str(entry["expires_at"]).replace("Z", "+00:00")).timestamp()
+        elif harness == "pmux":
+            expiry = payload["claudeAiOauth"]["expiresAt"] / 1000
+        elif harness in ("pi", "opencode"):
+            entry = payload[provider]
+            if entry.get("type") != "oauth":
+                raise ValueError
+            expiry = entry["expires"] / 1000
+        else:
+            raise ValueError
+        if type(expiry) not in (int, float) or not 0 < expiry < 1e12:
+            raise ValueError
+        return float(expiry)
+    except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError):
+        raise CredentialError("native OAuth expiry metadata unavailable") from None
+
+
+def require_native_oauth_lifetime(agent, account: str, agent_timeout: float,
+                                  verifier_timeout: float) -> None:
+    """Vendor refresh is not a substitute for a trial's initial lifetime gate."""
+    harness = getattr(agent, "_native_harness", None)
+    if type(agent).__name__ == "FrozenPmux":
+        harness = "pmux"
+    provider = None
+    if harness == "codex":
+        path = agent._resolve_auth_json_path()
+    elif harness == "grok-build":
+        path = require_ready_grok_auth()
+    elif harness == "pmux":
+        path = require_ready_claude_code_store() / ".credentials.json"
+    elif harness == "pi":
+        provider = {"codex": "openai-codex", "grok": "xai"}.get(account)
+        path = require_ready_pi_auth(provider)
+    elif harness == "opencode":
+        provider = {"codex": "openai", "grok": "xai"}.get(account)
+        path = require_ready_opencode_auth(provider)
+    else:
+        return  # Plak uses trial_oauth under its host refresh lock.
+    if path is None or native_oauth_expiry(Path(path), harness, provider) - time.time() < (
+        agent_timeout + verifier_timeout + 300
+    ):
+        raise CredentialError("native OAuth lifetime cannot cover task and verifier budgets plus margin; refresh the host store first")
+
+
+def replace_codex_auth(path: Path, candidate: Path, snapshot: bytes) -> None:
+    """Persist a same-account refresh, never overwriting a concurrent rotation."""
+    try:
+        old = json.loads(snapshot)
+        raw = candidate.read_bytes()
+        new = json.loads(raw)
+        before, after = old["tokens"], new["tokens"]
+        if not before.get("account_id") or after.get("account_id") != before["account_id"]:
+            raise ValueError
+        if not all(isinstance(after.get(k), str) and after[k] for k in ("access_token", "refresh_token")):
+            raise ValueError
+        if path.read_bytes() != snapshot:
+            raise ValueError
+    except (OSError, ValueError, TypeError, KeyError):
+        raise CredentialError("Codex OAuth refresh invalid or host changed") from None
+    # The downloaded tempfile is on the same filesystem as the host pin.
+    candidate.chmod(0o600)
+    os.replace(candidate, path)
+
+
+@contextmanager
+def trial_oauth(account: str, *, agent_timeout: float, verifier_timeout: float,
+                xdg_state_home: Path | None = None):
+    directory = require_ready_oauth(account, xdg_state_home=xdg_state_home)
+    # Keep the lock through upload, so digest/lifetime and uploaded bytes cannot
+    # straddle another trial's host refresh.
+    fd = os.open(directory.parent / ("." + directory.name + ".harbor-refresh.lock"), os.O_CREAT | os.O_RDWR, 0o600)
+    with os.fdopen(fd, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        required = agent_timeout + verifier_timeout + 300
+        if oauth_expiry(directory / "credential.json", account) - time.time() < required:
+            env = dict(os.environ)
+            if xdg_state_home is not None:
+                env["XDG_STATE_HOME"] = str(xdg_state_home)
+            try:
+                refreshed = subprocess.run(["plak", "refresh", account], env=env,
+                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                           timeout=120, check=False)
+            except (OSError, subprocess.TimeoutExpired):
+                raise CredentialError("host OAuth refresh failed") from None
+            if refreshed.returncode:
+                raise CredentialError("host OAuth refresh failed")
+        if oauth_expiry(directory / "credential.json", account) - time.time() < required:
+            raise CredentialError("OAuth lifetime cannot cover task and verifier budgets plus margin")
+        yield directory
 
 
 def remote_state_acl_command(user: str | int | None, *paths: str) -> str:

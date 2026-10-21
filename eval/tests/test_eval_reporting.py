@@ -124,7 +124,7 @@ class ReportTests(unittest.TestCase):
             self.assertEqual((first / "result.json").read_bytes(), original)
             a = next(arm for arm in report["arms"] if arm["arm"] == "arm-a")
             self.assertEqual((a["attempts"], a["eligible"], a["passes"]), (3, 2, 1))
-            self.assertEqual(a["outcomes"]["setup_infrastructure_error"], 1)
+            self.assertEqual(a["outcomes"]["infra"], 1)
             self.assertIsNone(a["implied_cost_usd"]["complete_total"])
             self.assertEqual(a["implied_cost_usd"]["covered"], 2)
             self.assertIsNone(a["total_attempt_cost_per_pass_usd"])
@@ -135,7 +135,7 @@ class ReportTests(unittest.TestCase):
             markdown = (report_dir / "eval-report.md").read_text()
             self.assertIn("Total attempt $/pass", markdown)
             self.assertIn("[result](", markdown)
-            self.assertIn("setup_infrastructure_error", markdown)
+            self.assertIn("infra", markdown)
             incomplete = next(t for t in report["trials"] if t["trial"] == "task-a__three")
             self.assertIsNone(incomplete["tokens"]["cache_read"])
             self.assertEqual(incomplete["raw_reward"], 1)
@@ -193,20 +193,20 @@ class ReportTests(unittest.TestCase):
             self.assertEqual(rows["bootstrap"]["verifier_evidence"]["status"], "missing_ctrf")
             self.assertEqual(rows["bootstrap"]["raw_reward"], 0)
             self.assertIsNone(rows["bootstrap"]["reward"])
-            self.assertIs(rows["bootstrap"]["pass"], False)
+            self.assertIsNone(rows["bootstrap"]["pass"])
             self.assertFalse(rows["bootstrap"]["eligible_pass_rate"])
             self.assertEqual(rows["asserted-fail"]["outcome"], "verifier_fail")
             self.assertEqual(rows["asserted-pass"]["outcome"], "verifier_pass")
             self.assertEqual(rows["asserted-pass"]["verifier_evidence"]["counts"]["passed"], 1)
             self.assertEqual(rows["unverified-pass"]["outcome"], "verifier_unverified")
-            self.assertIs(rows["unverified-pass"]["pass"], True)
+            self.assertIsNone(rows["unverified-pass"]["pass"])
             self.assertEqual(rows["noncompleted"]["raw_reward"], 1)
             self.assertNotEqual(rows["noncompleted"]["termination"], "completed")
-            self.assertIsNone(rows["noncompleted"]["pass"])
+            self.assertIs(rows["noncompleted"]["pass"], True)
             arm = report["arms"][0]
             self.assertEqual((arm["attempts"], arm["eligible"], arm["eligible_passes"],
-                              arm["passes"]), (5, 2, 1, 2))
-            self.assertEqual(arm["pass_at_1"], 0.5)
+                              arm["passes"]), (5, 3, 2, 2))
+            self.assertAlmostEqual(arm["pass_at_1"], 2 / 3)
             self.assertEqual(arm["operational_pass_per_attempt"], 0.4)
 
     def test_selected_rung_a_rejects_unasserted_or_mismatched_ctrf(self):
@@ -265,12 +265,13 @@ class ReportTests(unittest.TestCase):
                                        text=True, capture_output=True)
             self.assertEqual(completed.returncode, 0, completed.stderr)
             row = json.loads(completed.stdout)["trials"][0]
-            self.assertEqual(row["outcome"], "agent_timeout")
+            self.assertEqual(row["outcome"], "verifier_fail")
+            self.assertEqual(row["failure_class"], "agent")
             self.assertEqual(row["exception_type"], "AgentTimeoutError")
             self.assertEqual(row["raw_reward"], 0)
-            self.assertIsNone(row["reward"])
-            self.assertIsNone(row["pass"])
-            self.assertFalse(row["eligible_pass_rate"])
+            self.assertEqual(row["reward"], 0)
+            self.assertIs(row["pass"], False)
+            self.assertTrue(row["eligible_pass_rate"])
             self.assertEqual(row["usage_status"], "partial")
             self.assertEqual(row["cost"]["implied_status"], "unresolved_usage")
             self.assertEqual(row["evidence"]["result"], str(trial / "result.json"))
@@ -351,7 +352,7 @@ class ReportTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             report = json.loads(completed.stdout)
             self.assertEqual(report["arms"][0]["attempts"], 1)
-            self.assertEqual(report["trials"][0]["outcome"], "unreadable_result")
+            self.assertEqual(report["trials"][0]["outcome"], "infra")
             self.assertEqual(report["trials"][0]["result_status"], "missing")
 
     def test_empty_invocation_writes_planned_unattempted_report(self):
@@ -425,7 +426,8 @@ class ReportTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             pairs = json.loads(result.stdout)["pairs"]
             self.assertEqual(len(pairs), 1)
-            self.assertTrue(pairs[0]["comparison_eligible"])
+            self.assertFalse(pairs[0]["comparison_eligible"])
+            self.assertIn("validity:campaign_missing", pairs[0]["reasons"])
             self.assertEqual(len(pairs[0]["paired_agent_execution_difference"]), 3)
             self.assertTrue(all(row["artifact"]["binaries"] for row in json.loads(result.stdout)["trials"]))
 
@@ -504,7 +506,8 @@ class ReportTests(unittest.TestCase):
                                        text=True, capture_output=True)
             self.assertEqual(completed.returncode, 0, completed.stderr)
             pair = json.loads(completed.stdout)["pairs"][0]
-            self.assertTrue(pair["comparison_eligible"], pair["reasons"])
+            self.assertFalse(pair["comparison_eligible"])
+            self.assertIn("validity:campaign_missing", pair["reasons"])
 
     def test_prompt_ablation_allows_only_executed_variant_delta_on_one_binary(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -546,7 +549,7 @@ class ReportTests(unittest.TestCase):
             self.assertIn("control_unverified_or_mismatched:prompt_variant", ordinary["reasons"])
             paired = report("--prompt-ablation")
             self.assertEqual(paired.returncode, 0, paired.stderr)
-            self.assertTrue(json.loads(paired.stdout)["pairs"][0]["comparison_eligible"])
+            self.assertFalse(json.loads(paired.stdout)["pairs"][0]["comparison_eligible"])
 
             context_path = trials["parity"].parent.parent / "comparison-context.json"
             context = json.loads(context_path.read_text())
@@ -632,7 +635,8 @@ class ReportTests(unittest.TestCase):
                 self.assertTrue(all(t["artifact"] for t in report["trials"]), report["trials"])
                 return report["pairs"][0]
 
-            self.assertTrue(pair()["comparison_eligible"], pair()["reasons"])
+            self.assertFalse(pair()["comparison_eligible"])
+            self.assertIn("validity:campaign_missing", pair()["reasons"])
             for arm in ("plak-claude", "claude-code"):
                 source = root / arm / "run-one" / f"task-a__{arm}"
                 other = root / arm / "run-one" / f"task-b__{arm}"
@@ -740,7 +744,7 @@ class ReportTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             row = json.loads(completed.stdout)["trials"][0]
             self.assertEqual(row["result_status"], "repaired")
-            self.assertEqual(row["outcome"], "verifier_pass")
+            self.assertEqual(row["outcome"], "infra")
             self.assertFalse(row["eligible_pass_rate"])
             self.assertIsNone(row["pass"])
             self.assertEqual(row["raw_reward"], 1)

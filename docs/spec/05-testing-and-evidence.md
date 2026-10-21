@@ -419,6 +419,8 @@ in no gate tier and not product qualification; its adapter tests run with
 `just harbor-test`, and `eval/README.md` owns its datasets, arms,
 evidence rules and recipes.
 
+Scored Harbor comparisons are gated as defined in `eval/README.md`.
+
 Test-only session-record faults use one complete forwarding store with per-method
 policies; composition fixtures use one scripted integration, session and event
 port. Refactoring these fixtures does not change their scenario assertions.

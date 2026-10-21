@@ -276,6 +276,10 @@ api-census *ARGS:
 harbor-test:
     python3 -m unittest discover -s eval/tests -t eval/tests
 
+# Pinned public search executable, identical policy for every arm.
+fetch-harbor-tools:
+    PYTHONPATH=eval python3 -m harbor_adapter.cell_prep
+
 harbor-bootstrap:
     eval/scripts/harbor.sh bootstrap
 
