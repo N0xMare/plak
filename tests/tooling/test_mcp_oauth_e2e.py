@@ -57,5 +57,45 @@ class ParsingTests(unittest.TestCase):
         self.assertIn("state_key_carry", lane.SCENARIOS)
 
 
+class ComposeProcessTests(unittest.TestCase):
+    def test_timeout_retires_the_cli_and_plugin_process_group(self):
+        from unittest import mock
+        import signal
+        import subprocess
+
+        harness = lane.Harness.__new__(lane.Harness)
+        harness.compose = ["docker", "compose"]
+        proc = mock.MagicMock()
+        proc.pid = 12345
+        proc.communicate.side_effect = [
+            subprocess.TimeoutExpired("docker", 1),
+            (b"", b""),
+        ]
+        with (
+            mock.patch.object(lane.subprocess, "Popen") as popen,
+            mock.patch.object(lane.os, "killpg") as killpg,
+        ):
+            popen.return_value.__enter__.return_value = proc
+            with self.assertRaises(subprocess.TimeoutExpired):
+                harness.compose_run("up", timeout=1)
+            self.assertTrue(popen.call_args.kwargs["start_new_session"])
+            killpg.assert_called_once_with(proc.pid, signal.SIGTERM)
+
+    def test_compose_failure_preserves_bounded_stderr(self):
+        from unittest import mock
+        import subprocess
+
+        harness = lane.Harness.__new__(lane.Harness)
+        harness.compose = ["docker", "compose"]
+        proc = mock.MagicMock()
+        proc.returncode = 1
+        proc.communicate.return_value = (b"", b"fixture error")
+        with mock.patch.object(lane.subprocess, "Popen") as popen:
+            popen.return_value.__enter__.return_value = proc
+            with self.assertRaises(subprocess.CalledProcessError) as error:
+                harness.compose_run("up")
+            self.assertEqual(error.exception.stderr, b"fixture error")
+
+
 if __name__ == "__main__":
     unittest.main()

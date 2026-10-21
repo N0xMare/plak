@@ -21,6 +21,7 @@ services:
       - ./browser.mjs:/harness/browser.mjs:ro
       - dependencies:/harness/node_modules
     profiles: [driver]
+    command: [sleep, infinity]
   services:
     extends: node
     profiles: []
@@ -36,6 +37,7 @@ services:
       - ./browser.mjs:/harness/browser.mjs:ro
       - dependencies:/harness/node_modules
     profiles: [driver]
+    command: [sleep, infinity]
     environment:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
 volumes:

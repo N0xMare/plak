@@ -33,7 +33,9 @@ records bearer/refresh tokens, authorization codes, device user codes, cookies,
 client secrets or full authorize URLs. Fresh scratch homes and Compose volumes
 are removed in `finally`; no server is intentionally left running. Raw Docker
 logs are not evidence artifacts. Interrupt the driver with Ctrl-C, not SIGKILL.
-A failed teardown is a failing run. Reports are overwritten by default; use
+A failed teardown is a failing run. Browser logins exec into one owned
+Playwright container with a fresh browser/context per login; timed-out Compose
+CLI/plugin process groups are joined before resource teardown. Reports are overwritten by default; use
 `--report PATH` to retain separate runs. Do not commit private homes/carries.
 
 ## Coverage And Oracles

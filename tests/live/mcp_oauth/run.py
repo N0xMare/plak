@@ -155,24 +155,58 @@ class Harness:
             path.chmod(0o700)
 
     def compose_run(self, *args, **kwargs):
-        return subprocess.run(
-            self.compose + list(args),
-            check=True,
+        command = self.compose + list(args)
+        timeout = kwargs.pop("timeout", 180)
+        payload = kwargs.pop("input", None)
+        with subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE if payload is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=kwargs.pop("timeout", 180),
+            start_new_session=True,
             **kwargs,
-        )
+        ) as proc:
+            try:
+                stdout, stderr = proc.communicate(payload, timeout=timeout)
+            except BaseException:
+                # Docker's CLI can spawn a Compose plugin. Retire the whole group
+                # before teardown so it cannot create a late orphan container.
+                try:
+                    os.killpg(proc.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    proc.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    proc.communicate()
+                raise
+            if proc.returncode:
+                raise subprocess.CalledProcessError(
+                    proc.returncode, command, stdout, stderr
+                )
+            return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
 
     def start(self):
         for port in (18080, 18081, 18082, 18083, 18084, 18765):
             with socket.socket() as probe:
                 probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 probe.bind(("127.0.0.1", port))
+        self.compose_run("up", "-d", "node")
         self.compose_run(
-            "run", "--rm", "-T", "node", "npm", "ci", "--ignore-scripts", timeout=300
+            "exec",
+            "--interactive=false",
+            "-T",
+            "node",
+            "npm",
+            "ci",
+            "--ignore-scripts",
+            timeout=300,
         )
-        self.compose_run("up", "-d", "keycloak", "services")
+        self.compose_run("up", "-d", "keycloak", "services", "browser")
         self.wait_url(f"{KC}/realms/mcp/.well-known/openid-configuration")
         self.wait_url("http://127.0.0.1:18083/.well-known/openid-configuration")
         self.admin_token = self.admin_login()
@@ -355,8 +389,7 @@ class Harness:
     def browser(self, url, paste=False, code=None):
         try:
             result = self.compose_run(
-                "run",
-                "--rm",
+                "exec",
                 "-T",
                 "browser",
                 "node",
@@ -643,9 +676,14 @@ class Harness:
                 for result in results:
                     require(
                         result.returncode == 0
+                        or "could not renew its login" in result.stdout
                         or "renewing its login in another process" in result.stdout,
                         "refresh contender did not fail closed on the in-flight claim",
                     )
+                require(
+                    any(result.returncode == 0 for result in results),
+                    "refresh owner did not complete",
+                )
                 self.test()
                 require(
                     refresh_count(self.delta()) == 1,
