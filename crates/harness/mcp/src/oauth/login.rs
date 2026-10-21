@@ -905,10 +905,10 @@ async fn protected_resource(
     challenge: &BearerChallenge,
 ) -> Result<plakous_auth::oauth_workflow::ProtectedResourceMetadata, McpError> {
     let parse = |body: &[u8], url: &str| {
-        parse_protected_resource_metadata(body, resource).map_err(|error| {
+        parse_protected_resource_metadata(body, resource, url).map_err(|error| {
             authorization(&match error {
                 OAuthWorkflowError::ResourceMismatch => format!(
-                    "the resource metadata at {} publishes resource {} instead of {resource}; set url exactly as published",
+                    "the resource metadata at {} publishes resource {} which does not cover endpoint {resource}; check the resource origin and path; a strict path prefix covers the endpoint only when served at the published resource's own RFC 9728 well-known location",
                     redact_query(url),
                     published_resource(body)
                 ),

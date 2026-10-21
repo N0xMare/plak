@@ -4976,10 +4976,18 @@ endpoint. When its 401 carries a `WWW-Authenticate` Bearer challenge with
 `resource_metadata`, the client fetches that URL; otherwise it tries
 `/.well-known/oauth-protected-resource<path>` and then
 `/.well-known/oauth-protected-resource` on the endpoint's origin, in that
-order. The protected-resource metadata's `resource` MUST equal the requested
-server URI byte-for-byte, not a broader same-origin prefix. This deliberately
-narrows RFC 9728: origin-resource metadata obtained by root fallback is refused
-for a path endpoint, as are host-case and trailing-slash differences.
+order. The protected-resource metadata's `resource` MUST be an HTTPS URL
+(or loopback HTTP where the endpoint allows it), without credentials, query
+or fragment, with the same scheme, host and port as the endpoint. Plak policy allows a path-segment prefix only when the fetched metadata URL
+is the published resource's own RFC 9728 §3.1 well-known URL: its origin plus
+`/.well-known/oauth-protected-resource` plus its path with one terminating
+slash removed as Plak normalization (locations are compared as parsed URLs). Everywhere else, including custom challenge and endpoint-path
+well-known locations, resource and endpoint must be equal ignoring one trailing
+slash. Thus origin coverage is location-bound, not tenant-controlled. Published
+resources must not contain control characters, non-visible-ASCII, whitespace, backslashes, dot segments (including
+percent-encoded dots), encoded path separators, or a raw path that differs from
+the parsed path. Only scheme/host case and default-port normalization are allowed
+(IDN hosts must already be ASCII).
 The published value is sent byte-for-byte as `resource=` (including a bare
 trailing slash), and its `authorization_servers` MUST name one; the pinned
 issuer is used and must be listed, else the first listed. Authorization-server metadata is

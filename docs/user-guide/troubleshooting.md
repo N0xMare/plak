@@ -889,11 +889,15 @@ resubmit it as a new prompt.
 
 ## MCP Resource Mismatch
 
-OAuth discovery requires `url` to match the server's published `resource`
-exactly, including host case and trailing slash. Set `url` exactly as the
-server publishes it; origin-wide root-fallback metadata does not cover a path
-endpoint. If the server publishes only an origin resource, ask its operator
-for endpoint-specific metadata or configure its published origin endpoint.
+OAuth discovery requires the published `resource` to share the endpoint's
+scheme, host and port. An origin resource covers `/mcp` only when served at
+`origin/.well-known/oauth-protected-resource`. More generally, path-segment
+coverage (`/mcp` covers `/mcp/x`, not `/mcp2`) is allowed only at the published
+resource's own RFC 9728 well-known URL. Plak normalizes that location by
+stripping one trailing slash from the resource path. Elsewhere, including
+custom challenge and endpoint-path documents, resource and endpoint must be
+equal ignoring one trailing slash. Check both the published resource and the
+location serving it; do not substitute a sibling path or another origin.
 Diagnostics omit user information, query and fragment.
 
 For live MCP testing, use a dedicated `PLAK_HOME` (mode 0700). New `[mcp]`,

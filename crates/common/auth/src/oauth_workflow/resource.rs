@@ -245,10 +245,12 @@ struct ProtectedResourceWire {
     scopes_supported: Vec<String>,
 }
 
-/// Parses protected-resource metadata for the exact requested resource URI.
+/// Parses protected-resource metadata covering the requested resource URI.
 ///
-/// The metadata's resource must exactly equal the requested identifier, not
-/// a broader prefix, and it must list an authorization server. The published
+/// The metadata's resource must have the same origin and an equal or
+/// path-segment-prefix path only at its own RFC 9728 well-known URL; elsewhere
+/// equality is required (ignoring one trailing slash). It must list an
+/// authorization server. Plain HTTP is limited to loopback. The published
 /// value is retained byte-for-byte for resource indicators.
 ///
 /// # Errors
@@ -260,10 +262,71 @@ struct ProtectedResourceWire {
 pub fn parse_protected_resource_metadata(
     body: &[u8],
     resource_uri: &str,
+    metadata_url: &str,
 ) -> Result<ProtectedResourceMetadata, OAuthWorkflowError> {
     let wire: ProtectedResourceWire = decode_json_bounded(body, MAX_RESOURCE_OAUTH_RESPONSE_BYTES)?;
     canonical_resource_uri(&wire.resource).map_err(|_| OAuthWorkflowError::ResourceMismatch)?;
-    if wire.resource != resource_uri {
+    let published = Url::parse(&wire.resource).map_err(|_| OAuthWorkflowError::ResourceMismatch)?;
+    // Only scheme/host case and default-port normalization are harmless here.
+    // WHATWG path repair must not silently broaden a published audience.
+    let raw_path = wire
+        .resource
+        .split_once("://")
+        .and_then(|(_, rest)| rest.find('/').map(|index| &rest[index..]))
+        .unwrap_or("/");
+    let authority = wire
+        .resource
+        .split_once("://")
+        .map(|(_, rest)| rest.split('/').next().unwrap_or(""));
+    let origin = published.origin().ascii_serialization();
+    let normalized_authority = origin
+        .split_once("://")
+        .map_or("", |(_, authority)| authority);
+    let default_port = if published.scheme() == "https" {
+        443
+    } else {
+        80
+    };
+    let authority_matches = authority.is_some_and(|authority| {
+        authority.eq_ignore_ascii_case(normalized_authority)
+            || (published.port().is_none()
+                && authority
+                    .eq_ignore_ascii_case(&format!("{normalized_authority}:{default_port}")))
+    });
+    let lower_path = raw_path.to_ascii_lowercase();
+    if wire
+        .resource
+        .chars()
+        .any(|c| c.is_control() || !c.is_ascii() || c.is_whitespace() || c == '\\')
+        || !authority_matches
+        || raw_path != published.path()
+        || lower_path.contains("%2f")
+        || lower_path.contains("%5c")
+    {
+        return Err(OAuthWorkflowError::ResourceMismatch);
+    }
+    let endpoint = Url::parse(resource_uri).map_err(|_| OAuthWorkflowError::ResourceMismatch)?;
+    let path = published
+        .path()
+        .strip_suffix('/')
+        .unwrap_or(published.path());
+    let endpoint_path = endpoint.path().strip_suffix('/').unwrap_or(endpoint.path());
+    let own_metadata = format!(
+        "{}{}{}",
+        published.origin().ascii_serialization(),
+        PROTECTED_RESOURCE_WELL_KNOWN,
+        path
+    );
+    let location_bound = Url::parse(metadata_url).ok() == Url::parse(&own_metadata).ok();
+    let loopback = matches!(published.host_str(), Some("127.0.0.1" | "[::1]"));
+    if published.origin() != endpoint.origin()
+        || (published.scheme() == "http" && !loopback)
+        || !(endpoint_path == path
+            || location_bound
+                && endpoint_path
+                    .strip_prefix(path)
+                    .is_some_and(|rest| rest.starts_with('/')))
+    {
         return Err(OAuthWorkflowError::ResourceMismatch);
     }
     if wire.authorization_servers.is_empty() {
@@ -845,9 +908,12 @@ mod tests {
                 "scopes_supported": ["files:read", hostile],
             })
             .to_string();
-            let prm =
-                parse_protected_resource_metadata(body.as_bytes(), "https://mcp.example.com/")
-                    .unwrap();
+            let prm = parse_protected_resource_metadata(
+                body.as_bytes(),
+                "https://mcp.example.com/",
+                "https://mcp.example.com/.well-known/oauth-protected-resource",
+            )
+            .unwrap();
             assert_eq!(prm.resource, "https://mcp.example.com/");
             assert_eq!(prm.scopes_supported, ["files:read"]);
             let body = serde_json::json!({
@@ -955,8 +1021,13 @@ mod tests {
     }
 
     #[test]
-    fn resource_metadata_must_name_exactly_this_resource() {
-        let metadata = |resource: &str| {
+    fn resource_metadata_covers_only_same_origin_path_segments() {
+        let metadata = |resource: &str, endpoint: &str| {
+            let published = Url::parse(resource).unwrap();
+            let path = published
+                .path()
+                .strip_suffix('/')
+                .unwrap_or(published.path());
             parse_protected_resource_metadata(
                 serde_json::json!({
                     "resource": resource,
@@ -964,37 +1035,177 @@ mod tests {
                 })
                 .to_string()
                 .as_bytes(),
-                "https://mcp.example.com/v1/mcp",
+                endpoint,
+                &format!(
+                    "{}{}{}",
+                    published.origin().ascii_serialization(),
+                    PROTECTED_RESOURCE_WELL_KNOWN,
+                    path
+                ),
             )
         };
-        assert_eq!(
-            metadata("https://mcp.example.com/v1/mcp").map(|found| found.resource),
-            Ok(String::from("https://mcp.example.com/v1/mcp"))
+        for resource in [
+            "https://mcp.example.com",
+            "https://mcp.example.com/",
+            "https://MCP.example.com:443/v1",
+            "https://mcp.example.com/v1/",
+            "https://mcp.example.com/v1/mcp",
+            "https://mcp.example.com/v1/mcp/",
+        ] {
+            let parsed = metadata(resource, "https://mcp.example.com/v1/mcp").unwrap();
+            assert_eq!(parsed.resource, resource);
+        }
+        assert!(
+            metadata(
+                "https://mcp.example.com/mcp",
+                "https://mcp.example.com/mcp/x"
+            )
+            .is_ok()
         );
-        assert_eq!(
-            metadata("https://MCP.example.com/v1/mcp").err(),
-            Some(OAuthWorkflowError::ResourceMismatch)
-        );
-        assert!(metadata("https://mcp.example.com/").is_err());
-        for other in [
-            "https://mcp.example.com/v1/mc",
-            "https://mcp.example.com/v1/mcp/x",
-            "https://other.example.com/v1/mcp",
-            "http://mcp.example.com/v1/mcp",
+        assert!(metadata("http://127.0.0.1:8080/", "http://127.0.0.1:8080/mcp").is_ok());
+        assert!(metadata("http://[::1]:8080/", "http://[::1]:8080/mcp").is_ok());
+        for (resource, endpoint) in [
+            (
+                "https://mcp.example.com/mcp",
+                "https://mcp.example.com/mcp2",
+            ),
+            (
+                "https://mcp.example.com/mcp/x",
+                "https://mcp.example.com/mcp",
+            ),
+            (
+                "https://mcp.example.com:8443/mcp",
+                "https://mcp.example.com/mcp",
+            ),
+            (
+                "https://other.example.com/mcp",
+                "https://mcp.example.com/mcp",
+            ),
+            ("http://mcp.example.com/mcp", "https://mcp.example.com/mcp"),
+            ("http://mcp.example.com/", "http://mcp.example.com/mcp"),
+            (
+                "https://mcp.example.com/mcp#x",
+                "https://mcp.example.com/mcp",
+            ),
+            (
+                "https://mcp.example.com/mcp//",
+                "https://mcp.example.com/mcp",
+            ),
         ] {
             assert_eq!(
-                metadata(other).err(),
+                metadata(resource, endpoint).err(),
                 Some(OAuthWorkflowError::ResourceMismatch),
-                "{other}"
+                "{resource} {endpoint}"
             );
         }
         assert_eq!(
             parse_protected_resource_metadata(
-                br#"{"resource":"https://mcp.example.com/v1/mcp"}"#,
-                "https://mcp.example.com/v1/mcp"
+                br#"{"resource":"https://mcp.example.com/"}"#,
+                "https://mcp.example.com/mcp",
+                "https://mcp.example.com/.well-known/oauth-protected-resource"
             )
             .err(),
             Some(OAuthWorkflowError::MissingMetadata)
+        );
+    }
+
+    #[test]
+    fn resource_coverage_is_location_bound_and_never_repairs_paths() {
+        let parse = |resource: &str, endpoint: &str, location: &str| {
+            parse_protected_resource_metadata(
+                serde_json::json!({"resource": resource, "authorization_servers": ["https://auth.example"]}).to_string().as_bytes(),
+                endpoint, location,
+            )
+        };
+        for location in [
+            "https://shared.example/tenantA/metadata",
+            "https://shared.example/.well-known/oauth-protected-resource/tenantA/mcp",
+        ] {
+            assert!(
+                parse(
+                    "https://shared.example",
+                    "https://shared.example/tenantA/mcp",
+                    location
+                )
+                .is_err()
+            );
+        }
+        assert!(
+            parse(
+                "https://shared.example",
+                "https://shared.example/tenantA/mcp",
+                "https://shared.example/.well-known/oauth-protected-resource"
+            )
+            .is_ok()
+        );
+        assert!(
+            parse(
+                "https://shared.example",
+                "https://shared.example/mcp",
+                "https://SHARED.example:443/.well-known/oauth-protected-resource"
+            )
+            .is_ok()
+        );
+        for resource in [
+            "https://shared.example/a/../mcp",
+            "https://shared.example/./mcp",
+            "https://shared.example/%2e/mcp",
+            "https://shared.example/a/%2E%2e/mcp",
+            "https://shared.example/%2F/mcp",
+            "https://shared.example/a\\mcp",
+            " https://shared.example/mcp",
+            "\u{1}https://shared.example/mcp",
+            "https://shared.example/mcp\u{7f}",
+            "https://shared.example/mcp\t",
+            "https://shared.example/m cp",
+            "https://shared.example/mcp?x=y",
+            "https://user@shared.example/mcp",
+            "https://shared.example/mcp#x",
+            "https://b\u{fc}cher.example/mcp",
+            "https://%73hared.example/mcp",
+            "http://127.1/mcp",
+        ] {
+            assert!(
+                parse(
+                    resource,
+                    "https://shared.example/mcp",
+                    "https://shared.example/metadata"
+                )
+                .is_err(),
+                "{resource}"
+            );
+        }
+        for (raw, endpoint) in [
+            (
+                "https://b\u{fc}cher.example/mcp",
+                "https://xn--bcher-kva.example/mcp",
+            ),
+            ("http://127.1/mcp", "http://127.0.0.1/mcp"),
+            (
+                "https://shared.example/caf\u{e9}",
+                "https://shared.example/caf%C3%A9",
+            ),
+        ] {
+            assert!(
+                parse(raw, endpoint, "https://shared.example/custom").is_err(),
+                "{raw}"
+            );
+        }
+        assert!(
+            parse(
+                "HTTPS://SHARED.example:443/mcp/",
+                "https://shared.example/mcp",
+                "https://shared.example/custom"
+            )
+            .is_ok()
+        );
+        assert!(
+            parse(
+                "https://xn--bcher-kva.example/mcp",
+                "https://xn--bcher-kva.example/mcp",
+                "https://xn--bcher-kva.example/custom"
+            )
+            .is_ok()
         );
     }
 

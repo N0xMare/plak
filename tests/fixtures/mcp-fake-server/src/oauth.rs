@@ -61,7 +61,7 @@ pub enum CallbackIssuer {
 pub struct OAuthConfig {
     /// Where the resource metadata lives.
     pub resource_metadata: ResourceMetadataAt,
-    /// The resource metadata's `resource`, a path on the fixture's origin;
+    /// The resource metadata's `resource`, an absolute URL or path on the fixture's origin;
     /// the MCP URL when `None`.
     pub resource: Option<String>,
     /// The issuer's path after the origin, such as `/tenant`.
@@ -431,11 +431,10 @@ impl OAuthGate {
             return Some(Reply::json(
                 200,
                 &serde_json::json!({
-                    "resource": format!(
-                        "{}{}",
-                        self.origin(),
-                        self.config.resource.as_deref().unwrap_or(mcp_path)
-                    ),
+                    "resource": match self.config.resource.as_deref() {
+                        Some(resource) if resource.contains("://") => resource.to_owned(),
+                        resource => format!("{}{}", self.origin(), resource.unwrap_or(mcp_path)),
+                    },
                     "authorization_servers": [self.issuer()],
                     "scopes_supported": self.config.scopes_supported,
                 }),

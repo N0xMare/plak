@@ -182,9 +182,9 @@ An HTTP server with `auth = "oauth"` (chapter 01 §8.5, MCP authorization)
 receives an access token issued for it and nothing else. Discovery follows
 URLs the server names, so each is held to the transport policy (`https://`,
 or a loopback literal only when the server itself is loopback; no redirect, no
-proxy, bounded bodies) and to the MCP specification's checks: the resource
-metadata must name this server's canonical URI (or a same-origin
-path-segment prefix of it), the authorization-server metadata's `issuer` must
+proxy, bounded bodies) and to Plak's location-bound resource policy: equality
+ignoring one trailing slash, or same-origin path-segment coverage only at the
+published resource's own RFC 9728 §3.1 well-known URL (§3.6). The authorization-server metadata's `issuer` must
 be identical to the issuer its URL was built from, PKCE S256 must be
 advertised, and the callback's `iss` must match the recorded issuer before any
 code reaches a token endpoint. A pre-registered client requires an issuer pin,
@@ -829,11 +829,20 @@ credential is validated, fenced and committed exactly like a browser login
 holds no lock and writes nothing, so cancellation or expiry before approval
 leaves no credential and no login-recovery marker.
 
-MCP protected-resource metadata must publish a resource byte-identical to the
-configured endpoint URL. This deliberately narrows RFC 9728: root-fallback
-origin resources do not cover path endpoints, and host-case or trailing-slash
-differences are refused. The mismatch diagnostic includes a bounded published
-URL with user information, query and fragment removed.
+Plak policy requires MCP protected-resource metadata to publish a resource with
+the endpoint's scheme, host and port, equal ignoring one trailing slash.
+Same-origin path-segment coverage is allowed only when the fetched URL is the
+published resource's own RFC 9728 §3.1 well-known location: origin plus
+`/.well-known/oauth-protected-resource` plus resource path with one terminating
+slash removed as Plak normalization (locations are compared as parsed URLs). A custom challenge or endpoint-path document cannot claim an
+origin-wide audience. Published resources reject control characters, non-visible-ASCII, whitespace, backslashes, dot
+segments (including encoded dots), encoded separators and raw-versus-parsed
+path changes; only scheme/host case and default-port normalization are allowed,
+not Unicode-to-IDN repair. HTTPS (or permitted loopback HTTP), no credentials,
+query or fragment, and exact-endpoint token delivery remain required. The
+published audience is sent byte-for-byte; endpoint credential binding is not
+widened. The mismatch diagnostic includes a bounded published URL with user
+information, query and fragment removed.
 
 MCP server logins follow the same surface rules. `plak mcp login <id>` is
 CLI-only and never started by an agent or a tool: an expired, revoked or

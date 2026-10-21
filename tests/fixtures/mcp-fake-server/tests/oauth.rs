@@ -252,7 +252,7 @@ async fn discovery_refuses_another_resource_and_a_server_without_pkce() -> TestR
     assert!(
         refused.message().contains("publishes resource")
             && refused.message().contains("/mcp/elsewhere")
-            && refused.message().contains("set url exactly as published"),
+            && refused.message().contains("does not cover endpoint"),
         "{refused}"
     );
 
@@ -272,18 +272,104 @@ async fn discovery_refuses_another_resource_and_a_server_without_pkce() -> TestR
     );
     assert!(no_pkce.gate.requests_to("/register").is_empty());
 
-    // An origin-wide audience must not widen a path-specific server.
-    let prefix = setup(OAuthConfig {
-        resource: Some("/".to_owned()),
-        ..OAuthConfig::default()
-    })
-    .await?;
-    assert!(
-        McpPool::new()
-            .login(&prefix.spec(prefix.settings())?, McpLoginOptions::new())
-            .await
-            .is_err()
-    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn resource_prefix_matching_requires_the_resources_own_well_known_location() -> TestResult {
+    for source in [
+        ResourceMetadataAt::Challenge,
+        ResourceMetadataAt::PathWellKnown,
+        ResourceMetadataAt::RootWellKnown,
+    ] {
+        for resource in ["", "/", "/mcp", "/mcp/"] {
+            let setup = setup(OAuthConfig {
+                resource_metadata: source,
+                resource: Some(resource.to_owned()),
+                ..OAuthConfig::default()
+            })
+            .await?;
+            let spec = setup.spec(setup.settings())?;
+            if matches!(resource, "" | "/") && source != ResourceMetadataAt::RootWellKnown {
+                assert!(McpPool::new().login(&spec, McpLoginOptions::new()).await.is_err());
+                assert!(setup.gate.requests_to("/register").is_empty());
+                continue;
+            }
+            let McpRemoteLogin::Paste(login) = McpPool::new()
+                .login(&spec, McpLoginOptions::new())
+                .await?
+                .remote()
+                .await?
+            else {
+                return Err("unexpected device login".into());
+            };
+            let (_, callback) = browse(login.authorization_url()).await?;
+            let requests = setup.gate.requests_to("/authorize");
+            let expected = format!("{}{resource}", setup.fixture.url().trim_end_matches("/mcp"));
+            assert_eq!(
+                requests
+                    .last()
+                    .and_then(|request| request.field("resource")),
+                Some(expected.as_str())
+            );
+            assert!(logged_in(
+                &login.complete(&callback.ok_or("no callback")?).await?
+            ));
+            let tokens = setup.gate.requests_to("/token");
+            assert_eq!(
+                tokens.last().and_then(|request| request.field("resource")),
+                Some(expected.as_str())
+            );
+        }
+        for resource in [
+            "/mcp2",
+            "http://localhost/mcp",
+            "http://127.0.0.1:1/mcp",
+            "https://127.0.0.1/mcp",
+        ] {
+            let setup = setup(OAuthConfig {
+                resource_metadata: source,
+                resource: Some(resource.to_owned()),
+                ..OAuthConfig::default()
+            })
+            .await?;
+            assert!(
+                McpPool::new()
+                    .login(&setup.spec(setup.settings())?, McpLoginOptions::new())
+                    .await
+                    .is_err()
+            );
+            assert!(setup.gate.requests_to("/register").is_empty());
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn nested_endpoint_coverage_is_bound_to_the_published_resources_location() -> TestResult {
+    for resource in ["", "/mcp"] {
+        let setup = setup(OAuthConfig {
+            resource_metadata: ResourceMetadataAt::RootWellKnown,
+            resource: Some(resource.to_owned()),
+            ..OAuthConfig::default()
+        })
+        .await?;
+        let endpoint = format!("{}/x", setup.fixture.url());
+        let spec = McpServerSpec::http(
+            McpServerName::new("nested")?,
+            McpHttpEndpoint::new(&endpoint)?.with_oauth(setup.settings())?,
+        );
+        let login = McpPool::new().login(&spec, McpLoginOptions::new()).await;
+        if resource == "/mcp" {
+            assert!(login.is_err());
+            assert!(setup.gate.requests_to("/register").is_empty());
+            continue;
+        }
+        let McpRemoteLogin::Paste(login) = login?.remote().await? else {
+            return Err("unexpected device login".into());
+        };
+        assert!(login.authorization_url().contains("resource="));
+    }
     Ok(())
 }
 
