@@ -730,6 +730,14 @@ fn commit_views(
             .map_err(unavailable)?;
     }
     for (key, row) in &writes.upserts {
+        if let Some(call_id) = row.call_id() {
+            let duplicated: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM transcript_rows WHERE session_id=?1 AND call_id=?2 AND NOT (anchor=?3 AND lane=?4 AND ordinal=?5))",
+                params![session_id, call_id, to_i64(key.anchor)?, key.lane.number(), key.ordinal],
+                |row| row.get(0),
+            ).map_err(unavailable)?;
+            debug_assert!(!duplicated, "duplicated transcript call id: {call_id}");
+        }
         let text =
             serde_json::to_string(row).map_err(|_| "transcript row is not encodable".to_owned())?;
         tx.execute(

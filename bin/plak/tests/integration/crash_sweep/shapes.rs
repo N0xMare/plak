@@ -8,6 +8,13 @@ pub(super) mod c1;
 mod sw3a;
 
 #[test]
+fn uncertain_mcp_tool_pilot_proves_live_shape() {
+    let shape = "uncertain_mcp_tool";
+    let (seed, session) = super::driver::setup(shape);
+    super::driver::pilot(&seed, &session, shape);
+}
+
+#[test]
 fn hosted_tool_call_final_pilot_proves_live_shape() {
     let shape = "hosted_tool_call_final";
     let (seed, session) = super::driver::setup(shape);
@@ -114,6 +121,16 @@ pub(super) enum ExpectedTerminal {
 }
 
 pub(super) const REGISTRY: &[Shape] = &[
+    Shape {
+        name: "uncertain_mcp_tool",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: uncertain_mcp_script,
+        configure: configure_uncertain_mcp,
+        setup: no_setup,
+        lifecycle: uncertain_mcp_lifecycle,
+        assert_live: assert_uncertain_mcp,
+    },
     Shape {
         name: "busy_quit_escalates",
         subset: false,
@@ -857,4 +874,43 @@ fn live_fact_pilots() {
         let pilot = super::driver::pilot(&seed, &session, name);
         assert!(pilot.iter().any(|commit| commit.store == "runtime"));
     }
+}
+
+fn uncertain_mcp_script() -> Value {
+    json!({"version":1,"steps":[{"output":{"tool":{"name":"mcp__fake__escaped_result","arguments":{}}},"finish":"tool_calls"}]})
+}
+
+fn configure_uncertain_mcp(fixture: &Fixture) {
+    let config = std::fs::read_to_string(fixture.home().join("config.toml")).unwrap();
+    if !config.contains("[mcp_servers.fake]") {
+        super::super::offline_e2e::enable_fake_mcp(fixture, &[]);
+    }
+}
+
+fn uncertain_mcp_lifecycle(
+    fixture: &Fixture,
+    records: &[Value],
+    state: &mut Lifecycle,
+) -> Option<Value> {
+    if state.sent
+        && !state.quit
+        && records
+            .iter()
+            .any(|row| row["kind"] == "turn_lifecycle" && row["phase"] == "recovery_required")
+    {
+        state.quit = true;
+        return Some(quit_frame());
+    }
+    prompt_then_quit(fixture, records, state)
+}
+
+fn assert_uncertain_mcp(_: &Fixture, outcome: &AgentOutcome, state: &summary::Summary) {
+    assert!(
+        outcome
+            .records()
+            .iter()
+            .any(|row| row["kind"] == "turn_lifecycle" && row["phase"] == "recovery_required")
+    );
+    assert_eq!(state.tool_call_count, 1);
+    assert_eq!(state.original_answers, 0);
 }

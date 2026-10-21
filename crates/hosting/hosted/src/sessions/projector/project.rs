@@ -216,9 +216,21 @@ pub fn project(
             ordinal: 0,
             touched: &mut touched,
             terminal_usages: &mut terminal_usages,
+            resolved_calls: Vec::new(),
         };
         if let Some(successor) = applier.apply()? {
             successors.push(successor);
+        }
+        // A record can name the same call in both its canonical history and
+        // operation facts. Retire tombstones only after all those facts ran.
+        for call_id in applier.resolved_calls {
+            if next.state.calls.get(&call_id).is_some_and(|call| {
+                call.turn_id
+                    .as_ref()
+                    .is_some_and(|turn| !next.state.open_turns.contains_key(turn))
+            }) {
+                next.state.calls.remove(&call_id);
+            }
         }
         next.cursor = header.seq;
         if next
@@ -307,6 +319,7 @@ struct Applier<'a> {
     ordinal: u32,
     touched: &'a mut BTreeSet<RowKey>,
     terminal_usages: &'a mut Vec<ProjectedTurnUsage>,
+    resolved_calls: Vec<String>,
 }
 
 impl Applier<'_> {
@@ -796,6 +809,16 @@ impl Applier<'_> {
             tool_row(&call_id, &canonical, &exposed, arguments.as_deref())
         });
         self.count(&call_id);
+        if result.is_some()
+            && self
+                .views
+                .state
+                .calls
+                .get(&call_id)
+                .is_some_and(|call| call.settled)
+        {
+            self.resolved_calls.push(call_id.clone());
+        }
         let Some(TranscriptRow::Tool(mut tool)) = self.views.rows.get(&key).cloned() else {
             if result.is_some()
                 && let Some(call) = self.views.state.calls.get_mut(&call_id)
@@ -818,8 +841,7 @@ impl Applier<'_> {
             tool.subject = projected_tool_subject(&canonical, arguments.as_deref());
         }
         let call = self.views.state.calls.get_mut(&call_id);
-        let settled = call.as_ref().is_some_and(|call| call.settled);
-        if let (Some(result), false) = (result.as_ref(), settled) {
+        if let Some(result) = result.as_ref() {
             if let Some(call) = call {
                 call.settled = true;
             }
@@ -858,18 +880,36 @@ impl Applier<'_> {
         if let Some(call) = self.views.state.calls.get(call_id) {
             return call.key;
         }
-        let key = self.next_key();
+        // A later fact can mention a canonical call whose live bookkeeping
+        // was already pruned. Its retained row still owns the key.
+        let existing = self.views.rows.iter().find_map(|(key, row)| {
+            row.as_tool()
+                .filter(|tool| tool.call_id == call_id)
+                .map(|tool| {
+                    (
+                        *key,
+                        tool.started_at_ms.is_some()
+                            || matches!(
+                                tool.activity_state(),
+                                ActivityState::Succeeded | ActivityState::Failed { .. }
+                            ),
+                    )
+                })
+        });
+        let key = existing.map_or_else(|| self.next_key(), |(key, _)| key);
         self.views.state.calls.insert(
             call_id.to_owned(),
             CallView {
                 key,
                 turn_id,
-                counted: false,
+                counted: existing.is_some_and(|(_, counted)| counted),
                 operated: false,
                 settled: false,
             },
         );
-        self.replace(key, TranscriptRow::Tool(create()));
+        if existing.is_none() {
+            self.replace(key, TranscriptRow::Tool(create()));
+        }
         key
     }
 
@@ -1147,10 +1187,17 @@ impl Applier<'_> {
                 self.replace(key, TranscriptRow::Tool(tool));
             }
         }
-        self.views
-            .state
-            .calls
-            .retain(|_, call| call.turn_id.as_deref() != Some(turn.as_str()));
+        // Provisional terminal presentation must retain both the row key and
+        // counted bit, including a tombstone for an already truncated row.
+        self.views.state.calls.retain(|_, call| {
+            !call.counted
+                || call.turn_id.as_deref() != Some(turn.as_str())
+                || self.views.rows.get(&call.key).is_none_or(|row| {
+                    row.as_tool().is_some_and(|tool| {
+                        matches!(tool.state.as_str(), "interrupted" | "cancelled")
+                    })
+                })
+        });
         let anchor = self.seq();
         match outcome {
             FeedTurnOutcome::Failed { context, .. } => {
@@ -1558,7 +1605,7 @@ fn bound_transcript(
         if let Some(tool) = row.as_tool()
             && let Some(call) = views.state.calls.get_mut(&tool.call_id)
         {
-            // Keep a settled tombstone until the turn ends. Late results
+            // Keep a settled tombstone until its canonical result. Late results
             // cannot resurrect this key or count the call a second time.
             call.settled = true;
         }

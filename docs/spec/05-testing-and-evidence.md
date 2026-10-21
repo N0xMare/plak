@@ -1434,6 +1434,10 @@ the pilot proves the released head is still Working and requires abandonment
 on reopen. Every indexed startup, admission, escalation and release commit is
 cut, with the same outcome/verdict table and convergence checks. A prompt cut
 before admission resumes normally from its restored queue, then completes once.
+The opt-in `uncertain_mcp_tool` shape drives the fake MCP server's escaped
+result into an uncertain tool outcome, then exercises recovery and a follow-up
+on exact reopen. It participates in the complete SQLite view-rebuild and plain
+reopen laws and in the strict indexed sweep.
 Cross-store interleaving is free. Every per-store indexed commit, including
 startup and shutdown, is killed in a fresh home copy with `<store>:<k>`. The
 child must exit with signal 9; its targeted store must emit exactly the pilot

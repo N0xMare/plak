@@ -1,6 +1,7 @@
 use super::*;
 
 const SHAPES: &[&str] = &[
+    "uncertain_mcp_tool",
     "busy_quit_escalates",
     "hosted_tool_call_final",
     "capacity_overflow",
@@ -36,7 +37,7 @@ fn full_sqlite_view_rebuild_and_plain_reopen_equal_incremental_for_every_sweep_s
             incremental,
             "{shape}: complete SQL views differ"
         );
-        if *shape == "busy_quit_escalates" {
+        if matches!(*shape, "busy_quit_escalates" | "uncertain_mcp_tool") {
             // Compare identical canonical facts, not two independently minted recovery heads.
             let mut opened = reopen_result(&fixture, &session)
                 .unwrap_or_else(|outcome| panic!("busy quit recovery refused: {}", outcome.stderr));

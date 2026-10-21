@@ -333,6 +333,99 @@ mod tests {
     }
 
     #[test]
+    fn failed_pre_open_projection_does_not_fence_a_current_head() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut config, _) = fresh_injected_attached_host(root.path());
+        let memory = Arc::new(crate::session_store::MemoryStore::new());
+        config.store = memory.clone();
+        let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
+        let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
+        let mut host = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
+        host.config.store.save(&mut host.config.session).unwrap();
+        let inner = host.config.store.clone();
+        let id = host.config.session.id.clone();
+        host.release().unwrap();
+
+        let (mut config, _) = fresh_injected_attached_host(root.path());
+        config.session = inner.load(&id).unwrap();
+        config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
+            inner.clone(),
+            crate::runtime::test_support::SlowProjection {
+                delay: std::time::Duration::ZERO,
+                refuse: true,
+            },
+        ));
+        // Force a write on the next pre-open pass, even if release caught up.
+        memory.delete_views(&id);
+        let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
+        // The recorded head is current: deterministic debt must not fence open.
+        let mut opened = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
+        opened.config.store = inner.clone();
+        opened.release().unwrap();
+        let (mut config, _) = fresh_injected_attached_host(root.path());
+        config.session = inner.load(&id).unwrap();
+        config.store = inner;
+        let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
+        HostLoop::open(config, &rx, Sender::over(tx), None)
+            .unwrap()
+            .release()
+            .unwrap();
+    }
+
+    #[test]
+    fn failed_projection_with_a_stale_head_names_debt_without_recovery_loop() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut config, _) = fresh_injected_attached_host(root.path());
+        let memory = Arc::new(crate::session_store::MemoryStore::new());
+        config.store = memory.clone();
+        let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
+        let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
+        let mut host = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
+        host.config.store.save(&mut host.config.session).unwrap();
+        let recorded = host.opened.locator();
+        let inner = host.config.store.clone();
+        let id = host.config.session.id.clone();
+        let agent = host.opened.agent().unwrap().clone();
+        host.executor
+            .block_on(async {
+                let turn = agent.prompt("advance the canonical head").await.unwrap();
+                turn.result().await.unwrap();
+            })
+            .unwrap();
+        host.release().unwrap();
+        memory.delete_views(&id);
+        for _ in 0..2 {
+            let (mut config, _) = fresh_injected_attached_host(root.path());
+            config.session = inner.load(&id).unwrap();
+            config.session.plakous_locator = Some(recorded);
+            config.store = Arc::new(crate::runtime::fault_store::FaultStore::new(
+                inner.clone(),
+                crate::runtime::test_support::SlowProjection {
+                    delay: std::time::Duration::ZERO,
+                    refuse: true,
+                },
+            ));
+            let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
+            let error = match HostLoop::open(config, &rx, Sender::over(tx), None) {
+                Ok(_) => panic!("a stale head opened despite failed projection"),
+                Err(error) => error,
+            };
+            assert!(!error.is_recovery_required(), "{error}");
+            assert!(
+                error.message().contains("recorded session head is stale"),
+                "{error}"
+            );
+            assert!(
+                error
+                    .message()
+                    .contains("injected projector commit refusal"),
+                "{error}"
+            );
+            assert!(!error.message().contains("another process"), "{error}");
+        }
+    }
+
+    #[test]
     fn post_release_projection_refusal_is_cleanup_and_preserves_release_failure() {
         for fail_child in [false, true] {
             let root = tempfile::tempdir().unwrap();

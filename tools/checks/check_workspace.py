@@ -581,7 +581,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plakous-hosted", "src/runtime/test_kit.rs"): {"panic"},
     ("plakous-hosted", "src/sessions.rs"): {"thread_local"},
     ("plak", "src/store/mod.rs"): {"params"},
-    ("plak", "src/store/views.rs"): {"params"},
+    ("plak", "src/store/views.rs"): {"params", "debug_assert"},
     ("plak", "src/store/tree.rs"): {"params"},
     ("plakous-recursive-subagents-store", "src/database.rs"): {"params"},
     ("plakous-recursive-subagents-store", "src/rows.rs"): {"params"},

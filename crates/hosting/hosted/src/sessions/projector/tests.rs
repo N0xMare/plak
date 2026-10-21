@@ -1247,7 +1247,162 @@ fn a_bound_dropped_call_is_a_settled_tombstone_and_a_late_result_stays_above_the
 }
 
 #[test]
-fn terminal_turns_prune_call_bookkeeping_but_keep_their_transcript_rows() {
+fn a_non_mcp_recovered_call_reuses_its_row_and_counter() {
+    recovered_call(false, false);
+}
+
+#[test]
+fn an_undispatched_call_is_counted_when_recovered() {
+    recovered_call(true, false);
+}
+
+#[test]
+fn a_truncated_call_is_not_counted_again_after_terminal_recovery() {
+    recovered_call(false, true);
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "one recovery feed with both truncation and dispatch variants"
+)]
+fn recovered_call(undispatched: bool, truncated: bool) {
+    let (mut feed, _) = single_turn(End::RecoveryRequired, true, false);
+    if undispatched {
+        for record in &mut feed.records {
+            *record = FeedRecord::from_store(
+                *record.header(),
+                record
+                    .facts()
+                    .iter()
+                    .filter(|fact| !matches!(fact, FeedFact::OperationAdvanced { .. }))
+                    .cloned()
+                    .collect(),
+            );
+        }
+    }
+    let mut before = project_all(&feed).views;
+    if truncated {
+        let mut running = project(
+            &SessionViews::empty(),
+            &feed.intents,
+            &feed.records[..feed.records.len() - 1],
+            &feed.reads,
+        )
+        .unwrap()
+        .views;
+        for ordinal in 0..crate::sessions::MAX_TRANSCRIPT_LINES {
+            running.rows.insert(
+                RowKey::new(feed.seq, Lane::Runtime, u32::try_from(ordinal).unwrap()),
+                TranscriptRow::assistant("retained output"),
+            );
+        }
+        running.state.row_bytes = running
+            .rows
+            .values()
+            .map(|row| plakous_host_protocol::views::presentation::row_bytes(row) as u64)
+            .sum();
+        before = project(
+            &running,
+            &feed.intents,
+            &feed.records[feed.records.len() - 1..],
+            &feed.reads,
+        )
+        .unwrap()
+        .views;
+        assert!(!before.rows.values().any(|row| row.as_tool().is_some()));
+        assert!(before.state.truncated);
+    }
+    let (call_id, call_view) = before.state.calls.first_key_value().unwrap();
+    let call_id = call_id.clone();
+    let original_key = call_view.key;
+    let call: CallId = call_id.parse().unwrap();
+    assert_eq!(before.state.counters.tool_calls, u64::from(!undispatched));
+    let (result, items) = feed.history(
+        None,
+        HistorySegmentKind::ToolExchange,
+        vec![text_item(ReadActor::Other, "recovered")],
+        vec![call],
+    );
+    let mut facts = vec![result];
+    let mut operation_reads = Vec::new();
+    if truncated {
+        let (operation_id, turn_id) = feed
+            .records
+            .iter()
+            .flat_map(FeedRecord::facts)
+            .find_map(|fact| {
+                if let FeedFact::OperationAdvanced {
+                    operation_id,
+                    turn_id: Some(turn_id),
+                    ..
+                } = fact
+                {
+                    Some((*operation_id, *turn_id))
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        facts.push(effect(
+            operation_id,
+            turn_id,
+            call,
+            FeedCallerLineage::Direct,
+            FeedOperationState::Completed,
+        ));
+        operation_reads.push((
+            CallTarget::Operation(operation_id),
+            CallRead::Tool {
+                canonical: "process_session_start".into(),
+                exposed: "bash".into(),
+                arguments: None,
+                result: Some(ResultRead {
+                    succeeded: false,
+                    text: "recovered interruption".into(),
+                }),
+            },
+        ));
+    }
+    feed.advance(
+        facts,
+        Reads {
+            items: vec![(0, items)],
+            calls: [
+                vec![(
+                    CallTarget::Call(call),
+                    CallRead::Tool {
+                        canonical: "process_session_start".to_owned(),
+                        exposed: "bash".to_owned(),
+                        arguments: Some(r#"{"command":"ls -la"}"#.to_owned()),
+                        result: Some(ResultRead {
+                            succeeded: false,
+                            text: "recovered interruption".to_owned(),
+                        }),
+                    },
+                )],
+                operation_reads,
+            ]
+            .concat(),
+            ..Reads::default()
+        },
+    );
+    let after = project(&before, &feed.intents, &feed.records, &feed.reads)
+        .unwrap()
+        .views;
+    assert_eq!(after.state.counters.tool_calls, 1);
+    if truncated {
+        assert!(!after.rows.values().any(|row| row.as_tool().is_some()));
+    } else {
+        assert_eq!(only_tool(&after).call_id, call_id);
+        assert_eq!(
+            after.rows.get(&original_key).unwrap().call_id(),
+            Some(call_id.as_str())
+        );
+    }
+}
+
+#[test]
+fn terminal_turns_settle_calls_and_keep_their_transcript_rows() {
     for end in [
         End::Completed,
         End::Failed,
@@ -1256,10 +1411,7 @@ fn terminal_turns_prune_call_bookkeeping_but_keep_their_transcript_rows() {
         End::RecoveryRequired,
     ] {
         let (_, views) = single_turn(end, true, false);
-        assert!(
-            views.state.calls.is_empty(),
-            "terminal calls need no live bookkeeping"
-        );
+        assert!(views.state.calls.values().all(|call| call.settled));
         assert!(views.rows.values().any(|row| row.as_tool().is_some()));
         assert_eq!(views.state.counters.tool_calls, 1);
     }

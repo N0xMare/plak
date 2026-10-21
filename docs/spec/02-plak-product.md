@@ -327,6 +327,15 @@ model. Session records carry no workflow journal or two-phase workflow states;
 the legacy `workflows` table remains inert until its DDL is removed. Recovery
 blocking reads the runtime's context disposition, not a product journal flag.
 
+`session show` reports the projected tool-call counter alongside transcript size.
+Recovery keeps one transcript row per canonical call id even when the recovered
+result is published after a provisional terminal. Counted call tombstones survive
+until the canonical result, even when the transcript row was truncated.
+If the pre-open projection fails, a current recorded head still opens. A stale
+recorded head refuses with the actual projector or store failure, not lease
+contention or recovery-required. Retrying a deterministic projector error is
+not a recovery remedy; the reported failure must be repaired.
+
 Deleting a telemetry file loses analytics and nothing else. Each schema has
 its own `telemetry/telemetry-v<schema>.sqlite3`; writers never drop or rewrite
 another schema's data. Old schema files and the legacy `telemetry.sqlite3` are
@@ -802,6 +811,10 @@ message instead of "not found":
 ```text
 session <id> was created by an incompatible plak build (state <key>); carry it forward with that build's `plak session export <id>` and then `plak session import <file>`, or start a new session
 ```
+
+Startup may refuse for projection debt only when the recorded head is stale
+and the pre-open pass cannot catch up. It reports the actual failure, never
+recovery-required; a current head opens and per-action debt checks still apply.
 
 A store in this build's own directory at another schema version can only be a
 damaged or hand-placed file. It is refused with a message naming the file and
@@ -2214,7 +2227,7 @@ withdraw a batch whose acceptance has not yet been applied.
 No step compares a stored locator with the runtime head or refuses because
 product and runtime disagree: the product never disagrees with the runtime, it
 is only behind it.
-Startup refuses only for runtime reasons (a head the runtime cannot close,
+Startup refuses for stale-head projection debt (§2.5), or runtime reasons (a head the runtime cannot close,
 which exists only as typed integrity; an incompatible build; a revalidation
 failure; storage; lease contention), with the runtime's typed refusal and exit 5
 for recovery-required.

@@ -585,7 +585,7 @@ fn cut_after_kill(
 fn requeued_script(fixture: &Fixture, shape: &str) -> Value {
     let mut script: Value = serde_json::from_slice(&std::fs::read(fixture.script()).unwrap())
         .expect("post-setup configured original script");
-    if shape == "busy_quit_escalates" {
+    if matches!(shape, "busy_quit_escalates" | "uncertain_mcp_tool") {
         // Only the cut lifecycle is cancellation-deaf. A never-admitted original
         // resumes normally so its queued recovery can finish before the follow-up.
         script["steps"] = json!([{"output": {"text": shapes::ANSWER}}]);

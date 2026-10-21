@@ -85,7 +85,7 @@ pub(crate) async fn project_before_open(
     sessions: &AgentSessions,
     store: &Arc<dyn SessionRecordStore>,
     session: &SessionRecord,
-) -> Result<Option<plakous::sessions::SessionLocator>, String> {
+) -> Result<Option<plakous::sessions::SessionLocator>, ReadFailure> {
     let Some(recorded) = session.plakous_locator else {
         return Ok(None);
     };

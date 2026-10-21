@@ -4473,7 +4473,7 @@ fn fake_mcp_server() -> PathBuf {
 
 /// Points the fixture's `[root] agent` template at `mcp:fake`, served by the
 /// fixture server with `args`.
-fn enable_fake_mcp(fixture: &Fixture, args: &[&str]) {
+pub(super) fn enable_fake_mcp(fixture: &Fixture, args: &[&str]) {
     let config = fixture.home().join("config.toml");
     let mut body = std::fs::read_to_string(&config).expect("config");
     write!(
@@ -4517,6 +4517,77 @@ fn a_code_mode_cell_calls_a_template_mcp_tool_as_a_nested_call() {
         outcome.lines.join("\n")
     );
     assert_eq!(std::fs::read_to_string(&log).expect("call log"), "echo\n");
+}
+
+#[test]
+fn uncertain_mcp_call_recovers_across_three_cli_runs() {
+    use plak::store::session_records::SessionRecordStore as _;
+
+    let fixture = Fixture::new(&json!({
+        "version": 1,
+        "steps": [{"output": {"tool": {"name": "mcp__fake__escaped_result", "arguments": {}}}, "finish": "tool_calls"}]
+    }));
+    enable_fake_mcp(&fixture, &[]);
+    let first = run_cli(
+        &fixture,
+        &[
+            "run",
+            "--account",
+            "codex",
+            "--model",
+            "offline-loopback-v1",
+            "--effort",
+            "medium",
+            "--print-session-id",
+            "--",
+            "call the tool",
+        ],
+    );
+    assert_eq!(first.status.code(), Some(5), "{}", first.stderr);
+    let session = first.session_id();
+    fixture.write_script(&json!({"version": 1, "steps": [
+        {"output": {"text": "continued"}}
+    ]}));
+    for prompt in ["recover", "third run"] {
+        let next = run_cli(&fixture, &["run", "--session", &session, "--", prompt]);
+        assert!(next.status.success(), "{}", next.stderr);
+        assert!(next.stdout.contains("continued"), "{}", next.stdout);
+    }
+    let log = run_cli(
+        &fixture,
+        &["session", "log", &session, "--kind", "tool", "--json"],
+    );
+    assert!(log.status.success(), "{}", log.stderr);
+    let rows: Vec<Value> = log
+        .stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row["kind"] == "tool.started")
+            .count(),
+        1,
+        "{}",
+        log.stdout
+    );
+    let show = run_cli(&fixture, &["session", "show", &session]);
+    assert!(show.status.success(), "{}", show.stderr);
+    assert!(show.stdout.contains("Tool calls    1"), "{}", show.stdout);
+    let store = plak::store::session_records::SqliteSessionStore::new(
+        plak::home::paths::PlakPaths::explicit(fixture.home()),
+    );
+    let views = store.load_views(&session).unwrap().unwrap();
+    assert_eq!(
+        views
+            .rows
+            .values()
+            .filter(|row| row.as_tool().is_some())
+            .count(),
+        1
+    );
+    let recover = run_cli(&fixture, &["session", "recover", &session]);
+    assert!(recover.status.success(), "{}", recover.stderr);
 }
 
 #[test]
@@ -8693,3 +8764,4 @@ fn a_cli_image_prompt_on_a_model_without_image_input_is_refused_naming_the_route
     assert_eq!(run.status.code(), Some(2), "{}", run.stderr);
     assert!(run.stderr.contains("missing.png"), "{}", run.stderr);
 }
+

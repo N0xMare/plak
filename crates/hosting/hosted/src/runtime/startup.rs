@@ -427,20 +427,31 @@ pub(super) async fn build_session_from_config<P: plakous_host_protocol::Protocol
     // Spec 02 §4.2: step 0 names the head, step 1 opens exactly it. A stale
     // refusal means another owner committed in between: step 0 runs once
     // more, and a second stale answer is lease contention.
-    let mut head = projected_head(config).await?;
+    let (mut head, mut projection_error) = projected_head(config).await?;
     let mut retried = false;
     loop {
         match open_head(config, head, stderr_buf).await {
             Ok(session) => return Ok(session),
-            Err(error) if error.current_locator.is_some() && !retried => {
-                retried = true;
-                head = projected_head(config).await?;
-            }
             Err(error) if error.current_locator.is_some() => {
-                return Err(CliFailure::new(format!(
-                    "{}; another process is using this session",
-                    error.failure.message()
-                )));
+                if let Some(reason) = projection_error {
+                    let remedy = if reason.store_refusal().is_some() {
+                        "the store temporarily refused projection; retry when it is available"
+                    } else {
+                        "repair the reported projector or store failure; reopening alone cannot repair deterministic projection errors"
+                    };
+                    return Err(CliFailure::new(format!(
+                        "the recorded session head is stale and projection could not catch up: {}; {remedy}; projection debt is not a recovery fence",
+                        reason.message()
+                    )));
+                }
+                if retried {
+                    return Err(CliFailure::new(format!(
+                        "{}; another process is using this session",
+                        error.failure.message()
+                    )));
+                }
+                retried = true;
+                (head, projection_error) = projected_head(config).await?;
             }
             Err(error) => return Err(error.failure),
         }
@@ -450,17 +461,17 @@ pub(super) async fn build_session_from_config<P: plakous_host_protocol::Protocol
 /// Step 0 of the reopen: the head the projector's lease-free pass names.
 async fn projected_head<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
-) -> CliResult<plakous::sessions::SessionLocator> {
+) -> CliResult<(plakous::sessions::SessionLocator, Option<CliFailure>)> {
     let recorded = config
         .session
         .plakous_locator
         .ok_or_else(|| CliFailure::new("the session has no runtime to open"))?;
     let sessions = config.state_roots.runtime_sessions()?;
     match super::projection::project_before_open(&sessions, &config.store, &config.session).await {
-        Ok(head) => Ok(head.unwrap_or(recorded)),
-        // Projection debt: the record's locator is the newest head this
-        // product applied, and the next pass catches up.
-        Err(_) => Ok(recorded),
+        Ok(head) => Ok((head.unwrap_or(recorded), None)),
+        // Debt cannot fence a current head. Keep the pass's actual reason
+        // only for an exact-open stale-head refusal.
+        Err(error) => Ok((recorded, Some(CliFailure::from(error)))),
     }
 }
 

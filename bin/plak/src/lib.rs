@@ -632,6 +632,7 @@ fn show_session_read_only(
         .map_err(|_| CliFailure::new("stdout failed"))?;
     writeln!(stdout, "\nState")
         .and_then(|()| writeln!(stdout, "  Transcript    {} entries", s.transcript.len()))
+        .and_then(|()| writeln!(stdout, "  Tool calls    {}", s.tool_call_count))
         .and_then(|()| writeln!(stdout, "  Pending       {}", s.pending_queue.len()))
         .and_then(|()| writeln!(stdout, "  Events        {n}"))
         .and_then(|()| {
@@ -1167,14 +1168,7 @@ fn execute_command(
                 record,
                 surface_protocol::UserAction::Recover,
                 stdout,
-            )
-            .map_err(|failure| {
-                if failure.is_recovery_required() {
-                    failure
-                } else {
-                    CliFailure::recovery_required(failure.message().to_owned())
-                }
-            })?;
+            )?;
             Ok(ProcessOutcome::Success)
         }
         Command::SessionExport { id, out } => {
