@@ -1423,115 +1423,115 @@ pub(crate) mod suite {
     const PROMPT_RENDER_PINS: &[(&str, &str)] = &[
         (
             "codex.direct.root.single-agent",
-            "923fef62000be989b131b7ef633f4663457c61e97df7f42a82a8e773e3741aa9",
+            "6396a9a1aef8cf912d10d748c928eb43c6e9b46dbca1c217935aef428a1f8394",
         ),
         (
             "codex.direct.root",
-            "182a7e0119c9dcc651829b55b5211d57ec3202e66c78f4a0c35073a81197e704",
+            "576bcd7540781b92cde11c100011e0f48dce6c5f9e3f0e5c69e9d8c724c64acc",
         ),
         (
             "codex.direct.nested-parent",
-            "d71f82d344deaefe4598cc163f995d3e7e28fed4ee3c68e11cc74791666f2db6",
+            "35fdb51eec86cd1342ad35597451c2c5189054d91a9e35f40238a9d2ab5d8124",
         ),
         (
             "codex.direct.child",
-            "23a3cc65dfd662da0b27b00ab1fb8cd239071d3b468eb0e986ef0f5a29810d33",
+            "936e6e04d40605e0d8592ee8059a78438308c942d31488c961d9eead857ebadd",
         ),
         (
             "codex.native-ptc.root.single-agent",
-            "cb94c503fd3e8e0c16fa260bf0e745b262194dafc4f8d51f4da8accf82dc4b6b",
+            "a716c9202b22d58b806976476879e9ca5214309f813c7facacc5394d2cb667df",
         ),
         (
             "codex.native-ptc.root",
-            "38ff183e774e42edb209e627568201199f01b7f1b05ee1b0b41b126345c98619",
+            "672524a7e774d87449dd0c5d02a5996cd5cd81ca9e2da272c5149fb9a18ebc9d",
         ),
         (
             "codex.native-ptc.nested-parent",
-            "5e89040867c229897def91bc2d3fbbb1b1dfb70bde178c6b567ec79663cf0f47",
+            "96c79778b351624f9a7cf89b71d14f581168880290b4dcb88bf5e25eca52bbbf",
         ),
         (
             "codex.native-ptc.child",
-            "1758a176c68a8b7a134bc1c1518407c989f034e0707c6b5480cca7a2e06d9490",
+            "19acbdbb99fdefcf017dbf44ba210a1eba0cb2259005a83f40edf71a777f6777",
         ),
         (
             "codex.js-ptc.root.single-agent",
-            "a99c553fec6a7ce6fcdf12147d540ad43cbfdca8adae55a5f38d2692ffbb9982",
+            "ab8f3cb545e78b04b8d84ee6d870d40635bdf1bef133274a2a473a9ce8f39f8a",
         ),
         (
             "codex.js-ptc.root",
-            "5e08f2dd49998b1c1164c28438840bba24fc7a4146b2e1203efe30a0cd2cfae3",
+            "cf2811e0683d8eba4b8b2febe7092d7863c96ef3fba4f59ebe557c23ba190cf9",
         ),
         (
             "codex.js-ptc.nested-parent",
-            "d388eb4b158de770dfe218f781f00973bdf604fb68c00d2ab615c7f7af632c18",
+            "c9b683eca8b51f3ca235dd63511d9626d866f1d144cc53ab3a9ecd18ea96de48",
         ),
         (
             "codex.js-ptc.child",
-            "f850e7906fd060dccd6f72d2fe33e752cf1c45fc2b1a58aa0c135f06fe86e9ee",
+            "2eff1d68bd6bff8ff693283dd6426b1c43af908656f3ed84237f670c1c06f041",
         ),
         (
             "codex.py-ptc.root.single-agent",
-            "ace7ccd06cc47bd7306b02a0b6eded4642298ceda7811397ce93a85ca6d69ce7",
+            "8725d6733c8512547463ffbf7a4f454f66f98a6771590620df93582f9926c7c5",
         ),
         (
             "codex.py-ptc.root",
-            "1870da535a5f5fc6f63f6528e4542dd1150b09c16a66fd993138f8fb9b9ed607",
+            "320fe7ae4512c68b3415b0eea2799f82fb306511d94b18f688dabc7ea08488d4",
         ),
         (
             "codex.py-ptc.nested-parent",
-            "63b5af705a140a6e59605b4249cfe07ba3e739a428e96251df6171a72a0fd6f4",
+            "792e5118781178312f74772542e1192167b92d31350a2e87848eaca27439ae15",
         ),
         (
             "codex.py-ptc.child",
-            "bcd7ae3251f4990bcf56a97fcc2059650978f1c1dbe7d09ee160c75a944571ad",
+            "a31f87a5fbdea56bf5997e9ea30e44ea42db1da919fa10c92ad80c972486468c",
         ),
         (
             "grok.direct.root.single-agent",
-            "b572a7a0d94fdce76f05b8a4bb6b5752e5dc12bc7c4ad1a2f278c2c20927e894",
+            "3c7c7252f9a14f9fb9fc5fb52d358f3da9dfbc1b8c699bd0c0774798b21b3626",
         ),
         (
             "grok.direct.root",
-            "c844b4d65e2ce7b20474bdeefff31fbe31875a4ab92d0862078f1dbc692fca3b",
+            "06101ca172ed980d99b1c013d1e5bbc2567a19268741dbbc84c05fd0df6a68d6",
         ),
         (
             "grok.direct.nested-parent",
-            "2524a3ae61298f3c4a22209755974bfd641643ca225cb0700aa8492270978222",
+            "838c51b98cb5d7bf7522309bbae8f35ed32c0e94af2b2de067e568cded968936",
         ),
         (
             "grok.direct.child",
-            "50a750425d1368622a93f6e43adee58751a6b3c6e1aed939fe0ddae16f0788a4",
+            "e7f9de5454cb4cdefd3e633e1b97e631187ecb12d3c5095b7ad75d7c9375b572",
         ),
         (
             "grok.js-ptc.root.single-agent",
-            "6193c1989a26b7fb8a0a7957f85e37047d81f0385ae83b9b69de9b0b03f5f288",
+            "6e96b45db99a1d40b108200ce55369758603162d9e61df08b374d4c26c058d2c",
         ),
         (
             "grok.js-ptc.root",
-            "73622122ac2c47440401e6e21591fb874dc31025107fd914324d4ea02be67031",
+            "18da4e0d15c19ff997802a67eca10270913e5e1689fedec8fc96564ffe2fc543",
         ),
         (
             "grok.js-ptc.nested-parent",
-            "85674590fcd144796df5ea2995496b7d46ed47731a6ccfd8d7b76b2a0b27d330",
+            "20c307326c787ed934fb3968094abe2e91f97066e9fe21cbebb9b2bf256bacd4",
         ),
         (
             "grok.js-ptc.child",
-            "0bae8490b0efe5db7dbcc3d69c4029784c4a7b62d4fd94ad6087fb71f5d0b895",
+            "4462f6f110d0380b6aa900ebbd2ccb76a0d74692fb9dce1d6b2b4ba2bdfd56e7",
         ),
         (
             "grok.py-ptc.root.single-agent",
-            "34b814e0c00515fb7b09cdc556e99c748686c6cbfba0a0b1f83332aed4905707",
+            "51647380c3d2199174775dc3ccd128a6c25bf08f6875fc92e239e31917a7a108",
         ),
         (
             "grok.py-ptc.root",
-            "5145aa005804e883d71a5d40ba5790bc967a9c3f9d60466eadee5ee59c0e3494",
+            "d0302cddb44653c168f1da8b2b43e47654be984910b85caf112d03c650e05de7",
         ),
         (
             "grok.py-ptc.nested-parent",
-            "e08ce56408880f574134348de3e9b796a962c5c31013cc62a9b93599de954761",
+            "3c6875ce6dd05ca11ff64b239157578812aa97ce495004fa755e47e69e214105",
         ),
         (
             "grok.py-ptc.child",
-            "d671e3fef0eb1c5b7d936ad8f8cba9022fffa9532bba6e252be6a505e15e0db2",
+            "698084f6c5ac159c3fbf46970126fabc29e52081d2842c9eb62d8efa05cd9fac",
         ),
         (
             "claude.direct.root.single-agent",

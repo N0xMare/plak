@@ -1189,8 +1189,11 @@ present. The full inventory:
 What a model sees on each product route — harness costume, identity, enrolled
 `AGENTS.md`, every tool name and description, and the first-turn HTTP request
 body — is pinned by sha256 tables in `crates/hosting/hosted/tests/common/rendered_prompts.rs`
-and `rendered_lifecycle.rs`, with the wire lowering in `rendered_wire.rs`. They
-are private fixture suites compiled into the `plakous-hosted` unit-test target,
+and `rendered_lifecycle.rs`, with the wire lowering in `rendered_wire.rs`.
+Review headers assert the Plak User-Agent shape `plak/<semver>` separately and
+normalize its release version to `plak/<version>` before rendering and hashing;
+a workspace version bump alone does not change these pins. The suites
+are private fixtures compiled into the `plakous-hosted` unit-test target,
 the crate that builds a session
 from route, composition, packs, topology and prompts together. The
 tests render in memory and compare digests. They read no file, so a fresh clone

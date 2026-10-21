@@ -693,6 +693,16 @@ pub(crate) mod suite {
                 ));
             }
         }
+        for (name, value) in &mut headers {
+            if name == "user-agent" && value.starts_with("plak/") {
+                assert_eq!(value, PLAK_USER_AGENT);
+                let version = value.strip_prefix("plak/").expect("Plak UA prefix");
+                let parts: Vec<_> = version.split('.').collect();
+                assert_eq!(parts.len(), 3, "Plak UA must contain a semver");
+                assert!(parts.iter().all(|part| part.parse::<u64>().is_ok()));
+                *value = "plak/<version>".into();
+            }
+        }
         headers
     }
 
