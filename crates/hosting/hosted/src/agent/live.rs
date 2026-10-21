@@ -24,6 +24,42 @@ pub(super) const RESTART_RECONCILIATION_REQUIRED: &str =
 /// Prefix of a restart the runtime definitely rejected: nothing was admitted.
 pub(super) const RESTART_REJECTED: &str = "child restart was rejected";
 
+type LiveTransition<'a> = (
+    tokio::sync::MutexGuard<'a, crate::topology_runtime::LiveChildTable>,
+    Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
+);
+
+pub(super) async fn lock_for_transition<'a>(
+    live: &'a Arc<tokio::sync::Mutex<crate::topology_runtime::LiveChildTable>>,
+    agent_id: &str,
+    turn: TurnId,
+) -> Result<LiveTransition<'a>, String> {
+    loop {
+        let children = live.lock().await;
+        let child = children
+            .get(agent_id)
+            .ok_or("child live session is missing")?;
+        if child.turn_id() != turn {
+            return Err("child turn has already been replaced".into());
+        }
+        let delivery = match child.follow_up_barrier() {
+            Some(barrier) => {
+                if let Ok(guard) = Arc::clone(&barrier).try_write_owned() {
+                    Some(guard)
+                } else {
+                    drop(children);
+                    // Never invert map/barrier order. Racing deliveries target
+                    // the ended turn and fail fast, so this drain is bounded.
+                    drop(barrier.write_owned().await);
+                    continue;
+                }
+            }
+            None => None,
+        };
+        return Ok((children, delivery));
+    }
+}
+
 #[derive(Debug)]
 enum ChildRestartError {
     ReconciliationRequired,
@@ -57,7 +93,10 @@ pub struct ProductLiveChild {
     pub turn_id: TurnId,
     pub control: TurnControl,
     /// Follow-up turns admitted behind the running turn, in admission order.
-    pub follow_ups: std::sync::Mutex<std::collections::VecDeque<(TurnControl, TurnResultHandle)>>,
+    pub follow_ups:
+        Arc<std::sync::Mutex<std::collections::VecDeque<(TurnControl, TurnResultHandle)>>>,
+    delivery: Arc<tokio::sync::RwLock<()>>,
+    delivery_serial: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl ProductLiveChild {
@@ -68,8 +107,52 @@ impl ProductLiveChild {
             attached,
             turn_id,
             control,
-            follow_ups: std::sync::Mutex::default(),
+            follow_ups: Arc::default(),
+            delivery: Arc::default(),
+            delivery_serial: Arc::default(),
         }
+    }
+
+    fn follow_up_with_ack(
+        &self,
+        command_id: CommandId,
+        body: String,
+        acknowledged: impl Future<Output = ()> + Send + 'static,
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
+        // Reserve synchronously under the map guard: terminal handoff must
+        // wait even if this owned operation has not been polled yet.
+        let delivery = Arc::clone(&self.delivery).try_read_owned();
+        let agent = self.attached.agent().cloned();
+        let turn_id = self.turn_id;
+        let follow_ups = Arc::clone(&self.follow_ups);
+        let serial = Arc::clone(&self.delivery_serial);
+        Box::pin(async move {
+            let _delivery = delivery.map_err(|_| TURN_ENDED.to_owned())?;
+            let _serial = serial.lock().await;
+            let agent = agent.ok_or_else(|| "opened child has no agent".to_owned())?;
+            let submission = agent
+                .follow_up_with_id(command_id, turn_id, body)
+                .await
+                .map_err(|error| {
+                    if error.kind() == plakous::agent::ControlErrorKind::WrongPhase {
+                        TURN_ENDED.to_owned()
+                    } else {
+                        error.to_string()
+                    }
+                })?;
+            #[cfg(test)]
+            super::park::hooks::after_follow_up_admission(&agent.id().to_string()).await;
+            acknowledged.await;
+            // A newly admitted follow-up is the child's next turn; an exact
+            // duplicate was queued by the first delivery.
+            if let (Some(turn), Some(result)) = (submission.turn(), submission.result()) {
+                follow_ups
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push_back((turn.control(), result.clone()));
+            }
+            Ok(())
+        })
     }
 
     // The offline fixture delays host acknowledgement while the admitted turn
@@ -259,37 +342,18 @@ impl LiveChildHandle for ProductLiveChild {
         &self,
         command_id: CommandId,
         body: String,
-    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
-        Box::pin(async move {
-            let submission = self
-                .attached
-                .agent()
-                .ok_or_else(|| "opened child has no agent".to_owned())?
-                .follow_up_with_id(command_id, self.turn_id, body)
-                .await
-                .map_err(|error| {
-                    if error.kind() == plakous::agent::ControlErrorKind::WrongPhase {
-                        TURN_ENDED.to_owned()
-                    } else {
-                        error.to_string()
-                    }
-                })?;
-            // A newly admitted follow-up is the child's next turn; an exact
-            // duplicate was queued by the first delivery.
-            if let (Some(turn), Some(result)) = (submission.turn(), submission.result()) {
-                self.follow_ups
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push_back((turn.control(), result.clone()));
-            }
-            Ok(())
-        })
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
+        self.follow_up_with_ack(command_id, body, std::future::ready(()))
+    }
+
+    fn follow_up_barrier(&self) -> Option<Arc<tokio::sync::RwLock<()>>> {
+        Some(Arc::clone(&self.delivery))
     }
 
     fn take_follow_up(&mut self) -> Option<TurnResultHandle> {
         let (control, result) = self
             .follow_ups
-            .get_mut()
+            .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .pop_front()?;
         self.turn_id = result.turn_id();
@@ -302,8 +366,11 @@ impl LiveChildHandle for ProductLiveChild {
         driver: crate::agent_tree_tools::TreeDriver,
         command_id: CommandId,
         prompt: String,
+        delivery: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
     ) -> Pin<Box<dyn Future<Output = Result<TurnResultHandle, String>> + Send + '_>> {
         Box::pin(async move {
+            let _delivery = delivery
+                .ok_or_else(|| "child restart requires a delivery reservation".to_owned())?;
             self.restart_with_ack(&driver, command_id, prompt, std::future::ready(()))
                 .await
                 .map_err(|error| error.to_string())
@@ -315,6 +382,7 @@ impl LiveChildHandle for ProductLiveChild {
         driver: crate::agent_tree_tools::TreeDriver,
     ) -> Pin<Box<dyn Future<Output = LiveRelease> + Send>> {
         Box::pin(async move {
+            let _delivery = Arc::clone(&self.delivery).write_owned().await;
             let sessions = Arc::clone(&self.attached.sessions);
             match self.attached.release_opened_for_transfer().await {
                 Ok(locator) => {
@@ -338,6 +406,7 @@ impl LiveChildHandle for ProductLiveChild {
         driver: crate::agent_tree_tools::TreeDriver,
     ) -> Pin<Box<dyn Future<Output = LiveRelease> + Send>> {
         Box::pin(async move {
+            let _delivery = Arc::clone(&self.delivery).write_owned().await;
             let cancel = match crate::interrupt::settle_cancel(
                 self.control.cancel(),
                 plakous_host_protocol::limits::HOST_CANCEL_SETTLE_TIMEOUT,
@@ -388,6 +457,145 @@ mod job_release_tests {
     #[tokio::test]
     async fn direct_attachment_release_stops_job_and_reopens_with_terminal() {
         terminal_release_fixture(false).await;
+    }
+
+    #[tokio::test]
+    async fn slow_follow_up_allows_list_steer_and_close_without_losing_or_duplicating_delivery() {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let root = tempfile::tempdir().unwrap();
+            let tree_id = uuid::Uuid::new_v4().to_string();
+            let tree = crate::agent_tree::ProductAgentTree::bootstrap_root_for_test(
+                &tree_id,
+                "root",
+                "owner",
+                root.path().to_owned(),
+                "selected",
+                crate::agent_tree_protocol::WriterMode::SingleLease,
+            )
+            .unwrap();
+            let runtime = crate::topology_runtime::insert_root_with(
+                tree_id,
+                tree,
+                Arc::new(crate::agent_tree::MemoryTreeStore::new()),
+                None,
+            )
+            .unwrap();
+            let controller = BoundaryController::quiet_from_evidence_path(
+                CrashBoundary::None,
+                root.path().join("evidence.jsonl"),
+            )
+            .unwrap();
+            let plan = Arc::new(
+                serde_json::from_value(serde_json::json!({
+                    "version": plakous_offline_crash_harness::script::SCRIPT_VERSION,
+                    "steps": [{"stream": [{"text": "waiting"}, {"stall": 30000}]}]
+                }))
+                .unwrap(),
+            );
+            let binding = scripted_runtime_binding(root.path(), controller, plan).unwrap();
+            let sessions = Arc::new(
+                AgentSessions::new(
+                    SessionBackend::sqlite(root.path().join("slow-mail.sqlite3")).unwrap(),
+                )
+                .unwrap(),
+            );
+            let CreateSessionOutcome::Created { session, .. } = sessions
+                .create(CreateSessionRequest::new(
+                    SessionOperationId::new("slow-mail:create").unwrap(),
+                    binding,
+                ))
+                .await
+                .unwrap()
+            else {
+                panic!("created session required")
+            };
+            let turn = session.agent().prompt("start").await.unwrap();
+            let child = ProductLiveChild::new(
+                AttachedCodingSession {
+                    output_bound_rederived: None,
+                    reachability_probe: None,
+                    sessions,
+                    locator: session.locator(),
+                    opened: Some(session),
+                    recovered_turn: None,
+                    topology_owner: None,
+                },
+                turn.id(),
+                turn.control(),
+            );
+            let queued = Arc::clone(&child.follow_ups);
+            let admitted = Arc::new(tokio::sync::Notify::new());
+            let finish = Arc::new(tokio::sync::Notify::new());
+            let command = CommandId::new("slow-mail:follow-up").unwrap();
+            let delivery = child.follow_up_with_ack(command.clone(), "follow up".into(), {
+                let admitted = admitted.clone();
+                let finish = finish.clone();
+                async move {
+                    admitted.notify_one();
+                    finish.notified().await;
+                }
+            });
+            assert!(
+                runtime
+                    .try_occupy_live("root".into(), Box::new(child))
+                    .await
+                    .is_ok()
+            );
+            let delivery = tokio::spawn(delivery);
+            admitted.notified().await;
+            let (control, duplicate) = {
+                let live = runtime.live.lock().await;
+                assert_eq!(live.keys().count(), 1);
+                let child = live.get("root").unwrap();
+                (
+                    child.turn_control(),
+                    child.follow_up(command, "follow up".into()),
+                )
+            };
+            assert!(
+                control
+                    .steer_with_id(
+                        CommandId::new("slow-mail:steer").unwrap(),
+                        "steer while mail acknowledgement is slow"
+                    )
+                    .await
+                    .unwrap()
+                    .rejection()
+                    .is_none()
+            );
+            let duplicate = tokio::spawn(duplicate);
+            let mut close = Box::pin(runtime.cancel_live("root"));
+            assert!(
+                std::future::poll_fn(|cx| std::task::Poll::Ready(
+                    close.as_mut().poll(cx).is_pending()
+                ))
+                .await
+            );
+            {
+                let live = runtime.live.lock().await;
+                assert!(
+                    live.contains_key("root"),
+                    "retirement reserves the child slot"
+                );
+                assert!(
+                    live.get("root").is_none(),
+                    "close admitted despite slow delivery"
+                );
+            }
+            assert!(queued.lock().unwrap().is_empty());
+            finish.notify_one();
+            delivery.await.unwrap().unwrap();
+            duplicate.await.unwrap().unwrap();
+            assert_eq!(
+                queued.lock().unwrap().len(),
+                1,
+                "exact replay registers no duplicate"
+            );
+            close.await.unwrap();
+            assert!(runtime.live.lock().await.is_empty());
+        })
+        .await
+        .unwrap();
     }
 
     async fn terminal_release_fixture(child: bool) {
@@ -846,3 +1054,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "live/follow_up_tests.rs"]
+mod follow_up_tests;

@@ -143,12 +143,12 @@ pub(super) async fn turn_end(
     identity: &ChildTurnIdentity,
     carried: &Arrivals,
 ) -> TurnEnd {
-    let follow_up = live
-        .lock()
-        .await
-        .get_mut(agent_id)
-        .filter(|child| child.turn_id() == identity.turn)
-        .and_then(crate::topology_runtime::LiveChildHandle::take_follow_up);
+    let follow_up = match super::live::lock_for_transition(live, agent_id, identity.turn).await {
+        Ok((mut children, _delivery)) => children
+            .get_mut(agent_id)
+            .and_then(crate::topology_runtime::LiveChildHandle::take_follow_up),
+        Err(_) => None,
+    };
     if let Some(handle) = follow_up {
         let bound = mutate_child(driver, agent_id, |tree| {
             let owns = tree
@@ -409,7 +409,17 @@ async fn start_wake_turn(
         .map_err(|error| WakeRefusal::Failed(error.to_string()))?;
     let context = super::result_context::prepare(driver, agent_id, &command_text, prompt)
         .map_err(WakeRefusal::Failed)?;
-    let mut live_map = live.lock().await;
+    let Ok((mut live_map, delivery)) =
+        super::live::lock_for_transition(live, agent_id, identity.turn).await
+    else {
+        super::result_context::acknowledge(
+            driver,
+            &command_text,
+            super::result_context::Submission::Refused,
+        )
+        .map_err(WakeRefusal::Failed)?;
+        return Err(WakeRefusal::ParkEnded);
+    };
     // Re-checked under the live lock: an interrupt's cancel needs this lock,
     // so after this point it can only cancel the bound wake turn.
     let admissible = driver
@@ -429,7 +439,7 @@ async fn start_wake_turn(
         return Err(WakeRefusal::ParkEnded);
     };
     let result = match child
-        .restart(driver.clone(), command_id, context.prompt.clone())
+        .restart(driver.clone(), command_id, context.prompt.clone(), delivery)
         .await
     {
         Ok(result) => result,
@@ -1098,6 +1108,7 @@ pub(super) mod hooks {
 
     static BEFORE_WAKE_ADMISSION: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
     static BEFORE_FAILED_WAKE_END: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
+    static AFTER_FOLLOW_UP_ADMISSION: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
     static AFTER_START_ADMISSION: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
     static AFTER_RECOVERED_OCCUPY: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
     static AROUND_REOPEN_SPAWNED_CHILD: Mutex<Option<HashMap<String, Hook>>> = Mutex::new(None);
@@ -1148,6 +1159,14 @@ pub(super) mod hooks {
 
     pub(in crate::agent) async fn after_start_admission(agent_id: &str) {
         run(&AFTER_START_ADMISSION, agent_id).await;
+    }
+
+    pub(in crate::agent) fn set_after_follow_up_admission(agent_id: &str, hook: Hook) {
+        set(&AFTER_FOLLOW_UP_ADMISSION, agent_id, hook);
+    }
+
+    pub(in crate::agent) async fn after_follow_up_admission(agent_id: &str) {
+        run(&AFTER_FOLLOW_UP_ADMISSION, agent_id).await;
     }
 
     /// Runs `hook` after a mail Start's rejoin handed its recovered turn to

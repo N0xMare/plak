@@ -72,12 +72,12 @@ pub(super) use turns::{
     end_attempt_work, end_spent_attempt, mutate_child, release_startup, start_child_turn,
     start_child_turn_as, start_child_turn_owned_with_ack,
 };
-#[cfg(test)]
-pub(super) use waiter::child_turn_was_cancelled;
 pub(super) use waiter::{
     ChildFeedSource, FailedTurnWaits, TurnWaiterRegistration, finalize_child_failure,
     read_finalize_terminal, spawn_topology_turn_waiter, wait_resume_gate,
 };
+#[cfg(test)]
+pub(super) use waiter::{child_turn_was_cancelled, start_instruction_turn};
 
 use bind::{SPAWN_MATERIALIZE_TIMEOUT, StartupCaller};
 use deliver::mail_command_id;

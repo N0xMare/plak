@@ -323,14 +323,19 @@ mod tests {
             &self,
             _: plakous::agent::CommandId,
             _: String,
-        ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+        ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
             Box::pin(async { Ok(()) })
+        }
+
+        fn follow_up_barrier(&self) -> Option<std::sync::Arc<tokio::sync::RwLock<()>>> {
+            None
         }
         fn restart(
             &mut self,
             _: crate::agent_tree_tools::TreeDriver,
             _: plakous::agent::CommandId,
             _: String,
+            _delivery: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
         ) -> std::pin::Pin<
             Box<dyn Future<Output = Result<plakous::agent::TurnResultHandle, String>> + Send + '_>,
         > {

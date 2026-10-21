@@ -59,11 +59,9 @@ pub struct LiveRelease {
 /// that knows there is a session behind the handle at all.
 ///
 /// The two consuming methods are consuming because a turn is cancelled once
-/// and a session is released once. `follow_up` is `&self` and expects the
-/// table's lock held — `Agent` is not cloneable, so the guard is what stops a
-/// concurrent reopen replacing the child mid-follow-up — while `turn_control`
-/// hands back a clone precisely so a steer can drop that lock before it
-/// awaits.
+/// and a session is released once. Follow-up returns an owned operation so
+/// delivery never retains the table lock. Its per-child barrier orders queued
+/// result registration before terminal handoff, restart, and release.
 pub trait LiveChildHandle: Send + Sync {
     /// Runtime capability retained for lease-only process-exit release.
     fn agent(&self) -> Option<Agent>;
@@ -86,12 +84,16 @@ pub trait LiveChildHandle: Send + Sync {
         Box::pin(std::future::ready(Ok(None)))
     }
 
-    /// Follows up on the running turn.
+    /// Follows up on the running turn. The owned future reserves this child
+    /// from construction; await or drop it before re-acquiring the live table.
     fn follow_up(
         &self,
         command_id: CommandId,
         body: String,
-    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>>;
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>>;
+
+    /// Orders in-flight follow-up admission before terminal handoff.
+    fn follow_up_barrier(&self) -> Option<Arc<tokio::sync::RwLock<()>>>;
 
     /// The follow-up turn admitted behind the turn that just ended, if any.
     /// It is now the session's active turn: the handle rebinds to it so the
@@ -103,11 +105,14 @@ pub trait LiveChildHandle: Send + Sync {
     /// Starts a fresh turn on this child's session and rebinds the handle to
     /// it, so the table names the turn that is actually running. The driver
     /// lets the host settle duplicates through the tree's feed projector.
+    /// The caller drains delivery outside the map and passes the exclusive
+    /// reservation, retained through rebinding; handles without a barrier pass None.
     fn restart(
         &mut self,
         driver: TreeDriver,
         command_id: CommandId,
         prompt: String,
+        _delivery: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
     ) -> Pin<Box<dyn Future<Output = Result<TurnResultHandle, String>> + Send + '_>>;
 
     /// Releases the session without cancelling, reporting the locator its
@@ -2407,14 +2412,19 @@ mod tests {
             &self,
             _: CommandId,
             _: String,
-        ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+        ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
             Box::pin(async { Err("fixture".into()) })
+        }
+
+        fn follow_up_barrier(&self) -> Option<Arc<tokio::sync::RwLock<()>>> {
+            None
         }
         fn restart(
             &mut self,
             _: TreeDriver,
             _: CommandId,
             _: String,
+            _delivery: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
         ) -> Pin<Box<dyn Future<Output = Result<TurnResultHandle, String>> + Send + '_>> {
             Box::pin(async { Err("fixture".into()) })
         }

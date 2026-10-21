@@ -432,14 +432,19 @@ impl plakous_hosted::topology_runtime::LiveChildHandle for ProcessChild {
         &self,
         _: plakous::agent::CommandId,
         _: String,
-    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
         Box::pin(async { Err("offline held child does not accept follow-ups".into()) })
+    }
+
+    fn follow_up_barrier(&self) -> Option<Arc<tokio::sync::RwLock<()>>> {
+        None
     }
     fn restart(
         &mut self,
         _: plakous_hosted::agent_tree_tools::TreeDriver,
         _: plakous::agent::CommandId,
         _: String,
+        _delivery: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
     ) -> Pin<Box<dyn Future<Output = Result<plakous::agent::TurnResultHandle, String>> + Send + '_>>
     {
         Box::pin(async { Err("offline held child does not restart".into()) })

@@ -1300,7 +1300,7 @@ pub(super) async fn start_submit_harness_turn(
     start_instruction_turn(driver, live, agent_id, identity, command_id, prompt).await
 }
 
-async fn start_instruction_turn(
+pub(in crate::agent) async fn start_instruction_turn(
     driver: &TreeDriver,
     live: &Arc<tokio::sync::Mutex<crate::topology_runtime::LiveChildTable>>,
     agent_id: &str,
@@ -1311,16 +1311,36 @@ async fn start_instruction_turn(
     let command_text = command_id.as_str().to_owned();
     let result_context =
         crate::agent::result_context::prepare(driver, agent_id, &command_text, &prompt)?;
-    let mut live_map = live.lock().await;
-    if command_text.starts_with(crate::agent::result_context::TRANSIENT_RESUME_PREFIX)
-        && !resume_allowed(driver, agent_id, identity)
-    {
+    let (mut live_map, delivery) =
+        crate::agent::live::lock_for_transition(live, agent_id, identity.turn).await?;
+    let transient = command_text.starts_with(crate::agent::result_context::TRANSIENT_RESUME_PREFIX);
+    let admissible = if transient {
+        resume_allowed(driver, agent_id, identity)
+    } else {
+        driver
+            .read(|tree| {
+                identity.still_owns(tree, agent_id)
+                    && tree.node(agent_id).is_ok_and(|node| {
+                        node.status == crate::agent_tree_protocol::NodeStatus::Running
+                    })
+                    && tree.attempt(agent_id).is_some_and(|attempt| {
+                        !attempt.status.is_stopped() && attempt.output_json.is_none()
+                    })
+            })
+            .unwrap_or(false)
+    };
+    if !admissible {
         crate::agent::result_context::acknowledge(
             driver,
             &command_text,
             crate::agent::result_context::Submission::Refused,
         )?;
-        return Err("transient continuation was cancelled".to_owned());
+        return Err(if transient {
+            "transient continuation was cancelled"
+        } else {
+            "child instruction was cancelled"
+        }
+        .to_owned());
     }
     let child = live_map
         .get_mut(agent_id)
@@ -1329,7 +1349,12 @@ async fn start_instruction_turn(
         return Err("child turn has already been replaced".into());
     }
     let result = match child
-        .restart(driver.clone(), command_id, result_context.prompt.clone())
+        .restart(
+            driver.clone(),
+            command_id,
+            result_context.prompt.clone(),
+            delivery,
+        )
         .await
     {
         Ok(result) => result,

@@ -25,14 +25,19 @@ impl LiveChildHandle for CleanupChild {
         &self,
         _: CommandId,
         _: String,
-    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
         Box::pin(async { Ok(()) })
+    }
+
+    fn follow_up_barrier(&self) -> Option<Arc<tokio::sync::RwLock<()>>> {
+        None
     }
     fn restart(
         &mut self,
         _: TreeDriver,
         _: CommandId,
         _: String,
+        _delivery: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
     ) -> Pin<Box<dyn Future<Output = Result<TurnResultHandle, String>> + Send + '_>> {
         Box::pin(async { Err("unused".into()) })
     }
@@ -932,14 +937,19 @@ impl LiveChildHandle for EndingChild {
         &self,
         _: CommandId,
         _: String,
-    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
         Box::pin(async { Err("fixture".into()) })
+    }
+
+    fn follow_up_barrier(&self) -> Option<Arc<tokio::sync::RwLock<()>>> {
+        None
     }
     fn restart(
         &mut self,
         _: TreeDriver,
         _: CommandId,
         _: String,
+        _delivery: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
     ) -> Pin<Box<dyn Future<Output = Result<TurnResultHandle, String>> + Send + '_>> {
         Box::pin(async {
             Err("duplicate child restart has no live turn; result reconciliation required".into())
@@ -1320,19 +1330,25 @@ async fn submit_harness_receives_results_and_supports_followup_attempts() {
                     Ok(())
                 })
                 .unwrap();
-            let result = runtime
-                .live
-                .lock()
-                .await
+            let (mut live_map, delivery) = crate::agent::live::lock_for_transition(
+                &runtime.live,
+                &parent.agent_id,
+                completed_turn,
+            )
+            .await
+            .unwrap();
+            let result = live_map
                 .get_mut(&parent.agent_id)
                 .unwrap()
                 .restart(
                     runtime.driver().clone(),
                     CommandId::new("harness-followup-start").unwrap(),
                     "followup assignment".into(),
+                    delivery,
                 )
                 .await
                 .unwrap();
+            drop(live_map);
             completed_turn = result.turn_id();
             result.result().await.unwrap();
             runtime
@@ -2636,14 +2652,19 @@ impl LiveChildHandle for CountedCancellation {
         &self,
         _: CommandId,
         _: String,
-    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
         Box::pin(async { Err("fixture".into()) })
+    }
+
+    fn follow_up_barrier(&self) -> Option<Arc<tokio::sync::RwLock<()>>> {
+        None
     }
     fn restart(
         &mut self,
         _: TreeDriver,
         _: CommandId,
         _: String,
+        _delivery: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
     ) -> Pin<Box<dyn Future<Output = Result<TurnResultHandle, String>> + Send + '_>> {
         Box::pin(async { Err("fixture".into()) })
     }

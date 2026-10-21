@@ -721,14 +721,19 @@ impl crate::topology_runtime::LiveChildHandle for LateReleaseChild {
         &self,
         _: CommandId,
         _: String,
-    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + '_>> {
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> {
         Box::pin(async { Err("unused".into()) })
+    }
+
+    fn follow_up_barrier(&self) -> Option<Arc<tokio::sync::RwLock<()>>> {
+        None
     }
     fn restart(
         &mut self,
         _: crate::agent_tree_tools::TreeDriver,
         _: CommandId,
         _: String,
+        _delivery: Option<tokio::sync::OwnedRwLockWriteGuard<()>>,
     ) -> Pin<Box<dyn Future<Output = Result<plakous::agent::TurnResultHandle, String>> + Send + '_>>
     {
         Box::pin(async { Err("unused".into()) })

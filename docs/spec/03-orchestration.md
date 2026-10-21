@@ -3427,6 +3427,19 @@ effect is drained after the tree mutex is released, including when the initial
 publish fails. Chained cleanup is recorded before the original failure returns.
 Raw tree handles are available only to test fixtures.
 
+Follow-up delivery snapshots an owned operation under the live-map lock and
+awaits it without that guard. The owned delivery runs to completion independently
+of the delivering send, so admission and result registration finish even if
+that send is cancelled. A per-child barrier reserves the exact live
+session until admission and follow-up result registration finish. Deliveries
+for that child serialize; terminal handoff, restart, and release drain them
+before rebinding or releasing the session. Terminal handoff and restart drain
+delivery without the map lock, then recheck turn identity and admissibility
+under the map before consuming a queued result or starting a new turn. Steer,
+list, and close admission remain available during slow follow-up delivery;
+close retains its retiring-slot reservation until release completes, so a
+concurrent reopen cannot replace the targeted child mid-delivery.
+
 A retiring live child reserves its agent slot by exact turn identity. A tracked
 worker owns release and locator publication independently of the caller's future.
 Concurrent cancel and close join that same completion; pending retirement is

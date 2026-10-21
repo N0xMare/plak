@@ -357,21 +357,23 @@ impl ProductMailDeliverer {
             command_id.as_str(),
             &request.body,
         )?;
-        // Follow-up is on `Agent`, which is not cloneable; the live-map guard
-        // stays held for this one child so a concurrent reopen cannot replace it.
-        let mut live = self.runtime.live.lock().await;
-        let child = live
-            .get_mut(&request.agent_id)
-            .ok_or_else(|| "child live session is missing after reopen".to_owned())?;
-        child
-            .follow_up(command_id, context.prompt)
+        let (delivery, turn_id, read) = {
+            let live = self.runtime.live.lock().await;
+            let child = live
+                .get(&request.agent_id)
+                .ok_or_else(|| "child live session is missing after reopen".to_owned())?;
+            let cursor =
+                crate::agent::live::live_feed_cursor(self.runtime.driver(), &request.agent_id)?;
+            (
+                child.follow_up(command_id, context.prompt),
+                child.turn_id(),
+                child.feed(cursor),
+            )
+        };
+        tokio::spawn(delivery)
             .await
+            .map_err(|_| "follow-up delivery task failed".to_owned())?
             .map_err(turn_ended_or)?;
-        let turn_id = child.turn_id();
-        let cursor =
-            crate::agent::live::live_feed_cursor(self.runtime.driver(), &request.agent_id)?;
-        let read = child.feed(cursor);
-        drop(live);
         if let Some(feed) = read.await? {
             self.runtime.mutate_then_emit(false, |tree| {
                 feed.apply(tree, &request.agent_id)
