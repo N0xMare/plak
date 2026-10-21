@@ -62,6 +62,8 @@ mod wave;
 mod ui;
 
 #[cfg(test)]
+mod code_wrap_tests;
+#[cfg(test)]
 mod markdown_tests;
 #[cfg(test)]
 mod perf_gate;

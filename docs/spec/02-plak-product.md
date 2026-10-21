@@ -3485,7 +3485,11 @@ queued prompt sent as a steer keeps its submit time. A queue carried in by
 import is stamped at import. `steer_ack` is protocol chrome and MUST NOT add a second grey
 system row. Assistant text sits behind a
 two-space gutter and renders as markdown against theme tokens. Fenced and
-indented code in that markdown is syntax-highlighted. GFM tables are laid out
+indented code in that markdown is syntax-highlighted. Prose, including inline
+code and URLs, wraps at the pane width; an over-wide token hard-breaks at
+grapheme boundaries without dropping text or its styles. Fenced and indented
+code listings keep their source line breaks and clip over-wide rows instead.
+GFM tables are laid out
 with measured columns and a full grid in the muted rule colour: top and bottom
 rules, outer edges, a rule under the header, and a rule between every body row,
 including wrapped rows. The width budget counts four outer edge/padding cells.
