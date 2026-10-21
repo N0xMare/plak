@@ -5614,7 +5614,7 @@ futures when it needs host results. Acceptance proves correlated interpreter
 delivery, not that Python explicitly awaited or used each result. Cancellation
 or interpreter loss after admission does not roll back effects or authorize
 replay. The engine contract names Monty `1.2.0` and includes
-`plakous.monty-python-adapter.v6`. Exact reopen requires the current engine,
+`plakous.monty-python-adapter.v7`. Exact reopen requires the current engine,
 adapter, profile and presentation identities. Cross-build session transfer
 uses export/carry; there is no migration.
 

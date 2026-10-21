@@ -282,13 +282,12 @@ per-cell cap has an explicit truncation notice.
 Steers yield observation without killing the cell, and nested agent/process
 awaits are allowed.
 
-This build runs Monty 1.2.0 under adapter `plakous.monty-python-adapter.v6`. It
-refuses to reopen py-ptc roots and children recorded by a Monty 1.1.0 build
-(the same adapter, a different engine contract), under adapter
-`plakous.monty-python-adapter.v4` or `plakous.monty-python-adapter.v5` (the
-Monty 0.0.21 builds), profile `plakous.python-ptc-profile.v2`, or
-presentation `plakous.python-ptc-presentation.v3`. There is no migration; use
-session carry/export to reference them.
+This build runs Monty 1.2.0 under adapter `plakous.monty-python-adapter.v7`. It
+refuses to reopen py-ptc roots and children recorded under the Monty 1.1.0
+engine contract, adapter v4 or v5 (Monty 0.0.21) or v6, profile
+`plakous.python-ptc-profile.v2`, or presentation
+`plakous.python-ptc-presentation.v3`. There is no migration; use session
+carry/export to reference them.
 
 `js-ptc` and `py-ptc` are one Plak-owned harness class: custom, non-default, one
 engine per agent. `exec_js` takes a JSON field `source` (an async module; emit

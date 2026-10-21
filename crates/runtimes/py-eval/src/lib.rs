@@ -71,7 +71,7 @@ const MAX_OUTSTANDING_NESTED: usize = 16;
 const MONTY_UNDECODABLE_EXCEPTION_CONTEXT: &str = "invalid exception payload";
 
 /// Identity of the Python tool bindings and interpreter delivery contract.
-pub const ADAPTER_REVISION: &str = "plakous.monty-python-adapter.v6";
+pub const ADAPTER_REVISION: &str = "plakous.monty-python-adapter.v7";
 
 type CellCompletion = Result<LocalCompositionResponse, LocalCompositionSessionLoss>;
 type MontyFeedTask = (u64, AbortOnDropJoinHandle);
@@ -1077,6 +1077,19 @@ async fn handle_function_call(
     Ok(resume_call(checkout, printed, ResumeValue::Future).await)
 }
 
+fn os_call_refusal(function_name: &str) -> ResumeValue {
+    // Monty absorbs OSError during glob/walk; use RuntimeError so a
+    // refused scan cannot be mistaken for an empty directory.
+    if function_name == "Path.scan" {
+        ResumeValue::Error(MontyException::new(
+            ExcType::RuntimeError,
+            Some("filesystem access is not available in cells; use the nested tools".into()),
+        ))
+    } else {
+        ResumeValue::NotHandled
+    }
+}
+
 async fn drive_feed(
     checkout: &mut Checkout,
     source: &str,
@@ -1132,8 +1145,8 @@ async fn drive_feed(
                 )
                 .await?
             }
-            TurnEvent::OsCall { .. } => {
-                resume_call(checkout, &mut printed, ResumeValue::NotHandled).await
+            TurnEvent::OsCall { function_name, .. } => {
+                resume_call(checkout, &mut printed, os_call_refusal(&function_name)).await
             }
             TurnEvent::NameLookup { .. } => resume_name_denied(checkout, &mut printed).await,
             TurnEvent::ResolveFutures {

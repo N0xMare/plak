@@ -2308,7 +2308,23 @@ probe('getenv', lambda: os.getenv('HOME'))
 probe('environ', lambda: os.environ)
 probe('urandom', lambda: os.urandom(4))
 probe('sleep', lambda: time.sleep(0))
-probe('os.path', lambda: os.path.isfile('/etc/hosts'))
+probe('isfile', lambda: os.path.isfile('/etc/hosts'))
+probe('exists', lambda: os.path.exists('/etc/hosts'))
+probe('isdir', lambda: os.path.isdir('/etc'))
+probe('islink', lambda: os.path.islink('/etc/hosts'))
+probe('lexists', lambda: os.path.lexists('/etc/hosts'))
+probe('getsize', lambda: os.path.getsize('/etc/hosts'))
+probe('realpath', lambda: os.path.realpath('/etc/hosts'))
+probe('expanduser', lambda: os.path.expanduser('~'))
+probe('expandvars', lambda: os.path.expandvars('$HOME'))
+probe('glob', lambda: list(Path('/etc').glob('*')))
+probe('rglob', lambda: list(Path('/etc').rglob('*')))
+probe('os.walk', lambda: list(os.walk('/etc')))
+probe('Path.walk', lambda: list(Path('/etc').walk()))
+try:
+    list(Path('/etc').glob('*'))
+except RuntimeError as error:
+    assert str(error) == 'filesystem access is not available in cells; use the nested tools'
 probe('scan', lambda: list(os.scandir('/etc')))
 try:
     await asyncio.sleep(0)
@@ -2333,9 +2349,92 @@ probe('cwd', lambda: os.getcwd())
         text,
         "open: PermissionError\npath: PermissionError\ngetenv: RuntimeError\n\
          environ: RuntimeError\nurandom: RuntimeError\nsleep: RuntimeError\n\
-         os.path: PermissionError\nscan: PermissionError\nasync_sleep: RuntimeError\n\
+         isfile: PermissionError\nexists: PermissionError\nisdir: PermissionError\n\
+         islink: PermissionError\nlexists: PermissionError\ngetsize: PermissionError\n\
+         realpath: PermissionError\nexpanduser: RuntimeError\nexpandvars: RuntimeError\n\
+         glob: RuntimeError\nrglob: RuntimeError\nos.walk: RuntimeError\n\
+         Path.walk: RuntimeError\nscan: RuntimeError\nasync_sleep: RuntimeError\n\
          host_import: ModuleNotFoundError\nnow: ok\ntoday: ok\ntime: ok\nrandom: ok\ncwd: ok"
     );
+}
+
+#[tokio::test]
+async fn new_builtin_modules_type_check_and_run_against_vendored_stubs() {
+    use monty_pool::TurnEvent;
+    use monty_types::NamedValues;
+
+    let Some(worker) = monty_worker() else { return };
+    let pool = Pool::new(super::pool_config(&worker, super::WORKER_REQUEST_TIMEOUT))
+        .await
+        .expect("pool");
+    let mut checkout = pool
+        .checkout(&ReplConfig {
+            type_check: true,
+            ..super::repl_config()
+        })
+        .await
+        .expect("checkout");
+    let mut on_print = monty_pool::on_print_sync(|_, _| {});
+    let source = r#"import csv
+import hashlib
+import tomllib
+import bisect
+import os.path
+assert list(csv.reader(["a,b", "1,2"])) == [["a", "b"], ["1", "2"]]
+assert hashlib.sha256(b"x").hexdigest() == "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881"
+assert tomllib.loads("x = 1")["x"] == 1
+assert bisect.bisect([1, 3, 5], 4) == 2
+assert os.path.join("/a", "b") == "/a/b"
+True"#;
+    let mut event = checkout
+        .feed(source, NamedValues::new(), Vec::new(), false, &mut on_print)
+        .await
+        .expect("type checked feed");
+    loop {
+        match event {
+            TurnEvent::Complete(value) => {
+                assert_eq!(codec::format_monty(&value, 1024), "True");
+                break;
+            }
+            TurnEvent::OsCall { function_name, .. } => {
+                assert_eq!(function_name, "import_stubs");
+                event = checkout
+                    .resume(super::os_call_refusal(&function_name), &mut on_print)
+                    .await
+                    .expect("built-in stubs suffice");
+            }
+            other => panic!("unexpected built-in host request: {other:?}"),
+        }
+    }
+    let event = checkout
+        .feed(
+            "import plak_host_module",
+            NamedValues::new(),
+            Vec::new(),
+            false,
+            &mut on_print,
+        )
+        .await
+        .expect("unknown import requests stubs");
+    let TurnEvent::OsCall {
+        function_name,
+        args,
+        ..
+    } = event
+    else {
+        panic!("expected import_stubs, got {event:?}");
+    };
+    assert_eq!(function_name, "import_stubs");
+    assert!(format!("{args:?}").contains("plak_host_module"));
+    let refusal = super::os_call_refusal(&function_name);
+    assert!(matches!(refusal, monty_pool::ResumeValue::NotHandled));
+    let error = checkout
+        .resume(refusal, &mut on_print)
+        .await
+        .expect_err("no host stubs");
+    assert!(matches!(error, monty_pool::PoolError::Typing(_)), "{error}");
+    assert!(error.to_string().contains("plak_host_module"), "{error}");
+    checkout.finish().await.expect("finish");
 }
 
 #[tokio::test]

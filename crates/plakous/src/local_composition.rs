@@ -2382,7 +2382,7 @@ mod monty_upgrade_tests {
     use super::*;
 
     /// The engine contract this build's predecessor recorded: Monty 1.1.0
-    /// under the same adapter revision v6.
+    /// under adapter revision v6.
     fn previous_monty_contract() -> Result<Digest, AgentError> {
         Digest::sha256(
             DigestDomain::ExecutionEnvironment,
@@ -2398,10 +2398,10 @@ mod monty_upgrade_tests {
     }
 
     #[test]
-    fn the_contract_names_monty_1_2_0_and_adapter_v6() -> Result<(), AgentError> {
+    fn the_contract_names_monty_1_2_0_and_adapter_v7() -> Result<(), AgentError> {
         assert_eq!(
             crate::monty_python::ADAPTER_REVISION,
-            "plakous.monty-python-adapter.v6"
+            "plakous.monty-python-adapter.v7"
         );
         let expected = Digest::sha256(
             DigestDomain::ExecutionEnvironment,
@@ -2410,7 +2410,7 @@ mod monty_upgrade_tests {
                 b"plakous.monty-python-engine-contract.v2",
                 b"monty-pool",
                 b"1.2.0",
-                b"plakous.monty-python-adapter.v6",
+                b"plakous.monty-python-adapter.v7",
             ],
         )
         .map_err(identity_error)?;

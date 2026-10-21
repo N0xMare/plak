@@ -732,10 +732,12 @@ Rebuild the complete product, or set `PLAK_MONTY_WORKER` to that `monty` binary.
 ```
 PermissionError: Permission denied: '/etc/hosts'
 RuntimeError: 'os.getenv' is not supported in this environment
+RuntimeError: filesystem access is not available in cells; use the nested tools
 ```
 
-The `py-ptc` interpreter has no host access: opening files, reading the
-environment, `os.urandom`, the network and `time.sleep` / `asyncio.sleep` are
+The `py-ptc` interpreter has no host access: opening files, scanning directories,
+globbing or walking paths, reading the environment, `os.urandom`, the network
+and `time.sleep` / `asyncio.sleep` are
 refused by design. Use the nested tools for workspace effects. Clock reads
 (`datetime.now()`, `time.time()`, in UTC) and `random` work inside the cell.
 

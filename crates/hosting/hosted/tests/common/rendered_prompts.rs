@@ -1471,19 +1471,19 @@ pub(crate) mod suite {
         ),
         (
             "codex.py-ptc.root.single-agent",
-            "e5204f3f4473bffc1545ef236ca7ad84990b82c05c8545c125f3ca2f2eaffb6c",
+            "ec0220de6a8a9e3415e83ea3406e26de3ca58e8d627637f93218aa3b59f555b2",
         ),
         (
             "codex.py-ptc.root",
-            "510b5ee8c59bcdffdb108723780f6597d6971524a9241b9b06f6f8dc13755630",
+            "a7b99ccae4df0fc4a4e1a1a2b1d19a0b6a13d447a57bdb94315d887d127dbf2f",
         ),
         (
             "codex.py-ptc.nested-parent",
-            "c1788c66275d13c579c7ac1fefb78d7812aa67eb4c206b2956711c4f387a2597",
+            "8cd7e4f97fbe0679d4630d4a6787b6cd7a10fdeca06eb6d260809366230c15b8",
         ),
         (
             "codex.py-ptc.child",
-            "f36681d3434a477efbc77a120ff20124f451e7afa7df9eccc36f947d03bf9c2a",
+            "be4ba345ef23bccaac38d1d5a974e42baf19daea0573c62f6b3411ca55a0addc",
         ),
         (
             "grok.direct.root.single-agent",
@@ -1519,19 +1519,19 @@ pub(crate) mod suite {
         ),
         (
             "grok.py-ptc.root.single-agent",
-            "8c3fd1f1fe8427ff8608f3c7b8d4b7c67bb9277fa2f6b94aeb81d113bd19d088",
+            "34b814e0c00515fb7b09cdc556e99c748686c6cbfba0a0b1f83332aed4905707",
         ),
         (
             "grok.py-ptc.root",
-            "e8919abdbb502553386daf20e3ebe9aaedc6a8371bd6adbe9302d40d84eb0997",
+            "5145aa005804e883d71a5d40ba5790bc967a9c3f9d60466eadee5ee59c0e3494",
         ),
         (
             "grok.py-ptc.nested-parent",
-            "649b6d331ddea9d5d20416c9dfa9c0156d422c35426426f4a9a6260e39c5086d",
+            "e08ce56408880f574134348de3e9b796a962c5c31013cc62a9b93599de954761",
         ),
         (
             "grok.py-ptc.child",
-            "16ce10dc983ca35ffd53d3842a2ba15782392d2966f21753c8aa37e3fc7e08a5",
+            "d671e3fef0eb1c5b7d936ad8f8cba9022fffa9532bba6e252be6a505e15e0db2",
         ),
         (
             "claude.direct.root.single-agent",
@@ -1567,19 +1567,19 @@ pub(crate) mod suite {
         ),
         (
             "claude.py-ptc.root.single-agent",
-            "a07e727fb8a0fe451d6b4a874a431288e3df128737e70da74143d7c1dd0b5178",
+            "a756b4f5fa2f3a14e66688ded33aa7ec90986f265e1412550d7d52f438a28330",
         ),
         (
             "claude.py-ptc.root",
-            "855ae214d9ae63994a2cf62732ab764471f758332637299a0ea7ea976df2a5f2",
+            "1769327b4c99f80f5f62d5f32d82b3aa515f69c13ac07d5275fb30a1b2720597",
         ),
         (
             "claude.py-ptc.nested-parent",
-            "3aa84370d6dbd3fe7af4586c8f742a1190daa38c3aca6293f8c7e1fe97fac3ad",
+            "f3ea2bc810f11f0d3fe928bbfa9644c5c40ff236c0d6a7062f42ce886030b90d",
         ),
         (
             "claude.py-ptc.child",
-            "b9275436e78e1219a4cfa704e70c2c178c90e576432e616f47f1a4cb0bca41f4",
+            "419fa078c4e640e2081c1e11ad044d6a6dfe8af8f30a3fc6ace8f28275c0e0f7",
         ),
         (
             "openrouter-chat.direct.root.single-agent",
@@ -1615,19 +1615,19 @@ pub(crate) mod suite {
         ),
         (
             "openrouter-chat.py-ptc.root.single-agent",
-            "4a84c96cda7a23b6953fe72563922db3bebb738a53f575a5eb4ffddfab2f3f4f",
+            "1f780d7167634120853a6c6bcf1ef99978214e97fa9a759eb50dc3f2a111ed1a",
         ),
         (
             "openrouter-chat.py-ptc.root",
-            "494f024207f60b4a309ee2a93889af85e30f7b3ec4d2964097ead0ca857da2df",
+            "0d687dde0a0bbcd25ea86291f67ddd8d761eb7688fdbfd0077cda626ee697b1c",
         ),
         (
             "openrouter-chat.py-ptc.nested-parent",
-            "f7295f73faff3d809c6bc9d010e51fbc172215fb2faacfeb6f0a2734df070745",
+            "1397ca4cf97b90d0448e72a7c2ad46d32cd74bf8ec14b5f481e73cbe0d3a7bc3",
         ),
         (
             "openrouter-chat.py-ptc.child",
-            "db6bb72fcd436357112241e2808bd88d9f247fdb4ea576f26b02ccc5a13cb91b",
+            "f8fc6ccf95743d09f95b140d4657a6eb9b18c1ef1bb96665eb678c71989eab97",
         ),
         (
             "openrouter-responses.direct.root.single-agent",
@@ -1663,19 +1663,19 @@ pub(crate) mod suite {
         ),
         (
             "openrouter-responses.py-ptc.root.single-agent",
-            "91bfa3c8080e6a34bc0337a6508c06905b921f829811fbc254813329b7fd5f72",
+            "eda7a997ad229151bba2577927f354afc75ada47613069df3356aa19d7f773f2",
         ),
         (
             "openrouter-responses.py-ptc.root",
-            "098a4f20b25ac76242d50979528dd4232a9ee27616a041ee1d44202c11e3c94a",
+            "a84e28cf28eedcc6999a3dcad239d74938b14ea580fd030fe279e32f44033e0e",
         ),
         (
             "openrouter-responses.py-ptc.nested-parent",
-            "866fbdb0c2105e90450dae2dc3b24a7557831e30eb611a99d8fac6e72321592e",
+            "a00c6247540673aefc08e33c9ab5175d24f772e8739d55661b8f137ca6d30d81",
         ),
         (
             "openrouter-responses.py-ptc.child",
-            "b68614b14b00378099c2a660181f06f45cbd85a9aa0ade0842b684788c1cb44f",
+            "d44f25287113cc371498fbba6480d2fbdff273b6e1da75754bac3ec61c239aa7",
         ),
         (
             "openrouter-messages.direct.root.single-agent",
@@ -1711,19 +1711,19 @@ pub(crate) mod suite {
         ),
         (
             "openrouter-messages.py-ptc.root.single-agent",
-            "423c967ec0302dffccdf1856e3d2cd5c2514589c67d395e0245d65e2b999c00d",
+            "7886a8ae796a798bee3db2cdc9a4d692a1368546ec13d6b74c2ba75ec1f03c16",
         ),
         (
             "openrouter-messages.py-ptc.root",
-            "02a693892fef8114fc5aa4aab52ae6fe55fde22c7a706b5d36dbe9b99bc42e7e",
+            "2c327022a944fa244dc9c931369f1e055cfe0cc2553bc94f7782159889421727",
         ),
         (
             "openrouter-messages.py-ptc.nested-parent",
-            "6f619be4e3db04460e9356f98b9e59e05d20690dc72613a571bc4e2f1063def1",
+            "0be41dcf74557bbd096b827c377316a29e2f35ae888d72913f12a6a45098d977",
         ),
         (
             "openrouter-messages.py-ptc.child",
-            "9b979b0bced6ca3ac5435703a88a2b4915d0055ccc55159eb0ce0ca0c79ff246",
+            "34c476d4b8a5e29949254093856077a7d9a1336caad5d71fca807939272a97f5",
         ),
         (
             "openai-api.direct.root.single-agent",
@@ -1739,7 +1739,7 @@ pub(crate) mod suite {
         ),
         (
             "openai-api.py-ptc.root.single-agent",
-            "44c521af5a378cd8aaad03601b7bad49d1f15173a57f3c69913620e6cf79bf3e",
+            "4e41a42ea20b964835ed7c1090b71998eb02e5f61e0c06da0ca3cd6f04833735",
         ),
         (
             "xai-api.direct.root.single-agent",
@@ -1751,7 +1751,7 @@ pub(crate) mod suite {
         ),
         (
             "xai-api.py-ptc.root.single-agent",
-            "ad9d09666c7330ba73d7af117e3e73b17322b5fc0193d00927f1e3346ea8e452",
+            "6ad75b3fda616b6fc56a41883a09f27afeb863941c211d074df4e29915cbbfaa",
         ),
         (
             "anthropic-api.direct.root.single-agent",
@@ -1763,7 +1763,7 @@ pub(crate) mod suite {
         ),
         (
             "anthropic-api.py-ptc.root.single-agent",
-            "b01c411610a9c89fcd311309b36a582bcc55ad4dd9fe07a6e749fa0d5394ac81",
+            "144f263ff7f5b4a5fea254e178cbc8dd55cde8894c71a40f4c1fc04870097208",
         ),
     ];
 

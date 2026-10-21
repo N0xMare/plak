@@ -1140,11 +1140,17 @@ snapshots are part of the repository source closure.
 The worker holds no host authority. Only the local subprocess transport is
 configured; `monty-pool`'s remote WebSocket transport is never used, and no
 mounts or working directory are sent (`os.getcwd()` reports the virtual `/`).
-Every OS call the interpreter routes to the host is refused, so the cell raises
-the call's own no-handler exception: filesystem paths and `open`
-(`PermissionError`), `os.getenv` and `os.environ`, `os.urandom`, and
-`time.sleep` and `asyncio.sleep`, which are configured to suspend to the host
-(`RuntimeError`). The interpreter answers clock reads (`datetime.now`,
+Every OS call the interpreter routes to the host is refused. Host `import`
+raises `ModuleNotFoundError`; `import_stubs` receives no stubs. `Path.scan`
+(including `os.scandir`) raises `RuntimeError` explaining that filesystem
+access is not available in cells and nested tools must be used. This non-`OSError`
+refusal also makes `Path.glob`, `Path.rglob`, `os.walk` and `Path.walk` raise
+rather than silently returning no entries. Other filesystem paths, `open`,
+and `os.path` predicates raise `PermissionError`. `os.getenv`, `os.environ`,
+`os.path.expanduser` and `os.path.expandvars` (via `getenv`), `os.urandom`,
+and `time.sleep` and `asyncio.sleep` (configured to suspend to the host)
+raise `RuntimeError`. No host data reaches the cell through these routes.
+The interpreter answers clock reads (`datetime.now`,
 `date.today`, `time.time` and the other `time` clocks, in UTC) and seeds
 `random` from its own process entropy without suspending; neither reaches
 host state. Name reads of undefined names stay undefined (`NameError`).
