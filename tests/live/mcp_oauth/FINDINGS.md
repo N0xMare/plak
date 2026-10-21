@@ -1,10 +1,13 @@
 # Product Findings
 
-These are product defects, not waived passes. No product code is changed by
-this lane. The complete matrix intentionally exits nonzero while they remain.
+These historical product defects are fixed on main. No product code is changed by
+this lane. The complete matrix requires both regression rows to pass.
 Use the JSON report's per-row commands and safe AS events for fresh evidence.
+The observations below describe the pre-fix builds.
 
-## Keycloak Callback Extension Rejected
+## Keycloak Callback Extension Rejected (Fixed)
+
+Fixed by `fbc1bc14` (ignore unrecognized OAuth callback response parameters).
 
 `dcr_loopback_keycloak` registers successfully and the real Keycloak browser
 login reaches Plak's callback. Keycloak includes `session_state` along with
@@ -24,7 +27,10 @@ The separate pre-registered fixture clients use Keycloak's supported
 refresh/revocation and restart coverage can proceed independently. The DCR
 row is never normalized or patched to pass.
 
-## DCR Client Missing Device Grant
+## DCR Client Missing Device Grant (Fixed)
+
+Fixed by `1a7ec565` (request device registration only for eligible remote attempts
+with an admitted device endpoint; bind secrets to verified issuer metadata).
 
 `dcr_device` advertises a real RFC 8628 endpoint but Plak's registration asks
 for only `authorization_code` and `refresh_token`. node-oidc-provider's DCR

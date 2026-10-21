@@ -28,12 +28,12 @@ try {
   while (Date.now() < deadline) {
     if (code)
       deviceApproved =
-        /Device Login Successful|You may close this browser window|successfully|approved/i.test(
+        /Device Login Successful|Sign-in Success|You may close this browser window|successfully|approved/i.test(
           await page.locator("body").innerText(),
         );
     if (callback || deviceApproved) break;
     const userCode = page.locator(
-      'input[name="user_code"], input[name="device_user_code"], input#user_code',
+      'input[name="user_code"]:visible, input[name="device_user_code"]:visible, input#user_code:visible',
     );
     if (code && (await userCode.count())) await userCode.first().fill(code);
     const user = page.locator('input[name="username"]');

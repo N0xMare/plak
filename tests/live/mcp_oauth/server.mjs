@@ -151,6 +151,7 @@ http
 for (const [port, upstream, label] of [
   [18081, 18080, "keycloak"],
   [18083, 18084, "strict"],
+  [18085, 18080, "keycloak"],
 ]) {
   http
     .createServer(async (req, res) => {
@@ -174,8 +175,8 @@ for (const [port, upstream, label] of [
           );
         const headers = {
           ...req.headers,
-          host: `127.0.0.1:${port}`,
-          "x-forwarded-host": `127.0.0.1:${port}`,
+          host: `127.0.0.1:${label === "keycloak" ? 18081 : port}`,
+          "x-forwarded-host": `127.0.0.1:${label === "keycloak" ? 18081 : port}`,
           "x-forwarded-proto": "http",
         };
         delete headers["content-length"];
@@ -185,7 +186,19 @@ for (const [port, upstream, label] of [
           body: ["GET", "HEAD"].includes(req.method) ? undefined : data,
           redirect: "manual",
         });
-        const bytes = Buffer.from(await response.arrayBuffer());
+        let bytes = Buffer.from(await response.arrayBuffer());
+        if (controls[label]?.hideDevice && req.url.includes(".well-known/") && response.status === 200) {
+          const metadata = JSON.parse(bytes);
+          delete metadata.device_authorization_endpoint;
+          bytes = Buffer.from(JSON.stringify(metadata));
+        }
+        if (label === "keycloak" && controls.keycloak?.splitEndpoints &&
+            req.url.includes(".well-known/") && response.status === 200) {
+          const metadata = JSON.parse(bytes);
+          for (const key of ["token_endpoint", "device_authorization_endpoint", "revocation_endpoint"])
+            if (metadata[key]) metadata[key] = metadata[key].replace(":18081/", ":18085/");
+          bytes = Buffer.from(JSON.stringify(metadata));
+        }
         if (
           /token$|revoke$|revocation$|\/reg$|\/registrations|\/device\/auth$|\/auth\/device$/.test(
             req.url,
@@ -199,6 +212,10 @@ for (const [port, upstream, label] of [
             as: label,
             event: "http",
             path: req.url.split("?")[0],
+            destination_port: port,
+            client_secret_matches: params.get("client_secret") === "fixture-client-secret" ||
+              req.headers.authorization === "Basic " + Buffer.from("confidential:fixture-client-secret").toString("base64") ||
+              req.headers.authorization === "Basic " + Buffer.from("device-confidential:fixture-client-secret").toString("base64"),
             grant: params.get("grant_type"),
             status: response.status,
             error: result.error,

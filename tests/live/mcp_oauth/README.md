@@ -4,7 +4,7 @@ Opt-in, no real accounts, no inference, no changes to product code. Run on
 **tars0, never tars1**. Requirements: Python 3.11+, Docker Compose v2+, Rust
 1.99.0 and network access to pull the pinned images/npm lockfile. On macOS,
 Docker Desktop 4.34+ must have host networking enabled. All fixtures bind
-loopback, including Keycloak; fixed ports 18080-18084 and 18765 must be free.
+loopback, including Keycloak; fixed ports 18080-18085 and 18765 must be free.
 A cross-checkout file lock prevents concurrent runs. Do not expose the fixture
 ports: admin and test-user passwords are intentionally public test data.
 
@@ -32,7 +32,8 @@ results, redacted CLI output, session logs and safe AS/MCP events. It never
 records bearer/refresh tokens, authorization codes, device user codes, cookies,
 client secrets or full authorize URLs. Fresh scratch homes and Compose volumes
 are removed in `finally`; no server is intentionally left running. Raw Docker
-logs are not evidence artifacts. Interrupt the driver with Ctrl-C, not SIGKILL.
+logs are not evidence artifacts. Playwright stderr is omitted on failure because
+its locator diagnostics can contain entered device codes. Interrupt the driver with Ctrl-C, not SIGKILL.
 A failed teardown is a failing run. Browser logins exec into one owned
 Playwright container with a fresh browser/context per login; timed-out Compose
 CLI/plugin process groups are joined before resource teardown. Reports are overwritten by default; use
@@ -60,7 +61,9 @@ persisted realm. Keycloak's raw DCR login retains its default `session_state`
 callback parameter. The pre-registered client disables that optional parameter
 using Keycloak's native client attribute (never browser callback rewriting),
 so other rows can qualify independently if Plak rejects that extension.
-The confidential, revocation and restart rows use that client. Device uses a
+The confidential, revocation, split-origin and restart rows use that client.
+Paste-back and callback-policy rows omit the optional device endpoint from
+metadata so remote device preference cannot replace callback coverage. Device uses a
 separate confidential client without an auth-code PKCE requirement (RFC 8628
 does not send a PKCE challenge); public DCR and confidential auth-code clients
 require S256.
@@ -71,7 +74,8 @@ before SDK dispatch, with per-tool scope enforcement outside the SDK.
 
 Resource-rule policy is `resource-rules.json`, overridable with
 `--resource-rules PATH`. `tenant_metadata` accepts `refuse` or `accept`; the
-current spec requires `refuse`. This keeps the parallel interoperability
+current location-bound rule requires `refuse`: metadata served at strict's
+well-known location cannot claim sibling tenantb. This keeps the parallel interoperability
 branch's resource-rule changes out of fixture implementation.
 
 State-key carry requires `--previous-binary` with test-hooks and a
@@ -90,4 +94,8 @@ Offline tooling tests (no Docker/browser):
 python3 -m unittest tests/tooling/test_mcp_oauth_e2e.py -v
 ```
 
-Known product failures and their independent witnesses are in [FINDINGS.md](FINDINGS.md).
+Historical fixed product findings and their independent witnesses are in [FINDINGS.md](FINDINGS.md).
+
+Additional rows qualify verified split-origin token/device/revocation secret
+dispatch, refusal after metadata removes a stored endpoint, extension callback
+parameters, and duplicate-state refusal before token exchange.

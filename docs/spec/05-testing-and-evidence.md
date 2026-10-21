@@ -3526,7 +3526,14 @@ Compose resources, including on failure. A state-key carry scenario requires
 an explicitly supplied second test-hooks binary with a different state key;
 missing evidence is reported as blocked, never a pass. Resource-matching
 expectations are external JSON data so the lane can follow the owning MCP
-specification without changing its fixture logic. Only offline parser and
+specification without changing its fixture logic. A separate loopback origin
+proxies token, device and revocation endpoints advertised by verified issuer
+metadata; safe boolean witnesses prove confidential secret delivery. Removing
+the stored revocation endpoint from that metadata must refuse logout before
+secret dispatch. Browser paste-back rows accept `session_state` plus another
+extension and refuse duplicate `state` before token issuance. Paste-back
+fixtures omit the optional device endpoint so remote device preference cannot
+silently replace their callback coverage. Only offline parser and
 redaction self-tests run in the tooling group; no gate starts Docker, a
 browser, or these authorization servers. Linux runs use tars0 (not tars1);
 macOS requires Docker Desktop host networking for the loopback URL identities.

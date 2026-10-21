@@ -52,6 +52,11 @@ SCENARIOS = (
     "issuer_mismatch",
     "as_restart",
     "state_key_carry",
+    "split_origin_token_revocation",
+    "split_origin_device",
+    "unverified_endpoint",
+    "callback_extensions",
+    "callback_duplicate_state",
 )
 
 
@@ -196,7 +201,7 @@ class Harness:
             return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
 
     def start(self):
-        for port in (18080, 18081, 18082, 18083, 18084, 18765):
+        for port in (18080, 18081, 18082, 18083, 18084, 18085, 18765):
             with socket.socket() as probe:
                 probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 probe.bind(("127.0.0.1", port))
@@ -323,7 +328,7 @@ class Harness:
         if confidential:
             client_id = (
                 "device-confidential"
-                if name == "device_confidential"
+                if name in ("device_confidential", "split_origin_device")
                 else "confidential"
             )
             self.config += (
@@ -346,6 +351,8 @@ class Harness:
                     "resource": None,
                     "issuer": None,
                     "refreshDelayMs": 0,
+                    "splitEndpoints": False,
+                    "hideDevice": False,
                 },
             )
         self.before = len(self.events())
@@ -406,11 +413,11 @@ class Harness:
             )
         except subprocess.CalledProcessError as error:
             raise RuntimeError(
-                "browser failed: " + redact(error.stderr.decode())[-2500:]
+                f"browser approval failed (exit {error.returncode}); browser stderr omitted"
             ) from None
         return json.loads(result.stdout)
 
-    def login(self, remote=False, expect_device=False, scope=None, tamper=False):
+    def login(self, remote=False, expect_device=False, scope=None, tamper=False, callback_mode=None):
         args = [str(self.binary), "mcp", "login", "srv"]
         if remote:
             args.append("--remote")
@@ -471,6 +478,15 @@ class Harness:
                             callback = urllib.parse.urlunsplit(
                                 p._replace(query=urllib.parse.urlencode(q, doseq=True))
                             )
+                        if callback_mode:
+                            p = urllib.parse.urlsplit(callback)
+                            q = urllib.parse.parse_qsl(p.query, keep_blank_values=True)
+                            if callback_mode == "duplicate":
+                                q.append(("state", dict(q)["state"]))
+                            else:
+                                q.extend([("session_state", "fixture-extension"), ("extra_extension", "ignored")])
+                            callback = urllib.parse.urlunsplit(p._replace(query=urllib.parse.urlencode(q)))
+                            self.output.append({"submitted_callback_keys": [k for k, _ in q]})
                         proc.stdin.write(callback + "\n")
                         proc.stdin.flush()
                 if proc.poll() is not None:
@@ -483,7 +499,13 @@ class Harness:
             self.output.append(
                 {"args": args[1:], "exit": proc.returncode, "output": redact(output)}
             )
-            if tamper:
+            if callback_mode:
+                require(any("submitted_callback_keys" in item for item in self.output),
+                        "callback scenario did not submit a browser response")
+            if callback_mode == "duplicate":
+                require(proc.returncode != 0 and "callback is invalid" in output,
+                        "duplicate state not refused")
+            elif tamper:
                 require(
                     proc.returncode != 0 and "expected authorization server" in output,
                     "issuer mismatch not refused",
@@ -565,6 +587,9 @@ class Harness:
                 "device_confidential",
                 "server_revocation",
                 "as_restart",
+                "split_origin_token_revocation",
+                "split_origin_device",
+                "unverified_endpoint",
             )
             else "strict"
         )
@@ -577,8 +602,44 @@ class Harness:
                 "device_confidential",
                 "server_revocation",
                 "as_restart",
+                "split_origin_token_revocation",
+                "split_origin_device",
+                "unverified_endpoint",
             ),
         )
+        if name in ("split_origin_token_revocation", "split_origin_device", "unverified_endpoint"):
+            self.control(splitEndpoints=True)
+            self.login(remote=name == "split_origin_device", expect_device=name == "split_origin_device")
+            self.test()
+            dispatched = [e for e in self.delta() if e.get("event") == "http" and
+                          (e.get("issued") or "/auth/device" in e.get("path", ""))]
+            require(dispatched and all(e.get("destination_port") == 18085 and
+                    e.get("client_secret_matches") for e in dispatched),
+                    "verified split-origin endpoint did not receive client secret")
+            if name == "unverified_endpoint":
+                self.control(splitEndpoints=False)
+                mark = len(self.events())
+                result = self.command("mcp", "logout", "srv")
+                require(result.returncode != 0, "unverified stored revocation endpoint accepted")
+                require(not any(e.get("revoked") or e.get("client_secret_matches")
+                                for e in self.events()[mark:]),
+                        "secret sent to endpoint no longer in verified metadata")
+                require(self.command("mcp", "logout", "srv", "--local").returncode == 0,
+                        "local logout after refusal failed")
+            else:
+                require(self.command("mcp", "logout", "srv").returncode == 0, "split-origin logout failed")
+                revokes = [e for e in self.delta() if e.get("revoked")]
+                require(len(revokes) == 1 and revokes[0].get("destination_port") == 18085 and
+                        revokes[0].get("client_secret_matches"), "split-origin revocation missing secret")
+            return "PASS", "verified metadata controls split-origin secret dispatch"
+        if name in ("callback_extensions", "callback_duplicate_state"):
+            self.control(hideDevice=True)
+            self.login(remote=True, callback_mode="duplicate" if name == "callback_duplicate_state" else "extensions")
+            if name == "callback_duplicate_state":
+                require(not any(e.get("issued") for e in self.delta()), "duplicate state reached token issuance")
+            else:
+                self.test()
+            return "PASS", "callback extension/duplicate policy witnessed before token dispatch"
         if name == "state_key_carry":
             if not self.args.previous_binary:
                 return (
@@ -635,10 +696,14 @@ class Harness:
         if name == "dcr_device":
             self.login(remote=True, expect_device=True)
         elif name == "dcr_paste":
+            self.control(hideDevice=True)
             self.login(remote=True)
+            require(any("browser_callback" in item for item in self.output),
+                    "paste-back row did not receive a browser callback")
         elif name == "device_confidential":
             self.login(remote=True, expect_device=True)
         elif name == "issuer_mismatch":
+            self.control(hideDevice=True)
             self.login(remote=True, tamper=True)
             require(
                 not any(e.get("issued") for e in self.delta()),

@@ -75,6 +75,20 @@ class ParsingTests(unittest.TestCase):
 
 
 class ComposeProcessTests(unittest.TestCase):
+    def test_browser_error_does_not_retain_playwright_input_values(self):
+        from unittest import mock
+        import subprocess
+
+        harness = lane.Harness.__new__(lane.Harness)
+        error = subprocess.CalledProcessError(
+            1, "browser", stderr=b'locator.fill("PRIVATE-DEVICE-CODE")'
+        )
+        with mock.patch.object(harness, "compose_run", side_effect=error):
+            with self.assertRaises(RuntimeError) as raised:
+                harness.browser("http://127.0.0.1:18083/device")
+        self.assertNotIn("PRIVATE-DEVICE-CODE", str(raised.exception))
+        self.assertIn("stderr omitted", str(raised.exception))
+
     def test_timeout_retires_the_cli_and_plugin_process_group(self):
         from unittest import mock
         import signal
