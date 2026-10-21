@@ -281,7 +281,8 @@ impl App {
     /// Carries what the operator did to the agent's rows across a re-sent
     /// transcript (every turn end): open items and their fetched detail,
     /// folded thoughts, the focused row and the camera's anchor, each found
-    /// again by its identity (a tool's call id, a thought's location). A
+    /// again by its identity (a tool's call id, a thought's location, or a
+    /// typed content key and occurrence for rows without a durable id). A
     /// selection addresses old rows and is dropped.
     pub(super) fn carry_item_state(&mut self, old: &[ScrollBlock]) {
         let by_identity: HashMap<(bool, String), &ScrollBlock> = old
@@ -290,14 +291,23 @@ impl App {
                 item_identity(block).map(|(tool, id)| ((tool, id.to_owned()), block))
             })
             .collect();
+        let by_content: HashMap<_, _> = old
+            .iter()
+            .filter(|block| matches!(block, ScrollBlock::Thinking { .. }))
+            .map(|block| ((std::mem::discriminant(block), block.body()), block))
+            .collect();
         for block in &mut self.pane.blocks {
             let Some(id) = item_identity(block).map(|(tool, id)| (tool, id.to_owned())) else {
                 continue;
             };
-            let Some(was) = by_identity.get(&id) else {
+            let Some(was) = by_identity.get(&id).copied().or_else(|| {
+                by_content
+                    .get(&(std::mem::discriminant(block), block.body()))
+                    .copied()
+            }) else {
                 continue;
             };
-            match (block, *was) {
+            match (block, was) {
                 (
                     ScrollBlock::Tool {
                         mode,
@@ -334,24 +344,24 @@ impl App {
             }
         }
         let new = &self.pane.blocks;
-        let remap = |idx: usize| -> Option<usize> {
-            let block = old.get(idx)?;
-            match item_identity(block) {
-                Some(id) => new
-                    .iter()
-                    .position(|block| item_identity(block) == Some(id)),
-                // A row without identity keeps its distance from the tail:
-                // a re-send drops head rows and appends nothing new.
-                None => new.len().checked_sub(old.len() - idx).filter(|at| {
-                    new.get(*at).map(std::mem::discriminant) == Some(std::mem::discriminant(block))
-                }),
-            }
-        };
+        let remap = |idx| remap_block(old, new, idx);
         self.pane.focused_block = self.pane.focused_block.and_then(remap);
-        self.pane.transcript_view_anchor = self
-            .pane
-            .transcript_view_anchor
-            .and_then(|(idx, row)| remap(idx).map(|at| (at, row)));
+        self.pane.transcript_view_anchor =
+            self.pane.transcript_view_anchor.and_then(|(idx, row)| {
+                remap(idx)
+                    .map(|at| (at, row))
+                    .or_else(|| {
+                        // If the row was removed, hold the nearest surviving
+                        // content, never reinterpret the old bottom offset.
+                        (1..old.len()).find_map(|distance| {
+                            idx.checked_add(distance)
+                                .and_then(remap)
+                                .or_else(|| idx.checked_sub(distance).and_then(remap))
+                                .map(|at| (at, 0))
+                        })
+                    })
+                    .or_else(|| (!new.is_empty()).then_some((0, 0)))
+            });
         self.selection.clear();
         self.pending_tool_click = None;
     }
@@ -404,6 +414,45 @@ impl App {
         self.mouse_scroll_queue = 0;
         self.scrollbar_drag = None;
     }
+}
+
+fn remap_block(old: &[ScrollBlock], new: &[ScrollBlock], idx: usize) -> Option<usize> {
+    let block = old.get(idx)?;
+    if let Some(id) = item_identity(block)
+        && let Some(at) = new
+            .iter()
+            .position(|block| item_identity(block) == Some(id))
+    {
+        return Some(at);
+    }
+    // Snapshots can replace live location keys. Prose and notices
+    // have no wire id at all. Their typed content plus occurrence is
+    // a stable presentation key, independent of distance to the tail.
+    let same = |other: &&ScrollBlock| {
+        std::mem::discriminant(*other) == std::mem::discriminant(block)
+            && other.body() == block.body()
+            && match (block, *other) {
+                (
+                    ScrollBlock::Tool {
+                        subject,
+                        parent_call_id,
+                        ..
+                    },
+                    ScrollBlock::Tool {
+                        subject: other_subject,
+                        parent_call_id: other_parent,
+                        ..
+                    },
+                ) => subject == other_subject && parent_call_id == other_parent,
+                _ => true,
+            }
+    };
+    let occurrence = old[..idx].iter().filter(same).count();
+    new.iter()
+        .enumerate()
+        .filter(|(_, other)| same(other))
+        .nth(occurrence)
+        .map(|(at, _)| at)
 }
 
 /// The identity a row keeps across re-sent transcripts: a tool's call id or

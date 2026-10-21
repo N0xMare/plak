@@ -1568,6 +1568,118 @@ fn live_transcript_updates_do_not_snap_a_scrolled_viewport_to_tail() {
 }
 
 #[test]
+fn detached_camera_survives_snapshots_and_resumes_only_at_tip() {
+    for (rekey, return_to_tip) in [(false, 0), (true, 1), (true, 2)] {
+        let mut app = App::new(launch_basic(), true);
+        let mut rows: Vec<_> = (0..40)
+            .map(|i| TranscriptRow::assistant(format!("row-{i:02}\n\nsecond line\n\nthird line")))
+            .collect();
+        // Attach/resume starts at the tail.
+        app.apply_host_event(restore_snapshot(1, rows.clone()));
+        let mut terminal = Terminal::new(TestBackend::new(48, 14)).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        assert_eq!(app.pane.scroll_from_bottom, 0);
+        app.pane.scroll_from_bottom = 37;
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let anchor = app.pane.transcript_view_anchor.unwrap();
+        let body = app.pane.blocks[anchor.0].body().to_owned();
+        let assert_held = |app: &App| {
+            let held = app.pane.transcript_view_anchor.unwrap();
+            assert_eq!(app.pane.blocks[held.0].body(), body);
+            assert_eq!(held.1, anchor.1);
+            assert!(app.pane.scroll_from_bottom > 0);
+            assert!(app.jump_to_live_hit.is_some());
+        };
+        // An identical turn-end replacement must not reset follow mode.
+        app.apply_host_event(restore_snapshot(2, rows.clone()));
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        assert_held(&app);
+        // A host wake has no user row; it starts streaming directly.
+        app.apply_host_event(HostEvent::SetBusy(true));
+        app.apply_host_event(HostEvent::AssistantDelta("wake output\n".repeat(20)));
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        assert_held(&app);
+        rows.push(TranscriptRow::assistant("wake output\n".repeat(20)));
+        if rekey {
+            // Rebuild the row vector with shifted ordering keys: content
+            // before the camera can be inserted or evicted by projection.
+            rows.remove(0);
+            rows.insert(0, TranscriptRow::info(NoticeScope::Host, "new prefix"));
+            rows.insert(0, TranscriptRow::info(NoticeScope::Host, "another prefix"));
+        }
+        app.apply_host_event(restore_snapshot(3, rows.clone()));
+        app.apply_host_event(HostEvent::SetBusy(false));
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        assert_held(&app);
+        // Scrolling down to the actual tip resumes following.
+        match return_to_tip {
+            0 => {
+                while app.pane.scroll_from_bottom > 0 {
+                    app.handle_key(key(KeyCode::PageDown));
+                    terminal.draw(|frame| app.draw(frame)).unwrap();
+                }
+            }
+            1 => {
+                app.handle_key(key(KeyCode::End));
+            }
+            _ => {
+                let hit = app.jump_to_live_hit.unwrap();
+                app.handle_mouse(left_mouse(
+                    MouseEventKind::Down(MouseButton::Left),
+                    hit.x,
+                    hit.y,
+                ));
+            }
+        }
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        assert!(app.jump_to_live_hit.is_none());
+        let before = app.pane.transcript_visible_start;
+        app.apply_host_event(HostEvent::AssistantDelta("new tail\n".repeat(20)));
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        assert_eq!(app.pane.scroll_from_bottom, 0);
+        assert!(app.pane.transcript_visible_start > before);
+        rows.push(TranscriptRow::assistant("new tail\n".repeat(20)));
+        app.apply_host_event(restore_snapshot(4, rows));
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        assert_eq!(app.pane.scroll_from_bottom, 0);
+    }
+}
+
+#[test]
+fn snapshot_rekeys_a_thought_without_moving_its_camera() {
+    let mut app = App::new(launch_basic(), true);
+    app.render_prefs.group_tool_calls = false;
+    app.apply_host_event(HostEvent::ReasoningDelta {
+        location_key: "live-key".into(),
+        text: "thought\n\n".repeat(40),
+    });
+    if let ScrollBlock::Thinking { mode, manual, .. } = &mut app.pane.blocks[0] {
+        *mode = DisplayMode::Expanded;
+        *manual = true;
+    }
+    say(&mut app, &"tail\n\n".repeat(30));
+    let mut terminal = Terminal::new(TestBackend::new(48, 14)).unwrap();
+    terminal.draw(|frame| app.draw(frame)).unwrap();
+    app.pane.scroll_from_bottom = 80;
+    terminal.draw(|frame| app.draw(frame)).unwrap();
+    let anchor = app.pane.transcript_view_anchor.unwrap();
+    assert_eq!(anchor.0, 0);
+    app.apply_host_event(restore_snapshot(
+        1,
+        vec![
+            TranscriptRow::Thinking(plakous_host_protocol::views::transcript::ThinkingRow {
+                location_key: "projected-key".into(),
+                text: "thought\n\n".repeat(40),
+                elapsed_ms: None,
+            }),
+            TranscriptRow::assistant("tail\n\n".repeat(30)),
+        ],
+    ));
+    terminal.draw(|frame| app.draw(frame)).unwrap();
+    assert_eq!(app.pane.transcript_view_anchor, Some(anchor));
+}
+
+#[test]
 fn replace_transcript_and_scroll_do_not_quit() {
     let mut app = App::new(launch_basic(), true);
     app.apply_host_event(restore_snapshot(

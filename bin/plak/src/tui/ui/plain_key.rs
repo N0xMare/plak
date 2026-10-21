@@ -309,6 +309,12 @@ impl App {
                 None
             }
             KeyCode::End => {
+                if self.input.is_empty() {
+                    self.pane.scroll_from_bottom = 0;
+                    self.begin_transcript_camera();
+                    self.mark_dirty();
+                    return None;
+                }
                 let after_start = self.input_cursor;
                 let rest: String = self.input.chars().skip(after_start).collect();
                 let add = rest.find('\n').unwrap_or(rest.chars().count());

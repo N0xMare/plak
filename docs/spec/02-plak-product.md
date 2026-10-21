@@ -3610,6 +3610,11 @@ never wrap. In an open group each member hangs on the rail and the last
 member's `└─` ends it; a cell's nested calls sit one rail level deeper
 (`│   ├─`). Copied text uses the same projection.
 
+The transcript follows new output only at the tip: while detached, streaming, appended rows
+and full snapshot replacements (including attach/resume and host wake turns)
+retain the visible row's stable presentation key and intra-row offset, keeping
+the jump-to-bottom affordance until the operator returns to the tip by that
+affordance, End, or scrolling down.
 The transcript reserves its rightmost column for an always-visible scrollbar,
 including an agent transcript shown as the Activity > Agents body. While that body is showing, the track pages on a click and the thumb drags, unless a confirmation pop-up, Menu, an overlay or the resume picker owns input. Other overlay bodies have no track and use
 their full width; wheel and keyboard scrolling remain available. Its track is

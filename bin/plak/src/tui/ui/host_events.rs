@@ -501,7 +501,6 @@ impl App {
                 }
                 let old = std::mem::replace(&mut self.pane.blocks, blocks);
                 self.carry_item_state(&old);
-                self.pane.scroll_from_bottom = 0;
                 self.mark_transcript_replaced();
                 self.warm_transcript_projection();
             }
