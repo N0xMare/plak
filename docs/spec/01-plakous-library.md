@@ -1358,8 +1358,10 @@ payload presence, canonical bytes, exact lengths and foreign keys. It is test
 support only (the store's hidden `open_verified`), not a product operation and
 not on the facade: it runs inside the writer's admission transaction, so on a
 live store it would hold the writer lock for an O(store) reconstruction under
-the readiness window. Ordinary open admits shape, schema and counters; loads
-and read-only inspections validate the object graphs they touch.
+the readiness window. Ordinary open admits shape, schema and counters; cold
+loads and checkpoint-materializing inspections validate their full object graphs.
+Recovery-status diagnostics validate only their addressed metadata and obligation
+paths (§5.5).
 
 The persistent candidate queue is drained by bounded `IMMEDIATE` transactions:
 examine at most 256 candidates and delete at most 8 MiB of accounted bytes per
@@ -1887,12 +1889,12 @@ the evidence comes from:
 
 - the live open (`DurableSessionRuntime` open and agent construction) loads it
   under its fresh lease and executes exactly the returned plan;
-- `AgentSessions::inspect_recovery_sqlite` and the `sessions::rehearsal`
-  inspector read it from one `SqliteSessionStore::inspect_branch` snapshot;
+- the `sessions::rehearsal` inspector reads it from one
+  `SqliteSessionStore::inspect_branch` snapshot;
 - the recovery-scope check (§4.1) accepts every verdict except `Refuse`.
 
-Read-only callers therefore predict the closure an open performs on the same
-bytes by construction. The closure an open performs is committed atomically with
+The full rehearsal inspector therefore predicts the closure an open performs
+on the same bytes by construction. The closure an open performs is committed atomically with
 its feed record (§5.11); a consumer learns the closed turn's single terminal, or
 the closed workflow's settlement, from that record's `TurnTerminal` or
 `WorkflowSettled` fact. Restorable frames are not closures; typed integrity

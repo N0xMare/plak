@@ -1451,7 +1451,7 @@ in the same transaction. An eligible source projection also supplies the exact
 view seed at that published sequence, with the target branch record applied;
 source work after the branch cannot enter it. The successor's ordinary projector
 follows its own lineage, continuing the seed or rebuilding from empty to the
-same views (§2.6 above). Live fork and rebind run that same target pass before
+same views. Live fork and rebind run that same target pass before
 loading their target snapshot. A retained rebuild
 seeds canonical prose and its history frontier from that branch's own head,
 never the source's post-branch head or frontier. A successor's product UUID is derived from its
