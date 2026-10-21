@@ -162,7 +162,6 @@ impl std::fmt::Display for CliFailure {
 impl From<plakous::sessions::AgentSessionsError> for CliFailure {
     fn from(error: plakous::sessions::AgentSessionsError) -> Self {
         let mut failure = Self::new(error.to_string());
-        failure.refusal = StoreRefusal::of(&error);
         failure.source = Some(Box::new(LookupFailure::Recovery(error)));
         failure
     }
@@ -184,6 +183,14 @@ impl From<crate::agent_tree::TreeRuntimeError> for CliFailure {
 }
 
 impl CliFailure {
+    /// A read/preflight refusal, retaining its typed source and retry class.
+    pub(crate) fn session_read(context: &str, error: plakous::sessions::AgentSessionsError) -> Self {
+        let refusal = StoreRefusal::of(&error);
+        let mut failure = Self::from(error).with_context(context);
+        failure.refusal = refusal;
+        failure
+    }
+
     /// Internal failure with the default category.
     pub fn new(message: impl Into<String>) -> Self {
         Self::classified(CliFailureKind::Internal, message)

@@ -130,7 +130,7 @@ pub(super) fn query_context(
     let report = executor
         .block_on(opened.context_status(operation, query))
         .map_err(|_| CliFailure::new("application execution failed"))?
-        .map_err(|error| CliFailure::from(error).with_context(CONTEXT_QUERY_FAILED))?;
+        .map_err(|error| CliFailure::session_read(CONTEXT_QUERY_FAILED, error))?;
     if report.locator() != opened.locator() {
         return Err(CliFailure::new(
             "canonical context report locator does not match the attached session",

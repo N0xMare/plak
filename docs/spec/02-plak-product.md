@@ -1199,6 +1199,11 @@ view, and nothing is both.
 | Identity registry | intent | each identity and its content digest | permanent; a discarded unadmitted workflow binding refuses even identical replay; it holds no runtime outcomes |
 | Carry and export bookkeeping: carried-forward lineage, carry files, retained references, deleted-artifact tombstones | intent and files | §2.5 | lineage is written by import; files and tombstones live outside the store and keep their own rules |
 
+Transient store refusal classes on hosted session errors are attached only at
+read/preflight boundaries, not by the general session-error conversion. A
+runtime shutdown or scheduled-compaction failure during a child wake parks it
+with a transcript row; it is not a transient-read retry.
+
 Host wake preflight failures and undispatched-wake discards write their keyed
 host intents before returning to idle; idle interrupt writes wake suppression.
 An unavailable store leaves suppression active in the live process and an

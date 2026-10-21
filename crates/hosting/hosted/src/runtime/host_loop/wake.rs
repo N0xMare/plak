@@ -2856,7 +2856,7 @@ mod tests {
     }
 
     #[test]
-    fn wake_preflight_attempts_compaction_before_preparing_delivery() {
+    fn wake_preflight_compaction_error_parks_instead_of_deferring() {
         with_fixture(1, true, |host, runtime, _, observed| {
             let now = Instant::now();
             host.child_wake_prompt(now).unwrap();
@@ -2873,6 +2873,7 @@ mod tests {
                 [] as [crate::sessions::queue::QueueItem; 0]
             );
             assert!(host.config.session.child_wake_suppressed);
+            assert!(host.child_wake.retry.is_none(), "compaction errors must park, not defer");
             let events: Vec<_> = observed.try_iter().collect();
             assert!(
                 events.iter().any(|event| matches!(
