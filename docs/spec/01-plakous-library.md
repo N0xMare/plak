@@ -5036,7 +5036,16 @@ bounded constant-time verifier. The callback's `iss` is compared to it by simple
 string comparison when present, and its absence refuses the response when the
 metadata sets `authorization_response_iss_parameter_supported`; on a mismatch
 the response, error fields included, is discarded and no token endpoint is
-contacted. The requested scope is the login's explicit scope, else the
+contacted.
+
+MCP loopback and remote paste-back callbacks ignore unrecognized response
+parameters, including `session_state`, as RFC 6749 §4.1.2 requires. Duplicate
+recognized parameters (`code`, `state`, `iss`, `error`, `error_description`,
+`error_uri`, and optional `scope`) still refuse the response before token
+exchange. Redirect, state and issuer checks and input bounds are unchanged.
+Native subscription callbacks retain their revision-pinned query grammar.
+
+The requested scope is the login's explicit scope, else the
 challenge's `scope`, else the resource metadata's `scopes_supported`, else
 none, united with the scope the login it replaces requested; `offline_access`
 is added when the authorization server lists it. Scope tokens at every input

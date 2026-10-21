@@ -858,6 +858,13 @@ revocation re-verify metadata before sending a secret. Failed logout verificatio
 sends no credentials and leaves the login intact; `plak mcp logout <id> --local`
 retires it locally (the remote grant may remain active).
 
+MCP loopback and remote paste-back callbacks ignore unrecognized response
+parameters, including `session_state`, as RFC 6749 §4.1.2 requires. Duplicate
+recognized parameters (`code`, `state`, `iss`, `error`, `error_description`,
+`error_uri`, and optional `scope`) still refuse the response before token
+exchange. Redirect, state and issuer checks and input bounds are unchanged.
+Native subscription callbacks retain their revision-pinned query grammar.
+
 MCP server logins follow the same surface rules. `plak mcp login <id>` is
 CLI-only and never started by an agent or a tool: an expired, revoked or
 under-scoped login is a tool failure naming the command. Scope ingestion uses

@@ -148,6 +148,65 @@ fn logged_in(status: &McpOAuthStatus) -> bool {
 }
 
 #[tokio::test]
+async fn callback_extensions_are_ignored_locally_and_in_remote_paste_back() -> TestResult {
+    for remote in [false, true] {
+        let setup = setup(OAuthConfig {
+            callback_parameters: vec![
+                ("session_state".to_owned(), "keycloak-session".to_owned()),
+                ("another_extension".to_owned(), "ignored".to_owned()),
+            ],
+            ..OAuthConfig::default()
+        })
+        .await?;
+        let spec = setup.spec(setup.settings())?;
+        let pool = McpPool::new();
+        if remote {
+            let McpRemoteLogin::Paste(login) = pool
+                .login(&spec, McpLoginOptions::new())
+                .await?
+                .remote()
+                .await?
+            else {
+                return Err("unexpected device login".into());
+            };
+            let (_, callback) = browse(login.authorization_url()).await?;
+            assert!(logged_in(
+                &login.complete(&callback.ok_or("no callback")?).await?
+            ));
+        } else {
+            assert!(logged_in(&local_login(&pool, &spec).await?));
+        }
+        assert_eq!(setup.gate.requests_to("/token").len(), 1);
+        pool.shutdown().await;
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn duplicate_callback_state_refuses_before_token_exchange() -> TestResult {
+    let setup = setup(OAuthConfig::default()).await?;
+    let spec = setup.spec(setup.settings())?;
+    let pool = McpPool::new();
+    let McpRemoteLogin::Paste(login) = pool
+        .login(&spec, McpLoginOptions::new())
+        .await?
+        .remote()
+        .await?
+    else {
+        return Err("unexpected device login".into());
+    };
+    let (_, callback) = browse(login.authorization_url()).await?;
+    let callback = format!(
+        "{}&state=duplicate&session_state=ignored",
+        callback.ok_or("no callback")?
+    );
+    assert!(login.complete(&callback).await.is_err());
+    assert!(setup.gate.requests_to("/token").is_empty());
+    pool.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn a_local_login_discovers_registers_and_binds_the_token_to_the_resource() -> TestResult {
     let setup = setup(OAuthConfig::default()).await?;
     let spec = setup.spec(setup.settings())?;

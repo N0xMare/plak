@@ -14,10 +14,12 @@ use super::OAuthWorkflowError;
 pub struct CallbackQueryPolicy {
     /// Maximum accepted query string length in bytes.
     pub max_query_bytes: usize,
-    /// Maximum number of distinct keys.
+    /// Maximum number of distinct recognized keys.
     pub max_keys: usize,
     /// Whether `error_uri` is an allowed parameter.
     pub allow_error_uri: bool,
+    /// Ignore unrecognized response parameters (RFC 6749 section 4.1.2).
+    pub ignore_unknown_parameters: bool,
     /// Maximum authorization `code` length.
     pub max_code_bytes: usize,
     /// Maximum `state` length.
@@ -35,13 +37,15 @@ pub struct CallbackQueryPolicy {
 }
 
 impl CallbackQueryPolicy {
-    /// Default policy matching common authorization-code callback bounds.
+    /// Standard OAuth policy: ignore unrecognized response parameters, retain
+    /// duplicate checks and bounds for recognized parameters.
     #[must_use]
     pub const fn standard() -> Self {
         Self {
             max_query_bytes: 8 * 1024,
             max_keys: 6,
-            allow_error_uri: false,
+            allow_error_uri: true,
+            ignore_unknown_parameters: true,
             max_code_bytes: 16 * 1024,
             max_state_bytes: 128,
             max_error_bytes: 128,
@@ -59,6 +63,7 @@ impl CallbackQueryPolicy {
             max_query_bytes: 8 * 1024,
             max_keys: 4,
             allow_error_uri: false,
+            ignore_unknown_parameters: false,
             max_code_bytes: 16 * 1024,
             max_state_bytes: 128,
             max_error_bytes: 128,
@@ -76,6 +81,7 @@ impl CallbackQueryPolicy {
             max_query_bytes: 8 * 1024,
             max_keys: 6,
             allow_error_uri: true,
+            ignore_unknown_parameters: false,
             max_code_bytes: 4096,
             max_state_bytes: 128,
             max_error_bytes: 128,
@@ -133,9 +139,10 @@ impl Eq for OAuthCallbackOutcome {}
 
 /// Parses an OAuth callback query string under `policy`.
 ///
-/// Accepts only known OAuth keys (`code`, `state`, `scope`, `error`,
-/// `error_description`, and optionally `error_uri`). Duplicate keys, unknown
-/// keys, mixed success/error, and bound violations fail closed.
+/// Recognizes `code`, `state`, `scope`, `error`, `error_description`, and
+/// optionally `error_uri`. Unrecognized keys are ignored only when policy
+/// allows it; duplicate recognized keys, mixed success/error and bound
+/// violations fail closed.
 ///
 /// # Errors
 ///
@@ -161,10 +168,15 @@ pub fn parse_oauth_callback_query(
             key.as_ref(),
             "code" | "state" | "scope" | "error" | "error_description"
         ) || (policy.allow_error_uri && key.as_ref() == "error_uri");
-        if !allowed
-            || values
-                .insert(key.into_owned(), Zeroizing::new(value.into_owned()))
-                .is_some()
+        if !allowed {
+            if policy.ignore_unknown_parameters {
+                continue;
+            }
+            return Err(OAuthWorkflowError::Callback);
+        }
+        if values
+            .insert(key.into_owned(), Zeroizing::new(value.into_owned()))
+            .is_some()
             || values.len() > policy.max_keys
         {
             return Err(OAuthWorkflowError::Callback);
@@ -338,6 +350,43 @@ mod tests {
     use crate::oauth_pins::{browser_test_pins, oidc_test_pins};
     use crate::oauth_workflow::OAuthWorkflowError;
     use zeroize::Zeroizing;
+
+    #[test]
+    fn standard_callbacks_ignore_extensions_but_reject_duplicate_recognized_keys() {
+        let policy = CallbackQueryPolicy::standard();
+        let redirect = "http://127.0.0.1:49152/callback";
+        let query = "code=c&state=s&session_state=keycloak&other=value&other=ignored";
+        assert!(
+            parse_absolute_redirect_query(&format!("{redirect}?{query}"), redirect, policy).is_ok()
+        );
+        assert!(
+            parse_loopback_callback_target(
+                "127.0.0.1:49152",
+                &format!("/callback?{query}"),
+                redirect,
+                policy
+            )
+            .is_ok()
+        );
+        for query in [
+            "code=c&state=s&state=s",
+            "code=c&code=c&state=s",
+            "error=denied&error=denied&state=s",
+            "error=denied&state=s&error_description=x&error_description=x",
+            "error=denied&state=s&error_uri=x&error_uri=x",
+        ] {
+            assert!(
+                parse_oauth_callback_query(query, policy).is_err(),
+                "{query}"
+            );
+        }
+        for policy in [
+            CallbackQueryPolicy::codex("openid"),
+            CallbackQueryPolicy::xai("openid"),
+        ] {
+            assert!(parse_oauth_callback_query(query, policy).is_err());
+        }
+    }
 
     #[test]
     fn browser_policy_accepts_success_and_error() {

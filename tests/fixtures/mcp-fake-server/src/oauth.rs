@@ -76,6 +76,8 @@ pub struct OAuthConfig {
     pub advertise_iss: bool,
     /// What the callback's `iss` carries.
     pub callback_issuer: CallbackIssuer,
+    /// Additional authorization callback parameters.
+    pub callback_parameters: Vec<(String, String)>,
     /// Whether dynamic registration is offered.
     pub registration: bool,
     /// Whether the device grant is offered.
@@ -112,6 +114,7 @@ impl Default for OAuthConfig {
             pkce: true,
             advertise_iss: true,
             callback_issuer: CallbackIssuer::Correct,
+            callback_parameters: Vec::new(),
             registration: true,
             device: false,
             refuse_device: false,
@@ -636,6 +639,9 @@ impl OAuthGate {
                 let _ = write!(location, "&iss={}", encode("https://evil.example.com"));
             }
             CallbackIssuer::Absent => {}
+        }
+        for (key, value) in &self.config.callback_parameters {
+            let _ = write!(location, "&{}={}", encode(key), encode(value));
         }
         Reply {
             status: 302,
