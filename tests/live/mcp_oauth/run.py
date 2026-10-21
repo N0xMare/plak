@@ -107,6 +107,11 @@ def redact(output):
     return output
 
 
+def remedy_scopes(output):
+    match = re.search(r"plak mcp login srv --scope '([A-Za-z0-9._:/+ \-]+)'", output)
+    return set(match.group(1).split()) if match else set()
+
+
 def session_id(output):
     match = re.search(r"^session_id=([0-9a-f-]{36})$", output, re.MULTILINE)
     return match.group(1) if match else None
@@ -756,8 +761,8 @@ class Harness:
             require("$(touch" not in result.stdout, "hostile scope reached remedy")
             if name == "step_up":
                 require(
-                    "--scope 'read write'" in result.stdout,
-                    "step-up remedy omitted the scope union",
+                    {"read", "write", "offline_access"} <= remedy_scopes(result.stdout),
+                    "step-up remedy omitted the stored/challenged scope union",
                 )
                 self.login(scope="read write")
                 self.tool("write")
@@ -979,7 +984,18 @@ def main(argv=None):
 
     signal.signal(signal.SIGTERM, interrupted)
     try:
-        version = subprocess.check_output([str(harness.binary), "version"], text=True)
+        probe_home = harness.root / "version-home"
+        probe_home.mkdir(mode=0o700)
+        version = subprocess.check_output(
+            [str(harness.binary), "version"],
+            text=True,
+            env={
+                "HOME": str(harness.root / "fake-home"),
+                "PLAK_HOME": str(probe_home),
+                "XDG_STATE_HOME": str(harness.root / "xdg-state"),
+                "PATH": os.defpath,
+            },
+        )
         require("test-hooks" in version, "binary must be built with test-hooks")
         report["version"] = version.strip()
         harness.start()
