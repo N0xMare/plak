@@ -457,7 +457,7 @@ scripts/dev-check.sh --steps GROUP,... # just steps GROUP,...: exactly these gro
 
 | Group (canonical order) | Coverage |
 | --- | --- |
-| `static` | fmt, then `check_workspace.py` and `check_features.py` (not in platform), then workspace clippy |
+| `static` | fmt, then locked dependency fetch, offline first, online only for missing cache inputs, then `check_workspace.py` and `check_features.py` (fetch and structure checkers not in platform), then workspace clippy |
 | `builds` | Workspace default-feature build; Plak maintainer-feature build. Both deny rustc warnings |
 | `rustdoc` | Workspace all-features rustdoc, denied warnings |
 | `tests-parallel` | nextest profile `offline`: everything but the serial and durability lanes |
@@ -490,7 +490,8 @@ separate checkout, target and temporary roots. Each group prints a
 
 After argument validation and the prerequisite check, every selected group runs
 even if an earlier group fails. The static group also runs every step (fmt,
-each structure checker, clippy) and summarizes all failures. Other groups may
+locked dependency fetch, each structure checker, clippy) and summarizes all
+failures. Other groups may
 stop internally on a failed command; later groups still run. The final summary
 names all failed groups, exits with the first failed group's status, and never
 reports success when any group failed.

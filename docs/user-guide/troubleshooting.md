@@ -727,7 +727,7 @@ with `cargo build --release --locked -p plakous-js-runtime -p plakous-py-worker`
 Separate invocations keep Monty runtime features out of `plak`.
 Rebuild the complete product, or set `PLAK_MONTY_WORKER` to that `monty` binary.
 
-## A Python cell raises `PermissionError` or "is not supported in this environment"
+## A Python cell raises `PermissionError` or `RuntimeError` for host access
 
 ```
 PermissionError: Permission denied: '/etc/hosts'

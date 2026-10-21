@@ -792,6 +792,11 @@ A store in this build's own directory at another schema version can only be a
 damaged or hand-placed file. It is refused with a message naming the file and
 saying it was created by an incompatible plak build; nothing is moved.
 
+An exact reopen refused for incompatible recorded evaluator bytes, path or
+contract names the actual session id in the `plak session export <id>` recovery
+command, followed by `plak session import <file>`. The library refusal stays
+product-neutral; the hosted product renderer supplies the recovery commands.
+
 #### 2.5.1 Carry-forward
 
 Before leaving a resumable session, `/reload` asks the destination build for

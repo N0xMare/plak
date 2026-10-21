@@ -2881,8 +2881,25 @@ async fn publication_cut_reconstructs_child_before_binding_and_new_children_use_
     assert_ne!(new_locator, recovered);
     assert_eq!(
         *observed.lock().unwrap(),
-        [historical.clone(), historical.clone(), historical, current]
+        [
+            historical.clone(),
+            historical.clone(),
+            historical.clone(),
+            current
+        ]
     );
+    assert_eq!(fixture.dispatches(), 0);
+
+    std::fs::remove_file(&historical).unwrap();
+    let error = sessions
+        .created_composition_artifact(created)
+        .await
+        .expect_err("missing recorded evaluator must refuse reopen");
+    let refusal = crate::agent::CodingSessionOpenFailure::from(error);
+    let message = refusal.failure.message();
+    assert!(message.contains(&format!("plak session export {}", created.session_id())));
+    assert!(message.contains("plak session import <file>"));
+    assert!(!message.contains("<id>"));
     assert_eq!(fixture.dispatches(), 0);
 }
 

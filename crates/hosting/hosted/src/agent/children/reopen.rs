@@ -711,9 +711,15 @@ pub(in crate::agent) fn format_session_reopen_error(
 
 /// The one refusal every surface prints for a session another build wrote.
 pub(crate) fn incompatible_session_message(error: &AgentSessionsError) -> String {
-    error
+    let message = error
         .to_string()
-        .replace("an incompatible build", "an incompatible plak build")
+        .replace("an incompatible build", "an incompatible plak build");
+    match error.incompatible_session() {
+        Some(id) => format!(
+            "{message}; recover with that build's `plak session export {id}` then `plak session import <file>`"
+        ),
+        None => message,
+    }
 }
 
 /// Product does not persist executor outcomes outside Plakous. SIGKILL during

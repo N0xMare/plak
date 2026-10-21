@@ -1141,8 +1141,10 @@ The worker holds no host authority. Only the local subprocess transport is
 configured; `monty-pool`'s remote WebSocket transport is never used, and no
 mounts or working directory are sent (`os.getcwd()` reports the virtual `/`).
 Every OS call the interpreter routes to the host is refused. Host `import`
-raises `ModuleNotFoundError`; `import_stubs` receives no stubs. `Path.scan`
-(including `os.scandir`) raises `RuntimeError` explaining that filesystem
+raises `ModuleNotFoundError`. Production cells are not type-checked
+(`type_check: false`); a stub request (`import_stubs`), if any, receives no
+stubs. `Path.scan` (including `os.scandir`) raises `RuntimeError` explaining
+that filesystem
 access is not available in cells and nested tools must be used. This non-`OSError`
 refusal also makes `Path.glob`, `Path.rglob`, `os.walk` and `Path.walk` raise
 rather than silently returning no entries. Other filesystem paths, `open`,

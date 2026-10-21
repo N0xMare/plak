@@ -1250,7 +1250,9 @@ settings have been changed.
 Dependency updates are manual: a maintainer raises a version and the change is
 verified by `just full` and `cargo deny` before it lands. There is no
 automated update service. Routine checks are deterministic and offline except
-for advisory acquisition, which refreshes advisory data.
+for advisory acquisition, which refreshes advisory data, and the static group's
+locked dependency fetch before the structure checkers: it tries offline first
+and goes online only for missing cache inputs.
 
 ## 9. Change requirements
 
