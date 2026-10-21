@@ -113,22 +113,32 @@ pub fn target_instructions(
     selected_model: &str,
     selected_effort: Option<&str>,
 ) -> String {
+    let codex = crate::bases::codex::is_codex_base(family_base);
     let base = match composition {
         Composition::JavaScriptCell => PtcHarness::JavaScript.instructions(surface.exposed_names()),
         Composition::PythonCell => PtcHarness::Python.instructions(surface.exposed_names()),
         Composition::Direct | Composition::NativeCell => {
-            catalog_bound_family_base(family_base, surface)
+            let base = crate::bases::codex::model_base(
+                family_base,
+                selected_model,
+                composition,
+                surface.exposed_names(),
+            );
+            catalog_bound_family_base(&base, surface)
         }
     };
-    PromptPlan::new(
+    let mut plan = PromptPlan::new(
         base,
         workspace_root,
         cwd,
         selected_model,
         selected_effort,
         surface.contributions().to_vec(),
-    )
-    .assemble()
+    );
+    if codex {
+        plan.agreements = crate::identity::CODEX_WORKING_AGREEMENTS;
+    }
+    plan.assemble()
 }
 
 const CATALOG_BOUND_EDIT_SENTENCES: &[(&[&str], &str)] = &[
@@ -170,6 +180,7 @@ fn catalog_bound_family_base(base: &str, surface: &CompiledSurface) -> String {
         }
     }
     if !presents("apply_patch") {
+        base = base.replace(crate::bases::codex::GPT6_EDIT_BULLET, "");
         for line in crate::bases::codex_vendor::CODEX_VENDOR_GENERAL_AND_EDITING_CONSTRAINTS
             .lines()
             .filter(|line| line.contains("apply_patch"))
@@ -192,6 +203,52 @@ mod tests {
     };
     use crate::surface_fixture::surface;
     use plakous_tools::CodingPresentation;
+
+    #[test]
+    fn gpt6_assembly_uses_the_model_family_and_compiled_catalog() {
+        use crate::bases::{self, PromptVariant};
+        for composition in [Composition::Direct, Composition::NativeCell] {
+            let family_base = match composition {
+                Composition::Direct => {
+                    bases::codex_direct_base_instructions_for(PromptVariant::Parity)
+                }
+                _ => bases::codex_code_mode_base_instructions_template_for(PromptVariant::Parity),
+            };
+            let surface = surface(CodingPresentation::Codex, &[]);
+            let render = |model| {
+                target_instructions(
+                    family_base,
+                    composition,
+                    &surface,
+                    Path::new("/repo"),
+                    Path::new("/repo"),
+                    model,
+                    Some("high"),
+                )
+            };
+            let gpt6 = render("gpt-6.1-sol");
+            let gpt5 = render("gpt-5.6-sol");
+            assert!(gpt6.starts_with("You are Codex, an agent based on GPT-6."));
+            assert!(gpt5.starts_with("You are Codex, a coding agent based on GPT-5."));
+            assert_eq!(
+                gpt6.contains(bases::codex::GPT6_EDIT_BULLET),
+                surface
+                    .exposed_names()
+                    .iter()
+                    .any(|name| name.as_str() == "apply_patch")
+            );
+            assert!(gpt6.contains("Never sleep-poll.")); // No-wake paragraph stays intact.
+            assert!(gpt6.contains(crate::identity::CODEX_WORKING_AGREEMENTS));
+            assert!(!gpt6.contains("Do not narrate tool calls"));
+            assert!(!gpt6.contains("You may call independent presented tools together"));
+            assert_eq!(gpt6.matches("Workspace root:").count(), 1);
+            assert_eq!(
+                gpt6.matches("Commit or push only when the user asks.")
+                    .count(),
+                1
+            );
+        }
+    }
 
     #[test]
     fn catalog_bound_edit_sentences_occur_verbatim_in_family_bases() {

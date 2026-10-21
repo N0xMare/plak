@@ -353,14 +353,15 @@ pub(crate) mod suite {
     ) -> String {
         match file_stem {
             "codex.direct.root.single-agent" => {
-                "Codex OAuth Direct (gpt-5.6-luna), single-agent root (no spawn)".to_owned()
+                format!("Codex OAuth Direct ({model}), single-agent root (no spawn)")
             }
             "codex.native-ptc.root" => {
-                "Codex OAuth Code Mode (gpt-5.6-sol), tree root with spawn + implement/review roster"
-                    .to_owned()
+                format!(
+                    "Codex OAuth Code Mode ({model}), tree root with spawn + implement/review roster"
+                )
             }
             "codex.native-ptc.child" => {
-                "Codex OAuth Code Mode (gpt-5.6-sol), spawned leaf".to_owned()
+                format!("Codex OAuth Code Mode ({model}), spawned leaf")
             }
             "grok.direct.root.single-agent" => {
                 "SuperGrok OAuth Direct (grok-4.6), single-agent root (no spawn)".to_owned()
@@ -447,7 +448,10 @@ pub(crate) mod suite {
                 for occupancy in occupancies {
                     let (model, code_mode) = match (provider, composition) {
                         (ProviderKind::Codex, ProductCompositionSelection::NativePtc) => {
-                            ("gpt-5.6-sol", true)
+                            ("gpt-6.1-sol", true)
+                        }
+                        (ProviderKind::Codex, ProductCompositionSelection::Direct) => {
+                            ("gpt-6.1-luna", false)
                         }
                         (ProviderKind::Codex, _) => ("gpt-5.6-luna", false),
                         (ProviderKind::Grok, _) => ("grok-4.6", false),
@@ -1423,67 +1427,67 @@ pub(crate) mod suite {
     const PROMPT_RENDER_PINS: &[(&str, &str)] = &[
         (
             "codex.direct.root.single-agent",
-            "6396a9a1aef8cf912d10d748c928eb43c6e9b46dbca1c217935aef428a1f8394",
+            "e9ee3583cf3a10fe1ab6f653705035dbf26fe50ea72ee9b07950d445c41e292e",
         ),
         (
             "codex.direct.root",
-            "576bcd7540781b92cde11c100011e0f48dce6c5f9e3f0e5c69e9d8c724c64acc",
+            "1a1340555a837c4427c72dbf90017f5c722c4062d26bb1d27c6adf8865a242cd",
         ),
         (
             "codex.direct.nested-parent",
-            "35fdb51eec86cd1342ad35597451c2c5189054d91a9e35f40238a9d2ab5d8124",
+            "f3df8a75a923f1ddf5f3a4046aee31bf874c6f5626be202383453d17c93ea9ee",
         ),
         (
             "codex.direct.child",
-            "936e6e04d40605e0d8592ee8059a78438308c942d31488c961d9eead857ebadd",
+            "e7a32a761473128383c00bb5d31ad8dcb66174118b1a0d294160eb0175b4f911",
         ),
         (
             "codex.native-ptc.root.single-agent",
-            "a716c9202b22d58b806976476879e9ca5214309f813c7facacc5394d2cb667df",
+            "928ed644019ca84f2bb380562886ef4e8f48f5f075361c2d7c97f4ce5df3da4a",
         ),
         (
             "codex.native-ptc.root",
-            "672524a7e774d87449dd0c5d02a5996cd5cd81ca9e2da272c5149fb9a18ebc9d",
+            "5dcfe1259ed29878f10c31968b9db229913848a55c3e53606e124095c8135fc5",
         ),
         (
             "codex.native-ptc.nested-parent",
-            "96c79778b351624f9a7cf89b71d14f581168880290b4dcb88bf5e25eca52bbbf",
+            "3a7bdb74f1653865b649c875a5381b83427709572944b57d13c89e93d81c1c53",
         ),
         (
             "codex.native-ptc.child",
-            "19acbdbb99fdefcf017dbf44ba210a1eba0cb2259005a83f40edf71a777f6777",
+            "4115c0bdf1ba92949c3f5bca72267fd23993c5ae67b778e85e1b775e31de11e6",
         ),
         (
             "codex.js-ptc.root.single-agent",
-            "ab8f3cb545e78b04b8d84ee6d870d40635bdf1bef133274a2a473a9ce8f39f8a",
+            "ccff5bfa7bbbf13846316db81c7403277e7e4f98757868c79e04c2d49c1b4001",
         ),
         (
             "codex.js-ptc.root",
-            "cf2811e0683d8eba4b8b2febe7092d7863c96ef3fba4f59ebe557c23ba190cf9",
+            "d59db1b5de3e1125ef9d1f4add84ae50b64f7d82cc4a63604a6ac3f2abd07a05",
         ),
         (
             "codex.js-ptc.nested-parent",
-            "c9b683eca8b51f3ca235dd63511d9626d866f1d144cc53ab3a9ecd18ea96de48",
+            "01c5f11419a9776a5ee7f2b0e851474cf5c567923050179b594d96550c375953",
         ),
         (
             "codex.js-ptc.child",
-            "2eff1d68bd6bff8ff693283dd6426b1c43af908656f3ed84237f670c1c06f041",
+            "006121956af2a2b2f66545f129c30f8ae66a3cb81fe78e00348a961264ab22a8",
         ),
         (
             "codex.py-ptc.root.single-agent",
-            "8725d6733c8512547463ffbf7a4f454f66f98a6771590620df93582f9926c7c5",
+            "2dcdc5c5c0c0d18c744bd012d6e801ce92fdd3d5d40f91378292e4258e518d74",
         ),
         (
             "codex.py-ptc.root",
-            "320fe7ae4512c68b3415b0eea2799f82fb306511d94b18f688dabc7ea08488d4",
+            "85c577df5343effcbd236267ee744a003f9c7ecf0776eb817bad08acf2258801",
         ),
         (
             "codex.py-ptc.nested-parent",
-            "792e5118781178312f74772542e1192167b92d31350a2e87848eaca27439ae15",
+            "8c37a533ab2402d01a6fe6f0b526424b2b6ad861c6456bae63c03d1aeaf0aecc",
         ),
         (
             "codex.py-ptc.child",
-            "a31f87a5fbdea56bf5997e9ea30e44ea42db1da919fa10c92ad80c972486468c",
+            "aac0a0680caedd09cb580a97164808ef45e5611c844f5dac0626f411e9553aa2",
         ),
         (
             "grok.direct.root.single-agent",
@@ -1727,19 +1731,19 @@ pub(crate) mod suite {
         ),
         (
             "openai-api.direct.root.single-agent",
-            "ef6480480f9665e683ff6ce60ef558f6a59a395faac39c56e5a7456f88826338",
+            "47651f8c8380b003a64c45f540386a7f681890b9ead9965ea237b7ef215e350e",
         ),
         (
             "openai-api.native-ptc.root.single-agent",
-            "1184151e44360b94fcd4a727f580435e514c5b03f44d36978e5a93620b6fedcd",
+            "99180b96f53c29ae484b90321e378d1a30ef9de26e2b4d18bc4a262dd5d01f4f",
         ),
         (
             "openai-api.js-ptc.root.single-agent",
-            "a841cbe8d0d8cbce657a68d76f9646634ce250416f754b158c537b31c2c6beb6",
+            "686c3a5bb0383fa3876c8c1f1a7fad6d2471fb527abe0abd9c78ca235ec7de98",
         ),
         (
             "openai-api.py-ptc.root.single-agent",
-            "4fe433a18b6b37121d04df8a619229d444fb4257bed49f272329bcc4bd2ff39c",
+            "7d21c45161f8969e552cb5bb14d93ad4c304ba09d88b86c8cc4a36d2d4dbf800",
         ),
         (
             "xai-api.direct.root.single-agent",
@@ -1952,7 +1956,66 @@ pub(crate) mod suite {
     /// and whose tools carry the orchestration schemas.
     pub(crate) const ORCHESTRATION_TOKEN_BUDGET: usize = 8_000;
 
-    /// Every route's harness footprint, against the two normative budgets.
+    #[test]
+    fn rendered_codex_base_selection_tracks_the_model_family() {
+        let (_tmp, home, root, cwd) = instruction_fixture();
+        let tools = occupancy_tools(&root);
+        for mut spec in routes().into_iter().filter(|spec| {
+            spec.provider == ProviderKind::Codex
+                && matches!(
+                    spec.composition,
+                    ProductCompositionSelection::Direct | ProductCompositionSelection::NativePtc
+                )
+        }) {
+            for model in ["gpt-6.1-sol", "gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"] {
+                spec.model = model;
+                let artifacts = wire::render_wire(&spec, &home, &root, &cwd, &tools);
+                let text = &artifacts.footprint.instruction_text;
+                assert!(
+                    text.contains(if model.starts_with("gpt-6") {
+                        "You are Codex, an agent based on GPT-6."
+                    } else {
+                        "You are Codex, a coding agent based on GPT-5."
+                    }),
+                    "{}: {model}",
+                    spec.file_stem
+                );
+                assert_eq!(
+                    text.contains("## Intermediate commentary"),
+                    model.starts_with("gpt-6")
+                );
+                assert!(!text.contains("JSON.parse(await tools.exec_command"));
+                assert!(!text.contains("Do not narrate tool calls"));
+                let total =
+                    wire::HarnessFootprint::approx_tokens(artifacts.footprint.total_bytes());
+                let budget = if spec.occupancy == Occupancy::SingleAgent {
+                    if model.starts_with("gpt-6") {
+                        5_500
+                    } else {
+                        SINGLE_NODE_TOKEN_BUDGET
+                    }
+                } else {
+                    ORCHESTRATION_TOKEN_BUDGET
+                };
+                assert!(
+                    total < budget,
+                    "{}: {model} uses {total} tokens",
+                    spec.file_stem
+                );
+                if spec.occupancy == Occupancy::SingleAgent
+                    && spec.composition == ProductCompositionSelection::NativePtc
+                {
+                    assert!(
+                        total <= budget - 150,
+                        "{}: {model} lacks headroom",
+                        spec.file_stem
+                    );
+                }
+            }
+        }
+    }
+
+    /// Every route's harness footprint, against its normative family budget.
     ///
     /// This is the gate the prompt-parity work needed: the Codex base grew
     /// from ~400 characters to the kept sections of Codex's own base
@@ -1974,17 +2037,30 @@ pub(crate) mod suite {
             let instructions = wire::HarnessFootprint::approx_tokens(footprint.instruction_bytes);
             let tool_tokens = wire::HarnessFootprint::approx_tokens(footprint.tool_bytes);
             let total = wire::HarnessFootprint::approx_tokens(footprint.total_bytes());
+            let gpt6 = spec.model.starts_with("gpt-6")
+                && matches!(
+                    spec.composition,
+                    ProductCompositionSelection::Direct | ProductCompositionSelection::NativePtc
+                )
+                && spec.provider.presentation() == CodingPresentation::Codex;
+            let single_budget = if gpt6 {
+                5_500
+            } else {
+                SINGLE_NODE_TOKEN_BUDGET
+            };
+            let full_budget = ORCHESTRATION_TOKEN_BUDGET;
             let (occupancy, budget) = match spec.occupancy {
-                Occupancy::SingleAgent => ("single-agent", SINGLE_NODE_TOKEN_BUDGET),
-                Occupancy::Root => ("root", ORCHESTRATION_TOKEN_BUDGET),
-                Occupancy::NestedParent => ("nested-parent", ORCHESTRATION_TOKEN_BUDGET),
-                Occupancy::Child => ("child", ORCHESTRATION_TOKEN_BUDGET),
+                Occupancy::SingleAgent => ("single-agent", single_budget),
+                Occupancy::Root => ("root", full_budget),
+                Occupancy::NestedParent => ("nested-parent", full_budget),
+                Occupancy::Child => ("child", full_budget),
             };
             rows.push(format!(
                 "| `{}` | {occupancy} | {instructions} | {tool_tokens} | {total} | {budget} |",
                 spec.file_stem
             ));
-            if spec.file_stem == "codex.native-ptc.root.single-agent" && total > 3_850 {
+            if spec.file_stem == "codex.native-ptc.root.single-agent" && total > single_budget - 150
+            {
                 failures.push(format!(
                     "{}: {total} tokens leaves insufficient headroom",
                     spec.file_stem

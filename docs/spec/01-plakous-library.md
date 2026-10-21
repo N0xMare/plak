@@ -104,7 +104,10 @@ says; a profile arrives with one settled string, and construction freezes it.
 
 Where alternative wordings exist, the choice is a parameter, not an ambient
 read. `plakous-prompts` owns the two family-base variants (spec 02 §6.2.1) and
-every accessor for them takes the variant as an argument; the recommended
+the model-keyed GPT-6 Codex parity base. The product's first-turn assembler
+selects it from the explicit model id on Direct/native Code Mode before
+freezing the complete instruction string; other models retain their base.
+Every variant accessor takes the variant as an argument; the recommended
 profile constructors come in pairs, one carrying the default variant and one
 taking an explicit variant. Reading the `PLAK_PROMPT_VARIANT` switch is the
 product's job, done once where it selects a recommended profile, above
@@ -4188,7 +4191,8 @@ embedder chooses the presentation its own route catalog declares. The frozen
 seven-tool Code Mode reference profile (§9.3) is a composition profile, not a
 Direct presentation. The
 Codex base's opening identity line (`You are Codex, a coding agent based on
-GPT-5.`) is pack text, part of the base instruction, not costume. Code Mode
+GPT-5.`, or `You are Codex, an agent based on GPT-6.` for the `gpt-6` family;
+chapter 02 §6.2.1) is pack text, part of the base instruction, not costume. Code Mode
 presentations are compiled only for the Codex OAuth route tuple and the OpenAI
 API `openai.responses`/`openai.platform` route; which profiles and models the
 API route carries is its own enrollment. The library admits Code Mode on the

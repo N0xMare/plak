@@ -77,3 +77,69 @@ prompt goldens with
 `PLAK_UPDATE_GOLDENS=1 cargo test -p plakous-hosted --lib rendered_`. Any
 movement in those pins is a change to model-visible wording and needs its own
 review.
+
+## GPT-6 family snapshot
+
+The GPT-6 parity base is separately pinned to tag `rust-v0.163.0`
+(annotated tag object `129b8ec7ee6f4511557a4856279f529025c25af4`), peeled
+commit `83086188ae0614bd882818ff1aa23f3194962012` of `openai/codex`.
+Source: `codex-rs/models-manager/models.json`, entry `slug == "gpt-6.1-sol"`,
+`model_messages.instructions_template`. Apache-2.0; the LICENSE and NOTICE
+in this directory apply. This does not move the Code Mode protocol pin.
+
+Verified directly against the commit URL and the upstream tag reference.
+The decoded UTF-8 template is **21,779 bytes**, not 21,769: the latter count
+in the review proposal was inaccurate. The source snapshot preserves every
+byte, including trailing spaces and the final newline.
+
+| File | Bytes | sha256 |
+| --- | ---: | --- |
+| `gpt6/direct.md` | 11218 | `c59094ea776a953a05b0cde13880fa72bde1264ec970ed371039b8fb464e0c42` |
+| `gpt6/instructions-template.md` | 21779 | `e1bdd4f8f0df4b20f4a0ffc8a861ce819df45325d8cecdfb92e80379cf8d142e` |
+| `gpt6/native-ptc.md` | 11863 | `bbdcae63bfcdb39b9a1a20d2aa4d2259c976124b20c325191a79321f8ff7e120` |
+
+`native-ptc.md` is the approved Code Mode base; `direct.md` is its Direct
+delta. Both trim upstream line-end spaces. The full source snapshot is not
+sent to the model. Line numbers below refer to that snapshot.
+
+### Recorded CHANGED edits
+
+- L7: replace "skills" with "project instruction files".
+- L11: retain the no-messaging rule; remove skill/plugin authorization clauses.
+- L13: retain the confirmation explanation, with "AGENTS.md rule" as its only
+  example; remove automatic approval-review reporting.
+- L19: remove "creating draft PRs" from the reversible-work examples.
+- L23: ask in the final message after independent work, with stated assumptions.
+- L25: remove "and skill" from local-file exceptions.
+- L67: replace the async-question-tool paragraph with two sentences explaining
+  that questions end the turn after useful independent work.
+- L81: remove the claim that commentary is collapsed after the final answer.
+- L89-L100: describe terminal Markdown; replace clickable Markdown file-link
+  instructions with standalone backticked paths and optional 1-based lines;
+  omit L97, retaining the URI, range and grouping rules.
+- L117-L118 (Direct only): replace both Code Mode parallelism bullets with
+  independent tool calls in one response, keeping dependent work sequential.
+- L123: remove `$CODEX_HOME` from the reserved-variable examples.
+
+### Omitted and authored text
+
+Omit L37, L41-L45, L49, L55-L59, L83, L97, L104-L112, L121, L126,
+and L130-L172 (skills, Apps, Plugins). Retain L47's heading. Direct additionally
+omits L124's JavaScript shell-escaping bullet. Other upstream wording is kept.
+
+Append two authored editing/worktree bullets: use apply_patch except for generated
+or multi-file replacements, preserve others' edits, prefer non-interactive git.
+The authored Tools suffix names exec/wait and the compiled nested catalog on
+Code Mode; on Direct it retains the first and last sentences of the existing
+Direct tool paragraph (the apply_patch rule is already in the editing bullet).
+The assembler omits the editing bullet when apply_patch is absent.
+
+The Codex-family working agreements omit the no-narration and generic
+parallelism sentences; the bases own that guidance. The Codex wake paragraph
+omits "Never sleep-poll"; the wait paragraph is unchanged. Identity, topology,
+assignment and enrolled project instructions remain separately owned.
+
+Re-vendor by decoding that exact JSON member, checking the source digest,
+reviewing the recorded edits, then updating the source/base pins in
+`src/bases/codex.rs` and the rendered prompt pins. GPT-5.6 and other models
+retain the earlier base, and the legacy variant retains its control base.

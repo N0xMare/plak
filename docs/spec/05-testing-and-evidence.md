@@ -1223,7 +1223,14 @@ in the harness instruction text.
 
 The same suite holds the two normative harness-footprint budgets (chapter 02
 §6.7): a basic single node under 4,000 approximate tokens, the fullest surface
-at or under 8,000. `rendered_prompt_footprints_stay_within_budget` fails the
+at or under 8,000. GPT-6 Codex Direct/native Code Mode instead has an explicit
+family budget under 5,500 for a single node and at or under 8,000 for the
+fullest surface/children. Codex native-PTC single-agent leaves at least 150
+tokens of headroom under the applicable family budget (5,350 for GPT-6,
+3,850 otherwise). Other routes' budgets do not change. The suite also checks
+GPT-6 versus GPT-5.6 base selection and pins the source and approved derived
+bases; unaffected routes retain their rendered digests.
+`rendered_prompt_footprints_stay_within_budget` fails the
 build for any route over its budget, naming the route and its instruction and
 tool split, and prints a table of every route's footprint whether it passes or
 not, so the cost of a wording change is read rather than re-derived.

@@ -18,7 +18,7 @@
 )]
 
 mod claude;
-mod codex;
+pub(crate) mod codex;
 pub mod codex_vendor;
 mod grok;
 pub mod legacy;

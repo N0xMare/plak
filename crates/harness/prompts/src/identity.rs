@@ -51,6 +51,9 @@ pub const PLAK_PRODUCT_VCS_POLICY: &str = "Commit or push only when the user ask
 /// tools earn them. Do not name tools that are not on the current surface.
 pub const PLAK_PRODUCT_WORKING_AGREEMENTS: &str = "Work from tool results: do not claim an effect finished unless the returned result shows it. Do not narrate tool calls; human-facing text is the outcome. Stay inside the asked scope; do not add drive-by features or comments. Follow enrolled project instruction files and in-repo conventions when they exist. You may call independent presented tools together. Do not retry a deterministic invalid call with the same arguments; bounded retries of transient failures and supported polling are different (polling is not a repeated invalid call); after an ambiguous mutating failure, inspect the affected state before retrying. Local reversible work may proceed; hard-to-reverse or shared effects (force-push, history rewrite, broad deletes, dropping data) need an explicit user ask.";
 
+/// Codex-family agreements; the base owns commentary and parallel-call guidance.
+pub(crate) const CODEX_WORKING_AGREEMENTS: &str = "Work from tool results: do not claim an effect finished unless the returned result shows it. Stay inside the asked scope; do not add drive-by features or comments. Follow enrolled project instruction files and in-repo conventions when they exist. Do not retry a deterministic invalid call with the same arguments; bounded retries of transient failures and supported polling are different (polling is not a repeated invalid call); after an ambiguous mutating failure, inspect the affected state before retrying. Local reversible work may proceed; hard-to-reverse or shared effects (force-push, history rewrite, broad deletes, dropping data) need an explicit user ask.";
+
 /// Spawner-only paragraph, appended when `spawn_agent` is compiled for the
 /// node (leaves get no topology paragraph at all).
 pub const PLAK_PRODUCT_TOPOLOGY_AGREEMENTS: &str = "The child starts from the spawn prompt; send_agent_message is follow-up on a running turn, not how work is assigned. wait_agent returns when a watched child settles or sends mail, and returns and acknowledges only that mail, and settlement is not success: read output_json only from rows that submitted. Default: children share your checkout; give them file-disjoint work or run writers in sequence. Pass workspace=fork when more than one child must write at the same time, or when the work should stay off this checkout. A forked child's edits are not in your checkout until adopt_candidate succeeds. adopt_candidate and discard_workspace stay valid when presented. A plan or todo tool records your intentions only; it does not start, cancel, or finish child work.";
@@ -97,7 +100,7 @@ pub const UNTRUSTED_TOOL_DATA_AGREEMENTS: &str = "A result that begins with an [
 pub const PLAK_PRODUCT_ASSIGNMENT_WAKE_AGREEMENTS: &str =
     "Ending a turn to wait is not a result: call submit_result when the assignment is done.";
 
-const PROCESS_CODEX_WAKE_AGREEMENTS: &str = "When only waiting remains, end this turn; completion notices start a new turn. Use write_stdin to wait only when you need the output to continue this turn. Never sleep-poll; stop servers you no longer need before ending the turn.";
+const PROCESS_CODEX_WAKE_AGREEMENTS: &str = "When only waiting remains, end this turn; completion notices start a new turn. Use write_stdin to wait only when you need the output to continue this turn. Stop servers you no longer need before ending the turn.";
 
 const PROCESS_GROK_WAKE_AGREEMENTS: &str = "When only waiting remains, end this turn; completion notices start a new turn. Use get_command_or_subagent_output with nonzero timeout_ms only when you need a result to continue this turn. Never sleep-poll; stop servers you no longer need before ending the turn.";
 
@@ -488,7 +491,7 @@ pub static IDENTITY_PROMPT_PINS: &[PromptPin] = &[
     PromptPin::new(
         "identity.process_codex_wake_agreements",
         PROCESS_CODEX_WAKE_AGREEMENTS,
-        "f8566372e8b254b5123730c00595781442343264c188e1c5b5a3b592e4f2252f",
+        "dcd45d58cd1180e3d47e0d63e9d52236d6bbf607b600b2e2ec31dffb9f0ce91e",
     ),
     PromptPin::new(
         "identity.process_grok_wake_agreements",
@@ -549,6 +552,11 @@ pub static IDENTITY_PROMPT_PINS: &[PromptPin] = &[
         "identity.product_vcs_policy",
         PLAK_PRODUCT_VCS_POLICY,
         "c15e58dceddec14657265bc5e4dd1da3e83851e2140e8885b768107c99acc2b1",
+    ),
+    PromptPin::new(
+        "identity.codex_working_agreements",
+        CODEX_WORKING_AGREEMENTS,
+        "1f45e05ce98c7a4cc9cb042f7e2c011ec3cebae17b0b5d50e4b790b91577ed75",
     ),
     PromptPin::new(
         "identity.product_working_agreements",
@@ -739,7 +747,11 @@ mod tests {
                         text.contains(PLAK_PRODUCT_ASSIGNMENT_WAKE_AGREEMENTS),
                         host_wakes && assignee
                     );
-                    assert!(text.contains("sleep-poll") || text.contains("do not poll"));
+                    if tool == "write_stdin" && host_wakes {
+                        assert!(!text.contains("sleep-poll"));
+                    } else {
+                        assert!(text.contains("sleep-poll") || text.contains("do not poll"));
+                    }
                     assert!(text.contains("servers"));
                 }
             }

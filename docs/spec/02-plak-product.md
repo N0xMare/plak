@@ -4925,6 +4925,12 @@ mutating failure is inspected before it is retried; local reversible work may
 proceed, but hard-to-reverse or shared effects — force-push, history rewrite,
 broad deletes, dropping data — need an explicit user ask.
 
+On Codex-family packs (including OpenAI API), omit the no-narration sentence
+and the generic independent-tools sentence: the base owns commentary and
+parallelism guidance. The Codex wake process paragraph says "Stop servers you
+no longer need before ending the turn" without "Never sleep-poll"; its wait
+variant is unchanged. All other agreements and the identity tail are unchanged.
+
 Neither paragraph names Plak, Plakous, or any integration. The product's own
 identity is chrome for the operator, not a claim made to the model.
 
@@ -5008,7 +5014,9 @@ dirty-worktree rules and the destructive-command rule. Dropped: personality
 prose, the `AGENTS.md` spec, the preamble and planning cadence, the plan tool
 section, special user requests, frontend guidance, and the tool guidelines,
 which in Plakous belong to the pack that owns each capability (§6.3). No byte
-inside a kept vendor source range is edited. During assembly, the `apply_patch`
+inside a kept vendor source range is edited for this earlier base. The
+GPT-6 base below is the sole exception, with each CHANGED edit recorded. During
+assembly, the `apply_patch`
 editing bullet and tool-naming edit sentences are omitted when the compiled
 catalog lacks their required tools (§6.7). Where a kept paragraph assumes a
 Codex feature Plakous does not have, the execution sentence in the identity
@@ -5016,6 +5024,51 @@ tail states the truth instead. The Plakous paragraph that names the
 composition's tools — the
 `exec`/`wait` sentence for Code Mode, the `apply_patch` sentence for Direct when
 that tool is present — follows the copied text as a suffix.
+
+**Codex GPT-6 family.** On parity Direct and native Code Mode, models whose
+id starts with `gpt-6` use the base vendored from `openai/codex`
+`rust-v0.163.0`, commit `83086188ae0614bd882818ff1aa23f3194962012`,
+`codex-rs/models-manager/models.json`, `gpt-6.1-sol`'s
+`model_messages.instructions_template`. The decoded UTF-8 source is 21,779 bytes,
+sha256 `e1bdd4f8f0df4b20f4a0ffc8a861ce819df45325d8cecdfb92e80379cf8d142e`.
+Source and approved bases are under `vendor/codex-prompt/gpt6` in the prompts
+package, with source and base pins in `bases/codex.rs`. GPT-5.6 and other models
+keep the earlier base; legacy keeps its control base. JavaScript/Python PTC
+still replace the family base outright. No provider request policy changes.
+
+This base keeps permission and persistence guidance, personality and concise
+writing, technical communication, commentary/final channel discipline,
+compaction continuity, terminal answer formatting and work rules. It drops
+redundant style paragraphs, PR descriptions, visualizations, skills, Apps and
+Plugins. Unlike earlier vendored ranges, it permits these recorded CHANGED
+edits (upstream line numbers), plus trimming line-end spaces:
+
+- L7: "skills" becomes "project instruction files".
+- L11: remove skill/plugin messaging authorization and reporting clauses.
+- L13: keep the confirmation explanation with only "AGENTS.md rule" as example;
+  drop automatic approval-review reporting.
+- L19: remove creating draft PRs from autonomous-work examples.
+- L23: unclear intent asks in final after independent work, stating assumptions.
+- L25: remove "and skill" from local markdown file exceptions.
+- L67: replace the async-question-tool paragraph with Plak's no-mid-turn-question
+  rule: finish independent work, then ask in final.
+- L81: remove the claim that the UI collapses commentary.
+- L89-L100: describe terminal Markdown, replace clickable file links with
+  standalone backticked paths and optional 1-based lines, drop L97's link rule;
+  keep URI/range prohibitions and grouping guidance.
+- L123: remove `$CODEX_HOME` from reserved-variable examples.
+
+Code Mode keeps L117-L118's batching in one exec with awaited promises and
+L124's JavaScript shell-escaping warning; Direct replaces the two batching
+bullets with independent tool calls in one response, keeping dependent work
+sequential, and drops L124. Authored editing/worktree bullets require
+apply_patch except for generated/multi-file replacements, preserving others'
+edits and non-interactive git. The Tools suffix names only exec/wait with the
+compiled nested catalog on Code Mode; Direct retains the existing tool
+paragraph's first and last sentences, avoiding duplicate apply_patch guidance.
+The source disposition, exact omissions and all digests are recorded in
+`vendor/codex-prompt/PROVENANCE.md`. These changes do not authorize arbitrary
+edits to other vendored ranges or move the Code Mode protocol snapshot.
 
 **Claude and Grok.** Anthropic and xAI publish no base prompt, so nothing of
 theirs is copied, quoted or reconstructed. Both families carry one
@@ -5439,13 +5492,18 @@ environment as defined above:
   orchestration schemas — MUST stay at or under **8,000**. A leaf child is held
   to the same 8,000.
 
-The Codex native-PTC single-agent default additionally leaves at least 150
-approximate tokens of headroom (at most 3,850); its compact cell wording keeps
+For the GPT-6 Codex family on Direct/native Code Mode, the explicit family
+budgets are **under 5,500** for a basic single node and **at most 8,000** for
+orchestration/children. Other families retain 4,000/8,000; this is not a global
+increase. The Codex native-PTC single-agent default additionally leaves at least
+150 approximate tokens below its family budget (at most 5,350 for GPT-6,
+3,850 for the earlier base); its compact cell wording keeps
 yield/output defaults and the process catalog's foreground/background lifetime
 facts. Non-mutating child catalogs omit file-writing presentations before
 instruction assembly. Family editing sentences, including the vendored Codex
 `apply_patch` editing bullet, appear only when their named tools are in that
-compiled catalog. The vendor source files themselves remain byte-identical.
+compiled catalog. The vendor source snapshots remain byte-identical; the GPT-6
+derived bases carry only the recorded edits in §6.2.1.
 
 The `read_only` and `execute` occupancy policies and the native exec
 description are identity-bearing: a session recorded under a different one
