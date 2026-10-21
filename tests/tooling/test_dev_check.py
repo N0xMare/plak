@@ -82,6 +82,8 @@ with open(os.environ['GATE_CALLS'], 'a') as log:
                              target_rustflags=os.environ.get(
                                  'CARGO_TARGET_HOST_TRIPLE_RUSTFLAGS'))) + '\n')
 failure = json.loads(os.environ.get('GATE_CARGO_FAILURES', '{}')).get(args[0], 0)
+if args == ['fetch', '--locked', '--offline'] and os.environ.get('GATE_COLD_CACHE'):
+    failure = 1
 if failure and args != ['nextest', '--version']:
     raise SystemExit(failure)
 if args[0] == 'test':
@@ -247,7 +249,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, scripts = self.run_gate('--steps', 'static,contracts,tooling')
         self.assertEqual(result.returncode, 1)
         self.assertEqual([c['args'][0] for c in calls if c['args'][0] != 'nextest'],
-                         ['fmt', 'clippy'])
+                         ['fmt', 'fetch', 'clippy'])
         self.assertEqual([Path(s[0]).name for s in scripts if s[0].endswith('.py')],
                          ['check_workspace.py', 'check_features.py', 'check_public_compile.py',
                           'run_tooling_tests.py'])
@@ -271,7 +273,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, scripts = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([c['args'][0] for c in calls if c['args'][0] not in {'nextest'}],
-                         ['fmt', 'clippy', 'build', 'build', 'test'])
+                         ['fmt', 'fetch', 'clippy', 'build', 'build', 'test'])
         builds = [c['args'] for c in calls if c['args'][0] == 'build']
         self.assertIn('--workspace', builds[0])
         self.assertNotIn('--all-features', builds[0])
@@ -318,7 +320,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         result, calls, scripts = self.run_gate('--full')
         self.assertEqual(result.returncode, 0, result.stderr)
         order = [c['args'][0] for c in calls if c['args'][0] != 'nextest' or c['args'][1] == 'run']
-        self.assertEqual(order, ['fmt', 'clippy', 'build', 'build', 'doc', 'test', 'nextest', 'nextest', 'nextest'])
+        self.assertEqual(order, ['fmt', 'fetch', 'clippy', 'build', 'build', 'doc', 'test', 'nextest', 'nextest', 'nextest'])
         doc = next(c for c in calls if c['args'][0] == 'doc')
         self.assertEqual(doc['rustdocflags'], '-D warnings')
         for flag in ('--workspace', '--no-deps', '--all-features', '--locked'):
@@ -404,7 +406,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         self.env['PLAK_MONTY_WORKER'] = 'missing'
         result, calls, _ = self.run_gate('--fast')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual([c['args'][0] for c in calls if c['args'][0] != 'nextest'], ['fmt', 'clippy'])
+        self.assertEqual([c['args'][0] for c in calls if c['args'][0] != 'nextest'], ['fmt', 'fetch', 'clippy'])
         self.assertEqual(self.lanes(calls), [])
 
     def test_unknown_argument_is_refused(self):
@@ -414,19 +416,39 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
                                         env=self.env, text=True, capture_output=True, timeout=15)
                 self.assertEqual(result.returncode, 2)
 
-    def test_steps_static_checks_structure_right_after_fmt(self):
+    def test_steps_static_fetches_offline_before_structure_checks(self):
         result, calls, scripts = self.run_gate('--steps', 'static')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([c['args'][0] for c in calls if c['args'][0] != 'nextest'],
-                         ['fmt', 'clippy'])
+                         ['fmt', 'fetch', 'clippy'])
         self.assertIn(['tools/checks/check_workspace.py'], scripts)
         self.assertIn(['tools/checks/check_features.py'], scripts)
         self.assertEqual(self.lanes(calls), [])
         records = [json.loads(line) for line in self.log.read_text().splitlines()]
         fmt = next(i for i, row in enumerate(records) if row.get('args', [''])[0] == 'fmt')
-        self.assertEqual(records[fmt + 1]['python'], ['tools/checks/check_workspace.py'])
-        self.assertEqual(records[fmt + 2]['python'], ['tools/checks/check_features.py'])
-        self.assertEqual(records[fmt + 3]['args'][0], 'clippy')
+        self.assertEqual(records[fmt + 1]['args'], ['fetch', '--locked', '--offline'])
+        self.assertEqual(records[fmt + 2]['python'], ['tools/checks/check_workspace.py'])
+        self.assertEqual(records[fmt + 3]['python'], ['tools/checks/check_features.py'])
+        self.assertEqual(records[fmt + 4]['args'][0], 'clippy')
+
+    def test_cold_cache_fetches_locked_online_before_structure_checks(self):
+        self.env['GATE_COLD_CACHE'] = '1'
+        result, calls, _ = self.run_gate('--steps', 'static')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        fetches = [c['args'] for c in calls if c['args'][0] == 'fetch']
+        self.assertEqual(fetches, [['fetch', '--locked', '--offline'], ['fetch', '--locked']])
+        records = [json.loads(line) for line in self.log.read_text().splitlines()]
+        online = next(i for i, row in enumerate(records)
+                      if row.get('args') == ['fetch', '--locked'])
+        self.assertEqual(records[online + 1]['python'], ['tools/checks/check_workspace.py'])
+
+    def test_failed_fetch_fails_static_but_runs_the_remaining_checks(self):
+        self.env['GATE_CARGO_FAILURES'] = json.dumps({'fetch': 1})
+        result, calls, scripts = self.run_gate('--steps', 'static')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('failed static steps: fetch', result.stdout)
+        self.assertIn(['tools/checks/check_features.py'], scripts)
+        self.assertTrue(any(c['args'][0] == 'clippy' for c in calls))
 
     def test_full_equals_every_group_in_canonical_order(self):
         full, full_calls, full_scripts = self.run_gate('--full')

@@ -171,6 +171,9 @@ run_group() {
       if [[ "$tier" == platform ]]; then
         echo "skip structure checkers: platform-independent (check/full on Linux)"
       else
+        echo "== dependencies: fetch locked (offline first) =="
+        cargo fetch --locked --offline || cargo fetch --locked \
+          || failed_steps="${failed_steps:+$failed_steps }fetch"
         echo "== structure: workspace =="
         python3 tools/checks/check_workspace.py || failed_steps="${failed_steps:+$failed_steps }workspace"
         echo "== structure: features (static) =="
