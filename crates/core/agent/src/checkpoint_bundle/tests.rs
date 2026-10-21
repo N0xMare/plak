@@ -2541,6 +2541,59 @@ fn builder_just_addressed_segment_is_roundtripped_without_rehashing() -> TestRes
 }
 
 #[test]
+fn diagnostic_metadata_inspection_never_loads_history() -> TestResult {
+    for checkpoint in [
+        fixture(4, 9100, false)?,
+        fixture(4, 9101, true)?,
+        multi_operation_fixture()?.3,
+    ] {
+        let bundle = RuntimeCheckpointCodec::bundle(&checkpoint, None)?;
+        let inspection = RuntimeCheckpointCodec::inspect_metadata(
+            bundle.checkpoint_id(),
+            bundle.checkpoint_integrity(),
+            bundle.root(),
+            |address| {
+                assert!(!matches!(
+                    address.kind(),
+                    RuntimeObjectKind::HistorySegment
+                        | RuntimeObjectKind::HistoryNode
+                        | RuntimeObjectKind::CanonicalState
+                        | RuntimeObjectKind::WorkingProjection
+                ));
+                let object = bundle
+                    .supplied_objects()
+                    .iter()
+                    .find(|object| object.address() == address)
+                    .ok_or(CheckpointBundleError::MissingObject)?;
+                RuntimeObject::from_store(
+                    address,
+                    object.canonical_bytes().to_vec(),
+                    object.children().to_vec(),
+                )
+            },
+            |error| error,
+        )?;
+        assert_eq!(inspection.topology, checkpoint.manifest().topology());
+        assert_eq!(&inspection.lifecycle, checkpoint.manifest().lifecycle());
+        assert_eq!(
+            inspection.requests.len(),
+            inspection.lifecycle.obligations().len()
+        );
+        for (operation_id, identity) in inspection.requests {
+            let operation = checkpoint
+                .manifest()
+                .ledger()
+                .operations()
+                .into_iter()
+                .find(|record| record.operation_id() == operation_id)
+                .ok_or("missing operation")?;
+            assert_eq!(identity, operation.request_identity());
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn history_and_working_materializers_share_the_decoded_segment() -> TestResult {
     let checkpoint = fixture(1, 9200, false)?;
     let bundle = RuntimeCheckpointCodec::bundle(&checkpoint, None)?;

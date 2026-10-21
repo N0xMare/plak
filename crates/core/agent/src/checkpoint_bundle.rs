@@ -836,7 +836,116 @@ fn cas_insert_all(
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RuntimeCheckpointCodec;
 
+/// Read-only diagnostic metadata, not a materialized or recovery-authorizing checkpoint.
+#[derive(Clone, Debug)]
+pub struct RuntimeCheckpointInspection {
+    /// Exact topology bound by the manifest metadata address.
+    pub topology: crate::manifest::RuntimeTopology,
+    /// Recorded runtime lifecycle.
+    pub lifecycle: crate::manifest::RuntimeLifecycle,
+    /// Recorded durability.
+    pub durability: crate::manifest::RuntimeDurability,
+    /// Operation ids and canonical request identities named by recovery obligations.
+    pub requests: Vec<(u64, Digest)>,
+}
+
 impl RuntimeCheckpointCodec {
+    /// Reads diagnostic metadata and only the ledger paths named by Working obligations.
+    /// The loader must reconstruct each object with `RuntimeObject::from_store`.
+    /// This is not a full graph validation or permission to resume a runtime.
+    ///
+    /// # Errors
+    /// Refuses invalid root identities, malformed metadata and missing obligation requests.
+    pub fn inspect_metadata<E>(
+        checkpoint_id: CheckpointId,
+        integrity: Digest,
+        root: RuntimeObjectAddress,
+        mut load: impl FnMut(RuntimeObjectAddress) -> Result<RuntimeObject, E>,
+        error: impl Fn(CheckpointBundleError) -> E,
+    ) -> Result<RuntimeCheckpointInspection, E> {
+        let mut inspected = BTreeMap::<RuntimeObjectAddress, RuntimeObject>::new();
+        let mut retained_bytes = 0_usize;
+        let mut read = |address: RuntimeObjectAddress, kind| {
+            if address.kind() != kind {
+                return Err(error(CheckpointBundleError::WrongKind));
+            }
+            if let Some(object) = inspected.get(&address) {
+                return Ok(object.clone());
+            }
+            if inspected.len() == MAX_CHECKPOINT_OBJECTS {
+                return Err(error(CheckpointBundleError::BoundExceeded));
+            }
+            let object = load(address)?;
+            retained_bytes = retained_bytes.saturating_add(object.retained_bytes());
+            if retained_bytes > MAX_CHECKPOINT_OBJECT_BYTES {
+                return Err(error(CheckpointBundleError::BoundExceeded));
+            }
+            if object.address() != address {
+                return Err(error(CheckpointBundleError::InvalidAddress));
+            }
+            inspected.insert(address, object.clone());
+            Ok(object)
+        };
+        let object = read(root, RuntimeObjectKind::CheckpointRoot)?;
+        let (stored_id, stored_integrity, manifest) =
+            parse_checkpoint_root(object.canonical_bytes()).map_err(&error)?;
+        if stored_id != checkpoint_id || stored_integrity != integrity {
+            return Err(error(CheckpointBundleError::SemanticDisagreement));
+        }
+        let object = read(manifest, RuntimeObjectKind::ManifestRoot)?;
+        let manifest = parse_manifest_root(object.canonical_bytes()).map_err(&error)?;
+        let object = read(manifest.metadata, RuntimeObjectKind::ManifestMetadata)?;
+        let metadata =
+            decode_bundle_metadata(object.canonical_bytes()).map_err(|e| error(e.into()))?;
+        let mut requests = Vec::new();
+        if let crate::manifest::RuntimeLifecycle::Working { obligations, .. } = &metadata.lifecycle
+        {
+            let object = read(manifest.ledger, RuntimeObjectKind::OperationLedger)?;
+            let ledger = parse_ledger(object.canonical_bytes()).map_err(&error)?;
+            for obligation in obligations {
+                let mut current = ledger.operation_head;
+                let mut visited = BTreeSet::new();
+                let request = loop {
+                    let address =
+                        current.ok_or_else(|| error(CheckpointBundleError::MissingObject))?;
+                    if !visited.insert(address) || visited.len() > ledger.operation_count {
+                        return Err(error(CheckpointBundleError::InvalidTopology));
+                    }
+                    let object = read(address, RuntimeObjectKind::OperationNode)?;
+                    let node = parse_operation_node(object.canonical_bytes()).map_err(&error)?;
+                    match obligation.operation_id().cmp(&node.key) {
+                        Ordering::Less => current = node.left,
+                        Ordering::Greater => current = node.right,
+                        Ordering::Equal => {
+                            let object = read(node.record, RuntimeObjectKind::OperationRecord)?;
+                            let wire = OperationRecordWire::decode(object.canonical_bytes())
+                                .map_err(|e| error(e.into()))?;
+                            if wire.operation_id() != obligation.operation_id() {
+                                return Err(error(CheckpointBundleError::InvalidTopology));
+                            }
+                            let digest = wire.request_component_digest();
+                            let address = component_object_address(digest).map_err(&error)?;
+                            let object = read(address, RuntimeObjectKind::ReconstructiveComponent)?;
+                            let request =
+                                canonical_component(object.canonical_bytes()).map_err(&error)?;
+                            if request.kind() != crate::manifest::RuntimeComponentKind::Operation {
+                                return Err(error(RuntimeManifestError::ComponentKind.into()));
+                            }
+                            break request.integrity();
+                        }
+                    }
+                };
+                requests.push((obligation.operation_id(), request));
+            }
+        }
+        Ok(RuntimeCheckpointInspection {
+            topology: metadata.topology,
+            lifecycle: metadata.lifecycle,
+            durability: metadata.durability,
+            requests,
+        })
+    }
+
     /// Splits a checkpoint into a canonical closed object graph.
     ///
     /// A validated prior bundle is optional and supplies immutable allocations

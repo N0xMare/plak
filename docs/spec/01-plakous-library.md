@@ -1221,8 +1221,10 @@ ready entry is retained alone, evicting every other entry; the next ready insert
 policy. Retention is bounded by the validated graph limits (1 GiB encoded
 objects and the checkpoint object-count limit), even when it exceeds the cache
 budget. Accounting charges twice the encoded object/edge bytes plus object and
-entry overhead, not process RSS. Read-only inspections and cold loads still
-validate the full object graph. Disabled durability does not open SQLite.
+entry overhead, not process RSS. Cold loads and read-only inspections that
+materialize checkpoints still validate the full object graph. The diagnostic
+recovery-status inspection below validates only its addressed metadata and
+obligation paths; it is never a checkpoint load or recovery authority. Disabled durability does not open SQLite.
 Initial `BestEffort` truthfully uses the same stronger synchronous boundary.
 
 Default SQLite aggregate retention is bounded to **4 GiB of accounted object
@@ -1909,8 +1911,11 @@ scopes are effect-decision restoration and hosted server-pause and tool-batch
 restoration.
 
 `AgentSessions::inspect_recovery_sqlite` is a bounded read-only diagnostic for
-one exact SQLite branch locator. It validates the current head and returns the
-typed Working phase and every operation/action/request identity, or `None` for
+one exact SQLite branch locator. It validates the head row and relational seal,
+checkpoint root, manifest metadata, and the ledger paths and request components
+named by Working obligations, without materializing canonical history. It does
+not validate unrelated history or the full graph, and cannot authorize resume.
+It returns the typed Working phase and every operation/action/request identity, or `None` for
 a quiescent head. A stale locator names the current head in a typed error; the
 caller must inspect that head separately. Inspection opens no runtime, lease,
 provider, or tool and changes no durable boot, schema, checkpoint, or session

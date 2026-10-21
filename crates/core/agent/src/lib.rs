@@ -91,7 +91,8 @@ mod usage;
 pub mod internal {
     pub use crate::checkpoint_bundle::{
         CheckpointBundleError, CheckpointBundleStats, CheckpointObjectBundle, RUNTIME_FORMAT_EPOCH,
-        RuntimeCheckpointCodec, RuntimeObject, RuntimeObjectAddress, RuntimeObjectKind,
+        RuntimeCheckpointCodec, RuntimeCheckpointInspection, RuntimeObject, RuntimeObjectAddress,
+        RuntimeObjectKind,
     };
     pub use crate::context_source::{
         ContextSourceCatalog, ContextSourceResolver, RegisteredContextSource,

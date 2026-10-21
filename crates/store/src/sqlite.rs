@@ -801,6 +801,61 @@ impl SqliteSessionStore {
         load_branch(&snapshot, session)
     }
 
+    /// Inspects the head row and its addressed diagnostic metadata without history materialization.
+    /// This validates only the metadata and obligation paths, not the whole checkpoint graph.
+    ///
+    /// # Errors
+    /// Returns typed lookup, shape, integrity or storage failures.
+    pub fn inspect_branch_metadata(
+        path: impl AsRef<Path>,
+        selector: SessionRef,
+    ) -> Result<
+        (
+            BranchHead,
+            plakous_agent::internal::RuntimeCheckpointInspection,
+        ),
+        SessionStoreError,
+    > {
+        let connection =
+            Self::open_inspection(path.as_ref())?.ok_or(SessionStoreError::NotFound)?;
+        let snapshot = connection.unchecked_transaction().map_err(map_sqlite)?;
+        admit_inspection_snapshot(&snapshot)?;
+        let session = live_session(&snapshot, selector.session_id())?;
+        let branch = branch_row(&snapshot, selector)?.ok_or(SessionStoreError::NotFound)?;
+        let reference = branch.head.checkpoint();
+        let row = checkpoint_row(&snapshot, reference.checkpoint_id())?
+            .ok_or_else(SessionStoreError::corrupt)?;
+        let inspection = plakous_agent::internal::RuntimeCheckpointCodec::inspect_metadata(
+            reference.checkpoint_id(),
+            reference.integrity(),
+            reference.root(),
+            |address| load_object(&snapshot, address)?.ok_or_else(SessionStoreError::corrupt),
+            bundle_error,
+        )?;
+        let topology = inspection.topology;
+        if row.reference != reference
+            || row.revision != branch.head.revision()
+            || row.selector != selector
+            || topology.session_id != selector.session_id()
+            || topology.branch_id != selector.branch_id()
+            || topology.checkpoint_id != reference.checkpoint_id()
+            || topology.branch_revision != branch.head.revision().get()
+            || topology.parent_checkpoint_id != row.parent
+            || topology.fork != row.lineage
+            || topology.lease_fence != row.fence
+            || topology.commit_identity != row.commit
+            || inspection.durability != row.durability
+            || inspection.durability != session.durability()
+            || matches!(
+                inspection.lifecycle,
+                plakous_agent::internal::RuntimeLifecycle::Working { .. }
+            ) != (row.kind == RuntimeCheckpointKind::Working)
+        {
+            return Err(SessionStoreError::corrupt());
+        }
+        Ok((branch.head, inspection))
+    }
+
     /// Reads one bounded page of a session's change feed after `after`, with
     /// its retained window, over one read-only snapshot: no runtime, lease or
     /// write. The page has the same bounds and retention answer as
@@ -2130,15 +2185,12 @@ fn verify_database(c: &Connection) -> Result<(), SessionStoreError> {
     verify_authority(c)
 }
 
-fn load_verified_objects(
-    c: &Connection,
-) -> Result<BTreeMap<RuntimeObjectAddress, RuntimeObject>, SessionStoreError> {
+fn load_verified_objects(c: &Connection) -> Result<(), SessionStoreError> {
     let mut children = load_all_children(c)?;
     let mut s = c
         .prepare("SELECT o.kind,o.codec,o.digest,p.bytes,o.byte_len FROM runtime_objects o LEFT JOIN runtime_object_bytes p USING(id) ORDER BY o.kind,o.codec,o.digest")
         .map_err(map_sqlite)?;
     let mut rows = s.query([]).map_err(map_sqlite)?;
-    let mut objects = BTreeMap::new();
     while let Some(r) = rows.next().map_err(map_sqlite)? {
         let a = decode_address(
             r.get(0).map_err(map_sqlite)?,
@@ -2152,18 +2204,15 @@ fn load_verified_objects(
         if nonnegative(r.get(4).map_err(map_sqlite)?)? != u64n(bytes.len()) {
             return Err(SessionStoreError::corrupt());
         }
-        let object = RuntimeObject::from_store(a, bytes, children.remove(&a).unwrap_or_default())
+        RuntimeObject::from_store(a, bytes, children.remove(&a).unwrap_or_default())
             .map_err(bundle_error)?;
-        if objects.insert(a, object).is_some() {
-            return Err(SessionStoreError::corrupt());
-        }
     }
     if !children.is_empty() {
         return Err(SessionStoreError::corrupt());
     }
     drop(rows);
     drop(s);
-    Ok(objects)
+    Ok(())
 }
 
 fn verify_shape_pragmas(c: &Connection) -> Result<(), SessionStoreError> {

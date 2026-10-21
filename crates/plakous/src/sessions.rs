@@ -306,21 +306,46 @@ impl AgentSessions {
         path: impl AsRef<Path>,
         locator: SessionLocator,
     ) -> Result<Option<RecoveryRequiredReport>, AgentSessionsError> {
-        let loaded =
-            SqliteSessionStore::inspect_branch(path, locator.session_ref()).map_err(store_error)?;
-        let exact = ExactSource::validate(locator, &loaded)?;
-        let report = exact.recovery_report();
-        if matches!(
-            exact.checkpoint.manifest().lifecycle(),
-            RuntimeLifecycle::Working { .. }
-        ) && report.is_none()
-        {
-            return Err(AgentSessionsError::new(
-                AgentSessionsErrorKind::Integrity,
-                "working checkpoint lost its exact recovery obligations",
-            ));
+        let (head, metadata) =
+            SqliteSessionStore::inspect_branch_metadata(path, locator.session_ref())
+                .map_err(store_error)?;
+        let current = SessionLocator::new(
+            head.session().session_id(),
+            head.session().branch_id(),
+            head.checkpoint().checkpoint_id(),
+        );
+        if current != locator {
+            return Err(AgentSessionsError::stale(current));
         }
-        Ok(report)
+        let RuntimeLifecycle::Working {
+            recovery_phase,
+            obligations,
+            ..
+        } = metadata.lifecycle
+        else {
+            return Ok(None);
+        };
+        let obligations = obligations
+            .into_iter()
+            .map(|obligation| {
+                metadata
+                    .requests
+                    .iter()
+                    .find(|(id, _)| *id == obligation.operation_id())
+                    .map(|(_, identity)| types::obligation_report(obligation, *identity))
+                    .ok_or_else(|| {
+                        AgentSessionsError::new(
+                            AgentSessionsErrorKind::Integrity,
+                            "working checkpoint lost its exact recovery obligations",
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Some(RecoveryRequiredReport {
+            locator,
+            phase: types::recovery_phase_report(recovery_phase),
+            obligations,
+        }))
     }
 
     /// Pages committed canonical history at one exact SQLite branch head,

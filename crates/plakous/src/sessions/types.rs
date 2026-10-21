@@ -1422,7 +1422,7 @@ impl RecoveryRequiredReport {
     }
 }
 
-fn recovery_phase_report(phase: WorkingRecoveryPhase) -> SessionRecoveryPhase {
+pub(super) fn recovery_phase_report(phase: WorkingRecoveryPhase) -> SessionRecoveryPhase {
     match phase {
         WorkingRecoveryPhase::DispatchEvidence => SessionRecoveryPhase::DispatchEvidence,
         WorkingRecoveryPhase::EffectReconciliation => SessionRecoveryPhase::EffectReconciliation,
@@ -1433,7 +1433,7 @@ fn recovery_phase_report(phase: WorkingRecoveryPhase) -> SessionRecoveryPhase {
     }
 }
 
-fn obligation_report(
+pub(super) fn obligation_report(
     obligation: RecoveryObligation,
     request_identity: Digest,
 ) -> RecoveryObligationReport {

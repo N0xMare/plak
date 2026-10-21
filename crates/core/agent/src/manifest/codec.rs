@@ -1020,6 +1020,10 @@ impl OperationRecordWire {
         self.operation_id
     }
 
+    pub(crate) const fn request_component_digest(&self) -> Digest {
+        self.request
+    }
+
     /// Referenced component-object digests in persisted order: the request,
     /// then each component-carrying transition.
     pub(crate) fn component_digests(&self) -> Vec<Digest> {

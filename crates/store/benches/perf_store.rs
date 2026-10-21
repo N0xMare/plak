@@ -141,6 +141,7 @@ struct Options {
     turn_sweep: &'static [u64],
     dry_run: bool,
     large_store_admission: bool,
+    cold_lineage: bool,
     restart_probe: Option<(PathBuf, u64)>,
 }
 
@@ -151,6 +152,9 @@ async fn main() -> BenchResult<()> {
         return run_sqlite_restart_probe(path, *turns).await;
     }
     emit_metadata(&options);
+    if options.cold_lineage {
+        return run_cold_lineage().await;
+    }
     if options.dry_run {
         println!(
             "{}",
@@ -188,6 +192,7 @@ fn options() -> BenchResult<Options> {
     let mut turn_sweep = DEFAULT_TURN_SWEEP;
     let mut dry_run = false;
     let mut large_store_admission = false;
+    let mut cold_lineage = false;
     let mut restart_probe = None;
     let mut arguments = std::env::args().skip(1);
     while let Some(argument) = arguments.next() {
@@ -196,6 +201,7 @@ fn options() -> BenchResult<Options> {
             "--long" => turn_sweep = LONG_TURN_SWEEP,
             "--dry-run" => dry_run = true,
             "--large-store-admission" => large_store_admission = true,
+            "--cold-lineage" => cold_lineage = true,
             "--bench" => {}
             "--restart-probe" => {
                 let path = arguments
@@ -214,6 +220,7 @@ fn options() -> BenchResult<Options> {
         turn_sweep,
         dry_run,
         large_store_admission,
+        cold_lineage,
         restart_probe,
     })
 }
@@ -1302,6 +1309,142 @@ async fn run_large_store_admission() -> BenchResult<()> {
         json!({"schema": SCHEMA, "kind": "large-store-admission", "sessions": 200,
         "retained_checkpoints_before_admission": 2000, "payload_bytes": 64 * 1024,
         "admission_elapsed_ns": elapsed, "queue_wait_ns": trace.queue_wait_ns(), "informational": true})
+    );
+    store.shutdown().await?;
+    Ok(())
+}
+
+/// A roughly 20 MiB head with thousands of independently addressed history
+/// objects. Timings deliberately separate cold graph loads from status reads.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one ordered cold-load/fork workload keeps setup outside the timers"
+)]
+async fn run_cold_lineage() -> BenchResult<()> {
+    use plakous_agent::internal::{
+        ForkBranch, ForkLineage, RuntimeContextState, SessionRevision, SessionWorkflowId,
+    };
+    let database = Database::new()?;
+    let session = conformance::id(710_000)?;
+    let branch = conformance::id(710_001)?;
+    let owner = conformance::id(710_002)?;
+    let selector = SessionRef::new(session, branch);
+    let ttl = NonZeroU64::new(3600).ok_or("ttl")?;
+    let payload = "x".repeat(4_600);
+    let context = RuntimeContextState::genesis(session, branch, [0x51; 32])?;
+    let mut prior = conformance::bundle(
+        &conformance::checkpoint_with_payload(
+            conformance::topology(session, branch, conformance::id(710_003)?, None, 0, None, 1)?,
+            4_088,
+            RuntimeDurability::Required,
+            context.clone(),
+            false,
+            &payload,
+        )?,
+        None,
+    )?;
+    let store = SqliteSessionStore::open(&database.path)?;
+    let created = store
+        .create(CreateSession::new(
+            selector,
+            Timestamp::new(50, 0)?,
+            owner,
+            ttl,
+            prior.clone(),
+        ))
+        .await?;
+    let mut head = created.branch();
+    for revision in 1..=8 {
+        let checkpoint = conformance::checkpoint_with_payload(
+            conformance::topology(
+                session,
+                branch,
+                conformance::id(710_003 + u128::from(revision))?,
+                Some(prior.checkpoint_id()),
+                revision,
+                None,
+                created.lease().fence().get(),
+            )?,
+            4_088 + u32::try_from(revision)?,
+            RuntimeDurability::Required,
+            context.clone(),
+            false,
+            &payload,
+        )?;
+        let next = conformance::bundle(&checkpoint, Some(&prior))?;
+        head = store
+            .commit(CommitCheckpoint::new(
+                created.lease().clone(),
+                head,
+                next.clone(),
+            ))
+            .await?
+            .head();
+        prior = next;
+    }
+    let started = Instant::now();
+    let loaded = SqliteSessionStore::inspect_branch(&database.path, selector)?;
+    let cold_load_ns = elapsed_ns(started);
+    let started = Instant::now();
+    let _status = SqliteSessionStore::inspect_branch_metadata(&database.path, selector)?;
+    let status_ns = elapsed_ns(started);
+    let target_branch = conformance::id(720_001)?;
+    let source = loaded.checkpoint().checkpoint();
+    let target_context = source.manifest().canonical().context().ordinary_fork(
+        prior.checkpoint_id(),
+        session,
+        target_branch,
+        [0x64; 32],
+    )?;
+    let started = Instant::now();
+    let target = conformance::checkpoint_with_payload(
+        conformance::topology(
+            session,
+            target_branch,
+            conformance::id(720_002)?,
+            Some(prior.checkpoint_id()),
+            0,
+            Some(ForkLineage {
+                session_id: session,
+                branch_id: branch,
+                checkpoint_id: prior.checkpoint_id(),
+                branch_revision: head.revision().get(),
+            }),
+            1,
+        )?,
+        4_096,
+        RuntimeDurability::Required,
+        target_context,
+        false,
+        &payload,
+    )?;
+    let target = conformance::bundle(&target, Some(&prior))?;
+    let fork_build_ns = elapsed_ns(started);
+    let started = Instant::now();
+    let _fork = store
+        .fork(ForkBranch::new(
+            SessionWorkflowId::new([0x71; 32])?,
+            Digest::sha256(DigestDomain::RequestPlan, 1, &[b"cold-lineage-fork"])?,
+            created.lease().clone(),
+            SessionRevision::INITIAL,
+            head,
+            target_branch,
+            owner,
+            ttl,
+            target,
+        ))
+        .await?;
+    let fork_commit_ns = elapsed_ns(started);
+    println!(
+        "{}",
+        json!({
+            "schema": SCHEMA, "kind": "long-lineage-cold-load", "host_id": perf_host_id(),
+            "history_segments": 4_096, "objects": loaded.checkpoint().bundle().stats().object_count(),
+            "encoded_object_bytes": loaded.checkpoint().bundle().supplied_objects().iter().map(|o| o.canonical_bytes().len()).sum::<usize>(),
+            "cold_branch_load_ns": cold_load_ns, "diagnostic_status_ns": status_ns,
+            "fork_build_ns": fork_build_ns, "fork_commit_ns": fork_commit_ns,
+            "scope": "store operations; excludes hosted attachment, projector catch-up and CLI process startup",
+        })
     );
     store.shutdown().await?;
     Ok(())

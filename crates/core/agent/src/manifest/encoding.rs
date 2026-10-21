@@ -10,11 +10,11 @@ use super::*;
 
 pub(crate) struct RuntimeManifestBundleMetadata {
     provenance: ProducerProvenance,
-    topology: RuntimeTopology,
-    lifecycle: RuntimeLifecycle,
+    pub(crate) topology: RuntimeTopology,
+    pub(crate) lifecycle: RuntimeLifecycle,
     interpreter_observation: Option<InterpreterObservation>,
     jobs: JobLedger,
-    durability: RuntimeDurability,
+    pub(crate) durability: RuntimeDurability,
 }
 
 pub(crate) fn encode_bundle_metadata(

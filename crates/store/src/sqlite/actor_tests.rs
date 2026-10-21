@@ -1914,3 +1914,29 @@ async fn delete_drops_pending_seed_without_normalizing_it() -> TestResult {
         .await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn diagnostic_metadata_does_not_materialize_or_certify_history() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("runtime.sqlite3");
+    let store = SqliteSessionStore::open(&path)?;
+    let created = store.create(seed()?).await?;
+    let selector = created.branch().session();
+    let connection = Connection::open(&path)?;
+    assert_eq!(connection.execute(
+        "UPDATE runtime_object_bytes SET bytes=x'00' WHERE id=(SELECT id FROM runtime_objects WHERE kind=5 LIMIT 1)", [],
+    )?, 1);
+    let (head, metadata) = SqliteSessionStore::inspect_branch_metadata(&path, selector)?;
+    assert_eq!(head, created.branch());
+    assert_eq!(
+        metadata.topology.checkpoint_id,
+        head.checkpoint().checkpoint_id()
+    );
+    assert!(SqliteSessionStore::inspect_branch(&path, selector).is_err());
+    assert_eq!(connection.execute(
+        "UPDATE runtime_object_bytes SET bytes=x'00' WHERE id=(SELECT id FROM runtime_objects WHERE kind=1 LIMIT 1)", [],
+    )?, 1);
+    assert!(SqliteSessionStore::inspect_branch_metadata(&path, selector).is_err());
+    store.shutdown().await?;
+    Ok(())
+}

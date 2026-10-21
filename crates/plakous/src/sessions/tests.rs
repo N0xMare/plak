@@ -6079,6 +6079,10 @@ async fn sqlite_recovery_inspection_reports_working_obligations_without_mutation
         .await?;
     let source = session.release().await?;
     let genesis_loaded = store.load_branch(source.session_ref()).await?;
+    assert_eq!(
+        AgentSessions::inspect_recovery_sqlite(&database, source)?,
+        RecoveryRequiredReport::from_checkpoint(source, genesis_loaded.checkpoint().checkpoint())
+    );
     let genesis = Arc::clone(genesis_loaded.checkpoint().checkpoint());
     let source_topology = genesis.manifest().topology();
     let lease = store
@@ -6204,6 +6208,11 @@ async fn sqlite_recovery_inspection_reports_working_obligations_without_mutation
     let before = store.stats().await?;
     let report = AgentSessions::inspect_recovery_sqlite(&database, head)?
         .ok_or("Working head reported quiescent")?;
+    let full = SqliteSessionStore::inspect_branch(&database, head.session_ref())?;
+    assert_eq!(
+        Some(report.clone()),
+        RecoveryRequiredReport::from_checkpoint(head, full.checkpoint().checkpoint())
+    );
     let page = AgentSessions::inspect_history_page_sqlite(
         &database,
         &SessionHistoryPageRequest::new(
