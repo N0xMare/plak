@@ -120,6 +120,9 @@ pub(crate) enum Command {
     },
     /// Hidden `plak version --state-key`.
     StateKey,
+    WriteBinaryManifest {
+        directory: PathBuf,
+    },
     ReloadProbe,
     ExportVersion,
     StatePruneLegacy {
@@ -270,7 +273,11 @@ impl Command {
     pub(crate) const fn diagnostic_verb(&self) -> &'static str {
         match self {
             Self::Help | Self::CommandHelp { .. } => "help",
-            Self::Version | Self::StateKey | Self::ReloadProbe | Self::ExportVersion => "version",
+            Self::Version
+            | Self::StateKey
+            | Self::ReloadProbe
+            | Self::ExportVersion
+            | Self::WriteBinaryManifest { .. } => "version",
             Self::Tui { .. } => "tui",
             Self::Resume { .. } | Self::ImportResume { .. } => "resume",
             Self::Fork { .. } => "fork",

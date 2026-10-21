@@ -38,7 +38,7 @@ def sha(data: bytes) -> str:
 def executable_bytes(name: str, tag: str = "one") -> bytes:
     # The snapshot install runs `plak version --state-key`.
     return (f"#!/bin/sh\n# {name} {tag}\n"
-            'case "$2" in --state-key) echo r1.e1.p1.t1 ;; --export-version) echo 7 ;; esac\n'
+            'case "$2" in --state-key) echo r1.e1.p1.t1 ;; --export-version) echo 7 ;; --write-binary-manifest) if [ -n "$REJECT_BINARY_MANIFEST" ]; then echo partial >"$3/binary-id"; exit 2; fi; echo fixture >"$3/binary-id"; chmod 0444 "$3/binary-id" ;; esac\n'
             ).encode()
 
 
@@ -237,6 +237,14 @@ class InstallScriptTests(unittest.TestCase):
         manifest = "".join(f"{name} {digests[name]}\n" for name in EXECUTABLES)
         return self.lib / "release" / sha(manifest.encode())
 
+    def test_install_accepts_a_release_without_the_binary_manifest_probe(self) -> None:
+        result = self.install(REJECT_BINARY_MANIFEST="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        snapshot = self.expected_snapshot()
+        self.assertTrue((snapshot / "plak").is_file())
+        self.assertFalse((snapshot / "binary-id").exists())
+        self.assertEqual(list(snapshot.parent.glob(".staging.*")), [])
+
     def test_latest_install_writes_the_source_install_layout(self) -> None:
         result = self.install()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -246,6 +254,8 @@ class InstallScriptTests(unittest.TestCase):
         self.assertEqual((snapshot / "plak").stat().st_mode & 0o777, 0o555)
         self.assertEqual((snapshot / "state-key").read_text(), "r1.e1.p1.t1\n")
         self.assertEqual((snapshot / "export-version").read_text(), "7\n")
+        self.assertEqual((snapshot / "binary-id").read_text(), "fixture\n")
+        self.assertEqual((snapshot / "binary-id").stat().st_mode & 0o777, 0o444)
         for name in ("plakous-js-host", "monty"):
             worker = self.lib / "sidecars" / name / sha(executable_bytes(name)) / name
             self.assertEqual(os.readlink(snapshot / name), str(worker))

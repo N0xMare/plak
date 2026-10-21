@@ -269,7 +269,10 @@ fn log_start(binary: &str, command: &str) {
 
 fn log_command_start(command: &Command) {
     match command {
-        Command::StateKey | Command::ReloadProbe | Command::ExportVersion => {}
+        Command::StateKey
+        | Command::ReloadProbe
+        | Command::ExportVersion
+        | Command::WriteBinaryManifest { .. } => {}
         Command::Version => log_start(build_identity::binary_id(), command.diagnostic_verb()),
         _ => {
             if let Some(binary) = build_identity::ready_binary_id() {
@@ -284,6 +287,13 @@ fn log_command_start(command: &Command) {
 fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcome> {
     let command = parse(arguments)
         .map_err(|message| CliFailure::classified(CliFailureKind::Usage, message))?;
+
+    if let Command::WriteBinaryManifest { directory } = &command {
+        build_identity::write_binary_manifest(directory).map_err(|error| {
+            CliFailure::new(format!("could not write binary manifest: {error}"))
+        })?;
+        return Ok(ProcessOutcome::Success);
+    }
 
     if let Command::SessionImport { path } = &command {
         carry::read_document(path).map_err(|error| CliFailure::new(error.to_string()))?;
@@ -440,6 +450,9 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         Command::ExportVersion => {
             writeln!(stdout, "{}", carry::VERSION).map_err(|_| CliFailure::new("stdout failed"))?;
             Ok(ProcessOutcome::Success)
+        }
+        Command::WriteBinaryManifest { .. } => {
+            Err(CliFailure::new("internal command dispatch error"))
         }
         Command::StateKey => {
             writeln!(stdout, "{}", home::state::state_key())
@@ -1418,6 +1431,7 @@ fn execute_command(
         | Command::ConfigEdit
         | Command::StatePruneLegacy { .. }
         | Command::StateKey
+        | Command::WriteBinaryManifest { .. }
         | Command::ReloadProbe
         | Command::ExportVersion
         | Command::ImportResume { .. }

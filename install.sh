@@ -136,6 +136,8 @@ if [ ! -d "$snapshot" ]; then
   cp "$work/$stem/plak" "$staging/plak" && chmod 0555 "$staging/plak"
   ln -s "$installed_js" "$staging/plakous-js-host"
   ln -s "$installed_monty" "$staging/monty"
+  "$staging/plak" version --write-binary-manifest "$staging" 2>/dev/null \
+    || rm -f "$staging/binary-id"
   "$staging/plak" version --state-key >"$staging/state-key" 2>/dev/null || rm -f "$staging/state-key"
   "$staging/plak" version --export-version >"$staging/export-version" 2>/dev/null \
     || rm -f "$staging/export-version"

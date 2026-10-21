@@ -12,12 +12,18 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
+def executable_fixture(text: str) -> str:
+    if text.split()[0] != "plak":
+        return text
+    return ('#!/bin/sh\n# ' + text + '\n'
+            'case "$2" in --write-binary-manifest) echo fixture >"$3/binary-id"; '
+            'chmod 0444 "$3/binary-id" ;; *) exit 1 ;; esac\n')
+
+
 def snapshot_env(home: str) -> dict[str, str]:
     """Environment for the snapshot install block over text fixtures.
 
-    The block runs the installed `plak` for its state key. A text fixture
-    such as "plak one" is a shell script whose first word is `plak`, so it
-    resolves through PATH; a stub there keeps an operator build out of it.
+    A defensive PATH stub keeps an operator build out of fixture execution.
     """
     stub = pathlib.Path(home).parent / "path-stub"
     stub.mkdir(exist_ok=True)
@@ -207,7 +213,7 @@ class BuildPlakTests(unittest.TestCase):
 
             def install(content: str) -> list[str]:
                 for name in ("plak", "plakous-js-host", "monty"):
-                    (out / name).write_text(f"{name} {content}")
+                    (out / name).write_text(executable_fixture(f"{name} {content}"))
                 result = subprocess.run(
                     ["bash", "-c", script, "snapshot", str(out / "plak"),
                      str(out / "plakous-js-host"), str(out / "monty")],
@@ -220,7 +226,7 @@ class BuildPlakTests(unittest.TestCase):
                 return hashlib.sha256(text.encode()).hexdigest()
 
             def snapshot_id(plak: str, js_host: str, monty: str) -> str:
-                manifest = (f"plak {digest(plak)}\nplakous-js-host {digest(js_host)}\n"
+                manifest = (f"plak {digest(executable_fixture(plak))}\nplakous-js-host {digest(js_host)}\n"
                             f"monty {digest(monty)}\n")
                 return digest(manifest)
 
@@ -234,7 +240,7 @@ class BuildPlakTests(unittest.TestCase):
                 self.assertEqual(pathlib.Path(path).stat().st_mode & 0o777, 0o555)
             self.assertEqual(install("one"), first)  # same bytes, same snapshot
             # Rebuilding only the parent leaves both canonical worker paths unchanged.
-            (out / "plak").write_text("plak parent-only rebuild")
+            (out / "plak").write_text(executable_fixture("plak parent-only rebuild"))
             result = subprocess.run(
                 ["bash", "-c", script, "snapshot", str(out / "plak"),
                  str(out / "plakous-js-host"), str(out / "monty")],
@@ -246,7 +252,7 @@ class BuildPlakTests(unittest.TestCase):
             self.assertEqual(rebuilt[1:], first[1:])
             self.assertEqual((pathlib.Path(rebuilt[0]).parent / "plakous-js-host").resolve(),
                              pathlib.Path(first[1]))
-            (out / "plak").write_text("plak one")
+            (out / "plak").write_text(executable_fixture("plak one"))
             # A rebuild that changes only a sidecar is a new snapshot.
             (out / "plakous-js-host").write_text("plakous-js-host two")
             result = subprocess.run(
@@ -269,7 +275,7 @@ class BuildPlakTests(unittest.TestCase):
                           {entry.name for entry in snapshots})
             self.assertEqual([entry.name for entry in root.iterdir() if entry.name.startswith(".")],
                              [".staging.abandoned"])
-            self.assertEqual(pathlib.Path(first[0]).read_text(), "plak one")
+            self.assertEqual(pathlib.Path(first[0]).read_text(), executable_fixture("plak one"))
             self.assertTrue(all((entry / "plak").is_file() for entry in snapshots))
             self.assertEqual(pathlib.Path(first[1]).read_text(), "plakous-js-host one")
             self.assertEqual(pathlib.Path(first[2]).read_text(), "monty one")
@@ -302,7 +308,7 @@ class BuildPlakTests(unittest.TestCase):
                 out = base / "target"
                 out.mkdir()
                 for name in ("plak", "plakous-js-host", "monty"):
-                    (out / name).write_text(name)
+                    (out / name).write_text(executable_fixture(name))
                 env = snapshot_env(str(base / "home"))
                 command = ["bash", "-c", script, "snapshot", str(out / "plak"),
                            str(out / "plakous-js-host"), str(out / "monty")]
@@ -351,7 +357,7 @@ class BuildPlakTests(unittest.TestCase):
                     out = base / "target"
                     out.mkdir()
                     for name in ("plak", "plakous-js-host", "monty"):
-                        (out / name).write_text(name)
+                        (out / name).write_text(executable_fixture(name))
                     env = snapshot_env(str(linked))
                     result = subprocess.run(
                         ["bash", "-c", script, "snapshot", str(out / "plak"),
@@ -375,7 +381,7 @@ class BuildPlakTests(unittest.TestCase):
             out = base / "target"
             out.mkdir()
             for name in ("plak", "plakous-js-host", "monty"):
-                (out / name).write_text(name)
+                (out / name).write_text(executable_fixture(name))
             env = snapshot_env(str(base / "home"))
             command = ["bash", "-c", script, "snapshot", str(out / "plak"),
                        str(out / "plakous-js-host"), str(out / "monty")]
@@ -400,7 +406,7 @@ class BuildPlakTests(unittest.TestCase):
                                  hashlib.sha256(worker.read_bytes()).hexdigest())
             cache = base / "home/.local/lib/plak"
             self.assertEqual(list(cache.rglob(".staging.*")), [])
-            # The fixture's state-key probe reached only the PATH stub.
+            # These fixtures deliberately decline the state-key probe.
             self.assertEqual(list(cache.rglob("state-key")), [])
 
     def test_install_preserves_legacy_producer_and_canonical_workers(self) -> None:
@@ -423,7 +429,7 @@ class BuildPlakTests(unittest.TestCase):
             env = snapshot_env(str(base / "home"))
             for index in range(10):
                 for name in ("plak", "plakous-js-host", "monty"):
-                    (out / name).write_text(f"{name} build {index}")
+                    (out / name).write_text(executable_fixture(f"{name} build {index}"))
                 result = subprocess.run(
                     ["bash", "-c", script, "snapshot", str(out / "plak"),
                      str(out / "plakous-js-host"), str(out / "monty")],
@@ -456,7 +462,7 @@ class BuildPlakTests(unittest.TestCase):
             out = base / "target"
             out.mkdir()
             for name in ("plak", "plakous-js-host", "monty"):
-                (out / name).write_text('#!/bin/sh\necho r1.e1.p1.t1\n')
+                (out / name).write_text('#!/bin/sh\ncase "$2" in --state-key) echo r1.e1.p1.t1 ;; --write-binary-manifest) echo fixture >"$3/binary-id"; chmod 0444 "$3/binary-id" ;; esac\n')
             env = snapshot_env(str(linked))
             result = subprocess.run(
                 ["bash", "-c", script, "snapshot", str(out / "plak"),
@@ -468,6 +474,27 @@ class BuildPlakTests(unittest.TestCase):
             self.assertEqual(installed, installed.resolve())
             self.assertTrue(installed.is_relative_to(physical))
             self.assertEqual((linked / ".local/bin/plak").resolve(), installed)
+
+    def test_snapshot_install_accepts_a_binary_without_the_manifest_probe(self) -> None:
+        source = (ROOT / "tools/build/build-plak.sh").read_text()
+        block = source.split("# BEGIN SNAPSHOT INSTALL", 1)[1].split("# END SNAPSHOT INSTALL", 1)[0]
+        script = ('set -euo pipefail; bin="$1"; js_host="$2"; monty="$3"; snapshot_flavor=maintainer; '
+                  + block + '\nprintf "%s\\n" "$bin"')
+        with tempfile.TemporaryDirectory() as directory:
+            base = pathlib.Path(directory).resolve()
+            binary = base / "plak"
+            binary.write_text('#!/bin/sh\ncase "$2" in --write-binary-manifest) echo partial >"$3/binary-id"; exit 2 ;; --state-key) echo r1.e1.p1.t1 ;; esac\n')
+            for name in ("plakous-js-host", "monty"):
+                (base / name).write_text(name)
+            result = subprocess.run(
+                ["bash", "-c", script, "snapshot", str(binary), str(base / "plakous-js-host"), str(base / "monty")],
+                capture_output=True, text=True, env=snapshot_env(str(base / "home")), check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            snapshot = pathlib.Path(result.stdout.strip()).parent
+            self.assertTrue((snapshot / "plak").is_file())
+            self.assertFalse((snapshot / "binary-id").exists())
+            self.assertEqual(list(snapshot.parent.glob(".staging.*")), [])
 
     def test_snapshot_records_its_state_key_and_preserves_all_keys(self) -> None:
         source = (ROOT / "tools/build/build-plak.sh").read_text()
@@ -486,7 +513,7 @@ class BuildPlakTests(unittest.TestCase):
                 (out / "plak").write_text(
                     f'#!/bin/sh\n# build {build}\n'
                     f'case "$1 $2" in\n"version --state-key") echo {key} ;;\n'
-                    '"version --export-version") echo 4 ;;\nesac\n'
+                    '"version --export-version") echo 4 ;;\n"version --write-binary-manifest") echo fixture >"$3/binary-id"; chmod 0444 "$3/binary-id" ;;\nesac\n'
                 )
                 for name in ("plakous-js-host", "monty"):
                     (out / name).write_text(f"{name} {build}")
@@ -501,6 +528,8 @@ class BuildPlakTests(unittest.TestCase):
             old = install("r1.e1.p1.t1", 0)
             self.assertEqual((old / "state-key").read_text().strip(), "r1.e1.p1.t1")
             self.assertEqual((old / "export-version").read_text().strip(), "4")
+            self.assertEqual((old / "binary-id").read_text(), "fixture\n")
+            self.assertEqual((old / "binary-id").stat().st_mode & 0o777, 0o444)
             for build in range(1, 11):
                 install("r2.e1.p1.t1", build)
             root = base / "home/.local/lib/plak/maintainer"
@@ -558,7 +587,7 @@ for package in "${{packages[@]}}"; do
     plakous-py-worker) names=(monty) ;;
   esac
   for name in "${{names[@]}}"; do
-    printf '#!/bin/sh\\n# %s\\ncase "$2" in --state-key) echo r1.e1.p1.t1 ;; --export-version) echo 7 ;; esac\\n' "$*" >"$out/$name"
+    printf '#!/bin/sh\\n# %s\\ncase "$2" in --state-key) echo r1.e1.p1.t1 ;; --export-version) echo 7 ;; --write-binary-manifest) echo fixture >"$3/binary-id"; chmod 0444 "$3/binary-id" ;; esac\\n' "$*" >"$out/$name"
     chmod 0755 "$out/$name"
   done
 done
@@ -588,6 +617,7 @@ done
             self.assertEqual(installed.parent.parent, lib / "release")
             self.assertEqual(len(installed.parent.name), 64)
             self.assertEqual((installed.parent / "state-key").read_text().strip(), "r1.e1.p1.t1")
+            self.assertEqual((installed.parent / "binary-id").read_text(), "fixture\n")
             self.assertFalse((lib / "maintainer").exists())
             for name in ("plakous-js-host", "monty"):
                 worker = (home / ".local/bin" / name).resolve()

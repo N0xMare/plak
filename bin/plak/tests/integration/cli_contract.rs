@@ -2341,3 +2341,101 @@ fn mcp_prompts_list_and_expand_into_one_labelled_user_message() {
         String::from_utf8_lossy(&refused.stderr)
     );
 }
+
+#[test]
+fn installed_binary_manifest_preserves_version_and_help_identity() {
+    use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+    let root = tempfile::tempdir().unwrap();
+    let staged = root.path().join("staging");
+    std::fs::create_dir(&staged).unwrap();
+    let executable = staged.join("plak");
+    std::fs::copy(plak_bin(), &executable).unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let expected = format!("plak {}\n", expected_version_label());
+    let run = |path: &std::path::Path, args: &[&str]| {
+        Command::new(path)
+            .args(args)
+            .env("HOME", root.path())
+            .env("PLAK_HOME", root.path().join("home"))
+            .output()
+            .unwrap()
+    };
+    let missing = run(&executable, &["version"]);
+    assert_eq!(stdout(&missing), expected);
+    let probe = Command::new(&executable)
+        .env("HOME", root.path())
+        .env("PLAK_HOME", root.path().join("probe-home"))
+        .args([
+            "version",
+            "--write-binary-manifest",
+            staged.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        probe.status.success(),
+        "{}",
+        String::from_utf8_lossy(&probe.stderr)
+    );
+    assert_eq!(probe.stdout, [] as [u8; 0]);
+    let manifest = std::fs::read_to_string(staged.join("binary-id")).unwrap();
+    let words: Vec<_> = manifest.split_whitespace().collect();
+    let metadata = std::fs::metadata(&executable).unwrap();
+    assert_eq!(words.len(), 5);
+    assert_eq!(words[1], metadata.dev().to_string());
+    assert_eq!(words[2], metadata.ino().to_string());
+    assert_eq!(words[3], metadata.len().to_string());
+    assert_eq!(
+        words[4],
+        (i128::from(metadata.mtime()) * 1_000_000_000 + i128::from(metadata.mtime_nsec()))
+            .to_string()
+    );
+    assert!(expected.contains(words[0]));
+    assert_eq!(
+        std::fs::metadata(staged.join("binary-id"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o444
+    );
+    let snapshot = root
+        .path()
+        .join(".local/lib/plak/release")
+        .join("a".repeat(64));
+    std::fs::create_dir_all(snapshot.parent().unwrap()).unwrap();
+    std::fs::rename(staged, &snapshot).unwrap();
+    let installed = snapshot.join("plak");
+    for arguments in [&["version"][..], &["--version"][..]] {
+        assert_eq!(stdout(&run(&installed, arguments)), expected);
+    }
+    assert!(stdout(&run(&installed, &["--help"])).contains(&expected_version_label()));
+    let manifest_path = snapshot.join("binary-id");
+    let mut fields: Vec<_> = manifest.split_whitespace().map(str::to_owned).collect();
+    let forged = if fields[0] == "abcdef012345" {
+        "012345abcdef"
+    } else {
+        "abcdef012345"
+    };
+    fields[0] = forged.to_owned();
+    std::fs::set_permissions(&manifest_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    std::fs::write(&manifest_path, fields.join(" ")).unwrap();
+    let links = root.path().join(".local/bin");
+    std::fs::create_dir_all(&links).unwrap();
+    let link = links.join("plak");
+    std::os::unix::fs::symlink(&installed, &link).unwrap();
+    let from_link = || {
+        Command::new(&link)
+            .arg("version")
+            .current_dir(root.path().parent().unwrap())
+            .env("HOME", root.path())
+            .env("PLAK_HOME", root.path().join("home"))
+            .output()
+            .unwrap()
+    };
+    assert!(stdout(&from_link()).contains(&format!("binary {forged}")));
+    fields[3] = "0".to_owned();
+    std::fs::write(&manifest_path, fields.join(" ")).unwrap();
+    assert_eq!(stdout(&from_link()), expected);
+    assert!(!root.path().join("probe-home").exists());
+}

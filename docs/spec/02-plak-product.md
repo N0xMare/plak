@@ -44,8 +44,16 @@ The launch banner distinguishes `maintainer release`, `maintainer debug`,
 digits of SHA-256 over the executable. A `test-hooks` build is labeled separately.
 `plak version` and global help carry the same build identity alongside the
 package version. `0.0.1` alone is package metadata, not proof of build recency.
-The binary ID is computed once per process with bounded-memory file reads;
-unreadable executable identity is shown as `unavailable`, never invented from
+The binary ID is read from the snapshot's install-time `binary-id` manifest
+when its device, inode, size and nanosecond modification time all match the
+running executable. Manifests are considered only beside executables in the
+installer layout: `.local/lib/plak/{maintainer,release}/<64-lowercase-hex>/`.
+The manifest must be a regular file owned by the effective user, opened without
+following links or blocking, with neither it nor its parent directory writable
+by group or others. Outside that layout (including development builds), or
+without a usable matching manifest, identity is computed once per process
+with bounded-memory file reads.
+Unreadable executable identity is shown as `unavailable`, never invented from
 the current checkout. Maintainer installations use immutable executable/sidecar
 snapshots. Replacing the installed command affects new launches, not already
 running sessions. The package version in telemetry and host protocols is unchanged.
@@ -877,7 +885,8 @@ document carries no owner encoding.
 created 0700 and refused if it is not a private directory. The file is created
 exclusively at mode 0600 and never overwrites an existing path. The document
 carries source session/build provenance (the producer binary id when the
-exporting process can verify it, otherwise an explicit unavailable marker),
+exporting process can identify it by hash or a matching install manifest,
+otherwise an explicit unavailable marker),
 workspace, title, binding, a
 deterministic restart checkpoint bounded to 32 KiB each for user intent and
 reference text (64 KiB total), a readable inert archive
@@ -1778,6 +1787,8 @@ Two hidden forms exist for `/reload` only and are not in help:
 `plak version --state-key` prints this build's state key, and
 `plak --import-resume <file>` imports an export document and opens the TUI on
 the new session (§2.5.1).
+The hidden install-time machine form `plak version --write-binary-manifest <dir>`
+writes binary identity metadata without creating product state (§1).
 
 `fork`, `compact`, and `compatibility` compile only under the `maintainer`
 feature and are absent from an ordinary build (chapter 06 §4.1). They are not
@@ -2024,8 +2035,12 @@ with only `binary` (the same 12-hex build id as `plak version`), `state_key`
 and `command` (the normalized top-level verb), skipped if the build id is unavailable;
 only plain `version` obtains the id synchronously. Other commands use an already
 computed id or emit from the background identity reader without delaying startup.
-The hidden `version --state-key`, `--reload-probe` and `--export-version` machine
-probes emit no startup event and do not prepare a binary id.
+The hidden `version --state-key`, `--reload-probe`, `--export-version` and
+`--write-binary-manifest <dir>` machine probes emit no startup event and do not
+prepare a cached binary id. The install-only manifest probe hashes and stats
+the same running image and creates `<dir>/binary-id` with mode 0444, containing
+`id dev ino size mtime_ns`. It runs before product diagnostics and creates no
+product state.
 A log over 64 MiB is renamed to `plak.log.1` (replacing the previous one) when
 a process opens it or writes past that size; a process whose log another process
 already rotated follows the path to the new file. A diagnostics failure prints one line to stderr and the

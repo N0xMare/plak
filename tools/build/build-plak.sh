@@ -203,8 +203,9 @@ if [[ ! -d "$snapshot" ]]; then
   chmod 0555 "$staging/plak"
   ln -s "$installed_js" "$staging/plakous-js-host"
   ln -s "$installed_monty" "$staging/monty"
-  # The state key lets a later build find the snapshot that can still open a
-  # session this one wrote, to export it for carry-forward.
+  "$staging/plak" version --write-binary-manifest "$staging" 2>/dev/null \
+    || rm -f "$staging/binary-id"
+  # The state key finds the snapshot that can export this build's sessions.
   "$staging/plak" version --state-key >"$staging/state-key" 2>/dev/null \
     || rm -f "$staging/state-key"
   "$staging/plak" version --export-version >"$staging/export-version" 2>/dev/null \

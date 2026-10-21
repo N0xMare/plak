@@ -414,6 +414,8 @@ enum TopCommand {
         /// Hidden: print only this build's state key (`/reload` asks it).
         #[arg(long = "state-key", action = ArgAction::SetTrue, hide = true)]
         state_key: bool,
+        #[arg(long, hide = true, conflicts_with_all = ["state_key", "reload_probe", "export_version"])]
+        write_binary_manifest: Option<std::path::PathBuf>,
         #[arg(long, action = ArgAction::SetTrue, hide = true, conflicts_with_all = ["state_key", "export_version"])]
         reload_probe: bool,
         #[arg(long, action = ArgAction::SetTrue, hide = true, conflicts_with = "state_key")]
@@ -682,6 +684,10 @@ impl TopCommand {
             Self::Telemetry {
                 action: Some(action),
             } => action.into_command(),
+            Self::Version {
+                write_binary_manifest: Some(directory),
+                ..
+            } => Ok(Command::WriteBinaryManifest { directory }),
             Self::Version {
                 reload_probe: true, ..
             } => Ok(Command::ReloadProbe),
@@ -2501,6 +2507,10 @@ mod tests {
             (&["session", "gc"], |c| {
                 matches!(c, Command::CommandHelp { .. })
             }),
+            (
+                &["version", "--write-binary-manifest", "/tmp/snapshot"],
+                |c| matches!(c, Command::WriteBinaryManifest { directory } if directory.as_os_str() == "/tmp/snapshot"),
+            ),
             (&["version", "--state-key"], |c| {
                 matches!(c, Command::StateKey)
             }),

@@ -751,8 +751,17 @@ other file or link is refused. A rebuild never
 rewrites a file a running session executes, so a running TUI can offer
 `/reload` (chapter 02 §5.1). A running `plak` finds its sidecars beside the
 snapshot file it executes, not beside the `PATH` symlink. Each snapshot also
-holds a `state-key` manifest, the output of the snapshot's own hidden
-`plak version --state-key` (absent if that fails), which is how a later build
+holds a mode-0444 `binary-id` manifest (`id dev ino size mtime_ns`). After the
+executable's final chmod and before renaming the staging directory, the
+installer runs `plak version --write-binary-manifest <staging>` to hash and
+stat the same open executable. Directory rename preserves those identity
+fields; a matching manifest avoids hashing on startup (chapter 02 §1). This
+manifest is trusted like the private installation directory, not as a signature.
+It is generated at installation, not shipped in the release tarball. If the
+probe fails (including a release without that flag), the manifest is absent
+and installation continues; that binary hashes its executable as before.
+Each snapshot also holds a `state-key` manifest, the output of the snapshot's
+own hidden `plak version --state-key` (absent if that fails), which is how a later build
 finds the build that can export an old key's sessions (chapter 02 §2.5.1).
 The matching snapshot, rather than the new build, creates the bounded restart
 checkpoint and readable archive; the new build never carries an unbounded set
@@ -1057,8 +1066,8 @@ otherwise it reports that only the checksum was verified
 (`PLAK_SKIP_ATTESTATION=1` skips the step). `PLAK_RELEASE_BASE` replaces
 `https://github.com/N0xMare/plak` for mirrors and tests and lifts the HTTPS-only
 restriction. The install is exactly the §6.1 layout: the snapshot
-`~/.local/lib/plak/release/<id>/` with the same `<id>`, its `state-key` and
-`export-version` manifests, the shared mode-0555 workers under
+`~/.local/lib/plak/release/<id>/` with the same `<id>`, its install-time
+`binary-id`, `state-key` and `export-version` manifests, the shared mode-0555 workers under
 `~/.local/lib/plak/sidecars/`, the same ownership and writability refusals for
 installation directories and their physical ancestors, and `~/.local/bin`
 links that replace only links already pointing into the maintainer, release
