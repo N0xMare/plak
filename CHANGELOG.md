@@ -43,7 +43,14 @@ one cross-build carrier (a build imports its own and the previous version).
   default builds are git-only. Copies use a command allowlist, a repository
   discovery ceiling and a frozen base; `plak doctor` reports jj readiness.
   The optional integration uses jj-lib 0.46.
-- Release binaries are stripped and built with fat LTO.
+- Release binaries are stripped and built with fat LTO. The release
+  tarball's `THIRD-PARTY` lists exactly the packages the release build links
+  (no jj-lib, gix or test-support entries from the workspace-wide resolve).
+- OpenRouter: an error the provider reports inside an already accepted stream
+  reads `OpenRouter returned an in-band error after accepting the request:
+  HTTP <status> (<class>) from <upstream>`; `stream validation failed` now
+  means a real protocol violation. Chat is the recommended OpenRouter protocol
+  for non-Anthropic models.
 
 ### Plakous
 
@@ -52,6 +59,10 @@ one cross-build carrier (a build imports its own and the previous version).
 - Codex cache affinity and request IDs match its backend expectations;
   Anthropic API-key turns use prompt-cache breakpoints.
 - Request uploads time out on idle progress instead of total duration.
+- A failed request's attempt summary (`[N requests; last: ...]`) names the
+  provider's refusal class (`rate limited`, `unavailable`, `timeout`) on every
+  provider, and OpenRouter failures carry the provider's HTTP status, including
+  an in-band one, on the model error and the JSONL `turn_lifecycle`.
 - OpenRouter derives its input capacity from the catalog.
 - Long Responses sessions keep working past 4096 history items or 3 MiB of
   replay: per-response limits no longer apply to accumulated history.
