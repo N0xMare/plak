@@ -3625,7 +3625,7 @@ extension and refuse duplicate `state` before token issuance. Paste-back
 fixtures omit the optional device endpoint so remote device preference cannot
 silently replace their callback coverage. Only offline parser and
 redaction self-tests run in the tooling group; no gate starts Docker, a
-browser, or these authorization servers. Linux runs use tars0 (not tars1);
+browser, or these authorization servers. Linux runs use a native Docker host;
 macOS requires Docker Desktop host networking for the loopback URL identities.
 
 Compiled-review time is never a qualification precondition: `just full`'s

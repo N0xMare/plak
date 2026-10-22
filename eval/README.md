@@ -182,7 +182,7 @@ operator action, not part of a scored run or this offline test suite.
 
 All paths below are absolute private paths outside the repository. Do not put
 credentials, raw requests or campaign files in the tree. Run from a clean
-checkout on one native Docker host (`tars2` has an x86_64 Docker daemon);
+checkout on one native Docker host (for example an x86_64 Linux host with a native Docker daemon);
 never mix native architectures in a campaign. Worker Rust builds/gates use
 the assigned wtools lane, not the Mac. Python-only adapter tests can use the
 Mac eval venv. None of the preparation commands below sends model requests.
@@ -380,7 +380,7 @@ tasks, three blocks and two identical labels. `harbor-codex` requires exactly
 the expanded Codex pair, five blocks and the matching successful A/A receipt.
 Do not weaken any gate to make a historical job or unobserved arm pass.
 Before paid dispatch, test Docker create/start/stop/cleanup on an owned,
-credential-free disposable cell. A tars2 probe under concurrent gate load
+credential-free disposable cell. A Linux Docker-host probe under concurrent gate load
 needed about **9 minutes** to finish Compose cleanup, and a bounded kill API
 call timed out before cleanup eventually completed. All probe resources were
 removed and verified absent. Do not interpret `docker info` alone as cleanup

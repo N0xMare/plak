@@ -619,5 +619,5 @@ report-only cross-check. Offline: `--fixture tests/tooling/fixtures/api_model_ce
 Keycloak, strict node-oidc-provider resource indicators, an official-SDK MCP
 server and Playwright login. It uses a private disposable home and Plak's
 scripted model, never a provider account or paid inference. It is separate
-from smoke/soak and every gate tier. Run on tars0, never tars1, or on Docker
-Desktop with host networking enabled. Only its parser self-tests enter tooling.
+from smoke/soak and every gate tier. Run on a native Linux Docker host, or on
+Docker Desktop with host networking enabled. Only its parser self-tests enter tooling.

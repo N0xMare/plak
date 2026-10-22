@@ -1,7 +1,7 @@
 # MCP OAuth E2E
 
 Opt-in, no real accounts, no inference, no changes to product code. Run on
-**tars0, never tars1**. Requirements: Python 3.11+, Docker Compose v2+, Rust
+a native Linux Docker host. Requirements: Python 3.11+, Docker Compose v2+, Rust
 1.99.0 and network access to pull the pinned images/npm lockfile. On macOS,
 Docker Desktop 4.34+ must have host networking enabled. All fixtures bind
 loopback, including Keycloak; fixed ports 18080-18085 and 18765 must be free.

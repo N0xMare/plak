@@ -61,8 +61,8 @@ never replace absent bytes with its requested options. Resolve that specific
 pin's first-party transport/logging configuration before scoring it. The proxy
 itself is tested with local TLS and synthetic SSE, without provider traffic.
 
-Before paid use, recheck Docker lifecycle latency: a credential-free tars2
-Compose probe under concurrent gate load took about nine minutes to clean up.
+Before paid use, recheck Docker lifecycle latency: a credential-free
+Compose probe on a Linux x86_64 Docker host under concurrent gate load took about nine minutes to clean up.
 It eventually completed; its container, image and network were verified
 removed. This is infrastructure latency, not an agent failure or successful
 campaign evidence. `docker info` alone is not a sufficient preflight.
