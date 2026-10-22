@@ -1721,7 +1721,7 @@ Readers, including read-only SQLite inspection, read the report directly from
 the record and do not require the parent checkpoint to survive pruning.
 
 These encodings, and the exposed name on each canonical tool call (§6.5), are
-runtime checkpoint format epoch 28 (chapter 00). An earlier-epoch checkpoint
+runtime checkpoint format epoch 29 (chapter 00). An earlier-epoch checkpoint
 does not decode and is refused as an incompatible build (§5.4); sessions cross
 the bump only through the export document.
 
@@ -4122,7 +4122,7 @@ tool's restore bind the canonical name; provider replay sends the exposed name
 exactly, every kernel alike; views label a call by its exposed name, display
 telemetry records it, and classification follows the canonical name. Tool
 results correlate by call identity and record no name. This is part of
-runtime checkpoint format epoch 28.
+runtime checkpoint format epoch 29.
 V2 lowering preserves the canonical input contract's wire shape: structured
 targets receive semantic JSON, while bounded UTF-8 targets receive the exact
 validated text. In particular, Codex `apply_patch` sends its `*** Begin Patch`
@@ -4586,7 +4586,7 @@ fresh host authority, excluded from descriptor bytes and digests. The relative
 prefix and discovery ceiling are reconstructive policy: descriptor digest
 format 4 and host backend semantic revision 15 bind them, and exact reopen rejects
 changed prefix or discovery-ceiling policy. The descriptor wire encoding carries
-the ceiling boolean, including when false. Runtime format epoch 28 isolates
+the ceiling boolean, including when false. Runtime format epoch 29 isolates
 these bindings from earlier state. CarryBinding does not embed an environment
 descriptor; export remains v8 with its existing v7 importer.
 Unsupported descriptors have no compatibility path.
@@ -5542,7 +5542,7 @@ runtime under the ordinary mutating write-ahead claim, so a crash after the
 claim settles `OutcomeUnknown` and is never replayed. Provider-hosted MCP and
 connectors stay in the stop class below. Its
 serialized variant names are part of the canonical history encoding and so of
-runtime checkpoint format epoch 28.
+runtime checkpoint format epoch 29.
 
 Caller lineage and `ToolExecutionOwner` are independent axes. A customer tool
 called by a provider program MAY retain a local or MCP owner and MUST traverse
@@ -6438,7 +6438,9 @@ a rolling cut inside the active turn replaces its sealed middle with the
 summary while the instruction and the current round's batch survive byte for
 byte. The summarizer's input is the folded set in source order — plus the
 latest intent when the cut reaches inside the turn, since the summary must
-preserve the user intent it is folding work for.
+preserve the user intent it is folding work for. A Codex native successor keeps
+the same protected current-round tail verbatim after its compaction item
+(§10.4).
 
 Protection bounds a group's body; it does not make a group immovable. Inside
 the protected tail, a completed tool-call-and-result group may have its
@@ -6718,9 +6720,11 @@ folded inside its own turn, so the first mid-turn fold's note stays, and a
 later fold in the same turn whose successor already holds it after the latest
 user intent appends nothing; that note then sits just before the current
 round's batch. A later turn folds it whole with its intent group. A fold before a new prompt (fence (a)), an
-endpoint compaction and a recovery-published fold append no continuation note,
-and neither does a native compaction: its successor ends in the native
-compaction item, not a tool exchange.
+endpoint compaction and a recovery-published fold append no continuation note.
+A native compaction gets the note on the same rule: a native successor that
+keeps the current round's batch after its compaction item ends in that tool
+exchange, while one published without the tail ends in the compaction item and
+gets none.
 The note is part of the published successor, like the plan note, and failure to
 build it fails the publication.
 
@@ -6869,7 +6873,10 @@ An unanchored estimate alone never fires the percentage/token trigger; only the
 explicit pre-send overflow rule of §6.8 or a current-binding provider refusal
 can force compaction before a credible anchor exists.
 
-The context-state encoding and digest are version 3. Its encoded bound and the
+The context-state encoding and digest are version 3. Compaction provenance
+records the retained segment count and how many of those segments follow the
+summary segment: a native successor's protected current-round tail, zero for
+every other strategy. Native provenance carries strategy revision 2. Its encoded bound and the
 prepared-call recovery-record bound are each 4 MiB. Item digests use compact
 hex strings, not digest structs with integer arrays. The full request anchor is
 stored once in context state; prepared records and continuation frames reference
@@ -7076,11 +7083,31 @@ remains a typed context-limit failure.
 
 ### 10.4 Codex native successor and replay
 
-After a successful Codex native compaction the successor keeps user, developer,
-and system groups newest-first up to a retained-message budget of **64 000
-tokens** (`ceil(utf8/4)` of item text), whole groups only, with exactly one
-native compaction segment appended last. Assistant, tool, reasoning, and prior
-compaction groups are not retained.
+The native compaction request is the whole active head plus the trailing
+`compaction_trigger`; it is measured, cut and dispatched once, as above. After
+a successful Codex native compaction the successor keeps user, developer, and
+system groups that precede the protected tail newest-first up to a
+retained-message budget of **64 000 tokens** (`ceil(utf8/4)` of item text),
+whole groups only, then exactly one native compaction segment, then the
+source's protected current-round tail (§10.1) verbatim: the newest tool
+exchange after the latest user intent with every segment after it, so steering
+after that batch stays after it in order. Older assistant, tool, reasoning and
+prior compaction groups are not retained, and a tail that would hold a
+compaction segment is not kept. Upstream Codex drops every tool item; Plak
+keeps the current batch because the model has not yet acted on it.
+
+Both successor shapes — with that tail and without it — are pure functions of
+the source history and the compaction item. Completion measures the with-tail
+successor offline first and publishes it when it is measurable, `Fits`, and
+strictly smaller than the source; otherwise it measures and publishes the
+tail-less successor `[retained groups, compaction item]` under the unchanged
+measurable strict-shrink rule. A source with no tail, or one that is only its
+protected material, therefore keeps the tail-less successor. Neither choice
+dispatches again. The retained tail lowers like any history after the family
+artifact is cleared: unbound reasoning and opaque replay are omitted or fall
+back per their portable rules, calls and outputs stay paired, and caller
+lineage is lowered unchanged. A tail that cannot be lowered is not measurable,
+so the tail-less successor is published.
 
 The next ordinary Codex request lowers that assistant compaction block to
 exactly `{"type": "compaction", "encrypted_content": <summary>}`, and only when
@@ -7198,7 +7225,11 @@ definite failed compaction (the response is known and is not applied), never a
 publication ambiguity or a recovery fence; any other admission denial is an
 error and never publishes. Both fall to the placeholder rung like any definite
 failure. Reopen validation refuses a recorded harness or native fold whose
-after input is not strictly smaller than its recorded before.
+after input is not strictly smaller than its recorded before. A native receipt
+is accepted only when its successor is exactly one of the two source-derived
+shapes of §10.4, rebuilt from the source checkpoint and the recorded compaction
+item, with provenance, ledger and context recomputed from that shape; any other
+successor is corrupt.
 
 **A failed paid fold falls to the placeholder rung with round backoff.** A definite
 paid-fold failure mid-turn changed nothing, so the ladder continues with the

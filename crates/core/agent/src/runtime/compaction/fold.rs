@@ -2,6 +2,7 @@
 
 use crate::runtime::OperationId;
 use crate::runtime::admission::validate_configuration_runtime_authority;
+use crate::runtime::compaction::continuation::is_user_intent;
 use crate::runtime::compaction::record::{
     compaction_attempt_id, compaction_operation_component, compaction_uuid,
 };
@@ -300,12 +301,63 @@ pub(in crate::runtime) fn record_summarized_turns(
     Ok((recorded, successor))
 }
 
+/// The two successor shapes a native compaction item can publish.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::runtime) enum NativeSuccessorShape {
+    /// Retained messages, the compaction item, then the source's protected
+    /// current-round tail verbatim.
+    WithTail,
+    /// Retained messages and the compaction item last.
+    WithoutTail,
+}
+
+/// Where the source's protected current-round tail starts: the newest tool
+/// exchange after the latest user intent (spec 01 §10.1), which the tail keeps
+/// with everything after it. `None` when there is no such exchange or the tail
+/// would carry a compaction segment.
+fn native_protected_tail_start(source: &CanonicalHistory) -> Option<usize> {
+    let segments = source.segments();
+    let latest_intent = segments
+        .iter()
+        .enumerate()
+        .filter(|(_, segment)| is_user_intent(segment))
+        .map(|(position, _)| position)
+        .last()?;
+    let start = segments
+        .iter()
+        .enumerate()
+        .skip(latest_intent.saturating_add(1))
+        .filter(|(_, segment)| segment.kind() == HistorySegmentKind::ToolExchange)
+        .map(|(position, _)| position)
+        .last()?;
+    segments
+        .iter()
+        .skip(start)
+        .all(|segment| segment.kind() != HistorySegmentKind::Compaction)
+        .then_some(start)
+}
+
+/// Builds one native successor shape from the source and its compaction item.
+///
+/// Both shapes are pure functions of the source history and the item, so
+/// publication and reopen validation derive them identically. `WithTail`
+/// returns `None` when the source has no protected current-round tail.
 pub(in crate::runtime) fn native_compaction_successor(
     source: &CanonicalHistory,
     summary: HistorySegment,
-) -> Result<CanonicalHistory, AgentError> {
+    shape: NativeSuccessorShape,
+) -> Result<Option<CanonicalHistory>, AgentError> {
+    let tail_start = match shape {
+        NativeSuccessorShape::WithTail => {
+            let Some(start) = native_protected_tail_start(source) else {
+                return Ok(None);
+            };
+            start
+        }
+        NativeSuccessorShape::WithoutTail => source.segments().len(),
+    };
     let mut segments = Vec::new();
-    for segment in source.segments() {
+    for segment in source.segments().iter().take(tail_start) {
         if matches!(
             segment.kind(),
             HistorySegmentKind::Compaction
@@ -343,7 +395,8 @@ pub(in crate::runtime) fn native_compaction_successor(
     }
     let mut segments = retain_native_compaction_prefix(segments);
     segments.push(summary);
-    CanonicalHistory::new(segments).map_err(|_| {
+    segments.extend(source.segments().iter().skip(tail_start).cloned());
+    CanonicalHistory::new(segments).map(Some).map_err(|_| {
         AgentError::new(
             AgentErrorKind::Model,
             "native compaction successor is invalid",
@@ -814,32 +867,201 @@ pub(in crate::runtime) async fn build_compaction_success_fold(
             ),
         ));
     }
-    let cut = if request.version >= 3 {
-        None
-    } else {
-        Some(
-            reconstruct_compaction_cut(manifest, identity, request)
-                .map_err(CompactionCompletionError::recovery)?,
+    if request.version >= 3 {
+        return build_native_success_fold(
+            manifest,
+            identity,
+            compaction,
+            provider,
+            request,
+            response,
+            model,
+            current_configuration,
+            clock,
+            authority_timeout,
         )
-    };
+        .await;
+    }
+    let cut = reconstruct_compaction_cut(manifest, identity, request)
+        .map_err(CompactionCompletionError::recovery)?;
     let summary = compaction_summary_segment(identity, response)
         .map_err(CompactionCompletionError::semantic)?;
-    let successor = if let Some(cut) = &cut {
-        cut.build_successor(&summary).map_err(|_| {
-            CompactionCompletionError::semantic(AgentError::new(
-                AgentErrorKind::Model,
-                "compaction summary cannot build its exact successor",
-            ))
-        })?
-    } else {
-        native_compaction_successor(manifest.canonical().history(), summary.clone())
-            .map_err(CompactionCompletionError::semantic)?
-    };
+    let successor = cut.build_successor(&summary).map_err(|_| {
+        CompactionCompletionError::semantic(AgentError::new(
+            AgentErrorKind::Model,
+            "compaction summary cannot build its exact successor",
+        ))
+    })?;
     let (summary, successor) =
         record_summarized_turns(manifest.canonical().history(), summary, successor)
             .map_err(CompactionCompletionError::semantic)?;
-    let (after, occupancy_tokens_after, proof_before) = if request.version >= 3 {
-        let (after, occupancy) = native_successor_audit(
+    let source_context = manifest.canonical().context().retained_for_exact_resume();
+    let next_epoch = source_context
+        .affinity()
+        .epoch()
+        .checked_add(1)
+        .ok_or_else(|| {
+            CompactionCompletionError::semantic(AgentError::new(
+                AgentErrorKind::Session,
+                "cache epoch overflowed",
+            ))
+        })?;
+    let target_affinity = ModelCacheAffinity::from_runtime_entropy(
+        source_context.affinity().session(),
+        source_context.affinity().branch(),
+        next_epoch,
+        request.target_affinity_entropy,
+    )
+    .map_err(|_| {
+        CompactionCompletionError::recovery(AgentError::new(
+            AgentErrorKind::Session,
+            "cache affinity rotation failed",
+        ))
+    })?;
+    let successor_request = ModelRequest::from_parts(
+        manifest.canonical().stable_prefix().clone(),
+        ConversationView::from_shared(successor.clone(), WorkingProjection::default()),
+        RequestMetadata::for_session_workflow(
+            request.request.metadata().run_id(),
+            identity.workflow_id,
+            compaction_attempt_id(identity.workflow_id, b"successor-measurement")
+                .map_err(CompactionCompletionError::recovery)?,
+            request.request.metadata().created_at(),
+        ),
+    )
+    .map_err(|_| {
+        CompactionCompletionError::recovery(AgentError::new(
+            AgentErrorKind::Model,
+            "compaction successor request is invalid",
+        ))
+    })?;
+    let (status, after) = measure_compaction_successor(
+        Arc::clone(&model),
+        manifest,
+        current_configuration,
+        successor_request,
+        target_affinity.clone(),
+        clock,
+        authority_timeout,
+    )
+    .await
+    .map_err(CompactionCompletionError::recovery)?;
+    if !matches!(status.kind(), ContextStatusKind::Fits { .. }) {
+        return Err(CompactionCompletionError::semantic(AgentError::new(
+            AgentErrorKind::Model,
+            "compaction successor does not independently fit",
+        )));
+    }
+    // The admission-time before and this successor audit are not one basis
+    // (anchor, prefix, counter). Re-measure the source with the same call
+    // the successor just used, and publish that audit as the provenance
+    // before so the proof and the logged figures name the same numbers.
+    let source_request = ModelRequest::from_parts(
+        manifest.canonical().stable_prefix().clone(),
+        ConversationView::from_shared(
+            manifest.canonical().history().clone(),
+            WorkingProjection::default(),
+        ),
+        RequestMetadata::for_session_workflow(
+            request.request.metadata().run_id(),
+            identity.workflow_id,
+            compaction_attempt_id(identity.workflow_id, b"source-proof-measurement")
+                .map_err(CompactionCompletionError::recovery)?,
+            request.request.metadata().created_at(),
+        ),
+    )
+    .map_err(|_| {
+        CompactionCompletionError::recovery(AgentError::new(
+            AgentErrorKind::Model,
+            "compaction source proof request is invalid",
+        ))
+    })?;
+    // Classified like the successor measurement above: a capacity denial
+    // is a measurement, anything else (authority, infrastructure) fences
+    // recovery rather than discarding a paid response as failed.
+    let (_source_status, proof_before) = measure_compaction_successor(
+        model,
+        manifest,
+        current_configuration,
+        source_request,
+        target_affinity,
+        clock,
+        authority_timeout,
+    )
+    .await
+    .map_err(CompactionCompletionError::recovery)?;
+    // A source that overflows on this basis (a capacity denial carries
+    // its audit) is above the capacity the successor Fits in, so the
+    // strict comparison holds for it as well; reopen checks the same rule.
+    if after.input_tokens() >= proof_before.input_tokens() {
+        return Err(CompactionCompletionError::semantic(AgentError::new(
+            AgentErrorKind::Model,
+            "compaction successor did not prove net input shrink",
+        )));
+    }
+    let fold = fold_compaction_success(
+        manifest,
+        identity,
+        compaction,
+        provider,
+        request,
+        &cut,
+        &summary,
+        successor,
+        response,
+        proof_before,
+        after,
+    )
+    .map_err(CompactionCompletionError::recovery)?;
+    Ok(CompactionSuccessFold {
+        occupancy_tokens_after: status.unanchored_occupancy_tokens(),
+        ..fold
+    })
+}
+
+/// Publishes the first acceptable native successor shape from one compaction
+/// item: the retained current-round tail when its successor is measurable,
+/// Fits and strictly shrinks; otherwise the tail-less successor under today's
+/// measurable strict-shrink rule. Both candidates are measured offline; the
+/// paid dispatch already happened once.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "native completion consumes the same exact persisted authority tuple"
+)]
+async fn build_native_success_fold(
+    manifest: &RuntimeManifest,
+    identity: DurableCompactionIdentity,
+    compaction: OperationId,
+    provider: OperationId,
+    request: &DurableCompactionRequestRecord,
+    response: &ModelResponse,
+    model: Arc<dyn LanguageModel>,
+    current_configuration: &CompiledProviderConfiguration,
+    clock: &dyn Clock,
+    authority_timeout: Duration,
+) -> Result<CompactionSuccessFold, CompactionCompletionError> {
+    let source = manifest.canonical().history();
+    let item = compaction_summary_segment(identity, response)
+        .map_err(CompactionCompletionError::semantic)?;
+    let mut selected = None;
+    for (shape, attempt_role) in [
+        (
+            NativeSuccessorShape::WithTail,
+            &b"successor-tail-measurement"[..],
+        ),
+        (
+            NativeSuccessorShape::WithoutTail,
+            &b"successor-measurement"[..],
+        ),
+    ] {
+        let Some(successor) = native_compaction_successor(source, item.clone(), shape)
+            .map_err(CompactionCompletionError::semantic)?
+        else {
+            continue;
+        };
+        let (summary, successor) = record_summarized_turns(source, item.clone(), successor)
+            .map_err(CompactionCompletionError::semantic)?;
+        let audit = native_successor_audit(
             Arc::clone(&model),
             manifest,
             &identity,
@@ -848,160 +1070,47 @@ pub(in crate::runtime) async fn build_compaction_success_fold(
             clock,
             authority_timeout,
             &successor,
+            attempt_role,
         )
         .await
         .map_err(CompactionCompletionError::semantic)?;
-        if occupancy.is_none() || after.input_tokens() >= request.before_input_tokens {
-            return Err(CompactionCompletionError::semantic(AgentError::new(
-                AgentErrorKind::Model,
-                "compaction successor did not prove net input shrink",
-            )));
+        let shrinks =
+            audit.occupancy.is_some() && audit.after.input_tokens() < request.before_input_tokens;
+        let acceptable = match shape {
+            NativeSuccessorShape::WithTail => shrinks && audit.fits,
+            NativeSuccessorShape::WithoutTail => shrinks,
+        };
+        if acceptable {
+            selected = Some((summary, successor, audit));
+            break;
         }
-        (after, occupancy, None)
-    } else {
-        let source_context = manifest.canonical().context().retained_for_exact_resume();
-        let next_epoch = source_context
-            .affinity()
-            .epoch()
-            .checked_add(1)
-            .ok_or_else(|| {
-                CompactionCompletionError::semantic(AgentError::new(
-                    AgentErrorKind::Session,
-                    "cache epoch overflowed",
-                ))
-            })?;
-        let target_affinity = ModelCacheAffinity::from_runtime_entropy(
-            source_context.affinity().session(),
-            source_context.affinity().branch(),
-            next_epoch,
-            request.target_affinity_entropy,
-        )
-        .map_err(|_| {
-            CompactionCompletionError::recovery(AgentError::new(
-                AgentErrorKind::Session,
-                "cache affinity rotation failed",
-            ))
-        })?;
-        let successor_request = ModelRequest::from_parts(
-            manifest.canonical().stable_prefix().clone(),
-            ConversationView::from_shared(successor.clone(), WorkingProjection::default()),
-            RequestMetadata::for_session_workflow(
-                request.request.metadata().run_id(),
-                identity.workflow_id,
-                compaction_attempt_id(identity.workflow_id, b"successor-measurement")
-                    .map_err(CompactionCompletionError::recovery)?,
-                request.request.metadata().created_at(),
-            ),
-        )
-        .map_err(|_| {
-            CompactionCompletionError::recovery(AgentError::new(
-                AgentErrorKind::Model,
-                "compaction successor request is invalid",
-            ))
-        })?;
-        let (status, after) = measure_compaction_successor(
-            Arc::clone(&model),
-            manifest,
-            current_configuration,
-            successor_request,
-            target_affinity.clone(),
-            clock,
-            authority_timeout,
-        )
-        .await
-        .map_err(CompactionCompletionError::recovery)?;
-        if !matches!(status.kind(), ContextStatusKind::Fits { .. }) {
-            return Err(CompactionCompletionError::semantic(AgentError::new(
-                AgentErrorKind::Model,
-                "compaction successor does not independently fit",
-            )));
-        }
-        // The admission-time before and this successor audit are not one basis
-        // (anchor, prefix, counter). Re-measure the source with the same call
-        // the successor just used, and publish that audit as the provenance
-        // before so the proof and the logged figures name the same numbers.
-        let source_request = ModelRequest::from_parts(
-            manifest.canonical().stable_prefix().clone(),
-            ConversationView::from_shared(
-                manifest.canonical().history().clone(),
-                WorkingProjection::default(),
-            ),
-            RequestMetadata::for_session_workflow(
-                request.request.metadata().run_id(),
-                identity.workflow_id,
-                compaction_attempt_id(identity.workflow_id, b"source-proof-measurement")
-                    .map_err(CompactionCompletionError::recovery)?,
-                request.request.metadata().created_at(),
-            ),
-        )
-        .map_err(|_| {
-            CompactionCompletionError::recovery(AgentError::new(
-                AgentErrorKind::Model,
-                "compaction source proof request is invalid",
-            ))
-        })?;
-        // Classified like the successor measurement above: a capacity denial
-        // is a measurement, anything else (authority, infrastructure) fences
-        // recovery rather than discarding a paid response as failed.
-        let (_source_status, proof_before) = measure_compaction_successor(
-            model,
-            manifest,
-            current_configuration,
-            source_request,
-            target_affinity,
-            clock,
-            authority_timeout,
-        )
-        .await
-        .map_err(CompactionCompletionError::recovery)?;
-        // A source that overflows on this basis (a capacity denial carries
-        // its audit) is above the capacity the successor Fits in, so the
-        // strict comparison holds for it as well; reopen checks the same rule.
-        if after.input_tokens() >= proof_before.input_tokens() {
-            return Err(CompactionCompletionError::semantic(AgentError::new(
-                AgentErrorKind::Model,
-                "compaction successor did not prove net input shrink",
-            )));
-        }
-        (
-            after,
-            status.unanchored_occupancy_tokens(),
-            Some(proof_before),
-        )
+    }
+    let Some((summary, successor, audit)) = selected else {
+        return Err(CompactionCompletionError::semantic(AgentError::new(
+            AgentErrorKind::Model,
+            "compaction successor did not prove net input shrink",
+        )));
     };
-    let fold = match cut.as_ref() {
-        Some(cut) => fold_compaction_success(
-            manifest,
-            identity,
-            compaction,
-            provider,
-            request,
-            cut,
-            &summary,
-            successor,
-            response,
-            proof_before.ok_or_else(|| {
-                CompactionCompletionError::semantic(AgentError::new(
-                    AgentErrorKind::Internal,
-                    "harness compaction proof before was not measured",
-                ))
-            })?,
-            after,
-        )
-        .map_err(CompactionCompletionError::recovery),
-        None => fold_native_compaction_success(
-            manifest, identity, compaction, provider, request, &summary, successor, response, after,
-        )
-        .map_err(|error| {
-            if error.kind() == AgentErrorKind::OutcomeUnknown {
-                CompactionCompletionError::recovery(error)
-            } else {
-                CompactionCompletionError::semantic(error)
-            }
-        }),
-    };
-    fold.map(|fold| CompactionSuccessFold {
-        occupancy_tokens_after,
+    let fold = fold_native_compaction_success(
+        manifest,
+        identity,
+        compaction,
+        provider,
+        request,
+        &summary,
+        successor,
+        response,
+        audit.after,
+    )
+    .map_err(|error| {
+        if error.kind() == AgentErrorKind::OutcomeUnknown {
+            CompactionCompletionError::recovery(error)
+        } else {
+            CompactionCompletionError::semantic(error)
+        }
+    })?;
+    Ok(CompactionSuccessFold {
+        occupancy_tokens_after: audit.occupancy,
         ..fold
     })
 }

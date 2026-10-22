@@ -42,6 +42,7 @@ pub(super) mod jobs_carry_fixture;
 pub(super) mod landed_round_abandonment;
 mod long_turn_compaction;
 mod native_capacity_tests;
+mod native_tail_tests;
 mod observation_budget;
 mod process_notices;
 #[path = "../provider_outcome_tests.rs"]
@@ -119,7 +120,8 @@ use crate::runtime::checkpoint::identity::{
 use crate::runtime::checkpoint::io::recovered_commit_matches_exact;
 use crate::runtime::cleanup::settle_local_composition_deliveries;
 use crate::runtime::compaction::fold::{
-    build_compaction_success_fold, compaction_summary_segment, native_compaction_successor,
+    NativeSuccessorShape, build_compaction_success_fold, compaction_summary_segment,
+    native_compaction_successor,
 };
 use crate::runtime::compaction::record::compaction_attempt_id;
 use crate::runtime::compaction::request::{

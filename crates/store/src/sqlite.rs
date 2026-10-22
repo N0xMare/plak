@@ -2007,7 +2007,7 @@ INSERT INTO store_meta VALUES(1,0,0,0,0,0,0,0,0,0,zeroblob(48));
 CREATE TABLE runtime_objects (
  id INTEGER PRIMARY KEY,
  kind INTEGER NOT NULL CHECK(kind BETWEEN 1 AND 19),
- codec INTEGER NOT NULL CHECK(codec=28), digest BLOB NOT NULL CHECK(length(digest)=32),
+ codec INTEGER NOT NULL CHECK(codec=29), digest BLOB NOT NULL CHECK(length(digest)=32),
  byte_len INTEGER NOT NULL CHECK(byte_len>=0), UNIQUE(kind,codec,digest));
 CREATE TABLE runtime_object_bytes (
  id INTEGER PRIMARY KEY REFERENCES runtime_objects(id), bytes BLOB NOT NULL);

@@ -6061,3 +6061,163 @@ fn hosted_programs_ignore_lineage_from_an_earlier_account() -> TestResult {
     assert_eq!(foreign, crate::ResponsesHostedProgramContext::default());
     Ok(())
 }
+
+/// A Codex native successor that keeps the current round's batch after its
+/// compaction item lowers with no family artifact: unbound reasoning and call
+/// replay fall back to portable semantics, Code Mode `exec` stays a paired
+/// custom call with its cell yield, and program-caller lineage is lowered on
+/// both call and output.
+#[test]
+fn native_successor_tail_lowers_after_the_compaction_item_without_replay() -> TestResult {
+    let (protocol, family, model) = target_values()?;
+    let account = Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?;
+    let replay = |native: Value| -> Result<ReplayEnvelope, Box<dyn std::error::Error>> {
+        Ok(ReplayEnvelope::new(
+            protocol.clone(),
+            Some(family.clone()),
+            ReplayScope::ExactAccountModel {
+                model: model.clone(),
+                account,
+            },
+            ReplayKindId::new("responses.output_item")?,
+            1,
+            DataClassification::Sensitive,
+            RawValue::from_string(native.to_string())?,
+        )?)
+    };
+    let reasoning = ContentBlock::Reasoning(ReasoningBlock::new(
+        ReasoningVisibility::OpaqueReplay,
+        None,
+        Some(replay(json!({
+            "type": "reasoning", "id": "tail-reasoning",
+            "encrypted_content": "tail-encrypted", "summary": []
+        }))?),
+    )?);
+    let exec = ToolCallBlock::new(
+        id::<CallId>(960)?,
+        ToolName::new("exec")?,
+        ToolExecutionOwner::Local,
+        ToolCallState::Requested,
+        ToolCorrelation::new(
+            Some("call_exec".to_owned()),
+            None,
+            ToolCallerLineage::Direct,
+        )?,
+        serde_json::to_string("const page = await read(2); yield_(page);")?,
+    )?;
+    let lineage = ToolCallerLineage::provider_programmatic(
+        NamespaceId::new("openai.responses.program")?,
+        "pcall_1",
+    )?;
+    let lookup = ToolCallBlock::new(
+        id::<CallId>(961)?,
+        ToolName::new("lookup")?,
+        ToolExecutionOwner::Local,
+        ToolCallState::Requested,
+        ToolCorrelation::new(Some("call_lookup".to_owned()), None, lineage.clone())?,
+        r#"{"q":"check word"}"#,
+    )?;
+    let items = vec![
+        user(962, "read every page")?,
+        bound_compaction_prior(
+            "opaque-ciphertext",
+            r#"{"type":"compaction","encrypted_content":"opaque-ciphertext"}"#,
+        )?,
+        ConversationItem::new(
+            id::<EntryId>(963)?,
+            Actor::Assistant,
+            vec![
+                reasoning,
+                ContentBlock::ToolCall(exec.clone()),
+                ContentBlock::Opaque(OpaqueBlock::new(
+                    replay(json!({
+                        "type": "custom_tool_call", "id": "ctc_1", "call_id": "call_exec",
+                        "name": "exec", "input": "const page = await read(2); yield_(page);"
+                    }))?,
+                    OpaqueFallback::CompatibleReplay,
+                )?),
+                ContentBlock::ToolCall(lookup.clone()),
+            ],
+            Provenance::ModelOutput,
+        )?,
+        ConversationItem::new(
+            id::<EntryId>(964)?,
+            Actor::Tool,
+            vec![
+                ContentBlock::ToolResultUpdate(ToolResultUpdateBlock::new(
+                    exec.call_id(),
+                    ToolExecutionOwner::Local,
+                    TextBlock::new("page 2 check word: quartz", None)?,
+                    exec.correlation().clone(),
+                )?),
+                ContentBlock::ToolResult(ToolResultBlock::new(
+                    exec.call_id(),
+                    ToolExecutionOwner::Local,
+                    ToolResultKind::Success,
+                    vec![ToolResultPart::Text(TextBlock::new("cell done", None)?)],
+                    exec.correlation().clone(),
+                )?),
+                ContentBlock::ToolResult(ToolResultBlock::new(
+                    lookup.call_id(),
+                    ToolExecutionOwner::Local,
+                    ToolResultKind::Success,
+                    vec![ToolResultPart::Text(TextBlock::new("found", None)?)],
+                    ToolCorrelation::new(Some("call_lookup".to_owned()), None, lineage)?,
+                )?),
+            ],
+            Provenance::ToolExecution,
+        )?,
+        user(965, "also read page three")?,
+    ];
+    let request = crate::test_support::model_request_builder(
+        ConversationView::from_items(items)?,
+        metadata()?,
+    )
+    .tools(vec![tool("exec", true)?, tool("lookup", false)?])
+    .build()?;
+    let lowered = lower_responses_request(
+        &request,
+        ResponsesRequestConfig::new(
+            &protocol,
+            Some(&family),
+            &model,
+            ResponsesRequestPolicy::openai_codex(false, true, "reasoning.encrypted_content"),
+            None,
+        )
+        .with_account_binding(&account),
+    )?;
+    let input = lowered.body()["input"].as_array().ok_or("input")?;
+    let types = input
+        .iter()
+        .map(|item| item["type"].as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        types,
+        [
+            "message",
+            "compaction",
+            "custom_tool_call",
+            "function_call",
+            "custom_tool_call_output",
+            "custom_tool_call_output",
+            "function_call_output",
+            "message",
+        ]
+    );
+    assert_eq!(input[1]["encrypted_content"], "opaque-ciphertext");
+    assert_eq!(input[2]["call_id"], "call_exec");
+    assert_eq!(input[4]["call_id"], "call_exec");
+    assert_eq!(input[4]["output"], "page 2 check word: quartz");
+    assert_eq!(input[5]["call_id"], "call_exec");
+    let program = json!({"type": "program", "caller_id": "pcall_1"});
+    assert_eq!(input[3]["caller"], program);
+    assert_eq!(input[6]["call_id"], "call_lookup");
+    assert_eq!(input[6]["caller"], program);
+    let body = lowered.body().to_string();
+    assert!(
+        !body.contains("tail-encrypted"),
+        "unbound reasoning is omitted"
+    );
+    assert!(!body.contains("ctc_1"), "unbound call replay is not sent");
+    Ok(())
+}

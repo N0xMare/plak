@@ -522,6 +522,14 @@ pub(in crate::runtime) async fn exact_compaction_runtime(
     })
 }
 
+/// One offline native successor measurement.
+pub(super) struct NativeSuccessorAudit {
+    pub(super) after: ContextEvaluationAudit,
+    /// `None` when the successor could not be measured.
+    pub(super) occupancy: Option<u64>,
+    pub(super) fits: bool,
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "successor audit keeps persisted source and current measurement authority explicit"
@@ -535,7 +543,8 @@ pub(super) async fn native_successor_audit(
     clock: &dyn Clock,
     authority_timeout: Duration,
     successor: &CanonicalHistory,
-) -> Result<(ContextEvaluationAudit, Option<u64>), AgentError> {
+    attempt_role: &[u8],
+) -> Result<NativeSuccessorAudit, AgentError> {
     let source_context = manifest.canonical().context().retained_for_exact_resume();
     let Some(next_epoch) = source_context.affinity().epoch().checked_add(1) else {
         return unmeasured_successor(successor);
@@ -548,8 +557,7 @@ pub(super) async fn native_successor_audit(
     ) else {
         return unmeasured_successor(successor);
     };
-    let Ok(attempt_id) = compaction_attempt_id(identity.workflow_id, b"successor-measurement")
-    else {
+    let Ok(attempt_id) = compaction_attempt_id(identity.workflow_id, attempt_role) else {
         return unmeasured_successor(successor);
     };
     let Ok(successor_request) = ModelRequest::from_parts(
@@ -575,15 +583,21 @@ pub(super) async fn native_successor_audit(
     )
     .await
     {
-        Ok((status, audit)) => Ok((audit, status.unanchored_occupancy_tokens())),
+        Ok((status, audit)) => Ok(NativeSuccessorAudit {
+            after: audit,
+            occupancy: status.unanchored_occupancy_tokens(),
+            fits: matches!(status.kind(), ContextStatusKind::Fits { .. }),
+        }),
         Err(_) => unmeasured_successor(successor),
     }
 }
 
-fn unmeasured_successor(
-    successor: &CanonicalHistory,
-) -> Result<(ContextEvaluationAudit, Option<u64>), AgentError> {
-    Ok((unmeasured_native_compact_audit(successor.identity())?, None))
+fn unmeasured_successor(successor: &CanonicalHistory) -> Result<NativeSuccessorAudit, AgentError> {
+    Ok(NativeSuccessorAudit {
+        after: unmeasured_native_compact_audit(successor.identity())?,
+        occupancy: None,
+        fits: false,
+    })
 }
 
 pub(in crate::runtime) fn unmeasured_native_compact_audit(

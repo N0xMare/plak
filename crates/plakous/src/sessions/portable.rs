@@ -116,14 +116,16 @@ fn invalid_history(error: &dyn std::fmt::Display) -> AgentSessionsError {
 
 /// Strips replay, then places a carried native compaction at position zero.
 ///
-/// A native successor is `[retained prefix..., summary]`. The summary stands
-/// in for context before that prefix (the carried marker says earlier context
-/// could not be carried; the prefix is the verbatim user, developer and system
-/// tail). A semantic cut accepts a prior compaction only at position zero, so
-/// the plain summary has to lead. Turn position is the sum of the compaction
-/// record and the root turns still outside it, so the move keeps
-/// `(prompts, turns)`. Same-binding carry keeps the native item and this
-/// order: Codex still replays the summary last.
+/// A native successor is `[retained prefix..., summary, current-round
+/// tail...]`, and later rounds follow the tail. The summary stands in for
+/// context before that prefix (the carried marker says earlier context could
+/// not be carried; the prefix is the verbatim user, developer and system
+/// messages). A semantic cut accepts a prior compaction only at position zero,
+/// so the plain summary has to lead; the tail and later rounds keep their
+/// order behind the prefix. Turn position is the sum of the compaction record
+/// and the root turns still outside it, so the move keeps `(prompts, turns)`.
+/// Same-binding carry keeps the native item and this order: Codex still
+/// replays the summary after the retained prefix and before the tail.
 fn carried_segments_without_replay(
     segments: &[HistorySegment],
 ) -> Result<Vec<HistorySegment>, AgentSessionsError> {

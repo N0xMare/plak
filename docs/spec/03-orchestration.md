@@ -2324,7 +2324,7 @@ canonical `seal_outcome` payload and result-mail replay emits `history left
 plak_base(); the candidate is the whole tree` when true. The transient snapshot
 observation uses the sealed commit and recorded base under the unlocked seal
 phase, never a later working-copy observation. This is folded into unreleased
-tree schema 8; epoch e28 prevents older-shape state being opened. A JJ copy
+tree schema 8; epoch e29 prevents older-shape state being opened. A JJ copy
 with no owning tree row refuses with `jj copy has no recorded tree row; launch
 from its owning session, or discard or close it and respawn`.
 

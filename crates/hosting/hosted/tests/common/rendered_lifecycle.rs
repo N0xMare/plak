@@ -1229,7 +1229,7 @@ mod suite {
             "json",
             &serde_json::to_string_pretty(&native_json).expect("native json"),
         ));
-        md.push_str("Native successor keeps newest user/developer/system messages under a 64k token budget and inserts one compaction item. That fold is not sealed through `SemanticCompactionCut::build_successor` (`request.version >= 3` uses `native_compaction_successor`).\n");
+        md.push_str("Native successor keeps newest user/developer/system messages under a 64k token budget, inserts one compaction item, then keeps the current round's tool batch with everything after it verbatim when that successor fits and shrinks (otherwise it ends at the compaction item). That fold is not sealed through `SemanticCompactionCut::build_successor` (`request.version >= 3` uses `native_compaction_successor`).\n");
         md
     }
 
@@ -1920,7 +1920,7 @@ mod suite {
         ),
         (
             "compaction",
-            "e8bac68cffc9d6d2a46676fe4f66012edb1b2bf1e149cd5e75c95f01f6555d4c",
+            "7055519d50f3995bdf645d9ec3bd894862275e85fb860d51ca835b172804704d",
         ),
         (
             "child-mail",

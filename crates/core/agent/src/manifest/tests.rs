@@ -943,6 +943,17 @@ fn native_compact_context(
     source_checkpoint: CheckpointId,
     entropy: [u8; 32],
 ) -> TestResult<(RuntimeContextState, CanonicalHistory, HistorySegment)> {
+    native_compact_context_with_tail(source, source_history, &[], source_checkpoint, entropy)
+}
+
+/// A native successor `[source..., summary, tail...]`.
+fn native_compact_context_with_tail(
+    source: &RuntimeContextState,
+    source_history: &CanonicalHistory,
+    tail: &[HistorySegment],
+    source_checkpoint: CheckpointId,
+    entropy: [u8; 32],
+) -> TestResult<(RuntimeContextState, CanonicalHistory, HistorySegment)> {
     let summary = HistorySegment::new(
         HistorySegmentKind::Compaction,
         vec![ConversationItem::new(
@@ -956,6 +967,7 @@ fn native_compact_context(
     )?;
     let mut segments = source_history.segments().to_vec();
     segments.push(summary.clone());
+    segments.extend(tail.iter().cloned());
     let successor = CanonicalHistory::new(segments)?;
     let projection =
         ConversationView::from_shared(source_history.clone(), WorkingProjection::default());
@@ -1066,6 +1078,62 @@ fn compaction_provenance_survives_a_later_user_append() -> TestResult {
         WorkingProjection::default(),
         native,
     )?;
+    Ok(())
+}
+
+#[test]
+fn native_provenance_names_the_summary_and_its_trailing_tail() -> TestResult {
+    let source = RuntimeContextState::genesis(id(83_201)?, id(83_202)?, [0x75; 32])?;
+    let prefix = empty_request_prefix()?;
+    let history = context_history(2)?;
+    let tail = vec![later_user_segment(83_210)?, later_user_segment(83_211)?];
+    let (native, successor, summary) =
+        native_compact_context_with_tail(&source, &history, &tail, id(83_203)?, [0x76; 32])?;
+    let provenance = native.compaction_provenance().ok_or("native provenance")?;
+    assert_eq!(provenance.trailing_segment_count(), 2);
+    assert_eq!(provenance.retained_tail().1, 4);
+    assert_eq!(provenance.summary_segment_identity(), summary.identity());
+    assert_eq!(RuntimeContextState::decode(&native.encode()?)?, native);
+    RuntimeCanonicalState::new(
+        prefix.clone(),
+        successor.append(later_user_segment(83_212)?)?,
+        WorkingProjection::default(),
+        native.clone(),
+    )?;
+
+    // The same segments in another order no longer hold the recorded prefix.
+    let mut reordered = successor.segments().to_vec();
+    reordered.swap(3, 4);
+    assert!(
+        RuntimeCanonicalState::new(
+            prefix,
+            CanonicalHistory::new(reordered)?,
+            WorkingProjection::default(),
+            native.clone(),
+        )
+        .is_err()
+    );
+
+    // The tail count is part of the validated, identity-bound provenance.
+    let mut forged = provenance.clone();
+    forged.trailing_segment_count = 5;
+    assert_eq!(
+        forged.validate(),
+        Err(RuntimeManifestError::InvalidCompactionProvenance)
+    );
+    let mut forged = provenance.clone();
+    forged.trailing_segment_count = 1;
+    forged.identity = compaction_provenance_identity(&forged)?;
+    let mut writer = Writer::default();
+    write_compaction_provenance_fields(&mut writer, &forged)?;
+    writer.digest(forged.identity)?;
+    let forged = read_compaction_provenance(&mut Reader::new(&writer.bytes))?;
+    assert_eq!(
+        forged.validate_history_prefix(&successor),
+        Err(RuntimeManifestError::InvalidCompactionProvenance),
+        "a tail count that misplaces the summary is refused against history"
+    );
+    provenance.validate_history_prefix(&successor)?;
     Ok(())
 }
 
@@ -2757,7 +2825,7 @@ fn effect_decision_pause_is_exact_pre_dispatch_and_closed() -> TestResult {
 
 #[test]
 fn lifecycle_codec_golden_matrix_is_closed_bounded_and_tamper_checked() -> TestResult {
-    assert_eq!(RUNTIME_FORMAT_EPOCH, 28);
+    assert_eq!(RUNTIME_FORMAT_EPOCH, 29);
     assert_eq!(RUNTIME_LIFECYCLE_CODEC_REVISION, 3);
     let signature = RecoveryHandlerSignature::new;
     let command = RecoveryObligation::new(
@@ -3367,7 +3435,7 @@ fn job_row(number: u32) -> TestResult<JobRow> {
 
 #[test]
 fn quiescent_job_ledger_and_terminal_evidence_round_trip() -> TestResult {
-    assert_eq!(RUNTIME_FORMAT_EPOCH, 28);
+    assert_eq!(RUNTIME_FORMAT_EPOCH, 29);
     let mut manifest = manifest(ProducerProvenance::new("plakous", "jobs", "offline")?, None)?;
     let mut row = job_row(3)?;
     row.terminal = Some(JobTerminal {

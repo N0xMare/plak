@@ -465,13 +465,13 @@ CHECK              RESULT   DETAIL                                        FIX
 Version            OK       available · 0.0.2                             —
 Home               OK       available · /home/you/.plak                   —
 Config             OK       valid · /home/you/.plak/config.toml           —
-Product db         OK       available · /home/you/.plak/state/r25.e28.p33.t8/product.sqlite3   —
-Runtime db         OK       available · /home/you/.plak/state/r25.e28.p33.t8/runtime.sqlite3   —
+Product db         OK       available · /home/you/.plak/state/r25.e29.p33.t8/product.sqlite3   —
+Runtime db         OK       available · /home/you/.plak/state/r25.e29.p33.t8/runtime.sqlite3   —
 Runtime store      OK       available · checkpoints 412/524288 (new work stops at 458752), …   —
-Subagents db       OK       available · /home/you/.plak/state/r25.e28.p33.t8/subagents.sqlite3   —
+Subagents db       OK       available · /home/you/.plak/state/r25.e29.p33.t8/subagents.sqlite3   —
 Telemetry db       OK       ok · 1189 rows                                —
 Secrets dir        OK       available · /home/you/.plak/secrets           —
-Sessions dir       OK       available · /home/you/.plak/state/r25.e28.p33.t8/sessions          —
+Sessions dir       OK       available · /home/you/.plak/state/r25.e29.p33.t8/sessions          —
 Carry files        OK       none · /home/you/.plak/carry                  —
 Cwd                OK       available · /home/you/project                 —
 Jj cli             OK       missing · native workspace operations need no jj CLI; library not built   —

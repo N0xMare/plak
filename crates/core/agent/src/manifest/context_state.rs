@@ -290,6 +290,10 @@ impl RuntimeCompactionStrategy {
     }
 }
 
+/// Native successors that may keep a protected current-round tail after
+/// the compaction item.
+const NATIVE_COMPACTION_STRATEGY_REVISION: u32 = 2;
+
 /// Exact invalidation and epoch-rotation proof published with compaction.
 #[derive(Clone, Eq, PartialEq)]
 pub struct CompactionInvalidation {
@@ -433,6 +437,9 @@ pub struct CompactionProvenance {
     selected_segment_count: u32,
     selected_identity: Digest,
     retained_segment_count: u32,
+    /// Retained segments after the summary: a native successor's protected
+    /// current-round tail. Zero for every other strategy.
+    pub(super) trailing_segment_count: u32,
     retained_tail_identity: Digest,
     target_history: Digest,
     target_segment_count: u32,
@@ -485,13 +492,18 @@ impl CompactionProvenance {
             || self.selected_start >= self.selected_end
             || self.selected_end.saturating_sub(self.selected_start) < self.selected_segment_count
             || self.target_segment_count != self.retained_segment_count.saturating_add(1)
+            || self.trailing_segment_count > self.retained_segment_count
+            || (self.strategy == RuntimeCompactionStrategy::NativeResponsesTriggerV1
+                && self.strategy_revision != NATIVE_COMPACTION_STRATEGY_REVISION)
+            || (self.strategy != RuntimeCompactionStrategy::NativeResponsesTriggerV1
+                && self.trailing_segment_count != 0)
         {
             return Err(RuntimeManifestError::InvalidCompactionProvenance);
         }
         self.invalidation.validate()
     }
 
-    fn validate_history_prefix(
+    pub(super) fn validate_history_prefix(
         &self,
         history: &CanonicalHistory,
     ) -> Result<(), RuntimeManifestError> {
@@ -502,14 +514,11 @@ impl CompactionProvenance {
             return Err(RuntimeManifestError::InvalidCompactionProvenance);
         }
         let summary_index = match self.strategy {
-            RuntimeCompactionStrategy::NativeResponsesTriggerV1 => {
-                let index = usize::try_from(self.retained_segment_count)
-                    .map_err(|_| RuntimeManifestError::InvalidCompactionProvenance)?;
-                if index.saturating_add(1) != target_len {
-                    return Err(RuntimeManifestError::InvalidCompactionProvenance);
-                }
-                index
-            }
+            RuntimeCompactionStrategy::NativeResponsesTriggerV1 => self
+                .retained_segment_count
+                .checked_sub(self.trailing_segment_count)
+                .and_then(|index| usize::try_from(index).ok())
+                .ok_or(RuntimeManifestError::InvalidCompactionProvenance)?,
             RuntimeCompactionStrategy::SemanticSummaryPrefixV1 => 0,
             // A placeholder pass merges into whichever compaction segment the source
             // already had, so its position is whatever the published prefix
@@ -596,6 +605,13 @@ impl CompactionProvenance {
         (self.retained_tail_identity, self.retained_segment_count)
     }
 
+    /// Returns how many retained segments follow the summary segment: a native
+    /// successor's protected current-round tail, otherwise zero.
+    #[must_use]
+    pub const fn trailing_segment_count(&self) -> u32 {
+        self.trailing_segment_count
+    }
+
     /// Returns the canonical summary segment identity without duplicating content.
     #[must_use]
     pub const fn summary_segment_identity(&self) -> Digest {
@@ -643,6 +659,7 @@ impl fmt::Debug for CompactionProvenance {
             .field("strategy", &self.strategy)
             .field("selected_segment_count", &self.selected_segment_count)
             .field("retained_segment_count", &self.retained_segment_count)
+            .field("trailing_segment_count", &self.trailing_segment_count)
             .field("summary_segment", &self.summary_segment)
             .field("invalidation", &self.invalidation)
             .finish_non_exhaustive()
@@ -752,8 +769,9 @@ impl RuntimeContextState {
     /// Atomically describes a Codex remote-compaction publication.
     ///
     /// The successor keeps a newest-first 64k-token retained
-    /// user/developer/system tail and appends exactly one native
-    /// compaction segment last. Cache affinity still rotates.
+    /// user/developer/system prefix, then exactly one native compaction
+    /// segment, then optionally the source's protected current-round tail
+    /// verbatim. Cache affinity still rotates.
     #[allow(
         clippy::too_many_arguments,
         reason = "native publication binds source, summary, successor, and affinity entropy together"
@@ -769,19 +787,23 @@ impl RuntimeContextState {
         source_segment_count: usize,
     ) -> Result<Self, RuntimeManifestError> {
         let successor_segments = successor_history.segments();
-        let retained_segment_count = successor_segments.len().saturating_sub(1);
-        let summary = if successor_segments.is_empty() {
-            None
-        } else {
-            successor_segments.get(successor_segments.len() - 1)
-        }
-        .ok_or(RuntimeManifestError::InvalidCompactionProvenance)?;
-        if summary_segment.kind() != HistorySegmentKind::Compaction
-            || summary.kind() != HistorySegmentKind::Compaction
+        let mut compactions = successor_segments
+            .iter()
+            .enumerate()
+            .filter(|(_, segment)| segment.kind() == HistorySegmentKind::Compaction);
+        let (summary_index, summary) = compactions
+            .next()
+            .ok_or(RuntimeManifestError::InvalidCompactionProvenance)?;
+        if compactions.next().is_some()
+            || summary_segment.kind() != HistorySegmentKind::Compaction
             || summary.identity() != summary_segment.identity()
         {
             return Err(RuntimeManifestError::InvalidCompactionProvenance);
         }
+        let trailing = successor_segments
+            .iter()
+            .skip(summary_index + 1)
+            .collect::<Vec<_>>();
         let selected_end = u32::try_from(source_segment_count.max(1))
             .map_err(|_| RuntimeManifestError::InvalidCompactionProvenance)?;
         let next_epoch = self
@@ -805,9 +827,11 @@ impl RuntimeContextState {
         let invalidation = CompactionInvalidation::new(&self.affinity, &affinity)?;
         let target_projection =
             ConversationView::from_shared(successor_history.clone(), WorkingProjection::default());
-        let retained_segment_count = u32::try_from(retained_segment_count)
+        let retained_segment_count = u32::try_from(successor_segments.len() - 1)
             .map_err(|_| RuntimeManifestError::InvalidCompactionProvenance)?;
-        let target_segment_count = u32::try_from(successor_history.segments().len())
+        let trailing_segment_count = u32::try_from(trailing.len())
+            .map_err(|_| RuntimeManifestError::InvalidCompactionProvenance)?;
+        let target_segment_count = u32::try_from(successor_segments.len())
             .map_err(|_| RuntimeManifestError::InvalidCompactionProvenance)?;
         let retained_tail_identity = if retained_segment_count == 0 {
             Digest::sha256(
@@ -818,14 +842,20 @@ impl RuntimeContextState {
             .map_err(|_| RuntimeManifestError::InvalidDigest)?
         } else {
             let prefix = successor_history
-                .segment_prefix_identity(retained_segment_count as usize)
+                .segment_prefix_identity(summary_index)
                 .map_err(|_| RuntimeManifestError::InvalidCompactionProvenance)?;
+            let trailing_identities = trailing
+                .iter()
+                .flat_map(|segment| segment.identity().bytes().to_vec())
+                .collect::<Vec<_>>();
             Digest::sha256(
                 DigestDomain::ContextPlan,
-                2,
+                3,
                 &[
-                    b"plakous-agent/native-compaction-retained-prefix-v1",
+                    b"plakous-agent/native-compaction-retained-v2",
                     prefix.bytes(),
+                    &trailing_segment_count.to_be_bytes(),
+                    &trailing_identities,
                 ],
             )
             .map_err(|_| RuntimeManifestError::InvalidDigest)?
@@ -848,7 +878,7 @@ impl RuntimeContextState {
             harness_plan: publication.harness_plan,
             selection_plan,
             strategy: RuntimeCompactionStrategy::NativeResponsesTriggerV1,
-            strategy_revision: 1,
+            strategy_revision: NATIVE_COMPACTION_STRATEGY_REVISION,
             source_projection,
             selected_start: 0,
             selected_end,
@@ -856,6 +886,7 @@ impl RuntimeContextState {
             selected_segment_count: selected_end,
             selected_identity: selection_plan,
             retained_segment_count,
+            trailing_segment_count,
             retained_tail_identity,
             target_history: successor_history.identity(),
             target_segment_count,
@@ -989,6 +1020,7 @@ impl RuntimeContextState {
             selected_segment_count: selected_end.saturating_sub(selected_start),
             selected_identity: selection_plan,
             retained_segment_count,
+            trailing_segment_count: 0,
             retained_tail_identity,
             target_history: successor_history.identity(),
             target_segment_count,
@@ -1109,6 +1141,7 @@ impl RuntimeContextState {
             selected_identity: cut.selection_identity(),
             retained_segment_count: u32::try_from(retained_segment_count)
                 .map_err(|_| RuntimeManifestError::InvalidCompactionProvenance)?,
+            trailing_segment_count: 0,
             retained_tail_identity: cut.retained_tail_identity(),
             target_history: successor_history.identity(),
             target_segment_count: u32::try_from(successor_history.segments().len())
@@ -1494,6 +1527,7 @@ pub(super) fn write_compaction_provenance_fields(
     writer.u32(provenance.selected_segment_count);
     writer.digest(provenance.selected_identity)?;
     writer.u32(provenance.retained_segment_count);
+    writer.u32(provenance.trailing_segment_count);
     writer.digest(provenance.retained_tail_identity)?;
     writer.digest(provenance.target_history)?;
     writer.u32(provenance.target_segment_count);
@@ -1660,6 +1694,7 @@ pub(super) fn read_compaction_provenance(
     let selected_segment_count = reader.u32()?;
     let selected_identity = reader.digest(Some(DigestDomain::ContextPlan))?;
     let retained_segment_count = reader.u32()?;
+    let trailing_segment_count = reader.u32()?;
     let retained_tail_identity = reader.digest(Some(DigestDomain::ContextPlan))?;
     let target_history = reader.digest(Some(DigestDomain::CanonicalHistory))?;
     let target_segment_count = reader.u32()?;
@@ -1704,6 +1739,7 @@ pub(super) fn read_compaction_provenance(
             selected_segment_count,
             selected_identity,
             retained_segment_count,
+            trailing_segment_count,
             retained_tail_identity,
             target_history,
             target_segment_count,

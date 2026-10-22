@@ -168,8 +168,10 @@ async fn long_turn_rearms_pressure_after_committed_paid_folds() -> TestResult {
         .await?;
     assert!(matches!(result.outcome(), TurnResultOutcome::Completed(_)));
     assert_eq!(result.tool_calls(), bodies.len());
-    assert_eq!(model.paid_compaction_calls.load(Ordering::Acquire), 2);
-    assert_eq!(*lock_mutex(&model.paid_compaction_rounds), [3, 6]);
+    // Each native successor keeps the current round's 60k batch, so the
+    // next 20k round crosses the fence again after the first fold.
+    assert_eq!(model.paid_compaction_calls.load(Ordering::Acquire), 3);
+    assert_eq!(*lock_mutex(&model.paid_compaction_rounds), [3, 5, 6]);
     agent.shutdown().await?;
     Ok(())
 }

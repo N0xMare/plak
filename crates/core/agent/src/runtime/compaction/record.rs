@@ -3,8 +3,9 @@
 use crate::runtime::OperationId;
 use crate::runtime::checkpoint::identity::{CheckpointCommitFacts, checkpoint_commit_identity};
 use crate::runtime::compaction::fold::{
-    compaction_summary_segment, fold_compaction_success, fold_native_compaction_success,
-    native_compaction_successor, reconstruct_compaction_cut, record_summarized_turns,
+    NativeSuccessorShape, compaction_summary_segment, fold_compaction_success,
+    fold_native_compaction_success, native_compaction_successor, reconstruct_compaction_cut,
+    record_summarized_turns,
 };
 use crate::runtime::compaction::{
     DurableCompactionIdentity, DurableCompactionPublicationEvidence, DurableCompactionRequestRecord,
@@ -376,12 +377,31 @@ pub(in crate::runtime) fn validate_compaction_receipt(
         let summary = compaction_summary_segment(identity, &response)?;
         let native = operations.request.version >= 3;
         let (summary, successor, expected_cut, expected) = if native {
-            let successor =
-                native_compaction_successor(source_manifest.canonical().history(), summary.clone())
-                    .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
+            // Publication chose one of the two source-derived shapes by an
+            // offline measurement; the receipt names which by its successor,
+            // and nothing else is a valid native fold.
+            let source = source_manifest.canonical().history();
+            let mut published = None;
+            for shape in [
+                NativeSuccessorShape::WithTail,
+                NativeSuccessorShape::WithoutTail,
+            ] {
+                let Some(candidate) =
+                    native_compaction_successor(source, summary.clone(), shape)
+                        .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?
+                else {
+                    continue;
+                };
+                let (summary, successor) =
+                    record_summarized_turns(source, summary.clone(), candidate)
+                        .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
+                if successor.identity() == publication.successor_history {
+                    published = Some((summary, successor));
+                    break;
+                }
+            }
             let (summary, successor) =
-                record_summarized_turns(source_manifest.canonical().history(), summary, successor)
-                    .map_err(|_| AgentError::from_store(SessionStoreError::corrupt()))?;
+                published.ok_or_else(|| AgentError::from_store(SessionStoreError::corrupt()))?;
             let expected = fold_native_compaction_success(
                 previous_stored.checkpoint().manifest(),
                 identity,

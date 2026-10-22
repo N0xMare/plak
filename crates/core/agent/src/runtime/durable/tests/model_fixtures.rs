@@ -524,6 +524,7 @@ fn shrink_proof_measurement(metadata: RequestMetadata) -> bool {
     let attempt = metadata.attempt_id();
     [
         b"successor-measurement".as_slice(),
+        b"successor-tail-measurement".as_slice(),
         b"source-proof-measurement".as_slice(),
     ]
     .into_iter()

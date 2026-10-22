@@ -2607,7 +2607,9 @@ fn native_compaction_successor_retains_user_groups_and_appends_compaction()
             Provenance::ModelOutput,
         )?],
     )?;
-    let successor = native_compaction_successor(&source, summary.clone())?;
+    let successor =
+        native_compaction_successor(&source, summary.clone(), NativeSuccessorShape::WithoutTail)?
+            .ok_or("tail-less native successor")?;
     assert_eq!(successor.segments().len(), 2);
     assert!(successor.segments().get(0).is_some_and(|segment| {
         segment.kind() == HistorySegmentKind::RecentIntent && segment.shares_storage_with(&user)
@@ -2654,7 +2656,9 @@ fn native_compaction_successor_keeps_newest_users_under_retained_budget()
             Provenance::ModelOutput,
         )?],
     )?;
-    let successor = native_compaction_successor(&source, summary.clone())?;
+    let successor =
+        native_compaction_successor(&source, summary.clone(), NativeSuccessorShape::WithoutTail)?
+            .ok_or("tail-less native successor")?;
     assert_eq!(successor.segments().len(), 2);
     assert!(successor.segments().get(0).is_some_and(|segment| {
         segment.kind() == HistorySegmentKind::RecentIntent && segment.shares_storage_with(&newer)
@@ -2704,7 +2708,9 @@ fn native_compaction_successor_retains_two_small_users_under_budget()
             Provenance::ModelOutput,
         )?],
     )?;
-    let successor = native_compaction_successor(&source, summary.clone())?;
+    let successor =
+        native_compaction_successor(&source, summary.clone(), NativeSuccessorShape::WithoutTail)?
+            .ok_or("tail-less native successor")?;
     assert_eq!(successor.segments().len(), 3);
     assert!(successor.segments().get(0).is_some_and(|segment| {
         segment.kind() == HistorySegmentKind::Conversation && segment.shares_storage_with(&first)
@@ -2715,5 +2721,177 @@ fn native_compaction_successor_retains_two_small_users_under_budget()
     assert!(successor.segments().get(2).is_some_and(|segment| {
         segment.kind() == HistorySegmentKind::Compaction && segment.identity() == summary.identity()
     }));
+    Ok(())
+}
+
+fn native_text_segment(
+    kind: HistorySegmentKind,
+    entry: u128,
+    actor: Actor,
+    text: &str,
+) -> Result<HistorySegment, Box<dyn std::error::Error>> {
+    let provenance = match actor {
+        Actor::Assistant => Provenance::ModelOutput,
+        _ => Provenance::UserInput,
+    };
+    Ok(HistorySegment::new(
+        kind,
+        vec![ConversationItem::new(
+            EntryId::try_from(uuid::Uuid::from_u128(entry))?,
+            actor,
+            vec![ContentBlock::Text(TextBlock::new(text, None)?)],
+            provenance,
+        )?],
+    )?)
+}
+
+fn native_tool_exchange(
+    base: u128,
+    output: &str,
+) -> Result<HistorySegment, Box<dyn std::error::Error>> {
+    let call_id = CallId::try_from(uuid::Uuid::from_u128(base))?;
+    let correlation = ToolCorrelation::default();
+    Ok(HistorySegment::new(
+        HistorySegmentKind::ToolExchange,
+        vec![
+            ConversationItem::new(
+                EntryId::try_from(uuid::Uuid::from_u128(base + 1))?,
+                Actor::Assistant,
+                vec![ContentBlock::ToolCall(ToolCallBlock::new(
+                    call_id,
+                    ToolName::new("read")?,
+                    ToolExecutionOwner::Local,
+                    ToolCallState::Requested,
+                    correlation.clone(),
+                    "{}",
+                )?)],
+                Provenance::ModelOutput,
+            )?,
+            ConversationItem::new(
+                EntryId::try_from(uuid::Uuid::from_u128(base + 2))?,
+                Actor::Tool,
+                vec![ContentBlock::ToolResult(ToolResultBlock::new(
+                    call_id,
+                    ToolExecutionOwner::Local,
+                    ToolResultKind::Success,
+                    vec![ToolResultPart::Text(TextBlock::new(output, None)?)],
+                    correlation,
+                )?)],
+                Provenance::ToolExecution,
+            )?,
+        ],
+    )?)
+}
+
+fn native_summary_segment(entry: u128) -> Result<HistorySegment, Box<dyn std::error::Error>> {
+    Ok(HistorySegment::new(
+        HistorySegmentKind::Compaction,
+        vec![ConversationItem::new(
+            EntryId::try_from(uuid::Uuid::from_u128(entry))?,
+            Actor::Assistant,
+            vec![ContentBlock::Compaction(CompactionBlock::new(
+                "native ciphertext summary",
+            )?)],
+            Provenance::ModelOutput,
+        )?],
+    )?)
+}
+
+#[test]
+fn native_compaction_successor_keeps_the_current_round_tail_after_the_item()
+-> Result<(), Box<dyn std::error::Error>> {
+    let older = native_text_segment(
+        HistorySegmentKind::Conversation,
+        31,
+        Actor::User,
+        "first intent",
+    )?;
+    let intent = native_text_segment(
+        HistorySegmentKind::RecentIntent,
+        32,
+        Actor::User,
+        "read every page",
+    )?;
+    let working = native_text_segment(
+        HistorySegmentKind::Conversation,
+        33,
+        Actor::Assistant,
+        "reading",
+    )?;
+    let consumed = native_tool_exchange(40, "page one")?;
+    let current = native_tool_exchange(50, "page two says: check word")?;
+    let steer = native_text_segment(
+        HistorySegmentKind::Steering,
+        34,
+        Actor::User,
+        "also read page three",
+    )?;
+    let source = CanonicalHistory::new(vec![
+        older.clone(),
+        intent.clone(),
+        working,
+        consumed.clone(),
+        current.clone(),
+        steer.clone(),
+    ])?;
+    let summary = native_summary_segment(35)?;
+
+    let with_tail =
+        native_compaction_successor(&source, summary.clone(), NativeSuccessorShape::WithTail)?
+            .ok_or("the current round has a protected tail")?;
+    let kept = with_tail.segments().to_vec();
+    assert_eq!(kept.len(), 5);
+    assert!(kept[0].shares_storage_with(&older));
+    assert!(kept[1].shares_storage_with(&intent));
+    assert_eq!(kept[2].identity(), summary.identity());
+    // The current round's batch and the steering after it, verbatim and in order.
+    assert!(kept[3].shares_storage_with(&current));
+    assert!(kept[4].shares_storage_with(&steer));
+    assert!(
+        !kept
+            .iter()
+            .any(|segment| segment.shares_storage_with(&consumed))
+    );
+
+    // The same item without the tail: steering is a retained user message.
+    let without_tail =
+        native_compaction_successor(&source, summary.clone(), NativeSuccessorShape::WithoutTail)?
+            .ok_or("tail-less native successor")?;
+    let kept = without_tail.segments().to_vec();
+    assert_eq!(kept.len(), 4);
+    assert!(kept[2].shares_storage_with(&steer));
+    assert_eq!(kept[3].identity(), summary.identity());
+    Ok(())
+}
+
+#[test]
+fn native_compaction_successor_has_no_tail_without_a_current_round_batch()
+-> Result<(), Box<dyn std::error::Error>> {
+    let summary = native_summary_segment(65)?;
+    let answered = CanonicalHistory::new(vec![
+        native_text_segment(HistorySegmentKind::RecentIntent, 61, Actor::User, "one")?,
+        native_tool_exchange(70, "done")?,
+        native_text_segment(
+            HistorySegmentKind::Conversation,
+            62,
+            Actor::Assistant,
+            "answered",
+        )?,
+        native_text_segment(HistorySegmentKind::RecentIntent, 63, Actor::User, "two")?,
+    ])?;
+    assert!(
+        native_compaction_successor(&answered, summary.clone(), NativeSuccessorShape::WithTail)?
+            .is_none(),
+        "a batch before the latest intent is not the current round"
+    );
+    let no_tools = CanonicalHistory::new(vec![native_text_segment(
+        HistorySegmentKind::RecentIntent,
+        64,
+        Actor::User,
+        "plain",
+    )?])?;
+    assert!(
+        native_compaction_successor(&no_tools, summary, NativeSuccessorShape::WithTail)?.is_none()
+    );
     Ok(())
 }

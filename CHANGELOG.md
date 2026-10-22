@@ -59,6 +59,10 @@ one cross-build carrier (a build imports its own and the previous version).
   accounts never sends one account's encrypted reasoning under another.
 - Hosted runtime construction goes through one sealed `RuntimeFactory` port.
 - Oversized user messages are refused at admission.
+- A Codex native compaction mid-turn keeps the current round's tool batch
+  verbatim after the compaction item, so the model still sees the output it
+  asked for; when that successor would not fit or shrink, the tail-less
+  successor from the same compaction item is published instead.
 - Python Code Mode (`py-ptc`) runs Monty 1.2.0 under adapter
   `plakous.monty-python-adapter.v7`. A refused `Path.scan` (glob, rglob, walk)
   raises `RuntimeError` instead of returning an empty result; `bisect`, `csv`,
@@ -67,9 +71,11 @@ one cross-build carrier (a build imports its own and the previous version).
 ### Persisted formats
 
 - Export document version 8; imports versions 8 and 7. State key
-  `r25.e28.p33.t8`: 0.0.1 state is not opened or migrated. To carry a 0.0.1
+  `r25.e29.p33.t8`: 0.0.1 state is not opened or migrated. To carry a 0.0.1
   session, use `/reload` from the running 0.0.1 build, or export with that
   binary and import the v7 document with 0.0.2. New exports use v8.
+- Runtime format epoch 29: native compaction provenance records how many
+  retained segments follow the compaction item.
 
 ### Security
 
