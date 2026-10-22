@@ -20,10 +20,9 @@ use plakous_model::{
 pub(in crate::runtime) const TURN_CONTINUATION_NOTE_MARKER: &str =
     "[plak: earlier work in this turn was summarized]";
 
-const TURN_CONTINUATION_NOTE_BODY: &str = "The earlier part of this turn is now the summary at \
-     the start of the conversation. The task is not finished: continue from the latest tool \
-     result with your next tool call, and end the turn only when the task is done or you need \
-     the user.";
+const TURN_CONTINUATION_NOTE_BODY: &str = "The earlier part of this turn is now summarized \
+     above. The task is not finished: continue from the latest tool result with your next tool \
+     call, and end the turn only when the task is done or you need the user.";
 
 /// Appends the continuation note to a fold successor whose newest
 /// non-steering segment is a tool exchange: the fence-(b) shape, where the same

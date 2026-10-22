@@ -123,6 +123,17 @@ fn a_mid_turn_successor_ends_with_one_user_role_continuation_note() {
     let item = &segments[2].items()[0];
     assert_eq!(item.actor(), Actor::User);
     assert_eq!(item.provenance(), Provenance::Instruction);
+    // A native successor places its compaction item after the retained user
+    // messages, so the note must not claim the summary opens the conversation.
+    let text = item
+        .blocks()
+        .iter()
+        .find_map(|block| match block {
+            ContentBlock::Text(text) => Some(text.text()),
+            _ => None,
+        })
+        .expect("note text");
+    assert!(text.contains("The earlier part of this turn is now summarized above."));
 }
 
 #[test]

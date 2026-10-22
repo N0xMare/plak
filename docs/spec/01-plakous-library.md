@@ -6720,10 +6720,12 @@ So when a live turn-fence fold's successor has a tool exchange as its newest
 non-steering segment (fence (b), where the same turn's next round follows), the
 driver appends one more steering segment with `Instruction` provenance as the
 last segment. It opens with the constant marker
-`[plak: earlier work in this turn was summarized]` and says the task is not
-finished, that the model should continue from the latest tool result with its
-next tool call, and that it should end the turn only when the task is done or
-it needs the user. A turn carries at most one such note: a fold only appends
+`[plak: earlier work in this turn was summarized]` and says that the earlier
+part of the turn is summarized above, without placing the summary at the start
+of the conversation, since a native successor's compaction item follows the
+retained user messages; that the task is not finished; that the model should
+continue from the latest tool result with its next tool call; and that it
+should end the turn only when the task is done or it needs the user. A turn carries at most one such note: a fold only appends
 (the compaction provenance pins the successor prefix) and steering is never
 folded inside its own turn, so the first mid-turn fold's note stays, and a
 later fold in the same turn whose successor already holds it after the latest
