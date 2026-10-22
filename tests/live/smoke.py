@@ -147,6 +147,21 @@ def discarded_replay(turn: live.Turn) -> bool:
                and retry.get("output_discarded") is True for retry in turn.retries)
 
 
+def compaction_first_prompt(pack: str) -> str:
+    """The compaction scenario's first turn: one whole read of fold.txt.
+
+    Code Mode has no read tool; told only to "read" the file, Codex at low
+    effort repeatedly answered "ok" without any call, which leaves nothing to
+    fold. It is told which tool to use, as the long-session Codex prompts are.
+    """
+    if pack == "codex":
+        how = ("Print fold.txt in full with one exec that runs exactly one exec_command, "
+               "without max_output_tokens, and returns its whole output with text(...).")
+    else:
+        how = "Read fold.txt in full with one read."
+    return f"{how} Remember the code word ZEBRA-42. Reply: ok"
+
+
 def judge_fault_reset(turn: live.Turn, hello: Path, segments: list[Path] | None) -> str:
     """A reset is a safe replay, a declined unsafe replay, or a provider refusal.
 
@@ -345,10 +360,8 @@ class Smoke:
         # cannot answer the follow-up.
         (repo / "fold.txt").write_text(live.compaction_padding())
         agent = self.agent("compaction", repo)
-        first = agent.prompt(
-            "Read fold.txt in full with one read. Remember the code word ZEBRA-42. "
-            "Reply: ok",
-            timeout=300)
+        first = agent.prompt(compaction_first_prompt(long_session.pack_of(self.route)),
+                             timeout=300)
         capacity_recovered = first.phase == "failed" and first.model_error_kind == "ContextLimit"
         committed = 0
         if capacity_recovered:

@@ -471,6 +471,16 @@ class QualificationFixTests(unittest.TestCase):
             self.assertEqual(raised.exception.outcome, live.HARNESS)
             self.assertEqual(agent.prompt.call_count, 2)
 
+    def test_compaction_first_prompt_names_the_code_mode_tool_only_for_codex(self):
+        codex = smoke.compaction_first_prompt("codex")
+        self.assertIn("one exec_command", codex)
+        self.assertIn("without max_output_tokens", codex)
+        self.assertTrue(codex.endswith("Remember the code word ZEBRA-42. Reply: ok"))
+        for pack in ("grok", "claude", "pi"):
+            self.assertEqual(
+                smoke.compaction_first_prompt(pack),
+                "Read fold.txt in full with one read. Remember the code word ZEBRA-42. Reply: ok")
+
     def test_compaction_first_turn_without_the_read_is_a_model_miss(self):
         with tempfile.TemporaryDirectory() as directory:
             driver, agent = self.compaction_driver(Path(directory))
