@@ -1,4 +1,6 @@
 //! In-process JJ operations. No command parsing or recovery checkout occurs here.
+pub(super) const ENABLED: bool = true;
+
 use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::Arc;

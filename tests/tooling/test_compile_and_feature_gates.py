@@ -617,11 +617,11 @@ class FeatureGateTests(unittest.TestCase):
         self.assertEqual(feature_gate.cargo_command("tree", (), True, "plak")[:6],
                          ["cargo", "tree", "--locked", "--offline", "-p", "plak"])
 
-    def test_maintainer_feature_is_local_to_the_product(self) -> None:
+    def test_maintainer_feature_enables_opt_in_jj(self) -> None:
         manifests = feature_gate.load_workspace_manifests()
         self.assertNotIn("maintainer", manifests["plakous"]["features"])
         self.assertNotIn("maintainer", manifests["plakous-hosted"]["features"])
-        self.assertEqual(manifests["plak"]["features"]["maintainer"], [])
+        self.assertEqual(manifests["plak"]["features"]["maintainer"], ["jj"])
         self.assertIn("maintainer", feature_gate.optional_features(manifests["plak"]))
 
 

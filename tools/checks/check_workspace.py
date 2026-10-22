@@ -3923,18 +3923,17 @@ def main() -> int:
             "test-hooks",
             "test-support",
             "git-cli",
-            "jj-lib",
+            "jj",
         }:
             errors.append(
                 "plak may expose only default, maintainer, otel, test-hooks, test-support "
                 "and workspace backend features"
             )
-        elif app_features.get("default") != ["git-cli", "jj-lib"]:
-            errors.append("plak default must enable both workspace backends")
-        elif app_features.get("maintainer") != []:
+        elif app_features.get("default") != ["git-cli"]:
+            errors.append("plak default must enable only the git workspace backend")
+        elif app_features.get("maintainer") != ["jj"]:
             errors.append(
-                "plak maintainer feature must be empty: it gates plak's own cfg "
-                "sites and plakous-hosted has no maintainer-gated code to forward to"
+                "plak maintainer feature must enable jj"
             )
         elif "dep:opentelemetry" not in app_features.get("otel", []):
             errors.append("plak otel feature must enable the opentelemetry dependency")

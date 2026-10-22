@@ -217,7 +217,7 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES = {
 # Native workspace engines are independent build capabilities. Every host edge
 # forwards explicitly; no default-enabled transitive edge may defeat selection.
 REQUIRED_DEPENDENCY_FEATURE_EDGES.update(
-    (package, feature, f"{dependency}/{feature}")
+    (package, "jj" if package == "plak" and feature == "jj-lib" else feature, f"{dependency}/{feature}")
     for package, dependencies in {
         "plak": ["plakous-hosted", "plakous-recursive-subagents", "plakous-recursive-subagents-store"],
         "plakous-hosted": ["plakous-workspace", "plakous-recursive-subagents"],
@@ -269,6 +269,8 @@ EXPECTED_SECURITY_SURFACE_DIGESTS = {
 # absence is the load-bearing evidence that a JavaScript-only embedder does not
 # pull in the Monty closure.
 EXCLUDED_CLOSURE_PACKAGES = {
+    ("plak", ("default",)): ("jj-lib", "gix", "pollster"),
+    ("plak", ("git-cli",)): ("jj-lib", "gix", "pollster"),
     ("plakous", ("composition",)): (
         "htmd",
         "monty-pool",

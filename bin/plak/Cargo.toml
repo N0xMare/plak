@@ -103,10 +103,10 @@ harness = false
 required-features = ["test-support"]
 
 [features]
-default = ["git-cli", "jj-lib"]
+default = ["git-cli"]
 git-cli = ["plakous-hosted/git-cli", "plakous-recursive-subagents/git-cli", "plakous-recursive-subagents-store/git-cli"]
-jj-lib = ["plakous-hosted/jj-lib", "plakous-recursive-subagents/jj-lib", "plakous-recursive-subagents-store/jj-lib"]
-maintainer = []
+jj = ["plakous-hosted/jj-lib", "plakous-recursive-subagents/jj-lib", "plakous-recursive-subagents-store/jj-lib"]
+maintainer = ["jj"]
 # The product fixtures the binary's own integration contracts drive: an
 # isolated product home and the state roots over Plak's real ports.
 test-support = []

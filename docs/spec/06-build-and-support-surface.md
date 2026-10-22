@@ -305,7 +305,8 @@ called out explicitly.
 | `plakous-openai` | `test-support` | Implies `native-auth`; exposes the doc-hidden builder that binds Codex browser-login callbacks on an ephemeral port instead of the pinned redirect ports. A dev-dependency of `plakous`, never a production edge |
 | `plakous-hosted` | `test-support` | Test-only session doubles, the host-loop drivers, and injected runtime construction; a dev-dependency of `plak`, never a production edge |
 | `plakous-host-protocol` | `test-support` | Test-only view constructors; a dev-dependency of `plakous-hosted` and `plak`, never a production edge |
-| `plak`, `plakous-hosted`, `plakous-recursive-subagents`, `plakous-recursive-subagents-store`, `plakous-workspace` | `git-cli`, `jj-lib` | Explicit backend forwarding; default builds include both. With defaults disabled, either or neither backend may be selected. Missing backends refuse their repository kind without fallback. |
+| `plak` | `git-cli`, `jj` | Defaults enable only `git-cli`. `jj` forwards the native `jj-lib` backend; `maintainer` enables `jj`. Release tarballs and `build-plak.sh --artifacts` use defaults, without JJ. A no-JJ build refuses JJ-only repositories with an instruction to use the `jj` feature; colocated repositories use Git copies, with a doctor row and one new-session notice. |
+| `plakous-hosted`, `plakous-recursive-subagents`, `plakous-recursive-subagents-store`, `plakous-workspace` | `git-cli`, `jj-lib` | Explicit backend forwarding; library defaults include both. With defaults disabled, either or neither backend may be selected. Without JJ, colocated repositories use Git when enabled; JJ-only repositories refuse. |
 | `plakous-workspace` | `test-support` | `FakeVcs` and the real-`git`/`jj` repository fixtures; a dev-dependency of `plakous-recursive-subagents`, never a production edge |
 | `plakous-recursive-subagents` | `test-support` | `MemoryTreeStore`, the tree's bootstrap and mutation fixtures, and the hub's; forwards `plakous-host-protocol/test-support` and `plakous-workspace/test-support`, never a production edge |
 | `plakous-recursive-subagents-store` | `test-support` | The store conformance suite's tree fixtures; never a production edge |
@@ -314,7 +315,7 @@ Neither `plakous` nor `plakous-hosted` exposes a `maintainer` feature.
 The facade's unsupported doc-hidden offline inspector compiles under
 `sessions-sqlite` (chapter 01 §12.1). Hosted root-restore and bounded child-page
 presentation helpers are doc-hidden repository seams without a feature gate,
-not supported embedder authority. Plak's maintainer feature forwards no edges.
+not supported embedder authority. Plak's maintainer feature enables its `jj` feature.
 
 `plak` depends on exactly `plakous`, `plakous-hosted`,
 `plakous-recursive-subagents`, `plakous-recursive-subagents-store`, and
@@ -843,6 +844,11 @@ It matches QuickJS entry points and length-prefixed Monty runtime crate names
 in raw ELF or Mach-O symbols, so Apple's `nm` needs no demangling support.
 Both worker positive controls and distinct artifact digests are mandatory;
 missing artifacts, a missing symbol lister or an unreadable listing fail closed.
+For release-profile helper builds, Cargo outputs retain raw symbols solely for
+this check (`CARGO_PROFILE_RELEASE_STRIP=debuginfo`). After successful proof,
+the helper copies all three executables into the profile's `stripped/`
+directory and strips those copies. Release installs and `--artifacts` use
+only these staged copies; the original Cargo outputs remain inspectable.
 The gate's `builds` group reuses its default worker builds and isolated
 maintainer parent build to require the same check on both supported platforms;
 it runs in `check`, `platform` and publication `full`, without another release
@@ -942,13 +948,60 @@ not compile with `ruff_python_ast` 0.0.14. `just deny` audits the unified
 workspace and worker dependency graph.
 
 Three profiles beyond the Cargo defaults exist. `release` uses
-`codegen-units = 1`, thin LTO, and strips debuginfo. `maintainer` inherits
+`codegen-units = 1`, speed-focused `opt-level = 3`, fat LTO, and
+`strip = "symbols"`. Panic unwinding remains enabled: stripping retains unwind
+tables and panic messages (including source locations), but release backtraces
+lose symbol names and source-line resolution. Use the maintainer or profiling
+profile for symbolized backtraces. `maintainer` inherits
 release without LTO, with 16 codegen units, incremental compilation and line
 tables, so dogfood rebuilds are fast and backtraces name source lines;
 `just build-maintainer` builds it. `profiling` inherits
 release with full debug symbols, no stripping, and LTO off so frames stay
 attributable; `just build-profiling` produces `target/profiling/plak`, and
 `just samply`, `just flamegraph`, `just perf-stat`, and `just bloat` drive it.
+
+#### Release size and speed qualification
+
+Linux x86_64 GNU measurements qualify the release profile's size/build-time
+tradeoff; these are non-publication rehearsals, not musl or macOS evidence.
+Both columns use Git-only defaults, unchanged AWS-LC-backed JWT verification,
+and separate parent/worker Cargo resolutions. Sizes are bytes; raw means the
+symbol-bearing Cargo output used for strict linkage proof. Staged copies have
+all symbols stripped. The tarball includes all three executables and licenses.
+
+| Artifact | Thin raw | Thin stripped | Fat raw | Fat stripped |
+| --- | ---: | ---: | ---: | ---: |
+| `plak` | 81,903,112 | 67,232,472 | 71,031,984 | 61,277,272 |
+| `plakous-js-host` | 2,500,000 | 2,080,016 | 2,298,784 | 1,988,720 |
+| `monty` | 35,642,912 | 28,802,632 | 32,455,792 | 27,440,648 |
+| GNU rehearsal `.tar.gz` | - | 41,632,982 | - | 40,392,040 |
+
+| Wall time | Thin | Fat |
+| --- | ---: | ---: |
+| Parent Cargo build | 7m 14s | 8m 47s |
+| Worker Cargo build | 5m 55s | 6m 34s |
+| Complete `--artifacts` build, linkage proof and staging | 812s | 928s |
+| Tarball packing | 12s | 10s |
+| Complete build and packing | 824s | 938s |
+
+Fat LTO removes 5,955,200 bytes from stripped Plak for 13.8% more total
+release-workflow wall time. These are sequential shared-host measurements with
+warm dependency caches, not a clean-build benchmark. The maintainer profile
+continues to override LTO off, so this tradeoff does not change its codegen.
+
+Warm process-launch medians (11 samples) are 52.47ms for the original
+symbol-bearing default build, 42.31ms after stripping that same executable,
+37.09ms for Git-only thin LTO, and 34.64ms for Git-only fat LTO. The original
+build is 90,227,472 bytes raw / 73,734,584 stripped: stripping and omitting JJ
+account for the reductions before LTO. No global or per-dependency size-oriented
+optimization level is selected.
+
+The deterministic offline `test-hooks` fixture, measured separately with seven
+runs per variant, compares the original default build with Git-only, stripped
+thin LTO. Offline `run` medians are 54.84ms / 33.88ms and `session show` medians
+are 7.80ms / 5.03ms. Their `--version` medians (11 samples) are 59.38ms / 40.43ms.
+These instrumented sizes and timings are not shipped-artifact measurements;
+fat-LTO offline-turn and session-show timings are not established by this table.
 
 ### 6.2 Isolated playground
 

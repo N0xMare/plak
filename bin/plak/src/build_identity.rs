@@ -7,6 +7,8 @@ use std::sync::OnceLock;
 
 use sha2::{Digest as _, Sha256};
 
+pub(crate) const JJ_ENABLED: bool = cfg!(feature = "jj");
+
 pub(crate) const FLAVOR: &str = match (cfg!(feature = "maintainer"), cfg!(debug_assertions)) {
     (true, true) => "maintainer debug",
     (true, false) => "maintainer release",

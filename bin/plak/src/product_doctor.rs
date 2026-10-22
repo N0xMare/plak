@@ -1215,12 +1215,33 @@ fn database_check(kind: CheckKind, path: &Path, status: DatabaseStatus) -> Docto
 
 fn cwd_check(cwd: Result<PathBuf, String>) -> DoctorCheck {
     match cwd {
+        Ok(path)
+            if !crate::build_identity::JJ_ENABLED
+                && path.join(".jj").exists()
+                && !path.join(".git").exists() =>
+        {
+            DoctorCheck::new(
+                CheckKind::WorkingDirectory,
+                "environment",
+                Severity::Error,
+                "jj unavailable",
+                path.display().to_string(),
+                Some("this build has no jj support; use a build with the jj feature"),
+            )
+        }
         Ok(path) if path.is_absolute() && path.is_dir() => DoctorCheck::new(
             CheckKind::WorkingDirectory,
             "environment",
             Severity::Ok,
             "available",
-            path.display().to_string(),
+            if !crate::build_identity::JJ_ENABLED && path.join(".jj").exists() {
+                format!(
+                    "{}; this build has no jj support; using git copies",
+                    path.display()
+                )
+            } else {
+                path.display().to_string()
+            },
             None,
         ),
         Ok(path) => DoctorCheck::new(
@@ -1551,6 +1572,22 @@ fn javascript_host_unavailable_remediation() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn doctor_explains_colocated_git_selection_without_jj() {
+        if crate::build_identity::JJ_ENABLED {
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        fs::create_dir(directory.path().join(".jj")).unwrap();
+        let check = cwd_check(Ok(directory.path().to_path_buf()));
+        assert_eq!(check.severity, Severity::Error);
+        assert!(check.remediation.unwrap().contains("jj feature"));
+        fs::create_dir(directory.path().join(".git")).unwrap();
+        let check = cwd_check(Ok(directory.path().to_path_buf()));
+        assert_eq!(check.severity, Severity::Ok);
+        assert!(check.detail.contains("using git copies"));
+    }
 
     #[test]
     fn doctor_reports_old_telemetry_files_without_modifying_them()

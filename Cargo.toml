@@ -395,8 +395,8 @@ opt-level = 3
 
 [profile.release]
 codegen-units = 1
-lto = "thin"
-strip = "debuginfo"
+lto = "fat"
+strip = "symbols"
 
 # Dogfood build (`just build-maintainer`): release codegen without LTO so
 # rebuilds stay incremental, with line tables for panics and backtraces.
@@ -419,7 +419,7 @@ lto = false
 [workspace.metadata.plakous.cfg.plak]
 feature-sites = ["src/lib.rs", "src/capabilities.rs"]
 env-sites = ["src/environment.rs", "src/home/paths.rs", "src/home/secrets.rs"]
-feature-ceiling = 130
+feature-ceiling = 131
 test-seam-ceiling = 75
 env-ceiling = 32
 reason = "Capability registry entry sites; existing placement debt must fall as composition-root ports and module boundaries replace inline configuration."

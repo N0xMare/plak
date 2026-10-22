@@ -128,14 +128,16 @@ The binary ID is the executable identity used by `/reload` and handoffs.
 To update later, pull the source and repeat `just install` (or the Cargo
 commands). A running TUI shows `new build installed · /reload` once a new
 `just install` snapshot is in place. Default builds
-include native JJ and the Git CLI backend. To build only native JJ:
+include the Git CLI backend only; release tarballs also omit JJ. Add
+`--features plak/jj` to enable native JJ alongside Git (maintainer builds
+already enable it). To build only native JJ:
 
 ```sh
-cargo build --locked --release -p plak --no-default-features --features plak/jj-lib
+cargo build --locked --release -p plak --no-default-features --features plak/jj
 cargo build --locked --release -p plakous-js-runtime -p plakous-py-worker
 ```
 
-Use `plak/git-cli` in place of `plak/jj-lib` for a Git-only build. The root
+Use `plak/git-cli` in place of `plak/jj` for a Git-only build. The root
 workspace's default member is only `plak`; build both workers separately. Native
 JJ workspace operations do not require the `jj` executable; the Git CLI backend
 requires `git`.

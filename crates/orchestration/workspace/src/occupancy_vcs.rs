@@ -1,7 +1,7 @@
 //! Git worktree and jj workspace mint/seal/adopt.
 //!
-//! Session VCS is exclusive: `.jj` (including colocated git-backed jj) is jj
-//! mode; otherwise `.git` is git mode. Probe-fail is `mint_unavailable`.
+//! Session VCS prefers JJ when compiled in; Git-only builds use colocated Git.
+//! Probe-fail is `mint_unavailable`.
 //! The host drives mint/discard; models do not prelude `git worktree add` or
 //! `jj workspace add`. JJ repository operations use the private native backend;
 //! Git operations use the optional CLI backend.
@@ -382,7 +382,7 @@ pub(crate) enum SessionVcs {
 }
 
 pub(crate) fn detect_vcs(launch: &Path) -> Result<SessionVcs, VcsError> {
-    if launch.join(".jj").exists() {
+    if launch.join(".jj").exists() && super::native_jj::ENABLED {
         Ok(SessionVcs::Jj)
     } else if launch.join(".git").exists() {
         if !GIT_CLI_ENABLED {
@@ -391,6 +391,10 @@ pub(crate) fn detect_vcs(launch: &Path) -> Result<SessionVcs, VcsError> {
             ));
         }
         Ok(SessionVcs::Git)
+    } else if launch.join(".jj").exists() {
+        Err(VcsError::mint_unavailable(
+            "this build has no jj support; use a build with the jj feature",
+        ))
     } else {
         Err(VcsError::mint_unavailable(
             "launch checkout has no git or jj identity",
@@ -854,16 +858,8 @@ pub(crate) fn ahead_behind(child: &Path, parent: &Path) -> Option<(u64, u64)> {
 
 fn detect_parent_vcs(path: &Path) -> Result<SessionVcs, VcsError> {
     for ancestor in path.ancestors() {
-        if ancestor.join(".jj").exists() {
-            return Ok(SessionVcs::Jj);
-        }
-        if ancestor.join(".git").exists() {
-            if !GIT_CLI_ENABLED {
-                return Err(VcsError::mint_unavailable(
-                    "Git CLI backend is not included in this build",
-                ));
-            }
-            return Ok(SessionVcs::Git);
+        if ancestor.join(".jj").exists() || ancestor.join(".git").exists() {
+            return detect_vcs(ancestor);
         }
     }
     Err(VcsError::mint_unavailable("path has no git or jj identity"))
@@ -2119,6 +2115,9 @@ mod tests {
     }
 
     fn jj_available() -> bool {
+        if !cfg!(feature = "jj-lib") {
+            return false;
+        }
         Command::new("jj")
             .arg("--version")
             .stdout(std::process::Stdio::null())
@@ -2384,11 +2383,30 @@ mod tests {
     }
 
     #[test]
+    fn git_only_build_snapshots_colocated_repository_and_nested_paths() {
+        if cfg!(feature = "jj-lib") || !cfg!(feature = "git-cli") {
+            return;
+        }
+        let root = git_repo();
+        std::fs::create_dir(root.path().join(".jj")).unwrap();
+        let nested = root.path().join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        assert_eq!(detect_parent_vcs(&nested).unwrap(), SessionVcs::Git);
+        assert!(snapshot(root.path(), "colocated-git").is_ok());
+    }
+
+    #[test]
     fn detect_vcs_prefers_jj_when_both_exist() {
         let root = tempdir().unwrap();
         std::fs::create_dir(root.path().join(".git")).unwrap();
         std::fs::create_dir(root.path().join(".jj")).unwrap();
-        assert_eq!(detect_vcs(root.path()).unwrap(), SessionVcs::Jj);
+        if cfg!(feature = "jj-lib") {
+            assert_eq!(detect_vcs(root.path()).unwrap(), SessionVcs::Jj);
+        } else if cfg!(feature = "git-cli") {
+            assert_eq!(detect_vcs(root.path()).unwrap(), SessionVcs::Git);
+        } else {
+            assert!(detect_vcs(root.path()).is_err());
+        }
     }
 
     #[test]
@@ -2415,11 +2433,18 @@ mod tests {
             assert!(error.detail.contains("Git CLI backend is not included"));
         }
         std::fs::create_dir(root.path().join(".jj")).unwrap();
-        assert_eq!(detect_vcs(root.path()).unwrap(), SessionVcs::Jj);
+        if cfg!(feature = "jj-lib") {
+            assert_eq!(detect_vcs(root.path()).unwrap(), SessionVcs::Jj);
+        } else if cfg!(feature = "git-cli") {
+            assert_eq!(detect_vcs(root.path()).unwrap(), SessionVcs::Git);
+        } else {
+            assert!(detect_vcs(root.path()).is_err());
+        }
+        std::fs::remove_dir(root.path().join(".git")).unwrap();
         if !cfg!(feature = "jj-lib") {
             let error = snapshot(root.path(), "disabled-jj").unwrap_err();
             assert_eq!(error.kind, VcsErrorKind::MintUnavailable);
-            assert!(error.detail.contains("native JJ backend is not included"));
+            assert!(error.detail.contains("this build has no jj support"));
         }
     }
 

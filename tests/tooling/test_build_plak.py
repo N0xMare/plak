@@ -593,6 +593,10 @@ for package in "${{packages[@]}}"; do
 done
 """)
             (fake / "cargo").chmod(0o755)
+            (fake / "strip").write_text(
+                f"#!/bin/sh\nprintf 'strip %s\\n' \"$1\" >>{log}\n"
+                "printf '# stripped\\n' >>\"$1\"\n")
+            (fake / "strip").chmod(0o755)
             home = base / "home"
             env = {k: v for k, v in os.environ.items() if k != "CARGO_BUILD_TARGET"}
             env.update(HOME=str(home), CARGO_TARGET_DIR=str(base / "target"),
@@ -612,7 +616,13 @@ done
                 "cargo build --locked -p plak --profile release",
                 "cargo build --locked -p plakous-js-runtime -p plakous-py-worker --profile release",
                 f"linkage {base / 'target/release'}",
+                f"strip {base / 'target/release/stripped/plak'}",
+                f"strip {base / 'target/release/stripped/plakous-js-host'}",
+                f"strip {base / 'target/release/stripped/monty'}",
             ])
+            for name in ("plak", "plakous-js-host", "monty"):
+                self.assertNotIn("# stripped", (base / "target/release" / name).read_text())
+                self.assertIn("# stripped", (base / "target/release/stripped" / name).read_text())
             installed = (home / ".local/bin/plak").resolve()
             self.assertEqual(installed.parent.parent, lib / "release")
             self.assertEqual(len(installed.parent.name), 64)
@@ -624,6 +634,21 @@ done
                 self.assertEqual(worker.parent.parent, lib / "sidecars" / name)
                 self.assertEqual((installed.parent / name).resolve(), worker)
             self.assertNotIn("maintainer", installed.read_text())
+
+            result = run("--artifacts")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), str(base / "target/release/stripped"))
+            self.assertNotIn("--features", log.read_text())
+            self.assertEqual((home / ".local/bin/plak").resolve(), installed)
+
+            checker = repo / "tools/build/check-artifact-linkage.py"
+            checker_source = checker.read_text()
+            checker.write_text(checker_source + "raise SystemExit(2)\n")
+            result = run("--artifacts")
+            self.assertEqual(result.returncode, 2)
+            self.assertNotIn("strip ", log.read_text())
+            self.assertEqual(result.stdout, "")
+            checker.write_text(checker_source)
 
             # A maintainer build may replace the release links and back again;
             # both snapshots are retained.

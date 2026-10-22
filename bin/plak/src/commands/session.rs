@@ -1512,6 +1512,17 @@ pub fn seed_new_session_binding(
     record: &mut product_sessions::SessionRecord,
     config: &product_config::ProductConfig,
 ) -> CliResult<()> {
+    if !crate::build_identity::JJ_ENABLED && record.workspace_root.join(".jj").exists() {
+        if !record.workspace_root.join(".git").exists() {
+            return Err(CliFailure::new(
+                "this build has no jj support; use a build with the jj feature",
+            ));
+        }
+        record.record_notice(TranscriptRow::info(
+            product_sessions::NoticeScope::Session,
+            "This build has no jj support; using git copies in this colocated repository.",
+        ));
+    }
     record.account = config.default_account().map(str::to_owned);
     record.model = config.default_model().map(str::to_owned);
     if record.account.as_deref() == Some("openrouter") {
@@ -1720,5 +1731,26 @@ mod recovery_tests {
         assert!(output.contains(&format!("Child          {}", second.agent_id)));
         assert!(output.contains(&format!("quiescent at {valid}")));
         assert!(output.find("invalid recorded locator") < output.find("quiescent at"));
+    }
+}
+
+#[cfg(test)]
+mod vcs_selection_tests {
+    use super::*;
+
+    #[test]
+    fn new_session_refuses_jj_only_or_records_one_colocated_notice() {
+        if crate::build_identity::JJ_ENABLED {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join(".jj")).unwrap();
+        let config = product_config::ProductConfig::default_product();
+        let mut record = product_sessions::SessionRecord::new(root.path().to_path_buf());
+        let error = seed_new_session_binding(&mut record, &config).unwrap_err();
+        assert!(error.to_string().contains("jj feature"));
+        std::fs::create_dir(root.path().join(".git")).unwrap();
+        seed_new_session_binding(&mut record, &config).unwrap();
+        assert_eq!(record.transcript.pending_notices().len(), 1);
     }
 }

@@ -378,6 +378,7 @@ class PackageReleaseTests(unittest.TestCase):
                            '-m) echo "${FAKE_ARCH:-x86_64}" ;; esac')
         self.stub("rustup", "echo x86_64-unknown-linux-musl")
         self.stub("musl-gcc", "true")
+        self.stub("strip", "true")  # Cargo writes shell-script executables in this fixture.
         self.stub("git", 'case "$1" in status) printf "%s" "${FAKE_DIRTY:-}" ;; '
                          'tag) echo "${FAKE_TAG:-}" ;; log) echo 1700000000 ;; esac')
         writer = "".join(

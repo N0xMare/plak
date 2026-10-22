@@ -2241,7 +2241,7 @@ class FeaturePolicyTests(unittest.TestCase):
         self.assertEqual(profile_counts["plakous"], 2**10 + 2)
         # sqlite, perf-instrumentation, repository-only commit-trace.
         self.assertEqual(profile_counts["plakous-store"], 2**3 + 1)
-        # git-cli, jj-lib, maintainer, otel, test-hooks, test-support.
+        # git-cli, jj, maintainer, otel, test-hooks, test-support.
         self.assertEqual(profile_counts["plak"], 2**6 + 1)
         self.assertNotIn("plakous-js-eval", profile_counts)
         self.assertNotIn("plakous-js-runtime", profile_counts)

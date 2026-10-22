@@ -383,14 +383,15 @@ same confirmation pop-up: focus starts on the action, so `Enter` sends it and
 
 ## git and jj
 
-Session VCS is exclusive and jj wins: if the project has a `.jj` directory —
-including a colocated, git-backed jj repo — Plak is in jj mode; otherwise `.git`
-is git mode; with neither, minting a copy fails with `mint_unavailable`.
+Release tarballs and default source builds use Git copies. In a colocated
+repository (`.jj` and `.git`), a Git-only build reports this choice in
+`plak doctor` and once in a new session. A JJ-only repository is refused with
+`this build has no jj support; use a build with the jj feature`.
 
-Plak uses JJ in process through `jj-lib`; workspace operations do not require
-the `jj` executable. The optional Git backend uses the Git CLI. Default builds
-include both; [custom builds](getting-started.md#build) can select either.
-A repository whose backend was omitted is refused, with no fallback.
+Enable `plak/jj` for native JJ support (included in maintainer builds). When
+enabled, `.jj` takes precedence over `.git`. Workspace operations use `jj-lib`
+in process and do not require the `jj` executable. See
+[custom builds](getting-started.md#build).
 
 - Harmless operation changes can be reconciled automatically. If another
   workspace rewrites the child's base and safe recovery cannot be established,

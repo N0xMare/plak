@@ -1,8 +1,10 @@
-//! A build without JJ refuses JJ repositories; it never selects Git implicitly.
+//! Unavailable native JJ operations for builds without the backend.
+pub(super) const ENABLED: bool = false;
+
 use super::occupancy_vcs::{AdoptFailure, AdoptLanding, MintedCopy, VcsError, VcsSnapshot};
 use std::path::Path;
 fn unavailable() -> VcsError {
-    VcsError::mint_unavailable("native JJ backend is not included in this build")
+    VcsError::mint_unavailable("this build has no jj support; use a build with the jj feature")
 }
 pub(super) fn snapshot(_: &Path) -> Result<VcsSnapshot, VcsError> {
     Err(unavailable())

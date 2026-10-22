@@ -42,6 +42,10 @@ if [[ "$profile" != debug ]]; then
 fi
 
 # Separate resolutions keep monty-proto/worker features out of the parent.
+if [[ "$profile" == release ]]; then
+  # Linkage proof needs raw symbols; strip only the staged shipping copies.
+  export CARGO_PROFILE_RELEASE_STRIP=debuginfo
+fi
 cargo build --locked -p plak ${plak_features[@]+"${plak_features[@]}"} ${profile_flag[@]+"${profile_flag[@]}"}
 cargo build --locked -p plakous-js-runtime -p plakous-py-worker ${profile_flag[@]+"${profile_flag[@]}"}
 target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
@@ -66,6 +70,17 @@ fi
 # Inspect raw symbols on both ELF and Mach-O; require worker positive controls.
 # Report on stderr: --artifacts prints only the output directory on stdout.
 python3 tools/build/check-artifact-linkage.py "$output_dir" >&2
+if [[ "$profile" == release ]]; then
+  output_dir="$output_dir/stripped"
+  mkdir -p "$output_dir"
+  for artifact in "$bin" "$js_host" "$monty"; do
+    cp "$artifact" "$output_dir/$(basename "$artifact")"
+    strip "$output_dir/$(basename "$artifact")"
+  done
+  bin="$output_dir/plak"
+  js_host="$output_dir/plakous-js-host"
+  monty="$output_dir/monty"
+fi
 if [[ -n "$artifacts_only" ]]; then
   printf '%s\n' "$output_dir"
   exit 0

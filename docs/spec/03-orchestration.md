@@ -1384,6 +1384,13 @@ hang that holds the seal or the adopt.
 
 ### 6.2 JJ
 
+Plak defaults to Git-only copies. Its opt-in `jj` feature enables the native
+`jj-lib` backend (also enabled by the maintainer build). A build without JJ
+refuses JJ-only repositories with `this build has no jj support; use a build
+with the jj feature`. In a colocated repository it uses Git copies and reports
+that choice in doctor and once when creating a session. With JJ enabled, JJ
+takes precedence over colocated Git.
+
 The optional `jj-lib` backend runs in process, with no JJ CLI fallback. It
 supports Git-backed JJ repositories and loads a fixed library configuration
 (`plak`, `plak@local`, signing disabled), without user configuration or aliases.
