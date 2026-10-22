@@ -1869,11 +1869,6 @@ pub(crate) fn import_and_resume(services: &Services, path: &Path) -> CliResult<P
         ))
     })?;
     let source_id = document.source().0.to_owned();
-    let local_handoff = consume_handoff_receipt(
-        path,
-        services.paths()?.home(),
-        document.local_digest.as_deref(),
-    );
     let paths = PlakPaths::for_workspace(
         services.paths()?.home().to_path_buf(),
         document.workspace_root(),
@@ -1898,6 +1893,11 @@ pub(crate) fn import_and_resume(services: &Services, path: &Path) -> CliResult<P
     }
     crate::home::state::ensure_usable_state(services.paths()?, &mut std::io::stderr().lock())
         .map_err(CliFailure::new)?;
+    let local_handoff = consume_handoff_receipt(
+        path,
+        services.paths()?.home(),
+        document.local_digest.as_deref(),
+    );
     let (record, note) = commands::session::import_document(services, document, local_handoff)
         .map_err(|failure| {
             CliFailure::new(format!(

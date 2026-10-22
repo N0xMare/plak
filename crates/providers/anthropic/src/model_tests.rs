@@ -4,6 +4,9 @@
     clippy::expect_used,
     reason = "offline assertions"
 )]
+#[path = "model_tests/carry_replay.rs"]
+mod carry_replay;
+
 use super::*;
 use futures_util::StreamExt as _;
 use plakous_agent::{AgentBuilder, AgentRequestPolicy};

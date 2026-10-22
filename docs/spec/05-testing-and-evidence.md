@@ -1865,7 +1865,12 @@ requires the reopen alone to converge before the harness checks idempotence.
   v7 fixture and `previous_document_preserves_every_transcript_row_type` pin
   typed rows; `rejected_exports_do_not_create_state_or_reference_files` pins
   refusal of v6. The v8 neutral round-trip includes presentation subjects,
-  base64 media, bounded parsing and closed unknown-field refusals.
+  base64 media, bounded parsing and closed unknown-field refusals. Production-dialect
+  carry fixtures lower sanitized Responses encrypted reasoning, Messages thinking
+  signatures and Codex native compaction without dispatch. Unsupported nested
+  opaque result parts and invalid replay prove successful stripped creation;
+  hosted notice evidence pins the single-line fallback notice. A many-minimal-
+  blocks fixture pins the cumulative block/part budget.
 
 The opt-in live-fact pilots cover `non_stop_finish_length`,
 `empty_length_retry`, `non_stop_finish_refusal`, `steer_accepted_mid_turn`,

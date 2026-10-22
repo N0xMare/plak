@@ -915,7 +915,7 @@ Blocks have an explicit `kind` and neutral fields:
 - `image`: MIME `mime`, `source`, optional `detail` (`auto`, `low`, `high`,
   `original`); `document` and `audio`: MIME and source. Byte sources carry
   base64 strings; URI sources must parse as HTTPS with a host (all other
-  schemes are refused); data-URL sources retain their original string. No blob-store dependency or import-time network fetch exists.
+  schemes are refused on export as well as import); data-URL sources retain their original string. No blob-store dependency or import-time network fetch exists.
 - `call`: call UUID `id`, exposed `name`, `canonical_name`, execution `owner`,
   `state`, `correlation`, and exact raw `arguments`. `result`: UUID, owner,
   `outcome`, ordered `parts`, correlation. Result parts are only text, image,
@@ -955,8 +955,13 @@ local receipt; an unreceipted/modified file takes the default stripping path.
 The receipt is not part of the export or a cross-machine carrier. Even then,
 `retains_replay_for` must prove the identical account/model and every retained
 replay segment must pass the destination route's offline dialect decoding before
-seed creation. Malformed/incompatible replay refuses with a typed error before
-persisting a successor. Historical tools, children and workflows never execute.
+seed creation. If the new build cannot validate retained replay, carry continues
+with the ordinary stripping path and records a one-line notice in the new
+session; replay incompatibility never fails the handoff. Nested opaque tool-result
+parts never survive a carry because no production dialect accepts them; they
+follow this stripping fallback even on an identical binding. Config, terminal and
+workspace preconditions run before consuming the receipt. A failed exec removes
+the receipt, so the kept export can only be imported with replay stripped. Historical tools, children and workflows never execute.
 
 A document is bounded to 256 MiB before parsing, its encoded neutral history
 to 128 MiB and 100,000 messages/groups. Runtime constructors enforce per-content
@@ -964,7 +969,9 @@ bounds (including the 16 MiB media-source bound and the existing
 3,932,160-byte user-image bound), UUID validity and complete
 canonical-history invariants. Groups and messages are bounded while parsing
 with a shared 100,000-message budget; each message has at most 4096 blocks
-and each tool result at most 1024 parts. Raw history size is checked once
+and each tool result at most 1024 parts. One cumulative budget allows at most
+100,000 blocks and result parts across the entire history, not per group.
+Raw history size is checked once
 before content decoding. Unknown fields/tags, another format/version,
 invalid contents and oversized payloads refuse before seed creation. History is
 never excerpted or silently truncated to fit export. Export makes no inference

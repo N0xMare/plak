@@ -81,6 +81,7 @@ impl Source {
             });
         }
         if let Some(uri) = source.as_uri() {
+            Self::validate_uri(uri)?;
             return Ok(Self::Uri {
                 uri: uri.to_owned(),
             });
@@ -91,6 +92,13 @@ impl Source {
             });
         }
         Err(invalid("unsupported media source"))
+    }
+    fn validate_uri(uri: &str) -> Result<()> {
+        let parsed = url::Url::parse(uri).map_err(invalid)?;
+        if parsed.scheme() != "https" || parsed.host_str().is_none() {
+            return Err(invalid("media URI must use https"));
+        }
+        Ok(())
     }
     fn import(self) -> Result<MediaSource> {
         match self {
@@ -105,10 +113,7 @@ impl Source {
                 )
             }
             Self::Uri { uri } => {
-                let parsed = url::Url::parse(&uri).map_err(invalid)?;
-                if parsed.scheme() != "https" || parsed.host_str().is_none() {
-                    return Err(invalid("media URI must use https"));
-                }
+                Self::validate_uri(&uri)?;
                 MediaSource::uri(uri)
             }
             Self::DataUrl { data_url } => MediaSource::data_url(data_url),
@@ -425,6 +430,13 @@ enum Block {
     },
 }
 impl Block {
+    fn block_count(&self) -> usize {
+        1 + match self {
+            Self::Result { parts, .. } => parts.iter().map(Self::block_count).sum(),
+            _ => 0,
+        }
+    }
+
     #[allow(
         clippy::too_many_lines,
         reason = "exhaustive neutral content conversion"
@@ -730,6 +742,16 @@ impl History {
         super::validate_size("history groups", self.groups.len(), 100_000)?;
         let count = self.groups.iter().map(|g| g.messages.len()).sum::<usize>();
         super::validate_size("history messages", count, 100_000)?;
+        super::validate_size(
+            "history blocks and parts",
+            self.groups
+                .iter()
+                .flat_map(|g| &g.messages)
+                .flat_map(|m| &m.blocks)
+                .map(Block::block_count)
+                .sum(),
+            100_000,
+        )?;
         for message in self.groups.iter().flat_map(|g| &g.messages) {
             if message.actor == "user" {
                 for block in &message.blocks {
@@ -888,8 +910,8 @@ fn bounded_groups<'de, D: serde::Deserializer<'de>>(
 ) -> std::result::Result<Vec<Group>, D::Error> {
     use serde::de::{DeserializeSeed, Error, MapAccess, SeqAccess, Visitor};
     struct Groups;
-    struct GroupSeed<'a>(&'a mut usize);
-    struct Messages<'a>(&'a mut usize);
+    struct GroupSeed<'a>(&'a mut usize, &'a mut usize);
+    struct Messages<'a>(&'a mut usize, &'a mut usize);
     impl<'de> DeserializeSeed<'de> for Messages<'_> {
         type Value = Vec<Message>;
         fn deserialize<D: serde::Deserializer<'de>>(
@@ -914,6 +936,12 @@ fn bounded_groups<'de, D: serde::Deserializer<'de>>(
                     return Ok(messages);
                 };
                 *self.0 -= 1;
+                let message: Message = message;
+                let blocks = message.blocks.iter().map(Block::block_count).sum::<usize>();
+                *self.1 = self
+                    .1
+                    .checked_sub(blocks)
+                    .ok_or_else(|| A::Error::custom("history blocks and parts exceed 100000"))?;
                 messages.push(message);
             }
             if seq.next_element::<serde::de::IgnoredAny>()?.is_some() {
@@ -942,7 +970,7 @@ fn bounded_groups<'de, D: serde::Deserializer<'de>>(
                 match key.as_str() {
                     "kind" if kind.is_none() => kind = Some(map.next_value()?),
                     "messages" if messages.is_none() => {
-                        messages = Some(map.next_value_seed(Messages(self.0))?);
+                        messages = Some(map.next_value_seed(Messages(self.0, self.1))?);
                     }
                     _ => return Err(A::Error::custom("unknown or duplicate group field")),
                 }
@@ -964,8 +992,11 @@ fn bounded_groups<'de, D: serde::Deserializer<'de>>(
         ) -> std::result::Result<Self::Value, A::Error> {
             let mut groups = Vec::new();
             let mut remaining = 100_000;
+            let mut remaining_blocks = 100_000;
             while groups.len() < 100_000 {
-                let Some(group) = seq.next_element_seed(GroupSeed(&mut remaining))? else {
+                let Some(group) =
+                    seq.next_element_seed(GroupSeed(&mut remaining, &mut remaining_blocks))?
+                else {
                     return Ok(groups);
                 };
                 groups.push(group);

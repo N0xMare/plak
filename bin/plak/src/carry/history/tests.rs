@@ -521,3 +521,41 @@ fn neutral_history_preserves_a_bounded_presentation_subject() {
         history
     );
 }
+
+#[test]
+fn cumulative_minimal_blocks_and_result_parts_are_bounded_across_messages() {
+    let block = serde_json::json!({"kind":"text","text":"x","phase":null});
+    let message = |blocks| serde_json::json!({"id":"00000000-0000-0000-0000-000000000001","actor":"user","origin":"user_input","blocks":blocks});
+    let mut messages = vec![message(vec![block.clone(); 4000]); 25];
+    let history = |messages| serde_json::json!({"replay_account":"00ff","replay_model":"model","groups":[{"kind":"conversation","messages":messages}]});
+    assert!(serde_json::from_value::<History>(history(messages.clone())).is_ok());
+    messages.push(message(vec![block.clone()]));
+    let error = serde_json::from_value::<History>(history(messages))
+        .err()
+        .unwrap();
+    assert!(
+        error
+            .to_string()
+            .contains("history blocks and parts exceed")
+    );
+    let result = serde_json::json!({"kind":"result","id":"id","owner":{"kind":"local"},"outcome":"success","parts":vec![block;1000],"correlation":{"remote_call":null,"container":null,"caller":{"kind":"direct"}}});
+    assert!(
+        serde_json::from_value::<History>(history(vec![message(vec![result.clone()]); 99])).is_ok()
+    );
+    let error = serde_json::from_value::<History>(history(vec![message(vec![result]); 100]))
+        .err()
+        .unwrap();
+    assert!(
+        error
+            .to_string()
+            .contains("history blocks and parts exceed")
+    );
+}
+
+#[test]
+fn export_refuses_media_urls_import_would_reject() {
+    for uri in ["file:///etc/passwd", "http://example.com/image.png"] {
+        assert!(Source::export(&MediaSource::uri(uri).unwrap()).is_err());
+    }
+    assert!(Source::export(&MediaSource::uri("https://example.com/image.png").unwrap()).is_ok());
+}

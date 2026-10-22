@@ -402,6 +402,7 @@ pub fn create_seeded_session_with_preflight<P: plakous_host_protocol::ProtocolEx
     let opened = executor
         .block_on(create_session(&mut config, Some(seed), &mut stderr_buf))
         .map_err(|e| CliFailure::new(e.to_string()))??;
+    record_replay_fallback_notice(&mut config.session, opened.replay_stripped());
     let locator = executor
         .block_on(opened.release())
         .map_err(|e| CliFailure::new(e.to_string()))?
@@ -417,6 +418,12 @@ pub fn create_seeded_session_with_preflight<P: plakous_host_protocol::ProtocolEx
         .save(&mut config.session)
         .map_err(CliFailure::new)?;
     Ok((config.session, notes))
+}
+
+fn record_replay_fallback_notice(session: &mut SessionRecord, stripped: bool) {
+    if stripped {
+        session.record_notice(TranscriptRow::warning(NoticeScope::Settings,"Provider replay was incompatible with this build and was stripped; the conversation was carried without it."));
+    }
 }
 
 pub(super) async fn build_session_from_config<P: plakous_host_protocol::ProtocolExtension>(
@@ -1105,6 +1112,25 @@ mod tests {
     type HostConfig = crate::runtime::HostConfig<TestExtension>;
     type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
     type UserAction = crate::surface_protocol::UserAction<TestExtension>;
+
+    #[test]
+    fn replay_fallback_authors_one_persistable_notice_only_when_needed() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut config, _) = test_support::fresh_injected_attached_host(root.path());
+        record_replay_fallback_notice(&mut config.session, false);
+        assert_eq!(config.session.transcript.pending_notices().len(), 0);
+        record_replay_fallback_notice(&mut config.session, true);
+        let notices = config.session.transcript.pending_notices();
+        assert_eq!(notices.len(), 1);
+        let TranscriptRow::Notice(notice) = &notices[0] else {
+            panic!("not a notice");
+        };
+        assert!(notice.text.contains("conversation was carried"));
+        assert!(!notice.text.contains('\n'));
+        config.store.save(&mut config.session).unwrap();
+        let loaded = config.store.load(&config.session.id).unwrap();
+        assert_eq!(loaded.transcript.iter().filter(|row|matches!(row,TranscriptRow::Notice(notice) if notice.text.contains("Provider replay was incompatible"))).count(),1);
+    }
 
     use super::*;
     use crate::runtime::*;

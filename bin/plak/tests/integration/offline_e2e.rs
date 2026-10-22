@@ -7642,8 +7642,21 @@ fn import_resume_requires_a_terminal_before_creating_a_successor() {
     );
     assert!(first.status.success(), "{}", first.stderr);
     let (path, _) = export_session(&fixture, &first.session_id(), "tty-import.json");
+    let carry_dir = fixture.home().join("carry");
+    std::fs::create_dir_all(&carry_dir).unwrap();
+    std::fs::set_permissions(
+        &carry_dir,
+        std::os::unix::fs::PermissionsExt::from_mode(0o700),
+    )
+    .unwrap();
+    let local_path = carry_dir.join("tty-import.json");
+    let bytes = std::fs::read(&path).unwrap();
+    write_private(&local_path, std::str::from_utf8(&bytes).unwrap());
+    let receipt = local_path.with_extension("handoff");
+    write_private(&receipt, &plakous::model::sha256_hex(&[&bytes]));
+    let path = local_path.to_str().unwrap();
     let before = retained_runtime_sessions(&fixture);
-    let imported = run_cli(&fixture, &["--import-resume", &path]);
+    let imported = run_cli(&fixture, &["--import-resume", path]);
     assert!(!imported.status.success());
     assert!(
         imported.stderr.contains("needs a terminal"),
@@ -7651,7 +7664,11 @@ fn import_resume_requires_a_terminal_before_creating_a_successor() {
         imported.stderr
     );
     assert_eq!(retained_runtime_sessions(&fixture), before);
-    assert!(Path::new(&path).is_file());
+    assert!(Path::new(path).is_file());
+    assert!(
+        receipt.is_file(),
+        "terminal refusal must not consume the local handoff receipt"
+    );
 }
 
 #[test]

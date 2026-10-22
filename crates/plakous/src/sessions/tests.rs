@@ -1,12 +1,11 @@
+#[cfg(feature = "native-subscriptions")]
+mod carry_replay;
+
 #[path = "tests/command_ancestry.rs"]
 mod command_ancestry;
 
 use plakous_agent::internal::{RuntimeDurability, SessionStoreError};
 use std::collections::{BTreeMap, VecDeque};
-#[cfg(all(unix, feature = "sessions-sqlite"))]
-use std::fs::{File, OpenOptions};
-#[cfg(all(unix, feature = "sessions-sqlite"))]
-use std::io::Write;
 use std::num::{NonZeroU32, NonZeroU64};
 #[cfg(any(all(unix, feature = "sessions-sqlite"), feature = "composition"))]
 use std::path::Path;
@@ -22,6 +21,11 @@ use std::sync::{Mutex, MutexGuard};
 use std::task::{Context, Poll};
 #[cfg(all(unix, feature = "sessions-sqlite"))]
 use std::time::{Duration, Instant};
+#[cfg(all(unix, feature = "sessions-sqlite"))]
+use std::{
+    fs::{File, OpenOptions},
+    io::Write,
+};
 
 use super::*;
 

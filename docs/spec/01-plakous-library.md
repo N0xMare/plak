@@ -2057,8 +2057,9 @@ reuses its actual runtime binding.
 `PortableSessionHistory::without_replay` removes self-declared provider replay
 from external documents regardless of account/model equality.
 `with_replay_validation` requests offline destination-dialect validation before
-creation of same-binding seeds, with no store/session creation or dispatch on
-refusal. Product handoff authentication is a separate host concern, not a
+creation of same-binding seeds. A validation refusal falls back to the stripping
+path without dispatch and exposes `OpenedSession::replay_stripped() == true` on the created handle;
+the host records a one-line notice in the new session. Product handoff authentication is a separate host concern, not a
 property of a declared replay binding. Seed-only occupancy scheduling applies
 to nonempty root genesis checkpoints, never fork/rebind/clear successors.
 
@@ -6892,9 +6893,10 @@ failure and the Compact remedy; no overflow fold is dispatched.
 Admission authority is restored only for a matching stable
 binding. A failed or abandoned compaction preserves it; a committed compaction,
 fork or rebind successor clears it. Conversation carry/export documents
-contain no anchor, so import is unanchored. A seeded history with no provider
-operation yet may use the destination's unanchored occupancy measure solely
-to schedule its first preflight fold; this is not paid admission authority.
+contain no anchor, so import is unanchored. A nonempty root genesis seed
+(never a fork, rebind or clear successor) may use the destination's unanchored
+occupancy measure, once, for its first preflight fold; this is not paid admission
+authority.
 The export document is version 8; this build imports versions 8 and 7 (chapter 02 §2.5.1).
 
 A paid fold's **own input must admit under a conservative bound** before

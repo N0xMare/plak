@@ -201,7 +201,10 @@ async fn irreducible_pure_text_seed_refuses_without_repeated_paid_dispatch() -> 
     let first = agent.prompt("continue").await?.result().await?;
     assert!(first.context_capacity().is_some(), "{:?}", first.outcome());
     let paid = lock_mutex(&model.paid_compaction_rounds).len();
-    assert!(paid <= 1);
+    assert_eq!(
+        paid, 0,
+        "irreducible input refuses before any paid dispatch"
+    );
     let second = agent.prompt("continue again").await?.result().await?;
     assert!(
         second.context_capacity().is_some(),

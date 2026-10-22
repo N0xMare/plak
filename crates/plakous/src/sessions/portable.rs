@@ -59,8 +59,9 @@ impl PortableSessionHistory {
         Ok(self)
     }
 
-    /// Requires the destination's offline dialect decoder to accept retained
-    /// replay before creating the seed. Use only for a locally attested handoff.
+    /// Checks retained replay with the destination's offline dialect decoder.
+    /// A refusal creates with stripped history, reported by
+    /// [`super::OpenedSession::replay_stripped`]. Use only for a locally attested handoff.
     #[must_use]
     pub fn with_replay_validation(mut self) -> Self {
         self.validate_replay = true;

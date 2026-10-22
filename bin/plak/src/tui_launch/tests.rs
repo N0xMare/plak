@@ -228,3 +228,15 @@ fn combine_cleanup_retains_both_failure_reasons() {
         error.message()
     );
 }
+
+#[test]
+fn failed_exec_removes_only_the_receipt_and_keeps_the_export() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("session.json");
+    std::fs::write(&path, "export").unwrap();
+    std::fs::write(path.with_extension("handoff"), "receipt").unwrap();
+    remove_failed_handoff_receipt(Some(&path));
+    assert!(path.is_file());
+    assert!(!path.with_extension("handoff").exists());
+    remove_failed_handoff_receipt(None);
+}

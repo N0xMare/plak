@@ -1006,8 +1006,8 @@ strips provider replay by default (including nested opaque tool-result parts).
 Only `/reload` with this machine's private one-use exact-bytes handoff receipt
 may retain replay on an identical account/model binding. Each retained replay
 segment is passed through the destination dialect decoder offline before seed
-creation; malformed payloads fail with a typed refusal, not an unusable saved
-session. A receipt cannot authorize tool execution or a foreign binding. Export files remain
+creation; rejected replay falls back to the ordinary stripping path and a
+one-line notice, never an unusable saved session or a failed carry. A receipt cannot authorize tool execution or a foreign binding. Export files remain
 0600 in private directories, and neutral-history debug output never includes
 message contents or opaque replay. A user must trust a document's conversation
 contents before importing it; typed validation is not prompt-injection filtering.

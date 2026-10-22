@@ -219,6 +219,8 @@ first prompt. The probe never starts MCP servers. A failed capacity check leaves
 the check runs requires `/reload` again.
 Only this machine's private `/reload` handoff can retain provider replay on an
 identical binding, and the destination validates it before creating the session.
+If replay is incompatible, the new session still opens with replay stripped and
+one notice explaining the fallback. A failed exec removes the private receipt.
 Importing an ordinary export file strips replay.
 The destination may compact an over-window conversation at first prompt.
 Children and live processes do not carry; queued prompts stay paused. Old

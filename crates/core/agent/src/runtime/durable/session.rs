@@ -35,11 +35,25 @@ pub(crate) async fn validate_seed_replay(
     };
     let admission = sealed_runtime_admission(builder).await?;
     let identities = DurableGenesisIdentities::new("validate-carry-replay")?;
+    let durability = match builder
+        .provider_configuration
+        .effective()
+        .behavior()
+        .local_durability
+    {
+        plakous_model::LocalDurabilityDisposition::Ephemeral => crate::RuntimeDurability::Disabled,
+        plakous_model::LocalDurabilityDisposition::BestEffort => {
+            crate::RuntimeDurability::BestEffort
+        }
+        plakous_model::LocalDurabilityDisposition::DurableRequired => {
+            crate::RuntimeDurability::Required
+        }
+    };
     let checkpoint = prepare_durable_genesis(
         builder,
         identities,
         admission,
-        crate::RuntimeDurability::Required,
+        durability,
         CanonicalHistory::default(),
     )?;
     for segment in segments {
@@ -99,6 +113,14 @@ pub(crate) async fn validate_seed_replay(
             ModelPreparationContext::new(
                 builder.initial_model_authority.clone(),
                 builder.clock.now(),
+            )
+            .with_cache_affinity(
+                checkpoint
+                    .manifest()
+                    .canonical()
+                    .context()
+                    .affinity()
+                    .clone(),
             ),
         );
         prepared.map_err(|e| {

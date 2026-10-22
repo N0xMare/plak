@@ -6,18 +6,27 @@ use std::fmt;
 
 /// An attached exact session runtime.
 pub struct OpenedSession {
+    pub(super) replay_stripped: bool,
     agent: Agent,
     binding: SessionBindingReport,
     _registration: DriverRegistration,
 }
 
 impl OpenedSession {
+    /// Whether this creation fell back to stripped history after replay validation.
+    /// False on an ordinary create or reopen; the host can persist a carry notice.
+    #[must_use]
+    pub const fn replay_stripped(&self) -> bool {
+        self.replay_stripped
+    }
+
     pub(super) fn new(
         agent: Agent,
         binding: SessionBindingReport,
         registration: DriverRegistration,
     ) -> Self {
         Self {
+            replay_stripped: false,
             agent,
             binding,
             _registration: registration,

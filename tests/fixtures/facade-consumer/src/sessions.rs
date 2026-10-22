@@ -14,6 +14,7 @@ pub(crate) fn surface_is_nameable() {
     let _ = |history: plakous::sessions::PortableSessionHistory| {
         history.without_replay().map(|history| history.with_replay_validation())
     };
+    let _ = |session: &plakous::sessions::OpenedSession| session.replay_stripped();
     let _ = SessionBackend::memory().and_then(AgentSessions::new);
     let _ = |path: &Path, locator: SessionLocator| {
         AgentSessions::inspect_recovery_sqlite(path, locator)

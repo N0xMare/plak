@@ -1944,6 +1944,12 @@ pub struct AttachedCodingSession {
 }
 
 impl AttachedCodingSession {
+    pub(crate) fn replay_stripped(&self) -> bool {
+        self.opened
+            .as_ref()
+            .is_some_and(OpenedSession::replay_stripped)
+    }
+
     pub(crate) fn reachability_probe(&self) -> Option<plakous::model::ReachabilityProbe> {
         self.reachability_probe.clone()
     }

@@ -1396,6 +1396,7 @@ fn reload_installed_plak(
         "exec installed plak"
     );
     let error = std::os::unix::process::CommandExt::exec(&mut command);
+    remove_failed_handoff_receipt(carry_file.as_deref());
     if resumable {
         let _ = writeln!(
             io::stdout(),
@@ -1411,6 +1412,12 @@ fn reload_installed_plak(
         executable.display(),
         unverified.unwrap_or_default()
     )))
+}
+
+fn remove_failed_handoff_receipt(path: Option<&Path>) {
+    if let Some(path) = path {
+        let _ = std::fs::remove_file(path.with_extension("handoff"));
+    }
 }
 
 #[cfg(test)]
