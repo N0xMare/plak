@@ -446,7 +446,7 @@ class QualificationFixTests(unittest.TestCase):
         driver = smoke.Smoke(live.ROUTES["codex"], Mock(capture_segments=[]))
         driver.repo = Mock(return_value=repo)
         agent = Mock(session_id="session", capture_dir=repo)
-        agent.prompt.return_value = live.Turn(phase="completed", text="ZEBRA-42")
+        agent.prompt.return_value = live.Turn(phase="completed", text="ZEBRA-42", tools=1)
         agent.command.return_value = {"kind": "ok"}
         driver.agent = Mock(return_value=agent)
         return driver, agent
@@ -461,7 +461,7 @@ class QualificationFixTests(unittest.TestCase):
                     self.assertNotIn("Do not write", text)
                     (repo / "nested").mkdir()
                     (repo / "nested" / "fact.bin").write_bytes(b"\x00ZEBRA-42\x00")
-                return live.Turn(phase="completed", text="ZEBRA-42")
+                return live.Turn(phase="completed", text="ZEBRA-42", tools=1)
 
             agent.prompt.side_effect = prompt
             with patch.object(live, "session_records", return_value=[
@@ -470,6 +470,17 @@ class QualificationFixTests(unittest.TestCase):
                     driver.compaction()
             self.assertEqual(raised.exception.outcome, live.HARNESS)
             self.assertEqual(agent.prompt.call_count, 2)
+
+    def test_compaction_first_turn_without_the_read_is_a_model_miss(self):
+        with tempfile.TemporaryDirectory() as directory:
+            driver, agent = self.compaction_driver(Path(directory))
+            agent.prompt.return_value = live.Turn(phase="completed", text="ok", tools=0)
+            with self.assertRaises(live.ScenarioFailure) as raised:
+                driver.compaction()
+            self.assertEqual(raised.exception.outcome, live.MODEL)
+            self.assertIn("without reading fold.txt", str(raised.exception))
+            self.assertEqual(agent.prompt.call_count, 1)
+            agent.command.assert_not_called()
 
     def test_compaction_fact_survives_without_a_file_shortcut(self):
         with tempfile.TemporaryDirectory() as directory:

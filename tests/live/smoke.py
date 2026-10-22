@@ -372,6 +372,11 @@ class Smoke:
             committed = live.committed_compactions(records)
         else:
             require_completed(first, "first turn", segments=[agent.capture_dir])
+            if first.tools == 0:
+                # Without the read there is nothing to fold, and a manual
+                # compact correctly refuses as not smaller.
+                agent.quit()
+                raise ScenarioFailure(MODEL, "first turn replied without reading fold.txt")
         require_completed(agent.prompt("Now read test_calc.py. Reply: ok"), "second turn",
                           segments=[agent.capture_dir])
         if not capacity_recovered:
