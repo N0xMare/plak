@@ -175,7 +175,9 @@ pub(crate) async fn project_to_tail(
     product_id: &str,
     followed: plakous::sessions::SessionLocator,
 ) -> Result<SessionViews, ReadFailure> {
-    project_to_tail_cached(sessions, store, product_id, followed, None).await
+    project_to_tail_cached(sessions, store, product_id, followed, None)
+        .await
+        .map(|projected| projected.views)
 }
 
 pub(super) async fn project_to_tail_interruptible(
@@ -196,6 +198,15 @@ pub(super) async fn project_to_tail_interruptible(
         progress,
     )
     .await
+    .map(|projected| projected.views)
+}
+
+/// Owned projector state. Same-cursor workflow joins in the store may be newer;
+/// this is not a fresh snapshot of the store's joined workflow bookkeeping.
+pub(super) struct ProjectedViews {
+    pub(super) views: SessionViews,
+    /// None after a store reload: reconcile all retained settled rows once.
+    changed: Option<std::collections::BTreeSet<crate::sessions::projector::RowKey>>,
 }
 
 async fn project_to_tail_cached(
@@ -204,7 +215,7 @@ async fn project_to_tail_cached(
     product_id: &str,
     followed: plakous::sessions::SessionLocator,
     cached: Option<SessionViews>,
-) -> Result<SessionViews, ReadFailure> {
+) -> Result<ProjectedViews, ReadFailure> {
     project_to_tail_controlled(
         sessions,
         store,
@@ -225,9 +236,10 @@ async fn project_to_tail_controlled(
     cached: Option<SessionViews>,
     interrupted: impl Fn() -> bool,
     progress: impl Fn(FeedSeq, FeedSeq),
-) -> Result<SessionViews, ReadFailure> {
+) -> Result<ProjectedViews, ReadFailure> {
     #[cfg(test)]
     let _entry = probe::enter(product_id);
+    let mut changed = cached.as_ref().map(|_| std::collections::BTreeSet::new());
     let runtime_session = followed.session_id();
     let mut views = match cached {
         Some(views) => views,
@@ -279,31 +291,36 @@ async fn project_to_tail_controlled(
                 retained_from,
                 ..
             } if records.is_empty() => {
-                let previous = views.clone();
+                let previous = views.state.clone();
                 if retained_from.get() > 1 {
                     views.state.retained_from = Some(retained_from.get());
                 }
                 views.consume_before_retention(&intents);
-                if views != previous {
-                    let writes = ViewWrites::between(&previous, &views);
-                    let next = views.clone();
-                    if blocking(store, product_id, move |store, id| {
-                        store.commit_projection_views(id, &writes, &next)
+                if views.state != previous {
+                    let mut writes =
+                        ViewWrites::between(&SessionViews::empty(), &SessionViews::empty());
+                    writes.expected_cursor = views.cursor;
+                    writes.cursor = views.cursor;
+                    let (outcome, next) = blocking(store, product_id, move |store, id| {
+                        let outcome = store.commit_projection_views(id, &writes, &views.state)?;
+                        Ok((outcome, views))
                     })
-                    .await?
-                        == ProjectionCommit::CursorMoved
-                    {
+                    .await?;
+                    views = next;
+                    if outcome == ProjectionCommit::CursorMoved {
+                        changed = None;
                         views = load_views(store, product_id).await?;
                         continue;
                     }
                 }
-                let joined = views.clone();
-                if blocking(store, product_id, move |store, id| {
-                    rejoin_clear_source(store, id, &joined)
+                let (outcome, next) = blocking(store, product_id, move |store, id| {
+                    let outcome = rejoin_clear_source(store, id, &views)?;
+                    Ok((outcome, views))
                 })
-                .await?
-                    == ProjectionCommit::CursorMoved
-                {
+                .await?;
+                views = next;
+                if outcome == ProjectionCommit::CursorMoved {
+                    changed = None;
                     views = load_views(store, product_id).await?;
                     continue;
                 }
@@ -353,7 +370,7 @@ async fn project_to_tail_controlled(
                     if let Some(completion) = crate::sessions::projector::clear_completion(
                         request,
                         &target,
-                        &target_views,
+                        &target_views.state,
                     ) {
                         views
                             .state
@@ -361,7 +378,7 @@ async fn project_to_tail_controlled(
                             .insert(request.operation_id.clone(), completion);
                     }
                 }
-                return Ok(views);
+                return Ok(ProjectedViews { views, changed });
             }
             FeedPage::Records {
                 records,
@@ -369,7 +386,7 @@ async fn project_to_tail_controlled(
                 ..
             } => {
                 let mut projection =
-                    crate::sessions::projector::run(sessions, &views, &intents, &records)
+                    crate::sessions::projector::run(sessions, views, &intents, &records)
                         .await
                         .map_err(|error| error.to_string())?;
                 if retained_from.get() > 1 {
@@ -406,24 +423,30 @@ async fn project_to_tail_controlled(
             }
             _ => return Err("the projector read an unknown feed page".to_owned().into()),
         };
+        if let Some(changed) = &mut changed {
+            changed.extend(writes.upserts.iter().map(|(key, _)| *key));
+            changed.extend(writes.deletes.iter().copied());
+        }
         next.consume_before_retention(&intents);
-        let committed = next.clone();
         let observations = terminal_usages;
-        match blocking(store, product_id, move |store, id| {
-            let outcome = store.commit_projection_views(id, &writes, &committed)?;
+        let (outcome, next) = blocking(store, product_id, move |store, id| {
+            let outcome = store.commit_projection_views(id, &writes, &next.state)?;
             if outcome == ProjectionCommit::Applied {
                 store.emit_projected_turn_usages(&observations);
             }
-            Ok(outcome)
+            Ok((outcome, next))
         })
-        .await?
-        {
+        .await?;
+        match outcome {
             ProjectionCommit::Applied => views = next,
-            ProjectionCommit::CursorMoved => views = load_views(store, product_id).await?,
+            ProjectionCommit::CursorMoved => {
+                changed = None;
+                views = load_views(store, product_id).await?;
+            }
         }
         progress(views.cursor, tail);
     }
-    Ok(views)
+    Ok(ProjectedViews { views, changed })
 }
 
 async fn load_views(
@@ -477,10 +500,9 @@ fn rejoin_clear_source(
         return Ok(ProjectionCommit::Applied);
     };
     let intents = store.load_intents(source_id)?;
-    let Some(completion) = intents
-        .workflow_request(operation)
-        .and_then(|request| crate::sessions::projector::clear_completion(request, &target, views))
-    else {
+    let Some(completion) = intents.workflow_request(operation).and_then(|request| {
+        crate::sessions::projector::clear_completion(request, &target, &views.state)
+    }) else {
         return Ok(ProjectionCommit::Applied);
     };
     let source_views = store
@@ -492,7 +514,7 @@ fn rejoin_clear_source(
         return store.commit_projection_views(
             product_id,
             &ViewWrites::between(views, views),
-            views,
+            &views.state,
         );
     }
     Ok(ProjectionCommit::Applied)

@@ -13,7 +13,7 @@ use tokio::sync::{Notify, watch};
 
 use crate::agent::ProductStateRoots;
 use crate::session_store::SessionRecordStore;
-use crate::sessions::projector::SessionViews;
+use crate::sessions::projector::{RowKey, SessionViews};
 use crate::sessions::{ToolItem, TranscriptRow};
 
 use super::super::topology_state::HostRows;
@@ -42,7 +42,10 @@ impl LiveTarget {
         self.views(None).await.map(|_| ())
     }
 
-    async fn views(&self, cached: Option<SessionViews>) -> Result<SessionViews, String> {
+    pub(in crate::runtime) async fn views(
+        &self,
+        cached: Option<SessionViews>,
+    ) -> Result<super::ProjectedViews, String> {
         let pass = super::project_to_tail_cached(
             &self.sessions,
             &self.store,
@@ -94,6 +97,7 @@ struct Applied {
 struct Request {
     generation: u64,
     target: LiveTarget,
+    finish: bool,
 }
 
 /// The host loop's handle on its session's projector task.
@@ -103,7 +107,7 @@ pub(crate) struct LiveProjector {
     applied: watch::Receiver<Applied>,
     generation: u64,
     reported: u64,
-    task: tokio::task::JoinHandle<()>,
+    task: tokio::task::JoinHandle<Option<SessionViews>>,
 }
 
 impl LiveProjector {
@@ -131,6 +135,7 @@ impl LiveProjector {
         let _ = self.requests.send(Some(Request {
             generation: self.generation,
             target,
+            finish: false,
         }));
         self.wake.notify_one();
     }
@@ -146,26 +151,37 @@ impl LiveProjector {
     }
 
     /// Requests a final pass over `target` and waits for it, at most `bound`
-    /// when one is given. Returns the debt left behind: the pass's refusal,
-    /// or that it exceeded its bound. The task stops either way.
+    /// when one is given. Returns its owned views, or the debt left behind.
+    /// The task stops either way.
+    /// Its workflow bookkeeping may lag same-cursor joins performed by the
+    /// store; returned state is the projector's view, not a fresh store read.
     pub(crate) async fn finish(
         mut self,
         target: LiveTarget,
         bound: Option<Duration>,
-    ) -> Option<String> {
-        self.tick(target);
-        let wanted = self.generation;
-        let mut applied = self.applied.clone();
-        let done = applied.wait_for(|applied| applied.generation >= wanted);
+    ) -> Result<SessionViews, String> {
+        self.generation = self.generation.saturating_add(1);
+        let _ = self.requests.send(Some(Request {
+            generation: self.generation,
+            target,
+            finish: true,
+        }));
+        self.wake.notify_one();
+        let task = &mut self.task;
         let finished = match bound {
-            Some(bound) => tokio::time::timeout(bound, done).await,
-            None => Ok(done.await),
+            Some(bound) => tokio::time::timeout(bound, task).await,
+            None => Ok(task.await),
         };
-        self.task.abort();
         match finished {
-            Ok(Ok(applied)) => applied.error.clone(),
-            Ok(Err(_)) => Some("the projector task stopped".to_owned()),
-            Err(_) => Some("the final projector pass exceeded its bound".to_owned()),
+            Ok(Ok(Some(views))) => Ok(views),
+            Ok(Ok(None)) => Err(self
+                .applied
+                .borrow()
+                .error
+                .clone()
+                .unwrap_or_else(|| "the projector task stopped".to_owned())),
+            Ok(Err(_)) => Err("the projector task stopped".to_owned()),
+            Err(_) => Err("the final projector pass exceeded its bound".to_owned()),
         }
     }
 }
@@ -183,12 +199,11 @@ async fn run(
     mut requests: watch::Receiver<Option<Request>>,
     wake: Arc<Notify>,
     report: watch::Sender<Applied>,
-) {
+) -> Option<SessionViews> {
     let mut current: Option<Request> = None;
     let mut cached = None;
     let mut forwarder: Option<tokio::task::JoinHandle<()>> = None;
-    let mut shown: std::collections::HashMap<String, ToolItem> =
-        std::collections::HashMap::default();
+    let mut shown = SettledRows::default();
     loop {
         wake.notified().await;
         if requests.has_changed().is_err() {
@@ -211,7 +226,7 @@ async fn run(
                     .as_ref()
                     .is_none_or(|current| !current.target.same_session(&next.target))
             {
-                shown.clear();
+                shown = SettledRows::default();
                 if let Some(old) = forwarder.take() {
                     old.abort();
                 }
@@ -236,27 +251,19 @@ async fn run(
         let Some(request) = &current else {
             continue;
         };
-        let error = match request.target.views(cached.clone()).await {
-            Ok(views) => {
+        let error = match request.target.views(cached.take()).await {
+            Ok(super::ProjectedViews { views, changed }) => {
                 let current_target = requests
                     .borrow()
                     .as_ref()
                     .is_some_and(|latest| latest.target.same_session(&request.target));
-                let mut retained = std::collections::HashMap::new();
-                for row in views.rows.values().filter(|_| current_target) {
-                    let TranscriptRow::Tool(tool) = row else {
-                        continue;
-                    };
-                    if tool.state == "running" {
-                        continue;
-                    }
-                    if shown.get(&tool.call_id) != Some(tool) {
-                        (request.target.emit_settled)(row.clone());
-                    }
-                    retained.insert(tool.call_id.clone(), tool.clone());
-                }
                 if current_target {
-                    shown = retained;
+                    emit_settled_changes(
+                        &views,
+                        changed,
+                        &mut shown,
+                        &*request.target.emit_settled,
+                    );
                 }
                 cached = Some(views);
                 None
@@ -267,8 +274,319 @@ async fn run(
             generation: request.generation,
             error,
         });
+        if request.finish {
+            break;
+        }
     }
     if let Some(forwarder) = forwarder {
         forwarder.abort();
+    }
+    cached
+}
+
+#[derive(Default)]
+struct SettledRows {
+    keys: std::collections::HashMap<RowKey, String>,
+    calls: std::collections::HashMap<String, ToolItem>,
+}
+
+fn emit_settled_changes(
+    views: &SessionViews,
+    changed: Option<std::collections::BTreeSet<RowKey>>,
+    shown: &mut SettledRows,
+    emit: &dyn Fn(TranscriptRow),
+) {
+    let changed = changed.unwrap_or_else(|| {
+        views
+            .rows
+            .keys()
+            .chain(shown.keys.keys())
+            .copied()
+            .collect()
+    });
+    let mut removed: std::collections::HashSet<_> = changed
+        .iter()
+        .filter_map(|key| shown.keys.remove(key))
+        .collect();
+    // A retention rebuild can move a call to another row key. Compare call
+    // identities before retiring deleted keys, as the full-row scan did.
+    for key in changed {
+        let Some(tool) = views
+            .rows
+            .get(&key)
+            .and_then(TranscriptRow::as_tool)
+            .filter(|tool| tool.state != "running")
+        else {
+            continue;
+        };
+        if shown.calls.get(&tool.call_id) != Some(tool) {
+            emit(TranscriptRow::Tool(tool.clone()));
+            shown.calls.insert(tool.call_id.clone(), tool.clone());
+        }
+        removed.remove(&tool.call_id);
+        shown.keys.insert(key, tool.call_id.clone());
+    }
+    for call in removed {
+        shown.calls.remove(&call);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "unit tests")]
+mod tests {
+    use super::*;
+    use crate::runtime::fault_store::{FaultStore, StoreCall, StoreFaults};
+    use crate::session_store::MemoryStore;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct RefuseCommit(Arc<AtomicBool>);
+
+    impl StoreFaults for RefuseCommit {
+        fn before(
+            &self,
+            call: StoreCall,
+            _: Option<&crate::sessions::SessionRecord>,
+        ) -> Result<(), String> {
+            if call == StoreCall::CommitProjectionViews && self.0.load(Ordering::SeqCst) {
+                return Err("injected projection commit failure".into());
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_failed_live_page_drops_its_views_and_the_next_pass_reloads() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut config, _) =
+            crate::runtime::test_support::fresh_injected_attached_host(root.path());
+        let store = Arc::new(MemoryStore::new());
+        config.store = store.clone();
+        let id = config.session.id.clone();
+        super::super::tests::run_prompts(config, &["recorded turn"]);
+        let record = store.load(&id).unwrap();
+        let (config, _) = crate::runtime::test_support::fresh_injected_attached_host(root.path());
+        let refuse = Arc::new(AtomicBool::new(true));
+        let target = LiveTarget {
+            sessions: config.state_roots.runtime_sessions().unwrap(),
+            store: Arc::new(FaultStore::new(
+                store.clone(),
+                RefuseCommit(Arc::clone(&refuse)),
+            )),
+            roots: config.state_roots,
+            product_id: id.clone(),
+            followed: record.plakous_locator.unwrap(),
+            tree_id: id,
+            emit_settled: Arc::new(|_| {}),
+        };
+        let executor = plakous::application::ApplicationExecutor::new().unwrap();
+        let records: Arc<dyn SessionRecordStore> = store.clone();
+        let expected = executor
+            .block_on(super::super::project_to_tail(
+                &target.sessions,
+                &records,
+                &target.product_id,
+                target.followed,
+            ))
+            .unwrap()
+            .unwrap();
+        store.delete_views(&target.product_id);
+        executor
+            .block_on(async {
+                let mut live = LiveProjector::spawn();
+                let reads = store.view_read_count();
+                live.tick(target.clone());
+                live.applied
+                    .wait_for(|applied| applied.generation == 1)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    live.take_refusal().as_deref(),
+                    Some("injected projection commit failure")
+                );
+                assert_eq!(store.view_read_count(), reads + 1);
+                refuse.store(false, Ordering::SeqCst);
+                let actual = live.finish(target.clone(), None).await.unwrap();
+                assert_eq!(
+                    store.view_read_count(),
+                    reads + 2,
+                    "the failed page cannot retain mutated views"
+                );
+                assert_eq!(actual, expected);
+                let mut live = LiveProjector::spawn();
+                live.tick(target.clone());
+                live.applied
+                    .wait_for(|applied| applied.generation == 1)
+                    .await
+                    .unwrap();
+                let reads = store.view_read_count();
+                let records = store.record_read_count();
+                assert_eq!(live.finish(target, None).await.unwrap(), expected);
+                assert_eq!(
+                    store.view_read_count(),
+                    reads,
+                    "finish reuses the live views"
+                );
+                assert_eq!(
+                    store.record_read_count(),
+                    records,
+                    "finish needs no full record"
+                );
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn a_facade_read_failure_on_page_two_reloads_the_last_committed_page() {
+        use crate::sessions::projector::{ProductIntents, read_fault, run};
+        use plakous::sessions::feed::{FeedCursor, FeedPage, FeedPageRequest};
+        let root = tempfile::tempdir().unwrap();
+        let (mut config, _) =
+            crate::runtime::test_support::fresh_injected_attached_host(root.path());
+        let store = Arc::new(MemoryStore::new());
+        config.store = store.clone();
+        let id = config.session.id.clone();
+        super::super::tests::run_prompts(config, &["recorded turn"; 80]);
+        let followed = store.load(&id).unwrap().plakous_locator.unwrap();
+        let (config, _) = crate::runtime::test_support::fresh_injected_attached_host(root.path());
+        let sessions = config.state_roots.runtime_sessions().unwrap();
+        let records = super::super::tests::feed_records(&sessions, followed.session_id());
+        let executor = plakous::application::ApplicationExecutor::new().unwrap();
+        executor
+            .block_on(async {
+                let FeedPage::Records { records: first, .. } = sessions
+                    .feed_page(FeedPageRequest::after(FeedCursor::start(
+                        followed.session_id(),
+                    )))
+                    .await
+                    .unwrap()
+                else {
+                    panic!("retained feed required")
+                };
+                assert!(records.len() > first.len(), "fixture must span pages");
+                let mut intents: ProductIntents = store.load_intents(&id).unwrap();
+                intents
+                    .submissions
+                    .extend(store.load_inherited_submissions(&id).unwrap());
+                let prefix = run(&sessions, SessionViews::empty(), &intents, &first)
+                    .await
+                    .unwrap()
+                    .views;
+                let expected = run(&sessions, SessionViews::empty(), &intents, &records)
+                    .await
+                    .unwrap()
+                    .views;
+                store.delete_views(&id);
+                read_fault::arm(followed.session_id(), prefix.cursor);
+                let target = LiveTarget {
+                    sessions,
+                    store: store.clone(),
+                    roots: config.state_roots,
+                    product_id: id.clone(),
+                    followed,
+                    tree_id: id.clone(),
+                    emit_settled: Arc::new(|_| {}),
+                };
+                let reads = store.view_read_count();
+                let mut live = LiveProjector::spawn();
+                live.tick(target.clone());
+                live.applied
+                    .wait_for(|applied| applied.generation == 1)
+                    .await
+                    .unwrap();
+                assert!(
+                    live.take_refusal()
+                        .unwrap()
+                        .starts_with("projector read failed:")
+                );
+                assert_eq!(store.view_read_count(), reads + 1);
+                assert_eq!(store.load_views(&id).unwrap(), Some(prefix));
+                let reads = store.view_read_count();
+                assert_eq!(live.finish(target, None).await.unwrap(), expected);
+                assert_eq!(
+                    store.view_read_count(),
+                    reads + 1,
+                    "read error must discard live cached views"
+                );
+                assert_eq!(store.load_views(&id).unwrap(), Some(expected));
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn changed_keys_emit_the_same_settled_rows_as_a_full_scan() {
+        use crate::sessions::projector::{Lane, ViewWrites};
+        use std::cell::RefCell;
+        let tool = |call: &str, state: &str| {
+            TranscriptRow::Tool(ToolItem {
+                call_id: call.into(),
+                name: "bash".into(),
+                exposed_name: None,
+                kind: crate::activity::tool_activity_kind("bash"),
+                state: state.into(),
+                subject: None,
+                detail: None,
+                started_at_ms: None,
+                finished_at_ms: None,
+                parent_call_id: None,
+                cell_id: None,
+                wait: None,
+            })
+        };
+        let a = RowKey::new(1, Lane::Runtime, 0);
+        let b = RowKey::new(2, Lane::Runtime, 0);
+        let c = RowKey::new(3, Lane::Runtime, 0);
+        let mut views = SessionViews::empty();
+        let mut shown = SettledRows::default();
+        let mut scanned = std::collections::HashMap::new();
+        for changes in [
+            vec![(a, Some(tool("a", "running")))],
+            vec![(b, Some(tool("b", "succeeded")))],
+            vec![(a, Some(tool("a", "succeeded")))],
+            vec![(a, None), (c, Some(tool("a", "succeeded")))],
+            vec![(b, Some(tool("b", "failed")))],
+            vec![(c, None)],
+            vec![(b, Some(tool("b", "running")))],
+            vec![(b, Some(tool("b", "succeeded")))],
+        ] {
+            let before = views.clone();
+            for (key, row) in changes {
+                if let Some(row) = row {
+                    views.rows.insert(key, row);
+                } else {
+                    views.rows.remove(&key);
+                }
+            }
+            let writes = ViewWrites::between(&before, &views);
+            let changed = writes
+                .upserts
+                .iter()
+                .map(|(key, _)| *key)
+                .chain(writes.deletes)
+                .collect();
+            let mut retained = std::collections::HashMap::new();
+            let mut expected = Vec::new();
+            for row in views.rows.values() {
+                if let Some(tool) = row.as_tool().filter(|tool| tool.state != "running") {
+                    if scanned.get(&tool.call_id) != Some(tool) {
+                        expected.push(row.clone());
+                    }
+                    retained.insert(tool.call_id.clone(), tool.clone());
+                }
+            }
+            scanned = retained;
+            let emitted = RefCell::new(Vec::new());
+            emit_settled_changes(&views, Some(changed), &mut shown, &|row| {
+                emitted.borrow_mut().push(row);
+            });
+            assert_eq!(*emitted.borrow(), expected);
+            emitted.borrow_mut().clear();
+            emit_settled_changes(&views, None, &mut shown, &|row| {
+                emitted.borrow_mut().push(row);
+            });
+            assert!(
+                emitted.borrow().is_empty(),
+                "reloading cannot duplicate settled rows"
+            );
+        }
     }
 }

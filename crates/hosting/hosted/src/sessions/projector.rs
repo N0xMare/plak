@@ -12,6 +12,9 @@ mod reads;
 mod views;
 
 #[cfg(test)]
+pub(crate) mod read_fault;
+
+#[cfg(test)]
 mod tests;
 
 pub use intents::{
@@ -86,10 +89,11 @@ impl std::error::Error for RunError {
 ///
 /// # Errors
 ///
-/// Returns a refused read or an unappliable page; nothing is applied.
+/// Returns a refused read or an unappliable page. The owned views are dropped
+/// and the caller reloads the last committed views.
 pub async fn run(
     sessions: &AgentSessions,
-    views: &SessionViews,
+    views: SessionViews,
     intents: &ProductIntents,
     records: &[FeedRecord],
 ) -> Result<Projection, RunError> {
@@ -111,14 +115,13 @@ pub async fn run(
                 from_seq: 0,
             });
         }
-        load_reads(
-            sessions,
-            record.header().session_id,
-            plan_reads(record),
-            &mut cache,
-        )
-        .await
-        .map_err(RunError::Read)?;
+        let requests = plan_reads(record);
+        let session = record.header().session_id;
+        #[cfg(test)]
+        let session = read_fault::session_for_read(session, views.cursor, !requests.is_empty());
+        load_reads(sessions, session, requests, &mut cache)
+            .await
+            .map_err(RunError::Read)?;
     }
     project(views, intents, records, &cache).map_err(RunError::Project)
 }

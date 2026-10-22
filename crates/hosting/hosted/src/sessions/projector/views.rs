@@ -287,6 +287,49 @@ pub struct SessionViewState {
 }
 
 impl SessionViewState {
+    /// Settles historical intents without inventing feed facts.
+    pub fn consume_before_retention(&mut self, intents: &ProductIntents) {
+        for submission in &intents.submissions {
+            if intents.submission_consumed(&submission.command_id, self.retained_from) {
+                self.deliveries
+                    .entry(submission.command_id.clone())
+                    .or_insert(Delivery::Consumed);
+            }
+        }
+        for request in &intents.workflow_requests {
+            if intents.workflow_consumed(&request.operation_id, self.retained_from) {
+                self.workflows
+                    .entry(request.operation_id.clone())
+                    .or_insert(WorkflowCompletion {
+                        admitted_at: None,
+                        settled: Some(WorkflowSettlement::Consumed),
+                    });
+            }
+        }
+    }
+
+    /// Updates a binding only from its own branch's projected head.
+    #[must_use]
+    pub fn projected_locator(
+        &self,
+        recorded: Option<plakous::sessions::SessionLocator>,
+    ) -> Option<plakous::sessions::SessionLocator> {
+        let head = self.head.map(|head| {
+            plakous::sessions::SessionLocator::new(
+                head.session_id,
+                head.branch_id,
+                head.checkpoint_id,
+            )
+        });
+        head.filter(|head| {
+            recorded.is_none_or(|recorded| {
+                head.session_id() == recorded.session_id()
+                    && head.branch_id() == recorded.branch_id()
+            })
+        })
+        .or(recorded)
+    }
+
     pub(super) fn applies_own(&self, header: &plakous::sessions::feed::FeedHeader) -> bool {
         self.branch_at(header.seq.get()) == Some(header.branch_id)
             || (self.lineage.is_empty()
@@ -333,44 +376,13 @@ impl SessionViews {
         &self,
         recorded: Option<plakous::sessions::SessionLocator>,
     ) -> Option<plakous::sessions::SessionLocator> {
-        let head = self.state.head.map(|head| {
-            plakous::sessions::SessionLocator::new(
-                head.session_id,
-                head.branch_id,
-                head.checkpoint_id,
-            )
-        });
-        head.filter(|head| {
-            recorded.is_none_or(|recorded| {
-                head.session_id() == recorded.session_id()
-                    && head.branch_id() == recorded.branch_id()
-            })
-        })
-        .or(recorded)
+        self.state.projected_locator(recorded)
     }
 
     /// Settles intents older than the retained window without inventing facts
     /// or withdrawing a historical clear's successor reservation.
     pub fn consume_before_retention(&mut self, intents: &ProductIntents) {
-        for submission in &intents.submissions {
-            if intents.submission_consumed(&submission.command_id, self.state.retained_from) {
-                self.state
-                    .deliveries
-                    .entry(submission.command_id.clone())
-                    .or_insert(Delivery::Consumed);
-            }
-        }
-        for request in &intents.workflow_requests {
-            if intents.workflow_consumed(&request.operation_id, self.state.retained_from) {
-                self.state
-                    .workflows
-                    .entry(request.operation_id.clone())
-                    .or_insert(WorkflowCompletion {
-                        admitted_at: None,
-                        settled: Some(WorkflowSettlement::Consumed),
-                    });
-            }
-        }
+        self.state.consume_before_retention(intents);
     }
 
     /// The views of a session nothing was applied to yet.

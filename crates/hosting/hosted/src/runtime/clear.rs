@@ -770,7 +770,7 @@ mod tests {
                 .commit_projection_views(
                     &config.session.id,
                     &sessions::projector::ViewWrites::between(&rebuilt, &stale),
-                    &stale,
+                    &stale.state,
                 )
                 .unwrap();
             assert_eq!(

@@ -1522,7 +1522,9 @@ before each action it takes from its loop), coalesces them, and always passes
 over the newest target. Its store reads and commits run on the blocking
 pool, so a slow commit never holds a runtime worker.
 The live task keeps its committed views between pages and passes, loading them
-once per followed session and again only after a moved-cursor retry. Ordinary
+once per followed session and again after a moved-cursor retry or a failed pass.
+Projection consumes and updates those views in place; a failed pass drops them,
+so uncommitted changes never become the next pass's starting point. Ordinary
 passes do not reload a session record or transcript to discover a clear join;
 only a clear target's creation identity or an unresolved clear request needs
 that join. Call bookkeeping is pruned when its owning turn ends, while the
@@ -1532,6 +1534,12 @@ and before release it
 requests a final pass; interactive terminal publication, quit and release
 bound that pass at 400 ms. Past the bound the host proceeds with projection
 debt, not a snapshot of stale rows.
+Terminal publication takes the final pass's views and counters directly from
+the live task and still emits the full presentation snapshot; it does not reload
+the session record or transcript for that snapshot.
+It normalizes and bounds those rows exactly as a stored transcript load does.
+A narrow read restores the stored queue intents and recorded locator before
+applying the cached views' consumption and branch-head guards.
 The one-shot face waits for it to complete and fails the command when it is
 refused (§4). An open's step 2 and an in-process recovery's reopen run their
 pass inline. A refused or unfinished pass is projection debt, recorded as a

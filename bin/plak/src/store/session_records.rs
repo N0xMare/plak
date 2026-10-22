@@ -96,6 +96,14 @@ impl SessionRecordStore for SqliteSessionStore {
         self.with_store(|store| store.load(id))
     }
 
+    fn load_queue_head(
+        &self,
+        id: &str,
+    ) -> Result<plakous_hosted::session_store::SessionQueueHead, String> {
+        crate::store::sessions::canonical_product_session_id(id)?;
+        self.with_store(|store| store.load_queue_head(id))
+    }
+
     fn save(&self, session: &mut SessionRecord) -> Result<(), String> {
         self.with_store(|store| store.commit(session))
     }
@@ -163,7 +171,7 @@ impl SessionRecordStore for SqliteSessionStore {
         &self,
         id: &str,
         writes: &ViewWrites,
-        views: &SessionViews,
+        views: &plakous_hosted::sessions::projector::SessionViewState,
     ) -> Result<ProjectionCommit, String> {
         self.with_store(|store| store.commit_projection_views(id, writes, views))
     }
@@ -200,6 +208,9 @@ mod contract {
         assert_eq!(session.store_revision, 0);
         store.save(&mut session).unwrap();
         assert_eq!(session.store_revision, 1);
+        let narrow = store.load_queue_head(&session.id).unwrap();
+        assert_eq!(narrow.pending_queue, session.pending_queue);
+        assert_eq!(narrow.recorded_locator, session.plakous_locator);
         let mut stale = session.clone();
         // A runtime row is shown, never persisted by a record commit; an
         // operator notice is persisted as an intent (spec 02 §2.6).
@@ -292,7 +303,7 @@ mod contract {
                 .commit_projection_views(
                     &session.id,
                     &ViewWrites::between(&empty, &partial),
-                    &partial,
+                    &partial.state,
                 )
                 .unwrap();
             assert_eq!(
@@ -381,7 +392,7 @@ mod contract {
             writes.successors = vec![successor.clone(), invalid];
             assert!(
                 store
-                    .commit_projection_views(&source.id, &writes, &source_views)
+                    .commit_projection_views(&source.id, &writes, &source_views.state)
                     .is_err()
             );
             assert!(store.load_views(&source.id).unwrap().is_none());
@@ -393,7 +404,7 @@ mod contract {
             writes.successors = vec![successor.clone()];
             assert_eq!(
                 store
-                    .commit_projection_views(&source.id, &writes, &source_views)
+                    .commit_projection_views(&source.id, &writes, &source_views.state)
                     .unwrap(),
                 ProjectionCommit::Applied
             );
@@ -412,7 +423,7 @@ mod contract {
             );
             assert_eq!(
                 store
-                    .commit_projection_views(&source.id, &writes, &source_views)
+                    .commit_projection_views(&source.id, &writes, &source_views.state)
                     .unwrap(),
                 ProjectionCommit::CursorMoved
             );
@@ -421,7 +432,7 @@ mod contract {
                 .commit_projection_views(
                     &target.id,
                     &ViewWrites::between(&SessionViews::empty(), &target_views),
-                    &target_views,
+                    &target_views.state,
                 )
                 .unwrap();
             let before = source_views.clone();
@@ -429,7 +440,7 @@ mod contract {
             let mut writes = ViewWrites::between(&before, &source_views);
             writes.successors.push(successor);
             store
-                .commit_projection_views(&source.id, &writes, &source_views)
+                .commit_projection_views(&source.id, &writes, &source_views.state)
                 .unwrap();
             assert_eq!(store.load_views(&target.id).unwrap().unwrap(), target_views);
             assert_eq!(store.load_intents(&target.id).unwrap().notices.len(), 1);
@@ -533,7 +544,7 @@ mod contract {
                         open_turns: Vec::new(),
                         processes: Vec::new(),
                     },
-                    &views,
+                    &views.state,
                 )
                 .unwrap();
             let mut stale = session.clone();
@@ -651,7 +662,7 @@ mod contract {
                         processes: Vec::new(),
                         successors: Vec::new(),
                     },
-                    &views,
+                    &views.state,
                 )
                 .unwrap();
             let mut stale = session.clone();
@@ -849,10 +860,10 @@ mod contract {
             let empty = SessionViews::empty();
             let writes = ViewWrites::between(&empty, &empty);
             store
-                .commit_projection_views(&session.id, &writes, &empty)
+                .commit_projection_views(&session.id, &writes, &empty.state)
                 .unwrap();
             store
-                .commit_projection_views(&request.successor_product_id(), &writes, &empty)
+                .commit_projection_views(&request.successor_product_id(), &writes, &empty.state)
                 .unwrap();
             let revision = session.store_revision;
             assert!(store.withdraw_unadmitted_workflows(&mut session).is_err());
@@ -904,7 +915,7 @@ mod contract {
         views.state.runtime_session_id = Some(locator().session_id());
         views.state.deliveries.insert(command.into(), delivery);
         store
-            .commit_projection_views(id, &ViewWrites::between(&before, &views), &views)
+            .commit_projection_views(id, &ViewWrites::between(&before, &views), &views.state)
             .unwrap();
     }
 
@@ -965,7 +976,7 @@ mod contract {
                 },
             );
             store
-                .commit_projection_views(&session.id, &writes, &views)
+                .commit_projection_views(&session.id, &writes, &views.state)
                 .unwrap();
             let loaded = store.load(&session.id).unwrap();
             assert_eq!(loaded.store_revision, revision);
@@ -978,7 +989,7 @@ mod contract {
                 .deliveries
                 .insert(submission.command_id.clone(), Delivery::Accepted);
             store
-                .commit_projection_views(&session.id, &writes, &views)
+                .commit_projection_views(&session.id, &writes, &views.state)
                 .unwrap();
             let loaded = store.load(&session.id).unwrap();
             assert_eq!(loaded.store_revision, revision);
@@ -986,6 +997,9 @@ mod contract {
                 loaded.pending_queue,
                 [] as [plakous_hosted::sessions::QueueItem; 0]
             );
+            let narrow = store.load_queue_head(&session.id).unwrap();
+            assert_eq!(narrow.pending_queue, vec![item]);
+            assert_eq!(narrow.recorded_locator, session.plakous_locator);
             assert_eq!(
                 store.load_intents(&session.id).unwrap().submissions,
                 vec![submission]
@@ -1220,7 +1234,7 @@ mod contract {
                 .commit_projection_views(
                     &session.id,
                     &ViewWrites::between(&views, &resumed),
-                    &resumed,
+                    &resumed.state,
                 )
                 .unwrap();
             let loaded = store.load(&session.id).unwrap();
@@ -1314,7 +1328,7 @@ mod contract {
                     .commit_projection_views(
                         &session.id,
                         &ViewWrites::between(&before, &empty),
-                        &empty,
+                        &empty.state,
                     )
                     .unwrap();
                 assert!(store.save_submission(&mut session, &invalid).is_err());

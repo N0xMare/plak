@@ -488,7 +488,7 @@ impl ProductStore {
         &mut self,
         session_id: &str,
         writes: &ViewWrites,
-        views: &SessionViews,
+        views: &SessionViewState,
     ) -> Result<ProjectionCommit, String> {
         self.durability(false)?;
         let tx = match self
@@ -504,9 +504,8 @@ impl ProductStore {
         let intents = intents_of(&tx, session_id)?;
         for request in &intents.workflow_requests {
             if request.kind != plakous_hosted::sessions::SessionWorkflowKind::Clear
-                || intents.workflow_consumed(&request.operation_id, views.state.retained_from)
+                || intents.workflow_consumed(&request.operation_id, views.retained_from)
                 || views
-                    .state
                     .workflows
                     .get(&request.operation_id)
                     .is_some_and(|workflow| workflow.settled.is_some())
@@ -519,10 +518,9 @@ impl ProductStore {
                 if let Some(completion) = plakous_hosted::sessions::projector::clear_completion(
                     request,
                     &target,
-                    &target_views,
+                    &target_views.state,
                 ) {
                     joined
-                        .state
                         .workflows
                         .insert(request.operation_id.clone(), completion);
                 }
@@ -534,7 +532,6 @@ impl ProductStore {
             return Ok(ProjectionCommit::CursorMoved);
         }
         if views
-            .state
             .created_operation_id
             .as_deref()
             .is_some_and(|operation| operation.ends_with(":create"))
@@ -556,7 +553,7 @@ impl ProductStore {
                         .insert(operation.to_owned(), completion);
                     source_views.consume_before_retention(&intents);
                     let writes = ViewWrites::between(&previous, &source_views);
-                    commit_views(&tx, source_id, &writes, &source_views)?;
+                    commit_views(&tx, source_id, &writes, &source_views.state)?;
                 }
             }
         }
@@ -619,7 +616,7 @@ impl ProductStore {
                 {
                     let writes = ViewWrites::between(&SessionViews::empty(), seed);
                     // A pre-existing target cursor wins; never rewind it.
-                    let _ = commit_views(&tx, &target.id, &writes, seed)?;
+                    let _ = commit_views(&tx, &target.id, &writes, &seed.state)?;
                 }
             }
         }
@@ -659,10 +656,9 @@ fn commit_views(
     tx: &Connection,
     session_id: &str,
     writes: &ViewWrites,
-    views: &SessionViews,
+    views: &SessionViewState,
 ) -> Result<ProjectionCommit, String> {
     let runtime_session = views
-        .state
         .runtime_session_id
         .map(|session| session.to_string())
         .unwrap_or_default();
@@ -683,9 +679,9 @@ fn commit_views(
     if moved != 1 {
         return Ok(ProjectionCommit::CursorMoved);
     }
-    let state = serde_json::to_string(&views.state)
+    let state = serde_json::to_string(&views)
         .map_err(|_| "product session views are not encodable".to_owned())?;
-    let counters = views.state.counters;
+    let counters = views.counters;
     let recorded: Option<String> = tx
         .query_row(
             "SELECT locator FROM sessions WHERE id=?1",
@@ -1385,7 +1381,7 @@ mod tests {
             .commit_projection_views(
                 &id,
                 &ViewWrites::between(&SessionViews::empty(), &views),
-                &views,
+                &views.state,
             )
             .unwrap();
         // Valid SQLite rows with invalid presentation/workflow encodings would
@@ -1425,17 +1421,23 @@ mod tests {
         let views = views_at(1, &[(1, TranscriptRow::user("once"))]);
         let writes = ViewWrites::between(&SessionViews::empty(), &views);
         assert_eq!(
-            store.commit_projection_views(&id, &writes, &views).unwrap(),
+            store
+                .commit_projection_views(&id, &writes, &views.state)
+                .unwrap(),
             ProjectionCommit::CursorMoved
         );
         assert!(store.load_views(&id).unwrap().is_none());
         tx.rollback().unwrap();
         assert_eq!(
-            other.commit_projection_views(&id, &writes, &views).unwrap(),
+            other
+                .commit_projection_views(&id, &writes, &views.state)
+                .unwrap(),
             ProjectionCommit::Applied
         );
         assert_eq!(
-            store.commit_projection_views(&id, &writes, &views).unwrap(),
+            store
+                .commit_projection_views(&id, &writes, &views.state)
+                .unwrap(),
             ProjectionCommit::CursorMoved
         );
         assert_eq!(store.load_views(&id).unwrap(), Some(views));
@@ -1477,7 +1479,7 @@ mod tests {
             .commit_projection_views(
                 &request.successor_product_id(),
                 &ViewWrites::between(&SessionViews::empty(), &target),
-                &target,
+                &target.state,
             )
             .unwrap();
         for deleted in [false, true] {
@@ -1491,7 +1493,11 @@ mod tests {
             let mut retained = views_at(10, &[(10, TranscriptRow::user("head history"))]);
             retained.state.retained_from = Some(9);
             store
-                .commit_projection_views(&id, &ViewWrites::between(&previous, &retained), &retained)
+                .commit_projection_views(
+                    &id,
+                    &ViewWrites::between(&previous, &retained),
+                    &retained.state,
+                )
                 .unwrap();
             let views = store.load_views(&id).unwrap().unwrap();
             store.write_submission(&id, &submission).unwrap();
@@ -1643,7 +1649,7 @@ mod tests {
         let target = store.load(&request.successor_product_id()).unwrap();
         let empty = SessionViews::empty();
         store
-            .commit_projection_views(&id, &ViewWrites::between(&empty, &empty), &empty)
+            .commit_projection_views(&id, &ViewWrites::between(&empty, &empty), &empty.state)
             .unwrap();
         store.connection.execute_batch("CREATE TEMP TRIGGER refuse_clear_notice BEFORE INSERT ON operator_notices BEGIN SELECT RAISE(ABORT, 'cut'); END;").unwrap();
         let revision = source.store_revision;
@@ -1708,7 +1714,7 @@ mod tests {
         )).unwrap();
         assert!(
             store
-                .commit_projection_views(&target.id, &writes, &views)
+                .commit_projection_views(&target.id, &writes, &views.state)
                 .is_err()
         );
         assert!(store.load_views(&target.id).unwrap().is_none());
@@ -1718,7 +1724,7 @@ mod tests {
             .execute_batch("DROP TRIGGER refuse_clear_join")
             .unwrap();
         store
-            .commit_projection_views(&target.id, &writes, &views)
+            .commit_projection_views(&target.id, &writes, &views.state)
             .unwrap();
         let source_views = store.load_views(&id).unwrap().unwrap();
         assert!(
@@ -1728,12 +1734,20 @@ mod tests {
         );
         let stale = SessionViews::empty();
         store
-            .commit_projection_views(&id, &ViewWrites::between(&source_views, &stale), &stale)
+            .commit_projection_views(
+                &id,
+                &ViewWrites::between(&source_views, &stale),
+                &stale.state,
+            )
             .unwrap();
         assert_eq!(store.load_views(&id).unwrap().unwrap(), source_views);
         store.delete_views(&id).unwrap();
         store
-            .commit_projection_views(&target.id, &ViewWrites::between(&views, &views), &views)
+            .commit_projection_views(
+                &target.id,
+                &ViewWrites::between(&views, &views),
+                &views.state,
+            )
             .unwrap();
         assert_eq!(store.load_views(&id).unwrap().unwrap(), source_views);
         assert_eq!(
@@ -1800,7 +1814,7 @@ mod tests {
         )).unwrap();
         assert!(
             store
-                .commit_projection_views(&id, &writes, &source_views)
+                .commit_projection_views(&id, &writes, &source_views.state)
                 .is_err()
         );
         assert!(store.load_views(&id).unwrap().is_none());
@@ -1814,7 +1828,7 @@ mod tests {
         )).unwrap();
         assert!(
             store
-                .commit_projection_views(&id, &writes, &source_views)
+                .commit_projection_views(&id, &writes, &source_views.state)
                 .is_err()
         );
         assert!(store.load_views(&id).unwrap().is_none());
@@ -1825,13 +1839,13 @@ mod tests {
             .unwrap();
         assert_eq!(
             store
-                .commit_projection_views(&id, &writes, &source_views)
+                .commit_projection_views(&id, &writes, &source_views.state)
                 .unwrap(),
             ProjectionCommit::Applied
         );
         assert_eq!(
             store
-                .commit_projection_views(&id, &writes, &source_views)
+                .commit_projection_views(&id, &writes, &source_views.state)
                 .unwrap(),
             ProjectionCommit::CursorMoved
         );
@@ -1852,7 +1866,7 @@ mod tests {
         store.delete_views(&id).unwrap();
         assert_eq!(
             store
-                .commit_projection_views(&id, &writes, &source_views)
+                .commit_projection_views(&id, &writes, &source_views.state)
                 .unwrap(),
             ProjectionCommit::Applied
         );
@@ -1913,7 +1927,7 @@ mod tests {
         });
         assert_eq!(
             store
-                .commit_projection_views(&id, &writes, &source_views)
+                .commit_projection_views(&id, &writes, &source_views.state)
                 .unwrap(),
             ProjectionCommit::Applied
         );
@@ -1952,7 +1966,11 @@ mod tests {
             );
         }
         store
-            .commit_projection_views(&session, &writes(&SessionViews::empty(), &views), &views)
+            .commit_projection_views(
+                &session,
+                &writes(&SessionViews::empty(), &views),
+                &views.state,
+            )
             .unwrap();
         let start = std::time::Instant::now();
         let mut state_bytes = 0;
@@ -1962,7 +1980,7 @@ mod tests {
             views.cursor = FeedSeq::new(views.cursor.get() + 1);
             views.state.calls.get_mut("call-1999").unwrap().settled ^= true;
             store
-                .commit_projection_views(&session, &writes(&from, &views), &views)
+                .commit_projection_views(&session, &writes(&from, &views), &views.state)
                 .unwrap();
             state_bytes = store
                 .connection
@@ -2029,7 +2047,7 @@ mod tests {
         let empty = SessionViews::empty();
         let first = with_bookkeeping(views_at(1, &[]));
         store
-            .commit_projection_views(&session, &writes(&empty, &first), &first)
+            .commit_projection_views(&session, &writes(&empty, &first), &first.state)
             .unwrap();
         assert_eq!(store.load_views(&session).unwrap(), Some(first.clone()));
         let mut second = first.clone();
@@ -2047,13 +2065,13 @@ mod tests {
         second.state.processes.get_mut(&1).unwrap().reported = true;
         let before = store.connection.total_changes();
         store
-            .commit_projection_views(&session, &writes(&first, &second), &second)
+            .commit_projection_views(&session, &writes(&first, &second), &second.state)
             .unwrap();
         assert_eq!(store.connection.total_changes() - before, 8);
         let before = store.connection.total_changes();
         assert_eq!(
             store
-                .commit_projection_views(&session, &writes(&first, &second), &second)
+                .commit_projection_views(&session, &writes(&first, &second), &second.state)
                 .unwrap(),
             ProjectionCommit::CursorMoved
         );
@@ -2080,7 +2098,7 @@ mod tests {
             );
         }
         store
-            .commit_projection_views(&session, &writes(&empty, &second), &second)
+            .commit_projection_views(&session, &writes(&empty, &second), &second.state)
             .unwrap();
         assert_eq!(store.load_views(&session).unwrap(), Some(second));
     }
@@ -2092,7 +2110,7 @@ mod tests {
         let empty = SessionViews::empty();
         let first = with_bookkeeping(views_at(1, &[]));
         store
-            .commit_projection_views(&session, &writes(&empty, &first), &first)
+            .commit_projection_views(&session, &writes(&empty, &first), &first.state)
             .unwrap();
         store.connection.execute_batch("CREATE TEMP TRIGGER fail_process_update BEFORE UPDATE ON session_process_views BEGIN SELECT RAISE(ABORT,'fixture'); END").unwrap();
         let mut second = first.clone();
@@ -2101,7 +2119,7 @@ mod tests {
         second.state.processes.get_mut(&1).unwrap().reported = true;
         assert!(
             store
-                .commit_projection_views(&session, &writes(&first, &second), &second)
+                .commit_projection_views(&session, &writes(&first, &second), &second.state)
                 .is_err()
         );
         assert_eq!(store.load_views(&session).unwrap(), Some(first));
@@ -2117,7 +2135,7 @@ mod tests {
         let writes = writes(&SessionViews::empty(), &views);
         for session in [&first, &second.id] {
             store
-                .commit_projection_views(session, &writes, &views)
+                .commit_projection_views(session, &writes, &views.state)
                 .unwrap();
         }
         // Schema 31 rejects the obsolete JSON shape even through raw SQL.
@@ -2228,7 +2246,7 @@ mod tests {
             .commit_projection_views(
                 &session,
                 &ViewWrites::between(&SessionViews::empty(), &views_at(0, &[])),
-                &views_at(0, &[]),
+                &views_at(0, &[]).state,
             )
             .unwrap();
         let notices = store.withdraw_unadmitted_workflows(&mut record).unwrap();
@@ -2263,7 +2281,11 @@ mod tests {
         assert_eq!(counters(&store.load(&session.id).unwrap()), (0, 0, 0));
         let views = views_at(2, &[(1, TranscriptRow::user("hello"))]);
         store
-            .commit_projection_views(&session.id, &writes(&SessionViews::empty(), &views), &views)
+            .commit_projection_views(
+                &session.id,
+                &writes(&SessionViews::empty(), &views),
+                &views.state,
+            )
             .unwrap();
         assert_eq!(counters(&store.load(&session.id).unwrap()), (2, 1, 0));
         let listed = store.list_for_workspace(Path::new("/work")).unwrap();
@@ -2285,7 +2307,7 @@ mod tests {
         );
         assert_eq!(
             store
-                .commit_projection_views(&session, &writes(&empty, &first), &first)
+                .commit_projection_views(&session, &writes(&empty, &first), &first.state)
                 .unwrap(),
             ProjectionCommit::Applied
         );
@@ -2294,7 +2316,7 @@ mod tests {
         let other = views_at(1, &[(1, TranscriptRow::user("stale"))]);
         assert_eq!(
             store
-                .commit_projection_views(&session, &writes(&empty, &other), &other)
+                .commit_projection_views(&session, &writes(&empty, &other), &other.state)
                 .unwrap(),
             ProjectionCommit::CursorMoved
         );
@@ -2305,7 +2327,7 @@ mod tests {
         );
         assert_eq!(
             store
-                .commit_projection_views(&session, &writes(&first, &second), &second)
+                .commit_projection_views(&session, &writes(&first, &second), &second.state)
                 .unwrap(),
             ProjectionCommit::Applied
         );
@@ -2315,7 +2337,7 @@ mod tests {
         store.delete_views(&session).unwrap();
         assert_eq!(store.load_views(&session).unwrap(), None);
         store
-            .commit_projection_views(&session, &writes(&empty, &second), &second)
+            .commit_projection_views(&session, &writes(&empty, &second), &second.state)
             .unwrap();
         assert_eq!(store.load_views(&session).unwrap(), Some(second));
     }

@@ -41,10 +41,14 @@ pub(super) fn assert_idempotent(fixture: &Fixture, id: &str, shape: &str) {
                 else {
                     panic!("fixture feed was pruned")
                 };
-                let replayed =
-                    plakous_hosted::sessions::projector::run(&sessions, &views, &intents, &records)
-                        .await
-                        .unwrap();
+                let replayed = plakous_hosted::sessions::projector::run(
+                    &sessions,
+                    views.clone(),
+                    &intents,
+                    &records,
+                )
+                .await
+                .unwrap();
                 assert_eq!(
                     replayed.views, views,
                     "{shape}: replay changed complete views"

@@ -18,6 +18,21 @@ use proptest::prelude::*;
 use super::*;
 use crate::sessions::{NoticeScope, ProductCompactReason, SessionWorkflowKind, TranscriptRow};
 
+#[cfg(test)]
+mod perf_commit;
+
+fn project(
+    views: SessionViews,
+    intents: &ProductIntents,
+    records: &[FeedRecord],
+    reads: &dyn ProjectorReads,
+) -> Result<Projection, ProjectError> {
+    let expected = project::project_cloned(&views, intents, records, reads);
+    let actual = super::project(views, intents, records, reads);
+    assert_eq!(actual, expected);
+    actual
+}
+
 fn uuid(n: u64) -> String {
     format!("00000000-0000-4000-8000-{n:012x}")
 }
@@ -739,7 +754,7 @@ fn step() -> impl Strategy<Value = Step> {
 
 fn project_all(feed: &Feed) -> Projection {
     project(
-        &SessionViews::empty(),
+        SessionViews::empty(),
         &feed.intents,
         &feed.records,
         &feed.reads,
@@ -775,7 +790,13 @@ fn terminal_usage_is_fact_derived_and_identical_on_rebuild_not_replay() {
     assert_eq!(live.terminal_usages[0].turn_id, id(91));
     assert_eq!(live.terminal_usages[0].committed_at_ms, 2_000);
     assert_eq!(project_all(&feed).terminal_usages, live.terminal_usages);
-    let replay = project(&live.views, &feed.intents, &feed.records, &feed.reads).unwrap();
+    let replay = project(
+        live.views.clone(),
+        &feed.intents,
+        &feed.records,
+        &feed.reads,
+    )
+    .unwrap();
     assert_eq!(replay.terminal_usages, [] as [ProjectedTurnUsage; 0]);
 }
 
@@ -798,8 +819,13 @@ fn project_paged(
         let size = sizes.next().unwrap_or(1).max(1);
         let end = (start + size).min(feed.records.len());
         let from = start.saturating_sub(replay);
-        let projection =
-            project(&views, &feed.intents, &feed.records[from..end], &feed.reads).unwrap();
+        let projection = project(
+            views.clone(),
+            &feed.intents,
+            &feed.records[from..end],
+            &feed.reads,
+        )
+        .unwrap();
         assert_eq!(projection.writes.expected_cursor, views.cursor);
         for key in &projection.writes.deletes {
             stored.remove(key);
@@ -853,7 +879,7 @@ proptest! {
     fn a_replayed_feed_changes_nothing(steps in prop::collection::vec(step(), 1..7)) {
         let feed = feed_of(&steps);
         let all = project_all(&feed);
-        let again = project(&all.views, &feed.intents, &feed.records, &feed.reads).unwrap();
+        let again = project(all.views.clone(), &feed.intents, &feed.records, &feed.reads).unwrap();
         prop_assert_eq!(&again.views, &all.views);
         prop_assert!(again.writes.is_empty());
         prop_assert!(again.writes.successors.is_empty());
@@ -863,7 +889,7 @@ proptest! {
     fn deleting_the_views_and_rebuilding_is_identical(steps in prop::collection::vec(step(), 1..7)) {
         let feed = feed_of(&steps);
         let first = project_all(&feed);
-        let rebuilt = project(&SessionViews::empty(), &feed.intents, &feed.records, &feed.reads).unwrap();
+        let rebuilt = project(SessionViews::empty(), &feed.intents, &feed.records, &feed.reads).unwrap();
         prop_assert_eq!(&rebuilt.views, &first.views);
         prop_assert_eq!(
             rebuilt.views.transcript(&feed.intents),
@@ -960,7 +986,7 @@ proptest! {
             apply_step(&mut feed, step);
         }
         let mut source_prefix = project(
-            &source_initial, &feed.intents,
+            source_initial.clone(), &feed.intents,
             &feed.records.iter().filter(|record| record.header().seq.get() < branched_at).cloned().collect::<Vec<_>>(),
             &feed.reads,
         ).unwrap().views;
@@ -976,7 +1002,7 @@ proptest! {
                 }),
             });
         }
-        let source_run = project(&source_prefix, &feed.intents, &feed.records, &feed.reads).unwrap();
+        let source_run = project(source_prefix.clone(), &feed.intents, &feed.records, &feed.reads).unwrap();
         prop_assert_eq!(source_run.writes.successors.len(), 1);
         let successor = &source_run.writes.successors[0];
         prop_assert_eq!(successor.operation_id.as_deref(), Some(operation_id.as_str()));
@@ -997,7 +1023,7 @@ proptest! {
             ..ProductIntents::default()
         };
         let prefix = project(
-            &initial,
+            initial.clone(),
             &target_intents,
             &feed.records.iter().filter(|record| record.header().seq.get() <= branched_at).cloned().collect::<Vec<_>>(),
             &feed.reads,
@@ -1011,7 +1037,7 @@ proptest! {
             prop_assert_eq!(seed, &prefix);
         }
         let continued = project(
-            &prefix,
+            prefix.clone(),
             &target_intents,
             &feed.records,
             &feed.reads,
@@ -1019,7 +1045,7 @@ proptest! {
         .unwrap()
         .views;
         let rebuilt = project(
-            &initial,
+            initial.clone(),
             &target_intents,
             &feed.records,
             &feed.reads,
@@ -1290,7 +1316,7 @@ fn a_bound_dropped_call_is_a_settled_tombstone_and_a_late_result_stays_above_the
         .sum();
     feed.advance(Vec::new(), Reads::default());
     let bounded = project(
-        &views,
+        views.clone(),
         &feed.intents,
         &feed.records[feed.records.len() - 1..],
         &feed.reads,
@@ -1328,7 +1354,7 @@ fn a_bound_dropped_call_is_a_settled_tombstone_and_a_late_result_stays_above_the
         },
     );
     let late = project(
-        &bounded,
+        bounded.clone(),
         &feed.intents,
         &feed.records[feed.records.len() - 1..],
         &feed.reads,
@@ -1382,7 +1408,7 @@ fn recovered_call(undispatched: bool, truncated: bool) {
     let mut before = project_all(&feed).views;
     if truncated {
         let mut running = project(
-            &SessionViews::empty(),
+            SessionViews::empty(),
             &feed.intents,
             &feed.records[..feed.records.len() - 1],
             &feed.reads,
@@ -1401,7 +1427,7 @@ fn recovered_call(undispatched: bool, truncated: bool) {
             .map(|row| plakous_host_protocol::views::presentation::row_bytes(row) as u64)
             .sum();
         before = project(
-            &running,
+            running.clone(),
             &feed.intents,
             &feed.records[feed.records.len() - 1..],
             &feed.reads,
@@ -1485,7 +1511,7 @@ fn recovered_call(undispatched: bool, truncated: bool) {
             ..Reads::default()
         },
     );
-    let after = project(&before, &feed.intents, &feed.records, &feed.reads)
+    let after = project(before.clone(), &feed.intents, &feed.records, &feed.reads)
         .unwrap()
         .views;
     assert_eq!(after.state.counters.tool_calls, 1);
@@ -1762,7 +1788,7 @@ fn notices_count_in_the_transcript_bound_alike_incrementally_and_rebuilt() {
             .filter(|notice| notice.anchor <= incremental.cursor.get())
             .count();
         incremental = project(
-            &incremental,
+            incremental.clone(),
             &prefixes[count],
             std::slice::from_ref(record),
             &feed.reads,
@@ -1770,7 +1796,7 @@ fn notices_count_in_the_transcript_bound_alike_incrementally_and_rebuilt() {
         .unwrap()
         .views;
     }
-    let rebuilt = project(&SessionViews::empty(), &every, &feed.records, &feed.reads)
+    let rebuilt = project(SessionViews::empty(), &every, &feed.records, &feed.reads)
         .unwrap()
         .views;
     assert_eq!(incremental, rebuilt);
@@ -2047,7 +2073,7 @@ fn a_record_whose_read_was_not_loaded_is_refused_whole() {
         end: End::Completed,
     }]);
     let error = project(
-        &SessionViews::empty(),
+        SessionViews::empty(),
         &feed.intents,
         &feed.records,
         &ReadCache::default(),
@@ -2195,7 +2221,7 @@ fn retained_window_rows_cannot_precede_or_evict_the_seeded_canonical_tail() {
         live.state.head.unwrap(),
         &history,
     );
-    let rebuilt = project(&seed, &feed.intents, &feed.records[1..], &feed.reads).unwrap();
+    let rebuilt = project(seed.clone(), &feed.intents, &feed.records[1..], &feed.reads).unwrap();
     assert_eq!(rebuilt.views.rows, seed.rows);
     let rows = rebuilt.views.transcript(&ProductIntents::default());
     assert_eq!(rows.first().unwrap().1, TranscriptRow::Truncated);
@@ -2210,9 +2236,15 @@ fn retained_window_rows_cannot_precede_or_evict_the_seeded_canonical_tail() {
     );
     assert_eq!(rebuilt.terminal_usages.len(), 1);
     for end in 2..=feed.records.len() {
-        let retained = project(&seed, &feed.intents, &feed.records[1..end], &feed.reads).unwrap();
+        let retained = project(
+            seed.clone(),
+            &feed.intents,
+            &feed.records[1..end],
+            &feed.reads,
+        )
+        .unwrap();
         let full = project(
-            &SessionViews::empty(),
+            SessionViews::empty(),
             &feed.intents,
             &feed.records[..end],
             &feed.reads,
@@ -2252,9 +2284,14 @@ fn retained_history_frontier_survives_an_interrupted_replay() {
         live.state.head.unwrap(),
         &history,
     );
-    let mut partial = project(&seed, &feed.intents, &feed.records[1..2], &feed.reads)
-        .unwrap()
-        .views;
+    let mut partial = project(
+        seed.clone(),
+        &feed.intents,
+        &feed.records[1..2],
+        &feed.reads,
+    )
+    .unwrap()
+    .views;
     assert_eq!(partial.state.history_through, Some(tail.get()));
     let mut restored: SessionViewState =
         serde_json::from_value(serde_json::to_value(&partial.state).unwrap()).unwrap();
@@ -2263,7 +2300,13 @@ fn retained_history_frontier_survives_an_interrupted_replay() {
     restored.calls.clone_from(&partial.state.calls);
     restored.processes.clone_from(&partial.state.processes);
     partial.state = restored;
-    let resumed = project(&partial, &feed.intents, &feed.records[2..], &feed.reads).unwrap();
+    let resumed = project(
+        partial.clone(),
+        &feed.intents,
+        &feed.records[2..],
+        &feed.reads,
+    )
+    .unwrap();
     assert_eq!(resumed.views.state.history_through, None);
     assert_eq!(resumed.terminal_usages.len(), 1);
     assert_eq!(resumed.views.state.counters, live.state.counters);
@@ -2289,7 +2332,7 @@ fn retained_history_frontier_survives_an_interrupted_replay() {
         },
     );
     let later = project(
-        &resumed.views,
+        resumed.views.clone(),
         &feed.intents,
         &feed.records[start..],
         &feed.reads,
@@ -2313,9 +2356,44 @@ fn records_of_another_runtime_session_are_refused() {
     let mut foreign = Feed::new_for(id(78));
     apply_step(&mut foreign, &Step::Release);
     assert_eq!(
-        project(&applied, &feed.intents, &foreign.records, &foreign.reads).unwrap_err(),
+        project(
+            applied.clone(),
+            &feed.intents,
+            &foreign.records,
+            &foreign.reads
+        )
+        .unwrap_err(),
         ProjectError::ForeignSession
     );
+}
+
+#[test]
+fn a_read_error_after_applied_records_restarts_from_the_committed_preimage() {
+    let mut feed = Feed::new();
+    let stored = project_all(&feed).views;
+    apply_step(&mut feed, &Step::Rejected);
+    apply_step(
+        &mut feed,
+        &Step::Turn {
+            host_wake: false,
+            submitted: true,
+            tools: 1,
+            nested_duplicate: false,
+            steer: false,
+            end: End::Completed,
+        },
+    );
+    assert!(matches!(
+        project(
+            stored.clone(),
+            &feed.intents,
+            &feed.records,
+            &ReadCache::default()
+        ),
+        Err(ProjectError::MissingRead(_))
+    ));
+    let reloaded = project(stored, &feed.intents, &feed.records, &feed.reads).unwrap();
+    assert_eq!(reloaded.views, project_all(&feed).views);
 }
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -2411,7 +2489,7 @@ async fn a_pilot_feed_projects_identically_at_every_page_boundary() -> TestResul
     };
     let records = pilot_records(&sessions, session.locator().session_id()).await?;
     let intents = ProductIntents::default();
-    let all = run(&sessions, &SessionViews::empty(), &intents, &records).await?;
+    let all = run(&sessions, SessionViews::empty(), &intents, &records).await?;
     let sizes: Vec<usize> = if cfg!(debug_assertions) {
         vec![1, 2, records.len()]
     } else {
@@ -2424,7 +2502,7 @@ async fn a_pilot_feed_projects_identically_at_every_page_boundary() -> TestResul
             while start < records.len() {
                 let end = (start + size).min(records.len());
                 let from = start.saturating_sub(replay);
-                views = run(&sessions, &views, &intents, &records[from..end])
+                views = run(&sessions, views.clone(), &intents, &records[from..end])
                     .await?
                     .views;
                 start = end;
@@ -2432,7 +2510,7 @@ async fn a_pilot_feed_projects_identically_at_every_page_boundary() -> TestResul
             assert_eq!(views, all.views, "page size {size}, replay {replay}");
         }
     }
-    let again = run(&sessions, &all.views, &intents, &records).await?;
+    let again = run(&sessions, all.views.clone(), &intents, &records).await?;
     assert!(again.writes.is_empty());
     let rows: Vec<&TranscriptRow> = all.views.rows.values().collect();
     let position = |wanted: &dyn Fn(&TranscriptRow) -> bool| {
@@ -2812,17 +2890,17 @@ async fn sibling_records_need_no_reads_and_match_fully_loaded_views() -> TestRes
         branch_id: id(999),
         from_seq: 0,
     }]);
-    let expected = project(&views, &feed.intents, &feed.records, &feed.reads)?.views;
+    let expected = project(views.clone(), &feed.intents, &feed.records, &feed.reads)?.views;
     let directory = tempfile::tempdir()?;
     let sessions = AgentSessions::new(plakous::sessions::SessionBackend::sqlite(
         directory.path().join("runtime.sqlite"),
     )?)?;
     // These synthetic checkpoints do not exist: any planned read fails closed.
-    let actual = run(&sessions, &views, &feed.intents, &feed.records).await?;
+    let actual = run(&sessions, views.clone(), &feed.intents, &feed.records).await?;
     assert_eq!(actual.views, expected);
     let own = run(
         &sessions,
-        &SessionViews::empty(),
+        SessionViews::empty(),
         &feed.intents,
         &feed.records,
     )

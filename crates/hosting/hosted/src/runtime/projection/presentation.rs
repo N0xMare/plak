@@ -27,6 +27,10 @@ impl SessionRecordStore for PresentingStore {
         self.inner.load(id)
     }
 
+    fn load_queue_head(&self, id: &str) -> Result<crate::session_store::SessionQueueHead, String> {
+        self.inner.load_queue_head(id)
+    }
+
     fn save(&self, session: &mut SessionRecord) -> Result<(), String> {
         self.inner.save(session)
     }
@@ -102,7 +106,7 @@ impl SessionRecordStore for PresentingStore {
         &self,
         id: &str,
         writes: &ViewWrites,
-        views: &SessionViews,
+        views: &crate::sessions::projector::SessionViewState,
     ) -> Result<ProjectionCommit, String> {
         self.inner.commit_projection_views(id, writes, views)
     }

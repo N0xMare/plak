@@ -758,7 +758,7 @@ fn reopened_summary_rejects_a_cursor_behind_the_runtime_tail() {
         .commit_projection_views(
             &session,
             &ViewWrites::between(&SessionViews::empty(), &earlier),
-            &earlier,
+            &earlier.state,
         )
         .unwrap();
     drop(product);

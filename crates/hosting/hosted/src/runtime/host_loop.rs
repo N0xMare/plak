@@ -266,12 +266,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let deadline = self.projection_deadline(one_shot);
         let projected = self.executor.block_on(async {
             let pass = async {
-                if let Some(live) = self.live.take()
-                    && let Some(error) = live.finish(target.clone(), None).await
-                {
-                    return Err(error);
+                match self.live.take() {
+                    Some(live) => live.finish(target.clone(), None).await,
+                    None => target.views(None).await.map(|projected| projected.views),
                 }
-                target.pass().await
             };
             if let Some(deadline) = deadline {
                 tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), pass)
@@ -283,8 +281,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 pass.await
             }
         });
-        match projected {
-            Ok(Ok(())) => {}
+        let views = match projected {
+            Ok(Ok(views)) => views,
             Ok(Err(error)) => {
                 self.log_projector_debt(&error);
                 return;
@@ -293,22 +291,36 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 self.log_projector_debt("the terminal projector pass could not run");
                 return;
             }
-        }
+        };
         self.publish_projected_usage();
-        let Ok(stored) = self.config.store.load(&self.config.session.id) else {
+        let Ok(intents) = self.config.store.load_intents(&self.config.session.id) else {
+            return;
+        };
+        let Ok(stored) = self.config.store.load_queue_head(&self.config.session.id) else {
             return;
         };
         let unsaved = self.config.session.transcript.pending_notices().to_vec();
-        self.config.session.transcript = stored.transcript;
+        self.config.session.transcript = sessions::ProductTranscript::committed(
+            views
+                .transcript(&intents)
+                .into_iter()
+                .map(|(_, row)| row)
+                .collect(),
+        );
         for notice in unsaved {
             self.config.session.record_notice(notice);
         }
-        self.config.session.root_turn_count = stored.root_turn_count;
-        self.config.session.tool_call_count = stored.tool_call_count;
-        self.config.session.compaction_count = stored.compaction_count;
-        self.config.session.plakous_locator = stored.plakous_locator;
+        self.config.session.root_turn_count = views.state.counters.root_turns;
+        self.config.session.tool_call_count = views.state.counters.tool_calls;
+        self.config.session.compaction_count = views.state.counters.compactions;
+        self.config.session.plakous_locator = views.projected_locator(stored.recorded_locator);
+        self.config.session.queue_commands =
+            sessions::QueueCommands::from_join(&intents, Some(&views));
         self.config.session.pending_queue = stored.pending_queue;
-        self.config.session.queue_commands = stored.queue_commands;
+        self.config
+            .session
+            .pending_queue
+            .retain(|item| !self.config.session.queue_commands.is_consumed(item));
         self.config.session.queue_projection_debt = self.config.session.queue_projection_debt
             && self.config.session.queue_commands.has_pending();
         let _ = self.events.send(super::logging::project_session_snapshot(
@@ -352,7 +364,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
         let finished = self.executor.block_on(async {
             let pass = async {
                 let refused = match live {
-                    Some(live) => live.finish(target.clone(), None).await,
+                    Some(live) => live.finish(target.clone(), None).await.err(),
                     None => target.pass().await.err(),
                 };
                 (refused, target.tree_pass().await.err())

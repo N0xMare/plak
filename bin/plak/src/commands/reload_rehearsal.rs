@@ -337,7 +337,7 @@ fn dry_run(
             )
             .map_err(CliFailure::from)?;
         }
-        views = projector::project(&views, intents, page, &reads)
+        views = projector::project(views, intents, page, &reads)
             .map_err(|_| CliFailure::new("projector integrity"))?
             .views;
     }

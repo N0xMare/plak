@@ -97,12 +97,12 @@ pub fn workflow_withdrawals(
 pub fn clear_completion(
     request: &super::WorkflowRequest,
     target: &crate::sessions::SessionRecord,
-    views: &SessionViews,
+    views: &super::SessionViewState,
 ) -> Option<super::WorkflowCompletion> {
     if request.kind != crate::sessions::SessionWorkflowKind::Clear
         || target.id != request.successor_product_id()
         || target.source_workflow_operation_id.as_deref() != Some(&request.operation_id)
-        || views.state.created_operation_id.as_deref() != Some(&target.create_operation_id)
+        || views.created_operation_id.as_deref() != Some(&target.create_operation_id)
     {
         return None;
     }
@@ -112,7 +112,7 @@ pub fn clear_completion(
     }
     let operation = plakous::sessions::SessionOperationId::new(create).ok()?;
     let genesis = plakous::sessions::AgentSessions::genesis_locator_for(&operation).ok()?;
-    if views.state.runtime_session_id != Some(genesis.session_id()) {
+    if views.runtime_session_id != Some(genesis.session_id()) {
         return None;
     }
     Some(super::WorkflowCompletion {

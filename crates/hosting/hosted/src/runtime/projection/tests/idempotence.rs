@@ -34,7 +34,7 @@ fn converged_memory_views_are_byte_identical_after_replaying_every_feed_page() {
                     panic!("fixture feed was pruned")
                 };
                 let replayed =
-                    crate::sessions::projector::run(&sessions, &views, &intents, &records)
+                    crate::sessions::projector::run(&sessions, views.clone(), &intents, &records)
                         .await
                         .unwrap();
                 assert_eq!(replayed.views, views);

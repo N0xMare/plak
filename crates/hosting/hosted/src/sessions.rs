@@ -595,7 +595,7 @@ mod tests {
             .commit_projection_views(
                 &session.id,
                 &ViewWrites::between(&SessionViews::empty(), &views),
-                &views,
+                &views.state,
             )
             .unwrap();
     }

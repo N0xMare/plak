@@ -2169,7 +2169,7 @@ mod tests {
                     open_turns: Vec::new(),
                     processes: Vec::new(),
                 },
-                &views,
+                &views.state,
             )
             .unwrap();
         apply_compact_views(
@@ -2251,7 +2251,7 @@ mod tests {
                     open_turns: Vec::new(),
                     processes: Vec::new(),
                 },
-                &views,
+                &views.state,
             )
             .unwrap();
         let unadmitted = compact_error_is_unadmitted(AgentSessionsErrorKind::OutcomeUnknown);

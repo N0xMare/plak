@@ -207,7 +207,7 @@ fn a_pruned_feed_reopen_consumes_historical_intents_without_withdrawing_clear() 
 
 /// Runs one attached host over `config` until its prompts' turns end, then
 /// quits it.
-fn run_prompts(config: crate::runtime::HostConfig<TestExtension>, prompts: &[&str]) {
+pub(super) fn run_prompts(config: crate::runtime::HostConfig<TestExtension>, prompts: &[&str]) {
     let (actions, events, worker) = crate::runtime::startup::spawn_host_worker(config).unwrap();
     for prompt in prompts {
         send_attached_action(&actions, UserAction::Prompt((*prompt).to_owned().into()));
@@ -328,6 +328,7 @@ fn cached_projector_passes_reload_views_only_after_a_cursor_race() {
             ))
             .unwrap()
             .unwrap()
+            .views
     };
     let reads = store.view_read_count();
     let mut cached = pass(None);
@@ -421,7 +422,7 @@ fn live_views_equal_the_views_a_reopen_rebuilds_from_empty() {
 }
 
 /// Every record of `session`'s feed.
-fn feed_records(
+pub(super) fn feed_records(
     sessions: &plakous::sessions::AgentSessions,
     session: plakous::model::SessionId,
 ) -> Vec<plakous::sessions::feed::FeedRecord> {
@@ -691,7 +692,7 @@ fn fork_and_rebind_interrupt_between_pages_keep_source_and_resumable_target() {
         let writes = crate::sessions::projector::ViewWrites::between(&previous, &retained);
         config
             .store
-            .commit_projection_views(&config.session.id, &writes, &retained)
+            .commit_projection_views(&config.session.id, &writes, &retained.state)
             .unwrap();
         let source_id = config.session.id.clone();
         let store = Arc::clone(&config.store);
@@ -900,7 +901,7 @@ fn pruned_lineage_rebuild_from_zero_equals_incremental_views() {
     let incremental = executor
         .block_on(crate::sessions::projector::run(
             &sessions,
-            &incremental,
+            incremental,
             &intents,
             &records,
         ))
@@ -909,7 +910,7 @@ fn pruned_lineage_rebuild_from_zero_equals_incremental_views() {
         .views;
     let rebuilt = executor
         .block_on(crate::sessions::projector::run(
-            &sessions, &initial, &intents, &records,
+            &sessions, initial, &intents, &records,
         ))
         .unwrap()
         .unwrap();

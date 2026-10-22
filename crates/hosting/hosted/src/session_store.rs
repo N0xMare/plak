@@ -75,6 +75,15 @@ impl From<RecordStoreError> for String {
     }
 }
 
+/// Narrow product metadata used when publishing cached projection views.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SessionQueueHead {
+    /// Stored queue intents, before consumed submissions are filtered out.
+    pub pending_queue: Vec<crate::sessions::QueueItem>,
+    /// Recorded binding, before applying the projector's branch-head guard.
+    pub recorded_locator: Option<plakous::sessions::SessionLocator>,
+}
+
 /// Durable product session records with compare-and-swap commits.
 pub trait SessionRecordStore: Send + Sync {
     /// Load one record by its exact id. Queue items and unresolved delivery or
@@ -84,6 +93,13 @@ pub trait SessionRecordStore: Send + Sync {
     /// # Errors
     /// `session not found`, or a message when the row is invalid.
     fn load(&self, id: &str) -> Result<SessionRecord, String>;
+
+    /// Reads queue intents and the recorded locator together, without hydrating
+    /// the transcript, views, prompt history, or the rest of the record.
+    ///
+    /// # Errors
+    /// A missing session or invalid stored metadata.
+    fn load_queue_head(&self, id: &str) -> Result<SessionQueueHead, String>;
 
     /// Commit `session` at its `store_revision` and advance the token.
     ///
@@ -193,7 +209,7 @@ pub trait SessionRecordStore: Send + Sync {
     fn load_views(&self, id: &str) -> Result<Option<SessionViews>, String>;
 
     /// Commits one projector run under the cursor CAS: when the stored cursor
-    /// is still `writes.expected_cursor`, writes `writes` and `views`' state
+    /// is still `writes.expected_cursor`, writes `writes` and the supplied state
     /// and advances the cursor; otherwise changes nothing.
     ///
     /// # Errors
@@ -202,7 +218,7 @@ pub trait SessionRecordStore: Send + Sync {
         &self,
         id: &str,
         writes: &ViewWrites,
-        views: &SessionViews,
+        views: &crate::sessions::projector::SessionViewState,
     ) -> Result<ProjectionCommit, String>;
 
     /// Emits one batch of disposable usage observations after the winning commit.
@@ -700,6 +716,21 @@ mod memory {
                 .ok_or_else(|| "session not found".to_owned())
         }
 
+        fn load_queue_head(&self, id: &str) -> Result<super::SessionQueueHead, String> {
+            let state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let record = state
+                .records
+                .get(id)
+                .ok_or_else(|| "session not found".to_owned())?;
+            Ok(super::SessionQueueHead {
+                pending_queue: record.pending_queue.clone(),
+                recorded_locator: record.plakous_locator,
+            })
+        }
+
         fn save(&self, session: &mut SessionRecord) -> Result<(), String> {
             let mut state = self
                 .state
@@ -1046,7 +1077,7 @@ mod memory {
             &self,
             id: &str,
             writes: &ViewWrites,
-            views: &SessionViews,
+            views: &crate::sessions::projector::SessionViewState,
         ) -> Result<ProjectionCommit, String> {
             #[cfg(test)]
             crate::runtime::observe_projector_view_write(id);
@@ -1066,7 +1097,19 @@ mod memory {
                 return Ok(ProjectionCommit::CursorMoved);
             }
             let mut next = state.clone();
-            let mut joined = views.clone();
+            let mut joined = next
+                .views
+                .get(id)
+                .cloned()
+                .unwrap_or_else(SessionViews::empty);
+            joined.cursor = writes.cursor;
+            joined.state = views.clone();
+            for key in &writes.deletes {
+                joined.rows.remove(key);
+            }
+            for (key, row) in &writes.upserts {
+                joined.rows.insert(*key, row.clone());
+            }
             for request in next
                 .intents
                 .get(id)
@@ -1081,9 +1124,11 @@ mod memory {
                 if let (Some(target), Some(target_views)) =
                     (next.records.get(&target_id), next.views.get(&target_id))
                 {
-                    if let Some(completion) =
-                        crate::sessions::projector::clear_completion(&request, target, target_views)
-                    {
+                    if let Some(completion) = crate::sessions::projector::clear_completion(
+                        &request,
+                        target,
+                        &target_views.state,
+                    ) {
                         joined
                             .state
                             .workflows
@@ -1104,7 +1149,7 @@ mod memory {
             ) {
                 let intents = next.intents.get(source_id).cloned().unwrap_or_default();
                 if let Some(completion) = intents.workflow_request(operation).and_then(|request| {
-                    crate::sessions::projector::clear_completion(request, &source, views)
+                    crate::sessions::projector::clear_completion(request, &source, &views.state)
                 }) {
                     let source_views = next
                         .views
@@ -1191,7 +1236,11 @@ mod memory {
             }
             let empty = SessionViews::empty();
             store
-                .commit_projection_views(&source.id, &ViewWrites::between(&empty, &empty), &empty)
+                .commit_projection_views(
+                    &source.id,
+                    &ViewWrites::between(&empty, &empty),
+                    &empty.state,
+                )
                 .unwrap();
             assert_eq!(
                 store
@@ -1243,7 +1292,7 @@ mod memory {
                 seed: Some(target_views.clone()),
             });
             store
-                .commit_projection_views(&source.id, &writes, &views)
+                .commit_projection_views(&source.id, &writes, &views.state)
                 .unwrap();
             let target = request.successor_product_id();
             assert_eq!(store.load(&target).unwrap().created_at_unix, 42);
@@ -1260,7 +1309,7 @@ mod memory {
             }
             assert_eq!(
                 store
-                    .commit_projection_views(&source.id, &writes, &views)
+                    .commit_projection_views(&source.id, &writes, &views.state)
                     .unwrap(),
                 ProjectionCommit::Applied
             );

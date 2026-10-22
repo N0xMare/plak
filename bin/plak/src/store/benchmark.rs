@@ -180,7 +180,7 @@ fn persist(
                 open_turns: vec![],
                 processes: vec![],
             },
-            views,
+            &views.state,
         )
         .expect("projector commit");
 }

@@ -454,6 +454,39 @@ impl ProductStore {
         Ok(())
     }
 
+    pub fn load_queue_head(
+        &mut self,
+        id: &str,
+    ) -> Result<plakous_hosted::session_store::SessionQueueHead, String> {
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(|_| "could not start product store read".to_owned())?;
+        let locator: Option<String> = transaction
+            .query_row("SELECT locator FROM sessions WHERE id=?1", [id], |row| {
+                row.get(0)
+            })
+            .map_err(|error| {
+                if matches!(error, rusqlite::Error::QueryReturnedNoRows) {
+                    "session not found".to_owned()
+                } else {
+                    "product session locator is invalid".to_owned()
+                }
+            })?;
+        let recorded_locator = locator
+            .map(|locator| locator.parse())
+            .transpose()
+            .map_err(|_| "product session locator is invalid".to_owned())?;
+        let pending_queue = load_queue(&transaction, id)?;
+        transaction
+            .commit()
+            .map_err(|_| "could not finish product store read".to_owned())?;
+        Ok(plakous_hosted::session_store::SessionQueueHead {
+            pending_queue,
+            recorded_locator,
+        })
+    }
+
     pub fn load(&mut self, id: &str) -> Result<SessionRecord, String> {
         #[cfg(feature = "test-hooks")]
         let _settle = SettleCommitTrace;
@@ -1677,7 +1710,7 @@ mod tests {
         };
         assert_eq!(
             store
-                .commit_projection_views(session_id, &writes, &views)
+                .commit_projection_views(session_id, &writes, &views.state)
                 .unwrap(),
             plakous_hosted::sessions::projector::ProjectionCommit::Applied
         );
@@ -1719,7 +1752,7 @@ mod tests {
                 successors: Vec::new(),
             };
             store
-                .commit_projection_views(&session.id, &writes, &views)
+                .commit_projection_views(&session.id, &writes, &views.state)
                 .unwrap();
             session.record_notice(TranscriptRow::warning(NoticeScope::Tree, "a notice intent"));
             store.commit(&mut session).unwrap();
@@ -1880,7 +1913,7 @@ mod tests {
         let mut views = before.clone();
         views.state.deliveries.insert(command.into(), delivery);
         store
-            .commit_projection_views(id, &ViewWrites::between(&before, &views), &views)
+            .commit_projection_views(id, &ViewWrites::between(&before, &views), &views.state)
             .unwrap();
     }
 
@@ -2919,7 +2952,7 @@ mod tests {
             .commit_projection_views(
                 &session.id,
                 &ViewWrites::between(&empty, &projected),
-                &projected,
+                &projected.state,
             )
             .unwrap();
         let mut loaded = store.load(&session.id).unwrap();

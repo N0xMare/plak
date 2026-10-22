@@ -3,7 +3,7 @@
 //! no clock, configuration, environment or event: the same records over the
 //! same intents produce the same views, page by page or all at once.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use plakous::sessions::feed::{
     FeedBranchTransition, FeedCallerLineage, FeedCancelCause, FeedChange, FeedCommandKind,
@@ -187,15 +187,20 @@ pub struct ProjectedTurnUsage {
 /// # Errors
 ///
 /// Refuses a record of another runtime session, or a record whose read was
-/// not loaded into `reads`.
+/// not loaded into `reads`. On error the owned views are dropped; retry from
+/// the last committed views, not a partially applied page.
 pub fn project(
-    views: &SessionViews,
+    views: SessionViews,
     intents: &ProductIntents,
     records: &[FeedRecord],
     reads: &dyn ProjectorReads,
 ) -> Result<Projection, ProjectError> {
-    let mut next = views.clone();
-    let mut touched = BTreeSet::new();
+    let expected_cursor = views.cursor;
+    let calls = views.state.calls.clone();
+    let open_turns = views.state.open_turns.clone();
+    let processes = views.state.processes.clone();
+    let mut next = views;
+    let mut touched = BTreeMap::new();
     let mut successors = Vec::new();
     let mut terminal_usages = Vec::new();
     for record in records {
@@ -250,20 +255,19 @@ pub fn project(
     }
     next.consume_before_retention(intents);
     let writes = ViewWrites {
-        expected_cursor: views.cursor,
+        expected_cursor,
         cursor: next.cursor,
-        calls: changed_entries(&views.state.calls, &next.state.calls),
-        open_turns: changed_entries(&views.state.open_turns, &next.state.open_turns),
-        processes: changed_entries(&views.state.processes, &next.state.processes),
+        calls: changed_entries(&calls, &next.state.calls),
+        open_turns: changed_entries(&open_turns, &next.state.open_turns),
+        processes: changed_entries(&processes, &next.state.processes),
         successors,
         upserts: touched
-            .iter()
+            .keys()
             .filter_map(|key| next.rows.get(key).map(|row| (*key, row.clone())))
             .collect(),
         deletes: touched
             .iter()
-            .filter(|key| !next.rows.contains_key(*key) && views.rows.contains_key(*key))
-            .copied()
+            .filter_map(|(key, existed)| (*existed && !next.rows.contains_key(key)).then_some(*key))
             .collect(),
     };
     Ok(Projection {
@@ -308,7 +312,7 @@ pub fn rebuild_behind_retention(
         }
     }
     views.state.truncated = true;
-    let mut touched = BTreeSet::new();
+    let mut touched = BTreeMap::new();
     bound_transcript(&mut views, &mut touched, &[]);
     views
 }
@@ -319,7 +323,8 @@ struct Applier<'a> {
     reads: &'a dyn ProjectorReads,
     record: &'a FeedRecord,
     ordinal: u32,
-    touched: &'a mut BTreeSet<RowKey>,
+    // Whether each touched key existed before this page's first mutation.
+    touched: &'a mut BTreeMap<RowKey, bool>,
     terminal_usages: &'a mut Vec<ProjectedTurnUsage>,
     resolved_calls: Vec<String>,
 }
@@ -439,7 +444,7 @@ impl Applier<'_> {
                 from_seq: header.seq.get(),
             });
             project(
-                &inherited,
+                inherited,
                 self.intents,
                 std::slice::from_ref(self.record),
                 self.reads,
@@ -505,7 +510,9 @@ impl Applier<'_> {
         {
             return;
         }
-        self.touched.insert(key);
+        self.touched
+            .entry(key)
+            .or_insert_with(|| self.views.rows.contains_key(&key));
         put_row(self.views, key, row);
     }
 
@@ -1613,7 +1620,7 @@ fn counted_notices(intents: &ProductIntents, seq: u64) -> Vec<(RowKey, u64)> {
 /// truncated transcript goes with it ([`SessionViews::transcript`]).
 fn bound_transcript(
     views: &mut SessionViews,
-    touched: &mut BTreeSet<RowKey>,
+    touched: &mut BTreeMap<RowKey, bool>,
     notices: &[(RowKey, u64)],
 ) {
     let measured = |views: &SessionViews| {
@@ -1656,7 +1663,7 @@ fn bound_transcript(
             // cannot resurrect this key or count the call a second time.
             call.settled = true;
         }
-        touched.insert(key);
+        touched.entry(key).or_insert(true);
         views.state.truncated = true;
     }
 }
@@ -1698,6 +1705,93 @@ fn session_wide(error: &str) -> bool {
         error,
         "storage_pressure" | "ledger_full" | "shutdown" | "internal" | "reclaimed"
     )
+}
+
+// Clone-based reference retained only to check the owned projector over recorded feeds.
+#[cfg(test)]
+pub(super) fn project_cloned(
+    views: &SessionViews,
+    intents: &ProductIntents,
+    records: &[FeedRecord],
+    reads: &dyn ProjectorReads,
+) -> Result<Projection, ProjectError> {
+    let mut next = views.clone();
+    let mut touched = BTreeMap::new();
+    let mut successors = Vec::new();
+    let mut terminal_usages = Vec::new();
+    for record in records {
+        let header = record.header();
+        if header.seq <= next.cursor {
+            continue;
+        }
+        match next.state.runtime_session_id {
+            Some(session) if session != header.session_id => {
+                return Err(ProjectError::ForeignSession);
+            }
+            Some(_) => {}
+            None => next.state.runtime_session_id = Some(header.session_id),
+        }
+        let mut applier = Applier {
+            views: &mut next,
+            intents,
+            reads,
+            record,
+            ordinal: 0,
+            touched: &mut touched,
+            terminal_usages: &mut terminal_usages,
+            resolved_calls: Vec::new(),
+        };
+        if let Some(successor) = applier.apply()? {
+            successors.push(successor);
+        }
+        // A record can name the same call in both its canonical history and
+        // operation facts. Retire tombstones only after all those facts ran.
+        for call_id in applier.resolved_calls {
+            if next.state.calls.get(&call_id).is_some_and(|call| {
+                call.turn_id
+                    .as_ref()
+                    .is_some_and(|turn| !next.state.open_turns.contains_key(turn))
+            }) {
+                next.state.calls.remove(&call_id);
+            }
+        }
+        next.cursor = header.seq;
+        if next
+            .state
+            .history_through
+            .is_some_and(|through| header.seq.get() >= through)
+        {
+            next.state.history_through = None;
+        }
+        bound_transcript(
+            &mut next,
+            &mut touched,
+            &counted_notices(intents, header.seq.get()),
+        );
+    }
+    next.consume_before_retention(intents);
+    let writes = ViewWrites {
+        expected_cursor: views.cursor,
+        cursor: next.cursor,
+        calls: changed_entries(&views.state.calls, &next.state.calls),
+        open_turns: changed_entries(&views.state.open_turns, &next.state.open_turns),
+        processes: changed_entries(&views.state.processes, &next.state.processes),
+        successors,
+        upserts: touched
+            .keys()
+            .filter_map(|key| next.rows.get(key).map(|row| (*key, row.clone())))
+            .collect(),
+        deletes: touched
+            .keys()
+            .filter(|key| !next.rows.contains_key(*key) && views.rows.contains_key(*key))
+            .copied()
+            .collect(),
+    };
+    Ok(Projection {
+        views: next,
+        writes,
+        terminal_usages,
+    })
 }
 
 #[cfg(test)]

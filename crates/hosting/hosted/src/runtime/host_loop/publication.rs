@@ -626,7 +626,9 @@ mod tests {
         use crate::sessions::projector::{Submission, SubmissionKind};
         use plakous::agent::{CommandId, TurnResultOutcome};
         let root = tempfile::tempdir().unwrap();
-        let (config, _) = fresh_injected_attached_host(root.path());
+        let (mut config, _) = fresh_injected_attached_host(root.path());
+        let records = std::sync::Arc::new(crate::session_store::MemoryStore::new());
+        config.store = records.clone();
         let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (tx, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
         let mut host = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
@@ -678,8 +680,20 @@ mod tests {
             super::Instant::now(),
             super::TerminalErrorPresentation::Events,
         );
+        let record_reads = records.record_read_count();
         host.publish_projected_transcript(true);
+        assert_eq!(
+            records.record_read_count(),
+            record_reads,
+            "terminal publication must not hydrate a full session record"
+        );
         let stored = store.load(&id).unwrap();
+        assert_eq!(host.config.session.pending_queue, stored.pending_queue);
+        assert_eq!(host.config.session.queue_commands, stored.queue_commands);
+        assert!(
+            host.config.session.pending_queue.is_empty(),
+            "consumed queue item survived publication"
+        );
         assert_ne!(source, Some(head));
         assert_eq!(stored.plakous_locator, Some(head));
         host.release().unwrap();
@@ -699,6 +713,123 @@ mod tests {
             .filter(|row| row.text() == Some(assistant.as_str()))
             .count();
         assert_eq!(count, 1, "the terminal result was published twice");
+    }
+
+    #[test]
+    fn cached_terminal_publication_matches_the_stored_projection_and_preserves_pending_notices() {
+        use crate::runtime::test_kit::TestExtension;
+        use crate::runtime::test_support::fresh_injected_attached_host;
+        use crate::runtime::{Sender, host_loop::HostLoop};
+        use crate::session_store::SessionRecordStore;
+        use crate::sessions::projector::{Lane, RowKey, ViewWrites};
+        use crate::sessions::{MAX_TRANSCRIPT_LINES, NoticeScope, TranscriptRow};
+        for pending_notice in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let (mut config, _) = fresh_injected_attached_host(root.path());
+            let records = std::sync::Arc::new(crate::session_store::MemoryStore::new());
+            config.store = records.clone();
+            let (_, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
+            let (events, _) = crate::surface_protocol::host_event_channel::<TestExtension>();
+            let mut host = HostLoop::open(config, &actions, Sender::over(events), None).unwrap();
+            records.save(&mut host.config.session).unwrap();
+            if let Some(live) = host.live.take() {
+                let target = host.live_target();
+                host.executor
+                    .block_on(live.finish(target, None))
+                    .unwrap()
+                    .unwrap();
+            }
+            host.project_now();
+            let id = host.config.session.id.clone();
+            let before = records.load_views(&id).unwrap().unwrap();
+            let mut views = before.clone();
+            views.rows.clear();
+            for ordinal in 1..=MAX_TRANSCRIPT_LINES {
+                views.rows.insert(
+                    RowKey::new(views.cursor.get(), Lane::Runtime, ordinal as u32),
+                    TranscriptRow::assistant(format!("bounded row {ordinal}")),
+                );
+            }
+            views.state.truncated = true;
+            views.state.counters.root_turns = 17;
+            views.state.counters.tool_calls = 31;
+            views.state.counters.compactions = 2;
+            views.state.row_bytes = views
+                .rows
+                .values()
+                .map(|row| plakous_host_protocol::views::presentation::row_bytes(row) as u64)
+                .sum();
+            records
+                .commit_projection_views(&id, &ViewWrites::between(&before, &views), &views.state)
+                .unwrap();
+            let mut stored = records.load(&id).unwrap();
+            let kept =
+                crate::sessions::queue::enqueue(&mut stored.pending_queue, "stored queue text")
+                    .unwrap();
+            stored.record_notice(TranscriptRow::info(
+                NoticeScope::Session,
+                "at the current cursor",
+            ));
+            records.save(&mut stored).unwrap();
+            assert_eq!(
+                records
+                    .load_intents(&id)
+                    .unwrap()
+                    .notices
+                    .last()
+                    .unwrap()
+                    .anchor,
+                views.cursor.get()
+            );
+            host.config.session = records.load(&id).unwrap();
+            host.project();
+            host.commit_notice_intents();
+            host.config
+                .session
+                .pending_queue
+                .iter_mut()
+                .find(|item| item.id == kept.id)
+                .unwrap()
+                .text = "unsaved queue edit".into();
+            host.config.session.plakous_locator = None;
+            host.config.session.root_turn_count = 0;
+            host.config.session.tool_call_count = 0;
+            host.config.session.compaction_count = 0;
+            let pending = TranscriptRow::info(NoticeScope::Session, "pending unsaved notice");
+            if pending_notice {
+                host.config.session.record_notice(pending.clone());
+            }
+            host.publish_projected_transcript(true);
+            let mut expected = records.load(&id).unwrap();
+            if pending_notice {
+                expected.record_notice(pending);
+            }
+            assert_eq!(host.config.session.transcript, expected.transcript);
+            assert_eq!(
+                host.config.session.root_turn_count,
+                expected.root_turn_count
+            );
+            assert_eq!(
+                host.config.session.tool_call_count,
+                expected.tool_call_count
+            );
+            assert_eq!(
+                host.config.session.compaction_count,
+                expected.compaction_count
+            );
+            assert_eq!(
+                host.config.session.plakous_locator,
+                expected.plakous_locator
+            );
+            assert_eq!(host.config.session.queue_commands, expected.queue_commands);
+            assert_eq!(host.config.session.pending_queue, expected.pending_queue);
+            assert!(host.config.session.transcript.len() <= MAX_TRANSCRIPT_LINES);
+            assert_eq!(
+                host.config.session.transcript.first(),
+                Some(&TranscriptRow::Truncated)
+            );
+            host.release().unwrap();
+        }
     }
 
     #[test]

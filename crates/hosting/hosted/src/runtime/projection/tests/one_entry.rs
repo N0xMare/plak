@@ -40,7 +40,7 @@ fn a_view_writer_outside_the_common_entry_is_rejected_even_beside_an_active_pass
     super::super::probe::track(&id);
     let entry = super::super::probe::enter(&id);
     let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        store.commit_projection_views(&id, &writes, &views)
+        store.commit_projection_views(&id, &writes, &views.state)
     }));
     assert!(refused.is_err(), "the probe allowed a bypass writer");
     assert_eq!(store.load_views(&id).unwrap(), Some(views));

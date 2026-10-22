@@ -7,6 +7,7 @@ use std::sync::Arc;
 pub(crate) enum StoreCall {
     WriteHostControls,
     Load,
+    LoadQueueHead,
     Save,
     SaveSubmission,
     DiscardSubmission,
@@ -71,6 +72,11 @@ impl<F: StoreFaults> SessionRecordStore for FaultStore<F> {
     fn load(&self, id: &str) -> Result<SessionRecord, String> {
         self.faults.before(StoreCall::Load, None)?;
         self.inner.load(id)
+    }
+
+    fn load_queue_head(&self, id: &str) -> Result<crate::session_store::SessionQueueHead, String> {
+        self.faults.before(StoreCall::LoadQueueHead, None)?;
+        self.inner.load_queue_head(id)
     }
 
     fn save(&self, session: &mut SessionRecord) -> Result<(), String> {
@@ -167,7 +173,7 @@ impl<F: StoreFaults> SessionRecordStore for FaultStore<F> {
         &self,
         id: &str,
         writes: &sessions::projector::ViewWrites,
-        views: &sessions::projector::SessionViews,
+        views: &sessions::projector::SessionViewState,
     ) -> Result<sessions::projector::ProjectionCommit, String> {
         self.faults.before(StoreCall::CommitProjectionViews, None)?;
         self.inner.commit_projection_views(id, writes, views)
