@@ -6678,22 +6678,12 @@ the bound. **A summary that stops for `Length` is rejected**: it lost whatever i
 would have said last, usually the open work and the next step, so the fold is a
 definite failure that publishes nothing (§10.5), and mid-turn it falls to the
 placeholder rung like any failed paid fold. The instruction is a short
-checklist — each user request in order with its requirements verbatim, where
-a request the model answered with a final reply is done apart from what that
-reply left undone, an interrupted or unanswered request is said to be so, and
-the latest request, when it is still in progress, is the active one, kept
-verbatim after the summary (§10.1); the instruction itself is not a
-request; every value the remaining work still needs copied exactly
-(identifiers, tokens, numbers, short file contents, text to write or report
-later); work already done as the tool results show it — files read or written
-with paths, commands and their results — stated as done so it is not
-repeated; decisions, open errors, the plan with each item's status, and the
-next step. Order and status matter when a fold covers a finished request and
-the active one: a summary that presents the finished request as the
-instruction, or its completed side effects as pending, leads the model to redo
-them after the fold. The instruction also tells the model that the summary
-replaces the conversation and any earlier summary in its own context and is
-not a reply, so
+checklist — goal and constraints with the user's requirements verbatim,
+every value the remaining work still needs copied exactly (identifiers, tokens,
+numbers, short file contents, text to write or report later), decisions, files
+with paths, commands and their results, open errors, the plan with each item's
+status, and the next step. It tells the model that the summary replaces the
+conversation and any earlier summary in its own context and is not a reply, so
 a user's rule about what a reply may show does not license dropping a value the
 work depends on, and that whatever still applies from an earlier summary
 carries forward: repeated folds see only the previous summary, so a value it

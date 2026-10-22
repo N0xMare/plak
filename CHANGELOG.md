@@ -70,10 +70,6 @@ one cross-build carrier (a build imports its own and the previous version).
   accounts never sends one account's encrypted reasoning under another.
 - Hosted runtime construction goes through one sealed `RuntimeFactory` port.
 - Oversized user messages are refused at admission.
-- The compaction summary lists each user request in order with its status,
-  keeps the active request verbatim after the summary, and states completed
-  work as done so a model does not redo it after a mid-task compaction. The
-  mid-turn continuation note says the earlier work is summarized above.
 - A Codex native compaction mid-turn keeps the current round's tool batch
   verbatim after the compaction item, so the model still sees the output it
   asked for; when that successor would not fit or shrink, the tail-less
