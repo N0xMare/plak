@@ -1,5 +1,5 @@
 use super::ProductCapability;
-use super::{OauthDoctor, Recommendation};
+use super::{Recommendation, RouteDoctor};
 use crate::product_doctor::CheckKind;
 use crate::profiles::{Builtin, BuiltinFile};
 
@@ -13,7 +13,7 @@ pub(super) static GROK: ProductCapability = ProductCapability {
         accounts: &["grok", "supergrok", "xai"],
         model: RECOMMENDED_MODEL,
     }),
-    doctor: Some(OauthDoctor {
+    doctor: Some(RouteDoctor::Oauth {
         kind: CheckKind::OauthXai,
         probe: |probes| probes.xai.clone(),
     }),

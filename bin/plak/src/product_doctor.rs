@@ -935,14 +935,23 @@ pub fn diagnose(input: DoctorInputs) -> DoctorReport {
         input.python_containment_required,
         input.runtime_directory.as_deref(),
     ));
-    checks.push(openrouter_catalog_check(input.openrouter_catalog));
+    if crate::capabilities::ROUTES.iter().any(|capability| {
+        matches!(
+            capability.doctor,
+            Some(crate::capabilities::RouteDoctor::OpenRouterCatalog)
+        )
+    }) {
+        checks.push(openrouter_catalog_check(input.openrouter_catalog));
+    }
     checks.push(root_template_check(input.root_template));
     checks.push(spawn_templates_check(input.spawn_templates));
     for doctor in crate::capabilities::ROUTES
         .iter()
         .filter_map(|capability| capability.doctor.as_ref())
     {
-        checks.push(oauth_check(doctor.kind, (doctor.probe)(&input.oauth)));
+        if let crate::capabilities::RouteDoctor::Oauth { kind, probe } = doctor {
+            checks.push(oauth_check(*kind, (probe)(&input.oauth)));
+        }
     }
     DoctorReport::from_checks(checks)
 }

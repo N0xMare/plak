@@ -127,6 +127,8 @@ modules and one registry: canonical accounts, accepted aliases, OAuth/API
 classification, fixed wire families, catalog labels, Usage verticals and
 native-PTC diagnostics. Plak's product registry attaches provider-row labels,
 recommendations, doctor probes and bundled agent profiles to those identities.
+Route-owned doctor checks include OAuth credential rows and the OpenRouter
+catalog row; home, storage and runtime-wide checks remain common checks.
 Catalog refresh iterates the registered native routes, preserving their
 presentation order and excluding the attached route. This is an identity and
 presentation registry, not a second runtime or a construction fallback list;

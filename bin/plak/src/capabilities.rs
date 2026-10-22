@@ -21,9 +21,12 @@ pub(crate) struct Recommendation {
     pub model: &'static str,
 }
 
-pub(crate) struct OauthDoctor {
-    pub kind: CheckKind,
-    pub probe: fn(&OauthCredentialProbes) -> OauthCredentialProbe,
+pub(crate) enum RouteDoctor {
+    Oauth {
+        kind: CheckKind,
+        probe: fn(&OauthCredentialProbes) -> OauthCredentialProbe,
+    },
+    OpenRouterCatalog,
 }
 
 pub(crate) struct ProductCapability {
@@ -31,7 +34,7 @@ pub(crate) struct ProductCapability {
     pub label: &'static str,
     pub short_label: &'static str,
     pub recommendation: Option<Recommendation>,
-    pub doctor: Option<OauthDoctor>,
+    pub doctor: Option<RouteDoctor>,
     /// Preserve the profile menu's order independently of catalog order.
     pub preset: Option<(u8, &'static Builtin)>,
 }
@@ -126,6 +129,28 @@ mod tests {
         assert_eq!(recommended_model("chatgpt"), Some(RECOMMENDED_CODEX_MODEL));
         assert_eq!(recommended_model("openai"), None);
         assert!(plakous_hosted::capabilities::for_account("xai").is_none());
+    }
+
+    #[test]
+    fn route_doctors_include_native_credentials_and_gateway_catalog() {
+        let doctors: Vec<_> = ROUTES
+            .iter()
+            .filter_map(|capability| {
+                capability.doctor.as_ref().map(|doctor| match doctor {
+                    RouteDoctor::Oauth { kind, .. } => kind.key(),
+                    RouteDoctor::OpenRouterCatalog => CheckKind::OpenRouterCatalog.key(),
+                })
+            })
+            .collect();
+        assert_eq!(
+            doctors,
+            [
+                "oauth_codex",
+                "oauth_xai",
+                "oauth_claude",
+                "openrouter_catalog"
+            ]
+        );
     }
 
     #[test]
