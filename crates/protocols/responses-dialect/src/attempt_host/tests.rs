@@ -6178,3 +6178,27 @@ async fn an_expired_workflow_hard_deadline_declines_as_deadline() -> TestResult 
     assert_eq!(peer.await??, 1);
     Ok(())
 }
+
+#[test]
+fn attempt_rejects_replay_projection_for_another_account() -> Result<(), TestError> {
+    let client = Client::new(Limits::default())?;
+    let authorization = ResponsesAuthorizationAdapter::new(1, 1, test_preflight, test_revalidate)?;
+    let mut data = attempt_data(&client, &authorization)?;
+    let (request, authority) = exact_request_authority()?;
+    let old_account = authority.artifact_binding().account();
+    let new_account = model_binding(b"new-account")?;
+    assert_ne!(old_account, new_account);
+    data.replay = ResponsesReplayProjection::new(
+        ProtocolId::new("openai.responses")?,
+        None,
+        ModelId::new("gpt-test")?,
+        ReplayKindId::new("responses.output_item")?,
+        1,
+        new_account,
+    )?;
+    assert!(matches!(
+        prepare_responses_attempt(authority, &request, None, &data),
+        Err(ResponsesAttemptBuildError::Binding)
+    ));
+    Ok(())
+}

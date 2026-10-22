@@ -6,14 +6,13 @@ use std::sync::Arc;
 
 use plakous_model::{
     Actor, BlockCompleted, BlockStart, BlockStarted, CallId, Clock, ContentBlock, ConversationItem,
-    DataClassification, Digest, EntryId, IdGenerator, ModelEvent, ModelFamilyId, ModelId,
-    ModelResponseMetadata, OutputLocation, ProtocolId, Provenance, ReasoningBlock, ReasoningDelta,
-    ReasoningVisibility, RefusalBlock, ReplayEnvelope, ReplayKindId, ReplayScope, ResponseStarted,
-    SystemClock, SystemIdGenerator, TextBlock, TextDelta, TextPhase, ToolCallBlock, ToolCallState,
-    ToolCallerLineage, ToolCorrelation, ToolExecutionOwner, ToolInputDelta, ToolName,
+    Digest, EntryId, IdGenerator, ModelEvent, ModelResponseMetadata, OutputLocation, Provenance,
+    ReasoningBlock, ReasoningDelta, ReasoningVisibility, RefusalBlock, ReplayEnvelope,
+    ResponseStarted, SystemClock, SystemIdGenerator, TextBlock, TextDelta, TextPhase,
+    ToolCallBlock, ToolCallState, ToolCallerLineage, ToolCorrelation, ToolExecutionOwner,
+    ToolInputDelta, ToolName,
 };
 use serde_json::Value;
-use serde_json::value::RawValue;
 
 use super::error::FamilyProjectionError;
 
@@ -1235,28 +1234,6 @@ impl ResponseProjectorCore {
             ))
     }
 
-    /// Build a replay envelope from a serialized payload.
-    pub fn make_replay_envelope(
-        &mut self,
-        protocol: ProtocolId,
-        model_family: Option<ModelFamilyId>,
-        model: ModelId,
-        kind: &'static str,
-        version: u32,
-        payload: Box<RawValue>,
-    ) -> ProjResult<ReplayEnvelope> {
-        self.reserve_bytes(payload.get().len())?;
-        Ok(ReplayEnvelope::new(
-            protocol,
-            model_family,
-            ReplayScope::ExactModel(model),
-            ReplayKindId::new(kind)?,
-            version,
-            DataClassification::Sensitive,
-            payload,
-        )?)
-    }
-
     /// Reserve projected byte budget.
     pub fn reserve_bytes(&mut self, bytes: usize) -> ProjResult<()> {
         let accumulated_bytes = self
@@ -1458,7 +1435,11 @@ fn canonical_block(block: &ProjectedBlock) -> ProjResult<ContentBlock> {
 )]
 mod tests {
     use super::*;
-    use plakous_model::{ToolExecutionOwner, ToolName};
+    use plakous_model::{
+        DataClassification, ModelId, ProtocolId, ReplayKindId, ReplayScope, ToolExecutionOwner,
+        ToolName,
+    };
+    use serde_json::value::RawValue;
 
     fn empty_core(policy: ProjectorPolicy) -> ResponseProjectorCore {
         core_with_byte_limit(policy, ProjectorLimits::default().max_accumulated_bytes)
@@ -1739,16 +1720,26 @@ mod tests {
         assert_eq!(out, [] as [ModelEvent; 0]);
 
         let payload = RawValue::from_string("{}".into()).expect("raw");
-        let replay = core
-            .make_replay_envelope(
-                ProtocolId::new("openai.responses").expect("proto"),
-                None,
-                ModelId::new("gpt-test").expect("model"),
-                "test.reasoning",
-                1,
-                payload,
-            )
-            .expect("replay");
+        core.reserve_bytes(payload.get().len())
+            .expect("replay bytes");
+        let replay = ReplayEnvelope::new(
+            ProtocolId::new("openai.responses").expect("proto"),
+            None,
+            ReplayScope::ExactAccountModel {
+                model: ModelId::new("gpt-test").expect("model"),
+                account: Digest::sha256(
+                    plakous_model::DigestDomain::ModelBinding,
+                    1,
+                    &[b"test-account"],
+                )
+                .expect("account"),
+            },
+            ReplayKindId::new("test.reasoning").expect("kind"),
+            1,
+            DataClassification::Sensitive,
+            payload,
+        )
+        .expect("replay");
         core.finish_deferred_reasoning(0, &replay, &mut out)
             .expect("finish");
         assert!(

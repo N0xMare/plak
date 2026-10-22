@@ -5701,8 +5701,7 @@ fn new_account_artifact_does_not_resurrect_previous_account_reasoning() -> TestR
     let (protocol, family, model) = target_values()?;
     let route = "responses-test-route";
     let now = Timestamp::new(1_700_000_000, 0)?;
-    let old_account = Digest::sha256(DigestDomain::ModelBinding, 1, &[route.as_bytes()])?;
-    let new_account = Digest::sha256(DigestDomain::ModelBinding, 1, &[b"new-account"])?;
+    let (old_account, new_account) = replay_account_fixtures()?;
     let raw = |marker: &str,
                account: Digest|
      -> Result<ReplayEnvelope, Box<dyn std::error::Error>> {
@@ -5840,5 +5839,225 @@ fn new_account_artifact_does_not_resurrect_previous_account_reasoning() -> TestR
         "new account artifact resurrected old account reasoning"
     );
     assert!(input.contains("account-B-ciphertext"));
+    Ok(())
+}
+
+fn replay_account_fixtures() -> Result<(Digest, Digest), Box<dyn std::error::Error>> {
+    Ok((
+        Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?,
+        Digest::sha256(DigestDomain::ModelBinding, 1, &[b"new-account"])?,
+    ))
+}
+
+fn replay_with_scope(
+    source: &ReplayEnvelope,
+    scope: ReplayScope,
+) -> Result<ReplayEnvelope, Box<dyn std::error::Error>> {
+    Ok(ReplayEnvelope::new(
+        source.protocol().clone(),
+        source.model_family().cloned(),
+        scope,
+        source.kind().clone(),
+        source.version(),
+        source.classification(),
+        RawValue::from_string(source.payload().get().to_owned())?,
+    )?)
+}
+
+#[test]
+fn artifact_append_rejects_foreign_account_and_accountless_output() -> TestResult {
+    let (request, active) = active_replay_fixture(ResponsesStorageMode::Stateless, None)?;
+    let artifact = ResponsesArtifactCodec::decode_inert(active.bytes())?;
+    let (old_account, new_account) = replay_account_fixtures()?;
+    assert_eq!(artifact.binding().account(), old_account);
+    let (_, _, model) = target_values()?;
+    let source = replay::exact_replay_for_kind(
+        request.input().items().get(1),
+        ResponsesReplayKind::new("openai.output_item", 2),
+    )?
+    .ok_or("replay missing")?;
+    for scope in [
+        ReplayScope::ExactAccountModel {
+            model: model.clone(),
+            account: new_account,
+        },
+        ReplayScope::ExactModel(model),
+    ] {
+        let rejected = ResponsesArtifact::new(
+            artifact.binding().clone(),
+            artifact.production().clone(),
+            artifact.replay_contract().clone(),
+            vec![ResponsesReplayItem::new(
+                ResponsesReplayPurpose::OutputItem,
+                0,
+                replay_with_scope(source, scope)?,
+            )],
+            None,
+            None,
+            ResponsesStorageMode::Stateless,
+            None,
+            Timestamp::new(1_700_000_000, 0)?,
+        );
+        assert_eq!(
+            rejected.err(),
+            Some(plakous_responses::ResponsesArtifactError::ReplayBindingMismatch { index: 0 })
+        );
+    }
+    Ok(())
+}
+
+#[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one fixture distinguishes append integrity, covered-window account validation and fresh lowering"
+)]
+fn foreign_account_or_accountless_covered_output_prepares_fresh() -> TestResult {
+    let (base, _) = active_replay_fixture(ResponsesStorageMode::Stateless, None)?;
+    let (protocol, family, model) = target_values()?;
+    let (old_account, new_account) = replay_account_fixtures()?;
+    let kind = ResponsesReplayKind::new("openai.output_item", 2);
+    let source = replay::exact_replay_for_kind(base.input().items().get(1), kind)?
+        .ok_or("replay missing")?;
+    let prefix = base.input().history().segments()[0].clone();
+    let producing = ModelRequest::from_parts(
+        base.stable_prefix().clone(),
+        ConversationView::from_shared(
+            CanonicalHistory::new(vec![prefix])?,
+            WorkingProjection::default(),
+        ),
+        metadata()?,
+    )?;
+    let now = Timestamp::new(1_700_000_000, 0)?;
+    for scope in [
+        ReplayScope::ExactAccountModel {
+            model: model.clone(),
+            account: new_account,
+        },
+        ReplayScope::ExactModel(model.clone()),
+    ] {
+        let mut segments = base.input().history().segments().to_vec();
+        segments[1] = HistorySegment::new(
+            HistorySegmentKind::ReasoningReplay,
+            vec![ConversationItem::new(
+                id::<EntryId>(501)?,
+                Actor::Assistant,
+                vec![ContentBlock::Reasoning(ReasoningBlock::new(
+                    ReasoningVisibility::OpaqueReplay,
+                    None,
+                    Some(replay_with_scope(source, scope)?),
+                )?)],
+                Provenance::ModelOutput,
+            )?],
+        )?;
+        let request = ModelRequest::from_parts(
+            base.stable_prefix().clone(),
+            ConversationView::from_shared(
+                CanonicalHistory::new(segments)?,
+                WorkingProjection::default(),
+            ),
+            metadata()?,
+        )?;
+        // Seal the malformed canonical window but keep a valid append envelope,
+        // so canonical authorization must independently reject its account.
+        let artifact = output_artifact(
+            &producing,
+            &request,
+            "responses-test-route",
+            vec![source.clone()],
+            ResponsesStorageMode::Stateless,
+            "unused",
+            None,
+            now,
+            b"bad-covered-account",
+        )?;
+        let authority = operation_authority(
+            &request,
+            "responses-test-route",
+            ResponsesStoragePolicy::Stateless,
+        )?;
+        assert_eq!(authority.artifact_binding().account(), old_account);
+        let error = ResponsesArtifactReplayBridge::from_active_artifact(
+            &active_artifact(&artifact)?,
+            &request,
+            authority,
+            kind,
+            None,
+            None,
+            now,
+        )
+        .err()
+        .ok_or("covered account mismatch was admitted")?;
+        assert!(
+            matches!(
+                error,
+                ResponsesRequestError::Replay(ResponsesReplayError::ArtifactCanonicalMismatch)
+            ),
+            "{error:?}"
+        );
+        assert!(error.artifact_is_not_for_this_request());
+        let fresh = lower_responses_request(
+            &request,
+            ResponsesRequestConfig::new(
+                &protocol,
+                Some(&family),
+                &model,
+                ResponsesRequestPolicy::openai_codex(false, false, "reasoning.encrypted_content"),
+                None,
+            ),
+        )?;
+        assert!(
+            !fresh.body()["input"]
+                .to_string()
+                .contains("fixture-encrypted")
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn hosted_programs_ignore_lineage_from_an_earlier_account() -> TestResult {
+    let (protocol, family, model) = target_values()?;
+    let (old_account, new_account) = replay_account_fixtures()?;
+    let envelope = ReplayEnvelope::new(protocol, Some(family), ReplayScope::ExactAccountModel { model, account: old_account },
+        ReplayKindId::new("openai.output_item")?, 2, DataClassification::Sensitive,
+        RawValue::from_string(json!({"type":"program", "id":"old-program", "call_id":"old-call", "code":"test", "fingerprint":"old-fingerprint"}).to_string())?)?;
+    let request = crate::test_support::model_request_builder(
+        ConversationView::from_items(vec![ConversationItem::new(
+            id::<EntryId>(41_000)?,
+            Actor::Assistant,
+            vec![ContentBlock::Opaque(OpaqueBlock::new(
+                envelope,
+                OpaqueFallback::CompatibleReplay,
+            )?)],
+            Provenance::ModelOutput,
+        )?])?,
+        metadata()?,
+    )
+    .resolved_harness_plan_identity(harness_plan_identity()?)
+    .build()?;
+    let old_authority = operation_authority(
+        &request,
+        "responses-test-route",
+        ResponsesStoragePolicy::Stateless,
+    )?;
+    let descriptor = descriptor("responses-test-route")?;
+    let plan = descriptor.validate_request(request.clone(), ValidationMode::Strict)?;
+    let new_authority = ResponsesRequestAuthority::from_admitted_operation(
+        &descriptor,
+        &plan,
+        &request,
+        new_account,
+        ResponsesSemanticRevisions::new(1, 1, 1)?,
+        None,
+        ResponsesStoragePolicy::Stateless,
+    )?;
+    let kind = ResponsesReplayKind::new("openai.output_item", 2);
+    let same = replay::validated_hosted_programs(&request, 1, kind, &old_authority)?;
+    assert_eq!(
+        same.live_program("old-call"),
+        Some(("old-program", "old-fingerprint"))
+    );
+    let foreign = replay::validated_hosted_programs(&request, 1, kind, &new_authority)?;
+    assert_eq!(foreign, crate::ResponsesHostedProgramContext::default());
     Ok(())
 }

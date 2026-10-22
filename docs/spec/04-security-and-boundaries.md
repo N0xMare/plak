@@ -1037,6 +1037,9 @@ conversation data, not a sanitized transcript. Import validates its bounds and
 content, then admits a new seeded session through the facade. No prior lease,
 terminal receipt, command, workflow, child or tool-call record becomes authority
 in the new session, and historical tool calls are never executed by import.
+Export documents also carry non-secret account-binding digests (linkable
+pseudonyms, never raw account identifiers or credentials) that are self-declared
+and grant no replay authority outside a local `/reload` handoff.
 Replay bindings in an export are self-declared, not authenticated. File import
 strips provider replay by default (including nested opaque tool-result parts).
 Only `/reload` with this machine's private one-use exact-bytes handoff receipt
