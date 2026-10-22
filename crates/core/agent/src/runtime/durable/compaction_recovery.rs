@@ -7,6 +7,7 @@ use crate::runtime::checkpoint::candidate::{
 use crate::runtime::checkpoint::io::{
     StoreCallError, StorePhase, commit_with_acknowledgement_recovery, store_call,
 };
+use crate::runtime::compaction::continuation::with_post_compaction_note;
 use crate::runtime::compaction::fold::{build_compaction_success_fold, reconstruct_compaction_cut};
 use crate::runtime::compaction::record::{
     CompactionReceiptKind, compaction_operation_component, validate_compaction_receipt,
@@ -30,7 +31,7 @@ use crate::runtime::operation_record::{
     compaction_success_lifecycle, operation_result_component, working_lifecycle_for_root,
 };
 use crate::runtime::terminal::DurableAgentError;
-use crate::runtime::{AgentBuilder, OperationId};
+use crate::runtime::{AgentBuilder, OperationId, PostCompactionNote};
 use crate::{
     AcquireBranch, AgentError, AgentErrorKind, CheckpointId, CommitCheckpoint,
     DurableOperationKind, DurableOperationRecord, DurableOperationState,
@@ -39,7 +40,7 @@ use crate::{
     RuntimeWorkingRoot, SessionStoreError, StoreAdmission,
 };
 use plakous_model::{
-    CanonicalHistory, Clock, CompiledProviderConfiguration, LanguageModel,
+    CanonicalHistory, Clock, CompiledProviderConfiguration, EntryId, IdGenerator, LanguageModel,
     ModelCallRecoveryOutcome, ModelOperationRoot, ModelResponse, PreparedCallRecord,
     ProviderCallRecoveryLocator,
 };
@@ -256,6 +257,10 @@ impl DurableSessionRuntime {
             if operations.request.version < 3 {
                 reconstruct_compaction_cut(checkpoint.manifest(), identity, &operations.request)?;
             }
+            // The recovered fold gets the note the live publication would
+            // have appended, from the same builder function.
+            let note = builder.post_compaction_note.clone();
+            let ids = Arc::clone(&builder.ids);
             let runtime = exact_compaction_runtime(
                 builder,
                 checkpoint,
@@ -495,6 +500,8 @@ impl DurableSessionRuntime {
                 &runtime.provider_configuration,
                 runtime.clock.as_ref(),
                 runtime.model_operation_timeout,
+                note.as_ref(),
+                ids.as_ref(),
             )
             .await
             {
@@ -1283,6 +1290,8 @@ pub(in crate::runtime) async fn recovery_publish_compaction_success(
     current_configuration: &CompiledProviderConfiguration,
     clock: &dyn Clock,
     authority_timeout: Duration,
+    note: Option<&PostCompactionNote>,
+    ids: &dyn IdGenerator,
 ) -> Result<DurableSessionAddress, CompactionCompletionError> {
     let fold = build_compaction_success_fold(
         owner.checkpoint.manifest(),
@@ -1298,12 +1307,19 @@ pub(in crate::runtime) async fn recovery_publish_compaction_success(
         authority_timeout,
     )
     .await?;
+    let history = with_post_compaction_note(
+        fold.history,
+        owner.checkpoint.manifest().canonical().history(),
+        note,
+        || EntryId::generate(clock, ids).map_err(|error| AgentError::from_identity(&error)),
+    )
+    .map_err(CompactionCompletionError::semantic)?;
     owner
         .publish(
             identity.success_checkpoint,
             compaction_success_lifecycle(&fold.ledger)
                 .map_err(CompactionCompletionError::semantic)?,
-            fold.history,
+            history,
             fold.ledger,
             fold.context,
             None,

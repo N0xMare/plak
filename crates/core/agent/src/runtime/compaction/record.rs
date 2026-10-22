@@ -516,9 +516,9 @@ pub(in crate::runtime) fn validate_compaction_receipt(
 }
 
 /// Whether `published` is the fold's `successor` followed by nothing but what
-/// live publication appends to it: at most one post-compaction note and, after
-/// a turn-fence fold, the turn continuation note. A recovery-published fold
-/// appends neither.
+/// publication appends to it: at most one post-compaction note and, after a
+/// live turn-fence fold, the turn continuation note. Recovery appends the note
+/// its own builder derives, which may be none.
 ///
 /// The note's text comes from the builder's note function, which a receipt
 /// query does not have and which may change between builds, so the note is

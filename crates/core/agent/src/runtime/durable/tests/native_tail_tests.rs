@@ -46,11 +46,11 @@ async fn native_endpoint_compaction(
         true,
         LocalDurabilityDisposition::DurableRequired,
     )?;
-    let builder = builder.with_scheduled_compaction_enabled(false);
-    let builder = match plan_note {
+    let noted = |builder: AgentBuilder| match plan_note {
         Some(note) => builder.post_compaction_note(Arc::new(move |_, _| Some(note.to_owned()))),
         None => builder,
     };
+    let builder = noted(builder.with_scheduled_compaction_enabled(false));
     let agent = sessions
         .create(&format!("create:{operation_id}"), builder)
         .await?;
@@ -119,7 +119,8 @@ async fn native_endpoint_compaction(
         store.expire_active_lease();
         let (restart_builder, restart_model) = compact_fixture()?;
         let recovered =
-            Box::pin(sessions.recover_compaction(operation_id, source, restart_builder)).await?;
+            Box::pin(sessions.recover_compaction(operation_id, source, noted(restart_builder)))
+                .await?;
         assert_eq!(
             recovered,
             DurableCompactionRecoveryOutcome::Compacted {
@@ -551,4 +552,54 @@ async fn a_noted_native_successor_keeps_a_valid_receipt_across_reopen() -> TestR
     );
     assert_eq!(model.paid_compaction_calls.load(Ordering::Acquire), 0);
     Ok(())
+}
+
+/// A native compaction recovered after its owner was lost publishes the plan
+/// note once, as the live publication would have, and its receipt validates
+/// from a reopened runtime.
+#[tokio::test]
+async fn a_noted_native_compaction_recovered_after_owner_loss_keeps_its_note() -> TestResult {
+    const NOTE: &str = "restored plan: native recovery";
+    let run = native_endpoint_compaction(
+        378_000,
+        &[60_000, 2_000],
+        0,
+        "compact:native-noted-recovered",
+        true,
+        Some(NOTE),
+    )
+    .await?;
+    let (segments, _) = run.published().await?;
+    let notes = segments
+        .iter()
+        .flat_map(HistorySegment::items)
+        .flat_map(ConversationItem::blocks)
+        .filter(|block| matches!(block, ContentBlock::Text(text) if text.text() == NOTE))
+        .count();
+    assert_eq!(notes, 1, "the recovered successor holds the note once");
+    let last = segments.last().ok_or("empty successor")?;
+    assert_eq!(last.kind(), HistorySegmentKind::Steering);
+    assert!(matches!(
+        last.items().first().and_then(|item| item.blocks().first()),
+        Some(ContentBlock::Text(text)) if text.text() == NOTE
+    ));
+    let reopened = DurableSessionRuntime::current(
+        run.store.clone(),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("lease")?,
+    )?;
+    assert_eq!(
+        reopened
+            .compaction_receipt(run.operation_id, run.source)
+            .await?,
+        DurableCompactionReceipt::Compacted {
+            source: run.source,
+            target: DurableSessionAddress::new(
+                run.source.session_id,
+                run.source.branch_id,
+                run.identity.success_checkpoint,
+            ),
+        }
+    );
+    run.shutdown().await
 }

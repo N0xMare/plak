@@ -4,12 +4,13 @@ use super::commands::ordinary_capacity_refusal;
 use super::operations::transition_admission;
 use crate::input::UserInput;
 use crate::runtime::admission::validate_configuration_runtime_authority;
-use crate::runtime::compaction::continuation::with_turn_continuation_note;
+use crate::runtime::compaction::continuation::{
+    with_post_compaction_note, with_turn_continuation_note,
+};
 use crate::runtime::compaction::fold::{
     build_compaction_success_fold, compact_diagnostic, nested_observation_token_upper_bound,
 };
 use crate::runtime::compaction::live::{CompactionStreamError, LiveCompaction};
-use crate::runtime::compaction::placeholder::harness_note_segment;
 use crate::runtime::compaction::record::{
     compaction_attempt_id, compaction_checkpoint_id, compaction_operation_component,
 };
@@ -2865,25 +2866,13 @@ impl Driver {
             authority_timeout,
         )
         .await?;
-        if let Some(note) = self
-            .post_compaction_note
-            .as_ref()
-            .and_then(|derive| derive(&source_history, &fold.history))
-        {
-            // Receipt validation rebuilds the note with the same constructor.
-            let segment = harness_note_segment(
-                self.entry_id()
-                    .map_err(CompactionCompletionError::semantic)?,
-                note,
-            )
-            .map_err(CompactionCompletionError::semantic)?;
-            fold.history = fold.history.append(segment).map_err(|_| {
-                CompactionCompletionError::semantic(AgentError::new(
-                    AgentErrorKind::Internal,
-                    "compaction note could not be appended",
-                ))
-            })?;
-        }
+        fold.history = with_post_compaction_note(
+            fold.history,
+            &source_history,
+            self.post_compaction_note.as_ref(),
+            || self.entry_id(),
+        )
+        .map_err(CompactionCompletionError::semantic)?;
         if turn_id.is_some() {
             fold.history = with_turn_continuation_note(fold.history, identity.workflow_id)
                 .map_err(CompactionCompletionError::semantic)?;

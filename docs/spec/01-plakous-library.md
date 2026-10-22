@@ -6710,9 +6710,14 @@ the same plan. The note is a steering segment with `Instruction` provenance,
 appended atomically to the compacted successor. Mid-turn it is therefore
 visible immediately after the fold; after an idle compaction it is already the
 last segment when the next turn appends its prompt. It is ordinary committed
-history, so release, resume and recovery replay it exactly once. Failure to
-construct or append the note fails the compaction publication rather than
-publishing a successor that silently lost the restoration instruction.
+history, so release, resume and recovery replay it exactly once. A
+session-workflow fold that `recover_compaction` or the next open publishes from
+its recorded summary (§10.5) appends the note the same way, derived by the
+recovering or opening builder's function from the same source and successor,
+so a fold recovered after owner loss keeps its restoration note; recovery still
+never dispatches. Failure to construct or append the note fails the compaction
+publication rather than publishing a successor that silently lost the
+restoration instruction.
 
 **The turn continues after a mid-turn fold.** After a fold, the model sees its
 earlier turn as one assistant summary that describes the next step, and some
@@ -7244,7 +7249,10 @@ item, with provenance, ledger and context recomputed from that shape; any other
 successor is corrupt. A success receipt's published history, harness or
 native, must be that recomputed successor followed by nothing but what
 publication appends to it (§10.2): at most one post-compaction note and, after
-a turn-fence fold, the turn continuation note. The note's text belongs to the
+a live turn-fence fold, the turn continuation note (recovery never publishes a
+turn-fence fold; a lost owner's fold is abandoned). A recovery-published fold
+carries the note its own builder derives, which may be none, so the bare
+successor is also accepted. The note's text belongs to the
 builder's note function, which a receipt query does not have and which may
 change between builds, so validation rebuilds the note's steering segment from
 the entry and text it holds and accepts it only when that rebuild is the whole

@@ -1006,6 +1006,8 @@ impl PreparedAgent {
             configuration: &self.provider_configuration,
             clock: self.clock.as_ref(),
             authority_timeout: self.config.model_operation_timeout,
+            post_compaction_note: self.post_compaction_note.as_ref(),
+            ids: self.ids.as_ref(),
         };
         let recovery = Box::pin(
             self.authority

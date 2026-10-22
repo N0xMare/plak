@@ -8,6 +8,7 @@
 //! step instead of taking it. The note sits at the tail, where the model is
 //! working, and says the task is still open.
 
+use crate::runtime::PostCompactionNote;
 use crate::runtime::compaction::placeholder::harness_note_segment;
 use crate::runtime::compaction::record::compaction_uuid;
 use crate::{AgentError, AgentErrorKind, SessionWorkflowId};
@@ -57,6 +58,29 @@ fn is_turn_continuation_note(segment: &HistorySegment) -> bool {
                 matches!(block, ContentBlock::Text(text)
                     if text.text().starts_with(TURN_CONTINUATION_NOTE_MARKER))
             })
+}
+
+/// Appends the post-compaction note `note` derives from a fold of `source`
+/// into `successor`, when it derives one. Live and recovery publication both
+/// call this over the same source and successor, so a recovered fold carries
+/// the note the live one would have.
+pub(in crate::runtime) fn with_post_compaction_note(
+    successor: CanonicalHistory,
+    source: &CanonicalHistory,
+    note: Option<&PostCompactionNote>,
+    entry_id: impl FnOnce() -> Result<EntryId, AgentError>,
+) -> Result<CanonicalHistory, AgentError> {
+    let Some(text) = note.and_then(|derive| derive(source, &successor)) else {
+        return Ok(successor);
+    };
+    successor
+        .append(harness_note_segment(entry_id()?, text)?)
+        .map_err(|_| {
+            AgentError::new(
+                AgentErrorKind::Internal,
+                "compaction note could not be appended",
+            )
+        })
 }
 
 pub(in crate::runtime) fn with_turn_continuation_note(

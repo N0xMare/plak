@@ -6,7 +6,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use plakous_model::{Clock, CompiledProviderConfiguration, LanguageModel, ModelResponse};
+use plakous_model::{
+    Clock, CompiledProviderConfiguration, IdGenerator, LanguageModel, ModelResponse,
+};
 
 use super::compaction_recovery::{
     close_abandoned_compaction, decode_compaction_failure_evidence,
@@ -14,6 +16,7 @@ use super::compaction_recovery::{
     recovery_publish_compaction_success,
 };
 use super::{CompactionRecoveryOwner, DurableCompactionOperations};
+use crate::runtime::PostCompactionNote;
 use crate::runtime::compaction::fold::reconstruct_compaction_cut;
 use crate::runtime::compaction::{
     CompactionCompletionError, DurableCompactionIdentity, DurableCompactionRequestRecord,
@@ -43,12 +46,16 @@ pub(in crate::runtime) enum WorkflowRow {
 }
 
 /// What a closure's publication needs from the opening agent: the Completed
-/// row measures the successor exactly as the live publication does.
+/// row measures and notes the successor exactly as the live publication does.
 pub(in crate::runtime) struct WorkflowClosureRuntime<'a> {
     pub(in crate::runtime) model: Arc<dyn LanguageModel>,
     pub(in crate::runtime) configuration: &'a CompiledProviderConfiguration,
     pub(in crate::runtime) clock: &'a dyn Clock,
     pub(in crate::runtime) authority_timeout: Duration,
+    /// The opening agent's post-compaction note, applied as live publication
+    /// applies it.
+    pub(in crate::runtime) post_compaction_note: Option<&'a PostCompactionNote>,
+    pub(in crate::runtime) ids: &'a dyn IdGenerator,
 }
 
 fn integrity(message: &'static str) -> AgentError {
@@ -225,6 +232,8 @@ async fn publish_row(
                 runtime.configuration,
                 runtime.clock,
                 runtime.authority_timeout,
+                runtime.post_compaction_note,
+                runtime.ids,
             )
             .await
             {
