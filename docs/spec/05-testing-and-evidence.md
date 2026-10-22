@@ -2502,11 +2502,17 @@ in `tests/live/` (whose README lists every scenario and its oracle):
   stays within its own tool's per-call cap (pi `read` returns at most 50 KiB,
   one Codex `exec_command` result at most 40,000 bytes), so a batch on such a
   pack takes more, shorter reads, and `bulk.txt` holds every planned line. On
-  the Codex and pi packs the plan is phrased as sequential reads, one call per
-  response, each under both caps, because their models did not reliably issue
-  one batch per round; a pi round is then a single read, so the sequential
-  reads still pass the trigger and the read that passes it lands on an almost
-  full window. Sizing converts bulk bytes to tokens at the pack's measured bytes per
+  the pi pack the plan is phrased as sequential reads, one call per response,
+  each under both caps, because its model did not reliably issue one batch per
+  round; a pi round is then a single read, so the sequential reads still pass
+  the trigger and the read that passes it lands on an almost full window. On
+  the Codex pack the growth and overflow `bulk.txt` is the planned reads as
+  pages, each a header line with a random check word and the next page (or
+  that it is the last) followed by that read's lines, read one page per Code
+  Mode exec through a pager script, with no loop in an exec and no
+  `max_output_tokens`; the model writes each page's check word to
+  `pages/<k>.txt`. The Codex growth turn must write every page's word; the
+  overflow turn reports the count, which a `model` miss names. Sizing converts bulk bytes to tokens at the pack's measured bytes per
   token, and a pi growth `bulk.txt` holds only the reads that pass the trigger
   plus a few more. The overflow
   remedy is whichever the session log shows: an in-turn
@@ -2526,7 +2532,12 @@ in `tests/live/` (whose README lists every scenario and its oracle):
   segments` when the checkpoint's provenance does not name it). The summary
   ciphertext is not that text, and an empty assistant item is not the
   segment. `acknowledged.txt` and
-  `recalled.txt` in the adopted checkout must match `codeword.txt`. That
+  `recalled.txt` in the adopted checkout must match the fact file. The fact
+  is a neutral code word in `codeword.txt`, except on the Codex pack, which
+  read a code word as a secret it must not reproduce: there it is the
+  project's release label in `release_label.txt`, which a later step needs.
+  On every pack the oracle is that the copies match the fact file and that
+  no fact file is read again after the compaction. That
   projection carries no `model.operation_usage`, so a history without the
   segment is `model`. `pending` is a failure of `session show` or `session
   log` itself, not a missing segment. Chapter 07

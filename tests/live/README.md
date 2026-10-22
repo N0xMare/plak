@@ -225,8 +225,8 @@ private home copied from the scratch home. Spec 07's only compaction key is `[co
 (pinned `true`). `[turn] max_model_rounds` is pinned to 128 so a growth turn
 cannot run away and is not stopped before a handful of read pages. There is
 no key that lowers a context window or a compaction trigger. Growth is pack-aware. Codex and the OpenAI API are native Code Mode and have
-no `read_file`: those routes print `bulk.txt` with `exec_command`, at most
-20 lines per call. Other packs use their read tool (`read_file`, `Read`, or
+no `read_file`: those routes read a paged `bulk.txt` through `page.py` with
+`exec_command`, one 20-line page per exec (below). Other packs use their read tool (`read_file`, `Read`, or
 `read`) with the same 20-line limit on a sequential growth turn, except that a
 pi `read` takes 32 lines once those are at most an eighth of the window (from
 384,000 tokens): 34 would fill its 50 KiB cap. `bulk.txt` is
@@ -250,8 +250,8 @@ cap: pi `read` returns at most 50 KiB and one Codex `exec_command` result at
 most 40,000 bytes, so a batch takes as many reads as that needs (at least two).
 `bulk.txt` holds at least the planned lines. Codex refused every batched
 wording, so on Codex the
-same total is 36 sequential 21-line reads, one `exec_command` per Code Mode
-exec (a multi-slice exec passes the round cap and is clipped). DeepSeek on
+same total is 36 pages of 21 lines, one page per Code Mode exec (a
+multi-slice exec passes the round cap and is clipped). DeepSeek on
 Messages issued one read per response whatever the batch wording, so a pi
 round is a single read of at most 32 lines, phrased as sequential reads one
 per response: 29 reads at a 967,232-token DeepSeek ceiling, the last two past
@@ -266,7 +266,18 @@ oracle counts. A Codex child page is two halves of 26 base64 lines read by one
 exec through `page.py`, one half returned with `notify` and one with `text`:
 one `exec_command` result stops at 40,000 bytes and two halves stay under the
 round cap, so the 272k trigger is six pages (ten for 500k) instead of dozens of 30 KB reads
-(told only an exact read count, a Codex child stopped after 3 to 9 of them). The default page
+(told only an exact read count, a Codex child stopped after 3 to 9 of them).
+Codex growth and overflow page the same way: `bulk.txt` is pages of one header
+line (check word, next page or last) and the planned digit lines (20 per page
+for growth, the plan's 21 for overflow on a 272k window), each page one exec of
+`python3 page.py k` returned with `text`, with no loop in an exec and no
+`max_output_tokens`, and each page's check word written to `pages/<k>.txt`.
+Told to print slices of a plain file, `gpt-6-luna` stopped overflow after 8 of
+36 ("the output per call was unexpectedly enormous") and `gpt-6.1-sol` looped
+over all 70 growth slices in one exec with `max_output_tokens`, which the round
+cap clipped (prepared input peaked near 76k). The Codex growth turn must write
+every page's check word; overflow reports the count and names it in a `model`
+miss, since a placeholder shrink or a capacity stop can end paging early. The default page
 count follows the route's catalog window: 6 for the 256k–272k grok-4.7 and
 Codex/OpenAI rows, 8 for 500k `grok-4.6` and `gpt-6.1-sol` (`codex-sol`), 16 for the 1M Claude rows, and 6
 when this driver does not know the window. DeepSeek reports 1M, but Plak's
@@ -290,7 +301,7 @@ to eof: 31 reads of 32 lines (992 lines) at a 967,232-token ceiling, where 15
 pages read 20 lines at a time were 131 calls and DeepSeek stopped after about
 20. The page count still sets the turn timeouts and the reported
 `growth_pages`.
-The pre-compaction fact is a neutral code word (`ZEBRA-` and six digits) that lives only in `codeword.txt`; prompts call it a code word and ask for it from memory, because "token" wording drew Codex refusals ("I can't write the previously disclosed token into another file"). A pass does not accept
+The pre-compaction fact is a neutral code word (`ZEBRA-` and six digits) that lives only in `codeword.txt`; prompts call it a code word and ask for it from memory, because "token" wording drew Codex refusals ("I can't write the previously disclosed token into another file"). On the Codex pack even the code word read as a secret ("I can't print or reproduce an earlier secret code word into another file"), so there the fact is the project's release label (`rel-` and six digits) in `release_label.txt`, which a later step needs, and the recall steps ask for it without opening the files again rather than "from memory". The oracle is the same on every pack: the copies match the fact file, which is not read again after the compaction. A pass does not accept
 the model's own claim that it compacted or remembered. Reports name
 `route_report` (class, account, effort, protocol, `composition_requested`, which
 the private home pins as `plakous-default`, and `composition_bound`, the
@@ -299,10 +310,10 @@ the shared home and the scenario private home.
 
 | Scenario | Surface | Passes when |
 | --- | --- | --- |
-| `in_turn_compaction` | `plak agent` | one turn pages `bulk.txt` until the session log shows `compact.started` reason `scheduled` and `compact.finished` outcome `committed` inside that turn's admitted..terminal bracket; prepared input shrinks when both figures are present; `recalled.txt` matches `codeword.txt`; the fact files are not read again after that commit; a follow-up writes `followup.txt` with the same code word |
-| `overflow` | `plak agent` | rounds of parallel read batches, each under the round cap (sequential reads, one per response, on Codex and pi), then the log shows a remedy: an in-turn `scheduled` compact, a `context.placeholders` shrink inside that turn, or a `failed` / `ContextLimit` turn followed by `compact.started` reason `capacity` and a committed finish; `acknowledged.txt` is unchanged, and a later turn writes `continuation.txt` containing `CONTINUED` |
+| `in_turn_compaction` | `plak agent` | one turn pages `bulk.txt` until the session log shows `compact.started` reason `scheduled` and `compact.finished` outcome `committed` inside that turn's admitted..terminal bracket; prepared input shrinks when both figures are present; `recalled.txt` matches the fact file (`codeword.txt`, or `release_label.txt` on Codex); the fact files are not read again after that commit; on Codex every `pages/<k>.txt` holds page k's check word; a follow-up writes `followup.txt` with the same fact |
+| `overflow` | `plak agent` | rounds of parallel read batches, each under the round cap (sequential reads, one per response, on pi; one check-word page per exec on Codex), then the log shows a remedy: an in-turn `scheduled` compact, a `context.placeholders` shrink inside that turn, or a `failed` / `ContextLimit` turn followed by `compact.started` reason `capacity` and a committed finish; `acknowledged.txt` is unchanged, and a later turn writes `continuation.txt` containing `CONTINUED` |
 | `kill_reopen` | `plak agent` | SIGKILL after the marker process is observed running, or after 15s if it never appears (the marker is an argv token, not a shell comment); reopen emits JSONL `recovered` and the session log has `turn.abandoned` with `cause=process_lost` and `claim=running_tool`, `nothing_started` or `tool_round_completed` (spec 02 §2.4: Code Mode can abandon as `nothing_started` when exec was shown before the cell was durably prepared; a kill after a finalized tool round and before the next model request abandons as `tool_round_completed`; process restart does not log `session.recovered`); the follow-up writes `after_reopen.txt` containing `REOPENED` |
-| `child_compaction` | `plak agent` | after the root quits, `plak session log <root>.cN --json` contains a committed compaction segment and the adopted checkout has `acknowledged.txt` and `recalled.txt` matching `codeword.txt` and every `pages/<k>.txt` holding page k's check word. `cN` comes from the root JSONL `tree` frames or spawn/wait receipts, otherwise from `plak session show <root>`. The segment projects as `kind` `compaction` with text beginning `compacted ` (the summary is not display text; an empty assistant item is not the segment; the harness `compact` row is not on this log). `pending` only when that show/log channel fails. A child tool failure on a `tool` event (a root call the model retried successfully, such as an adopt refused as `target_changed` and then made with the current target, does not count), a topology node, or a wait receipt (`agents[].blocked` with `account`, `quota`, `resets_at`) is that failure. `blocked.quota` of `rate_limited` or a quota exhaustion, or provider-unavailable fault text, is `provider` (spec 05 §3.2); any other child failure is `harness`. The projection has no prepared-input row, so a missing segment is `model`, as is a missing or wrong page check word |
+| `child_compaction` | `plak agent` | after the root quits, `plak session log <root>.cN --json` contains a committed compaction segment and the adopted checkout has `acknowledged.txt` and `recalled.txt` matching the fact file and every `pages/<k>.txt` holding page k's check word. `cN` comes from the root JSONL `tree` frames or spawn/wait receipts, otherwise from `plak session show <root>`. The segment projects as `kind` `compaction` with text beginning `compacted ` (the summary is not display text; an empty assistant item is not the segment; the harness `compact` row is not on this log). `pending` only when that show/log channel fails. A child tool failure on a `tool` event (a root call the model retried successfully, such as an adopt refused as `target_changed` and then made with the current target, does not count), a topology node, or a wait receipt (`agents[].blocked` with `account`, `quota`, `resets_at`) is that failure. `blocked.quota` of `rate_limited` or a quota exhaustion, or provider-unavailable fault text, is `provider` (spec 05 §3.2); any other child failure is `harness`. The projection has no prepared-input row, so a missing segment is `model`, as is a missing or wrong page check word |
 
 A growth turn that finishes without that compaction is `harness` only when `model.operation_usage` shows prepared input at the lower of the compaction trigger and the catalog window minus one read page, and `model` otherwise. The trigger is spec 01 §10.3: 80% for `grok-4.6`, otherwise the window minus a tenth (about 90%) when that exceeds the semantic-summary headroom. A peak between that trigger and the window minus one page is harness, not a model miss. The same split applies to an overflow turn that completes without a remedy, so sequential reads that never reach the bar are not a harness failure. It does not apply to `child_compaction`: the child history projection has no `model.operation_usage` row, and a history without the compaction segment is `model`. A `ContextLimit` stop without a committed recovery is `harness`. Provider refusal is classified the same way as smoke.
 

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import hashlib
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -18,6 +19,9 @@ import live  # noqa: E402
 import long_session  # noqa: E402
 import smoke  # noqa: E402
 import soak  # noqa: E402
+
+# sha256 of the grok, claude and pi prompts in test_non_codex_prompts_are_pinned.
+NON_CODEX_PROMPTS_SHA256 = "c212f89396bf7545432a894ab5161246fb0b967a1af073cca428d163a666fb6f"
 
 FAKE_PLAK = r'''#!/usr/bin/env python3
 import json
@@ -86,8 +90,23 @@ def reply(command_id, events):
 
 
 def token():
-    path = repo / "codeword.txt"
-    return path.read_text().strip() if path.is_file() else ""
+    for name in ("codeword.txt", "release_label.txt"):
+        path = repo / name
+        if path.is_file():
+            return path.read_text().strip()
+    return ""
+
+
+def write_pages():
+    """Each paged bulk.txt header's check word into pages/<k>.txt, unless told to skip."""
+    if (home / "skip-pages").is_file():
+        return
+    (repo / "pages").mkdir(exist_ok=True)
+    for line in (repo / "bulk.txt").read_text().splitlines():
+        if line.startswith("Page "):
+            index = line.split()[1]
+            word = line.split("Check word: ", 1)[1].split(".", 1)[0]
+            (repo / "pages" / f"{index.rstrip('.')}.txt").write_text(word + "\n")
 
 
 def lifecycle(turn_id, phase, **extra):
@@ -129,12 +148,7 @@ for line in sys.stdin:
     if "Spawn one worker child" in text:
         (repo / "acknowledged.txt").write_text(token() + "\n")
         (repo / "recalled.txt").write_text(token() + "\n")
-        (repo / "pages").mkdir(exist_ok=True)
-        for line in (repo / "bulk.txt").read_text().splitlines():
-            if line.startswith("Page "):
-                index = line.split()[1]
-                word = line.split("Check word: ", 1)[1].split(".", 1)[0]
-                (repo / "pages" / f"{index.rstrip('.')}.txt").write_text(word + "\n")
+        write_pages()
         reply(command_id, [
             {"v": 1, "kind": "tree", "nodes": [
                 {"depth": 0, "agent_id": "root", "status": "running"},
@@ -147,8 +161,11 @@ for line in sys.stdin:
             lifecycle("root", "completed"),
         ])
         continue
-    if "parallel batch" in text:
+    if "parallel batch" in text or ("page.py" in text and "recalled.txt" not in text):
+        if "page.py" in text:
+            write_pages()
         log({"kind": "turn.lifecycle", "phase": "admitted", "turn_id": "over"})
+        log({"kind": "tool.started", "name": "exec", "subject": "python3 page.py 1"})
         log({"kind": "turn.lifecycle", "phase": "failed", "turn_id": "over"})
         log({"kind": "compact.started", "reason": "capacity"})
         log({"kind": "compact.finished", "outcome": "committed",
@@ -178,16 +195,20 @@ for line in sys.stdin:
         continue
     if "recalled.txt" in text and "bulk.txt" in text:
         (repo / "recalled.txt").write_text(token() + "\n")
+        paged = "page.py" in text
+        if paged:
+            write_pages()
         log({"kind": "turn.lifecycle", "phase": "admitted", "turn_id": "grow"})
         for _ in range(4):
-            log({"kind": "tool.started", "name": "read_file", "subject": "bulk.txt"})
+            log({"kind": "tool.started", "name": "exec" if paged else "read_file",
+                 "subject": "python3 page.py 1" if paged else "bulk.txt"})
         log({"kind": "compact.started", "reason": "scheduled"})
         log({"kind": "compact.finished", "outcome": "committed",
              "input_tokens_before": 200000, "input_tokens_after": 8000})
         log({"kind": "turn.lifecycle", "phase": "completed", "turn_id": "grow"})
         reply(command_id, [lifecycle("grow", "admitted"), lifecycle("grow", "completed")])
         continue
-    if "acknowledged.txt" in text and "codeword.txt" in text:
+    if "acknowledged.txt" in text and ("codeword.txt" in text or "release_label.txt" in text):
         (repo / "acknowledged.txt").write_text(token() + "\n")
         log({"kind": "turn.lifecycle", "phase": "admitted", "turn_id": "plant"})
         log({"kind": "tool.started", "name": "read_file", "subject": "codeword.txt"})
@@ -387,11 +408,11 @@ class LongSessionOracleTests(unittest.TestCase):
         self.assertEqual(long_session.reread_after_commit(records, 0, 2), [])
 
     def test_prompts_do_not_carry_the_fact_token(self):
-        token = "ZEBRA-123456"
-        for prompt in (long_session.growth_prompt(10), long_session.follow_prompt(),
-                       long_session.overflow_prompt(20, [[1, 21], [41, 61]]), long_session.child_prompt(),
-                       long_session.plant_prompt()):
-            self.assertNotIn(token, prompt)
+        for pack, token in (("grok", "ZEBRA-123456"), ("codex", "rel-123456")):
+            for prompt in (long_session.growth_prompt(10, pack), long_session.follow_prompt(pack),
+                           long_session.overflow_prompt(20, [[1, 21], [41, 61]], pack),
+                           long_session.child_prompt(pack), long_session.plant_prompt(pack)):
+                self.assertNotIn(token, prompt)
         long_session.hide_token(long_session.growth_prompt(4), token)
         with self.assertRaises(live.ScenarioFailure):
             long_session.hide_token(f"remember {token}", token)
@@ -671,7 +692,7 @@ class LongSessionOracleTests(unittest.TestCase):
         codex = long_session.growth_prompt(40, "codex")
         self.assertIn("exec_command", codex)
         self.assertNotIn("read_file", codex)
-        self.assertIn(str(long_session.GROWTH_CALL_LINES), codex)
+        self.assertIn('{cmd: "python3 page.py k"}', codex)
         self.assertNotIn("2000", long_session.growth_prompt(40))
         self.assertNotIn("2000", long_session.overflow_prompt(20, [[1, 21]]))
 
@@ -705,10 +726,9 @@ class LongSessionOracleTests(unittest.TestCase):
         self.assertEqual(long_session.round_cap_bytes(65_536), 32_768)
         self.assertEqual(long_session.round_cap_bytes(272_000), 87_040)
         prompt = long_session.overflow_prompt(21, [[1, 22], [43, 64]], "codex")
-        self.assertIn("in exactly 4 sequential calls of 21 lines each", prompt)
+        self.assertTrue(prompt.startswith(long_session.codex_paging()))
         self.assertIn("exec_command", prompt)
-        self.assertTrue(prompt.startswith("Page through bulk.txt"))
-        self.assertTrue(long_session.growth_prompt(40, "codex").startswith("Print bulk.txt"))
+        self.assertTrue(long_session.growth_prompt(40, "codex").startswith(long_session.codex_paging()))
         self.assertIn("non-interactive command", long_session.plant_prompt("codex"))
         for pack in ("codex", "grok", "claude", "pi"):
             for text in (long_session.growth_prompt(40, pack), prompt):
@@ -902,9 +922,84 @@ class LongSessionOracleTests(unittest.TestCase):
                 over_lines, batches = long_session.overflow_plan(window, pack, None, route.model)
                 self.assertEqual((over_lines, len(batches[0]), len(batches)), plan, name)
         prompt = long_session.overflow_prompt(21, [[1, 22]] * 18, "codex")
-        self.assertTrue(prompt.startswith("Page through bulk.txt"))
+        self.assertTrue(prompt.startswith(long_session.codex_paging()))
         self.assertNotIn(long_session.OVERFLOW_PURPOSE, prompt)
-        self.assertTrue(prompt.endswith("After the last call, reply with exactly: done"))
+        self.assertTrue(prompt.endswith("After the last page, reply with exactly: done"))
+
+    def test_non_codex_prompts_are_pinned(self):
+        """The codex reframing leaves every other pack's prompts byte-identical."""
+        texts = {pack: [long_session.plant_prompt(pack), long_session.growth_prompt(1_044, pack),
+                        long_session.growth_prompt(992, pack, 32),
+                        long_session.overflow_prompt(20, [[1, 21], [41, 61]], pack),
+                        long_session.overflow_prompt(32, [[1]] * 29, pack),
+                        long_session.child_prompt(pack, 20), long_session.child_prompt(pack, 32),
+                        long_session.follow_prompt(pack)]
+                 for pack in ("grok", "claude", "pi")}
+        digest = hashlib.sha256(json.dumps(texts, sort_keys=True).encode()).hexdigest()
+        self.assertEqual(digest, NON_CODEX_PROMPTS_SHA256)
+
+    def test_codex_plants_a_release_label_not_a_code_word(self):
+        """gpt-6-luna refused to reproduce an "earlier secret code word"."""
+        fact = long_session.new_fact("codex", lambda size: b"\x00\x00\x00\x05")
+        self.assertEqual(fact, "rel-100005")
+        self.assertEqual(long_session.new_fact("grok", lambda size: b"\x00\x00\x00\x05"),
+                         "ZEBRA-100005")
+        self.assertEqual(long_session.fact_file("codex"), "release_label.txt")
+        self.assertEqual(long_session.fact_file("pi"), "codeword.txt")
+        self.assertIn("release_label.txt", long_session.FACT_FILES)
+        plant = long_session.plant_prompt("codex")
+        self.assertTrue(plant.startswith("This project's release label is in release_label.txt, "
+                                         "and a later step needs it."))
+        child = long_session.child_prompt("codex", 20)
+        prompts = (plant, long_session.growth_prompt(1_044, "codex"),
+                   long_session.overflow_prompt(21, [[1, 22]] * 18, "codex"),
+                   long_session.follow_prompt("codex"), child)
+        for prompt in prompts:
+            for word in ("code word", "codeword", "secret", "from memory"):
+                self.assertNotIn(word, prompt)
+            self.assertNotRegex(prompt, r"\btoken\b")
+        self.assertIn(long_session.CODEX_RECALL_STEP, prompts[1])
+        self.assertIn(f"Then {long_session.CODEX_CHILD_RECALL_STEP}", child)
+        self.assertIn("release label", long_session.follow_prompt("codex"))
+        self.assertIn("followup.txt", long_session.follow_prompt("codex"))
+
+    def test_codex_growth_and_overflow_read_one_check_word_page_per_exec(self):
+        paging = long_session.codex_paging()
+        self.assertIn('const r = await tools.exec_command({cmd: "python3 page.py k"});\n'
+                      "text(r.output);\n", paging)
+        for rule in ("no loops", "never a second page in the same exec", "no max_output_tokens",
+                     "pages/k.txt", "Keep paging until you have read the last page"):
+            self.assertIn(rule, paging)
+        self.assertTrue(long_session.growth_prompt(1_044, "codex").endswith(
+            f"After the last page, {long_session.CODEX_RECALL_STEP} Reply with exactly: done"))
+        # Read count is not stated: a Codex child told it bailed early.
+        self.assertNotIn("52", long_session.growth_prompt(1_044, "codex"))
+        self.assertNotIn("36", long_session.overflow_prompt(21, [[1, 22]] * 18, "codex"))
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            words = long_session.write_slice_pages(repo / "bulk.txt", 3, 21)
+            pages = [subprocess.run([sys.executable, long_session.PAGER, str(page)], cwd=repo,
+                                    check=True, capture_output=True, text=True).stdout
+                     for page in (1, 2, 3)]
+            self.assertEqual(long_session.pages_written(repo, words), 0)
+            self.assertEqual(long_session.page_progress(repo, words), "check words for 0/3 pages")
+            (repo / "pages").mkdir()
+            (repo / "pages" / "2.txt").write_text(words[1] + "\n")
+            self.assertEqual(long_session.page_progress(repo, words), "check words for 1/3 pages")
+        self.assertEqual(long_session.page_progress(repo, []), "")
+        for index, text in enumerate(pages):
+            lines = text.splitlines()
+            after = "This is the last page." if index == 2 else f"The next page is page {index + 2}."
+            self.assertEqual(lines[0], f"Page {index + 1}. Check word: {words[index]}. {after}")
+            self.assertEqual(len(lines), 22)
+            self.assertTrue(set("".join(lines[1:])) <= set("0123456789 "))
+            # One exec_command result is at most 40,000 bytes.
+            self.assertLess(len(text.encode()), long_session.CODEX_EXEC_CALL_BYTES)
+        # The pager names the paging turn's window like a direct bulk.txt read.
+        records = [{"kind": "turn.lifecycle", "phase": "admitted"},
+                   {"kind": "tool.started", "name": "exec", "arguments": "python3 page.py 3"},
+                   {"kind": "turn.lifecycle", "phase": "completed"}]
+        self.assertEqual(long_session.bulk_windows(records), [(0, 3)])
 
     def test_child_pages_carry_the_check_words_the_oracle_counts(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -919,7 +1014,7 @@ class LongSessionOracleTests(unittest.TestCase):
                 self.assertEqual(lines[index * 5], f"Page {index + 1}. Check word: {word}. {after}")
                 self.assertTrue(set("".join(lines[index * 5 + 1:index * 5 + 5]))
                                 <= set("0123456789 "))
-            self.assertFalse((repo / long_session.CHILD_PAGER).exists())
+            self.assertFalse((repo / long_session.PAGER).exists())
             self.assertEqual(long_session.pages_written(repo, words), 0)
             (repo / "pages").mkdir()
             (repo / "pages" / "1.txt").write_text(words[0] + "\n")
@@ -938,7 +1033,7 @@ class LongSessionOracleTests(unittest.TestCase):
             for page in (1, 2):
                 for part in (1, 2):
                     halves[page, part] = subprocess.run(
-                        [sys.executable, long_session.CHILD_PAGER, str(page), str(part)],
+                        [sys.executable, long_session.PAGER, str(page), str(part)],
                         cwd=repo, check=True, capture_output=True, text=True).stdout
         self.assertEqual(halves[1, 1].splitlines()[0],
                          f"Page 1. Check word: {words[0]}. The next page is page 2.")
@@ -1078,11 +1173,31 @@ class LongSessionFakeBinaryTests(unittest.TestCase):
             part for part in saved.split(os.pathsep) if not part.endswith(f"{os.sep}.plak{os.sep}bin"))
         self.addCleanup(os.environ.__setitem__, "PATH", saved)
 
-    def play(self, name: str) -> str:
-        artifacts = self.capture_workspace / "artifacts" / name
+    def play(self, name: str, route: str = "grok", skip_pages: bool = False) -> str:
+        artifacts = self.capture_workspace / "artifacts" / route / name
         artifacts.mkdir(parents=True)
+        if skip_pages:
+            (artifacts / name / "home").mkdir(parents=True)
+            (artifacts / name / "home" / "skip-pages").write_text("1\n")
         env = live.Env(self.binary, artifacts / "shared-home", artifacts)
-        return long_session.play(live.ROUTES["grok"], env, name)
+        return long_session.play(live.ROUTES[route], env, name)
+
+    def test_fake_binary_satisfies_each_codex_scenario_and_counts_its_pages(self):
+        with patch.dict(os.environ, {"PLAK_LIVE_GROWTH_PAGES": ""}):
+            for name, _surface in long_session.CATALOG:
+                with self.subTest(name=name):
+                    detail = self.play(name, "codex")
+                    if name == "overflow":
+                        self.assertIn("check words for 36/36 pages", detail)
+                    if name == "child_compaction":
+                        self.assertIn("recalled.txt matches release_label.txt", detail)
+            repo = self.capture_workspace / "artifacts/codex/in_turn_compaction/in_turn_compaction/repo"
+            self.assertEqual((repo / "release_label.txt").read_text().strip()[:4], "rel-")
+            self.assertFalse((repo / "codeword.txt").exists())
+            with self.assertRaises(live.ScenarioFailure) as raised:
+                self.play("in_turn_compaction", "codex-sol", skip_pages=True)
+        self.assertEqual(raised.exception.outcome, live.MODEL)
+        self.assertEqual(str(raised.exception), "growth turn wrote check words for 0/69 pages")
 
     def test_fake_session_log_emits_the_compaction_projection_and_a_bad_child_is_pending(self):
         items = long_session.read_child_history(

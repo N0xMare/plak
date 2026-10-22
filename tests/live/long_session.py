@@ -104,10 +104,14 @@ _DIGITS_PER_GROUP = 5
 # print it ... write the token from memory" read like secret handling, and
 # xAI's usage-guideline check refused that follow-up before generation.
 FACT_FILE = "codeword.txt"
-FACT_FILES = (FACT_FILE, "acknowledged.txt")
-# A child told an exact read count of a plain file stopped well short of its
-# trigger. Its pages carry check words it writes here, one file per page.
-CHILD_PAGE_DIR = "pages"
+# Codex read even a "code word" as a secret it must not reproduce ("I can't
+# print or reproduce an earlier secret code word into another file"), so the
+# codex pack plants a project release label that a later step needs.
+CODEX_FACT_FILE = "release_label.txt"
+FACT_FILES = (FACT_FILE, CODEX_FACT_FILE, "acknowledged.txt")
+# A model told an exact read count of a plain file stopped well short of its
+# trigger. Paged files carry check words it writes here, one file per page.
+PAGE_DIR = "pages"
 # A Codex child read 3 to 9 of the 30 KB exec results its trigger needed and
 # then stopped, so a Codex child page is two halves read in one exec, one
 # through `notify` and one through `text`. One `exec_command` result stops at
@@ -117,7 +121,8 @@ CHILD_PAGE_DIR = "pages"
 # digits.
 CODEX_CHILD_HALF_LINES = 26
 CODEX_BASE64_BYTES_PER_TOKEN = 1.47
-CHILD_PAGER = "page.py"
+# Codex reads every paged `bulk.txt` through this script beside it.
+PAGER = "page.py"
 # `session log <root>.cN --json` pages newest-first. The compaction segment
 # sits at position zero, so the tail has to cover the whole child history.
 CHILD_HISTORY_TAIL = 65_536
@@ -342,7 +347,7 @@ def write_child_pages(path: Path, pages: int, call_lines: int, pack: str = "grok
     the paging as incomplete: the count times the page size is past its
     window, and only compaction makes it fit. The header names the next page
     instead, and the last page alone says it is last. A Codex child reads
-    through `page.py` beside `bulk.txt`.
+    through `PAGER` beside `bulk.txt`.
     """
     page_lines = child_page_lines(pack, call_lines)
     size = page_lines + 1
@@ -356,8 +361,40 @@ def write_child_pages(path: Path, pages: int, call_lines: int, pack: str = "grok
                 line = base64_line(random_bytes) if pack == "codex" else bulk_line(pack, random_bytes)
                 handle.write(line + "\n")
     if pack == "codex":
-        (path.parent / CHILD_PAGER).write_text(codex_pager(path.name))
+        (path.parent / PAGER).write_text(codex_pager(path.name))
     return words
+
+
+def write_slice_pages(path: Path, pages: int, lines: int, random_bytes=os.urandom) -> list[str]:
+    """Codex growth and overflow: `pages` pages of one header and `lines` digit lines.
+
+    Each page is one Code Mode exec of `python3 page.py K`, within one
+    `exec_command` result, and its check word is that read's deliverable.
+    Codex told to print slices of a plain file stopped early or looped over
+    every slice in one exec, whose result the round cap clipped.
+    """
+    size = lines + 1
+    words = []
+    with path.open("w") as handle:
+        for index in range(1, pages + 1):
+            word = new_check_word(random_bytes)
+            words.append(word)
+            handle.write(page_header(index, pages, word, size, "codex") + "\n")
+            for _ in range(lines):
+                handle.write(bulk_line("codex", random_bytes) + "\n")
+    (path.parent / PAGER).write_text(codex_slice_pager(path.name, size))
+    return words
+
+
+def codex_slice_pager(bulk: str, size: int) -> str:
+    """`python3 page.py K` prints page K: its header line and its bulk lines."""
+    return (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "page = int(sys.argv[1])\n"
+        f"lines = Path({bulk!r}).read_text().splitlines(keepends=True)\n"
+        f"sys.stdout.write(''.join(lines[(page - 1) * {size}:page * {size}]))\n"
+    )
 
 
 def codex_pager(bulk: str) -> str:
@@ -373,9 +410,14 @@ def codex_pager(bulk: str) -> str:
     )
 
 
+def page_progress(repo: Path, words: list[str]) -> str:
+    """`check words for N/M pages`, or empty when the file is not paged."""
+    return f"check words for {pages_written(repo, words)}/{len(words)} pages" if words else ""
+
+
 def pages_written(repo: Path, words: list[str]) -> int:
     """Pages whose `pages/<k>.txt` holds that page's check word."""
-    return sum(text_equals(repo / CHILD_PAGE_DIR / f"{index}.txt", word)
+    return sum(text_equals(repo / PAGE_DIR / f"{index}.txt", word)
                for index, word in enumerate(words, 1))
 
 
@@ -428,19 +470,30 @@ def new_code_word(random_bytes=os.urandom) -> str:
     return f"ZEBRA-{int.from_bytes(random_bytes(4), 'big') % 900_000 + 100_000}"
 
 
+def new_fact(pack: str, random_bytes=os.urandom) -> str:
+    """The planted fact: a code word, or on the codex pack a release label."""
+    if pack != "codex":
+        return new_code_word(random_bytes)
+    return f"rel-{int.from_bytes(random_bytes(4), 'big') % 900_000 + 100_000}"
+
+
+def fact_file(pack: str) -> str:
+    return CODEX_FACT_FILE if pack == "codex" else FACT_FILE
+
+
 def plant_steps(pack: str = "grok") -> str:
     if pack == "codex":
         # Codex once wrote the file with `cat > acknowledged.txt`, which reads
         # an exec_command's closed stdin and leaves the file empty.
-        how = f"exec_command, printing {FACT_FILE} and no other file"
-        write = (" with one non-interactive command (exec_command stdin is closed "
-                 "unless tty is true)")
-    else:
-        how = f"the {_read_tool(pack)} tool on {FACT_FILE}"
-        write = ""
+        return (
+            f"This project's release label is in {CODEX_FACT_FILE}, and a later step needs "
+            f"it. Read {CODEX_FACT_FILE} with exec_command, printing it and no other file. "
+            "Write its exact contents, and nothing else, into acknowledged.txt with one "
+            "non-interactive command (exec_command stdin is closed unless tty is true)."
+        )
     return (
-        f"Read {FACT_FILE} with {how}. Write its exact contents, and nothing "
-        f"else, into acknowledged.txt{write}."
+        f"Read {FACT_FILE} with the {_read_tool(pack)} tool on {FACT_FILE}. Write its exact "
+        "contents, and nothing else, into acknowledged.txt."
     )
 
 
@@ -453,32 +506,13 @@ def _page_bulk(pack: str, line_count: int, limit: int, reads: int | None = None)
 
     `reads` bounds the paging to that many calls instead of eof.
     """
-    # Codex prompts say nothing about what bulk.txt holds: a note that it has
-    # no secrets or personal data made Codex refuse every attempt live ("can't
-    # print bulk.txt"), against about one refusal per attempt without it.
     if reads is not None:
-        tool = "exec_command, printing with python3" if pack == "codex" else f"the {_read_tool(pack)} tool"
         offsets = f"1, {1 + limit}, {1 + 2 * limit}, and so on up to {1 + (reads - 1) * limit}"
-        # A Code Mode exec that runs several slices passes the round cap and
-        # is clipped, so the context does not grow; one slice per exec.
-        # Codex also shrank results with `max_output_tokens`, which keeps the
-        # slice out of the context; the whole slice must come back.
-        per_round = ("In Code Mode, make one exec per call, each running exactly one "
-                     "exec_command without max_output_tokens and returning its whole output "
-                     "with text(...)" if pack == "codex" else "Make one call per response")
         return (
-            f"Page through bulk.txt using only {tool}, in exactly {reads} sequential calls of "
-            f"{limit} lines each, at line offsets {offsets}. {per_round}, and wait for its "
-            f"result before the next call. Do not stop before the {reads}th call."
-        )
-    if pack == "codex":
-        return (
-            "Print bulk.txt with exec_command only. This surface has no read tool. "
-            "In Code Mode, make one exec per slice and wait for its result before the next exec. "
-            f"Each call prints at most {limit} lines, using python3 to slice the file "
-            f"starting at line 1 and then at each next offset of {limit}. "
-            f"The file is {line_count} lines; do not stop early and do not print "
-            "more than that many lines in one call."
+            f"Page through bulk.txt using only the {_read_tool(pack)} tool, in exactly {reads} "
+            f"sequential calls of {limit} lines each, at line offsets {offsets}. Make one call "
+            f"per response, and wait for its result before the next call. Do not stop before "
+            f"the {reads}th call."
         )
     tool = _read_tool(pack)
     return (
@@ -506,6 +540,8 @@ def _pi_read_arguments(pack: str, offset: int, limit: int) -> str:
 
 
 def growth_prompt(line_count: int, pack: str = "grok", call_lines: int | None = None) -> str:
+    if pack == "codex":
+        return f"{codex_paging()} After the last page, {CODEX_RECALL_STEP} Reply with exactly: done"
     return (
         f"{_page_bulk(pack, line_count, call_lines or growth_call_lines(pack))} "
         f"When eof is true, {RECALL_STEP} Reply with exactly: done"
@@ -520,9 +556,30 @@ CHILD_RECALL_STEP = (
     "write the code word you copied into acknowledged.txt into recalled.txt, exactly and "
     f"alone, from memory: do not open {FACT_FILE} or acknowledged.txt again."
 )
+# Codex refused to "print or reproduce an earlier secret code word"; the
+# release label is a project fact the task carries forward.
+CODEX_RECALL_STEP = (
+    "write the project's release label, which you read in the earlier turn, into "
+    f"recalled.txt, exactly and alone, without opening {CODEX_FACT_FILE} or "
+    "acknowledged.txt again."
+)
+CODEX_CHILD_RECALL_STEP = (
+    "write the release label you copied into acknowledged.txt into recalled.txt, exactly "
+    f"and alone, without opening {CODEX_FACT_FILE} or acknowledged.txt again."
+)
 
 
-def follow_prompt() -> str:
+def child_recall_step(pack: str) -> str:
+    return CODEX_CHILD_RECALL_STEP if pack == "codex" else CHILD_RECALL_STEP
+
+
+def follow_prompt(pack: str = "grok") -> str:
+    if pack == "codex":
+        return (
+            "Write the project's release label from the earlier turn into followup.txt, "
+            f"exactly and alone, without opening {CODEX_FACT_FILE}, acknowledged.txt, or "
+            "recalled.txt. Reply with exactly: done"
+        )
     return (
         "Write the code word from the earlier turn into followup.txt, exactly and "
         f"alone, from memory: do not open {FACT_FILE}, acknowledged.txt, or recalled.txt. "
@@ -610,15 +667,17 @@ def overflow_prompt(lines: int, batches: list[list[int]], pack: str = "grok") ->
         f"Round {index}: offsets {', '.join(str(offset) for offset in batch)}."
         for index, batch in enumerate(batches, 1))
     order = "Wait for a batch's results before the next round, and do not skip or merge rounds."
-    if pack in ("codex", "pi"):
+    if pack == "codex":
         # Codex refused every batched wording live ("can't help exhaust the
-        # context"), and DeepSeek on Messages read once per response, so these
-        # rounds are the growth turn's sequential reads, each under the round
-        # cap, with the same total. Codex also refused context-filling wording.
+        # context") and refused context-filling wording, so its rounds are
+        # one-page execs with a check word each (`write_slice_pages`), with the
+        # same total.
+        return f"{codex_paging()} After the last page, reply with exactly: done"
+    if pack == "pi":
+        # DeepSeek on Messages read once per response, so these rounds are the
+        # growth turn's sequential reads, each under the round cap.
         reads = len(batches) * len(batches[0])
         sequential = f"{_page_bulk(pack, 0, lines, reads)} After the last call, reply with exactly: done"
-        if pack == "codex":
-            return sequential
         return f"{OVERFLOW_PURPOSE} {sequential}. Do not open {FACT_FILE}."
     return (
         f"{OVERFLOW_PURPOSE} Read bulk.txt in {len(batches)} rounds "
@@ -667,32 +726,53 @@ def child_paging(pack: str, call_lines: int) -> str:
     """Page-by-page reading of the child's `bulk.txt` with one deliverable per page."""
     if pack == "codex":
         read = (
-            f"bulk.txt is a sequence of pages; read it only through {CHILD_PAGER}. Read page k "
+            f"bulk.txt is a sequence of pages; read it only through {PAGER}. Read page k "
             "with one exec whose source has these two lines, with k replaced by the page "
             "number:\n"
-            f"const a = await tools.exec_command({{cmd: \"python3 {CHILD_PAGER} k 1\"}}); "
+            f"const a = await tools.exec_command({{cmd: \"python3 {PAGER} k 1\"}}); "
             "notify(a.output);\n"
-            f"const b = await tools.exec_command({{cmd: \"python3 {CHILD_PAGER} k 2\"}}); "
+            f"const b = await tools.exec_command({{cmd: \"python3 {PAGER} k 2\"}}); "
             "text(b.output);\n"
             "Do not add max_output_tokens. Read page 1 first, and wait for each page's result "
             "before the next page."
         )
-        nxt = "which page is next"
-    else:
-        size = call_lines + 1
-        read = (
-            f"bulk.txt is a sequence of pages of {size} lines each; page 1 starts at line 1. "
-            f"Page through it using only the {_read_tool(pack)} tool. Read one page per call "
-            f"with limit {size}, one call per response, and wait for its result before the "
-            f"next call.{_pi_read_arguments(pack, 1, size)}"
-        )
-        nxt = "where the next page starts"
+        return f"{read} {_page_deliverables('which page is next')}"
+    size = call_lines + 1
+    read = (
+        f"bulk.txt is a sequence of pages of {size} lines each; page 1 starts at line 1. "
+        f"Page through it using only the {_read_tool(pack)} tool. Read one page per call "
+        f"with limit {size}, one call per response, and wait for its result before the "
+        f"next call.{_pi_read_arguments(pack, 1, size)}"
+    )
+    return f"{read} {_page_deliverables('where the next page starts')}"
+
+
+def codex_paging() -> str:
+    """Codex growth and overflow paging: one page per exec, one deliverable per page.
+
+    Told to print slices of a plain file, gpt-6-luna stopped after 8 of 36
+    ("the output per call was unexpectedly enormous") and gpt-6.1-sol looped
+    over every slice in one exec with `max_output_tokens`, whose result the
+    round cap clipped; the child's check-word pages passed on both.
+    """
     return (
-        f"{read} Each page's first line names that page's check word and {nxt}, or says "
+        f"bulk.txt is a sequence of pages; read it only through {PAGER}. Read page k with one "
+        "exec whose source has these two lines, with k replaced by the page number:\n"
+        f"const r = await tools.exec_command({{cmd: \"python3 {PAGER} k\"}});\n"
+        "text(r.output);\n"
+        "One exec reads one page: no loops, never a second page in the same exec, and no "
+        "max_output_tokens. Read page 1 first, and wait for each page's result before the "
+        f"next page. {_page_deliverables('which page is next')}"
+    )
+
+
+def _page_deliverables(nxt: str) -> str:
+    return (
+        f"Each page's first line names that page's check word and {nxt}, or says "
         "it is the last page. After you have seen page k, write its check word, exactly and "
-        f"alone, into {CHILD_PAGE_DIR}/k.txt; you may do that in the call that reads the next "
+        f"alone, into {PAGE_DIR}/k.txt; you may do that in the call that reads the next "
         "page. Keep paging until you have read the last page: your context is compacted "
-        f"automatically when it fills, and the files in {CHILD_PAGE_DIR}/ record your "
+        f"automatically when it fills, and the files in {PAGE_DIR}/ record your "
         "progress. Do not read or search bulk.txt any other way."
     )
 
@@ -701,7 +781,7 @@ def child_prompt(pack: str = "grok", call_lines: int | None = None) -> str:
     instructions = (
         f"{plant_steps(pack)} "
         f"{child_paging(pack, call_lines or growth_call_lines(pack))} "
-        f"Then {CHILD_RECALL_STEP} Reply with exactly: done"
+        f"Then {child_recall_step(pack)} Reply with exactly: done"
     )
     return (
         "Spawn one worker child from the worker template, tier mutate, "
@@ -863,8 +943,9 @@ def tool_hits(records: list[dict], start: int, end: int, needles: tuple[str, ...
 
 
 def bulk_windows(records: list[dict]) -> list[tuple[int, int]]:
+    """Turns that read `bulk.txt`, directly or through Codex's `PAGER`."""
     return [window for window in lifecycle_windows(records)
-            if tool_hits(records, window[0], window[1], ("bulk.txt",))]
+            if tool_hits(records, window[0], window[1], ("bulk.txt", PAGER))]
 
 
 def forbidden_reread(records: list[dict], start: int, end: int) -> list[dict]:
@@ -1320,11 +1401,17 @@ class LongSession:
 
     def repo(self, name: str, token: str, bulk_lines: int = 0) -> Path:
         path = self.env.artifacts / name / "repo"
-        live.git_repo(path, {FACT_FILE: token + "\n", "README.md": "seed\n"})
+        live.git_repo(path, {fact_file(pack_of(self.route)): token + "\n", "README.md": "seed\n"})
         if bulk_lines:
             write_bulk_lines(path / "bulk.txt", bulk_lines, pack_of(self.route), self.random_bytes)
             commit_extra(path, "bulk")
         return path
+
+    def slice_pages(self, repo: Path, pages: int, lines: int) -> list[str]:
+        """Codex's paged `bulk.txt` and pager, committed; returns the check words."""
+        words = write_slice_pages(repo / "bulk.txt", pages, lines, self.random_bytes)
+        commit_extra(repo, "bulk")
+        return words
 
     def home(self, name: str) -> Path:
         home = self.env.artifacts / name / "home"
@@ -1336,17 +1423,22 @@ class LongSession:
         return live.Agent(self.env, repo, f"{name}/agent", args=args or [], home=home)
 
     def in_turn_compaction(self) -> str:
-        token = new_code_word(self.random_bytes)
+        pack = pack_of(self.route)
+        token = new_fact(pack, self.random_bytes)
         lines = growth_lines(self.route)
-        repo = self.repo("in_turn_compaction", token, lines)
+        words: list[str] = []
+        if pack == "codex":
+            repo = self.repo("in_turn_compaction", token)
+            words = self.slice_pages(repo, lines // self.call_lines, self.call_lines)
+        else:
+            repo = self.repo("in_turn_compaction", token, lines)
         home = self.home("in_turn_compaction")
         agent = self.agent("in_turn_compaction", repo, home)
         try:
-            pack = pack_of(self.route)
             plant = agent.prompt(plant_prompt(pack), timeout=180)
             require_completed(plant, "fact turn")
             if not text_equals(repo / "acknowledged.txt", token):
-                raise ScenarioFailure(MODEL, f"acknowledged.txt does not match {FACT_FILE}")
+                raise ScenarioFailure(MODEL, f"acknowledged.txt does not match {fact_file(pack)}")
             growth = growth_prompt(lines, pack, self.call_lines)
             hide_token(growth, token)
             turn = agent.prompt(growth, timeout=growth_timeout(self.pages))
@@ -1355,8 +1447,11 @@ class LongSession:
                 home, agent.session_id,
                 lambda rows: any(scheduled_in_window(rows, start, end)
                                  for start, end in bulk_windows(rows)))
-            self._require_in_turn(records, token, repo / "recalled.txt")
-            follow = follow_prompt()
+            progress = page_progress(repo, words)
+            self._require_in_turn(records, token, repo / "recalled.txt", progress)
+            if words and pages_written(repo, words) != len(words):
+                raise ScenarioFailure(MODEL, f"growth turn wrote {progress}")
+            follow = follow_prompt(pack)
             hide_token(follow, token)
             follow_turn = agent.prompt(follow, timeout=180)
             require_completed(follow_turn, "follow-up")
@@ -1370,7 +1465,8 @@ class LongSession:
             close_agent(agent)
         return "in-turn scheduled compaction committed; fact survived; follow-up wrote followup.txt"
 
-    def _require_in_turn(self, records: list[dict], token: str, recalled: Path) -> None:
+    def _require_in_turn(self, records: list[dict], token: str, recalled: Path,
+                         progress: str = "") -> None:
         windows = bulk_windows(records)
         committed = [record for start, end in windows
                      for record in scheduled_in_window(records, start, end)]
@@ -1378,7 +1474,8 @@ class LongSession:
             if reached_trigger(records, self.window, self.route.model):
                 raise ScenarioFailure(
                     HARNESS, "prepared input reached the compaction trigger without a committed compact")
-            raise ScenarioFailure(MODEL, "growth turn did not reach the compaction trigger")
+            raise ScenarioFailure(MODEL, "growth turn did not reach the compaction trigger"
+                                  + (f" ({progress})" if progress else ""))
         for record in committed:
             assert_shrunk(record)
         for start, end in windows:
@@ -1396,25 +1493,35 @@ class LongSession:
             raise ScenarioFailure(MODEL, "follow-up re-read the fact file")
 
     def overflow(self) -> str:
-        token = new_code_word(self.random_bytes)
         pack = pack_of(self.route)
-        pages = max(self.pages, overflow_bulk_pages(self.window, pack, self.route.model))
-        line_count = pages * lines_per_page()
-        repo = self.repo("overflow", token, line_count)
+        token = new_fact(pack, self.random_bytes)
+        words: list[str] = []
+        if pack == "codex":
+            # One page per planned read: the same lines and total as the plan.
+            lines, batches = overflow_plan(self.window, pack, None, self.route.model)
+            repo = self.repo("overflow", token)
+            words = self.slice_pages(repo, len(batches) * len(batches[0]), lines)
+        else:
+            pages = max(self.pages, overflow_bulk_pages(self.window, pack, self.route.model))
+            line_count = pages * lines_per_page()
+            repo = self.repo("overflow", token, line_count)
+            lines, batches = overflow_plan(self.window, pack, line_count, self.route.model)
         home = self.home("overflow")
         agent = self.agent("overflow", repo, home)
         try:
             plant = agent.prompt(plant_prompt(pack), timeout=180)
             require_completed(plant, "fact turn")
             if not text_equals(repo / "acknowledged.txt", token):
-                raise ScenarioFailure(MODEL, f"acknowledged.txt does not match {FACT_FILE}")
-            lines, batches = overflow_plan(self.window, pack, line_count, self.route.model)
+                raise ScenarioFailure(MODEL, f"acknowledged.txt does not match {fact_file(pack)}")
             prompt = overflow_prompt(lines, batches, pack)
             hide_token(prompt, token)
             turn = agent.prompt(prompt, timeout=overflow_timeout(len(batches), self.pages))
             records = poll_records(
                 home, agent.session_id, lambda rows: overflow_remedy(rows) is not None)
-            remedy = self._require_overflow(turn, records)
+            progress = page_progress(repo, words)
+            remedy = self._require_overflow(turn, records, progress)
+            if progress:
+                remedy = f"{remedy}; {progress}"
             if not text_equals(repo / "acknowledged.txt", token):
                 raise ScenarioFailure(HARNESS, "overflow changed the pre-compaction fact file")
             follow = agent.prompt(continuation_prompt(), timeout=240)
@@ -1425,7 +1532,7 @@ class LongSession:
             close_agent(agent)
         return f"{remedy}; continuation wrote continuation.txt"
 
-    def _require_overflow(self, turn: live.Turn, records: list[dict]) -> str:
+    def _require_overflow(self, turn: live.Turn, records: list[dict], progress: str = "") -> str:
         remedy = overflow_remedy(records)
         if remedy is not None:
             return remedy
@@ -1436,7 +1543,8 @@ class LongSession:
         if reached_trigger(records, self.window, self.route.model):
             raise ScenarioFailure(
                 HARNESS, "prepared input reached the compaction trigger without a committed remedy")
-        raise ScenarioFailure(MODEL, "overflow turn did not reach the compaction trigger")
+        raise ScenarioFailure(MODEL, "overflow turn did not reach the compaction trigger"
+                              + (f" ({progress})" if progress else ""))
 
     def kill_reopen(self) -> str:
         marker = "plak-long-kill-" + self.random_bytes(4).hex()
@@ -1519,9 +1627,9 @@ class LongSession:
         return claim
 
     def child_compaction(self) -> str:
-        token = new_code_word(self.random_bytes)
-        repo = self.repo("child_compaction", token)
         pack = pack_of(self.route)
+        token = new_fact(pack, self.random_bytes)
+        repo = self.repo("child_compaction", token)
         pages = child_pages(self.window, pack, self.call_lines, self.route.model)
         words = write_child_pages(repo / "bulk.txt", pages, self.call_lines, pack,
                                   self.random_bytes)
@@ -1584,7 +1692,7 @@ class LongSession:
         finally:
             close_agent(agent)
         return (f"child compaction segment committed; {pages}/{pages} page check words; "
-                f"recalled.txt matches {FACT_FILE}")
+                f"recalled.txt matches {fact_file(pack)}")
 
     @staticmethod
     def _reap(marker: str, pid: int | None) -> None:
