@@ -260,6 +260,7 @@ impl XaiPlatformModel {
             descriptor.requested_model().clone(),
             ReplayKindId::new(REPLAY_KIND).map_err(|_| XaiPlatformBuildError::Configuration)?,
             1,
+            execution_authority.account_binding(),
         )
         .map_err(|_| XaiPlatformBuildError::Transport)?;
         let attempt_data = ResponsesAttemptDialectData::new(

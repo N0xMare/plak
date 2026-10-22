@@ -33,6 +33,7 @@ pub struct ResponsesReplayProjection {
     protocol: ProtocolId,
     model_family: Option<ModelFamilyId>,
     model: ModelId,
+    account: Digest,
     output_item_kind: ReplayKindId,
     version: u32,
     opaque_output_kind: Option<(ReplayKindId, u32)>,
@@ -41,7 +42,7 @@ pub struct ResponsesReplayProjection {
 }
 
 impl ResponsesReplayProjection {
-    /// Builds exact-model replay construction data.
+    /// Builds exact-account/model replay construction data.
     ///
     /// # Errors
     ///
@@ -52,6 +53,7 @@ impl ResponsesReplayProjection {
         model: ModelId,
         output_item_kind: ReplayKindId,
         version: u32,
+        account: Digest,
     ) -> Result<Self, ResponsesProjectError> {
         if version == 0 {
             return Err(ResponsesProjectError::InvalidReplayVersion);
@@ -60,6 +62,7 @@ impl ResponsesReplayProjection {
             protocol,
             model_family,
             model,
+            account,
             output_item_kind,
             version,
             opaque_output_kind: None,
@@ -135,10 +138,12 @@ impl ResponsesReplayProjection {
         protocol: &ProtocolId,
         model_family: Option<&ModelFamilyId>,
         model: &ModelId,
+        account: Digest,
     ) -> bool {
         &self.protocol == protocol
             && self.model_family.as_ref() == model_family
             && &self.model == model
+            && self.account == account
     }
 
     fn artifact_replay_contract(&self) -> Result<ResponsesReplayContract, ResponsesProjectError> {
@@ -154,6 +159,7 @@ impl ResponsesReplayProjection {
     /// Returns the complete behavior-bearing execution identity for attempt binding.
     pub(crate) fn execution_identity(&self) -> Result<Digest, ResponsesProjectError> {
         let version = self.version.to_be_bytes();
+        let account = self.account.identity_bytes();
         let (family_presence, family) = self
             .model_family
             .as_ref()
@@ -181,9 +187,10 @@ impl ResponsesReplayProjection {
         };
         Digest::sha256(
             DigestDomain::ModelBinding,
-            3,
+            4,
             &[
-                b"plak-responses/replay-projection-execution-v3",
+                b"plak-responses/replay-projection-execution-v4",
+                &account,
                 self.protocol.as_str().as_bytes(),
                 family_presence,
                 family.as_bytes(),
@@ -878,7 +885,10 @@ fn replay_envelope(
     Ok(ReplayEnvelope::new(
         replay.protocol.clone(),
         replay.model_family.clone(),
-        ReplayScope::ExactModel(replay.model.clone()),
+        ReplayScope::ExactAccountModel {
+            model: replay.model.clone(),
+            account: replay.account,
+        },
         kind.clone(),
         version,
         DataClassification::Sensitive,
@@ -1305,8 +1315,15 @@ mod tests {
         let Ok(output_kind) = ReplayKindId::new("responses.output_item") else {
             panic!("valid output kind test fixture");
         };
-        let Ok(replay) = ResponsesReplayProjection::new(protocol, None, model, output_kind, 1)
-        else {
+        let Ok(replay) = ResponsesReplayProjection::new(
+            protocol,
+            None,
+            model,
+            output_kind,
+            1,
+            Digest::sha256(DigestDomain::ModelBinding, 1, &[b"project-host-account"])
+                .expect("account binding"),
+        ) else {
             panic!("valid replay test fixture");
         };
         replay
@@ -1770,14 +1787,21 @@ mod tests {
         let projection = replay();
         let protocol = ProtocolId::new("openai.responses").expect("protocol");
         let model = ModelId::new("gpt-test").expect("model");
-        assert!(projection.matches_target(&protocol, None, &model));
+        assert!(projection.matches_target(&protocol, None, &model, projection.account));
 
         let other_protocol = ProtocolId::new("xai.responses").expect("other protocol");
         let other_model = ModelId::new("grok-test").expect("other model");
         let family = ModelFamilyId::new("gpt-family").expect("family");
-        assert!(!projection.matches_target(&other_protocol, None, &model));
-        assert!(!projection.matches_target(&protocol, None, &other_model));
-        assert!(!projection.matches_target(&protocol, Some(&family), &model));
+        assert!(!projection.matches_target(&other_protocol, None, &model, projection.account));
+        assert!(!projection.matches_target(&protocol, None, &other_model, projection.account));
+        assert!(!projection.matches_target(&protocol, Some(&family), &model, projection.account));
+
+        assert!(!projection.matches_target(
+            &protocol,
+            None,
+            &model,
+            Digest::sha256(DigestDomain::ModelBinding, 1, &[b"other-account"]).expect("account")
+        ));
 
         let ambiguous = projection
             .with_opaque_output_kind(
@@ -2691,6 +2715,8 @@ mod tests {
             ModelId::new("gpt-test").expect("model"),
             ReplayKindId::new("xai.output_item").expect("output kind"),
             2,
+            Digest::sha256(DigestDomain::ModelBinding, 1, &[b"project-host-account"])
+                .expect("account binding"),
         )
         .expect("projection")
         .with_opaque_output_kind(

@@ -203,6 +203,7 @@ impl OpenAiPlatformModel {
             ReplayKindId::new("responses.output_item")
                 .map_err(|_| OpenAiPlatformBuildError::SharedBinding)?,
             1,
+            account_binding,
         )
         .map_err(|_| OpenAiPlatformBuildError::SharedBinding)?;
         let replay = if authority.is_local_fixture() {

@@ -1360,6 +1360,7 @@ impl ResponsesArtifact {
                 &self.binding.dialect,
                 self.binding.model_family.as_ref(),
                 &self.binding.model,
+                Some(self.binding.account),
             ) {
                 return Err(ResponsesArtifactError::ReplayBindingMismatch { index });
             }
@@ -1502,6 +1503,7 @@ impl ResponsesArtifact {
                     &self.binding.dialect,
                     self.binding.model_family.as_ref(),
                     &self.binding.model,
+                    Some(self.binding.account),
                 );
                 // Compatible historical envelopes in the bound canonical
                 // prefix may still be replayed by a latest stateless artifact.
@@ -2741,7 +2743,10 @@ mod tests {
         ReplayEnvelope::new(
             ProtocolId::new("openai.codex.responses").expect("dialect"),
             Some(ModelFamilyId::new("gpt-5.6").expect("family")),
-            plakous_model::ReplayScope::ExactModel(ModelId::new(model).expect("model")),
+            plakous_model::ReplayScope::ExactAccountModel {
+                model: ModelId::new(model).expect("model"),
+                account: digest(DigestDomain::ModelBinding, b"account-a"),
+            },
             ReplayKindId::new("responses.output_item").expect("kind"),
             1,
             DataClassification::Sensitive,
@@ -3171,9 +3176,9 @@ mod tests {
         assert_eq!(
             *decoded.integrity(),
             [
-                0x51, 0x17, 0x03, 0xed, 0x98, 0xa3, 0xee, 0x03, 0x91, 0xcd, 0x76, 0xe4, 0xa8, 0xe9,
-                0x1a, 0x76, 0xe3, 0x17, 0x31, 0x02, 0xee, 0xc3, 0xe5, 0x4e, 0x3d, 0x5d, 0xc3, 0x45,
-                0x45, 0x36, 0x5c, 0xba,
+                0x2d, 0xc8, 0x63, 0x34, 0xcb, 0x3c, 0x31, 0xe0, 0xe7, 0xb4, 0xdc, 0xb3, 0x36, 0x09,
+                0x04, 0x37, 0xd9, 0xda, 0x88, 0x7e, 0xb7, 0x2b, 0x26, 0xb5, 0x93, 0x53, 0x3f, 0x51,
+                0x47, 0xd6, 0xb0, 0x88
             ]
         );
     }
@@ -3416,7 +3421,10 @@ mod tests {
         let secret = ReplayEnvelope::new(
             fixture.binding.dialect().clone(),
             fixture.binding.model_family().cloned(),
-            plakous_model::ReplayScope::ExactModel(fixture.binding.model().clone()),
+            plakous_model::ReplayScope::ExactAccountModel {
+                model: fixture.binding.model().clone(),
+                account: fixture.binding.account(),
+            },
             ReplayKindId::new("responses.output_item").expect("kind"),
             1,
             DataClassification::Secret,

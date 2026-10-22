@@ -251,6 +251,8 @@ struct Replay {
     family: Option<String>,
     scope: String,
     model: Option<String>,
+    account: Option<[u8; 32]>,
+    account_version: Option<u32>,
     namespace: String,
     version: u32,
     classification: String,
@@ -258,10 +260,15 @@ struct Replay {
 }
 impl Replay {
     fn export(r: &ReplayEnvelope) -> Result<Self> {
-        let (scope, model) = match r.scope() {
-            ReplayScope::Protocol => ("protocol", None),
-            ReplayScope::ModelFamily => ("family", None),
-            ReplayScope::ExactModel(model) => ("model", Some(model.as_str().to_owned())),
+        let (scope, model, account) = match r.scope() {
+            ReplayScope::Protocol => ("protocol", None, None),
+            ReplayScope::ModelFamily => ("family", None, None),
+            ReplayScope::ExactModel(model) => ("model", Some(model.as_str().to_owned()), None),
+            ReplayScope::ExactAccountModel { model, account } => (
+                "account_model",
+                Some(model.as_str().to_owned()),
+                Some(*account),
+            ),
             _ => return Err(invalid("unsupported replay scope")),
         };
         Ok(Self {
@@ -269,6 +276,8 @@ impl Replay {
             family: r.model_family().map(|f| f.as_str().to_owned()),
             scope: scope.to_owned(),
             model,
+            account: account.map(|account| *account.bytes()),
+            account_version: account.map(Digest::version),
             namespace: r.kind().as_str().to_owned(),
             version: r.version(),
             classification: classification_out(r.classification())?,
@@ -276,11 +285,27 @@ impl Replay {
         })
     }
     fn import(self) -> Result<ReplayEnvelope> {
-        let scope = match (self.scope.as_str(), self.model) {
-            ("protocol", None) => ReplayScope::Protocol,
-            ("family", None) => ReplayScope::ModelFamily,
-            ("model", Some(model)) => {
+        let scope = match (
+            self.scope.as_str(),
+            self.model,
+            self.account,
+            self.account_version,
+        ) {
+            ("protocol", None, None, None) => ReplayScope::Protocol,
+            ("family", None, None, None) => ReplayScope::ModelFamily,
+            ("model", Some(model), None, None) => {
                 ReplayScope::ExactModel(ModelId::new(model).map_err(invalid)?)
+            }
+            ("account_model", Some(model), Some(account), Some(version)) => {
+                ReplayScope::ExactAccountModel {
+                    model: ModelId::new(model).map_err(invalid)?,
+                    account: Digest::from_sha256_bytes(
+                        DigestDomain::ModelBinding,
+                        version,
+                        account,
+                    )
+                    .map_err(invalid)?,
+                }
             }
             _ => return Err(invalid("invalid replay scope")),
         };

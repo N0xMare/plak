@@ -428,7 +428,10 @@ fn bound_compaction_prior(
     let replay = ReplayEnvelope::new(
         protocol,
         Some(family),
-        ReplayScope::ExactModel(model),
+        ReplayScope::ExactAccountModel {
+            model,
+            account: Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?,
+        },
         ReplayKindId::new("responses.output_item")?,
         1,
         DataClassification::Sensitive,
@@ -457,7 +460,10 @@ fn projector_shaped_history_reopens_with_exact_artifact_and_prepares_fresh() -> 
         Ok(ReplayEnvelope::new(
             protocol.clone(),
             Some(family.clone()),
-            ReplayScope::ExactModel(model.clone()),
+            ReplayScope::ExactAccountModel {
+                model: model.clone(),
+                account: Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?,
+            },
             ReplayKindId::new("responses.output_item")?,
             1,
             DataClassification::Sensitive,
@@ -817,7 +823,10 @@ fn native_output_with_fallback(
     let replay = ReplayEnvelope::new(
         protocol.clone(),
         Some(family.clone()),
-        ReplayScope::ExactModel(model.clone()),
+        ReplayScope::ExactAccountModel {
+            model: model.clone(),
+            account: Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?,
+        },
         ReplayKindId::new("responses.output_item")?,
         1,
         DataClassification::Sensitive,
@@ -1829,7 +1838,10 @@ fn active_replay_fixture_with_encrypted(
     let replay = ReplayEnvelope::new(
         protocol,
         Some(family),
-        ReplayScope::ExactModel(model),
+        ReplayScope::ExactAccountModel {
+            model,
+            account: Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?,
+        },
         ReplayKindId::new("openai.output_item")?,
         2,
         DataClassification::Sensitive,
@@ -3612,7 +3624,10 @@ fn fresh_codex_body_matches_portable_reasoning_projection() -> TestResult {
         Some(ReplayEnvelope::new(
             protocol.clone(),
             Some(family.clone()),
-            ReplayScope::ExactModel(model.clone()),
+            ReplayScope::ExactAccountModel {
+                model: model.clone(),
+                account: Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?,
+            },
             ReplayKindId::new("responses.output_item")?,
             1,
             DataClassification::Sensitive,
@@ -3865,7 +3880,14 @@ fn openai_platform_programmatic_request_and_replay_are_exact_in_both_storage_mod
         Ok::<_, Box<dyn std::error::Error>>(ReplayEnvelope::new(
             protocol.clone(),
             Some(family.clone()),
-            ReplayScope::ExactModel(model.clone()),
+            ReplayScope::ExactAccountModel {
+                model: model.clone(),
+                account: Digest::sha256(
+                    DigestDomain::ModelBinding,
+                    1,
+                    &[b"responses-ptc-test-route"],
+                )?,
+            },
             ReplayKindId::new("openai.output_item")?,
             2,
             DataClassification::Sensitive,
@@ -4526,7 +4548,10 @@ fn active_artifact_turns_one_two_three_and_reopen_use_latest_stored_response() -
     let replay = ReplayEnvelope::new(
         protocol.clone(),
         Some(family.clone()),
-        ReplayScope::ExactModel(model.clone()),
+        ReplayScope::ExactAccountModel {
+            model: model.clone(),
+            account: Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?,
+        },
         ReplayKindId::new("openai.output_item")?,
         2,
         DataClassification::Sensitive,
@@ -4630,7 +4655,10 @@ fn active_artifact_turns_one_two_three_and_reopen_use_latest_stored_response() -
     let replay_two = ReplayEnvelope::new(
         protocol.clone(),
         Some(family.clone()),
-        ReplayScope::ExactModel(model.clone()),
+        ReplayScope::ExactAccountModel {
+            model: model.clone(),
+            account: Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?,
+        },
         ReplayKindId::new("openai.output_item")?,
         2,
         DataClassification::Sensitive,
@@ -5040,6 +5068,7 @@ fn project_codec_append_and_next_request_are_exact_in_both_storage_modes() -> Te
         model.clone(),
         ReplayKindId::new("openai.output_item")?,
         2,
+        Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?,
     )?;
     let response = ResponsesResponse::parse(
         &json!({
@@ -5204,7 +5233,10 @@ fn latest_artifact_authorizes_full_prefix_and_disambiguates_same_digest_groups()
         Ok(ReplayEnvelope::new(
             protocol.clone(),
             Some(family.clone()),
-            ReplayScope::ExactModel(model.clone()),
+            ReplayScope::ExactAccountModel {
+                model: model.clone(),
+                account: Digest::sha256(DigestDomain::ModelBinding, 1, &[b"responses-test-route"])?,
+            },
             ReplayKindId::new("openai.output_item")?,
             2,
             DataClassification::Sensitive,
@@ -5452,7 +5484,10 @@ fn long_history_replay(
         Ok(ReplayEnvelope::new(
             protocol.clone(),
             Some(family.clone()),
-            ReplayScope::ExactModel(model.clone()),
+            ReplayScope::ExactAccountModel {
+                model: model.clone(),
+                account: Digest::sha256(DigestDomain::ModelBinding, 1, &[route.as_bytes()])?,
+            },
             ReplayKindId::new("openai.output_item")?,
             2,
             DataClassification::Sensitive,
@@ -5656,3 +5691,154 @@ long_history_route_tests!(
     long_openrouter,
     ResponsesRequestPolicy::openrouter_stateless()
 );
+
+#[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the regression follows a fresh account-B round through artifact publication and the next request"
+)]
+fn new_account_artifact_does_not_resurrect_previous_account_reasoning() -> TestResult {
+    let (protocol, family, model) = target_values()?;
+    let route = "responses-test-route";
+    let now = Timestamp::new(1_700_000_000, 0)?;
+    let old_account = Digest::sha256(DigestDomain::ModelBinding, 1, &[route.as_bytes()])?;
+    let new_account = Digest::sha256(DigestDomain::ModelBinding, 1, &[b"new-account"])?;
+    let raw = |marker: &str,
+               account: Digest|
+     -> Result<ReplayEnvelope, Box<dyn std::error::Error>> {
+        Ok(ReplayEnvelope::new(protocol.clone(), Some(family.clone()), ReplayScope::ExactAccountModel { model: model.clone(), account },
+            ReplayKindId::new("openai.output_item")?, 2, DataClassification::Sensitive,
+            RawValue::from_string(json!({"id":marker,"type":"reasoning","status":"completed","summary":[],"encrypted_content":marker}).to_string())?)?)
+    };
+    let reasoning = |entry, replay| -> Result<HistorySegment, Box<dyn std::error::Error>> {
+        Ok(HistorySegment::new(
+            HistorySegmentKind::ReasoningReplay,
+            vec![ConversationItem::new(
+                id::<EntryId>(entry)?,
+                Actor::Assistant,
+                vec![ContentBlock::Reasoning(ReasoningBlock::new(
+                    ReasoningVisibility::OpaqueReplay,
+                    None,
+                    Some(replay),
+                )?)],
+                Provenance::ModelOutput,
+            )?],
+        )?)
+    };
+    let build = |segments| -> Result<ModelRequest, Box<dyn std::error::Error>> {
+        Ok(crate::test_support::model_request_builder(
+            ConversationView::from_shared(
+                CanonicalHistory::new(segments)?,
+                WorkingProjection::default(),
+            ),
+            metadata()?,
+        )
+        .resolved_harness_plan_identity(harness_plan_identity()?)
+        .build()?)
+    };
+    // Rebind preserves canonical history and clears the active artifact. A fork
+    // of that branch or retained same-model import can carry the same prefix.
+    let mut segments = vec![
+        HistorySegment::new(
+            HistorySegmentKind::RecentIntent,
+            vec![user(40_000, "start")?],
+        )?,
+        reasoning(40_001, raw("account-A-ciphertext", old_account)?)?,
+    ];
+    let fresh_request = build(segments.clone())?;
+    let policy = ResponsesRequestPolicy::openai_codex(false, false, "reasoning.encrypted_content");
+    let fresh = lower_responses_request(
+        &fresh_request,
+        ResponsesRequestConfig::new(&protocol, Some(&family), &model, policy, None),
+    )?;
+    assert!(
+        !fresh.body()["input"]
+            .to_string()
+            .contains("account-A-ciphertext")
+    );
+    let new_replay = raw("account-B-ciphertext", new_account)?;
+    segments.push(reasoning(40_002, new_replay.clone())?);
+    segments.push(HistorySegment::new(
+        HistorySegmentKind::RecentIntent,
+        vec![user(40_003, "next")?],
+    )?);
+    let next = build(segments)?;
+    let authority =
+        |request: &ModelRequest| -> Result<ResponsesRequestAuthority, Box<dyn std::error::Error>> {
+            let descriptor = descriptor(route)?;
+            let plan = descriptor.validate_request(request.clone(), ValidationMode::Strict)?;
+            Ok(ResponsesRequestAuthority::from_admitted_operation(
+                &descriptor,
+                &plan,
+                request,
+                new_account,
+                ResponsesSemanticRevisions::new(1, 1, 1)?,
+                None,
+                ResponsesStoragePolicy::Stateless,
+            )?)
+        };
+    let plan =
+        descriptor(route)?.validate_request(fresh_request.clone(), ValidationMode::Strict)?;
+    let production = ResponsesArtifactProduction::from_admitted_response(
+        &fresh_request,
+        &plan,
+        Digest::sha256(
+            DigestDomain::ProviderOperation,
+            1,
+            &[b"account-rebind-request"],
+        )?,
+        Digest::sha256(
+            DigestDomain::ProviderOperation,
+            1,
+            &[b"account-rebind-response"],
+        )?,
+        1,
+        next.input().canonical_item_prefix_identity(3)?.identity(),
+    )?;
+    let contract = ResponsesReplayContract::new(ResponsesArtifactReplayKind::new(
+        new_replay.kind().clone(),
+        new_replay.version(),
+    )?);
+    let artifact = ResponsesArtifact::new(
+        authority(&fresh_request)?.artifact_binding().clone(),
+        production,
+        contract,
+        vec![ResponsesReplayItem::new(
+            ResponsesReplayPurpose::OutputItem,
+            0,
+            new_replay,
+        )],
+        None,
+        None,
+        ResponsesStorageMode::Stateless,
+        None,
+        now,
+    )?;
+    let active = active_artifact(&artifact)?;
+    let bridge = ResponsesArtifactReplayBridge::from_active_artifact(
+        &active,
+        &next,
+        authority(&next)?,
+        ResponsesReplayKind::new("openai.output_item", 2),
+        None,
+        None,
+        now,
+    )?;
+    let lowered = lower_responses_request(
+        &next,
+        ResponsesRequestConfig::new(
+            &protocol,
+            Some(&family),
+            &model,
+            policy,
+            Some(bridge.context()),
+        ),
+    )?;
+    let input = lowered.body()["input"].to_string();
+    assert!(
+        !input.contains("account-A-ciphertext"),
+        "new account artifact resurrected old account reasoning"
+    );
+    assert!(input.contains("account-B-ciphertext"));
+    Ok(())
+}

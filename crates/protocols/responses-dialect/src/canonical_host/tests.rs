@@ -101,6 +101,8 @@ fn replay_projection() -> ResponsesReplayProjection {
         ModelId::new(MODEL).expect("test model"),
         ReplayKindId::new("responses.output_item").expect("test replay kind"),
         1,
+        Digest::sha256(DigestDomain::ModelBinding, 1, &[b"canonical-host-account"])
+            .expect("account"),
     )
     .expect("test replay projection")
 }

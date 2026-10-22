@@ -754,6 +754,14 @@ for the full freshness-sensitive descriptor used to admit plans or dispatch.
 Unknown replay schemas and incompatible behavior remain unusable and produce
 a bounded diagnostic; no account or model fallback is introduced.
 
+Responses item replay also carries its producing account in an exact
+account/model scope covered by the canonical envelope digest. Clearing the
+aggregate artifact on rebind does not clear or retag that scope: a subsequent
+artifact on another account cannot resurrect earlier-account encrypted
+reasoning or hosted-program lineage from its prefix. Forks and export/import
+preserve the same check; accountless historical material grants no Responses
+replay authority (spec 01 §5.7 and §6.1).
+
 Responses replay bounds distinguish one response from a session: the 4,096-item
 and 3 MiB append limits and 4 MiB artifact codec bound do not cap accumulated
 canonical history. Reuse validates the entire bound prefix without copying its

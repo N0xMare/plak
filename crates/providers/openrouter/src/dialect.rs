@@ -89,6 +89,7 @@ impl OpenRouterDialect {
         protocol: ProtocolId,
         model_family: Option<ModelFamilyId>,
         model: ModelId,
+        account: plakous_model::Digest,
     ) -> Result<ResponsesReplayProjection, plakous_responses_dialect::ResponsesProjectError> {
         ResponsesReplayProjection::new(
             protocol,
@@ -98,6 +99,7 @@ impl OpenRouterDialect {
                 plakous_responses_dialect::ResponsesProjectError::ProjectionIdentity
             })?,
             OPENROUTER_OUTPUT_ITEM_REPLAY_VERSION,
+            account,
         )
     }
 }

@@ -236,6 +236,7 @@ impl OpenRouterResponsesLanguageModel {
                 descriptor.protocol().clone(),
                 descriptor.model_family().cloned(),
                 descriptor.requested_model().clone(),
+                route.identity().account_binding(),
             )
             .map_err(|_| OpenRouterResponsesLanguageModelConfigError::SharedBinding)?;
         let retention = route

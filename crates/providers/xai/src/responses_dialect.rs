@@ -194,6 +194,7 @@ impl SuperGrokResponsesDialect {
         protocol: ProtocolId,
         model_family: Option<ModelFamilyId>,
         model: ModelId,
+        account: plakous_model::Digest,
     ) -> Result<ResponsesReplayProjection, plakous_responses_dialect::ResponsesProjectError> {
         ResponsesReplayProjection::new(
             protocol,
@@ -203,6 +204,7 @@ impl SuperGrokResponsesDialect {
                 plakous_responses_dialect::ResponsesProjectError::ProjectionIdentity
             })?,
             SUPERGROK_OUTPUT_ITEM_REPLAY_VERSION,
+            account,
         )?
         .requiring_encrypted_reasoning()
         .with_opaque_output_kind(
@@ -577,7 +579,16 @@ mod tests {
         assert_eq!(stream.usage_policy(), ResponsesUsagePolicy::RequireTotal);
 
         let protocol = ProtocolId::new(facts.protocol_id())?;
-        let projection = facts.replay_projection(protocol, None, model)?;
+        let projection = facts.replay_projection(
+            protocol,
+            None,
+            model,
+            plakous_model::Digest::sha256(
+                plakous_model::DigestDomain::ModelBinding,
+                1,
+                &[b"account"],
+            )?,
+        )?;
         assert_eq!(
             projection.output_kind().as_str(),
             SUPERGROK_OUTPUT_ITEM_REPLAY_KIND

@@ -1981,6 +1981,15 @@ transition at a safe checkpoint. It never rewrites the source branch or mutates
 the running plan. **There is no automatic provider, model, or account
 failover.**
 
+Responses replay envelopes retain their producing account binding in canonical
+history across rebinds, ordinary forks and export/import. Rebind clears the
+aggregate artifact, not that item-level binding. A later target-account artifact
+cannot authorize earlier-account encrypted reasoning merely because it covers
+the same prefix: only exact account/model/family/dialect matches gain replay
+authority. Unbound reasoning follows fresh omission; protected opaque content
+still refuses when it has no portable projection. No ciphertext is retagged or
+converted into ordinary text to complete a rebind.
+
 A rebind names its tool transition. An exact rebind
 (`RebindSessionRequest::new`) keeps the source's tool presentation, execution
 environment and instruction sources byte for byte, and refuses a target that
@@ -2569,6 +2578,13 @@ historical envelope in its covered prefix. The exact binding, the stable-prefix
 reuse identity and fresh preparation on any prefix difference are the guards;
 the offline compaction rules of §10.2 keep a pass from re-admitting replay a
 later artifact would resurrect.
+For Responses, compatibility requires the envelope's exact producing account,
+model, family and dialect. The canonical replay scope and its digest include the
+full account-binding digest, including its version; an accountless envelope
+never acquires Responses replay authority. This check applies to historical
+prefixes as well as newly appended output and hosted-program lineage. Export v8
+preserves the scope; v7's accountless items remain unbound rather than being
+retagged by its importer. Ordinary forks and validated imports cannot widen it.
 The Responses limits of 4,096 replay items and 3 MiB replay payload apply to
 one newly appended response, not the accumulated canonical history. An exact
 active artifact remains reusable beyond either historical total, including

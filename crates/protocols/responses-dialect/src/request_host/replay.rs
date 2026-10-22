@@ -490,6 +490,7 @@ impl ResponsesArtifactReplayBridge {
                         authority.binding.dialect(),
                         authority.binding.model_family(),
                         authority.binding.model(),
+                        Some(authority.binding.account()),
                     )
                 {
                     return Err(ResponsesReplayError::IncompatibleEnvelope.into());
@@ -918,6 +919,7 @@ pub(super) fn validated_hosted_programs(
             authority.binding.dialect(),
             authority.binding.model_family(),
             authority.binding.model(),
+            Some(authority.binding.account()),
         ) {
             // A canonical prefix may retain replay from another model before
             // the active artifact's producing projection. Such history cannot
@@ -982,12 +984,17 @@ pub(super) fn replay_authority(
     canonical_position: usize,
     replay: &ReplayEnvelope,
 ) -> Result<ReplayAuthority, ResponsesRequestError> {
-    if !replay.is_compatible(config.protocol, config.model_family, config.model) {
-        return Ok(ReplayAuthority::Unbound);
-    }
     let Some(context) = config.replay else {
         return Ok(ReplayAuthority::Unbound);
     };
+    if !replay.is_compatible(
+        config.protocol,
+        config.model_family,
+        config.model,
+        Some(context.authority.binding.account()),
+    ) {
+        return Ok(ReplayAuthority::Unbound);
+    }
     let coordinate = context
         .output_coordinates
         .binary_search_by_key(&canonical_position, |coordinate| {
@@ -1131,7 +1138,14 @@ pub(super) fn bound_output_item<'a>(
         || context.opaque_output.is_some_and(|kind| {
             replay.version() == kind.version && replay.kind().as_str() == kind.name
         });
-    if !kind_matches || !replay.is_compatible(config.protocol, config.model_family, config.model) {
+    if !kind_matches
+        || !replay.is_compatible(
+            config.protocol,
+            config.model_family,
+            config.model,
+            Some(context.authority.binding.account()),
+        )
+    {
         return Err(ResponsesReplayError::IncompatibleEnvelope.into());
     }
     if let Some(coordinate) = context.output_for(canonical_position, replay.digest()) {

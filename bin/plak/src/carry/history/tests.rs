@@ -559,3 +559,39 @@ fn export_refuses_media_urls_import_would_reject() {
     }
     assert!(Source::export(&MediaSource::uri("https://example.com/image.png").unwrap()).is_ok());
 }
+
+#[test]
+fn account_scoped_replay_round_trips_and_old_accountless_scope_stays_unbound() {
+    let model = ModelId::new("carry.model").unwrap();
+    let account = Digest::sha256(DigestDomain::ModelBinding, 1, &[b"account-A"]).unwrap();
+    let source = ReplayEnvelope::new(
+        ProtocolId::new("carry.protocol").unwrap(),
+        None,
+        ReplayScope::ExactAccountModel {
+            model: model.clone(),
+            account,
+        },
+        ReplayKindId::new("carry.reasoning").unwrap(),
+        1,
+        DataClassification::Sensitive,
+        serde_json::value::RawValue::from_string(r#"{"encrypted_content":"synthetic"}"#.to_owned())
+            .unwrap(),
+    )
+    .unwrap();
+    let encoded = serde_json::to_value(Replay::export(&source).unwrap()).unwrap();
+    assert_eq!(encoded["scope"], "account_model");
+    let decoded: Replay = serde_json::from_value(encoded).unwrap();
+    let restored = decoded.import().unwrap();
+    assert_eq!(source, restored);
+    assert!(restored.is_compatible(source.protocol(), None, &model, Some(account)));
+    let other = Digest::sha256(DigestDomain::ModelBinding, 1, &[b"account-B"]).unwrap();
+    assert!(!restored.is_compatible(source.protocol(), None, &model, Some(other)));
+    // The immediately previous export's embedded encoding has neither field.
+    let mut previous = serde_json::to_value(Replay::export(&replay()).unwrap()).unwrap();
+    previous.as_object_mut().unwrap().remove("account");
+    previous.as_object_mut().unwrap().remove("account_version");
+    let previous: Replay = serde_json::from_value(previous).unwrap();
+    let previous = previous.import().unwrap();
+    assert_eq!(previous, replay());
+    assert!(!previous.is_compatible(source.protocol(), None, &model, Some(account)));
+}

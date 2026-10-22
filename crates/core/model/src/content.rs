@@ -1503,6 +1503,13 @@ pub enum ReplayScope {
     ModelFamily,
     /// Compatible only with one exact model identity.
     ExactModel(ModelId),
+    /// Compatible only with one exact account and model identity.
+    ExactAccountModel {
+        /// The producing model identity.
+        model: ModelId,
+        /// The producing account's non-secret binding.
+        account: Digest,
+    },
 }
 
 /// The data-sensitivity classification of replay material.
@@ -1642,20 +1649,35 @@ impl ReplayEnvelope {
     }
 
     /// Reports whether the target binding may consume this replay material.
+    /// Supplying an account requires an exact account/model scope; an omitted
+    /// account never authorizes account-scoped material.
     #[must_use]
     pub fn is_compatible(
         &self,
         protocol: &ProtocolId,
         model_family: Option<&ModelFamilyId>,
         model: &ModelId,
+        account: Option<Digest>,
     ) -> bool {
         if &self.protocol != protocol {
             return false;
         }
-        match &self.scope {
-            ReplayScope::Protocol => true,
-            ReplayScope::ModelFamily => self.model_family.as_ref() == model_family,
-            ReplayScope::ExactModel(expected) => expected == model,
+        match (&self.scope, account) {
+            (
+                ReplayScope::ExactAccountModel {
+                    model: expected,
+                    account: producing,
+                },
+                Some(account),
+            ) => {
+                expected == model
+                    && *producing == account
+                    && self.model_family.as_ref() == model_family
+            }
+            (ReplayScope::ExactAccountModel { .. }, None) | (_, Some(_)) => false,
+            (ReplayScope::Protocol, None) => true,
+            (ReplayScope::ModelFamily, None) => self.model_family.as_ref() == model_family,
+            (ReplayScope::ExactModel(expected), None) => expected == model,
         }
     }
 }
@@ -1721,10 +1743,32 @@ fn replay_digest(
     payload: &RawValue,
 ) -> Result<Digest, DigestError> {
     let family = model_family.map_or("", ModelFamilyId::as_str);
+    if let ReplayScope::ExactAccountModel { model, account } = scope {
+        return Digest::sha256(
+            DigestDomain::ReplayEnvelope,
+            3,
+            &[
+                protocol.as_str().as_bytes(),
+                family.as_bytes(),
+                b"account-model",
+                model.as_str().as_bytes(),
+                &account.identity_bytes(),
+                kind.as_str().as_bytes(),
+                &version.to_be_bytes(),
+                &[match classification {
+                    DataClassification::Public => 0,
+                    DataClassification::Sensitive => 1,
+                    DataClassification::Secret => 2,
+                }],
+                payload.get().as_bytes(),
+            ],
+        );
+    }
     let (scope_tag, exact_model) = match scope {
         ReplayScope::Protocol => (&[0_u8][..], ""),
         ReplayScope::ModelFamily => (&[1_u8][..], ""),
         ReplayScope::ExactModel(model) => (&[2_u8][..], model.as_str()),
+        ReplayScope::ExactAccountModel { model, .. } => (&[3_u8][..], model.as_str()),
     };
     let classification_text = match classification {
         DataClassification::Public => "public",
@@ -2324,6 +2368,57 @@ mod tests {
     }
 
     #[test]
+    fn account_scoped_replay_cannot_cross_accounts_or_be_retagged()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let protocol = ProtocolId::new("scoped.protocol")?;
+        let model = ModelId::new("scoped-model")?;
+        let account = Digest::sha256(DigestDomain::ModelBinding, 1, &[b"account-A"])?;
+        let other = Digest::sha256(DigestDomain::ModelBinding, 1, &[b"account-B"])?;
+        let envelope = ReplayEnvelope::new(
+            protocol.clone(),
+            None,
+            ReplayScope::ExactAccountModel {
+                model: model.clone(),
+                account,
+            },
+            ReplayKindId::new("scoped.output")?,
+            1,
+            DataClassification::Sensitive,
+            RawValue::from_string(r#"{"encrypted_content":"synthetic"}"#.to_owned())?,
+        )?;
+        assert!(envelope.is_compatible(&protocol, None, &model, Some(account)));
+        assert!(!envelope.is_compatible(&protocol, None, &model, Some(other)));
+        let other_version = Digest::from_sha256_bytes(
+            DigestDomain::ModelBinding,
+            account.version() + 1,
+            *account.bytes(),
+        )?;
+        assert!(!envelope.is_compatible(&protocol, None, &model, Some(other_version)));
+        assert!(!envelope.is_compatible(&protocol, None, &model, None));
+        assert!(!envelope.is_compatible(
+            &protocol,
+            None,
+            &ModelId::new("other-model")?,
+            Some(account)
+        ));
+        let mut tampered = serde_json::to_value(&envelope)?;
+        tampered["scope"]["ExactAccountModel"]["account"] = serde_json::to_value(other)?;
+        assert!(serde_json::from_value::<ReplayEnvelope>(tampered).is_err());
+        let legacy = ReplayEnvelope::new(
+            protocol.clone(),
+            None,
+            ReplayScope::ExactModel(model.clone()),
+            envelope.kind().clone(),
+            1,
+            DataClassification::Sensitive,
+            RawValue::from_string(envelope.payload().get().to_owned())?,
+        )?;
+        assert!(!legacy.is_compatible(&protocol, None, &model, Some(account)));
+        assert!(legacy.is_compatible(&protocol, None, &model, None));
+        Ok(())
+    }
+
+    #[test]
     fn replay_debug_redacts_exact_payload() -> Result<(), Box<dyn std::error::Error>> {
         let payload = RawValue::from_string(String::from("{\"secret\":\"do-not-log\"}"))?;
         let envelope = ReplayEnvelope::new(
@@ -2342,6 +2437,7 @@ mod tests {
             &ProtocolId::new("test-protocol")?,
             Some(&ModelFamilyId::new("test-family")?),
             &ModelId::new("test-model")?,
+            None
         ));
         Ok(())
     }

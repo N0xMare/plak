@@ -707,6 +707,10 @@ impl OpenAiLanguageModel {
             ReplayKindId::new("responses.output_item")
                 .map_err(|_| StandardOpenAiHttpBuildError::SharedBinding)?,
             1,
+            target
+                .route()
+                .account_binding()
+                .map_err(|_| StandardOpenAiHttpBuildError::SharedBinding)?,
         )
         .map_err(|_| StandardOpenAiHttpBuildError::SharedBinding)?
         .requiring_encrypted_reasoning_with_optional_status();
@@ -2062,7 +2066,10 @@ mod tests {
         Ok(ReplayEnvelope::new(
             ProtocolId::new("openai.responses")?,
             None,
-            ReplayScope::ExactModel(plakous_model::ModelId::new("gpt-codex-artifact-test")?),
+            ReplayScope::ExactAccountModel {
+                model: plakous_model::ModelId::new("gpt-codex-artifact-test")?,
+                account: account_binding(OPENAI_CODEX_SUBSCRIPTION_ROUTE_ID)?,
+            },
             ReplayKindId::new("responses.output_item")?,
             1,
             DataClassification::Sensitive,

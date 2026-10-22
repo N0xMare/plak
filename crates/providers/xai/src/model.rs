@@ -653,6 +653,10 @@ mod shared_host_model {
                     descriptor.protocol().clone(),
                     descriptor.model_family().cloned(),
                     descriptor.requested_model().clone(),
+                    route
+                        .identity()
+                        .ok_or(XaiLanguageModelConfigError::UnsupportedRoute)?
+                        .account_binding(),
                 )
                 .map_err(|_| XaiLanguageModelConfigError::SharedBinding)?;
             let authorization = supergrok_authorization()?;
@@ -1539,7 +1543,10 @@ mod shared_host_model {
             Ok(ReplayEnvelope::new(
                 descriptor.protocol().clone(),
                 descriptor.model_family().cloned(),
-                ReplayScope::ExactModel(descriptor.requested_model().clone()),
+                ReplayScope::ExactAccountModel {
+                    model: descriptor.requested_model().clone(),
+                    account: account()?,
+                },
                 ReplayKindId::new(kind.name())?,
                 kind.version(),
                 DataClassification::Sensitive,

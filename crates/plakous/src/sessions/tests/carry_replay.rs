@@ -36,10 +36,13 @@ fn behavior() -> TestResult<ProviderBehaviorConfiguration> {
     })
 }
 async fn responses() -> TestResult<ConfiguredLanguageModel> {
+    responses_with_key("synthetic-carry-key").await
+}
+async fn responses_with_key(key: &str) -> TestResult<ConfiguredLanguageModel> {
     use plakous_openai::*;
     let reference = CredentialReference::application("carry-sanitized-fixture")?;
     let source = Arc::new(StaticPlatformCredentialSource::new(
-        SecretString::new("synthetic-carry-key")?,
+        SecretString::new(key)?,
         reference.clone(),
         CredentialAuthorityId::new("carry-fixture")?,
     ));
@@ -85,7 +88,10 @@ fn envelope(
     Ok(ReplayEnvelope::new(
         descriptor.protocol().clone(),
         None,
-        ReplayScope::ExactModel(descriptor.requested_model().clone()),
+        ReplayScope::ExactAccountModel {
+            model: descriptor.requested_model().clone(),
+            account: configured.initial_authority().account_binding(),
+        },
         ReplayKindId::new(kind)?,
         version,
         DataClassification::Sensitive,
@@ -294,6 +300,164 @@ async fn unsupported_nested_opaque_result_successfully_carries_with_stripping() 
     assert!(
         matches!(result.parts(),[ToolResultPart::Text(text)] if text.text()=="sanitized result")
     );
+    session.release().await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one offline workflow pins account scope through validated import, rebind and ordinary fork"
+)]
+async fn responses_account_scope_survives_import_rebind_and_fork() -> TestResult {
+    let root = TempDir::new()?;
+    let workspace = Arc::new(WorkspacePolicy::host(root.path(), ".")?);
+    let configured_a = responses_with_key("synthetic-account-A").await?;
+    let configured_b = responses_with_key("synthetic-account-B").await?;
+    let account_a = configured_a.initial_authority().account_binding();
+    let account_b = configured_b.initial_authority().account_binding();
+    assert_ne!(account_a, account_b);
+    let model = configured_a
+        .registered()
+        .descriptor()
+        .requested_model()
+        .clone();
+    let replay = envelope(
+        &configured_a,
+        "responses.output_item",
+        1,
+        &serde_json::json!({"type":"reasoning","id":"rs_account_A","status":"completed","summary":[],"encrypted_content":"synthetic-account-A-ciphertext"}),
+    )?;
+    let segment = reasoning_segment(
+        70_001,
+        vec![ContentBlock::Reasoning(ReasoningBlock::new(
+            ReasoningVisibility::OpaqueReplay,
+            None,
+            Some(replay.clone()),
+        )?)],
+    )?;
+    let store = MemorySessionStore::with_clock(
+        MemoryStoreLimits::default(),
+        Arc::new(FixedLeaseClock::new(timestamp()?)),
+    )?;
+    let sessions = AgentSessions::new(SessionBackend::from_store(
+        Arc::new(store.clone()),
+        RuntimeDurability::Disabled,
+    ))?;
+    let CreateSessionOutcome::Created { session, .. } = sessions
+        .create(
+            CreateSessionRequest::new(
+                SessionOperationId::new("scope-import-A")?,
+                SessionRuntimeBinding::new(builder(configured_a, Arc::clone(&workspace))?),
+            )
+            .with_history(
+                PortableSessionHistory::new(
+                    vec![segment.clone()],
+                    plakous_model::hex_lower(account_a.bytes()),
+                    model.clone(),
+                )
+                .with_replay_validation(),
+            ),
+        )
+        .await?;
+    assert!(!session.replay_stripped());
+    let source = session.release().await?;
+    let runtime_b =
+        SessionRuntimeBinding::new(builder(configured_b.clone(), Arc::clone(&workspace))?);
+    let RebindSessionOutcome::Rebound {
+        target: rebound, ..
+    } = Box::pin(sessions.rebind(RebindSessionRequest::new(
+        SessionOperationId::new("scope-rebind-B")?,
+        source,
+        runtime_b.target_binding(),
+        runtime_b,
+    )))
+    .await?
+    else {
+        return Err("rebind did not publish".into());
+    };
+    let ForkSessionOutcome::Forked { target: fork, .. } = sessions
+        .fork(ForkSessionRequest::new(
+            SessionOperationId::new("scope-fork-B")?,
+            rebound,
+        ))
+        .await?
+    else {
+        return Err("fork did not publish".into());
+    };
+    for locator in [source, rebound, fork] {
+        let loaded = store.load_branch(locator.session_ref()).await?;
+        let blocks = loaded
+            .checkpoint()
+            .checkpoint()
+            .manifest()
+            .canonical()
+            .history()
+            .segments()
+            .iter()
+            .flat_map(HistorySegment::items)
+            .flat_map(ConversationItem::blocks)
+            .collect::<Vec<_>>();
+        let retained = blocks
+            .iter()
+            .find_map(|block| match block {
+                ContentBlock::Reasoning(r) => r.replay(),
+                _ => None,
+            })
+            .ok_or("reasoning lost")?;
+        assert_eq!(retained, &replay);
+        assert!(retained.is_compatible(
+            replay.protocol(),
+            replay.model_family(),
+            &model,
+            Some(account_a)
+        ));
+        assert!(!retained.is_compatible(
+            replay.protocol(),
+            replay.model_family(),
+            &model,
+            Some(account_b)
+        ));
+    }
+    // Even a locally validated import declaring B in its outer metadata cannot
+    // retag an A-bound item. Fresh omission does not grant later replay authority.
+    let CreateSessionOutcome::Created { session, .. } = sessions
+        .create(
+            CreateSessionRequest::new(
+                SessionOperationId::new("scope-import-declared-B")?,
+                SessionRuntimeBinding::new(builder(configured_b, workspace)?),
+            )
+            .with_history(
+                PortableSessionHistory::new(
+                    vec![segment],
+                    plakous_model::hex_lower(account_b.bytes()),
+                    model.clone(),
+                )
+                .with_replay_validation(),
+            ),
+        )
+        .await?;
+    let checkpoint = agent_checkpoint(session.agent());
+    let retained = checkpoint
+        .manifest()
+        .canonical()
+        .history()
+        .segments()
+        .iter()
+        .flat_map(HistorySegment::items)
+        .flat_map(ConversationItem::blocks)
+        .find_map(|block| match block {
+            ContentBlock::Reasoning(r) => r.replay(),
+            _ => None,
+        })
+        .ok_or("retained imported item missing")?;
+    assert_eq!(retained, &replay);
+    assert!(!retained.is_compatible(
+        replay.protocol(),
+        replay.model_family(),
+        &model,
+        Some(account_b)
+    ));
     session.release().await?;
     Ok(())
 }

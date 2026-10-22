@@ -2033,6 +2033,7 @@ mod grok_length_tests {
             ModelId::new("grok-test")?,
             ReplayKindId::new("responses.output_item")?,
             1,
+            Digest::sha256(DigestDomain::ModelBinding, 1, &[b"model-host-account"])?,
         )?;
         let provider_request = ResponsesProviderRequestBinding::new(
             Digest::sha256(DigestDomain::ProviderOperation, 1, &[b"request"])?,
@@ -2096,6 +2097,7 @@ mod grok_length_tests {
             ModelId::new("grok-test")?,
             ReplayKindId::new("responses.output_item")?,
             1,
+            Digest::sha256(DigestDomain::ModelBinding, 1, &[b"model-host-account"])?,
         )?;
         let provider_request = ResponsesProviderRequestBinding::new(
             Digest::sha256(DigestDomain::ProviderOperation, 1, &[b"request"])?,

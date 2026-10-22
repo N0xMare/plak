@@ -182,7 +182,7 @@ Monty worker package needs.
 | Store | Owner | Current version |
 | --- | --- | --- |
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **25** |
-| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **28** (reconstructive process discovery ceiling) |
+| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **28** (reconstructive process discovery ceiling and account-scoped replay) |
 | Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **33** |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **8** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **19**, disposable, never recovery authority |
@@ -191,7 +191,9 @@ Monty worker package needs.
 Tree schema 8's unreleased canonical `seal_outcome` payload includes the durable
 `history_left_base` boolean used by replayed result-mail notices. Runtime epoch
 28 moves the whole state key, so no older t8 shape is opened. Export v8 carries
-conversation history and CarryBinding, not tree seal outcomes; it is unchanged.
+conversation history and CarryBinding, not tree seal outcomes. Its unreleased v8
+history encoding also preserves exact account/model replay scope; the v7
+importer keeps accountless material unbound rather than retagging it.
 
 There are no released persisted-format obligations. Each store has exactly one
 supported version, and nothing is migrated. The session export document is the

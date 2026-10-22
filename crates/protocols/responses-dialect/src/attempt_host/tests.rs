@@ -857,6 +857,7 @@ fn attempt_data_with_stream<D, G>(
         ModelId::new("gpt-test")?,
         ReplayKindId::new("responses.output_item")?,
         1,
+        model_binding(b"test account")?,
     )?;
     Ok(ResponsesAttemptDialectData::new(
         1,
@@ -1318,6 +1319,7 @@ fn execution_identity_binds_transport_policy_limits_and_authorization_revisions(
         ModelId::new("gpt-other")?,
         ReplayKindId::new("responses.output_item")?,
         1,
+        model_binding(b"test account")?,
     )?;
     assert!(
         executable_attempt(&mismatched_replay, CancellationToken::new()).is_err(),
