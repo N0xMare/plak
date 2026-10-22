@@ -707,11 +707,14 @@ class LongSessionOracleTests(unittest.TestCase):
         prompt = long_session.overflow_prompt(21, [[1, 22], [43, 64]], "codex")
         self.assertIn("in exactly 4 sequential calls of 21 lines each", prompt)
         self.assertIn("exec_command", prompt)
-        self.assertTrue(prompt.startswith(long_session.CODEX_BULK_NOTE))
-        self.assertTrue(long_session.growth_prompt(40, "codex").startswith(long_session.CODEX_BULK_NOTE))
+        self.assertTrue(prompt.startswith("Page through bulk.txt"))
+        self.assertTrue(long_session.growth_prompt(40, "codex").startswith("Print bulk.txt"))
         self.assertIn("non-interactive command", long_session.plant_prompt("codex"))
+        for pack in ("codex", "grok", "claude", "pi"):
+            for text in (long_session.growth_prompt(40, pack), prompt):
+                for primer in ("secret", "personal data", "synthetic"):
+                    self.assertNotIn(primer, text, pack)
         for pack in ("grok", "claude", "pi"):
-            self.assertNotIn(long_session.CODEX_BULK_NOTE, long_session.growth_prompt(40, pack))
             self.assertNotIn("non-interactive", long_session.plant_prompt(pack))
         self.assertIn("Round 2: offsets 41, 61.",
                       long_session.overflow_prompt(20, [[1, 21], [41, 61]], "grok"))
@@ -899,7 +902,7 @@ class LongSessionOracleTests(unittest.TestCase):
                 over_lines, batches = long_session.overflow_plan(window, pack, None, route.model)
                 self.assertEqual((over_lines, len(batches[0]), len(batches)), plan, name)
         prompt = long_session.overflow_prompt(21, [[1, 22]] * 18, "codex")
-        self.assertTrue(prompt.startswith(long_session.CODEX_BULK_NOTE))
+        self.assertTrue(prompt.startswith("Page through bulk.txt"))
         self.assertNotIn(long_session.OVERFLOW_PURPOSE, prompt)
         self.assertTrue(prompt.endswith("After the last call, reply with exactly: done"))
 

@@ -448,19 +448,14 @@ def plant_prompt(pack: str = "grok") -> str:
     return f"{plant_steps(pack)} Reply with exactly: ok"
 
 
-CODEX_BULK_NOTE = ("bulk.txt is synthetic filler of random digits that this test generated; "
-                   "it holds no secrets or personal data, and printing it is the task.")
-
-
 def _page_bulk(pack: str, line_count: int, limit: int, reads: int | None = None) -> str:
     """How this pack pages `bulk.txt` without exceeding one call's budget.
 
     `reads` bounds the paging to that many calls instead of eof.
     """
-    # Codex refused to print bulk.txt ("can't print the contents of bulk.txt in
-    # this way") without knowing what it holds; the note avoids context-filling
-    # wording, which drew its own refusals.
-    note = (f"{CODEX_BULK_NOTE} " if pack == "codex" else "")
+    # Codex prompts say nothing about what bulk.txt holds: a note that it has
+    # no secrets or personal data made Codex refuse every attempt live ("can't
+    # print bulk.txt"), against about one refusal per attempt without it.
     if reads is not None:
         tool = "exec_command, printing with python3" if pack == "codex" else f"the {_read_tool(pack)} tool"
         offsets = f"1, {1 + limit}, {1 + 2 * limit}, and so on up to {1 + (reads - 1) * limit}"
@@ -472,13 +467,13 @@ def _page_bulk(pack: str, line_count: int, limit: int, reads: int | None = None)
                      "exec_command without max_output_tokens and returning its whole output "
                      "with text(...)" if pack == "codex" else "Make one call per response")
         return (
-            f"{note}Page through bulk.txt using only {tool}, in exactly {reads} sequential calls of "
+            f"Page through bulk.txt using only {tool}, in exactly {reads} sequential calls of "
             f"{limit} lines each, at line offsets {offsets}. {per_round}, and wait for its "
             f"result before the next call. Do not stop before the {reads}th call."
         )
     if pack == "codex":
         return (
-            f"{note}Print bulk.txt with exec_command only. This surface has no read tool. "
+            "Print bulk.txt with exec_command only. This surface has no read tool. "
             "In Code Mode, make one exec per slice and wait for its result before the next exec. "
             f"Each call prints at most {limit} lines, using python3 to slice the file "
             f"starting at line 1 and then at each next offset of {limit}. "
