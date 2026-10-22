@@ -410,3 +410,97 @@ inherits = "release"
 debug = "full"
 strip = "none"
 lto = false
+
+# Placement debt is capped at the current inventory; reductions must lower ceilings.
+
+[workspace.metadata.plakous.cfg.plak]
+env-sites = ["src/environment.rs", "src/home/paths.rs", "src/home/secrets.rs"]
+feature-ceiling = 130
+test-seam-ceiling = 75
+env-ceiling = 32
+reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
+
+[workspace.metadata.plakous.cfg.plakous]
+feature-ceiling = 98
+reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
+
+[workspace.metadata.plakous.cfg.plakous-anthropic]
+feature-ceiling = 22
+reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
+
+[workspace.metadata.plakous.cfg.plakous-auth]
+feature-ceiling = 18
+env-ceiling = 4
+reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
+
+[workspace.metadata.plakous.cfg.plakous-compose]
+feature-ceiling = 7
+test-seam-ceiling = 7
+reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
+
+[workspace.metadata.plakous.cfg.plakous-host-protocol]
+feature-ceiling = 1
+test-seam-ceiling = 1
+reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
+
+[workspace.metadata.plakous.cfg.plakous-hosted]
+feature-ceiling = 110
+test-seam-ceiling = 113
+reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
+
+[workspace.metadata.plakous.cfg.plakous-http]
+feature-ceiling = 17
+test-seam-ceiling = 18
+env-ceiling = 1
+reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
+
+[workspace.metadata.plakous.cfg.plakous-mcp-fake-server]
+env-ceiling = 2
+reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
+
+[workspace.metadata.plakous.cfg.plakous-openai]
+feature-ceiling = 115
+test-seam-ceiling = 1
+reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
+
+[workspace.metadata.plakous.cfg.plakous-openrouter]
+feature-ceiling = 1
+reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
+
+[workspace.metadata.plakous.cfg.plakous-prompts]
+env-ceiling = 1
+reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
+
+[workspace.metadata.plakous.cfg.plakous-recursive-subagents]
+feature-ceiling = 41
+test-seam-ceiling = 41
+reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
+
+[workspace.metadata.plakous.cfg.plakous-recursive-subagents-store]
+feature-ceiling = 3
+test-seam-ceiling = 3
+reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
+
+[workspace.metadata.plakous.cfg.plakous-store]
+feature-ceiling = 55
+test-seam-ceiling = 53
+env-ceiling = 2
+reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."
+
+[workspace.metadata.plakous.cfg.plakous-tool-web]
+feature-ceiling = 2
+reason = "Existing placement debt; ratchet down as module boundaries replace inline configuration."
+
+[workspace.metadata.plakous.cfg.plakous-tools]
+env-sites = ["src/environment/backend.rs", "src/environment/backend/process.rs"]
+reason = "Reviewed child-process/VCS environment construction reads; passed-in environment remains a later refactor."
+
+[workspace.metadata.plakous.cfg.plakous-workspace]
+env-sites = ["src/git_redirect_fence.rs", "src/occupancy_vcs.rs", "src/workspace.rs"]
+feature-ceiling = 5
+test-seam-ceiling = 2
+reason = "Reviewed child-process/VCS environment construction reads; passed-in environment remains a later refactor."
+
+[workspace.metadata.plakous.cfg.plakous-xai]
+feature-ceiling = 84
+reason = "Existing placement debt; ratchet down as composition-root ports and module boundaries replace inline configuration."

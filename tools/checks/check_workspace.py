@@ -2950,6 +2950,188 @@ def validate_module_rules(
     return errors
 
 
+# Test seams are composition-root registrations, not production control flow.
+TEST_SEAM_FEATURES = frozenset({
+    "test-support", "test-hooks", "commit-trace", "fault-injection",
+    "perf-instrumentation", "scripted-code-mode-enrolment",
+})
+
+
+def _token_group_end(tokens: list[RustToken], opening: int) -> int:
+    pairs = {"(": ")", "[": "]", "{": "}"}
+    stack = [pairs[tokens[opening].value]]
+    cursor = opening + 1
+    while cursor < len(tokens) and stack:
+        value = tokens[cursor].value
+        if value in pairs:
+            stack.append(pairs[value])
+        elif value == stack[-1]:
+            stack.pop()
+        cursor += 1
+    return cursor
+
+
+def _registry_entry_positions(tokens: list[RustToken]) -> set[int]:
+    """Direct elements of const/static slice initializers, not function bodies."""
+    positions: set[int] = set()
+    for index, token in enumerate(tokens):
+        if token.value not in {"static", "const"}:
+            continue
+        cursor = index + 1
+        while cursor < len(tokens) and tokens[cursor].value not in {"=", ";", "{"}:
+            cursor += 1
+        if cursor == len(tokens) or tokens[cursor].value != "=":
+            continue
+        cursor += 1
+        if cursor < len(tokens) and tokens[cursor].value == "&":
+            cursor += 1
+        if cursor == len(tokens) or tokens[cursor].value != "[":
+            continue
+        end = _token_group_end(tokens, cursor)
+        cursor += 1
+        while cursor < end - 1:
+            positions.add(cursor)
+            if tokens[cursor].value in {"(", "[", "{"}:
+                cursor = _token_group_end(tokens, cursor)
+            else:
+                cursor += 1
+    return positions
+
+
+def configuration_debt(
+    package: str, sources: dict[str, str], rule: dict[str, Any]
+) -> dict[str, list[str]]:
+    """Inventory placement violations, including cfg(any(test, feature)).
+
+    A disjunction with test still ships under the feature, so it must not be
+    stripped like cfg(test) or cfg(all(test, ...)). Count one predicate, not
+    every feature name inside it. Imported environment readers count at import
+    (including aliases/function items), not at each subsequent call.
+    """
+    debt: dict[str, list[str]] = {"feature": [], "test-seam": [], "env": []}
+    feature_sites = rule.get("feature-sites", ["src/lib.rs", "src/registry.rs"])
+    env_sites = rule.get("env-sites", [])
+    for path, source in sorted(sources.items()):
+        parts = Path(path).parts
+        if any(part in {"tests", "benches", "examples"} for part in parts) or (
+            Path(path).name == "tests.rs" or Path(path).name.endswith("_tests.rs")
+            or any(part.startswith("test_support") for part in parts)
+        ):
+            continue
+        tokens = rust_tokens(source)
+        registry_positions = _registry_entry_positions(tokens) if path in feature_sites else set()
+        cursor = 0
+        while cursor < len(tokens):
+            token = tokens[cursor]
+            if token.value not in {"cfg", "cfg_attr"}:
+                cursor += 1
+                continue
+            opening = cursor + 1
+            if opening < len(tokens) and tokens[opening].value == "!":
+                opening += 1
+            if opening >= len(tokens) or tokens[opening].value != "(":
+                cursor += 1
+                continue
+            end = _token_group_end(tokens, opening)
+            features = {
+                tokens[i + 2].value for i in range(opening + 1, end - 2)
+                if tokens[i].value == "feature" and tokens[i + 1].value == "="
+                and tokens[i + 2].kind == "string"
+            }
+            if not features:
+                cursor = end
+                continue
+            following = end
+            if following < len(tokens) and tokens[following].value == "]":
+                following += 1
+            while following + 1 < len(tokens) and tokens[following].value == "#":
+                if tokens[following + 1].value != "[":
+                    break
+                following = _token_group_end(tokens, following + 1)
+            if following < len(tokens) and tokens[following].value == "pub":
+                following += 1
+                if following < len(tokens) and tokens[following].value == "(":
+                    following = _token_group_end(tokens, following)
+            is_module = following < len(tokens) and tokens[following].value == "mod"
+            is_registration = (
+                cursor >= 2 and cursor - 2 in registry_positions
+                and tokens[cursor - 2].value == "#"
+                and following + 3 < len(tokens)
+                and tokens[following].value == "&"
+                and tokens[following + 1].kind == "identifier"
+                and tokens[following + 2].value == "::"
+            )
+            label = f"{path}: {token.value}({', '.join(sorted(features))})"
+            if not is_module and not is_registration:
+                debt["feature"].append(label)
+            if features & TEST_SEAM_FEATURES:
+                if package == "plak":
+                    allowed = path in {"src/lib.rs", "src/test_hooks.rs"}
+                else:
+                    name = tokens[following + 1].value if is_module and following + 1 < len(tokens) else ""
+                    allowed = is_module and (name.startswith("test") or name.endswith("test_support"))
+                if not allowed:
+                    debt["test-seam"].append(label)
+            cursor = end
+        if path in env_sites:
+            continue
+        spans = _use_statement_spans(tokens)
+        for start, end in spans:
+            for names in _use_tree_paths(tokens[start:end]):
+                if names[:2] == ["std", "env"] and (
+                    len(names) == 2 or names[2] in {"var", "var_os", "vars", "vars_os", "*"}
+                ):
+                    debt["env"].append(f"{path}: import {'::'.join(names)}")
+        for index in range(2, len(tokens)):
+            if any(start <= index < end for start, end in spans):
+                continue
+            if tokens[index].value in {"var", "var_os", "vars", "vars_os"} and (
+                tokens[index - 2].value == "env" and tokens[index - 1].value == "::"
+            ):
+                debt["env"].append(f"{path}: env::{tokens[index].value}")
+    return debt
+
+
+def validate_configuration_rules(
+    package: str, sources: dict[str, str], rule: dict[str, Any]
+) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(rule, dict):
+        return [f"cfg.{package}: expected a table"]
+    allowed_keys = {"feature-sites", "env-sites", "feature-ceiling", "test-seam-ceiling", "env-ceiling", "reason"}
+    for key in sorted(set(rule) - allowed_keys):
+        errors.append(f"cfg.{package}: unknown key {key!r}")
+    if "reason" in rule and not isinstance(rule["reason"], str):
+        errors.append(f"cfg.{package}.reason: expected a review reason string")
+    for key in ("feature-sites", "env-sites"):
+        if key in rule and (not isinstance(rule[key], list) or any(
+            not isinstance(path, str) or not path.startswith("src/") or ".." in path.split("/")
+            for path in rule[key]
+        )):
+            errors.append(f"cfg.{package}.{key}: expected package-relative src paths")
+    for kind in ("feature", "test-seam", "env"):
+        ceiling = rule.get(f"{kind}-ceiling", 0)
+        if type(ceiling) is not int or ceiling < 0:
+            errors.append(f"cfg.{package}.{kind}-ceiling: expected nonnegative integer")
+    if errors:
+        return errors
+    debt = configuration_debt(package, sources, rule)
+    if any(rule.get(f"{kind}-ceiling", 0) for kind in debt) and not str(rule.get("reason", "")).strip():
+        errors.append(f"cfg.{package}: nonzero ceilings require a reviewed reason")
+    elif (rule.get("env-sites") or rule.get("feature-sites")) and not str(rule.get("reason", "")).strip():
+        errors.append(f"cfg.{package}: explicit boundary sites require a reviewed reason")
+    for kind, sites in debt.items():
+        ceiling = rule.get(f"{kind}-ceiling", 0)
+        if len(sites) > ceiling:
+            errors.append(
+                f"{package}: {kind} placement debt {len(sites)} exceeds ceiling {ceiling}: "
+                + "; ".join(sites)
+            )
+        elif len(sites) < ceiling:
+            errors.append(f"{package}: lower {kind}-ceiling from {ceiling} to {len(sites)}")
+    return errors
+
+
 def package_sources(package: Package, repository: Path = ROOT) -> tuple[dict[str, str], list[str]]:
     """Return the package's production sources keyed by package-relative path."""
     sources, errors = production_rust_sources(package.metadata, repository)
@@ -3785,6 +3967,16 @@ def main() -> int:
     for name in sorted(policy.modules):
         if name not in packages:
             errors.append(f"modules rule names unknown package {name!r}")
+
+    configuration_rules = root_workspace.get("metadata", {}).get("plakous", {}).get("cfg", {})
+    for name in sorted(set(configuration_rules) - set(packages)):
+        errors.append(f"cfg rule names unknown package {name!r}")
+    for package in sorted(packages.values(), key=lambda item: item.name):
+        sources, discovery_errors = package_sources(package, ROOT)
+        errors.extend(discovery_errors)
+        errors.extend(validate_configuration_rules(
+            package.name, sources, configuration_rules.get(package.name, {})
+        ))
 
     # Neutral packages: no provider dependency (above) and no provider name.
     for package in sorted(packages.values(), key=lambda item: item.name):

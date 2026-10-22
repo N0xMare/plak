@@ -246,6 +246,37 @@ published shape.
 
 ## 4. Product features
 
+Compile-time capabilities are additive. A capability merits a feature when it
+adds at least five exclusive packages, a C/system build or 1 MB stripped; ships
+or spawns an executable; has a distinct trust, legal or network posture; or
+integrates with a platform. Other choices belong in runtime configuration.
+Feature selection must not change persisted or wire vocabularies. The release
+profile remains speed-focused; feature work does not change its optimization.
+
+The workspace checker enforces configuration placement through
+`[workspace.metadata.plakous.cfg.<package>]`. `feature-sites` defaults to
+`src/lib.rs` and `src/registry.rs`; these allow gated `&module::ENTRY`
+registrations, not arbitrary gated items or statements. Other feature
+predicates must gate a module declaration (including disabled-module swaps).
+`env-sites` defaults to
+empty and lists reviewed environment-reading boundary files. Plak's boundary
+files are `environment.rs`, `home/paths.rs` and `home/secrets.rs`; the tools
+child-environment builder and workspace VCS environment files are reviewed
+library exceptions. Imported environment readers, including aliases and
+function items, are inventoried as well as direct calls.
+
+Test-seam features (`test-support`, `test-hooks`, `commit-trace`,
+`fault-injection`, `perf-instrumentation`, `scripted-code-mode-enrolment`)
+belong only on test-support module declarations in libraries and in Plak's
+`lib.rs`/`test_hooks.rs` composition root. Production control-flow seams are
+existing debt, not a precedent for new sites. The checker counts feature,
+test-seam and environment placement debt separately, with exact current
+`feature-ceiling`, `test-seam-ceiling` and `env-ceiling` inventories and a
+review reason. Missing ceilings mean zero; growth fails and reductions require
+lowering the ceiling in the same change. Test-only items and test source
+trees are excluded; `cfg(any(test, feature = ...))` still ships under the
+feature and is counted. Comments and literals are not configuration sites.
+
 `plakous` facade features are listed in chapter 00. The host and product
 features and the evaluator selection are summarized here; backend defaults are
 called out explicitly.
