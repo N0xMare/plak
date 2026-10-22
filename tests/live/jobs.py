@@ -2228,9 +2228,9 @@ def _discover(home: Path, timeout: float = 30) -> str:
     raise ScenarioFailure(HARNESS, "session log did not appear")
 
 
-def _capture_complete(segments: list[Path]) -> bool:
+def _capture_complete(segments: list[Path], pending: list[Path]) -> bool:
     return bool(segments) and all(any(segment.glob("*.info")) for segment in segments) \
-        and live.capture_integrity(segments)
+        and live.capture_integrity(segments, pending)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -2277,10 +2277,12 @@ def main(argv: list[str]) -> int:
             outcome, detail = HARNESS, f"driver error: {error!r}"
             (artifacts / name / "traceback.txt").write_text(traceback.format_exc())
         segments = env.capture_segments[segment_start:]
-        complete = _capture_complete(segments)
+        pending = live.provider_pending(env, segments, outcome)
+        complete = _capture_complete(segments, pending)
         evidence[name] = {
             "segments": [str(segment) for segment in segments],
             "capture_complete": complete,
+            "provider_pending": [str(segment) for segment in pending],
             "captured_exchanges": sum(len(list(segment.glob("*.info"))) for segment in segments),
         }
         if outcome == PASS and not complete:

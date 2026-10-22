@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests" / "live"))
 
 import live  # noqa: E402
+import qualification  # noqa: E402
 import smoke  # noqa: E402
 import soak  # noqa: E402
 import tui_soak  # noqa: E402
@@ -282,6 +283,138 @@ class LiveOracleTests(unittest.TestCase):
                 self.assertEqual(evidence["capture_complete"], condition == "complete")
                 self.assertEqual(len(evidence["evidence"][condition]["segments"]),
                                  0 if condition == "not_started" else 1)
+
+    def write_pending(self, segment, number=2):
+        name = f"exchange-{number:04}"
+        (segment / f"{name}.request").write_bytes(b"synthetic request")
+        (segment / f"{name}.body").write_bytes(b"")
+        (segment / f"{name}.info").write_text(
+            f"process_id=123\nexchange={number}\nstatus=None\nterminal=pending\n"
+            "recorded_bytes=0\nincomplete=true\n")
+
+    def timed_out_run(self, env, *, pending: bool, faults: str | None = None):
+        """`plak run` killed at its timeout, its capture as the process left it."""
+        def run(*args, **kwargs):
+            segment = Path(kwargs["env"]["PLAK_TEST_EXCHANGE_CAPTURE_DIR"])
+            self.write_capture(segment)
+            if pending:
+                self.write_pending(segment)
+            raise live.subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+        base = self.capture_workspace
+        with patch.object(live.subprocess, "run", side_effect=run):
+            with self.assertRaises(live.ScenarioFailure) as failure:
+                live.run_cli(env, base, ["--", "hi"], base / "run.log", timeout=300, faults=faults)
+        return failure.exception
+
+    def test_pending_exchange_is_only_the_last_exchanges_pre_dispatch_marker(self):
+        segment = self.capture_workspace / "segment"
+        segment.mkdir()
+        self.assertIsNone(live.pending_exchange(segment))
+        self.write_capture(segment)
+        self.assertIsNone(live.pending_exchange(segment))
+        self.write_pending(segment, 2)
+        self.assertEqual(live.pending_exchange(segment), 2)
+        self.assertFalse(live.capture_integrity([segment]))
+        self.assertTrue(live.capture_integrity([segment], [segment]))
+        # Only the highest-numbered exchange may be pending, ordered by number.
+        self.write_capture(segment, "exchange-0010")
+        self.assertIsNone(live.pending_exchange(segment))
+        self.assertFalse(live.capture_integrity([segment], [segment]))
+        (segment / "exchange-0010.info").write_text(
+            (segment / "exchange-0002.info").read_text().replace("exchange=2", "exchange=10"))
+        self.assertEqual(live.pending_exchange(segment), 10)
+        self.assertFalse(live.capture_integrity([segment], [segment]))
+        for name in ("exchange-0002", "exchange-0010"):
+            for kind in ("request", "body", "info"):
+                (segment / f"{name}.{kind}").unlink()
+        info = segment / "exchange-0001.info"
+        self.write_pending(segment, 1)
+        valid = info.read_text()
+        for metadata in (valid.replace("terminal=pending", "terminal=Complete"),
+                         valid.replace("incomplete=true", "incomplete=false"),
+                         valid.replace("status=None", "status=Some(200)"),
+                         valid.replace("exchange=1", "exchange=2"),
+                         valid + "terminal=pending\n"):
+            with self.subTest(metadata=metadata):
+                info.write_text(metadata)
+                self.assertIsNone(live.pending_exchange(segment))
+        info.write_text(valid)
+        (segment / "exchange-0001.request").unlink()
+        self.assertIsNone(live.pending_exchange(segment))
+
+    def test_run_cli_timeout_on_a_pending_exchange_is_provider(self):
+        base = self.capture_workspace
+        env = live.Env(base / "plak", base / "home", base)
+        failure = self.timed_out_run(env, pending=True)
+        self.assertEqual(failure.outcome, live.PROVIDER)
+        self.assertEqual(str(failure), "plak run did not finish in 300s: provider did not "
+                                       "respond within the scenario budget (exchange 2 pending)")
+        self.assertEqual(env.provider_pending, {env.capture_segments[-1]})
+        self.assertEqual(live.provider_pending(env, env.capture_segments, live.PROVIDER),
+                         env.capture_segments)
+        self.assertEqual(live.provider_pending(env, env.capture_segments, live.HARNESS), [])
+
+    def test_run_cli_timeout_without_a_pending_exchange_is_harness(self):
+        base = self.capture_workspace
+        env = live.Env(base / "plak", base / "home", base)
+        failure = self.timed_out_run(env, pending=False)
+        self.assertEqual((failure.outcome, str(failure)),
+                         (live.HARNESS, "plak run did not finish in 300s"))
+        # A fault the scenario injected must be absorbed, so it never relabels a hang.
+        failure = self.timed_out_run(env, pending=True, faults="fault=stall,seconds=40")
+        self.assertEqual(failure.outcome, live.HARNESS)
+        self.assertEqual(env.provider_pending, set())
+        missing = live.timeout_failure(env, base / "missing", "plak run did not finish in 300s")
+        self.assertEqual(missing.outcome, live.HARNESS)
+
+    def test_turn_timeout_on_a_pending_exchange_is_provider(self):
+        base = self.capture_workspace
+        for pending, faults, expected in ((True, None, live.PROVIDER), (False, None, live.HARNESS),
+                                          (True, "fault=stall", live.HARNESS)):
+            with self.subTest(pending=pending, faults=faults):
+                env = live.Env(base / "plak", base / "home", base)
+                env.environ(source={})
+                segment = env.capture_segments[-1]
+                self.write_capture(segment)
+                if pending:
+                    self.write_pending(segment)
+                agent = live.Agent.__new__(live.Agent)
+                agent.env, agent.capture_dir, agent.lookup_faults = env, segment, faults
+                agent.events = queue.Queue()
+                with patch.object(agent, "send", return_value="1"), \
+                        self.assertRaises(live.ScenarioFailure) as failure:
+                    agent.prompt("hi", timeout=0.05)
+                self.assertEqual(failure.exception.outcome, expected)
+                self.assertTrue(str(failure.exception).startswith("turn: no expected event within"))
+                self.assertEqual(env.provider_pending, {segment} if expected == live.PROVIDER else set())
+
+    def test_provider_timeout_keeps_the_cell_provider_and_a_hang_stays_harness(self):
+        binary = self.capture_workspace / "plak"
+        binary.write_bytes(b"synthetic executable; never launched")
+        for pending in (True, False):
+            with self.subTest(pending=pending):
+                def scenario(runner):
+                    self.timed_out_run(runner.env, pending=pending)
+                    raise self.timed_out_run(runner.env, pending=pending)
+
+                with patch.object(live, "write_home"), \
+                        patch.object(live, "capture_root_mismatch", return_value=None), \
+                        patch.object(smoke.Smoke, "SCENARIOS", (("timeout", "cli"),)), \
+                        patch.object(smoke.Smoke, "timeout", scenario, create=True), \
+                        patch("builtins.print"):
+                    code = smoke.main(["--binary", str(binary)])
+                self.assertEqual(code, 1)
+                path = next((self.capture_workspace / "target/live").glob("*/report.json"))
+                report = json.loads(path.read_text())
+                path.unlink()
+                item = report["evidence"]["timeout"]
+                self.assertEqual(report["capture_complete"], True)
+                self.assertEqual(item["capture_complete"], True)
+                self.assertEqual(len(item["provider_pending"]), 2 if pending else 0)
+                outcome, reason = qualification.score_report(code, report)
+                self.assertEqual(outcome, live.PROVIDER if pending else live.HARNESS)
+                self.assertIn(live.PROVIDER_PENDING if pending else "did not finish", reason)
 
     def test_drivers_default_to_release_and_remove_capture_opt_in(self):
         def inspect(parser, argv):

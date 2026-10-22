@@ -26,6 +26,7 @@ import signal
 import sys
 import time
 import traceback
+from collections.abc import Collection
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -595,9 +596,11 @@ def main(argv: list[str]) -> int:
         if outcome not in (PASS, features.REFUSED) and name in EXPECTED_PENDING:
             outcome, detail = PENDING, f"{detail} [{EXPECTED_PENDING[name]}]"
         segments = env.capture_segments[segment_start:]
-        complete = capture_complete(segments)
+        pending = live.provider_pending(env, segments, outcome)
+        complete = capture_complete(segments, pending)
         evidence[name] = {"segments": [str(segment) for segment in segments],
                           "capture_complete": complete,
+                          "provider_pending": [str(segment) for segment in pending],
                           "captured_exchanges": sum(len(list(segment.glob("*.info")))
                                                     for segment in segments)}
         if outcome == PASS and not complete:
@@ -614,7 +617,8 @@ def main(argv: list[str]) -> int:
               if next(r.outcome for r in results if r.scenario == name) != features.REFUSED]
     scored_segments = [Path(segment) for name in scored
                        for segment in evidence[name]["segments"]]
-    evidence_complete = (not scored or capture_complete(scored_segments)) and all(
+    pending = {Path(segment) for name in scored for segment in evidence[name]["provider_pending"]}
+    evidence_complete = (not scored or capture_complete(scored_segments, pending)) and all(
         evidence[name]["capture_complete"] for name in scored)
     (artifacts / "report.json").write_text(json.dumps(
         {**live.route_report(route, bound=env.bound_compositions), "binary": str(env.binary),
@@ -735,10 +739,13 @@ def _require_py_ptc_oracle(out: str, records: list[dict], exchanges: str) -> Non
         raise ScenarioFailure(MODEL, "py-ptc answer lacks the reversed token")
 
 
-def capture_complete(segments: list[Path]) -> bool:
-    """A successful smoke needs terminal raw evidence from every launched process."""
+def capture_complete(segments: list[Path], pending: Collection[Path] = ()) -> bool:
+    """A successful smoke needs terminal raw evidence from every launched process.
+
+    `pending` segments may end on the one exchange a provider timeout left pending.
+    """
     return (bool(segments) and all(any(segment.glob("*.info")) for segment in segments)
-            and live.capture_integrity(segments))
+            and live.capture_integrity(segments, pending))
 
 
 if __name__ == "__main__":

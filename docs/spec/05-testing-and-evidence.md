@@ -2653,6 +2653,20 @@ is `harness`, and the reason names the remedy, `plak models <account>`.
 An injected fault the scenario required the product to absorb stays
 `harness` when the turn fails with that same fault; a different provider
 refusal during that scenario is still `provider`.
+A driver's `plak run`, or an awaited `plak agent` turn, that outlives its
+scenario budget is `harness` (a product hang) unless the timed-out process's
+capture segment ends on an exchange still pending at the provider: its
+highest-numbered exchange, ordered by integer exchange number, carries the
+pre-dispatch record `status=None`, `terminal=pending`, `incomplete=true`,
+which the product rewrites only at that exchange's terminal. That timeout is
+`provider` (`provider did not respond within the scenario budget`). A missing
+capture, a last exchange that reached a terminal, or a scenario that injects
+faults (which the product must absorb) keeps the timeout `harness`. Capture
+completeness then excuses exactly that one pending exchange in that segment,
+and only on a scenario scored `provider` this way: the scenario evidence lists
+the segment under `provider_pending`, and every other exchange in it and every
+other segment must still be complete, so the cell is not relabeled `harness`
+solely because the killed process left that exchange pending.
 
 TUI `turn.lifecycle` terminals carry only the turn id and phase. Smoke and the
 jobs driver use that turn's last `model_retries` telemetry row to recognize an
@@ -2832,7 +2846,8 @@ an operator's newer build. Each attempt records the current, intentional and
 restored digests and `starting_build_restored`. A pre-attempt mismatch records
 `binary changed before attempt; no paid attempt`; a missing or invalid
 OpenRouter `PLAK_LIVE_INPUT_CEILING` on a long-session cell is refused the same
-way, scored `harness` with its remedy and no paid attempt. Missing or incomplete captures,
+way, scored `harness` with its remedy and no paid attempt. Missing or incomplete captures
+(other than the one pending exchange a provider timeout leaves, §3.2),
 dead ends and unexpected build changes are `harness`, not a reason to spend
 another attempt. A TUI failed turn that reaches a completed recovery turn is
 not an unrecovered harness failure; the recovery's answer oracle is still scored.

@@ -28,6 +28,7 @@ import tempfile
 import termios
 import threading
 import time
+from collections.abc import Collection
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -239,6 +240,10 @@ class ScenarioFailure(Exception):
     def __init__(self, outcome: str, detail: str):
         super().__init__(detail)
         self.outcome = outcome
+
+
+class EventTimeout(ScenarioFailure):
+    """No expected `plak agent` event arrived within the wait's budget."""
 
 
 # Typed provider refusals and outages. `QuotaExhausted` is the name some
@@ -941,8 +946,69 @@ def route_report(route: Route, composition: str = DEFAULT_COMPOSITION,
     return report
 
 
-def capture_integrity(segments: list[Path]) -> bool:
-    """Reject incomplete, unpaired, or potentially exhausted process captures."""
+PROVIDER_PENDING = "provider did not respond within the scenario budget"
+
+
+def pending_exchange(segment: Path) -> int | None:
+    """The number of `segment`'s last exchange when it still awaits the provider.
+
+    The product writes `status=None`, `terminal=pending`, `incomplete=true`
+    before dispatch and rewrites that record only at the exchange's terminal,
+    so this marker on the highest-numbered exchange of a timed-out process
+    means its request was still waiting on the provider.
+    """
+    try:
+        last = max(segment.glob("exchange-*.info"),
+                   key=lambda path: int(path.stem.removeprefix("exchange-")), default=None)
+        if last is None:
+            return None
+        lines = last.read_text().splitlines()
+        fields = dict(line.split("=", 1) for line in lines)
+        if (len(fields) != len(lines)
+                or fields.keys() != {"process_id", "exchange", "status", "terminal",
+                                     "recorded_bytes", "incomplete"}
+                or (fields["status"], fields["terminal"], fields["incomplete"])
+                != ("None", "pending", "true")
+                or not re.fullmatch(r"[1-9][0-9]*", fields["process_id"])
+                or not re.fullmatch(r"[1-9][0-9]*", fields["exchange"])
+                or last.stem != f"exchange-{int(fields['exchange']):04}"
+                or not all(last.with_suffix(suffix).is_file() for suffix in (".request", ".body"))):
+            return None
+        return int(fields["exchange"])
+    except (OSError, UnicodeError, ValueError):
+        return None
+
+
+def timeout_failure(env: Env | None, segment: Path | None, what: str,
+                    faults: str | None = None) -> ScenarioFailure:
+    """Score a process that outlived the scenario budget.
+
+    `provider` when its last exchange is still pending at the provider; the
+    segment is then recorded on `env` so that one pending exchange does not
+    by itself make the capture incomplete. A product hang (nothing pending),
+    a missing capture, or a scenario with injected faults, which the product
+    must absorb, stays `harness`.
+    """
+    exchange = None if faults or segment is None else pending_exchange(segment)
+    if exchange is None:
+        return ScenarioFailure(HARNESS, what)
+    if env is not None:
+        env.provider_pending.add(segment)
+    return ScenarioFailure(PROVIDER, f"{what}: {PROVIDER_PENDING} (exchange {exchange} pending)")
+
+
+def provider_pending(env: Env, segments: list[Path], outcome: str) -> list[Path]:
+    """The scenario's segments a `provider` timeout on a pending exchange explains."""
+    return [segment for segment in segments
+            if segment in env.provider_pending] if outcome == PROVIDER else []
+
+
+def capture_integrity(segments: list[Path], pending: Collection[Path] = ()) -> bool:
+    """Reject incomplete, unpaired, or potentially exhausted process captures.
+
+    A segment in `pending` (a process scored `provider` because it timed out
+    on a pending exchange) may end with that one pending exchange.
+    """
     try:
         for segment in segments:
             if not segment.is_dir():
@@ -954,9 +1020,13 @@ def capture_integrity(segments: list[Path]) -> bool:
             if (files["request"].keys() != files["info"].keys()
                     or files["body"].keys() != files["info"].keys()):
                 return False
+            exchange = pending_exchange(segment) if segment in pending else None
+            excused = None if exchange is None else f"exchange-{exchange:04}"
             for name, path in files["info"].items():
                 if not all(files[kind][name].is_file() for kind in files):
                     return False
+                if name == excused:
+                    continue
                 fields = {}
                 for line in path.read_text().splitlines():
                     key, value = line.split("=", 1)
@@ -1244,6 +1314,8 @@ class Env:
         self.fixture_seed: int | None = None
         self._capture_root: Path | None = None
         self.capture_segments: list[Path] = []
+        # Segments whose timed-out process was scored `provider` on a pending exchange.
+        self.provider_pending: set[Path] = set()
         # Compositions the `plak agent` hellos of this run reported.
         self.bound_compositions: set[str] = set()
 
@@ -1308,6 +1380,7 @@ def run_cli(env: Env, repo: Path, args: list[str], log: Path,
     the log keeps the real status.
     """
     child = env.environ(faults=faults)
+    segment = env.capture_segments[-1]
     if home is not None:
         child["PLAK_HOME"] = str(home)
     try:
@@ -1316,7 +1389,8 @@ def run_cli(env: Env, repo: Path, args: list[str], log: Path,
                                 text=True, timeout=timeout)
     except subprocess.TimeoutExpired as error:
         log.write_text(f"timeout after {timeout}s\n{error.stdout or ''}{error.stderr or ''}")
-        raise ScenarioFailure(HARNESS, f"plak run did not finish in {timeout:.0f}s")
+        raise timeout_failure(env, segment, f"plak run did not finish in {timeout:.0f}s",
+                              faults) from None
     code, note = result.returncode, ""
     if truncated_answer(code, result.stderr):
         code, note = 0, " (answer committed at its output limit; scored as completed)"
@@ -1404,6 +1478,7 @@ class Agent:
         if home is not None:
             child_env["PLAK_HOME"] = str(home)
         self.home = home or env.home
+        self.env = env
         self.capture_dir = env.capture_segments[-1]
         self.transcript = (env.artifacts / f"{name}.jsonl").open("a")
         self.stderr = (env.artifacts / f"{name}.stderr").open("a")
@@ -1456,7 +1531,7 @@ class Agent:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise ScenarioFailure(HARNESS, f"no expected event within {timeout:.0f}s")
+                raise EventTimeout(HARNESS, f"no expected event within {timeout:.0f}s")
             try:
                 event = self.events.get(timeout=remaining)
             except queue.Empty:
@@ -1502,8 +1577,12 @@ class Agent:
         command_id = self.send("prompt", text=text)
         turn, started, terminal = Turn(lookup_faults=getattr(self, "lookup_faults", None)), time.monotonic(), False
         while True:
-            event = self.wait_for(lambda e: e.get("id") == command_id or
-                                  e.get("kind") in ("error", "busy", "eof"), timeout)
+            try:
+                event = self.wait_for(lambda e: e.get("id") == command_id or
+                                      e.get("kind") in ("error", "busy", "eof"), timeout)
+            except EventTimeout as error:
+                raise timeout_failure(getattr(self, "env", None), getattr(self, "capture_dir", None),
+                                      f"turn: {error}", turn.lookup_faults) from None
             kind = event.get("kind")
             if on_event:
                 on_event(event)

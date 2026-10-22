@@ -414,6 +414,13 @@ counts), never an earlier scenario, process or exchange;
 `provider`, the real provider refusing with no injected fault; and
 `pending`, a failure a named in-flight slice is expected to fix
 (`EXPECTED_PENDING` in `smoke.py`).
+A `plak run` or awaited `plak agent` turn that outlives its scenario budget is
+`harness` unless that process's highest-numbered captured exchange is still
+pending at the provider (`status=None`, `terminal=pending`,
+`incomplete=true`) and the scenario injected no faults: then it is `provider`,
+`provider did not respond within the scenario budget`. The report lists that
+process's segment under `provider_pending`, and that one pending exchange does
+not make the capture incomplete; every other exchange must still be complete.
 Output limits score alike on every surface (spec 05 §3.2). A tool-free answer
 committed at its output limit completed its turn: `plak run` prints it and
 exits 5 with `turn_failed:output-limit`, and the drivers judge that printed
