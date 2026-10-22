@@ -64,9 +64,10 @@ class ConfigurationPlacementTests(unittest.TestCase):
         self.assertEqual(len(self.debt(source, package="plak")["test-seam"]), 1)
 
     def test_registry_and_explicit_feature_sites(self):
-        source = 'static CAPS: &[&dyn Capability] = &[#[cfg(feature = "x")] &x::CAPABILITY,];'
-        self.assertFalse(any(self.debt(source, "src/registry.rs").values()))
-        self.assertFalse(any(self.debt(source, rule={"feature-sites": ["src/logic.rs"]}).values()))
+        for entry in ("x::CAPABILITY", "CAPABILITY"):
+            source = f'static CAPS: &[&dyn Capability] = &[#[cfg(feature = "x")] &{entry},];'
+            self.assertFalse(any(self.debt(source, "src/registry.rs").values()))
+            self.assertFalse(any(self.debt(source, rule={"feature-sites": ["src/logic.rs"]}).values()))
 
     def test_registry_file_does_not_allow_gated_function_bodies(self):
         source = 'fn branch() { #[cfg(feature = "x")] &x::CAPABILITY; }'

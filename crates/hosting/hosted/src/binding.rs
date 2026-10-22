@@ -158,48 +158,27 @@ pub enum PlatformProvider {
 impl PlatformProvider {
     #[must_use]
     pub const fn account(self) -> &'static str {
-        match self {
-            Self::OpenAi => "openai",
-            Self::Anthropic => "anthropic",
-            Self::Xai => "xai-api",
-        }
+        crate::capabilities::for_platform(self).account
     }
 
     /// Refusal for an explicit `native-ptc` on an API model that enrolls no
     /// native programmatic tool calling.
     #[must_use]
     pub const fn native_ptc_refusal(self) -> &'static str {
-        match self {
-            Self::OpenAi => {
-                "this OpenAI API model has no native programmatic tool calling (native-ptc) enrolled; \
-                 Codex Code Mode is enrolled only on its CodeModeOnly models; use js-ptc, py-ptc or direct"
-            }
-            Self::Anthropic => {
-                "the Anthropic API has no native programmatic tool calling (native-ptc) enrolled; \
-                 use js-ptc, py-ptc or direct"
-            }
-            Self::Xai => {
-                "the xAI API has no native programmatic tool calling (native-ptc) enrolled; \
-                 use js-ptc, py-ptc or direct"
-            }
-        }
+        crate::capabilities::for_platform(self).native_ptc_refusal
     }
 
     #[must_use]
     pub fn for_account(account: &str) -> Option<Self> {
-        match account {
-            "openai" => Some(Self::OpenAi),
-            "anthropic" => Some(Self::Anthropic),
-            "xai-api" => Some(Self::Xai),
-            _ => None,
-        }
+        crate::capabilities::for_account(account)
+            .and_then(crate::capabilities::RouteCapability::platform_provider)
     }
 
     #[must_use]
     pub const fn protocol(self) -> ResolvedProtocol {
-        match self {
-            Self::OpenAi | Self::Xai => ResolvedProtocol::Responses,
-            Self::Anthropic => ResolvedProtocol::Messages,
+        match crate::capabilities::for_platform(self).protocol {
+            Some(protocol) => protocol,
+            None => unreachable!(),
         }
     }
 }
@@ -309,9 +288,17 @@ impl RouteRefusal {
     pub fn message(&self, account: &str) -> String {
         match self {
             Self::AccountMismatch => "target/account binding is inconsistent".to_owned(),
-            Self::NotOauth => format!(
-                "account `{account}` requires an exact API target or a supported OAuth account (codex|grok|claude)"
-            ),
+            Self::NotOauth => {
+                let accounts = crate::capabilities::ROUTES
+                    .iter()
+                    .filter(|route| route.native_provider().is_some())
+                    .map(|route| route.account)
+                    .collect::<Vec<_>>()
+                    .join("|");
+                format!(
+                    "account `{account}` requires an exact API target or a supported OAuth account ({accounts})"
+                )
+            }
         }
     }
 }
@@ -323,11 +310,9 @@ impl RouteRefusal {
 /// API-key account) has none.
 #[must_use]
 pub const fn oauth_provider_for_account(account: &str) -> Option<NativeProvider> {
-    match account.as_bytes() {
-        b"grok" | b"supergrok" | b"xai-oauth" => Some(NativeProvider::Xai),
-        b"codex" | b"chatgpt" => Some(NativeProvider::Codex),
-        b"claude" => Some(NativeProvider::Claude),
-        _ => None,
+    match crate::capabilities::for_account(account) {
+        Some(route) => route.native_provider(),
+        None => None,
     }
 }
 
@@ -345,21 +330,15 @@ pub fn admit_account_model(account: &str, model: &str) -> Result<(), String> {
         if provider.enrolls(model) {
             return Ok(());
         }
-        match provider {
-            NativeProvider::Xai => ("SuperGrok subscription", "grok"),
-            NativeProvider::Claude => ("Claude subscription", "claude"),
-            _ => ("ChatGPT/Codex subscription", "codex"),
-        }
+        let route = crate::capabilities::for_account(account)
+            .ok_or_else(|| RouteRefusal::NotOauth.message(account))?;
+        (route.catalog_label, route.account)
     } else if let Some(provider) = PlatformProvider::for_account(account) {
         if crate::platform::platform_model(provider, model).is_some() {
             return Ok(());
         }
-        let catalog = match provider {
-            PlatformProvider::OpenAi => "OpenAI API",
-            PlatformProvider::Anthropic => "Anthropic API",
-            PlatformProvider::Xai => "xAI API",
-        };
-        (catalog, provider.account())
+        let route = crate::capabilities::for_platform(provider);
+        (route.catalog_label, route.account)
     } else if account == "openrouter" {
         return Ok(());
     } else {
@@ -376,26 +355,15 @@ pub fn admit_account_model(account: &str, model: &str) -> Result<(), String> {
 /// on `CodeModeOnly` rows.
 #[must_use]
 pub const fn native_ptc_refusal(provider: NativeProvider) -> &'static str {
-    match provider {
-        NativeProvider::Xai => {
-            "Grok has no native programmatic tool calling (native-ptc) enrolled; \
-             use js-ptc, py-ptc or direct"
-        }
-        NativeProvider::Claude => {
-            "Claude has no native programmatic tool calling (native-ptc) enrolled; \
-             use js-ptc, py-ptc or direct"
-        }
-        _ => {
-            "this Codex model has no native programmatic tool calling (native-ptc) enrolled; \
-             Codex Code Mode is enrolled only on CodeModeOnly rows; use js-ptc, py-ptc or direct"
-        }
+    match crate::capabilities::for_native(provider) {
+        Some(route) => route.native_ptc_refusal,
+        None => unreachable!(),
     }
 }
 
 /// Refusal for an explicit `native-ptc` on OpenRouter, which enrolls no
 /// native programmatic tool calling.
-pub const OPENROUTER_NATIVE_PTC_REFUSAL: &str = "OpenRouter has no native programmatic tool calling (native-ptc) enrolled; \
-     use js-ptc, py-ptc or direct";
+pub const OPENROUTER_NATIVE_PTC_REFUSAL: &str = crate::capabilities::OPENROUTER.native_ptc_refusal;
 
 impl TargetSelection {
     /// The route this target takes on `account`, or why it takes none.

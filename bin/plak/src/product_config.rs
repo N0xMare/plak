@@ -799,26 +799,19 @@ impl Eq for ProductConfig {}
 /// Every account a `[templates.*]` card may name, and so every account a
 /// tree epoch may pin. The product owns this roster; the tree reads it as
 /// frozen `bind_hints` and only checks membership.
-pub const TEMPLATE_ACCOUNTS: &[&str] = &[
-    "codex",
-    "chatgpt",
-    "grok",
-    "supergrok",
-    "xai-oauth",
-    "claude",
-    "openrouter",
-    "openai",
-    "anthropic",
-    "xai-api",
-];
+pub fn template_accounts() -> impl Iterator<Item = &'static str> {
+    plakous_hosted::capabilities::account_ids()
+}
 
 /// Accounts with no Codex Code Mode, so a `native-ptc` card on them is a
 /// wire-vocabulary error. The `openai` API wears the Codex pack: its cards are
 /// checked against the enrolled model table at load instead.
-pub const NO_NATIVE_PROTOCOL_ACCOUNTS: &[&str] = &["openrouter", "anthropic", "xai-api"];
+pub fn no_native_protocol_accounts() -> impl Iterator<Item = &'static str> {
+    plakous_hosted::capabilities::no_native_protocol_accounts()
+}
 
 fn is_template_account(account: &str) -> bool {
-    TEMPLATE_ACCOUNTS.contains(&account)
+    template_accounts().any(|known| known == account)
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

@@ -104,17 +104,12 @@ pub struct TuiPresentationBundle {
 }
 
 /// Frozen product coding tuples. Catalogs may list other enrolled ids.
-pub const PRODUCT_RECOMMENDED_CODEX_MODEL: &str = "gpt-5.6-sol";
+pub const PRODUCT_RECOMMENDED_CODEX_MODEL: &str = crate::capabilities::RECOMMENDED_CODEX_MODEL;
 
 /// Returns the frozen product recommendation for an OAuth account.
 #[must_use]
 pub fn product_recommended_model(account: &str) -> Option<&'static str> {
-    match account {
-        "codex" | "chatgpt" => Some(PRODUCT_RECOMMENDED_CODEX_MODEL),
-        "grok" | "supergrok" | "xai" => Some("grok-4.6"),
-        "claude" => Some("claude-sonnet-5"),
-        _ => None,
-    }
+    crate::capabilities::recommended_model(account)
 }
 
 /// Select the recommended model id when it is present in `models`.
@@ -288,11 +283,16 @@ pub fn tui_presentation_bundle_with_backend_and_composition(
     backend: &mut impl PresentationBackend,
     composition: ProductCompositionSelection,
 ) -> TuiPresentationBundle {
-    let oauth = [
-        ("codex", "Codex (ChatGPT)", "Codex", NativeProvider::Codex),
-        ("grok", "Grok (SuperGrok)", "Grok", NativeProvider::Xai),
-        ("claude", "Claude (Max)", "Claude", NativeProvider::Claude),
-    ];
+    let oauth = crate::capabilities::ROUTES.iter().filter_map(|capability| {
+        capability.route.native_provider().map(|provider| {
+            (
+                capability.route.account,
+                capability.label,
+                capability.short_label,
+                provider,
+            )
+        })
+    });
     let mut providers = Vec::new();
     let mut sections = Vec::new();
     let mut native_models = Vec::new();
@@ -524,12 +524,13 @@ pub fn tui_presentation_bundle_with_backend_and_composition(
             account_label: None,
         });
     }
-    for (account, label) in [
-        ("openai", "OpenAI"),
-        ("xai-api", "xAI"),
-        ("anthropic", "Anthropic"),
-        ("openrouter", "OpenRouter"),
-    ] {
+    for (account, label) in crate::capabilities::ROUTES
+        .iter()
+        .filter(|capability| {
+            capability.auth_kind() == plakous_host_protocol::views::AuthKind::ApiKey
+        })
+        .map(|capability| (capability.route.account, capability.label))
+    {
         // The only account identity an API key supplies is its fingerprint,
         // or the environment variable that won. Neither is key material.
         let (state, detail, account_label) = match secrets::key_status(paths, account) {

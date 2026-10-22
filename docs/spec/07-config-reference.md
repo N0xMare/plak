@@ -127,6 +127,14 @@ Import checks the document's workspace configuration before creating a successor
 The bare account spelling `xai` is refused as ambiguous: use `grok` for
 SuperGrok OAuth or `xai-api` for an API key. Other unambiguous aliases remain.
 
+The hosted capability registry owns route identity aliases and catalog-policy
+metadata; Plak's registry adds product presentation, doctor probes and bundled
+profiles. Those registries add no configuration keys and do not change account,
+model, composition or protocol admission. The template-account membership and
+no-native-protocol vocabularies stay complete and ungated, as do serialized
+session binding enums. Recommendation aliases are presentation policy, never
+authority to admit an otherwise unknown or ambiguous account.
+
 Deleting a key restores its default. Deleting `config.toml` restores every
 default. `plak config show` prints the resolved file with its path; secrets are
 never in it.

@@ -122,36 +122,50 @@ pub fn is_rate_limited_reason(reason: &str) -> bool {
 /// neutral crate holds no closed list of Plak's accounts.
 #[must_use]
 pub fn product_verticals() -> [UsageVertical; 4] {
-    [
-        codex_vertical(),
-        supergrok_vertical(),
-        claude_vertical(),
-        openrouter_vertical(),
-    ]
+    let verticals: Vec<_> = crate::capabilities::ROUTES
+        .iter()
+        .filter_map(|route| {
+            route
+                .usage_label
+                .map(|label| UsageVertical::new(route.account, label))
+        })
+        .collect();
+    // Preserve the existing fixed-array API without a second route roster.
+    match verticals.try_into() {
+        Ok(verticals) => verticals,
+        Err(_) => unreachable!("Usage registry must contain four verticals"),
+    }
 }
 
 /// The ChatGPT/Codex OAuth subscription vertical.
 #[must_use]
 pub fn codex_vertical() -> UsageVertical {
-    UsageVertical::new("codex", "Codex")
+    vertical_for_route(&crate::capabilities::CODEX)
 }
 
 /// The `SuperGrok` OAuth subscription vertical.
 #[must_use]
 pub fn supergrok_vertical() -> UsageVertical {
-    UsageVertical::new("grok", "SuperGrok")
+    vertical_for_route(&crate::capabilities::GROK)
 }
 
 /// The Claude OAuth subscription vertical.
 #[must_use]
 pub fn claude_vertical() -> UsageVertical {
-    UsageVertical::new("claude", "Claude")
+    vertical_for_route(&crate::capabilities::CLAUDE)
 }
 
 /// The `OpenRouter` inference-key vertical.
 #[must_use]
 pub fn openrouter_vertical() -> UsageVertical {
-    UsageVertical::new("openrouter", "OpenRouter")
+    vertical_for_route(&crate::capabilities::OPENROUTER)
+}
+
+fn vertical_for_route(route: &crate::capabilities::RouteCapability) -> UsageVertical {
+    match route.usage_label {
+        Some(label) => UsageVertical::new(route.account, label),
+        None => unreachable!("route must have a Usage vertical"),
+    }
 }
 
 /// Whether `reason` is the Busy sentence [`unavailable_reason`] emits.
@@ -820,20 +834,23 @@ fn format_duration(value: Duration) -> String {
 /// Maps a native provider onto its Usage vertical.
 #[must_use]
 pub fn vertical_for_native(provider: NativeProvider) -> UsageVertical {
-    match provider {
-        NativeProvider::Xai => supergrok_vertical(),
-        NativeProvider::Claude => claude_vertical(),
-        _ => codex_vertical(),
-    }
+    let route = match crate::capabilities::for_native(provider) {
+        Some(route) => route,
+        None => unreachable!(),
+    };
+    vertical_for_route(route)
 }
 
 /// Returns the operator-facing label for one native subscription vertical.
 #[must_use]
 pub const fn subscription_provider_label(provider: NativeProvider) -> &'static str {
-    match provider {
-        NativeProvider::Xai => "Grok Subscription",
-        NativeProvider::Claude => "Claude Subscription",
-        _ => "Codex Subscription",
+    let route = match crate::capabilities::for_native(provider) {
+        Some(route) => route,
+        None => unreachable!(),
+    };
+    match route.subscription_label {
+        Some(label) => label,
+        None => unreachable!(),
     }
 }
 

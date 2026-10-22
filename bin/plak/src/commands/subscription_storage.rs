@@ -12,14 +12,6 @@ use std::path::{Path, PathBuf};
 
 use plakous::subscriptions::NativeProvider;
 
-/// Every subscription account the store keeps a subtree for, in the order the
-/// store prepares their directories.
-const PROVIDERS: [NativeProvider; 3] = [
-    NativeProvider::Codex,
-    NativeProvider::Xai,
-    NativeProvider::Claude,
-];
-
 /// One store rule a path on disk breaks.
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum StorageRule {
@@ -256,7 +248,7 @@ pub(crate) fn find_violation(
         (plak, Place::Outside, Kind::Directory),
         (subscriptions.clone(), Place::Store, Kind::Directory),
     ];
-    let mut providers = PROVIDERS.to_vec();
+    let mut providers: Vec<_> = plakous_hosted::capabilities::native_providers().collect();
     if let Some(account) = account {
         providers.retain(|provider| *provider != account);
         providers.insert(0, account);

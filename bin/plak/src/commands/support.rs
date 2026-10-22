@@ -181,11 +181,9 @@ pub(crate) fn admit_account_model(account: &str, model: &str) -> Result<(), Stri
 }
 
 pub const fn cli_provider_name(provider: NativeProvider) -> &'static str {
-    match provider {
-        NativeProvider::Codex => "codex",
-        NativeProvider::Xai => "grok",
-        NativeProvider::Claude => "claude",
-        _ => provider.as_str(),
+    match plakous_hosted::capabilities::for_native(provider) {
+        Some(route) => route.account,
+        None => provider.as_str(),
     }
 }
 

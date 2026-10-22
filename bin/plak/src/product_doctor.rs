@@ -938,9 +938,12 @@ pub fn diagnose(input: DoctorInputs) -> DoctorReport {
     checks.push(openrouter_catalog_check(input.openrouter_catalog));
     checks.push(root_template_check(input.root_template));
     checks.push(spawn_templates_check(input.spawn_templates));
-    checks.push(oauth_check(CheckKind::OauthCodex, input.oauth.codex));
-    checks.push(oauth_check(CheckKind::OauthXai, input.oauth.xai));
-    checks.push(oauth_check(CheckKind::OauthClaude, input.oauth.claude));
+    for doctor in crate::capabilities::ROUTES
+        .iter()
+        .filter_map(|capability| capability.doctor.as_ref())
+    {
+        checks.push(oauth_check(doctor.kind, (doctor.probe)(&input.oauth)));
+    }
     DoctorReport::from_checks(checks)
 }
 
@@ -1480,13 +1483,8 @@ fn oauth_check(kind: CheckKind, probe: OauthCredentialProbe) -> DoctorCheck {
 }
 
 fn native_provider(provider: &str) -> Option<NativeProvider> {
-    [
-        NativeProvider::Codex,
-        NativeProvider::Xai,
-        NativeProvider::Claude,
-    ]
-    .into_iter()
-    .find(|candidate| candidate.as_str() == provider)
+    plakous_hosted::capabilities::native_providers()
+        .find(|candidate| candidate.as_str() == provider)
 }
 
 fn composition_checks(

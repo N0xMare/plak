@@ -45,6 +45,7 @@ pub mod agent_stdio;
 #[doc(hidden)]
 pub mod agents_projection;
 mod build_identity;
+mod capabilities;
 mod carry;
 mod cli;
 #[path = "product_cli_output.rs"]

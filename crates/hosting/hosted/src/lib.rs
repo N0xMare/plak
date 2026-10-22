@@ -57,6 +57,8 @@ pub mod attachments;
 /// The session-binding vocabulary: composition, wire, target, and the
 /// `[root] agent` fact a session compares its bound tuple against.
 pub mod binding;
+/// The route identity and catalog capability registry.
+pub mod capabilities;
 /// The provider-grounded context projection a turn reports against.
 pub mod context;
 /// The closed reasoning-effort vocabulary.

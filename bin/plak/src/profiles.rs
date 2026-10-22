@@ -4,7 +4,7 @@
 //! built-ins ship inside the binary as `{id}-root`, `{id}-worker`,
 //! `{id}-reviewer`, and `{id}-researcher`, so a user's own `worker.toml` is
 //! left alone. A file in `~/.plak/profiles/<name>.toml` names templates the
-//! user already has. The built-in ids in [`BUILTINS`] are reserved.
+//! user already has. The built-in ids in [`builtins`] are reserved.
 //!
 //! Nothing here writes. [`prepare`] answers the config a profile would
 //! produce; the caller saves it once the choice has landed.
@@ -18,112 +18,48 @@ use crate::product_config::{AgentTemplate, ProductConfig, parse_template};
 use crate::surface_protocol::{ProfileRole, ProfileRow, ProfilesView};
 use plakous_hosted::agent_tree_protocol::TemplateName;
 
-struct BuiltinFile {
-    role: &'static str,
-    body: &'static str,
+pub(crate) struct BuiltinFile {
+    pub(crate) role: &'static str,
+    pub(crate) body: &'static str,
 }
 
-struct Builtin {
-    id: &'static str,
+pub(crate) struct Builtin {
+    pub(crate) id: &'static str,
     /// Short names `/agents` accepts, unless a user profile owns that stem.
-    aliases: &'static [&'static str],
-    files: &'static [BuiltinFile],
+    pub(crate) aliases: &'static [&'static str],
+    pub(crate) files: &'static [BuiltinFile],
 }
 
 /// The roles every built-in ships, the working set in this order.
 const ROLES: [&str; 3] = ["worker", "reviewer", "researcher"];
 
-const BUILTINS: &[Builtin] = &[
-    Builtin {
-        id: "codex-default",
-        aliases: &["codex", "chatgpt"],
-        files: &[
-            BuiltinFile {
-                role: "root",
-                body: include_str!("../presets/codex/agents/root-agent.toml"),
-            },
-            BuiltinFile {
-                role: "worker",
-                body: include_str!("../presets/codex/agents/worker.toml"),
-            },
-            BuiltinFile {
-                role: "reviewer",
-                body: include_str!("../presets/codex/agents/reviewer.toml"),
-            },
-            BuiltinFile {
-                role: "researcher",
-                body: include_str!("../presets/codex/agents/researcher.toml"),
-            },
-        ],
-    },
-    Builtin {
-        id: "claude-default",
-        aliases: &["claude"],
-        files: &[
-            BuiltinFile {
-                role: "root",
-                body: include_str!("../presets/claude/agents/root-agent.toml"),
-            },
-            BuiltinFile {
-                role: "worker",
-                body: include_str!("../presets/claude/agents/worker.toml"),
-            },
-            BuiltinFile {
-                role: "reviewer",
-                body: include_str!("../presets/claude/agents/reviewer.toml"),
-            },
-            BuiltinFile {
-                role: "researcher",
-                body: include_str!("../presets/claude/agents/researcher.toml"),
-            },
-        ],
-    },
-    Builtin {
-        id: "grok-default",
-        aliases: &["grok", "supergrok"],
-        files: &[
-            BuiltinFile {
-                role: "root",
-                body: include_str!("../presets/grok/agents/root-agent.toml"),
-            },
-            BuiltinFile {
-                role: "worker",
-                body: include_str!("../presets/grok/agents/worker.toml"),
-            },
-            BuiltinFile {
-                role: "reviewer",
-                body: include_str!("../presets/grok/agents/reviewer.toml"),
-            },
-            BuiltinFile {
-                role: "researcher",
-                body: include_str!("../presets/grok/agents/researcher.toml"),
-            },
-        ],
-    },
-    // Root and reviewer on Claude, worker on Codex, researcher on Grok.
-    Builtin {
-        id: "multi-default",
-        aliases: &["multi"],
-        files: &[
-            BuiltinFile {
-                role: "root",
-                body: include_str!("../presets/multi/agents/root-agent.toml"),
-            },
-            BuiltinFile {
-                role: "worker",
-                body: include_str!("../presets/multi/agents/worker.toml"),
-            },
-            BuiltinFile {
-                role: "reviewer",
-                body: include_str!("../presets/multi/agents/reviewer.toml"),
-            },
-            BuiltinFile {
-                role: "researcher",
-                body: include_str!("../presets/multi/agents/researcher.toml"),
-            },
-        ],
-    },
-];
+// Root and reviewer on Claude, worker on Codex, researcher on Grok.
+const MULTI: Builtin = Builtin {
+    id: "multi-default",
+    aliases: &["multi"],
+    files: &[
+        BuiltinFile {
+            role: "root",
+            body: include_str!("../presets/multi/agents/root-agent.toml"),
+        },
+        BuiltinFile {
+            role: "worker",
+            body: include_str!("../presets/multi/agents/worker.toml"),
+        },
+        BuiltinFile {
+            role: "reviewer",
+            body: include_str!("../presets/multi/agents/reviewer.toml"),
+        },
+        BuiltinFile {
+            role: "researcher",
+            body: include_str!("../presets/multi/agents/researcher.toml"),
+        },
+    ],
+};
+
+fn builtins() -> impl Iterator<Item = &'static Builtin> {
+    crate::capabilities::presets().chain(std::iter::once(&MULTI))
+}
 
 /// A profile ready to apply: the config it produces and its root binding.
 pub(crate) struct Prepared {
@@ -156,7 +92,7 @@ struct Resolved {
 pub(crate) fn list(config: &ProductConfig, home: &Path) -> ProfilesView {
     let (users, mut diagnostics) = user_profiles(config, home);
     let mut rows = Vec::new();
-    for builtin in BUILTINS {
+    for builtin in builtins() {
         match resolve_builtin(config, builtin) {
             Ok(resolved) => rows.push(row(
                 config,
@@ -218,9 +154,8 @@ fn resolve(config: &ProductConfig, home: &Path, name: &str) -> Result<Resolved, 
     if let Some(user) = users.into_iter().find(|user| user.id == name) {
         return Ok(user);
     }
-    if let Some(builtin) = BUILTINS
-        .iter()
-        .find(|builtin| builtin.id == name || builtin.aliases.contains(&name))
+    if let Some(builtin) =
+        builtins().find(|builtin| builtin.id == name || builtin.aliases.contains(&name))
     {
         return resolve_builtin(config, builtin);
     }
@@ -284,7 +219,7 @@ fn user_profiles(config: &ProductConfig, home: &Path) -> (Vec<Resolved>, Vec<Str
     files.sort();
     let mut profiles = Vec::new();
     for (stem, path) in files {
-        if BUILTINS.iter().any(|builtin| builtin.id == stem) {
+        if builtins().any(|builtin| builtin.id == stem) {
             diagnostics.push(format!(
                 "profiles/{stem}.toml is ignored: `{stem}` is the built-in profile's name"
             ));
@@ -332,7 +267,7 @@ fn current(config: &ProductConfig, rows: &[ProfileRow], users: &[Resolved]) -> O
         .iter()
         .map(TemplateName::as_str)
         .collect();
-    let builtin = BUILTINS.iter().find(|builtin| {
+    let builtin = builtins().find(|builtin| {
         root == format!("{}-root", builtin.id)
             && cards
                 == ROLES

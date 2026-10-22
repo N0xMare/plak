@@ -13,7 +13,7 @@ use plakous::model::sha256_hex;
 
 use crate::home::paths::PlakPaths;
 use crate::product_config::{
-    AgentTemplate, NO_NATIVE_PROTOCOL_ACCOUNTS, ProductConfig, TEMPLATE_ACCOUNTS,
+    AgentTemplate, ProductConfig, no_native_protocol_accounts, template_accounts,
 };
 use plakous_hosted::agent_tree_protocol::{Delegation, TemplateName};
 use plakous_hosted::orchestration::{
@@ -168,8 +168,8 @@ fn reached_tool_sections<'a>(
 #[must_use]
 pub fn product_bind_hints() -> BindHints {
     BindHints::new(
-        name_set(TEMPLATE_ACCOUNTS),
-        name_set(NO_NATIVE_PROTOCOL_ACCOUNTS),
+        template_accounts().map(str::to_owned).collect(),
+        no_native_protocol_accounts().map(str::to_owned).collect(),
     )
 }
 
@@ -248,10 +248,6 @@ pub(crate) fn nested_spawns(
         }
     }
     out
-}
-
-fn name_set(names: &[&str]) -> BTreeSet<String> {
-    names.iter().map(|name| (*name).to_owned()).collect()
 }
 
 /// Digest over the resolved template contents this epoch depends on: every

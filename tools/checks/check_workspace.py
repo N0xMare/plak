@@ -451,10 +451,12 @@ EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
     # fragments (head, maintainer verbs, tail) and one page per verb. The
     # renderer supplies only what a page cannot state for itself.
     ("plak", "src/cli/render.rs"): ("include_str",) * 24,
-    # The four provider homes are the built-in Agents profiles. Each home's
-    # four role files are compiled into the binary so a user with no
-    # `~/.plak/profiles` still has codex, claude, grok and multi.
-    ("plak", "src/profiles.rs"): ("include_str",) * 16,
+    # Each route owns its four bundled role files; the common multi-provider
+    # profile remains in profiles.rs. The total stays sixteen documents.
+    ("plak", "src/profiles.rs"): ("include_str",) * 4,
+    ("plak", "src/capabilities/codex.rs"): ("include_str",) * 4,
+    ("plak", "src/capabilities/claude.rs"): ("include_str",) * 4,
+    ("plak", "src/capabilities/grok.rs"): ("include_str",) * 4,
 }
 EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]] = {
     ("plak", "src/terminal_application.rs"): [
@@ -559,6 +561,9 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     # The help pages; see EXPECTED_PRODUCT_GENERATED_MACROS.
     ("plak", "src/cli/render.rs"): {"include_str"},
     ("plak", "src/profiles.rs"): {"include_str"},
+    ("plak", "src/capabilities/codex.rs"): {"include_str"},
+    ("plak", "src/capabilities/claude.rs"): {"include_str"},
+    ("plak", "src/capabilities/grok.rs"): {"include_str"},
     ("plak", "src/commands/application.rs"): {"select"},
     ("plak", "src/commands/secret_input.rs"): {"select"},
     # The SIGTERM/SIGHUP watcher thread waits on two signal streams at once.
@@ -3057,10 +3062,10 @@ def configuration_debt(
             is_registration = (
                 cursor >= 2 and cursor - 2 in registry_positions
                 and tokens[cursor - 2].value == "#"
-                and following + 3 < len(tokens)
+                and following + 2 < len(tokens)
                 and tokens[following].value == "&"
                 and tokens[following + 1].kind == "identifier"
-                and tokens[following + 2].value == "::"
+                and tokens[following + 2].value in {"::", ",", "]"}
             )
             label = f"{path}: {token.value}({', '.join(sorted(features))})"
             if not is_module and not is_registration:

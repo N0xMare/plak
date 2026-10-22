@@ -147,37 +147,23 @@ impl ProviderRowPresentation for ProviderDef {
     }
 }
 
-/// The OAuth accounts `plak login` / `plak logout` accept.
+/// Independent oracle for the OAuth command contract tests.
+#[cfg(test)]
 pub const OAUTH_ACCOUNTS: [&str; 3] = ["codex", "grok", "claude"];
 
 /// The API-key accounts `plak key set` / `plak key clear` accept.
 #[cfg(test)]
 pub const API_KEY_ACCOUNTS: [&str; 4] = ["openai", "xai-api", "anthropic", "openrouter"];
 
-/// The Usage "Limits" roster: each vertical's account id with the
-/// operator-facing label, in presentation order (spec 02 §7.2).
-///
-/// The host protocol carries a vertical as data — an account id plus a label —
-/// so the roster itself is the product's to state. The host projects the same
-/// four; this table is what the surface lists before the first projection
-/// lands, and it is why an unread Limits page still names every vertical.
-pub const USAGE_VERTICALS: [(&str, &str); 4] = [
-    ("codex", "Codex"),
-    ("grok", "SuperGrok"),
-    ("claude", "Claude"),
-    ("openrouter", "OpenRouter"),
-];
-
 /// The Limits projection before any host read: every vertical of
-/// [`USAGE_VERTICALS`] listed, none painted as connected.
+/// the capability registry listed, none painted as connected.
 #[must_use]
 pub fn unread_usage_limits() -> crate::tui::presentation::UsageLimitsView {
     use crate::tui::presentation::{
         UsageLimitsView, UsageVertical, VerticalUsageState, VerticalUsageView,
     };
     UsageLimitsView {
-        verticals: USAGE_VERTICALS
-            .into_iter()
+        verticals: crate::config::usage_verticals()
             .map(|(account, label)| VerticalUsageView {
                 vertical: UsageVertical::new(account, label),
                 account_email: None,
@@ -224,7 +210,7 @@ pub fn api_key_remedy(account: &str) -> String {
 /// unknown name is the exact defect this dispatch exists to prevent.
 #[must_use]
 pub fn account_remedy(account: &str) -> String {
-    if OAUTH_ACCOUNTS.contains(&account) {
+    if crate::config::oauth_accounts().any(|known| known == account) {
         oauth_login_remedy(account)
     } else {
         api_key_remedy(account)

@@ -1261,62 +1261,33 @@ fn tui_presentation_bundle(paths: &product_paths::PlakPaths) -> CliResult<TuiPre
 /// Fallback rows used when the credential store cannot be read at all. Every
 /// vertical reads as unready, so nothing is painted as connected.
 fn supported_provider_rows() -> Vec<plakous_host_protocol::views::ProviderDef> {
-    [
-        (
-            "codex",
-            "Codex (ChatGPT)",
-            plakous_host_protocol::views::AuthKind::Oauth,
-        ),
-        (
-            "grok",
-            "Grok (SuperGrok)",
-            plakous_host_protocol::views::AuthKind::Oauth,
-        ),
-        (
-            "claude",
-            "Claude (Max)",
-            plakous_host_protocol::views::AuthKind::Oauth,
-        ),
-        (
-            "openai",
-            "OpenAI",
-            plakous_host_protocol::views::AuthKind::ApiKey,
-        ),
-        (
-            "xai-api",
-            "xAI",
-            plakous_host_protocol::views::AuthKind::ApiKey,
-        ),
-        (
-            "anthropic",
-            "Anthropic",
-            plakous_host_protocol::views::AuthKind::ApiKey,
-        ),
-        (
-            "openrouter",
-            "OpenRouter",
-            plakous_host_protocol::views::AuthKind::ApiKey,
-        ),
-    ]
-    .into_iter()
-    .map(
-        |(id, label, kind)| plakous_host_protocol::views::ProviderDef {
-            id: id.to_owned(),
-            label: label.to_owned(),
-            kind,
-            state: match kind {
-                plakous_host_protocol::views::AuthKind::Oauth => {
-                    plakous_host_protocol::views::ProviderState::NotLoggedIn
-                }
-                plakous_host_protocol::views::AuthKind::ApiKey => {
-                    plakous_host_protocol::views::ProviderState::NoKey
-                }
+    crate::capabilities::ROUTES
+        .iter()
+        .map(|capability| {
+            (
+                capability.route.account,
+                capability.label,
+                capability.auth_kind(),
+            )
+        })
+        .map(
+            |(id, label, kind)| plakous_host_protocol::views::ProviderDef {
+                id: id.to_owned(),
+                label: label.to_owned(),
+                kind,
+                state: match kind {
+                    plakous_host_protocol::views::AuthKind::Oauth => {
+                        plakous_host_protocol::views::ProviderState::NotLoggedIn
+                    }
+                    plakous_host_protocol::views::AuthKind::ApiKey => {
+                        plakous_host_protocol::views::ProviderState::NoKey
+                    }
+                },
+                detail: String::new(),
+                account_label: None,
             },
-            detail: String::new(),
-            account_label: None,
-        },
-    )
-    .collect()
+        )
+        .collect()
 }
 
 pub(crate) fn handle_tui_handoff(

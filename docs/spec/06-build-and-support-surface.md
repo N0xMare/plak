@@ -255,8 +255,8 @@ profile remains speed-focused; feature work does not change its optimization.
 
 The workspace checker enforces configuration placement through
 `[workspace.metadata.plakous.cfg.<package>]`. `feature-sites` defaults to
-`src/lib.rs` and `src/registry.rs`; these allow gated `&module::ENTRY`
-registrations, not arbitrary gated items or statements. Other feature
+`src/lib.rs` and `src/registry.rs`; these allow gated static-entry references
+(`&module::ENTRY` or `&ENTRY`), not arbitrary gated items or statements. Other feature
 predicates must gate a module declaration (including disabled-module swaps).
 `env-sites` defaults to
 empty and lists reviewed environment-reading boundary files. Plak's boundary
@@ -276,6 +276,16 @@ review reason. Missing ceilings mean zero; growth fails and reductions require
 lowering the ceiling in the same change. Test-only items and test source
 trees are excluded; `cfg(any(test, feature = ...))` still ships under the
 feature and is counted. Comments and literals are not configuration sites.
+
+`plakous-hosted::capabilities` owns the complete current route metadata in
+per-route modules and one ordered registry. Plak's private product registry
+adds its labels, recommendation aliases, doctor probe and bundled preset for
+each hosted identity. No new Cargo features or feature implications are
+introduced by that registry; the default and maintainer closures and the
+speed-focused release profile are unchanged. Runtime construction and its
+test-support seams remain separate from this metadata registry. Serialized
+binding enums, the complete template-account vocabulary and credential-store
+directory names remain ungated; they describe records, not enabled menus.
 
 `plakous` facade features are listed in chapter 00. The host and product
 features and the evaluator selection are summarized here; backend defaults are

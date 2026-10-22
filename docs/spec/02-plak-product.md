@@ -122,6 +122,19 @@ Three rules follow, and they are the ones a reviewer checks:
   loses nothing: the next open rebuilds them from the feed (§2.6). Deleting the
   logs or telemetry loses display and numbers, never the ability to resume.
 
+Hosted route identities and catalog policy live in per-route capability
+modules and one registry: canonical accounts, accepted aliases, OAuth/API
+classification, fixed wire families, catalog labels, Usage verticals and
+native-PTC diagnostics. Plak's product registry attaches provider-row labels,
+recommendations, doctor probes and bundled agent profiles to those identities.
+Catalog refresh iterates the registered native routes, preserving their
+presentation order and excluding the attached route. This is an identity and
+presentation registry, not a second runtime or a construction fallback list;
+runtime construction and its existing injected test seams are unchanged.
+Registry iteration preserves the shipped catalog, doctor, profile and Usage
+ordering, rendered prompts and recommendation aliases. The common
+`multi-default` profile remains product data rather than a provider route.
+
 The `tui` module of `bin/plak` is inert: typed views in, typed intents out, no
 Plakous and no persistence import — only `plakous-host-protocol`, itself, and
 the named `crate::config` doors, a constraint the workspace policy checks per

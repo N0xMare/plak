@@ -39,13 +39,8 @@ fn refresh_providers(attached_account: Option<&str>) -> impl Iterator<Item = Nat
     let attached_provider = attached_account.and_then(oauth_provider_for_account);
     // Only an attached host already resolved its catalog. A selected account
     // in a fallback shell may be precisely the provider whose catalog is cold.
-    [
-        NativeProvider::Codex,
-        NativeProvider::Xai,
-        NativeProvider::Claude,
-    ]
-    .into_iter()
-    .filter(move |provider| Some(*provider) != attached_provider)
+    plakous_hosted::capabilities::native_providers()
+        .filter(move |provider| Some(*provider) != attached_provider)
 }
 
 fn spawn(
