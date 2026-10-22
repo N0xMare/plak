@@ -1335,21 +1335,6 @@ pub(super) fn apply_event<P: plakous_host_protocol::ProtocolExtension>(
                     stash_tool_subjects_from_response(tool_subjects, response);
                 }
                 ModelEvent::Retry(retry) => {
-                    if let Some(turn_id) = event.turn_id() {
-                        roots.emit_product(
-                            crate::product_observation::ProductObservation::ModelRetry {
-                                at: event.timestamp(),
-                                session_id: event.session_id(),
-                                branch_id: event.branch_id(),
-                                agent_id: event.agent_id(),
-                                turn_id,
-                                next_attempt: retry.next_physical(),
-                                max_attempts: retry.max_physical(),
-                                cause: retry.cause(),
-                                loss: retry.loss(),
-                            },
-                        );
-                    }
                     if retry.loss().declined_reason.is_some() {
                         return;
                     }

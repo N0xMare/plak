@@ -185,7 +185,7 @@ Monty worker package needs.
 | Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **27** |
 | Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **33** |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **8** |
-| Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **17**, disposable, never recovery authority |
+| Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **19**, disposable, never recovery authority |
 | Session export document | Plak | version **7**, imports **7** and **6** |
 
 There are no released persisted-format obligations. Each store has exactly one

@@ -31,7 +31,7 @@ fn private_home(home: &std::path::Path) {
 /// sessions carry a `SessionLocator` string in `sessions.locator`; spawned
 /// children carry theirs in `agent_nodes.session_locator`. Node ids are not
 /// plakous agent ids.
-fn seed_minimal_product_provenance(database: &std::path::Path) {
+fn seed_minimal_product_provenance(database: &std::path::Path, subagents: &std::path::Path) {
     let connection = Connection::open(database).expect("open product db");
     connection
         .execute_batch(
@@ -46,7 +46,13 @@ fn seed_minimal_product_provenance(database: &std::path::Path) {
             INSERT INTO sessions VALUES (
               'node-root','openai','gpt-test','low','sess-1/br/ckpt','direct'
             );
-            CREATE TABLE agent_nodes (
+            ",
+        )
+        .expect("seed product provenance");
+    let connection = Connection::open(subagents).expect("open subagents db");
+    connection
+        .execute_batch(
+            "CREATE TABLE agent_nodes (
               tree_id TEXT NOT NULL,
               agent_id TEXT NOT NULL,
               tuple_id TEXT NOT NULL,
@@ -79,7 +85,14 @@ fn telemetry_sql_with_product_attach() {
             [],
         )
         .expect("seed turn");
-    seed_minimal_product_provenance(&paths.product_database());
+    seed_minimal_product_provenance(&paths.product_database(), &paths.subagents_database());
+    for sql in [
+        "SELECT * FROM v_session_models",
+        "SELECT s.tuple_id, s.effort, s.composition, SUM(t.cached_input_tokens) FROM v_turn_costs t JOIN v_session_models s ON s.session_id = t.session_id GROUP BY s.tuple_id, s.effort, s.composition",
+        "SELECT s.tuple_id, s.effort, AVG(m.ttft_ns), AVG(m.ttlb_ns) FROM model_attempts m JOIN v_session_models s ON s.session_id = m.session_id GROUP BY s.tuple_id, s.effort",
+    ] {
+        TelemetryStore::query_attached(&paths, sql).expect("canned provenance query");
+    }
 
     private_home(paths.home());
     let output = Command::new(plak_bin())
@@ -124,8 +137,8 @@ fn telemetry_status_reports_schema_version() {
     assert!(output.status.success(), "{output:?}");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("Schema version 18"),
-        "expected schema v18 in status: {stdout}"
+        stdout.contains("Schema version 19"),
+        "expected schema v19 in status: {stdout}"
     );
 }
 
@@ -137,7 +150,7 @@ fn jobs_telemetry_schema_is_content_free_and_route_joinable() {
     assert!(
         paths
             .telemetry_database()
-            .ends_with("telemetry-v18.sqlite3")
+            .ends_with("telemetry-v19.sqlite3")
     );
     let connection = Connection::open(paths.telemetry_database()).expect("telemetry db");
     let mut query = connection
@@ -343,6 +356,7 @@ fn model_finished_persists_served_endpoint_and_cost() {
                     status: TelemetryTerminalStatus::Completed,
                     usage: Some(Usage::new(1, 2, 0, 0, 0).with_cost_micros(Some(123_456))),
                     served_by: Some(ServedBy::new("Provider").expect("served_by")),
+                    output_deltas: 3,
                 },
             ),
             TelemetryObservation::new(
@@ -353,6 +367,7 @@ fn model_finished_persists_served_endpoint_and_cost() {
                     status: TelemetryTerminalStatus::Completed,
                     usage: Some(Usage::new(3, 4, 0, 0, 0)),
                     served_by: None,
+                    output_deltas: 0,
                 },
             ),
         ])

@@ -192,7 +192,7 @@ launch directory — the cwd of the process, resolved once.
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
   carry/<id>.<uuid>.json      session export documents, 0600 in 0700 (§2.5.1)
   references/<id>.json        imported archives, 0600 in 0700 (§2.5.1)
-  telemetry/telemetry-v18.sqlite3 disposable analytics, schema 18
+  telemetry/telemetry-v19.sqlite3 disposable analytics, schema 19
   logs/plak.log               PLAK_LOG boundary spans
 ```
 
@@ -5696,7 +5696,17 @@ with their session; both tables are session-keyed. `tool_calls` is keyed by
 turn **and** call id rather than call id alone, because a nested composition
 call id is a digest of the nested request and repeats across turns and sessions
 for identical
-nested calls. `retention_runs` records each automatic history prune that
+nested calls. `tool_calls.tool_name` is the exact presented tool alias, or the
+canonical name when no alias exists. Clean commits write one `durability_attempts` row with attempt kind
+`durability_finished`; a successful initial-commit attempt is not also recorded. Failed initial
+attempts and acknowledgement recovery keep their separate attempt rows.
+`model_attempts.served_path_fingerprint` is an opaque `dpt-v1` token: text,
+reasoning and tool-input deltas per mille of reported output tokens, rounded
+down, in the final physical response. Discarded replay deltas are excluded;
+missing or zero output usage leaves it null. This replaces the proposed
+`served_tier` observation; it is not a service-tier or routing assertion and
+has no admission authority.
+`retention_runs` records each automatic history prune that
 removed checkpoints or failed: status, elapsed time and pruned checkpoints;
 it is exported as a `retention` span. It does not attribute asynchronous object
 reclamation to the prune acknowledgement. Cumulative reclaim counters are
@@ -5705,8 +5715,8 @@ store statistics, not canonical history.
 Model, account, effort, and composition provenance is **joined, never copied**.
 The join is on the Plakous session id, recovered from the locator prefix in the
 product store — root sessions from the sessions table, spawned children from
-the node table. A tree node id is not a Plakous agent id and is never a join
-key. The tree is never duplicated into telemetry.
+`subagents.agent_nodes` in the separately attached `subagents.sqlite3`. A tree
+node id is not a Plakous agent id and is never a join key. The tree is never duplicated into telemetry.
 
 Cost is recorded as tokens by class plus `cost_micros` and a `cost_status` of
 `reported` or `unknown`; USD is a Plak-side join against a versioned price
@@ -5764,7 +5774,9 @@ the terminal projector pass: it follows lifecycle/result observations and
 `assistant_done`, and precedes idle. The background projector is joined at
 that boundary so a winning background pass cannot publish usage late.
 
-`model_retries` contains one content-free row per observed retry: timestamp,
+`model_retries` contains one content-free row per observed retry in every runtime,
+including children, emitted by the product sink's `observe_model_retry` hook
+(not by hosted event projection): timestamp,
 session, branch, agent and turn ids; next/max physical attempts; cause kind and
 transport phase; discarded streamed assistant-text and reasoning byte counts;
 completed items discarded; broken-attempt elapsed milliseconds before backoff;
@@ -5773,7 +5785,7 @@ prose enters the row. The cause column is unconstrained SQL `TEXT`, populated
 by `ModelRetryCause::kind()`: its closed spelling set is `http_status`, `connect`,
 `record_rejected_in_transit`, `transport_after_send`, and `stream_interrupted`.
 The new string value requires no column of its own. The disposable store is
-schema 18. Request host, route and body size are log fields, not SQL columns.
+schema 19. Request host, route and body size are log fields, not SQL columns.
 The bounded writer has the same best-effort drop behavior
 as other analytics; these rows are not recovery authority. `v_replay_loss` is
 the canned view printed by `plak telemetry status --views`, including declined
@@ -5812,10 +5824,14 @@ retention, the writer's write-error, drop, and WAL-checkpoint-busy counts, and a
 row count per table; `--views` appends the recommended read-only SQL, which is
 the whole content of the retired `telemetry views` verb. `plak telemetry sql`
 opens the store **read-only and symlink-refusing**, attaches `product.sqlite3`
-and `runtime.sqlite3` read-only under those two names, and builds the
+as `product`, `runtime.sqlite3` as `runtime`, and `subagents.sqlite3` as
+`subagents`, all read-only, and builds the
 provenance view as a TEMP view after the attach — a persistent view cannot
 reference an attached schema. A file that is not there is skipped rather than
-failing the query. Blob columns render as a byte count, never as content.
+failing the query. The product and subagents stores may contain prompt text;
+SQL is an operator inspection surface, not a content-free export. The provenance
+view selects only locator, model/account/effort/composition columns. Blob columns
+render as a byte count, never as content.
 
 `plak telemetry prune` deletes **whole sessions, oldest first**, never rows
 within a session: sessions are ordered by their oldest activity across the
@@ -5842,8 +5858,10 @@ checkpoint stops pruning rather than deleting more sessions to chase a WAL
 that cannot yet shrink.
 
 Two asymmetries are worth stating. `telemetry sql` is strictly read-only, while
-`telemetry status` opens the store for writing and will therefore rebuild a
-stale schema as a side effect. And a stale schema on a *read* path fails closed
+`telemetry status` opens the current per-schema file for writing, creating
+schema 19 from scratch when absent. Existing older telemetry files are left
+untouched and are not imported; telemetry is disposable. A mismatched schema
+inside the current file is refused without migration or deletion. And a stale schema on a *read* path fails closed
 with the found and expected versions rather than silently wiping analytics the
 operator may still want.
 

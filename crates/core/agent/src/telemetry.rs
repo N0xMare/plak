@@ -13,6 +13,39 @@ use thiserror::Error;
 
 use crate::{CompactionEventOutcome, CompactionEventReason, TurnUsage};
 
+/// Exact presented tool name in a fixed-size, copyable telemetry observation.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct TelemetryToolName {
+    len: u8,
+    bytes: [u8; 128],
+}
+
+impl From<&plakous_model::ToolName> for TelemetryToolName {
+    fn from(tool: &plakous_model::ToolName) -> Self {
+        let mut bytes = [0; 128];
+        let name = tool.as_str().as_bytes();
+        bytes[..name.len()].copy_from_slice(name);
+        Self {
+            len: u8::try_from(name.len()).unwrap_or(128),
+            bytes,
+        }
+    }
+}
+
+impl TelemetryToolName {
+    /// Returns the validated presented name, without truncation.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..usize::from(self.len)]).unwrap_or("")
+    }
+}
+
+impl fmt::Debug for TelemetryToolName {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_str().fmt(formatter)
+    }
+}
+
 /// Content-free classification of an exact compaction endpoint refusal.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CompactionRefusalReason {
@@ -456,9 +489,14 @@ pub enum TelemetryObservationKind {
         usage: Option<Usage>,
         /// Served upstream provider display name when reported.
         served_by: Option<plakous_model::ServedBy>,
+        /// Output delta events in the final physical response, excluding replay loss.
+        output_deltas: u64,
     },
     /// A local tool dispatch began.
-    ToolStarted,
+    ToolStarted {
+        /// Exact provider-facing alias, or the canonical name without an alias.
+        tool: TelemetryToolName,
+    },
     /// A local tool dispatch reached a terminal state.
     ToolFinished {
         /// Complete tool duration.
@@ -1034,6 +1072,7 @@ mod tests {
                 status: TelemetryTerminalStatus::Completed,
                 usage: Some(Usage::new(11, 12, 13, 14, 15)),
                 served_by: None,
+                output_deltas: 0,
             },
         ))
     }
@@ -1200,6 +1239,16 @@ mod tests {
     }
 
     #[test]
+    fn telemetry_tool_name_preserves_the_full_validated_name_and_is_copyable() -> TestResult {
+        let name = plakous_model::ToolName::new("x".repeat(128))?;
+        let token = TelemetryToolName::from(&name);
+        let copied = token;
+        assert_eq!(copied.as_str(), name.as_str());
+        assert_eq!(token, copied);
+        Ok(())
+    }
+
+    #[test]
     fn observation_surface_contains_only_typed_content_free_values() -> TestResult {
         let observation = observation()?;
         let TelemetryObservationKind::ModelFinished {
@@ -1207,6 +1256,7 @@ mod tests {
             status,
             usage,
             served_by,
+            ..
         } = observation.kind()
         else {
             panic!("fixture kind changed");

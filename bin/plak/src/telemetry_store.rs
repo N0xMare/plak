@@ -15,7 +15,7 @@ use rusqlite::{Connection, OpenFlags, params};
 use crate::home::paths::PlakPaths;
 use plakous_hosted::product_observation::{ChildKind, ProductObservation};
 
-pub(crate) const TELEMETRY_SCHEMA_VERSION: i64 = 18;
+pub(crate) const TELEMETRY_SCHEMA_VERSION: i64 = 19;
 
 /// Default disposable telemetry retention.
 pub const DEFAULT_TELEMETRY_MAX_BYTES: u64 = 512 * 1024 * 1024;
@@ -118,6 +118,7 @@ CREATE TABLE model_attempts (
   cached_input_tokens INTEGER,
   cache_write_tokens INTEGER,
   served_endpoint TEXT,
+  served_path_fingerprint TEXT,
   cost_micros INTEGER,
   cost_status TEXT NOT NULL DEFAULT 'unknown'
 );
@@ -135,6 +136,7 @@ CREATE TABLE tool_calls (
   elapsed_ns INTEGER,
   status TEXT,
   output_bytes INTEGER,
+  tool_name TEXT,
   PRIMARY KEY (turn_id, call_id)
 );
 
@@ -719,8 +721,10 @@ impl TelemetryStore {
         TelemetryStore::require_attached_schema(&connection)?;
         let product_attached = attach_readonly(&connection, "product", &paths.product_database())?;
         attach_readonly(&connection, "runtime", &paths.runtime_database())?;
+        let subagents_attached =
+            attach_readonly(&connection, "subagents", &paths.subagents_database())?;
         if product_attached {
-            create_session_models_view(&connection)?;
+            create_session_models_view(&connection, subagents_attached)?;
         }
         let mut statement = connection
             .prepare(sql)
@@ -917,7 +921,18 @@ fn attach_readonly(
 /// a TEMP view built after ATTACH.
 pub const SESSION_MODELS_VIEW: &str = "v_session_models";
 
-fn create_session_models_view(connection: &Connection) -> Result<(), TelemetryStoreOpenError> {
+fn create_session_models_view(
+    connection: &Connection,
+    subagents_attached: bool,
+) -> Result<(), TelemetryStoreOpenError> {
+    let children = if subagents_attached {
+        "UNION SELECT substr(session_locator, 1, instr(session_locator, '/') - 1),
+                    tuple_id, account, effort, NULL, 'child'
+             FROM subagents.agent_nodes
+             WHERE session_locator IS NOT NULL AND instr(session_locator, '/') > 1"
+    } else {
+        ""
+    };
     connection
         .execute_batch(&format!(
             "CREATE TEMP VIEW {SESSION_MODELS_VIEW} AS
@@ -925,11 +940,7 @@ fn create_session_models_view(connection: &Connection) -> Result<(), TelemetrySt
                     model AS tuple_id, account, effort, composition, 'root' AS origin
              FROM product.sessions
              WHERE locator IS NOT NULL AND instr(locator, '/') > 1
-             UNION
-             SELECT substr(session_locator, 1, instr(session_locator, '/') - 1),
-                    tuple_id, account, effort, NULL, 'child'
-             FROM product.agent_nodes
-             WHERE session_locator IS NOT NULL AND instr(session_locator, '/') > 1"
+             {children}"
         ))
         .map_err(|error| TelemetryStoreOpenError::unavailable(error.to_string()))
 }
@@ -1509,6 +1520,7 @@ fn write_observation(
             status,
             usage,
             served_by,
+            output_deltas,
         } => {
             let Some(attempt_id) = context.attempt_id() else {
                 return Ok(());
@@ -1518,6 +1530,14 @@ fn write_observation(
                 .unwrap_or((None, None, None, None, None));
             let (cost_micros, cost_status) =
                 usage.map_or((None, "unknown"), cost_fields_from_usage);
+            // Opaque observational token, not a provider or admission classification.
+            let fingerprint = usage
+                .map(Usage::output_tokens)
+                .filter(|tokens| *tokens > 0)
+                .map(|tokens| {
+                    let per_mille = u128::from(output_deltas) * 1000 / u128::from(tokens);
+                    format!("dpt-v1:{per_mille}")
+                });
             let served_endpoint = served_by.map(|value| value.as_str().to_owned());
             transaction.execute(
                 "INSERT INTO model_attempts (
@@ -1525,8 +1545,8 @@ fn write_observation(
                     finished_at, ttlb_ns, status,
                     input_tokens, output_tokens, reasoning_tokens,
                     cached_input_tokens, cache_write_tokens,
-                    served_endpoint, cost_micros, cost_status
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+                    served_endpoint, cost_micros, cost_status, served_path_fingerprint
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
                  ON CONFLICT(attempt_id) DO UPDATE SET
                     finished_at = excluded.finished_at,
                     ttlb_ns = excluded.ttlb_ns,
@@ -1538,7 +1558,8 @@ fn write_observation(
                     cache_write_tokens = excluded.cache_write_tokens,
                     served_endpoint = excluded.served_endpoint,
                     cost_micros = excluded.cost_micros,
-                    cost_status = excluded.cost_status",
+                    cost_status = excluded.cost_status,
+                    served_path_fingerprint = excluded.served_path_fingerprint",
                 params![
                     id_text(attempt_id),
                     id_text(context.session_id()),
@@ -1557,20 +1578,22 @@ fn write_observation(
                     served_endpoint,
                     cost_micros,
                     cost_status,
+                    fingerprint,
                 ],
             )?;
         }
-        TelemetryObservationKind::ToolStarted => {
+        TelemetryObservationKind::ToolStarted { tool } => {
             let (Some(turn_id), Some(call_id)) = (context.turn_id(), context.call_id()) else {
                 return Ok(());
             };
             transaction.execute(
                 "INSERT INTO tool_calls (
                     call_id, session_id, branch_id, run_id, agent_id, turn_id,
-                    attempt_id, started_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                    attempt_id, started_at, tool_name
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT(turn_id, call_id) DO UPDATE SET
-                    started_at = excluded.started_at",
+                    started_at = excluded.started_at,
+                    tool_name = excluded.tool_name",
                 params![
                     id_text(call_id),
                     id_text(context.session_id()),
@@ -1580,6 +1603,7 @@ fn write_observation(
                     id_text(turn_id),
                     context.attempt_id().map(id_text),
                     timestamp,
+                    tool.as_str(),
                 ],
             )?;
         }
@@ -1754,6 +1778,11 @@ fn write_observation(
             attempt,
             outcome,
         } => {
+            if attempt == DurabilityAttemptKind::InitialCommit
+                && outcome == DurabilityAttemptOutcome::Committed
+            {
+                return Ok(());
+            }
             transaction.execute(
                 "INSERT INTO durability_attempts (
                     session_id, branch_id, run_id, agent_id, turn_id,
@@ -2190,6 +2219,101 @@ mod tests {
     }
 
     #[test]
+    fn clean_commit_has_one_row_but_failed_and_recovery_attempts_are_retained() -> TestResult {
+        use plakous::agent::{DurabilityAttemptKind as K, DurabilityAttemptOutcome as O};
+        let (_guard, paths) = PlakPaths::isolated_test_home();
+        let mut store = TelemetryStore::open(&paths)?;
+        let context = fixture_context()?;
+        let at = fixture_timestamp()?;
+        store.write_batch(&[
+            TelemetryItem::Agent(TelemetryObservation::new(
+                context,
+                at,
+                TelemetryObservationKind::DurabilityAttemptFinished {
+                    elapsed: Duration::ZERO,
+                    attempt: K::InitialCommit,
+                    outcome: O::Committed,
+                },
+            )),
+            TelemetryItem::Agent(TelemetryObservation::new(
+                context,
+                at,
+                TelemetryObservationKind::DurabilityFinished {
+                    elapsed: Duration::ZERO,
+                    status: TelemetryTerminalStatus::Completed,
+                },
+            )),
+        ])?;
+        assert_eq!(
+            store.query_i64("SELECT count(*) FROM durability_attempts"),
+            Some(1)
+        );
+        for (attempt, outcome) in [
+            (K::InitialCommit, O::Failed),
+            (
+                K::InitialAcknowledgementRecovery,
+                O::RecoveredAcknowledgement,
+            ),
+        ] {
+            store.write_batch(&[TelemetryItem::Agent(TelemetryObservation::new(
+                context,
+                at,
+                TelemetryObservationKind::DurabilityAttemptFinished {
+                    elapsed: Duration::ZERO,
+                    attempt,
+                    outcome,
+                },
+            ))])?;
+        }
+        assert_eq!(
+            store.query_i64("SELECT count(*) FROM durability_attempts"),
+            Some(3)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn presented_tool_and_delta_fingerprint_are_recorded() -> TestResult {
+        let (_guard, paths) = PlakPaths::isolated_test_home();
+        let mut store = TelemetryStore::open(&paths)?;
+        let context = fixture_context()?;
+        let at = fixture_timestamp()?;
+        let tool = plakous::model::ToolName::new("functions.exec")?;
+        store.write_batch(&[
+            TelemetryItem::Agent(TelemetryObservation::new(
+                context,
+                at,
+                TelemetryObservationKind::ToolStarted {
+                    tool: (&tool).into(),
+                },
+            )),
+            TelemetryItem::Agent(TelemetryObservation::new(
+                context,
+                at,
+                TelemetryObservationKind::ModelFinished {
+                    elapsed: Duration::ZERO,
+                    status: TelemetryTerminalStatus::Completed,
+                    usage: Some(Usage::new(10, 20, 0, 0, 0)),
+                    served_by: None,
+                    output_deltas: 4,
+                },
+            )),
+        ])?;
+        let name: String =
+            store
+                .connection
+                .query_row("SELECT tool_name FROM tool_calls", [], |row| row.get(0))?;
+        let fingerprint: String = store.connection.query_row(
+            "SELECT served_path_fingerprint FROM model_attempts",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(name, "functions.exec");
+        assert_eq!(fingerprint, "dpt-v1:200");
+        Ok(())
+    }
+
+    #[test]
     fn turn_origin_is_stored_for_user_prompts_and_host_wakes() -> TestResult {
         let (_guard, paths) = PlakPaths::isolated_test_home();
         let mut store = TelemetryStore::open(&paths)?;
@@ -2257,9 +2381,16 @@ mod tests {
                     status: TelemetryTerminalStatus::Completed,
                     usage: Some(Usage::new(21, 22, 23, 24, 25)),
                     served_by: None,
+                    output_deltas: 0,
                 },
             ),
-            TelemetryObservation::new(context, timestamp, TelemetryObservationKind::ToolStarted),
+            TelemetryObservation::new(
+                context,
+                timestamp,
+                TelemetryObservationKind::ToolStarted {
+                    tool: (&plakous::model::ToolName::new("test").unwrap()).into(),
+                },
+            ),
             TelemetryObservation::new(
                 context,
                 timestamp,
@@ -2418,7 +2549,9 @@ mod tests {
             TelemetryItem::Agent(TelemetryObservation::new(
                 context,
                 fixture_timestamp().expect("fixture timestamp"),
-                TelemetryObservationKind::ToolStarted,
+                TelemetryObservationKind::ToolStarted {
+                    tool: (&plakous::model::ToolName::new("test").unwrap()).into(),
+                },
             ))
         };
         store.write_batch(&[
@@ -2792,7 +2925,7 @@ mod tests {
             store.query_i64("SELECT COUNT(*) FROM v_replay_loss"),
             Some(2)
         );
-        assert_eq!(store.query_i64("PRAGMA user_version"), Some(18));
+        assert_eq!(store.query_i64("PRAGMA user_version"), Some(19));
         assert_eq!(
             store.query_i64(
                 "SELECT COUNT(*) FROM model_retries WHERE cause_kind = 'record_rejected_in_transit'"
@@ -3369,13 +3502,22 @@ mod tests {
     fn writer_leaves_legacy_and_other_schema_files_untouched() -> TestResult {
         let (_guard, paths) = PlakPaths::isolated_test_home();
         paths.ensure_layout().map_err(|error| error.to_string())?;
-        for name in ["telemetry.sqlite3", "telemetry-v9.sqlite3"] {
+        for (name, version) in [
+            ("telemetry.sqlite3", 9),
+            ("telemetry-v9.sqlite3", 9),
+            ("telemetry-v18.sqlite3", 18),
+        ] {
             let database = paths.telemetry_dir().join(name);
             let connection = Connection::open(&database)?;
-            connection.execute_batch("CREATE TABLE evidence (value TEXT); INSERT INTO evidence VALUES ('retained'); PRAGMA user_version = 9;")?;
+            connection.execute_batch(&format!("CREATE TABLE evidence (value TEXT); INSERT INTO evidence VALUES ('retained'); PRAGMA user_version = {version};"))?;
             drop(connection);
             let before = std::fs::read(&database)?;
-            let _store = TelemetryStore::open(&paths)?;
+            let store = TelemetryStore::open(&paths)?;
+            assert_eq!(store.query_i64("PRAGMA user_version"), Some(19));
+            assert_eq!(
+                store.query_i64("SELECT count(*) FROM sqlite_master WHERE name = 'evidence'"),
+                Some(0)
+            );
             assert_eq!(std::fs::read(&database)?, before);
         }
         Ok(())

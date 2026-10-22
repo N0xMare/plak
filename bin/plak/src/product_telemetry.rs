@@ -26,8 +26,8 @@ SELECT * FROM v_tool_success ORDER BY total DESC LIMIT 20;
 -- Child/sidecar CPU and peak RSS per session
 SELECT * FROM v_child_resources ORDER BY user_cpu_ns DESC;
 
--- Model provenance per plakous session (TEMP view built after ATTACH product;
--- root sessions from product.sessions, spawned children from product.agent_nodes)
+-- Model provenance per plakous session (TEMP view built after ATTACH product and subagents;
+-- root sessions from product.sessions, spawned children from subagents.agent_nodes)
 SELECT * FROM v_session_models;
 
 -- Cache hit rate per model/effort/composition

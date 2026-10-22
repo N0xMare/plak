@@ -69,7 +69,7 @@ mod enabled {
     use plakous::exchange_observation::{
         ConnectionUse, ExchangeObservation, ExchangeObserver, ExchangeTerminal,
     };
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::fs::{self, File, OpenOptions};
     use std::io::{Seek as _, SeekFrom, Write as _};
     use std::os::unix::fs::DirBuilderExt as _;
@@ -173,7 +173,8 @@ mod enabled {
     struct Segment {
         bytes: usize,
         active: usize,
-        protected: bool,
+        protected: BTreeSet<usize>,
+        exchanges: BTreeMap<usize, usize>,
         first: usize,
         last: usize,
     }
@@ -187,6 +188,59 @@ mod enabled {
         reserved: Arc<Mutex<Budget>>,
         max_run_bytes: usize,
         segment_exchanges: usize,
+        diagnostics: Mutex<Diagnostics>,
+    }
+
+    #[derive(Default)]
+    struct Diagnostics {
+        reasons: BTreeMap<&'static str, ReasonDiagnostics>,
+    }
+
+    impl Diagnostics {
+        fn report(&mut self, reason: &'static str, now: std::time::Instant) -> Option<u64> {
+            self.reasons.entry(reason).or_default().report(now)
+        }
+
+        fn pending(&mut self) -> Vec<(&'static str, u64)> {
+            self.reasons
+                .iter_mut()
+                .filter_map(|(&reason, state)| {
+                    let count = std::mem::take(&mut state.suppressed);
+                    (count > 0).then_some((reason, count))
+                })
+                .collect()
+        }
+    }
+
+    #[derive(Default)]
+    struct ReasonDiagnostics {
+        last: Option<std::time::Instant>,
+        suppressed: u64,
+    }
+
+    impl ReasonDiagnostics {
+        fn report(&mut self, now: std::time::Instant) -> Option<u64> {
+            if self
+                .last
+                .is_some_and(|last| now.duration_since(last).as_secs() < 60)
+            {
+                self.suppressed = self.suppressed.saturating_add(1);
+                return None;
+            }
+            self.last = Some(now);
+            Some(std::mem::take(&mut self.suppressed))
+        }
+    }
+
+    impl Drop for Capture {
+        fn drop(&mut self) {
+            if let Ok(diagnostics) = self.diagnostics.get_mut() {
+                for (reason, suppressed) in diagnostics.pending() {
+                    tracing::warn!(target: "plak.capture", reason, required = self.required,
+                        suppressed, "private wire evidence incomplete; final suppressed summary");
+                }
+            }
+        }
     }
 
     impl Capture {
@@ -350,9 +404,13 @@ mod enabled {
             inspect(run, 0)
         }
 
-        fn diagnose(&self, reason: &str) {
-            tracing::warn!(target: "plak.capture", reason, required = self.required,
-                "private wire evidence incomplete");
+        fn diagnose(&self, reason: &'static str) {
+            if let Ok(mut diagnostics) = self.diagnostics.lock()
+                && let Some(suppressed) = diagnostics.report(reason, std::time::Instant::now())
+            {
+                tracing::warn!(target: "plak.capture", reason, required = self.required,
+                    suppressed, "private wire evidence incomplete");
+            }
             // A sticky run-level gap record complements per-exchange crash markers.
             // Never include prompts, bodies or filesystem error strings here.
             if let Ok(mut file) = OpenOptions::new()
@@ -418,6 +476,7 @@ mod enabled {
                 reserved: Arc::new(Mutex::new(Budget::default())),
                 max_run_bytes: MAX_RUN_BYTES,
                 segment_exchanges: SEGMENT_EXCHANGES,
+                diagnostics: Mutex::new(Diagnostics::default()),
             })
         }
 
@@ -430,7 +489,13 @@ mod enabled {
             let candidates: Vec<_> = budget
                 .segments
                 .range(..current)
-                .filter(|(_, segment)| segment.active == 0 && !segment.protected)
+                .filter(|(_, segment)| {
+                    segment.active == 0
+                        && segment
+                            .exchanges
+                            .keys()
+                            .any(|id| !segment.protected.contains(id))
+                })
                 .map(|(&id, _)| id)
                 .collect();
             for id in candidates {
@@ -438,9 +503,15 @@ mod enabled {
                     break;
                 }
                 let selected = &budget.segments[&id];
-                let first = selected.first;
-                let last = selected.last;
-                budget.removed.push((first, last));
+                let exchanges: Vec<_> = selected
+                    .exchanges
+                    .keys()
+                    .copied()
+                    .filter(|index| !selected.protected.contains(index))
+                    .collect();
+                budget
+                    .removed
+                    .extend(exchanges.iter().map(|index| (*index, *index)));
                 budget.removed.sort_unstable();
                 // Disjoint ranges are separated by retained (charged) segments;
                 // merging prevents summary growth with the lifetime start count.
@@ -474,12 +545,33 @@ mod enabled {
                     self.dir.join("retention.info"),
                 )?;
                 File::open(&self.dir)?.sync_all()?;
-                fs::remove_dir_all(self.dir.join(format!("segment-{id:04}")))?;
+                let directory = self.dir.join(format!("segment-{id:04}"));
+                for index in exchanges {
+                    for extension in ["request", "body", "info"] {
+                        let path = directory.join(format!("exchange-{index:04}.{extension}"));
+                        match fs::remove_file(path) {
+                            Ok(()) => {}
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                            Err(error) => return Err(error),
+                        }
+                    }
+                    if let Some(bytes) = budget
+                        .segments
+                        .get_mut(&id)
+                        .and_then(|segment| segment.exchanges.remove(&index))
+                    {
+                        budget.bytes = budget.bytes.saturating_sub(bytes);
+                        if let Some(segment) = budget.segments.get_mut(&id) {
+                            segment.bytes = segment.bytes.saturating_sub(bytes);
+                        }
+                    }
+                }
+                File::open(&directory)?.sync_all()?;
+                if budget.segments[&id].exchanges.is_empty() {
+                    fs::remove_dir(&directory)?;
+                    budget.segments.remove(&id);
+                }
                 File::open(&self.dir)?.sync_all()?;
-                let segment = budget.segments.remove(&id).ok_or_else(|| {
-                    std::io::Error::other("capture segment accounting unavailable")
-                })?;
-                budget.bytes = budget.bytes.saturating_sub(segment.bytes);
             }
             Ok(())
         }
@@ -540,6 +632,7 @@ mod enabled {
                 reserved.bytes += bytes;
                 let entry = reserved.segments.entry(segment).or_default();
                 entry.bytes += bytes;
+                entry.exchanges.insert(*next + 1, bytes);
                 entry.active += 1;
                 if entry.first == 0 {
                     entry.first = *next + 1;
@@ -611,7 +704,7 @@ mod enabled {
                 {
                     let entry = budget.segments.entry(segment).or_default();
                     entry.active -= 1;
-                    entry.protected = true;
+                    entry.protected.insert(*next);
                 }
                 self.diagnose("could not persist exchange files");
                 None
@@ -645,9 +738,13 @@ mod enabled {
                 let segment = reserved.segments.entry(self.segment).or_default();
                 segment.bytes = segment.bytes.saturating_sub(unused);
                 segment.active -= 1;
-                segment.protected |= !self.complete
-                    || self.failed
-                    || self.status.is_some_and(|status| status >= 400);
+                if let Some(bytes) = segment.exchanges.get_mut(&self.exchange) {
+                    *bytes = bytes.saturating_sub(unused);
+                }
+                if !self.complete || self.failed || self.status.is_some_and(|status| status >= 400)
+                {
+                    segment.protected.insert(self.exchange);
+                }
             }
         }
     }
@@ -1045,6 +1142,104 @@ mod enabled {
         }
 
         #[test]
+        fn diagnostic_warnings_are_bounded_to_one_summary_per_minute() {
+            let mut diagnostics = Diagnostics::default();
+            let now = std::time::Instant::now();
+            assert_eq!(diagnostics.report("capacity", now), Some(0));
+            assert_eq!(
+                diagnostics.report("capacity", now + std::time::Duration::from_secs(1)),
+                None
+            );
+            assert_eq!(
+                diagnostics.report("capacity", now + std::time::Duration::from_secs(59)),
+                None
+            );
+            assert_eq!(
+                diagnostics.report("capacity", now + std::time::Duration::from_secs(60)),
+                Some(2)
+            );
+        }
+
+        #[test]
+        fn diagnostic_reasons_are_independent_and_flush_pending_counts() {
+            let mut diagnostics = Diagnostics::default();
+            let now = std::time::Instant::now();
+            assert_eq!(diagnostics.report("capacity", now), Some(0));
+            assert_eq!(diagnostics.report("io", now), Some(0));
+            assert_eq!(diagnostics.report("capacity", now), None);
+            assert_eq!(diagnostics.report("io", now), None);
+            assert_eq!(diagnostics.report("capacity", now), None);
+            assert_eq!(diagnostics.pending(), vec![("capacity", 2), ("io", 1)]);
+            assert_eq!(diagnostics.pending(), Vec::new());
+        }
+
+        #[test]
+        fn dropping_capture_flushes_suppressed_diagnostics() {
+            #[derive(Clone)]
+            struct Buffer(Arc<Mutex<Vec<u8>>>);
+            impl std::io::Write for Buffer {
+                fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                    self.0.lock().unwrap().extend_from_slice(bytes);
+                    Ok(bytes.len())
+                }
+                fn flush(&mut self) -> std::io::Result<()> {
+                    Ok(())
+                }
+            }
+            let bytes = Arc::new(Mutex::new(Vec::new()));
+            let writer = Buffer(Arc::clone(&bytes));
+            let subscriber = tracing_subscriber::fmt()
+                .with_ansi(false)
+                .without_time()
+                .with_writer(move || writer.clone())
+                .finish();
+            let home = tempfile::tempdir().unwrap();
+            tracing::subscriber::with_default(subscriber, || {
+                let capture = Capture::automatic(home.path()).unwrap();
+                capture.diagnose("capacity");
+                capture.diagnose("capacity");
+                capture.diagnose("io");
+                drop(capture);
+            });
+            let output = String::from_utf8(bytes.lock().unwrap().clone()).unwrap();
+            assert_eq!(
+                output.matches("private wire evidence incomplete").count(),
+                3
+            );
+            assert!(output.contains("final suppressed summary"));
+            assert!(output.contains("suppressed=1"));
+        }
+
+        #[test]
+        fn failed_exchange_does_not_pin_successful_neighbors() {
+            let home = tempfile::tempdir().unwrap();
+            let mut capture = Capture::automatic(home.path()).unwrap();
+            capture.segment_exchanges = 2;
+            for terminal in [ExchangeTerminal::Abandoned, ExchangeTerminal::Complete] {
+                let mut exchange = capture.start(b"request").unwrap();
+                exchange.terminal(&terminal);
+            }
+            let mut budget = capture.reserved.lock().unwrap();
+            capture
+                .reclaim(&mut budget, 1, capture.max_run_bytes)
+                .unwrap();
+            assert!(
+                capture
+                    .dir
+                    .join("segment-0000/exchange-0001.request")
+                    .exists()
+            );
+            assert!(
+                !capture
+                    .dir
+                    .join("segment-0000/exchange-0002.request")
+                    .exists()
+            );
+            assert_eq!(budget.removed, vec![(2, 2)]);
+            assert_eq!(budget.bytes, budget.segments[&0].exchanges[&1]);
+        }
+
+        #[test]
         fn small_budget_protects_active_abandoned_and_incomplete_segments() {
             let temp = tempfile::tempdir().unwrap();
             let mut capture = Capture::automatic(temp.path()).unwrap();
@@ -1087,6 +1282,7 @@ mod enabled {
                 reserved: Arc::new(Mutex::new(Budget::default())),
                 max_run_bytes: MAX_RUN_BYTES,
                 segment_exchanges: SEGMENT_EXCHANGES,
+                diagnostics: Mutex::new(Diagnostics::default()),
             };
             assert!(capture.start(b"not dispatched").is_none());
             let capture = Capture {
@@ -1097,6 +1293,7 @@ mod enabled {
                 reserved: Arc::new(Mutex::new(Budget::default())),
                 max_run_bytes: MAX_RUN_BYTES,
                 segment_exchanges: SEGMENT_EXCHANGES,
+                diagnostics: Mutex::new(Diagnostics::default()),
             };
             let request = temp.path().join("exchange-0001.request");
             fs::write(&request, b"do not overwrite").unwrap();

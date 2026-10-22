@@ -421,7 +421,7 @@ fn emit_observation(worker: &mut BridgeWorker, observation: TelemetryObservation
     match observation.kind() {
         TelemetryObservationKind::TurnStarted { .. }
         | TelemetryObservationKind::ModelStarted
-        | TelemetryObservationKind::ToolStarted
+        | TelemetryObservationKind::ToolStarted { .. }
         | TelemetryObservationKind::CompactionStarted { .. } => {}
         TelemetryObservationKind::ModelFirstEvent { elapsed } => {
             if let Some(attempt_id) = ctx.attempt_id() {
@@ -502,6 +502,7 @@ fn emit_observation(worker: &mut BridgeWorker, observation: TelemetryObservation
             status,
             usage,
             served_by,
+            ..
         } => {
             let Some(attempt_id) = ctx.attempt_id() else {
                 return;
@@ -1407,7 +1408,13 @@ mod tests {
                 },
             ),
             TelemetryObservation::new(ctx, ts, TelemetryObservationKind::ModelStarted),
-            TelemetryObservation::new(ctx, ts, TelemetryObservationKind::ToolStarted),
+            TelemetryObservation::new(
+                ctx,
+                ts,
+                TelemetryObservationKind::ToolStarted {
+                    tool: (&plakous::model::ToolName::new("test").unwrap()).into(),
+                },
+            ),
             TelemetryObservation::new(
                 ctx,
                 ts,
@@ -1683,6 +1690,7 @@ mod tests {
                     served_by: Some(
                         plakous::model::ServedBy::new("deepinfra/turbo").expect("endpoint"),
                     ),
+                    output_deltas: 0,
                 },
             ),
         );
@@ -1711,6 +1719,7 @@ mod tests {
                     status: TelemetryTerminalStatus::Failed,
                     usage: Some(Usage::new(1, 2, 3, 4, 5)),
                     served_by: None,
+                    output_deltas: 0,
                 },
             ),
         );
@@ -1755,6 +1764,7 @@ mod tests {
                     status: TelemetryTerminalStatus::Completed,
                     usage: None,
                     served_by: None,
+                    output_deltas: 0,
                 },
             ),
         );
@@ -1969,6 +1979,7 @@ mod tests {
                         status: TelemetryTerminalStatus::Completed,
                         usage: None,
                         served_by: None,
+                        output_deltas: 0,
                     },
                 ),
             );

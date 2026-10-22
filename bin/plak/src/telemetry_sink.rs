@@ -469,12 +469,16 @@ fn compose_telemetry_sink(
     writer: Arc<TelemetryWriter>,
     extra: Option<Arc<dyn TelemetrySink>>,
 ) -> Arc<dyn TelemetrySink> {
+    let product_writer = Arc::clone(&writer);
     let writer: Arc<dyn TelemetrySink> = writer;
     let inner = match extra {
         None => writer,
         Some(extra) => FanOutSink::new(vec![writer, extra]),
     };
-    Arc::new(RetryLoggingSink { inner: Some(inner) })
+    Arc::new(RetryLoggingSink {
+        inner: Some(inner),
+        writer: Some(product_writer),
+    })
 }
 
 struct RetryLog {
@@ -509,6 +513,7 @@ fn log_model_retry(context: plakous::agent::TelemetryContext, retry: &plakous::m
 
 /// Logging is independent of SQLite availability and analytics admission.
 struct RetryLoggingSink {
+    writer: Option<Arc<TelemetryWriter>>,
     inner: Option<Arc<dyn TelemetrySink>>,
 }
 
@@ -518,6 +523,19 @@ impl TelemetrySink for RetryLoggingSink {
         context: plakous::agent::TelemetryContext,
         retry: &plakous::model::ModelRetry,
     ) {
+        if let (Some(writer), Some(turn_id)) = (&self.writer, context.turn_id()) {
+            writer.emit_product(ProductObservation::ModelRetry {
+                at: wall_timestamp(),
+                session_id: context.session_id(),
+                branch_id: context.branch_id(),
+                agent_id: context.agent_id(),
+                turn_id,
+                next_attempt: retry.next_physical(),
+                max_attempts: retry.max_physical(),
+                cause: retry.cause(),
+                loss: retry.loss(),
+            });
+        }
         if retry.loss().declined_reason.is_some() {
             return;
         }
@@ -610,7 +628,10 @@ impl plakous_hosted::agent::ProductTelemetry for OpenedProductTelemetry {
         match &self.cache {
             TelemetryCache::Ready(ready) => Some(Arc::clone(&ready.emitter)),
             TelemetryCache::Unavailable(_) => Some(Arc::new(TelemetryEmitter::enabled(Arc::new(
-                RetryLoggingSink { inner: None },
+                RetryLoggingSink {
+                    inner: None,
+                    writer: None,
+                },
             )))),
         }
     }
@@ -810,8 +831,46 @@ mod tests {
                 status: TelemetryTerminalStatus::Completed,
                 usage: Some(Usage::new(11, 12, 13, 14, 15)),
                 served_by: None,
+                output_deltas: 0,
             },
         ))
+    }
+
+    #[test]
+    fn every_runtime_retry_is_enqueued_once_with_its_own_context() -> TestResult {
+        let (writer, receiver) = TelemetryWriter::detached(4);
+        let sink = RetryLoggingSink {
+            inner: None,
+            writer: Some(writer),
+        };
+        let retry = plakous::model::ModelRetry::new(
+            2,
+            4,
+            Duration::ZERO,
+            plakous::model::ModelRetryCause::RecordRejectedInTransit,
+            false,
+            "fixture",
+        );
+        for id in [1, 99] {
+            let context = TelemetryContext::new(
+                AgentId::try_from(Uuid::from_u128(id))?,
+                SessionId::try_from(Uuid::from_u128(id + 100))?,
+                BranchId::try_from(Uuid::from_u128(3))?,
+                RunId::try_from(Uuid::from_u128(4))?,
+            )
+            .with_turn(TurnId::try_from(Uuid::from_u128(id + 200))?);
+            sink.observe_model_retry(context, &retry);
+            let TelemetryItem::Product(ProductObservation::ModelRetry {
+                agent_id, turn_id, ..
+            }) = receiver.try_recv()?
+            else {
+                panic!("expected a retry row");
+            };
+            assert_eq!(agent_id, context.agent_id());
+            assert_eq!(Some(turn_id), context.turn_id());
+        }
+        assert!(receiver.try_recv().is_err());
+        Ok(())
     }
 
     #[test]
@@ -860,7 +919,10 @@ mod tests {
             "/v1/messages?secret=must-not-log",
             4_194_304,
         );
-        let emitter = TelemetryEmitter::enabled(Arc::new(RetryLoggingSink { inner: None }));
+        let emitter = TelemetryEmitter::enabled(Arc::new(RetryLoggingSink {
+            inner: None,
+            writer: None,
+        }));
         // The child's ordinary telemetry port closes before its retry.
         emitter.emit(observation()?);
         tracing::subscriber::with_default(subscriber, || {

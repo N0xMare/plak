@@ -250,6 +250,8 @@ pub enum ProductObservation {
         resumed: bool,
         elapsed: Duration,
     },
+    /// Product sink observation from `TelemetrySink::observe_model_retry` for every
+    /// runtime, not emitted by hosted event projection.
     ModelRetry {
         at: Timestamp,
         session_id: SessionId,

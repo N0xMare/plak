@@ -200,7 +200,7 @@ pub mod internal {
         CredentialRefreshPhase, DurabilityAttemptKind, DurabilityAttemptOutcome, HttpStatusClass,
         JobHintSource, JobNoticeDelivery, JobPreemption, JobTool, TelemetryContext,
         TelemetryEmitter, TelemetryObservation, TelemetryObservationKind, TelemetrySink,
-        TelemetrySinkError, TelemetryStatus, TelemetryTerminalStatus,
+        TelemetrySinkError, TelemetryStatus, TelemetryTerminalStatus, TelemetryToolName,
     };
     pub use crate::tool_runtime::{
         AuthorizedToolInvocation, ClaimedToolInvocation, EffectAuthorization, EffectDispatchIntent,

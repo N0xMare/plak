@@ -531,7 +531,7 @@ async fn local_composition_invalid_wait_then_valid_wait_completes_without_replay
     let mut turn_tool_calls = None;
     for observation in lock_mutex(&sink.observations).iter() {
         match observation.kind() {
-            TelemetryObservationKind::ToolStarted => {
+            TelemetryObservationKind::ToolStarted { .. } => {
                 tool_started.push(observation.context().call_id());
             }
             TelemetryObservationKind::ToolFinished { status, .. } => {

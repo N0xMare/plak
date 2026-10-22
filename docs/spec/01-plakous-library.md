@@ -7341,7 +7341,10 @@ supplies its typed wake classification, without topology entering L0.
   turn ended on a refused or failed resolution. The product does not persist
   it;
 - `ModelStarted`, `ModelFirstEvent { elapsed }` (time to first token), and
-  `ModelFinished { elapsed, status, usage }` (time to last byte);
+  `ModelFinished { elapsed, status, usage, served_by, output_deltas }` (time to
+  last byte). The delta count covers text, reasoning and tool input in the
+  final physical response; discarded retries reset it. It is observational,
+  not history or admission authority;
 - `PromptCacheDiagnosis { reason, missed_input_tokens }`, a Messages
   `message_start.diagnostics.cache_miss_reason` (§7.2). `reason` is the closed
   class `model_changed`, `system_changed`, `tools_changed`,
@@ -7349,7 +7352,7 @@ supplies its typed wake classification, without topology entering L0.
   `missed_input_tokens` is an optional non-negative integer, absent when the
   provider omitted the count. The observation carries no provider message id
   and no raw unknown spelling. Malformed diagnostics are not an observation.
-  The product persists that pair in telemetry schema 18, with the count
+  The product persists that pair in telemetry schema 19, with the count
   column nullable, and does not project it to OTEL. Turn model rounds and
   compaction provider streams both record it. It is not canonical usage;
 - `ModelArtifactPrefixDrift { fields }`, a model round whose stable request
@@ -7358,7 +7361,8 @@ supplies its typed wake classification, without topology entering L0.
   `tool-choice` on the operation-budget wrap-up). A Responses route still
   replays the artifact when only `tool-choice` differs and prepares any other
   drift fresh. The product does not persist it;
-- `ToolStarted` and `ToolFinished { elapsed, status, output_bytes }`;
+- `ToolStarted { tool }` (exact presented name as a bounded opaque token) and
+  `ToolFinished { elapsed, status, output_bytes }`;
 - `JobPromoted { tool, nested, hint_source, hint_ms }`, `JobWaited { tool }`,
   `JobPreempted { kind }`, and `JobNoticesDelivered { point, count }`. All
   classifications are closed neutral enums: operations `start`, `poll`,
@@ -7393,7 +7397,7 @@ busy, stale, unavailable, invalid_input, or rejected) in `CompactionFinished`,
 and retains the measured source tokens even when the ladder cannot commit.
 The exact bounded diagnostic remains in the session event's `detail`, never
 in the content-incapable telemetry sink. The product persists the refusal class
-in telemetry schema 18 and projects it to OTEL.
+in telemetry schema 19 and projects it to OTEL.
 
 Driver shutdown emits content-free `DurabilityAttemptFinished` phase timings
 for tool drain, job-terminal publication, heartbeat join, lease release and

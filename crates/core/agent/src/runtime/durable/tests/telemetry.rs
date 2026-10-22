@@ -123,8 +123,10 @@ async fn runtime_telemetry_records_turn_model_tool_compaction_and_durability() -
         );
         assert!(
             observations.iter().any(|observation| {
-                matches!(observation.kind(), TelemetryObservationKind::ToolStarted)
-                    && observation.context().call_id().is_some()
+                matches!(
+                    observation.kind(),
+                    TelemetryObservationKind::ToolStarted { .. }
+                ) && observation.context().call_id().is_some()
             }),
             "missing ToolStarted with call id"
         );

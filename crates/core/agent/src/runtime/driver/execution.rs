@@ -98,7 +98,13 @@ impl ActorToolDispatchObserver {
         self.telemetry.emit(TelemetryObservation::new(
             self.telemetry_context,
             self.clock.now(),
-            TelemetryObservationKind::ToolStarted,
+            TelemetryObservationKind::ToolStarted {
+                tool: self
+                    .audit_identity
+                    .exposed_name()
+                    .unwrap_or_else(|| self.audit_identity.canonical_name())
+                    .into(),
+            },
         ));
         Ok(())
     }

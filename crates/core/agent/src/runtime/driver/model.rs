@@ -236,6 +236,7 @@ impl Driver {
             .with_attempt(attempt_id);
         self.emit_telemetry(context, TelemetryObservationKind::ModelStarted);
         let mut usage = None;
+        let mut output_deltas = 0;
         let mut operation_id = None;
         let mut validated_plan = None;
         let mut request_estimate_tokens = None;
@@ -255,6 +256,7 @@ impl Driver {
             &mut request_wire_input,
             &mut request_context_status,
             &mut prepared_wire_output_limit,
+            &mut output_deltas,
         ))
         .await
         .map(|response| self.land_tool_calls(command, attempt_id, response));
@@ -276,6 +278,7 @@ impl Driver {
                 status: agent_terminal_status(&result, self.shutdown.is_cancelled()),
                 usage,
                 served_by,
+                output_deltas,
             },
         );
         command.shared.record_model_telemetry(model_elapsed);
@@ -348,6 +351,7 @@ impl Driver {
         request_wire_input: &mut Option<plakous_model::ContextWireInput>,
         request_context_status: &mut Option<Box<ContextStatus>>,
         prepared_wire_output_limit: &mut Option<NonZeroU32>,
+        output_deltas: &mut u64,
     ) -> Result<ModelResponse, AgentError> {
         let descriptor = self.provider_configuration.effective().descriptor().clone();
         let plan = descriptor
@@ -779,6 +783,14 @@ impl Driver {
                 );
                 continue;
             }
+            if matches!(
+                &event,
+                ModelEvent::TextDelta(_)
+                    | ModelEvent::ReasoningDelta(_)
+                    | ModelEvent::ToolInputDelta(_)
+            ) {
+                *output_deltas = output_deltas.saturating_add(1);
+            }
             if let ModelEvent::Usage(update) = &event {
                 *observed_usage = Some(update.usage());
             }
@@ -796,6 +808,7 @@ impl Driver {
                 && retry.output_discarded()
             {
                 *observed_usage = None;
+                *output_deltas = 0;
             }
             if let ModelEvent::ResponseCompleted(response) = &event {
                 if response.plan_digest() != digest {

@@ -1323,11 +1323,12 @@ limit. Automatic capture rotates segments at 128 starts or earlier under byte
 pressure, sealing a partially filled current segment, and budgets 1 GiB per
 process run (request bytes, actual response bytes, 4 KiB metadata allowance per
 exchange, maximum response reservation while in flight). Before declining a new
-recording, it reclaims oldest closed successful segments in that active run:
-every observation must have been dropped after `Complete` or validated typed-terminal
-`ProtocolComplete` with `incomplete=false`, and no HTTP error status.
-Arbitrary `ClosedEarly` does not qualify. Unsealed current segments, pending, abandoned, failed and active
-observations are protected. A private, synced `process/retention.info` records
+recording, it reclaims successful exchanges from the oldest closed segments in
+that active run. Each selected observation must have been dropped after `Complete`
+or validated typed-terminal `ProtocolComplete` with `incomplete=false`, and no
+HTTP error status. Arbitrary `ClosedEarly` does not qualify. Unsealed current
+segments and pending, abandoned, failed and active observations are protected;
+a protected exchange does not pin its successful neighbors. A private, synced `process/retention.info` records
 merged actual exchange ranges selected for removal and `full_run=false` before deletion;
 an interrupted cleanup may retain some selected files. This summary prevents a
 retained suffix from being mistaken for full-run evidence. If protected/current
@@ -2258,7 +2259,7 @@ and observer combination plus TLS 1.2 (run with `--run-ignored only`; its
 nextest override allows 300-second periods).
 Pool fixtures pin the five-second idle bound and content-free checkout age in
 failure diagnostics. Product telemetry tests pin replay-loss counts, ids,
-`v_replay_loss`, retention and disposable schema version 17.
+`v_replay_loss`, retention and disposable schema version 19.
 Responses in-band rate-limit and overload fixtures pin failed lifecycle,
 closed observations, fresh terminal facts and one physical request for session
 workflows (including compaction) and turns carrying `x-should-retry: false`.
@@ -2842,6 +2843,13 @@ This bar does not cover:
   the re-confirmation rule above says carries that pass
 
 ### 3.5 Private provider wire captures
+
+Automatic byte-pressure retention protects failed, abandoned and incomplete
+exchanges individually, not their entire 128-exchange segment. Successful
+neighbors in closed segments may be removed; `retention.info` omission ranges
+exclude protected exchanges, whose bytes remain charged. Repeated incomplete
+capture warnings are summarized per static reason at most once per 60 seconds
+with a suppressed count; capture drop flushes remaining suppressed summaries; capture failure does not stop inference.
 
 Raw wire captures (§2.5) are private local observations, not qualification
 receipts or committed fixtures. Ordinary maintainer capture lives under

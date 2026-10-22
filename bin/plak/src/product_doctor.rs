@@ -1607,8 +1607,8 @@ mod tests {
     fn doctor_labels_newer_telemetry_files_without_warning_or_removal_advice()
     -> Result<(), Box<dyn std::error::Error>> {
         let directory = tempfile::tempdir()?;
-        let current = directory.path().join("telemetry-v17.sqlite3");
-        fs::write(directory.path().join("telemetry-v18.sqlite3"), b"retained")?;
+        let current = directory.path().join("telemetry-v19.sqlite3");
+        fs::write(directory.path().join("telemetry-v20.sqlite3"), b"retained")?;
         let check = telemetry_check(
             CheckKind::TelemetryDatabase,
             &current,
@@ -1623,10 +1623,10 @@ mod tests {
         assert!(
             check
                 .detail
-                .contains("newer-schema files left untouched: telemetry-v18.sqlite3")
+                .contains("newer-schema files left untouched: telemetry-v20.sqlite3")
         );
         assert_eq!(
-            fs::read(directory.path().join("telemetry-v18.sqlite3"))?,
+            fs::read(directory.path().join("telemetry-v20.sqlite3"))?,
             b"retained"
         );
         Ok(())
