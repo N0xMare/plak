@@ -1920,7 +1920,7 @@ mod suite {
         ),
         (
             "compaction",
-            "77aa65d827fddfbde6e2ea302bb0338ae3905846f1eb5eec74211e5b35be806d",
+            "8e3dda5a7f9108017f09e197763425810ab8faa3a9fe4c34ae54d459cacef2a6",
         ),
         (
             "child-mail",

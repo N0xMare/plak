@@ -1446,7 +1446,7 @@ across boots. Historical receipts remain exact evidence, never fresh authority;
 old-boot renewal/release refuses as superseded. Binding rotation and subsequent
 branch acquisition are separate transactions.
 
-The runtime schema is **25** and the checkpoint format epoch is **28**; the
+The runtime schema is **25** and the checkpoint format epoch is **29**; the
 feed record encoding (§5.11) is part of that epoch, which it shares with the
 decision-fact encodings of the same release. Only
 the current exact schema and format epoch are supported. Every other runtime
@@ -6679,9 +6679,10 @@ would have said last, usually the open work and the next step, so the fold is a
 definite failure that publishes nothing (§10.5), and mid-turn it falls to the
 placeholder rung like any failed paid fold. The instruction is a short
 checklist — each user request in order with its requirements verbatim, where
-a request the model's final reply answered is done apart from what that reply
-left undone and the request still in progress is the active one, kept
-verbatim after the summary (§10.1), and the instruction itself is not a
+a request the model answered with a final reply is done apart from what that
+reply left undone, an interrupted or unanswered request is said to be so, and
+the latest request, when it is still in progress, is the active one, kept
+verbatim after the summary (§10.1); the instruction itself is not a
 request; every value the remaining work still needs copied exactly
 (identifiers, tokens, numbers, short file contents, text to write or report
 later); work already done as the tool results show it — files read or written
