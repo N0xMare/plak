@@ -2569,6 +2569,25 @@ historical envelope in its covered prefix. The exact binding, the stable-prefix
 reuse identity and fresh preparation on any prefix difference are the guards;
 the offline compaction rules of §10.2 keep a pass from re-admitting replay a
 later artifact would resurrect.
+The Responses limits of 4,096 replay items and 3 MiB replay payload apply to
+one newly appended response, not the accumulated canonical history. An exact
+active artifact remains reusable beyond either historical total, including
+more than 4,096 canonical items. Stateless lowering sends the complete authorized
+prefix, including historical encrypted reasoning; provider-stored lowering
+keeps its validated continuation and sends only the uncovered suffix. History
+growth alone neither prepares fresh nor drops a replay tail: fresh lowering
+omits unbound reasoning and cannot represent every protected opaque item.
+Validation traverses the existing request and borrows replay payloads; its
+coordinate tables are constrained by actual canonical positions, not a fixed
+session-length ceiling. Per-response append, artifact codec, integrity, exact
+binding and structural limits remain enforced. Fresh preparation, compaction
+preparation and OpenRouter Chat likewise do not apply these aggregate historical
+item or replay-byte cutoffs; canonical history bounds, their per-item/response
+limits and ordinary context admission still apply.
+Long stateless requests remain bounded by context admission: byte estimators
+count `encrypted_content` as part of the request, not as free replay. The
+transport's 8 MiB request-body limit also refuses oversized requests locally
+before dispatch.
 Fresh Responses lowering preserves local and MCP calls in their stored
 `Requested` state, with the ordinary protected call/result correlation checks.
 Tool execution appends results without changing that stored state. A projected

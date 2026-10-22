@@ -22,9 +22,9 @@ pub const RESPONSES_ARTIFACT_CODEC_REVISION: u32 = 6;
 pub const RESPONSES_ARTIFACT_SCHEMA_REVISION: u32 = 7;
 /// Hard upper bound for one complete encoded Responses artifact.
 pub const MAX_RESPONSES_ARTIFACT_BYTES: usize = 4 * 1024 * 1024;
-/// Maximum canonical items inspected for active Responses replay authorization.
+/// Maximum output or replay items appended by one Responses response.
 pub const MAX_RESPONSES_REPLAY_ITEMS: usize = 4_096;
-/// Maximum aggregate canonical replay-envelope bytes inspected per authorization.
+/// Maximum aggregate replay-envelope bytes appended by one Responses response.
 pub const MAX_RESPONSES_REPLAY_BYTES: usize = 3 * 1024 * 1024;
 
 const MAGIC: &[u8; 8] = b"PLAKRSP\0";
@@ -1450,10 +1450,6 @@ impl ResponsesArtifact {
         Ok(())
     }
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one pass keeps coordinate, replay-byte, compatibility, and output-cardinality validation causal"
-    )]
     fn validate_canonical_coverage<'a>(
         &self,
         request: &'a ModelRequest,
@@ -1463,11 +1459,6 @@ impl ResponsesArtifact {
         let covered = usize::try_from(self.production.covered_projection_items)
             .map_err(|_| ResponsesArtifactError::InvalidCoordinates)?;
         let items = request.input().items();
-        if items.len() > MAX_RESPONSES_REPLAY_ITEMS {
-            return Err(ResponsesArtifactError::TooManyReplayItems {
-                maximum: MAX_RESPONSES_REPLAY_ITEMS,
-            });
-        }
         if items.len() < covered
             || request
                 .input()
@@ -1499,7 +1490,8 @@ impl ResponsesArtifact {
         }
 
         let mut authorized = Vec::new();
-        let mut replay_bytes = 0_usize;
+        // Append limits constrain one response, not the already-owned history.
+        // Authorization borrows payloads and still checks every covered item.
         for (position, item) in items.iter().enumerate() {
             let mut output_at_position = 0_usize;
             for envelope in item.blocks().iter().filter_map(canonical_replay) {
@@ -1536,16 +1528,6 @@ impl ResponsesArtifact {
                 {
                     return Err(ResponsesArtifactError::CanonicalCoordinateMismatch);
                 }
-                replay_bytes = replay_bytes
-                    .checked_add(envelope.payload().get().len())
-                    .ok_or(ResponsesArtifactError::ReplayBytesTooLarge {
-                        maximum: MAX_RESPONSES_REPLAY_BYTES,
-                    })?;
-                if replay_bytes > MAX_RESPONSES_REPLAY_BYTES {
-                    return Err(ResponsesArtifactError::ReplayBytesTooLarge {
-                        maximum: MAX_RESPONSES_REPLAY_BYTES,
-                    });
-                }
                 if purpose.is_output() {
                     output_at_position = output_at_position.saturating_add(1);
                 }
@@ -1554,11 +1536,6 @@ impl ResponsesArtifact {
                     canonical_position: position,
                     envelope,
                 });
-                if authorized.len() > MAX_RESPONSES_REPLAY_ITEMS {
-                    return Err(ResponsesArtifactError::TooManyReplayItems {
-                        maximum: MAX_RESPONSES_REPLAY_ITEMS,
-                    });
-                }
             }
             let model_output =
                 item.actor() == Actor::Assistant && item.provenance() == Provenance::ModelOutput;
@@ -3009,6 +2986,168 @@ mod tests {
             artifact.validate_for_reuse(&tail_binding, &tail_request, timestamp(150)),
             Err(ResponsesArtifactError::UnauthorizedReplayTail { position: 2 })
         ));
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum LongHistoryCorruption {
+        Secret,
+        PublicEncrypted,
+        UnauthorizedTail,
+        KindVersion,
+        CanonicalDigest,
+    }
+
+    #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one sealed fixture checks late failures after both former history cutoffs"
+    )]
+    fn long_history_still_rejects_late_corruption_with_exact_errors() {
+        use plakous_model::{
+            CanonicalHistory, HistorySegment, HistorySegmentKind, WorkingProjection,
+        };
+
+        let descriptor = descriptor("codex.subscription");
+        let historical = replay(
+            serde_json::json!({"type":"reasoning", "encrypted_content":"e".repeat(800)})
+                .to_string(),
+        );
+        let small = replay(r#"{"type":"reasoning","encrypted_content":"latest"}"#.to_owned());
+        let items = (0..4_097)
+            .map(|index| output_item(10_000 + index, historical.clone()))
+            .collect::<Vec<_>>();
+        assert!(items.len() > MAX_RESPONSES_REPLAY_ITEMS);
+        assert!(items.len() * historical.payload().get().len() > MAX_RESPONSES_REPLAY_BYTES);
+        let base = items
+            .chunks(2_048)
+            .map(|chunk| {
+                HistorySegment::new(HistorySegmentKind::ReasoningReplay, chunk.to_vec())
+                    .expect("segment")
+            })
+            .collect::<Vec<_>>();
+        let view = |segments| {
+            ConversationView::from_shared(
+                CanonicalHistory::new(segments).expect("history"),
+                WorkingProjection::default(),
+            )
+        };
+        let encrypted_kind = ResponsesArtifactReplayKind::new(
+            ReplayKindId::new("responses.encrypted_reasoning").expect("kind"),
+            1,
+        )
+        .expect("contract kind");
+        for corruption in [
+            LongHistoryCorruption::Secret,
+            LongHistoryCorruption::PublicEncrypted,
+            LongHistoryCorruption::UnauthorizedTail,
+            LongHistoryCorruption::KindVersion,
+            LongHistoryCorruption::CanonicalDigest,
+        ] {
+            let mut segments = base.clone();
+            let (kind, version, classification) = match corruption {
+                LongHistoryCorruption::Secret => {
+                    ("responses.output_item", 1, DataClassification::Secret)
+                }
+                LongHistoryCorruption::PublicEncrypted => (
+                    "responses.encrypted_reasoning",
+                    1,
+                    DataClassification::Public,
+                ),
+                LongHistoryCorruption::KindVersion => {
+                    ("responses.output_item", 2, DataClassification::Sensitive)
+                }
+                _ => ("responses.output_item", 1, DataClassification::Sensitive),
+            };
+            let bad = ReplayEnvelope::new(
+                historical.protocol().clone(),
+                historical.model_family().cloned(),
+                historical.scope().clone(),
+                ReplayKindId::new(kind).expect("kind"),
+                version,
+                classification,
+                RawValue::from_string(
+                    r#"{"type":"reasoning","encrypted_content":"bad"}"#.to_owned(),
+                )
+                .expect("json"),
+            )
+            .expect("envelope");
+            let bad_segment = HistorySegment::new(
+                HistorySegmentKind::ReasoningReplay,
+                vec![output_item(20_000, bad)],
+            )
+            .expect("late segment");
+            if !matches!(corruption, LongHistoryCorruption::UnauthorizedTail) {
+                segments.push(bad_segment.clone());
+            }
+            let producing = request(view(segments.clone()), 20, 21);
+            let (plan, binding) = admitted(&descriptor, &producing, b"account-a");
+            segments.push(
+                HistorySegment::new(
+                    HistorySegmentKind::ReasoningReplay,
+                    vec![output_item(20_001, small.clone())],
+                )
+                .expect("latest segment"),
+            );
+            let covered_view = view(segments.clone());
+            let covered = covered_view
+                .canonical_item_prefix_identity(covered_view.items().len())
+                .expect("coverage")
+                .identity();
+            let production = ResponsesArtifactProduction::from_admitted_response(
+                &producing,
+                &plan,
+                digest(DigestDomain::ProviderOperation, b"long-negative-request"),
+                digest(DigestDomain::ProviderOperation, b"long-negative-terminal"),
+                1,
+                covered,
+            )
+            .expect("production");
+            let artifact = ResponsesArtifact::new(
+                binding,
+                production,
+                contract()
+                    .with_encrypted_reasoning(encrypted_kind.clone())
+                    .expect("encrypted contract"),
+                vec![ResponsesReplayItem::new(
+                    ResponsesReplayPurpose::OutputItem,
+                    0,
+                    small.clone(),
+                )],
+                None,
+                None,
+                ResponsesStorageMode::Stateless,
+                None,
+                timestamp(100),
+            )
+            .expect("valid active artifact");
+            artifact
+                .validate_active(timestamp(150))
+                .expect("artifact integrity");
+            if matches!(corruption, LongHistoryCorruption::UnauthorizedTail) {
+                segments.push(bad_segment);
+            } else if matches!(corruption, LongHistoryCorruption::CanonicalDigest) {
+                let late = segments.len() - 2;
+                segments[late] = HistorySegment::new(
+                    HistorySegmentKind::ReasoningReplay,
+                    vec![output_item(20_000, small.clone())],
+                )
+                .expect("changed canonical digest");
+            }
+            let next = request(view(segments), 22, 23);
+            let (_, current) = admitted(&descriptor, &next, b"account-a");
+            let expected = if matches!(corruption, LongHistoryCorruption::UnauthorizedTail) {
+                ResponsesArtifactError::UnauthorizedReplayTail { position: 4_098 }
+            } else {
+                ResponsesArtifactError::CanonicalCoordinateMismatch
+            };
+            assert_eq!(
+                artifact
+                    .validate_for_reuse(&current, &next, timestamp(150))
+                    .err(),
+                Some(expected),
+                "{corruption:?}"
+            );
+        }
     }
 
     #[test]

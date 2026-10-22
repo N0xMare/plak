@@ -1583,10 +1583,27 @@ mod tests {
         }
 
         fn plan(&self, items: Vec<ConversationItem>) -> TestResult<ValidatedRequestPlan> {
+            let view = if items.len() > 4_096 {
+                let segments = items
+                    .chunks(2_048)
+                    .map(|chunk| {
+                        plakous_model::HistorySegment::new(
+                            plakous_model::HistorySegmentKind::ReasoningReplay,
+                            chunk.to_vec(),
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                ConversationView::from_shared(
+                    plakous_model::CanonicalHistory::new(segments)?,
+                    plakous_model::WorkingProjection::default(),
+                )
+            } else {
+                ConversationView::from_items(items)?
+            };
             let request = ModelRequest::builder(
                 self.selected,
                 self.effective,
-                ConversationView::from_items(items)?,
+                view,
                 RequestMetadata::for_turn(
                     RunId::try_from(Uuid::from_u128(1))?,
                     TurnId::try_from(Uuid::from_u128(2))?,
@@ -2067,6 +2084,30 @@ mod tests {
             vec![serde_json::from_str::<Value>(second_detail)?]
         );
         assert!(body["messages"][3].get("tool_calls").is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn long_openrouter_history_has_no_aggregate_replay_wall() -> TestResult {
+        let fixture = Fixture::new()?;
+        let policy = fixture.exact_details_policy(&seed_plan(&fixture)?)?;
+        for (count, bytes) in [(4_097_u128, 1), (64, 60_000)] {
+            let exact = serde_json::json!({"type":"reasoning.encrypted", "data":"e".repeat(bytes)})
+                .to_string();
+            let replay = reasoning_detail_replay(&policy, &exact, 0)?;
+            let plan = fixture.plan(
+                (0..count)
+                    .map(|index| item(10_000 + index, Actor::Assistant, vec![replay.clone()]))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )?;
+            let lowered = lower_request(&plan, &policy)?;
+            let body: Value = serde_json::from_slice(lowered.body())?;
+            let messages = body["messages"].as_array().ok_or("missing messages")?;
+            assert_eq!(messages.len(), usize::try_from(count)?);
+            for message in messages {
+                assert_eq!(message["reasoning_details"][0]["data"], "e".repeat(bytes));
+            }
+        }
         Ok(())
     }
 

@@ -5328,27 +5328,6 @@ fn latest_artifact_authorizes_full_prefix_and_disambiguates_same_digest_groups()
 }
 
 #[test]
-fn replay_coordinate_construction_rejects_first_bound_crossing() -> TestResult {
-    assert_eq!(
-        bounded_replay_coordinate_count(0, MAX_REPLAY_PREFIX_BINDINGS)?,
-        MAX_REPLAY_PREFIX_BINDINGS
-    );
-    assert!(matches!(
-        bounded_replay_coordinate_count(MAX_REPLAY_PREFIX_BINDINGS, 1),
-        Err(ResponsesRequestError::Replay(
-            ResponsesReplayError::TooManyPrefixBindings
-        ))
-    ));
-    assert!(matches!(
-        bounded_replay_coordinate_count(usize::MAX, 1),
-        Err(ResponsesRequestError::Replay(
-            ResponsesReplayError::InvalidOutputCoordinates
-        ))
-    ));
-    Ok(())
-}
-
-#[test]
 fn strict_router_policy_is_closed_and_rejects_unbounded_or_ambient_values() -> TestResult {
     let policy = ResponsesRouterPolicy::strict("anthropic/claude", "deny", true)?;
     assert_eq!(
@@ -5445,3 +5424,235 @@ fn a_route_derived_output_bound_compiles_where_the_policy_emits_one() -> TestRes
     )?;
     Ok(())
 }
+
+#[derive(Clone, Copy, Debug)]
+enum LongReplayHistory {
+    CanonicalItems,
+    ReplayEnvelopes,
+    ReplayBytes,
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "one fixture exercises all historical bounds through sealing and lowering"
+)]
+fn long_history_replay(
+    route: &str,
+    policy: ResponsesRequestPolicy,
+    bound: LongReplayHistory,
+) -> TestResult {
+    let (protocol, family, model) = target_values()?;
+    let now = Timestamp::new(1_700_000_000, 0)?;
+    let (plain_count, replay_count, encrypted_bytes) = match bound {
+        LongReplayHistory::CanonicalItems => (4_097, 0, 1),
+        LongReplayHistory::ReplayEnvelopes => (1, 4_097, 1),
+        LongReplayHistory::ReplayBytes => (4, 4, 800_000),
+    };
+    let replay = |bytes: usize| -> Result<ReplayEnvelope, Box<dyn std::error::Error>> {
+        Ok(ReplayEnvelope::new(
+            protocol.clone(),
+            Some(family.clone()),
+            ReplayScope::ExactModel(model.clone()),
+            ReplayKindId::new("openai.output_item")?,
+            2,
+            DataClassification::Sensitive,
+            RawValue::from_string(
+                json!({
+                    "id":"long-reasoning", "type":"reasoning", "status":"completed",
+                    "summary":[], "encrypted_content":"e".repeat(bytes)
+                })
+                .to_string(),
+            )?,
+        )?)
+    };
+    let reasoning_item = |index: u128,
+                          envelope: ReplayEnvelope|
+     -> Result<ConversationItem, Box<dyn std::error::Error>> {
+        Ok(ConversationItem::new(
+            id::<EntryId>(index)?,
+            Actor::Assistant,
+            vec![ContentBlock::Reasoning(ReasoningBlock::new(
+                ReasoningVisibility::OpaqueReplay,
+                None,
+                Some(envelope),
+            )?)],
+            Provenance::ModelOutput,
+        )?)
+    };
+    let plain = (0..plain_count)
+        .map(|i| user(10_000 + i, &"h".repeat(encrypted_bytes)))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut segments = plain
+        .chunks(2_048)
+        .map(|items| HistorySegment::new(HistorySegmentKind::RecentIntent, items.to_vec()))
+        .collect::<Result<Vec<_>, _>>()?;
+    if replay_count > 0 {
+        let historical = replay(encrypted_bytes)?;
+        let items = (0..replay_count)
+            .map(|i| reasoning_item(20_000 + i, historical.clone()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let response_items = if matches!(bound, LongReplayHistory::ReplayBytes) {
+            1
+        } else {
+            2_048
+        };
+        for chunk in items.chunks(response_items) {
+            segments.push(HistorySegment::new(
+                HistorySegmentKind::ReasoningReplay,
+                chunk.to_vec(),
+            )?);
+        }
+    }
+    let build = |segments| -> Result<ModelRequest, Box<dyn std::error::Error>> {
+        Ok(crate::test_support::model_request_builder(
+            ConversationView::from_shared(
+                CanonicalHistory::new(segments)?,
+                WorkingProjection::default(),
+            ),
+            metadata()?,
+        )
+        .resolved_harness_plan_identity(harness_plan_identity()?)
+        .build()?)
+    };
+    let producing = build(segments.clone())?;
+    let latest = replay(1)?;
+    segments.push(HistorySegment::new(
+        HistorySegmentKind::ReasoningReplay,
+        vec![reasoning_item(30_000, latest.clone())?],
+    )?);
+    segments.push(HistorySegment::new(
+        HistorySegmentKind::RecentIntent,
+        vec![user(30_001, "next")?],
+    )?);
+    let next = build(segments)?;
+    let storage = replay::storage_mode(policy.storage());
+    let artifact = output_artifact(
+        &producing,
+        &next,
+        route,
+        vec![latest],
+        storage,
+        "long-response",
+        None,
+        now,
+        b"long-history",
+    )?;
+    let active = active_artifact(&artifact)?;
+    // The active artifact has one small output; only the historical prefix is large.
+    assert!(active.bytes().len() < 16_384);
+    let bridge = ResponsesArtifactReplayBridge::from_active_artifact(
+        &active,
+        &next,
+        operation_authority(&next, route, policy.storage())?,
+        ResponsesReplayKind::new("openai.output_item", 2),
+        None,
+        (storage == ResponsesStorageMode::ProviderStored)
+            .then_some(ResponsesReplayKind::new("openai.previous_response_id", 1)),
+        now,
+    )?;
+    let lowered = lower_responses_request(
+        &next,
+        ResponsesRequestConfig::new(
+            &protocol,
+            Some(&family),
+            &model,
+            policy,
+            Some(bridge.context()),
+        ),
+    )?;
+    let input = lowered.body()["input"].as_array().expect("input");
+    if storage == ResponsesStorageMode::ProviderStored {
+        assert_eq!(input.len(), 1);
+        assert_eq!(lowered.body()["previous_response_id"], "long-response");
+    } else {
+        assert_eq!(
+            input.len(),
+            usize::try_from(plain_count + replay_count + 2)?
+        );
+        assert_eq!(input[input.len() - 2]["encrypted_content"], "e");
+        if replay_count > 0 {
+            assert_eq!(
+                input[usize::try_from(plain_count)?]["encrypted_content"],
+                "e".repeat(encrypted_bytes)
+            );
+        }
+    }
+    // Fresh and compaction lowering have no aggregate artifact authority. They
+    // omit unbound reasoning, not a bounded tail of the portable conversation.
+    let fresh = lower_responses_request(
+        &next,
+        ResponsesRequestConfig::new(&protocol, Some(&family), &model, policy, None),
+    )?;
+    assert_eq!(
+        fresh.body()["input"].as_array().expect("fresh input").len(),
+        usize::try_from(plain_count + 1)?
+    );
+    assert!(
+        !fresh.body()["input"]
+            .to_string()
+            .contains("encrypted_content")
+    );
+    let compaction = crate::test_support::model_request_builder(next.input().clone(), metadata()?)
+        .resolved_harness_plan_identity(harness_plan_identity()?)
+        .tool_choice(ToolChoice::None)
+        .build()?;
+    let compact = lower_responses_request(
+        &compaction,
+        ResponsesRequestConfig::new(&protocol, Some(&family), &model, policy, None),
+    )?;
+    assert_eq!(compact.body()["input"], fresh.body()["input"]);
+    Ok(())
+}
+
+macro_rules! long_history_route_tests {
+    ($name:ident, $policy:expr) => {
+        mod $name {
+            use super::*;
+            #[test]
+            fn canonical_items() -> TestResult {
+                long_history_replay(
+                    stringify!($name),
+                    $policy,
+                    LongReplayHistory::CanonicalItems,
+                )
+            }
+            #[test]
+            fn replay_envelopes() -> TestResult {
+                long_history_replay(
+                    stringify!($name),
+                    $policy,
+                    LongReplayHistory::ReplayEnvelopes,
+                )
+            }
+            #[test]
+            fn replay_bytes() -> TestResult {
+                long_history_replay(stringify!($name), $policy, LongReplayHistory::ReplayBytes)
+            }
+        }
+    };
+}
+
+long_history_route_tests!(
+    long_codex,
+    ResponsesRequestPolicy::openai_codex(false, false, "reasoning.encrypted_content")
+);
+long_history_route_tests!(
+    long_openai_platform,
+    ResponsesRequestPolicy::openai_platform_stateless()
+);
+long_history_route_tests!(
+    long_openai_stored,
+    ResponsesRequestPolicy::openai_platform(ResponsesStoragePolicy::ProviderStored, false, false)
+);
+long_history_route_tests!(
+    long_supergrok,
+    ResponsesRequestPolicy::supergrok_stateless()
+);
+long_history_route_tests!(
+    long_xai_platform,
+    ResponsesRequestPolicy::xai_platform_stateless("reasoning.encrypted_content")
+);
+long_history_route_tests!(
+    long_openrouter,
+    ResponsesRequestPolicy::openrouter_stateless()
+);

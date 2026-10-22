@@ -734,6 +734,14 @@ for the full freshness-sensitive descriptor used to admit plans or dispatch.
 Unknown replay schemas and incompatible behavior remain unusable and produce
 a bounded diagnostic; no account or model fallback is introduced.
 
+Responses replay bounds distinguish one response from a session: the 4,096-item
+and 3 MiB append limits and 4 MiB artifact codec bound do not cap accumulated
+canonical history. Reuse validates the entire bound prefix without copying its
+payloads into an aggregate artifact; coordinate storage is limited by the
+existing request's canonical positions. History size never authorizes dropping
+encrypted replay or weakening integrity, structure, classification, expiry or
+exact-target checks (spec 01 §6.1).
+
 A running SuperGrok or Codex OAuth model that renews its credential receipt
 after a refresh (spec 01 §7.4) stays on its exact route: the claimed refresh and
 the catalog fetch are bound to the same account, login selection epoch and

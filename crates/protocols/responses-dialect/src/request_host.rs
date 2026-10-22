@@ -41,7 +41,6 @@ use crate::project_host::validate_output_semantic_pair;
 use crate::response_host::{ResponsesHostDecodeError, parse_output_item};
 
 const MAX_REPLAY_KIND_BYTES: usize = 256;
-const MAX_REPLAY_PREFIX_BINDINGS: usize = 4_096;
 const MAX_RESPONSE_ID_BYTES: usize = 1_024;
 
 // Bare-hex client item ids select a degraded Codex backend path.
@@ -754,7 +753,7 @@ pub use replay::{
     ResponsesReplayContext, ResponsesReplayKind, ResponsesRequestAuthority,
 };
 #[cfg(test)]
-use replay::{bounded_replay_coordinate_count, operation_authority_digest, prefix_binding_digest};
+use replay::{operation_authority_digest, prefix_binding_digest};
 #[cfg(test)]
 use tools::lower_allowed_callers;
 pub use tools::{
@@ -955,9 +954,6 @@ pub enum ResponsesReplayError {
     /// Replay revision zero is reserved.
     #[error("replay kind version must be nonzero")]
     InvalidVersion,
-    /// The borrowed prefix-binding or output-coordinate table exceeded its fixed bound.
-    #[error("replay prefix bindings or output coordinates exceed the limit of 4096")]
-    TooManyPrefixBindings,
     /// Prefix bindings were duplicated or unordered.
     #[error("replay prefix bindings must be strictly ordered")]
     PrefixBindingsNotStrictlyOrdered,

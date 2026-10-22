@@ -2,8 +2,8 @@
 
 use super::{
     ActiveFamilyArtifact, BTreeSet, ContentBlock, ConversationItem, Digest, DigestDomain, HashSet,
-    MAX_REPLAY_KIND_BYTES, MAX_REPLAY_PREFIX_BINDINGS, MAX_RESPONSE_ID_BYTES, ModelFamilyId,
-    ModelRequest, RESPONSES_ARTIFACT_CODEC_REVISION, RESPONSES_ARTIFACT_SCHEMA_REVISION, RawValue,
+    MAX_REPLAY_KIND_BYTES, MAX_RESPONSE_ID_BYTES, ModelFamilyId, ModelRequest,
+    RESPONSES_ARTIFACT_CODEC_REVISION, RESPONSES_ARTIFACT_SCHEMA_REVISION, RawValue,
     ReplayEnvelope, ReplayKindId, ResolvedModelDescriptor, ResponsesArtifact,
     ResponsesArtifactBinding, ResponsesArtifactCodec, ResponsesHostDecodeError,
     ResponsesReplayError, ResponsesReplayMode, ResponsesReplayPolicy, ResponsesReplayPurpose,
@@ -428,7 +428,6 @@ impl ResponsesArtifactReplayBridge {
             .copied()
             .filter(|item| is_output_replay_purpose(item.purpose()))
             .collect::<Vec<_>>();
-        bounded_replay_coordinate_count(0, replay_items.len())?;
         let mut segment_starts = BTreeSet::new();
         let mut segment_position = 0_usize;
         for segment in request
@@ -459,6 +458,8 @@ impl ResponsesArtifactReplayBridge {
             return Err(ResponsesReplayError::InvalidOutputCoordinates.into());
         }
         let mut output_coordinates = Vec::with_capacity(replay_items.len());
+        // Authorized positions ascend, so one cursor avoids repeated segment walks.
+        let mut canonical_items = request.input().items().iter().enumerate();
         let mut cursor = 0_usize;
         while cursor < replay_items.len() {
             let group_start = replay_items[cursor].canonical_position();
@@ -496,10 +497,9 @@ impl ResponsesArtifactReplayBridge {
                 let output_index = u32::try_from(relative)
                     .map_err(|_| ResponsesReplayError::InvalidOutputCoordinates)?;
                 let canonical_position = replay_item.canonical_position();
-                let canonical_item = request
-                    .input()
-                    .items()
-                    .get(canonical_position)
+                let (_, canonical_item) = canonical_items
+                    .by_ref()
+                    .find(|(position, _)| *position == canonical_position)
                     .ok_or(ResponsesReplayError::MissingOutputCoordinate)?;
                 let canonical_envelope = exact_replay_for_kind(Some(canonical_item), replay_kind)?
                     .ok_or(ResponsesReplayError::MissingOutputCoordinate)?;
@@ -621,9 +621,6 @@ pub(super) fn validate_replay_context(
     {
         validate_replay_kind(kind)?;
     }
-    if replay.prefix_bindings.len() > MAX_REPLAY_PREFIX_BINDINGS {
-        return Err(ResponsesReplayError::TooManyPrefixBindings.into());
-    }
     if replay
         .prefix_bindings
         .windows(2)
@@ -638,8 +635,8 @@ pub(super) fn validate_replay_context(
             return Err(ResponsesReplayError::AuthorityMismatch.into());
         }
     }
-    if replay.output_coordinates.len() > MAX_REPLAY_PREFIX_BINDINGS {
-        return Err(ResponsesReplayError::TooManyPrefixBindings.into());
+    if replay.output_coordinates.len() > request.input().items().len() {
+        return Err(ResponsesReplayError::InvalidOutputCoordinates.into());
     }
     let mut prior_position = None;
     for coordinate in replay.output_coordinates {
@@ -647,6 +644,7 @@ pub(super) fn validate_replay_context(
             .ok()
             .and_then(|index| coordinate.group_start.checked_add(index));
         if prior_position.is_some_and(|prior| prior >= coordinate.canonical_position)
+            || coordinate.canonical_position >= request.input().items().len()
             || coordinate.output_count == 0
             || coordinate.output_index >= coordinate.output_count
             || expected_position != Some(coordinate.canonical_position)
@@ -660,19 +658,6 @@ pub(super) fn validate_replay_context(
         prior_position = Some(coordinate.canonical_position);
     }
     Ok(())
-}
-
-pub(super) fn bounded_replay_coordinate_count(
-    existing: usize,
-    additional: usize,
-) -> Result<usize, ResponsesRequestError> {
-    let aggregate = existing
-        .checked_add(additional)
-        .ok_or(ResponsesReplayError::InvalidOutputCoordinates)?;
-    if aggregate > MAX_REPLAY_PREFIX_BINDINGS {
-        return Err(ResponsesReplayError::TooManyPrefixBindings.into());
-    }
-    Ok(aggregate)
 }
 
 pub(super) const fn is_output_replay_purpose(purpose: ResponsesReplayPurpose) -> bool {
