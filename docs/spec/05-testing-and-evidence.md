@@ -2191,7 +2191,7 @@ rule whose ordinal it is wins.
 | `connect` | The exchange fails before resolution | `Failure(Connect, NotStarted, Io)`, as for a refused connection |
 | `write-reset` | The exchange fails before resolution | `Failure(RequestWriteOrResponseHead, RequestIncomplete, Protocol)`, as for a peer that resets the connection while the request body is being written |
 | `record-rejected` | The exchange fails before resolution, with no upstream traffic | `Failure(RequestWriteOrResponseHead, RequestIncomplete, Protocol)`, cause `peer_rejected_record`, TLS `AlertReceived(20)`, HTTP/1.1; all kernels label it as corruption in transit and resend immediately on a fresh connection after the first physical failure |
-| `reset` | The real response passes until `after-events=<n>` SSE events (a blank line ends one) or `after-bytes=<n>` bytes, cut exactly there | `Failure(ResponseBody, MayHaveTransmitted, Protocol)`, as for a peer that drops mid-body |
+| `reset` | The real response passes until `after-events=<n>` SSE events (a blank line ends a block; a block of only `:` comment lines, such as a keep-alive, dispatches no event and does not count) or `after-bytes=<n>` bytes, cut exactly there | `Failure(ResponseBody, MayHaveTransmitted, Protocol)`, as for a peer that drops mid-body |
 | `eof` | The same cut, then a clean end of body | The end of body a closed stream gives |
 | `stall` | The same cut, then `seconds=<s>` of silence under the body's own timeouts and cancellation, then the rest | `DeadlineExceeded` if a body deadline expires first |
 

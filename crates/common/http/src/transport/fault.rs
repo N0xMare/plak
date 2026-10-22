@@ -15,7 +15,7 @@
 //! | `nth=<n>` | Only the n-th matching request, counting from 1 (every one when absent) |
 //! | `fault=<kind>` | `401`, `429`, `500`, `502`, `503`, `529`, `xai-refusal`, `connect`, `write-reset`, `record-rejected`, `reset`, `eof` or `stall` |
 //! | `retry-after=<secs>` | Status faults: send this `Retry-After` |
-//! | `after-events=<n>` / `after-bytes=<n>` | Stream faults: deliver this much of the body first |
+//! | `after-events=<n>` / `after-bytes=<n>` | Stream faults: deliver this many SSE events (comment-only blocks such as keep-alives do not count) or bytes of the body first |
 //! | `seconds=<secs>` | `stall`: how long the body goes silent |
 //!
 //! Status faults answer from an in-memory peer before anything is resolved,
@@ -303,6 +303,7 @@ pub(super) struct StreamFault {
     bytes: usize,
     events: usize,
     previous: u8,
+    block_has_field: bool,
     reached: bool,
     fired: bool,
 }
@@ -315,7 +316,8 @@ impl StreamFault {
             after,
             bytes: 0,
             events: 0,
-            previous: 0,
+            previous: b'\n',
+            block_has_field: false,
             reached,
             fired: false,
         }
@@ -335,16 +337,22 @@ impl StreamFault {
     }
 
     /// Counts delivered bytes and returns where the threshold falls inside
-    /// `data`, if it does. An SSE event ends at a blank line; `\r` is ignored
-    /// so CRLF framing counts the same.
+    /// `data`, if it does. A blank line ends an SSE block, and the block is
+    /// an event only if one of its lines is not a `:` comment, so keep-alive
+    /// blocks dispatch nothing and count nothing. `\r` is ignored so CRLF
+    /// framing counts the same.
     pub(super) fn cut_point(&mut self, data: &[u8]) -> Option<usize> {
         if self.reached {
             return None;
         }
         for (index, &byte) in data.iter().enumerate() {
             self.bytes += 1;
-            if byte == b'\n' && self.previous == b'\n' {
+            let line_start = self.previous == b'\n';
+            if byte == b'\n' && line_start && self.block_has_field {
                 self.events += 1;
+                self.block_has_field = false;
+            } else if line_start && !matches!(byte, b'\r' | b'\n' | b':') {
+                self.block_has_field = true;
             }
             if byte != b'\r' {
                 self.previous = byte;
@@ -555,6 +563,66 @@ mod tests {
         assert_eq!(fault.cut_point(b"\n\r\ndata: c\n\n"), Some(3));
         assert_eq!(fault.due(), Some(StreamAction::Reset));
         assert_eq!(fault.due(), None);
+    }
+
+    #[test]
+    fn comment_only_blocks_before_data_are_not_events() {
+        let mut fault = StreamFault::new(StreamAction::Reset, Threshold::Events(1));
+        let keep_alive = b": OPENROUTER PROCESSING\n\n";
+        for _ in 0..3 {
+            assert_eq!(fault.cut_point(keep_alive), None);
+        }
+        assert_eq!(fault.cut_point(b"\n\n"), None);
+        assert_eq!(fault.due(), None);
+        assert_eq!(fault.cut_point(b"data: a\n\ndata: b\n\n"), Some(9));
+        assert_eq!(fault.due(), Some(StreamAction::Reset));
+    }
+
+    #[test]
+    fn comments_within_and_between_events_do_not_add_events() {
+        let body: &[u8] =
+            b": ping\n\nevent: delta\n: inside\ndata: a\n\n: between\n:\n\nid: 7\nretry: 5\n\ndata\n\n";
+        for (events, end) in [
+            (1, b"data: a\n\n".as_slice()),
+            (2, b"retry: 5\n\n"),
+            (3, b"data\n\n"),
+        ] {
+            let mut fault = StreamFault::new(StreamAction::Eof, Threshold::Events(events));
+            let cut = fault.cut_point(body);
+            assert!(body[..cut.unwrap_or(0)].ends_with(end), "{events}: {cut:?}");
+        }
+        let mut short = StreamFault::new(StreamAction::Eof, Threshold::Events(4));
+        assert_eq!(short.cut_point(body), None);
+    }
+
+    #[test]
+    fn crlf_framing_counts_the_same_as_lf() {
+        let mut fault = StreamFault::new(StreamAction::Reset, Threshold::Events(2));
+        let body = b": keep-alive\r\n\r\ndata: a\r\n\r\n: x\r\ndata: b\r\n\r\ndata: c\r\n\r\n";
+        let cut = fault.cut_point(body);
+        assert_eq!(
+            cut.map(|cut| &body[..cut]),
+            Some(&body[..body.len() - b"data: c\r\n\r\n".len()])
+        );
+    }
+
+    #[test]
+    fn a_block_with_a_comment_and_a_data_line_counts_once() {
+        let mut fault = StreamFault::new(StreamAction::Reset, Threshold::Events(2));
+        assert_eq!(fault.cut_point(b": note\ndata: a\n\n"), None);
+        assert_eq!(fault.cut_point(b"data: b\n: note\n\n: tail\n\n"), Some(16));
+    }
+
+    #[test]
+    fn the_cut_lands_exactly_after_the_nth_data_event() {
+        let body = b": OPENROUTER PROCESSING\n\ndata: one\n\n: OPENROUTER PROCESSING\n\ndata: two\n\ndata: three\n\n";
+        let mut fault = StreamFault::new(StreamAction::Reset, Threshold::Events(2));
+        let cut = fault.cut_point(body).unwrap_or(0);
+        assert_eq!(
+            &body[..cut],
+            b": OPENROUTER PROCESSING\n\ndata: one\n\n: OPENROUTER PROCESSING\n\ndata: two\n\n"
+        );
+        assert_eq!(fault.due(), Some(StreamAction::Reset));
     }
 
     #[test]
