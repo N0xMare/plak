@@ -210,7 +210,7 @@ async fn retiring_a_live_child_advances_its_session_locator() {
         temporary.path().join("physical.jsonl"),
     )
     .expect("offline facade controller");
-    let created = build_or_open_injected_session(
+    let created = build_or_open_bound_session(
         Arc::clone(&sessions),
         None,
         None,
@@ -271,7 +271,7 @@ async fn retiring_a_live_child_advances_its_session_locator() {
         "the turn moved the branch head; the node must follow it"
     );
     // The advanced locator is the head: an exact reopen of it succeeds.
-    let reopened = build_or_open_injected_session(
+    let reopened = build_or_open_bound_session(
         Arc::clone(&sessions),
         Some(SessionLocator::from_str(&bound).expect("locator parses")),
         None,
@@ -306,7 +306,7 @@ async fn product_session_facade_create_turn_shutdown_and_reopen() {
         temporary.path().join("physical.jsonl"),
     )
     .expect("offline facade controller");
-    let created = build_or_open_injected_session(
+    let created = build_or_open_bound_session(
         Arc::clone(&sessions),
         None,
         None,
@@ -326,7 +326,7 @@ async fn product_session_facade_create_turn_shutdown_and_reopen() {
         .expect("terminal turn result");
     let locator = created.release().await.expect("durable shutdown");
 
-    let mut reopened = build_or_open_injected_session(
+    let mut reopened = build_or_open_bound_session(
         Arc::clone(&sessions),
         Some(locator),
         None,
@@ -351,7 +351,7 @@ async fn product_session_facade_create_turn_shutdown_and_reopen() {
     ));
     drop(reopened);
 
-    let restored = build_or_open_injected_session(
+    let restored = build_or_open_bound_session(
         Arc::clone(&sessions),
         Some(detached),
         None,

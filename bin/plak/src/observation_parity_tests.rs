@@ -59,7 +59,7 @@ use crate::home::paths::PlakPaths;
 use crate::store::sessions::SessionRecord;
 use crate::surface_protocol::{HostEvent, UserAction};
 use plakous_hosted::runtime::{
-    HostConfig, HostTargetAuthority, ReadyPathTiming, TestHostInjection, spawn_host_worker,
+    HostConfig, HostTargetAuthority, ReadyPathTiming, ScriptedRuntimeFactory, spawn_host_worker,
 };
 
 /// How long one scripted step may take before the oracle calls it a hang.
@@ -933,10 +933,10 @@ impl Fixture {
         // scenario proves the loop rebound; the compaction workflow asks for
         // its own runtime role.
         let primary_workspace = workspace.clone();
-        let injection = Arc::new(TestHostInjection {
+        let injection = Arc::new(ScriptedRuntimeFactory {
             runtime: Arc::new(move |role| {
                 let script = match role {
-                    plakous_hosted::runtime::TestRuntimeRole::Compact => Script::CompactionSummary,
+                    plakous_hosted::runtime::RuntimeRole::Compact => Script::CompactionSummary,
                     _ => script,
                 };
                 script_binding(script, tree.clone(), &primary_workspace, controller.clone())
@@ -965,7 +965,7 @@ impl Fixture {
                 .topology_enabled,
             product_home: paths.home().to_path_buf(),
             session,
-            target: HostTargetAuthority::Injected {
+            target: HostTargetAuthority::Registered {
                 provider: NativeProvider::Codex,
             },
             model_id: "offline-loopback-v1".into(),
@@ -979,7 +979,7 @@ impl Fixture {
             cwd: workspace,
             ready_catalog: parity_ready_catalog(),
             resume_publication: None,
-            test_injection: Some(injection),
+            runtime_factory: injection,
             ready_path: ReadyPathTiming::default(),
             seed_history: None,
             source_releases: crate::product_host::SourceReleases::default(),
@@ -1879,7 +1879,7 @@ pub(crate) fn refusal_config_with_controller(
         plakous::model::FinishReason::Refusal,
     )
     .unwrap();
-    config.test_injection = Some(Arc::new(TestHostInjection {
+    config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
         rebind_target: binding.target_binding(),
         runtime: Arc::new(move |_| {
             plakous_offline_crash_harness::text_runtime_binding_with_finish(
@@ -1894,7 +1894,7 @@ pub(crate) fn refusal_config_with_controller(
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
-    }));
+    });
     config
 }
 

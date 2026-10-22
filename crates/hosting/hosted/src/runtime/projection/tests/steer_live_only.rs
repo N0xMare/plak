@@ -71,7 +71,7 @@ fn an_accepted_steer_commits_no_revision_and_rebuilds_from_its_acceptance() {
     store.delete_views(&id);
     let mut config = reopened(root.path(), &store, &id);
     let (fresh, _) = scripted_host_with(root.path(), script(serde_json::json!([])));
-    config.test_injection = fresh.test_injection;
+    config.runtime_factory = fresh.runtime_factory;
     run_prompts(config, &[]);
     let rebuilt = caught_up(root.path(), &store, &id);
     assert_eq!(rebuilt.rows, live.rows, "the rebuild keeps the steer row");

@@ -1352,7 +1352,7 @@ mod tests {
             topology_enabled: true,
             product_home: home_dir.clone(),
             session,
-            target: HostTargetAuthority::Injected {
+            target: HostTargetAuthority::Registered {
                 provider: NativeProvider::Codex,
             },
             model_id: "gpt-existing".into(),
@@ -1366,7 +1366,7 @@ mod tests {
             cwd: root.path().to_path_buf(),
             ready_catalog: plakous_host_protocol::views::ReadyCatalog::default(),
             resume_publication: None,
-            test_injection: None,
+            runtime_factory: Arc::new(ProductionRuntimeFactory),
             ready_path: ReadyPathTiming::default(),
             seed_history: None,
             source_releases: SourceReleases::default(),

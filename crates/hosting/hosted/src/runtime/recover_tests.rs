@@ -17,7 +17,7 @@ use plakous_offline_crash_harness::{BoundaryController, scripted_runtime_binding
 
 use crate::runtime::test_kit::TestExtension;
 use crate::runtime::test_support::{fresh_injected_attached_host, send_attached_action};
-use crate::runtime::{TestHostInjection, spawn_host_worker};
+use crate::runtime::{ScriptedRuntimeFactory, spawn_host_worker};
 
 type HostEvent = crate::surface_protocol::HostEvent<TestExtension>;
 type UserAction = crate::surface_protocol::UserAction<TestExtension>;
@@ -187,7 +187,7 @@ pub(super) fn scripted_host_with(
     )
     .unwrap()
     .target_binding();
-    config.test_injection = Some(Arc::new(TestHostInjection {
+    config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
         runtime: Arc::new(move |_| {
             scripted_runtime_binding_with_cursor(
                 &workspace,
@@ -201,7 +201,7 @@ pub(super) fn scripted_host_with(
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
-    }));
+    });
     (config, evidence)
 }
 

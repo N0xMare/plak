@@ -31,7 +31,7 @@ fn resumed_fork_and_rebind_do_not_present_inherited_terminal_usage() {
                     root.path().join("rebind-usage-evidence.jsonl"),
                 )
                 .unwrap();
-            let injection = Arc::get_mut(config.test_injection.as_mut().unwrap()).unwrap();
+            let injection = crate::runtime::test_kit::scripted_mut(&mut config);
             injection.rebind_target = plakous_offline_crash_harness::runtime_binding_for_account(
                 &workspace,
                 controller.clone(),
@@ -41,7 +41,7 @@ fn resumed_fork_and_rebind_do_not_present_inherited_terminal_usage() {
             .target_binding();
             let primary = injection.runtime.clone();
             injection.runtime = Arc::new(move |role| {
-                if role == crate::runtime::TestRuntimeRole::Rebind {
+                if role == crate::runtime::RuntimeRole::Rebind {
                     plakous_offline_crash_harness::runtime_binding_for_account(
                         &workspace,
                         controller.clone(),
@@ -67,7 +67,7 @@ fn resumed_fork_and_rebind_do_not_present_inherited_terminal_usage() {
                 &config.session,
                 locator,
                 &mut Vec::new(),
-                crate::runtime::TestRuntimeRole::Primary,
+                crate::runtime::RuntimeRole::Primary,
             ))
             .unwrap()
             .unwrap_or_else(|_| panic!("source opens"));

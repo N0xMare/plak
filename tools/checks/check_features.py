@@ -190,9 +190,9 @@ REQUIRED_DEPENDENCY_FEATURE_EDGES = {
     # `MemoryStore` is the hosted session-record double `plakous-hosted`'s own
     # tests drive; it lives with the port it implements.
     ("plakous-hosted", "test-support", "plakous-recursive-subagents/test-support"),
-    # `plak`'s repository-gate offline model reaches the host's injection point
-    # through exactly this edge; without it `test_injection` is compiled out and
-    # the scripted binding would be inert.
+    # `plak`'s repository-gate offline model registers a scripted RuntimeFactory
+    # through this edge; the production construction port is always available,
+    # but the scripted factory belongs to the hosted test kit.
     ("plak", "test-hooks", "plakous-hosted/test-support"),
     ("plak", "test-hooks", "plakous-recursive-subagents-store/commit-trace"),
     (

@@ -10,8 +10,7 @@ use super::{
     run_scheduled_compaction_until_fits, scheduled_compaction_disabled_note,
     scheduled_compaction_parks_when_disabled, send_session_info, sessions, topology_state,
 };
-#[cfg(any(test, feature = "test-support"))]
-use super::{TestHostBoundary, TestHostWorkflow, observe_test_boundary};
+use super::{HostBoundary, HostWorkflow, observe_boundary};
 use crate::runtime::admission::{QueuePersistAction, log_queue_persist_failed};
 use crate::sessions::{NoticeScope, TranscriptRow};
 
@@ -462,8 +461,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     ledger: &self.session_ledger,
                     last_tree_revision: &mut self.last_tree_revision,
                     job_events: &mut self.job_events,
-                    #[cfg(any(test, feature = "test-support"))]
-                    test_injection: self.config.test_injection.as_deref(),
+                    runtime_factory: self.config.runtime_factory.as_ref(),
                 },
                 queued_delivery
                     .as_ref()
@@ -517,11 +515,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             }
         }
         self.recovery_blocked |= host_outcome_blocks_continuation(&drive);
-        #[cfg(any(test, feature = "test-support"))]
-        observe_test_boundary(
-            self.config.test_injection.as_deref(),
-            TestHostWorkflow::RootDelivery,
-            TestHostBoundary::TerminalReady,
+        observe_boundary(
+            self.config.runtime_factory.as_ref(),
+            HostWorkflow::RootDelivery,
+            HostBoundary::TerminalReady,
         );
         let one_shot_terminal = one_shot
             .as_ref()
@@ -975,15 +972,15 @@ mod tests {
         let arm = armed.clone();
         let hold = Arc::new(AtomicBool::new(false));
         let hold_after_ack = hold.clone();
-        let injection = Arc::get_mut(config.test_injection.as_mut().unwrap()).unwrap();
-        injection.rebind_target = binding(crate::runtime::TestRuntimeRole::Primary)
+        let injection = crate::runtime::test_kit::scripted_mut(&mut config);
+        injection.rebind_target = binding(crate::runtime::RuntimeRole::Primary)
             .unwrap()
             .target_binding();
         injection.runtime = Arc::new(binding);
         let inject_once = AtomicBool::new(true);
         injection.observe = Arc::new(move |workflow, boundary| {
-            if workflow == TestHostWorkflow::RootDelivery
-                && boundary == TestHostBoundary::RuntimeReturned
+            if workflow == HostWorkflow::RootDelivery
+                && boundary == HostBoundary::RuntimeReturned
                 && inject_once.swap(false, Ordering::SeqCst)
             {
                 // Later auto-drained roots must not re-arm the recovered fault.
@@ -1897,7 +1894,7 @@ mod tests {
             plakous::model::ModelErrorKind::ContextLimit,
         )
         .unwrap();
-        config.test_injection = Some(Arc::new(crate::runtime::TestHostInjection {
+        config.runtime_factory = Arc::new(crate::runtime::ScriptedRuntimeFactory {
             rebind_target: binding.target_binding(),
             runtime: Arc::new(move |_| {
                 plakous_offline_crash_harness::projected_terminal_failure_runtime_binding(
@@ -1910,7 +1907,7 @@ mod tests {
             observe: Arc::new(|_, _| {}),
             child_runtime: None,
             rebind_builds: Mutex::new(Vec::new()),
-        }));
+        });
         let (actions, action_rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (event_tx, event_rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
         let mut host = HostLoop::open(

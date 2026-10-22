@@ -17,13 +17,9 @@ use super::logging::{log_ev, project_session_snapshot};
 use super::models::native_compact_facet;
 use super::reconcile::persist;
 use super::source_release::{Settlement, release_source_attachment};
-#[cfg(any(test, feature = "test-support"))]
-use super::startup::injected_runtime;
 use super::startup::{cached_api_runtime_for_record, observe_phase, open_session_for_host};
 use super::usage::report_context;
-use super::{
-    HostConfig, HostEvent, HostLifecyclePhase, HostTargetAuthority, Sender, TestRuntimeRole,
-};
+use super::{HostConfig, HostEvent, HostLifecyclePhase, HostTargetAuthority, RuntimeRole, Sender};
 use crate::sessions::{NoticeScope, TranscriptRow};
 
 /// New product session in the same workspace; rebuild agent for a clean slate.
@@ -124,7 +120,7 @@ pub fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
         source.id,
         events.pinned_to(&config.session.id),
         "clear",
-        config.test_injection.clone(),
+        config.runtime_factory.clone(),
     ));
     persist(&*config.store, &mut config.session);
     emit_agent_plan_notes(events, config, stderr_buf);
@@ -171,7 +167,7 @@ pub fn clear_session_rebuild<P: plakous_host_protocol::ProtocolExtension>(
     Ok(())
 }
 
-pub(super) fn build_clear_candidate<P: plakous_host_protocol::ProtocolExtension>(
+pub(super) fn production_build_clear_candidate<P: plakous_host_protocol::ProtocolExtension>(
     executor: &ApplicationExecutor,
     config: &mut HostConfig<P>,
     opened: &AttachedCodingSession,
@@ -185,22 +181,6 @@ pub(super) fn build_clear_candidate<P: plakous_host_protocol::ProtocolExtension>
     Option<std::sync::Arc<ResolvedProvider>>,
 )> {
     let topology_enabled = config.live_topology_enabled()?;
-    #[cfg(any(test, feature = "test-support"))]
-    if let Some(runtime) = injected_runtime(config, TestRuntimeRole::Primary) {
-        let operation = SessionOperationId::new(create_operation_id)
-            .map_err(|_| CliFailure::new("injected clear operation identity is invalid"))?;
-        let session = executor
-            .block_on(opened.create_with_runtime(operation, opened.clear_job_counter(runtime?)?))
-            .map_err(|_| CliFailure::new("application execution failed"))?
-            .map_err(|error| error.failure)?;
-        observe_phase(
-            events,
-            HostLifecyclePhase::ClearResolveAuthority,
-            started,
-            config.session.pending_queue.len(),
-        );
-        return Ok((session, None));
-    }
 
     if config.target.is_api() {
         let mut target = config.session.clone();
@@ -405,7 +385,7 @@ fn switch_onto_session<P: plakous_host_protocol::ProtocolExtension>(
             &next,
             locator,
             stderr_buf,
-            TestRuntimeRole::Primary,
+            RuntimeRole::Primary,
         ))
         .map_err(|_| CliFailure::new("application execution failed"))?
         .map_err(|error| error.failure)?;
@@ -419,7 +399,7 @@ fn switch_onto_session<P: plakous_host_protocol::ProtocolExtension>(
             source.id,
             events.pinned_to(&config.session.id),
             "resume",
-            config.test_injection.clone(),
+            config.runtime_factory.clone(),
         ));
     });
     if let Some(release) = release {
@@ -485,6 +465,32 @@ pub(super) fn exact_resume_target_matches(
         && candidate.target_selection == current.target_selection
 }
 
+pub(super) fn build_clear_candidate<P: plakous_host_protocol::ProtocolExtension>(
+    executor: &ApplicationExecutor,
+    config: &mut HostConfig<P>,
+    opened: &AttachedCodingSession,
+    target_product_session_id: &str,
+    create_operation_id: &str,
+    stderr_buf: &mut Vec<u8>,
+    events: &Sender<P>,
+    started: Instant,
+) -> CliResult<(
+    AttachedCodingSession,
+    Option<std::sync::Arc<ResolvedProvider>>,
+)> {
+    let factory = config.runtime_factory.clone();
+    factory.clear(
+        executor,
+        config,
+        opened,
+        target_product_session_id,
+        create_operation_id,
+        stderr_buf,
+        events,
+        started,
+    )
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
@@ -495,11 +501,9 @@ mod tests {
     use super::*;
     use crate::runtime::*;
 
-    use crate::runtime::shell::*;
-
-    #[cfg(any(test, feature = "test-support"))]
-    use crate::agent::build_or_open_injected_session;
+    use crate::agent::build_or_open_bound_session;
     use crate::interrupt::InterruptWatch;
+    use crate::runtime::shell::*;
     use crate::runtime::test_support::*;
     use crate::sessions::{self, SessionRecord};
     use plakous::application::ApplicationExecutor;
@@ -574,13 +578,14 @@ mod tests {
         let executor = ApplicationExecutor::new().unwrap();
         let create = SessionOperationId::new(&config.session.create_operation_id).unwrap();
         let mut opened = executor
-            .block_on(build_or_open_injected_session(
+            .block_on(build_or_open_bound_session(
                 config.state_roots.runtime_sessions().unwrap(),
                 None,
                 None,
                 create,
-                injected_runtime(&config, TestRuntimeRole::Primary)
-                    .unwrap()
+                config
+                    .runtime_factory
+                    .runtime(&config, RuntimeRole::Primary, &mut Vec::new())
                     .unwrap(),
             ))
             .unwrap()

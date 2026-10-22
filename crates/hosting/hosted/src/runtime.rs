@@ -93,9 +93,8 @@ pub fn rehearse_presentation_snapshot(
         _ => unreachable!("restore projection always produces a snapshot"),
     }
 }
+use factory::observe_boundary;
 pub use resume::note_idle_only;
-#[cfg(any(test, feature = "test-support"))]
-use startup::observe_test_boundary;
 use tree::{emit_tree_snapshot_if_revision_advanced, record_emitted_tree_revision};
 use turn::{
     admitted_turn_lifecycle, apply_cancel_settlement, emit_turn_lifecycle, flush_assistant_delta,
@@ -127,6 +126,7 @@ mod oneshot;
 mod projection;
 #[cfg(test)]
 pub(crate) use projection::probe::view_write as observe_projector_view_write;
+mod factory;
 #[cfg(test)]
 mod fault_store;
 mod rebind;
@@ -139,6 +139,9 @@ mod resume;
 pub mod shell;
 mod source_release;
 mod startup;
+pub use factory::{ProductionRuntimeFactory, RuntimeFactory, RuntimeFuture};
+#[cfg(any(test, feature = "test-support"))]
+pub use test_kit::ScriptedRuntimeFactory;
 mod surface;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_kit;
@@ -158,7 +161,7 @@ use turn_drive::{TurnHost, drive_one_turn};
 mod usage;
 
 #[cfg(any(test, feature = "test-support"))]
-pub use self::{startup::run_injected_host, topology_state::install_successor_epoch_headless};
+pub use self::{test_kit::run_scripted_host, topology_state::install_successor_epoch_headless};
 pub use binding_document::{
     RootBindingDocument, RootBindingDraft, RootBindingEdit, RootBindingSaveError,
 };
@@ -347,8 +350,9 @@ pub enum HostTargetAuthority {
         subscriptions: NativeSubscriptions,
         evidence: Option<Box<OpenRouterHostEvidence>>,
     },
-    #[cfg(any(test, feature = "test-support"))]
-    Injected { provider: NativeProvider },
+
+    /// A route whose factory owns runtime authority rather than a native subscription.
+    Registered { provider: NativeProvider },
 }
 
 impl HostTargetAuthority {
@@ -356,8 +360,8 @@ impl HostTargetAuthority {
         match self {
             Self::Native { provider, .. } => Some(*provider),
             Self::OpenRouter { .. } | Self::Platform { .. } => None,
-            #[cfg(any(test, feature = "test-support"))]
-            Self::Injected { provider } => Some(*provider),
+
+            Self::Registered { provider } => Some(*provider),
         }
     }
 
@@ -365,23 +369,19 @@ impl HostTargetAuthority {
         match self {
             Self::Native { resolved, .. } => Some(resolved),
             Self::OpenRouter { .. } | Self::Platform { .. } => None,
-            #[cfg(any(test, feature = "test-support"))]
-            Self::Injected { .. } => None,
+
+            Self::Registered { .. } => None,
         }
     }
 
-    #[allow(
-        clippy::unnecessary_wraps,
-        reason = "the closed injected test authority intentionally has no production subscriptions"
-    )]
     fn native_subscriptions(&self) -> Option<&NativeSubscriptions> {
         match self {
             Self::Native { subscriptions, .. } => Some(subscriptions),
             Self::OpenRouter { subscriptions, .. } | Self::Platform { subscriptions, .. } => {
                 Some(subscriptions)
             }
-            #[cfg(any(test, feature = "test-support"))]
-            Self::Injected { .. } => None,
+
+            Self::Registered { .. } => None,
         }
     }
 
@@ -451,7 +451,7 @@ pub struct HostConfig<P: plakous_host_protocol::ProtocolExtension = plakous_host
     /// record and observation are published only after the canonical runtime
     /// has opened successfully.
     pub resume_publication: Option<Arc<AtomicBool>>,
-    pub test_injection: Option<Arc<TestHostInjection>>,
+    pub runtime_factory: Arc<dyn RuntimeFactory<P>>,
     /// Presentation + provider-resolve timings captured before `run_host_loop`.
     pub ready_path: ReadyPathTiming,
     /// A carried conversation the session's runtime is created with. Taken by
@@ -472,11 +472,13 @@ pub struct HostConfig<P: plakous_host_protocol::ProtocolExtension = plakous_host
 pub fn carry_input_window<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
 ) -> CliResult<plakous::sessions::SessionInputWindow> {
+    config.runtime_factory.input_window(config)
+}
+
+pub(super) fn production_carry_input_window<P: plakous_host_protocol::ProtocolExtension>(
+    config: &HostConfig<P>,
+) -> CliResult<plakous::sessions::SessionInputWindow> {
     use plakous::sessions::SessionInputWindow;
-    #[cfg(any(test, feature = "test-support"))]
-    if let Some(runtime) = startup::injected_runtime(config, TestRuntimeRole::Primary) {
-        return Ok(runtime?.input_window());
-    }
     if let HostTargetAuthority::Native { resolved, .. } = &config.target {
         let configured = resolved.configured_model();
         let descriptor = configured.configuration().effective().descriptor();
@@ -588,7 +590,7 @@ pub struct ProcessResourceSnapshot {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TestRuntimeRole {
+pub enum RuntimeRole {
     Primary,
     Compact,
     Rebind,
@@ -609,7 +611,7 @@ enum HostLifecyclePhase {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TestHostWorkflow {
+pub enum HostWorkflow {
     RootDelivery,
     SendNow,
     Fork,
@@ -620,7 +622,7 @@ pub enum TestHostWorkflow {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TestHostBoundary {
+pub enum HostBoundary {
     Prepared,
     RuntimeReturned,
     ProductPublished,
@@ -631,27 +633,6 @@ pub enum TestHostBoundary {
 #[cfg(any(test, feature = "test-support"))]
 pub const COMPLETION_WINS_QUIT_PROMPT: &str = "complete while quit is accepted";
 
-pub struct TestHostInjection {
-    pub runtime:
-        Arc<dyn Fn(TestRuntimeRole) -> Result<SessionRuntimeBinding, String> + Send + Sync>,
-    pub rebind_target: SessionTargetBinding,
-    pub observe: Arc<dyn Fn(TestHostWorkflow, TestHostBoundary) + Send + Sync>,
-    /// A child's runtime binding, by agent id and workspace path.
-    ///
-    /// `runtime` covers the root only, because `startup` is the only place that
-    /// builds the root's session; a child's binding is built in
-    /// `agent::children::child_session_runtime_binding` from real credentials
-    /// and a real catalog. Without this a topology turn could not be driven
-    /// offline. `None` leaves that path exactly as it is in production.
-    pub child_runtime: Option<Arc<ChildRuntimeFactory>>,
-    /// Attach choice each injected rebind build observed.
-    ///
-    /// The real spec arm applies the same choice to the runtime it builds.
-    /// The injected arm (`spec: None`) records it here, because that build
-    /// has no provider to attach.
-    pub rebind_builds: std::sync::Mutex<Vec<crate::topology_runtime::TopologyHubAttach>>,
-}
-
 /// Builds one child's binding with the real binder's scoped construction roots.
 pub type ChildRuntimeFactory = dyn Fn(&str, &str, &crate::agent::ProductStateRoots) -> Result<SessionRuntimeBinding, String>
     + Send
@@ -659,28 +640,6 @@ pub type ChildRuntimeFactory = dyn Fn(&str, &str, &crate::agent::ProductStateRoo
     + 'static;
 
 use crate::sessions::queue;
-
-#[cfg(any(test, feature = "test-support"))]
-impl TestHostInjection {
-    /// Holds attachment release completion for `delay` after runtime release,
-    /// so switch-back deterministically exercises the tracked join.
-    #[must_use]
-    pub fn with_source_release_delay(&self, delay: Duration) -> Arc<Self> {
-        let observe = Arc::clone(&self.observe);
-        Arc::new(Self {
-            runtime: Arc::clone(&self.runtime),
-            rebind_target: self.rebind_target.clone(),
-            observe: Arc::new(move |workflow, boundary| {
-                if workflow == TestHostWorkflow::SourceRelease {
-                    thread::sleep(delay);
-                }
-                observe(workflow, boundary);
-            }),
-            child_runtime: self.child_runtime.clone(),
-            rebind_builds: std::sync::Mutex::new(Vec::new()),
-        })
-    }
-}
 
 /// The last complete Usage projection the host observed, with the instant it
 /// was stored.
@@ -961,8 +920,7 @@ struct ResolvedRebindTarget {
 
 /// Where a rebind's target runs.
 enum RebindRoute {
-    /// A native OAuth subscription. `spec` is absent only for an injected
-    /// test target.
+    /// A native OAuth subscription, or a registered binder that owns its spec.
     Native {
         provider: NativeProvider,
         resolved: Option<Arc<ResolvedProvider>>,

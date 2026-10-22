@@ -23,9 +23,8 @@ use plakous_offline_crash_harness::{
 
 use crate::home::paths::PlakPaths;
 use plakous_hosted::runtime::{
-    COMPLETION_WINS_QUIT_PROMPT, HostConfig, HostTargetAuthority, ReadyPathTiming,
-    TestHostBoundary, TestHostInjection, TestHostWorkflow, TestRuntimeRole, run_injected_host,
-    spawn_host_worker,
+    COMPLETION_WINS_QUIT_PROMPT, HostBoundary, HostConfig, HostTargetAuthority, HostWorkflow,
+    ReadyPathTiming, RuntimeRole, ScriptedRuntimeFactory, run_scripted_host, spawn_host_worker,
 };
 use plakous_hosted::sessions::TranscriptRow;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -36,7 +35,7 @@ use crate::shell::settings::ProductSurface;
 use crate::store::sessions::{self, SessionRecord};
 use crate::surface_protocol;
 use plakous::sessions::SessionOperationId as HostSessionOperationId;
-use plakous_hosted::agent::build_or_open_injected_session;
+use plakous_hosted::agent::build_or_open_bound_session;
 use plakous_hosted::binding::{CompositionSelection as ProductComposition, TargetSelection};
 use plakous_hosted::runtime::{Sender, clear_session_rebuild};
 use surface_protocol::{HostEvent, SurfaceIntent, UserAction};
@@ -49,7 +48,7 @@ pub(crate) fn product_injected_attached_host(
     root: &std::path::Path,
 ) -> (
     HostConfig<surface_protocol::PlakExtension>,
-    Arc<TestHostInjection>,
+    Arc<ScriptedRuntimeFactory>,
     PlakPaths,
 ) {
     let paths = PlakPaths::explicit(root.join("home"));
@@ -65,7 +64,7 @@ pub(crate) fn product_injected_attached_host(
         .unwrap()
         .target_binding();
     let runtime_workspace = workspace.clone();
-    let injection = Arc::new(TestHostInjection {
+    let injection = Arc::new(ScriptedRuntimeFactory {
         runtime: Arc::new(move |_| {
             runtime_binding(&runtime_workspace, controller.clone())
                 .map_err(|error| error.to_string())
@@ -94,7 +93,7 @@ pub(crate) fn product_injected_attached_host(
         topology_enabled: SessionPolicy::load(&paths).unwrap().topology_enabled,
         product_home: paths.home().to_path_buf(),
         session,
-        target: HostTargetAuthority::Injected {
+        target: HostTargetAuthority::Registered {
             provider: NativeProvider::Codex,
         },
         model_id: "offline-loopback-v1".into(),
@@ -108,7 +107,7 @@ pub(crate) fn product_injected_attached_host(
         cwd: workspace,
         ready_catalog: plakous_host_protocol::views::ReadyCatalog::default(),
         resume_publication: None,
-        test_injection: Some(Arc::clone(&injection)),
+        runtime_factory: injection.clone(),
         ready_path: ReadyPathTiming::default(),
         seed_history: None,
         source_releases: crate::product_host::SourceReleases::default(),
@@ -122,7 +121,7 @@ fn product_overflow_attached_host(
     provider: NativeProvider,
 ) -> (
     HostConfig<surface_protocol::PlakExtension>,
-    Arc<TestHostInjection>,
+    Arc<ScriptedRuntimeFactory>,
     PlakPaths,
 ) {
     let (mut config, _, paths) = product_injected_attached_host(root);
@@ -136,7 +135,7 @@ fn product_overflow_attached_host(
         .unwrap()
         .target_binding();
     let runtime_workspace = workspace.clone();
-    let injection = Arc::new(TestHostInjection {
+    let injection = Arc::new(ScriptedRuntimeFactory {
         runtime: Arc::new(move |_| {
             overflow_runtime_binding(&runtime_workspace, controller.clone())
                 .map_err(|error| error.to_string())
@@ -154,9 +153,9 @@ fn product_overflow_attached_host(
         }
         .into(),
     );
-    config.target = HostTargetAuthority::Injected { provider };
+    config.target = HostTargetAuthority::Registered { provider };
     config.compaction_enabled = true;
-    config.test_injection = Some(Arc::clone(&injection));
+    config.runtime_factory = injection.clone();
     (config, injection, paths)
 }
 
@@ -270,16 +269,15 @@ fn overflow_usage_and_codex_compact_records_capacity_recovery() {
     let captured = Arc::clone(&prepared);
     let observed_store = Arc::clone(&store);
     let observed_id = session_id.clone();
-    Arc::get_mut(config.test_injection.as_mut().unwrap())
-        .unwrap()
-        .observe = Arc::new(move |workflow, boundary| {
-        if workflow == TestHostWorkflow::Compact && boundary == TestHostBoundary::Prepared {
-            *captured.lock().unwrap() = observed_store
-                .load_intents(&observed_id)
-                .unwrap()
-                .workflow_requests;
-        }
-    });
+    plakous_hosted::runtime::test_kit::scripted_mut(&mut config).observe =
+        Arc::new(move |workflow, boundary| {
+            if workflow == HostWorkflow::Compact && boundary == HostBoundary::Prepared {
+                *captured.lock().unwrap() = observed_store
+                    .load_intents(&observed_id)
+                    .unwrap()
+                    .workflow_requests;
+            }
+        });
     let events = run_attached_actions(
         config,
         vec![
@@ -338,9 +336,9 @@ fn scheduled_compaction_failure_keeps_host_worker_alive() {
     let (compact_requested_tx, compact_requested_rx) = std::sync::mpsc::channel::<()>();
     let (drained_tx, drained_rx) = std::sync::mpsc::channel::<()>();
     let drained_rx = std::sync::Mutex::new(drained_rx);
-    config.test_injection = Some(Arc::new(TestHostInjection {
+    config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
         runtime: Arc::new(move |role| {
-            if role == TestRuntimeRole::Compact {
+            if role == RuntimeRole::Compact {
                 let _ = compact_requested_tx.send(());
                 let _ = drained_rx
                     .lock()
@@ -355,7 +353,7 @@ fn scheduled_compaction_failure_keeps_host_worker_alive() {
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
-    }));
+    });
     let session_id = config.session.id.clone();
     let paths = PlakPaths::from_home(config.product_home.clone());
     let (actions, receiver, worker) = spawn_host_worker(config).unwrap();
@@ -485,7 +483,7 @@ fn fresh_attached_quit_removes_unpublished_runtime_and_first_intent_publishes_pa
     let intent_root = tempfile::tempdir().unwrap();
     let (config, injection, paths) = product_injected_attached_host(intent_root.path());
     let session_id = config.session.id.clone();
-    run_injected_host(
+    run_scripted_host(
         config,
         injection,
         vec![
@@ -541,31 +539,31 @@ fn completed_terminal_outcome_remains_authoritative_when_exit_was_requested() {
         std::sync::Condvar::new(),
     ));
     let observed_boundary = Arc::clone(&boundary);
-    config.test_injection = Some(Arc::new(TestHostInjection {
+    config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
         runtime: Arc::clone(&injection.runtime),
         rebind_target: injection.rebind_target.clone(),
         observe: Arc::new(move |workflow, observed| {
-            if workflow != TestHostWorkflow::SendNow {
+            if workflow != HostWorkflow::SendNow {
                 return;
             }
             let (state, changed) = &*observed_boundary;
             let mut state = state.lock().unwrap();
             match observed {
-                TestHostBoundary::RuntimeReturned => {
+                HostBoundary::RuntimeReturned => {
                     state.0 = 1;
                     changed.notify_all();
                     while !state.1 {
                         state = changed.wait(state).unwrap();
                     }
                 }
-                TestHostBoundary::ProductPublished => state.0 = 2,
-                TestHostBoundary::ProductCommitted => state.0 = 3,
-                TestHostBoundary::Prepared | TestHostBoundary::TerminalReady => {}
+                HostBoundary::ProductPublished => state.0 = 2,
+                HostBoundary::ProductCommitted => state.0 = 3,
+                HostBoundary::Prepared | HostBoundary::TerminalReady => {}
             }
         }),
         child_runtime: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
-    }));
+    });
     let (actions, events, worker) = spawn_host_worker(config).unwrap();
 
     send_attached_action(
@@ -788,7 +786,7 @@ fn clear_publishes_fresh_product_and_runtime_authority_before_dispatch() {
     let operation = HostSessionOperationId::new(&session.create_operation_id).unwrap();
     let state_roots = crate::shell::host::product_state_roots(&paths);
     let mut opened = executor
-        .block_on(build_or_open_injected_session(
+        .block_on(build_or_open_bound_session(
             state_roots.runtime_sessions().unwrap(),
             None,
             None,
@@ -838,7 +836,7 @@ fn clear_publishes_fresh_product_and_runtime_authority_before_dispatch() {
     let resolution_counter = Arc::clone(&resolutions);
     let runtime_workspace = workspace.clone();
     let runtime_controller = controller.clone();
-    let injection = Arc::new(TestHostInjection {
+    let injection = Arc::new(ScriptedRuntimeFactory {
         runtime: Arc::new(move |_| {
             resolution_counter.fetch_add(1, Ordering::SeqCst);
             runtime_binding(&runtime_workspace, runtime_controller.clone())
@@ -860,7 +858,7 @@ fn clear_publishes_fresh_product_and_runtime_authority_before_dispatch() {
             paths.clone(),
         )),
         session,
-        target: HostTargetAuthority::Injected {
+        target: HostTargetAuthority::Registered {
             provider: NativeProvider::Codex,
         },
         model_id: "offline-loopback-v1".into(),
@@ -875,7 +873,7 @@ fn clear_publishes_fresh_product_and_runtime_authority_before_dispatch() {
         cwd: workspace,
         ready_catalog: plakous_host_protocol::views::ReadyCatalog::default(),
         resume_publication: None,
-        test_injection: Some(injection),
+        runtime_factory: injection,
         ready_path: ReadyPathTiming::default(),
         seed_history: None,
         source_releases: crate::product_host::SourceReleases::default(),

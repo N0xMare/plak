@@ -4,8 +4,8 @@
 use super::test_kit::{ProbeIntent, ProbeObservation, TestExtension};
 use super::test_support::fresh_injected_attached_host_for;
 use super::{
-    HostConfig, HostEvent, OneShot, OneShotOutcome, Sender, SurfaceEffect, SurfaceFacts,
-    SurfaceHandler, SurfacePhase, SurfaceRefusal, TestHostInjection, UserAction,
+    HostConfig, HostEvent, OneShot, OneShotOutcome, ScriptedRuntimeFactory, Sender, SurfaceEffect,
+    SurfaceFacts, SurfaceHandler, SurfacePhase, SurfaceRefusal, UserAction,
 };
 use plakous_host_protocol::views::{ProviderDef, ProviderSection};
 use plakous_host_protocol::{Core, ProtocolExtension};
@@ -54,7 +54,7 @@ fn gated<P: ProtocolExtension>(root: &std::path::Path) -> (HostConfig<P>, std::p
         "prefix complete",
     )
     .unwrap();
-    config.test_injection = Some(Arc::new(TestHostInjection {
+    config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
         rebind_target: binding.target_binding(),
         runtime: Arc::new(move |_| {
             plakous_offline_crash_harness::text_runtime_binding(
@@ -68,7 +68,7 @@ fn gated<P: ProtocolExtension>(root: &std::path::Path) -> (HostConfig<P>, std::p
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
         rebind_builds: Mutex::new(Vec::new()),
-    }));
+    });
     (config, release)
 }
 

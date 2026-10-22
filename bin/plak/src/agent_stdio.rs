@@ -1153,15 +1153,14 @@ mod tests {
             }
         }
         let (terminal_ready, terminal) = mpsc::channel();
-        std::sync::Arc::get_mut(config.test_injection.as_mut().unwrap())
-            .unwrap()
-            .observe = std::sync::Arc::new(move |workflow, boundary| {
-            if workflow == plakous_hosted::runtime::TestHostWorkflow::RootDelivery
-                && boundary == plakous_hosted::runtime::TestHostBoundary::TerminalReady
-            {
-                let _ = terminal_ready.send(());
-            }
-        });
+        plakous_hosted::runtime::test_kit::scripted_mut(config).observe =
+            std::sync::Arc::new(move |workflow, boundary| {
+                if workflow == plakous_hosted::runtime::HostWorkflow::RootDelivery
+                    && boundary == plakous_hosted::runtime::HostBoundary::TerminalReady
+                {
+                    let _ = terminal_ready.send(());
+                }
+            });
         std::io::BufReader::new(std::io::Read::chain(
             std::io::Cursor::new(prompt.as_bytes()),
             AfterTerminal {
@@ -1584,14 +1583,13 @@ mod tests {
         let (entered, at_terminal) = mpsc::channel();
         let (release, held) = mpsc::channel();
         let held = std::sync::Mutex::new(held);
-        std::sync::Arc::get_mut(config.test_injection.as_mut().unwrap())
-            .unwrap()
-            .observe = std::sync::Arc::new(move |_, boundary| {
-            if boundary == plakous_hosted::runtime::TestHostBoundary::TerminalReady {
-                entered.send(()).unwrap();
-                held.lock().unwrap().recv().unwrap();
-            }
-        });
+        plakous_hosted::runtime::test_kit::scripted_mut(&mut config).observe =
+            std::sync::Arc::new(move |_, boundary| {
+                if boundary == plakous_hosted::runtime::HostBoundary::TerminalReady {
+                    entered.send(()).unwrap();
+                    held.lock().unwrap().recv().unwrap();
+                }
+            });
         let command = thread::spawn(move || {
             run_agent_stdio_with_input(
                 config,
@@ -1671,7 +1669,7 @@ mod tests {
             // Keep the real product binding and transport; replace only the
             // provider execution with the established offline host injection.
             config.target = injected.target;
-            config.test_injection = injected.test_injection;
+            config.runtime_factory = injected.runtime_factory;
             config.topology_enabled = false;
             config.compaction_enabled = false;
             let mut stdout = Vec::new();

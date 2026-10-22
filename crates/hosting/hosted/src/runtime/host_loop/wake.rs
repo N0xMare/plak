@@ -753,8 +753,8 @@ mod tests {
                 0,
                 false,
                 |config, _| {
-                    let injection = config.test_injection.as_ref().unwrap();
-                    config.test_injection = Some(Arc::new(crate::runtime::TestHostInjection {
+                    let injection = crate::runtime::test_kit::scripted(config);
+                    config.runtime_factory = Arc::new(crate::runtime::ScriptedRuntimeFactory {
                         runtime: injection.runtime.clone(),
                         rebind_target: injection.rebind_target.clone(),
                         observe: injection.observe.clone(),
@@ -770,7 +770,7 @@ mod tests {
                                 .map_err(|error| error.to_string())
                         })),
                         rebind_builds: std::sync::Mutex::new(Vec::new()),
-                    }));
+                    });
                 },
                 |host, runtime, controls, _| {
                     let child = runtime
@@ -784,11 +784,7 @@ mod tests {
                     let path = runtime
                         .read(|tree| tree.node(&child).unwrap().path.clone())
                         .unwrap();
-                    let factory = host
-                        .config
-                        .test_injection
-                        .as_ref()
-                        .unwrap()
+                    let factory = crate::runtime::test_kit::scripted(&host.config)
                         .child_runtime
                         .as_ref()
                         .unwrap();
@@ -1098,9 +1094,7 @@ mod tests {
         });
         let workspace = config.cwd.clone();
         let cursor = Arc::new(std::sync::atomic::AtomicU64::new(0));
-        Arc::get_mut(config.test_injection.as_mut().unwrap())
-            .unwrap()
-            .runtime = Arc::new(move |_| {
+        crate::runtime::test_kit::scripted_mut(config).runtime = Arc::new(move |_| {
             scripted_topology_runtime_binding_with_clock(
                 &workspace,
                 controller.clone(),
@@ -1184,9 +1178,7 @@ mod tests {
         .unwrap();
         let workspace = config.cwd.clone();
         let cursor = Arc::new(std::sync::atomic::AtomicU64::new(0));
-        Arc::get_mut(config.test_injection.as_mut().unwrap())
-            .unwrap()
-            .runtime = Arc::new(move |_| {
+        crate::runtime::test_kit::scripted_mut(config).runtime = Arc::new(move |_| {
             scripted_topology_runtime_binding(
                 &workspace,
                 controller.clone(),
@@ -1581,15 +1573,12 @@ mod tests {
                 let workspace = config.cwd.clone();
                 let cursor = Arc::new(std::sync::atomic::AtomicU64::new(1));
                 let script = Arc::clone(&script);
-                config.test_injection = Some(Arc::new(crate::runtime::TestHostInjection {
-                    rebind_target: config
-                        .test_injection
-                        .as_ref()
-                        .unwrap()
+                config.runtime_factory = Arc::new(crate::runtime::ScriptedRuntimeFactory {
+                    rebind_target: crate::runtime::test_kit::scripted(config)
                         .rebind_target
                         .clone(),
                     runtime: Arc::new(move |role| {
-                        if role == crate::runtime::TestRuntimeRole::Compact {
+                        if role == crate::runtime::RuntimeRole::Compact {
                             plakous_offline_crash_harness::scripted_compaction_runtime_binding(
                                 &workspace,
                                 controller.clone(),
@@ -1611,7 +1600,7 @@ mod tests {
                     observe: Arc::new(|_, _| {}),
                     child_runtime: None,
                     rebind_builds: std::sync::Mutex::new(Vec::new()),
-                }));
+                });
                 config.compaction_enabled = true;
             },
             test,
@@ -2165,7 +2154,7 @@ mod tests {
         config.state_roots = host.config.state_roots.clone();
         config.store = host.config.store.clone();
         config.session = config.store.load(&host.config.session.id).unwrap();
-        config.test_injection = host.config.test_injection.clone();
+        config.runtime_factory = host.config.runtime_factory.clone();
         let mut reopened = HostLoop::open(config, host.actions, host.events.clone(), None).unwrap();
         test(&mut reopened);
         // Keep the fixture's old host at the same released head and CAS revision.
@@ -2860,12 +2849,12 @@ mod tests {
     fn runtime_shutdown_during_wake_compaction_parks_instead_of_deferring() {
         with_fixture(1, true, |host, _, _, observed| {
             let agent = host.opened.agent().unwrap().clone();
-            let injection = Arc::get_mut(host.config.test_injection.as_mut().unwrap()).unwrap();
+            let injection = crate::runtime::test_kit::scripted_mut(&mut host.config);
             let runtime = Arc::clone(&injection.runtime);
             let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let observed_stop = Arc::clone(&stopped);
             injection.runtime = Arc::new(move |role| {
-                if role == crate::runtime::TestRuntimeRole::Compact {
+                if role == crate::runtime::RuntimeRole::Compact {
                     // Stop after the pending-context read, before the compact
                     // endpoint is called: this is not a failed read.
                     plakous::application::ApplicationExecutor::new()
@@ -3395,9 +3384,7 @@ mod tests {
             )
             .unwrap();
             let cursor = Arc::new(std::sync::atomic::AtomicU64::new(1));
-            Arc::get_mut(config.test_injection.as_mut().unwrap())
-                .unwrap()
-                .runtime = Arc::new(move |_| {
+            crate::runtime::test_kit::scripted_mut(config).runtime = Arc::new(move |_| {
                 scripted_topology_runtime_binding(
                     &workspace,
                     controller.clone(),

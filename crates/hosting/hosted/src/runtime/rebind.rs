@@ -19,23 +19,20 @@ use crate::sessions::{self, SessionRecord};
 use crate::{CliFailure, CliResult};
 
 use super::admission::{emit_queue_snapshot, emit_unavailable_context};
+use super::factory::observe_boundary;
 use super::info::{effort_label, send_binding, send_last_user_prompt_at};
 use super::models::{effort_from_config, native_compact_facet, oauth_provider_for_account};
 use super::shell::{api_root_binding, profile_target_selection};
 use super::source_release::release_source_attachment;
 use super::startup::{
-    api_runtime_for_record, bounded_transition_stage, host_runtime_binding, observe_phase,
-    open_session_for_host,
+    api_runtime_for_record, bounded_transition_stage, observe_phase, open_session_for_host,
 };
-#[cfg(any(test, feature = "test-support"))]
-use super::startup::{injected_rebind_target, observe_test_boundary};
 use super::usage::report_context;
+use super::{HostBoundary, HostWorkflow};
 use super::{
     HostConfig, HostLifecyclePhase, HostTargetAuthority, RebindBefore, RebindRoute,
-    ResolvedRebindTarget, Sender, TestRuntimeRole, TopologyRows, TreeRows, topology_state,
+    ResolvedRebindTarget, RuntimeRole, Sender, TopologyRows, TreeRows, topology_state,
 };
-#[cfg(any(test, feature = "test-support"))]
-use super::{TestHostBoundary, TestHostWorkflow};
 use crate::sessions::{NoticeScope, TranscriptRow};
 
 fn report_rebind_context<P: plakous_host_protocol::ProtocolExtension>(
@@ -77,7 +74,7 @@ pub(super) fn restore_detached_source<P: plakous_host_protocol::ProtocolExtensio
             &config.session,
             locator,
             stderr_buf,
-            TestRuntimeRole::Primary,
+            RuntimeRole::Primary,
         ))
         .map_err(|_| CliFailure::new("application execution failed while restoring source"))?
         .map_err(|error| error.failure)?;
@@ -124,38 +121,13 @@ pub(super) fn native_rebind_runtime<P: plakous_host_protocol::ProtocolExtension>
     } else {
         crate::topology_runtime::TopologyHubAttach::LookupOnly
     };
-    match route {
-        RebindRoute::Native {
-            spec: Some(spec), ..
-        } => {
-            let mut attached = None;
-            let binding = crate::agent::coding_session_runtime_binding_with_attach(
-                (**spec).clone(),
-                stderr_buf,
-                attach,
-                &mut attached,
-            );
-            (binding, attached)
-        }
-        RebindRoute::Native { spec: None, .. } => {
-            #[cfg(any(test, feature = "test-support"))]
-            if let Some(injection) = config.test_injection.as_deref() {
-                injection
-                    .rebind_builds
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push(attach);
-            }
-            (
-                host_runtime_binding(config, stderr_buf, TestRuntimeRole::Rebind),
-                None,
-            )
-        }
-        RebindRoute::Api(_) => (
-            host_runtime_binding(config, stderr_buf, TestRuntimeRole::Rebind),
-            None,
-        ),
-    }
+    let spec = match route {
+        RebindRoute::Native { spec, .. } => spec.as_deref(),
+        RebindRoute::Api(_) => None,
+    };
+    config
+        .runtime_factory
+        .rebind_runtime(config, spec, attach, stderr_buf)
 }
 
 /// Drops the lease a profile fork's runtime build took on the tree it
@@ -191,15 +163,14 @@ pub(super) fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExtension>
     topology_tree_id: &str,
 ) -> CliResult<ResolvedRebindTarget> {
     let topology_enabled = config.live_topology_enabled()?;
-    #[cfg(any(test, feature = "test-support"))]
-    if let Some(binding) = injected_rebind_target(config) {
+    if let Some((provider, binding)) = config.runtime_factory.target_binding() {
         let (parsed_effort, explicit) = effort_from_config(effort);
         if effort.is_some() && !explicit {
             return Err(CliFailure::new("injected rebind effort is invalid"));
         }
         return Ok(ResolvedRebindTarget {
             route: RebindRoute::Native {
-                provider: NativeProvider::Codex,
+                provider,
                 resolved: None,
                 spec: None,
             },
@@ -227,8 +198,8 @@ pub(super) fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExtension>
             .iter()
             .find(|candidate| candidate.account == account && candidate.exact_id == model),
         HostTargetAuthority::OpenRouter { .. } | HostTargetAuthority::Platform { .. } => None,
-        #[cfg(any(test, feature = "test-support"))]
-        HostTargetAuthority::Injected { .. } => None,
+
+        HostTargetAuthority::Registered { .. } => None,
     };
     let (reasoning_efforts, service_tiers, native_tool_mode) = if let Some(candidate) = candidate {
         (
@@ -455,11 +426,10 @@ pub(super) fn complete_rebind<P: plakous_host_protocol::ProtocolExtension>(
         started,
         config.session.pending_queue.len(),
     );
-    #[cfg(any(test, feature = "test-support"))]
-    observe_test_boundary(
-        config.test_injection.as_deref(),
-        TestHostWorkflow::Rebind,
-        TestHostBoundary::RuntimeReturned,
+    observe_boundary(
+        config.runtime_factory.as_ref(),
+        HostWorkflow::Rebind,
+        HostBoundary::RuntimeReturned,
     );
     let target_locator = match outcome {
         RebindSessionOutcome::Rebound {
@@ -566,11 +536,10 @@ pub(super) fn complete_rebind<P: plakous_host_protocol::ProtocolExtension>(
             )));
         }
     };
-    #[cfg(any(test, feature = "test-support"))]
-    observe_test_boundary(
-        config.test_injection.as_deref(),
-        TestHostWorkflow::Rebind,
-        TestHostBoundary::ProductPublished,
+    observe_boundary(
+        config.runtime_factory.as_ref(),
+        HostWorkflow::Rebind,
+        HostBoundary::ProductPublished,
     );
     let Some(resume_locator) = target_record.plakous_locator else {
         restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
@@ -610,7 +579,7 @@ pub(super) fn complete_rebind<P: plakous_host_protocol::ProtocolExtension>(
                 record,
                 resume_locator,
                 stderr_buf,
-                TestRuntimeRole::Rebind,
+                RuntimeRole::Rebind,
             )) {
                 Ok(result) => result.map_err(|error| error.failure),
                 Err(_) => Err(CliFailure::new("application execution failed")),
@@ -672,13 +641,13 @@ pub(super) fn complete_rebind<P: plakous_host_protocol::ProtocolExtension>(
                 HostTargetAuthority::OpenRouter { .. } | HostTargetAuthority::Platform { .. } => {
                     std::sync::Arc::from([])
                 }
-                #[cfg(any(test, feature = "test-support"))]
-                HostTargetAuthority::Injected { .. } => std::sync::Arc::from([]),
+
+                HostTargetAuthority::Registered { .. } => std::sync::Arc::from([]),
             },
         },
-        #[cfg(any(test, feature = "test-support"))]
-        (RebindRoute::Native { provider, .. }, HostTargetAuthority::Injected { .. }) => {
-            HostTargetAuthority::Injected { provider }
+
+        (RebindRoute::Native { provider, .. }, HostTargetAuthority::Registered { .. }) => {
+            HostTargetAuthority::Registered { provider }
         }
     };
     config.model_id = target_model;
@@ -695,7 +664,7 @@ pub(super) fn complete_rebind<P: plakous_host_protocol::ProtocolExtension>(
         source.id,
         events.pinned_to(&config.session.id),
         "rebind",
-        config.test_injection.clone(),
+        config.runtime_factory.clone(),
     ));
     emit_queue_snapshot(events, &config.session);
     let _ = events.send(super::logging::project_session_snapshot(&config.session));
@@ -1186,11 +1155,10 @@ pub(super) fn handle_rebind<P: plakous_host_protocol::ProtocolExtension>(
             started,
             config.session.pending_queue.len(),
         );
-        #[cfg(any(test, feature = "test-support"))]
-        observe_test_boundary(
-            config.test_injection.as_deref(),
-            TestHostWorkflow::Rebind,
-            TestHostBoundary::Prepared,
+        observe_boundary(
+            config.runtime_factory.as_ref(),
+            HostWorkflow::Rebind,
+            HostBoundary::Prepared,
         );
         let source_locator = match run_watched(executor, watch, opened.detach()) {
             Ok(Ok(locator)) => locator,
@@ -1545,7 +1513,7 @@ mod tests {
     ) -> (HostConfig<TestExtension>, AttachedCodingSession) {
         let (mut config, _) = fresh_injected_attached_host(root);
         config.session.frozen_tools = frozen;
-        config.test_injection = None;
+        config.runtime_factory = Arc::new(ProductionRuntimeFactory);
         config.state_roots = config
             .state_roots
             .with_test_platform_credentials(Arc::new(TopologyApiCredentials));
@@ -2355,10 +2323,7 @@ mod tests {
              on codex; remedy: /clear, or start a new session on that model"
         );
         assert!(
-            config
-                .test_injection
-                .as_ref()
-                .unwrap()
+            test_kit::scripted(&config)
                 .rebind_builds
                 .lock()
                 .unwrap()
@@ -2711,10 +2676,7 @@ mod tests {
             "unexpected refusal: {error}"
         );
         assert!(
-            !config
-                .test_injection
-                .as_ref()
-                .unwrap()
+            !test_kit::scripted(&config)
                 .rebind_builds
                 .lock()
                 .unwrap()

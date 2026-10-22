@@ -21,14 +21,13 @@ use super::events::{
     compact_row_token_pair, compact_terminal_state, compact_terminal_subject,
     compaction_summary_clause, publish_compact_activity,
 };
+use super::factory::observe_boundary;
 use super::logging::{
     compact_reason_label, log_compact_finished, log_compact_finished_with_detail,
     log_compact_started, log_ev,
 };
 use super::rebind::interrupted_before_dispatch;
 use super::startup::host_runtime_binding;
-#[cfg(any(test, feature = "test-support"))]
-use super::startup::observe_test_boundary;
 use super::usage::{emit_context_projection, last_enrolled_source_bytes, query_context};
 use super::{
     COMPACT_COMMITTED_DETAIL, COMPACT_COMMITTED_STILL_OVERFLOWS_DETAIL, COMPACT_FAILED_DETAIL,
@@ -36,10 +35,9 @@ use super::{
     COMPACT_RECOVERY_REQUIRED_DETAIL, COMPACT_UNAVAILABLE_DETAIL,
     CONTEXT_CAPACITY_COMPACTABLE_GUIDANCE, CONTEXT_CAPACITY_NATIVE_COMPACT_GUIDANCE,
     CONTEXT_CAPACITY_PROTECTED_GUIDANCE, CONTEXT_CAPACITY_UNVERIFIED_GUIDANCE, HostConfig,
-    HostEvent, Sender, TestRuntimeRole, queue,
+    HostEvent, RuntimeRole, Sender, queue,
 };
-#[cfg(any(test, feature = "test-support"))]
-use super::{TestHostBoundary, TestHostWorkflow};
+use super::{HostBoundary, HostWorkflow};
 use crate::sessions::{NoticeScope, TranscriptRow};
 
 /// What one host compaction pass did to the conversation.
@@ -470,7 +468,7 @@ pub(super) fn handle_compact<P: plakous_host_protocol::ProtocolExtension>(
         return Err(interrupted_before_dispatch("compact"));
     }
     stderr_buf.clear();
-    let runtime = host_runtime_binding(config, stderr_buf, TestRuntimeRole::Compact)?;
+    let runtime = host_runtime_binding(config, stderr_buf, RuntimeRole::Compact)?;
     let operation_id = SessionOperationId::new(&operation)
         .map_err(|_| CliFailure::new("compact operation identity is invalid"))?;
     let facade_reason = match reason {
@@ -500,11 +498,10 @@ pub(super) fn handle_compact<P: plakous_host_protocol::ProtocolExtension>(
             },
         )
         .map_err(CliFailure::new)?;
-    #[cfg(any(test, feature = "test-support"))]
-    observe_test_boundary(
-        config.test_injection.as_deref(),
-        TestHostWorkflow::Compact,
-        TestHostBoundary::Prepared,
+    observe_boundary(
+        config.runtime_factory.as_ref(),
+        HostWorkflow::Compact,
+        HostBoundary::Prepared,
     );
     let occupancy_before = unanchored_occupancy(executor, opened);
     publish_compact_row(config, events, &call_id, "running", None, None);
@@ -576,11 +573,10 @@ pub(super) fn handle_compact<P: plakous_host_protocol::ProtocolExtension>(
             return Err(CliFailure::new(detail));
         }
     };
-    #[cfg(any(test, feature = "test-support"))]
-    observe_test_boundary(
-        config.test_injection.as_deref(),
-        TestHostWorkflow::Compact,
-        TestHostBoundary::RuntimeReturned,
+    observe_boundary(
+        config.runtime_factory.as_ref(),
+        HostWorkflow::Compact,
+        HostBoundary::RuntimeReturned,
     );
     let mut size_subject = None;
     let unadmitted = compact_answer_is_unadmitted(&outcome, source);
@@ -760,19 +756,18 @@ pub(super) fn handle_compact<P: plakous_host_protocol::ProtocolExtension>(
         .store
         .save(&mut config.session)
         .map_err(CliFailure::new)?;
-    #[cfg(any(test, feature = "test-support"))]
     {
         // The runtime fact settles the request; this save holds host intents.
         // These two observations intentionally share a fence.
-        observe_test_boundary(
-            config.test_injection.as_deref(),
-            TestHostWorkflow::Compact,
-            TestHostBoundary::ProductPublished,
+        observe_boundary(
+            config.runtime_factory.as_ref(),
+            HostWorkflow::Compact,
+            HostBoundary::ProductPublished,
         );
-        observe_test_boundary(
-            config.test_injection.as_deref(),
-            TestHostWorkflow::Compact,
-            TestHostBoundary::ProductCommitted,
+        observe_boundary(
+            config.runtime_factory.as_ref(),
+            HostWorkflow::Compact,
+            HostBoundary::ProductCommitted,
         );
     }
     let _ = events.send(HostEvent::Status {
@@ -1661,15 +1656,10 @@ mod tests {
             .unwrap();
         let workspace = config.cwd.clone();
         let cursor = Arc::new(std::sync::atomic::AtomicU64::new(1));
-        config.test_injection = Some(Arc::new(TestHostInjection {
-            rebind_target: config
-                .test_injection
-                .as_ref()
-                .unwrap()
-                .rebind_target
-                .clone(),
+        config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
+            rebind_target: test_kit::scripted(&config).rebind_target.clone(),
             runtime: Arc::new(move |role| {
-                if role == TestRuntimeRole::Compact {
+                if role == RuntimeRole::Compact {
                     plakous_offline_crash_harness::scripted_compaction_runtime_binding(
                         &workspace,
                         controller.clone(),
@@ -1691,13 +1681,12 @@ mod tests {
             observe: Arc::new(|_, _| {}),
             child_runtime: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
-        }));
+        });
         config.compaction_enabled = true;
         let executor = ApplicationExecutor::new().unwrap();
-        let runtime =
-            host_runtime_binding(&config, &mut Vec::new(), TestRuntimeRole::Primary).unwrap();
+        let runtime = host_runtime_binding(&config, &mut Vec::new(), RuntimeRole::Primary).unwrap();
         let opened = executor
-            .block_on(crate::agent::build_or_open_injected_session(
+            .block_on(crate::agent::build_or_open_bound_session(
                 config.state_roots.runtime_sessions().unwrap(),
                 None,
                 None,
@@ -1934,7 +1923,7 @@ mod tests {
             .unwrap(),
         );
         let (mut config, _) = recover_tests::scripted_host_with(root.path(), Arc::clone(&script));
-        let runtime = Arc::clone(&config.test_injection.as_ref().unwrap().runtime);
+        let runtime = Arc::clone(&test_kit::scripted(&config).runtime);
         let workspace = config.cwd.clone();
         let controller =
             plakous_offline_crash_harness::BoundaryController::quiet_from_evidence_path(
@@ -1942,10 +1931,8 @@ mod tests {
                 root.path().join("compact-evidence.jsonl"),
             )
             .unwrap();
-        Arc::get_mut(config.test_injection.as_mut().unwrap())
-            .unwrap()
-            .runtime = Arc::new(move |role| {
-            if role == TestRuntimeRole::Compact {
+        test_kit::scripted_mut(&mut config).runtime = Arc::new(move |role| {
+            if role == RuntimeRole::Compact {
                 plakous_offline_crash_harness::scripted_compaction_runtime_binding(
                     &workspace,
                     controller.clone(),
@@ -1966,10 +1953,8 @@ mod tests {
         let captured = Arc::clone(&prepared);
         let observed_store = Arc::clone(&store);
         let observed_id = session_id.clone();
-        Arc::get_mut(config.test_injection.as_mut().unwrap())
-            .unwrap()
-            .observe = Arc::new(move |workflow, boundary| {
-            if workflow == TestHostWorkflow::Compact && boundary == TestHostBoundary::Prepared {
+        test_kit::scripted_mut(&mut config).observe = Arc::new(move |workflow, boundary| {
+            if workflow == HostWorkflow::Compact && boundary == HostBoundary::Prepared {
                 *captured.lock().unwrap() = observed_store
                     .load_intents(&observed_id)
                     .unwrap()
@@ -2087,10 +2072,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let (mut config, _) = fresh_injected_attached_host(root.path());
         let executor = ApplicationExecutor::new().unwrap();
-        let runtime =
-            host_runtime_binding(&config, &mut Vec::new(), TestRuntimeRole::Primary).unwrap();
+        let runtime = host_runtime_binding(&config, &mut Vec::new(), RuntimeRole::Primary).unwrap();
         let opened = executor
-            .block_on(crate::agent::build_or_open_injected_session(
+            .block_on(crate::agent::build_or_open_bound_session(
                 config.state_roots.runtime_sessions().unwrap(),
                 None,
                 None,
@@ -2099,9 +2083,8 @@ mod tests {
             ))
             .unwrap()
             .unwrap_or_else(|error| panic!("{}", error.failure.message()));
-        Arc::get_mut(config.test_injection.as_mut().unwrap())
-            .unwrap()
-            .runtime = Arc::new(|_| Err("compact binding unavailable".into()));
+        test_kit::scripted_mut(&mut config).runtime =
+            Arc::new(|_| Err("compact binding unavailable".into()));
         config
             .session
             .bind_plakous_locator(opened.locator())

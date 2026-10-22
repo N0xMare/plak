@@ -298,7 +298,7 @@ mod tests {
             canonical,
         )
         .unwrap();
-        config.test_injection = Some(Arc::new(super::super::TestHostInjection {
+        config.runtime_factory = Arc::new(super::super::ScriptedRuntimeFactory {
             rebind_target: binding.target_binding(),
             runtime: Arc::new(move |_| {
                 plakous_offline_crash_harness::text_runtime_binding(
@@ -312,7 +312,7 @@ mod tests {
             observe: Arc::new(|_, _| {}),
             child_runtime: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
-        }));
+        });
         let store = config.store.clone();
         let id = config.session.id.clone();
         let mut observations = Vec::new();
@@ -428,36 +428,36 @@ mod tests {
     #[test]
     fn completed_terminal_wins_a_quit_whose_cancellation_is_refused() {
         use super::super::{
-            COMPLETION_WINS_QUIT_PROMPT, TestHostBoundary, TestHostInjection, TestHostWorkflow,
+            COMPLETION_WINS_QUIT_PROMPT, HostBoundary, HostWorkflow, ScriptedRuntimeFactory,
         };
         let root = tempfile::tempdir().unwrap();
         let (mut config, injection) = fresh_injected_attached_host(root.path());
         let boundary = Arc::new((std::sync::Mutex::new((0, false)), std::sync::Condvar::new()));
         let gate = boundary.clone();
-        config.test_injection = Some(Arc::new(TestHostInjection {
+        config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
             runtime: injection.runtime.clone(),
             rebind_target: injection.rebind_target.clone(),
             child_runtime: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
             observe: Arc::new(move |workflow, boundary| {
-                if workflow != TestHostWorkflow::SendNow {
+                if workflow != HostWorkflow::SendNow {
                     return;
                 }
                 let (state, wake) = &*gate;
                 let mut state = state.lock().unwrap();
                 match boundary {
-                    TestHostBoundary::RuntimeReturned => {
+                    HostBoundary::RuntimeReturned => {
                         state.0 = 1;
                         while !state.1 {
                             state = wake.wait(state).unwrap();
                         }
                     }
-                    TestHostBoundary::ProductPublished => state.0 = 2,
-                    TestHostBoundary::ProductCommitted => state.0 = 3,
-                    TestHostBoundary::Prepared | TestHostBoundary::TerminalReady => {}
+                    HostBoundary::ProductPublished => state.0 = 2,
+                    HostBoundary::ProductCommitted => state.0 = 3,
+                    HostBoundary::Prepared | HostBoundary::TerminalReady => {}
                 }
             }),
-        }));
+        });
         let result = OneShot::run(config, COMPLETION_WINS_QUIT_PROMPT.into(), |_, controls| {
             let (state, wake) = &*boundary;
             let mut state = state.lock().unwrap();
@@ -579,14 +579,14 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let (mut config, injection) = fresh_injected_attached_host(root.path());
         let database = config.product_home.join("runtime.sqlite3");
-        config.test_injection = Some(Arc::new(super::super::TestHostInjection {
+        config.runtime_factory = Arc::new(super::super::ScriptedRuntimeFactory {
             runtime: injection.runtime.clone(),
             rebind_target: injection.rebind_target.clone(),
             child_runtime: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
             observe: Arc::new(move |workflow, boundary| {
-                if workflow == super::super::TestHostWorkflow::SendNow
-                    && boundary == super::super::TestHostBoundary::ProductCommitted
+                if workflow == super::super::HostWorkflow::SendNow
+                    && boundary == super::super::HostBoundary::ProductCommitted
                 {
                     rusqlite::Connection::open(&database).unwrap().execute_batch(
                         "CREATE TRIGGER fail_release BEFORE UPDATE OF active_owner ON branches
@@ -594,7 +594,7 @@ mod tests {
                     ).unwrap();
                 }
             }),
-        }));
+        });
         let mut done = false;
         let error = OneShot::run(config, "release failure".into(), |event, _| {
             done |= matches!(event, Some(HostEvent::AssistantDone));
@@ -615,14 +615,14 @@ mod tests {
             ))
             .unwrap();
         let database = config.product_home.join("runtime.sqlite3");
-        config.test_injection = Some(Arc::new(super::super::TestHostInjection {
+        config.runtime_factory = Arc::new(super::super::ScriptedRuntimeFactory {
             runtime: injection.runtime.clone(),
             rebind_target: injection.rebind_target.clone(),
             child_runtime: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
             observe: Arc::new(move |workflow, boundary| {
-                if workflow == super::super::TestHostWorkflow::SendNow
-                    && boundary == super::super::TestHostBoundary::ProductCommitted
+                if workflow == super::super::HostWorkflow::SendNow
+                    && boundary == super::super::HostBoundary::ProductCommitted
                 {
                     rusqlite::Connection::open(&database).unwrap().execute_batch(
                         "CREATE TRIGGER fail_release BEFORE UPDATE OF active_owner ON branches
@@ -630,7 +630,7 @@ mod tests {
                     ).unwrap();
                 }
             }),
-        }));
+        });
         let mut done = false;
         let error = OneShot::run(config, "release failure".into(), |event, _| {
             done |= matches!(event, Some(HostEvent::AssistantDone));

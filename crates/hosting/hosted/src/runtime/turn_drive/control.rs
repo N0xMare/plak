@@ -1,11 +1,6 @@
 //! Busy-turn control intents and their acknowledgements.
 
-use std::time::Duration;
-
-#[cfg(any(test, feature = "test-support"))]
-use super::{
-    COMPLETION_WINS_QUIT_PROMPT, TestHostBoundary, TestHostWorkflow, observe_test_boundary,
-};
+use super::HostBoundary;
 use super::{
     CancelRefusal, CancelSettlement, CancellationStatus, HOST_CANCEL_SETTLE_TIMEOUT, HostEvent,
     Instant, SessionQueueDrainState, TryRecvError, TurnDrive, UserAction, accept_draft,
@@ -19,6 +14,7 @@ use crate::runtime::admission::{
     QueuePersistAction, report_queue_persist_failed as queue_persist_failed,
 };
 use crate::sessions::{NoticeScope, TranscriptRow};
+use std::time::Duration;
 
 const QUIT_CANCEL_GRACE: Duration = Duration::from_millis(300);
 const QUIT_RESULT_JOIN: Duration = Duration::from_millis(100);
@@ -34,10 +30,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
         let _ = self.host.events.notice(row);
     }
 
-    pub(super) async fn poll_actions(
-        &mut self,
-        #[cfg(any(test, feature = "test-support"))] prompt: &str,
-    ) -> bool {
+    pub(super) async fn poll_actions(&mut self, prompt: &str) -> bool {
         crate::call_detail::note_attached(&self.host.session.id);
         self.host
             .last_tree_revision
@@ -131,14 +124,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                     }
                     self.quit_after_terminal = true;
                     self.quit_join_deadline = Some(Instant::now() + QUIT_RESULT_JOIN);
-                    #[cfg(any(test, feature = "test-support"))]
-                    if prompt == COMPLETION_WINS_QUIT_PROMPT {
-                        observe_test_boundary(
-                            self.host.test_injection,
-                            TestHostWorkflow::SendNow,
-                            TestHostBoundary::ProductPublished,
-                        );
-                    }
+                    self.host
+                        .runtime_factory
+                        .observe_turn_boundary(prompt, HostBoundary::ProductPublished);
                 }
                 Ok(action @ (UserAction::FollowUp(_) | UserAction::Prompt(_))) => {
                     let draft = match &action {

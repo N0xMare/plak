@@ -5,8 +5,7 @@ use super::{
     CommandId, HostEvent, TurnDrive, emit_queue_snapshot, queue, reject_stale_queue_action,
     sessions,
 };
-#[cfg(any(test, feature = "test-support"))]
-use super::{TestHostBoundary, TestHostWorkflow, observe_test_boundary};
+use super::{HostBoundary, HostWorkflow, observe_boundary};
 use crate::sessions::projector::{Submission, SubmissionKind};
 use crate::sessions::{NoticeScope, TranscriptRow};
 
@@ -82,11 +81,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                 return true;
             }
         };
-        #[cfg(any(test, feature = "test-support"))]
-        observe_test_boundary(
-            self.host.test_injection,
-            TestHostWorkflow::SendNow,
-            TestHostBoundary::Prepared,
+        observe_boundary(
+            self.host.runtime_factory,
+            HostWorkflow::SendNow,
+            HostBoundary::Prepared,
         );
         let submission = match self.host.job_agent.command(command).await {
             Ok(submission) => submission,
@@ -115,11 +113,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                 return false;
             }
         };
-        #[cfg(any(test, feature = "test-support"))]
-        observe_test_boundary(
-            self.host.test_injection,
-            TestHostWorkflow::SendNow,
-            TestHostBoundary::RuntimeReturned,
+        observe_boundary(
+            self.host.runtime_factory,
+            HostWorkflow::SendNow,
+            HostBoundary::RuntimeReturned,
         );
         if let Some(followed) = self.host.session.plakous_locator {
             let projected = match self.host.roots.runtime_sessions() {
@@ -256,11 +253,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                 detail: Some("steering...".into()),
             });
         }
-        #[cfg(any(test, feature = "test-support"))]
-        observe_test_boundary(
-            self.host.test_injection,
-            TestHostWorkflow::SendNow,
-            TestHostBoundary::ProductPublished,
+        observe_boundary(
+            self.host.runtime_factory,
+            HostWorkflow::SendNow,
+            HostBoundary::ProductPublished,
         );
         emit_queue_snapshot(self.host.events, self.host.session);
         false

@@ -475,6 +475,14 @@ The generated `rebuild_from_empty_equals_every_paging_and_replay` law covers
 arbitrary page partitions in either build. Wall-clock performance claims still
 require the release procedure, not a debug gate.
 
+Hosted construction tests register a scripted `RuntimeFactory` through the
+same port as production route builders. Lifecycle boundary observations are
+port calls, not feature-conditioned host control flow. Child binding fixtures
+register against their own construction roots: cloning those roots preserves
+the registration and an unrelated host cannot observe it. Existing lifecycle
+and crash-cut observations retain their ordering and durability authority;
+scripted construction does not replace the real admission or publication path.
+
 ## 1. Gate layers
 
 The authoritative gate is `scripts/dev-check.sh`, in four tiers plus an

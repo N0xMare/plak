@@ -32,6 +32,7 @@ use super::compact::{
     ScheduledPrompt, compact_may_resume_queue, context_capacity_recovery_guidance, handle_compact,
     observe_compact, run_scheduled_compaction_until_fits,
 };
+use super::factory::observe_boundary;
 use super::fork::handle_fork;
 use super::info::{
     TerminalPhase, emit_agent_plan_notes, emit_terminal_status, send_binding, send_session_info,
@@ -47,8 +48,6 @@ use super::reconcile::{
 use super::resume::handle_resume_picker;
 use super::shell::refresh_credential_readiness;
 use super::startup::build_session_from_config;
-#[cfg(any(test, feature = "test-support"))]
-use super::startup::observe_test_boundary;
 use super::surface;
 use super::tree::{
     dispatch_invoke_tool_sync, dispatch_topology_navigator_sync,
@@ -65,8 +64,7 @@ use super::{
     TREE_OBSERVE_INTERVAL, TreeSnapshotPush, TurnHostOutcome, UserAction, drive_one_turn, queue,
     topology_state,
 };
-#[cfg(any(test, feature = "test-support"))]
-use super::{TestHostBoundary, TestHostWorkflow};
+use super::{HostBoundary, HostWorkflow};
 
 pub(super) fn run_host_loop<P: plakous_host_protocol::ProtocolExtension>(
     config: HostConfig<P>,
@@ -123,8 +121,6 @@ struct HostLoop<'a, P: plakous_host_protocol::ProtocolExtension> {
     /// The session's projector task, spawned on the first tick.
     live: Option<super::projection::live::LiveProjector>,
     projection_finished: bool,
-    #[cfg(any(test, feature = "test-support"))]
-    _injected_child_runtime: Option<crate::agent::injected_child_binding::Guard>,
 }
 
 enum HostStep {

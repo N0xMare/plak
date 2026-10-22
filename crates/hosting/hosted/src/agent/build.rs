@@ -567,7 +567,7 @@ impl SpawnParent {
         Self::Native(spec)
     }
 
-    pub(super) fn state_roots(&self) -> &ProductStateRoots {
+    pub(crate) fn state_roots(&self) -> &ProductStateRoots {
         match self {
             Self::Native(spec) => &spec.state_roots,
             Self::Api(parent) => &parent.state_roots,
@@ -1971,7 +1971,7 @@ impl AttachedCodingSession {
     }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub(crate) fn claim_injected_topology_owner(&mut self, tree_id: &str) {
+    pub(crate) fn claim_registered_topology_owner(&mut self, tree_id: &str) {
         self.topology_owner = claim_root_topology_owner(tree_id, true);
     }
 
@@ -2498,7 +2498,8 @@ pub fn selected_coding_provider_configuration_with_processing_tier(
     .map_err(|_| CliFailure::new("native provider behavior is invalid"))
 }
 
-pub(crate) struct SeededHistory {
+/// A carried history and its once-only input-window preflight, passed through the runtime factory.
+pub struct SeededHistory {
     pub(crate) history: PortableSessionHistory,
     preflight:
         Option<Box<dyn FnOnce(plakous::sessions::SessionInputWindow) -> CliResult<()> + Send>>,
@@ -3247,7 +3248,7 @@ pub(super) fn require_reconstructed_coding_projection(
 }
 
 #[cfg(any(test, feature = "test-support"))]
-pub async fn build_or_open_injected_session(
+pub async fn build_or_open_bound_session(
     sessions: Arc<AgentSessions>,
     locator: Option<SessionLocator>,
     seed: Option<PortableSessionHistory>,

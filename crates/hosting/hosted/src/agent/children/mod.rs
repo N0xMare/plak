@@ -37,8 +37,7 @@ mod reopen;
 mod turns;
 mod waiter;
 
-#[cfg(any(test, feature = "test-support"))]
-pub use bind::injected_child_binding;
+pub(crate) mod runtime_factory;
 pub use bind::{ChildBoundBind, spawn_child_start_composition, spawned_child_spec};
 pub use reopen::child_reopen_head;
 pub use turns::{persist_or_fault, retire_live_child, settle_or_fault};

@@ -162,8 +162,8 @@ pub(super) fn session_info_view<P: plakous_host_protocol::ProtocolExtension>(
             }
         }),
         HostTargetAuthority::Platform { .. } => None,
-        #[cfg(any(test, feature = "test-support"))]
-        HostTargetAuthority::Injected { .. } => None,
+
+        HostTargetAuthority::Registered { .. } => None,
     };
     plakous_host_protocol::views::presentation::SessionInfoView {
         host_version: plakous::VERSION.to_owned(),

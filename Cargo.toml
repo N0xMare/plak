@@ -449,8 +449,8 @@ reason = "Existing placement debt; ratchet down as composition-root ports and mo
 
 [workspace.metadata.plakous.cfg.plakous-hosted]
 feature-sites = ["src/lib.rs", "src/capabilities.rs"]
-feature-ceiling = 110
-test-seam-ceiling = 113
+feature-ceiling = 28
+test-seam-ceiling = 30
 reason = "Capability registry entry sites; existing placement debt must fall as composition-root ports and module boundaries replace inline configuration."
 
 [workspace.metadata.plakous.cfg.plakous-http]

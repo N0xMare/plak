@@ -30,7 +30,7 @@ use plakous_offline_crash_harness::{
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
 use crate::commands::host_config::TuiAttacher;
-use crate::product_host::{HostConfig, TestHostInjection, TestRuntimeRole};
+use crate::product_host::{HostConfig, RuntimeRole, ScriptedRuntimeFactory};
 use crate::product_paths::PlakPaths;
 use crate::product_sessions::{self, SessionRecord, TranscriptRow};
 use crate::test_support::latency_budget;
@@ -144,16 +144,16 @@ impl TuiAttacher for OfflineAttacher {
             profile_fork && session.model.as_deref() == Some("claude-opus-test");
         let rebound = Arc::new(AtomicBool::new(false));
         let runtime_generation = Arc::new(AtomicU64::new(1));
-        let runtime = Arc::new(move |role: TestRuntimeRole| {
+        let runtime = Arc::new(move |role: RuntimeRole| {
             if profile_fork {
-                let account = if resumed_profile_target || role == TestRuntimeRole::Rebind {
+                let account = if resumed_profile_target || role == RuntimeRole::Rebind {
                     b"tui-target-claude".as_slice()
                 } else {
                     b"tui-source-grok".as_slice()
                 };
                 runtime_binding_for_account(&workspace, controller.clone(), account)
             } else if long_work {
-                if role == TestRuntimeRole::Rebind {
+                if role == RuntimeRole::Rebind {
                     rebound.store(true, Ordering::Release);
                 }
                 let account = if rebound.load(Ordering::Acquire) {
@@ -174,7 +174,7 @@ impl TuiAttacher for OfflineAttacher {
             }
             .map_err(|error| error.to_string())
         });
-        let injection = Arc::new(TestHostInjection {
+        let injection = Arc::new(ScriptedRuntimeFactory {
             runtime,
             rebind_target: target,
             observe: Arc::new(|_, _| {}),
@@ -200,7 +200,7 @@ impl TuiAttacher for OfflineAttacher {
                 paths.clone(),
             )),
             session,
-            target: crate::product_host::HostTargetAuthority::Injected {
+            target: crate::product_host::HostTargetAuthority::Registered {
                 provider: NativeProvider::Codex,
             },
             model_id,
@@ -223,7 +223,7 @@ impl TuiAttacher for OfflineAttacher {
                 ready_catalog.clone()
             },
             resume_publication,
-            test_injection: Some(injection),
+            runtime_factory: injection,
             ready_path: crate::product_host::ReadyPathTiming::default(),
             seed_history: None,
             source_releases: crate::product_host::SourceReleases::default(),
@@ -1628,14 +1628,14 @@ fn account_injection(
     controller: &BoundaryController,
     primary: &'static [u8],
     target: &'static [u8],
-) -> Result<Arc<TestHostInjection>, Box<dyn Error + Send + Sync>> {
+) -> Result<Arc<ScriptedRuntimeFactory>, Box<dyn Error + Send + Sync>> {
     let rebind_target =
         runtime_binding_for_account(workspace, controller.clone(), target)?.target_binding();
     let workspace = workspace.to_path_buf();
     let controller = controller.clone();
-    Ok(Arc::new(TestHostInjection {
+    Ok(Arc::new(ScriptedRuntimeFactory {
         runtime: Arc::new(move |role| {
-            let account = if role == TestRuntimeRole::Rebind {
+            let account = if role == RuntimeRole::Rebind {
                 target
             } else {
                 primary
@@ -1666,7 +1666,7 @@ fn host_config(
             paths.clone(),
         )),
         session,
-        target: crate::product_host::HostTargetAuthority::Injected {
+        target: crate::product_host::HostTargetAuthority::Registered {
             provider: NativeProvider::Codex,
         },
         model_id: "offline-loopback-v1".to_owned(),
@@ -1683,7 +1683,7 @@ fn host_config(
         cwd: workspace.to_path_buf(),
         ready_catalog: plakous_host_protocol::views::ReadyCatalog::default(),
         resume_publication: None,
-        test_injection: None,
+        runtime_factory: Arc::new(plakous_hosted::runtime::ProductionRuntimeFactory),
         ready_path: crate::product_host::ReadyPathTiming::default(),
         seed_history: None,
         source_releases: crate::product_host::SourceReleases::default(),
@@ -1799,12 +1799,12 @@ fn exact_resume_is_published_only_by_successfully_attached_runtime_host()
     let publication = Arc::new(AtomicBool::new(false));
 
     let mut config = host_config(&paths, &workspace, session);
-    config.test_injection = Some(account_injection(
+    config.runtime_factory = account_injection(
         &workspace,
         &controller,
         b"binding-a-account",
         b"binding-b-account",
-    )?);
+    )?;
     config.resume_publication = Some(Arc::clone(&publication));
     let (actions, _events, worker) = crate::product_host::spawn_host_worker(config)?;
 
@@ -1860,7 +1860,7 @@ fn injected_dual_profile_fork_continues_history_queue_and_reverse_switch()
 
     let mut first_config = host_config(&paths, &workspace, source);
     first_config.ready_catalog = profile_ready_catalog();
-    first_config.test_injection = Some(account_injection(&workspace, &controller, A, B)?);
+    first_config.runtime_factory = account_injection(&workspace, &controller, A, B)?;
     let (actions, events, worker) = crate::product_host::spawn_host_worker(first_config)?;
     let mut observed = Vec::new();
     send_action(
@@ -2045,7 +2045,7 @@ fn profile_fork_maps_the_fast_lane_on_and_off() -> Result<(), Box<dyn Error + Se
 
     let mut first = host_config(&paths, &workspace, source);
     first.ready_catalog = profile_ready_catalog();
-    first.test_injection = Some(account_injection(&workspace, &controller, A, B)?);
+    first.runtime_factory = account_injection(&workspace, &controller, A, B)?;
     let (actions, events, worker) = crate::product_host::spawn_host_worker(first)?;
     let mut observed = Vec::new();
     send_action(
@@ -2100,7 +2100,7 @@ fn profile_fork_maps_the_fast_lane_on_and_off() -> Result<(), Box<dyn Error + Se
     reverse.ready_catalog = profile_ready_catalog();
     reverse.model_id = "binding-b-model".to_owned();
     reverse.effort = Some(ReasoningEffort::Low);
-    reverse.test_injection = Some(account_injection(&workspace, &controller, B, FAST)?);
+    reverse.runtime_factory = account_injection(&workspace, &controller, B, FAST)?;
     let (actions, events, worker) = crate::product_host::spawn_host_worker(reverse)?;
     let mut observed = Vec::new();
     send_action(&actions, fork_onto("pa"))?;
@@ -2158,7 +2158,7 @@ fn profile_fork_from_native_ptc_onto_direct_commits_a_turn()
     let source_id = source.id.clone();
     let mut config = host_config(&paths, &workspace, source);
     config.ready_catalog = profile_ready_catalog();
-    config.test_injection = Some(account_injection(&workspace, &controller, A, B)?);
+    config.runtime_factory = account_injection(&workspace, &controller, A, B)?;
     let (actions, events, worker) = crate::product_host::spawn_host_worker(config)?;
     let mut observed = Vec::new();
     send_action(
@@ -2238,10 +2238,10 @@ type BindingHostStep = (
 
 fn drive_injected_binding_host(
     mut config: HostConfig<crate::surface_protocol::PlakExtension>,
-    injection: Arc<TestHostInjection>,
+    injection: Arc<ScriptedRuntimeFactory>,
     steps: Vec<BindingHostStep>,
 ) -> Result<Vec<crate::surface_protocol::HostEvent>, Box<dyn Error + Send + Sync>> {
-    config.test_injection = Some(injection);
+    config.runtime_factory = injection;
     let (actions, events, worker) = crate::product_host::spawn_host_worker(config)?;
     let mut observed = Vec::new();
     for (action, completed) in steps {
@@ -3268,10 +3268,8 @@ fn profile_fork_now_branches_onto_its_own_tree_and_saves_after_it_lands()
     config.ready_catalog = profile_ready_catalog();
     // The source attachment join is held half a second past runtime release, so
     // the quit below always lands while it is pending.
-    config.test_injection = Some(
-        account_injection(&workspace, &controller, A, B)?
-            .with_source_release_delay(Duration::from_millis(500)),
-    );
+    config.runtime_factory = account_injection(&workspace, &controller, A, B)?
+        .with_source_release_delay(Duration::from_millis(500));
     let (actions, events, worker) = crate::product_host::spawn_host_worker(config)?;
     let mut observed = Vec::new();
     send_action(
@@ -3365,7 +3363,7 @@ fn profile_fork_now_branches_onto_its_own_tree_and_saves_after_it_lands()
         product_sessions::load_session(&paths, &source_id)?,
     );
     reopen.ready_catalog = profile_ready_catalog();
-    reopen.test_injection = Some(account_injection(&workspace, &controller, A, B)?);
+    reopen.runtime_factory = account_injection(&workspace, &controller, A, B)?;
     let (actions, events, worker) = crate::product_host::spawn_host_worker(reopen)?;
     let mut observed = Vec::new();
     send_action(
@@ -3404,7 +3402,7 @@ fn a_refused_profile_fork_saves_nothing() -> Result<(), Box<dyn Error + Send + S
 
     let mut config = host_config(&paths, &workspace, source);
     config.ready_catalog = profile_ready_catalog();
-    config.test_injection = Some(account_injection(&workspace, &controller, A, B)?);
+    config.runtime_factory = account_injection(&workspace, &controller, A, B)?;
     let (actions, events, worker) = crate::product_host::spawn_host_worker(config)?;
     let mut observed = Vec::new();
     send_action(
@@ -3496,12 +3494,8 @@ fn same_profile_fork(with_tree: bool) -> Result<(), Box<dyn Error + Send + Sync>
 
     let mut host = host_config(&paths, &workspace, source);
     host.ready_catalog = profile_ready_catalog();
-    host.test_injection = Some(account_injection(
-        &workspace,
-        &controller,
-        A,
-        if with_tree { A } else { B },
-    )?);
+    host.runtime_factory =
+        account_injection(&workspace, &controller, A, if with_tree { A } else { B })?;
     let (actions, events, worker) = crate::product_host::spawn_host_worker(host)?;
     let mut observed = Vec::new();
     send_action(
@@ -3592,7 +3586,7 @@ fn a_live_follow_up_drains_after_a_resume_with_a_stale_pause()
 
     let mut config = host_config(&paths, &workspace, source);
     config.ready_catalog = dual_binding_ready_catalog();
-    config.test_injection = Some(account_injection(&workspace, &controller, A, A)?);
+    config.runtime_factory = account_injection(&workspace, &controller, A, A)?;
     let (actions, events, worker) = crate::product_host::spawn_host_worker(config)?;
     let mut observed = Vec::new();
     send_action(

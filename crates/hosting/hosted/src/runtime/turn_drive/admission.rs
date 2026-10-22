@@ -7,8 +7,7 @@ use super::{
     admitted_turn_lifecycle, emit_prompt_history, emit_queue_snapshot, emit_turn_lifecycle,
     operator_facing_agent_error, sessions, settle_cancel, terminal_turn_outcome, turn_lifecycle,
 };
-#[cfg(any(test, feature = "test-support"))]
-use super::{TestHostBoundary, TestHostWorkflow, observe_test_boundary};
+use super::{HostBoundary, HostWorkflow, observe_boundary};
 use crate::sessions::{NoticeScope, TranscriptRow};
 
 pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::ProtocolExtension>(
@@ -50,8 +49,7 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
         ledger,
         last_tree_revision,
         job_events,
-        #[cfg(any(test, feature = "test-support"))]
-        test_injection,
+        runtime_factory,
     } = host;
     job_agent.set_unread_mail_pending(false);
     job_agent.set_notice_delivery_available(host_wakes && !session.child_wake_suppressed);
@@ -139,11 +137,10 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
             candidate
         };
         *session = prepared;
-        #[cfg(any(test, feature = "test-support"))]
-        observe_test_boundary(
-            test_injection,
-            TestHostWorkflow::RootDelivery,
-            TestHostBoundary::Prepared,
+        observe_boundary(
+            runtime_factory,
+            HostWorkflow::RootDelivery,
+            HostBoundary::Prepared,
         );
         #[cfg(test)]
         let stub = take_test_start_refusal(&operation_id);
@@ -226,11 +223,10 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
         } else {
             None
         };
-        #[cfg(any(test, feature = "test-support"))]
-        observe_test_boundary(
-            test_injection,
-            TestHostWorkflow::RootDelivery,
-            TestHostBoundary::RuntimeReturned,
+        observe_boundary(
+            runtime_factory,
+            HostWorkflow::RootDelivery,
+            HostBoundary::RuntimeReturned,
         );
         if let Some(followed) = session.plakous_locator {
             match super::super::projection::queue_after_ack(
@@ -382,11 +378,10 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                 super::TurnHostOutcome::ConsumedDelivery,
             ));
         }
-        #[cfg(any(test, feature = "test-support"))]
-        observe_test_boundary(
-            test_injection,
-            TestHostWorkflow::RootDelivery,
-            TestHostBoundary::ProductPublished,
+        observe_boundary(
+            runtime_factory,
+            HostWorkflow::RootDelivery,
+            HostBoundary::ProductPublished,
         );
         if let Err(error) = super::super::projection::project_tree(
             runtime,
@@ -401,11 +396,10 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                 format!("child mail projector deferred: {error}"),
             ));
         }
-        #[cfg(any(test, feature = "test-support"))]
-        observe_test_boundary(
-            test_injection,
-            TestHostWorkflow::RootDelivery,
-            TestHostBoundary::ProductCommitted,
+        observe_boundary(
+            runtime_factory,
+            HostWorkflow::RootDelivery,
+            HostBoundary::ProductCommitted,
         );
         let submission =
             submission.ok_or_else(|| "accepted command omitted its submission".to_owned())?;
@@ -533,15 +527,10 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                 ledger,
                 last_tree_revision,
                 job_events,
-                #[cfg(any(test, feature = "test-support"))]
-                test_injection,
+                runtime_factory,
             },
         )
-        .run(
-            turn,
-            #[cfg(any(test, feature = "test-support"))]
-            prompt,
-        ),
+        .run(turn, prompt),
     )
     .await;
     if let Err(error) = super::super::projection::project_tree(

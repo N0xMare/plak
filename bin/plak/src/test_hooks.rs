@@ -818,8 +818,8 @@ impl OfflineSelection {
         let runtime_controller = controller;
         let runtime_tree = prepared;
         let telemetry = state_roots.telemetry_emitter();
-        let runtime = Arc::new(move |role: product_host::TestRuntimeRole| {
-            if role == product_host::TestRuntimeRole::Compact {
+        let runtime = Arc::new(move |role: product_host::RuntimeRole| {
+            if role == product_host::RuntimeRole::Compact {
                 let tree_tools = runtime_tree
                     .as_ref()
                     .map(|prepared| {
@@ -887,7 +887,7 @@ impl OfflineSelection {
             }
             .map_err(|error| error.to_string())
         });
-        let injection = Arc::new(product_host::TestHostInjection {
+        let injection = Arc::new(product_host::ScriptedRuntimeFactory {
             runtime,
             rebind_target: target,
             observe: Arc::new(|_, _| {}),
@@ -901,7 +901,7 @@ impl OfflineSelection {
             store: state_roots.session_records(),
             state_roots: state_roots.clone(),
             session,
-            target: product_host::HostTargetAuthority::Injected {
+            target: product_host::HostTargetAuthority::Registered {
                 provider: NativeProvider::Codex,
             },
             model_id: SELECTOR.to_owned(),
@@ -922,7 +922,7 @@ impl OfflineSelection {
             cwd: cwd.to_path_buf(),
             ready_catalog: ready_catalog.clone(),
             resume_publication,
-            test_injection: Some(injection),
+            runtime_factory: injection,
             ready_path: product_host::ReadyPathTiming::default(),
             seed_history: None,
             source_releases: product_host::SourceReleases::default(),

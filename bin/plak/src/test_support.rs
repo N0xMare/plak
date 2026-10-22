@@ -11,7 +11,7 @@ use plakous::sessions::{SessionLocator, SessionRuntimeBinding, SessionTargetBind
 use plakous::subscriptions::NativeProvider;
 
 use crate::product_host::{
-    self, HostConfig, TestHostBoundary, TestHostInjection, TestHostWorkflow, TestRuntimeRole,
+    self, HostBoundary, HostConfig, HostWorkflow, RuntimeRole, ScriptedRuntimeFactory,
 };
 use crate::product_paths::PlakPaths;
 use crate::product_sessions::{self, QueueDrainState, QueueItem, SessionRecord};
@@ -99,31 +99,31 @@ pub fn run_actual_host(
     let cwd = session.workspace_root.clone();
     let runtime = Arc::clone(&injection.runtime);
     let observe = Arc::clone(&injection.observe);
-    let internal = Arc::new(TestHostInjection {
+    let internal = Arc::new(ScriptedRuntimeFactory {
         runtime: Arc::new(move |role| {
             runtime(match role {
-                TestRuntimeRole::Primary => InjectedRuntimeRole::Primary,
-                TestRuntimeRole::Compact => InjectedRuntimeRole::Compact,
-                TestRuntimeRole::Rebind => InjectedRuntimeRole::Rebind,
+                RuntimeRole::Primary => InjectedRuntimeRole::Primary,
+                RuntimeRole::Compact => InjectedRuntimeRole::Compact,
+                RuntimeRole::Rebind => InjectedRuntimeRole::Rebind,
             })
         }),
         rebind_target: injection.rebind_target,
         observe: Arc::new(move |workflow, boundary| {
             observe(
                 match workflow {
-                    TestHostWorkflow::RootDelivery => ActualHostWorkflow::RootDelivery,
-                    TestHostWorkflow::SendNow => ActualHostWorkflow::SendNow,
-                    TestHostWorkflow::Fork => ActualHostWorkflow::Fork,
-                    TestHostWorkflow::Rebind => ActualHostWorkflow::Rebind,
-                    TestHostWorkflow::Compact => ActualHostWorkflow::Compact,
-                    TestHostWorkflow::SourceRelease => return,
+                    HostWorkflow::RootDelivery => ActualHostWorkflow::RootDelivery,
+                    HostWorkflow::SendNow => ActualHostWorkflow::SendNow,
+                    HostWorkflow::Fork => ActualHostWorkflow::Fork,
+                    HostWorkflow::Rebind => ActualHostWorkflow::Rebind,
+                    HostWorkflow::Compact => ActualHostWorkflow::Compact,
+                    HostWorkflow::SourceRelease => return,
                 },
                 match boundary {
-                    TestHostBoundary::Prepared => ActualHostBoundary::Prepared,
-                    TestHostBoundary::RuntimeReturned => ActualHostBoundary::RuntimeReturned,
-                    TestHostBoundary::ProductPublished => ActualHostBoundary::ProductPublished,
-                    TestHostBoundary::ProductCommitted => ActualHostBoundary::ProductCommitted,
-                    TestHostBoundary::TerminalReady => ActualHostBoundary::TerminalReady,
+                    HostBoundary::Prepared => ActualHostBoundary::Prepared,
+                    HostBoundary::RuntimeReturned => ActualHostBoundary::RuntimeReturned,
+                    HostBoundary::ProductPublished => ActualHostBoundary::ProductPublished,
+                    HostBoundary::ProductCommitted => ActualHostBoundary::ProductCommitted,
+                    HostBoundary::TerminalReady => ActualHostBoundary::TerminalReady,
                 },
             );
         }),
@@ -150,7 +150,7 @@ pub fn run_actual_host(
             ActualHostAction::Quit => crate::surface_protocol::UserAction::Quit,
         })
         .collect();
-    product_host::run_injected_host(
+    product_host::run_scripted_host(
         HostConfig {
             surface: Some(crate::shell::settings::ProductSurface::boxed(&paths)),
             auto_continue: true,
@@ -165,7 +165,7 @@ pub fn run_actual_host(
                 .topology_enabled,
             product_home: paths.home().to_path_buf(),
             session,
-            target: product_host::HostTargetAuthority::Injected {
+            target: product_host::HostTargetAuthority::Registered {
                 provider: NativeProvider::Codex,
             },
             model_id: "offline-loopback-v1".into(),
@@ -179,7 +179,7 @@ pub fn run_actual_host(
             cwd,
             ready_catalog: plakous_host_protocol::views::ReadyCatalog::default(),
             resume_publication: None,
-            test_injection: None,
+            runtime_factory: Arc::new(plakous_hosted::runtime::ProductionRuntimeFactory),
             ready_path: product_host::ReadyPathTiming::default(),
             seed_history: None,
             source_releases: product_host::SourceReleases::default(),

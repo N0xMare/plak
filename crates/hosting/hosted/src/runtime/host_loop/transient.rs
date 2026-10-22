@@ -563,7 +563,7 @@ mod tests {
             cursor.clone(),
         )
         .unwrap();
-        config.test_injection = Some(Arc::new(crate::runtime::TestHostInjection {
+        config.runtime_factory = Arc::new(crate::runtime::ScriptedRuntimeFactory {
             rebind_target: binding.target_binding(),
             runtime: Arc::new(move |_| {
                 scripted_runtime_binding_with_cursor(
@@ -577,7 +577,7 @@ mod tests {
             observe: Arc::new(|_, _| {}),
             child_runtime: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
-        }));
+        });
         let (sender, actions) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (events, observations) = crate::surface_protocol::host_event_channel::<TestExtension>();
         let mut host = HostLoop::open(config, &actions, Sender::over(events), None).unwrap();

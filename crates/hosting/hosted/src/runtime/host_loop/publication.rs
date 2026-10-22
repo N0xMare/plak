@@ -8,8 +8,7 @@ use super::{
     emit_unavailable_context, handle_compact, log_ev, native_compact_facet, report_context,
     sessions, should_schedule_compaction,
 };
-#[cfg(any(test, feature = "test-support"))]
-use super::{TestHostBoundary, TestHostWorkflow, observe_test_boundary};
+use super::{HostBoundary, HostWorkflow, observe_boundary};
 use crate::sessions::{NoticeScope, TranscriptRow};
 
 /// One-shot callers return terminal failures; interactive hosts publish them.
@@ -62,12 +61,11 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     },
                 ) {
                     Ok(true) => {
-                        #[cfg(any(test, feature = "test-support"))]
                         {
-                            observe_test_boundary(
-                                self.config.test_injection.as_deref(),
-                                TestHostWorkflow::SendNow,
-                                TestHostBoundary::ProductCommitted,
+                            observe_boundary(
+                                self.config.runtime_factory.as_ref(),
+                                HostWorkflow::SendNow,
+                                HostBoundary::ProductCommitted,
                             );
                         }
                         if finish_reason == plakous::model::FinishReason::Length {
@@ -542,15 +540,14 @@ mod tests {
         let captured = std::sync::Arc::clone(&prepared);
         let store = std::sync::Arc::clone(&config.store);
         let id = config.session.id.clone();
-        std::sync::Arc::get_mut(config.test_injection.as_mut().unwrap())
-            .unwrap()
-            .observe = std::sync::Arc::new(move |workflow, boundary| {
-            if workflow == super::TestHostWorkflow::Compact
-                && boundary == super::TestHostBoundary::Prepared
-            {
-                *captured.lock().unwrap() = store.load_intents(&id).unwrap().workflow_requests;
-            }
-        });
+        crate::runtime::test_kit::scripted_mut(&mut config).observe =
+            std::sync::Arc::new(move |workflow, boundary| {
+                if workflow == super::HostWorkflow::Compact
+                    && boundary == super::HostBoundary::Prepared
+                {
+                    *captured.lock().unwrap() = store.load_intents(&id).unwrap().workflow_requests;
+                }
+            });
         let (_, rx) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let (tx, events) = crate::surface_protocol::host_event_channel::<TestExtension>();
         let mut host = HostLoop::open(config, &rx, Sender::over(tx), None).unwrap();
@@ -1114,7 +1111,7 @@ mod wait_settlement_tests {
             config.state_roots = host.config.state_roots.clone();
             config.store = host.config.store.clone();
             config.session = config.store.load(&host.config.session.id).unwrap();
-            config.test_injection = host.config.test_injection.clone();
+            config.runtime_factory = host.config.runtime_factory.clone();
             let mut reopened =
                 HostLoop::open(config, host.actions, host.events.clone(), None).unwrap();
             assert_eq!(receipts_and_unread(runtime), (0, 0));

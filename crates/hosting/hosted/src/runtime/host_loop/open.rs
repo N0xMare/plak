@@ -37,8 +37,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             });
         config.session.queue_projection_debt = false;
         let attach_started = Instant::now();
-        #[cfg(any(test, feature = "test-support"))]
-        let injected_child_runtime = super::super::startup::install_injected_child_runtime(&config);
+        config.runtime_factory.clone().configure(&mut config);
         let log = SessionLog::open(&config.home, &config.session.id).ok();
         let mut stderr_buf = Vec::new();
         let executor = ApplicationExecutor::new()
@@ -75,13 +74,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             .cloned();
         // Read before `opened` is consumed below; reported near `session.resumed`.
         let output_bound_rederived = opened.output_bound_rederived;
-        #[cfg(any(test, feature = "test-support"))]
-        if config.test_injection.is_some() {
-            opened.claim_injected_topology_owner(&super::durable_tree_id(
-                &config.topology_rows(),
-                &config.session,
-            ));
-        }
+        config.runtime_factory.attached(&config, &mut opened);
         let session_open_ms = elapsed_ms_since(session_open_started);
 
         if let Err(error) = executor
@@ -576,8 +569,6 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             subscription_usage_refresh,
             live: None,
             projection_finished: false,
-            #[cfg(any(test, feature = "test-support"))]
-            _injected_child_runtime: injected_child_runtime,
         };
         host.publish_pending_continuation();
         host.publish_projected_usage();
@@ -673,28 +664,28 @@ mod tests {
         )
         .unwrap();
         let workspace = config.cwd.clone();
-        std::sync::Arc::get_mut(config.test_injection.as_mut().unwrap())
-            .unwrap()
-            .runtime = std::sync::Arc::new(move |_| {
-            if approval {
-                let script = serde_json::from_value(serde_json::json!({
+        crate::runtime::test_kit::scripted_mut(&mut config).runtime = std::sync::Arc::new(
+            move |_| {
+                if approval {
+                    let script = serde_json::from_value(serde_json::json!({
                         "version": 1, "tool_policy": "decision_required",
                         "steps": [
                             {"output": {"tool": {"name": "loopback_effect", "arguments": {}}}, "finish": "tool_calls"},
                             {"output": {"text": "approved terminal"}, "finish": "stop"}
                         ]
                     })).unwrap();
-                plakous_offline_crash_harness::scripted_runtime_binding(
-                    &workspace,
-                    controller.clone(),
-                    std::sync::Arc::new(script),
-                )
-                .map_err(|error| error.to_string())
-            } else {
-                plakous_offline_crash_harness::runtime_binding(&workspace, controller.clone())
+                    plakous_offline_crash_harness::scripted_runtime_binding(
+                        &workspace,
+                        controller.clone(),
+                        std::sync::Arc::new(script),
+                    )
                     .map_err(|error| error.to_string())
-            }
-        });
+                } else {
+                    plakous_offline_crash_harness::runtime_binding(&workspace, controller.clone())
+                        .map_err(|error| error.to_string())
+                }
+            },
+        );
         config
     }
 

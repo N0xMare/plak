@@ -32,7 +32,7 @@ use plakous_offline_crash_harness::{
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
 use crate::commands::host_config::TuiAttacher;
-use crate::product_host::{HostConfig, TestHostInjection, TestHostWorkflow};
+use crate::product_host::{HostConfig, HostWorkflow, ScriptedRuntimeFactory};
 use crate::product_paths::PlakPaths;
 use crate::product_sessions::{self, SessionRecord};
 use crate::tui_launch::launch_tui_with_attacher;
@@ -101,7 +101,7 @@ impl TuiAttacher for CompactionAttacher {
         let observed_session = session.id.clone();
         let boundaries = self.boundaries.clone();
         let observe = Arc::new(move |workflow, boundary| {
-            if workflow != TestHostWorkflow::Compact {
+            if workflow != HostWorkflow::Compact {
                 return;
             }
             let locator = product_sessions::load_session(&observed_paths, &observed_session)
@@ -117,7 +117,7 @@ impl TuiAttacher for CompactionAttacher {
             writeln!(file, "{boundary:?}\t{locator}").expect("write compact boundary evidence");
             file.sync_data().expect("sync compact boundary evidence");
         });
-        let injection = Arc::new(TestHostInjection {
+        let injection = Arc::new(ScriptedRuntimeFactory {
             runtime,
             rebind_target: target,
             observe,
@@ -135,7 +135,7 @@ impl TuiAttacher for CompactionAttacher {
                 paths.clone(),
             )),
             session,
-            target: crate::product_host::HostTargetAuthority::Injected {
+            target: crate::product_host::HostTargetAuthority::Registered {
                 provider: NativeProvider::Codex,
             },
             model_id: "offline-loopback-v1".to_owned(),
@@ -152,7 +152,7 @@ impl TuiAttacher for CompactionAttacher {
             cwd: cwd.to_path_buf(),
             ready_catalog: ready_catalog.clone(),
             resume_publication,
-            test_injection: Some(injection),
+            runtime_factory: injection,
             ready_path: crate::product_host::ReadyPathTiming::default(),
             seed_history: None,
             source_releases: crate::product_host::SourceReleases::default(),

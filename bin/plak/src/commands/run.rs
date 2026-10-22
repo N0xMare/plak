@@ -53,7 +53,7 @@ impl PlakousApplication {
             return self.run_hosted(
                 config,
                 session,
-                product_host::HostTargetAuthority::Injected { provider },
+                product_host::HostTargetAuthority::Registered { provider },
                 prompt,
                 print_session_id,
                 false,
@@ -296,7 +296,7 @@ impl PlakousApplication {
             return self.run_hosted(
                 config,
                 session,
-                product_host::HostTargetAuthority::Injected {
+                product_host::HostTargetAuthority::Registered {
                     provider: NativeProvider::Codex,
                 },
                 prompt,
@@ -539,7 +539,7 @@ impl PlakousApplication {
             ready_catalog: plakous_host_protocol::views::ReadyCatalog::default(),
             surface: None,
             resume_publication: None,
-            test_injection: None,
+            runtime_factory: Arc::new(plakous_hosted::runtime::ProductionRuntimeFactory),
             ready_path: product_host::ReadyPathTiming::default(),
             seed_history: None,
             source_releases: product_host::SourceReleases::default(),

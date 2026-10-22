@@ -9,19 +9,15 @@ use crate::sessions::{self};
 use crate::{CliFailure, CliResult};
 
 use super::admission::emit_queue_snapshot;
+use super::factory::observe_boundary;
 use super::info::{send_binding, send_last_user_prompt_at};
 use super::rebind::{
     durable_tree_id, instruction_sources, interrupted_before_dispatch, note_reread_instructions,
     note_reread_instructions_at, restore_detached_source,
 };
-#[cfg(any(test, feature = "test-support"))]
-use super::startup::injected_runtime;
-#[cfg(any(test, feature = "test-support"))]
-use super::startup::observe_test_boundary;
 use super::startup::{api_runtime_for_record, host_runtime_binding, open_session_for_host};
-use super::{HostConfig, Sender, TestRuntimeRole};
-#[cfg(any(test, feature = "test-support"))]
-use super::{TestHostBoundary, TestHostWorkflow};
+use super::{HostBoundary, HostWorkflow};
+use super::{HostConfig, RuntimeRole, Sender};
 use crate::sessions::{NoticeScope, TranscriptRow};
 
 pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
@@ -113,11 +109,10 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
         restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
         return Err(CliFailure::new(error));
     }
-    #[cfg(any(test, feature = "test-support"))]
-    observe_test_boundary(
-        config.test_injection.as_deref(),
-        TestHostWorkflow::Fork,
-        TestHostBoundary::Prepared,
+    observe_boundary(
+        config.runtime_factory.as_ref(),
+        HostWorkflow::Fork,
+        HostBoundary::Prepared,
     );
     if watch.observe_now() {
         restore_detached_source(executor, config, opened, source_locator, stderr_buf)?;
@@ -171,11 +166,10 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
             return Err(CliFailure::new("application execution failed"));
         }
     };
-    #[cfg(any(test, feature = "test-support"))]
-    observe_test_boundary(
-        config.test_injection.as_deref(),
-        TestHostWorkflow::Fork,
-        TestHostBoundary::RuntimeReturned,
+    observe_boundary(
+        config.runtime_factory.as_ref(),
+        HostWorkflow::Fork,
+        HostBoundary::RuntimeReturned,
     );
     let target_locator = match outcome {
         ForkSessionOutcome::Forked {
@@ -234,11 +228,10 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
             )));
         }
     };
-    #[cfg(any(test, feature = "test-support"))]
-    observe_test_boundary(
-        config.test_injection.as_deref(),
-        TestHostWorkflow::Fork,
-        TestHostBoundary::ProductPublished,
+    observe_boundary(
+        config.runtime_factory.as_ref(),
+        HostWorkflow::Fork,
+        HostBoundary::ProductPublished,
     );
     stderr_buf.clear();
     let replacement = match run_watched(
@@ -249,7 +242,7 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
             &target,
             target_locator,
             stderr_buf,
-            TestRuntimeRole::Primary,
+            RuntimeRole::Primary,
         ),
     ) {
         Ok(Ok(replacement)) => replacement,
@@ -284,11 +277,10 @@ pub(super) fn handle_fork<P: plakous_host_protocol::ProtocolExtension>(
             format!("fork target is active; source release could not be joined: {error}"),
         ));
     }
-    #[cfg(any(test, feature = "test-support"))]
-    observe_test_boundary(
-        config.test_injection.as_deref(),
-        TestHostWorkflow::Fork,
-        TestHostBoundary::ProductCommitted,
+    observe_boundary(
+        config.runtime_factory.as_ref(),
+        HostWorkflow::Fork,
+        HostBoundary::ProductCommitted,
     );
     emit_queue_snapshot(events, &config.session);
     let _ = events.send(super::logging::project_session_snapshot(&config.session));
@@ -323,17 +315,13 @@ pub(super) fn fork_refusal(kind: AgentSessionsErrorKind, message: &str) -> Optio
 
 /// The runtime a fork recompiles from: this session's own binding and tree,
 /// built from the files as they are now. It takes no topology lease.
-pub(super) fn fork_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
+pub(super) fn production_fork_runtime<P: plakous_host_protocol::ProtocolExtension>(
     executor: &ApplicationExecutor,
     config: &HostConfig<P>,
     stderr_buf: &mut Vec<u8>,
 ) -> CliResult<plakous::sessions::SessionRuntimeBinding> {
-    #[cfg(any(test, feature = "test-support"))]
-    if let Some(runtime) = injected_runtime(config, TestRuntimeRole::Primary) {
-        return runtime;
-    }
     if config.session.target_selection.api_target().is_none() {
-        return host_runtime_binding(config, stderr_buf, TestRuntimeRole::Primary);
+        return host_runtime_binding(config, stderr_buf, RuntimeRole::Primary);
     }
     let tree_id = durable_tree_id(&config.topology_rows(), &config.session);
     let mut attached = None;
@@ -408,6 +396,16 @@ fn discard_unstarted_fork<P: plakous_host_protocol::ProtocolExtension>(
         .map_err(CliFailure::new)
 }
 
+pub(super) fn fork_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
+    executor: &ApplicationExecutor,
+    config: &HostConfig<P>,
+    stderr: &mut Vec<u8>,
+) -> CliResult<plakous::sessions::SessionRuntimeBinding> {
+    config
+        .runtime_factory
+        .fork_runtime(executor, config, stderr)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
@@ -462,12 +460,12 @@ mod tests {
         let source_id = config.session.id.clone();
         let (actions, receiver) = crate::surface_protocol::user_action_channel::<TestExtension>();
         let sent = AtomicBool::new(false);
-        config.test_injection = Some(Arc::new(crate::runtime::TestHostInjection {
+        config.runtime_factory = Arc::new(crate::runtime::ScriptedRuntimeFactory {
             runtime: Arc::clone(&injection.runtime),
             rebind_target: injection.rebind_target.clone(),
             observe: Arc::new(move |workflow, boundary| {
-                if workflow == TestHostWorkflow::Fork
-                    && boundary == TestHostBoundary::RuntimeReturned
+                if workflow == HostWorkflow::Fork
+                    && boundary == HostBoundary::RuntimeReturned
                     && !sent.swap(true, Ordering::SeqCst)
                 {
                     actions.send(UserAction::Interrupt).unwrap();
@@ -475,7 +473,7 @@ mod tests {
             }),
             child_runtime: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
-        }));
+        });
         let state = RefCell::new(InterruptWatchState::default());
         let watch = InterruptWatch::new(&receiver, &state);
         let (events, _rx) = host_event_sink();
@@ -739,11 +737,11 @@ mod tests {
         let primaries = std::sync::Arc::new(AtomicUsize::new(0));
         let runtime = std::sync::Arc::clone(&injection.runtime);
         let counted = std::sync::Arc::clone(&primaries);
-        config.test_injection = Some(std::sync::Arc::new(crate::runtime::TestHostInjection {
+        config.runtime_factory = std::sync::Arc::new(crate::runtime::ScriptedRuntimeFactory {
             // Primary runtimes: the source, the fork's compilation, then the
             // fork's own session.
             runtime: std::sync::Arc::new(move |role| {
-                if role == TestRuntimeRole::Primary && counted.fetch_add(1, Ordering::SeqCst) == 2 {
+                if role == RuntimeRole::Primary && counted.fetch_add(1, Ordering::SeqCst) == 2 {
                     return Err("injected: the fork target cannot attach".to_owned());
                 }
                 runtime(role)
@@ -752,7 +750,7 @@ mod tests {
             observe: std::sync::Arc::new(|_, _| {}),
             child_runtime: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
-        }));
+        });
         let store = std::sync::Arc::clone(&config.store);
         let source_id = config.session.id.clone();
         let events = run_attached_actions(

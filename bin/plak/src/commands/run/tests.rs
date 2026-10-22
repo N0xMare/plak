@@ -1,6 +1,6 @@
 use super::*;
 use crate::observation_parity_tests::{Fixture, Script};
-use plakous_hosted::runtime::{TestHostBoundary, TestHostInjection, TestHostWorkflow};
+use plakous_hosted::runtime::{HostBoundary, HostWorkflow, ScriptedRuntimeFactory};
 use plakous_hosted::sessions::TranscriptRow;
 use plakous_offline_crash_harness::protocol::CrashBoundary;
 use plakous_offline_crash_harness::{BoundaryController, text_runtime_binding};
@@ -140,7 +140,7 @@ fn production_one_shot_stdout_uses_terminal_text_once_and_retains_exact_transcri
         let target = text_runtime_binding(&workspace, controller.clone(), preview, canonical)
             .unwrap()
             .target_binding();
-        config.test_injection = Some(Arc::new(TestHostInjection {
+        config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
             runtime: Arc::new(move |_| {
                 text_runtime_binding(&workspace, controller.clone(), preview, canonical)
                     .map_err(|error| error.to_string())
@@ -149,7 +149,7 @@ fn production_one_shot_stdout_uses_terminal_text_once_and_retains_exact_transcri
             observe: Arc::new(|_, _| {}),
             child_runtime: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
-        }));
+        });
         let store = config.store.clone();
         let id = config.session.id.clone();
         let mut stdout = Vec::new();
@@ -248,7 +248,7 @@ fn a_tool_bearing_one_shot_turn_reaches_its_answer_through_the_real_face() {
         .unwrap()
         .target_binding();
         let scripted_workspace = workspace.clone();
-        config.test_injection = Some(Arc::new(TestHostInjection {
+        config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
             runtime: Arc::new(move |_| {
                 plakous_offline_crash_harness::scripted_runtime_binding(
                     &scripted_workspace,
@@ -261,7 +261,7 @@ fn a_tool_bearing_one_shot_turn_reaches_its_answer_through_the_real_face() {
             observe: Arc::new(|_, _| {}),
             child_runtime: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
-        }));
+        });
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let result = run_config(
@@ -314,7 +314,7 @@ fn a_run_always_says_which_composition_it_used() {
     let target = text_runtime_binding(&workspace, controller.clone(), "", "answered")
         .unwrap()
         .target_binding();
-    config.test_injection = Some(Arc::new(TestHostInjection {
+    config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
         runtime: Arc::new(move |_| {
             text_runtime_binding(&workspace, controller.clone(), "", "answered")
                 .map_err(|error| error.to_string())
@@ -323,7 +323,7 @@ fn a_run_always_says_which_composition_it_used() {
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
-    }));
+    });
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     run_config(
@@ -365,24 +365,23 @@ fn failed_terminal_publication_never_reports_success_and_reopen_publishes_it() {
         } else {
             fixture.host_config()
         };
-        let injection = config.test_injection.take().unwrap();
+        let injection = plakous_hosted::runtime::test_kit::take_scripted(&mut config);
         let paths = crate::home::paths::PlakPaths::explicit(config.product_home.clone());
         let database = paths.product_database();
         let failing_database = database.clone();
-        config.test_injection = Some(Arc::new(TestHostInjection {
+        config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
             runtime: injection.runtime.clone(),
             rebind_target: injection.rebind_target.clone(),
             child_runtime: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
             observe: Arc::new(move |workflow, boundary| {
-                if workflow == TestHostWorkflow::RootDelivery
-                    && boundary == TestHostBoundary::TerminalReady
+                if workflow == HostWorkflow::RootDelivery && boundary == HostBoundary::TerminalReady
                 {
                     let connection = rusqlite::Connection::open(&failing_database).unwrap();
                     connection.execute_batch("CREATE TRIGGER fail_terminal BEFORE UPDATE ON sessions BEGIN SELECT RAISE(FAIL, 'injected publication failure'); END;").unwrap();
                 }
             }),
-        }));
+        });
         let store = config.store.clone();
         let id = config.session.id.clone();
         let mut stdout = Vec::new();
@@ -451,20 +450,20 @@ fn failed_interactive_publication_recovers_in_place_on_the_next_prompt() {
     let mut config = fixture.host_config();
     let retained = plakous_hosted::sessions::QueueItem::new("retained queued prompt");
     config.session.pending_queue.push(retained.clone());
-    let injection = config.test_injection.take().unwrap();
+    let injection = plakous_hosted::runtime::test_kit::take_scripted(&mut config);
     let database =
         crate::home::paths::PlakPaths::explicit(config.product_home.clone()).product_database();
     let failing_database = database.clone();
     let terminals = Arc::new(AtomicUsize::new(0));
     let observed_terminals = terminals.clone();
-    config.test_injection = Some(Arc::new(TestHostInjection {
+    config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
         runtime: injection.runtime.clone(),
         rebind_target: injection.rebind_target.clone(),
         child_runtime: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
         observe: Arc::new(move |workflow, boundary| {
-            if workflow == TestHostWorkflow::RootDelivery
-                && boundary == TestHostBoundary::TerminalReady
+            if workflow == HostWorkflow::RootDelivery
+                && boundary == HostBoundary::TerminalReady
                 && observed_terminals.fetch_add(1, Ordering::SeqCst) == 0
             {
                 rusqlite::Connection::open(&failing_database).unwrap().execute_batch(
@@ -472,7 +471,7 @@ fn failed_interactive_publication_recovers_in_place_on_the_next_prompt() {
                 ).unwrap();
             }
         }),
-    }));
+    });
     let store = config.store.clone();
     let id = config.session.id.clone();
     let (actions, events, worker) = plakous_hosted::runtime::spawn_host_worker(config).unwrap();
@@ -653,23 +652,21 @@ fn refusal_pauses_queued_work_until_explicit_resume() {
 fn refusal_one_shot_release_failure_keeps_stdout_empty_and_reports_release() {
     let fixture = Fixture::new(Script::Effect);
     let mut config = crate::observation_parity_tests::refusal_config(&fixture, "refusal text");
-    let injection = config.test_injection.take().unwrap();
+    let injection = plakous_hosted::runtime::test_kit::take_scripted(&mut config);
     let database =
         crate::home::paths::PlakPaths::explicit(config.product_home.clone()).runtime_database();
-    config.test_injection = Some(Arc::new(TestHostInjection {
+    config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
         runtime: injection.runtime.clone(),
         rebind_target: injection.rebind_target.clone(),
         child_runtime: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
         observe: Arc::new(move |workflow, boundary| {
-            if workflow == TestHostWorkflow::SendNow
-                && boundary == TestHostBoundary::ProductCommitted
-            {
+            if workflow == HostWorkflow::SendNow && boundary == HostBoundary::ProductCommitted {
                 let connection = rusqlite::Connection::open(&database).unwrap();
                 connection.execute_batch("CREATE TRIGGER fail_refused_release BEFORE UPDATE OF active_owner ON branches WHEN NEW.active_owner IS NULL BEGIN SELECT RAISE(FAIL, 'injected refusal release failure'); END;").unwrap();
             }
         }),
-    }));
+    });
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let error = run_config(
@@ -733,7 +730,7 @@ fn one_shot_terminal_error_is_returned_once_and_keeps_failure_guidance() {
     )
     .unwrap()
     .target_binding();
-    config.test_injection = Some(Arc::new(TestHostInjection {
+    config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
         runtime: Arc::new(move |_| {
             plakous_offline_crash_harness::terminal_failure_runtime_binding(
                 &workspace,
@@ -746,7 +743,7 @@ fn one_shot_terminal_error_is_returned_once_and_keeps_failure_guidance() {
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
-    }));
+    });
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let failure = run_config(
@@ -802,7 +799,7 @@ fn one_shot_length_outputs_text_or_retries_empty_then_exits_five() {
         )
         .unwrap()
         .target_binding();
-        config.test_injection = Some(Arc::new(TestHostInjection {
+        config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
             runtime: Arc::new(move |_| {
                 plakous_offline_crash_harness::scripted_runtime_binding(
                     &workspace,
@@ -815,7 +812,7 @@ fn one_shot_length_outputs_text_or_retries_empty_then_exits_five() {
             observe: Arc::new(|_, _| {}),
             child_runtime: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
-        }));
+        });
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let failure = run_config(
@@ -1058,7 +1055,7 @@ fn assistant_stdout_is_sanitized_on_a_terminal_and_exact_on_a_pipe() {
         let target = text_runtime_binding(&workspace, controller.clone(), "", ANSWER)
             .unwrap()
             .target_binding();
-        config.test_injection = Some(Arc::new(TestHostInjection {
+        config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
             runtime: Arc::new(move |_| {
                 text_runtime_binding(&workspace, controller.clone(), "", ANSWER)
                     .map_err(|error| error.to_string())
@@ -1067,7 +1064,7 @@ fn assistant_stdout_is_sanitized_on_a_terminal_and_exact_on_a_pipe() {
             observe: Arc::new(|_, _| {}),
             child_runtime: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
-        }));
+        });
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let result = run_config(
@@ -1097,20 +1094,20 @@ fn failed_terminal_then_successful_quit_handoff_replays_exactly_once() {
     let mut config = fixture.host_config();
     let retained = plakous_hosted::sessions::QueueItem::new("retained queued prompt");
     config.session.pending_queue.push(retained.clone());
-    let injection = config.test_injection.take().unwrap();
+    let injection = plakous_hosted::runtime::test_kit::take_scripted(&mut config);
     let database =
         crate::home::paths::PlakPaths::explicit(config.product_home.clone()).product_database();
     let failing_database = database.clone();
     let terminals = Arc::new(AtomicUsize::new(0));
     let observed_terminals = terminals.clone();
-    config.test_injection = Some(Arc::new(TestHostInjection {
+    config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
         runtime: injection.runtime.clone(),
         rebind_target: injection.rebind_target.clone(),
         child_runtime: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
         observe: Arc::new(move |workflow, boundary| {
-            if workflow == TestHostWorkflow::RootDelivery
-                && boundary == TestHostBoundary::TerminalReady
+            if workflow == HostWorkflow::RootDelivery
+                && boundary == HostBoundary::TerminalReady
                 && observed_terminals.fetch_add(1, Ordering::SeqCst) == 0
             {
                 rusqlite::Connection::open(&failing_database).unwrap().execute_batch(
@@ -1118,7 +1115,7 @@ fn failed_terminal_then_successful_quit_handoff_replays_exactly_once() {
                 ).unwrap();
             }
         }),
-    }));
+    });
     let store = config.store.clone();
     let id = config.session.id.clone();
     let (actions, events, worker) = plakous_hosted::runtime::spawn_host_worker(config).unwrap();
@@ -1169,19 +1166,19 @@ fn inprocess_finalization_recovery(explicit: bool) {
 
     let fixture = Fixture::new(Script::Effect);
     let mut config = fixture.host_config();
-    let injection = config.test_injection.take().unwrap();
+    let injection = plakous_hosted::runtime::test_kit::take_scripted(&mut config);
     let paths = crate::home::paths::PlakPaths::explicit(config.product_home.clone());
     let runtime_db = paths.runtime_database();
     let trigger_db = runtime_db.clone();
     let cut_once = std::sync::atomic::AtomicBool::new(false);
-    config.test_injection = Some(Arc::new(TestHostInjection {
+    config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
         runtime: injection.runtime.clone(),
         rebind_target: injection.rebind_target.clone(),
         child_runtime: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
         observe: Arc::new(move |workflow, boundary| {
-            if workflow == TestHostWorkflow::RootDelivery
-                && boundary == TestHostBoundary::Prepared
+            if workflow == HostWorkflow::RootDelivery
+                && boundary == HostBoundary::Prepared
                 && !cut_once.swap(true, Ordering::SeqCst)
             {
                 rusqlite::Connection::open(&trigger_db).unwrap().execute_batch(
@@ -1189,7 +1186,7 @@ fn inprocess_finalization_recovery(explicit: bool) {
                 ).unwrap();
             }
         }),
-    }));
+    });
     let store = config.store.clone();
     let id = config.session.id.clone();
     let (actions, events, worker) = plakous_hosted::runtime::spawn_host_worker(config).unwrap();
@@ -1321,22 +1318,20 @@ fn recorded_terminal_uncertain_siblings_reopen_without_notice_or_second_terminal
     let id = config.session.id.clone();
     let paths = crate::home::paths::PlakPaths::explicit(config.product_home.clone());
     let failing_database = paths.product_database();
-    let injection = config.test_injection.take().unwrap();
-    config.test_injection = Some(Arc::new(TestHostInjection {
+    let injection = plakous_hosted::runtime::test_kit::take_scripted(&mut config);
+    config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
         runtime: injection.runtime.clone(),
         rebind_target: injection.rebind_target.clone(),
         child_runtime: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
         observe: Arc::new(move |workflow, boundary| {
-            if workflow == TestHostWorkflow::RootDelivery
-                && boundary == TestHostBoundary::TerminalReady
-            {
+            if workflow == HostWorkflow::RootDelivery && boundary == HostBoundary::TerminalReady {
                 rusqlite::Connection::open(&failing_database).unwrap().execute_batch(
                     "CREATE TRIGGER fail_terminal BEFORE UPDATE ON sessions BEGIN SELECT RAISE(FAIL, 'injected publication failure'); END;",
                 ).unwrap();
             }
         }),
-    }));
+    });
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     run_config(

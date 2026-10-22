@@ -80,7 +80,7 @@ fn a_pruned_feed_reopen_consumes_historical_intents_without_withdrawing_clear() 
         ]));
         let (mut config, _) =
             crate::runtime::recover_tests::scripted_host_with(root.path(), script.clone());
-        let runtime = Arc::clone(&config.test_injection.as_ref().unwrap().runtime);
+        let runtime = Arc::clone(&crate::runtime::test_kit::scripted(&config).runtime);
         let workspace = config.cwd.clone();
         let controller =
             plakous_offline_crash_harness::BoundaryController::quiet_from_evidence_path(
@@ -88,10 +88,8 @@ fn a_pruned_feed_reopen_consumes_historical_intents_without_withdrawing_clear() 
                 root.path().join("retained-compact-evidence.jsonl"),
             )
             .unwrap();
-        Arc::get_mut(config.test_injection.as_mut().unwrap())
-            .unwrap()
-            .runtime = Arc::new(move |role| {
-            if role == crate::runtime::TestRuntimeRole::Compact {
+        crate::runtime::test_kit::scripted_mut(&mut config).runtime = Arc::new(move |role| {
+            if role == crate::runtime::RuntimeRole::Compact {
                 plakous_offline_crash_harness::scripted_compaction_runtime_binding(
                     &workspace,
                     controller.clone(),
@@ -105,14 +103,14 @@ fn a_pruned_feed_reopen_consumes_historical_intents_without_withdrawing_clear() 
                 runtime(role)
             }
         });
-        let injection = config.test_injection.clone();
+        let injection = config.runtime_factory.clone();
         let database = config.product_home.join("runtime.sqlite3");
         let store = Arc::new(MemoryStore::new());
         config.store = store.clone();
         let id = config.session.id.clone();
         let reopen = || {
             let mut config = reopened(root.path(), &store, &id);
-            config.test_injection = injection.clone();
+            config.runtime_factory = injection.clone();
             config
         };
         run_prompts(config, &["historical root"]);
@@ -622,7 +620,7 @@ fn background_projection_releases_the_next_admission_without_resending_the_previ
 #[test]
 fn fork_and_rebind_interrupt_between_pages_keep_source_and_resumable_target() {
     use crate::interrupt::{InterruptWatch, InterruptWatchState};
-    use crate::runtime::{TestHostBoundary, TestHostInjection, TestHostWorkflow};
+    use crate::runtime::{HostBoundary, HostWorkflow, ScriptedRuntimeFactory};
     use std::cell::RefCell;
 
     for rebind in [false, true] {
@@ -715,10 +713,10 @@ fn fork_and_rebind_interrupt_between_pages_keep_source_and_resumable_target() {
         )
         .unwrap()
         .target_binding();
-        config.test_injection = Some(Arc::new(TestHostInjection {
+        config.runtime_factory = Arc::new(ScriptedRuntimeFactory {
             runtime: Arc::new(move |role| {
                 if rebind
-                    && (role == crate::runtime::TestRuntimeRole::Rebind
+                    && (role == crate::runtime::RuntimeRole::Rebind
                         || resumed_target.load(std::sync::atomic::Ordering::SeqCst))
                 {
                     plakous_offline_crash_harness::runtime_binding_for_account(
@@ -737,12 +735,12 @@ fn fork_and_rebind_interrupt_between_pages_keep_source_and_resumable_target() {
                 injection.rebind_target.clone()
             },
             observe: Arc::new(move |workflow, boundary| {
-                if boundary == TestHostBoundary::RuntimeReturned
+                if boundary == HostBoundary::RuntimeReturned
                     && workflow
                         == if rebind {
-                            TestHostWorkflow::Rebind
+                            HostWorkflow::Rebind
                         } else {
-                            TestHostWorkflow::Fork
+                            HostWorkflow::Fork
                         }
                 {
                     let request = store
@@ -762,7 +760,7 @@ fn fork_and_rebind_interrupt_between_pages_keep_source_and_resumable_target() {
             }),
             child_runtime: None,
             rebind_builds: std::sync::Mutex::new(Vec::new()),
-        }));
+        });
         let state = RefCell::new(InterruptWatchState::default());
         let watch = InterruptWatch::new(&receiver, &state);
         let (events, _events_rx) = crate::runtime::test_support::host_event_sink();

@@ -9,12 +9,8 @@ use plakous::model::{
     SelectedProviderConfigurationId, SessionLineage, SystemClock,
 };
 use plakous::sessions::SessionRuntimeBinding;
-#[cfg(any(test, feature = "test-support"))]
-use plakous::sessions::{SessionOperationId, SessionTargetBinding};
 use plakous::subscriptions::{NativeProvider, ResolvedProvider};
 
-#[cfg(any(test, feature = "test-support"))]
-use crate::agent::build_or_open_injected_session;
 use crate::agent::{
     AttachedCodingSession, ProductAgentSpec, SessionToolFence, api_session_runtime_binding,
     api_topology_parent, coding_session_runtime_binding, open_api_coding_session_with_fence,
@@ -29,11 +25,9 @@ use super::info::plan_state_authority;
 use super::models::effort_from_record;
 use super::rebind::durable_tree_id;
 use super::{
-    HostConfig, HostEvent, HostLifecyclePhase, HostTargetAuthority, OpenRouterHostEvidence, Sender,
-    ShellHostConfig, TestRuntimeRole, TuiHostMode, TuiHostPreparation,
+    HostConfig, HostEvent, HostLifecyclePhase, HostTargetAuthority, OpenRouterHostEvidence,
+    RuntimeRole, Sender, ShellHostConfig, TuiHostMode, TuiHostPreparation,
 };
-#[cfg(any(test, feature = "test-support"))]
-use super::{TestHostBoundary, TestHostInjection, TestHostWorkflow, UserAction};
 use crate::sessions::{NoticeScope, TranscriptRow};
 
 impl HostLifecyclePhase {
@@ -90,101 +84,6 @@ pub(super) async fn bounded_transition_stage<T>(
     stage: impl Future<Output = T>,
 ) -> Result<T, ()> {
     tokio::time::timeout(timeout, stage).await.map_err(|_| ())
-}
-
-#[cfg(any(test, feature = "test-support"))]
-pub fn run_injected_host<P: plakous_host_protocol::ProtocolExtension>(
-    mut config: HostConfig<P>,
-    injection: std::sync::Arc<TestHostInjection>,
-    actions: Vec<UserAction<P>>,
-) -> CliResult<Vec<HostEvent<P>>> {
-    config.test_injection = Some(injection);
-    let (action_tx, action_rx) = crate::surface_protocol::user_action_channel();
-    let (event_tx, event_rx) = crate::surface_protocol::host_event_channel();
-    for action in actions {
-        action_tx
-            .send(action)
-            .map_err(|_| CliFailure::new("injected host action channel closed"))?;
-    }
-    let mut one_shot = config
-        .attached_one_shot
-        .then_some(super::oneshot::OneShotState {
-            attempted: false,
-            resume_tree: false,
-            result: None,
-            run: None,
-        });
-    let result = super::host_loop::run(
-        config,
-        &action_rx,
-        Sender::over(event_tx),
-        None,
-        one_shot.as_mut(),
-    );
-    drop(action_tx);
-    result?;
-    if let Some(state) = one_shot {
-        state
-            .result
-            .ok_or_else(|| CliFailure::new("injected one-shot had no terminal"))??;
-    }
-    let mut observations = Vec::new();
-    while let Ok(event) = event_rx.try_recv() {
-        observations.push(event);
-    }
-    Ok(observations)
-}
-
-/// Installs the injected child-binding factory for the life of one host loop.
-///
-/// The guard is process-global, like the topology hub the children attach to,
-/// so it is returned rather than dropped here: the caller holds it for exactly
-/// as long as the loop it belongs to.
-#[cfg(any(test, feature = "test-support"))]
-#[must_use]
-pub(super) fn install_injected_child_runtime<P: plakous_host_protocol::ProtocolExtension>(
-    config: &HostConfig<P>,
-) -> Option<crate::agent::injected_child_binding::Guard> {
-    let factory = config
-        .test_injection
-        .as_ref()
-        .and_then(|injection| injection.child_runtime.clone())?;
-    Some(crate::agent::injected_child_binding::install(factory))
-}
-
-#[cfg(any(test, feature = "test-support"))]
-pub(super) fn injected_runtime<P: plakous_host_protocol::ProtocolExtension>(
-    config: &HostConfig<P>,
-    role: TestRuntimeRole,
-) -> Option<CliResult<SessionRuntimeBinding>> {
-    config.test_injection.as_ref().map(|injection| {
-        (injection.runtime)(role)
-            .map(|runtime| {
-                runtime.with_job_host(config.state_roots.job_registry().for_agent("root", "root"))
-            })
-            .map_err(CliFailure::new)
-    })
-}
-
-#[cfg(any(test, feature = "test-support"))]
-pub(super) fn injected_rebind_target<P: plakous_host_protocol::ProtocolExtension>(
-    config: &HostConfig<P>,
-) -> Option<SessionTargetBinding> {
-    config
-        .test_injection
-        .as_ref()
-        .map(|injection| injection.rebind_target.clone())
-}
-
-#[cfg(any(test, feature = "test-support"))]
-pub(super) fn observe_test_boundary(
-    injection: Option<&TestHostInjection>,
-    workflow: TestHostWorkflow,
-    boundary: TestHostBoundary,
-) {
-    if let Some(injection) = injection {
-        (injection.observe)(workflow, boundary);
-    }
 }
 
 /// Control mailbox, bounded observations, and the worker owned by one driver.
@@ -496,36 +395,12 @@ async fn projected_head<P: plakous_host_protocol::ProtocolExtension>(
     }
 }
 
-#[cfg(any(test, feature = "test-support"))]
-fn injected_role<P: plakous_host_protocol::ProtocolExtension>(
-    config: &HostConfig<P>,
-) -> TestRuntimeRole {
-    if config.session.account.as_deref() == Some("offline-rebind") {
-        TestRuntimeRole::Rebind
-    } else {
-        TestRuntimeRole::Primary
-    }
-}
-
 /// Step 1 of the reopen: the exact open of `head` under a fresh lease.
-async fn open_head<P: plakous_host_protocol::ProtocolExtension>(
+pub(super) async fn production_open_head<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut HostConfig<P>,
     head: plakous::sessions::SessionLocator,
     stderr_buf: &mut Vec<u8>,
 ) -> Result<AttachedCodingSession, crate::agent::CodingSessionOpenFailure> {
-    #[cfg(any(test, feature = "test-support"))]
-    if let Some(runtime) = injected_runtime(config, injected_role(config)) {
-        let operation = SessionOperationId::new(format!("plak:test-open:{}", uuid::Uuid::new_v4()))
-            .map_err(|_| CliFailure::new("injected host operation identity is invalid"))?;
-        return build_or_open_injected_session(
-            config.state_roots.runtime_sessions()?,
-            Some(head),
-            None,
-            operation,
-            runtime?,
-        )
-        .await;
-    }
     if config.target.is_api() {
         return Box::pin(open_api_coding_session_with_fence(
             api_parent_from_config(config, &config.session)?,
@@ -540,31 +415,11 @@ async fn open_head<P: plakous_host_protocol::ProtocolExtension>(
     Box::pin(open_coding_session(native_spec(config)?, head, stderr_buf)).await
 }
 
-async fn create_session<P: plakous_host_protocol::ProtocolExtension>(
+pub(super) async fn production_create_session<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut HostConfig<P>,
     seed: Option<crate::agent::SeededHistory>,
     stderr_buf: &mut Vec<u8>,
 ) -> CliResult<AttachedCodingSession> {
-    freeze_root_tools(config)?;
-    #[cfg(any(test, feature = "test-support"))]
-    if let Some(runtime) = injected_runtime(config, injected_role(config)) {
-        let mut seed = seed;
-        let operation = SessionOperationId::new(config.session.create_operation_id.clone())
-            .map_err(|_| CliFailure::new("injected host operation identity is invalid"))?;
-        let runtime = runtime?;
-        if let Some(seed) = seed.as_mut() {
-            seed.inspect(&runtime)?;
-        }
-        return build_or_open_injected_session(
-            config.state_roots.runtime_sessions()?,
-            None,
-            seed.map(|s| s.history),
-            operation,
-            runtime,
-        )
-        .await
-        .map_err(|error| error.failure);
-    }
     if config.target.is_api() {
         return Box::pin(crate::agent::build_api_coding_session_seed(
             api_parent_from_config(config, &config.session)?,
@@ -853,7 +708,9 @@ pub(super) fn api_host_runtime_binding<P: plakous_host_protocol::ProtocolExtensi
         .map_err(|_| CliFailure::new("application execution failed"))?
 }
 
-pub(super) async fn api_runtime_for_record<P: plakous_host_protocol::ProtocolExtension>(
+pub(super) async fn production_api_runtime_for_record<
+    P: plakous_host_protocol::ProtocolExtension,
+>(
     config: &HostConfig<P>,
     record: &SessionRecord,
     opening_durable_session: bool,
@@ -976,16 +833,12 @@ pub(super) async fn cached_api_runtime_for_record<P: plakous_host_protocol::Prot
     Ok(prepared.runtime)
 }
 
-pub(super) fn host_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
+pub(super) fn production_host_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
     config: &HostConfig<P>,
     stderr_buf: &mut Vec<u8>,
-    role: TestRuntimeRole,
+    role: RuntimeRole,
 ) -> CliResult<SessionRuntimeBinding> {
-    #[cfg(any(test, feature = "test-support"))]
-    if let Some(runtime) = injected_runtime(config, role) {
-        return runtime;
-    }
-    if role == TestRuntimeRole::Compact && config.target.is_api() {
+    if role == RuntimeRole::Compact && config.target.is_api() {
         return api_compaction_runtime_binding(config);
     }
     if config.target.is_api() {
@@ -1022,11 +875,11 @@ pub(super) fn host_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
 
 pub(super) fn native_runtime_for_record(
     spec: ProductAgentSpec,
-    role: TestRuntimeRole,
+    role: RuntimeRole,
     stderr: &mut dyn std::io::Write,
 ) -> CliResult<SessionRuntimeBinding> {
     let binding = coding_session_runtime_binding(spec, stderr)?;
-    if role == TestRuntimeRole::Compact {
+    if role == RuntimeRole::Compact {
         binding
             .with_compaction_output_limit()
             .map_err(|_| CliFailure::new("compaction generation policy is invalid"))
@@ -1041,27 +894,15 @@ pub(super) fn native_runtime_for_record(
 /// than the attached one: the plan-state authority, workspace root, topology
 /// tree and composition must come from the target, or its durable
 /// `update_plan` executor id has no fresh binding and exact reopen fails.
-pub(super) async fn open_session_for_host<P: plakous_host_protocol::ProtocolExtension>(
+pub(super) async fn production_open_session_for_host<
+    P: plakous_host_protocol::ProtocolExtension,
+>(
     config: &HostConfig<P>,
     session: &SessionRecord,
     locator: plakous::sessions::SessionLocator,
     stderr_buf: &mut Vec<u8>,
-    role: TestRuntimeRole,
+    role: RuntimeRole,
 ) -> Result<AttachedCodingSession, crate::agent::CodingSessionOpenFailure> {
-    #[cfg(any(test, feature = "test-support"))]
-    if let Some(runtime) = injected_runtime(config, role) {
-        let operation = SessionOperationId::new(format!("plak:test-open:{}", uuid::Uuid::new_v4()))
-            .map_err(|_| CliFailure::new("injected open operation identity is invalid"))?;
-        return build_or_open_injected_session(
-            config.state_roots.runtime_sessions()?,
-            Some(locator),
-            None,
-            operation,
-            runtime?,
-        )
-        .await;
-    }
-    #[cfg(not(any(test, feature = "test-support")))]
     let _ = role;
     if session.target_selection.api_target().is_some() {
         let parent = api_parent_from_config(config, session)
@@ -1103,6 +944,64 @@ pub(super) async fn open_session_for_host<P: plakous_host_protocol::ProtocolExte
     };
 
     Box::pin(open_coding_session(spec, locator, stderr_buf)).await
+}
+
+async fn open_head<P: plakous_host_protocol::ProtocolExtension>(
+    config: &mut HostConfig<P>,
+    head: plakous::sessions::SessionLocator,
+    stderr: &mut Vec<u8>,
+) -> Result<AttachedCodingSession, crate::agent::CodingSessionOpenFailure> {
+    let factory = config.runtime_factory.clone();
+    factory.open_head(config, head, stderr).await
+}
+async fn create_session<P: plakous_host_protocol::ProtocolExtension>(
+    config: &mut HostConfig<P>,
+    seed: Option<crate::agent::SeededHistory>,
+    stderr: &mut Vec<u8>,
+) -> CliResult<AttachedCodingSession> {
+    freeze_root_tools(config)?;
+    let factory = config.runtime_factory.clone();
+    factory.create(config, seed, stderr).await
+}
+pub(super) fn host_runtime_binding<P: plakous_host_protocol::ProtocolExtension>(
+    config: &HostConfig<P>,
+    stderr: &mut Vec<u8>,
+    role: RuntimeRole,
+) -> CliResult<SessionRuntimeBinding> {
+    config.runtime_factory.runtime(config, role, stderr)
+}
+pub(super) async fn open_session_for_host<P: plakous_host_protocol::ProtocolExtension>(
+    config: &HostConfig<P>,
+    record: &SessionRecord,
+    head: plakous::sessions::SessionLocator,
+    stderr: &mut Vec<u8>,
+    role: RuntimeRole,
+) -> Result<AttachedCodingSession, crate::agent::CodingSessionOpenFailure> {
+    config
+        .runtime_factory
+        .open(config, record, head, role, stderr)
+        .await
+}
+
+pub(super) async fn api_runtime_for_record<P: plakous_host_protocol::ProtocolExtension>(
+    config: &HostConfig<P>,
+    record: &SessionRecord,
+    opening_durable_session: bool,
+    topology_attach: crate::topology_runtime::TopologyHubAttach,
+    tree_id: Option<&str>,
+    attached_tree: &mut Option<String>,
+) -> CliResult<SessionRuntimeBinding> {
+    config
+        .runtime_factory
+        .api_runtime(
+            config,
+            record,
+            opening_durable_session,
+            topology_attach,
+            tree_id,
+            attached_tree,
+        )
+        .await
 }
 
 #[cfg(test)]
@@ -1435,68 +1334,6 @@ mod tests {
         assert_eq!(error.message(), "unfinished head");
     }
 
-    /// The child-binding seam: a host loop configured with an injected child
-    /// runtime installs it for exactly its own lifetime, and
-    /// `agent::children::child_session_runtime_binding` consults it before it
-    /// resolves anything.
-    ///
-    /// One test, not three, because the factory is process-global: split across
-    /// test functions these assertions would race each other under a
-    /// thread-per-test runner.
-    #[test]
-    fn an_injected_child_runtime_is_installed_for_the_life_of_its_host_loop() {
-        use crate::agent::injected_child_binding;
-        use crate::runtime::test_support::fresh_injected_attached_host;
-
-        let root = tempfile::tempdir().unwrap();
-        let (mut config, _) = fresh_injected_attached_host(root.path());
-        assert!(
-            injected_child_binding::lookup_for_test().is_none(),
-            "nothing may be installed before a host loop asks for it"
-        );
-        assert!(
-            install_injected_child_runtime(&config).is_none(),
-            "a config with no child factory installs nothing, so production is untouched"
-        );
-
-        let injection = config
-            .test_injection
-            .as_ref()
-            .expect("the fixture carries an injection");
-        config.test_injection = Some(Arc::new(TestHostInjection {
-            runtime: Arc::clone(&injection.runtime),
-            rebind_target: injection.rebind_target.clone(),
-            observe: Arc::clone(&injection.observe),
-            child_runtime: Some(Arc::new(|agent_id: &str, path: &str, _| {
-                Err(format!("injected child binding for {agent_id} at {path}"))
-            })),
-            rebind_builds: std::sync::Mutex::new(Vec::new()),
-        }));
-
-        {
-            let _guard = install_injected_child_runtime(&config)
-                .expect("a config carrying a child factory installs it");
-            let installed = injected_child_binding::lookup_for_test()
-                .expect("the child binder must see the installed factory");
-            assert_eq!(
-                installed(
-                    "a2",
-                    "/work/a2",
-                    &crate::agent::ProductStateRoots::with_doubles(
-                        root.path().to_path_buf(),
-                        root.path().join("state"),
-                    )
-                )
-                .err(),
-                Some("injected child binding for a2 at /work/a2".to_owned()),
-                "the binder must reach the test's own factory, not a resolved provider"
-            );
-        }
-        assert!(
-            injected_child_binding::lookup_for_test().is_none(),
-            "the guard must uninstall, so one test's fake cannot outlive it"
-        );
-    }
     #[test]
     fn deferred_startup_never_claims_attachment_before_failed_open_falls_back() {
         let root = tempfile::tempdir().unwrap();
@@ -1522,7 +1359,7 @@ mod tests {
             home: session_home.clone(),
             store: Arc::clone(&store) as Arc<dyn SessionRecordStore>,
             session,
-            target: HostTargetAuthority::Injected {
+            target: HostTargetAuthority::Registered {
                 provider: NativeProvider::Codex,
             },
             model_id: "gpt-existing".into(),
@@ -1537,7 +1374,7 @@ mod tests {
             cwd: root.path().to_path_buf(),
             ready_catalog: plakous_host_protocol::views::ReadyCatalog::default(),
             resume_publication: Some(Arc::clone(&publication)),
-            test_injection: None,
+            runtime_factory: Arc::new(ProductionRuntimeFactory),
             ready_path: ReadyPathTiming::default(),
             seed_history: None,
             source_releases: SourceReleases::default(),

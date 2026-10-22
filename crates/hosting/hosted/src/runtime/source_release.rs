@@ -11,7 +11,7 @@ use plakous::application::ApplicationExecutor;
 use crate::agent::AttachedCodingSession;
 use crate::sessions::{NoticeScope, TranscriptRow};
 
-use super::{HOST_RELEASE_DEADLINE, Sender, TestHostInjection};
+use super::{HOST_RELEASE_DEADLINE, RuntimeFactory, Sender};
 
 pub(super) const SETTLE_DEADLINE: Duration = Duration::from_secs(5);
 const EXIT_DEADLINE: Duration = Duration::from_secs(20);
@@ -96,7 +96,7 @@ pub(super) fn release_source_attachment<P: plakous_host_protocol::ProtocolExtens
     source_id: String,
     events: Sender<P>,
     label: &'static str,
-    test_injection: Option<Arc<TestHostInjection>>,
+    runtime_factory: Arc<dyn RuntimeFactory<P>>,
 ) -> PendingRelease {
     let (done, outcome) = mpsc::sync_channel(1);
     let background_events = events.clone();
@@ -105,14 +105,11 @@ pub(super) fn release_source_attachment<P: plakous_host_protocol::ProtocolExtens
         .spawn(move || {
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 let released = release(previous);
-                #[cfg(any(test, feature = "test-support"))]
-                super::startup::observe_test_boundary(
-                    test_injection.as_deref(),
-                    super::TestHostWorkflow::SourceRelease,
-                    super::TestHostBoundary::RuntimeReturned,
+                super::factory::observe_boundary(
+                    runtime_factory.as_ref(),
+                    super::HostWorkflow::SourceRelease,
+                    super::HostBoundary::RuntimeReturned,
                 );
-                #[cfg(not(any(test, feature = "test-support")))]
-                let _ = test_injection;
                 released
             }))
             .unwrap_or_else(|payload| {

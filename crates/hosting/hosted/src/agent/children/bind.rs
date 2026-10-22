@@ -626,69 +626,6 @@ pub(in crate::agent) fn child_plan_state_authority(
     Ok(authority)
 }
 
-/// Offline injection of a child's runtime binding (test/`test-support` only).
-///
-/// `TestHostInjection` supplies a fake runtime for the *root* only, because
-/// `runtime::startup` builds the root's session and nothing else does. A
-/// child's binding is built here, from `NativeSubscriptions` and a
-/// `resolve_turn_scoped_provider` call — real credentials against a real
-/// catalog — so a topology turn could not be driven offline at all, and the
-/// observation-parity oracle's topology scenario had no way to run. This is the
-/// missing half of the seam: `runtime::startup` installs a factory for the life
-/// of one host loop, and `child_session_runtime_binding` consults it before
-/// it resolves anything.
-///
-/// The factory is process-global, like the topology hub it serves, and scoped
-/// by an RAII guard so one test's fake cannot outlive it.
-#[cfg(any(test, feature = "test-support"))]
-pub mod injected_child_binding {
-    use std::sync::{Arc, Mutex, OnceLock};
-
-    use plakous::sessions::SessionRuntimeBinding;
-
-    /// Builds a child with the construction roots selected by the real binder.
-    pub type Factory = dyn Fn(&str, &str, &crate::agent::ProductStateRoots) -> Result<SessionRuntimeBinding, String>
-        + Send
-        + Sync
-        + 'static;
-
-    fn slot() -> &'static Mutex<Option<Arc<Factory>>> {
-        static SLOT: OnceLock<Mutex<Option<Arc<Factory>>>> = OnceLock::new();
-        SLOT.get_or_init(|| Mutex::new(None))
-    }
-
-    /// Installs `factory` until the returned guard is dropped.
-    #[must_use]
-    pub fn install(factory: Arc<Factory>) -> Guard {
-        if let Ok(mut slot) = slot().lock() {
-            *slot = Some(factory);
-        }
-        Guard(())
-    }
-
-    pub(super) fn lookup() -> Option<Arc<Factory>> {
-        slot().lock().ok().and_then(|slot| slot.clone())
-    }
-
-    /// The installed factory, for the seam's own test.
-    #[must_use]
-    pub fn lookup_for_test() -> Option<Arc<Factory>> {
-        lookup()
-    }
-
-    /// Removes the installed factory when dropped.
-    #[derive(Debug)]
-    pub struct Guard(());
-
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            if let Ok(mut slot) = slot().lock() {
-                *slot = None;
-            }
-        }
-    }
-}
-
 #[allow(
     clippy::too_many_arguments,
     reason = "one child bind names its whole exact tuple"
@@ -722,11 +659,37 @@ pub(in crate::agent) async fn child_session_runtime_binding(
         }
     }
     let parent = &scoped_parent;
-    #[cfg(any(test, feature = "test-support"))]
-    if let Some(factory) = injected_child_binding::lookup() {
-        let _ = (tuple_id, effort, opening_durable_session, fence);
-        return factory(agent_id, path, parent.state_roots());
-    }
+    parent
+        .state_roots()
+        .child_runtime_factory()
+        .bind(super::runtime_factory::ChildRuntimeRequest {
+            parent,
+            agent_id,
+            path,
+            account,
+            tuple_id,
+            effort,
+            opening_durable_session,
+            fence,
+            created_output_bound,
+        })
+        .await
+}
+
+pub(super) async fn production_child_runtime(
+    request: super::runtime_factory::ChildRuntimeRequest<'_>,
+) -> Result<SessionRuntimeBinding, String> {
+    let super::runtime_factory::ChildRuntimeRequest {
+        parent,
+        agent_id,
+        path,
+        account,
+        tuple_id,
+        effort,
+        opening_durable_session,
+        fence,
+        created_output_bound,
+    } = request;
     let account = account.filter(|value| !value.is_empty());
     if account == Some("openrouter")
         || account

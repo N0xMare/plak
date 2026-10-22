@@ -95,7 +95,7 @@ pub use build::{
     selected_coding_provider_configuration_with_processing_tier, topology_tree_is_restored_paused,
 };
 pub(crate) use build::{
-    SeededHistory, SessionToolFence, api_session_runtime_binding, build_api_coding_session_seed,
+    SessionToolFence, api_session_runtime_binding, build_api_coding_session_seed,
     build_coding_session_seed, coding_session_runtime_binding_with_attach,
     coding_tool_registry_with_extensions, direct_extension_tool, enroll_product_instructions,
     invoke_topology_tool_on_hub, node_coding_presentation, occupancy_session_fence,
@@ -104,15 +104,13 @@ pub(crate) use build::{
     stamped_workspace_policy, subagent_catalog_profile_id, vocabulary_for_presentation,
 };
 #[cfg(any(test, feature = "test-support"))]
-pub use build::{build_or_open_injected_session, injected_root_tool_registrations};
+pub use build::{build_or_open_bound_session, injected_root_tool_registrations};
 use build::{
     coding_session_runtime_binding_for, require_reconstructed_coding_projection,
     spawn_child_composition, spawn_parent_tree_id, spawn_roster_composition,
     spawn_roster_processing_tier,
 };
 /// Offline injection of a child's runtime binding; see the module's own docs.
-#[cfg(any(test, feature = "test-support"))]
-pub use children::injected_child_binding;
 use children::{
     ProductChildSessionBinder, ProductLiveCanceller, ProductMailDeliverer,
     format_session_reopen_error, incompatible_session_message, reattach_inflight_children,
@@ -155,3 +153,5 @@ use children::{
     frozen_openrouter_child_pin, openrouter_child_runtime_binding, openrouter_frozen_pin,
     spawn_child_operation_id, submit_harness_prompt,
 };
+
+pub use build::SeededHistory;

@@ -21,11 +21,7 @@ use super::{
     settle_late_cancel, settle_live_thinking, surface, terminal_turn_outcome,
     turn_finalization_ready, turn_lifecycle, unresolved_turn_lifecycle,
 };
-#[cfg(any(test, feature = "test-support"))]
-use super::{
-    COMPLETION_WINS_QUIT_PROMPT, TestHostBoundary, TestHostInjection, TestHostWorkflow,
-    observe_test_boundary,
-};
+use super::{HostBoundary, HostWorkflow, RuntimeFactory, observe_boundary};
 
 pub(super) struct TurnHost<'a, P: plakous_host_protocol::ProtocolExtension> {
     pub(super) job_agent: &'a Agent,
@@ -57,8 +53,7 @@ pub(super) struct TurnHost<'a, P: plakous_host_protocol::ProtocolExtension> {
     pub(super) ledger: &'a SessionLedger,
     pub(super) last_tree_revision: &'a mut TreeSnapshotPush,
     pub(super) job_events: &'a mut super::job_events::JobEvents,
-    #[cfg(any(test, feature = "test-support"))]
-    pub(super) test_injection: Option<&'a TestHostInjection>,
+    pub(super) runtime_factory: &'a dyn RuntimeFactory<P>,
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> TurnHost<'_, P> {
@@ -176,7 +171,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
     async fn run(
         mut self,
         mut turn: plakous::agent::Turn,
-        #[cfg(any(test, feature = "test-support"))] prompt: String,
+        prompt: String,
     ) -> Result<DrivenTurn, DriveTurnError> {
         let mut event_stream = turn
             .take_events()
@@ -216,13 +211,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
                 &mut self.interrupted_status_pending,
             )
             .await;
-            if self
-                .poll_actions(
-                    #[cfg(any(test, feature = "test-support"))]
-                    &prompt,
-                )
-                .await
-            {
+            if self.poll_actions(&prompt).await {
                 continue;
             }
 
@@ -242,14 +231,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
                 biased;
                 res = &mut result_fut, if self.turn_result.is_none() => {
                     self.turn_result = Some(res);
-                    #[cfg(any(test, feature = "test-support"))]
-                    if prompt == COMPLETION_WINS_QUIT_PROMPT {
-                        observe_test_boundary(
-                            self.host.test_injection,
-                            TestHostWorkflow::SendNow,
-                            TestHostBoundary::RuntimeReturned,
-                        );
-                    }
+                    self.host.runtime_factory.observe_turn_boundary(&prompt, HostBoundary::RuntimeReturned);
                 }
                 () = tokio::time::sleep(
                     self.quit_join_deadline

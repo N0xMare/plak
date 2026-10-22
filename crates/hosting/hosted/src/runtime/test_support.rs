@@ -83,13 +83,13 @@ pub(super) fn durable_authority_count(database: &std::path::Path, table: &str) -
 
 pub(super) fn fresh_injected_attached_host(
     root: &std::path::Path,
-) -> (HostConfig, Arc<TestHostInjection>) {
+) -> (HostConfig, Arc<ScriptedRuntimeFactory>) {
     fresh_injected_attached_host_for::<TestExtension>(root)
 }
 
 pub(super) fn fresh_injected_attached_host_for<P: plakous_host_protocol::ProtocolExtension>(
     root: &std::path::Path,
-) -> (super::HostConfig<P>, Arc<TestHostInjection>) {
+) -> (super::HostConfig<P>, Arc<ScriptedRuntimeFactory>) {
     let home = root.join("home");
     let workspace = root.join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
@@ -103,7 +103,7 @@ pub(super) fn fresh_injected_attached_host_for<P: plakous_host_protocol::Protoco
         .unwrap()
         .target_binding();
     let runtime_workspace = workspace.clone();
-    let injection = Arc::new(TestHostInjection {
+    let injection = Arc::new(ScriptedRuntimeFactory {
         runtime: Arc::new(move |_| {
             runtime_binding(&runtime_workspace, controller.clone())
                 .map_err(|error| error.to_string())
@@ -129,7 +129,7 @@ pub(super) fn fresh_injected_attached_host_for<P: plakous_host_protocol::Protoco
             topology_enabled: true,
             product_home: home.clone(),
             session,
-            target: HostTargetAuthority::Injected {
+            target: HostTargetAuthority::Registered {
                 provider: NativeProvider::Codex,
             },
             model_id: "offline-loopback-v1".into(),
@@ -143,7 +143,7 @@ pub(super) fn fresh_injected_attached_host_for<P: plakous_host_protocol::Protoco
             cwd: workspace,
             ready_catalog: plakous_host_protocol::views::ReadyCatalog::default(),
             resume_publication: None,
-            test_injection: Some(Arc::clone(&injection)),
+            runtime_factory: injection.clone(),
             ready_path: ReadyPathTiming::default(),
             seed_history: None,
             source_releases: SourceReleases::default(),
@@ -185,7 +185,7 @@ pub(super) fn no_effort_openrouter_injected_host(root: &std::path::Path) -> Host
 pub(super) fn overflow_injected_attached_host(
     root: &std::path::Path,
     provider: NativeProvider,
-) -> (HostConfig, Arc<TestHostInjection>) {
+) -> (HostConfig, Arc<ScriptedRuntimeFactory>) {
     let home = root.join("home");
     let workspace = root.join("workspace");
     std::fs::create_dir_all(&workspace).unwrap();
@@ -199,7 +199,7 @@ pub(super) fn overflow_injected_attached_host(
         .unwrap()
         .target_binding();
     let runtime_workspace = workspace.clone();
-    let injection = Arc::new(TestHostInjection {
+    let injection = Arc::new(ScriptedRuntimeFactory {
         // Every role gets the ordinary overflow binding. The harness has no
         // compaction binding that is exact for a tools-carrying source at
         // this ceiling, so a `/compact` driven through this fixture is
@@ -238,7 +238,7 @@ pub(super) fn overflow_injected_attached_host(
             topology_enabled: true,
             product_home: home.clone(),
             session,
-            target: HostTargetAuthority::Injected { provider },
+            target: HostTargetAuthority::Registered { provider },
             model_id: "offline-loopback-v1".into(),
             effort: Some(ReasoningEffort::Medium),
             effort_explicit: true,
@@ -250,7 +250,7 @@ pub(super) fn overflow_injected_attached_host(
             cwd: workspace,
             ready_catalog: plakous_host_protocol::views::ReadyCatalog::default(),
             resume_publication: None,
-            test_injection: Some(Arc::clone(&injection)),
+            runtime_factory: injection.clone(),
             ready_path: ReadyPathTiming::default(),
             seed_history: None,
             source_releases: SourceReleases::default(),

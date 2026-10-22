@@ -308,7 +308,7 @@ impl super::TreeRows for MemoryRows {
 }
 
 impl super::TopologyRows for MemoryRows {
-    fn session(&self, session_id: &str) -> Result<crate::sessions::SessionRecord, String> {
+    fn session(&self, session_id: &str) -> Result<SessionRecord, String> {
         use crate::session_store::SessionRecordStore as _;
         self.records.load(session_id)
     }
@@ -363,7 +363,7 @@ pub struct ShellHostFixture<
 #[must_use]
 pub fn shell_host_on_doubles<P: plakous_host_protocol::ProtocolExtension>(
     root: &std::path::Path,
-    session: crate::sessions::SessionRecord,
+    session: SessionRecord,
     binding: Option<RootBindingDraft>,
 ) -> ShellHostFixture<P> {
     use crate::session_store::SessionRecordStore as _;
@@ -405,12 +405,12 @@ pub fn spawn_shell_host_on_doubles<P: plakous_host_protocol::ProtocolExtension>(
 ) -> (
     crate::surface_protocol::UserActionSender<P>,
     crate::surface_protocol::HostEventReceiver<P>,
-    std::thread::JoinHandle<()>,
+    thread::JoinHandle<()>,
 ) {
     let (action_tx, action_rx) = crate::surface_protocol::user_action_channel();
     let (event_tx, event_rx) = crate::surface_protocol::host_event_channel();
     let events = Sender::over(event_tx);
-    let handle = std::thread::spawn(move || {
+    let handle = thread::spawn(move || {
         super::shell::run_shell_host_loop(config, action_rx, events, None);
     });
     (action_tx, event_rx, handle)
@@ -435,7 +435,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> ShellHostRunner<P> for Doubles
         actions: crate::surface_protocol::UserActionReceiver<P>,
         events: Sender<P>,
         clear_publication: Option<Arc<Mutex<Option<String>>>>,
-    ) -> crate::CliResult<()> {
+    ) -> CliResult<()> {
         crate::runtime::shell::run_shell_host_loop(config, actions, events, clear_publication);
         Ok(())
     }
@@ -642,7 +642,7 @@ impl crate::topology_runtime::LiveChildHandle for HangingShutdownChild {
 /// Returns a fixture child's released construction locator with its real feed.
 pub async fn child_release_with_feed(
     sessions: &plakous::sessions::AgentSessions,
-    locator: plakous::sessions::SessionLocator,
+    locator: SessionLocator,
     failure: Option<String>,
 ) -> crate::topology_runtime::LiveRelease {
     crate::agent::live::released_with_feed(sessions, locator, failure, 0, false).await
@@ -656,4 +656,364 @@ pub async fn child_feed(
     crate::agent::read_tree_feed(sessions, session_id, 0)
         .await
         .map_err(String::from)
+}
+
+/// An offline route registered through the production host's construction port.
+pub struct ScriptedRuntimeFactory {
+    pub runtime: Arc<dyn Fn(RuntimeRole) -> Result<SessionRuntimeBinding, String> + Send + Sync>,
+    pub rebind_target: SessionTargetBinding,
+    pub observe: Arc<dyn Fn(HostWorkflow, HostBoundary) + Send + Sync>,
+    /// A child's binding, given the real binder's scoped construction roots.
+    /// `None` retains the real child route rather than borrowing another host's
+    /// scripted registration.
+    pub child_runtime: Option<Arc<ChildRuntimeFactory>>,
+    /// Topology attachment choices observed by scripted rebind builds.
+    pub rebind_builds: Mutex<Vec<crate::topology_runtime::TopologyHubAttach>>,
+}
+
+impl ScriptedRuntimeFactory {
+    /// Holds attachment release completion for `delay` after runtime release,
+    /// so switch-back deterministically exercises the tracked join.
+    #[must_use]
+    pub fn with_source_release_delay(&self, delay: Duration) -> Arc<Self> {
+        let observe = Arc::clone(&self.observe);
+        Arc::new(Self {
+            runtime: Arc::clone(&self.runtime),
+            rebind_target: self.rebind_target.clone(),
+            observe: Arc::new(move |workflow, boundary| {
+                if workflow == HostWorkflow::SourceRelease {
+                    thread::sleep(delay);
+                }
+                observe(workflow, boundary);
+            }),
+            child_runtime: self.child_runtime.clone(),
+            rebind_builds: Mutex::new(Vec::new()),
+        })
+    }
+}
+
+pub fn run_scripted_host<P: plakous_host_protocol::ProtocolExtension>(
+    mut config: HostConfig<P>,
+    injection: Arc<ScriptedRuntimeFactory>,
+    actions: Vec<UserAction<P>>,
+) -> CliResult<Vec<HostEvent<P>>> {
+    config.runtime_factory = injection;
+    let (action_tx, action_rx) = crate::surface_protocol::user_action_channel();
+    let (event_tx, event_rx) = crate::surface_protocol::host_event_channel();
+    for action in actions {
+        action_tx
+            .send(action)
+            .map_err(|_| CliFailure::new("injected host action channel closed"))?;
+    }
+    let mut one_shot = config
+        .attached_one_shot
+        .then_some(super::oneshot::OneShotState {
+            attempted: false,
+            resume_tree: false,
+            result: None,
+            run: None,
+        });
+    let result = super::host_loop::run(
+        config,
+        &action_rx,
+        Sender::over(event_tx),
+        None,
+        one_shot.as_mut(),
+    );
+    drop(action_tx);
+    result?;
+    if let Some(state) = one_shot {
+        state
+            .result
+            .ok_or_else(|| CliFailure::new("injected one-shot had no terminal"))??;
+    }
+    let mut observations = Vec::new();
+    while let Ok(event) = event_rx.try_recv() {
+        observations.push(event);
+    }
+    Ok(observations)
+}
+
+use super::{
+    ChildRuntimeFactory, HostBoundary, HostConfig, HostEvent, HostWorkflow, RuntimeFactory,
+    RuntimeFuture, RuntimeRole, UserAction,
+};
+use crate::{
+    CliFailure, CliResult,
+    agent::{AttachedCodingSession, CodingSessionOpenFailure, ProductAgentSpec, SeededHistory},
+    sessions::SessionRecord,
+};
+use plakous::sessions::{
+    SessionLocator, SessionOperationId, SessionRuntimeBinding, SessionTargetBinding,
+};
+use std::{any::Any, thread, time::Duration};
+
+#[must_use]
+#[allow(
+    clippy::expect_used,
+    reason = "fixture access requires a registered scripted route"
+)]
+pub fn scripted<P: plakous_host_protocol::ProtocolExtension>(
+    config: &HostConfig<P>,
+) -> &ScriptedRuntimeFactory {
+    (&*config.runtime_factory as &dyn Any)
+        .downcast_ref()
+        .expect("scripted route")
+}
+#[allow(
+    clippy::expect_used,
+    reason = "fixture mutation requires an exclusive scripted route"
+)]
+pub fn scripted_mut<P: plakous_host_protocol::ProtocolExtension>(
+    config: &mut HostConfig<P>,
+) -> &mut ScriptedRuntimeFactory {
+    (Arc::get_mut(&mut config.runtime_factory).expect("exclusive route") as &mut dyn Any)
+        .downcast_mut()
+        .expect("scripted route")
+}
+pub fn take_scripted<P: plakous_host_protocol::ProtocolExtension>(
+    config: &mut HostConfig<P>,
+) -> Arc<ScriptedRuntimeFactory> {
+    let factory = std::mem::replace(
+        &mut config.runtime_factory,
+        Arc::new(super::ProductionRuntimeFactory),
+    );
+    let factory: Arc<dyn Any + Send + Sync> = factory;
+    factory
+        .downcast()
+        .unwrap_or_else(|_| panic!("scripted route"))
+}
+impl ScriptedRuntimeFactory {
+    fn role<P: plakous_host_protocol::ProtocolExtension>(config: &HostConfig<P>) -> RuntimeRole {
+        if config.session.account.as_deref() == Some("offline-rebind") {
+            RuntimeRole::Rebind
+        } else {
+            RuntimeRole::Primary
+        }
+    }
+    fn binding<P: plakous_host_protocol::ProtocolExtension>(
+        &self,
+        config: &HostConfig<P>,
+        role: RuntimeRole,
+    ) -> CliResult<SessionRuntimeBinding> {
+        (self.runtime)(role)
+            .map(|runtime| {
+                runtime.with_job_host(config.state_roots.job_registry().for_agent("root", "root"))
+            })
+            .map_err(CliFailure::new)
+    }
+    async fn open_binding<P: plakous_host_protocol::ProtocolExtension>(
+        &self,
+        config: &HostConfig<P>,
+        head: SessionLocator,
+        role: RuntimeRole,
+    ) -> Result<AttachedCodingSession, CodingSessionOpenFailure> {
+        let operation = SessionOperationId::new(format!("plak:test-open:{}", uuid::Uuid::new_v4()))
+            .map_err(|_| CliFailure::new("injected open operation identity is invalid"))?;
+        crate::agent::build_or_open_bound_session(
+            config.state_roots.runtime_sessions()?,
+            Some(head),
+            None,
+            operation,
+            self.binding(config, role)?,
+        )
+        .await
+    }
+}
+impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for ScriptedRuntimeFactory {
+    fn clear(
+        &self,
+        executor: &plakous::application::ApplicationExecutor,
+        config: &mut HostConfig<P>,
+        opened: &AttachedCodingSession,
+        _target_product_session_id: &str,
+        create_operation_id: &str,
+        _stderr_buf: &mut Vec<u8>,
+        events: &Sender<P>,
+        started: std::time::Instant,
+    ) -> CliResult<(
+        AttachedCodingSession,
+        Option<Arc<plakous::subscriptions::ResolvedProvider>>,
+    )> {
+        config.live_topology_enabled()?;
+        let operation = SessionOperationId::new(create_operation_id)
+            .map_err(|_| CliFailure::new("injected clear operation identity is invalid"))?;
+        let session = executor
+            .block_on(opened.create_with_runtime(
+                operation,
+                opened.clear_job_counter(self.binding(config, RuntimeRole::Primary)?)?,
+            ))
+            .map_err(|_| CliFailure::new("application execution failed"))?
+            .map_err(|error| error.failure)?;
+        super::startup::observe_phase(
+            events,
+            super::HostLifecyclePhase::ClearResolveAuthority,
+            started,
+            config.session.pending_queue.len(),
+        );
+        Ok((session, None))
+    }
+    fn api_runtime<'a>(
+        &'a self,
+        config: &'a HostConfig<P>,
+        _record: &'a SessionRecord,
+        _opening_durable_session: bool,
+        topology_attach: crate::topology_runtime::TopologyHubAttach,
+        _tree_id: Option<&'a str>,
+        _attached_tree: &'a mut Option<String>,
+    ) -> RuntimeFuture<'a, CliResult<SessionRuntimeBinding>> {
+        self.rebind_builds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(topology_attach);
+        Box::pin(async move { self.binding(config, RuntimeRole::Rebind) })
+    }
+    fn runtime(
+        &self,
+        config: &HostConfig<P>,
+        role: RuntimeRole,
+        _: &mut Vec<u8>,
+    ) -> CliResult<SessionRuntimeBinding> {
+        self.binding(config, role)
+    }
+    fn open_head<'a>(
+        &'a self,
+        config: &'a mut HostConfig<P>,
+        head: SessionLocator,
+        _: &'a mut Vec<u8>,
+    ) -> RuntimeFuture<'a, Result<AttachedCodingSession, CodingSessionOpenFailure>> {
+        Box::pin(self.open_binding(config, head, Self::role(config)))
+    }
+    fn create<'a>(
+        &'a self,
+        config: &'a mut HostConfig<P>,
+        mut seed: Option<SeededHistory>,
+        _: &'a mut Vec<u8>,
+    ) -> RuntimeFuture<'a, CliResult<AttachedCodingSession>> {
+        Box::pin(async move {
+            let operation = SessionOperationId::new(config.session.create_operation_id.clone())
+                .map_err(|_| CliFailure::new("injected host operation identity is invalid"))?;
+            let runtime = self.binding(config, Self::role(config))?;
+            if let Some(seed) = seed.as_mut() {
+                seed.inspect(&runtime)?;
+            }
+            crate::agent::build_or_open_bound_session(
+                config.state_roots.runtime_sessions()?,
+                None,
+                seed.map(|s| s.history),
+                operation,
+                runtime,
+            )
+            .await
+            .map_err(|error| error.failure)
+        })
+    }
+    fn open<'a>(
+        &'a self,
+        config: &'a HostConfig<P>,
+        _: &'a SessionRecord,
+        head: SessionLocator,
+        role: RuntimeRole,
+        _: &'a mut Vec<u8>,
+    ) -> RuntimeFuture<'a, Result<AttachedCodingSession, CodingSessionOpenFailure>> {
+        Box::pin(self.open_binding(config, head, role))
+    }
+    fn fork_runtime(
+        &self,
+        _: &plakous::application::ApplicationExecutor,
+        config: &HostConfig<P>,
+        _: &mut Vec<u8>,
+    ) -> CliResult<SessionRuntimeBinding> {
+        self.binding(config, RuntimeRole::Primary)
+    }
+    fn rebind_runtime(
+        &self,
+        config: &HostConfig<P>,
+        _: Option<&ProductAgentSpec>,
+        attach: crate::topology_runtime::TopologyHubAttach,
+        _: &mut Vec<u8>,
+    ) -> (CliResult<SessionRuntimeBinding>, Option<String>) {
+        self.rebind_builds
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(attach);
+        (self.binding(config, RuntimeRole::Rebind), None)
+    }
+    fn input_window(
+        &self,
+        config: &HostConfig<P>,
+    ) -> CliResult<plakous::sessions::SessionInputWindow> {
+        Ok(self.binding(config, RuntimeRole::Primary)?.input_window())
+    }
+    fn target_binding(
+        &self,
+    ) -> Option<(plakous::subscriptions::NativeProvider, SessionTargetBinding)> {
+        Some((
+            plakous::subscriptions::NativeProvider::Codex,
+            self.rebind_target.clone(),
+        ))
+    }
+    fn observe(&self, workflow: HostWorkflow, boundary: HostBoundary) {
+        (self.observe)(workflow, boundary);
+    }
+    fn observe_turn_boundary(&self, prompt: &str, boundary: HostBoundary) {
+        if prompt == super::COMPLETION_WINS_QUIT_PROMPT {
+            (self.observe)(HostWorkflow::SendNow, boundary);
+        }
+    }
+    fn configure(&self, config: &mut HostConfig<P>) {
+        if let Some(factory) = &self.child_runtime {
+            config.state_roots = config
+                .state_roots
+                .clone()
+                .with_child_runtime_factory(Arc::new(ScriptedChildRuntimeFactory(factory.clone())));
+        }
+    }
+    fn attached(&self, config: &HostConfig<P>, opened: &mut AttachedCodingSession) {
+        opened.claim_registered_topology_owner(&super::rebind::durable_tree_id(
+            &config.topology_rows(),
+            &config.session,
+        ));
+    }
+}
+
+struct ScriptedChildRuntimeFactory(Arc<ChildRuntimeFactory>);
+impl crate::agent::children::runtime_factory::ChildRuntimeFactory for ScriptedChildRuntimeFactory {
+    fn bind<'a>(
+        &'a self,
+        request: crate::agent::children::runtime_factory::ChildRuntimeRequest<'a>,
+    ) -> crate::agent::children::runtime_factory::ChildRuntimeFuture<'a> {
+        Box::pin(
+            async move { (self.0)(request.agent_id, request.path, request.parent.state_roots()) },
+        )
+    }
+}
+/// A fixture-local route registration. Dropping it restores only these roots.
+pub struct ChildRuntimeGuard {
+    slot: Arc<Mutex<Arc<dyn crate::agent::children::runtime_factory::ChildRuntimeFactory>>>,
+    previous: Arc<dyn crate::agent::children::runtime_factory::ChildRuntimeFactory>,
+}
+impl Drop for ChildRuntimeGuard {
+    fn drop(&mut self) {
+        *self
+            .slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = self.previous.clone();
+    }
+}
+pub fn install_child_runtime(
+    roots: &crate::agent::ProductStateRoots,
+    factory: Arc<ChildRuntimeFactory>,
+) -> ChildRuntimeGuard {
+    let previous = std::mem::replace(
+        &mut *roots
+            .child_runtime
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+        Arc::new(ScriptedChildRuntimeFactory(factory)),
+    );
+    ChildRuntimeGuard {
+        slot: roots.child_runtime.clone(),
+        previous,
+    }
 }

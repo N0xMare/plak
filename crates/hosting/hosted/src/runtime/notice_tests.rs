@@ -114,13 +114,13 @@ fn process_host(
         .map_err(|e| e.to_string())
     });
     let target = build().unwrap().target_binding();
-    config.test_injection = Some(Arc::new(crate::runtime::TestHostInjection {
+    config.runtime_factory = Arc::new(crate::runtime::ScriptedRuntimeFactory {
         runtime: Arc::new(move |_| build()),
         rebind_target: target,
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
         rebind_builds: Mutex::new(Vec::new()),
-    }));
+    });
     config
 }
 

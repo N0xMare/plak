@@ -401,7 +401,7 @@ mod tests {
         config.state_roots = host.config.state_roots.clone();
         config.store = host.config.store.clone();
         config.session = config.store.load(&host.config.session.id).unwrap();
-        config.test_injection = host.config.test_injection.clone();
+        config.runtime_factory = host.config.runtime_factory.clone();
         config.interactive = host.config.interactive;
         let mut restored = HostLoop::open(config, host.actions, host.events.clone(), None).unwrap();
         test(&mut restored);
@@ -998,10 +998,8 @@ mod tests {
     #[test]
     fn in_place_resume_keeps_a_recorded_pause_row_single() {
         let slow_release = |config: &mut crate::runtime::HostConfig<TestExtension>| {
-            config.test_injection = config
-                .test_injection
-                .as_deref()
-                .map(|injection| injection.with_source_release_delay(Duration::from_millis(500)));
+            config.runtime_factory = crate::runtime::test_kit::scripted(config)
+                .with_source_release_delay(Duration::from_millis(500));
         };
         with_configured_tree(0, slow_release, |host, runtime, actions, _| {
             spawn_child(runtime);
@@ -1044,20 +1042,20 @@ mod tests {
         config: &mut crate::runtime::HostConfig<TestExtension>,
         on_release: impl Fn() + Send + Sync + 'static,
     ) {
-        let injection = config.test_injection.clone().unwrap();
+        let injection = crate::runtime::test_kit::scripted(config);
         let observe = Arc::clone(&injection.observe);
-        config.test_injection = Some(Arc::new(crate::runtime::TestHostInjection {
+        config.runtime_factory = Arc::new(crate::runtime::ScriptedRuntimeFactory {
             runtime: Arc::clone(&injection.runtime),
             rebind_target: injection.rebind_target.clone(),
             observe: Arc::new(move |workflow, boundary| {
-                if workflow == crate::runtime::TestHostWorkflow::SourceRelease {
+                if workflow == crate::runtime::HostWorkflow::SourceRelease {
                     on_release();
                 }
                 observe(workflow, boundary);
             }),
             child_runtime: injection.child_runtime.clone(),
             rebind_builds: std::sync::Mutex::new(Vec::new()),
-        }));
+        });
     }
 
     /// Only the first release (the clear's, of the source) runs

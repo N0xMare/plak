@@ -165,13 +165,13 @@ fn inject(
         .unwrap()
     };
     let target = build().target_binding();
-    config.test_injection = Some(Arc::new(crate::runtime::TestHostInjection {
+    config.runtime_factory = Arc::new(crate::runtime::ScriptedRuntimeFactory {
         runtime: Arc::new(move |_| Ok(build())),
         rebind_target: target,
         observe: Arc::new(|_, _| {}),
         child_runtime: None,
         rebind_builds: std::sync::Mutex::new(Vec::new()),
-    }));
+    });
 }
 
 /// The reasoning text the host streamed live for the one turn.
