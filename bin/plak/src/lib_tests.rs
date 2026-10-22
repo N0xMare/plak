@@ -131,7 +131,7 @@ fn native_subscription_failures_name_their_repair_and_class() {
         (
             NativeSubscriptionError::AcceptanceRequired,
             Some(NativeProvider::Xai),
-            "the grok compatibility notice is not accepted; run `plak login grok` to review and accept it",
+            "the grok compatibility notice is not accepted; run `plak models grok` to review and accept it (the login is kept)",
             3,
         ),
         (
@@ -266,7 +266,7 @@ fn compatibility_prompt_states_its_dates_and_a_closed_stdin_refuses_with_the_rem
     assert_eq!(failure.exit_code(), 3);
     assert_eq!(
         failure.message(),
-        "the codex compatibility notice needs an answer on stdin and none came; accept it once with `plak login codex`, or pipe `y` to this command"
+        "the codex compatibility notice needs an answer on stdin and none came; accept it once with `plak models codex` from a terminal, or pipe `y` to this command"
     );
     assert_eq!(stdout, [] as [u8; 0]);
     assert_eq!(

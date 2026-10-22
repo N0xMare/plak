@@ -527,7 +527,7 @@ fn oauth_doctor_reports_the_same_verdict_as_status() {
             CompatibilityState::Required,
             "acceptance_required",
             Severity::Warning,
-            Some("run plak login grok to review and accept the notice"),
+            Some("run plak models grok to review and accept the renewed notice; the login is kept"),
         ),
         (
             CredentialState::Ready,

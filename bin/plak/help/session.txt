@@ -17,10 +17,12 @@ USAGE:
   recover reopens a session whose turn was interrupted, records once what that
   turn left unobserved, and releases it; the next prompt does the same on its own.
 
-  export writes a private session reference (0600; default ~/.plak/carry/)
-  containing a bounded restart checkpoint and readable inert archive. import
-  creates a linked session from only the checkpoint; queued work stays paused.
-  reference prints bounded archive excerpts without importing or running them.
+  export writes a portable session document (0600; default ~/.plak/carry/)
+  that carries the full conversation to another plak build. import creates a
+  linked session that continues from it; live tools, processes and sub-agents
+  are not restored, and queued work stays paused. reference prints bounded
+  excerpts of a version 7 document's archive (or of a session imported from
+  one) without importing or running them.
   Session IDs accept an unambiguous prefix of at least four characters.
   --abandon-children explicitly retires recovery-required children before delete.
 

@@ -1501,7 +1501,7 @@ fn oauth_check(kind: CheckKind, probe: OauthCredentialProbe) -> DoctorCheck {
     let remediation = match (verdict, native_provider(probe.provider)) {
         (CredentialVerdict::SignedOut, _) | (_, None) => None,
         (CredentialVerdict::Usable(CompatibilityState::Required), Some(provider)) => Some(format!(
-            "run plak login {} to review and accept the notice",
+            "run plak models {} to review and accept the renewed notice; the login is kept",
             crate::commands::support::cli_provider_name(provider)
         )),
         (verdict, Some(provider)) => verdict.remedy(provider, AccountCommand::Status),

@@ -39,7 +39,8 @@ OPTIONS:
 NOTES:
   Subscription accounts require ready OAuth login (login + revalidate).
   First use asks to accept the compatibility notice on stdin: pipe `y`
-  (echo y | plak run ...) or accept it once with `plak login <account>`.
+  (echo y | plak run ...) or accept it once with `plak login <account>`
+  (a renewed notice: `plak models <account>`, which keeps the login).
   A closed stdin refuses with exit 3; an invalid config.toml exits 1.
   API accounts require their exact API key; no OAuth fallback.
   openai, anthropic and xai-api take each model's own effort ladder

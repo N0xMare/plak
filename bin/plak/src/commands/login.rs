@@ -485,7 +485,9 @@ fn read_notice_answer(
     let remedy = match asker {
         Asker::Login => "answer `y` from a terminal, or pipe `y` on stdin".to_owned(),
         Asker::Other => {
-            format!("accept it once with `plak login {account}`, or pipe `y` to this command")
+            format!(
+                "accept it once with `plak models {account}` from a terminal, or pipe `y` to this command"
+            )
         }
     };
     let refusal = match read {
@@ -606,7 +608,7 @@ mod tests {
         assert_eq!(closed.exit_code(), 3);
         assert_eq!(
             closed.message(),
-            "the codex compatibility notice needs an answer on stdin and none came; accept it once with `plak login codex`, or pipe `y` to this command"
+            "the codex compatibility notice needs an answer on stdin and none came; accept it once with `plak models codex` from a terminal, or pipe `y` to this command"
         );
 
         let (unreadable, stderr) = answer(b"\xff\n", Asker::Other, false);
@@ -615,7 +617,7 @@ mod tests {
         assert_eq!(unreadable.exit_code(), 3);
         assert_eq!(
             unreadable.message(),
-            "the answer to the codex compatibility notice could not be read from stdin as text; accept it once with `plak login codex`, or pipe `y` to this command"
+            "the answer to the codex compatibility notice could not be read from stdin as text; accept it once with `plak models codex` from a terminal, or pipe `y` to this command"
         );
 
         let (login, _) = answer(b"\xff\n", Asker::Login, false);

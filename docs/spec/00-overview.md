@@ -167,7 +167,8 @@ agent, application, construction, sessions, model, tools, profiles, `VERSION` â€
 | `auth` | `plakous::auth` secret, credential-store, OAuth, pin, and account-binding foundations; implies `openai` and `xai` |
 | `composition` | The local composition attachment seam in `plakous::agent` (`LocalCompositionAttachment`, `attach_local_composition`): Code Mode presentation and JavaScript evaluation through the `plakous-js-host` sidecar. It reaches no credential, HTTP, subscription, or Python machinery |
 | `composition-python` | The Monty-backed Python PTC projection over the same composition API; implies `composition` |
-| `native-subscriptions` | The subscription tier: `subscriptions` and the native-auth facets of the provider crates. It implies `composition` and `composition-python`, which is Plak's product closure |
+| `native-subscriptions` | The subscription tier: `subscriptions` and the native-auth facets of the provider crates. It implies `composition` and `composition-python` |
+| `mcp` | Re-exports `plakous-mcp` as `plakous::mcp`, the MCP client (servers, tools, resources, prompts and MCP OAuth). It links `plakous-auth` for MCP OAuth without exposing `plakous::auth`; of the other features only `full` enables it. Plak's product closure is `native-subscriptions` plus `mcp` |
 | `sessions-sqlite` | The SQLite `SessionStore` backend |
 | `full` | All of the supported features above |
 

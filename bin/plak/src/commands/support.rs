@@ -591,7 +591,7 @@ pub fn native_subscription_failure(
             "native subscription storage is unsupported on this platform; use an API-key account with `plak key set <account>`".to_owned(),
         ),
         E::AcceptanceRequired => auth(format!(
-            "the {name} compatibility notice is not accepted; {login} to review and accept it"
+            "the {name} compatibility notice is not accepted; run `plak models {name}` to review and accept it (the login is kept)"
         )),
         E::ProfileInactive => profile_inactive_failure(account),
         E::InvalidReceipt => auth(format!(

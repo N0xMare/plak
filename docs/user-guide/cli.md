@@ -26,7 +26,7 @@ The binary ID identifies the executable in `/reload` and handoffs.
 | 2 | Usage or argument error, including a model, effort or composition the account does not offer, an unknown or ambiguous session prefix, a confirmation that needs `--yes`, an invalid config value, and `key status` for an OAuth account |
 | 3 | Authentication failure: a credential that is not ready, an unaccepted or inactive subscription compatibility profile, or an unsafe credential store |
 | 4 | Interrupted before completion, or stopped by `SIGTERM`/`SIGHUP` |
-| 5 | Agent/runtime failure, or explicit recovery required |
+| 5 | Agent/runtime failure, an answer truncated at its output limit (`turn_failed:output-limit`; the answer is still printed), or explicit recovery required |
 | 6 | Run reached `--max-turns` or `--timeout` |
 
 Every subscription failure ends with what to do about it, for example:
@@ -468,20 +468,28 @@ Config             OK       valid · /home/you/.plak/config.toml           —
 Product db         OK       available · /home/you/.plak/state/r25.e28.p33.t8/product.sqlite3   —
 Runtime db         OK       available · /home/you/.plak/state/r25.e28.p33.t8/runtime.sqlite3   —
 Runtime store      OK       available · checkpoints 412/524288 (new work stops at 458752), …   —
+Subagents db       OK       available · /home/you/.plak/state/r25.e28.p33.t8/subagents.sqlite3   —
 Telemetry db       OK       ok · 1189 rows                                —
 Secrets dir        OK       available · /home/you/.plak/secrets           —
 Sessions dir       OK       available · /home/you/.plak/state/r25.e28.p33.t8/sessions          —
+Carry files        OK       none · /home/you/.plak/carry                  —
 Cwd                OK       available · /home/you/project                 —
+Jj cli             OK       missing · native workspace operations need no jj CLI; library not built   —
+Stdin tty          OK       terminal · observed without reading or writing the stream   —
+Stdout tty         OK       terminal · observed without reading or writing the stream   —
 Composition host   OK       included · not required by the selected …     —
+OpenRouter catalog OK       not configured · no OpenRouter key; catalog allowlist is checked at attach   —
 Root template      OK       unset · no [root] agent; new sessions …       —
 Spawn templates    OK       none · [roster] working_set is empty          —
-Oauth codex        OK       ready · generation 13 · record 22h old …      —
+OAuth codex        OK       ready · record ready · generation 13 · 22h old …   —
+OAuth grok         OK       signed_out · no record · no refresh telemetry   —
+OAuth claude       OK       signed_out · no record · no refresh telemetry   —
 
-Result: 21 passed · 0 warnings · 0 failures
+Result: 22 passed · 0 warnings · 0 failures
 Provider credentials: run `plak status`
 ```
 
-The same 21 checks are always emitted. Every failing row carries its own FIX
+The same 22 checks are always emitted. Every failing row carries its own FIX
 column. `Runtime store` is an ERROR (`full`) once new work is refused for lack
 of space and a WARNING (`nearly_full`) shortly before; its fix is
 `plak session gc --all`, then `plak session delete <id>`. The row also shows

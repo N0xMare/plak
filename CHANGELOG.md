@@ -11,22 +11,31 @@ one cross-build carrier (a build imports its own and the previous version).
 
 - Conversations carry across builds and configuration changes: `/reload` and
   `session import` move the full neutral conversation through export
-  document version 8 (imports 8 and 7). Provider replay that the destination
-  cannot validate is stripped with a one-line notice instead of failing.
+  document version 8 (imports 8 and 7). `/reload` strips provider replay that
+  the destination cannot validate, with a one-line notice instead of failing;
+  file `session import` always strips provider replay.
 - Background work: shell groups left running after a command are promoted to
   owned background jobs, with `plak run --leave-jobs-running`; repeated quiet
   process polls are held and released on host notices.
-- MCP: OAuth login and logout (`plak mcp login|logout`), resources
-  (`read_resource`) and prompts (`plak mcp prompts`).
+- MCP: OAuth for HTTP servers (`auth = "oauth"` with `oauth_issuer`,
+  `oauth_client_id`, `oauth_client_secret` and `oauth_callback_port`;
+  `plak mcp add --oauth`; `plak mcp login|logout`), with the home-scoped
+  `mcp.client_id_metadata_url` for Client ID Metadata Document registration;
+  resources (`resources = true`, `plak mcp add --resources`, a `read_resource`
+  tool); and prompts (`plak mcp prompts`).
 - TUI: delivered child mail renders as compact expandable groups; Menu uses a
   list and detail pane at 140+ columns; Usage offers `[refresh]` for
   credentials that need it; streaming code fences highlight incrementally;
-  long inline code and URLs wrap.
+  long inline code and URLs wrap. A scrolled-up transcript stays anchored
+  while output arrives, and a send-now steer shows its row immediately.
+- `plak doctor` and `plak status` warn when a compiled provider review expires
+  within 14 days or has expired, naming the surface and UTC date.
 - Startup: store integrity scans moved to `plak doctor`; the binary identity
   comes from an install-time manifest. Resume and fork open faster, and the
   projector no longer copies the transcript on every commit.
-- Truncated final answers are reported instead of shown as complete; empty
-  output-limit responses retry once.
+- Truncated final answers are reported instead of shown as complete:
+  `plak run` prints the answer but exits 5 (`turn_failed:output-limit`), not
+  0. Empty output-limit responses retry once.
 - Telemetry records retries once per attempt and keeps failed wire exchanges
   individually; refused workspace reclamation backs off and trims proven
   disposable caches.
@@ -50,6 +59,10 @@ one cross-build carrier (a build imports its own and the previous version).
   accounts never sends one account's encrypted reasoning under another.
 - Hosted runtime construction goes through one sealed `RuntimeFactory` port.
 - Oversized user messages are refused at admission.
+- Python Code Mode (`py-ptc`) runs Monty 1.2.0 under adapter
+  `plakous.monty-python-adapter.v7`. A refused `Path.scan` (glob, rglob, walk)
+  raises `RuntimeError` instead of returning an empty result; `bisect`, `csv`,
+  `hashlib`, `os.path` and `tomllib` are importable.
 
 ### Persisted formats
 
@@ -58,12 +71,22 @@ one cross-build carrier (a build imports its own and the previous version).
   session, use `/reload` from the running 0.0.1 build, or export with that
   binary and import the v7 document with 0.0.2. New exports use v8.
 
+### Security
+
+- rustls-webpki 0.103.16 and webpki-roots 1.0.10 fix RUSTSEC-2026-0382
+  (distrusted intermediates accepted) and RUSTSEC-2026-0381 (distrusted
+  roots).
+
 ### Pins
 
 - No-change release-candidate review dated 2026-10-22. Review expiries (UTC):
   Codex subscription profile, 2026-11-21T23:59:59Z; OpenRouter Chat dialect,
-  2026-11-21T00:00:00Z; xAI and OpenAI API profiles, 2027-01-20T00:00:00Z.
-  Accept the current Codex notice again; renewal does not require re-login.
+  2026-11-21T00:00:00Z; xAI and OpenAI API profiles, 2027-01-20T00:00:00Z;
+  Grok subscription profile, 2027-01-31T00:00:00Z; Claude subscription and
+  Anthropic API profiles, 2027-09-22T00:00:00Z.
+- When a newer build renews a review, accept the renewed notice with
+  `plak models <account>` (this release asks again for Codex), which keeps the
+  login; `plak login` runs a full new login.
 
 ### Known limitations
 
@@ -79,6 +102,10 @@ one cross-build carrier (a build imports its own and the previous version).
 - xAI sometimes refuses a follow-up turn on content-policy grounds in long Grok
   sessions; Plak reports it as a provider content-policy refusal.
 - Image input on OpenRouter's free `gemma-4-31b-it:free` is unproven.
+- One message is capped at 16 MiB encoded, and that encoding stores each image
+  byte as a JSON number (about 3.6 bytes for compressed image data). A prompt
+  therefore holds about 4.5 MiB of images in total, one maximum-size
+  (3.75 MiB) image, although up to 8 images are accepted.
 - Starting a new TUI session whose `[root] agent` template names a model that
   is not in its account's catalog clears `[root] agent` from `config.toml`;
   choose the model again.

@@ -1945,7 +1945,7 @@ not have or a command that would only print help.
 | 2 | usage: any parse error, bad or ambiguous session prefixes, confirmation-required refusals without `--yes`, invalid config-set values, an OAuth account given to `key status`, an invalid model id, a model, effort or composition the authenticated catalog or the provider's resolution does not offer, conflicting binding flags, and the non-TTY refusal of the TUI or the picker |
 | 3 | auth: login, logout, refresh, and `plak status <account>` failures, a credential that is not ready, a missing, declined or inactive subscription compatibility acceptance, and an unsafe credential store |
 | 4 | the turn was interrupted, or `SIGTERM` or `SIGHUP` stopped the process |
-| 5 | agent or product failure, model refusal, or `RecoveryRequired` |
+| 5 | agent or product failure, model refusal, a `plak run` answer committed truncated at its output limit (`turn_failed:output-limit`), or `RecoveryRequired` |
 | 6 | `plak run` reached its admitted-turn or wall-clock bound |
 | 1 | anything else, including an invalid `config.toml` |
 
@@ -2218,6 +2218,9 @@ clock either; a turn's auth and catalog refreshes are charged to that turn.
 
 The terminal outcome maps to the process: a completed turn exits 0, an
 interrupted turn exits 4, and an agent or recovery-required outcome exits 5. A
+completed turn whose committed answer was truncated at its output limit
+(Plakous §5.5, length classification) prints that answer and exits 5
+(`turn_failed:output-limit`). A
 recovery-required startup refusal in `plak agent --session` emits one JSONL
 `error` and one terminal `bye` and exits 5; the worker startup/join boundary
 preserves its typed failure rather than reconstructing an internal error from

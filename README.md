@@ -110,9 +110,10 @@ export PATH="$PWD/target/release:$PATH"
 Use your target-specific output directory instead when building with `--target`.
 
 Supported targets are Linux x86_64 musl and Apple Silicon macOS. Default
-builds include the
-in-process jj-lib backend and the Git CLI backend; only the latter requires
-the `git` executable. To update, run `git pull` and repeat the build command.
+builds and release tarballs use the Git CLI backend, which requires the `git`
+executable. Native JJ needs `--features plak/jj` (maintainer builds include
+it); it uses jj-lib in process and does not require the `jj` executable. To
+update, run `git pull` and repeat the build command.
 
 To **embed Plakous as a library**, depend on `plakous` from crates.io or on a
 source checkout by path, using Rust 1.99.0 or later and edition 2024. Defaults are empty: a Custom
