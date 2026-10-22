@@ -3186,3 +3186,171 @@ async fn repository_queries_honour_gitignore_scan_by_matches_and_glob_from_the_r
     assert!(capped.incomplete());
     Ok(())
 }
+
+#[tokio::test]
+async fn host_repository_discovery_ceiling_is_reconstructive_and_preserves_path()
+-> Result<(), TestError> {
+    let launch = tempfile::tempdir()?;
+    assert!(
+        std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(launch.path())
+            .status()?
+            .success()
+    );
+    let copy = launch.path().join("copies/child");
+    fs::create_dir_all(copy.join("sub"))?;
+    let make = |options| -> Result<ExecutionEnvironment, TestError> {
+        Ok(ExecutionEnvironment::host_with_policy_and_process_options(
+            ExecutionEnvironmentScope::Run(run_id(92)?),
+            plakous_tools::WorkspacePolicy::host(&copy, ".")?,
+            ExecutionEnvironmentConfig::default(),
+            options,
+        )?)
+    };
+    let plain = make(plakous_tools::HostProcessOptions::default())?;
+    let fenced = make(plakous_tools::HostProcessOptions::default().with_discovery_ceiling(true))?;
+    assert_ne!(plain.descriptor().digest(), fenced.descriptor().digest());
+    let encoded = serde_json::to_string(fenced.descriptor())?;
+    let descriptor: plakous_tools::ExecutionEnvironmentDescriptor = serde_json::from_str(&encoded)?;
+    let rebuilt = ExecutionEnvironment::host_with_policy(
+        descriptor.scope(),
+        plakous_tools::WorkspacePolicy::host(&copy, ".")?,
+        descriptor.config().clone(),
+    )?;
+    assert!(rebuilt.matches_descriptor(&descriptor));
+    for (index, environment) in [&plain, &fenced, &rebuilt].into_iter().enumerate() {
+        let result = environment
+            .execute_literal_process(
+                LiteralProcessRequest::new(
+                    "/usr/bin/git",
+                    ["rev-parse".to_owned(), "--show-toplevel".to_owned()],
+                    "sub",
+                    [],
+                    LiteralProcessIntent::default(),
+                )?,
+                control(),
+            )
+            .await?;
+        assert_eq!(result.exit_code() == Some(0), index == 0);
+        let path = environment
+            .execute_literal_process(
+                LiteralProcessRequest::new(
+                    "/bin/sh",
+                    ["-c".to_owned(), "command -v git".to_owned()],
+                    ".",
+                    [],
+                    LiteralProcessIntent::default(),
+                )?,
+                control(),
+            )
+            .await?;
+        assert_eq!(path.exit_code(), Some(0));
+        if index != 0 {
+            let sessions = environment.joined_process_sessions()?;
+            for mode in [
+                JoinedProcessTerminalMode::Pipes,
+                JoinedProcessTerminalMode::UnixPty,
+            ] {
+                let profile = JoinedProcessShellProfile::new("/bin/sh", [String::from("-c")])?;
+                let request = JoinedProcessStartRequest::new(
+                    JoinedProcessCommand::shell(profile, "/usr/bin/git rev-parse --show-toplevel")?,
+                    "sub",
+                    [],
+                    false,
+                    mode,
+                )?;
+                let id = sessions.start(request, control())?;
+                let (_, status) = collect_joined_output(&sessions, id).await?;
+                assert_eq!(status, JoinedProcessStatus::Exited(Some(128)));
+                sessions.terminate(id)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn cargo_package_in_a_discovery_ceiling_copy_lists_its_own_source() -> Result<(), TestError> {
+    let launch = tempfile::tempdir()?;
+    assert!(
+        std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(launch.path())
+            .status()?
+            .success()
+    );
+    fs::write(launch.path().join(".gitignore"), "copies/\n")?;
+    fs::write(launch.path().join("launch-only"), "not the copy")?;
+    assert!(
+        std::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(launch.path())
+            .status()?
+            .success()
+    );
+    assert!(
+        std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-qm",
+                "seed"
+            ])
+            .current_dir(launch.path())
+            .status()?
+            .success()
+    );
+    let copy = launch.path().join("copies/child");
+    fs::create_dir_all(copy.join("src"))?;
+    fs::write(
+        copy.join("Cargo.toml"),
+        "[package]\nname='discovery-ceiling-fixture'\nversion='0.1.0'\nedition='2024'\n",
+    )?;
+    fs::write(
+        copy.join("src/lib.rs"),
+        "pub const COPY_SOURCE: bool = true;\n",
+    )?;
+    let before = fs::read(launch.path().join(".git/index"))?;
+    let environment = ExecutionEnvironment::host_with_policy_and_process_options(
+        ExecutionEnvironmentScope::Run(run_id(93)?),
+        plakous_tools::WorkspacePolicy::host(&copy, ".")?,
+        ExecutionEnvironmentConfig::default(),
+        plakous_tools::HostProcessOptions::default().with_discovery_ceiling(true),
+    )?;
+    let result = environment
+        .execute_literal_process(
+            LiteralProcessRequest::new(
+                "cargo",
+                [
+                    "package",
+                    "--list",
+                    "--allow-dirty",
+                    "--no-verify",
+                    "--offline",
+                ]
+                .map(str::to_owned),
+                ".",
+                [],
+                LiteralProcessIntent::default(),
+            )?,
+            control(),
+        )
+        .await?;
+    assert_eq!(
+        result.exit_code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(result.stderr())
+    );
+    let listed = String::from_utf8_lossy(result.stdout());
+    assert!(listed.lines().any(|path| path == "src/lib.rs"), "{listed}");
+    assert!(!listed.contains("launch-only"), "{listed}");
+    assert_eq!(fs::read(launch.path().join(".git/index"))?, before);
+    Ok(())
+}

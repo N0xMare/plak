@@ -434,3 +434,61 @@ fn stderr_tail_keeps_only_the_newest_bytes() {
     tail.push(b"\r");
     assert_eq!(tail.sanitized(), "789\u{fffd}");
 }
+
+#[tokio::test]
+async fn services_enforce_discovery_ceiling_after_declared_and_secret_values() -> TestResult {
+    let root = tempfile::tempdir()?;
+    let environment = ExecutionEnvironment::host_with_policy_and_process_options(
+        ExecutionEnvironmentScope::Run(run_id()?),
+        crate::WorkspacePolicy::host(root.path(), ".")?,
+        ExecutionEnvironmentConfig::default(),
+        crate::HostProcessOptions::default().with_discovery_ceiling(true),
+    )?;
+    for secret in [false, true] {
+        let declared = (!secret)
+            .then(|| {
+                Ok::<_, Box<dyn std::error::Error>>((
+                    name("GIT_CEILING_DIRECTORIES")?,
+                    "/wrong".to_owned(),
+                ))
+            })
+            .transpose()?;
+        let sensitive = secret
+            .then(|| {
+                Ok::<_, Box<dyn std::error::Error>>((
+                    name("GIT_CEILING_DIRECTORIES")?,
+                    ServiceSecretValue::new("/wrong".to_owned())?,
+                ))
+            })
+            .transpose()?;
+        let service = environment
+            .spawn_service(
+                ServiceProcessRequest::new(
+                    "env",
+                    [],
+                    declared,
+                    sensitive,
+                    MAX_SERVICE_STDERR_TAIL_BYTES,
+                )?,
+                control(),
+            )
+            .await?;
+        let ServiceProcess {
+            stdin,
+            mut stdout,
+            handle,
+            ..
+        } = service;
+        drop(stdin);
+        let mut output = Vec::new();
+        stdout.read_to_end(&mut output).await?;
+        handle.terminate(SERVICE_PROCESS_TERMINATE_GRACE).await?;
+        assert_eq!(
+            environment_lines(&output)
+                .get("GIT_CEILING_DIRECTORIES")
+                .map(String::as_str),
+            environment.root().parent().and_then(Path::to_str)
+        );
+    }
+    Ok(())
+}

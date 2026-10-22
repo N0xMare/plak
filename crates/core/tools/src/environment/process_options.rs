@@ -1,4 +1,4 @@
-//! Fresh host construction material and its bounded reconstructive prefix policy.
+//! Fresh host construction material and its bounded reconstructive path policy.
 
 use super::{ExecutionEnvironmentError, ExecutionEnvironmentErrorKind};
 use std::path::{Component, Path, PathBuf};
@@ -10,6 +10,7 @@ use std::path::{Component, Path, PathBuf};
 #[derive(Clone, Debug, Default)]
 pub struct HostProcessOptions {
     pub(super) required_path_prefix: Option<String>,
+    pub(super) discovery_ceiling: bool,
 }
 
 impl HostProcessOptions {
@@ -32,7 +33,16 @@ impl HostProcessOptions {
             .transpose()?;
         Ok(Self {
             required_path_prefix: prefix,
+            discovery_ceiling: false,
         })
+    }
+
+    /// Stops inherited Git repository discovery at the workspace root's parent.
+    /// This is a discovery guard, not containment against explicit repository paths.
+    #[must_use]
+    pub fn with_discovery_ceiling(mut self, enabled: bool) -> Self {
+        self.discovery_ceiling = enabled;
+        self
     }
 }
 

@@ -5,6 +5,7 @@ use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 use rustix::fs::OFlags;
 use rustix::io::Errno;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::fmt::Write as _;
 use std::io::{Read, Write};
 use std::num::NonZeroU64;
 use std::os::fd::{AsFd, AsRawFd, RawFd};
@@ -2287,6 +2288,9 @@ fn start_joined_pipes_process(
         command.env(name.as_str(), value.0.as_ref());
     }
     command.env("PATH", host_process_path(process, environment)?);
+    if let Some(ceiling) = &process.discovery_ceiling {
+        command.env("GIT_CEILING_DIRECTORIES", ceiling);
+    }
     if let Some(home) = host_process_home(process, environment) {
         command.env("HOME", home);
     }
@@ -2604,6 +2608,9 @@ fn start_joined_pty_process(
         command.env(name.as_str(), value.0.as_ref());
     }
     command.env("PATH", host_process_path(process, environment)?);
+    if let Some(ceiling) = &process.discovery_ceiling {
+        command.env("GIT_CEILING_DIRECTORIES", ceiling);
+    }
     if let Some(home) = host_process_home(process, environment) {
         command.env("HOME", home);
     }
@@ -3446,6 +3453,7 @@ pub(in crate::environment) struct HostProcessContext {
     pub(super) fallback_path: String,
     pub(super) home: Option<PathBuf>,
     pub(super) prefix: Option<(PathBuf, fs::File)>,
+    pub(super) discovery_ceiling: Option<PathBuf>,
 }
 
 impl HostProcessContext {
@@ -3475,6 +3483,18 @@ impl HostProcessContext {
                 Ok((canonical, directory))
             })
             .transpose()?;
+        if options.discovery_ceiling
+            && workspace
+                .root()
+                .parent()
+                .and_then(Path::to_str)
+                .is_none_or(|path| path.contains(':'))
+        {
+            return Err(ExecutionEnvironmentError::new(
+                ExecutionEnvironmentErrorKind::Workspace,
+                "repository discovery ceiling cannot be represented",
+            ));
+        }
         let fallback_path = std::env::var("PATH")
             .ok()
             .filter(|value| {
@@ -3488,6 +3508,13 @@ impl HostProcessContext {
             fallback_path,
             home,
             prefix,
+            discovery_ceiling: options.discovery_ceiling.then(|| {
+                workspace
+                    .root()
+                    .parent()
+                    .unwrap_or(workspace.root())
+                    .to_path_buf()
+            }),
         })
     }
 
@@ -3560,11 +3587,20 @@ fn restore_path_after_login(
     process: &HostProcessContext,
     command: &str,
 ) -> Result<String, ExecutionBackendError> {
-    let Some(prefix) = process.required_prefix()? else {
-        return Ok(command.to_owned());
-    };
-    let prefix = prefix.display().to_string().replace('\'', "'\\''");
-    Ok(format!("PATH='{prefix}':\"$PATH\"; export PATH\n{command}"))
+    let mut wrapper = String::new();
+    if let Some(prefix) = process.required_prefix()? {
+        let prefix = prefix.display().to_string().replace('\'', "'\\''");
+        let _ = writeln!(wrapper, "PATH='{prefix}':\"$PATH\"; export PATH");
+    }
+    if let Some(ceiling) = &process.discovery_ceiling {
+        let ceiling = ceiling.display().to_string().replace('\'', "'\\''");
+        let _ = writeln!(
+            wrapper,
+            "GIT_CEILING_DIRECTORIES='{ceiling}'; export GIT_CEILING_DIRECTORIES"
+        );
+    }
+    wrapper.push_str(command);
+    Ok(wrapper)
 }
 
 /// Resolves `program` to an absolute executable path.
@@ -3703,6 +3739,9 @@ fn supervise_host_process(
         "PATH",
         host_process_path(process, request.environment.as_ref())?,
     );
+    if let Some(ceiling) = &process.discovery_ceiling {
+        command.env("GIT_CEILING_DIRECTORIES", ceiling);
+    }
     if let Some(home) = host_process_home(process, request.environment.as_ref()) {
         command.env("HOME", home);
     }
@@ -5015,11 +5054,42 @@ mod process_policy_tests {
     }
 
     #[test]
+    fn login_profile_cannot_unset_the_discovery_ceiling() {
+        let root = tempfile::tempdir().expect("profile root");
+        let profile = root.path().join("profile");
+        fs::write(&profile, "unset GIT_CEILING_DIRECTORIES\n").expect("profile");
+        let process = HostProcessContext {
+            fallback_path: "/usr/bin:/bin".into(),
+            home: None,
+            prefix: None,
+            discovery_ceiling: Some(root.path().to_path_buf()),
+        };
+        let wrapped =
+            restore_path_after_login(&process, "printf '%s' \"$GIT_CEILING_DIRECTORIES\"")
+                .expect("wrapper");
+        let output = Command::new("/bin/sh")
+            .args([
+                "-c",
+                &format!(". \"$1\";\n{wrapped}"),
+                "profile",
+                profile.to_str().expect("path"),
+            ])
+            .output()
+            .expect("login profile");
+        assert!(output.status.success());
+        assert_eq!(
+            output.stdout,
+            root.path().to_str().expect("root").as_bytes()
+        );
+    }
+
+    #[test]
     fn prepared_path_uses_snapshot_and_nonempty_delegation_precedence() {
         let process = HostProcessContext {
             fallback_path: "/captured/bin".into(),
             home: Some("/captured/home".into()),
             prefix: None,
+            discovery_ceiling: None,
         };
         let name = EnvironmentVariableName::new("PATH").expect("PATH");
         assert_eq!(
@@ -5054,6 +5124,7 @@ mod process_policy_tests {
             fallback_path: "/captured/bin".into(),
             home: Some("/captured/home".into()),
             prefix: None,
+            discovery_ceiling: None,
         };
         let name = EnvironmentVariableName::new("HOME").expect("HOME");
         assert_eq!(
@@ -5078,6 +5149,7 @@ mod process_policy_tests {
             fallback_path: "/captured/bin".into(),
             home: None,
             prefix: None,
+            discovery_ceiling: None,
         };
         assert_eq!(host_process_home(&homeless, &[]), None);
     }
@@ -5100,6 +5172,7 @@ mod process_policy_tests {
             fallback_path: format!("{}:{}", shadow.display(), real.display()),
             home: None,
             prefix: None,
+            discovery_ceiling: None,
         };
         assert_eq!(
             resolve_host_process_program("tool", &process, &[]).expect("resolved"),
@@ -5109,6 +5182,7 @@ mod process_policy_tests {
             fallback_path: shadow.display().to_string(),
             home: None,
             prefix: None,
+            discovery_ceiling: None,
         };
         assert!(resolve_host_process_program("tool", &only_shadow, &[]).is_err());
     }

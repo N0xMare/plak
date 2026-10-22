@@ -29,7 +29,7 @@ pub use process_options::HostProcessOptions;
 pub use backend::*;
 
 /// Digest format for reconstruction-complete execution-environment descriptors.
-pub const EXECUTION_ENVIRONMENT_DIGEST_VERSION: u32 = 3;
+pub const EXECUTION_ENVIRONMENT_DIGEST_VERSION: u32 = 4;
 
 /// Maximum bytes accepted in a portable environment or authority identifier.
 pub const MAX_ENVIRONMENT_NAME_BYTES: usize = 128;
@@ -47,7 +47,9 @@ pub const MAX_ENVIRONMENT_EXECUTION_DURATION: Duration = Duration::from_secs(86_
 pub const MAX_ENVIRONMENT_CLEANUP_DURATION: Duration = Duration::from_secs(3_600);
 
 // 13: reported process snapshots retain bounded terminal tombstones.
-const HOST_BACKEND_SEMANTIC_REVISION: u64 = 14;
+// 14: surviving shell groups retain joined ownership after leader exit.
+// 15: reconstructive repository-discovery ceiling on every process spawn.
+const HOST_BACKEND_SEMANTIC_REVISION: u64 = 15;
 const HOST_BACKEND_AUTHORITY_REVISION: u64 = 1;
 const DETERMINISTIC_BACKEND_SEMANTIC_REVISION: u64 = 4;
 const DETERMINISTIC_BACKEND_AUTHORITY_REVISION: u64 = 1;
@@ -1140,6 +1142,7 @@ pub struct ExecutionEnvironmentConfig {
     environment_delegations: Arc<[EnvironmentDelegation]>,
     credential_delegations: Arc<[CredentialDelegation]>,
     required_path_prefix: Option<String>,
+    discovery_ceiling: bool,
 }
 
 impl ExecutionEnvironmentConfig {
@@ -1183,6 +1186,7 @@ impl ExecutionEnvironmentConfig {
             environment_delegations: environment_delegations.into(),
             credential_delegations: credential_delegations.into(),
             required_path_prefix: None,
+            discovery_ceiling: false,
         })
     }
 
@@ -1212,6 +1216,7 @@ impl Default for ExecutionEnvironmentConfig {
             environment_delegations: Arc::from([]),
             credential_delegations: Arc::from([]),
             required_path_prefix: None,
+            discovery_ceiling: false,
         }
     }
 }
@@ -1222,6 +1227,7 @@ impl fmt::Debug for ExecutionEnvironmentConfig {
             .debug_struct("ExecutionEnvironmentConfig")
             .field("limits", &self.limits)
             .field("required_path_prefix", &self.required_path_prefix.is_some())
+            .field("discovery_ceiling", &self.discovery_ceiling)
             .field(
                 "environment_delegation_count",
                 &self.environment_delegations.len(),
@@ -1303,6 +1309,7 @@ struct ExecutionEnvironmentDescriptorWire {
     environment_delegations: Vec<EnvironmentDelegationWire>,
     credential_delegations: Vec<CredentialDelegationWire>,
     required_path_prefix: Option<String>,
+    discovery_ceiling: bool,
     digest: Digest,
 }
 
@@ -1368,6 +1375,7 @@ impl From<ExecutionEnvironmentDescriptor> for ExecutionEnvironmentDescriptorWire
                 })
                 .collect(),
             required_path_prefix: descriptor.config.required_path_prefix.clone(),
+            discovery_ceiling: descriptor.config.discovery_ceiling,
             digest: descriptor.digest,
         }
     }
@@ -1521,6 +1529,7 @@ impl ExecutionEnvironment {
     ) -> Result<Self, ExecutionEnvironmentError> {
         let options = HostProcessOptions {
             required_path_prefix: config.required_path_prefix.clone(),
+            discovery_ceiling: config.discovery_ceiling,
         };
         Self::host_with_policy_and_process_options(scope, workspace, config, options)
     }
@@ -1539,6 +1548,7 @@ impl ExecutionEnvironment {
         config
             .required_path_prefix
             .clone_from(&options.required_path_prefix);
+        config.discovery_ceiling = options.discovery_ceiling;
         let process = Arc::new(HostProcessContext::capture(&workspace, options)?);
         let backend: Arc<dyn ExecutionBackend> =
             Arc::new(HostExecutionBackend::new(&config, Arc::clone(&process))?);
@@ -1910,6 +1920,7 @@ fn config_from_wire(
         .collect::<Result<Vec<_>, ExecutionEnvironmentError>>()?;
     let mut config =
         ExecutionEnvironmentConfig::new(limits, environment_delegations, credential_delegations)?;
+    config.discovery_ceiling = wire.discovery_ceiling;
     process_options::validate_prefix(wire.required_path_prefix.as_deref())?;
     config
         .required_path_prefix
@@ -1945,6 +1956,7 @@ fn environment_digest(
         root_object.inode.to_be_bytes().to_vec(),
     ]);
     push_limit_parts(&mut parts, config.limits());
+    parts.push(vec![u8::from(config.discovery_ceiling)]);
     parts.push(
         config
             .required_path_prefix
@@ -2166,7 +2178,7 @@ mod tests {
         assert_eq!(digest.version(), EXECUTION_ENVIRONMENT_DIGEST_VERSION);
         assert_eq!(
             digest.to_string(),
-            "feaab76de025627510865281653e9460ab1c531cb49b8bb798a9d957d765dbe2"
+            "4ae9c45752c449850a84b55c7ac2a789f9431f54a2e018324ac687d8ce21e729"
         );
         Ok(())
     }

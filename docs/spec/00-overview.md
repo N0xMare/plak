@@ -182,11 +182,16 @@ Monty worker package needs.
 | Store | Owner | Current version |
 | --- | --- | --- |
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **25** |
-| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **27** |
+| Runtime checkpoint graph and feed records (inside `runtime.sqlite3`) | Plakous | format epoch **28** (reconstructive process discovery ceiling) |
 | Product store (`product.sqlite3`): intents and feed-derived views | Plak | schema **33** |
 | Agent tree store (`subagents.sqlite3`): intents, feed-derived views and external-effect records | `plakous-recursive-subagents-store` (schema), Plak (location) | schema **8** |
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **19**, disposable, never recovery authority |
-| Session export document | Plak | version **7**, imports **7** and **6** |
+| Session export document | Plak | version **8**, imports **8** and **7** |
+
+Tree schema 8's unreleased canonical `seal_outcome` payload includes the durable
+`history_left_base` boolean used by replayed result-mail notices. Runtime epoch
+28 moves the whole state key, so no older t8 shape is opened. Export v8 carries
+conversation history and CarryBinding, not tree seal outcomes; it is unchanged.
 
 There are no released persisted-format obligations. Each store has exactly one
 supported version, and nothing is migrated. The session export document is the
@@ -195,7 +200,7 @@ of the one before, and no other store crosses between builds. A pre-release
 format change bumps the store's schema or the runtime format epoch; the
 per-component revision constants inside the checkpoint graph are frozen. Plak
 keeps each build's stores in a state directory named by all four versions
-(chapter 02 §2.5), currently `r25.e27.p33.t8`, so a build never opens files from another version tuple as
+(chapter 02 §2.5), currently `r25.e28.p33.t8`, so a build never opens files from another version tuple as
 session authority. Explicit legacy pruning may take schema-blind SQLite and
 holder locks to prove a directory is
 unused (chapter 02 §2.5). A session another build wrote is

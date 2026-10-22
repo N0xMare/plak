@@ -504,6 +504,9 @@ pub(super) fn spawn_host_service(
         for (name, secret) in &request.request.secret_environment {
             command.env(name.as_str(), secret.expose());
         }
+        if let Some(ceiling) = &process.discovery_ceiling {
+            command.env("GIT_CEILING_DIRECTORIES", ceiling);
+        }
         let mut child = command.spawn().map_err(|_| {
             backend_error(
                 ExecutionBackendErrorKind::InvalidRequest,

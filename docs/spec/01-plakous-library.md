@@ -1721,7 +1721,7 @@ Readers, including read-only SQLite inspection, read the report directly from
 the record and do not require the parent checkpoint to survive pruning.
 
 These encodings, and the exposed name on each canonical tool call (§6.5), are
-runtime checkpoint format epoch 27 (chapter 00). An earlier-epoch checkpoint
+runtime checkpoint format epoch 28 (chapter 00). An earlier-epoch checkpoint
 does not decode and is refused as an incompatible build (§5.4); sessions cross
 the bump only through the export document.
 
@@ -4104,7 +4104,7 @@ tool's restore bind the canonical name; provider replay sends the exposed name
 exactly, every kernel alike; views label a call by its exposed name, display
 telemetry records it, and classification follows the canonical name. Tool
 results correlate by call identity and record no name. This is part of
-runtime checkpoint format epoch 27.
+runtime checkpoint format epoch 28.
 V2 lowering preserves the canonical input contract's wire shape: structured
 targets receive semantic JSON, while bounded UTF-8 targets receive the exact
 validated text. In particular, Codex `apply_patch` sends its `*** Begin Patch`
@@ -4549,13 +4549,29 @@ time beneath the root descriptor, each opened `O_NOFOLLOW | O_DIRECTORY` so an
 existing link or non-directory refuses the create; directories a transaction
 created are removed again if it fails before publishing the file.
 
-`AgentBuilder::host_process_options` supplies one neutral, bounded host input:
-an optional required workspace-relative PATH prefix. The hosted workspace
-constructor selects the copy-shim prefix; core tools does not discover product
+`AgentBuilder::host_process_options` supplies neutral, bounded host inputs:
+an optional required workspace-relative PATH prefix and a `discovery_ceiling`
+boolean (default false). When enabled, core computes the parent of the canonical
+workspace root and sets `GIT_CEILING_DIRECTORIES` to it after delegated
+environment values for every literal, piped, PTY and service process (including
+MCP servers). For services it overrides declared and secret environment
+values as well. Login-shell wrappers re-export the ceiling after profiles
+run, alongside the required PATH prefix. Absolute Git,
+environment-aware gix discovery (`discover_with_environment_overrides`) and
+Cargo packaging therefore cannot discover an ancestor checkout by walking up
+from the workspace. PATH lookup is unchanged. Raw `gix::discover` in a custom
+binary ignores this environment policy; it,
+explicit repository paths and deliberate environment overrides remain residual
+host authority. The hosted workspace constructor selects the copy-shim prefix; core tools does not discover product
 homes or shims. The captured fallback PATH/HOME and live directory handles are
-fresh host authority, excluded from descriptor bytes and digests. The relative prefix is reconstructive policy: descriptor digest
-format 3 and host backend semantic revision 14 bind it, and exact reopen rejects
-changed prefix policy. Unsupported descriptors have no compatibility path.
+fresh host authority, excluded from descriptor bytes and digests. The relative
+prefix and discovery ceiling are reconstructive policy: descriptor digest
+format 4 and host backend semantic revision 15 bind them, and exact reopen rejects
+changed prefix or discovery-ceiling policy. The descriptor wire encoding carries
+the ceiling boolean, including when false. Runtime format epoch 28 isolates
+these bindings from earlier state. CarryBinding does not embed an environment
+descriptor; export remains v8 with its existing v7 importer.
+Unsupported descriptors have no compatibility path.
 The prefix directory is opened at construction and its canonical location and
 filesystem identity are revalidated before literal, piped or PTY spawn. Missing,
 escaping or replaced required directories fail closed rather than omit the prefix.
@@ -5508,7 +5524,7 @@ runtime under the ordinary mutating write-ahead claim, so a crash after the
 claim settles `OutcomeUnknown` and is never replayed. Provider-hosted MCP and
 connectors stay in the stop class below. Its
 serialized variant names are part of the canonical history encoding and so of
-runtime checkpoint format epoch 27.
+runtime checkpoint format epoch 28.
 
 Caller lineage and `ToolExecutionOwner` are independent axes. A customer tool
 called by a provider program MAY retain a local or MCP owner and MUST traverse

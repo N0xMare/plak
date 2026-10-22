@@ -27,5 +27,5 @@ pub(crate) fn bind_host_process_prefix(
 ) -> Result<plakous::agent::AgentBuilder, plakous::tools::ExecutionEnvironmentError> {
     let options =
         plakous::tools::HostProcessOptions::new(Some(std::path::PathBuf::from("process-bin")))?;
-    Ok(builder.host_process_options(options))
+    Ok(builder.host_process_options(options.with_discovery_ceiling(true)))
 }

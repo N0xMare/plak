@@ -729,7 +729,8 @@ impl ExecutionEnvironment {
     /// The child environment starts empty and receives exactly: the
     /// configured environment delegations (the allowlist literal processes
     /// receive), the captured PATH and HOME fallbacks, the request's declared
-    /// values, and its secrets. Credential delegations never enter it.
+    /// values, and its secrets. A required repository-discovery ceiling overrides
+    /// all of those values. Credential delegations never enter it.
     /// Cancellation observed before the service is returned terminates and
     /// joins any started process group.
     pub fn spawn_service(

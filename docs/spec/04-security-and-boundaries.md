@@ -289,6 +289,18 @@ the exception and its earlier-process refusal.
 
 ### 2.2 Shells are not constrained
 
+JJ copies request a reconstructive, provider-neutral repository-discovery
+ceiling. Literal, piped, PTY and service processes (including MCP servers) get `GIT_CEILING_DIRECTORIES` naming the workspace
+root's parent, including absolute Git, environment-aware gix callers
+(`discover_with_environment_overrides`), and Cargo packaging. This prevents
+accidental upward discovery of the launch
+checkout, not raw `gix::discover` in a custom binary, explicit repository
+access or hostile environment changes.
+Service ceilings override declared/secret environment, and login wrappers
+restore the ceiling after shell profiles. Profiles themselves remain trusted.
+The basename shims additionally refuse JJ-copy Git operations and repo-wide
+JJ mutations and inject immutability/secret-tracking policy (chapter 03 §12).
+
 Process tools receive a bounded environment and a process group, not a fence.
 The general process tool always requests destructive and network-capable
 authority, because an arbitrary executable can mutate the filesystem or use the
