@@ -9,6 +9,7 @@ use crate::runtime::compaction::fold::{
     build_compaction_success_fold, compact_diagnostic, nested_observation_token_upper_bound,
 };
 use crate::runtime::compaction::live::{CompactionStreamError, LiveCompaction};
+use crate::runtime::compaction::placeholder::harness_note_segment;
 use crate::runtime::compaction::record::{
     compaction_attempt_id, compaction_checkpoint_id, compaction_operation_component,
 };
@@ -53,14 +54,13 @@ use crate::{
 };
 use futures_util::StreamExt;
 use plakous_model::{
-    Actor, Clock, CompiledProviderConfiguration, ContentBlock, ContextHistoryPlan, ContextStatus,
-    ContextStatusKind, ConversationItem, ConversationView, Digest, DigestDomain,
-    HistorySegmentKind, LanguageModel, ModelCacheAffinity, ModelError, ModelErrorKind,
-    ModelErrorPhase, ModelEvent, ModelOperationRoot, ModelPreparationContext,
-    ModelPreparationError, ModelRequest, ModelResponse, ModelStreamItem, PreparedCallRecord,
-    PreparedModelCall, Provenance, ProviderCallRecoveryLocator, ProviderCallRecoveryLocatorStage,
-    RequestMetadata, SemanticCompactionCut, TextBlock, Timestamp, TurnId, Usage,
-    ValidatedRequestPlan, ValidationMode,
+    Clock, CompiledProviderConfiguration, ContextHistoryPlan, ContextStatus, ContextStatusKind,
+    ConversationItem, ConversationView, Digest, DigestDomain, LanguageModel, ModelCacheAffinity,
+    ModelError, ModelErrorKind, ModelErrorPhase, ModelEvent, ModelOperationRoot,
+    ModelPreparationContext, ModelPreparationError, ModelRequest, ModelResponse, ModelStreamItem,
+    PreparedCallRecord, PreparedModelCall, ProviderCallRecoveryLocator,
+    ProviderCallRecoveryLocatorStage, RequestMetadata, SemanticCompactionCut, Timestamp, TurnId,
+    Usage, ValidatedRequestPlan, ValidationMode,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -2870,34 +2870,13 @@ impl Driver {
             .as_ref()
             .and_then(|derive| derive(&source_history, &fold.history))
         {
-            let item = ConversationItem::new(
+            // Receipt validation rebuilds the note with the same constructor.
+            let segment = harness_note_segment(
                 self.entry_id()
                     .map_err(CompactionCompletionError::semantic)?,
-                Actor::User,
-                vec![ContentBlock::Text(TextBlock::new(note, None).map_err(
-                    |_| {
-                        CompactionCompletionError::semantic(AgentError::new(
-                            AgentErrorKind::Internal,
-                            "compaction note is invalid",
-                        ))
-                    },
-                )?)],
-                Provenance::Instruction,
+                note,
             )
-            .map_err(|_| {
-                CompactionCompletionError::semantic(AgentError::new(
-                    AgentErrorKind::Internal,
-                    "compaction note is invalid",
-                ))
-            })?;
-            let segment =
-                plakous_model::HistorySegment::new(HistorySegmentKind::Steering, vec![item])
-                    .map_err(|_| {
-                        CompactionCompletionError::semantic(AgentError::new(
-                            AgentErrorKind::Internal,
-                            "compaction note is invalid",
-                        ))
-                    })?;
+            .map_err(CompactionCompletionError::semantic)?;
             fold.history = fold.history.append(segment).map_err(|_| {
                 CompactionCompletionError::semantic(AgentError::new(
                     AgentErrorKind::Internal,

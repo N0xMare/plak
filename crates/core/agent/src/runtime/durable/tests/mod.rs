@@ -43,6 +43,7 @@ pub(super) mod landed_round_abandonment;
 mod long_turn_compaction;
 mod native_capacity_tests;
 mod native_tail_tests;
+mod note_receipt;
 mod observation_budget;
 mod process_notices;
 #[path = "../provider_outcome_tests.rs"]

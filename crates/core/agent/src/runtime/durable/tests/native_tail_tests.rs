@@ -26,6 +26,7 @@ async fn native_endpoint_compaction(
     summary_bytes: usize,
     operation_id: &'static str,
     recover: bool,
+    plan_note: Option<&'static str>,
 ) -> TestResult<NativeEndpointCompaction> {
     let directory = tempfile::tempdir()?;
     let workspace = Arc::new(WorkspacePolicy::host(directory.path(), ".")?);
@@ -45,11 +46,13 @@ async fn native_endpoint_compaction(
         true,
         LocalDurabilityDisposition::DurableRequired,
     )?;
+    let builder = builder.with_scheduled_compaction_enabled(false);
+    let builder = match plan_note {
+        Some(note) => builder.post_compaction_note(Arc::new(move |_, _| Some(note.to_owned()))),
+        None => builder,
+    };
     let agent = sessions
-        .create(
-            &format!("create:{operation_id}"),
-            builder.with_scheduled_compaction_enabled(false),
-        )
+        .create(&format!("create:{operation_id}"), builder)
         .await?;
     for turn in 0..bodies.len() {
         let result = agent
@@ -219,6 +222,7 @@ async fn native_successor_keeps_the_newest_batch_and_its_receipt_validates() -> 
         0,
         "compact:native-tail-kept",
         false,
+        None,
     )
     .await?;
     let source_stored = run.store.load_checkpoint(run.source.checkpoint_id).await?;
@@ -379,6 +383,7 @@ async fn protected_only_native_source_keeps_the_item_last() -> TestResult {
         0,
         "compact:native-tail-protected-only",
         false,
+        None,
     )
     .await?;
     let (segments, trailing) = run.published().await?;
@@ -404,6 +409,7 @@ async fn native_tail_that_does_not_shrink_falls_back_to_the_same_item() -> TestR
         10_000,
         "compact:native-tail-nonshrinking",
         false,
+        None,
     )
     .await?;
     let (segments, trailing) = run.published().await?;
@@ -421,6 +427,7 @@ async fn recovered_native_completion_publishes_the_same_tail() -> TestResult {
         0,
         "compact:native-tail-recovered",
         true,
+        None,
     )
     .await?;
     let (segments, trailing) = run.published().await?;
@@ -477,5 +484,71 @@ async fn mid_turn_native_successor_keeps_the_batch_and_the_continuation_note() -
         .count();
     assert_eq!(notes, 1, "one continuation note for the turn");
     agent.shutdown().await?;
+    Ok(())
+}
+
+/// A native successor that got a plan note is still a valid receipt for its
+/// operation, live and from a later process, and recovery answers from it
+/// without a provider call.
+#[tokio::test]
+async fn a_noted_native_successor_keeps_a_valid_receipt_across_reopen() -> TestResult {
+    const NOTE: &str = "restored plan: native receipt";
+    let run = native_endpoint_compaction(
+        376_000,
+        &[60_000, 2_000],
+        0,
+        "compact:native-noted",
+        false,
+        Some(NOTE),
+    )
+    .await?;
+    let (segments, _) = run.published().await?;
+    let last = segments.last().ok_or("empty successor")?;
+    assert_eq!(last.kind(), HistorySegmentKind::Steering);
+    assert!(matches!(
+        last.items().first().and_then(|item| item.blocks().first()),
+        Some(ContentBlock::Text(text)) if text.text() == NOTE
+    ));
+    run.assert_receipt_compacted().await?;
+    let NativeEndpointCompaction {
+        _directory: directory,
+        store,
+        agent,
+        source,
+        identity,
+        operation_id,
+        ..
+    } = run;
+    if let Some(agent) = agent {
+        agent.shutdown().await?;
+    }
+    let reopened = DurableSessionRuntime::current(
+        store.clone(),
+        RuntimeDurability::Required,
+        NonZeroU64::new(30).ok_or("lease")?,
+    )?;
+    let target = DurableSessionAddress::new(
+        source.session_id,
+        source.branch_id,
+        identity.success_checkpoint,
+    );
+    assert_eq!(
+        reopened.compaction_receipt(operation_id, source).await?,
+        DurableCompactionReceipt::Compacted { source, target }
+    );
+    let (builder, model) = placeholder_fixture(
+        Arc::new(WorkspacePolicy::host(directory.path(), ".")?),
+        381_000,
+        40_000,
+        &[],
+        &[],
+        true,
+        LocalDurabilityDisposition::DurableRequired,
+    )?;
+    assert_eq!(
+        Box::pin(reopened.recover_compaction(operation_id, source, builder)).await?,
+        DurableCompactionRecoveryOutcome::Compacted { source, target }
+    );
+    assert_eq!(model.paid_compaction_calls.load(Ordering::Acquire), 0);
     Ok(())
 }

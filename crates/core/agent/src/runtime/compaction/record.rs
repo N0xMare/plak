@@ -2,11 +2,13 @@
 
 use crate::runtime::OperationId;
 use crate::runtime::checkpoint::identity::{CheckpointCommitFacts, checkpoint_commit_identity};
+use crate::runtime::compaction::continuation::with_turn_continuation_note;
 use crate::runtime::compaction::fold::{
     NativeSuccessorShape, compaction_summary_segment, fold_compaction_success,
     fold_native_compaction_success, native_compaction_successor, reconstruct_compaction_cut,
     record_summarized_turns,
 };
+use crate::runtime::compaction::placeholder::harness_note_segment;
 use crate::runtime::compaction::{
     DurableCompactionIdentity, DurableCompactionPublicationEvidence, DurableCompactionRequestRecord,
 };
@@ -23,8 +25,8 @@ use crate::{
     RuntimeManifest, RuntimeWorkingRoot, SessionStoreError, SessionWorkflowId, StoredCheckpoint,
 };
 use plakous_model::{
-    AttemptId, Digest, DigestDomain, ModelCallRecoveryResult, ModelResponse, PreparedCallRecord,
-    ProviderCallRecoveryLocator,
+    AttemptId, CanonicalHistory, ContentBlock, Digest, DigestDomain, ModelCallRecoveryResult,
+    ModelResponse, PreparedCallRecord, ProviderCallRecoveryLocator,
 };
 
 /// Encodes exact operation evidence with a bounded encoded buffer.
@@ -457,7 +459,12 @@ pub(in crate::runtime) fn validate_compaction_receipt(
         if !manifest
             .jobs()
             .is_terminal_extension_of(previous_stored.checkpoint().manifest().jobs())
-            || manifest.canonical().history() != &expected.history
+            || !published_successor_ok(
+                manifest.canonical().history(),
+                &expected.history,
+                identity.workflow_id,
+                operations.request.turn_fence,
+            )
             || manifest.ledger() != &expected.ledger
             || manifest.canonical().context() != &expected.context
         {
@@ -506,6 +513,46 @@ pub(in crate::runtime) fn validate_compaction_receipt(
         }
     }
     Ok(())
+}
+
+/// Whether `published` is the fold's `successor` followed by nothing but what
+/// live publication appends to it: at most one post-compaction note and, after
+/// a turn-fence fold, the turn continuation note. A recovery-published fold
+/// appends neither.
+///
+/// The note's text comes from the builder's note function, which a receipt
+/// query does not have and which may change between builds, so the note is
+/// rebuilt from the entry and text its segment holds and accepted only when
+/// that rebuild is the whole segment.
+fn published_successor_ok(
+    published: &CanonicalHistory,
+    successor: &CanonicalHistory,
+    workflow_id: SessionWorkflowId,
+    turn_fence: bool,
+) -> bool {
+    let note = published
+        .segments()
+        .get(successor.segments().len())
+        .and_then(|segment| {
+            let [item] = segment.items() else {
+                return None;
+            };
+            let [ContentBlock::Text(text)] = item.blocks() else {
+                return None;
+            };
+            let rebuilt = harness_note_segment(item.id(), text.text().to_owned()).ok()?;
+            (rebuilt == *segment).then_some(rebuilt)
+        });
+    let noted = note.and_then(|note| successor.append(note).ok());
+    [Some(successor.clone()), noted]
+        .into_iter()
+        .flatten()
+        .any(|candidate| {
+            candidate == *published
+                || (turn_fence
+                    && with_turn_continuation_note(candidate, workflow_id)
+                        .is_ok_and(|continued| continued == *published))
+        })
 }
 
 fn provider_final_evidence_is_exact(

@@ -7241,7 +7241,15 @@ after input is not strictly smaller than its recorded before. A native receipt
 is accepted only when its successor is exactly one of the two source-derived
 shapes of §10.4, rebuilt from the source checkpoint and the recorded compaction
 item, with provenance, ledger and context recomputed from that shape; any other
-successor is corrupt.
+successor is corrupt. A success receipt's published history, harness or
+native, must be that recomputed successor followed by nothing but what
+publication appends to it (§10.2): at most one post-compaction note and, after
+a turn-fence fold, the turn continuation note. The note's text belongs to the
+builder's note function, which a receipt query does not have and which may
+change between builds, so validation rebuilds the note's steering segment from
+the entry and text it holds and accepts it only when that rebuild is the whole
+segment; the continuation note is recomputed exactly. Any other trailing
+segment is corrupt.
 
 **A failed paid fold falls to the placeholder rung with round backoff.** A definite
 paid-fold failure mid-turn changed nothing, so the ladder continues with the
