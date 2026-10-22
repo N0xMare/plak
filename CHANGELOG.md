@@ -83,6 +83,8 @@ one cross-build carrier (a build imports its own and the previous version).
   is not in its account's catalog clears `[root] agent` from `config.toml`;
   choose the model again.
 - Template `[env]` reaches only the `on_mint` hook, not tool calls.
+- Dormant jj copies are retained because coverage inspection is unavailable;
+  close or discard them explicitly.
 - An adopted candidate reports how many files landed, not which.
 - Responses prefix drift is not persisted and the producer is unnamed after
   reopen. Telemetry does not yet record wire bytes or per-kind event counts.
