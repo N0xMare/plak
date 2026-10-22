@@ -399,7 +399,7 @@ twelve-scenario smoke on each `full` row and on `api-openai`,
 and `or-qwen37` are best-effort light rows: a second provider outcome is
 recorded and does not block. Ids below are
 the `ROUTES` fields. Messages is planned only for
-`deepseek/deepseek-v4.1-flash`; every other OpenRouter row stays on Chat, the
+`deepseek/deepseek-v4.1-flash-1017`; every other OpenRouter row stays on Chat, the
 product default. `inclusionai/ling-3.0-flash-vl` and `qwen/qwen3.8-27b` are
 paid ids at informational depth.
 
@@ -418,8 +418,8 @@ paid ids at informational depth.
 | `claude-opus-low` | `claude` | `claude-opus-5-5` | low | light |
 | `claude-opus-medium` | `claude` | `claude-opus-5-5` | medium | light |
 | `claude-fable` | `claude` | `claude-fable-5-1` | low | light |
-| `deepseek` | `openrouter` | `deepseek/deepseek-v4.1-flash` | | full, Chat |
-| `deepseek-messages` | `openrouter` | `deepseek/deepseek-v4.1-flash` | | full, Messages |
+| `deepseek` | `openrouter` | `deepseek/deepseek-v4.1-flash-1017` | | full, Chat |
+| `deepseek-messages` | `openrouter` | `deepseek/deepseek-v4.1-flash-1017` | | full, Messages |
 | `or-mimo` | `openrouter` | `xiaomi/mimo-v2.6-flash` | | light |
 | `or-glm` | `openrouter` | `z-ai/glm-5.3-flash` | | light |
 | `or-qwen37` | `openrouter` | `qwen/qwen3.7-flash` | | light |

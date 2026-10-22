@@ -144,10 +144,10 @@ ROUTES = {
     "grok": _route("grok", "grok", "grok-4.7", "low", None, _GROK, FULL),
     "grok-46": _route("grok-46", "grok", "grok-4.6", "low", None, _GROK, LIGHT),
     "deepseek": _route(
-        "deepseek", "openrouter", "deepseek/deepseek-v4.1-flash", None, None,
+        "deepseek", "openrouter", "deepseek/deepseek-v4.1-flash-1017", None, None,
         _OR_CHAT, FULL),
     "deepseek-messages": _route(
-        "deepseek-messages", "openrouter", "deepseek/deepseek-v4.1-flash", None,
+        "deepseek-messages", "openrouter", "deepseek/deepseek-v4.1-flash-1017", None,
         "messages", _OR_MESSAGES, FULL),
     "or-mimo": _route(
         "or-mimo", "openrouter", "xiaomi/mimo-v2.6-flash", None, None, _OR_CHAT, LIGHT),

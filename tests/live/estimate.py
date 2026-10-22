@@ -256,8 +256,8 @@ def input_window(model: str) -> int:
     """Catalog input window used to pick the long-session growth band.
 
     Claude is 1,000,000. `grok-4.7` is 256,000 and `grok-4.6` is 500,000
-    (spec 01). Codex and OpenAI API rows are 272,000. `deepseek/deepseek-v4.1-flash`
-    is 1,048,576 from the 2026-10-08 catalog probe.
+    (spec 01). Codex and OpenAI API rows are 272,000.
+    `deepseek/deepseek-v4.1-flash-1017` is 1,048,576 in the OpenRouter catalog.
     """
     if model == "grok-4.7":
         return 256_000
@@ -267,7 +267,7 @@ def input_window(model: str) -> int:
         return 1_000_000
     if model.startswith("gpt-"):
         return 272_000
-    if model == "deepseek/deepseek-v4.1-flash":
+    if model == "deepseek/deepseek-v4.1-flash-1017":
         return 1_048_576
     raise EstimateError(f"no input window for {model}")
 

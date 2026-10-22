@@ -139,14 +139,14 @@ class EstimateTests(unittest.TestCase):
         self.assertNotIn("grok-4.7", report.unpriced_models)
 
     def test_openrouter_ceiling_warns_without_dropping_cells(self):
-        rates = {"deepseek/deepseek-v4.1-flash": estimate.Rate(
+        rates = {"deepseek/deepseek-v4.1-flash-1017": estimate.Rate(
             Decimal(1), Decimal(0), Decimal(0), Decimal(0))}
         assumptions = estimate.Assumptions(
             smoke_input_tokens=1_000_000, smoke_output_tokens=0,
             smoke_cache_share=Decimal(0), contingency=Decimal(0),
             openrouter_ceiling=Decimal("0.5"))
         cells = [
-            self.cell("deepseek", "deepseek/deepseek-v4.1-flash"),
+            self.cell("deepseek", "deepseek/deepseek-v4.1-flash-1017"),
             self.cell("codex", "gpt-6-luna", account="codex"),
         ]
         report = estimate.estimate_matrix(cells, rates, assumptions)
@@ -191,7 +191,7 @@ class EstimateTests(unittest.TestCase):
             return estimate.scaled_long_session(
                 total, estimate.input_window(model), assumptions.long_session_measured_window)
 
-        deepseek = "deepseek/deepseek-v4.1-flash"
+        deepseek = "deepseek/deepseek-v4.1-flash-1017"
         self.assertEqual(charge("deepseek").input_tokens, 750_415)
         self.assertEqual(charge("deepseek").output_tokens, 4_673)
         self.assertEqual(charge("deepseek").cached_input_tokens,
@@ -242,7 +242,7 @@ class EstimateTests(unittest.TestCase):
             self.assertEqual(code, 0)
             text = buffer.getvalue()
             self.assertIn("total 0.000000", text)
-            self.assertIn("deepseek/deepseek-v4.1-flash", text)
+            self.assertIn("deepseek/deepseek-v4.1-flash-1017", text)
             self.assertIn("api-openai-medium", text)
             self.assertIn("claude-haiku-5-5", text)
             self.assertIn("grok-4.7", text)
