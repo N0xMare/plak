@@ -2101,6 +2101,15 @@ async fn the_retry_budget_ends_on_the_last_failure_and_server_effects_are_not_re
             matches!(error, ResponsesAttemptError::HttpStatus { status: got, .. } if got == status)
         );
         assert_eq!(error.facts().physical_attempts(), sends, "HTTP {status}");
+        // The summary names the class the terminal is typed as, and a status
+        // that names no refusal keeps its point.
+        let summary = ledger.attempt_summary().to_string();
+        let last = match status {
+            StatusCode::TOO_MANY_REQUESTS => "last: rate limited",
+            StatusCode::BAD_GATEWAY => "last: unavailable",
+            _ => "last: after send",
+        };
+        assert!(summary.contains(last), "HTTP {status}: {summary}");
         assert!(ledger.is_logically_terminal());
         assert_eq!(peer.await??.len(), sends as usize, "HTTP {status}");
     }

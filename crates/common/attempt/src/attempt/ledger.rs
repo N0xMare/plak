@@ -268,6 +268,13 @@ impl PhysicalRequestLedger {
             .physical_attempts
             .checked_add(1)
             .ok_or(AttemptObservationError::PhysicalRequestCountOverflow)?;
+        // The summary's last classification describes the latest physical
+        // request; a new one starts unclassified until its own failure is
+        // recorded, so an earlier request's refusal never labels a later end.
+        state.summary = super::summary::AttemptSummary {
+            ride_out_physical: state.summary.ride_out_physical,
+            ..super::summary::AttemptSummary::default()
+        };
         state.active_request = Some(ActivePhysicalRequest {
             generation: state.physical_attempts,
             acceptance: ActiveRequestAcceptance::AwaitingAcceptance,
@@ -687,6 +694,33 @@ mod tests {
         assert_eq!(
             ledger.validate_auth(second, AuthReservationMask::PRIMARY),
             Err(AuthReservationError::AttemptNotAdmitted)
+        );
+    }
+
+    /// A refusal recorded for one physical request never labels a later one.
+    #[test]
+    fn a_new_physical_request_starts_its_summary_unclassified() {
+        let ledger = PhysicalRequestLedger::new(LedgerPolicy::OPENAI_STRICT);
+        ledger.admit_service().expect("admit");
+        ledger.physical_request_started().expect("start");
+        ledger
+            .physical_request_finished(PhysicalRequestOutcome::DefiniteRejection)
+            .expect("finish");
+        ledger.record_failure(
+            super::super::retry::FailurePoint::Refused,
+            Some("response_head"),
+            Some(super::super::terminal::ProviderRefusal::RateLimit),
+            false,
+            None,
+        );
+        assert_eq!(
+            ledger.attempt_summary().to_string(),
+            " [1 requests; last: rate limited]"
+        );
+        ledger.physical_request_started().expect("replay");
+        assert_eq!(
+            ledger.attempt_summary().to_string(),
+            " [2 requests; last: unclassified]"
         );
     }
 

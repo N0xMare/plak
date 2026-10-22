@@ -508,6 +508,19 @@ async fn execute<H: MessagesHttpHooks>(
                 let refused =
                     outcome == PhysicalRequestOutcome::DefiniteRejection && !head.provider_accepted;
                 attempt.observe_physical_request_finished(outcome)?;
+                // The status ends this request whether or not a retry follows;
+                // a retry evaluation overwrites it with its decision.
+                attempt.record_failure(
+                    if refused {
+                        FailurePoint::Refused
+                    } else {
+                        FailurePoint::AfterSend
+                    },
+                    Some(plakous_model::ModelRetryPhase::ResponseHead.as_str()),
+                    error.refusal(),
+                    false,
+                    None,
+                );
                 let step = if error.usage_limit() {
                     RetryStep::End
                 } else if status == StatusCode::UNAUTHORIZED

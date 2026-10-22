@@ -383,6 +383,19 @@ async fn execute<H: ChatHttpHooks>(
                     attempt.observe_physical_request_finished(head.outcome)?;
                     let refused = head.outcome == PhysicalRequestOutcome::DefiniteRejection
                         && !head.provider_accepted;
+                    // The status ends this request whether or not a retry
+                    // follows; a retry evaluation overwrites it with its decision.
+                    attempt.record_failure(
+                        if refused {
+                            FailurePoint::Refused
+                        } else {
+                            FailurePoint::AfterSend
+                        },
+                        Some(plakous_model::ModelRetryPhase::ResponseHead.as_str()),
+                        error.refusal(),
+                        false,
+                        None,
+                    );
                     let retryable = RetryPolicy::status_failure_point(status)
                         .filter(|_| !retry_disabled && !usage_limit)
                         .map(|point| {

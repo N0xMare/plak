@@ -29,6 +29,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["raw_value"] }
 tokio = { workspace = true, features = ["macros", "time"] }
 tower-service.workspace = true
+unicode-general-category.workspace = true
 
 [dev-dependencies]
 plakous-http = { workspace = true, features = ["fault-injection"] }

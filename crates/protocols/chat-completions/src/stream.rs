@@ -264,11 +264,18 @@ fn in_band_upstream(
     (!name.is_empty()).then_some(name)
 }
 
-/// Provider text without control characters, bounded and trimmed.
+/// Provider text without control or format characters (bidirectional
+/// overrides, zero-width marks), bounded and trimmed, so it cannot reorder or
+/// hide the operator text around it.
 fn bounded_in_band_text(raw: &str, limit: usize) -> String {
     let sanitized: String = raw
         .chars()
-        .filter(|ch| *ch == ' ' || !ch.is_control())
+        .filter(|ch| {
+            *ch == ' '
+                || !(ch.is_control()
+                    || unicode_general_category::get_general_category(*ch)
+                        == unicode_general_category::GeneralCategory::Format)
+        })
         .take(limit)
         .collect();
     sanitized.trim().to_owned()
@@ -3029,6 +3036,24 @@ mod tests {
             .expect_err("missing id");
         assert_eq!(violation.kind(), ChatStreamErrorKind::InvalidResponse);
         assert_eq!(violation.in_band_detail(), None);
+    }
+
+    /// Provider text cannot reorder or hide the operator text around it.
+    #[test]
+    fn in_band_text_drops_bidirectional_and_zero_width_format_characters() {
+        let error = projector()
+            .push(&data(&json!({
+                "error": {
+                    "code": 502,
+                    "message": "up\u{202E}stream\u{200B} failed\u{2066}",
+                    "metadata": {"provider_name": "\u{FEFF}Up\u{202D}stream\u{2069}"}
+                }
+            })))
+            .expect_err("in-band error");
+        assert_eq!(
+            error.in_band_detail(),
+            Some("HTTP 502 (unavailable) from Upstream: upstream failed")
+        );
     }
 
     /// The field shape behind this rule: an accepted OpenRouter stream of

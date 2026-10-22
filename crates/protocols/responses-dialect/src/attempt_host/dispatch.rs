@@ -293,6 +293,22 @@ where
             || provider
                 .as_ref()
                 .is_some_and(|error| error.class() == ResponsesProviderErrorClass::Quota);
+        // The status ends this request whether or not a retry follows; a
+        // retry evaluation overwrites it with its decision. Exhausted quota
+        // names no refusal class.
+        attempt.core.observations_ref().record_failure(
+            if outcome == PhysicalRequestOutcome::DefiniteRejection {
+                FailurePoint::Refused
+            } else {
+                FailurePoint::AfterSend
+            },
+            Some(plakous_model::ModelRetryPhase::ResponseHead.as_str()),
+            (class != ResponsesHttpStatusClass::Quota)
+                .then(|| plakous_attempt::ProviderRefusal::from_http_status(status.as_u16()))
+                .flatten(),
+            false,
+            None,
+        );
         return Err(ResponsesAttemptError::HttpStatus {
             physical: attempt.physical(),
             status,

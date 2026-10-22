@@ -1455,6 +1455,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower-service",
+ "unicode-general-category",
 ]
 
 [[package]]

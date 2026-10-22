@@ -4146,6 +4146,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
+ "unicode-general-category",
  "uuid",
 ]
 

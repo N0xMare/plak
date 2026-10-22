@@ -7953,8 +7953,12 @@ failure is a refusal the provider named — an HTTP status before the stream
 it — the last classification is that refusal's class instead of its
 point/phase: `rate limited`, `unavailable` or `timeout`, the classes the
 terminal is typed as (`RateLimited`, `Unavailable`, `Timeout`). Every kernel
-derives it from the typed retry cause, and the Chat kernel also records it for
-an in-band refusal no retry rule replays. The common
+derives it from the typed retry cause, records an HTTP error status with its
+point, phase and refusal whether or not a retry follows (exhausted quota names
+no refusal), and the Chat kernel also records an in-band refusal no retry rule
+replays. The last classification describes the latest physical request only:
+each new physical request starts unclassified, so an earlier request's refusal
+never labels a terminal that ended differently. The common
 attempt ledger holds these transient facts beside acceptance authority; the
 summary grants no replay authority. It is rendered into the existing sanitized
 ModelError message, not a new persisted field or export encoding. Zero-dispatch
@@ -8381,7 +8385,9 @@ that names no refusal); the upstream is the error's
 characters; the provider's message follows unless it only restates the status
 (`error code: 504`), and without a message its `type` label. With no status the
 provider's message is the whole account. The text is bounded and redacted like
-every provider diagnostic and never carries the upstream's raw body. `stream
+every provider diagnostic, drops control and Unicode format characters
+(bidirectional overrides, zero-width marks) from the upstream name and the
+message, and never carries the upstream's raw body. `stream
 validation failed` names only a stream that broke the Chat grammar.
 `ChatStreamError::in_band_detail` carries that account, without the
 sentence's framing, for exactly the provider-error class.

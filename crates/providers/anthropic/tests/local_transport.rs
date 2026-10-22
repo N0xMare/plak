@@ -2224,6 +2224,7 @@ async fn an_injected_529_reads_as_anthropics_own_overload() -> TestResult {
                     .as_ref()
                     .is_err_and(|error| error.message().contains("Overloaded"))
             }),
+            facts.summary().to_string(),
         ));
         if injected {
             assert!(!peer.is_finished(), "the injected 529 reached the peer");
@@ -2235,6 +2236,12 @@ async fn an_injected_529_reads_as_anthropics_own_overload() -> TestResult {
     assert_eq!(outcomes[0], outcomes[1]);
     assert_eq!(outcomes[0].0, Some(529));
     assert!(outcomes[0].3, "classified as Anthropic overload");
+    // The attempt summary names the class the terminal is typed as.
+    assert!(
+        outcomes[0].4.contains("last: unavailable"),
+        "{}",
+        outcomes[0].4
+    );
     Ok(())
 }
 

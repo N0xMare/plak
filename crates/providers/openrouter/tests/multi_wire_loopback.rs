@@ -1978,6 +1978,66 @@ async fn an_in_band_504_is_the_providers_timeout_with_its_status() -> TestResult
     Ok(())
 }
 
+/// A replay that ends on a status naming no refusal is summarized by that
+/// status, never by the rate limit an earlier request met.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_replay_ending_on_a_400_is_not_summarized_as_the_earlier_rate_limit() -> TestResult {
+    let mut replies = status_replies();
+    replies.push((
+        "429 Too Many Requests",
+        "application/json",
+        "{\"error\":{\"code\":429,\"message\":\"Rate limit exceeded\"}}".to_owned(),
+        "x-request-id: req-limited\r\nretry-after: 0\r\n",
+    ));
+    replies.push((
+        "400 Bad Request",
+        "application/json",
+        "{\"error\":{\"code\":400,\"message\":\"Invalid request\"}}".to_owned(),
+        "x-request-id: req-invalid\r\n",
+    ));
+    let (client, origin, peer) =
+        loopback_with_status(b"openrouter-replay-ends-400-v1", replies).await?;
+    let chat = discovered_chat_model(client, origin).await?;
+    let workspace_dir = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(workspace_dir.path(), ".")?);
+    let agent = AgentBuilder::new(chat, ToolRegistryBuilder::default().freeze(), workspace)
+        .request_policy(
+            AgentRequestPolicy::default()
+                .with_generation_limits(GenerationLimits::new(NonZeroU32::new(64), Vec::new())?),
+        )
+        .identity_sources(
+            Arc::new(review_clock()),
+            Arc::new(SequenceIdGenerator::new(
+                (100_u128..=400).map(Uuid::from_u128),
+            )?),
+        )
+        .build()?;
+
+    let result = agent.prompt("hello").await?.result().await?;
+    let error = result
+        .error()
+        .ok_or("failed turn error")?
+        .model_error()
+        .ok_or("model error")?;
+    assert_ne!(error.kind(), ModelErrorKind::RateLimited);
+    assert_eq!(
+        error
+            .context()
+            .and_then(plakous_model::ModelErrorContext::http_status)
+            .map(plakous_model::ModelHttpStatus::get),
+        Some(400)
+    );
+    assert!(
+        error.message().ends_with("[2 requests; last: after send]"),
+        "{}",
+        error.message()
+    );
+
+    agent.shutdown().await?;
+    assert_eq!(timeout(Duration::from_secs(5), peer).await???.len(), 4);
+    Ok(())
+}
+
 /// A gateway that refuses before the stream reads the same way.
 ///
 /// `520` through `527` are the statuses an edge invents for an upstream it
