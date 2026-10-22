@@ -9,6 +9,32 @@ use super::{
 
 const KIND: &str = "workspace_reclamation";
 
+#[derive(Clone, Debug)]
+pub(super) struct ReclaimBackoff {
+    generation: u64,
+    failures: u32,
+    next_at: u64,
+    detail: String,
+}
+
+impl ReclaimBackoff {
+    fn failed(previous: Option<&Self>, generation: u64, now: u64, detail: String) -> Self {
+        let failures = previous
+            .filter(|prior| prior.generation == generation)
+            .map_or(0, |prior| prior.failures)
+            .saturating_add(1);
+        let delay = 30_000_u64
+            .saturating_mul(1_u64 << failures.saturating_sub(1).min(7))
+            .min(3_600_000);
+        Self {
+            generation,
+            failures,
+            next_at: now.saturating_add(delay),
+            detail,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 enum Phase {
     Sealing,
@@ -54,6 +80,8 @@ pub(crate) struct DormancyTicket {
     namespace: String,
     copy_id: String,
     reference_id: String,
+    trim_target: bool,
+    trim_outcome: Option<TrimOutcome>,
 }
 
 #[derive(Debug)]
@@ -63,14 +91,52 @@ pub(crate) enum DormancyAnswer {
     Restored(MintedCopy),
 }
 
+#[derive(Clone, Copy, Debug)]
+enum TrimOutcome {
+    Trimmed,
+    Retained,
+    Refused,
+}
+
+impl TrimOutcome {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Trimmed => "trimmed",
+            Self::Retained => "retained",
+            Self::Refused => "refused",
+        }
+    }
+}
+
 impl DormancyTicket {
-    pub(crate) fn run(&self, vcs: &dyn VcsOps, launch: &Path) -> Result<DormancyAnswer, VcsError> {
-        match self.evidence.phase {
-            Phase::Sealing => {
-                vcs.check_reclaimable(&self.workspace.path, None)?;
-                vcs.seal(&self.workspace.path, &self.namespace, &self.reference_id)
-                    .map(DormancyAnswer::Sealed)
+    pub(crate) fn run(
+        &mut self,
+        vcs: &dyn VcsOps,
+        launch: &Path,
+    ) -> Result<DormancyAnswer, VcsError> {
+        if self.evidence.phase == Phase::Sealing
+            && let Err(error) = vcs.check_reclaimable(&self.workspace.path, None)
+        {
+            if self.trim_target
+                && error.reclamation_refusal
+                    == Some(plakous_workspace::occupancy_vcs::ReclamationRefusal::StaticCoverage)
+            {
+                self.trim_outcome = Some(match vcs.trim_disposable_target(&self.workspace.path) {
+                    Ok(true) => TrimOutcome::Trimmed,
+                    Ok(false) => TrimOutcome::Retained,
+                    Err(_) => TrimOutcome::Refused,
+                });
             }
+            return Err(error);
+        }
+        self.run_step(vcs, launch)
+    }
+
+    fn run_step(&self, vcs: &dyn VcsOps, launch: &Path) -> Result<DormancyAnswer, VcsError> {
+        match self.evidence.phase {
+            Phase::Sealing => vcs
+                .seal(&self.workspace.path, &self.namespace, &self.reference_id)
+                .map(DormancyAnswer::Sealed),
             Phase::Removing => {
                 if self.workspace.path.exists() {
                     let snapshot = self
@@ -226,6 +292,7 @@ impl ProductAgentTree {
         &mut self,
         workspace: &str,
         evidence: Reclamation,
+        trim_target: bool,
     ) -> Result<(), TopologyError> {
         if !self.removals_in_flight.insert(workspace.into()) {
             return Ok(());
@@ -243,6 +310,8 @@ impl ProductAgentTree {
             namespace: digest_text(&self.tree_id),
             workspace: row,
             evidence,
+            trim_target,
+            trim_outcome: None,
         });
         Ok(())
     }
@@ -258,19 +327,47 @@ impl ProductAgentTree {
             .ok_or_else(reclamation_corrupt)
     }
 
-    /// Pure checkout inventory for the host's unlocked disk-pressure probe.
-    #[must_use]
-    pub fn dormant_checkouts(&self) -> Vec<(String, PathBuf)> {
+    pub(crate) fn reclamation_retry_at(&self, workspace: &str) -> u64 {
+        self.reclaim_backoff
+            .get(workspace)
+            .filter(|retry| {
+                self.workspaces
+                    .get(workspace)
+                    .is_some_and(|row| row.generation == retry.generation)
+            })
+            .map_or(0, |retry| retry.next_at)
+    }
+
+    pub(crate) fn reset_reclamation_backoff(&mut self, agent: &str) {
+        if let Some(node) = self.nodes.get(agent) {
+            self.reclaim_backoff.remove(&node.workspace_id);
+        }
+    }
+
+    pub(crate) fn checkout_size_probes(&self) -> Vec<(String, PathBuf, u64, u64, u64)> {
         self.workspaces
             .values()
             .filter(|row| {
                 row.mode != WorkspaceMode::Inherit
                     && matches!(
                         row.status,
-                        WorkspaceStatus::Active | WorkspaceStatus::Adopted
+                        WorkspaceStatus::Active
+                            | WorkspaceStatus::Adopted
+                            | WorkspaceStatus::Discarding
                     )
             })
-            .map(|row| (row.workspace_id.clone(), row.path.clone()))
+            .map(|row| {
+                (
+                    row.workspace_id.clone(),
+                    row.path.clone(),
+                    row.generation,
+                    self.reclamation_retry_at(&row.workspace_id),
+                    self.reclaim_trim_epochs
+                        .get(&row.workspace_id)
+                        .copied()
+                        .unwrap_or(0),
+                )
+            })
             .collect()
     }
 
@@ -281,6 +378,8 @@ impl ProductAgentTree {
         now: u64,
         sizes: &BTreeMap<String, u64>,
     ) -> Result<Vec<String>, TopologyError> {
+        let over_budget = sizes.values().copied().fold(0_u64, u64::saturating_add)
+            > u64::from(self.snapshot.workspace_budget_mib) * 1024 * 1024;
         let pending: Vec<_> = self
             .workspaces
             .keys()
@@ -295,8 +394,8 @@ impl ProductAgentTree {
             })
             .collect();
         for (id, evidence) in pending {
-            if self.reclamation_quiescent(&id) {
-                self.queue_reclamation(&id, evidence)?;
+            if now >= self.reclamation_retry_at(&id) && self.reclamation_quiescent(&id) {
+                self.queue_reclamation(&id, evidence, over_budget)?;
             }
         }
         let mut eligible: Vec<_> = self
@@ -344,6 +443,9 @@ impl ProductAgentTree {
         let mut total: u64 = sizes.values().copied().fold(0, u64::saturating_add);
         let budget = u64::from(self.snapshot.workspace_budget_mib) * 1024 * 1024;
         for (ended, id) in eligible {
+            if now < self.reclamation_retry_at(&id) {
+                continue;
+            }
             if now.saturating_sub(ended) < u64::from(self.snapshot.workspace_idle_seconds) * 1000
                 && total <= budget
             {
@@ -364,7 +466,7 @@ impl ProductAgentTree {
                 .get_mut(&id)
                 .ok_or_else(reclamation_corrupt)?
                 .status = WorkspaceStatus::Discarding;
-            self.queue_reclamation(&id, evidence)?;
+            self.queue_reclamation(&id, evidence, over_budget)?;
             total = total.saturating_sub(sizes.get(&id).copied().unwrap_or(0));
         }
         Ok(self
@@ -422,13 +524,22 @@ impl ProductAgentTree {
             .get_mut(&id)
             .ok_or_else(reclamation_corrupt)?
             .status = WorkspaceStatus::Discarding;
-        self.queue_reclamation(&id, evidence)
+        self.queue_reclamation(&id, evidence, false)
     }
 
     pub(super) fn complete_dormancy(
         &mut self,
         ticket: DormancyTicket,
         answer: Result<DormancyAnswer, VcsError>,
+    ) -> Result<(), TopologyError> {
+        self.complete_dormancy_at(ticket, answer, now_unix_millis())
+    }
+
+    fn complete_dormancy_at(
+        &mut self,
+        ticket: DormancyTicket,
+        answer: Result<DormancyAnswer, VcsError>,
+        now: u64,
     ) -> Result<(), TopologyError> {
         let id = &ticket.workspace.workspace_id;
         self.removals_in_flight.remove(id);
@@ -451,6 +562,14 @@ impl ProductAgentTree {
                     evidence.generation
                 ),
             ));
+        }
+        if let Some(outcome) = ticket.trim_outcome {
+            if matches!(outcome, TrimOutcome::Trimmed | TrimOutcome::Refused) {
+                let epoch = self.reclaim_trim_epochs.entry(id.clone()).or_default();
+                *epoch = epoch.saturating_add(1);
+            }
+            tracing::info!(target: "plak.workspace", workspace_id = %id,
+                result = outcome.as_str(), refusal_class = "static_coverage", "workspace target trim");
         }
         match answer {
             Ok(DormancyAnswer::Sealed(snapshot)) => {
@@ -496,9 +615,10 @@ impl ProductAgentTree {
                 evidence.change_id = snapshot.change_id;
                 evidence.phase = Phase::Removing;
                 self.write_reclamation(id, &evidence)?;
-                self.queue_reclamation(id, evidence)?;
+                self.queue_reclamation(id, evidence, ticket.trim_target)?;
             }
             Ok(DormancyAnswer::Removed) => {
+                self.reclaim_backoff.remove(id);
                 evidence.phase = Phase::Reclaimed;
                 self.workspaces
                     .get_mut(id)
@@ -513,6 +633,7 @@ impl ProductAgentTree {
                 {
                     return Err(reclamation_corrupt());
                 }
+                self.reclaim_backoff.remove(id);
                 evidence.phase = Phase::Present;
                 let row = self
                     .workspaces
@@ -523,6 +644,16 @@ impl ProductAgentTree {
                 self.write_reclamation(id, &evidence)?;
             }
             Err(error) => {
+                let previous_generation = self
+                    .workspaces
+                    .get(id)
+                    .ok_or_else(reclamation_corrupt)?
+                    .generation;
+                let previous = self
+                    .reclaim_backoff
+                    .get(id)
+                    .filter(|prior| prior.generation == previous_generation)
+                    .cloned();
                 // A refused seal deletes nothing. Failed removal retains its
                 // durable seal and retry intent; failed mint retains its pin.
                 match evidence.phase {
@@ -552,10 +683,32 @@ impl ProductAgentTree {
                     _ => {}
                 }
                 self.write_reclamation(id, &evidence)?;
-                self.record_fault(&ticket.agent_id, error.detail);
+                let detail: String = error
+                    .detail
+                    .chars()
+                    .filter(|ch| !ch.is_control())
+                    .take(512)
+                    .collect();
+                let generation = self
+                    .workspaces
+                    .get(id)
+                    .ok_or_else(reclamation_corrupt)?
+                    .generation;
+                let prior = previous.as_ref();
+                if prior.is_none_or(|retry| retry.detail != detail) {
+                    tracing::warn!(target: "plak.workspace", workspace_id = %id, %detail,
+                        "workspace reclamation refused; checkout and sealed work retained");
+                }
+                let mut retry =
+                    ReclaimBackoff::failed(prior, previous_generation, now, detail.clone());
+                retry.generation = generation;
+                self.reclaim_backoff.insert(id.clone(), retry);
+                self.record_fault(&ticket.agent_id, detail.clone());
                 return Err(TopologyError::new(
                     TopologyErrorCode::WorkspaceRecoveryRequired,
-                    "workspace reclamation refused; checkout and sealed work retained",
+                    format!(
+                        "workspace reclamation refused; checkout and sealed work retained: {detail}"
+                    ),
                 ));
             }
         }
@@ -653,6 +806,185 @@ pub(super) mod tests {
         tree.acknowledge_wait_mail("root", &result);
         tree.mark_wait_delivered("root", &result);
         (repo, tree, child, path)
+    }
+
+    #[test]
+    fn refused_reclamation_backs_off_per_copy_and_resets_on_generation_change() {
+        let (_repo, mut tree, child, _path) = finished();
+        let workspace = tree.node(&child).unwrap().workspace_id.clone();
+        tree.reclaim_dormant(u64::MAX, &BTreeMap::new()).unwrap();
+        let ticket = tree.take_effects().dormancy.pop().unwrap();
+        tree.complete_dormancy_at(
+            ticket,
+            Err(VcsError::mint_unavailable("ignored content retained")),
+            0,
+        )
+        .unwrap_err();
+        let mut now = 0;
+        for delay in [
+            30_000, 60_000, 120_000, 240_000, 480_000, 960_000, 1_920_000, 3_600_000, 3_600_000,
+        ] {
+            let next = now + delay;
+            assert_eq!(tree.reclamation_retry_at(&workspace), next);
+            tree.reclaim_dormant(next - 1, &BTreeMap::new()).unwrap();
+            assert!(tree.take_effects().dormancy.is_empty());
+            // Pressure makes this test independent of the real attempt end time.
+            let sizes = BTreeMap::from([(workspace.clone(), u64::MAX)]);
+            tree.reclaim_dormant(next, &sizes).unwrap();
+            let ticket = tree.take_effects().dormancy.pop().unwrap();
+            tree.complete_dormancy_at(
+                ticket,
+                Err(VcsError::mint_unavailable("ignored content retained")),
+                next,
+            )
+            .unwrap_err();
+            now = next;
+        }
+        tree.workspaces.get_mut(&workspace).unwrap().generation += 1;
+        assert_eq!(tree.reclamation_retry_at(&workspace), 0);
+        tree.reset_reclamation_backoff(&child);
+        assert!(!tree.reclaim_backoff.contains_key(&workspace));
+    }
+
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    struct Warnings(Arc<AtomicUsize>);
+    impl tracing::Subscriber for Warnings {
+        fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+            metadata.target() == "plak.workspace" && *metadata.level() == tracing::Level::WARN
+        }
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+        fn event(&self, _: &tracing::Event<'_>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+        fn enter(&self, _: &tracing::span::Id) {}
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+    #[test]
+    fn refusal_detail_is_logged_only_when_it_changes() {
+        let (_repo, mut tree, child, _path) = finished();
+        let warnings = Arc::new(AtomicUsize::new(0));
+        tracing::subscriber::with_default(Warnings(Arc::clone(&warnings)), || {
+            for (now, detail) in [
+                (0, "first refusal"),
+                (30_000, "first refusal"),
+                (90_000, "changed refusal"),
+            ] {
+                tree.reclaim_dormant(u64::MAX, &BTreeMap::new()).unwrap();
+                let ticket = tree.take_effects().dormancy.pop().unwrap();
+                let error = tree
+                    .complete_dormancy_at(ticket, Err(VcsError::mint_unavailable(detail)), now)
+                    .unwrap_err();
+                assert!(error.message.contains(detail));
+            }
+        });
+        assert_eq!(warnings.load(Ordering::Relaxed), 2);
+        let workspace = tree.node(&child).unwrap().workspace_id.clone();
+        tree.discard_workspace(
+            "root",
+            &super::super::WorkspaceIdRequest {
+                workspace_id: workspace.clone(),
+            },
+            None,
+        )
+        .unwrap();
+        assert!(!tree.reclaim_backoff.contains_key(&workspace));
+    }
+
+    #[test]
+    fn removal_refusal_backoff_survives_resealing_and_internal_generation_bumps() {
+        let (_repo, mut tree, child, _path) = finished();
+        let workspace = tree.node(&child).unwrap().workspace_id.clone();
+        let warnings = Arc::new(AtomicUsize::new(0));
+        tracing::subscriber::with_default(Warnings(Arc::clone(&warnings)), || {
+            for (now, delay) in [(0, 30_000), (30_000, 60_000), (90_000, 120_000)] {
+                tree.reclaim_dormant(u64::MAX, &BTreeMap::new()).unwrap();
+                let mut seal = tree.take_effects().dormancy.pop().unwrap();
+                let result = seal.run(tree.vcs(), &tree.launch_checkout);
+                assert!(matches!(result, Ok(DormancyAnswer::Sealed(_))));
+                tree.complete_dormancy_at(seal, result, now).unwrap();
+                let removal = tree.take_effects().dormancy.pop().unwrap();
+                tree.complete_dormancy_at(
+                    removal,
+                    Err(VcsError::mint_unavailable(
+                        "workspace changed after sealing",
+                    )),
+                    now,
+                )
+                .unwrap_err();
+                assert_eq!(tree.reclamation_retry_at(&workspace), now + delay);
+            }
+        });
+        assert_eq!(warnings.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn target_is_retained_after_post_seal_change_or_operational_seal_failure() {
+        let (repo, mut tree, _child, path) = finished();
+        std::fs::write(path.join(".gitignore"), "target/\n").unwrap();
+        std::fs::create_dir(path.join("target")).unwrap();
+        std::fs::write(path.join("target/cache"), "disposable").unwrap();
+        tree.reclaim_dormant(u64::MAX, &BTreeMap::new()).unwrap();
+        let mut seal = tree.take_effects().dormancy.pop().unwrap();
+        seal.trim_target = true;
+        let reference =
+            plakous_workspace::occupancy_vcs::candidate_ref(&seal.namespace, &seal.reference_id);
+        let lock = repo.path().join(".git").join(format!("{reference}.lock"));
+        std::fs::create_dir_all(lock.parent().unwrap()).unwrap();
+        std::fs::write(&lock, "synthetic lock").unwrap();
+        assert!(seal.run(tree.vcs(), &tree.launch_checkout).is_err());
+        assert!(seal.trim_outcome.is_none());
+        assert!(path.join("target/cache").exists());
+        std::fs::remove_file(lock).unwrap();
+        let result = seal.run(tree.vcs(), &tree.launch_checkout);
+        tree.complete_dormancy_at(seal, result, 0).unwrap();
+        let mut removal = tree.take_effects().dormancy.pop().unwrap();
+        std::fs::write(path.join("WORK.txt"), "concurrent change").unwrap();
+        let error = removal.run(tree.vcs(), &tree.launch_checkout).unwrap_err();
+        assert_eq!(
+            error.reclamation_refusal,
+            Some(plakous_workspace::occupancy_vcs::ReclamationRefusal::ChangedAfterSeal)
+        );
+        assert!(removal.trim_outcome.is_none());
+        assert!(path.join("target/cache").exists());
+    }
+
+    #[test]
+    fn over_budget_retained_copy_trims_target_without_touching_the_refusal() {
+        let (_repo, mut tree, child, path) = finished();
+        std::fs::write(path.join(".gitignore"), "target/\n").unwrap();
+        std::fs::write(path.join(".env"), "synthetic retained content").unwrap();
+        std::fs::create_dir(path.join("target")).unwrap();
+        std::fs::write(path.join("target/cache"), "disposable").unwrap();
+        let workspace = tree.node(&child).unwrap().workspace_id.clone();
+        tree.reclaim_dormant(u64::MAX, &BTreeMap::from([(workspace.clone(), u64::MAX)]))
+            .unwrap();
+        let mut ticket = tree.take_effects().dormancy.pop().unwrap();
+        let answer = ticket.run(tree.vcs(), &tree.launch_checkout);
+        assert!(answer.is_err());
+        assert!(path.join(".env").exists());
+        assert!(!path.join("target").exists());
+        tree.complete_dormancy_at(ticket, answer, 0).unwrap_err();
+        assert_eq!(tree.reclamation_retry_at(&workspace), 30_000);
+        assert_eq!(tree.reclaim_trim_epochs.get(&workspace), Some(&1));
+    }
+
+    #[test]
+    fn target_trim_is_only_enabled_for_an_over_budget_intent() {
+        for over_budget in [false, true] {
+            let (_repo, mut tree, child, _path) = finished();
+            let workspace = tree.node(&child).unwrap().workspace_id.clone();
+            let sizes = BTreeMap::from([(workspace, if over_budget { u64::MAX } else { 0 })]);
+            tree.reclaim_dormant(u64::MAX, &sizes).unwrap();
+            let ticket = tree.take_effects().dormancy.pop().unwrap();
+            assert_eq!(ticket.trim_target, over_budget);
+        }
     }
 
     #[test]

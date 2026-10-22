@@ -2095,6 +2095,9 @@ configures the OTLP exporter in a build that has the `otel` feature. A
 `maintainer` build always writes that log, at `info` when `PLAK_LOG` is unset.
 Installing the log creates the private home and `logs/` only. It does not create
 `state/<key>/`.
+
+Workspace maintenance follows chapter 03 §6.6.
+
 After diagnostics initialize, startup emits one `INFO` event at `plak.start`
 with only `binary` (the same 12-hex build id as `plak version`), `state_key`
 and `command` (the normalized top-level verb), skipped if the build id is unavailable;

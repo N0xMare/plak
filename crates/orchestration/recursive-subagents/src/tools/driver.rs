@@ -27,9 +27,68 @@ pub struct TreeDriver {
     retirement_recovery: Arc<Mutex<Option<RetirementRecovery>>>,
     pub(super) observer: Option<Arc<dyn TopologyObserver>>,
     next_reclaim_probe: Arc<Mutex<u64>>,
+    checkout_sizes: Arc<Mutex<std::collections::BTreeMap<String, CheckoutSize>>>,
 }
 
 type RetirementRecovery = Arc<dyn Fn() + Send + Sync>;
+
+struct CheckoutSize {
+    generation: u64,
+    trim_epoch: u64,
+    path: std::path::PathBuf,
+    measured_at: u64,
+    bytes: u64,
+}
+
+impl CheckoutSize {
+    fn reusable(
+        &self,
+        path: &std::path::Path,
+        generation: u64,
+        now: u64,
+        retry_at: u64,
+        trim_epoch: u64,
+    ) -> bool {
+        self.path == path
+            && self.generation == generation
+            && self.trim_epoch == trim_epoch
+            && (now < retry_at || now.saturating_sub(self.measured_at) < 30_000)
+    }
+}
+
+fn probe_checkout_sizes(
+    cache: &mut std::collections::BTreeMap<String, CheckoutSize>,
+    inventory: Vec<(String, std::path::PathBuf, u64, u64, u64)>,
+    now: u64,
+    mut walk: impl FnMut(&std::path::Path) -> std::io::Result<u64>,
+) -> std::collections::BTreeMap<String, u64> {
+    cache.retain(|id, _| inventory.iter().any(|(current, ..)| current == id));
+    let mut sizes = std::collections::BTreeMap::new();
+    for (id, path, generation, retry_at, trim_epoch) in inventory {
+        if !cache
+            .get(&id)
+            .is_some_and(|size| size.reusable(&path, generation, now, retry_at, trim_epoch))
+        {
+            let Ok(bytes) = walk(&path) else {
+                continue;
+            };
+            cache.insert(
+                id.clone(),
+                CheckoutSize {
+                    generation,
+                    trim_epoch,
+                    path,
+                    measured_at: now,
+                    bytes,
+                },
+            );
+        }
+        if let Some(size) = cache.get(&id) {
+            sizes.insert(id, size.bytes);
+        }
+    }
+    sizes
+}
 
 fn directory_bytes(path: &std::path::Path) -> std::io::Result<u64> {
     let metadata = std::fs::symlink_metadata(path)?;
@@ -64,6 +123,7 @@ impl TreeDriver {
             retirement_recovery: Arc::new(Mutex::new(None)),
             observer,
             next_reclaim_probe: Arc::new(Mutex::new(0)),
+            checkout_sizes: Arc::new(Mutex::new(std::collections::BTreeMap::new())),
         }
     }
 
@@ -82,21 +142,23 @@ impl TreeDriver {
             }
             *next = now.saturating_add(u64::from(delay.min(30)) * 1000);
         }
-        let inventory = self.read(ProductAgentTree::dormant_checkouts)?;
+        let inventory = self.read(ProductAgentTree::checkout_size_probes)?;
+        let cache = Arc::clone(&self.checkout_sizes);
         let sizes = tokio::task::spawn_blocking(move || {
-            inventory
-                .into_iter()
-                .filter_map(|(id, path)| directory_bytes(&path).ok().map(|bytes| (id, bytes)))
-                .collect::<std::collections::BTreeMap<_, _>>()
+            let mut cache = cache.lock().map_err(|_| Self::lock_poisoned())?;
+            let sizes = probe_checkout_sizes(&mut cache, inventory, now, directory_bytes);
+            Ok::<_, TopologyError>(sizes)
         })
         .await
-        .map_err(|_| Self::lock_poisoned())?;
+        .map_err(|_| Self::lock_poisoned())??;
         let (owners, effects) = self.mutate(|tree| {
             let snapshot = tree.clone();
-            match tree
-                .reclaim_dormant(now, &sizes)
-                .and_then(|owners| self.save(tree).map(|()| owners))
-            {
+            match tree.reclaim_dormant(now, &sizes).and_then(|owners| {
+                if tree.revision != tree.stored_revision || !owners.is_empty() {
+                    self.save(tree)?;
+                }
+                Ok(owners)
+            }) {
                 Ok(owners) => Ok(owners),
                 Err(error) => {
                     *tree = snapshot;
@@ -661,5 +723,60 @@ pub(super) fn driver_for_tree(
         Err(TreeRuntimeError::new(format!(
             "topology tree {tree_id} is not attached to the hub; no store to persist it"
         )))
+    }
+}
+
+#[cfg(test)]
+mod reclamation_probe_tests {
+    use super::*;
+
+    #[test]
+    fn successful_trim_invalidates_size_inside_backoff_and_clears_budget_pressure() {
+        let mut cache = std::collections::BTreeMap::new();
+        let path = std::path::PathBuf::from("synthetic-copy");
+        let mut walks = 0;
+        let mut probe = |epoch, now, bytes| {
+            probe_checkout_sizes(
+                &mut cache,
+                vec![("workspace".into(), path.clone(), 1, 3_600_000, epoch)],
+                now,
+                |_| {
+                    walks += 1;
+                    Ok(bytes)
+                },
+            )
+        };
+        let before = probe(0, 0, 2048);
+        assert!(before.values().sum::<u64>() > 1024);
+        let after = probe(1, 1, 128);
+        assert!(after.values().sum::<u64>() < 1024);
+        assert_eq!(walks, 2);
+    }
+
+    #[test]
+    fn size_walk_is_cached_through_backoff_but_invalidated_by_generation() {
+        let mut cache = std::collections::BTreeMap::new();
+        let path = std::path::PathBuf::from("synthetic-copy");
+        let mut walks = 0;
+        for (now, generation, retry_at) in [
+            (0, 1, 0),
+            (29_999, 1, 0),
+            (30_000, 1, 90_000),
+            (89_999, 1, 90_000),
+            (90_000, 1, 90_000),
+            (90_001, 2, 0),
+        ] {
+            let sizes = probe_checkout_sizes(
+                &mut cache,
+                vec![("workspace".into(), path.clone(), generation, retry_at, 0)],
+                now,
+                |_| {
+                    walks += 1;
+                    Ok(123)
+                },
+            );
+            assert_eq!(sizes.get("workspace"), Some(&123));
+        }
+        assert_eq!(walks, 3);
     }
 }

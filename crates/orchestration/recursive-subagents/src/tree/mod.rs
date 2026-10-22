@@ -1171,7 +1171,7 @@ impl Effects {
         let dormancy = self
             .dormancy
             .into_iter()
-            .map(|ticket| {
+            .map(|mut ticket| {
                 let answer = ticket.run(vcs, &self.launch_checkout);
                 (ticket, answer)
             })
@@ -1409,6 +1409,9 @@ pub struct ProductAgentTree {
     /// canvas and the caller's tool result; never persisted and never
     /// recovery authority.
     fault_reasons: BTreeMap<String, String>,
+    /// Process-local automatic reclamation pacing; never recovery authority.
+    reclaim_backoff: BTreeMap<String, dormancy::ReclaimBackoff>,
+    reclaim_trim_epochs: BTreeMap<String, u64>,
     /// Failure kind for the next materialization failure of a node, set by the
     /// turn driver when it knows a better label than the generic one.
     /// Every conflicting path of an adopt that refused with `merge_conflict`,
@@ -1659,6 +1662,8 @@ impl ProductAgentTree {
             prune_failed: BTreeSet::new(),
             removals_in_flight: BTreeSet::new(),
             fault_reasons: BTreeMap::new(),
+            reclaim_backoff: BTreeMap::new(),
+            reclaim_trim_epochs: BTreeMap::new(),
             adopt_conflicts: BTreeMap::new(),
             terminal_recovery: BTreeMap::new(),
             max_attempts: DEFAULT_TREE_ATTEMPTS,
@@ -2128,6 +2133,8 @@ impl ProductAgentTree {
             prune_failed: BTreeSet::new(),
             removals_in_flight: BTreeSet::new(),
             fault_reasons: BTreeMap::new(),
+            reclaim_backoff: BTreeMap::new(),
+            reclaim_trim_epochs: BTreeMap::new(),
             adopt_conflicts: BTreeMap::new(),
             terminal_recovery: BTreeMap::new(),
             max_attempts: MAX_TREE_ATTEMPTS,

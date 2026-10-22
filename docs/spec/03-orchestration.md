@@ -1526,6 +1526,32 @@ versions and any uncertain inspection retain the entire checkout. The local
 `target/` cache and exact minted process fences are disposable. JJ coverage
 inspection is currently unavailable, so JJ copies are conservatively retained.
 
+A refused automatic reclamation backs off independently per workspace: 30 seconds,
+doubling to a one-hour cap. The process-local retry state resets on an external generation
+change, follow-up, explicit discard or terminal lifecycle success (removal or
+restoration), not an intermediate seal or reclamation's own generation bump. Size probes
+cache a copy's walk for 30 seconds and reuse it throughout a refusal's backoff;
+a changed generation, path or trim-result epoch invalidates the cache, even
+during backoff. A bounded `plak.workspace` INFO records each trim attempt's
+closed result and refusal class. VCS refusal detail is bounded
+and logged under `plak.workspace` only when it changes, and is included in the
+reported topology error.
+
+Only when the tree is over its disk budget, a retained copy may have its root
+`target/` trimmed under the acknowledged reclamation intent, with occupant jobs
+stopped and outside the tree mutex. Trimming is allowed only after a typed static
+coverage refusal in the pre-seal stage, never after a changed-after-seal refusal
+or an operational seal/removal failure that may indicate a concurrent writer.
+New budget pressure does not bypass an existing backoff, so a newly eligible
+trim can wait until that copy's next retry (up to one hour).
+The VCS port proves it a real (non-symlink), untracked, ignored directory with
+no unignored or secret leaves. Nested repositories or worktrees and case-aliased
+root names are retained. Tracked caches,
+symlinks, JJ and uncertain inspections are retained. The operation is idempotent
+and preserves the checkout, its seal and all candidate pins. There is no shared
+`CARGO_TARGET_DIR` default: cargo's shared lock serializes builds and absolute
+checkout paths affect fingerprints.
+
 These owned intents are recorded in `agent_operations`. Reopen resumes their
 seal/remove/restore stages rather than treating them as an uncertain explicit
 discard. Removing an already absent checkout is idempotent. A follow-up first

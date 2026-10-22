@@ -106,6 +106,7 @@ impl ProductAgentTree {
             workspace.status = WorkspaceStatus::Active;
         }
         self.fault_reasons.remove(agent_id);
+        self.reset_reclamation_backoff(agent_id);
         self.bump();
         Ok(())
     }

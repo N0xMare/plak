@@ -118,6 +118,15 @@ pub enum VcsErrorKind {
     HookFailed,
 }
 
+/// Coverage evidence governing whether disposable cache trimming is safe.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReclamationRefusal {
+    /// Static content cannot be covered by normal sealing.
+    StaticCoverage,
+    /// The working copy changed after its acknowledged seal.
+    ChangedAfterSeal,
+}
+
 /// A refusal from the VCS, typed so the caller can name it on its own wire
 /// without this crate knowing that wire.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -126,6 +135,8 @@ pub struct VcsError {
     pub kind: VcsErrorKind,
     /// The bounded operator-facing detail.
     pub detail: String,
+    /// Typed coverage refusal, absent for operational or unclassified failures.
+    pub reclamation_refusal: Option<ReclamationRefusal>,
 }
 
 impl VcsError {
@@ -135,6 +146,16 @@ impl VcsError {
         Self {
             kind,
             detail: detail.into(),
+            reclamation_refusal: None,
+        }
+    }
+
+    /// Creates a coverage refusal without classifying operational errors as static.
+    #[must_use]
+    pub fn reclamation_refused(class: ReclamationRefusal, detail: impl Into<String>) -> Self {
+        Self {
+            reclamation_refusal: Some(class),
+            ..Self::mint_unavailable(detail)
         }
     }
 
@@ -181,6 +202,12 @@ pub trait VcsOps: Send + Sync {
         Err(VcsError::mint_unavailable(
             "workspace coverage cannot be established",
         ))
+    }
+    /// Trims only a proven ignored, untracked root build cache in a stopped copy.
+    /// Callers own a reclamation intent and must stop all occupant jobs first.
+    fn trim_disposable_target(&self, path: &Path) -> Result<bool, VcsError> {
+        let _ = path;
+        Ok(false)
     }
     /// Mints `agent_id`'s copy of `parent_cwd` under `launch`, over `base`
     /// when one is named and over the parent's own state otherwise.
@@ -248,6 +275,10 @@ pub trait VcsOps: Send + Sync {
 pub struct SystemVcs;
 
 impl VcsOps for SystemVcs {
+    fn trim_disposable_target(&self, path: &Path) -> Result<bool, VcsError> {
+        maintenance::trim_disposable_target(path)
+    }
+
     fn check_reclaimable(&self, path: &Path, sealed: Option<&VcsSnapshot>) -> Result<(), VcsError> {
         maintenance::check_reclaimable(path, sealed)
     }

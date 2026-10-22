@@ -674,6 +674,7 @@ impl ProductAgentTree {
                 }
             }
         }
+        self.reclaim_backoff.remove(&request.workspace_id);
         let pending = mode != WorkspaceMode::Inherit;
         if pending {
             if let Some(id) = operation_id {
