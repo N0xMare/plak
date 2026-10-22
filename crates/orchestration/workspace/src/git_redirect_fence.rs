@@ -593,11 +593,19 @@ if [ "$at_op" -eq 1 ]; then
   esac
 fi
 
-cwd=`pwd -P 2>/dev/null || pwd`
+cwd=`pwd -P 2>/dev/null` || refuse "cannot resolve working directory"
 case "$cwd" in
   "$ALLOWED"|"$ALLOWED"/*) ;;
   *) refuse "working directory escapes occupancy copy" ;;
 esac
+[ -d "$ALLOWED/.jj" ] && [ ! -L "$ALLOWED/.jj" ] || refuse "copy .jj is missing or linked"
+probe=$cwd
+while [ "$probe" != "$ALLOWED" ]; do
+  if [ -e "$probe/.jj" ] || [ -L "$probe/.jj" ]; then
+    refuse "nested or linked .jj escapes occupancy copy"
+  fi
+  probe=${{probe%/*}}
+done
 # Expand admitted default aliases ourselves: jj ignores CLI alias overrides.
 expanded=""
 case "$sub1" in b) expanded=bookmark ;; ci) expanded=commit ;; desc) expanded=describe ;; op) expanded=operation ;; st) expanded=status ;; esac
@@ -922,6 +930,76 @@ mod tests {
             Path::new(".plak/bin/git"),
             None,
         ));
+    }
+
+    #[test]
+    fn jj_shim_refuses_nested_or_linked_workspace_discovery() {
+        if !jj_available() {
+            return;
+        }
+        let parent = jj_repo();
+        let child = mint_jj_child(parent.path(), "discovery-child");
+        let sibling = mint_jj_child(parent.path(), "discovery-sibling");
+        let sibling_head = jj(
+            &sibling,
+            &["log", "-r", "@", "--no-graph", "-T", "commit_id"],
+        )
+        .stdout;
+        let base = String::from_utf8(
+            jj(
+                &child,
+                &["log", "-r", "@-", "--no-graph", "-T", "commit_id"],
+            )
+            .stdout,
+        )
+        .unwrap();
+        let shim = install_jj(&child, base.trim()).unwrap();
+        let sub = child.join("sub");
+        let deep = sub.join("deep");
+        std::fs::create_dir_all(&deep).unwrap();
+        let run = |cwd: &Path, args: &[&str]| {
+            Command::new(&shim)
+                .args(args)
+                .env("JJ_CONFIG", "/dev/null")
+                .current_dir(cwd)
+                .output()
+                .unwrap()
+        };
+        assert!(run(&deep, &["status"]).status.success());
+        let refuse_new = |cwd: &Path| {
+            let output = run(cwd, &["new", "root()"]);
+            assert_eq!(output.status.code(), Some(1));
+            assert!(String::from_utf8_lossy(&output.stderr).contains("plak: jj-op refused"));
+            assert_eq!(
+                jj(
+                    &sibling,
+                    &["log", "-r", "@", "--no-graph", "-T", "commit_id"]
+                )
+                .stdout,
+                sibling_head
+            );
+        };
+        let nested = sub.join(".jj");
+        std::os::unix::fs::symlink(sibling.join(".jj"), &nested).unwrap();
+        refuse_new(&sub);
+        refuse_new(&deep);
+        std::fs::remove_file(&nested).unwrap();
+        std::os::unix::fs::symlink(sub.join("missing"), &nested).unwrap();
+        refuse_new(&deep);
+        std::fs::remove_file(&nested).unwrap();
+        std::fs::create_dir(&nested).unwrap();
+        refuse_new(&deep);
+        std::fs::remove_dir(&nested).unwrap();
+
+        let marker = child.join(".jj");
+        let saved = child.join("saved-jj");
+        std::fs::rename(&marker, &saved).unwrap();
+        refuse_new(&child);
+        std::os::unix::fs::symlink(sibling.join(".jj"), &marker).unwrap();
+        refuse_new(&child);
+        std::fs::remove_file(&marker).unwrap();
+        std::fs::rename(&saved, &marker).unwrap();
+        assert!(run(&deep, &["status"]).status.success());
     }
 
     #[test]

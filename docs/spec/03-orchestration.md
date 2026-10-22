@@ -2282,6 +2282,10 @@ default commands fail closed. The default aliases cannot be redefined through
 user config. `init`, `undo`, `redo`, `gerrit`, `-R`/`--repository`, cwd outside
 the copy, `--ignore-immutable`, `--config-file`, and `--config` naming aliases,
 `immutable_heads` or `snapshot` are refused with exit 1.
+Before execution, the shim requires the copy's `.jj` to be a real directory,
+not a symlink, and walks from the physical cwd up to the copy root. Any nested
+or linked `.jj` below that root is refused, including a dangling symlink, so
+workspace discovery cannot redirect an invocation to another copy.
 
 Repository-wide command groups are allowlists; any unlisted subcommand is
 refused, including future additions:
