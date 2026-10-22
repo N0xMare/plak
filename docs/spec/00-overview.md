@@ -179,6 +179,11 @@ Monty worker package needs.
 
 ## Persisted versions
 
+The workspace release is **0.0.2**. The current versions below are the 0.0.2
+state tuple; 0.0.1 state is not opened. Carry a 0.0.1 session with `/reload`
+from the running old build, or export it with the 0.0.1 binary and import its
+v7 document with 0.0.2 (§2.5.1 of chapter 02).
+
 | Store | Owner | Current version |
 | --- | --- | --- |
 | Runtime session store (`runtime.sqlite3`), including the change feed | Plakous | SQLite schema **25** |
@@ -188,10 +193,10 @@ Monty worker package needs.
 | Telemetry store (`telemetry/telemetry-v<schema>.sqlite3`) | Plak | schema **19**, disposable, never recovery authority |
 | Session export document | Plak | version **8**, imports **8** and **7** |
 
-Tree schema 8's unreleased canonical `seal_outcome` payload includes the durable
+Tree schema 8's canonical `seal_outcome` payload includes the durable
 `history_left_base` boolean used by replayed result-mail notices. Runtime epoch
 28 moves the whole state key, so no older t8 shape is opened. Export v8 carries
-conversation history and CarryBinding, not tree seal outcomes. Its unreleased v8
+conversation history and CarryBinding, not tree seal outcomes. Its v8
 history encoding also preserves exact account/model replay scope; the v7
 importer keeps accountless material unbound rather than retagging it.
 

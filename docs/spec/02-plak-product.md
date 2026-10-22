@@ -43,7 +43,7 @@ The launch banner distinguishes `maintainer release`, `maintainer debug`,
 `release`, and `debug`, and shows a binary ID: the first twelve hexadecimal
 digits of SHA-256 over the executable. A `test-hooks` build is labeled separately.
 `plak version` and global help carry the same build identity alongside the
-package version. `0.0.1` alone is package metadata, not proof of build recency.
+package version. `0.0.2` alone is package metadata, not proof of build recency.
 The binary ID is read from the snapshot's install-time `binary-id` manifest
 when its device, inode, size and nanosecond modification time all match the
 running executable. Manifests are considered only beside executables in the
@@ -4997,7 +4997,7 @@ The export document does not carry queued items' images (§2.5.1).
 
 Everything in this section is model-visible text: it is part of the product's
 behavior in the same way a screen is, and it changes only deliberately. The
-render pipeline that pins it — 76 routes, sha256 tables in code, and the
+render pipeline that pins it — 86 routes, sha256 tables in code, and the
 `just prompts` review artifact — is described in chapter 05 §2.5.
 
 ### 6.1 The composition of a first turn

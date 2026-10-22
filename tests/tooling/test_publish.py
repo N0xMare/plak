@@ -56,9 +56,9 @@ if args[:1] == ["package"] and "--no-verify" in args:
     directory = Path(os.environ["CARGO_TARGET_DIR"]) / "package"
     directory.mkdir(parents=True, exist_ok=True)
     for name in os.environ["FAKE_NAMES"].split(","):
-        with tarfile.open(directory / f"{name}-0.0.1.crate", "w:gz") as archive:
-            data = f"[package]\nname = '{name}'\nversion = '0.0.1'\n".encode()
-            member = tarfile.TarInfo(f"{name}-0.0.1/Cargo.toml")
+        with tarfile.open(directory / f"{name}-0.0.2.crate", "w:gz") as archive:
+            data = f"[package]\nname = '{name}'\nversion = '0.0.2'\n".encode()
+            member = tarfile.TarInfo(f"{name}-0.0.2/Cargo.toml")
             member.size = len(data)
             archive.addfile(member, io.BytesIO(data))
 if args[:1] == ["fetch"]:
@@ -76,13 +76,13 @@ if args[:1] == ["publish"]:
             os.environ["FAKE_NAMES"].split(",").index(name)]
         entry.parent.mkdir(parents=True, exist_ok=True)
         with entry.open("a") as stream:
-            stream.write(json.dumps(dict(name=name, vers="0.0.1")) + "\n")
+            stream.write(json.dumps(dict(name=name, vers="0.0.2")) + "\n")
 '''
 
 
 def library(name: str, dependencies: str = "", publish: bool = True) -> str:
     return (
-        f'[package]\nname = "{name}"\nversion = "0.0.1"\nedition = "2021"\n'
+        f'[package]\nname = "{name}"\nversion = "0.0.2"\nedition = "2021"\n'
         + ("" if publish else "publish = false\n")
         + f"\n[dependencies]\n{dependencies}"
     )
@@ -121,12 +121,12 @@ class PublishScriptTests(unittest.TestCase):
             ),
             "crates/zeta/Cargo.toml": library("plakous-zeta"),
             "crates/mid/Cargo.toml": library(
-                "plakous-mid", 'plakous-zeta = { version = "0.0.1", path = "../zeta" }\n'
+                "plakous-mid", 'plakous-zeta = { version = "0.0.2", path = "../zeta" }\n'
             ),
             "bin/plak/Cargo.toml": (
-                library("plak", 'plakous-mid = { version = "0.0.1", path = "../../crates/mid" }\n'
+                library("plak", 'plakous-mid = { version = "0.0.2", path = "../../crates/mid" }\n'
                         + publish_shape.HARNESS_DEPENDENCY)
-                + '\n[dev-dependencies]\nplakous-zeta = { version = "0.0.1", path = "../../crates/zeta" }\n'
+                + '\n[dev-dependencies]\nplakous-zeta = { version = "0.0.2", path = "../../crates/zeta" }\n'
                 + "\n[features]\n" + publish_shape.TEST_HOOKS_FEATURE
             ),
             "tests/harnesses/offline-crash/Cargo.toml": library(
@@ -190,7 +190,7 @@ class PublishScriptTests(unittest.TestCase):
     def index_entry(self, name: str) -> None:
         entry = self.index / publish_plan.index_path(name)
         entry.parent.mkdir(parents=True, exist_ok=True)
-        entry.write_text(json.dumps(dict(name=name, vers="0.0.1")) + "\n")
+        entry.write_text(json.dumps(dict(name=name, vers="0.0.2")) + "\n")
 
     def assert_packaged_in_order(self, call: dict) -> None:
         self.assertEqual(
@@ -292,8 +292,8 @@ class PublishScriptTests(unittest.TestCase):
         # cohort crate would be verified instead of the tree being packaged.
         cargo_home = self.repo.parent / "cargo-home"
         src = cargo_home / "registry" / "src"
-        stale = [src / "-overlay" / f"{name}-0.0.1" for name in ORDER]
-        stale.append(src / "index.crates.io-x" / "plakous-mid-0.0.1")
+        stale = [src / "-overlay" / f"{name}-0.0.2" for name in ORDER]
+        stale.append(src / "index.crates.io-x" / "plakous-mid-0.0.2")
         kept = [src / "-overlay" / "serde-1.0.0", src / "-overlay" / "plakous-mid-0.0.2"]
         for directory in (*stale, *kept):
             directory.mkdir(parents=True)
@@ -329,9 +329,9 @@ class PublishScriptTests(unittest.TestCase):
             [["publish", "--locked", "--no-verify", "-p", name] for name in ORDER[1:]],
         )
         self.assertTrue(all(call["offline"] is None for call in calls[1:]))
-        self.assertIn("plakous-zeta 0.0.1: already in the index, skipped", result.stdout)
+        self.assertIn("plakous-zeta 0.0.2: already in the index, skipped", result.stdout)
         for name in ORDER:
-            self.assertTrue(publish_plan.indexed(self.index.as_uri(), name, "0.0.1"))
+            self.assertTrue(publish_plan.indexed(self.index.as_uri(), name, "0.0.2"))
 
     def test_execute_stops_before_dependents_of_a_crate_that_never_appears(self) -> None:
         self.record_evidence()
@@ -339,7 +339,7 @@ class PublishScriptTests(unittest.TestCase):
                         PLAK_PUBLISH_TIMEOUT="0")
         result, calls = self.publish("--execute")
         self.assertEqual(result.returncode, 1)
-        self.assertIn("plakous-mid 0.0.1 did not appear", result.stderr)
+        self.assertIn("plakous-mid 0.0.2 did not appear", result.stderr)
         self.assertEqual(
             [call["args"][-1] for call in calls if call["args"][0] == "publish"],
             ["plakous-zeta", "plakous-mid"],
@@ -350,7 +350,7 @@ class PublishOrderTests(unittest.TestCase):
     @staticmethod
     def metadata(dependencies: dict[str, list[dict]]) -> dict:
         packages = [
-            dict(id=name, name=name, version="0.0.1", publish=None, dependencies=edges)
+            dict(id=name, name=name, version="0.0.2", publish=None, dependencies=edges)
             for name, edges in dependencies.items()
         ]
         return dict(workspace_members=list(dependencies), packages=packages)
@@ -358,13 +358,13 @@ class PublishOrderTests(unittest.TestCase):
     def test_path_only_dev_dependencies_do_not_order_and_cycles_fail(self) -> None:
         stripped = dict(name="b", kind="dev", req="*")
         order = publish_plan.publish_order(self.metadata({
-            "a": [stripped], "b": [dict(name="a", kind=None, req="^0.0.1")],
+            "a": [stripped], "b": [dict(name="a", kind=None, req="^0.0.2")],
         }))
-        self.assertEqual(order, [("a", "0.0.1"), ("b", "0.0.1")])
+        self.assertEqual(order, [("a", "0.0.2"), ("b", "0.0.2")])
         with self.assertRaises(publish_plan.PlanError):
             publish_plan.publish_order(self.metadata({
-                "a": [dict(stripped, req="^0.0.1")],
-                "b": [dict(name="a", kind=None, req="^0.0.1")],
+                "a": [dict(stripped, req="^0.0.2")],
+                "b": [dict(name="a", kind=None, req="^0.0.2")],
             }))
 
     def test_index_paths_follow_the_registry_layout(self) -> None:

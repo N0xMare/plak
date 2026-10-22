@@ -14,7 +14,7 @@ layer = "test"
 class = "repository-only"
 
 [dependencies]
-plakous = { version = "0.0.1", path = "../../../crates/plakous", features = ["composition", "sessions-sqlite"] }
+plakous = { version = "0.0.2", path = "../../../crates/plakous", features = ["composition", "sessions-sqlite"] }
 
 tempfile = "3.23"
 tokio = { version = "1.48", features = ["rt-multi-thread", "macros", "sync", "time"] }

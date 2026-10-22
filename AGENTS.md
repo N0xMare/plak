@@ -6,7 +6,7 @@ facade and the Plakous crates above it. Plakous owns the loop, providers,
 profiles, auth, and admit/revalidate; Plak owns product UX. There is no second
 runtime in Plak and no multi-agent topology in Plakous L0 — L0 is exactly
 `plakous-model`, `plakous-tools`, `plakous-agent` and the `plakous` facade.
-The workspace version is 0.0.1. Supported and published-internal packages are
+The workspace version is 0.0.2. Supported and published-internal packages are
 publishable to crates.io as one exact cohort and repository-only packages are
 not (spec 06 §1); uploading is a maintainer act, and a source checkout is a
 complete build.

@@ -14,11 +14,11 @@ layer = "test"
 class = "repository-only"
 
 [dependencies]
-plakous = { version = "0.0.1", path = "../../../crates/plakous", features = ["full"] }
-plakous-agent = { version = "0.0.1", path = "../../../crates/core/agent" }
-plakous-tools = { version = "0.0.1", path = "../../../crates/core/tools" }
-plakous-hosted = { version = "0.0.1", path = "../../../crates/hosting/hosted", default-features = false }
-plakous-host-protocol = { version = "0.0.1", path = "../../../crates/hosting/host-protocol" }
+plakous = { version = "0.0.2", path = "../../../crates/plakous", features = ["full"] }
+plakous-agent = { version = "0.0.2", path = "../../../crates/core/agent" }
+plakous-tools = { version = "0.0.2", path = "../../../crates/core/tools" }
+plakous-hosted = { version = "0.0.2", path = "../../../crates/hosting/hosted", default-features = false }
+plakous-host-protocol = { version = "0.0.2", path = "../../../crates/hosting/host-protocol" }
 
 [[bin]]
 name = "tools_internal_process_dispatch"

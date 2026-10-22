@@ -26,7 +26,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools/release"))
 import release_tarball  # noqa: E402
 
-VERSION = "0.0.1"
+VERSION = "0.0.2"
 LINUX = "x86_64-unknown-linux-musl"
 EXECUTABLES = ("plak", "plakous-js-host", "monty")
 

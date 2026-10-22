@@ -14,7 +14,7 @@ layer = "test"
 class = "repository-only"
 
 [dependencies]
-plakous = { version = "0.0.1", path = "../../../crates/plakous", features = ["anthropic", "auth", "native-subscriptions", "openai", "openrouter", "sessions-sqlite", "xai"] }
+plakous = { version = "0.0.2", path = "../../../crates/plakous", features = ["anthropic", "auth", "native-subscriptions", "openai", "openrouter", "sessions-sqlite", "xai"] }
 
 futures-util = "0.3.31"
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }

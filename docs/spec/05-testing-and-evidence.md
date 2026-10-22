@@ -1274,8 +1274,9 @@ Output goes to the git-ignored `target/prompt-renders/`, overridable with
 performs the full render and checks the pins; it just writes nothing.
 
 Beyond the digests, the tests assert file-free structural facts: the route
-matrix is exactly 76 included routes plus one documented exclusion
-(`native-ptc` is enrolled only as Codex Code Mode); the rendered wire JSON equals the
+matrix is exactly 86 included routes plus two documented exclusions
+(`native-ptc` is enrolled only as Codex Code Mode, and direct API routes render
+only the single-agent root); the rendered wire JSON equals the
 kernel-lowered request and the Markdown `## Request` fence equals the jsonc
 formatter's output; the harness footprint excludes the enrolled `AGENTS.md` and
 the scenario assignment, subtracts enrolled source bytes, and keeps the Claude

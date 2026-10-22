@@ -14,7 +14,7 @@ plak <command> --help             one command's help
 
 A bare command that needs an argument prints that command's help instead of
 failing — `plak run`, `plak login`, `plak key set`, `plak session show` — and
-that is a successful exit, not an error. `plak version` prints, for example, `plak 0.0.1 (release; binary 0123456789ab)`.
+that is a successful exit, not an error. `plak version` prints, for example, `plak 0.0.2 (release; binary 0123456789ab)`.
 The binary ID identifies the executable in `/reload` and handoffs.
 
 ## Exit codes
@@ -462,15 +462,15 @@ $ plak doctor
 Plak doctor
 
 CHECK              RESULT   DETAIL                                        FIX
-Version            OK       available · 0.0.1                             —
+Version            OK       available · 0.0.2                             —
 Home               OK       available · /home/you/.plak                   —
 Config             OK       valid · /home/you/.plak/config.toml           —
-Product db         OK       available · /home/you/.plak/state/r25.e27.p33.t8/product.sqlite3   —
-Runtime db         OK       available · /home/you/.plak/state/r25.e27.p33.t8/runtime.sqlite3   —
+Product db         OK       available · /home/you/.plak/state/r25.e28.p33.t8/product.sqlite3   —
+Runtime db         OK       available · /home/you/.plak/state/r25.e28.p33.t8/runtime.sqlite3   —
 Runtime store      OK       available · checkpoints 412/524288 (new work stops at 458752), …   —
 Telemetry db       OK       ok · 1189 rows                                —
 Secrets dir        OK       available · /home/you/.plak/secrets           —
-Sessions dir       OK       available · /home/you/.plak/state/r25.e27.p33.t8/sessions          —
+Sessions dir       OK       available · /home/you/.plak/state/r25.e28.p33.t8/sessions          —
 Cwd                OK       available · /home/you/project                 —
 Composition host   OK       included · not required by the selected …     —
 Root template      OK       unset · no [root] agent; new sessions …       —

@@ -146,7 +146,7 @@ class PackagedDependencyTests(unittest.TestCase):
 class WorkspaceInheritanceTests(unittest.TestCase):
     def test_inherited_edges_resolve_as_cargo_does(self):
         shared = {
-            'lib': {'version': '0.0.1', 'path': 'crates/lib', 'default-features': False,
+            'lib': {'version': '0.0.2', 'path': 'crates/lib', 'default-features': False,
                     'features': ['a']},
             'serde': '1',
         }
@@ -163,7 +163,7 @@ class WorkspaceInheritanceTests(unittest.TestCase):
         }
         resolved = policy_module.inherit_workspace_dependencies(manifest, shared)
         self.assertEqual(resolved['dependencies']['lib'], {
-            'version': '0.0.1', 'path': 'crates/lib', 'default-features': False,
+            'version': '0.0.2', 'path': 'crates/lib', 'default-features': False,
             'features': ['a', 'b'], 'optional': True,
         })
         self.assertEqual(resolved['dependencies']['serde'], {'version': '1'})
