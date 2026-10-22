@@ -530,6 +530,38 @@ async fn alternate_observations_and_stdin_close_reset_quiet_state() -> TestResul
 }
 
 #[tokio::test(start_paused = true)]
+async fn canonical_tail_and_exit_awaits_do_not_inherit_a_repeat_hold() -> TestResult {
+    for completion_notices in [false, true] {
+        let directory = tempfile::tempdir()?;
+        let env = environment(directory.path())?;
+        let handle = start(&env, completion_notices).await?;
+        poll(&env, handle, 5000, &control()).await?;
+        for (read_so_far, wait_for_exit, expected) in
+            [(false, true, 1000), (true, true, 1000), (true, false, 0)]
+        {
+            let began = tokio::time::Instant::now();
+            let result = ProcessSessionTools::poll_canonical(
+                &env,
+                &CanonicalProcessPollRequest {
+                    session_id: handle,
+                    cursor: None,
+                    read_so_far,
+                    wait_for_exit,
+                    yield_time_ms: 1000,
+                    max_output_bytes: 4096,
+                    max_output_records: 256,
+                },
+                &control(),
+            )
+            .await?;
+            assert_eq!(began.elapsed(), Duration::from_millis(expected));
+            assert_eq!(result.projection.output, "");
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test(start_paused = true)]
 async fn unread_mail_keeps_later_polls_bounded_and_names_the_end_turn_reason() -> TestResult {
     let directory = tempfile::tempdir()?;
     let env = environment(directory.path())?;

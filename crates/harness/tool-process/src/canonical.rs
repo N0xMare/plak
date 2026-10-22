@@ -742,7 +742,7 @@ impl ProcessSessionTools {
             return Ok(reported);
         }
         let session = Self::session(environment, request.session_id)?;
-        if request.read_so_far {
+        if request.read_so_far || request.wait_for_exit {
             let outcome = Self::await_canonical(
                 environment,
                 &CanonicalProcessAwaitRequest {

@@ -4590,6 +4590,10 @@ canonical plain single-id `process_session_poll`, top-level and nested.
 Grok `get_command_or_subagent_output`, pi `wait`, canonical
 `read_so_far`/`wait_for_exit` and Claude Bash starts retain
 their own observation windows; they gain Notice preemption, not repeat holds.
+A canonical single-id `wait_for_exit=true` selects exit observation even when
+`read_so_far=false`: it waits for exit, preemption or its requested ceiling,
+then reports a bounded output tail. This is an intended canonical projection
+change for every host, including hosts without completion notices.
 Output (including cursor progress in another observation), nonempty writes,
 stdin Close or exit reset the per-process counter. A preempted first poll
 does not earn a repeat hold: quiet counts advance only at the deadline,
