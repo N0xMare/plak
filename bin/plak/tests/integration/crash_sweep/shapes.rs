@@ -182,6 +182,16 @@ pub(super) const REGISTRY: &[Shape] = &[
         assert_live: assert_direct_tool,
     },
     Shape {
+        name: "leftover_background_job",
+        subset: false,
+        terminal: ExpectedTerminal::Answer,
+        script: sw3a::leftover_background_job,
+        configure: sw3a::configure_process,
+        setup: no_setup,
+        lifecycle: prompt_then_quit,
+        assert_live: sw3a::assert_leftover,
+    },
+    Shape {
         name: "promoted_background_job",
         subset: true,
         terminal: ExpectedTerminal::Answer,

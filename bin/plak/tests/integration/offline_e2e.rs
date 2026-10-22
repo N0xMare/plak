@@ -3404,6 +3404,110 @@ impl Drop for RunJobCli {
 }
 
 #[test]
+fn leftover_jobs_unredirected_http_writer_survives_run_exit() {
+    for budget_first in [false, true] {
+        let command = if budget_first {
+            "while [ ! -f release-leader ]; do sleep 0.02; done; python3 -u server.py & while [ ! -f service.port ]; do sleep 0.02; done; exit 0"
+        } else {
+            "python3 -u server.py & while [ ! -f service.port ]; do sleep 0.02; done; exit 0"
+        };
+        let mut script = promoted_run_script(command);
+        script["steps"][0]["output"]["tool"]["arguments"]["yield_time_ms"] =
+            json!(if budget_first { 0 } else { 30_000 });
+        if budget_first {
+            script["steps"].as_array_mut().unwrap().insert(1, json!({"output": {"tool": {"name": "process_session_start", "arguments": {
+            "command": "touch release-leader; while [ ! -f service.port ]; do sleep 0.02; done", "workdir": ".", "login": false, "tty": false, "keep_stdin_open": false, "yield_time_ms": 30000, "max_output_bytes": 8192
+        }}}, "finish": "tool_calls"}));
+        }
+        let fixture = Fixture::new(&script);
+        std::fs::write(
+            fixture.workspace().join("server.py"),
+            r#"import http.server, pathlib, threading
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        print("AFTER-RUN-WRITE", flush=True)
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"service-ready")
+        threading.Thread(target=self.server.shutdown, daemon=True).start()
+server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+pathlib.Path("service.port.tmp").write_text(str(server.server_port))
+pathlib.Path("service.port.tmp").replace("service.port")
+timer = threading.Timer(30, server.shutdown)
+timer.daemon = True
+timer.start()
+server.serve_forever()
+"#,
+        )
+        .unwrap();
+        let result = RunJobCli::start(&fixture, &["--leave-jobs-running"]).finish();
+        let port = std::fs::read_to_string(fixture.workspace().join("service.port"))
+            .unwrap()
+            .parse::<u16>()
+            .unwrap();
+        let endpoint = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+        let _cleanup = ServiceCleanup(endpoint);
+        assert!(result.status.success(), "{}", result.stderr);
+        assert!(
+            service_request(endpoint, "/").is_some(),
+            "writer died after output capture was released"
+        );
+    }
+}
+
+#[test]
+fn leftover_jobs_run_exits_without_waiting_and_stops_by_default() {
+    struct ReleaseOnDrop(PathBuf);
+    impl ReleaseOnDrop {
+        fn release(&self) {
+            if let Ok(mut fifo) = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&self.0)
+            {
+                let _ = fifo.write_all(b"finish\n");
+            }
+        }
+    }
+    impl Drop for ReleaseOnDrop {
+        fn drop(&mut self) {
+            self.release();
+        }
+    }
+    for leave in [false, true] {
+        let quoted =
+            format!("{RUN_OWNED_COMMAND}; printf released > released.txt").replace('\'', "'\\''");
+        let command = format!(
+            "sh -c '{quoted}' >/dev/null 2>&1 & while [ ! -f owned.pid ]; do sleep 0.02; done; exit 0"
+        );
+        let mut script = promoted_run_script(&command);
+        script["steps"][0]["output"]["tool"]["arguments"]["yield_time_ms"] = json!(30_000);
+        let fixture = Fixture::new(&script);
+        let cleanup = ReleaseOnDrop(fixture.workspace().join("stop-wait"));
+        let flags = if leave {
+            &["--leave-jobs-running"][..]
+        } else {
+            &[]
+        };
+        let result = RunJobCli::start(&fixture, flags).finish_within(Duration::from_secs(10));
+        assert!(result.status.success(), "{}", result.stderr);
+        assert_eq!(result.stdout, "first turn answer\n");
+        assert!(
+            !result.stderr.contains("plak: waiting for"),
+            "{}",
+            result.stderr
+        );
+        if leave {
+            assert!(!fixture.workspace().join("stopped.txt").exists());
+            cleanup.release();
+            wait_for_fixture_file(&fixture.workspace().join("released.txt"));
+        } else {
+            assert_owned_process_stopped(&fixture.workspace());
+        }
+    }
+}
+
+#[test]
 fn run_waits_for_a_real_promoted_process_then_continues_and_prints_only_last_answer() {
     let command = "printf ready > ready.txt; while [ ! -f release.txt ]; do sleep 0.1; done";
     let fixture = Fixture::new(&promoted_run_script(command));

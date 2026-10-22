@@ -244,6 +244,7 @@ pub fn process_session_update(outcome: &ToolOutcome) -> Option<ProcessSessionUpd
 #[derive(Default)]
 pub struct ProcessQuietPollState {
     pub completion_notices: bool,
+    pub leftover_observed: bool,
     pub quiet_polls: u32,
     pub output_cursor: u64,
     pub observers: u32,

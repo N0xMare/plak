@@ -13,6 +13,8 @@ use super::{HostConfig, HostEvent, Sender, TurnHostOutcome};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RunBounds {
     pub max_turns: u8,
+    /// Relinquish leftover process-group ownership at run exit.
+    pub leave_jobs_running: bool,
     /// Absolute whole-run deadline, established before product preparation.
     pub deadline: Option<std::time::Instant>,
 }
@@ -21,6 +23,7 @@ impl Default for RunBounds {
     fn default() -> Self {
         Self {
             max_turns: 25,
+            leave_jobs_running: false,
             deadline: None,
         }
     }
@@ -240,6 +243,7 @@ mod tests {
             false,
             RunBounds {
                 max_turns: 25,
+                leave_jobs_running: false,
                 deadline: Some(std::time::Instant::now()),
             },
             |_, _| {},

@@ -149,6 +149,14 @@ struct JoinedSessionShared {
     released: bool,
     spool: Option<super::job_output::JobOutputWriter>,
     pending_spool: Option<PendingJobOutput>,
+    leftover: Option<LeftoverJob>,
+    disowned: bool,
+}
+
+#[derive(Clone, Copy)]
+struct LeftoverJob {
+    exit_code: Option<i32>,
+    processes: usize,
 }
 
 struct PendingJobOutput {
@@ -333,6 +341,8 @@ impl JoinedSession {
                 released: false,
                 spool: None,
                 pending_spool: None,
+                leftover: None,
+                disowned: false,
             })),
             consumer_cursor: Arc::new(Mutex::new(JoinedProcessOutputCursor::new(0))),
             consumer_pending_utf8: Arc::new(Mutex::new(Vec::new())),
@@ -745,6 +755,67 @@ impl JoinedProcessSessions {
     pub fn is_promoted(&self, id: JoinedProcessSessionId) -> bool {
         self.session(id)
             .is_ok_and(|session| session.promoted.load(Ordering::Acquire) == PROMOTED)
+    }
+
+    /// Leader exit and the observed live-member count for a leftover job.
+    /// This allocation-local fact is not authority to recover or signal a PID.
+    #[must_use]
+    pub fn leftover(&self, id: JoinedProcessSessionId) -> Option<(Option<i32>, usize)> {
+        let session = self.session(id).ok()?;
+        let shared = lock(&session.shared);
+        shared.leftover.map(|job| (job.exit_code, job.processes))
+    }
+
+    /// Explicitly gives up ownership of leftover jobs. Their output readers
+    /// close, and no later stop, release, or hard cap can reach their groups.
+    ///
+    /// # Errors
+    /// Returns an error if a supervisor cannot finish relinquishing ownership.
+    pub fn disown_leftovers(&self) -> Result<(), ExecutionBackendError> {
+        let deadline = Instant::now() + self.inner.limits.cleanup_duration();
+        let sessions = lock(&self.inner.state)
+            .active
+            .iter()
+            .map(|(id, session)| (*id, Arc::clone(session)))
+            .collect::<Vec<_>>();
+        let mut pending = Vec::new();
+        for (id, session) in sessions {
+            let mut shared = lock(&session.shared);
+            if session.promoted.load(Ordering::Acquire) != PROMOTED
+                || shared.leftover.is_none()
+                || shared.status.is_terminal()
+            {
+                continue;
+            }
+            shared.disowned = true;
+            drop(shared);
+            pending.push((id, session));
+        }
+        for (id, session) in pending {
+            let shared = lock(&session.shared);
+            let terminal = Arc::clone(&shared.terminal);
+            let (shared, _) = terminal
+                .wait_timeout_while(
+                    shared,
+                    deadline.saturating_duration_since(Instant::now()),
+                    |shared| !shared.status.is_terminal(),
+                )
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !shared.status.is_terminal() {
+                return Err(cleanup_unresolved_error());
+            }
+            let status = shared.status;
+            drop(shared);
+            let _operation = session.enter_until(deadline)?;
+            session.join_finished_owner_until(status, deadline)?;
+            self.retire(id, status);
+            if status == JoinedProcessStatus::Failed {
+                return Err(io_error(
+                    "released output handoff failed; the group was stopped",
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Whether an exact active session or terminal snapshot is still retained.
@@ -2282,6 +2353,8 @@ fn start_joined_pipes_process(
         released: false,
         spool: None,
         pending_spool,
+        leftover: None,
+        disowned: false,
     }));
     let output_io_failed = Arc::new(AtomicBool::new(false));
     let io_stop = Arc::new(AtomicBool::new(false));
@@ -2350,6 +2423,7 @@ fn start_joined_pipes_process(
     let stop_grace_millis = Arc::new(AtomicU64::new(2000));
     let thread_stop_grace = Arc::clone(&stop_grace_millis);
     let thread_shared = Arc::clone(&shared);
+    let shell_command = matches!(request.command, JoinedProcessCommand::Shell { .. });
     let resources = JoinedProcessResources {
         child,
         process_group,
@@ -2386,6 +2460,7 @@ fn start_joined_pipes_process(
                 &resources.io_stop,
                 &output_io_failed,
                 &thread_shared,
+                shell_command,
             );
             resources.armed = false;
         })
@@ -2485,9 +2560,10 @@ fn start_joined_pty_process(
         ));
     }
     let wrapped_shell = match &request.command {
-        JoinedProcessCommand::Shell { command, .. } => {
-            Some(restore_path_after_login(process, command)?)
-        }
+        JoinedProcessCommand::Shell { command, .. } => Some(format!(
+            "trap '' HUP; {}",
+            restore_path_after_login(process, command)?
+        )),
         JoinedProcessCommand::Literal { .. } => None,
     };
     let argv0 = match &request.command {
@@ -2569,6 +2645,8 @@ fn start_joined_pty_process(
         released: false,
         spool: None,
         pending_spool,
+        leftover: None,
+        disowned: false,
     }));
     let output_io_failed = Arc::new(AtomicBool::new(false));
     let io_stop = Arc::new(AtomicBool::new(false));
@@ -2661,6 +2739,7 @@ fn start_joined_pty_process(
     let stop_grace_millis = Arc::new(AtomicU64::new(2000));
     let thread_stop_grace = Arc::clone(&stop_grace_millis);
     let thread_shared = Arc::clone(&shared);
+    let shell_command = matches!(request.command, JoinedProcessCommand::Shell { .. });
     let resources = JoinedPtyResources {
         child,
         process_group,
@@ -2698,6 +2777,7 @@ fn start_joined_pty_process(
                 &resources.io_stop,
                 &output_io_failed,
                 &thread_shared,
+                shell_command,
             );
             resources.armed = false;
         })
@@ -2972,12 +3052,19 @@ fn supervise_joined_pty(
     io_stop: &AtomicBool,
     output_io_failed: &AtomicBool,
     shared: &Mutex<JoinedSessionShared>,
+    shell_command: bool,
 ) {
     let started = Instant::now();
     let mut status = None;
+    let mut group = GroupProbe::new(process_group);
+    let mut disowned = false;
     let reason = loop {
         if stopped.load(Ordering::Acquire) {
             break JoinedProcessStatus::Terminated;
+        }
+        if lock(shared).disowned {
+            disowned = true;
+            break JoinedProcessStatus::OutcomeUnknown;
         }
         if cancel_foreground(promoted, control) {
             break JoinedProcessStatus::Cancelled;
@@ -2988,26 +3075,41 @@ fn supervise_joined_pty(
         if started.elapsed() >= limits.session_duration() {
             break JoinedProcessStatus::TimedOut;
         }
-        match child.try_wait() {
+        match peek_leader_exit(process_group) {
             Ok(Some(exit)) => {
-                let code = i32::try_from(exit.exit_code()).ok();
-                status = Some(exit);
-                break JoinedProcessStatus::Exited(code);
+                if shell_command && observe_leftover_group(&mut group, exit.code, shared) {
+                    std::thread::sleep(supervision_poll_interval(started.elapsed()));
+                    continue;
+                }
+                match child.try_wait() {
+                    Ok(Some(exit)) => {
+                        let code = i32::try_from(exit.exit_code()).ok();
+                        status = Some(exit);
+                        break JoinedProcessStatus::Exited(code);
+                    }
+                    Ok(None) => {}
+                    Err(_) => break JoinedProcessStatus::Failed,
+                }
             }
             Ok(None) => std::thread::sleep(supervision_poll_interval(started.elapsed())),
             Err(_) => break JoinedProcessStatus::Failed,
         }
     };
     let deadline = Instant::now() + limits.cleanup_duration();
-    let cleanup = terminate_owned_pty_group_with_grace(
-        child,
-        process_group,
-        status,
-        deadline,
-        Duration::from_millis(stop_grace_millis.load(Ordering::Acquire)),
-    );
+    let mut cleanup = if disowned {
+        Ok(())
+    } else {
+        terminate_owned_pty_group_with_grace(
+            child,
+            process_group,
+            status,
+            deadline,
+            Duration::from_millis(stop_grace_millis.load(Ordering::Acquire)),
+        )
+        .map(|_| ())
+    };
     let draining = Instant::now();
-    if matches!(reason, JoinedProcessStatus::Exited(_)) && cleanup.is_ok() {
+    if !disowned && matches!(reason, JoinedProcessStatus::Exited(_)) && cleanup.is_ok() {
         while Instant::now() < deadline && !reader_thread.is_finished() {
             sleep_until_next_poll(draining, deadline);
         }
@@ -3021,6 +3123,23 @@ fn supervise_joined_pty(
     let reader_joined = join_thread_until(reader_thread, deadline);
     let input_joined = join_thread_until(input_thread, deadline);
     let workers_joined = reader_joined && input_joined;
+    if disowned {
+        cleanup = if workers_joined && !output_io_failed.load(Ordering::Acquire) {
+            child
+                .try_wait()
+                .map(|_| ())
+                .map_err(|_| io_error("released process leader could not be reaped"))
+        } else {
+            terminate_owned_pty_group_with_grace(
+                child,
+                process_group,
+                None,
+                deadline,
+                Duration::from_millis(200),
+            )
+            .map(|_| ())
+        };
+    }
     let final_status = joined_process_final_status(
         reason,
         cleanup.is_ok(),
@@ -3050,12 +3169,19 @@ fn supervise_joined_process(
     io_stop: &AtomicBool,
     output_io_failed: &AtomicBool,
     shared: &Mutex<JoinedSessionShared>,
+    shell_command: bool,
 ) {
     let started = Instant::now();
     let mut status = None;
+    let mut group = GroupProbe::new(process_group);
+    let mut disowned = false;
     let reason = loop {
         if stopped.load(Ordering::Acquire) {
             break JoinedProcessStatus::Terminated;
+        }
+        if lock(shared).disowned {
+            disowned = true;
+            break JoinedProcessStatus::OutcomeUnknown;
         }
         if cancel_foreground(promoted, control) {
             break JoinedProcessStatus::Cancelled;
@@ -3066,30 +3192,63 @@ fn supervise_joined_process(
         if started.elapsed() >= limits.session_duration() {
             break JoinedProcessStatus::TimedOut;
         }
-        match child.try_wait() {
+        match peek_leader_exit(process_group) {
             Ok(Some(exit)) => {
-                status = Some(exit);
-                break JoinedProcessStatus::Exited(exit.code());
+                if shell_command && observe_leftover_group(&mut group, exit.code, shared) {
+                    std::thread::sleep(supervision_poll_interval(started.elapsed()));
+                    continue;
+                }
+                match child.try_wait() {
+                    Ok(Some(exit)) => {
+                        let code = exit.code();
+                        status = Some(exit);
+                        break JoinedProcessStatus::Exited(code);
+                    }
+                    Ok(None) => {}
+                    Err(_) => break JoinedProcessStatus::Failed,
+                }
             }
             Ok(None) => std::thread::sleep(supervision_poll_interval(started.elapsed())),
             Err(_) => break JoinedProcessStatus::Failed,
         }
     };
     let deadline = Instant::now() + limits.cleanup_duration();
-    let cleanup = terminate_owned_process_group_with_grace(
-        child,
-        process_group,
-        status,
-        deadline,
-        Duration::from_millis(stop_grace_millis.load(Ordering::Acquire)),
-    );
-    if matches!(reason, JoinedProcessStatus::Exited(_)) && cleanup.is_ok() {
+    let mut cleanup = if disowned {
+        Ok(())
+    } else {
+        terminate_owned_process_group_with_grace(
+            child,
+            process_group,
+            status,
+            deadline,
+            Duration::from_millis(stop_grace_millis.load(Ordering::Acquire)),
+        )
+        .map(|_| ())
+    };
+    if !disowned && matches!(reason, JoinedProcessStatus::Exited(_)) && cleanup.is_ok() {
         wait_for_output_readers_until(&stdout_thread, &stderr_thread, deadline);
     }
     io_stop.store(true, Ordering::Release);
     let stdout_joined = join_thread_until(stdout_thread, deadline);
     let stderr_joined = join_thread_until(stderr_thread, deadline);
     let readers_joined = stdout_joined && stderr_joined;
+    if disowned {
+        cleanup = if readers_joined && !output_io_failed.load(Ordering::Acquire) {
+            child
+                .try_wait()
+                .map(|_| ())
+                .map_err(|_| io_error("released process leader could not be reaped"))
+        } else {
+            terminate_owned_process_group_with_grace(
+                child,
+                process_group,
+                None,
+                deadline,
+                Duration::from_millis(200),
+            )
+            .map(|_| ())
+        };
+    }
     let final_status = joined_process_final_status(
         reason,
         cleanup.is_ok(),
@@ -3135,6 +3294,12 @@ where
             let mut reader = reader;
             let mut chunk = [0_u8; 16 * 1024];
             loop {
+                if lock(&shared).disowned {
+                    if detach_output_reader(&reader, stream, &shared).is_err() {
+                        io_failed.store(true, Ordering::Release);
+                    }
+                    return;
+                }
                 if stop.load(Ordering::Acquire) {
                     return;
                 }
@@ -3157,7 +3322,7 @@ where
                         return;
                     }
                 };
-                if stop.load(Ordering::Acquire) {
+                if stop.load(Ordering::Acquire) && !lock(&shared).disowned {
                     return;
                 }
                 let mut state = lock(&shared);
@@ -3219,6 +3384,58 @@ where
             }
         })
         .map_err(|_| io_error("joined process output worker could not start"))
+}
+
+fn detach_output_reader(
+    reader: &impl AsFd,
+    stream: JoinedProcessOutputStream,
+    shared: &Mutex<JoinedSessionShared>,
+) -> Result<(), ExecutionBackendError> {
+    let input = rustix::io::dup(reader)
+        .map(fs::File::from)
+        .map_err(|_| io_error("released output could not be transferred"))?;
+    let flags = rustix::fs::fcntl_getfl(&input)
+        .map_err(|_| io_error("released output flags unavailable"))?;
+    rustix::fs::fcntl_setfl(&input, flags & !OFlags::NONBLOCK)
+        .map_err(|_| io_error("released output could not become blocking"))?;
+    let (output, room) = lock(shared)
+        .spool
+        .as_mut()
+        .and_then(|spool| {
+            spool.detached_output(if stream == JoinedProcessOutputStream::Terminal {
+                1
+            } else {
+                2
+            })
+        })
+        .map_or_else(
+            || (Stdio::null(), 0),
+            |(file, room)| (Stdio::from(file), room),
+        );
+    // A thread would die with `plak run`. This deliberately unowned, EOF-bound
+    // drain process keeps the service's pipe readable after the product exits.
+    let mut drain = Command::new("/bin/sh")
+        .args([
+            "-c",
+            "trap '' HUP; head -c \"$1\"; exec cat >/dev/null",
+            "released-output",
+            &room.to_string(),
+        ])
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .process_group(0)
+        .stdin(input)
+        .stdout(output)
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| io_error("released output drainer could not start"))?;
+    std::thread::Builder::new()
+        .name(String::from("plak-released-output"))
+        .spawn(move || {
+            let _ = drain.wait();
+        })
+        .map_err(|_| io_error("released output drainer could not be reaped"))?;
+    Ok(())
 }
 
 /// Minimal PATH used when the prepared request injects no PATH and the host
@@ -3853,34 +4070,42 @@ fn terminate_owned_process_group_with_grace(
     cleanup_deadline: Instant,
     grace: Duration,
 ) -> Result<std::process::ExitStatus, ExecutionBackendError> {
+    let mut group = GroupProbe::new(process_group);
     let now = Instant::now();
     let term_deadline = now + grace.min(cleanup_deadline.saturating_duration_since(now) / 2);
     let _ = rustix::process::kill_process_group(process_group, rustix::process::Signal::TERM);
     while Instant::now() < term_deadline {
-        if status.is_none() {
+        if status.is_none()
+            && peek_leader_exit(process_group).is_ok_and(|exit| exit.is_some())
+            && group.members() == 0
+        {
             status = child
                 .try_wait()
                 .map_err(|_| io_error("host process cleanup wait failed"))?;
         }
-        if status.is_some() && !process_group_exists(process_group) {
+        if status.is_some() && group.members() == 0 {
             return status.ok_or_else(|| io_error("host process cleanup produced no status"));
         }
-        std::thread::sleep(Duration::from_millis(2));
+        sleep_until_next_poll(now, cleanup_deadline);
     }
 
     if process_group_exists(process_group) {
         let _ = rustix::process::kill_process_group(process_group, rustix::process::Signal::KILL);
+        group.checked = None;
     }
     while Instant::now() < cleanup_deadline {
-        if status.is_none() {
+        if status.is_none()
+            && peek_leader_exit(process_group).is_ok_and(|exit| exit.is_some())
+            && group.members() == 0
+        {
             status = child
                 .try_wait()
                 .map_err(|_| io_error("host process final join failed"))?;
         }
-        if status.is_some() && !process_group_exists(process_group) {
+        if status.is_some() && group.members() == 0 {
             return status.ok_or_else(|| io_error("host process cleanup produced no status"));
         }
-        std::thread::sleep(Duration::from_millis(2));
+        sleep_until_next_poll(now, cleanup_deadline);
     }
     Err(io_error(
         "host process group cleanup exceeded its configured bound",
@@ -3918,33 +4143,41 @@ fn terminate_owned_pty_group_with_grace(
     cleanup_deadline: Instant,
     grace: Duration,
 ) -> Result<portable_pty::ExitStatus, ExecutionBackendError> {
+    let mut group = GroupProbe::new(process_group);
     let now = Instant::now();
     let term_deadline = now + grace.min(cleanup_deadline.saturating_duration_since(now) / 2);
     let _ = rustix::process::kill_process_group(process_group, rustix::process::Signal::TERM);
     while Instant::now() < term_deadline {
-        if status.is_none() {
+        if status.is_none()
+            && peek_leader_exit(process_group).is_ok_and(|exit| exit.is_some())
+            && group.members() == 0
+        {
             status = child
                 .try_wait()
                 .map_err(|_| io_error("joined process PTY cleanup wait failed"))?;
         }
-        if status.is_some() && !process_group_exists(process_group) {
+        if status.is_some() && group.members() == 0 {
             return status.ok_or_else(|| io_error("joined process PTY cleanup produced no status"));
         }
-        std::thread::sleep(Duration::from_millis(2));
+        sleep_until_next_poll(now, cleanup_deadline);
     }
     if process_group_exists(process_group) {
         let _ = rustix::process::kill_process_group(process_group, rustix::process::Signal::KILL);
+        group.checked = None;
     }
     while Instant::now() < cleanup_deadline {
-        if status.is_none() {
+        if status.is_none()
+            && peek_leader_exit(process_group).is_ok_and(|exit| exit.is_some())
+            && group.members() == 0
+        {
             status = child
                 .try_wait()
                 .map_err(|_| io_error("joined process PTY final join failed"))?;
         }
-        if status.is_some() && !process_group_exists(process_group) {
+        if status.is_some() && group.members() == 0 {
             return status.ok_or_else(|| io_error("joined process PTY cleanup produced no status"));
         }
-        std::thread::sleep(Duration::from_millis(2));
+        sleep_until_next_poll(now, cleanup_deadline);
     }
     Err(io_error(
         "joined process PTY group cleanup exceeded its configured bound",
@@ -4034,8 +4267,182 @@ fn terminate_direct_pty_child(
     ))
 }
 
+struct LeaderExit {
+    code: Option<i32>,
+}
+
+fn peek_leader_exit(pid: rustix::process::Pid) -> rustix::io::Result<Option<LeaderExit>> {
+    use rustix::process::{WaitId, WaitIdOptions, waitid};
+    waitid(
+        WaitId::Pid(pid),
+        WaitIdOptions::EXITED | WaitIdOptions::NOWAIT | WaitIdOptions::NOHANG,
+    )
+    .map(|status| {
+        status.map(|status| LeaderExit {
+            code: status.exit_status(),
+        })
+    })
+}
+
+struct GroupProbe {
+    group: rustix::process::Pid,
+    checked: Option<Instant>,
+    count: usize,
+}
+
+impl GroupProbe {
+    fn new(group: rustix::process::Pid) -> Self {
+        Self {
+            group,
+            checked: None,
+            count: 0,
+        }
+    }
+
+    fn members(&mut self) -> usize {
+        if !process_group_exists(self.group) {
+            return 0;
+        }
+        if self
+            .checked
+            .is_none_or(|at| at.elapsed() >= Duration::from_millis(250))
+        {
+            self.count = live_group_members(self.group);
+            self.checked = Some(Instant::now());
+        }
+        self.count
+    }
+}
+
+fn observe_leftover_group(
+    group: &mut GroupProbe,
+    code: Option<i32>,
+    shared: &Mutex<JoinedSessionShared>,
+) -> bool {
+    if !process_group_exists(group.group) {
+        return false;
+    }
+    let count = group.members();
+    if count == 0 {
+        return false;
+    }
+    let mut shared = lock(shared);
+    let changed = shared.leftover.is_none();
+    shared.leftover = Some(LeftoverJob {
+        exit_code: code,
+        processes: count,
+    });
+    if changed {
+        shared
+            .changes
+            .send_modify(|revision| *revision = revision.wrapping_add(1));
+        if let Some(changes) = &shared.terminal_changes {
+            changes.send_modify(|revision| *revision = revision.wrapping_add(1));
+        }
+    }
+    true
+}
+
+// Zombies cannot run or receive signals. In particular, an orphaned zombie
+// waiting for the host's init must not keep a server job alive forever.
+fn live_group_members(group: rustix::process::Pid) -> usize {
+    if !process_group_exists(group) {
+        return 0;
+    }
+    live_group_members_impl(group).unwrap_or(1)
+}
+
+#[cfg(target_os = "linux")]
+fn live_group_members_impl(group: rustix::process::Pid) -> Option<usize> {
+    let mut count = 0;
+    for entry in fs::read_dir("/proc").ok()? {
+        let entry = entry.ok()?;
+        if !entry
+            .file_name()
+            .as_encoded_bytes()
+            .iter()
+            .all(u8::is_ascii_digit)
+        {
+            continue;
+        }
+        let Ok(stat) = fs::read_to_string(entry.path().join("stat")) else {
+            continue;
+        };
+        let (_, fields) = stat.rsplit_once(')')?;
+        let mut fields = fields.split_whitespace();
+        let state = fields.next()?;
+        let _parent = fields.next()?;
+        let pgid = fields.next()?.parse::<i32>().ok()?;
+        if pgid == group.as_raw_pid() && state != "Z" && state != "X" {
+            count += 1;
+        }
+    }
+    Some(count)
+}
+
+#[cfg(target_os = "macos")]
+fn live_group_members_impl(group: rustix::process::Pid) -> Option<usize> {
+    let mut child = Command::new("/bin/ps")
+        .args(["-axo", "pgid=,stat="])
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut output = Vec::new();
+    let collected = (|| {
+        let mut stdout = child.stdout.take()?;
+        set_nonblocking(&stdout).ok()?;
+        let deadline = Instant::now() + Duration::from_millis(100);
+        let mut buffer = [0; 4096];
+        loop {
+            match stdout.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(count) => output.extend_from_slice(&buffer[..count]),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(_) => return None,
+            }
+            if output.len() > 1_048_576 || Instant::now() >= deadline {
+                return None;
+            }
+        }
+        loop {
+            if let Some(status) = child.try_wait().ok()? {
+                return status.success().then_some(status);
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    })();
+    if collected.is_none() {
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    }
+    Some(
+        String::from_utf8(output)
+            .ok()?
+            .lines()
+            .filter(|line| {
+                let mut fields = line.split_whitespace();
+                fields.next().and_then(|pgid| pgid.parse::<i32>().ok()) == Some(group.as_raw_pid())
+                    && fields.next().is_some_and(|state| !state.starts_with('Z'))
+            })
+            .count(),
+    )
+}
+
 pub(super) fn process_group_exists(process_group: rustix::process::Pid) -> bool {
-    rustix::process::test_kill_process_group(process_group).is_ok()
+    match rustix::process::test_kill_process_group(process_group) {
+        Ok(()) | Err(Errno::PERM) => true,
+        Err(_) => false,
+    }
 }
 
 #[cfg(test)]

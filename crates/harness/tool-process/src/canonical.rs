@@ -14,6 +14,7 @@ use super::{
 };
 #[cfg(test)]
 use super::{ProcessToolProjectionKind, ProjectedProcessTool};
+use std::fmt::Write as _;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -762,7 +763,7 @@ impl ProcessSessionTools {
             let value: Value =
                 serde_json::from_str(&outcome.joined_text()).map_err(projection_arguments)?;
             let task = &value["tasks"][0];
-            let terminal = task["status"] != "running";
+            let terminal = task["status"] != "running" && task["status"] != "leftover";
             let status = session.sessions.joined_terminal_status(session.id);
             return Ok(ProcessExecutionResult {
                 projection: ProcessProjectionResult {
@@ -879,6 +880,13 @@ impl ProcessSessionTools {
             tokio::time::Instant::now() + std::time::Duration::from_millis(request.yield_time_ms);
         loop {
             changes.borrow_and_update();
+            if sessions.iter().any(|(_, session)| {
+                session
+                    .as_ref()
+                    .is_ok_and(BoundProcessSession::leftover_unobserved)
+            }) {
+                break;
+            }
             control.check_cancelled().map_err(backend_runtime_error)?;
             let terminal =
                 |(_, session): &(u64, Result<BoundProcessSession, ToolRuntimeError>)| match session
@@ -991,8 +999,27 @@ impl ProcessSessionTools {
                 }
                 output.push_str(reason);
             }
-            let mut task = json!({"task_id":format!("p{handle}"), "status":process_status_label(status), "output":output});
-            if let Some(code) = status_exit_code(status) {
+            let leftover = (!status.is_terminal())
+                .then(|| session.sessions.leftover(session.id))
+                .flatten();
+            if let Some((code, count)) = leftover {
+                let mut state = session
+                    .quiet_polls
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                state.leftover_observed = true;
+                state.quiet_polls = 0;
+                let _ = write!(
+                    output,
+                    "\n[leader exited {}] {count} {} still running as job {handle}",
+                    code.map_or_else(|| "unknown".to_owned(), |code| code.to_string()),
+                    if count == 1 { "process" } else { "processes" }
+                );
+            }
+            let mut task = json!({"task_id":format!("p{handle}"), "status":if leftover.is_some() { "leftover" } else { process_status_label(status) }, "output":output});
+            if let Some(code) =
+                status_exit_code(status).or_else(|| leftover.and_then(|(code, _)| code))
+            {
                 task["exit_code"] = json!(code);
             }
             tasks.push(task);

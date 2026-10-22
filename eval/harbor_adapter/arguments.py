@@ -100,6 +100,7 @@ def run_arguments(
     argv.extend(
         [
             "--print-session-id",
+            "--leave-jobs-running",
             "--",
             prompt,
         ]

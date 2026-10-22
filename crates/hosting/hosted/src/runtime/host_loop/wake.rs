@@ -587,6 +587,7 @@ mod tests {
             run: Some(super::super::super::oneshot::RunState {
                 bounds: crate::runtime::RunBounds {
                     max_turns,
+                    leave_jobs_running: false,
                     deadline: None,
                 },
                 deadline: None,

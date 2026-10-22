@@ -308,6 +308,25 @@ process group and applies TERM, KILL, direct-child reaping, group-absence
 verification, pipe-worker shutdown, and supervisor join within one configured
 cleanup attempt.
 
+Joined shell leader exit does not terminate still-live group members: they
+remain owned and killable as a leftover background job (chapter 01 §8.5),
+including `&` and `nohup ... &`. Completion means the live group is empty,
+not merely that the shell exited; zombies are not running work. Explicit stop,
+session release, attempt end and the hard cap terminate the group. Escaping the
+group with `setsid` or double-forking remains outside this ownership boundary.
+PTY shell commands retain their controlling terminal but inherit ignored
+SIGHUP, like `nohup`, so leftover PTY children survive shell-leader hangup.
+Stops, attempt end and session release use TERM then KILL, never HUP.
+Linux retains PTY output after leader exit, but macOS revokes that terminal:
+subsequent PTY writes fail with EIO and are not captured. Redirect service
+output to a file. Host death relinquishes leftovers, just as it relinquishes
+other promoted jobs; cold reopen does not signal stored PIDs.
+`plak run --leave-jobs-running` is an explicit exception: it relinquishes
+leftover groups alive at exit, transfers read ends to separate unowned,
+EOF-bound drain processes and gives up all
+future ownership and cleanup guarantees (chapter 02 §4.1). It is not a sandbox
+or a detached-service supervisor. TUI and JSONL have no such release exception.
+
 It reports **process-group cleanup, never hostile process-tree containment**.
 
 ### 2.3 What the containment descriptor says

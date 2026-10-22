@@ -512,6 +512,7 @@ mod tests {
                 run: Some(RunState {
                     bounds: RunBounds {
                         max_turns: 1,
+                        leave_jobs_running: false,
                         deadline,
                     },
                     deadline,

@@ -343,6 +343,9 @@ enum TopCommand {
         max_turns: u8,
         #[arg(long)]
         timeout: Option<u64>,
+        /// Leave leftover background jobs alive at exit, giving up ownership.
+        #[arg(long, action = ArgAction::SetTrue)]
+        leave_jobs_running: bool,
         #[arg(long = "resume-tree", action = ArgAction::SetTrue)]
         resume_tree: bool,
         /// Attach an image file (png, jpeg, gif, webp; at most 3.75 MiB). Repeatable.
@@ -522,12 +525,14 @@ impl TopCommand {
                 print_session_id,
                 max_turns,
                 timeout,
+                leave_jobs_running,
                 resume_tree,
                 image,
                 prompt,
             } => {
                 let limits = plakous_hosted::runtime::RunBounds {
                     max_turns,
+                    leave_jobs_running,
                     deadline: timeout
                         .map(|seconds| {
                             std::time::Instant::now()
@@ -546,6 +551,7 @@ impl TopCommand {
                     && session.is_none()
                     && !print_session_id
                     && !resume_tree
+                    && !leave_jobs_running
                     && max_turns == 25
                     && timeout.is_none()
                     && image.is_empty()

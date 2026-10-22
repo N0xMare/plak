@@ -768,6 +768,18 @@ pub(super) struct JobOutputWriter {
 }
 
 impl JobOutputWriter {
+    pub(super) fn detached_output(&mut self, parts: u64) -> Option<(File, u64)> {
+        if !self.open || self.file.metadata().ok()?.nlink() == 0 {
+            return None;
+        }
+        let file = self.file.try_clone().ok()?;
+        let flags = rustix::fs::fcntl_getfl(&file).ok()?;
+        rustix::fs::fcntl_setfl(&file, flags | OFlags::APPEND).ok()?;
+        let room = MAX_JOB_OUTPUT_FILE_BYTES.saturating_sub(self.written) / parts;
+        self.written = self.written.saturating_add(room);
+        Some((file, room))
+    }
+
     /// Writes bytes until the bound, then the truncation line once. A write
     /// failure stops spooling, records the content bytes the file holds
     /// (including the accepted prefix of a partial write) and tries once to

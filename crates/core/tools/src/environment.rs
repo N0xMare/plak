@@ -47,7 +47,7 @@ pub const MAX_ENVIRONMENT_EXECUTION_DURATION: Duration = Duration::from_secs(86_
 pub const MAX_ENVIRONMENT_CLEANUP_DURATION: Duration = Duration::from_secs(3_600);
 
 // 13: reported process snapshots retain bounded terminal tombstones.
-const HOST_BACKEND_SEMANTIC_REVISION: u64 = 13;
+const HOST_BACKEND_SEMANTIC_REVISION: u64 = 14;
 const HOST_BACKEND_AUTHORITY_REVISION: u64 = 1;
 const DETERMINISTIC_BACKEND_SEMANTIC_REVISION: u64 = 4;
 const DETERMINISTIC_BACKEND_AUTHORITY_REVISION: u64 = 1;
@@ -2166,7 +2166,7 @@ mod tests {
         assert_eq!(digest.version(), EXECUTION_ENVIRONMENT_DIGEST_VERSION);
         assert_eq!(
             digest.to_string(),
-            "fb28f8b062472d20c0291ec41df011d07dbe9fd1bef713ae87b93d8f2df8c501"
+            "feaab76de025627510865281653e9460ab1c531cb49b8bb798a9d957d765dbe2"
         );
         Ok(())
     }

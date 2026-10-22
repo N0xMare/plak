@@ -138,7 +138,7 @@ fn host_authority_allocations_are_distinct_and_paths_are_canonical() -> Result<(
     assert_eq!(first.cwd(), workspace.path().join("src").canonicalize()?);
     assert_eq!(first.relative_cwd(), Path::new("src"));
     assert_eq!(first.backend().kind(), ExecutionBackendKind::Host);
-    assert_eq!(first.backend().semantic_revision().get(), 13);
+    assert_eq!(first.backend().semantic_revision().get(), 14);
     assert_eq!(first.backend().authority_revision().get(), 1);
     assert_eq!(first.backend().operating_system(), std::env::consts::OS);
     assert_eq!(first.backend().path_format(), HostPathFormat::UnixUtf8);
@@ -494,7 +494,7 @@ fn descriptor_serde_is_reconstruction_complete_and_live_verification_fails_close
     );
 
     let mut changed_backend = encoded.clone();
-    changed_backend["backend"]["semantic_revision"] = serde_json::json!(14);
+    changed_backend["backend"]["semantic_revision"] = serde_json::json!(15);
     assert!(serde_json::from_value::<ExecutionEnvironmentDescriptor>(changed_backend).is_err());
 
     let mut changed_digest = encoded.clone();

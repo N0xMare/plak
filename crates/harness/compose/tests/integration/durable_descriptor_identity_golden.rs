@@ -53,50 +53,50 @@ type TestError = Box<dyn std::error::Error>;
 const DURABLE_DESCRIPTOR_PINS: &[(&str, &str, &str, &str)] = &[
     (
         "Pi",
-        "d482cb25682d874b815795ade4059f738c2d588e38d8d83608b5ad63dd9bfc4d",
-        "6b89fb4b85c7e080facf579de34dc87adf13a8d006a8cf256e0e8d20445e26ea",
+        "cbb3d16db1ea628de8f1f565ce37974a7ed1b855deb7223e662d7e53dbd03f45",
+        "7ae80997146a5e600164896b31e7940b7a9ee2fc30baaefaf4554e6c7b2c0e8c",
         "51dd93a3e90afc7cd958c8887e131957f68cfe81fd5f8c55bcbf8b9768652c62",
     ),
     (
         "CodexOAuth",
-        "d482cb25682d874b815795ade4059f738c2d588e38d8d83608b5ad63dd9bfc4d",
-        "90750e8b62a26646488fcd684e0d9a0860bcacf802968f3aa648c869a8843308",
+        "cbb3d16db1ea628de8f1f565ce37974a7ed1b855deb7223e662d7e53dbd03f45",
+        "63252eb216cba748f5ca6631438b68d53ce0a0de6b6bbe0c9579896eb0e23355",
         "51dd93a3e90afc7cd958c8887e131957f68cfe81fd5f8c55bcbf8b9768652c62",
     ),
     (
         "SuperGrokOAuth",
-        "d482cb25682d874b815795ade4059f738c2d588e38d8d83608b5ad63dd9bfc4d",
-        "c01619ede7f03c4b16d193cc68fefbe12baf33a77981bd149b4f63f5cf82b832",
+        "cbb3d16db1ea628de8f1f565ce37974a7ed1b855deb7223e662d7e53dbd03f45",
+        "6b68463d367d8aea2a98e353a95c083964eea3ad7d709abc246cf13bfa009337",
         "51dd93a3e90afc7cd958c8887e131957f68cfe81fd5f8c55bcbf8b9768652c62",
     ),
     (
         "ClaudeOAuth",
-        "d482cb25682d874b815795ade4059f738c2d588e38d8d83608b5ad63dd9bfc4d",
-        "77822d676399d2206a954cba7e6080579fe3b559a8c533be118781e34d39b456",
+        "cbb3d16db1ea628de8f1f565ce37974a7ed1b855deb7223e662d7e53dbd03f45",
+        "883534d853bca8b2b6061bdc8fb89030ceab72e1ee335eb18ba5e9c103c37147",
         "51dd93a3e90afc7cd958c8887e131957f68cfe81fd5f8c55bcbf8b9768652c62",
     ),
     (
         "Pi+topology",
-        "ae053117f1d85a6686ac625cc501abff1711564bb82363e3a3dff21f779a1fd5",
-        "3cf262c4268f6eccee53025c409c1bb7f89f257c98e3d2adb836ec6523620f46",
+        "a26a1fb236812d9abfbaead1a26ec4320b346086244a96ab714989ee201902bb",
+        "2ac5de52b9c3b25f3c48160a22536cf0267465dd187141cba8bfa96bbd4a526c",
         "a3e5d879b6cab514636931e7f8f63b29517c8fdb315bbbd40ca62a686c3d3313",
     ),
     (
         "CodexOAuth+topology",
-        "ae053117f1d85a6686ac625cc501abff1711564bb82363e3a3dff21f779a1fd5",
-        "03d4b3317c51c27c8e8ade4efe023882a8bf74ad0cf3362cd2732aa8d69a316d",
+        "a26a1fb236812d9abfbaead1a26ec4320b346086244a96ab714989ee201902bb",
+        "2200491026c4886cfe41c169fe5035d2765afa87c07e833b194a40ec45369392",
         "a3e5d879b6cab514636931e7f8f63b29517c8fdb315bbbd40ca62a686c3d3313",
     ),
     (
         "SuperGrokOAuth+topology",
-        "ae053117f1d85a6686ac625cc501abff1711564bb82363e3a3dff21f779a1fd5",
-        "c4d38112a300ca36a6ea1ed3b986625bc8bc640ab10c2899191091cdc2bb9750",
+        "a26a1fb236812d9abfbaead1a26ec4320b346086244a96ab714989ee201902bb",
+        "bdc25fdbc22f01c4faf7ce8911c050598e6ccdcc88de5442a4c3e65bdf54f907",
         "a3e5d879b6cab514636931e7f8f63b29517c8fdb315bbbd40ca62a686c3d3313",
     ),
     (
         "ClaudeOAuth+topology",
-        "ae053117f1d85a6686ac625cc501abff1711564bb82363e3a3dff21f779a1fd5",
-        "e23de7c4ded3c20cafb5da9a29ffccc8ae0fb723b5d0cb9802db31e9e10f9389",
+        "a26a1fb236812d9abfbaead1a26ec4320b346086244a96ab714989ee201902bb",
+        "48a5eba613819ebda2c9ac53dc40c9713e2ea07d90233caec59deb734d687489",
         "a3e5d879b6cab514636931e7f8f63b29517c8fdb315bbbd40ca62a686c3d3313",
     ),
 ];
@@ -233,7 +233,7 @@ fn stable_serialization_fixture(
     let expected = ToolExecutorBindingIdentity::new(
         1,
         &[
-            b"process-session-jobs",
+            b"process-session-leftover-jobs",
             b"non-login-shell",
             &shell
                 .identity()

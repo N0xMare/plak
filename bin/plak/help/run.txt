@@ -28,8 +28,10 @@ OPTIONS:
                        --account/--model/--effort/--composition/--protocol are refused
   --resume-tree        Resume a RestoredPaused topology (requires --session)
   --max-turns <n>      Admitted turns including the first, 1..=100 (default 25)
-  --timeout <seconds>  Hosted run wall clock (default none)
-  --print-session-id   Print `session_id=<session>` on stdout before the turn
+  --timeout <seconds>   Hosted run wall clock (default none)
+  --leave-jobs-running  Leave shell-background leftovers alive and unowned at exit;
+                       the caller must clean them up. Other jobs still wait.
+  --print-session-id    Print `session_id=<session>` on stdout before the turn
   --image <path>       Attach an image (png, jpeg, gif, webp; at most 3.75 MiB,
                        8 per prompt). Repeatable; with images the prompt after
                        `--` may be omitted. The model must accept images.
@@ -60,5 +62,7 @@ PROCESS-TOOL AUTHORITY:
   Unsupported process-tool targets, including Intel macOS, fail closed.
 
 Runs until idle; continuations and turn-free waiting are reported on stderr.
-Bounds stop jobs and interrupt children resumably (exit 6); Ctrl-C exits 4.
+Shell `&` leftovers never hold the run open and stop at exit by default.
+--leave-jobs-running gives up ownership of them; redirect service output to a file.
+Bounds stop owned jobs and interrupt children resumably (exit 6); Ctrl-C exits 4.
 Only the last turn answer is written to stdout, once after release.

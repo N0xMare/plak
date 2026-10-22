@@ -597,6 +597,48 @@ impl JobRegistry {
         self.stop_all_except(grace, &[]).await
     }
 
+    pub(crate) fn is_leftover(&self, job: &plakous::tools::JobView) -> bool {
+        self.services
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+            .any(|service| {
+                service.jobs().iter().any(|view| {
+                    view.session_id == job.session_id
+                        && view.owner_generation == job.owner_generation
+                }) && service
+                    .session_for_number(job.number)
+                    .is_some_and(|id| service.leftover(id).is_some())
+            })
+    }
+
+    pub(crate) async fn disown_leftovers(&self) -> Result<(), String> {
+        let services = self
+            .services
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut workers = tokio::task::JoinSet::new();
+        for service in services {
+            workers.spawn_blocking(move || service.disown_leftovers());
+        }
+        let mut failures = Vec::new();
+        while let Some(result) = workers.join_next().await {
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => failures.push(error.to_string()),
+                Err(_) => failures.push("job disown task failed".to_owned()),
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(failures.join("; "))
+        }
+    }
+
     pub(crate) async fn stop_all_except(
         &self,
         grace: Duration,
@@ -1495,6 +1537,54 @@ mod tests {
             observed[2],
             plakous_host_protocol::SessionObservation::JobTerminal { .. }
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn leftover_jobs_transfer_live_but_cold_reopen_has_no_process_authority() -> TestResult {
+        let root = tempfile::tempdir()?;
+        let registry = JobRegistry::default();
+        let key = owner("00000000-0000-0000-0000-000000000702")?;
+        let original = registry.attach(key, sessions(root.path())?)?;
+        let shell = JoinedProcessShellProfile::new("/bin/sh", [String::from("-c")])?;
+        let id = original.start(
+            JoinedProcessStartRequest::new(
+                JoinedProcessCommand::shell(shell, "sleep 30 & exit 0")?,
+                ".",
+                Vec::new(),
+                false,
+                JoinedProcessTerminalMode::Pipes,
+            )?,
+            ExecutionOperationControl::new(CancellationToken::new()),
+        )?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while original.leftover(id).is_none() {
+            assert!(
+                Instant::now() < deadline,
+                "shell never reported its leftover group"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        plakous_tools::internal::promote(&original, id)?;
+        let views = original.jobs();
+        assert!(registry.is_leftover(&views[0]));
+        let replacement = registry.attach(
+            JobOwner {
+                agent_id: AgentId::from_str("00000000-0000-0000-0000-000000000706")?,
+                ..key
+            },
+            sessions(root.path())?,
+        )?;
+        assert_eq!(replacement.leftover(id), Some((Some(0), 1)));
+        assert_eq!(replacement.running_job_count(), 1);
+        let cold = sessions(root.path())?;
+        plakous_tools::internal::restore_job_terminals(&cold, &views);
+        assert_eq!(cold.jobs()[0].status, JobStatus::OutcomeUnknown);
+        assert_eq!(cold.running_job_count(), 0);
+        assert!(!cold.retains_session(id));
+        cold.stop_jobs(JobStopReason::SessionExit, Duration::from_millis(200))?;
+        assert_eq!(replacement.running_job_count(), 1);
+        replacement.stop_jobs(JobStopReason::SessionExit, Duration::from_millis(200))?;
         Ok(())
     }
 

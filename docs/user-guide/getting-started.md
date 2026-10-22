@@ -215,7 +215,11 @@ Provider credentials: run `plak status`
 ## Your first run
 
 `plak run` runs non-interactively until idle, including continuation turns,
-bounded by `--max-turns` (default 25). Each turn can be billable. Name an exact model id — there is no
+bounded by `--max-turns` (default 25). Shell `&` leftovers become jobs but do not
+hold `run` open; they are stopped at exit. `--leave-jobs-running` leaves only
+those jobs alive and unowned for an external verifier or CI caller, which must
+clean them up. Redirect service output to a file or `/dev/null`. Budget-promoted
+commands hold the run open while their shell leaders remain alive. Each turn can be billable. Name an exact model id — there is no
 inference and no fuzzy matching — and, for a reasoning model, an effort:
 
 ```sh

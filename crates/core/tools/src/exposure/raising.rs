@@ -42,6 +42,19 @@ pub(super) fn raise_process_result(
     canonical.validate()?;
     let status = raised_process_status(&canonical.status);
     let mut output = canonical.output;
+    if canonical.status == "leftover" {
+        let stop = match entry.lowering {
+            ToolProjectionLoweringV2::CodexExecCommand
+            | ToolProjectionLoweringV2::CodexWriteStdin => {
+                "Stop with write_stdin using chars exactly \\u0003."
+            }
+            ToolProjectionLoweringV2::ClaudeBash => "Stop with TaskStop using task_id.",
+            ToolProjectionLoweringV2::PiBash => "Stop with stop using the id.",
+            _ => "Stop with kill_command_or_subagent using task_id.",
+        };
+        output.push('\n');
+        output.push_str(stop);
+    }
     if entry.lowering == ToolProjectionLoweringV2::PiBash
         && let Some(id) = canonical.session_id
         && let Some(hint) = canonical.foreground_hint_ms
@@ -281,6 +294,7 @@ impl CanonicalProcessResultWireV2 {
         let valid = self.cursor < u64::MAX
             && match self.status.as_str() {
                 "running" => self.session_id.is_some() && self.exit_code.is_none(),
+                "leftover" => self.session_id.is_some(),
                 "exited" => self.session_id.is_none(),
                 "terminated" | "cancelled" | "timed_out" | "output_limit" | "failed"
                 | "outcome_unknown" | "cleanup_unresolved" => {
@@ -315,6 +329,7 @@ struct RaisedProcessResultWireV2 {
 /// The raised status for a process that ended other than by its own exit.
 fn raised_process_status(status: &str) -> Option<&'static str> {
     match status {
+        "leftover" => Some("leftover"),
         "timed_out" => Some("timed_out"),
         "terminated" => Some("terminated"),
         "cancelled" => Some("cancelled"),

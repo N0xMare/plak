@@ -64,7 +64,10 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                 .map_or_else(Vec::new, plakous::agent::Agent::jobs);
             let running = jobs
                 .iter()
-                .filter(|job| job.status == plakous::tools::JobStatus::Running)
+                .filter(|job| {
+                    job.status == plakous::tools::JobStatus::Running
+                        && !self.config.state_roots.job_registry().is_leftover(job)
+                })
                 .collect::<Vec<_>>();
             let notices = jobs
                 .iter()
@@ -92,11 +95,34 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             };
             if bound.is_some() || interrupted || (!completed && !resuming) {
                 self.cancel_transient_resume();
-                let stopped = running
+                let stopped = jobs
                     .iter()
-                    .map(|job| format!("stopped p{}", job.number))
+                    .filter(|job| job.status == plakous::tools::JobStatus::Running)
+                    .map(|job| {
+                        format!(
+                            "{} p{}",
+                            if run.bounds.leave_jobs_running
+                                && self.config.state_roots.job_registry().is_leftover(job)
+                            {
+                                "released"
+                            } else {
+                                "stopped"
+                            },
+                            job.number
+                        )
+                    })
                     .collect::<Vec<_>>();
                 let mut failures = Vec::new();
+                if run.bounds.leave_jobs_running {
+                    match self
+                        .executor
+                        .block_on(self.config.state_roots.job_registry().disown_leftovers())
+                    {
+                        Ok(Ok(())) => {}
+                        Ok(Err(error)) => failures.push(error),
+                        Err(_) => failures.push("job disown execution failed".to_owned()),
+                    }
+                }
                 match self.executor.block_on(
                     self.config
                         .state_roots

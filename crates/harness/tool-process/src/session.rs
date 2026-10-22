@@ -1,5 +1,7 @@
 //! Joined process sessions as a tool executor: results, jobs and observation.
 
+use std::fmt::Write as _;
+
 use super::{
     Arc, CanonicalProcessOperationV2, CanonicalProcessTerminateRequest, ExecutionOperationControl,
     HeadTailPage, JoinedProcessOutputCursor, JoinedProcessSessionId, JoinedProcessSessions,
@@ -67,6 +69,19 @@ impl ProcessExecutionResult {
         if self.first_promotion || self.truncated {
             append_output_file(&mut output, &self.sessions, self.session_id);
         }
+        if !self.joined
+            && let Some((code, count)) = self.sessions.leftover(self.session_id)
+        {
+            self.projection.exit_code = code;
+            self.status = "leftover";
+            let _ = write!(
+                output,
+                "\n[leader exited {}]\n{count} {} still running as job {}. Session release, attempt end and the hard runtime cap stop this job; use this vocabulary's stop operation to stop it now.",
+                code.map_or_else(|| "unknown".to_owned(), |code| code.to_string()),
+                if count == 1 { "process" } else { "processes" },
+                JoinedProcessSessions::job_number(self.session_id)
+            );
+        }
         let mut canonical = json!({
             "status": self.status,
             "exit_code": self.projection.exit_code,
@@ -75,6 +90,7 @@ impl ProcessExecutionResult {
             "output": output,
         });
         if self.first_promotion
+            && self.status != "leftover"
             && let Some((hint, preempted)) = promotion
         {
             canonical["foreground_hint_ms"] = json!(hint);
@@ -175,6 +191,17 @@ impl Drop for ProcessObservationGuard {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.observers -= 1;
         state.repeat_observers -= u32::from(self.repeat);
+    }
+}
+
+impl BoundProcessSession {
+    pub(crate) fn leftover_unobserved(&self) -> bool {
+        self.sessions.leftover(self.id).is_some()
+            && !self
+                .quiet_polls
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .leftover_observed
     }
 }
 
@@ -551,7 +578,7 @@ impl ProcessSessionTools {
         let executor_binding_identity = ToolExecutorBindingIdentity::new(
             1,
             &[
-                b"process-session-jobs",
+                b"process-session-leftover-jobs",
                 b"non-login-shell",
                 &shell,
                 b"login-shell",
@@ -829,6 +856,7 @@ impl ProcessSessionTools {
                 drained_after_deadline += 1;
             }
             if result.joined
+                || session.leftover_unobserved()
                 || (matches!(
                     wait,
                     ObservationWait::Output | ObservationWait::ExitOrOutput
@@ -841,11 +869,15 @@ impl ProcessSessionTools {
             {
                 let truncated = page.omitted != 0;
                 let mut output = page.finish();
+                let leftover = session.sessions.leftover(session.id).is_some();
                 let mut state = session
                     .quiet_polls
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                if result.joined
+                if leftover && !state.leftover_observed {
+                    state.leftover_observed = true;
+                    state.quiet_polls = 0;
+                } else if result.joined
                     || !output.is_empty()
                     || state.output_cursor != result.cursor
                     || result.cursor != starting_cursor
@@ -997,7 +1029,8 @@ impl ProcessSessionTools {
                 });
             }
             control.check_cancelled().map_err(backend_runtime_error)?;
-            if wait.preempted(*control.preempt().borrow())
+            if session.leftover_unobserved()
+                || wait.preempted(*control.preempt().borrow())
                 || (matches!(
                     wait,
                     ObservationWait::Output | ObservationWait::ExitOrOutput

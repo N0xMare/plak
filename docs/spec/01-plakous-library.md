@@ -4530,7 +4530,7 @@ an optional required workspace-relative PATH prefix. The hosted workspace
 constructor selects the copy-shim prefix; core tools does not discover product
 homes or shims. The captured fallback PATH/HOME and live directory handles are
 fresh host authority, excluded from descriptor bytes and digests. The relative prefix is reconstructive policy: descriptor digest
-format 3 and host backend semantic revision 13 bind it, and exact reopen rejects
+format 3 and host backend semantic revision 14 bind it, and exact reopen rejects
 changed prefix policy. Unsupported descriptors have no compatibility path.
 The prefix directory is opened at construction and its canonical location and
 filesystem identity are revalidated before literal, piped or PTY spawn. Missing,
@@ -4636,8 +4636,8 @@ window. The end-the-turn instruction remains in force. Exactly `\u0003`, with or
 job. The canonical write schema admits empty-poll hints through 300 seconds;
 nonempty-input execution still enforces 30 seconds. A zero start hint in every
 process vocabulary selects the 250 ms first observation, not the default
-foreground budget. The process projection revision is **14** and canonical
-process capability revision is **8**; these also bind validated single/multi-id
+foreground budget. The process projection revision is **15** and canonical
+process capability revision is **10**; these also bind validated single/multi-id
 poll forms and bounded terminal tombstone observations. Canonical start lowering carries the
 neutral hint source (`default`, `model_hint`, `background`); the process adapter
 records neutral operations (`start`, `poll`, `write_wait`, `await`). L0 never
@@ -4858,6 +4858,46 @@ deletes every job file whose last write or consumption is at least 7 days
 old, consumed or not, and removes session directories left empty. Session
 deletion removes the runtime sessions' directories (chapter 02 §2.5.2).
 Without a bound root nothing is spooled and no path is issued.
+
+When a joined shell leader exits while its process group still has live
+members, observation returns promptly and promotes it through the same bounded
+job machinery instead of terminating the group. The result records the leader's
+exit code (`status: "leftover"`, `exit_code` is the leader status while
+`session_id` remains live) and `N processes still running as job <id>`, naming the stop tool and
+release/attempt-end/hard-cap cleanup. Output continues spooling, and group-empty
+completion emits the ordinary terminal notice with the leader's exit status.
+Zombies do not count as live members. Cancellation or promotion refusal still
+terminates the owned group; no handle is published without ownership.
+The service records leftover versus foreground-budget promotion locally. A job
+already budget-promoted converts to leftover when its shell leader exits with
+live members; poll and await wake on that transition and report the leader
+status and member count without consuming a group-completion notice. This
+transition also wakes an already-held quiet poll. Once observed, retained
+leftover metadata is not fresh output and does not bypass repeated-quiet-poll
+coalescing or an explicit wait for group exit. Same-branch
+registry transfers retain this distinction; fresh-process reopen retains only
+existing read-only outcome snapshots, never executable PID authority. A shell
+PTY ignores inherited SIGHUP so leader exit does not itself hang up its
+leftover group; explicit TERM/KILL stop and all ownership bounds remain intact.
+On Linux, the retained PTY master captures writes after leader exit. macOS
+revokes the controlling PTY when its leader exits: later writes fail with EIO
+and cannot be captured. Redirect a service's stdout/stderr to a file on both
+platforms when output must survive the leader, particularly on macOS.
+`JoinedProcessSessions::leftover(id)` exposes allocation-local leader status
+and observed live-member count; it grants no PID authority.
+`JoinedProcessSessions::disown_leftovers()` explicitly relinquishes only promoted
+leftovers and joins their supervisors under one cleanup bound. Each remaining
+read end transfers to a separate unowned drain process (a thread would die with
+`plak run`), which appends a bounded prefix to the already-open job spool and
+then drains to `/dev/null`; missing/unavailable spools drain to `/dev/null`.
+The drain exits at EOF (or terminal revocation) and has no session/attempt/hard-cap
+ownership. No new pathname is opened for the spool. Released rows reopen as OutcomeUnknown: no stored PID is later signalled.
+Leader exit is observed with waitid WNOWAIT; the unreaped leader pins the PGID
+until no live group members remain, or ownership is explicitly relinquished.
+Ordinary polls use killpg(0), treating EPERM as present; per-owner live-member
+scans for classification/zombies are limited to one per 250 ms except a new
+termination phase. Literal one-shot execution is not a joined shell/job operation and retains its
+bounded process-group cleanup contract.
 
 Promoted jobs survive turn and cell cleanup. They stop only on explicit
 stop, runtime release, attempt end or the hard cap. Every stop sends process

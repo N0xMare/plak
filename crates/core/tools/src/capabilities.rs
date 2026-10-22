@@ -33,7 +33,7 @@ pub const CLAUDE_BASH_OBSERVATION_BYTES: usize = 30_000;
 /// Canonical standard-tool pack semantic revision.
 pub const STANDARD_CODING_TOOL_VERSION: &str = "3.0.0";
 /// Exact process-tool projection catalog revision.
-pub const PROCESS_TOOL_PROJECTION_REVISION: u32 = 14;
+pub const PROCESS_TOOL_PROJECTION_REVISION: u32 = 15;
 /// Canonical provider-neutral process-session start operation name.
 pub const PROCESS_SESSION_CAPABILITY_NAME: &str = "process_session_start";
 /// Canonical process-session write operation name.
@@ -43,7 +43,7 @@ pub const PROCESS_SESSION_POLL_NAME: &str = "process_session_poll";
 /// Canonical process-session terminate operation name.
 pub const PROCESS_SESSION_TERMINATE_NAME: &str = "process_session_terminate";
 /// Canonical process-session capability revision.
-pub const PROCESS_SESSION_CAPABILITY_REVISION: &str = "8";
+pub const PROCESS_SESSION_CAPABILITY_REVISION: &str = "10";
 /// Exact durable canonical registration identity.
 pub const PROCESS_SESSION_REGISTERED_TOOL_ID: &str = "plakous.process-session-start.v3";
 /// Exact durable write registration identity.

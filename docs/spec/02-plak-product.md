@@ -1722,7 +1722,7 @@ version. There is no top-level prompt positional.
 | `key set\|clear <openai\|xai-api\|anthropic\|openrouter>`, `key status [<account>]` | `set` and `clear` refuse an account that is not an API-key account |
 | `secret set\|rm <name>`, `secret list` | named secrets config.toml refers to by name (spec 04 §3.1); `set` prompts with masked input, `list` prints names only |
 | `mcp add <id> [--scope user\|project] [--env K=V]… [--secret-env K=SECRET_NAME]… [--tools a,b] [--resources] [--startup-seconds <n>] [--call-seconds <n>] [--replace] -- <command> [args…]`, `mcp add <id> --url <url> [--scope user\|project] [--bearer-secret SECRET_NAME \| --oauth [--oauth-issuer <url>] [--oauth-client-id <id>] [--oauth-client-secret SECRET_NAME] [--oauth-callback-port <port>]] [--header N=V]… [--header-secret N=SECRET_NAME]… [--tools a,b] [--resources] [--startup-seconds <n>] [--call-seconds <n>] [--replace]`, `mcp list`, `mcp show <id>`, `mcp test <id>`, `mcp remove <id> [--scope user\|project] [--force]`, `mcp enable <id> --template <name> [--tool <t>]…`, `mcp disable <id> --template <name>`, `mcp login <id> [--scope <scopes>] [--remote]`, `mcp logout <id> [--local]`, `mcp prompts <id> [<prompt> [--arg NAME=VALUE]…]` | MCP server setup (spec 07 §3.5). `add` writes `[mcp_servers.<id>]` in place, validated by the load parser, and refuses an existing id without `--replace`; secrets are names only; `--oauth` writes `auth = "oauth"` and the `oauth_*` keys given, and `--resources` writes `resources = true`. `list` and `show` print transport, scope, the templates that enable each server, the secrets it names that are not stored, whether resources are enabled, and an OAuth server's login state (§2.3). `test` starts or connects to the server through the bind's spawn, environment, secret and login path on a pool of its own, lists the tools `mcp:<id>` would bind (with `read_resource` when resources are enabled) and the ones left out with the reason (schema not representable, not in the allowlist), reports with resources enabled how many resources and resource templates the server lists, stops it, and exits non-zero with the cause on failure; it calls no model. `login` runs the server's OAuth login (§8.3): discovery, registration, the browser or remote flow, and the token exchange, then stores the login; `--scope` replaces the discovered scope (space-separated, quoted as one argument) and is united with the replaced login's scope, so a step-up keeps earlier grants; it refuses for a server without `auth = "oauth"`. `logout` revokes at the authorization server when it offers revocation, else and with `--local` retires the login locally and says the grant may remain; a revocation that fails retires nothing and names `--local`. `prompts <id>` lists the server's prompts with their arguments; `prompts <id> <prompt>` gets one with the given arguments and prints its flattened expansion, exactly the user message a prompt invocation would send, with control characters shown as `�`; neither calls a model. `enable`/`disable` edit only that template's `tools` array (spec 07 §1). `remove` refuses while a template would be left listing what its layer no longer serves unless `--force`, which removes those entries first; it leaves a stored login in place, which `logout` retires; every edit is checked against the home alone and with the trusted project over it (spec 07 §3.5); secret flags take `SECRET_NAME`s and a rejected one is never echoed |
-| `run [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>] [--resume-tree] [--print-session-id] [--max-turns <1..100>] [--timeout <seconds>] -- <prompt…>` | runs until idle, including continuation turns, bounded by `--max-turns` (default 25); each turn can be billable |
+| `run [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>] [--resume-tree] [--print-session-id] [--max-turns <1..100>] [--timeout <seconds>] [--leave-jobs-running] -- <prompt…>` | runs until idle, including continuation turns, bounded by `--max-turns` (default 25); each turn can be billable |
 | `agent [--account\|--provider <id>] [--model <id>] [--effort <level>] [--composition <sel>] [--protocol <wire>] [--session <uuid>] [--resume-tree]` | the long-lived JSONL host client |
 | `resume [<session>]` | the TUI picker, or an exact id |
 | `config show\|set <key> <value> [--scope user\|project]\|edit\|init\|trust\|untrust` | product configuration |
@@ -2116,8 +2116,20 @@ not extend a compiled compatibility review.
 `plak run` opens or resumes a session and runs until idle. Every continuation
 is a distinct admitted root turn with its own terminal result. After a
 completed turn, pending process notices or child Result/Question mail trigger
-a continuation; running jobs or children alone cause turn-free waiting.
-It ends when idle: no completion is pending and no job or child is running.
+a continuation; running budget-promoted jobs or children alone cause turn-free
+waiting. Leftover jobs (a shell leader exited with live group members, chapter
+01 §8.5) never hold a run open. It ends when no completion is pending and no
+budget-promoted job or child is running. On exit, leftover jobs are stopped by
+default. `--leave-jobs-running` instead releases leftover groups alive and
+**unowned**: stop tools, session release, attempt end, and hard caps no longer
+apply, and the caller is responsible for cleanup. Redirect service output to a
+file or `/dev/null`, particularly for a PTY on macOS (chapter 01 §8.5).
+Piped output is transferred to EOF-bound unowned drain processes, so an
+unredirected pipe writer does not die merely because `run` exits. Budget-promoted
+jobs still wait while their leaders live; when a leader exits with live group
+members, that job converts to leftover and no longer holds the run open. This is a CLI
+flag, not a configuration key. The TUI and JSONL `plak agent` keep leftover jobs
+owned until stop, session release, attempt end, or the hard runtime cap.
 There is no consecutive-wake limit; the explicit max-turns and timeout bounds
 below still apply. It exits with the last turn status. Refused, failed and
 interrupted continuations end the run without retry.
@@ -2130,7 +2142,8 @@ share that deadline with hosted admission, turns, and idle waiting. Expiry
 during preparation cancels the pending request, writes `plak: run stopped at
 timeout`, and exits 6 without admitting a turn. Hosted drive never resets the clock;
 each job retains its own hard cap. A bound interrupts the current turn, stops
-background processes with `plak exit`, interrupts running children resumably,
+owned background processes with `plak exit` (leftovers are first relinquished
+when `--leave-jobs-running` is set), interrupts running children resumably,
 and exits 6. Timeout is a bound only when work would continue or wait, or the
 current turn did not complete; a completed final answer with no pending work
 still exits successfully. SIGINT performs the same cleanup and exits 4.

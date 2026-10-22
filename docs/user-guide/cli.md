@@ -352,6 +352,7 @@ plak run --account codex --model gpt-5.6-luna --effort low --image shot.png -- '
 | `--resume-tree` | Resume a `RestoredPaused` topology. Requires `--session`. |
 | `--max-turns <n>` | Admitted turns including the first, 1..=100; default 25. |
 | `--timeout <seconds>` | Whole-run wall clock, including authentication/catalog preparation and idle waiting; default none. |
+| `--leave-jobs-running` | Leave shell `&` leftover jobs alive and unowned at exit; the caller must clean them up. Budget-promoted jobs hold the run open while their leaders live. |
 | `--print-session-id` | Print `session_id=<uuid>` on stdout before the turn starts. |
 | `--image <path>` | Attach an image to the prompt; repeat for more (at most 8). png, jpeg, gif or webp, detected from the bytes; an image over 2048 px on its long edge or 3.75 MiB is downscaled to fit (PNG when that fits, otherwise JPEG) and reported on stderr as `plak: attached [image: shot.png 2048x1324 1.9 MB, downscaled from 3456x2234]`; smaller ones are sent unchanged. With images, the prompt after `--` may be left out. A file that cannot be read, is not a decodable image or is over 64 MiB is refused (exit 2) naming the file. A model without image input refuses the run naming the route and model. |
 
@@ -368,7 +369,12 @@ terminal tool results continue on stderr. Set `PLAK_VERBOSE=1` to include
 per-tool progress as well. An interrupted turn prints its recorded partial
 answer and exits with code 4. `--print-session-id` still prints before the turn.
 
-Waiting and continuation summaries go to stderr. A bound stops jobs,
+Shell `&` leftovers become jobs but never hold `run` open. They stop at exit
+unless `--leave-jobs-running` gives up ownership; redirect service output to
+a file or `/dev/null` if it must survive output capture closing. TUI and JSONL
+jobs remain owned until stop or session release.
+
+Waiting and continuation summaries go to stderr. A bound stops owned jobs,
 interrupts children resumably, and exits 6. Ctrl-C does the same and exits 4.
 Stopped root and live-child background processes keep their recorded stop
 reason when you reopen the session.

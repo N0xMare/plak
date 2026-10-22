@@ -11,6 +11,428 @@ use std::time::{Duration, Instant};
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 #[tokio::test]
+async fn leftover_jobs_leader_exit_wakes_an_already_held_quiet_poll() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let environment = environment(directory.path())?;
+    let sessions = environment.joined_process_sessions()?;
+    plakous_tools::internal::set_process_notice_delivery_available(&sessions, true);
+    let tools = ProcessSessionTools::posix_sh()?.with_config(ProcessPackConfig {
+        completion_notices: true,
+    });
+    let started = tools
+        .start_canonical(
+            &environment,
+            CanonicalProcessStartRequest {
+                command: "read go; sleep 30 & exit 7".to_owned(),
+                workdir: PathBuf::from("."),
+                login: false,
+                tty: false,
+                keep_stdin_open: true,
+                _model_description: None,
+                yield_time_ms: 0,
+                max_output_bytes: 4096,
+            },
+            ExecutionOperationControl::new(CancellationToken::new()),
+        )
+        .await?;
+    let handle = started.projection.session_id.ok_or("budget handle")?;
+    let bound = ProcessSessionTools::session(&environment, handle)?;
+    bound
+        .quiet_polls
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .quiet_polls = 1;
+    let control = ExecutionOperationControl::new(CancellationToken::new());
+    let observed = ProcessSessionTools::observe_summarized(
+        &environment,
+        handle,
+        30_000,
+        4096,
+        JoinedProcessOutputCursor::new(0),
+        ObservationWait::Output,
+        &control,
+    );
+    let release = async {
+        sessions.write_stdin(
+            started.session_id,
+            b"go\n",
+            JoinedProcessInputDisposition::KeepOpen,
+        )
+    };
+    let (result, released) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(observed, release)
+    })
+    .await?;
+    released?;
+    let value: Value = serde_json::from_str(&result?.into_outcome()?.joined_text())?;
+    assert_eq!(value["status"], "leftover");
+    assert_eq!(value["exit_code"], 7);
+    sessions.stop_jobs(
+        plakous_tools::JobStopReason::Model,
+        Duration::from_millis(200),
+    )?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn leftover_jobs_unreaped_leader_pins_the_owned_group() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let environment = environment(directory.path())?;
+    let sessions = environment.joined_process_sessions()?;
+    let result = start_leftover(&environment, "echo $$ > leader; sleep 30 & exit 0", false).await?;
+    let pid = std::fs::read_to_string(directory.path().join("leader"))?
+        .trim()
+        .parse::<i32>()?;
+    let pid = rustix::process::Pid::from_raw(pid).ok_or("leader pid")?;
+    let exit = rustix::process::waitid(
+        rustix::process::WaitId::Pid(pid),
+        rustix::process::WaitIdOptions::EXITED
+            | rustix::process::WaitIdOptions::NOHANG
+            | rustix::process::WaitIdOptions::NOWAIT,
+    )?;
+    assert!(
+        exit.is_some(),
+        "leader was reaped while its group was still owned"
+    );
+    sessions.stop(result.session_id, plakous_tools::JobStopReason::Model)?;
+    assert!(rustix::process::test_kill_process(pid).is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn leftover_jobs_disowned_writer_keeps_pipe_and_spools_until_eof() -> TestResult {
+    struct FinishOnDrop(PathBuf);
+    impl Drop for FinishOnDrop {
+        fn drop(&mut self) {
+            let _ = std::fs::write(&self.0, "");
+        }
+    }
+    let directory = tempfile::tempdir()?;
+    let state = tempfile::tempdir()?;
+    let _finish = FinishOnDrop(directory.path().join("finish"));
+    let environment = environment(directory.path())?;
+    let sessions = environment.joined_process_sessions()?;
+    sessions.bind_job_outputs(
+        plakous_tools::JobOutputRoot::open(&state.path().join("jobs"))?,
+        plakous_model::SessionId::from_str("00000000-0000-0000-0000-0000000000b0")?,
+        plakous_model::BranchId::from_str("00000000-0000-0000-0000-0000000000c0")?,
+    );
+    let result = start_leftover(
+        &environment,
+        "(while [ ! -f finish ]; do sleep 0.02; done; printf AFTER_DISOWN) & exit 0",
+        false,
+    )
+    .await?;
+    let path = sessions
+        .job_output_file(JoinedProcessSessions::job_number(result.session_id))
+        .ok_or("spool")?
+        .path;
+    sessions.disown_leftovers()?;
+    std::fs::write(directory.path().join("finish"), "")?;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !std::fs::read_to_string(&path)?.contains("AFTER_DISOWN") {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        Ok::<_, Box<dyn std::error::Error>>(())
+    })
+    .await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn literal_joined_commands_do_not_promote_leftover_shell_children() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let environment = environment(directory.path())?;
+    let sessions = environment.joined_process_sessions()?;
+    let mut changes = sessions.job_terminal_changes();
+    let id = sessions.start(
+        JoinedProcessStartRequest::new(
+            JoinedProcessCommand::literal(
+                "/bin/sh",
+                ["-c".to_owned(), "sleep 30 & exit 0".to_owned()],
+            )?,
+            ".",
+            Vec::new(),
+            false,
+            JoinedProcessTerminalMode::Pipes,
+        )?,
+        ExecutionOperationControl::new(CancellationToken::new()),
+    )?;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !sessions
+            .poll_from(id, JoinedProcessOutputCursor::new(0), 4096, 16)?
+            .status()
+            .is_terminal()
+        {
+            changes.changed().await?;
+        }
+        Ok::<_, Box<dyn std::error::Error>>(())
+    })
+    .await??;
+    sessions.join(id)?;
+    assert_eq!(sessions.leftover(id), None);
+    assert!(!sessions.is_promoted(id));
+    Ok(())
+}
+
+#[tokio::test]
+async fn leftover_jobs_budget_promotion_converts_and_wait_reports_leader_exit() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let environment = environment(directory.path())?;
+    let sessions = environment.joined_process_sessions()?;
+    let tools = ProcessSessionTools::posix_sh()?;
+    let started = tools
+        .start_canonical(
+            &environment,
+            CanonicalProcessStartRequest {
+                command: "read go; sleep 30 & exit 7".to_owned(),
+                workdir: PathBuf::from("."),
+                login: false,
+                tty: false,
+                keep_stdin_open: true,
+                _model_description: None,
+                yield_time_ms: 0,
+                max_output_bytes: 4096,
+            },
+            ExecutionOperationControl::new(CancellationToken::new()),
+        )
+        .await?;
+    let id = started.session_id;
+    let handle = started.projection.session_id.ok_or("budget handle")?;
+    assert_eq!(sessions.leftover(id), None);
+    let before = Instant::now();
+    let result = ProcessSessionTools::write_canonical(
+        &environment,
+        &CanonicalProcessWriteRequest {
+            session_id: handle,
+            input: "go\n".to_owned(),
+            disposition: CanonicalProcessInputDisposition::KeepOpen,
+            yield_time_ms: Some(30_000),
+            max_output_bytes: Some(4096),
+        },
+        &ExecutionOperationControl::new(CancellationToken::new()),
+    )
+    .await?;
+    assert!(before.elapsed() < Duration::from_secs(5));
+    assert!(!result.joined);
+    let value: Value = serde_json::from_str(&result.into_outcome()?.joined_text())?;
+    assert_eq!(value["status"], "leftover");
+    assert_eq!(value["exit_code"], 7);
+    let outcome = ProcessSessionTools::await_canonical(
+        &environment,
+        &await_request(&[handle], 0),
+        &ExecutionOperationControl::new(CancellationToken::new()),
+    )
+    .await?;
+    assert!(outcome.joined_text().contains("leader exited 7"));
+    assert_eq!(sessions.leftover(id), Some((Some(7), 1)));
+    sessions.stop_jobs(
+        plakous_tools::JobStopReason::Model,
+        Duration::from_millis(200),
+    )?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn leftover_jobs_pty_output_after_leader_exit_is_platform_specific() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let environment = environment(directory.path())?;
+    let result = start_leftover(&environment,
+        "(while [ ! -f finish ]; do sleep 0.02; done; printf AFTER_LEADER; echo $? > write-status) & exit 0", true).await?;
+    let sessions = environment.joined_process_sessions()?;
+    let id = result.session_id;
+    std::fs::write(directory.path().join("finish"), "")?;
+    let mut changes = sessions.job_terminal_changes();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while sessions.running_job_count() != 0 {
+            changes.changed().await?;
+        }
+        Ok::<_, Box<dyn std::error::Error>>(())
+    })
+    .await??;
+    let status = std::fs::read_to_string(directory.path().join("write-status"))?;
+    #[cfg(target_os = "linux")]
+    {
+        assert_eq!(status.trim(), "0");
+        assert!(sessions.jobs()[0].output.contains("AFTER_LEADER"));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        assert_ne!(status.trim(), "0");
+        assert!(!sessions.jobs()[0].output.contains("AFTER_LEADER"));
+    }
+    sessions.join(id)?;
+    assert!(sessions.joined_terminal_status(id).is_some());
+    Ok(())
+}
+
+async fn start_leftover(
+    environment: &ExecutionEnvironment,
+    command: &str,
+    tty: bool,
+) -> TestResult<ProcessExecutionResult> {
+    let tools = ProcessSessionTools::posix_sh()?;
+    Ok(tools
+        .start_canonical(
+            environment,
+            CanonicalProcessStartRequest {
+                command: command.to_owned(),
+                workdir: PathBuf::from("."),
+                login: false,
+                tty,
+                keep_stdin_open: false,
+                _model_description: None,
+                yield_time_ms: 30_000,
+                max_output_bytes: 4096,
+            },
+            ExecutionOperationControl::new(CancellationToken::new()),
+        )
+        .await?)
+}
+
+#[tokio::test]
+async fn leftover_jobs_return_promptly_and_stop_the_live_group() -> TestResult {
+    for tty in [false, true] {
+        for prefix in ["", "nohup "] {
+            let directory = tempfile::tempdir()?;
+            let environment = environment(directory.path())?;
+            let sessions = environment.joined_process_sessions()?;
+            let before = Instant::now();
+            let result = start_leftover(
+                &environment,
+                &format!("{prefix}sleep 30 >/dev/null 2>&1 & echo $! > child; exit 7"),
+                tty,
+            )
+            .await?;
+            assert!(before.elapsed() < Duration::from_secs(5));
+            let id = result.session_id;
+            assert!(result.first_promotion);
+            assert_eq!(sessions.leftover(id), Some((Some(7), 1)));
+            let value: Value = serde_json::from_str(&result.into_outcome()?.joined_text())?;
+            assert_eq!(value["exit_code"], 7);
+            assert!(
+                value["output"]
+                    .as_str()
+                    .ok_or("output")?
+                    .contains("1 process still running as job")
+            );
+            let pid = std::fs::read_to_string(directory.path().join("child"))?
+                .trim()
+                .parse::<i32>()?;
+            let pid = rustix::process::Pid::from_raw(pid).ok_or("pid")?;
+            assert!(rustix::process::test_kill_process(pid).is_ok());
+            assert_eq!(
+                sessions.stop(id, plakous_tools::JobStopReason::Model)?,
+                JoinedProcessStatus::Terminated
+            );
+            assert_eq!(
+                sessions.jobs()[0].status,
+                plakous_tools::JobStatus::Stopped(plakous_tools::JobStopReason::Model)
+            );
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn leftover_jobs_report_group_empty_and_keep_spooling() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let state = tempfile::tempdir()?;
+    let environment = environment(directory.path())?;
+    let sessions = environment.joined_process_sessions()?;
+    sessions.bind_job_outputs(
+        plakous_tools::JobOutputRoot::open(&state.path().join("jobs"))?,
+        plakous_model::SessionId::from_str("00000000-0000-0000-0000-0000000000b0")?,
+        plakous_model::BranchId::from_str("00000000-0000-0000-0000-0000000000c0")?,
+    );
+    let result = start_leftover(
+        &environment,
+        "(while [ ! -f finish ]; do sleep 0.02; done; echo AFTER) & exit 0",
+        false,
+    )
+    .await?;
+    let id = result.session_id;
+    let number = JoinedProcessSessions::job_number(id);
+    let mut changes = sessions.job_terminal_changes();
+    std::fs::write(directory.path().join("finish"), "")?;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while sessions.running_job_count() != 0 {
+            changes.changed().await?;
+        }
+        Ok::<_, Box<dyn std::error::Error>>(())
+    })
+    .await??;
+    assert!(sessions.has_unreported_terminal_job());
+    assert_eq!(
+        sessions.jobs()[0].status,
+        plakous_tools::JobStatus::Exited(Some(0))
+    );
+    assert!(
+        std::fs::read_to_string(sessions.job_output_file(number).ok_or("spool")?.path)?
+            .contains("AFTER")
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn leftover_jobs_release_and_attempt_end_stop_but_explicit_disown_does_not() -> TestResult {
+    for reason in [
+        plakous_tools::JobStopReason::SessionExit,
+        plakous_tools::JobStopReason::AttemptEnded,
+    ] {
+        let directory = tempfile::tempdir()?;
+        let environment = environment(directory.path())?;
+        let sessions = environment.joined_process_sessions()?;
+        let result = start_leftover(&environment, "sleep 30 & exit 0", false).await?;
+        sessions.stop_jobs(reason, Duration::from_millis(200))?;
+        assert_eq!(
+            sessions.jobs()[0].status,
+            plakous_tools::JobStatus::Stopped(reason)
+        );
+        assert!(sessions.joined_terminal_status(result.session_id).is_some());
+    }
+    let directory = tempfile::tempdir()?;
+    let environment = environment(directory.path())?;
+    let sessions = environment.joined_process_sessions()?;
+    let result = start_leftover(
+        &environment,
+        "sleep 30 >/dev/null 2>&1 & echo $! > child; exit 0",
+        false,
+    )
+    .await?;
+    let pid = std::fs::read_to_string(directory.path().join("child"))?
+        .trim()
+        .parse::<i32>()?;
+    let pid = rustix::process::Pid::from_raw(pid).ok_or("pid")?;
+    sessions.disown_leftovers()?;
+    sessions.stop_jobs(
+        plakous_tools::JobStopReason::SessionExit,
+        Duration::from_millis(200),
+    )?;
+    assert!(rustix::process::test_kill_process(pid).is_ok());
+    rustix::process::kill_process(pid, rustix::process::Signal::KILL)?;
+    assert_eq!(
+        sessions.joined_terminal_status(result.session_id),
+        Some(JoinedProcessStatus::OutcomeUnknown)
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn children_that_exit_before_the_leader_are_not_leftover_jobs() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let environment = environment(directory.path())?;
+    let result = start_leftover(&environment, "true & wait; exit 0", false).await?;
+    assert!(result.joined);
+    assert!(!result.first_promotion);
+    assert_eq!(
+        environment.joined_process_sessions()?.jobs(),
+        [] as [plakous_tools::JobView; 0]
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn untruncated_foreground_output_creates_no_output_file() -> TestResult {
     let directory = tempfile::tempdir()?;
     let state = tempfile::tempdir()?;

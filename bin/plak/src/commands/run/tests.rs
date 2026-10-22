@@ -24,6 +24,7 @@ fn expired_run_timeout_precedes_authentication_preparation() {
             &mut stderr,
             product_host::RunBounds {
                 max_turns: 25,
+                leave_jobs_running: false,
                 deadline: Some(std::time::Instant::now()),
             },
         )
@@ -42,6 +43,7 @@ fn preparation_and_hosted_drive_share_one_absolute_run_deadline() {
     let executor = ApplicationExecutor::new().unwrap();
     let limits = product_host::RunBounds {
         max_turns: 25,
+        leave_jobs_running: false,
         deadline: Some(std::time::Instant::now() + std::time::Duration::from_secs(2)),
     };
     assert_eq!(
@@ -105,6 +107,7 @@ fn bounded_run_has_one_stop_diagnostic_and_a_distinct_exit_projection() {
         &mut stderr,
         product_host::RunBounds {
             max_turns: 25,
+            leave_jobs_running: false,
             deadline: Some(std::time::Instant::now()),
         },
     )

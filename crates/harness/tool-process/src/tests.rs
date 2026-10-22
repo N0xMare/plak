@@ -50,6 +50,65 @@ fn a_failed_spool_is_reported_before_the_full_output_line() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn leftover_jobs_raise_leader_status_and_handle_in_every_shell_vocabulary()
+-> Result<(), Box<dyn Error>> {
+    let command = "sleep 30 & exit 7";
+    for (kind, tool, arguments) in [
+        (
+            ProcessToolProjectionKind::PiBash,
+            "bash",
+            json!({"command": command}),
+        ),
+        (
+            ProcessToolProjectionKind::CodexUnifiedExec,
+            "exec_command",
+            json!({"cmd": command, "login": false}),
+        ),
+        (
+            ProcessToolProjectionKind::GrokTerminal,
+            "run_terminal_command",
+            json!({"command": command, "description": "start service"}),
+        ),
+        (
+            ProcessToolProjectionKind::ClaudeOAuthBash,
+            "Bash",
+            json!({"command": command}),
+        ),
+    ] {
+        let workspace = tempfile::tempdir()?;
+        let environment = Arc::new(ExecutionEnvironment::host(
+            plakous_tools::ExecutionEnvironmentScope::Run(RunId::from_str(
+                "00000000-0000-0000-0000-000000000606",
+            )?),
+            workspace.path(),
+            ".",
+            plakous_tools::ExecutionEnvironmentConfig::default(),
+        )?);
+        let sessions = environment.joined_process_sessions()?;
+        let registry = process_session_registry()?;
+        let map = unified_exec_projection(registry.clone(), kind)?;
+        let outcome =
+            execute_projected_process_tool(&registry, &map, environment, tool, arguments).await?;
+        let value: Value = serde_json::from_str(&outcome.joined_text())?;
+        assert_eq!(value["exit_code"], 7, "{kind:?}: {value}");
+        assert!(
+            value["output"]
+                .as_str()
+                .ok_or("output")?
+                .contains("1 process still running as job")
+        );
+        assert!(value["session_id"].as_u64().is_some() || value["task_id"].as_str().is_some());
+        assert_eq!(sessions.running_job_count(), 1);
+        sessions.stop_jobs(
+            plakous_tools::JobStopReason::Model,
+            std::time::Duration::from_millis(200),
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn unified_exec_non_tty_has_null_stdin_and_pty_accepts_input() -> Result<(), Box<dyn Error>> {
     let workspace = tempfile::tempdir()?;
     let environment = ExecutionEnvironment::host(
@@ -658,7 +717,7 @@ fn exact_process_projection_schemas_are_v2_bound_goldens() -> Result<(), ToolRun
         json!({
             "exit_code": {"type":"integer"},
             "session_id": {"type":"integer","minimum":1},
-            "status": {"type":"string","enum":["timed_out","terminated","cancelled","output_limit","failed","outcome_unknown","cleanup_unresolved"]},
+            "status": {"type":"string","enum":["leftover","timed_out","terminated","cancelled","output_limit","failed","outcome_unknown","cleanup_unresolved"]},
             "output": {"type":"string"}
         }),
         &["output"],

@@ -40,7 +40,7 @@ use plakous_tools::PromptDigest;
 
 /// The concatenated digest of every string this module owns.
 const CODING_PROMPTS_DIGEST: &str =
-    "00c195647f1e74d6707d793c20d9cfaa1f49cc6421aca017296d7d310b7bd953";
+    "3c8e41a4e3611c97f77acad1b773ad647c0701577e6f56bf3391866955757d7e";
 #[test]
 fn coding_prompts_digest_is_stable() {
     let combined = [
@@ -80,7 +80,7 @@ fn coding_prompts_digest_is_stable() {
 
 /// The concatenated digest of every string this module owns.
 const CODEX_PROMPTS_DIGEST: &str =
-    "188371d536c7c4c4d0090d1d6623ca33406e8d60dc9d5d745a32e70bccb6c075";
+    "62947c9b1cfa151fcddabdf53c4fa4854bd1556e841bae0ab775a78d3b6ec544";
 #[test]
 fn codex_prompts_digest_is_stable() {
     let combined = [
@@ -99,7 +99,7 @@ fn codex_prompts_digest_is_stable() {
 
 /// The concatenated digest of every string this module owns.
 const GROK_PROMPTS_DIGEST: &str =
-    "d72c2ee8d0e875b874d6e014b80a1abf44fe7202653c2ee075fdd7a90bf3bb7c";
+    "601a84c057be8220774a05302954215d86956f1e790f40bcac96b1e4d3173d05";
 #[test]
 fn grok_prompts_digest_is_stable() {
     let combined = [

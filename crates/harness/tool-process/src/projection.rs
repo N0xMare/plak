@@ -22,7 +22,7 @@ pub const PROCESS_PROJECTION_FAMILY: &str = "responses-family";
 /// Claude OAuth `Bash` description: one-shot `/bin/sh` (not Claude Code's persistent shell).
 /// `timeout` blocks up to the hint; the pack has no output tool, so a leaf
 /// waits by giving a long command a long enough timeout.
-pub(crate) const CLAUDE_OAUTH_BASH_DESCRIPTION: &str = "Executes a given command through a one-shot `/bin/sh -c` in the session cwd (`.`) and returns its output; cwd and environment do not persist. Use Read for file contents and Edit and Write, when presented, for file changes; search with grep, rg or find here. `timeout` is how long to block for the result, in ms, not a kill timer; it is clamped to 600000 ms and defaults to the construction-bound foreground budget (default 30000 ms). `run_in_background: true` returns after a 250 ms first observation. When a command moves to the background with an output file, its result and its completion notice carry a `full output: <path>` line; read that file with Read. Output over 30000 bytes keeps its beginning and end with the omitted byte count. A still-running command continues in the background with its session id after the foreground budget; completion is reported automatically. Background jobs survive the turn and stop only on explicit stop, session release, attempt end or the bound hard runtime cap.";
+pub(crate) const CLAUDE_OAUTH_BASH_DESCRIPTION: &str = "Executes a given command through a one-shot `/bin/sh -c` in the session cwd (`.`) and returns its output; cwd and environment do not persist. Use Read for file contents and Edit and Write, when presented, for file changes; search with grep, rg or find here. `timeout` is how long to block for the result, in ms, not a kill timer; it is clamped to 600000 ms and defaults to the construction-bound foreground budget (default 30000 ms). `run_in_background: true` returns after a 250 ms first observation. When a command moves to the background with an output file, its result and its completion notice carry a `full output: <path>` line; read that file with Read. Output over 30000 bytes keeps its beginning and end with the omitted byte count. `&` children survive shell exit as a job; redirect a service's output to a file. A still-running command continues in the background with its session id after the foreground budget; completion is reported automatically. Background jobs survive the turn and stop only on explicit stop, session release, attempt end or the bound hard runtime cap.";
 
 /// Claude OAuth `TaskStop` description: terminate a background `Bash`.
 pub(crate) const CLAUDE_OAUTH_TASK_STOP_DESCRIPTION: &str = "Stop a running background task by ID. task_id is the process session_id Bash returned (N or pN). Send SIGTERM to the process group, then SIGKILL after a 2 second grace. Succeeds if the process stopped or had already exited. Processes only; agent tools, when presented, handle agents.";
@@ -433,7 +433,7 @@ impl ProjectedProcessTool {
             json!({
                 "exit_code": {"type":"integer"},
                 "session_id": {"type":"integer","minimum":1},
-                "status": {"type":"string","enum":["timed_out","terminated","cancelled","output_limit","failed","outcome_unknown","cleanup_unresolved"]},
+                "status": {"type":"string","enum":["leftover","timed_out","terminated","cancelled","output_limit","failed","outcome_unknown","cleanup_unresolved"]},
                 "output": {"type":"string"}
             }),
             &["output"],
@@ -456,7 +456,7 @@ impl ProjectedProcessTool {
                 json!({
                     "tasks": {"type":"array","items": {"type":"object","properties": {
                         "task_id":{"type":"string"},
-                        "status":{"type":"string","enum":["running","exited","terminated","cancelled","timed_out","output_limit","failed","outcome_unknown","cleanup_unresolved","already_reported","not_found"]},
+                        "status":{"type":"string","enum":["running","leftover","exited","terminated","cancelled","timed_out","output_limit","failed","outcome_unknown","cleanup_unresolved","already_reported","not_found"]},
                         "exit_code":{"type":"integer"},
                         "output":{"type":"string"}
                     }, "required":["task_id","status","output"],"additionalProperties":false}}

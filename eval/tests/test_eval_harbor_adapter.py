@@ -304,6 +304,7 @@ class ArgumentContractTests(unittest.TestCase):
         self.assertEqual(argv[0], REMOTE_BINARY)
         self.assertEqual(argv[1], "run")
         self.assertIn("--print-session-id", argv)
+        self.assertIn("--leave-jobs-running", argv)
         self.assertEqual(argv[-2], "--")
         self.assertEqual(argv[-1], "fix the tests")
         self.assertNotIn("--composition", argv)

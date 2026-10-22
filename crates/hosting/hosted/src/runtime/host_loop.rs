@@ -437,9 +437,21 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             .set_processes(self.config.state_roots.job_registry().snapshot());
     }
 
-    fn run(mut self, one_shot: Option<&mut super::oneshot::OneShotState>) -> CliResult<()> {
-        let driven = self.drive(one_shot);
-        let released = self.release();
+    fn run(mut self, mut one_shot: Option<&mut super::oneshot::OneShotState>) -> CliResult<()> {
+        let driven = self.drive(one_shot.as_deref_mut());
+        let disowned = if one_shot
+            .as_ref()
+            .and_then(|state| state.run.as_ref())
+            .is_some_and(|run| run.bounds.leave_jobs_running)
+        {
+            self.executor
+                .block_on(self.config.state_roots.job_registry().disown_leftovers())
+                .map_err(|_| CliFailure::new("job disown execution failed"))
+                .and_then(|result| result.map_err(CliFailure::new))
+        } else {
+            Ok(())
+        };
+        let released = self.release().and(disowned);
         match (driven, released) {
             (Ok(()), result) | (result, Ok(())) => result,
             (Err(error), Err(release)) => Err(error.with_release_failure(release)),
