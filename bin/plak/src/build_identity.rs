@@ -369,12 +369,13 @@ mod tests {
         symlink(&moved, &manifest).unwrap();
         assert_eq!(read_manifest_id(&image, &executable), None);
         std::fs::remove_file(&manifest).unwrap();
-        rustix::fs::mkfifoat(
-            rustix::fs::CWD,
-            &manifest,
-            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
-        )
-        .unwrap();
+        // rustix has no mkfifo on Apple targets; mkfifo(1) exists on both.
+        let made = std::process::Command::new("mkfifo")
+            .args(["-m", "600"])
+            .arg(&manifest)
+            .status()
+            .unwrap();
+        assert!(made.success());
         assert_eq!(read_manifest_id(&image, &executable), None);
         assert_eq!(
             identify_image(&mut image, None, hash_image).as_deref(),
