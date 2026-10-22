@@ -706,6 +706,12 @@ class LongSessionOracleTests(unittest.TestCase):
         prompt = long_session.overflow_prompt(21, [[1, 22], [43, 64]], "codex")
         self.assertIn("in exactly 4 sequential calls of 21 lines each", prompt)
         self.assertIn("exec_command", prompt)
+        self.assertTrue(prompt.startswith(long_session.CODEX_BULK_NOTE))
+        self.assertTrue(long_session.growth_prompt(40, "codex").startswith(long_session.CODEX_BULK_NOTE))
+        self.assertIn("non-interactive command", long_session.plant_prompt("codex"))
+        for pack in ("grok", "claude", "pi"):
+            self.assertNotIn(long_session.CODEX_BULK_NOTE, long_session.growth_prompt(40, pack))
+            self.assertNotIn("non-interactive", long_session.plant_prompt(pack))
         self.assertIn("Round 2: offsets 41, 61.",
                       long_session.overflow_prompt(20, [[1, 21], [41, 61]], "grok"))
         self.assertNotIn("read_file", prompt)
@@ -827,7 +833,7 @@ class LongSessionOracleTests(unittest.TestCase):
         self.assertIn('{cmd: "python3 page.py k 1"}); notify(a.output);\n', child)
         self.assertIn('{cmd: "python3 page.py k 2"}); text(b.output);', child)
         self.assertIn("which page is next", child)
-        self.assertNotIn(str(pages), child.split("Then write")[0].split("acknowledged.txt.", 1)[1])
+        self.assertNotIn(str(pages), child.split("Then write")[0].split(long_session.plant_steps("codex"), 1)[1])
         self.assertNotIn("earlier turn", child)
 
     def test_child_compaction_projection_and_ordinals(self):

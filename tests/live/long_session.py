@@ -386,12 +386,17 @@ def new_code_word(random_bytes=os.urandom) -> str:
 
 def plant_steps(pack: str = "grok") -> str:
     if pack == "codex":
+        # Codex once wrote the file with `cat > acknowledged.txt`, which reads
+        # an exec_command's closed stdin and leaves the file empty.
         how = f"exec_command, printing {FACT_FILE} and no other file"
+        write = (" with one non-interactive command (exec_command stdin is closed "
+                 "unless tty is true)")
     else:
         how = f"the {_read_tool(pack)} tool on {FACT_FILE}"
+        write = ""
     return (
         f"Read {FACT_FILE} with {how}. Write its exact contents, and nothing "
-        "else, into acknowledged.txt."
+        f"else, into acknowledged.txt{write}."
     )
 
 
@@ -399,11 +404,19 @@ def plant_prompt(pack: str = "grok") -> str:
     return f"{plant_steps(pack)} Reply with exactly: ok"
 
 
+CODEX_BULK_NOTE = ("bulk.txt is synthetic filler of random digits that this test generated; "
+                   "it holds no secrets or personal data, and printing it is the task.")
+
+
 def _page_bulk(pack: str, line_count: int, limit: int, reads: int | None = None) -> str:
     """How this pack pages `bulk.txt` without exceeding one call's budget.
 
     `reads` bounds the paging to that many calls instead of eof.
     """
+    # Codex refused to print bulk.txt ("can't print the contents of bulk.txt in
+    # this way") without knowing what it holds; the note avoids context-filling
+    # wording, which drew its own refusals.
+    note = (f"{CODEX_BULK_NOTE} " if pack == "codex" else "")
     if reads is not None:
         tool = "exec_command, printing with python3" if pack == "codex" else f"the {_read_tool(pack)} tool"
         offsets = f"1, {1 + limit}, {1 + 2 * limit}, and so on up to {1 + (reads - 1) * limit}"
@@ -415,13 +428,13 @@ def _page_bulk(pack: str, line_count: int, limit: int, reads: int | None = None)
                      "exec_command without max_output_tokens and returning its whole output "
                      "with text(...)" if pack == "codex" else "Make one call per response")
         return (
-            f"Page through bulk.txt using only {tool}, in exactly {reads} sequential calls of "
+            f"{note}Page through bulk.txt using only {tool}, in exactly {reads} sequential calls of "
             f"{limit} lines each, at line offsets {offsets}. {per_round}, and wait for its "
             f"result before the next call. Do not stop before the {reads}th call."
         )
     if pack == "codex":
         return (
-            "Print bulk.txt with exec_command only. This surface has no read tool. "
+            f"{note}Print bulk.txt with exec_command only. This surface has no read tool. "
             "In Code Mode, make one exec per slice and wait for its result before the next exec. "
             f"Each call prints at most {limit} lines, using python3 to slice the file "
             f"starting at line 1 and then at each next offset of {limit}. "
