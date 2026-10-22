@@ -690,6 +690,7 @@ impl TopCommand {
                 write_binary_manifest: Some(directory),
                 ..
             } => Ok(Command::WriteBinaryManifest { directory }),
+            Self::Version {
                 carry_probe: Some(path),
                 ..
             } => Ok(Command::CarryProbe { path }),

@@ -272,8 +272,7 @@ fn log_command_start(command: &Command) {
     match command {
         Command::StateKey
         | Command::ReloadProbe
-        | Command::ExportVersion
-        | Command::WriteBinaryManifest { .. } 
+        | Command::WriteBinaryManifest { .. }
         | Command::CarryProbe { .. }
         | Command::ExportVersion => {}
         Command::Version => log_start(build_identity::binary_id(), command.diagnostic_verb()),

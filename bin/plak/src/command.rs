@@ -279,8 +279,7 @@ impl Command {
             Self::Version
             | Self::StateKey
             | Self::ReloadProbe
-            | Self::ExportVersion
-            | Self::WriteBinaryManifest { .. } 
+            | Self::WriteBinaryManifest { .. }
             | Self::CarryProbe { .. }
             | Self::ExportVersion => "version",
             Self::Tui { .. } => "tui",
