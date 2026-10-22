@@ -57,7 +57,9 @@ class ReleaseError(Exception):
 def load_metadata(triple: str, path: Path | None) -> dict:
     if path is not None:
         return json.loads(path.read_text())
-    command = ["cargo", "metadata", "--locked", "--offline", "--format-version", "1",
+    # Online: a fresh release runner's cache holds only what the two release
+    # builds fetched, and workspace metadata needs every member's graph.
+    command = ["cargo", "metadata", "--locked", "--format-version", "1",
                "--filter-platform", triple]
     return json.loads(subprocess.run(command, cwd=ROOT, check=True, text=True,
                                      stdout=subprocess.PIPE).stdout)
