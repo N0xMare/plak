@@ -2607,11 +2607,15 @@ refusal, and a child failure. A typed provider refusal or outage is
 rejected before acceptance, and a model refusal terminal (the provider's own
 `stop_reason` `refusal`; the driver keeps its typed fields, never its prose). A
 provider error delivered inside an accepted Chat stream is the provider's own
-outage, not a protocol violation: when the product's typed diagnostic
-(`… returned an in-band error after accepting the request: HTTP 504 (timeout)
-…`) names HTTP status 429 or a 5xx, it is `provider` on every surface, like
-that status before acceptance; any other in-band error stays under the rule
-below. A kernel stream-validation failure is `provider`
+outage, not a protocol violation: an in-band error the product types
+`RateLimited`, `Unavailable` or `Timeout`, or whose diagnostic names 429 or a
+5xx with its class (`… returned an in-band error after accepting the request:
+HTTP 504 (timeout) …`), is `provider` on every surface, like that status before
+acceptance; any other in-band error is `harness` unless it is typed provider
+elsewhere (`Authentication`, `QuotaExceeded`). Provider text is matched only
+outside the bracketed attempt summary (`[N requests; last: …]`), whose label
+names a physical request, never the terminal's cause, and a typed HTTP status
+that is not a provider status outranks provider prose. A kernel stream-validation failure is `provider`
 only when the raw exchange capture shows the provider's response violated
 the documented protocol. The evidence rule is: some `exchange-*.body` in
 that turn's capture parses as JSON, or as an SSE `data:` JSON object, and
@@ -2672,10 +2676,20 @@ scenario budget is `harness` (a product hang) unless the timed-out process's
 capture segment ends on an exchange still pending at the provider: its
 highest-numbered exchange, ordered by integer exchange number, carries the
 pre-dispatch record `status=None`, `terminal=pending`, `incomplete=true`,
-which the product rewrites only at that exchange's terminal. That timeout is
-`provider` (`provider did not respond within the scenario budget`). A missing
-capture, a last exchange that reached a terminal, or a scenario that injects
-faults (which the product must absorb) keeps the timeout `harness`. Capture
+which the product rewrites only at that exchange's terminal, and that
+exchange shows a provider that never finished answering: its `.body` carries
+no protocol terminal event (Chat `data: [DONE]`, Responses
+`response.completed`, `response.done` or `response.failed`, Messages
+`message_stop`), and either the body received bytes within the 60 s before the
+kill (the provider was still streaming or sending keep-alives) or the body is
+empty and the request was dispatched at least 120 s before the kill (no first
+byte). File modification times are read against the kill time. That timeout
+is `provider` (`provider did not respond within the scenario budget`). A
+missing capture, a last exchange that reached a terminal, a pending exchange
+whose provider had finished or fell silent mid-body (a product hang after the
+answer), a request still young when the process was killed (a product request
+loop), or a scenario that injects faults (which the product must absorb) keeps
+the timeout `harness`. Capture
 completeness then excuses exactly that one pending exchange in that segment,
 and only on a scenario scored `provider` this way: the scenario evidence lists
 the segment under `provider_pending`, and every other exchange in it and every

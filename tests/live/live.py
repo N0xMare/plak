@@ -262,9 +262,11 @@ PROVIDER_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504, 529})
 # committed to; the product types it as a provider error and renders
 # "<provider> returned an in-band error after accepting the request: HTTP 504
 # (timeout) from <upstream>" with the status the gateway named leading the
-# account. A 429 or 5xx there is the provider's outage, not a protocol violation.
-_IN_BAND_STATUS = re.compile(r"returned an in-band error after accepting the request: HTTP (\d{3})\b",
-                             re.IGNORECASE)
+# account. A 429 or 5xx there, with the class the product typed it as, is the
+# provider's outage, not a protocol violation. A quota 429 carries no class and
+# is provider through its typed kind.
+_IN_BAND_STATUS = re.compile(r"returned an in-band error after accepting the request: HTTP (\d{3}) "
+                             r"\((?:rate limited|unavailable|timeout)\)", re.IGNORECASE)
 IN_BAND_ERROR_MARKER = "returned an in-band error after accepting the request:"
 # Kinds the product types an in-band provider error as; the typed kind scores
 # it even where the rendered text was cut before its status.
@@ -297,14 +299,26 @@ def _blob(*parts: object) -> str:
     return " ".join(str(part) for part in parts if part).lower()
 
 
+# The product's bracketed attempt summary, `[N requests; last: ...]`. Its
+# label describes a physical request, never the terminal's own cause, so no
+# provider text match may read it.
+_ATTEMPT_SUMMARY = re.compile(r"\[\d+ requests;[^\]]*\]")
+
+
+def without_attempt_summary(text: str) -> str:
+    """Operator text with every bracketed attempt summary removed."""
+    return _ATTEMPT_SUMMARY.sub("", text)
+
+
 def text_is_provider_refusal(text: str) -> bool:
     """True when operator text is a typed provider refusal or outage.
 
     A product refusal that merely mentions a missing checkpoint or a tool
     contract is not in this set. `unavailable` alone is not either: the
-    navigator uses that word for a missing hub.
+    navigator uses that word for a missing hub. The attempt summary is not
+    read.
     """
-    lowered = text.lower()
+    lowered = without_attempt_summary(text).lower()
     if "server_is_overloaded" in lowered or "server is overloaded" in lowered:
         return True
     if "rejected-before-acceptance" in lowered or "rejected before acceptance" in lowered:
@@ -362,7 +376,7 @@ def _provider_child_fault(text: str, lookup_faults: str | None = None) -> bool:
         return lookup[1] == PROVIDER
     if text_is_provider_refusal(text):
         return True
-    lowered = text.lower()
+    lowered = without_attempt_summary(text).lower()
     if ("provider unavailable" in lowered or "provider-unavailable" in lowered
             or "provider_unavailable" in lowered):
         return True
@@ -539,6 +553,10 @@ def provider_reason_from(kind: str | None, http_status: int | None, text: str, *
     if kind in PROVIDER_ERROR_KINDS or http_status in PROVIDER_HTTP_STATUSES:
         status = f"{kind or ''} {http_status or ''}".strip()
         return status or text[:160]
+    if http_status is not None:
+        # The product typed the status, and not as a provider refusal; its
+        # prose cannot overrule that.
+        return None
     in_band = in_band_provider_status(text)
     if in_band is not None:
         return f"provider in-band error {in_band}"
@@ -984,17 +1002,54 @@ def pending_exchange(segment: Path) -> int | None:
         return None
 
 
+# Protocol terminal events: a body that carries one was answered in full, so
+# the provider is not what the process was still waiting on.
+_TERMINAL_EVENT_MARKERS = (b"data: [DONE]", b"response.completed", b"response.done",
+                           b"response.failed", b"message_stop")
+# A provider still answering wrote within this window before the kill.
+PENDING_RECENT_BYTES_S = 60
+# A provider that never sent a first byte was waited on at least this long.
+PENDING_NO_FIRST_BYTE_S = 120
+
+
+def provider_never_finished(segment: Path, exchange: int, killed_at: float) -> bool:
+    """Whether pending `exchange` shows a provider that never finished answering.
+
+    Its body carries no protocol terminal event, and either bytes arrived
+    within `PENDING_RECENT_BYTES_S` before the kill (still streaming or
+    sending keep-alives) or no byte arrived and the request was dispatched at
+    least `PENDING_NO_FIRST_BYTE_S` before it. Anything else is the product:
+    a hang after the provider finished, or a request loop mid-request.
+    """
+    name = f"exchange-{exchange:04}"
+    try:
+        body_path = segment / f"{name}.body"
+        body = body_path.read_bytes()
+        if any(marker in body for marker in _TERMINAL_EVENT_MARKERS):
+            return False
+        if body:
+            return killed_at - body_path.stat().st_mtime <= PENDING_RECENT_BYTES_S
+        dispatched = (segment / f"{name}.request").stat().st_mtime
+        return killed_at - dispatched >= PENDING_NO_FIRST_BYTE_S
+    except OSError:
+        return False
+
+
 def timeout_failure(env: Env | None, segment: Path | None, what: str,
-                    faults: str | None = None) -> ScenarioFailure:
+                    faults: str | None = None, killed_at: float | None = None) -> ScenarioFailure:
     """Score a process that outlived the scenario budget.
 
-    `provider` when its last exchange is still pending at the provider; the
-    segment is then recorded on `env` so that one pending exchange does not
-    by itself make the capture incomplete. A product hang (nothing pending),
-    a missing capture, or a scenario with injected faults, which the product
-    must absorb, stays `harness`.
+    `provider` when its last exchange is still pending at a provider that
+    never finished answering (`provider_never_finished`, judged at
+    `killed_at`, default now); the segment is then recorded on `env` so that
+    one pending exchange does not by itself make the capture incomplete. A
+    product hang, a missing capture, or a scenario with injected faults, which
+    the product must absorb, stays `harness`.
     """
     exchange = None if faults or segment is None else pending_exchange(segment)
+    if exchange is not None and not provider_never_finished(
+            segment, exchange, time.time() if killed_at is None else killed_at):
+        exchange = None
     if exchange is None:
         return ScenarioFailure(HARNESS, what)
     if env is not None:

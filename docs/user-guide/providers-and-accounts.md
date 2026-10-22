@@ -343,4 +343,4 @@ changes your route, account, protocol or credentials and never enables fallback.
 `--protocol auto|chat|responses|messages` applies to OpenRouter only, default
 `auto` → `chat`. OAuth accounts reject the flag at parse time. Chat is also the
 recommended protocol for non-Anthropic models, since OpenRouter's Messages
-translation can degrade their multi-step tool use.
+translation can degrade multi-step tool use for some non-Anthropic models.

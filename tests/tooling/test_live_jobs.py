@@ -484,6 +484,22 @@ class JobEvidenceTests(unittest.TestCase):
             # observed, is still the wake turn's, not this turn's.
             shared.write_text(request("Run both commands.", notice, jobs.WAKE_PROMPT))
             self.assertFalse(jobs.notice_in_turn([segment], "p1", terminal))
+            # An earlier idle wake in the replayed history does not disqualify a
+            # later in-turn delivery: only the newest user input decides.
+            shared.write_text(request(jobs.WAKE_PROMPT, "Run both commands.", notice))
+            self.assertTrue(jobs.notice_in_turn([segment], "p1", terminal))
+            responses = {"input": [
+                {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": jobs.WAKE_PROMPT}]},
+                {"type": "message", "role": "user", "content": [
+                    {"type": "input_text", "text": notice}]},
+                {"type": "function_call_output", "call_id": "c1", "output": "ok"}]}
+            shared.write_text(json.dumps(responses))
+            self.assertTrue(jobs.notice_in_turn([segment], "p1", terminal))
+            responses["input"].append({"type": "message", "role": "user", "content": [
+                {"type": "input_text", "text": jobs.WAKE_PROMPT}]})
+            shared.write_text(json.dumps(responses))
+            self.assertFalse(jobs.notice_in_turn([segment], "p1", terminal))
             # A response body naming the notice is not a request of the turn.
             shared.write_text(request("Run both commands."))
             (segment / "exchange-0002.body").write_text(notice)

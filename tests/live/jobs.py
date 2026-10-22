@@ -1034,9 +1034,35 @@ def notice_in_turn(segments: list[Path], job_id: str | None, terminal_wall: floa
             continue
         texts = capture_texts(path)
         if (persisted <= terminal_wall and any(needle in text for text in texts)
-                and not any(WAKE_PROMPT in text for text in texts)):
+                and WAKE_PROMPT not in newest_user_input(path)):
             return True
     return False
+
+
+def newest_user_input(path: Path) -> str:
+    """The text of a captured request's newest user input.
+
+    A wake turn's request ends with the wake prompt; an earlier wake in the
+    replayed history does not make a later request a wake turn's. Chat and
+    Messages carry `messages`, Responses `input`. A file that is not a request
+    document is read whole.
+    """
+    try:
+        raw = path.read_text(errors="replace")
+    except OSError:
+        return ""
+    parsed = _parse_capture_json(raw)
+    if not isinstance(parsed, dict):
+        return raw
+    items = parsed.get("messages", parsed.get("input"))
+    if isinstance(items, str):
+        return items
+    if not isinstance(items, list):
+        return ""
+    for item in reversed(items):
+        if isinstance(item, dict) and item.get("role") == "user":
+            return _content_text(item.get("content"))
+    return ""
 
 
 def _content_text(value: object) -> str:

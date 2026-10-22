@@ -5,6 +5,7 @@ import os
 import queue
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -299,13 +300,54 @@ class LiveOracleTests(unittest.TestCase):
                 self.assertEqual(len(evidence["evidence"][condition]["segments"]),
                                  0 if condition == "not_started" else 1)
 
-    def write_pending(self, segment, number=2):
+    def write_pending(self, segment, number=2, *, body=b"", dispatched_ago=300.0, body_ago=0.0):
+        """A pending exchange; by default dispatched 300 s ago with no first byte."""
         name = f"exchange-{number:04}"
-        (segment / f"{name}.request").write_bytes(b"synthetic request")
-        (segment / f"{name}.body").write_bytes(b"")
+        now = time.time()
+        request, body_path = segment / f"{name}.request", segment / f"{name}.body"
+        request.write_bytes(b"synthetic request")
+        body_path.write_bytes(body)
+        os.utime(request, (now - dispatched_ago, now - dispatched_ago))
+        os.utime(body_path, (now - body_ago, now - body_ago))
         (segment / f"{name}.info").write_text(
             f"process_id=123\nexchange={number}\nstatus=None\nterminal=pending\n"
             "recorded_bytes=0\nincomplete=true\n")
+
+    def test_a_pending_timeout_excuses_only_a_provider_that_never_finished(self):
+        base = self.capture_workspace
+        for name, pending, expected in (
+                ("no first byte for 300 s", {}, live.PROVIDER),
+                ("no first byte for only 30 s", {"dispatched_ago": 30.0}, live.HARNESS),
+                ("keep-alives 10 s before the kill",
+                 {"body": b": OPENROUTER PROCESSING\n\n", "body_ago": 10.0}, live.PROVIDER),
+                ("streaming stopped 90 s before the kill",
+                 {"body": b"data: {\"choices\":[]}\n\n", "body_ago": 90.0}, live.HARNESS),
+                ("Chat answered in full", {"body": b"data: {}\n\ndata: [DONE]\n\n"}, live.HARNESS),
+                ("Responses completed",
+                 {"body": b"event: response.completed\ndata: {}\n\n"}, live.HARNESS),
+                ("Responses failed", {"body": b"event: response.failed\ndata: {}\n\n"},
+                 live.HARNESS),
+                ("Messages stopped", {"body": b"event: message_stop\ndata: {}\n\n"},
+                 live.HARNESS)):
+            with self.subTest(name):
+                env = live.Env(base / "plak", base / "home", base)
+                env.environ(source={})
+                segment = env.capture_segments[-1]
+                self.write_capture(segment)
+                self.write_pending(segment, **pending)
+                failure = live.timeout_failure(env, segment, "plak run did not finish in 300s")
+                self.assertEqual(failure.outcome, expected)
+                self.assertEqual(env.provider_pending,
+                                 {segment} if expected == live.PROVIDER else set())
+        # The kill time decides, not the time the driver scores it.
+        env = live.Env(base / "plak", base / "home", base)
+        env.environ(source={})
+        segment = env.capture_segments[-1]
+        self.write_capture(segment)
+        self.write_pending(segment, dispatched_ago=130.0)
+        self.assertEqual(live.timeout_failure(env, segment, "x", killed_at=time.time() - 60).outcome,
+                         live.HARNESS)
+        self.assertEqual(live.timeout_failure(env, segment, "x").outcome, live.PROVIDER)
 
     def timed_out_run(self, env, *, pending: bool, faults: str | None = None):
         """`plak run` killed at its timeout, its capture as the process left it."""
@@ -579,6 +621,26 @@ class LiveOracleTests(unittest.TestCase):
         self.assertEqual(raised.exception.outcome, live.HARNESS)
         self.assertEqual(live.provider_reason_from(None, 504, ""), "504")
 
+    def test_an_attempt_summary_label_never_relabels_a_product_failure(self):
+        # A replay that met a rate limit and then ended on a 400: whatever the
+        # summary says, the terminal is the 400.
+        text = ("agent turn failed: OpenRouter Chat operation failed: OpenRouter Chat HTTP 400 "
+                "(acceptance-unknown): Invalid request [2 requests; last: rate limited]")
+        self.assertFalse(live.text_is_provider_refusal(text))
+        self.assertFalse(live.provider_child_text(text))
+        self.assertEqual(live.without_attempt_summary("a [2 requests; last: timeout] b"), "a  b")
+        for kind, status in (("Protocol", 400), (None, 400), (None, None)):
+            turn = live.Turn(phase="failed", model_error_kind=kind, http_status=status,
+                             errors=[text])
+            with self.assertRaises(live.ScenarioFailure) as raised:
+                live.classify_incomplete(turn, "coding turn", segments=[])
+            self.assertEqual(raised.exception.outcome, live.HARNESS, (kind, status))
+        with self.assertRaises(live.ScenarioFailure) as raised:
+            live.classify_cli_failure(5, f"plak: {text}\n", "cli_task", segments=[])
+        self.assertEqual(raised.exception.outcome, live.HARNESS)
+        # A typed non-provider status outranks provider prose.
+        self.assertIsNone(live.provider_reason_from(None, 400, "too many requests"))
+
     def test_a_typed_in_band_provider_error_without_a_rendered_status_is_provider(self):
         # Text cut before its status still carries the typed kind.
         text = ("agent turn failed: OpenRouter Chat operation failed: OpenRouter returned an "
@@ -602,6 +664,16 @@ class LiveOracleTests(unittest.TestCase):
             "Chat provider returned an in-band error: error code: 504"))
         self.assertEqual(live.in_band_provider_status(
             prefix + "HTTP 503 (unavailable): type=server_error"), 503)
+        # The status counts only with the class the product typed it as; a
+        # quota 429 carries none and is provider through its typed kind.
+        for unclassed in (prefix + "HTTP 503", prefix + "HTTP 429: type=insufficient_quota",
+                          prefix + "HTTP 502 (overloaded)"):
+            self.assertIsNone(live.in_band_provider_status(unclassed), unclassed)
+        quota = live.Turn(phase="failed", model_error_kind="QuotaExceeded", http_status=429,
+                          errors=[prefix + "HTTP 429: type=insufficient_quota"])
+        with self.assertRaises(live.ScenarioFailure) as raised:
+            live.classify_incomplete(quota, "coding turn", segments=[])
+        self.assertEqual(raised.exception.outcome, live.PROVIDER)
         text = prefix + "HTTP 429 (rate limited)"
         self.assertFalse(live._absorbed_injection("RateLimited", None, "429", text))
         self.assertTrue(live._absorbed_injection("RateLimited", 429, "429", "provider rate limited"))
