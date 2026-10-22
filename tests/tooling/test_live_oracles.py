@@ -398,6 +398,35 @@ class LiveOracleTests(unittest.TestCase):
                     returncode=code, stdout="", stderr=stderr)):
                 self.assertEqual(live.run_cli(env, base, [], base / "run.log")[0], code)
 
+    def test_a_providers_in_band_5xx_or_429_is_provider_on_every_surface(self):
+        text = ("agent turn failed: OpenRouter Chat operation failed: OpenRouter Chat stream "
+                "validation failed: Chat provider returned an in-band error: error code: 504 "
+                "[1 requests; last: unclassified]")
+        self.assertEqual(live.in_band_provider_status(text), 504)
+        self.assertIsNone(live.stream_validation_outcome(text, None))
+        turn = live.Turn(phase="failed", model_error_kind="Timeout", errors=[text])
+        with self.assertRaises(live.ScenarioFailure) as raised:
+            live.classify_incomplete(turn, "coding turn", segments=[])
+        self.assertEqual(raised.exception.outcome, live.PROVIDER)
+        with self.assertRaises(live.ScenarioFailure) as raised:
+            live.classify_cli_failure(5, f"plak: {text}\n", "cli_task", segments=[])
+        self.assertEqual(raised.exception.outcome, live.PROVIDER)
+        self.assertTrue(live.provider_child_text(text))
+        self.assertEqual(live.in_band_provider_status(
+            "Chat provider returned an in-band error: code=429"), 429)
+        for other in ("Chat provider returned an in-band error: code=400",
+                      "Chat provider returned an in-band error: Provider returned error",
+                      "Chat provider returned an in-band error: unclassified",
+                      "Chat stream validation failed: Chat chunk omitted model"):
+            self.assertIsNone(live.in_band_provider_status(other), other)
+        other = live.Turn(phase="failed", errors=[
+            "OpenRouter Chat stream validation failed: Chat provider returned an in-band "
+            "error: code=400"])
+        with self.assertRaises(live.ScenarioFailure) as raised:
+            live.classify_incomplete(other, "coding turn", segments=[])
+        self.assertEqual(raised.exception.outcome, live.HARNESS)
+        self.assertEqual(live.provider_reason_from(None, 504, ""), "504")
+
     def test_output_limit_failure_is_model_on_every_surface(self):
         typed = live.Turn(phase="failed", model_error_kind="OutputLimit",
                           errors=["agent turn failed: model request failed"])

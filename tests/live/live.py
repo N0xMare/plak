@@ -240,7 +240,23 @@ PROVIDER_ERROR_KINDS = frozenset({
 })
 # Statuses that refuse before acceptance, or are the ambiguous 5xx the spec
 # already records as provider. 429 is the rate-limit case on every surface.
-PROVIDER_HTTP_STATUSES = frozenset({429, 500, 502, 503, 529})
+PROVIDER_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504, 529})
+# A Chat gateway reports an upstream failure inside the stream it already
+# committed to; the product types it as a provider error and renders
+# "Chat provider returned an in-band error: <detail>" with the status the
+# gateway named (`error code: 504`, `code=502`). A 429 or 5xx there is the
+# provider's outage, not a protocol violation.
+_IN_BAND_STATUS = re.compile(r"returned an in-band error:[^|\]]*?\bcode\s*[=:]\s*(\d{3})\b",
+                             re.IGNORECASE)
+
+
+def in_band_provider_status(text: str) -> int | None:
+    """The 429/5xx status a provider's in-band stream error named, or None."""
+    match = _IN_BAND_STATUS.search(text or "")
+    if not match:
+        return None
+    status = int(match.group(1))
+    return status if status == 429 or 500 <= status <= 599 else None
 # Kernel phrases. Provider only when the capture shows the protocol violation.
 STREAM_VALIDATION_MARKERS = (
     "stream validation failed",
@@ -379,6 +395,8 @@ def provider_child_text(text: str, *, lookup_faults: str | None = None) -> bool:
         return lookup[1] == PROVIDER
     if _provider_child_fault(text, lookup_faults):
         return True
+    if in_band_provider_status(text) is not None:
+        return True
     parts = text.lower().split()
     for index, part in enumerate(parts[:-1]):
         if part not in ("quota", "failure"):
@@ -500,6 +518,9 @@ def provider_reason_from(kind: str | None, http_status: int | None, text: str, *
     if kind in PROVIDER_ERROR_KINDS or http_status in PROVIDER_HTTP_STATUSES:
         status = f"{kind or ''} {http_status or ''}".strip()
         return status or text[:160]
+    in_band = in_band_provider_status(text)
+    if in_band is not None:
+        return f"provider in-band error {in_band}"
     if text_is_provider_refusal(text):
         return " ".join(text.split())[:200]
     return None
@@ -668,6 +689,9 @@ def stream_validation_outcome(text: str, segments: list[Path] | None) -> str | N
     """
     lowered = text.lower()
     if not any(marker in lowered for marker in STREAM_VALIDATION_MARKERS):
+        return None
+    if in_band_provider_status(text) is not None:
+        # The provider's own error, classified by provider_reason_from.
         return None
     if capture_shows_usage_on_finishless_choice(segments):
         return PROVIDER

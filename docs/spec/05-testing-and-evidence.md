@@ -2593,7 +2593,12 @@ refusal, and a child failure. A typed provider refusal or outage is
 `provider`: `RateLimited` or HTTP 429, `Unavailable` (including an OpenAI
 `server_is_overloaded` terminal), `QuotaExceeded`, a refusal
 rejected before acceptance, and a model refusal terminal (the provider's own
-`stop_reason` `refusal`; the driver keeps its typed fields, never its prose). A kernel stream-validation failure is `provider`
+`stop_reason` `refusal`; the driver keeps its typed fields, never its prose). A
+provider error delivered inside an accepted Chat stream is the provider's own
+outage, not a protocol violation: when the product's typed diagnostic
+(`Chat provider returned an in-band error: …`) names HTTP status 429 or a 5xx
+(`error code: 504`, `code=502`), it is `provider` on every surface, like that
+status before acceptance; any other in-band error stays under the rule below. A kernel stream-validation failure is `provider`
 only when the raw exchange capture shows the provider's response violated
 the documented protocol. The evidence rule is: some `exchange-*.body` in
 that turn's capture parses as JSON, or as an SSE `data:` JSON object, and
