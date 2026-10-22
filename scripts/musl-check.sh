@@ -16,7 +16,7 @@ tools="$(cd "$tools" && pwd -P)"
 target="${PLAK_MUSL_TARGET_DIR:-$root/target/musl-gate}"
 mkdir -p "$target" "$root/target"
 target="$(cd "$target" && pwd -P)"
-image=plak-qual-base:07d6b926
+image=plak-qual-base:2f225fd7
 # One Cargo cache per pinned image: a bumped image never inherits old crates.
 cargo_home="$target/cargo-home-${image##*:}"
 mkdir -p "$cargo_home"
