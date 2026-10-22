@@ -22,6 +22,17 @@ class CatalogTests(unittest.TestCase):
             self.assertIn(route.route_class, live.ROUTE_CLASSES, route.name)
             self.assertTrue(route.host and route.path.startswith("/"), route.name)
 
+    def test_only_messages_long_session_is_an_informational_lane(self):
+        lanes = {name: route.informational_lanes for name, route in live.ROUTES.items()
+                 if route.informational_lanes}
+        self.assertEqual(lanes, {"deepseek-messages": frozenset({"long-session"})})
+        messages = live.ROUTES["deepseek-messages"]
+        self.assertEqual(messages.route_class, live.FULL)
+        self.assertEqual(messages.lane_class("long-session"), live.INFORMATIONAL)
+        for lane in ("smoke", "jobs", "crash-jobs", "soak"):
+            self.assertEqual(messages.lane_class(lane), live.FULL, lane)
+        self.assertEqual(live.ROUTES["deepseek"].lane_class("long-session"), live.FULL)
+
     def test_xai_api_home_copies_the_shared_key_file(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
@@ -178,6 +189,16 @@ class EstimateTests(unittest.TestCase):
         for rows in (("nope",), ("grok", "grok"), ("api-openai",)):
             with self.assertRaises(estimate.EstimateError):
                 estimate.planned_cells(soak_row="grok", tui_rows=rows)
+
+    def test_messages_long_session_cell_is_priced_as_informational(self):
+        cells = {(c.platform, c.lane, c.route_name): c.route_class
+                 for c in estimate.planned_cells(soak_row="grok")}
+        self.assertEqual(cells[("mac", "long-session", "deepseek-messages")], live.INFORMATIONAL)
+        for lane in ("smoke", "jobs", "crash-jobs"):
+            self.assertEqual(cells[("mac", lane, "deepseek-messages")], live.FULL, lane)
+        self.assertEqual(cells[("linux", "smoke", "deepseek-messages")], live.FULL)
+        self.assertEqual(cells[("mac", "long-session", "deepseek")], live.FULL)
+        self.assertEqual(estimate.planned_cells(soak_row="deepseek-messages")[0].platform, "mac")
 
     def test_long_session_scales_the_measured_deepseek_cell(self):
         assumptions = estimate.Assumptions()

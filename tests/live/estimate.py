@@ -12,7 +12,8 @@ card's source URL and never invents a price.
 A cell is one platform, lane and route:
 
 - every planned route: one Mac smoke
-- `full`: also Mac long-session, jobs, two extra crash_jobs runs, and Linux smoke
+- `full`: also Mac long-session, jobs, two extra crash_jobs runs, and Linux smoke;
+  a lane the route marks informational is priced and shows class `informational`
 - one selected `full` row: Mac headless soak for one hour
 - optional `--tui-rows a,b`: half-hour Mac TUI sessions on those full routes
 - the four direct API rows (`api-openai`, `api-openai-medium`,
@@ -453,7 +454,7 @@ def main(argv: list[str]) -> int:
 
 
 def _cell(platform: str, lane: str, route: live.Route) -> Cell:
-    return Cell(platform, lane, route.name, route.route_class, route.model, route.account)
+    return Cell(platform, lane, route.name, route.lane_class(lane), route.model, route.account)
 
 
 def scaled_long_session(total: int, window: int, measured_window: int) -> int:

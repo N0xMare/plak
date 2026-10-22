@@ -2729,14 +2729,24 @@ with protocol `messages`. `or-ling` and `or-qwen38` are paid model ids at
 informational depth.
 
 - `full`: `codex`, `grok`, `claude-sonnet55-low`, `deepseek`,
-  `deepseek-messages`.
+  `deepseek-messages` (its long-session lane is informational, below).
 - `light`: `codex-luna-medium`, `codex-sol`, `codex-astra`, `grok-46`,
   `claude-sonnet55-medium`, `claude-haiku55-low`, `claude-haiku55-medium`,
   `claude-opus-low`, `claude-opus-medium`, `claude-fable`, `or-mimo`,
   `or-glm`, `or-qwen37`, `api-openai`, `api-openai-medium`, `api-anthropic`,
   `api-xai`.
 - `informational`: `or-nemotron-free`, `or-laguna-free`, `or-lfm-free`,
-  `or-ling`, `or-qwen38`.
+  `or-ling`, `or-qwen38`; also the `deepseek-messages` long-session lane.
+
+A route may mark single lanes informational (`informational_lanes` in
+`ROUTES`). Such a lane still runs at its row's depth and is scored like an
+informational row; the row's other lanes keep its class. `deepseek-messages`
+marks long-session: deep into long tool loops, DeepSeek over OpenRouter
+Messages sends `read` calls with only a path, even given an argument example,
+while the same model and upstream on Chat pages correctly with the same tool
+schema. That is a provider translation or model limitation, not product
+behavior. Its smoke and jobs stay blocking and cover the Messages dialect, and
+`deepseek` keeps the blocking long-session.
 
 `api-openai` is OpenAI `gpt-6-luna` at low. `api-openai-medium` is the same
 model at medium. `api-anthropic` is Anthropic `claude-haiku-5-5` at medium.
@@ -2757,10 +2767,14 @@ On Apple Silicon, §3.2 names the oracles:
 - `light` runs the twelve smoke scenarios.
 - `informational` runs the twelve smoke scenarios. The result is recorded. A
   `model` or `provider` outcome does not block the bar. A `harness` outcome
-  does.
+  does. An informational lane of a `full` row is scored the same way.
 
 On Apple Silicon the full cell of a `full` row, with `<route>` that row's
-name, is these commands; the soak line belongs only to the least-used row:
+name, is these commands; the soak line belongs only to the least-used row.
+On `deepseek-messages` the long-session line is informational: it runs and is
+recorded, a `model` or `provider` outcome does not block, and a `harness`
+outcome does. The cell driver records the scored class as `lane_class` in its
+binding.
 
 ```text
 python3 tests/live/qualification.py smoke <route>
@@ -2836,8 +2850,8 @@ cell report rather than losing the attempt.
 - A cell whose first attempt is `model` may rerun exactly once as a fresh
   attempt of the same tuple and prompt. The rerun is final: `pass` qualifies;
   anything else counts under its class, with no further rerun. A final
-  `model` blocks on `full` and `light`; on `informational` it is recorded and
-  does not block. A `provider` on this MODEL rerun is not the second PROVIDER
+  `model` blocks on `full` and `light`; on `informational`, including an
+  informational lane, it is recorded and does not block. A `provider` on this MODEL rerun is not the second PROVIDER
   outcome and receives neither another attempt nor the best-effort waiver.
 - A `provider` outcome is run again once, as its own scenario run of the same
   tuple, on every class. The rerun is classified on its own. The cell passes
@@ -2858,8 +2872,9 @@ explicitly priced beside the clean-attempt subtotal and before contingency.
 The PROVIDER and MODEL rules share that reserve, not successive attempts.
 
 Best-effort rows are the informational rows and the OpenRouter light rows
-`or-mimo`, `or-glm` and `or-qwen37`. On those three light rows the only waiver
-is the second `provider` outcome. `deepseek`, `deepseek-messages`, every
+`or-mimo`, `or-glm` and `or-qwen37`; an informational lane is best-effort
+too. On those three light rows the only waiver is the second `provider`
+outcome. `deepseek`, `deepseek-messages` outside its long-session lane, every
 subscription row, and `api-openai`, `api-openai-medium`, `api-anthropic` and
 `api-xai` are not best-effort.
 
@@ -2891,7 +2906,8 @@ estimate warns when the OpenRouter cells, including the contingency, exceed
 that ceiling, and it still prints every cell. It prices a Mac smoke for every
 planned route. For each `full` row it also prices the four long-session
 scenarios, the eleven jobs scenarios plus two further `crash_jobs` runs, and a
-Linux smoke; it prices one Mac headless soak for the row named by
+Linux smoke, and prints an informational lane's cell with class
+`informational`; it prices one Mac headless soak for the row named by
 `--soak-row`. For `api-openai`, `api-openai-medium`, `api-anthropic`
 and `api-xai` it also prices a Linux smoke. An API-key row, including
 OpenRouter and those four, is priced when the card names its model id. A

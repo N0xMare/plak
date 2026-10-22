@@ -435,7 +435,12 @@ Only the least-used `full` row also runs the headless soak (default one hour).
 There is no per-row two-hour TUI soak: the maintainer's TUI review replaces it.
 `light` is the twelve smoke scenarios.
 `informational` is that smoke, recorded: a model or provider outcome does not
-block, and a harness outcome does. Linux `x86_64-unknown-linux-musl` runs the
+block, and a harness outcome does. A row may mark single lanes informational
+(`informational_lanes`): the lane runs at the row's depth and is scored like
+an informational row. `deepseek-messages` marks long-session, because DeepSeek
+over OpenRouter Messages drops `read` offset and limit deep into long tool
+loops while Chat pages correctly; its smoke and jobs stay blocking, and
+`deepseek` keeps the blocking long-session. Linux `x86_64-unknown-linux-musl` runs the
 twelve-scenario smoke on each `full` row and on `api-openai`,
 `api-openai-medium`, `api-anthropic` and `api-xai` only. `or-mimo`, `or-glm`
 and `or-qwen37` are best-effort light rows: a second provider outcome is
@@ -461,7 +466,7 @@ paid ids at informational depth.
 | `claude-opus-medium` | `claude` | `claude-opus-5-5` | medium | light |
 | `claude-fable` | `claude` | `claude-fable-5-1` | low | light |
 | `deepseek` | `openrouter` | `deepseek/deepseek-v4.1-flash-1017` | | full, Chat |
-| `deepseek-messages` | `openrouter` | `deepseek/deepseek-v4.1-flash-1017` | | full, Messages |
+| `deepseek-messages` | `openrouter` | `deepseek/deepseek-v4.1-flash-1017` | | full, Messages; long-session informational |
 | `or-mimo` | `openrouter` | `xiaomi/mimo-v2.6-flash` | | light |
 | `or-glm` | `openrouter` | `z-ai/glm-5.3-flash` | | light |
 | `or-qwen37` | `openrouter` | `qwen/qwen3.7-flash` | | light |
@@ -531,7 +536,8 @@ fixtures replay the same seed. Its rerun is final: `PASS` qualifies, and
 anything else counts. `HARNESS` never reruns. A first `PROVIDER` still reruns
 once under its existing rule; a MODEL on that rerun cannot earn another
 attempt, nor can a PROVIDER on a MODEL rerun. At most two attempts run.
-Informational outcomes and the second-PROVIDER best-effort waiver retain
+Informational outcomes (including an informational lane, recorded in the
+binding as `lane_class`) and the second-PROVIDER best-effort waiver retain
 their existing class rules; a PROVIDER on a MODEL rerun is not that waiver.
 
 The cell's `report.json` embeds both original reports and their artifact and
@@ -631,7 +637,9 @@ Headless soak (1 hour): 5,600,000 input and 60,000 output, cached share 0.9.
 TUI soak (2 hours): 8,600,000 input, output scaled by the soak output/input
 ratio, cached share 0.9. Long-session, on each `full` row: the measured
 DeepSeek four-scenario cell, 750,415 input and 4,673 output at 22% cached,
-scaled by catalog window / 1,048,576 for every other window. Jobs (11
+scaled by catalog window / 1,048,576 for every other window; the
+`deepseek-messages` long-session cell is priced and printed with class
+`informational`. Jobs (11
 scenarios) uses the smoke per-scenario share and the smoke cache share.
 Two further `crash_jobs` runs are priced on every `full` row at two elevenths
 of the jobs volume, so that scenario runs three times including the jobs cell.

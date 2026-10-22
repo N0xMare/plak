@@ -165,7 +165,7 @@ class QualificationTests(unittest.TestCase):
     def test_best_effort_provider_waiver_does_not_apply_to_model_rerun(self):
         for initial, expected in ((live.PROVIDER, True), (live.MODEL, False)):
             result, _ = self.run_cell([initial, live.PROVIDER])
-            self.assertEqual(qualification.qualifies(live.ROUTES["or-mimo"], result), expected)
+            self.assertEqual(qualification.qualifies(live.ROUTES["or-mimo"], result, "smoke"), expected)
 
     def test_driver_error_during_rerun_is_recorded_harness(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -381,8 +381,48 @@ class QualificationReviewTests(unittest.TestCase):
                      if route.route_class == live.INFORMATIONAL)
         for outcome in (live.PASS, live.MODEL, live.PROVIDER, live.HARNESS, live.PENDING):
             with self.subTest(outcome=outcome):
-                self.assertEqual(qualification.qualifies(route, {"outcome": outcome}),
+                self.assertEqual(qualification.qualifies(route, {"outcome": outcome}, "smoke"),
                                  outcome in (live.PASS, live.MODEL, live.PROVIDER))
+
+    def test_messages_long_session_is_informational_and_other_lanes_block(self):
+        messages, chat = live.ROUTES["deepseek-messages"], live.ROUTES["deepseek"]
+        for outcome in (live.PASS, live.MODEL, live.PROVIDER, live.HARNESS, live.PENDING):
+            with self.subTest(outcome=outcome):
+                result = {"outcome": outcome, "attempts": [{"outcome": outcome}] * 2}
+                self.assertEqual(qualification.qualifies(messages, result, "long-session"),
+                                 outcome in (live.PASS, live.MODEL, live.PROVIDER))
+                for lane in ("smoke", "jobs", "soak"):
+                    self.assertEqual(qualification.qualifies(messages, result, lane),
+                                     outcome == live.PASS, lane)
+                self.assertEqual(qualification.qualifies(chat, result, "long-session"),
+                                 outcome == live.PASS)
+
+    def test_messages_long_session_cell_records_its_lane_class(self):
+        def execute(lane, route, used_binary, argv, seed, path):
+            path.mkdir()
+            return 1, {"capture_complete": True,
+                       "binary_sha256_start": "build", "binary_sha256_end": "build",
+                       "evidence": {"growth": {"capture_complete": True, "segments": ["capture"],
+                                               "captured_exchanges": 1}},
+                       "results": [{"scenario": "growth", "outcome": live.MODEL,
+                                    "detail": "reads omitted offset"}]}
+
+        for route, expected_code, lane_class in (("deepseek-messages", 0, live.INFORMATIONAL),
+                                                 ("deepseek", 1, live.FULL)):
+            with self.subTest(route=route), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                binary = root / "plak"
+                binary.write_bytes(b"build")
+                with patch.object(live, "ROOT", root), patch("builtins.print"), \
+                        patch.dict(os.environ, {"PLAK_LIVE_INPUT_CEILING": "967232"}, clear=True), \
+                        patch("qualification.execute", side_effect=execute) as launched:
+                    code = qualification.main(["long-session", route, "--binary", str(binary), "--all"])
+                report = json.loads(next((root / "target/live").glob("*/report.json")).read_text())
+                self.assertEqual(code, expected_code)
+                self.assertEqual(launched.call_count, 2)
+                self.assertEqual(report["status"], "MODEL after MODEL rerun")
+                self.assertEqual(report["binding"]["route_class"], live.FULL)
+                self.assertEqual(report["binding"]["lane_class"], lane_class)
 
     def test_openrouter_contingency_includes_shared_rerun_reserve(self):
         cells = [estimate.Cell("mac", "smoke", "or", live.LIGHT, "model", "openrouter"),

@@ -115,13 +115,13 @@ def run_cell(artifacts: Path, attempt, *, binding: dict | None = None) -> dict:
     return result
 
 
-def qualifies(route: live.Route, result: dict) -> bool:
+def qualifies(route: live.Route, result: dict, lane: str) -> bool:
     outcome = result["outcome"]
     if outcome == live.PASS:
         return True
     if outcome in (live.HARNESS, live.PENDING):
         return False
-    if route.route_class == live.INFORMATIONAL:
+    if route.lane_class(lane) == live.INFORMATIONAL:
         return True
     attempts = result["attempts"]
     return (route.name in ("or-mimo", "or-glm", "or-qwen37")
@@ -223,12 +223,12 @@ def main(argv: list[str]) -> int:
         return code, report
 
     result = run_cell(artifacts, attempt, binding={
-        **live.route_report(route), "lane": args.lane,
+        **live.route_report(route), "lane": args.lane, "lane_class": route.lane_class(args.lane),
         "binary": str(binary), "binary_sha256_start": digest, "fixture_seed": seed,
         "lane_options": forwarded,
         **({"input_ceiling": ceiling} if ceiling is not None else {}),
     })
-    return 0 if qualifies(route, result) else 1
+    return 0 if qualifies(route, result, args.lane) else 1
 
 
 if __name__ == "__main__":

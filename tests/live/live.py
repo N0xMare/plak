@@ -70,6 +70,8 @@ def binary_sha256(binary: Path) -> str:
 # Apple Silicon, plus a Linux smoke. `light` is an Apple Silicon smoke, plus
 # a Linux smoke on the four direct API rows. `informational` is one Apple
 # Silicon smoke, recorded, and non-blocking except for a harness failure.
+# A route's `informational_lanes` run at its class depth but score like an
+# informational row.
 FULL, LIGHT, INFORMATIONAL = "full", "light", "informational"
 ROUTE_CLASSES = (FULL, LIGHT, INFORMATIONAL)
 
@@ -88,7 +90,8 @@ class Route:
     """One account/model tuple and where its inference requests go.
 
     `planned` is false for enrolled routes kept runnable but left out of the
-    owner matrix (the dry-run estimator skips them).
+    owner matrix (the dry-run estimator skips them). `informational_lanes`
+    names lanes whose cell is informational on an otherwise blocking row.
     """
 
     name: str
@@ -100,6 +103,10 @@ class Route:
     path: str
     route_class: str = LIGHT
     planned: bool = True
+    informational_lanes: frozenset[str] = frozenset()
+
+    def lane_class(self, lane: str) -> str:
+        return INFORMATIONAL if lane in self.informational_lanes else self.route_class
 
     def flags(self) -> list[str]:
         flags = ["--account", self.account, "--model", self.model]
@@ -112,9 +119,10 @@ class Route:
 
 def _route(name: str, account: str, model: str, effort: str | None,
            protocol: str | None, endpoint: tuple[str, str], route_class: str,
-           planned: bool = True) -> Route:
+           planned: bool = True, informational_lanes: frozenset[str] = frozenset()) -> Route:
     host, path = endpoint
-    return Route(name, account, model, effort, protocol, host, path, route_class, planned)
+    return Route(name, account, model, effort, protocol, host, path, route_class, planned,
+                 informational_lanes)
 
 
 # Exact ids are pinned spellings. OpenRouter ids are the 2026-10-08
@@ -146,9 +154,13 @@ ROUTES = {
     "deepseek": _route(
         "deepseek", "openrouter", "deepseek/deepseek-v4.1-flash-1017", None, None,
         _OR_CHAT, FULL),
+    # Deep into long tool loops this model on OpenRouter Messages sends reads
+    # with only a path, even given an argument example, while Chat pages
+    # correctly with the same schema: a provider translation or model limit.
+    # Smoke and jobs still cover the Messages dialect at full depth.
     "deepseek-messages": _route(
         "deepseek-messages", "openrouter", "deepseek/deepseek-v4.1-flash-1017", None,
-        "messages", _OR_MESSAGES, FULL),
+        "messages", _OR_MESSAGES, FULL, informational_lanes=frozenset({"long-session"})),
     "or-mimo": _route(
         "or-mimo", "openrouter", "xiaomi/mimo-v2.6-flash", None, None, _OR_CHAT, LIGHT),
     "or-glm": _route(
