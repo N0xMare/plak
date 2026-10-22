@@ -78,6 +78,10 @@ one cross-build carrier (a build imports its own and the previous version).
   verbatim after the compaction item, so the model still sees the output it
   asked for; when that successor would not fit or shrink, the tail-less
   successor from the same compaction item is published instead.
+- Re-reading a compaction's receipt (recovery, or `/compact` repeated with the
+  same operation) no longer reports the session as corrupt when the successor
+  carries a post-compaction note, and a compaction completed during recovery
+  keeps its plan restoration note, as the live fold does.
 - Python Code Mode (`py-ptc`) runs Monty 1.2.0 under adapter
   `plakous.monty-python-adapter.v7`. A refused `Path.scan` (glob, rglob, walk)
   raises `RuntimeError` instead of returning an empty result; `bisect`, `csv`,
