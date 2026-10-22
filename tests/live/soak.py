@@ -246,6 +246,8 @@ class Soak:
                     record.outcome = "provider"
                     record.errors.append(reason or "provider stream violated the documented protocol")
                     raise live.ScenarioFailure(live.PROVIDER, record.errors[-1])
+                if live.output_limit_failure(turn.model_error_kind, " ".join(turn.errors)):
+                    raise live.ScenarioFailure(live.MODEL, live.OUTPUT_LIMIT_MISS)
                 after = f" after {turn.phase}:{turn.model_error_kind}"
                 follow = agent.prompt("Continue the task.", timeout=900, on_event=observe)
                 answer = follow.text

@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests" / "live"))
@@ -161,6 +162,28 @@ class SmokeTuiOracleTests(unittest.TestCase):
         with self.assertRaises(live.ScenarioFailure) as raised:
             live.classify_command_error("server_is_overloaded", "manual compact")
         self.assertEqual(raised.exception.outcome, live.PROVIDER)
+
+    def test_cli_resume_judges_an_answer_committed_at_its_output_limit(self):
+        """Exit 5 with `turn_failed:output-limit` is a completed, truncated turn."""
+        truncated = "plak: turn_failed:output-limit\n"
+        for answer, outcome in (("MAGENTA\n", live.PASS), ("I do not recall\n", live.MODEL)):
+            runs = iter([Mock(returncode=0, stdout="session_id=abc\nok\n", stderr=""),
+                         Mock(returncode=5, stdout=answer, stderr=truncated)])
+            with self.subTest(answer=answer), tempfile.TemporaryDirectory() as directory:
+                base = Path(directory).resolve()
+                (base / "tests").mkdir()
+                (base / "cli_resume").mkdir()
+                env = live.Env(base / "plak", base / "home", base)
+                runner = smoke.Smoke(live.ROUTES["grok"], env)
+                with patch.object(live, "ROOT", base), \
+                        patch.object(live.subprocess, "run", side_effect=lambda *a, **k: next(runs)), \
+                        patch.object(smoke.Smoke, "repo", return_value=base):
+                    if outcome == live.PASS:
+                        self.assertIn("continued", runner.cli_resume())
+                    else:
+                        with self.assertRaises(live.ScenarioFailure) as raised:
+                            runner.cli_resume()
+                        self.assertEqual(raised.exception.outcome, outcome)
 
 
 if __name__ == "__main__":

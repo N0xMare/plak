@@ -478,9 +478,51 @@ class LongSessionOracleTests(unittest.TestCase):
         self.assertEqual(report["composition_requested"], "plakous-default")
         self.assertEqual(report["composition_bound"], ["native-ptc"])
         self.assertEqual(report["growth_pages"], 6)
+        self.assertEqual(report["input_ceiling"], {"tokens": 256_000, "source": "driver catalog"})
         self.assertEqual(report["token_telemetry"]["input_tokens"], 9)
         self.assertEqual(report["token_telemetry"]["reasoning_tokens"], 2)
         self.assertEqual(report["results"][0]["outcome"], "pass")
+
+    def test_openrouter_driver_refuses_before_launch_without_an_input_ceiling(self):
+        for ceiling in (None, "0"):
+            with self.subTest(ceiling=ceiling), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                binary = root / "plak"
+                binary.write_bytes(b"synthetic executable; never launched")
+                environ = {} if ceiling is None else {"PLAK_LIVE_INPUT_CEILING": ceiling}
+                with patch.object(live, "ROOT", root), \
+                        patch.object(live, "write_home") as launch, \
+                        patch.object(long_session, "play") as play, \
+                        patch.dict(os.environ, environ, clear=True), \
+                        patch("builtins.print"):
+                    code = long_session.main(["deepseek-messages", "--all", "--binary", str(binary)])
+                report = json.loads(next((root / "target/live").glob("*/report.json")).read_text())
+            self.assertEqual(code, 2)
+            launch.assert_not_called()
+            play.assert_not_called()
+            self.assertIn("plak usage --session", report["pre_attempt_error"])
+            self.assertIn("admitted_input_ceiling=N", report["pre_attempt_error"])
+            self.assertEqual(report["input_ceiling"], {"tokens": None, "source": None})
+            self.assertEqual(report["protocol"], "messages")
+            self.assertEqual(report["results"], [])
+
+    def test_report_records_the_input_ceiling_and_its_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "plak"
+            binary.write_bytes(b"synthetic executable; never launched")
+            with patch.object(live, "ROOT", root), \
+                    patch.object(live, "write_home"), \
+                    patch.object(smoke, "capture_complete", return_value=True), \
+                    patch.object(long_session, "play", return_value="synthetic pass"), \
+                    patch.dict(os.environ, {"PLAK_LIVE_INPUT_CEILING": "967232",
+                                            "PLAK_LIVE_GROWTH_PAGES": ""}), \
+                    patch("builtins.print"):
+                code = long_session.main(["deepseek", "--only", "overflow", "--binary", str(binary)])
+            report = json.loads(next((root / "target/live").glob("*/report.json")).read_text())
+        self.assertEqual(code, 0)
+        self.assertEqual(report["input_ceiling"],
+                         {"tokens": 967_232, "source": "PLAK_LIVE_INPUT_CEILING"})
 
     def test_bad_dial_is_a_scenario_result(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -522,6 +564,10 @@ class LongSessionOracleTests(unittest.TestCase):
             long_session.raise_child_tool_failure(text)
         self.assertEqual(raised.exception.outcome, live.HARNESS)
         self.assertIn("child tool failure", str(raised.exception))
+        with self.assertRaises(live.ScenarioFailure) as raised:
+            long_session.raise_child_tool_failure(
+                "agent turn failed: response reached its output bound before completion")
+        self.assertEqual(raised.exception.outcome, live.MODEL)
 
     def test_blocked_child_quota_is_provider(self):
         blocked = {
@@ -638,10 +684,11 @@ class LongSessionOracleTests(unittest.TestCase):
             pack = long_session.pack_of(route)
             line_count = long_session.default_pages(route) * long_session.lines_per_page()
             lines, batches = long_session.overflow_plan(window, pack, line_count, route.model)
-            batch_bytes = long_session.OVERFLOW_BATCH_CALLS * lines * long_session.LINE_BYTES
+            calls = len(batches[0])
+            batch_bytes = calls * lines * long_session.LINE_BYTES
             self.assertLessEqual(batch_bytes, long_session.round_cap_bytes(window), name)
-            self.assertTrue(all(len(batch) == long_session.OVERFLOW_BATCH_CALLS
-                                for batch in batches), name)
+            self.assertGreaterEqual(calls, long_session.OVERFLOW_BATCH_CALLS, name)
+            self.assertTrue(all(len(batch) == calls for batch in batches), name)
             offsets = [offset for batch in batches for offset in batch]
             self.assertEqual(offsets, sorted(set(offsets)), name)
             self.assertLessEqual(offsets[-1] + lines - 1, line_count, name)
@@ -662,6 +709,63 @@ class LongSessionOracleTests(unittest.TestCase):
         self.assertIn("Round 2: offsets 41, 61.",
                       long_session.overflow_prompt(20, [[1, 21], [41, 61]], "grok"))
         self.assertNotIn("read_file", prompt)
+
+    def test_every_planned_read_fits_its_tool_call_cap_and_the_plan_reaches_the_trigger(self):
+        """pi `read` stops at 50 KiB, so a pi batch takes more, shorter reads.
+
+        Measured with the bytes a bulk line really has, every read of every
+        plan returns whole, every batch stays within the cap share, the file
+        holds the plan, and the batches before the last pass the trigger.
+        """
+        real_line = {pack: len(long_session.bulk_line(pack)) + 1
+                     for pack in ("pi", "grok", "claude", "codex")}
+        self.assertEqual(long_session.read_call_bytes("pi"), 50 * 1024)
+        self.assertEqual(long_session.read_call_bytes("codex"), 40_000)
+        self.assertEqual(long_session.read_call_bytes("grok"), long_session.READ_PAGE_BYTES)
+        cases = [("pi", window, "deepseek/deepseek-v4.1-flash-1017")
+                 for window in (*range(65_536, 967_232, 32_768), 967_232)]
+        cases += [("claude", 1_000_000, "claude-sonnet-5-5"), ("grok", 256_000, "grok-4.7"),
+                  ("grok", 500_000, "grok-4.6"), ("codex", 272_000, "gpt-6-luna"),
+                  ("codex", 500_000, "gpt-6.1-sol")]
+        for pack, window, model in cases:
+            label = (pack, window)
+            with patch.dict(os.environ, {"PLAK_LIVE_INPUT_CEILING": str(window)}):
+                route_pages = long_session.pages_for_window(window)
+            pages = max(route_pages, long_session.overflow_bulk_pages(window, pack, model))
+            line_count = pages * long_session.lines_per_page()
+            lines, batches = long_session.overflow_plan(window, pack, line_count, model)
+            self.assertEqual((lines, batches),
+                             long_session.overflow_plan(window, pack, None, model), label)
+            self.assertLessEqual(lines, long_session.read_call_lines(pack), label)
+            self.assertLessEqual(lines * real_line[pack], long_session.read_call_bytes(pack), label)
+            calls = len(batches[0])
+            self.assertLessEqual(calls * lines * long_session.LINE_BYTES,
+                                 long_session.round_cap_bytes(window)
+                                 * long_session.OVERFLOW_CAP_SHARE, label)
+            offsets = [offset for batch in batches for offset in batch]
+            self.assertEqual(offsets, list(range(1, 1 + len(offsets) * lines, lines)), label)
+            self.assertLessEqual(offsets[-1] + lines - 1, line_count, label)
+            round_tokens = calls * lines * real_line[pack] / long_session.bulk_bytes_per_token(pack)
+            self.assertGreater((len(batches) - 1) * round_tokens,
+                               long_session.compaction_trigger(window, model), label)
+            self.assertGreaterEqual(len(batches) * round_tokens,
+                                    long_session.harness_bar(window, model), label)
+            # Growth and child reads stay under the same per-call cap.
+            call_lines = long_session.growth_call_lines(pack, window)
+            self.assertLessEqual(call_lines, long_session.read_call_lines(pack), label)
+            child_read = (long_session.CODEX_CHILD_HALF_LINES if pack == "codex"
+                          else long_session.child_page_lines(pack, call_lines) + 1)
+            self.assertLessEqual(child_read, long_session.read_call_lines(pack), label)
+        # The measured DeepSeek ceiling: four 32-line reads per round, not two
+        # 65-line reads the 50 KiB cap would cut at 34 lines.
+        lines, batches = long_session.overflow_plan(
+            967_232, "pi", None, "deepseek/deepseek-v4.1-flash-1017")
+        self.assertEqual((lines, len(batches[0]), len(batches)), (32, 4, 7))
+        prompt = long_session.overflow_prompt(lines, batches, "pi")
+        self.assertIn("in 7 rounds using only the read tool", prompt)
+        self.assertIn("Round 1: offsets 1, 33, 65, 97.", prompt)
+        self.assertIn("each with limit 32", prompt)
+        self.assertIn("do not skip or merge rounds", prompt)
 
     def test_child_pages_carry_the_check_words_the_oracle_counts(self):
         with tempfile.TemporaryDirectory() as directory:

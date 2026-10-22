@@ -66,13 +66,20 @@ def check_task(repo: Path, item: Task) -> bool:
 
 
 def terminal_records(home: Path, session: str) -> list[dict]:
-    return [record for record in live.session_records(home, session)
+    return [record for record in live.with_failure_messages(live.session_records(home, session))
             if record.get("kind") == "turn.lifecycle"
             and record.get("phase") not in (None, "admitted")]
 
 
 def terminals(home: Path, session: str) -> list[str]:
     return [record.get("phase", "") for record in terminal_records(home, session)]
+
+
+def output_limit_terminal(home: Path, session: str, index: int) -> bool:
+    """The terminal failed with the typed OutputLimit diagnostic: a model miss."""
+    records = terminal_records(home, session)
+    return (0 <= index < len(records) and records[index].get("phase") == "failed"
+            and live.output_limit_failure(None, str(records[index].get("message") or "")))
 
 
 def raise_if_provider_terminal(home: Path, session: str, index: int, what: str) -> None:
@@ -207,6 +214,8 @@ def main(argv: list[str]) -> int:
                     env.home, session, len(terminal_records(env.home, session)) - 1, item.name)
                 if phase != "failed":
                     raise live.ScenarioFailure(live.HARNESS, f"{item.name}: terminal={phase}")
+                if output_limit_terminal(env.home, session, len(terminal_records(env.home, session)) - 1):
+                    records[-1].update(outcome=live.MODEL, detail=live.OUTPUT_LIMIT_MISS)
                 # A provider request can fail after transmission without being
                 # safe to replay. The next prompt must still be able to finish
                 # the work on this same attached TUI session.
@@ -276,6 +285,7 @@ def main(argv: list[str]) -> int:
                "model_misses": sum(record["phase"] == "completed" and not record["oracle"]
                                    for record in records),
                "turn_failures": sum(record["phase"] == "failed" and not record.get("recovered")
+                                    and record.get("outcome") != live.MODEL
                                     for record in records),
                "clean_quit": quit_code == 0, "failure": failure,
                "token_telemetry": live.session_usage(env.home).as_dict()}

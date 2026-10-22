@@ -54,7 +54,8 @@ class CrashTriageTests(unittest.TestCase):
 
     def test_read_only_commands_use_scenario_environment_and_optional_verdict(self):
         completed = [subprocess.CompletedProcess([], 0, show("Finalization", [(1, "FinalizationRequired")]), ""),
-                     subprocess.CompletedProcess([], 1, "root: offline=RefusesRecoveryScope recovery_phase=Some(Finalization) evaluator=verified process_budgets=verified\n", "SECRET")]
+                     subprocess.CompletedProcess([], 1, "root: step=runtime_inspection\n"
+                                                 "root: offline=RefusesRecoveryScope recovery_phase=Some(Finalization) evaluator=verified process_budgets=verified projects:3 laws=refused\n", "SECRET")]
         with patch.object(crash_triage.subprocess, "run", side_effect=completed) as run:
             result = crash_triage.inspect(Path("/binary"), Path("/repo"), Path("/home"), "session")
         self.assertEqual(run.call_args_list[0].args[0], ["/binary", "session", "show", "session"])
@@ -65,7 +66,20 @@ class CrashTriageTests(unittest.TestCase):
             self.assertNotIn("PLAK_TEST_EXCHANGE_CAPTURE_DIR", call.kwargs["env"])
         self.assertIn("bucket=unknown", result)
         self.assertIn("rehearsal=offline=RefusesRecoveryScope", result)
+        self.assertIn("process_budgets=verified laws=refused", result)
         self.assertNotIn("SECRET", result)
+
+    def test_rehearsal_verdict_reads_the_root_line_with_or_without_trailing_fields(self):
+        line = ("root: offline=OpensQuiescent recovery_phase=None evaluator=refused: recorded_artifact "
+                "process_budgets=refused")
+        self.assertEqual(crash_triage.rehearsal_verdict(line + " projects:0 laws=valid\n"),
+                         "offline=OpensQuiescent recovery_phase=None evaluator=refused: "
+                         "recorded_artifact process_budgets=refused laws=valid")
+        self.assertEqual(crash_triage.rehearsal_verdict(line + "\n"),
+                         "offline=OpensQuiescent recovery_phase=None evaluator=refused: "
+                         "recorded_artifact process_budgets=refused")
+        self.assertIsNone(crash_triage.rehearsal_verdict(line + " projects:0 laws=valid extra\n"))
+        self.assertEqual(crash_triage.rehearsal_verdict("root: refuses: Corrupt\n"), "refuses:Corrupt")
 
     def test_failed_inspection_is_unknown_and_unsupported_rehearsal_is_silent(self):
         with patch.object(crash_triage.subprocess, "run", return_value=

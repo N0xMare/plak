@@ -677,6 +677,69 @@ def stream_validation_outcome(text: str, segments: list[Path] | None) -> str | N
     return HARNESS
 
 
+# Spec 01 Length classification. A tool-free Length answer with visible text
+# is committed: `plak run` prints it, then exits 5 with this last stderr line.
+TRUNCATED_ANSWER_LINE = "plak: turn_failed:output-limit"
+# An empty Length that may not retry again is a failed turn of typed kind
+# OutputLimit. JSONL lifecycle frames carry the kind; `plak run` stderr and the
+# session log's `turn.failed` row carry only the rendered diagnostic, which
+# quotes one of these product messages.
+OUTPUT_LIMIT_KIND = "OutputLimit"
+OUTPUT_LIMIT_DIAGNOSTICS = (
+    "response reached its output bound before completion",
+    "Responses provider stopped at the output bound before",
+)
+OUTPUT_LIMIT_MISS = "OutputLimit: the model spent its output bound without an answer"
+_COMPATIBILITY_NOTICE = re.compile(
+    r"the (?:answer to the )?([\w-]+) compatibility notice "
+    r"(?:is not accepted|needs an answer|could not be read)")
+
+
+def truncated_answer(code: int, stderr: str) -> bool:
+    """`plak run` printed a committed answer cut at its output limit."""
+    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+    return code == 5 and bool(lines) and lines[-1] == TRUNCATED_ANSWER_LINE
+
+
+def output_limit_failure(kind: str | None, text: str) -> bool:
+    """A failed turn of typed kind OutputLimit, from its kind or its diagnostic."""
+    return kind == OUTPUT_LIMIT_KIND or any(needle in text for needle in OUTPUT_LIMIT_DIAGNOSTICS)
+
+
+def compatibility_notice_refusal(text: str) -> str | None:
+    """The remedy for a subscription compatibility notice Plak could not ask about."""
+    match = _COMPATIBILITY_NOTICE.search(text)
+    if match is None:
+        return None
+    account = match[1]
+    return (f"the {account} compatibility notice is not accepted; accept it once with "
+            f"`plak models {account}` from a terminal before a live run")
+
+
+def with_failure_messages(records: list[dict]) -> list[dict]:
+    """Session-log records whose failed terminals carry their turn's failure text.
+
+    The durable `turn.lifecycle` row stores only `turn_id` and `phase`. The host
+    logs the rendered failure as a separate `turn.failed` row (`msg`) inside the
+    same admitted bracket; that text becomes the terminal's `message`.
+    """
+    messages: dict[str, list[str]] = {}
+    current = None
+    for record in records:
+        if record.get("kind") == "turn.lifecycle" and record.get("phase") == "admitted":
+            current = str(record.get("turn_id") or "")
+        elif record.get("kind") == "turn.failed" and current:
+            messages.setdefault(current, []).append(str(record.get("msg") or ""))
+    out = []
+    for record in records:
+        turn_id = str(record.get("turn_id") or "")
+        if (record.get("kind") == "turn.lifecycle" and record.get("phase") not in (None, "admitted")
+                and not record.get("message") and turn_id in messages):
+            record = {**record, "message": " ".join(messages[turn_id])}
+        out.append(record)
+    return out
+
+
 def _absorbed_injection(kind: str | None, http_status: int | None, fault: str | None) -> bool:
     """The failure is the injected fault the product was required to absorb."""
     if fault not in ABSORBED_FAULTS:
@@ -708,6 +771,8 @@ def classify_incomplete(turn: Turn, what: str, *, injected_fault: str | None = N
     lookup = lookup_failure(text, lookup_faults or turn.lookup_faults)
     if lookup:
         raise ScenarioFailure(lookup[1], f"{what}: {lookup[0]}")
+    if output_limit_failure(turn.model_error_kind, text):
+        raise ScenarioFailure(MODEL, f"{what}: {OUTPUT_LIMIT_MISS}")
     status = f"{turn.phase} {turn.model_error_kind or ''} {turn.http_status or ''}".strip()
     validation = stream_validation_outcome(f"{text} {turn.model_error_kind or ''}", segments)
     if validation == MODEL:
@@ -753,10 +818,17 @@ def classify_command_error(message: str, what: str, *,
 
 def classify_cli_failure(code: int, stderr: str, what: str, *,
                          segments: list[Path] | None = None, lookup_faults: str | None = None) -> None:
-    """`plak run` exit. Exit 5 is the agent class; the text decides provider."""
+    """`plak run` exit. Exit 5 is the agent class; the text decides provider.
+
+    An unaccepted compatibility notice (exit 3) is `harness` naming the
+    remedy, and a typed OutputLimit diagnostic is `model` as on every surface.
+    """
     lookup = lookup_failure(stderr, lookup_faults)
     if lookup:
         raise ScenarioFailure(lookup[1], f"{what}: {lookup[0]}")
+    notice = compatibility_notice_refusal(stderr)
+    if notice:
+        raise ScenarioFailure(HARNESS, f"{what} exited {code}: {notice}")
     detail = " ".join(stderr.split())[:200]
     validation = stream_validation_outcome(stderr, segments)
     if validation == MODEL:
@@ -766,6 +838,8 @@ def classify_cli_failure(code: int, stderr: str, what: str, *,
     if validation == HARNESS:
         raise ScenarioFailure(HARNESS, f"{what}: kernel stream validation failed without "
                                        f"a captured protocol violation")
+    if output_limit_failure(None, stderr):
+        raise ScenarioFailure(MODEL, f"{what}: {OUTPUT_LIMIT_MISS}")
     if provider_reason_from(None, None, stderr):
         raise ScenarioFailure(PROVIDER, f"{what}: {detail}")
     raise ScenarioFailure(HARNESS, f"{what} exited {code}: {detail}".strip())
@@ -1178,21 +1252,28 @@ def run_cli(env: Env, repo: Path, args: list[str], log: Path,
     """`plak run …`; returns the exit status and stdout, keeping both streams.
 
     `home` overrides `PLAK_HOME` for this process only. Capture still belongs
-    to `env`.
+    to `env`. Stdin is closed, so a prompt Plak cannot ask (a compatibility
+    notice) fails at once instead of waiting out the timeout. A committed
+    answer cut at its output limit (`truncated_answer`) completed its turn and
+    is returned as exit 0, so the scenario's oracle judges the printed answer;
+    the log keeps the real status.
     """
     child = env.environ(faults=faults)
     if home is not None:
         child["PLAK_HOME"] = str(home)
     try:
         result = subprocess.run([str(env.binary), "run", *args], cwd=repo,
-                                env=child, capture_output=True, text=True,
-                                timeout=timeout)
+                                env=child, stdin=subprocess.DEVNULL, capture_output=True,
+                                text=True, timeout=timeout)
     except subprocess.TimeoutExpired as error:
         log.write_text(f"timeout after {timeout}s\n{error.stdout or ''}{error.stderr or ''}")
         raise ScenarioFailure(HARNESS, f"plak run did not finish in {timeout:.0f}s")
-    log.write_text(f"exit {result.returncode}\n--- stdout\n{result.stdout}"
+    code, note = result.returncode, ""
+    if truncated_answer(code, result.stderr):
+        code, note = 0, " (answer committed at its output limit; scored as completed)"
+    log.write_text(f"exit {result.returncode}{note}\n--- stdout\n{result.stdout}"
                    f"--- stderr\n{result.stderr}")
-    return result.returncode, result.stdout
+    return code, result.stdout
 
 
 @dataclasses.dataclass

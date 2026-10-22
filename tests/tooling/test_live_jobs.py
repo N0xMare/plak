@@ -193,6 +193,15 @@ class JobOracleTests(unittest.TestCase):
             both_started=False, short_finished=False, during_turn=False,
             notice_seen=False, delivery=None, steered=False,
         ), live.MODEL)
+        failure(self, lambda: jobs.judge_run(
+            code=5, stderr="plak: agent turn failed: response reached its output bound "
+            "before completion\n", finished=False,
+        ), live.MODEL)
+        with self.assertRaises(live.ScenarioFailure) as caught:
+            jobs.judge_run(code=3, stderr="plak: the codex compatibility notice needs an answer "
+                           "on stdin and none came\n", finished=False)
+        self.assertEqual(caught.exception.outcome, live.HARNESS)
+        self.assertIn("`plak models codex`", str(caught.exception))
         self.assertIn("continued", jobs.judge_run(
             code=0, stderr="plak: waiting for p1 (hold); Ctrl-C to stop\n"
             "plak: continuing (turn 2: p1 exited 0)\n", finished=True,
@@ -430,6 +439,72 @@ class JobEvidenceTests(unittest.TestCase):
             }
             path.write_text(json.dumps(only_notice))
             self.assertFalse(jobs.notice_on_steer([segment], "p1"))
+
+    def test_notice_passes_at_the_steer_or_at_a_notice_yield_of_the_same_turn(self):
+        """Both orderings R1 allows: steer first (one commit) or notice first."""
+        notice = '<process_notice id="p1" status="exited">\ncommand: python3 short.py tok\n'
+        steer = "Reply with the single word steered."
+
+        def request(*texts):
+            return json.dumps({"messages": [{"role": "user", "content": text} for text in texts]})
+
+        judged = dict(both_started=True, short_finished=True, during_turn=True,
+                      delivery="boundary", steered=True)
+        with tempfile.TemporaryDirectory() as directory:
+            segment = Path(directory)
+            # Steer first: the notice and the steer share the steer's request.
+            shared = segment / "exchange-0002.request"
+            shared.write_text(request("Run both commands.", notice, steer))
+            terminal = shared.stat().st_mtime + 5
+            self.assertTrue(jobs.notice_on_steer([segment], "p1"))
+            self.assertIn("steering boundary", jobs.judge_notice(
+                **judged, notice_seen=True,
+                notice_in_turn=jobs.notice_in_turn([segment], "p1", terminal)))
+            # Notice first: the wait yielded and the notice committed alone; a
+            # later steer request that replays only its own suffix lacks it.
+            shared.write_text(request("Run both commands.", notice))
+            (segment / "exchange-0003.request").write_text(request(steer))
+            self.assertFalse(jobs.notice_on_steer([segment], "p1"))
+            self.assertTrue(jobs.notice_in_turn([segment], "p1", terminal))
+            self.assertIn("Notice yield", jobs.judge_notice(
+                **judged, notice_seen=False,
+                notice_in_turn=jobs.notice_in_turn([segment], "p1", terminal)))
+            # A notice yield needs no steer at all.
+            self.assertIn("Notice yield", jobs.judge_notice(
+                **{**judged, "steered": False}, notice_seen=False, notice_in_turn=True))
+            # A request persisted after the turn's terminal is a later turn.
+            self.assertFalse(jobs.notice_in_turn([segment], "p1", shared.stat().st_mtime - 1))
+            self.assertFalse(jobs.notice_in_turn([segment], "p1", None))
+            self.assertFalse(jobs.notice_in_turn([segment], "p2", terminal))
+            # A response body naming the notice is not a request of the turn.
+            shared.write_text(request("Run both commands."))
+            (segment / "exchange-0002.body").write_text(notice)
+            self.assertFalse(jobs.notice_in_turn([segment], "p1", terminal))
+        failure(self, lambda: jobs.judge_notice(
+            **judged, notice_seen=False, notice_in_turn=False), live.HARNESS)
+        failure(self, lambda: jobs.judge_notice(
+            **{**judged, "delivery": "idle_wake"}, notice_seen=False, notice_in_turn=True),
+            live.HARNESS)
+        failure(self, lambda: jobs.judge_notice(
+            **{**judged, "during_turn": False}, notice_seen=False, notice_in_turn=True),
+            live.MODEL)
+
+    def test_tui_turn_failed_with_output_limit_is_model(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            log = home / "state" / "k" / "sessions" / "s.events.jsonl"
+            log.parent.mkdir(parents=True)
+            rows = [
+                {"kind": "turn.lifecycle", "phase": "admitted", "turn_id": "t1"},
+                {"kind": "turn.lifecycle", "phase": "failed", "turn_id": "t1"},
+                {"kind": "turn.failed", "disposition": "definite",
+                 "msg": "agent turn failed: response reached its output bound before completion"},
+            ]
+            log.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            failure(self, lambda: jobs.classify_tui_turn(home, "s", 0, "ctrl+b"), live.MODEL)
+            rows[2]["msg"] = "agent turn failed: protocol"
+            log.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            failure(self, lambda: jobs.classify_tui_turn(home, "s", 0, "ctrl+b"), live.HARNESS)
 
     def test_submit_outcomes_read_live_work_then_a_receipt(self):
         refusal = json.dumps({

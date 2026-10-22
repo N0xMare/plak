@@ -92,8 +92,11 @@ def continues(agent: live.Agent) -> None:
 
 
 def durable_terminals(records: list[dict]) -> list[dict]:
-    """Return durable turn terminals, excluding their admission records."""
-    return [record for record in records
+    """Return durable turn terminals, excluding their admission records.
+
+    A failed terminal carries its turn's `turn.failed` text as `message`.
+    """
+    return [record for record in live.with_failure_messages(records)
             if record.get("kind") == "turn.lifecycle"
             and record.get("phase") not in (None, "admitted")]
 

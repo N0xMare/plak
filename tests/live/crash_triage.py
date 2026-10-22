@@ -63,12 +63,15 @@ def detail(shape: RecoveryShape) -> str:
 
 
 def rehearsal_verdict(text: str) -> str | None:
+    """The root line of `plak session rehearse`, whose trailing fields are optional."""
     for line in text.splitlines():
         if match := re.fullmatch(r"root: offline=(\w+) recovery_phase=(None|Some\(\w+\)) "
                                  r"evaluator=(verified|refused: recorded_artifact) "
-                                 r"process_budgets=(verified|refused)", line):
+                                 r"process_budgets=(verified|refused)"
+                                 r"(?: projects:\d+ laws=(valid|refused))?", line):
+            laws = f" laws={match[5]}" if match[5] else ""
             return (f"offline={match[1]} recovery_phase={match[2]} "
-                    f"evaluator={match[3]} process_budgets={match[4]}")
+                    f"evaluator={match[3]} process_budgets={match[4]}{laws}")
         if match := re.fullmatch(r"root: refuses: (\w+)", line):
             return "refuses:" + match[1]
     return None

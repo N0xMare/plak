@@ -127,6 +127,12 @@ The Anthropic API-key route uses `/v1/messages` without that query. OpenAI API
 inference is `api.openai.com/v1/responses` and xAI API inference is
 `api.x.ai/v1/responses`.
 
+Subscription accounts need their current compatibility notice accepted before
+a live run: run `plak models <account>` once from a terminal (for example
+after a profile review renewal). The drivers start `plak run` with stdin
+closed, so an unaccepted notice fails at once with exit 3 instead of waiting
+on a hidden prompt, and the scenario scores `harness` with that remedy.
+
 **Smoke** (`smoke.py`, about three minutes) runs twelve scenarios, each in its own
 small git repo:
 
@@ -229,10 +235,15 @@ count_tokens prices like 20 base64 lines (about 29k tokens). The product
 caps the text one model round observes at `clamp(window * 4 * 8 / 100, 32 KiB,
 256 KiB)` bytes (spec 01 observation policy), so one parallel batch cannot fill
 a large window. The overflow turn therefore reads in rounds: each round is one
-parallel batch of two reads that together fill three quarters of that cap, and
+parallel batch of reads that together fill three quarters of that cap, and
 the rounds cover the compaction trigger at the pack's measured bytes per token
 plus two more (for example 7 rounds of 2 x 20 lines on grok-4.7, 12 of 2 x 65
-on the 1M Claude rows). Codex refused every batched wording, so on Codex the
+on the 1M Claude rows). Each read also stays within its own tool's per-call
+cap: pi `read` returns at most 50 KiB and one Codex `exec_command` result at
+most 40,000 bytes, so a batch takes as many reads as that needs (at least two):
+7 rounds of 4 x 32 lines at a 967,232-token DeepSeek ceiling, where 65-line
+reads would be cut at 34 lines. `bulk.txt` holds at least the planned lines.
+Codex refused every batched wording, so on Codex the
 same total is 36 sequential 21-line reads, one `exec_command` per Code Mode
 exec (a multi-slice exec passes the round cap and is clipped). The child of
 `child_compaction` reads its own `bulk.txt`: pages whose count passes its
@@ -249,8 +260,15 @@ count follows the route's catalog window: 6 for the 256k–272k grok-4.7 and
 Codex/OpenAI rows, 8 for 500k `grok-4.6` and `gpt-6.1-sol` (`codex-sol`), 16 for the 1M Claude rows, and 6
 when this driver does not know the window. DeepSeek reports 1M, but Plak's
 OpenRouter input admission uses the discovered window minus output and all
-endpoint limits. Set `PLAK_LIVE_INPUT_CEILING` to the session's admitted input
-ceiling (from its Context view) for OpenRouter long-session runs; the driver
+endpoint limits. OpenRouter long-session runs therefore set
+`PLAK_LIVE_INPUT_CEILING` to the session's admitted input ceiling: run a short
+session on the same route and protocol, then read `admitted_input_ceiling=N`
+from `plak usage --session <id>` (it prints `context_status=... prepared_input=...
+total_context_window=... admitted_input_ceiling=N`). Without a valid value an
+OpenRouter long-session run starts no process and writes a report whose
+`pre_attempt_error` names this remedy; the cell driver records that error as
+its only attempt and spends nothing. The long-session report and the cell's
+binding record the value used and its source as `input_ceiling`. The driver
 sizes it with `pages_for_window`: ceil(window / 65,536) pages, at least 2 for
 windows up to two pages and at least 6 otherwise, capped at 28. Per-call read
 sizes also follow the admitted window, so a fold leaves room below the trigger. `PLAK_LIVE_GROWTH_PAGES`
@@ -325,7 +343,7 @@ when it exits; it does not stop the job at the end of the first turn.
 | `promotion_budget` | `plak agent` | the fixture is promoted about 1 s after it starts, still running, with no immediate-background hint |
 | `steer_command` | `plak agent` | a steer during a 45 s foreground command returns it within 8 s and leaves the process running. On Codex and OpenAI Code Mode the command is promoted by `yield_time_ms` 0 and the steer is asserted at the outer-cell boundary, not as a direct-tool preemption |
 | `steer_await` | `plak agent` | a steer returns a wait on an already promoted job within 8 s and leaves that process running. Code Mode uses the same hint promotion and outer-cell steer |
-| `notice_while_busy` | `plak agent` | a short job exits during a later command; the driver then steers, and the exchange that contains that steer also contains `<process_notice id="pN">`. The check parses the request JSON and reads message text, so a serialized `\"` still counts (spec 01 §8.5 delivers busy notices only at a steering boundary) |
+| `notice_while_busy` | `plak agent` | a short job exits during a later command, and some request of that turn, persisted before its terminal, contains `<process_notice id="pN">`: either the request carrying the driver's steer, which the driver sends once the short job has finished, or an earlier one after the open wait yielded on the job-terminal Notice (spec 01 §8.5). An idle-wake delivery fails. The check parses the request JSON and reads message text, so a serialized `\"` still counts |
 | `run_promoted` | `plak run` | the prompt requests the pack's immediate background hint and ends without polling; stderr says `waiting for p` and then `continuing` with `exited`, and the fixture finishes |
 | `crash_jobs` | `plak agent` | SIGKILL only after the root turn's exchange info is `terminal=Complete` or `ProtocolComplete` and `incomplete=false`, while the promoted job is still live; reopen reports `outcome_unknown`, and the next request contains `Plak stopped unexpectedly while this command was running.` |
 | `child_settle` | `plak agent` | the child promotes with the pack's immediate hint and calls `submit_result` while that job is live. The first submit is refused `live_work` (spec 03 §4.6). The child then stops the job (or, on Codex, waits until it exits) and submits successfully, and the job is terminal when the attempt settles. A second worker promotes another job and does not submit; the driver `close_node`s it, and that job stops with `stop_reason=attempt_ended` (interrupt would keep the job). Model only when the child ignores those instructions. A provider refusal in the job output is provider |
@@ -379,6 +397,13 @@ counts), never an earlier scenario, process or exchange;
 `provider`, the real provider refusing with no injected fault; and
 `pending`, a failure a named in-flight slice is expected to fix
 (`EXPECTED_PENDING` in `smoke.py`).
+Output limits score alike on every surface (spec 05 §3.2). A tool-free answer
+committed at its output limit completed its turn: `plak run` prints it and
+exits 5 with `turn_failed:output-limit`, and the drivers judge that printed
+answer with the scenario's oracle. A failed turn of typed kind `OutputLimit`
+(an empty answer at the limit after its one retry) is `model`; JSONL reads the
+kind, while `plak run` stderr and the TUI's `turn.failed` row carry its
+diagnostic (`... output bound before ...`).
 For the headless soak, `dead_end` means the immediate follow-up in the same
 process also failed; it does not by itself prove a later, fault-free reopen
 cannot continue the durable session.
@@ -457,6 +482,11 @@ just jobs <route> --only crash_jobs    # twice more: three crash_jobs runs
 just soak <route> --hours 1            # least-used full row only
 ```
 
+On `deepseek` and `deepseek-messages` the long-session line runs as
+`PLAK_LIVE_INPUT_CEILING=<N> just soak <route> --long-session --all`, with N
+the `admitted_input_ceiling` that `plak usage --session <id>` prints for a short
+session on that row (Chat and Messages are read separately).
+
 Linux musl's cell is `just smoke <route>` on each `full` row and on the four
 API rows. A refused crash reopen is still a blocking `harness` outcome;
 the diagnostic bucket above does not waive it.
@@ -469,6 +499,7 @@ cell driver to apply spec 05 §3.4's bounded rerun policy automatically:
 ```text
 python3 tests/live/qualification.py smoke <route>
 python3 tests/live/qualification.py long-session <route> --all
+PLAK_LIVE_INPUT_CEILING=<N> python3 tests/live/qualification.py long-session deepseek --all
 python3 tests/live/qualification.py jobs <route>
 python3 tests/live/qualification.py jobs <route> --only crash_jobs
 python3 tests/live/qualification.py soak <route> --hours 1
@@ -491,6 +522,8 @@ capture references, in order, including the first MODEL's capture-proven
 reason. The printed summary shows `PASS after MODEL rerun` separately from
 clean `PASS`. Raw lane reports are never overwritten. Missing capture
 evidence, driver errors or a changed build are HARNESS, not retry candidates.
+An OpenRouter `long-session` cell without a valid `PLAK_LIVE_INPUT_CEILING` is
+refused before its first attempt, with that remedy as the attempt's reason.
 The soak's intentional byte-distinct rebuild remains part of its oracle.
 The driver retains its original starting binary and restores only that
 recorded intentional rebuild before a rerun; any unexpected replacement is

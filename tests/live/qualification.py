@@ -165,6 +165,14 @@ def main(argv: list[str]) -> int:
         return 0
     binary = args.binary.resolve()
     digest = live.binary_sha256(binary)
+    route = live.ROUTES[args.route]
+    ceiling = None
+    if args.lane == "long-session":
+        # Every long-session scenario sizes against this operator input, so a
+        # missing one is refused here rather than scored after a paid attempt.
+        import long_session
+        ceiling = long_session.input_ceiling(route)
+        option_error = option_error or long_session.input_ceiling_error(route)
     root = live.ROOT / "target/live"
     root.mkdir(parents=True, exist_ok=True)
     artifacts = Path(tempfile.mkdtemp(prefix=f"qualification-{args.lane}-{args.route}-", dir=root))
@@ -215,11 +223,12 @@ def main(argv: list[str]) -> int:
         return code, report
 
     result = run_cell(artifacts, attempt, binding={
-        **live.route_report(live.ROUTES[args.route]), "lane": args.lane,
+        **live.route_report(route), "lane": args.lane,
         "binary": str(binary), "binary_sha256_start": digest, "fixture_seed": seed,
         "lane_options": forwarded,
+        **({"input_ceiling": ceiling} if ceiling is not None else {}),
     })
-    return 0 if qualifies(live.ROUTES[args.route], result) else 1
+    return 0 if qualifies(route, result) else 1
 
 
 if __name__ == "__main__":

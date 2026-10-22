@@ -379,6 +379,88 @@ class LiveOracleTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["env"]["PLAK_HOME"], str(private))
         self.assertIn("PLAK_TEST_EXCHANGE_CAPTURE_DIR", run.call_args.kwargs["env"])
 
+    def test_run_cli_closes_stdin_and_scores_a_truncated_answer_as_completed(self):
+        base = self.capture_workspace
+        env = live.Env(base / "plak", base / "home", base)
+        truncated = "plak: answer truncated at its 64-token output limit\nplak: turn_failed:output-limit\n"
+        with patch.object(live.subprocess, "run", return_value=Mock(
+                returncode=5, stdout="MAGENTA\n", stderr=truncated)) as run:
+            code, out = live.run_cli(env, base, ["--", "hi"], base / "run.log")
+        self.assertIs(run.call_args.kwargs["stdin"], live.subprocess.DEVNULL)
+        self.assertEqual((code, out), (0, "MAGENTA\n"))
+        log = (base / "run.log").read_text()
+        self.assertTrue(log.startswith("exit 5 (answer committed at its output limit"))
+        self.assertIn("turn_failed:output-limit", log)
+        # The line must be the final status; any other exit 5 stays a failure.
+        for code, stderr in ((5, "plak: turn_failed:output-limit\nplak: agent turn failed: x\n"),
+                             (1, truncated), (5, "plak: agent turn failed: x\n")):
+            with patch.object(live.subprocess, "run", return_value=Mock(
+                    returncode=code, stdout="", stderr=stderr)):
+                self.assertEqual(live.run_cli(env, base, [], base / "run.log")[0], code)
+
+    def test_output_limit_failure_is_model_on_every_surface(self):
+        typed = live.Turn(phase="failed", model_error_kind="OutputLimit",
+                          errors=["agent turn failed: model request failed"])
+        with self.assertRaises(live.ScenarioFailure) as raised:
+            live.classify_incomplete(typed, "jsonl turn")
+        self.assertEqual(raised.exception.outcome, live.MODEL)
+        self.assertIn("OutputLimit", str(raised.exception))
+        rendered = "plak: agent turn failed: response reached its output bound before completion\n"
+        with self.assertRaises(live.ScenarioFailure) as raised:
+            live.classify_cli_failure(5, rendered, "cli_task")
+        self.assertEqual(raised.exception.outcome, live.MODEL)
+        responses = ("plak: agent turn failed: Responses provider stopped at the output bound "
+                     "before the response was complete\n")
+        with self.assertRaises(live.ScenarioFailure) as raised:
+            live.classify_cli_failure(5, responses, "cli_task")
+        self.assertEqual(raised.exception.outcome, live.MODEL)
+        # Another failure that merely mentions an output bound stays harness.
+        with self.assertRaises(live.ScenarioFailure) as raised:
+            live.classify_cli_failure(5, "plak: requested output bound exceeds the admitted maximum",
+                                      "cli_task")
+        self.assertEqual(raised.exception.outcome, live.HARNESS)
+        # TUI: the lifecycle row has no kind; the turn's `turn.failed` text does.
+        records = [
+            {"kind": "turn.lifecycle", "phase": "admitted", "turn_id": "t1"},
+            {"kind": "turn.output_limit_retry", "detail": "retrying"},
+            {"kind": "turn.lifecycle", "phase": "failed", "turn_id": "t1"},
+            {"kind": "turn.failed", "disposition": "definite",
+             "msg": "agent turn failed: response reached its output bound before completion"},
+            {"kind": "turn.lifecycle", "phase": "admitted", "turn_id": "t2"},
+            {"kind": "turn.lifecycle", "phase": "failed", "turn_id": "t2"},
+            {"kind": "turn.failed", "msg": "agent turn failed: protocol"},
+        ]
+        first, second = smoke.durable_terminals(records)
+        self.assertIn("output bound", first["message"])
+        self.assertEqual(second["message"], "agent turn failed: protocol")
+        self.assertNotIn("message", records[2])
+        with self.assertRaises(live.ScenarioFailure) as raised:
+            smoke.require_durable_completed(first, "first TUI turn")
+        self.assertEqual(raised.exception.outcome, live.MODEL)
+        with self.assertRaises(live.ScenarioFailure) as raised:
+            smoke.require_durable_completed(second, "second TUI turn")
+        self.assertEqual(raised.exception.outcome, live.HARNESS)
+        home = self.capture_workspace / "home"
+        log = home / "state" / "k" / "sessions" / "s.events.jsonl"
+        log.parent.mkdir(parents=True)
+        log.write_text("".join(json.dumps(record) + "\n" for record in records))
+        self.assertTrue(tui_soak.output_limit_terminal(home, "s", 0))
+        self.assertFalse(tui_soak.output_limit_terminal(home, "s", 1))
+        self.assertFalse(tui_soak.output_limit_terminal(home, "s", -1))
+
+    def test_unaccepted_compatibility_notice_names_its_remedy(self):
+        for stderr in (
+            "plak: the codex compatibility notice needs an answer on stdin and none came; "
+            "accept it once with `plak models codex` from a terminal, or pipe `y` to this command\n",
+            "plak: the codex compatibility notice is not accepted; run `plak models codex` to "
+            "review and accept it (the login is kept)\n",
+        ):
+            with self.assertRaises(live.ScenarioFailure) as raised:
+                live.classify_cli_failure(3, stderr, "cli_task")
+            self.assertEqual(raised.exception.outcome, live.HARNESS)
+            self.assertIn("compatibility notice is not accepted", str(raised.exception))
+            self.assertIn("`plak models codex`", str(raised.exception))
+
     def test_wrap_up_oracle_rejects_binding_loss_and_an_empty_answer(self):
         with tempfile.TemporaryDirectory() as directory:
             log = Path(directory) / "run.log"
@@ -429,6 +511,19 @@ class LiveOracleTests(unittest.TestCase):
             record = runner.run_task(soak.Task("explore", "inspect"), 1, None, False)
             self.assertEqual(record.outcome, "harness")
             self.assertIn("reopen refused", record.errors)
+
+    def test_headless_soak_output_limit_turn_is_a_model_miss_not_a_dead_end(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            env = live.Env(base / "plak", base / "home", base)
+            runner = soak.Soak(live.ROUTES["grok"], env, base)
+            agent = Mock(proc=Mock(pid=1, poll=Mock(return_value=0)), capture_dir=base)
+            agent.prompt.return_value = live.Turn(phase="failed", model_error_kind="OutputLimit")
+            runner.open = lambda _faults: agent
+            record = runner.run_task(soak.Task("explore", "inspect"), 1, None, False)
+        self.assertEqual(record.outcome, "model")
+        self.assertFalse(record.dead_end)
+        self.assertEqual(agent.prompt.call_count, 1)
 
     def test_plant_resets_a_differently_fixed_function_and_keeps_later_code(self):
         with tempfile.TemporaryDirectory() as directory:

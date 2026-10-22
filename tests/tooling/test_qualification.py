@@ -1,6 +1,7 @@
 """Qualification retries use synthetic reports, never a binary or provider."""
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -686,6 +687,44 @@ class QualificationReviewTests(unittest.TestCase):
             self.assertEqual(summary["binary_sha256_rebuilt"], digests[1])
             self.assertNotEqual(summary["binary_sha256_end"], summary["binary_sha256_rebuilt"])
             self.assertEqual(code, 1)
+
+    def test_openrouter_long_session_without_input_ceiling_spends_no_attempt(self):
+        def execute(lane, route, used_binary, argv, seed, path):
+            path.mkdir()
+            return 0, self.report(live.PASS)
+
+        for ceiling in (None, "nope", "967232"):
+            with self.subTest(ceiling=ceiling), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                binary = root / "plak"
+                binary.write_bytes(b"never executed")
+                environ = {} if ceiling is None else {"PLAK_LIVE_INPUT_CEILING": ceiling}
+                with patch.object(live, "ROOT", root), patch("builtins.print"), \
+                        patch.dict(os.environ, environ, clear=True), \
+                        patch("qualification.execute", side_effect=execute) as launched:
+                    code = qualification.main(["long-session", "deepseek", "--binary",
+                                               str(binary), "--all"])
+                report = json.loads(next((root / "target/live").glob("*/report.json")).read_text())
+                if ceiling == "967232":
+                    self.assertEqual(code, 0)
+                    self.assertEqual(launched.call_count, 1)
+                    self.assertEqual(report["binding"]["input_ceiling"],
+                                     {"tokens": 967_232, "source": "PLAK_LIVE_INPUT_CEILING"})
+                    continue
+                self.assertEqual(code, 1)
+                launched.assert_not_called()
+                self.assertEqual(report["outcome"], live.HARNESS)
+                self.assertEqual(len(report["attempts"]), 1)
+                reason = report["attempts"][0]["reason"]
+                self.assertIn("PLAK_LIVE_INPUT_CEILING", reason)
+                self.assertIn("`plak usage --session <id>`", reason)
+                self.assertTrue(reason.endswith("no paid attempt"), reason)
+                self.assertNotIn("raw exchange evidence", reason)
+                self.assertEqual(report["binding"]["input_ceiling"], {"tokens": None, "source": None})
+        # A route whose window the driver knows needs no operator input.
+        self.assertIsNone(long_session.input_ceiling_error(live.ROUTES["grok"]))
+        self.assertEqual(long_session.input_ceiling(live.ROUTES["grok"]),
+                         {"tokens": 256_000, "source": "driver catalog"})
 
 
 if __name__ == "__main__":

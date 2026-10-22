@@ -38,15 +38,21 @@ from live import HARNESS, MODEL, PASS, ScenarioFailure  # noqa: E402
 # is 64k tokens at the bytes/4 observation measure.
 READ_PAGE_BYTES = 262_144
 PAGE_TOKENS = READ_PAGE_BYTES // 4
+# Per-call content caps below a full page: tool-files cuts a read exposed as
+# pi `read` at 50 KiB, and one Codex `exec_command` result keeps only its head
+# and tail past 40,000 bytes. `read_file` and `Read` return a full page.
+PI_READ_CALL_BYTES = 50 * 1024
+CODEX_EXEC_CALL_BYTES = 40_000
 # Spec 01 §10.3: the generic rule subtracts max(ceil(window/10), this bound).
 # 16384 is the semantic compaction output bound; 4096 is the summary headroom.
 _SUMMARY_HEADROOM = 16_384 + 4_096
 # Spec 01 observation policy bounds for the per-round text cap.
 ROUND_CAP_MIN_BYTES = 32_768
 ROUND_CAP_MAX_BYTES = 262_144
-# An overflow round is one parallel batch of this many reads, filling this
-# share of the round cap. Extra rounds past the trigger estimate absorb the
-# estimate's error and put a batch on an almost full window.
+# An overflow round is one parallel batch of at least this many reads (more
+# when one read's cap holds less than its share), filling this share of the
+# round cap. Extra rounds past the trigger estimate absorb the estimate's error
+# and put a batch on an almost full window.
 OVERFLOW_BATCH_CALLS = 2
 OVERFLOW_CAP_SHARE = 0.75
 OVERFLOW_EXTRA_ROUNDS = 2
@@ -63,6 +69,8 @@ MAX_GROWTH_PAGES = 28
 # Above the page count, below the spec 07 ceiling of 1024, so a growth turn
 # is not cut off by the default 512 and still cannot run away.
 ROUND_CAP = 128
+# Sizing bytes per bulk line. A written line is 1,469 bytes with its newline;
+# the difference is the margin that keeps a planned read under its call cap.
 LINE_BYTES = 1500
 # One sequential read. 20 lines are 30_000 bytes, about 7_500 tokens. A
 # 2_000-line read of this file is most of a 256k window and trips ContextLimit
@@ -143,6 +151,36 @@ def catalog_window(model: str) -> int | None:
         return 1_000_000
     if model.startswith("gpt-"):
         return 272_000
+    return None
+
+
+INPUT_CEILING_ENV = "PLAK_LIVE_INPUT_CEILING"
+INPUT_CEILING_REMEDY = (
+    f"set {INPUT_CEILING_ENV} to the admitted input ceiling of a short session on this "
+    "route and protocol: `plak usage --session <id>` prints admitted_input_ceiling=N")
+
+
+def input_ceiling(route: live.Route) -> dict:
+    """The window this driver sizes against and where it came from, for reports."""
+    try:
+        tokens = catalog_window(route.model)
+    except ScenarioFailure:
+        tokens = None
+    if tokens is None:
+        return {"tokens": None, "source": None}
+    return {"tokens": tokens, "source": INPUT_CEILING_ENV if "/" in route.model else "driver catalog"}
+
+
+def input_ceiling_error(route: live.Route) -> str | None:
+    """Refusal before any paid attempt: an OpenRouter route without a valid ceiling."""
+    if "/" not in route.model:
+        return None
+    try:
+        window = catalog_window(route.model)
+    except ScenarioFailure as error:
+        return f"{error}; {INPUT_CEILING_REMEDY}; no paid attempt"
+    if window is None:
+        return f"{INPUT_CEILING_ENV} is not set; {INPUT_CEILING_REMEDY}; no paid attempt"
     return None
 
 
@@ -435,27 +473,50 @@ def round_cap_bytes(window: int) -> int:
     return min(ROUND_CAP_MAX_BYTES, max(ROUND_CAP_MIN_BYTES, window * 4 * 8 // 100))
 
 
-def overflow_plan(window: int | None, pack: str, line_count: int,
+def overflow_plan(window: int | None, pack: str, line_count: int | None,
                   model: str | None = None) -> tuple[int, list[list[int]]]:
     """Lines per call and the offsets of each round's parallel batch.
 
     Each batch fills `OVERFLOW_CAP_SHARE` of the round cap, so nothing is
-    clipped and every round adds its whole batch to the context. The rounds
-    cover the compaction trigger at the pack's measured bytes per token, plus
-    `OVERFLOW_EXTRA_ROUNDS` so a late batch lands on an almost full window.
+    clipped and every round adds its whole batch to the context. A batch has
+    `OVERFLOW_BATCH_CALLS` reads, or more when one read's call cap
+    (`read_call_lines`) holds less than its share, so no read is cut short.
+    The rounds cover the compaction trigger at the pack's measured bytes per
+    token, plus `OVERFLOW_EXTRA_ROUNDS` so a late batch lands on an almost full
+    window. `line_count` bounds the rounds to the file; None plans unbounded.
     An unknown window is planned as the smallest one the driver knows.
     """
     window = window or UNKNOWN_WINDOW_PAGE
     budget = int(round_cap_bytes(window) * OVERFLOW_CAP_SHARE)
-    lines = max(1, budget // OVERFLOW_BATCH_CALLS // LINE_BYTES)
-    per_round = OVERFLOW_BATCH_CALLS * lines
+    calls = max(OVERFLOW_BATCH_CALLS, -(-budget // (read_call_lines(pack) * LINE_BYTES)))
+    lines = max(1, budget // calls // LINE_BYTES)
+    per_round = calls * lines
     bytes_per_token = bulk_bytes_per_token(pack)
     round_tokens = per_round * LINE_BYTES / bytes_per_token
     rounds = -(-compaction_trigger(window, model) // int(round_tokens)) + OVERFLOW_EXTRA_ROUNDS
-    rounds = max(1, min(rounds, line_count // per_round))
-    batches = [[1 + (index * OVERFLOW_BATCH_CALLS + call) * lines
-                for call in range(OVERFLOW_BATCH_CALLS)] for index in range(rounds)]
+    if line_count is not None:
+        rounds = min(rounds, line_count // per_round)
+    rounds = max(1, rounds)
+    batches = [[1 + (index * calls + call) * lines
+                for call in range(calls)] for index in range(rounds)]
     return lines, batches
+
+
+def overflow_bulk_pages(window: int | None, pack: str, model: str | None = None) -> int:
+    """Read pages `bulk.txt` needs so the unbounded overflow plan fits in it."""
+    lines, batches = overflow_plan(window, pack, None, model)
+    needed = lines * sum(len(batch) for batch in batches)
+    return min(MAX_GROWTH_PAGES, -(-needed // lines_per_page()))
+
+
+def read_call_bytes(pack: str) -> int:
+    """Content bytes one read of this pack returns whole."""
+    return {"pi": PI_READ_CALL_BYTES, "codex": CODEX_EXEC_CALL_BYTES}.get(pack, READ_PAGE_BYTES)
+
+
+def read_call_lines(pack: str) -> int:
+    """Bulk lines one read of this pack returns whole, at `LINE_BYTES` each."""
+    return read_call_bytes(pack) // LINE_BYTES
 
 
 def bulk_bytes_per_token(pack: str) -> float:
@@ -945,12 +1006,15 @@ def raise_child_tool_failure(text: str, lookup_faults: str | None = None) -> Non
     """Surface the child tool failure itself, not the missing session log.
 
     `rate_limited`, a quota exhaustion, and provider-unavailable fault text
-    are `provider` (spec 05 §3.2). Any other child failure is `harness`.
+    are `provider` (spec 05 §3.2). The child's typed OutputLimit diagnostic is
+    `model`. Any other child failure is `harness`.
     """
     detail = f"child tool failure: {' '.join(text.split())[:200]}"
     if (live.provider_child_text(text, lookup_faults=lookup_faults)
             or live.stream_validation_outcome(text, None) == live.PROVIDER):
         raise ScenarioFailure(live.PROVIDER, detail)
+    if live.output_limit_failure(None, text):
+        raise ScenarioFailure(MODEL, detail)
     raise ScenarioFailure(HARNESS, detail)
 
 
@@ -1179,15 +1243,17 @@ class LongSession:
         self.pages = growth_pages(route)
         self.window = catalog_window(route.model)
         if "/" in route.model and self.window is None:
-            raise ScenarioFailure(HARNESS, "set PLAK_LIVE_INPUT_CEILING to this OpenRouter session's admitted ceiling")
+            raise ScenarioFailure(HARNESS, INPUT_CEILING_REMEDY)
         self.call_lines = growth_call_lines(pack_of(route), self.window)
 
-    def repo(self, name: str, token: str, bulk: bool) -> tuple[Path, int]:
+    def repo(self, name: str, token: str, bulk: bool,
+             pages: int | None = None) -> tuple[Path, int]:
         path = self.env.artifacts / name / "repo"
         live.git_repo(path, {FACT_FILE: token + "\n", "README.md": "seed\n"})
         lines = 0
         if bulk:
-            lines = write_bulk(path / "bulk.txt", self.pages, pack_of(self.route), self.random_bytes)
+            lines = write_bulk(path / "bulk.txt", pages or self.pages, pack_of(self.route),
+                               self.random_bytes)
             commit_extra(path, "bulk")
         return path, lines
 
@@ -1261,11 +1327,12 @@ class LongSession:
 
     def overflow(self) -> str:
         token = new_code_word(self.random_bytes)
-        repo, line_count = self.repo("overflow", token, bulk=True)
+        pack = pack_of(self.route)
+        pages = max(self.pages, overflow_bulk_pages(self.window, pack, self.route.model))
+        repo, line_count = self.repo("overflow", token, bulk=True, pages=pages)
         home = self.home("overflow")
         agent = self.agent("overflow", repo, home)
         try:
-            pack = pack_of(self.route)
             plant = agent.prompt(plant_prompt(pack), timeout=180)
             require_completed(plant, "fact turn")
             if not text_equals(repo / "acknowledged.txt", token):
@@ -1511,6 +1578,16 @@ def main(argv: list[str]) -> int:
     route = live.ROUTES[args.route]
     stamp = time.strftime("%Y%m%d-%H%M%S")
     artifacts = args.artifacts or live.ROOT / "target" / "live" / f"long-{route.name}-{stamp}"
+    ceiling = input_ceiling(route)
+    refused = input_ceiling_error(route)
+    if refused:
+        # Every scenario sizes against this ceiling, so none can start.
+        artifacts.mkdir(parents=True, exist_ok=True)
+        (artifacts / "report.json").write_text(json.dumps(
+            {**live.route_report(route), "pre_attempt_error": refused,
+             "input_ceiling": ceiling, "results": []}, indent=2) + "\n")
+        print(refused, file=sys.stderr)
+        return 2
     env = live.Env(args.binary.resolve(), artifacts / "home", artifacts)
     env.fixture_seed = args.fixture_seed
     binary_start = live.binary_sha256(env.binary)
@@ -1556,7 +1633,7 @@ def main(argv: list[str]) -> int:
     (artifacts / "report.json").write_text(json.dumps(
         {**header, "binary": str(env.binary),
          "binary_sha256_start": binary_start, "binary_sha256_end": binary_end,
-         "growth_pages": reported_pages, "round_cap": ROUND_CAP,
+         "growth_pages": reported_pages, "round_cap": ROUND_CAP, "input_ceiling": ceiling,
          "token_telemetry": live.sum_usage(
              live.TokenUsage(result.input_tokens, result.output_tokens,
                              result.cached_input_tokens, result.reasoning_tokens)

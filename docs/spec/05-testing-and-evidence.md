@@ -2497,7 +2497,10 @@ in `tests/live/` (whose README lists every scenario and its oracle):
   observation policy), so one parallel batch cannot fill a large window. The
   overflow turn reads in rounds instead: each round is one parallel batch of
   reads under that cap, and the rounds together pass the route's compaction
-  trigger, so the last batches land on an almost full window. The overflow
+  trigger, so the last batches land on an almost full window. Each read also
+  stays within its own tool's per-call cap (pi `read` returns at most 50 KiB,
+  one Codex `exec_command` result at most 40,000 bytes), so a batch on such a
+  pack takes more, shorter reads, and `bulk.txt` holds every planned line. The overflow
   remedy is whichever the session log shows: an in-turn
   `scheduled` compact, a `context.placeholders` shrink, or a failed
   `ContextLimit` turn followed by a `capacity` compact. `just smoke <route>
@@ -2521,7 +2524,11 @@ in `tests/live/` (whose README lists every scenario and its oracle):
   log` itself, not a missing segment. Chapter 07
   has no key that lowers a context window or compaction trigger; the scenarios
   pin `[compaction] enabled` and `[turn] max_model_rounds` on a private home
-  and size `bulk.txt` to the route's window.
+  and size `bulk.txt` to the route's window. An OpenRouter route's window is
+  the session's admitted input ceiling, which the operator supplies as
+  `PLAK_LIVE_INPUT_CEILING` (§3.4); without a valid value the driver starts no
+  process and reports a `pre_attempt_error`. The long-session report records
+  the window used and its source as `input_ceiling`.
 - `just tui-soak <route> [--hours N]` keeps one TUI session doing checked coding
   tasks, simulates a sleep, quits and reopens, then checks a follow-up in the
   same session. It does not inject transport faults or rebuild the binary.
@@ -2615,6 +2622,22 @@ of those three transport terminals (an `Abandoned` or `Failed` exchange is not
 evidence) and paired request/body/metadata with matching recorded byte length; missing, truncated,
 unfinished, or valid-argument captures stay `harness`. A model-selected job
 stop (`stop_reason` `model`) is `model`, not `harness`.
+Output-limit outcomes score alike on every surface. A tool-free `Length`
+answer with visible text is a completed turn (chapter 01, length
+classification): `plak run` prints it and exits 5 with
+`turn_failed:output-limit`, and the drivers treat that exit as the completed,
+truncated turn JSONL and TUI report, so the scenario's oracle judges the
+printed answer. A failed turn of typed kind `OutputLimit` (a second
+consecutive empty `Length`, or one that may not retry) is `model`: the model
+spent its output bound without an answer. JSONL lifecycle frames carry the
+kind; `plak run` stderr, the TUI's `turn.failed` session-log row and child
+failure text carry only its rendered diagnostic (`response reached its output
+bound before completion`, or the Responses provider's `stopped at the output
+bound before` message), which identifies it there. Like any first `model` it
+gets the single MODEL rerun (§3.4).
+A `plak run` launched by a driver has stdin closed, so a subscription
+compatibility notice that still needs acceptance fails at once (exit 3); that
+is `harness`, and the reason names the remedy, `plak models <account>`.
 An injected fault the scenario required the product to absorb stays
 `harness` when the turn fails with that same fault; a different provider
 refusal during that scenario is still `provider`.
@@ -2735,6 +2758,16 @@ python3 tests/live/qualification.py jobs <route> --only crash_jobs  # twice more
 python3 tests/live/qualification.py soak <route> --hours 1          # least-used full row only
 ```
 
+On the OpenRouter `full` rows (`deepseek`, `deepseek-messages`) the
+long-session line runs with `PLAK_LIVE_INPUT_CEILING` set to the session's
+admitted input ceiling: run a short session on the same route and protocol
+and take `admitted_input_ceiling=N` from `plak usage --session <id>`, which
+prints `context_status=... prepared_input=... total_context_window=...
+admitted_input_ceiling=N`. Chat and Messages are read separately. The cell
+driver refuses an OpenRouter long-session cell without a valid value before
+any paid attempt, recording the remedy as its one attempt's reason, and the
+cell binding and the long-session report record the value and its source.
+
 The qualification commands select the same oracles as the raw single-attempt
 diagnostics: `just smoke <route>` is the twelve scenarios; `just soak <route>
 --long-session --all` is exactly the four long-session scenarios. `--all` and
@@ -2771,7 +2804,9 @@ and requires the end digest to equal that digest. Before a rerun it restores
 only when the current binary still equals that intentional rebuild, never over
 an operator's newer build. Each attempt records the current, intentional and
 restored digests and `starting_build_restored`. A pre-attempt mismatch records
-`binary changed before attempt; no paid attempt`. Missing or incomplete captures,
+`binary changed before attempt; no paid attempt`; a missing or invalid
+OpenRouter `PLAK_LIVE_INPUT_CEILING` on a long-session cell is refused the same
+way, scored `harness` with its remedy and no paid attempt. Missing or incomplete captures,
 dead ends and unexpected build changes are `harness`, not a reason to spend
 another attempt. A TUI failed turn that reaches a completed recovery turn is
 not an unrecovered harness failure; the recovery's answer oracle is still scored.

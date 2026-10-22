@@ -171,7 +171,12 @@ def pack_of(route: live.Route) -> str:
 
 
 def code_mode(route: live.Route) -> bool:
-    """Native Code Mode. Nested starts promote on hint, never on steer."""
+    """Native Code Mode. Nested starts promote on hint, never on steer.
+
+    Nested dispatches get neither Steer nor Background preemption, but a
+    nested wait still yields its partial result on a job-terminal Notice
+    (spec 01 §8.5).
+    """
     return pack_of(route) == "codex"
 
 
@@ -510,31 +515,41 @@ def judge_stop(*, confirmed: bool, still_running: bool, finished: bool,
 
 
 def judge_notice(*, both_started: bool, short_finished: bool, during_turn: bool,
-                 notice_seen: bool, delivery: str | None, steered: bool) -> str:
-    """A busy notice is delivered at a steering boundary, not by extending the turn.
+                 notice_seen: bool, delivery: str | None, steered: bool,
+                 notice_in_turn: bool = False) -> str:
+    """A busy notice is delivered inside the turn that was busy, never by a wake.
 
-    Spec 01 §8.5 delivers a notice only at `apply_steering`. The scenario
-    creates that boundary with a steer after the short job has finished.
+    Spec 01 §8.5: when the short job exits, Notice makes the open wait on the
+    hold job yield an ordinary partial result, so the notice can commit at
+    that tool-round boundary before the driver's steer lands (`notice_in_turn`:
+    a request of this turn, sent before its terminal, carries it). When the
+    steer lands first, the steer and the notice share one commit
+    (`notice_seen`). An idle wake, or a turn none of whose requests carries
+    the notice, is harness.
     """
     if not both_started:
         raise ScenarioFailure(MODEL, "the two commands did not both start")
     if not short_finished or not during_turn:
         raise ScenarioFailure(MODEL, "the short command did not finish during the turn")
-    if not steered:
-        raise ScenarioFailure(HARNESS, "no steering boundary was created after the short job finished")
     if delivery == "idle_wake":
         raise ScenarioFailure(HARNESS, "completion was delivered as an idle wake")
-    if not notice_seen:
-        raise ScenarioFailure(HARNESS, "the steering boundary's request did not include the process notice")
-    return "completion notice was delivered at the steering boundary"
+    if steered and notice_seen:
+        return "completion notice was delivered at the steering boundary"
+    if notice_in_turn:
+        return "completion notice was delivered at a Notice yield inside the turn"
+    if not steered:
+        raise ScenarioFailure(HARNESS, "no steering boundary was created after the short job finished")
+    raise ScenarioFailure(HARNESS, "no request of the turn included the process notice")
 
 
 def judge_run(*, code: int, stderr: str, finished: bool) -> str:
-    """`plak run` waits for a promoted job and continues when it exits."""
-    if code != 0 and live.provider_reason_from(None, None, stderr):
-        raise ScenarioFailure(PROVIDER, " ".join(stderr.split())[:160])
+    """`plak run` waits for a promoted job and continues when it exits.
+
+    A failed exit is classified like every `plak run` exit; `run_cli` already
+    returned a committed answer cut at its output limit as exit 0.
+    """
     if code != 0:
-        raise ScenarioFailure(HARNESS, f"plak run exited {code}")
+        live.classify_cli_failure(code, stderr, "plak run")
     if "waiting for p" not in stderr:
         if finished:
             raise ScenarioFailure(MODEL, "model waited for the command instead of leaving it promoted")
@@ -991,6 +1006,29 @@ def notice_on_steer(segments: list[Path], job_id: str | None) -> bool:
     return False
 
 
+def notice_in_turn(segments: list[Path], job_id: str | None, terminal_wall: float | None) -> bool:
+    """Some request persisted before the turn's terminal carries the notice.
+
+    The capture writes each `.request` before dispatch, so its mtime orders it
+    against the terminal the driver observed; a later wake turn's requests
+    are after it. A notice committed at a Notice yield counts here whether or
+    not the later steer request replays it.
+    """
+    if not job_id or terminal_wall is None:
+        return False
+    needle = f'<process_notice id="{job_id}"'
+    for path in _exchange_files(segments):
+        if path.suffix != ".request":
+            continue
+        try:
+            persisted = path.stat().st_mtime
+        except OSError:
+            continue
+        if persisted <= terminal_wall and any(needle in text for text in capture_texts(path)):
+            return True
+    return False
+
+
 def _content_text(value: object) -> str:
     if isinstance(value, str):
         return value
@@ -1286,9 +1324,10 @@ def classify_tui_turn(home: Path, session: str, index: int, what: str, *,
     the row itself carries them, or when the turn's last `model_retries` row
     shows a provider cause exhausted the budget (`retry_budget_exhausted`).
     A product failure after a transient retry that was not the last allowed
-    attempt stays harness.
+    attempt stays harness. The turn's `turn.failed` text stands in for the
+    row's missing message, so a typed OutputLimit diagnostic is model.
     """
-    records = [record for record in live.session_records(home, session)
+    records = [record for record in live.with_failure_messages(live.session_records(home, session))
                if record.get("kind") == "turn.lifecycle"
                and record.get("phase") not in (None, "admitted")]
     if index >= len(records):
@@ -1679,15 +1718,20 @@ class Jobs:
         repo, home = self.prepare("notice_while_busy", FOREGROUND_BUDGET, {"short.py": SHORT_PY})
         agent = None
         segment = len(self.env.capture_segments)
-        state = {"steered": False}
+        state = {"steered": False, "terminal_wall": None}
         try:
             agent = self.open_agent("notice_while_busy", repo, home)
 
             def tick(_turn, event) -> None:
-                # Spec 01 §8.5: a busy notice is delivered only at a steering
-                # boundary. Create one after the short job has finished and
-                # while the later command is still the open turn. Poll on the
-                # empty reads too; the marker is a file, not an event.
+                # Spec 01 §8.5: the short job's exit makes the open wait yield
+                # at a Notice boundary, and a steer is a second boundary. Steer
+                # after the short job has finished and while the later command
+                # is still the open turn. Poll on the empty reads too; the
+                # marker is a file, not an event.
+                if (event and state["terminal_wall"] is None
+                        and event.get("kind") == "turn_lifecycle"
+                        and event.get("phase") not in (None, "admitted")):
+                    state["terminal_wall"] = time.time()
                 if state["steered"]:
                     return
                 if marker(repo, "short-finished") and matching(command_lines(), hold) \
@@ -1711,8 +1755,8 @@ class Jobs:
             rows, _turns = read_telemetry(home)
             delivery = next((row.get("delivery_point") for row in rows
                              if row.get("kind") == "notices"), None)
-            noticed = notice_for(self.env.capture_segments[segment:], short_id) \
-                and notice_on_steer(self.env.capture_segments[segment:], short_id)
+            segments = self.env.capture_segments[segment:]
+            noticed = notice_for(segments, short_id) and notice_on_steer(segments, short_id)
             mentioned = any(event.get("kind") == "tool" and hold in json.dumps(event) for event in events)
             return judge_notice(
                 both_started=short_id is not None and (job_id_for(events, hold) is not None or mentioned),
@@ -1721,6 +1765,7 @@ class Jobs:
                 notice_seen=bool(noticed),
                 delivery=delivery,
                 steered=state["steered"],
+                notice_in_turn=notice_in_turn(segments, short_id, state["terminal_wall"]),
             )
         finally:
             close_agent(agent)
