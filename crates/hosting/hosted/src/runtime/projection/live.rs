@@ -264,6 +264,14 @@ async fn run(
                         &mut shown,
                         &*request.target.emit_settled,
                     );
+                } else {
+                    shown.initialized = false;
+                    #[cfg(test)]
+                    tests::pause_noncurrent(
+                        &request.target.product_id,
+                        forwarder.as_ref().is_some_and(|task| !task.is_finished()),
+                    )
+                    .await;
                 }
                 cached = Some(views);
                 None
@@ -288,6 +296,7 @@ async fn run(
 struct SettledRows {
     keys: std::collections::HashMap<RowKey, String>,
     calls: std::collections::HashMap<String, ToolItem>,
+    initialized: bool,
 }
 
 fn emit_settled_changes(
@@ -296,6 +305,9 @@ fn emit_settled_changes(
     shown: &mut SettledRows,
     emit: &dyn Fn(TranscriptRow),
 ) {
+    // A replacement subscription clears shown without dropping cached views.
+    let changed = if shown.initialized { changed } else { None };
+    shown.initialized = true;
     let changed = changed.unwrap_or_else(|| {
         views
             .rows
@@ -338,6 +350,150 @@ mod tests {
     use crate::runtime::fault_store::{FaultStore, StoreCall, StoreFaults};
     use crate::session_store::MemoryStore;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[derive(Default)]
+    struct TargetCheckGate {
+        entered: Notify,
+        release: Notify,
+    }
+
+    fn target_gates()
+    -> &'static std::sync::Mutex<std::collections::BTreeMap<String, Arc<TargetCheckGate>>> {
+        static GATES: std::sync::OnceLock<
+            std::sync::Mutex<std::collections::BTreeMap<String, Arc<TargetCheckGate>>>,
+        > = std::sync::OnceLock::new();
+        GATES.get_or_init(std::sync::Mutex::default)
+    }
+
+    pub(super) async fn pause_noncurrent(id: &str, forwarder_alive: bool) {
+        let gate = target_gates().lock().unwrap().remove(id);
+        if let Some(gate) = gate {
+            gate.entered.notify_one();
+            assert!(
+                forwarder_alive,
+                "the A subscription must survive coalescing back to A"
+            );
+            gate.release.notified().await;
+        }
+    }
+
+    #[derive(Default)]
+    struct PausePass {
+        armed: AtomicBool,
+        entered: Notify,
+        released: std::sync::Mutex<bool>,
+        release: std::sync::Condvar,
+    }
+
+    impl PausePass {
+        fn unblock(&self) {
+            *self.released.lock().unwrap() = true;
+            self.release.notify_all();
+        }
+    }
+
+    impl StoreFaults for Arc<PausePass> {
+        fn before(
+            &self,
+            call: StoreCall,
+            _: Option<&crate::sessions::SessionRecord>,
+        ) -> Result<(), String> {
+            if call == StoreCall::LoadInheritedSubmissions
+                && self.armed.swap(false, Ordering::SeqCst)
+            {
+                self.entered.notify_one();
+                let mut released = self.released.lock().unwrap();
+                while !*released {
+                    released = self.release.wait(released).unwrap();
+                }
+            }
+            Ok(())
+        }
+    }
+
+    struct UnblockOnDrop(Arc<PausePass>);
+
+    impl Drop for UnblockOnDrop {
+        fn drop(&mut self) {
+            self.0.unblock();
+        }
+    }
+
+    #[test]
+    fn coalescing_a_b_a_during_a_pass_preserves_new_settled_rows() {
+        use crate::runtime::recover_tests::{script, scripted_host_with};
+        let root = tempfile::tempdir().unwrap();
+        let plan = || {
+            script(serde_json::json!([
+                {"output": {"tool": {"name": "loopback_effect", "arguments": {}}}, "finish": "tool_calls"},
+                {"output": {"text": "the effect ran"}}
+            ]))
+        };
+        let store = Arc::new(MemoryStore::new());
+        let (mut config, _) = scripted_host_with(root.path(), plan());
+        config.store = store.clone();
+        let id = config.session.id.clone();
+        super::super::tests::run_prompts(config, &["first effect"]);
+        let (mut config, _) = scripted_host_with(root.path(), plan());
+        config.store = store.clone();
+        config.session = store.load(&id).unwrap();
+        let pause = Arc::new(PausePass::default());
+        let emitted = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = Arc::clone(&emitted);
+        let target = LiveTarget {
+            sessions: config.state_roots.runtime_sessions().unwrap(),
+            store: Arc::new(FaultStore::new(store.clone(), Arc::clone(&pause))),
+            roots: config.state_roots.clone(),
+            product_id: id.clone(),
+            followed: config.session.plakous_locator.unwrap(),
+            tree_id: id.clone(),
+            emit_settled: Arc::new(move |row| sink.lock().unwrap().push(row)),
+        };
+        let executor = plakous::application::ApplicationExecutor::new().unwrap();
+        let _unblock = UnblockOnDrop(Arc::clone(&pause));
+        let mut live = executor
+            .block_on(async {
+                let mut live = LiveProjector::spawn();
+                live.tick(target.clone());
+                live.applied
+                    .wait_for(|applied| applied.generation == 1)
+                    .await
+                    .unwrap();
+                assert!(live.take_refusal().is_none());
+                live
+            })
+            .unwrap();
+        assert_eq!(emitted.lock().unwrap().len(), 1);
+        pause.armed.store(true, Ordering::SeqCst);
+        live.tick(target.clone());
+        executor.block_on(pause.entered.notified()).unwrap();
+        super::super::tests::run_prompts(config, &["second effect"]);
+        executor
+            .block_on(async {
+                let gate = Arc::new(TargetCheckGate::default());
+                target_gates()
+                    .lock()
+                    .unwrap()
+                    .insert(id.clone(), Arc::clone(&gate));
+                let mut b = target.clone();
+                b.product_id = "coalesced-other-target".into();
+                live.tick(b);
+                pause.unblock();
+                gate.entered.notified().await;
+                live.tick(target.clone());
+                gate.release.notify_one();
+                let views = live.finish(target, None).await.unwrap();
+                let expected: Vec<_> = views
+                    .rows
+                    .values()
+                    .filter(|row| row.as_tool().is_some_and(|tool| tool.state != "running"))
+                    .cloned()
+                    .collect();
+                assert_eq!(expected.len(), 2);
+                assert_eq!(*emitted.lock().unwrap(), expected);
+            })
+            .unwrap();
+    }
 
     struct RefuseCommit(Arc<AtomicBool>);
 
@@ -588,5 +744,20 @@ mod tests {
                 "reloading cannot duplicate settled rows"
             );
         }
+        let emitted = RefCell::new(Vec::new());
+        shown = SettledRows::default();
+        emit_settled_changes(
+            &views,
+            Some(std::collections::BTreeSet::new()),
+            &mut shown,
+            &|row| {
+                emitted.borrow_mut().push(row);
+            },
+        );
+        assert_eq!(
+            *emitted.borrow(),
+            vec![tool("b", "succeeded")],
+            "a replacement subscription reconciles settled rows even at an unchanged cursor"
+        );
     }
 }
