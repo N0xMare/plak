@@ -2619,12 +2619,14 @@ fn several_delivered_child_messages_fold_and_expand_on_the_terminal() {
     write_private(&config_path, &config);
     let mut terminal = Terminal::spawn_ready(&fixture);
     terminal.send(b"delegate three tasks\r");
+    // Wait on the turn's own result rather than per-child rows: how the
+    // spawn and finish rows group (and so whether `c1 finished` is still on
+    // screen) depends on delivery timing, which differs between platforms.
     terminal.wait_where(
         "three completed children before the next admission",
         |screen| {
-            ["c1 finished", "c2 finished", "c3 finished"]
-                .iter()
-                .all(|label| screen.contains(label))
+            screen.contains("children ready for mail review")
+                && screen.contains("3 results pending")
         },
     );
     terminal.send(b"review delivered mail\r");
