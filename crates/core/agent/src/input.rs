@@ -143,6 +143,22 @@ impl UserInput {
                 }
             }
         }
+        self.validate_encoded_size(label)?;
+        Ok(())
+    }
+
+    fn validate_encoded_size(&self, label: &str) -> Result<(), ControlError> {
+        let encoded = serde_json::to_vec(&self.content_blocks()?)
+            .map_err(|_| invalid("message cannot be encoded"))?;
+        // Reserve space for the item, segment identity and binary framing.
+        let limit = crate::MAX_RUNTIME_CHECKPOINT_BYTES - 1024;
+        let encoded_bytes = encoded.len();
+        if encoded_bytes > limit {
+            return Err(invalid(&format!(
+                "{label} encoded message is {encoded_bytes} bytes; the limit is {limit} bytes; \
+                 reduce the text or attach fewer or smaller images"
+            )));
+        }
         Ok(())
     }
 
@@ -269,6 +285,22 @@ mod tests {
         );
         assert_eq!(UserInput::from("a").text(), "a");
         assert_eq!(input.text(), "look");
+    }
+
+    #[test]
+    fn oversized_encoded_message_is_refused_before_admission()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let input = UserInput::new(vec![UserPart::Text(
+            "x".repeat(crate::MAX_RUNTIME_CHECKPOINT_BYTES - 1024),
+        )]);
+        let error = input
+            .validate("prompt")
+            .err()
+            .ok_or("message must exceed framing bound")?;
+        assert_eq!(error.kind(), ControlErrorKind::InvalidInput);
+        assert!(error.to_string().contains("encoded message"));
+        assert!(error.to_string().contains("reduce the text"));
+        Ok(())
     }
 
     #[test]

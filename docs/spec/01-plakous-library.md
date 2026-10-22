@@ -288,7 +288,11 @@ input with no parts, a text part that is not canonical text, more than
 raw, so base64 stays within 5 MB; the message tells the user to downscale, and
 nothing is resized), bytes that `plakous_tools::sniff_image` does not
 recognize as PNG, JPEG, GIF or WebP, or a declared media type that differs
-from the sniffed one. An input with any image is also refused when the bound
+from the sniffed one. Admission also checks the encoded message against the
+checkpoint segment byte budget, reserving 1 KiB for item/segment framing. An
+oversized message is `InvalidInput` before publication or provider dispatch;
+the refusal states its encoded size and limit and asks for less text or fewer
+or smaller images. An input with any image is also refused when the bound
 descriptor lacks a supported `Capability::ImageInput` fact; the refusal names
 the route and model, and nothing is dropped silently. An admitted input
 becomes one `User` item whose blocks follow the parts in order, images as
