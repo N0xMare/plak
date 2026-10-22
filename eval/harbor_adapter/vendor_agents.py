@@ -37,6 +37,7 @@ from harbor.environments.base import BaseEnvironment
 
 from harbor_adapter.hygiene import harvest_command
 from harbor_adapter.lifecycle import observe_run
+from harbor_adapter.wire import WireAgent
 from harbor_adapter.cell_prep import prepare_cell
 from harbor_adapter.campaign import sha256
 from harbor_adapter.credentials import (
@@ -224,14 +225,10 @@ async def _ensure_codex_ca_bundle(
     return {"path": _CA_BUNDLE, "sha256": sha, "bytes": size}
 
 
-class _CanonicalNativeUsage:
+class _CanonicalNativeUsage(WireAgent):
     """Attach content-free canonical token buckets after Harbor's stock parser."""
 
     _native_harness: str
-
-    @observe_run
-    async def run(self, instruction, environment, context):
-        return await super().run(instruction, environment, context)
 
     def populate_context_post_run(self, context: AgentContext) -> None:
         try:
@@ -263,8 +260,10 @@ class FrozenCodex(_CanonicalNativeUsage, Codex):
         self._arch, self._vendor_root = _vendor_selection(kwargs)
         _reject_host_overlays("codex", kwargs)
         _force_pin("codex", kwargs)
+        kwargs["web_search"] = "disabled"
         super().__init__(*args, **kwargs)
 
+    @observe_run
     async def run(self, instruction, environment, context):
         path = self._resolve_auth_json_path()
         if path is None:
@@ -502,13 +501,13 @@ class FrozenPi(_CanonicalNativeUsage, Pi):
         await prepare_cell(self, environment, self._arch)
         artifacts = require_frozen_artifacts("pi", self._vendor_root, self._arch)
         await _install_node_cli(self, environment, artifacts)
-        await self.ensure_system_dependencies(environment, ("coreutils",))
         await self.exec_as_root(
             environment, command=platform_record_command(self._arch)
         )
         await _assert_version(self, environment, artifacts.version)
         await _record_executable_identity(self, environment, "pi", self._arch)
 
+    @observe_run
     async def run(
         self,
         instruction: str,
@@ -596,8 +595,8 @@ class FrozenOpenCode(_CanonicalNativeUsage, OpenCode):
     _native_harness = "opencode"
     _REMOTE_OPENCODE_SECRETS_DIR = "/tmp/opencode-secrets"
     _ATTEMPTS_FILENAME = "opencode-attempts.jsonl"
-    # Must match Harbor OpenCode.run XDG_DATA_HOME.
-    _HARBOR_OPENCODE_XDG_DATA = "/logs/agent/opencode/xdg-data"
+    # WireAgent rewrites Harbor's XDG_DATA_HOME to cell-local state.
+    _HARBOR_OPENCODE_XDG_DATA = "/tmp/opencode-cell/xdg-data"
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._arch, self._vendor_root = _vendor_selection(kwargs)
@@ -609,13 +608,13 @@ class FrozenOpenCode(_CanonicalNativeUsage, OpenCode):
         await prepare_cell(self, environment, self._arch)
         artifacts = require_frozen_artifacts("opencode", self._vendor_root, self._arch)
         await _install_node_cli(self, environment, artifacts)
-        await self.ensure_system_dependencies(environment, ("coreutils",))
         await self.exec_as_root(
             environment, command=platform_record_command(self._arch)
         )
         await _assert_version(self, environment, artifacts.version)
         await _record_executable_identity(self, environment, "opencode", self._arch)
 
+    @observe_run
     async def run(
         self,
         instruction: str,

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from harbor_adapter.campaign import trial_gate, campaign_health, validate_campaign
-from harbor_adapter.observed_config import archived_config, resolved_composition
+from harbor_adapter.observed_config import archived_config, resolved_composition, retry_telemetry
 from harbor_adapter.paired import paired_reports
 from harbor_adapter.outcomes import failure_class
 from harbor_adapter.pricing import RATE_CARD_PATH, from_harbor_context, resolve_model_key
@@ -330,7 +330,7 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
             "codex": "codex", "grok-build": "grok", "pi": (
                 "codex" if model and model.startswith("openai/") else
                 "openrouter" if model and model.startswith("openrouter/") else None),
-            "opencode": "openrouter", "pmux": "claude",
+            "opencode": "codex" if model and model.startswith("openai/") else "openrouter", "pmux": "claude",
         }.get(summary.record.harness)
         if expected_account is not None and actual_account != expected_account:
             context_mismatches.append("account_or_route")
@@ -365,6 +365,8 @@ def _trial(job: Path, path: Path) -> dict[str, Any]:
         "comparison_context": context_bindings,
         "context_mismatches": context_mismatches,
         "observed_config": observed, "validity_failures": validity,
+        "provider_retries": retry_telemetry(observed),
+        "argv": load_json(path / "agent/argv.json").data,
         "campaign_sha256": context.get("campaign_sha256"),
         "comparison_context_sha256": _sha(context_path) if context else None,
         "task": task_name, "source": source, "task_ref": task_ref,

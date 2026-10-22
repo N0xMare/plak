@@ -32,13 +32,27 @@ RG_PINS = {
 }
 
 
+# Images are prepared once, not mutated differently by each adapter.
+CELL_PROBE = (
+    "set -e; id -u; for tool in rg git python3 curl bash; do command -v $tool; done; "
+    "rg --version | head -n 1; "
+    "dpkg-query -W -f='${Package} ${Version}\\n' | LC_ALL=C sort | sha256sum; "
+    "for name in cpu.max memory.max; do cat /sys/fs/cgroup/$name; done"
+)
+CELL_REQUIREMENTS = (
+    "set -e; test \"$(id -u)\" = 0; "
+    "for tool in git python3 curl bash timeout ps openssl; do command -v $tool >/dev/null; done; "
+    "test -s /etc/ssl/certs/ca-certificates.crt"
+)
+
+
 async def record_cell(agent: Any, environment: Any) -> None:
     """Probe immediately before dispatch, after every adapter's installation."""
     plan = load_campaign()
     arm = plan["arms"].get(os.environ.get("HARBOR_ARM"))
     if arm is None:
         raise PreflightError("HARBOR_ARM must name a frozen campaign arm")
-    remotes = {"plak": "/installed-agent/plak", "plakous-js-host": "/installed-agent/plakous-js-host",
+    remotes = {"claude-policy-launcher": "/installed-agent/claude-no-web", "plak": "/installed-agent/plak", "plakous-js-host": "/installed-agent/plakous-js-host",
                "node": "/installed-agent/vendor/node/bin/node", "node-archive": "/installed-agent/vendor/node.tar.gz"}
     for cli in ("codex", "grok", "pi", "opencode", "claude"):
         remotes[cli] = "/usr/local/bin/" + cli
@@ -52,24 +66,12 @@ async def record_cell(agent: Any, environment: Any) -> None:
         checked = await environment.exec(command=f"printf '%s\\n' {line} | sha256sum -c - >/dev/null")
         if checked.return_code:
             raise PreflightError("executed binary differs from frozen campaign pin")
-    command = (
-        "set -e; id -u; for tool in rg git python3 curl bash; do command -v $tool; done; "
-        "rg --version | head -n 1; "
-        "dpkg-query -W -f='${Package} ${Version}\\n' | LC_ALL=C sort | sha256sum; "
-        "for name in cpu.max memory.max; do cat /sys/fs/cgroup/$name; done"
-    )
+    command = CELL_PROBE
     result = await environment.exec(command=command)
     if result.return_code:
         raise PreflightError("cell tool/package/resource probe failed")
     uid = (result.stdout or "").splitlines()[0]
     actual_user = uid
-    if type(agent).__name__ == "FrozenPmux":
-        probe = await agent.exec_as_agent(environment, command=(
-            'if [ "$(id -u)" -eq 0 ]; then su -s /bin/bash pmux -c "id -un"; else id -un; fi'
-        ))
-        if probe.return_code:
-            raise PreflightError("pmux run-user probe failed")
-        actual_user = (probe.stdout or "").strip()
     expected_user = str(arm["policy"]["user"])
     if expected_user == "root":
         expected_user = "0"
@@ -98,6 +100,9 @@ async def prepare_cell(agent: Any, environment: Any, arch: str) -> None:
     digest = digest_file(path)
     if digest is None or digest.sha256 != RG_PINS[arch][2]:
         raise PreflightError("missing or unpinned cell rg; run just fetch-harbor-tools")
+    checked = await environment.exec(command=CELL_REQUIREMENTS)
+    if checked.return_code:
+        raise PreflightError("freeze a root cell with the shared packages before running any arm")
     require_elf_arch(path, arch, "cell rg")
     await environment.upload_file(str(path), "/usr/local/bin/rg")
     expected = shlex.quote(RG_PINS[arch][2] + "  /usr/local/bin/rg")

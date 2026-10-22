@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from contextlib import nullcontext
 import hashlib
 import importlib.util
 import json
@@ -38,7 +39,9 @@ class CampaignGateTests(unittest.TestCase):
             plan['artifact_sha256'] = {relative: hashlib.sha256(binary.read_bytes()).hexdigest()}
             calibration = root / 'calibration.json'
             reduced = {'source': 'exchange', 'wire_verified': True,
-                       'first_request': plan['arms']['a']['observed_config']}
+                       'first_request': plan['arms']['a']['observed_config'],
+                       'calibration_binding': {'source_commit': plan['source_commit'], 'arch': plan['arch'],
+                                               'binaries': plan['arms']['a']['binaries']}}
             calibration.write_text(json.dumps(reduced))
             for arm in plan['arms'].values():
                 arm['calibration_file'] = str(calibration)
@@ -55,7 +58,8 @@ class CampaignGateTests(unittest.TestCase):
                 self.assertEqual(argv[:3], ['docker', 'image', 'inspect'])
                 return json.dumps([info])
 
-            with mock.patch('harbor_adapter.campaign.load_campaign', return_value=plan), \
+            with mock.patch('harbor_adapter.arch.docker_daemon_arch', return_value='arm64'), \
+                 mock.patch('harbor_adapter.campaign.load_campaign', return_value=plan), \
                  mock.patch('harbor_adapter.campaign.subprocess.check_output', side_effect=output), \
                  mock.patch.dict(os.environ, {'HARBOR_ARCH': 'arm64', 'HARBOR_N_CONCURRENT': '1',
                                               'HARBOR_N_ATTEMPTS': '1'}):
@@ -157,21 +161,18 @@ class CellTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIs(env, environment)
                     return await execute(**kwargs)
                 pmux.exec_as_agent = mock.AsyncMock(side_effect=as_agent)
-                plan['arms']['a']['policy']['user'] = 'pmux'
                 await record_cell(pmux, environment)
-                for key, invalid in (('user', 'root'), ('user_status', 1)):
-                    original = state[key]
-                    state[key] = invalid
-                    with self.assertRaises(PreflightError):
-                        await record_cell(pmux, environment)
-                    state[key] = original
+                plan['arms']['a']['policy']['user'] = 'pmux'
+                with self.assertRaises(PreflightError):
+                    await record_cell(pmux, environment)
 
     async def test_prepare_uploads_only_verified_binary(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'tools').mkdir()
             (root / 'tools/rg').write_bytes(b'fixture')
-            environment = SimpleNamespace(upload_file=mock.AsyncMock())
+            environment = SimpleNamespace(upload_file=mock.AsyncMock(), exec=mock.AsyncMock(
+                return_value=SimpleNamespace(return_code=0)))
             agent = SimpleNamespace(exec_as_root=mock.AsyncMock())
             with mock.patch('harbor_adapter.cell_prep.installed_root', return_value=root), \
                  mock.patch('harbor_adapter.cell_prep.load_campaign', return_value={'arch': 'arm64'}), \
@@ -283,7 +284,8 @@ class RunnerTests(unittest.TestCase):
                 'evidence': {'result': 'fixture-result'}, 'result_sha256': 'f' * 64},
                 **responses.get(index, {}))]}
 
-        with mock.patch.object(module, 'campaign_gate', return_value=campaign()), \
+        with mock.patch.object(module, 'account_leases', return_value=nullcontext()), \
+             mock.patch.object(module, 'campaign_gate', return_value=campaign()), \
              mock.patch.object(module.subprocess, 'run', side_effect=launch), \
              mock.patch.object(module, 'discover', side_effect=lambda paths: paths), \
              mock.patch.object(module, 'build_report', side_effect=report), \
@@ -336,7 +338,7 @@ class RunnerTests(unittest.TestCase):
 
 class VendorReviewTests(unittest.IsolatedAsyncioTestCase):
     async def test_codex_writeback_failure_preserves_primary_error(self):
-        from harbor_adapter.vendor_agents import FrozenCodex, _CanonicalNativeUsage
+        from harbor_adapter.vendor_agents import FrozenCodex, Codex
         from harbor_adapter.credentials import CredentialError
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -350,9 +352,9 @@ class VendorReviewTests(unittest.IsolatedAsyncioTestCase):
                 agent._codex_writeback_error = True
                 raise RuntimeError('primary fixture failure')
 
-            with mock.patch.object(_CanonicalNativeUsage, 'run', side_effect=failed_run):
+            with mock.patch.object(Codex, 'run', side_effect=failed_run):
                 with self.assertRaisesRegex(RuntimeError, 'primary fixture failure'):
-                    await agent.run('fixture', object(), object())
+                    await agent.run.__wrapped__(agent, 'fixture', object(), object())
             evidence = json.loads((root / 'adapter-validity.json').read_text())
             self.assertTrue(evidence['codex_writeback_failed'])
             self.assertNotIn('primary fixture failure', json.dumps(evidence))
@@ -360,9 +362,9 @@ class VendorReviewTests(unittest.IsolatedAsyncioTestCase):
             async def completed_run(*args):
                 agent._codex_writeback_error = True
 
-            with mock.patch.object(_CanonicalNativeUsage, 'run', side_effect=completed_run):
+            with mock.patch.object(Codex, 'run', side_effect=completed_run):
                 with self.assertRaisesRegex(CredentialError, 'write-back failed'):
-                    await agent.run('fixture', object(), object())
+                    await agent.run.__wrapped__(agent, 'fixture', object(), object())
 
     async def test_codex_exact_scan_precedes_harbor_secret_cleanup(self):
         from harbor_adapter.vendor_agents import FrozenCodex, Codex

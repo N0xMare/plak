@@ -63,7 +63,7 @@ vendor_ak() {
 from harbor_adapter.controls import harbor_ak_flags
 from harbor_adapter.vendor_pins import CLI_PINS
 agent, effort = sys.argv[1], sys.argv[2]
-cli = {"codex": "codex", "grok-build": "grok", "pi": "pi"}[agent]
+cli = {"codex": "codex", "grok-build": "grok", "pi": "pi", "opencode": "opencode"}[agent]
 for value in harbor_ak_flags(agent, effort=effort, version=CLI_PINS[cli]):
     print(value)
 ' "$agent" "$effort"
@@ -100,12 +100,15 @@ from harbor_adapter.credentials import (
     require_ready_claude_code_store,
     require_ready_grok_auth,
     require_ready_pi_auth,
+    require_ready_opencode_auth,
 )
 kind, provider = sys.argv[1], sys.argv[2]
 if kind == "grok":
     require_ready_grok_auth()
 elif kind == "pi":
     require_ready_pi_auth(provider)
+elif kind == "opencode":
+    require_ready_opencode_auth(provider)
 elif kind == "claude-code":
     require_ready_claude_code_store()
 else:
@@ -286,7 +289,7 @@ run_vendor() {
   local account="$vendor_name"
   case "$vendor_name" in
     grok-build) account=grok ;;
-    pi) account=codex ;;
+    pi|opencode) account=codex ;;
   esac
   record_comparison_context "$account" "$model" "$effort" "$concurrent"
   # Stock vendor agents validate their kwargs, so arch travels in HARBOR_ARCH.
@@ -315,7 +318,7 @@ run_named_arm() (
     summary_status=$?; if [[ "$arm_status" == 0 ]]; then arm_status=$summary_status; fi
   fi; exit "$arm_status"' EXIT
   case "$named" in
-    plak-codex) run_plak codex gpt-6-luna low ;;
+    plak-codex|plak-codex-aa) run_plak codex gpt-6-luna low ;;
     plak-codex-legacy) run_plak codex gpt-6-luna low legacy ;;
     plak-codex-parity) run_plak codex gpt-6-luna low parity ;;
     plak-grok) run_plak grok grok-4.6 low ;;
@@ -360,6 +363,13 @@ run_named_arm() (
       unset OPENAI_API_KEY XAI_API_KEY OPENROUTER_API_KEY
       run_vendor harbor_adapter.vendor_agents:FrozenPi openai/gpt-6-luna \
         pi low
+      ;;
+    opencode-codex-oauth)
+      require_frozen_cli opencode
+      require_host_auth opencode openai
+      unset OPENAI_API_KEY XAI_API_KEY OPENROUTER_API_KEY
+      run_vendor harbor_adapter.vendor_agents:FrozenOpenCode openai/gpt-6-luna \
+        opencode low
       ;;
     grok-build)
       require_frozen_cli grok
@@ -441,7 +451,7 @@ case "$slice" in
 esac
 
 case "$arm" in
-  plak-codex|plak-grok|plak-openrouter|plak-claude|codex|pi-codex-oauth|grok-build|pi-openrouter|opencode-openrouter|claude-code)
+  plak-codex|plak-codex-aa|opencode-codex-oauth|plak-grok|plak-openrouter|plak-claude|codex|pi-codex-oauth|grok-build|pi-openrouter|opencode-openrouter|claude-code)
     run_named_arm "$arm"
     ;;
   plak-codex-legacy|plak-codex-parity|plak-grok-legacy|plak-grok-parity|plak-claude-legacy|plak-claude-parity)

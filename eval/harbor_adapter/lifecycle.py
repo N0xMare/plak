@@ -6,10 +6,11 @@ import asyncio
 import functools
 import json
 import sys
+import time
 from datetime import datetime, timezone
 from typing import Any
 
-from harbor_adapter.hygiene import harvest_command
+from harbor_adapter.hygiene import harvest_command, native_state_harvest
 
 
 def observe_run(run):
@@ -17,12 +18,23 @@ def observe_run(run):
     @functools.wraps(run)
     async def observed(self, instruction, environment, context):
         from harbor_adapter.cell_prep import record_cell
+        from harbor_adapter.preflight import task_budgets
+        self._eval_instruction = instruction
+        self._eval_deadline = time.monotonic() + task_budgets(environment)[0] - 10
         await record_cell(self, environment)
-        samples = [await sample_cell(environment, "before_agent_run")]
+        from harbor_adapter.wire import start_recording, harvest_recording
+        samples = []
+        recording_error = None
         try:
+            await start_recording(self, environment)
+            samples.append(await sample_cell(environment, "before_agent_run"))
             return await run(self, instruction, environment, context)
         finally:
             primary_error = sys.exc_info()[0]
+            try:
+                await harvest_recording(self, environment)
+            except Exception as error:
+                recording_error = error
             samples.append(await sample_cell(environment, "after_agent_run"))
             try:
                 (self.logs_dir / "lifecycle.json").write_text(
@@ -33,10 +45,14 @@ def observe_run(run):
                     raise
             finally:
                 try:
+                    if getattr(self, "_native_harness", None) in ("pi", "opencode"):
+                        await self.exec_as_root(environment, command=native_state_harvest())
                     await self.exec_as_root(environment, command=harvest_command())
                 except Exception:
                     if primary_error is None:
                         raise
+            if primary_error is None and recording_error is not None:
+                raise recording_error
     return observed
 
 
@@ -45,7 +61,10 @@ SAMPLE_COMMAND = (
     "ps -eo pid=,ppid=,pgid=,stat= 2>/dev/null | head -n 256 || true; "
     "printf 'SOCKETS\\n'; "
     "awk 'NF > 9 && $4 == \"0A\" {split($2,a,\":\"); print a[2], $10}' "
-    "/proc/net/tcp /proc/net/tcp6 2>/dev/null | head -n 128 || true"
+    "/proc/net/tcp /proc/net/tcp6 2>/dev/null | head -n 128 || true; "
+    "printf 'RESOURCES\\n'; "
+    "for metric in memory.peak memory.events cpu.stat; do "
+    "printf '%s\\n' \"$metric\"; cat /sys/fs/cgroup/$metric 2>/dev/null || true; done"
 )
 
 
@@ -56,13 +75,28 @@ def parse_sample(raw: str, phase: str) -> dict[str, Any]:
         "observed_at_utc": datetime.now(timezone.utc).isoformat(),
         "processes": [],
         "listen_sockets": [],
+        "resources": {},
     }
     section = ""
+    metric = ""
     for line in raw.splitlines():
-        if line in ("PROCESSES", "SOCKETS"):
+        if line in ("PROCESSES", "SOCKETS", "RESOURCES"):
             section = line
             continue
         parts = line.split()
+        if section == "RESOURCES":
+            if line in ("memory.peak", "memory.events", "cpu.stat"):
+                metric = line
+            elif len(parts) == 1 and parts[0].isdigit() and metric == "memory.peak":
+                result["resources"]["memory_peak_bytes"] = int(parts[0])
+            elif len(parts) == 2 and parts[1].isdigit():
+                key = (metric, parts[0])
+                name = {("memory.events", "oom_kill"): "oom_kill",
+                        ("memory.events", "oom"): "oom",
+                        ("cpu.stat", "usage_usec"): "cpu_usage_usec"}.get(key)
+                if name:
+                    result["resources"][name] = int(parts[1])
+            continue
         if section == "PROCESSES" and len(parts) == 4:
             try:
                 pid, ppid, pgid = (int(value) for value in parts[:3])

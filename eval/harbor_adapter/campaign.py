@@ -32,6 +32,10 @@ def validate_campaign(plan: dict[str, Any]) -> list[str]:
     if (plan.get("arch") not in ("amd64", "arm64") or type(plan.get("concurrency")) is not int
             or plan.get("concurrency") != 1):
         failures.append("platform_or_concurrency")
+    phase = plan.get("phase", "scored")
+    calibration = phase == "calibration"
+    if phase not in ("calibration", "null", "scored"):
+        failures.append("campaign_phase")
     tasks, arms = plan.get("tasks"), plan.get("arms")
     if not isinstance(tasks, dict) or not tasks:
         failures.append("tasks_missing")
@@ -42,8 +46,10 @@ def validate_campaign(plan: dict[str, Any]) -> list[str]:
                     or not all(type(task.get(k)) in (int, float) and task[k] > 0
                                for k in ("agent_timeout", "verifier_timeout"))):
                 failures.append("task_binding_incomplete")
+    if not calibration and isinstance(arms, dict) and "opencode-codex-oauth" in arms:
+        failures.append("calibration_only_arm")
     controls = []
-    if not isinstance(arms, dict) or len(arms) < 2:
+    if not isinstance(arms, dict) or len(arms) < (1 if calibration else 2):
         failures.append("arms_missing")
     else:
         for arm in arms.values():
@@ -52,12 +58,12 @@ def validate_campaign(plan: dict[str, Any]) -> list[str]:
                 continue
             observed = arm.get("observed_config")
             observed = observed if isinstance(observed, dict) else {}
-            if (not observed.get("model") or observed.get("effort") in (None, "none", "omit")
+            if not calibration and (not observed.get("model") or observed.get("effort") in (None, "none", "omit")
                     or not all(k in observed for k in ("thinking", "max_output", "temperature",
                                                        "requested_service_tier", "tool_names",
                                                        "tool_schema_sha256", "instructions_sha256"))):
                 failures.append("explicit_observed_config_required")
-            if not re.fullmatch(r"[0-9a-f]{64}", str(arm.get("calibration_sha256", ""))):
+            if not calibration and not re.fullmatch(r"[0-9a-f]{64}", str(arm.get("calibration_sha256", ""))):
                 failures.append("wire_calibration_required")
             binaries = arm.get("binaries")
             if not isinstance(binaries, dict) or not binaries or any(
@@ -68,23 +74,35 @@ def validate_campaign(plan: dict[str, Any]) -> list[str]:
             policy = policy if isinstance(policy, dict) else {}
             if not all(k in policy for k in ("user", "web_tools", "leftover_processes", "cell_prep")):
                 failures.append("policy_unverified")
-            if policy.get("web_tools") is False and any(
-                str(name).lower().replace("_", "").startswith(("websearch", "webfetch"))
+            web_available = any(
+                str(name).rsplit(".", 1)[-1].lower().replace("_", "").startswith(("websearch", "webfetch"))
                 for name in observed.get("tool_names", [])
-            ):
+            )
+            if not calibration and policy.get("web_tools") is not web_available:
                 failures.append("web_tool_policy_mismatch")
             controls.append(json.dumps({"model": observed.get("model"),
                                         "effort": observed.get("effort"), "thinking": observed.get("thinking"),
+                                        "thinking_budget": observed.get("thinking_budget"),
+                                        "temperature": observed.get("temperature"),
                                         "tier": observed.get("requested_service_tier"), "policy": policy}, sort_keys=True))
-        if len(set(controls)) != 1:
+        if not calibration and len(set(controls)) != 1:
             failures.append("policy_or_wire_parity")
     pins = plan.get("artifact_sha256")
     if not isinstance(pins, dict) or not pins or any(
         not re.fullmatch(r"[0-9a-f]{64}", str(value)) for value in pins.values()
     ):
         failures.append("artifact_pins_missing")
-    if type(plan.get("blocks")) is not int or plan["blocks"] < 3:
+    if type(plan.get("blocks")) is not int or plan["blocks"] < (1 if calibration else 3):
         failures.append("repeat_blocks")
+    if calibration and (plan.get("blocks") != 1 or len(tasks or {}) != 1):
+        failures.append("calibration_is_one_trial_per_arm")
+    if phase == "null":
+        from harbor_adapter.tuples import RUNG_A_AB_TASKS
+        if (set(tasks or {}) != set(RUNG_A_AB_TASKS) or plan.get("blocks") != 3
+                or set(arms or {}) != {"plak-codex", "plak-codex-aa"}):
+            failures.append("null_design")
+        elif arms["plak-codex"] != arms["plak-codex-aa"]:
+            failures.append("null_requires_identical_arms")
     return sorted(set(failures))
 
 
@@ -114,21 +132,31 @@ def campaign_gate(root: Path) -> dict[str, Any]:
         raise PreflightError("campaign requires clean recorded eval sources")
     if os.environ.get("HARBOR_ARCH") != plan["arch"]:
         raise PreflightError("campaign architecture mismatch")
+    from harbor_adapter.arch import docker_daemon_arch
+    if docker_daemon_arch() != plan["arch"]:
+        raise PreflightError("campaign requires the Docker daemon's native architecture")
     if os.environ.get("HARBOR_N_CONCURRENT", "1") != "1" or os.environ.get("HARBOR_N_ATTEMPTS", "1") != "1":
         raise PreflightError("campaign uses serial single-attempt slots; increase blocks, not concurrency or attempts")
     for relative, expected in plan["artifact_sha256"].items():
         path = (root / relative).resolve()
         if not path.is_relative_to((root / ".plak/installed" / plan["arch"]).resolve()):
             raise PreflightError("campaign artifact is outside the selected frozen prefix")
+        from harbor_adapter.vendor_pins import node_sha256, node_tarball_name
+        if path.name == node_tarball_name(plan["arch"]) and expected != node_sha256(plan["arch"]):
+            raise PreflightError("Node archive differs from its compiled official pin")
         if not path.is_file() or sha256(path) != expected:
             raise PreflightError("campaign artifact missing or digest mismatched")
     for arm in plan["arms"].values():
+        if plan.get("phase") == "calibration":
+            continue
         calibration = Path(arm.get("calibration_file", ""))
         if not calibration.is_file() or sha256(calibration) != arm["calibration_sha256"]:
             raise PreflightError("campaign wire calibration missing or mismatched")
         reduced = json.loads(calibration.read_text())
         if (reduced.get("source") != "exchange" or not reduced.get("wire_verified")
-                or reduced.get("first_request") != arm["observed_config"]):
+                or reduced.get("first_request") != arm["observed_config"]
+                or reduced.get("calibration_binding") != {"source_commit": plan["source_commit"],
+                    "arch": plan["arch"], "binaries": arm["binaries"]}):
             raise PreflightError("campaign calibration is not the pinned first wire request")
     for task in plan["tasks"].values():
         try:
@@ -144,6 +172,8 @@ def campaign_gate(root: Path) -> dict[str, Any]:
 
 def trial_gate(plan: dict[str, Any], arm: str, task: str, evidence: dict[str, Any]) -> list[str]:
     failures = []
+    if plan.get("phase") == "calibration":
+        return ["calibration_is_not_scored"]
     expected = plan.get("arms", {}).get(arm)
     target = plan.get("tasks", {}).get(task)
     if not expected or not target:
@@ -157,11 +187,18 @@ def trial_gate(plan: dict[str, Any], arm: str, task: str, evidence: dict[str, An
     if evidence.get("secrets_harvested") is not False:
         failures.append("harvest_unverified")
     observed = evidence.get("observed_config") or {}
-    if not observed.get("wire_verified") or observed.get("first_request") != expected["observed_config"]:
+    from harbor_adapter.observed_config import first_request_matches
+    if not observed.get("wire_verified") or not first_request_matches(
+        observed.get("first_request") or {}, expected["observed_config"], expected["account"]
+    ):
         failures.append("first_request_unverified_or_mismatched")
     requests = observed.get("requests") or []
     if not requests or any(not (r.get("response", {}).get("served_model") or
-                               r.get("response", {}).get("system_fingerprint")) for r in requests):
+                               r.get("response", {}).get("system_fingerprint") or
+                               r.get("response", {}).get("transport_error") is True or
+                               r.get("response", {}).get("client_cancelled") is True or
+                               (isinstance(r.get("response", {}).get("status_code"), int) and
+                                r["response"]["status_code"] >= 400)) for r in requests):
         failures.append("served_identity_missing")
     if expected.get("account") == "openrouter" and any(
         not r.get("response", {}).get("upstream_provider") for r in requests
@@ -181,7 +218,7 @@ def trial_gate(plan: dict[str, Any], arm: str, task: str, evidence: dict[str, An
 
 def schedule(arms: list[str], tasks: list[str], blocks: int) -> list[dict[str, Any]]:
     """AB, BA, AB, BA blocks, with one explicit shared slot per task/block."""
-    if blocks < 1 or len(arms) < 2 or not tasks or len(set(arms)) != len(arms):
+    if blocks < 1 or len(arms) < 1 or not tasks or len(set(arms)) != len(arms):
         raise ValueError("invalid paired schedule")
     return [{"block": block, "slot": f"{block}:{task}", "task": task, "arm": arm}
             for block in range(blocks)

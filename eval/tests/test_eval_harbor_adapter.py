@@ -31,12 +31,15 @@ def _import_harbor_module(name: str):
 def _isolated_adapter_probes(module):
     """Run-loop unit fixtures isolate the separately tested campaign probes."""
     with contextlib.ExitStack() as stack:
-        for name in ("prepare_cell", "record_cell"):
+        for name in ("prepare_cell", "record_cell", "probe_run_capabilities"):
             if hasattr(module, name):
                 stack.enter_context(mock.patch.object(module, name, new_callable=mock.AsyncMock))
         if hasattr(module, "task_budgets"):
             stack.enter_context(mock.patch.object(module, "task_budgets", return_value=(900, 600)))
         stack.enter_context(mock.patch("harbor_adapter.cell_prep.record_cell", new_callable=mock.AsyncMock))
+        stack.enter_context(mock.patch("harbor_adapter.preflight.task_budgets", return_value=(900, 600)))
+        stack.enter_context(mock.patch("harbor_adapter.wire.start_recording", new_callable=mock.AsyncMock))
+        stack.enter_context(mock.patch("harbor_adapter.wire.harvest_recording", new_callable=mock.AsyncMock))
         yield
 
 
@@ -152,7 +155,6 @@ from harbor_adapter.plans import (  # noqa: E402
 from harbor_adapter.timing import trial_phases  # noqa: E402
 from harbor_adapter.overload import (  # noqa: E402
     should_retry_compose,
-    should_score_through_rosetta,
 )
 from harbor_adapter.tuples import (  # noqa: E402
     DATASET,
@@ -557,125 +559,15 @@ class ComposeRetryContractTests(unittest.TestCase):
 
 
 class RosettaScoreThroughTests(unittest.TestCase):
-    def test_score_through_only_with_transcripts_and_rosetta_crash(self) -> None:
-        stderr = (
-            "assertion failed [!result.is_error]: Failed to create temporary file\n"
-            "(ThreadContextFcntl.cpp:85 create_tempfile)\n"
-            'pmux: pmuxd error code=DaemonLost message="private rmux session '
-            'control plane was lost" retryable=true\n'
-        )
-        self.assertTrue(
-            should_score_through_rosetta(
-                stderr,
-                has_transcripts=True,
-                cell_arch="amd64",
-                host_system="Darwin",
-            )
-        )
-        self.assertFalse(
-            should_score_through_rosetta(
-                stderr,
-                has_transcripts=False,
-                cell_arch="amd64",
-                host_system="Darwin",
-            )
-        )
-        self.assertFalse(
-            should_score_through_rosetta(
-                "exit 1",
-                has_transcripts=True,
-                cell_arch="amd64",
-                host_system="Darwin",
-            )
-        )
-        agent = (ROOT / "eval" / "harbor_adapter" / "pmux_agent.py").read_text()
-        self.assertIn("should_score_through_rosetta", agent)
-        self.assertIn("NonZeroAgentExitCodeError", agent)
-
-    def test_bare_daemon_loss_is_not_scored_through(self) -> None:
-        for stderr in (
-            'pmux: pmuxd error code=DaemonLost message="lost" retryable=true',
-            "pmux: RmuxUnavailable",
-        ):
-            with self.subTest(stderr=stderr):
-                self.assertFalse(
-                    should_score_through_rosetta(
-                        stderr,
-                        has_transcripts=True,
-                        cell_arch="amd64",
-                        host_system="Darwin",
-                    )
-                )
-
-    def test_rosetta_evidence_alone_is_not_scored_through(self) -> None:
-        self.assertFalse(
-            should_score_through_rosetta(
-                "Failed to create temporary file (create_tempfile)",
-                has_transcripts=True,
-                cell_arch="amd64",
-                host_system="Darwin",
-            )
-        )
-
-    def test_daemon_loss_with_rosetta_trace_is_scored_through(self) -> None:
-        stderr = (
-            "rosetta error: Failed to create temporary file\n"
-            "pmux: pmuxd error code=DaemonLost retryable=true\n"
-        )
-        self.assertTrue(
-            should_score_through_rosetta(
-                stderr,
-                has_transcripts=True,
-                cell_arch="amd64",
-                host_system="Darwin",
-            )
-        )
-        self.assertFalse(
-            should_score_through_rosetta(
-                stderr,
-                has_transcripts=False,
-                cell_arch="amd64",
-                host_system="Darwin",
-            )
-        )
-
-    def test_native_cells_never_score_through_a_daemon_loss(self) -> None:
-        # Rosetta only exists for an emulated amd64 cell on a Darwin host.
-        # A native arm64 cell, or an amd64 cell on Linux, has no such excuse:
-        # a lost daemon there is an ordinary harness failure and must be
-        # reported as one even if the stderr happens to carry the words.
-        stderr = (
-            "rosetta error: Failed to create temporary file\n"
-            "pmux: pmuxd error code=DaemonLost retryable=true\n"
-        )
-        self.assertFalse(
-            should_score_through_rosetta(
-                stderr,
-                has_transcripts=True,
-                cell_arch="arm64",
-                host_system="Darwin",
-            )
-        )
-        self.assertFalse(
-            should_score_through_rosetta(
-                stderr,
-                has_transcripts=True,
-                cell_arch="amd64",
-                host_system="Linux",
-            )
-        )
-        agent = (ROOT / "eval" / "harbor_adapter" / "pmux_agent.py").read_text()
-        self.assertIn("cell_arch=self._arch", agent)
-        self.assertIn("host_system=platform.system()", agent)
+    def test_no_daemon_loss_score_through(self):
+        source = (ROOT / "eval/harbor_adapter/pmux_agent.py").read_text()
+        self.assertNotIn("should_score_through_rosetta", source)
+        self.assertNotIn("_score_through_rosetta", source)
 
     def test_harness_termination_is_always_recorded(self) -> None:
         agent = (ROOT / "eval" / "harbor_adapter" / "pmux_agent.py").read_text()
         self.assertIn('"harness_termination": harness_termination', agent)
         self.assertIn('TERMINATION_CRASH = "harness-crash"', agent)
-        self.assertIn(
-            'TERMINATION_CRASH_SCORED_THROUGH = "harness-crash-scored-through"',
-            agent,
-        )
         self.assertIn('record["harness_termination"]', agent)
 
         pmux_agent_module = _import_harbor_module("harbor_adapter.pmux_agent")
@@ -1583,7 +1475,7 @@ class ConfigurationContractTests(unittest.TestCase):
         agent = (ROOT / "eval" / "harbor_adapter" / "agent.py").read_text()
         self.assertNotIn("bwrap", agent)
         self.assertIn("subscriptions/compatibility", agent)
-        self.assertIn("ca-certificates", agent)
+        self.assertIn("prepare_cell", agent)
         self.assertNotIn('REMOTE_BINARY, "refresh", self._account', agent)
         self.assertNotIn("quoted_refresh", agent)
         self.assertNotIn("|| true; fi", agent)
@@ -1953,7 +1845,6 @@ class FrozenPmuxContractTests(unittest.TestCase):
 
         from harbor_adapter.pmux_args import PmuxArgumentError, pmux_run_arguments
         from harbor_adapter.pmux_trial import (
-            PMUX_CELL_USER,
             pmux_prompt_write_command,
             pmux_trial_command,
         )
@@ -1978,11 +1869,12 @@ class FrozenPmuxContractTests(unittest.TestCase):
 
         quoted = " ".join(shlex.quote(part) for part in argv)
         command = pmux_trial_command(
-            quoted, "/logs/agent/pmux-stdout.txt", "/logs/agent/pmux-stderr.log"
+            quoted, "/logs/agent/pmux-stdout.txt", "/logs/agent/pmux-stderr.log", 900000
         )
         self.assertNotIn("certificate", command)
         self.assertIn(REMOTE_PMUX_TRIAL, command)
-        self.assertIn(f"exec su -s /bin/bash {PMUX_CELL_USER} --", command)
+        self.assertIn("exec bash", command)
+        self.assertNotIn("su -s", command)
         self.assertNotIn(" -c ", command)
         self.assertIn("base64 -d", command)
         import base64
@@ -1997,7 +1889,7 @@ class FrozenPmuxContractTests(unittest.TestCase):
         self.assertIn("/transcripts/", decoded)
         self.assertIn("pmux_harvest", decoded)
         self.assertIn("trap 'pmux_harvest' EXIT", decoded)
-        self.assertIn("sudo -n true", decoded)
+        self.assertIn("export IS_SANDBOX=1", decoded)
         self.assertIn("TMPDIR=/tmp/pmux-tmp", decoded)
         self.assertNotIn("certificate", decoded)
 
@@ -2015,22 +1907,13 @@ class FrozenPmuxContractTests(unittest.TestCase):
                 prompt_file="prompt.txt",
             )
 
-    def test_pmux_etc_acl_excludes_sudo_control_files(self) -> None:
+    def test_pmux_does_not_mutate_packages_users_or_acls(self):
         from harbor_adapter.pmux_trial import pmux_trial_command
-
-        command = pmux_trial_command(
-            "true", "/logs/agent/pmux-stdout.txt", "/logs/agent/pmux-stderr.log"
-        )
-        etc_find = [
-            line.strip()
-            for line in command.splitlines()
-            if line.strip().startswith("find /etc ")
-        ]
-        self.assertEqual(len(etc_find), 3)
-        for line in etc_find:
-            self.assertIn("-path '/etc/sudo*' -prune -o", line)
-        self.assertEqual(sum("-exec setfacl " in line for line in etc_find), 2)
-        self.assertEqual(sum("-exec chown " in line for line in etc_find), 1)
+        command = pmux_trial_command("true", "/logs/out", "/logs/err", 1800000)
+        for mutation in ("apt-get", "useradd", "setfacl", "chown", "sudo"):
+            self.assertNotIn(mutation, command)
+        with self.assertRaises(ValueError):
+            pmux_trial_command("true", "/logs/out", "/logs/err", 0)
 
     def test_pmux_refuses_relative_cwd_and_empty_prompt(self) -> None:
         from harbor_adapter.pmux_args import PmuxArgumentError, pmux_run_arguments
@@ -2418,25 +2301,17 @@ class FrozenPmuxContractTests(unittest.TestCase):
         self.assertIn("chmod 700", trial)
         self.assertIn("REMOTE_CLAUDE_SECURESTORAGE", trial)
         self.assertIn("chmod 700 {runtime} {pool} {tmpdir} {pin}", trial)
-        self.assertIn("useradd --system --create-home", trial)
-        self.assertIn("NOPASSWD:ALL", trial)
-        self.assertIn("!requiretty", trial)
-        self.assertIn("setfacl", trial)
-        self.assertIn("/etc/sudo*", trial)
-        self.assertIn("chown root:root /etc/sudoers", trial)
+        self.assertNotIn("useradd", trial)
+        self.assertNotIn("setfacl", trial)
+        self.assertNotIn("apt-get", trial)
+        self.assertIn("export IS_SANDBOX=1", trial)
         self.assertIn("pmux_harvest", trial)
-        self.assertIn("sudo -n true", trial)
         self.assertIn("parse_pmux_jsonl", agent)
-        self.assertIn("exec su -s /bin/bash", trial)
-        self.assertIn('PMUX_CELL_USER = "pmux"', trial)
-        self.assertIn('if [ "$(id -u)" -eq 0 ]', trial)
-        self.assertIn("/bin/ps", trial)
-        self.assertIn("procps", trial)
         self.assertIn("claude-transcripts", trial)
         self.assertIn("{pool}/transcripts/", trial)
         self.assertIn("projects/*/*.jsonl", trial)
         self.assertIn("--pool-turn-timeout-ms", trial)
-        self.assertIn("HARBOR_PMUX_TURN_TIMEOUT_MS = 900_000", trial)
+        self.assertIn("turn_timeout_ms: int", trial)
         self.assertNotIn("harvester=$!", trial)
         self.assertNotIn("while true; do", trial)
         self.assertNotIn(") &\n) &", trial)
@@ -2444,7 +2319,7 @@ class FrozenPmuxContractTests(unittest.TestCase):
         self.assertIn("REMOTE_PMUX_TMPDIR", trial)
         self.assertIn("download_file", agent)
         self.assertIn("replace_claude_code_store", agent)
-        self.assertIn("ulimit -n 8192", trial)
+        self.assertNotIn("ulimit -n 8192", trial)
         self.assertIn("prompt_file=", agent)
         self.assertIn("--prompt-file", (ROOT / "eval" / "harbor_adapter" / "pmux_args.py").read_text())
         self.assertNotIn("pmux ask", agent)
@@ -2536,6 +2411,7 @@ class HarnessTerminationRecordTests(unittest.TestCase):
             agent._model = "claude-sonnet-5"
             agent._effort = "low"
             agent._turn_timeout_ms = 900_000
+            agent.logs_dir = store
             agent._harness_termination = pmux_agent.TERMINATION_NOT_RUN
             agent.exec_as_root = _ok
             agent.exec_as_agent = _boom

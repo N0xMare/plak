@@ -50,6 +50,13 @@ for private in (source / 'secrets', source.parent / 'xdg/plak/subscriptions',
             value = path.read_bytes().strip()
             if value:
                 secret_values.add(value)
+# OpenCode may atomically replace the uploaded auth symlink during refresh.
+rotated = Path('/tmp/opencode-cell/xdg-data/opencode/auth.json')
+if rotated.is_file():
+    try:
+        collect(json.loads(rotated.read_text()))
+    except (ValueError, UnicodeError):
+        pass
 refused = False
 flag = Path("/logs/agent/harvest.json")
 try:
@@ -100,3 +107,19 @@ Path('/logs/agent/harvest.json').write_text(json.dumps({'secrets_harvested': Fal
 
 def harvest_command() -> str:
     return "python3 -c " + shlex.quote(HARVEST_SCRIPT)
+
+
+NATIVE_STATE_HARVEST = r'''
+from pathlib import Path
+import shutil
+for source, destination in (('/tmp/pi-cell/sessions', '/logs/agent/pi/sessions'),
+                            ('/tmp/opencode-cell/xdg-data', '/logs/agent/opencode/xdg-data')):
+    source = Path(source)
+    if source.is_dir():
+        shutil.copytree(source, destination, dirs_exist_ok=True, symlinks=True,
+                        ignore=shutil.ignore_patterns('auth.json*', 'auth-refreshed.json*', '.credentials.json*'))
+'''
+
+
+def native_state_harvest() -> str:
+    return "python3 -c " + shlex.quote(NATIVE_STATE_HARVEST)

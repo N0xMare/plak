@@ -7,7 +7,6 @@ ask pool, Harbor stock print-mode Claude, or set ANTHROPIC_API_KEY.
 from __future__ import annotations
 
 import json
-import platform
 import shlex
 from pathlib import Path
 from typing import Any
@@ -20,6 +19,7 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 from harbor_adapter.lifecycle import observe_run
+from harbor_adapter.wire import WireAgent
 from harbor_adapter.preflight import task_budgets
 from harbor_adapter.cell_prep import prepare_cell
 from harbor_adapter.credentials import (
@@ -48,7 +48,6 @@ from harbor_adapter.arch import (
     platform_record_command,
     resolve_arch,
 )
-from harbor_adapter.overload import should_score_through_rosetta
 from harbor_adapter.usage import UsageTotals, parse_pmux_json, parse_pmux_jsonl
 from harbor_adapter.vendor_install import node_cli_install_command
 from harbor_adapter.vendor_pins import (
@@ -64,7 +63,6 @@ from harbor_adapter.vendor_pins import (
 TERMINATION_NOT_RUN = "not-run"
 TERMINATION_OK = "ok"
 TERMINATION_CRASH = "harness-crash"
-TERMINATION_CRASH_SCORED_THROUGH = "harness-crash-scored-through"
 TERMINATION_ERROR = "harness-error"
 
 
@@ -92,7 +90,7 @@ def _apply_usage(
     }
 
 
-class FrozenPmux(BaseInstalledAgent):
+class FrozenPmux(WireAgent, BaseInstalledAgent):
     @staticmethod
     def name() -> str:
         return "pmux"
@@ -161,6 +159,15 @@ class FrozenPmux(BaseInstalledAgent):
             environment, command=platform_record_command(self._arch)
         )
         await self._assert_claude_pin(environment, artifacts.version)
+        policy = Path(__file__).with_name("claude-no-web.sh")
+        from harbor_adapter.campaign import sha256
+        self._artifact["binaries"]["claude-policy-launcher"] = {"sha256": sha256(policy), "bytes": policy.stat().st_size}
+        await environment.upload_file(str(policy), "/installed-agent/claude-no-web")
+        await self.exec_as_root(environment, command="chmod 0755 /installed-agent/claude-no-web")
+        from harbor_adapter.vendor_agents import _record_executable_identity
+        await _record_executable_identity(self, environment, "claude", self._arch)
+        identity = json.loads((self.logs_dir / "vendor-artifact.json").read_text())
+        self._artifact["binaries"].update(identity["binaries"])
 
     async def _install_claude_prefix(
         self, environment: BaseEnvironment, artifacts: FrozenArtifacts
@@ -226,6 +233,8 @@ class FrozenPmux(BaseInstalledAgent):
             prompt_file=REMOTE_PMUX_PROMPT,
             cwd=REMOTE_WORKSPACE,
         )
+        from harbor_adapter.argv import write_argv
+        write_argv(self.logs_dir, argv)
         quoted = " ".join(shlex.quote(part) for part in argv)
         stdout_path = "/logs/agent/pmux-stdout.txt"
         stderr_path = "/logs/agent/pmux-stderr.log"
@@ -240,12 +249,9 @@ class FrozenPmux(BaseInstalledAgent):
                 await self.exec_as_agent(environment, command=command)
                 self._harness_termination = TERMINATION_OK
             except NonZeroAgentExitCodeError:
-                # Record the crash before deciding whether to score through it:
-                # a harness death is never invisible in the trial record.
+                # Record every crash; daemon loss never scores through.
                 self._harness_termination = TERMINATION_CRASH
-                if not await self._score_through_rosetta(environment):
-                    raise
-                self._harness_termination = TERMINATION_CRASH_SCORED_THROUGH
+                raise
             except BaseException as error:
                 # Any other harness death names itself in the trial record
                 # rather than leaving the run indistinguishable from not-run.
@@ -256,25 +262,6 @@ class FrozenPmux(BaseInstalledAgent):
         finally:
             await self._persist_refreshed_pin(environment, store)
             await self._capture_usage(environment, context)
-
-    async def _score_through_rosetta(self, environment: BaseEnvironment) -> bool:
-        stderr = await self._read_agent_file(
-            environment, "/logs/agent/pmux-stderr.log"
-        )
-        listed = await self.exec_as_agent(
-            environment,
-            command=(
-                "ls /logs/agent/claude-transcripts/*.jsonl "
-                "2>/dev/null || true"
-            ),
-        )
-        has_transcripts = bool((listed.stdout or "").strip())
-        return should_score_through_rosetta(
-            stderr,
-            has_transcripts=has_transcripts,
-            cell_arch=self._arch,
-            host_system=platform.system(),
-        )
 
     async def _read_agent_file(
         self, environment: BaseEnvironment, path: str

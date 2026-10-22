@@ -441,6 +441,21 @@ in no gate tier and not product qualification; its adapter tests run with
 evidence rules and recipes.
 
 Scored Harbor comparisons are gated as defined in `eval/README.md`.
+The preparation plane freezes common root/package task images and writes
+private, digest-reviewed campaign plans without inference. Calibration plans
+are explicitly unscored, admit no fabricated prior calibration, and run one
+plumbing trial per arm. Comparator HTTPS recording is cell-local, verifies
+upstream TLS, and exports only structural fields and digests; Plak retains
+its exact-URL subscription routes and uses its own wire capture instead.
+The A/A recipe requires eight tasks, three serial blocks and identical Plak
+labels; the Codex campaign recipe requires its successful source/platform/
+binary-bound A/A receipt. All paid entry points remain explicit opt-ins.
+Account leases are host-local; the operator must prevent cross-host reuse.
+Incomplete wire evidence and retry lower bounds must never be represented as
+complete observations or exact retry counts. Claude trial instruction matching
+uses only the documented billing-nonce projection; exact full instruction and
+body digests remain evidence, and base client version, entrypoint, unknown
+fields and all other content stay pinned. Other arms retain exact matching.
 
 Test-only session-record faults use one complete forwarding store with per-method
 policies; composition fixtures use one scripted integration, session and event

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import math
 import random
 import statistics
 from collections import defaultdict
@@ -40,9 +41,28 @@ def estimate(tasks: dict[str, tuple[list[bool], list[bool]]], *, replicates: int
             upper = min(lower + 1, len(samples) - 1)
             return samples[lower] + (samples[upper] - samples[lower]) * (index - lower)
         return [percentile(.025), percentile(.975)]
+    permutation_extreme = 0
+    for _ in range(replicates):
+        differences = []
+        for a, b in values:
+            pooled = list(a) + list(b)
+            rng.shuffle(pooled)
+            differences.append(statistics.mean(pooled[:len(a)]) - statistics.mean(pooled[len(a):]))
+        permutation_extreme += abs(statistics.mean(differences)) >= abs(difference) - 1e-12
+    left_only = sum(statistics.mean(a) > .5 >= statistics.mean(b) for a, b in values)
+    right_only = sum(statistics.mean(b) > .5 >= statistics.mean(a) for a, b in values)
+    discordant = left_only + right_only
+    mcnemar = min(1, 2 * sum(math.comb(discordant, i) for i in range(min(left_only, right_only) + 1)) /
+                  2 ** discordant) if discordant else 1.0
+    population.sort()
+    ci90 = [population[int((len(population) - 1) * q)] for q in (.05, .95)]
     return {"tasks": len(included), "difference": difference, "dropped_tasks": dropped,
             "task_population_ci95": interval(population), "fixed_tasks_ci95": interval(fixed),
             "replicates": replicates, "seed": seed,
+            "permutation_p": (permutation_extreme + 1) / (replicates + 1),
+            "mcnemar_majority_p": mcnemar,
+            "task_population_ci90": ci90,
+            "equivalent_within_10pp": ci90[0] > -.10 and ci90[1] < .10,
             "per_task": {task: statistics.mean(a) - statistics.mean(b)
                          for task, (a, b) in included.items()}}
 
@@ -76,4 +96,11 @@ def paired_reports(rows: list[dict[str, Any]], pairs: list[dict[str, Any]]) -> l
                 sensitivity[task] = ([a[s]["pass"] for s in no_provider], [b[s]["pass"] for s in no_provider])
             results.append({"family": list(family), "arms": [left, right],
                             "primary": estimate(primary), "exclude_provider_failures": estimate(sensitivity)})
+    # Correct the predeclared pair family, never task-level diagnostic tests.
+    tested = sorted((result for result in results if result["primary"].get("permutation_p") is not None),
+                    key=lambda result: result["primary"]["permutation_p"])
+    adjusted = 0.0
+    for index, result in enumerate(tested):
+        adjusted = max(adjusted, min(1.0, (len(tested) - index) * result["primary"]["permutation_p"]))
+        result["holm_permutation_p"] = adjusted
     return results

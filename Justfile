@@ -280,6 +280,26 @@ harbor-test:
 fetch-harbor-tools:
     PYTHONPATH=eval python3 -m harbor_adapter.cell_prep
 
+# No inference: freeze images and generate a private digest-bound plan.
+harbor-inventory *ARGS:
+    PYTHONPATH=eval uv run --project eval python -m harbor_adapter.campaign_builder inventory {{ARGS}}
+
+harbor-freeze *ARGS:
+    PYTHONPATH=eval uv run --project eval python -m harbor_adapter.campaign_builder freeze {{ARGS}}
+
+harbor-campaign *ARGS:
+    PYTHONPATH=eval uv run --project eval python -m harbor_adapter.campaign_builder generate {{ARGS}}
+
+# Paid subscription usage, only after explicit operator approval and plan review.
+harbor-phase0:
+    uv run --project eval python eval/scripts/campaign.py calibration
+
+harbor-null:
+    uv run --project eval python eval/scripts/campaign.py null
+
+harbor-codex:
+    uv run --project eval python eval/scripts/campaign.py codex
+
 harbor-bootstrap:
     eval/scripts/harbor.sh bootstrap
 

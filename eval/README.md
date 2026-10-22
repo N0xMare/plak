@@ -61,7 +61,8 @@ them into the cell; they never `nvm install`, `npm i -g …@latest` or
 state. The pinned commit is **`fc0e8cb`**; it is defined once, in
 `harbor_adapter.pmux_provenance.PSEUDOMUX_PIN`. An arm refuses companions with
 no manifest, a different commit or a dirty build. Two explicit overrides
-exist, and both are recorded:
+exist for diagnostic builds, and both are recorded. Generated campaigns still
+require the exact clean pin and refuse both overrides:
 
 - `PMUX_ALLOW_DIRTY=1` lets the fetch build from a dirty worktree; the
   manifest then records `"dirty": true`.
@@ -78,8 +79,9 @@ the offline tests need neither credentials nor a campaign.
 
 Prepare a private campaign JSON (schema in `harbor_adapter/campaign.py`):
 
-1. Record `schemaVersion: 1`, `source_commit`, `arch`, `concurrency: 1` and
-   `blocks` (at least three for the paired estimator).
+1. Record `schemaVersion: 1`, `phase` (`calibration`, `null` or `scored`),
+   `source_commit`, `arch`, `concurrency: 1` and `blocks` (at least three for
+   the paired estimator; exactly one for calibration).
 2. Freeze each task image once on the selected architecture. Inspect it with
    `docker image inspect --format '{{.Id}}' IMAGE`. The `tasks` object maps the
    exact task names to `image` (`sha256:...`, not a tag), task `checksum`,
@@ -109,17 +111,32 @@ Prepare a private campaign JSON (schema in `harbor_adapter/campaign.py`):
    its `first_request` as `observed_config`. Pin the resolved shipped
    composition for Plak as `resolved_composition` as well. Codex rollout and Pi
    session declarations are extracted but deliberately cannot satisfy wire
-   calibration. A proxy/first-party wire capture for Grok, Claude Code and
-   OpenCode remains required; this change does not supply that recording proxy.
+   calibration. Comparator arms now run a cell-local HTTPS recording proxy;
+   Plak uses its own private capture, never a changed subscription URL.
+
+Claude-only instruction comparison has one reviewed projection. The exact
+`instructions_sha256` and full `request_sha256` are still recorded for every
+trial. `claude_instruction_projection_sha256` normalizes only three known
+per-request values on the first `x-anthropic-billing-header` system line:
+`cc_prompt_id` UUID, the five-hex body-derived `cch`, and the three-hex
+first-user-text suffix of `cc_version`. Their first-party definitions are
+`crates/providers/anthropic/src/cch.rs:41` (version suffix),
+`crates/providers/anthropic/src/cch.rs:78` (prompt UUID), and
+`crates/providers/anthropic/src/cch.rs:142` (body attestation). The base client
+version, entrypoint, all other fields (including unknown new fields), all
+other instruction text and every other wire control stay pinned. Only Claude
+arms match this projection at the trial gate; Codex/Grok remain exact, and
+missing or malformed projections never authorize an exception. No request
+body is rewritten and no projected digest is mislabeled as a wire digest.
 
 The package/tool/cgroup probe digest is recorded as `cell-preflight.json`.
 Plak refreshes short-lived OAuth on the host under an upload lock. Native
 stores must already cover the task and verifier budgets plus five minutes;
 missing expiry or insufficient lifetime refuses dispatch. Refresh those
 stores serially on the host before retrying, not in a sibling trial.
-Only one campaign process may use an account/store at a time. Serial slots
-are enforced within an invocation; a cross-campaign credential lease is not
-implemented.
+Only one campaign process may use an account/store at a time. The scheduler
+holds host-local account leases across all its serial slots, including retries.
+Do not use the same subscription account concurrently on another host.
 All arms get the same pinned `rg` 15.1.0 at `/usr/local/bin/rg`; amd64 uses the
 official static musl release, arm64 the official GNU release (no static arm64
 release exists at this pin). Both archive and executable hashes are pinned;
@@ -142,11 +159,13 @@ An agent trial failing the post-run wire/served-identity/artifact gate stops
 the campaign rather than silently entering the estimator. Report the selected
 slots with `summarize.py --selection .../selection.json --report DIR .../campaign-*`.
 
-Current blockers are intentional: the adapters still have different package
-and user policies (notably pmux), and vendor declarations alone are not wire
-evidence. Such campaigns must remain blocked until equal cell policy and
-per-trial wire evidence are available. Do not weaken a pin or synthesize an
-observation from requested flags to make the gate pass.
+Cells must be frozen with the common root/package policy below. Every arm
+refuses missing prerequisites instead of independently installing packages.
+Claude Code runs as root through pmux with `IS_SANDBOX=1`, and its first-party
+launcher denies WebSearch/WebFetch; Codex explicitly disables web search.
+Calibration must confirm those settings from bytes. A flag is never evidence.
+`READINESS.md` records every D1-D32 disposition and the deliberately deferred
+OpenRouter and exact native-retry questions.
 
 Plak's live home, OAuth state and exchange captures stay under `/tmp/plak-cell`.
 The reducer reads automatic, non-required captures from
@@ -158,6 +177,215 @@ Generic secret-pattern hits preserve task content and flag the trial unknown.
 automatically: they may still contain historical credential copies and must
 not be shared. Rotating/deleting those private historical secrets is an
 operator action, not part of a scored run or this offline test suite.
+
+## 0.0.2 Operator Sequence
+
+All paths below are absolute private paths outside the repository. Do not put
+credentials, raw requests or campaign files in the tree. Run from a clean
+checkout on one native Docker host (`tars2` has an x86_64 Docker daemon);
+never mix native architectures in a campaign. Worker Rust builds/gates use
+the assigned wtools lane, not the Mac. Python-only adapter tests can use the
+Mac eval venv. None of the preparation commands below sends model requests.
+
+First integrate the current GPT-6 Codex prompt and the amp-jobs change, then
+build **that commit**. `plak run --leave-jobs-running` must appear in
+`run_arguments`; the in-cell `run --help` probe refuses older builds before
+credential upload. This eval change does not duplicate that product flag.
+An old Plak manifest, old CLI version, dirty source or replacement archive
+cannot be approved by editing its hash. Rebuild/refetch instead.
+
+```sh
+just harbor-bootstrap
+PATH="$PWD/eval/.venv/bin:$PATH" just harbor-test
+export HARBOR_ARCH=amd64                 # arm64 only on a native arm64 daemon
+just build-harbor-agent                  # worker protocol: assigned Linux lane
+just fetch-harbor-vendor-clis
+just fetch-harbor-tools
+# Claude only: pinned clean PMUX_SRC, plus a Linux OAuth file store
+just fetch-harbor-pmux
+```
+
+The preparation commands below export `terminal-bench/terminal-bench-2-1@6`
+to a private task directory (`TB21`, one version only). Refresh or
+log in to each selected subscription store serially on the host. A native
+host `plak` must be on PATH for `plak refresh ACCOUNT`. Codex, Pi, Grok and
+Claude stores must cover agent + verifier budgets + 300 seconds. Do not copy
+one arm's OAuth document into another arm's different native store format.
+No API key is needed for the Codex, Grok or Claude verticals. OpenRouter stays
+disabled regardless of the presence of a key.
+
+### Prepare Phase 0
+
+`harbor-inventory` discovers task paths and names the frozen artifacts; it does
+not fabricate hashes or calibrations. `harbor-freeze` builds/pulls every task
+once, then bakes the **same** `ca-certificates coreutils procps curl git
+python3 openssl bash` package policy as root into it. These are derived eval
+images; each resulting immutable image ID is shared by every arm. There is
+no inference and no per-trial apt install. Compose/multi-image tasks are refused.
+For native arm64, or when intentionally rebuilding the task source, pass
+`--build-tasks` to `harbor-freeze`; this explicitly builds each task Dockerfile
+once instead of pulling a possibly amd64-only prebuilt tag. There is no silent
+architecture fallback or per-trial force-build. BuildKit cannot use a bare
+image ID in `FROM`; freezing creates a unique base tag for those already
+resolved bytes and records `base_image`/`base_tag` in the private inventory.
+Those pins are retained deliberately: removing the last tag could delete an
+image ID another campaign still references. Pruning is an explicit operator
+action after all campaigns using those images have ended.
+`harbor-campaign` inspects image architecture, probes the real cell (network
+none), hashes source task contents, archives, archive binary members and the
+clean Plak build, and writes a mode-0600 JSON plus its SHA-256. Outputs never
+overwrite an existing reviewed file.
+
+```sh
+export PRIVATE=/absolute/private/harbor-v002
+mkdir -m 700 "$PRIVATE"
+uv run --project eval harbor datasets download terminal-bench/terminal-bench-2-1@6 \
+  --export --output-dir "$PRIVATE/tasks"
+export TB21="$PRIVATE/tasks"
+just harbor-inventory --arch "$HARBOR_ARCH" --slice plumbing \
+  --task-root "$PWD/eval/datasets/rung-a-plumbing" \
+  --arms plak-codex codex pi-codex-oauth opencode-codex-oauth plak-grok grok-build plak-claude claude-code \
+  --output "$PRIVATE/plumbing-inputs.json"
+just harbor-freeze --inventory "$PRIVATE/plumbing-inputs.json" \
+  --output "$PRIVATE/plumbing-frozen.json"
+just harbor-campaign --inventory "$PRIVATE/plumbing-frozen.json" \
+  --phase calibration --slice plumbing --blocks 1 --output "$PRIVATE/phase0.json"
+```
+
+The calibration plan selects `write-hello` only: **one trial per selected
+arm**, not three plumbing tasks times three scored blocks. Unlike a scored
+plan it admits absent calibration pins and different models across verticals.
+It makes no wire/policy parity claim, is explicitly unscored, and cannot
+satisfy a scored trial gate. Review its
+one JSON and the printed SHA-256 before granting paid approval.
+
+```sh
+export HARBOR_CAMPAIGN="$PRIVATE/phase0.json"
+export HARBOR_CAMPAIGN_SHA256=<reviewed-sha256>
+just harbor-phase0                       # PAID: 8 trials for the eight arms above
+```
+
+The scheduler prints its output directory. Only reduced structural evidence
+is copied into source/platform/binary-bound `calibrations/ARM.json`; the raw
+Plak captures, ephemeral proxy
+CA/key, request/response buffers and credentials never leave the cell. A
+calibration succeeds only with actual wire evidence **and** a passing plumbing
+verifier. A failed calibration is diagnostic, never a license to infer an
+observation from CLI flags. Set `CAL` to that output's `calibrations` directory.
+
+The proxy is stdlib Python + OpenSSL, bound only to cell loopback. It records
+HTTPS CONNECT to exact allowlisted DNS hosts on 443, verifies upstream TLS,
+streams SSE, and writes only `observed_config.py` structural fields/digests.
+It never logs headers, URLs, exceptions or content. Its buffers are bounded.
+Comparator model traffic is decrypted only for the exact listed provider hosts;
+other HTTPS (including model-launched tool traffic) is blind-tunnelled without
+observation, and ordinary HTTP is not proxied. Recorders remain alive until
+Harbor tears down the cell, so a surviving service does not inherit a dead
+proxy at the agent/verifier boundary.
+The current transport is HTTP/1.1, not WebSocket; a CLI bypassing the proxy or
+requiring a different transport fails closed. Confirm the specific frozen
+CLI's first-party proxy/debug settings during Phase 0 before any scored run.
+The utility can also calibrate OpenCode manually inside a disposable cell
+without enabling an OpenRouter comparison. `opencode-codex-oauth` is a
+calibration-only arm using OpenCode's own `openai` OAuth entry; it cannot be
+included in a scored comparison. For a separate manual subscription capture,
+upload the `harbor_adapter` package's `recording_proxy.py`, `observed_config.py`
+and empty `__init__.py` under `/tmp/harbor-wire-code/harbor_adapter`, then:
+
+```sh
+# Inside the cell only; never apply these variables to Plak.
+PYTHONPATH=/tmp/harbor-wire-code python3 -m harbor_adapter.recording_proxy \
+  --directory /tmp/opencode-wire --host chatgpt.com --host api.openai.com --port 18080
+# In a second cell shell, for the comparator process only:
+HTTPS_PROXY=http://127.0.0.1:18080 NODE_EXTRA_CA_CERTS=/tmp/opencode-wire/ca.pem \
+  opencode --model=openai/gpt-6-luna run --variant=low <reviewed plumbing prompt>
+```
+
+This manual invocation is also paid and needs approval. Export only
+`/tmp/opencode-wire/observed-config.json`, then stop that recorder. No raw
+request, response or proxy CA/key may be exported. Plak's automatic private
+capture remains the preferred exact-URL path. A rotated/incomplete Plak
+capture is not a verified whole-run observation.
+
+### A/A Null Test
+
+Create/freeze the eight-task inventory once, preserving the same reviewed
+binary artifacts and source. Replace `TB21` and `CAL` with absolute paths.
+`--phase null` automatically creates `plak-codex` and `plak-codex-aa` with
+identical binaries, tuple, composition and calibration, not prompt ablations.
+
+```sh
+just harbor-inventory --arch "$HARBOR_ARCH" --slice ab --task-root "$TB21" \
+  --arms plak-codex --calibrations "$CAL" --output "$PRIVATE/null-inputs.json"
+just harbor-freeze --inventory "$PRIVATE/null-inputs.json" --output "$PRIVATE/null-frozen.json"
+just harbor-campaign --inventory "$PRIVATE/null-frozen.json" --phase null --slice ab \
+  --blocks 3 --output "$PRIVATE/null.json"
+# Review null.json and its SHA-256, then obtain paid approval.
+export HARBOR_CAMPAIGN="$PRIVATE/null.json"
+export HARBOR_CAMPAIGN_SHA256=<reviewed-sha256>
+just harbor-null                         # PAID: 8 x 3 x 2 = 48 trials
+```
+
+`null-receipt.json` must say `passed: true`: all eight tasks retained with
+three scored trials per label, paired 95% CI covering zero and infra strictly
+below 5% per arm. Failed receipts block the Codex recipe; never rerun a null
+until favorable without documenting the failure and the changed pipeline.
+Set `NULL` to the successful receipt path.
+
+### Codex Pair
+
+Freeze the expanded slice once (16 tasks), generate a fresh scored plan with
+both calibration files and the reviewed A/A receipt, then review its JSON and
+printed SHA-256. The generator binds the receipt's file digest; the launch
+recipe additionally checks its successful verdict, source, architecture and
+Plak binary hashes. Preparation itself does not authorize inference.
+
+```sh
+just harbor-inventory --arch "$HARBOR_ARCH" --slice expanded --task-root "$TB21" \
+  --arms plak-codex codex --calibrations "$CAL" --output "$PRIVATE/codex-inputs.json"
+just harbor-freeze --inventory "$PRIVATE/codex-inputs.json" --output "$PRIVATE/codex-frozen.json"
+just harbor-campaign --inventory "$PRIVATE/codex-frozen.json" --phase scored --slice expanded \
+  --blocks 5 --null-receipt "$NULL" --output "$PRIVATE/codex.json"
+export HARBOR_CAMPAIGN="$PRIVATE/codex.json"
+export HARBOR_CAMPAIGN_SHA256=<reviewed-sha256>
+just harbor-codex                        # PAID: 16 x 5 x 2 = 160 trials
+```
+
+All launches are serial. Alternating AB/BA blocks yield the preregistered
+ABBA order across blocks. Infra slots may add at most two retries each;
+exhausted slots are dropped symmetrically. More than 10% infra or 2% unknown
+per arm stops at the block boundary. A wire/artifact validity failure stops
+immediately rather than spending the remaining campaign budget.
+
+Subscription costs are **tokens/quota, not USD estimates**. Planned usage:
+Phase 0 = 1 task x 1 block x N arms (8 above); A/A = 48; Codex = 160;
+subsequent Grok/Claude pairs = 160 each. Retry ceilings are 3 times the planned
+scored slots, but health thresholds normally stop bad plumbing far earlier.
+The 40-task generalization slice is 40 x 3 x 2 = 240 per pair, separately
+preregistered. OpenRouter has no authorized phase or spend here. Do not extend
+a nonsignificant 16 x 5 result: its fixed-task MDE is about 15 percentage
+points and its task-population MDE about 22-32 points, not 3-5 points.
+
+### Refusals
+
+The preflight rejects changed/unreviewed plans, dirty/mismatched source or
+Plak builds, missing/wrong bytes, nonnative architecture, moving image tags,
+absent tools/CA/cgroup probes, mismatched package/resource manifests,
+nonserial scheduling, unsafe credential lifetime and a leased account.
+Scored plans additionally reject absent/unverified wire calibration,
+model/effort/thinking/tier/policy differences, enabled web tools, secrets in
+harvests, served-identity gaps, changed composition, or changed executed
+artifacts. Calibration cannot be scored. Null designs require exactly eight
+tasks, three blocks and two identical labels. `harbor-codex` requires exactly
+the expanded Codex pair, five blocks and the matching successful A/A receipt.
+Do not weaken any gate to make a historical job or unobserved arm pass.
+Before paid dispatch, test Docker create/start/stop/cleanup on an owned,
+credential-free disposable cell. A tars2 probe under concurrent gate load
+needed about **9 minutes** to finish Compose cleanup, and a bounded kill API
+call timed out before cleanup eventually completed. All probe resources were
+removed and verified absent. Do not interpret `docker info` alone as cleanup
+health; establish acceptable start/stop latency before spending subscription
+quota, and classify daemon/cleanup stalls as infrastructure.
 
 ## Running
 

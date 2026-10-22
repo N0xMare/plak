@@ -53,3 +53,16 @@ async def probe_executable(
         )
     if version_argument is not None and not (result.stdout or "").startswith("plak "):
         raise PreflightError(f"{path} cell version probe returned no Plak version")
+
+
+async def probe_run_capabilities(environment: Any, path: str) -> None:
+    """Refuse pre-integration Plak builds before any credential or paid upload."""
+    command = f"timeout -k 2s 15s {shlex.quote(path)} run --help"
+    try:
+        result = await asyncio.wait_for(environment.exec(command=command), 20)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        raise PreflightError("Plak run capability probe failed") from None
+    if result.return_code or "--leave-jobs-running" not in (result.stdout or ""):
+        raise PreflightError("Plak build lacks --leave-jobs-running; integrate amp-jobs and rebuild")

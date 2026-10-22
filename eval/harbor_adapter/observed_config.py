@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import copy
+import re
 from pathlib import Path
 from typing import Any
 
@@ -20,23 +22,74 @@ def _object(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def claude_instruction_projection(instructions: dict[str, Any]) -> str | None:
+    """Project only billing nonces, never change the recorded wire digest.
+
+    The first-party fields come from anthropic/src/cch.rs:41, :80 and :142.
+    Unknown fields and all non-billing instruction content remain pinned.
+    """
+    projected = copy.deepcopy(instructions)
+    system = projected.get("system")
+    if isinstance(system, str):
+        text = system
+    elif (isinstance(system, list) and system and isinstance(system[0], dict)
+          and system[0].get("type") == "text" and isinstance(system[0].get("text"), str)):
+        text = system[0]["text"]
+    else:
+        return None
+    lines = text.splitlines(keepends=True)
+    if not lines or not lines[0].startswith("x-anthropic-billing-header: "):
+        return None
+    line = lines[0]
+    boundary = r"(?<![A-Za-z0-9_])"
+    end = r"(?=;|\s|$)"
+    line = re.sub(boundary + r"cc_prompt_id=[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}" + end,
+                  "cc_prompt_id=<request-uuid>", line)
+    line = re.sub(boundary + r"cch=[0-9a-f]{5}" + end, "cch=<body-attestation>", line)
+    line = re.sub(boundary + r"cc_version=([0-9]+\.[0-9]+\.[0-9]+)\.[0-9a-f]{3}" + end,
+                  r"cc_version=\1.<task-suffix>", line)
+    text = line + "".join(lines[1:])
+    if isinstance(system, str):
+        projected["system"] = text
+    else:
+        system[0]["text"] = text
+    return _digest(projected)
+
+
+def first_request_matches(actual: dict, expected: dict, account: str) -> bool:
+    if account != "claude":
+        return actual == expected
+    key = "claude_instruction_projection_sha256"
+    if not all(re.fullmatch(r"[0-9a-f]{64}", str(value.get(key, ""))) for value in (actual, expected)):
+        return actual == expected
+    return ({k: v for k, v in actual.items() if k != "instructions_sha256"} ==
+            {k: v for k, v in expected.items() if k != "instructions_sha256"})
+
+
 def request_config(request: dict[str, Any]) -> dict[str, Any]:
     """Only call on a complete request: null then means absent, not unobserved."""
     reasoning = _object(request.get("reasoning"))
     output = _object(request.get("output_config"))
     thinking = _object(request.get("thinking"))
     tools = []
-    for tool in request.get("tools", []):
-        if isinstance(tool, dict):
+    def collect_tools(entries, prefix=""):
+        for tool in entries:
+            if not isinstance(tool, dict):
+                continue
             function = _object(tool.get("function"))
             name = tool.get("name") or function.get("name") or tool.get("type")
-            if isinstance(name, str):
-                tools.append(name)
-    instructions = request.get("instructions", request.get("system"))
-    if instructions is None:
-        instructions = [message for message in request.get("messages", [])
-                        if isinstance(message, dict) and message.get("role") in ("system", "developer")]
-    return {
+            if not isinstance(name, str):
+                continue
+            if isinstance(tool.get("tools"), list):
+                collect_tools(tool["tools"], prefix + name + ".")
+            else:
+                tools.append(prefix + name)
+    collect_tools(request.get("tools", []))
+    instructions = {key: request[key] for key in ("instructions", "system") if key in request}
+    instructions["messages"] = [message for key in ("messages", "input")
+                                for message in (request.get(key) if isinstance(request.get(key), list) else [])
+                                if isinstance(message, dict) and message.get("role") in ("system", "developer")]
+    config = {
         "model": _scalar(request.get("model")),
         "effort": _scalar(reasoning.get("effort", output.get("effort", request.get("reasoning_effort")))),
         "thinking": _scalar(thinking.get("type", reasoning.get("enabled"))),
@@ -47,6 +100,10 @@ def request_config(request: dict[str, Any]) -> dict[str, Any]:
         "tool_names": sorted(tools), "tool_schema_sha256": _digest(request.get("tools", [])),
         "instructions_sha256": _digest(instructions),
     }
+    projection = claude_instruction_projection(instructions)
+    if projection is not None:
+        config["claude_instruction_projection_sha256"] = projection
+    return config
 
 
 def response_config(response: dict[str, Any]) -> dict[str, Any]:
@@ -66,7 +123,8 @@ def json_records(text: str) -> list[dict[str, Any]]:
     except ValueError:
         pass
     for line in text.splitlines():
-        line = line.removeprefix("data: ")
+        if line.startswith("data:"):
+            line = line[5:].lstrip()
         try:
             value = json.loads(line)
         except ValueError:
@@ -100,6 +158,7 @@ def extract_native(harness: str, records: list[dict[str, Any]]) -> dict[str, Any
 
 def extract_exchanges(directory: Path) -> dict[str, Any]:
     requests = []
+    incomplete = False
     for path in sorted(directory.rglob("*.request")):
         records = json_records(path.read_text(encoding="utf-8"))
         if len(records) != 1 or not records[0].get("model"):
@@ -108,6 +167,14 @@ def extract_exchanges(directory: Path) -> dict[str, Any]:
         body = path.with_suffix(".body")
         responses = json_records(body.read_text(encoding="utf-8")) if body.is_file() else []
         served = {}
+        info = path.with_suffix(".info")
+        if info.is_file():
+            metadata = info.read_text()
+            status = re.search(r"^status=Some\((\d+)\)$", metadata, re.MULTILINE)
+            served["status_code"] = int(status[1]) if status else None
+            incomplete |= "incomplete=true" in metadata
+            served["transport_error"] = bool(re.search(r"^terminal=Failed\(", metadata, re.MULTILINE))
+            served["client_cancelled"] = bool(re.search(r"^terminal=(ClosedEarly|Abandoned)$", metadata, re.MULTILINE))
         for response in responses:
             served.update({k: v for k, v in response_config(response).items() if v is not None})
         if served.get("served_model") or served.get("system_fingerprint"):
@@ -115,9 +182,29 @@ def extract_exchanges(directory: Path) -> dict[str, Any]:
                 served.setdefault(key, None)
         requests.append({"request": request, "response": served,
                          "request_sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
-    return {"schemaVersion": 1, "source": "exchange", "wire_verified": bool(requests),
+    incomplete |= any(directory.rglob("retention.info")) or any(directory.rglob("incomplete.log"))
+    return {"schemaVersion": 1, "source": "exchange", "wire_verified": bool(requests) and not incomplete,
             "first_request": requests[0]["request"] if requests else None, "requests": requests}
 
+
+
+def retry_telemetry(observed: dict[str, Any]) -> dict[str, Any]:
+    """Symmetric wire lower bound; never mistake an unobserved retry for zero."""
+    previous = {}
+    causes = {}
+    for record in observed.get("requests", []):
+        digest = record.get("request_sha256")
+        if not digest:
+            continue
+        before = previous.get(digest, {})
+        status = before.get("status_code")
+        cause = ("transport" if before.get("transport_error") else
+                 "http_" + str(status) if isinstance(status, int) and status >= 400 else None)
+        if cause:
+            causes[cause] = causes.get(cause, 0) + 1
+        previous[digest] = record.get("response", {})
+    return {"observed_retries": sum(causes.values()), "causes": causes,
+            "complete": False, "basis": "identical wire body after HTTP or transport failure; lower bound"}
 
 def archived_config(agent: Path, harness: str) -> dict[str, Any]:
     reduced = agent / "observed-config.json"

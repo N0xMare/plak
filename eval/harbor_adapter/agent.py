@@ -23,7 +23,7 @@ from harbor.models.agent.context import AgentContext
 
 from harbor_adapter.cell_prep import prepare_cell, record_cell
 from harbor_adapter.artifact_identity import plak_artifact_record, require_plak_provenance
-from harbor_adapter.preflight import probe_executable, task_budgets
+from harbor_adapter.preflight import probe_executable, probe_run_capabilities, task_budgets
 from harbor_adapter.lifecycle import sample_cell
 from harbor_adapter.hygiene import harvest_command
 from harbor_adapter.arch import (
@@ -153,19 +153,8 @@ class PlakAgent(BaseInstalledAgent):
             str(Path(__file__).with_name("observed_config.py")), "/tmp/plak-observed-config.py"
         )
         await probe_executable(environment, REMOTE_BINARY)
+        await probe_run_capabilities(environment, REMOTE_BINARY)
         await probe_executable(environment, REMOTE_JS_HOST, version_argument=None)
-        await self.exec_as_root(
-            environment,
-            command=(
-                "if test -e /etc/ssl/certs/ca-certificates.crt; then :; "
-                "elif command -v apt-get >/dev/null; then "
-                "apt-get update -qq && "
-                "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates; "
-                "elif command -v apk >/dev/null; then "
-                "apk add --no-cache ca-certificates; "
-                "fi"
-            ),
-        )
         await self.exec_as_root(
             environment,
             command=(
@@ -214,6 +203,8 @@ class PlakAgent(BaseInstalledAgent):
         environment: BaseEnvironment,
         context: AgentContext,
     ) -> None:
+        import time
+        deadline = time.monotonic() + task_budgets(environment)[0] - 10
         await record_cell(self, environment)
         argv = run_arguments(
             account=self._account,
@@ -221,6 +212,8 @@ class PlakAgent(BaseInstalledAgent):
             effort=self._effort,
             prompt=instruction,
         )
+        from harbor_adapter.argv import write_argv
+        write_argv(self.logs_dir, argv[:-1])
         env = self._run_env()
         quoted = " ".join(shlex.quote(part) for part in argv)
         stdout_path = "/logs/agent/plak-stdout.txt"
@@ -233,6 +226,8 @@ class PlakAgent(BaseInstalledAgent):
         command = _plak_run_command(
             quoted, stdout_path, stderr_path, exit_path
         )
+        from harbor_adapter.wire import bounded_command
+        command = bounded_command(command, deadline - time.monotonic())
         lifecycle = [await sample_cell(environment, "before_agent_run")]
         exception_type = ""
         try:

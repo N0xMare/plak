@@ -1255,6 +1255,19 @@ The product's attached root model resolves through the state root's subscription
 handle, which carries the same observer as later child and rebind resolutions;
 an unrelated accounts/catalog handle must not silently drop inference observation.
 
+Harbor comparator calibration is separate opt-in maintainer tooling, not a
+library observer or a production credential route. Its loopback recording
+proxy decrypts only explicitly named provider authorities, validates upstream
+TLS, and reduces generation bodies inside the cell. Headers, credentials,
+content, the ephemeral CA and its private key are never exported as capture
+artifacts; only structural fields and digests leave the cell. Non-provider
+tool HTTPS is blind-tunnelled without observation and ordinary tool HTTP is
+not proxied. The proxy survives until cell teardown so surviving services do
+not inherit a dead transport during verification. It is not an egress sandbox.
+Plak subscription calibration does not use this MITM: its exact pinned URLs
+and credential bindings remain unchanged, using first-party private capture.
+Missing, rotated or incomplete capture cannot authorize a scored comparison.
+
 ## 6. Panics
 
 Production code MUST NOT use `unwrap` or `expect` for fallible I/O, parsing, or
