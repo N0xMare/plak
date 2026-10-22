@@ -636,6 +636,25 @@ impl App {
                 self.session_info = info;
                 self.mark_dirty();
             }
+            HostEvent::Extension(SurfaceObservation::UsageRefreshAccounts(accounts)) => {
+                self.usage_refresh.accounts = accounts;
+                self.usage_refresh.focus = self
+                    .usage_refresh
+                    .focus
+                    .min(self.usage_refresh.accounts.len().saturating_sub(1));
+                self.mark_dirty();
+            }
+            HostEvent::Extension(SurfaceObservation::UsageCredentialRefreshed {
+                account,
+                error,
+            }) => {
+                if self.usage_refresh.active.as_ref() == Some(&account) {
+                    self.usage_refresh.active = None;
+                    self.usage_refresh.error = error.map(|reason| (account, reason));
+                    self.usage_refresh.pending_read = true;
+                    self.mark_dirty();
+                }
+            }
             HostEvent::Extension(SurfaceObservation::Profiles(view)) => {
                 self.apply_profiles_view(view);
             }

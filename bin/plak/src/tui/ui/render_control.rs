@@ -64,6 +64,13 @@ impl App {
         if self.control_tab == Some(ControlTab::Models) {
             hints.push(Hint::new("Enter", "choose when it applies"));
         }
+        if self.control_tab == Some(ControlTab::Usage)
+            && !self.usage_refresh.accounts.is_empty()
+            && self.usage_refresh.active.is_none()
+        {
+            hints.push(Hint::new("↑/↓", "refresh action"));
+            hints.push(Hint::new("Enter", "refresh"));
+        }
         if self.control_tab == Some(ControlTab::Session) {
             hints.push(Hint::new("click", "copy this row"));
         }
@@ -134,6 +141,7 @@ impl App {
             .collect();
         self.settings_hits.clear();
         self.session_row_hits.clear();
+        self.usage_refresh_hits.clear();
         let body = layout.body;
         if body.height == 0 || body.width == 0 {
             return;
@@ -230,6 +238,7 @@ impl App {
         self.control_tab_hits.clear();
         self.settings_hits.clear();
         self.session_row_hits.clear();
+        self.usage_refresh_hits.clear();
         self.provider_row_hits.clear();
     }
 
@@ -381,13 +390,46 @@ impl App {
 
     /// The Usage tab body: provider allowances (spec 02 §7.2).
     pub(super) fn draw_control_usage(&mut self, frame: &mut Frame<'_>, body: Rect) {
-        let lines = self.usage_tab_lines(body.width);
-        self.remember_tab_copy_text(ControlTab::Usage, &lines);
-        let _ = self.draw_scrolled_lines(frame, body, ControlTab::Usage, lines);
+        let layout = self.usage_tab_layout(body.width);
+        self.usage_refresh_hits.clear();
+        let focused = self.usage_refresh.accounts.get(self.usage_refresh.focus);
+        if std::mem::take(&mut self.usage_refresh.reveal)
+            && let Some(hit) = layout
+                .refresh_hits
+                .iter()
+                .find(|hit| Some(&hit.account) == focused)
+        {
+            self.control_scroll[ControlTab::Usage.index()].reveal(hit.line);
+        }
+        self.remember_tab_copy_text(ControlTab::Usage, &layout.lines);
+        let offset = self.draw_scrolled_lines(frame, body, ControlTab::Usage, layout.lines);
+        for hit in layout.refresh_hits {
+            if let Some(relative) = hit
+                .line
+                .checked_sub(offset)
+                .and_then(|row| u16::try_from(row).ok())
+                && relative < body.height
+            {
+                self.usage_refresh_hits.push((
+                    hit.account,
+                    Rect::new(
+                        body.x.saturating_add(hit.column),
+                        body.y.saturating_add(relative),
+                        9,
+                        1,
+                    ),
+                ));
+            }
+        }
     }
 
     /// Lines of the Usage tab body.
+    #[cfg(test)]
     pub(super) fn usage_tab_lines(&self, width: u16) -> Vec<Line<'static>> {
+        self.usage_tab_layout(width).lines
+    }
+
+    fn usage_tab_layout(&self, width: u16) -> usage_tab::LimitsLayout {
         let note = match &self.subscription_usage {
             SubscriptionUsageView::Loading => {
                 Some("Loading provider allowance snapshots…".to_owned())
@@ -398,6 +440,7 @@ impl App {
             SubscriptionUsageView::Read => None,
         };
         let chrome = usage_tab::LimitsChrome {
+            refresh: Some(&self.usage_refresh),
             refresh_failure_notes: &self.refresh_failure_notes,
             read_note: note.as_deref(),
             latest_turn: self
@@ -412,7 +455,7 @@ impl App {
                     reporting_model_operations: counters.6,
                 }),
         };
-        usage_tab::limits_lines(&self.usage_limits, &chrome, width, &self.theme)
+        usage_tab::limits_layout(&self.usage_limits, &chrome, width, &self.theme)
     }
 
     /// The Context tab body: the canonical context projection (spec 02 §5.6).

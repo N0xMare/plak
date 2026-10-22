@@ -753,6 +753,7 @@ struct FakeBackend {
     models_failure: Option<CliFailure>,
     openrouter_key_usage: Option<product_usage::VerticalObservation>,
     revoke_refused: bool,
+    refresh_failure: Option<&'static str>,
 }
 
 impl FakeBackend {
@@ -773,6 +774,7 @@ impl FakeBackend {
             models_failure: None,
             openrouter_key_usage: None,
             revoke_refused: false,
+            refresh_failure: None,
         }
     }
 }
@@ -914,6 +916,9 @@ impl AccountOps for FakeBackend {
 
     fn refresh_now(&mut self, provider: NativeProvider) -> CliResult<(CredentialState, u64)> {
         self.calls.push(Call::RefreshNow(provider));
+        if let Some(error) = self.refresh_failure {
+            return Err(CliFailure::new(error));
+        }
         Ok((self.terminal, 1_720_000_000))
     }
 
@@ -3958,5 +3963,69 @@ fn product_gate_allows_inference() {
     assert!(
         limits.allowance(plakous::subscriptions::SubscriptionRequestClass::Inference) > 0,
         "product turns must not use catalog-only inference=0 gates"
+    );
+}
+
+#[test]
+fn usage_refresh_revalidates_fake_credentials_and_uses_the_claimed_cli_operation() {
+    use commands::usage::{can_refresh_usage, refresh_usage_credential};
+    for provider in [
+        NativeProvider::Codex,
+        NativeProvider::Claude,
+        NativeProvider::Xai,
+    ] {
+        for credential in [
+            CredentialState::Ready,
+            CredentialState::SignedOut,
+            CredentialState::LoginRequired,
+            CredentialState::Revoked,
+            CredentialState::RefreshRequired,
+            CredentialState::Quarantined,
+        ] {
+            let offered = credential == CredentialState::RefreshRequired
+                || (provider == NativeProvider::Xai && credential == CredentialState::Quarantined);
+            let status = CliStatus {
+                compatibility: CompatibilityState::Current,
+                credential,
+            };
+            assert_eq!(can_refresh_usage(provider, status), offered);
+            let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
+            backend.credential = credential;
+            assert_eq!(
+                refresh_usage_credential(&mut backend, provider).is_ok(),
+                offered
+            );
+            assert_eq!(backend.calls.contains(&Call::RefreshNow(provider)), offered);
+            assert!(
+                !backend
+                    .calls
+                    .iter()
+                    .any(|call| matches!(call, Call::Login(..) | Call::Refresh(_)))
+            );
+        }
+    }
+    let mut failure = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
+    failure.credential = CredentialState::RefreshRequired;
+    failure.refresh_failure = Some("scripted credential refresh failed");
+    assert!(
+        refresh_usage_credential(&mut failure, NativeProvider::Claude)
+            .unwrap_err()
+            .message()
+            .contains("scripted credential refresh failed")
+    );
+    assert_eq!(
+        failure.calls,
+        vec![
+            Call::Status(NativeProvider::Claude),
+            Call::RefreshNow(NativeProvider::Claude)
+        ]
+    );
+    let mut inactive = FakeBackend::new(CompatibilityState::Required, CredentialState::Ready);
+    inactive.credential = CredentialState::RefreshRequired;
+    assert!(refresh_usage_credential(&mut inactive, NativeProvider::Claude).is_err());
+    assert!(
+        !inactive
+            .calls
+            .contains(&Call::RefreshNow(NativeProvider::Claude))
     );
 }

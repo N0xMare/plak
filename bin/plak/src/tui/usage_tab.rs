@@ -1,5 +1,4 @@
-//! The bodies of the three read-only Menu tabs — `Usage`,
-//! `Context` and `Session` (spec 02 §5.5).
+//! Menu tab bodies for `Usage`, `Context` and `Session` (spec 02 §5.5).
 //!
 //! Pure rendering. Every function here takes a host-owned snapshot and returns
 //! lines, so the honesty clauses are testable without a terminal: nothing in
@@ -685,8 +684,31 @@ fn cells_for(tokens: u64, total: u64) -> usize {
         .min(CONTEXT_GRID_CELLS)
 }
 
+/// Transient Usage refresh controls, populated only by product observations.
+#[derive(Default)]
+pub(crate) struct RefreshActions {
+    pub accounts: Vec<String>,
+    pub active: Option<String>,
+    pub error: Option<(String, String)>,
+    pub focus: usize,
+    pub pending_read: bool,
+    pub reveal: bool,
+}
+
+pub(crate) struct RefreshHit {
+    pub account: String,
+    pub line: usize,
+    pub column: u16,
+}
+
+pub(crate) struct LimitsLayout {
+    pub lines: Vec<Line<'static>>,
+    pub refresh_hits: Vec<RefreshHit>,
+}
+
 /// Chrome the TUI owns for the Limits section.
 pub(crate) struct LimitsChrome<'a> {
+    pub refresh: Option<&'a RefreshActions>,
     /// Last failed refresh notes beside otherwise valid allowance facts.
     pub refresh_failure_notes: &'a [String],
     /// State of the allowance read itself, when it has not settled. This is
@@ -702,12 +724,13 @@ pub(crate) struct LimitsChrome<'a> {
     clippy::too_many_lines,
     reason = "one function owns the whole Limits layout the spec pins block by block"
 )]
-pub(crate) fn limits_lines(
+pub(crate) fn limits_layout(
     limits: &UsageLimitsView,
     chrome: &LimitsChrome<'_>,
     width: u16,
     theme: &Theme,
-) -> Vec<Line<'static>> {
+) -> LimitsLayout {
+    let mut refresh_hits = Vec::new();
     let muted = theme.slash_item_help;
     let text = theme.slash_item;
     let strong = theme.slash_item.add_modifier(Modifier::BOLD);
@@ -718,6 +741,16 @@ pub(crate) fn limits_lines(
     ))];
     if let Some(note) = chrome.read_note {
         lines.push(Line::from(Span::styled(note.to_owned(), muted)));
+    }
+    if let Some((account, error)) = chrome.refresh.and_then(|refresh| refresh.error.as_ref()) {
+        let recorded = limits.verticals.iter().find(|vertical| vertical.vertical.account() == account)
+            .is_some_and(|vertical| {
+                matches!(&vertical.state, VerticalUsageState::Unavailable { reason } if reason.starts_with("refresh failed at "))
+                    || chrome.refresh_failure_notes.iter().any(|note| note.starts_with(&format!("{}: refresh failed at ", vertical.vertical.provider_label())))
+            });
+        if !recorded {
+            lines.push(Line::from(Span::styled(error.clone(), theme.error)));
+        }
     }
     for note in chrome.refresh_failure_notes {
         lines.push(Line::from(Span::styled(note.clone(), muted)));
@@ -734,10 +767,46 @@ pub(crate) fn limits_lines(
         lines.push(Line::from(""));
         // The header is the vertical itself; the plan or tier belongs to the
         // account line under it, never guessed into the header.
-        lines.push(Line::from(Span::styled(
+        let mut header = vec![Span::styled(
             vertical.vertical.provider_label().to_owned(),
             strong,
-        )));
+        )];
+        if let Some(refresh) = chrome.refresh {
+            let account = vertical.vertical.account();
+            let column =
+                u16::try_from(vertical.vertical.provider_label().width() + 1).unwrap_or(u16::MAX);
+            let active = refresh.active.as_deref() == Some(account);
+            if (active || refresh.accounts.iter().any(|id| id == account))
+                && column.saturating_add(9) <= width
+            {
+                header.push(Span::raw(" "));
+                header.push(Span::styled(
+                    if active {
+                        "[refreshing…]"
+                    } else {
+                        "[refresh]"
+                    },
+                    if refresh.active.is_none()
+                        && refresh
+                            .accounts
+                            .get(refresh.focus)
+                            .is_some_and(|id| id == account)
+                    {
+                        theme.slash_selected
+                    } else {
+                        muted
+                    },
+                ));
+                if refresh.active.is_none() {
+                    refresh_hits.push(RefreshHit {
+                        account: account.to_owned(),
+                        line: lines.len(),
+                        column,
+                    });
+                }
+            }
+        }
+        lines.push(Line::from(header));
         if let Some(account) = account_line(
             vertical.account_email.as_ref(),
             vertical.plan_label.as_ref(),
@@ -827,7 +896,29 @@ pub(crate) fn limits_lines(
             )));
         }
     }
-    fit_limits_lines(lines, usize::from(width).max(1))
+    let mut fitted = Vec::new();
+    let mut starts = Vec::with_capacity(lines.len());
+    for line in lines {
+        starts.push(fitted.len());
+        fitted.extend(fit_limits_lines(vec![line], usize::from(width).max(1)));
+    }
+    for hit in &mut refresh_hits {
+        hit.line = starts[hit.line];
+    }
+    LimitsLayout {
+        lines: fitted,
+        refresh_hits,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn limits_lines(
+    limits: &UsageLimitsView,
+    chrome: &LimitsChrome<'_>,
+    width: u16,
+    theme: &Theme,
+) -> Vec<Line<'static>> {
+    limits_layout(limits, chrome, width, theme).lines
 }
 
 fn fit_limits_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'static>> {
@@ -2033,6 +2124,7 @@ mod tests {
         let lines = text_of(&limits_lines(
             &limits,
             &LimitsChrome {
+                refresh: None,
                 refresh_failure_notes: &[],
                 read_note: None,
                 latest_turn: None,
@@ -2067,6 +2159,7 @@ mod tests {
         let lines = text_of(&limits_lines(
             &limits_fixture(),
             &LimitsChrome {
+                refresh: None,
                 refresh_failure_notes: &[],
                 read_note: None,
                 latest_turn: None,
@@ -2110,6 +2203,7 @@ mod tests {
         let lines = text_of(&limits_lines(
             &limits_fixture(),
             &LimitsChrome {
+                refresh: None,
                 refresh_failure_notes: &[],
                 read_note: None,
                 latest_turn: None,
@@ -2343,6 +2437,7 @@ mod tests {
         let lines = text_of(&limits_lines(
             &stale,
             &LimitsChrome {
+                refresh: None,
                 refresh_failure_notes: &[],
                 read_note: None,
                 latest_turn: None,

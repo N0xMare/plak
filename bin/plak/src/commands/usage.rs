@@ -73,3 +73,34 @@ pub fn usage_vertical_for_account(account: &str) -> Option<UsageVertical> {
         _ => None,
     }
 }
+
+/// Only recoverable credential states offer an explicit Usage refresh.
+pub(crate) fn can_refresh_usage(
+    provider: NativeProvider,
+    status: crate::presentation::CliStatus,
+) -> bool {
+    status.compatibility == CompatibilityState::Current
+        && (status.credential == CredentialState::RefreshRequired
+            || (provider == NativeProvider::Xai
+                && status.credential == CredentialState::Quarantined))
+}
+
+/// The Usage action uses the same forced, claimed refresh as `plak refresh`.
+/// Revalidate the offline posture because a button may outlive its snapshot.
+pub(crate) fn refresh_usage_credential(
+    backend: &mut impl AccountOps,
+    provider: NativeProvider,
+) -> CliResult<()> {
+    if !can_refresh_usage(provider, backend.offline_status(provider)?) {
+        return Err(plakous_hosted::error::CliFailure::new(
+            "credential no longer needs a Usage refresh; reopen Usage",
+        ));
+    }
+    let (state, _) = backend.refresh_now(provider)?;
+    if state != CredentialState::Ready {
+        return Err(plakous_hosted::error::CliFailure::new(
+            "refresh did not produce a ready credential; reopen Usage for its remedy",
+        ));
+    }
+    Ok(())
+}

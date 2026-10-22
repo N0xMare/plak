@@ -4099,6 +4099,9 @@ These are in-process host observations, not new JSONL v1 lines.
 
 ### 5.5 The Menu
 
+Usage's explicit `[refresh]` action (§7.2) may refresh an expired subscription
+credential or SuperGrok's reclaimable quarantine; login stays CLI-only.
+
 Transcript child-mail folding uses the shared expandable-row controls (§5.4),
 independently of the Menu's `group tool calls` preference.
 
@@ -5874,11 +5877,13 @@ with its reason, not omitted, and the reason is its own: a local lock, a lease,
 a credential state, and an HTTP failure are named as exactly what they are; a
 local refusal is never reported as a transport failure. A non-Ready vertical
 renders one plain line naming
-the CLI command that repairs it, and **no bar**, because login is CLI-only.
+the command that repairs it and **no bar**. Login remains CLI-only; Usage
+may perform an explicit credential refresh as described below.
 
 No usage read refreshes an expired token, on any account (chapter 01 §7.3): an
 expired access token is `RefreshRequired` without network I/O, and the next
-turn, or `plak refresh <account>`, refreshes it. A usage endpoint that rejects
+turn, `plak refresh <account>`, or the Usage tab's explicit `[refresh]` action,
+refreshes it. A usage endpoint that rejects
 a fresh token (401/403) gets one forced claimed refresh and one more read; a
 failed grant shows the credential's resulting state, decorated with the
 recorded refresh failure below. A still-expired Ready token
@@ -5891,6 +5896,26 @@ Unsafe local storage remains a local-state refusal. A settled quarantine names
 `plak login <account>` as its remedy, except for Grok, whose next refresh
 reclaims an ambiguous outcome: there the line names the next turn or
 `plak refresh grok` first and `plak login grok` only as the fallback.
+
+**Explicit TUI refresh.** Usage offers `[refresh]` beside a provider name only
+when its current offline credential posture is `RefreshRequired`, or when
+SuperGrok has a reclaimable quarantine, under a current accepted compatibility
+profile. Ready, signed-out, revoked, login-required and non-reclaimable
+quarantine states offer no refresh action, and there is no `[login]` action.
+Up/Down focuses the offered actions, Enter activates the focused action, and
+clicking its `[refresh]` label activates it directly. Page keys and the wheel
+still scroll the whole Usage page; tab and close hits remain independent.
+The action revalidates the posture and invokes the same in-process facade
+`refresh_now` operation as `plak refresh <account>`, with the same single-flight
+claim, rotation and quarantine rules. It never logs in or accepts a profile.
+One explicit refresh runs per attached product surface; its button reads
+`[refreshing…]` and other refresh actions are disabled until it settles.
+Completion re-reads the host-owned Usage projection, bypassing held freshness;
+if a read predates the credential change, one follow-up read is queued rather
+than losing the request to coalescing. Failed refreshes use the recorded-failure
+notes below; local setup or posture refusals without a recorded failure show
+an inline reason. Closing Menu does not cancel a claimed refresh or reopen the
+modal when it completes.
 
 The Usage tab and `plak usage` decorate only their display copy with the newest
 failed credential refresh recorded in telemetry. A newer `Began` row does not

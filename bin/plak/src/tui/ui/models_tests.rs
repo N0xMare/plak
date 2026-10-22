@@ -10,7 +10,7 @@ use super::{App, user_phase};
 use crate::tui::ProviderRowPresentation as _;
 use crate::tui::blocks::ScrollBlock;
 use crate::tui::presentation::{ContextUsage, SessionLedgerView};
-use crate::tui::{HostEvent, UserAction, user_action_channel};
+use crate::tui::{HostEvent, SurfaceObservation, UserAction, user_action_channel};
 use crossterm::event::KeyCode;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -49,7 +49,18 @@ fn tui_usage_last_failed_refresh_uses_launch_home_and_fixed_zone()
         )],
         SessionLedgerView::default(),
     );
+    app.apply_host_event(HostEvent::Extension(
+        SurfaceObservation::UsageRefreshAccounts(vec!["claude".into()]),
+    ));
+    let _ = app.start_usage_refresh("claude".into());
+    app.apply_host_event(HostEvent::Extension(
+        SurfaceObservation::UsageCredentialRefreshed {
+            account: "claude".into(),
+            error: None,
+        },
+    ));
     app.apply_host_event(HostEvent::UsageLimits(limits));
+    assert!(app.usage_refresh.pending_read);
     let body = lines_text(&app.usage_tab_lines(200));
     assert!(body.contains("refresh failed at 05:48: network unreachable (DNS lookup timed out); credential unchanged; retry when online"), "{body}");
     assert!(!body.contains("credential needs a token refresh"), "{body}");

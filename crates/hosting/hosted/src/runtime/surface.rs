@@ -245,6 +245,11 @@ pub trait SurfaceHandler<P: ProtocolExtension>: Send {
     fn needs_usage(&self, _intent: &P::Intent) -> bool {
         false
     }
+    /// Bypass held allowance freshness after an explicit credential mutation.
+    fn fresh_usage(&self, _intent: &P::Intent) -> bool {
+        false
+    }
+
     /// Whether the dispatch reads the session's frozen MCP tools
     /// ([`SurfaceSession::mcp`]); they are gathered only when it does.
     fn needs_session_tools(&self, _intent: &P::Intent) -> bool {
@@ -273,6 +278,13 @@ pub(super) fn needs_session_tools<P: ProtocolExtension>(
     intent: &P::Intent,
 ) -> bool {
     surface.is_some_and(|handler| handler.needs_session_tools(intent))
+}
+
+pub(super) fn fresh_usage<P: ProtocolExtension>(
+    surface: Option<&dyn SurfaceHandler<P>>,
+    intent: &P::Intent,
+) -> bool {
+    surface.is_some_and(|handler| handler.fresh_usage(intent))
 }
 
 pub(super) fn needs_usage<P: ProtocolExtension>(

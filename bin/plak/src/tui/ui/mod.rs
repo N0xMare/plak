@@ -792,6 +792,8 @@ pub(crate) struct App {
     /// presentation prints is the operator's own.
     telemetry_paths: Option<crate::product_paths::PlakPaths>,
     refresh_failure_notes: Vec<String>,
+    usage_refresh: usage_tab::RefreshActions,
+    usage_refresh_hits: Vec<(String, Rect)>,
     time_zone: &'static jiff::tz::TimeZone,
     /// The launcher's one-line explanation of the round it started. The host
     /// replaces the transcript with the session's own lines when it opens, so
@@ -1007,6 +1009,8 @@ impl App {
             launch_resume_picker: launch.open_resume_picker,
             telemetry_paths: launch.telemetry_paths,
             refresh_failure_notes: Vec::new(),
+            usage_refresh: usage_tab::RefreshActions::default(),
+            usage_refresh_hits: Vec::new(),
             time_zone: launch.time_zone,
             opening_note,
             opening_note_position: None,

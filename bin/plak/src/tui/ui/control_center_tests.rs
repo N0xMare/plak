@@ -1590,3 +1590,130 @@ fn wide_menu_details_do_not_steal_list_mouse_hits() {
         assert_eq!(app.control_tab, None);
     }
 }
+
+#[test]
+fn usage_refresh_buttons_match_goldens_and_their_scrolled_mouse_hits() {
+    use crate::tui::presentation::VerticalUsageState;
+    for width in [40, 100, 220] {
+        let mut app = usage_offline_fixture();
+        app.activate_control_tab(super::ControlTab::Usage);
+        for vertical in &mut app.usage_limits.verticals {
+            let reason = match vertical.vertical.account() {
+                "grok" => {
+                    "credential is quarantined after an ambiguous refresh; the next turn retries it, or run `plak refresh grok`; run `plak login grok` if that fails"
+                }
+                "claude" => {
+                    "credential needs a token refresh; the next turn refreshes it, or run `plak refresh claude`"
+                }
+                _ => continue,
+            };
+            vertical.state = VerticalUsageState::Unavailable {
+                reason: reason.to_owned(),
+            };
+        }
+        app.apply_host_event(HostEvent::Extension(
+            SurfaceObservation::UsageRefreshAccounts(vec!["grok".into(), "claude".into()]),
+        ));
+        let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
+        for stage in ["offered", "refreshing", "failed"] {
+            terminal.draw(|frame| app.draw(frame)).unwrap();
+            let actual = serialize_frame(terminal.backend().buffer());
+            let path = format!("tests/goldens/usage-refresh-{stage}-{width}x40.frame");
+            if std::env::var_os("PLAK_UPDATE_GOLDENS").is_some() {
+                std::fs::write(&path, &actual).unwrap();
+            } else {
+                assert_eq!(actual, std::fs::read_to_string(&path).unwrap(), "{path}");
+            }
+            if stage == "offered" {
+                let hit = app
+                    .usage_refresh_hits
+                    .iter()
+                    .find(|(account, _)| account == "grok")
+                    .unwrap()
+                    .1;
+                assert_eq!(terminal.backend().buffer()[(hit.x, hit.y)].symbol(), "[");
+                assert_eq!(
+                    app.handle_mouse(left_click(hit.x, hit.y)),
+                    Some(UserAction::Extension(
+                        SurfaceIntent::RefreshUsageCredential {
+                            account: "grok".into()
+                        }
+                    ))
+                );
+                assert!(app.start_usage_refresh("claude".into()).is_none());
+            } else if stage == "refreshing" {
+                assert_eq!(
+                    app.usage_refresh_hits,
+                    [] as [(String, ratatui::layout::Rect); 0]
+                );
+                app.apply_host_event(HostEvent::Extension(
+                    SurfaceObservation::UsageCredentialRefreshed {
+                        account: "grok".into(),
+                        error: Some("scripted local refresh refusal; credential unchanged".into()),
+                    },
+                ));
+                let (sender, receiver) = user_action_channel();
+                app.maybe_reread_usage(Some(&sender));
+                assert_eq!(
+                    receiver.try_recv().unwrap(),
+                    UserAction::Extension(SurfaceIntent::RereadUsage)
+                );
+                app.maybe_reread_usage(Some(&sender));
+                assert!(receiver.try_recv().is_err());
+            }
+        }
+        app.handle_key(key(KeyCode::PageDown));
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        // Keyboard focus reveals the offered row again after arbitrary scrolling.
+        app.handle_key(key(KeyCode::Up));
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        assert!(
+            app.usage_refresh_hits
+                .iter()
+                .any(|(account, _)| account == "grok")
+        );
+    }
+}
+
+#[test]
+fn usage_refresh_is_keyboard_reachable_and_completion_does_not_reopen_menu() {
+    let mut app = usage_fixture();
+    app.activate_control_tab(super::ControlTab::Usage);
+    let _ = menu_rows(&mut app, 100, 40);
+    assert_eq!(
+        app.usage_refresh_hits,
+        [] as [(String, ratatui::layout::Rect); 0]
+    );
+    assert!(app.handle_key(key(KeyCode::Enter)).is_none());
+    app.apply_host_event(HostEvent::Extension(
+        SurfaceObservation::UsageRefreshAccounts(vec!["grok".into(), "claude".into()]),
+    ));
+    app.handle_key(key(KeyCode::Down));
+    assert_eq!(
+        app.handle_key(key(KeyCode::Enter)),
+        Some(UserAction::Extension(
+            SurfaceIntent::RefreshUsageCredential {
+                account: "claude".into()
+            }
+        ))
+    );
+    assert!(app.handle_key(key(KeyCode::Enter)).is_none());
+    app.close_control_center();
+    app.apply_host_event(HostEvent::Extension(
+        SurfaceObservation::UsageCredentialRefreshed {
+            account: "claude".into(),
+            error: None,
+        },
+    ));
+    app.apply_host_event(HostEvent::Extension(
+        SurfaceObservation::UsageRefreshAccounts(Vec::new()),
+    ));
+    assert!(app.control_tab.is_none());
+    let (sender, receiver) = user_action_channel();
+    app.maybe_reread_usage(Some(&sender));
+    assert_eq!(
+        receiver.try_recv().unwrap(),
+        UserAction::Extension(SurfaceIntent::RereadUsage)
+    );
+    assert!(app.usage_refresh.active.is_none());
+}

@@ -1,0 +1,87 @@
+frame 40x40
+p0 Rgb(90, 98, 112)/Rgb(20, 22, 27)
+p1 Rgb(230, 232, 238)/Rgb(20, 22, 27)
+p2 Rgb(190, 194, 204)/Rgb(20, 22, 27)
+p3 Reset/Rgb(20, 22, 27)
+p4 Rgb(255, 255, 255)/Rgb(48, 91, 156)
+p5 Rgb(150, 156, 168)/Rgb(20, 22, 27)
+00 symbols ╭────────────────·Menu·─────────────[×]╮
+00 colors  0-16:p0, 17-22:p1, 23-35:p0, 36-38:p2, 39-39:p0
+01 symbols │··Settings··Agents··Providers··Usage··│
+01 colors  0-0:p0, 1-1:p3, 2-30:p1, 31-37:p4, 38-38:p3, 39-39:p0
+02 symbols │··Context··Session··Keybinds··········│
+02 colors  0-0:p0, 1-1:p3, 2-29:p1, 30-38:p3, 39-39:p0
+03 symbols │·────────────────────────────────────·│
+03 colors  0-0:p0, 1-1:p3, 2-37:p0, 38-38:p3, 39-39:p0
+04 symbols │·Limits·······························│
+04 colors  0-0:p0, 1-1:p3, 2-7:p1, 8-38:p3, 39-39:p0
+05 symbols │·Loading·provider·allowance···········│
+05 colors  0-0:p0, 1-1:p3, 2-28:p5, 29-38:p3, 39-39:p0
+06 symbols │·snapshots…···························│
+06 colors  0-0:p0, 1-1:p3, 2-11:p5, 12-38:p3, 39-39:p0
+07 symbols │······································│
+07 colors  0-0:p0, 1-38:p3, 39-39:p0
+08 symbols │·Codex································│
+08 colors  0-0:p0, 1-1:p3, 2-6:p1, 7-38:p3, 39-39:p0
+09 symbols │·not·connected···run·`plak·login······│
+09 colors  0-0:p0, 1-1:p3, 2-33:p5, 34-38:p3, 39-39:p0
+10 symbols │·codex`·······························│
+10 colors  0-0:p0, 1-1:p3, 2-7:p5, 8-38:p3, 39-39:p0
+11 symbols │······································│
+11 colors  0-0:p0, 1-38:p3, 39-39:p0
+12 symbols │·SuperGrok·[refreshing…]··············│
+12 colors  0-0:p0, 1-1:p3, 2-10:p1, 11-11:p3, 12-24:p5, 25-38:p3, 39-39:p0
+13 symbols │·credential·is·quarantined·after·an···│
+13 colors  0-0:p0, 1-1:p3, 2-36:p5, 37-38:p3, 39-39:p0
+14 symbols │·ambiguous·refresh;·the·next·turn·····│
+14 colors  0-0:p0, 1-1:p3, 2-34:p5, 35-38:p3, 39-39:p0
+15 symbols │·retries·it,·or·run·`plak·refresh·····│
+15 colors  0-0:p0, 1-1:p3, 2-34:p5, 35-38:p3, 39-39:p0
+16 symbols │·grok`;·run·`plak·login·grok`·if·that·│
+16 colors  0-0:p0, 1-1:p3, 2-37:p5, 38-38:p3, 39-39:p0
+17 symbols │··fails·······························│
+17 colors  0-0:p0, 1-1:p3, 2-7:p5, 8-38:p3, 39-39:p0
+18 symbols │······································│
+18 colors  0-0:p0, 1-38:p3, 39-39:p0
+19 symbols │·Claude·[refresh]·····················│
+19 colors  0-0:p0, 1-1:p3, 2-7:p1, 8-8:p3, 9-17:p5, 18-38:p3, 39-39:p0
+20 symbols │·credential·needs·a·token·refresh;····│
+20 colors  0-0:p0, 1-1:p3, 2-35:p5, 36-38:p3, 39-39:p0
+21 symbols │·the·next·turn·refreshes·it,·or·run···│
+21 colors  0-0:p0, 1-1:p3, 2-36:p5, 37-38:p3, 39-39:p0
+22 symbols │·`plak·refresh·claude`················│
+22 colors  0-0:p0, 1-1:p3, 2-22:p5, 23-38:p3, 39-39:p0
+23 symbols │······································│
+23 colors  0-0:p0, 1-38:p3, 39-39:p0
+24 symbols │·OpenRouter···························│
+24 colors  0-0:p0, 1-1:p3, 2-11:p1, 12-38:p3, 39-39:p0
+25 symbols │·not·connected···run·`plak·key·set····│
+25 colors  0-0:p0, 1-1:p3, 2-35:p5, 36-38:p3, 39-39:p0
+26 symbols │·openrouter`··························│
+26 colors  0-0:p0, 1-1:p3, 2-12:p5, 13-38:p3, 39-39:p0
+27 symbols │······································│
+27 colors  0-0:p0, 1-38:p3, 39-39:p0
+28 symbols │·Session·usage·(since·start·or·last···│
+28 colors  0-0:p0, 1-1:p3, 2-36:p1, 37-38:p3, 39-39:p0
+29 symbols │·resume):·····························│
+29 colors  0-0:p0, 1-1:p3, 2-9:p1, 10-38:p3, 39-39:p0
+30 symbols │···Input·tokens:···0·(0·cached)·······│
+30 colors  0-0:p0, 1-1:p3, 2-31:p1, 32-38:p3, 39-39:p0
+31 symbols │···Output·tokens:··0·(0·reasoning)····│
+31 colors  0-0:p0, 1-1:p3, 2-34:p1, 35-38:p3, 39-39:p0
+32 symbols │···Model·calls:····0·(0·reporting)····│
+32 colors  0-0:p0, 1-1:p3, 2-37:p1, 38-38:p3, 39-39:p0
+33 symbols │···turn·wall·time·(host-measured):····│
+33 colors  0-0:p0, 1-1:p3, 2-35:p1, 36-38:p3, 39-39:p0
+34 symbols │···not·reported·······················│
+34 colors  0-0:p0, 1-1:p3, 2-15:p1, 16-38:p3, 39-39:p0
+35 symbols │···Cost:···········not·available·(no··│
+35 colors  0-0:p0, 1-1:p3, 2-37:p1, 38-38:p3, 39-39:p0
+36 symbols │···provider·reported·a·cost)··········│
+36 colors  0-0:p0, 1-1:p3, 2-28:p1, 29-38:p3, 39-39:p0
+37 symbols │···y·copy·this·tab···←/→·switch·tab···│
+37 colors  0-0:p0, 1-3:p3, 4-35:p5, 36-38:p3, 39-39:p0
+38 symbols │·····PgUp/PgDn·scroll···Esc·close·····│
+38 colors  0-0:p0, 1-5:p3, 6-33:p5, 34-38:p3, 39-39:p0
+39 symbols ╰──────────────────────────────────────╯
+39 colors  0-39:p0

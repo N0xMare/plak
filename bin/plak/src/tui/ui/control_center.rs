@@ -152,6 +152,34 @@ impl App {
                 self.mark_dirty();
                 None
             }
+            _ if self.control_tab == Some(ControlTab::Usage)
+                && !self.usage_refresh.accounts.is_empty() =>
+            {
+                match code {
+                    KeyCode::Up => {
+                        self.usage_refresh.focus = self.usage_refresh.focus.saturating_sub(1);
+                    }
+                    KeyCode::Down => {
+                        self.usage_refresh.focus = self
+                            .usage_refresh
+                            .focus
+                            .saturating_add(1)
+                            .min(self.usage_refresh.accounts.len() - 1);
+                    }
+                    KeyCode::Enter => {
+                        let account = self
+                            .usage_refresh
+                            .accounts
+                            .get(self.usage_refresh.focus)?
+                            .clone();
+                        return self.start_usage_refresh(account);
+                    }
+                    _ => return None,
+                }
+                self.usage_refresh.reveal = true;
+                self.mark_dirty();
+                None
+            }
             KeyCode::Up | KeyCode::Down => {
                 let delta = if code == KeyCode::Up { -1 } else { 1 };
                 let scroll = &mut self.control_scroll[self.control_tab?.index()];
@@ -167,6 +195,37 @@ impl App {
     /// Opens `tab` without emitting an action that could re-route the tab.
     /// Scrolls the one Usage page to the next (`delta >= 0`) or previous
     /// Copies the body of the active read-only tab (spec 02 §5.5).
+    pub(super) fn start_usage_refresh(&mut self, account: String) -> Option<UserAction> {
+        if self.usage_refresh.active.is_some() || !self.usage_refresh.accounts.contains(&account) {
+            return None;
+        }
+        if let Some(index) = self
+            .usage_refresh
+            .accounts
+            .iter()
+            .position(|id| id == &account)
+        {
+            self.usage_refresh.focus = index;
+        }
+        self.usage_refresh.active = Some(account.clone());
+        self.usage_refresh.error = None;
+        self.mark_dirty();
+        Some(UserAction::Extension(
+            SurfaceIntent::RefreshUsageCredential { account },
+        ))
+    }
+
+    pub(super) fn maybe_reread_usage(&mut self, actions: Option<&crate::tui::UserActionSender>) {
+        if self.usage_refresh.pending_read
+            && let Some(actions) = actions
+            && actions
+                .send(UserAction::Extension(SurfaceIntent::RereadUsage))
+                .is_ok()
+        {
+            self.usage_refresh.pending_read = false;
+        }
+    }
+
     pub(super) fn copy_active_tab(&mut self) {
         let Some(tab) = self.control_tab else {
             return;
@@ -214,6 +273,7 @@ impl App {
                 Some(UserAction::RefreshReadiness)
             }
             ControlTab::Usage | ControlTab::Context => {
+                self.usage_refresh.reveal = true;
                 self.pending_open_usage = true;
                 Some(UserAction::Extension(SurfaceIntent::OpenUsage))
             }
@@ -385,6 +445,14 @@ impl App {
             {
                 self.close_control_center();
                 return None;
+            }
+            if self.control_tab == Some(ControlTab::Usage)
+                && let Some((account, _)) = self
+                    .usage_refresh_hits
+                    .iter()
+                    .find(|(_, rect)| rect.contains(point))
+            {
+                return self.start_usage_refresh(account.clone());
             }
             if self.control_tab == Some(ControlTab::Session)
                 && let Some((row, _)) = self

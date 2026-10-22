@@ -481,10 +481,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                         if let Some(stale) = self.host.held_usage.stale() {
                             let _ = self.host.events.send(HostEvent::UsageLimits(stale));
                         }
-                        request_subscription_usage_service(
-                            self.host.subscription_service.clone(),
-                            self.host.subscription_usage_refresh,
-                        );
+                        if surface::fresh_usage(self.host.surface.as_deref(), &intent) {
+                            self.host
+                                .subscription_usage_refresh
+                                .request_fresh(self.host.subscription_service.clone());
+                        } else {
+                            request_subscription_usage_service(
+                                self.host.subscription_service.clone(),
+                                self.host.subscription_usage_refresh,
+                            );
+                        }
                     }
                     let with_tools =
                         surface::needs_session_tools(self.host.surface.as_deref(), &intent);

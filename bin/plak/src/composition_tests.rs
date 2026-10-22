@@ -81,7 +81,9 @@ pub(crate) fn product_injected_attached_host(
     session.effort = Some("medium".into());
     session.composition = plakous_hosted::binding::CompositionSelection::JsPtc;
     let config = HostConfig {
-        surface: Some(ProductSurface::boxed(&paths)),
+        surface: Some(Box::new(
+            ProductSurface::new(paths.clone()).with_test_state_home(root.join("account-state")),
+        )),
         auto_continue: true,
         topology_admission: Some(crate::product_config::topology_admission_probe(&paths)),
         state_roots: crate::shell::host::product_state_roots(&paths),

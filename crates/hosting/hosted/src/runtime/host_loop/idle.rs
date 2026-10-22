@@ -705,8 +705,14 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             ));
                         }
                         if !self.config.attached_one_shot {
-                            self.subscription_usage_refresh
-                                .request(self.config.target.native_subscriptions().cloned());
+                            if surface::fresh_usage(self.config.surface.as_deref(), &intent) {
+                                self.subscription_usage_refresh.request_fresh(
+                                    self.config.target.native_subscriptions().cloned(),
+                                );
+                            } else {
+                                self.subscription_usage_refresh
+                                    .request(self.config.target.native_subscriptions().cloned());
+                            }
                         }
                     }
                     let with_tools =

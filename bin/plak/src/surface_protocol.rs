@@ -239,6 +239,13 @@ pub enum SurfaceIntent {
     SaveSettings(SettingsUpdate),
     /// Open usage / limits pane.
     OpenUsage,
+    /// Explicitly refresh an eligible subscription credential; never logs in.
+    RefreshUsageCredential {
+        /// Exact OAuth account offered by the product.
+        account: String,
+    },
+    /// Re-read provider allowances after an explicit credential refresh.
+    RereadUsage,
     /// Request the profile list ([`SurfaceObservation::Profiles`]).
     ListProfiles,
     /// Re-read workspace branch and profile facts for composer chrome.
@@ -284,6 +291,8 @@ impl fmt::Debug for SurfaceIntent {
             Self::OpenSettings => "OpenSettings",
             Self::SaveSettings(_) => "SaveSettings(..)",
             Self::OpenUsage => "OpenUsage",
+            Self::RefreshUsageCredential { .. } => "RefreshUsageCredential{..}",
+            Self::RereadUsage => "RereadUsage",
             Self::ListProfiles => "ListProfiles",
             Self::RefreshComposerChrome => "RefreshComposerChrome",
             Self::ShowMcp => "ShowMcp",
@@ -307,6 +316,15 @@ pub enum SurfaceObservation {
     SettingsSaveFailed(String),
     /// Open the honest usage overlay after preceding usage state updates.
     OpenUsageOverlay,
+    /// Exact accounts whose offline credential posture permits refresh.
+    UsageRefreshAccounts(Vec<String>),
+    /// One explicit refresh settled; failures normally use recorded telemetry notes.
+    UsageCredentialRefreshed {
+        /// Account whose explicit refresh settled.
+        account: String,
+        /// Fallback only when no recorded credential failure explains it.
+        error: Option<String>,
+    },
     /// The current profile list.
     Profiles(ProfilesView),
     /// Session identity and its own frozen cards. `id` is `custom` when no
@@ -365,6 +383,8 @@ impl ObservationExtension for SurfaceObservation {
             Self::SettingsLoadFailed(_) => "settings_load_failed",
             Self::SettingsSaveFailed(_) => "settings_save_failed",
             Self::OpenUsageOverlay => "usage_overlay",
+            Self::UsageRefreshAccounts(_) => "usage_refresh_accounts",
+            Self::UsageCredentialRefreshed { .. } => "usage_credential_refreshed",
             Self::Profiles(_) => "profiles",
             Self::SessionProfile(_) => "session_profile",
             Self::WorkspaceChrome(_) => "workspace_chrome",

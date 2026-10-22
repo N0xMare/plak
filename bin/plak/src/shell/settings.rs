@@ -778,6 +778,8 @@ fn send_agent_acknowledgements(paths: &PlakPaths, tree_id: &str, events: &Sender
 pub struct ProductSurface {
     paths: PlakPaths,
     chrome_generation: std::sync::Arc<std::sync::Mutex<u64>>,
+    usage_refreshing: std::sync::Arc<std::sync::Mutex<bool>>,
+    state_home: Result<std::path::PathBuf, String>,
 }
 
 impl ProductSurface {
@@ -785,9 +787,100 @@ impl ProductSurface {
     #[must_use]
     pub fn new(paths: PlakPaths) -> Self {
         Self {
+            state_home: crate::home::paths::application_state_home(),
+            usage_refreshing: std::sync::Arc::new(std::sync::Mutex::new(false)),
             paths,
             chrome_generation: std::sync::Arc::new(std::sync::Mutex::new(0)),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_state_home(mut self, state_home: std::path::PathBuf) -> Self {
+        self.state_home = Ok(state_home);
+        self
+    }
+
+    fn accounts_backend(
+        &self,
+    ) -> plakous_hosted::error::CliResult<crate::commands::application::PlakousApplication> {
+        let state_home = self
+            .state_home
+            .as_ref()
+            .map_err(|error| plakous_hosted::error::CliFailure::new(error.clone()))?;
+        crate::commands::application::PlakousApplication::for_accounts(state_home.clone())
+    }
+
+    fn send_usage_refresh_accounts(&self, events: &Sender<PlakExtension>) {
+        use crate::commands::application::AccountOps as _;
+        let accounts = self
+            .accounts_backend()
+            .map(|mut backend| {
+                [
+                    plakous::subscriptions::NativeProvider::Codex,
+                    plakous::subscriptions::NativeProvider::Xai,
+                    plakous::subscriptions::NativeProvider::Claude,
+                ]
+                .into_iter()
+                .filter(|provider| {
+                    backend.offline_status(*provider).is_ok_and(|status| {
+                        crate::commands::usage::can_refresh_usage(*provider, status)
+                    })
+                })
+                .map(|provider| crate::commands::support::cli_provider_name(provider).to_owned())
+                .collect()
+            })
+            .unwrap_or_default();
+        let _ = events.send(HostEvent::Extension(
+            SurfaceObservation::UsageRefreshAccounts(accounts),
+        ));
+    }
+
+    fn refresh_usage(&self, account: String, events: &Sender<PlakExtension>) {
+        let Some(provider) = oauth_provider_for_account(&account) else {
+            let _ = events.send(HostEvent::Extension(
+                SurfaceObservation::UsageCredentialRefreshed {
+                    account,
+                    error: Some("Usage refresh requires a subscription account".to_owned()),
+                },
+            ));
+            return;
+        };
+        let Ok(mut running) = self.usage_refreshing.lock() else {
+            return;
+        };
+        if *running {
+            return;
+        }
+        *running = true;
+        drop(running);
+        let paths = self.paths.clone();
+        let state_home = self.state_home.clone();
+        let running = std::sync::Arc::clone(&self.usage_refreshing);
+        let events = events.clone();
+        std::thread::spawn(move || {
+            let _telemetry = crate::telemetry_sink::install_product_credential_telemetry(&paths);
+            let result = state_home
+                .map_err(plakous_hosted::error::CliFailure::new)
+                .and_then(crate::commands::application::PlakousApplication::for_accounts)
+                .and_then(|mut backend| {
+                    crate::commands::usage::refresh_usage_credential(&mut backend, provider)
+                });
+            let error = result.err().and_then(|error| {
+                crate::product_doctor::last_failed_refresh(
+                    &paths,
+                    &account,
+                    crate::local_time_zone(),
+                )
+                .is_none()
+                .then(|| error.message().to_owned())
+            });
+            if let Ok(mut running) = running.lock() {
+                *running = false;
+            }
+            let _ = events.send(HostEvent::Extension(
+                SurfaceObservation::UsageCredentialRefreshed { account, error },
+            ));
+        });
     }
 
     /// A boxed handler for a [`HostConfig`](plakous_hosted::runtime::HostConfig)'s `surface` field.
@@ -817,7 +910,14 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
     }
 
     fn needs_usage(&self, intent: &SurfaceIntent) -> bool {
-        matches!(intent, SurfaceIntent::OpenUsage)
+        matches!(
+            intent,
+            SurfaceIntent::OpenUsage | SurfaceIntent::RereadUsage
+        )
+    }
+
+    fn fresh_usage(&self, intent: &SurfaceIntent) -> bool {
+        matches!(intent, SurfaceIntent::RereadUsage)
     }
 
     fn needs_session_tools(&self, intent: &SurfaceIntent) -> bool {
@@ -864,7 +964,12 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
             }
             SurfaceIntent::OpenUsage
                 if facts.phase == SurfacePhase::Idle && facts.attached_one_shot => {}
+            SurfaceIntent::RefreshUsageCredential { account } => {
+                self.refresh_usage(account, events);
+            }
+            SurfaceIntent::RereadUsage => self.send_usage_refresh_accounts(events),
             SurfaceIntent::OpenUsage => {
+                self.send_usage_refresh_accounts(events);
                 emit_settings(&self.paths, events);
                 let _ = events.send(HostEvent::Extension(SurfaceObservation::OpenUsageOverlay));
             }
@@ -1289,7 +1394,8 @@ mod tests {
                 let (_root, paths) = PlakPaths::isolated_test_home();
                 let config = ProductConfig::default_product();
                 config.save(&paths).unwrap();
-                let handler = ProductSurface::new(paths.clone());
+                let handler = ProductSurface::new(paths.clone())
+                    .with_test_state_home(paths.home().join("account-state"));
                 let intent = match intent_index {
                     0 => SurfaceIntent::OpenConfigFile,
                     1 => SurfaceIntent::OpenSettings,
@@ -1353,11 +1459,14 @@ mod tests {
                     SurfaceIntent::OpenUsage => assert!(matches!(
                         observed.as_slice(),
                         [
+                            HostEvent::Extension(SurfaceObservation::UsageRefreshAccounts(_)),
                             HostEvent::Extension(SurfaceObservation::SettingsSnapshot(_)),
                             HostEvent::Extension(SurfaceObservation::OpenUsageOverlay),
                         ]
                     )),
-                    SurfaceIntent::ListProfiles
+                    SurfaceIntent::RefreshUsageCredential { .. }
+                    | SurfaceIntent::RereadUsage
+                    | SurfaceIntent::ListProfiles
                     | SurfaceIntent::RefreshComposerChrome
                     | SurfaceIntent::ShowMcp
                     | SurfaceIntent::ApplyProfile { .. }

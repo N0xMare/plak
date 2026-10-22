@@ -293,13 +293,17 @@ pub fn run_shell_host_loop<P: plakous_host_protocol::ProtocolExtension>(
             UserAction::Extension(intent) => {
                 if super::surface::needs_usage(config.surface.as_deref(), &intent) {
                     report_unavailable_context(&events);
-                    request_subscription_usage_cached(
-                        &held_usage,
-                        &session_ledger,
-                        &events,
-                        &subscription_usage_refresh,
-                        config.subscriptions.clone(),
-                    );
+                    if super::surface::fresh_usage(config.surface.as_deref(), &intent) {
+                        subscription_usage_refresh.request_fresh(config.subscriptions.clone());
+                    } else {
+                        request_subscription_usage_cached(
+                            &held_usage,
+                            &session_ledger,
+                            &events,
+                            &subscription_usage_refresh,
+                            config.subscriptions.clone(),
+                        );
+                    }
                 }
                 let with_tools =
                     super::surface::needs_session_tools(config.surface.as_deref(), &intent);

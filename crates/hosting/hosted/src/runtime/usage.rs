@@ -897,6 +897,16 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
     }
 
     pub(super) fn request(&self, subscriptions: Option<NativeSubscriptions>) {
+        self.request_inner(subscriptions, false);
+    }
+
+    /// An explicit credential change must be read even if an older read is in flight.
+    /// The bounded request channel coalesces multiple explicit requests into one follow-up.
+    pub(super) fn request_fresh(&self, subscriptions: Option<NativeSubscriptions>) {
+        self.request_inner(subscriptions, true);
+    }
+
+    fn request_inner(&self, subscriptions: Option<NativeSubscriptions>, fresh: bool) {
         let Some(requests) = &self.requests else {
             let _ = self.events.send(HostEvent::SubscriptionUsage(
                 plakous_host_protocol::views::presentation::SubscriptionUsageView::Unavailable {
@@ -908,6 +918,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
         if self
             .in_flight
             .swap(true, std::sync::atomic::Ordering::AcqRel)
+            && !fresh
         {
             return;
         }
@@ -1729,6 +1740,34 @@ mod tests {
             terminal, 1,
             "latest terminal observation replaces older state"
         );
+    }
+
+    #[test]
+    fn explicit_post_credential_read_is_queued_behind_an_older_read() {
+        let (tx, _rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
+        let events = Sender::over(tx);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let worker_calls = Arc::clone(&calls);
+        let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+        let refresh = SubscriptionUsageRefresh::new_with_projector(&events, move |_| {
+            if worker_calls.fetch_add(1, Ordering::AcqRel) == 0 {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            }
+            (
+                plakous_host_protocol::views::presentation::SubscriptionUsageView::Read,
+                None,
+            )
+        });
+        refresh.request(None);
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        for _ in 0..20 {
+            refresh.request_fresh(None);
+        }
+        release_tx.send(()).unwrap();
+        drop(refresh);
+        assert_eq!(calls.load(Ordering::Acquire), 2);
     }
 
     #[test]

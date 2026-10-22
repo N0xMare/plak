@@ -497,6 +497,7 @@ pub(super) fn run_app(
 
         app.maybe_request_tree_snapshot_after_attach(actions);
         app.maybe_refresh_composer_chrome(actions);
+        app.maybe_reread_usage(actions);
         app.maybe_request_agent_acknowledgements(actions);
         app.maybe_request_call_details(actions);
         app.sync_agent_transcript(actions);
