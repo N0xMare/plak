@@ -90,6 +90,10 @@ impl App {
             idx
         });
         match (target, block) {
+            (RowTarget::Group, ScrollBlock::Mail { group_open, .. }) => {
+                *group_open = !*group_open;
+                self.mark_transcript_structural();
+            }
             (
                 RowTarget::Group,
                 ScrollBlock::Tool {
@@ -169,6 +173,13 @@ impl App {
             block.display_mode().is_some_and(DisplayMode::shows_detail)
                 || matches!(
                     block,
+                    ScrollBlock::Mail {
+                        group_open: true,
+                        ..
+                    }
+                )
+                || matches!(
+                    block,
                     ScrollBlock::Tool { group_open, view, .. } if *group_open || view.members_open
                 )
         });
@@ -191,6 +202,9 @@ impl App {
                     DisplayMode::Collapsed
                 };
                 block.set_display_mode(next, false);
+            }
+            if let ScrollBlock::Mail { group_open, .. } = block {
+                *group_open = !any_open;
             }
             if let ScrollBlock::Tool {
                 group_open, view, ..

@@ -163,7 +163,7 @@ fn result_text(output_json: &str) -> Option<String> {
 
 /// `text` trimmed, or its head within `bound` bytes and a last line that
 /// says it was cut and from how much.
-fn bounded_text(text: &str, bound: usize) -> Option<String> {
+pub(crate) fn bounded_text(text: &str, bound: usize) -> Option<String> {
     let text = text.trim();
     if text.is_empty() {
         return None;

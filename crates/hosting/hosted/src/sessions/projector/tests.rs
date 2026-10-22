@@ -2701,10 +2701,48 @@ fn child_mail_riding_a_prompt_projects_as_rows_attributed_to_each_child() {
         rows,
         vec![
             TranscriptRow::user("fix the build"),
-            TranscriptRow::info(NoticeScope::Tree, "result · #c7 · all green"),
+            TranscriptRow::info(NoticeScope::Tree, "result · #c7 · all green\nmore"),
             TranscriptRow::info(NoticeScope::Tree, "question · #c9 · which <branch>?"),
         ]
     );
+}
+
+#[test]
+fn multiline_delivered_mail_rebuild_equals_incremental_and_replay() {
+    let mut feed = Feed::new();
+    let frame = crate::runtime::result_mail::CHILD_MAIL_FRAME;
+    let command = format!(
+        "review\n\n{frame}\n\n<child_message message_id=\"m1\" from=\"tree-c7\" purpose=\"finding\">\nfirst &lt;line&gt;\nsecond line\n</child_message>\n\n<child_message message_id=\"m2\" from=\"tree-c9\" purpose=\"question\">\nwhich branch?\nmore detail\n</child_message>"
+    );
+    let (fact, items) = feed.history(
+        None,
+        HistorySegmentKind::Conversation,
+        vec![text_item(ReadActor::User, &command)],
+        Vec::new(),
+    );
+    feed.advance(
+        vec![fact],
+        Reads {
+            items: vec![(0, items)],
+            ..Reads::default()
+        },
+    );
+    let all = project_all(&feed);
+    let rows: Vec<_> = all
+        .views
+        .transcript(&feed.intents)
+        .into_iter()
+        .map(|(_, row)| row)
+        .collect();
+    assert!(rows.contains(&TranscriptRow::info(
+        NoticeScope::Tree,
+        "finding · #c7 · first <line>\nsecond line"
+    )));
+    for pages in [&[1][..], &[2, 1][..]] {
+        let (paged, stored) = project_paged(&feed, pages, 1);
+        assert_eq!(paged, all.views);
+        assert_eq!(stored, all.views.rows);
+    }
 }
 
 /// A web call's projected row keeps the host's own subject (the quoted

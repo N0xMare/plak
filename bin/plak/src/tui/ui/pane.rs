@@ -285,6 +285,7 @@ impl App {
     /// typed content key and occurrence for rows without a durable id). A
     /// selection addresses old rows and is dropped.
     pub(super) fn carry_item_state(&mut self, old: &[ScrollBlock]) {
+        carry_mail_state(&mut self.pane.blocks, old);
         let by_identity: HashMap<(bool, String), &ScrollBlock> = old
             .iter()
             .filter_map(|block| {
@@ -413,6 +414,38 @@ impl App {
         self.tool_hit_targets.clear();
         self.mouse_scroll_queue = 0;
         self.scrollbar_drag = None;
+    }
+}
+
+fn carry_mail_state(blocks: &mut [ScrollBlock], old: &[ScrollBlock]) {
+    // Notices have no wire identity; retain folds by content and occurrence.
+    let mut mail_states: HashMap<&str, std::collections::VecDeque<(bool, bool)>> = HashMap::new();
+    for block in old {
+        if let ScrollBlock::Mail {
+            text,
+            open,
+            group_open,
+        } = block
+        {
+            mail_states
+                .entry(text)
+                .or_default()
+                .push_back((*open, *group_open));
+        }
+    }
+    for block in blocks {
+        if let ScrollBlock::Mail {
+            text,
+            open,
+            group_open,
+        } = block
+            && let Some((was_open, was_group)) = mail_states
+                .get_mut(text.as_str())
+                .and_then(std::collections::VecDeque::pop_front)
+        {
+            *open = was_open;
+            *group_open = was_group;
+        }
     }
 }
 

@@ -2566,3 +2566,62 @@ fn local_launch_timings(
         std::thread::sleep(Duration::from_millis(2));
     }
 }
+
+/// Delivered result envelopes use the same compact folds on a real terminal.
+#[test]
+fn several_delivered_child_messages_fold_and_expand_on_the_terminal() {
+    let spawn = tree_turn_script()["steps"][0].clone();
+    let fixture = Fixture::new(&json!({
+        "version": 1, "tree": true, "repeat_last_step": true,
+        "steps": [spawn.clone(), spawn.clone(), spawn,
+            {"output": {"text": "children ready for mail review"}},
+            {"output": {"text": "mail review complete"}}
+        ]
+    }));
+    let config_path = fixture.home().join("config.toml");
+    let mut config = std::fs::read_to_string(&config_path).unwrap();
+    config.push_str("\n[turn]\nauto_continue = false\n");
+    write_private(&config_path, &config);
+    let mut terminal = Terminal::spawn_ready(&fixture);
+    terminal.send(b"delegate three tasks\r");
+    terminal.wait_where(
+        "three completed children before the next admission",
+        |screen| {
+            ["c1 finished", "c2 finished", "c3 finished"]
+                .iter()
+                .all(|label| screen.contains(label))
+        },
+    );
+    terminal.send(b"review delivered mail\r");
+    let compact = terminal.wait_where("compact mail after the review turn", |screen| {
+        screen.contains("3 messages") && screen.contains("mail review complete")
+    });
+    assert!(
+        ["#c1", "#c2", "#c3"].iter().all(|id| compact.contains(id)),
+        "{compact}"
+    );
+    assert!(!compact.contains("result · #"), "{compact}");
+    // Ctrl-O opens the last visible foldable row: the mail group header.
+    terminal.send(b"\x0f");
+    let rows = terminal.wait_screen("result · #c3");
+    assert!(
+        rows.contains("result · #c1") && rows.contains("result · #c2"),
+        "{rows}"
+    );
+    let y = row_of(&rows, "result · #c3") + 1;
+    terminal.send(format!("\x1b[<0;5;{y}M\x1b[<0;5;{y}m").as_bytes());
+    let detail = terminal.wait_where("an expanded delivered body", |screen| {
+        screen
+            .lines()
+            .any(|line| line.trim_start().starts_with('{'))
+    });
+    assert!(
+        detail
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .contains("offline scripted child done"),
+        "{detail}"
+    );
+    terminal.quit();
+}

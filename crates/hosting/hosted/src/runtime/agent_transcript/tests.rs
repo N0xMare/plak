@@ -324,7 +324,7 @@ fn mail_is_a_tree_notice_and_harness_notes_and_hidden_reasoning_have_no_row() {
     assert_eq!(rows[2], TranscriptRow::assistant("done"));
     assert_eq!(
         rows[3],
-        TranscriptRow::info(NoticeScope::Tree, "result · #c39 · a2 · all green")
+        TranscriptRow::info(NoticeScope::Tree, "result · #c39 · a2 · all green\nmore")
     );
 }
 

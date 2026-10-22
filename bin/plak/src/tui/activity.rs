@@ -572,6 +572,7 @@ fn seals_activity(block: &ScrollBlock, prefs: RenderPrefs) -> bool {
         | ScrollBlock::Steer { .. }
         | ScrollBlock::Header(_)
         | ScrollBlock::Milestone { .. }
+        | ScrollBlock::Mail { .. }
         | ScrollBlock::System(_)
         | ScrollBlock::Error(_) => true,
         ScrollBlock::Tool { kind, .. } => *kind == ActivityKind::Compact,
@@ -640,6 +641,46 @@ pub(super) fn plan(blocks: &[ScrollBlock], prefs: RenderPrefs) -> Vec<RowPlan> {
         {
             plans[index - 1].activity_continues = true;
         }
+    }
+    let mut start = 0;
+    while start < blocks.len() {
+        if !matches!(blocks[start], ScrollBlock::Mail { .. }) {
+            start += 1;
+            continue;
+        }
+        let mut end = start + 1;
+        while end < blocks.len() && matches!(blocks[end], ScrollBlock::Mail { .. }) {
+            end += 1;
+        }
+        if end - start > 1 {
+            let open = matches!(
+                blocks[start],
+                ScrollBlock::Mail {
+                    group_open: true,
+                    ..
+                }
+            );
+            let mut agents = Vec::new();
+            for block in &blocks[start..end] {
+                if let ScrollBlock::Mail { text, .. } = block
+                    && let Some((_, agent, _)) = super::blocks::mail_parts(text)
+                    && !agents.contains(&agent)
+                {
+                    agents.push(agent);
+                }
+            }
+            plans[start].mail_summary =
+                Some(format!("{} messages · {}", end - start, agents.join(" ")));
+            plans[start].group_folded = !open;
+            for (index, plan) in plans.iter_mut().enumerate().take(end).skip(start) {
+                plan.group_owner = Some(start);
+                plan.activity_continues = index + 1 < end;
+                if index > start {
+                    plan.hidden = !open;
+                }
+            }
+        }
+        start = end;
     }
     plans
 }

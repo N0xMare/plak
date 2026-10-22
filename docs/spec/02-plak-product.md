@@ -3328,6 +3328,20 @@ one leaves them for the next.
 
 ### 5.4 The transcript grammar
 
+Delivered child mail remains one stored `tree` notice per message (chapter 03).
+In the TUI each recognized `<purpose> · #<agent> · <body>` notice is one
+collapsed row: purpose, sender and the body's first line, ellipsized to the
+available display width. Enter/Ctrl-O or the row's expand hit opens the full
+body; the usual fold-all chord also folds mail. Consecutive delivered-mail
+notices form a collapsed `N messages · #sender #sender` group (senders in
+first-seen order, deduplicated). Opening the header reveals the compact rows;
+each row then opens independently. A non-mail row ends the group. Grouping
+uses adjacency, not guessed arrival timing, so live and restored transcripts
+agree. Result and question mail also starts compact: purpose stays visible
+when the group is open and important mail remains available without making
+an orchestrating transcript unbounded. Selection/copy and search retain the
+full text. Non-mail tree notices keep their ordinary rendering.
+
 **Transient root continuation.** After a committed definite model failure,
 the host applies the shared transient classifier (03 §10.2). An eligible root
 gets at most `[orchestration] transient_resumes` new continuation turns per
@@ -4043,6 +4057,9 @@ protected recovery without a compact action.
 These are in-process host observations, not new JSONL v1 lines.
 
 ### 5.5 The Menu
+
+Transcript child-mail folding uses the shared expandable-row controls (§5.4),
+independently of the Menu's `group tool calls` preference.
 
 One full-page frame, seven tabs, one row renderer: **Settings · Agents · Providers ·
 Usage · Context · Session · Keybinds**. Menu and Activity (§5.7) share that frame: the whole terminal at every size, the same title row, tab row, footer and close glyph; only the body differs. On a terminal wider than 120 columns the border and close button still span the page, and the title, the tab row, the tab divider and the footer content center with the body, which is at most 120 columns. Hit rectangles follow that column. At 120 columns and narrower nothing moves. Activity is not capped. Nothing of the main view is drawn or hit-tested beneath either. Divergent hand-drawn chrome per pane is

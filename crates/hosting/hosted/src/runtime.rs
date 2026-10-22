@@ -150,6 +150,7 @@ mod tool_facts;
 mod tools;
 mod topology_state;
 mod tree;
+pub(crate) use tree::bounded_text as bounded_notice_text;
 mod turn;
 pub(crate) use turn::truncation_note;
 mod turn_drive;

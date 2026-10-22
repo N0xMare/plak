@@ -363,17 +363,15 @@ pub(crate) fn mail_row(text: &str) -> Option<String> {
         .or_else(|| object.get("body"))
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
-    // The first line only: the full output is in the child's own transcript,
-    // and a summary row that grows with the payload is the dump again.
-    if let Some(first) = body.lines().find(|line| !line.trim().is_empty()) {
-        row.push_str(&format!(" · {}", first.trim()));
+    if let Some(body) = crate::runtime::bounded_notice_text(body, 2048) {
+        row.push_str(&format!(" · {body}"));
     }
     Some(row)
 }
 
 /// Splits a root command that carries a child-mail batch back into the
 /// operator's own text and one row per `<child_message>` block, each read like
-/// [`mail_row`]: purpose, sender and the body's first line.
+/// [`mail_row`]: purpose, sender and the bounded body (the TUI folds its presentation).
 ///
 /// The batch is appended after the operator's text as the fixed frame
 /// sentence and escaped blocks (`result_mail::select`), so the boundary is the
@@ -399,8 +397,8 @@ fn child_mail_rows(mut rest: &str) -> Option<Vec<String>> {
         // Bodies are escaped, so the first closing tag ends this block.
         let (body, after) = block.split_once("\n</child_message>")?;
         let mut row = format!("{purpose} · {}", short_agent(&unescape_mail(from)));
-        if let Some(first) = body.lines().find(|line| !line.trim().is_empty()) {
-            row.push_str(&format!(" · {}", unescape_mail(first.trim())));
+        if let Some(body) = crate::runtime::bounded_notice_text(&unescape_mail(body), 2048) {
+            row.push_str(&format!(" · {body}"));
         }
         rows.push(row);
         rest = after;
@@ -877,11 +875,9 @@ mod tests {
     }
 
     /// a pushed `result` lands in the parent's session as one
-    /// entry carrying the whole envelope. Printed line by line that buries the
-    /// transcript, so it collapses to who, which attempt, which candidate, and
-    /// the first line of what the child said.
+    /// entry retaining a bounded body; the surface owns compact presentation.
     #[test]
-    fn a_pushed_result_renders_as_one_compact_row_not_a_mail_dump() {
+    fn a_pushed_result_retains_its_body_in_one_notice() {
         let envelope = serde_json::json!({
             "purpose": "result",
             "from": "navtree-c1",
@@ -895,9 +891,25 @@ mod tests {
         assert_eq!(lines[0].actor, "mail");
         assert_eq!(
             lines[0].text,
-            "result · #c1 · a2 · #0f3a91b2 · {\"verdict\":\"ok\"}"
+            "result · #c1 · a2 · #0f3a91b2 · {\"verdict\":\"ok\"}\nsecond line\nthird line"
         );
-        assert!(!lines[0].text.contains("second line"));
+        assert!(lines[0].text.contains("second line"));
+    }
+
+    #[test]
+    fn delivered_mail_body_has_a_utf8_safe_two_kib_bound_and_cut_marker() {
+        let body = "界".repeat(2000);
+        let command = format!(
+            "prompt\n\n{}\n\n<child_message message_id=\"m\" from=\"tree-c7\" purpose=\"finding\">\n{body}\n</child_message>",
+            crate::runtime::result_mail::CHILD_MAIL_FRAME
+        );
+        let (_, rows) = split_child_mail(&command).unwrap();
+        let carried = rows[0].strip_prefix("finding · #c7 · ").unwrap();
+        assert!(carried.len() <= 2048);
+        assert!(carried.ends_with("… cut at 2 KiB of 6 KiB"));
+        let envelope =
+            serde_json::json!({"purpose":"finding", "from":"tree-c7", "body":body}).to_string();
+        assert_eq!(mail_row(&envelope).unwrap(), rows[0]);
     }
 
     /// A `followup` is mail like any other and says so; it is not a user turn

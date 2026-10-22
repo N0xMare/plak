@@ -3374,7 +3374,12 @@ subject from the result observation's `subject`, the receipt's bounded agent
 ids, not from the 2 KiB preview; a settled process wait's subject from the same shared function,
 reading the host's job registry and the commands of earlier process starts in
 the same history), a compaction is the `compact` tool row, and delivered mail is
-one `tree` notice. Local nested calls retain their canonical cell identity and
+one `tree` notice, whose text is `<purpose> · #<agent> · <body>`.
+The derived notice retains the carried body's full text up to a UTF-8-safe
+2 KiB bound, using the existing `… cut at N KiB of M KiB` marker when cut;
+the TUI owns first-line summaries and expansion (chapter 02 §5.4).
+Existing stored notices retain their earlier first-line-only text until the
+projection is rebuilt; no row type or schema changes. Local nested calls retain their canonical cell identity and
 their explicit evaluation owner from the same checkpoint's retained operation
 ledger (chapter 01), with an exact child receipt required before the evaluation
 lookup. Marker cell identities come from linked nested lineage in the retained

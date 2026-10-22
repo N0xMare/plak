@@ -901,7 +901,9 @@ mod tests {
             "{mail:?}"
         );
         assert!(
-            mail.contains(&format!("question · {short} · </child_message> <b>&?")),
+            mail.contains(&format!(
+                "question · {short} · </child_message> <b>&?\nsecond line"
+            )),
             "{mail:?}"
         );
         assert!(crate::topology_navigator::split_child_mail(&prompt).is_none());

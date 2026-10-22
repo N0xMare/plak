@@ -13,8 +13,8 @@ use unicode_width::UnicodeWidthStr as _;
 use crate::tui::presentation::{ActivityKind, ActivityState, McpCall};
 use plakous_host_protocol::views::CallDetailOutcome;
 use plakous_host_protocol::views::transcript::{
-    AgentMilestone, MilestoneEvent, NoticePlacement, NoticeTone, ProcessNotice, ProcessOutcome,
-    ToolItem, TranscriptRow, WaitFacts,
+    AgentMilestone, MilestoneEvent, NoticePlacement, NoticeScope, NoticeTone, ProcessNotice,
+    ProcessOutcome, ToolItem, TranscriptRow, WaitFacts,
 };
 
 /// Grok Build / expandable-indicator prompt glyph (compressed `>` lookalike).
@@ -305,6 +305,15 @@ pub enum ScrollBlock {
         milestone: AgentMilestone,
         /// The operator opened the row's detail.
         open: bool,
+    },
+    /// Delivered child mail; folding and grouping are presentation-only.
+    Mail {
+        /// The complete bounded notice, unchanged for copying and search.
+        text: String,
+        /// The operator opened this message's body.
+        open: bool,
+        /// On a consecutive run's first message, reveal its member rows.
+        group_open: bool,
     },
     /// Dim system / session note. Ends the current tool group.
     System(String),
@@ -648,6 +657,7 @@ impl ScrollBlock {
             | Self::Discarded { text, .. }
             | Self::Steer { text, .. }
             | Self::Header(text)
+            | Self::Mail { text, .. }
             | Self::System(text)
             | Self::Error(text) => text.len(),
             Self::Item { text, meta } => text.len() + meta.iter().map(String::len).sum::<usize>(),
@@ -700,6 +710,7 @@ impl ScrollBlock {
             | Self::Item { text, .. }
             | Self::Steer { text, .. }
             | Self::Header(text)
+            | Self::Mail { text, .. }
             | Self::System(text)
             | Self::Error(text)
             | Self::Thinking { text, .. } => {
@@ -761,6 +772,13 @@ impl ScrollBlock {
             TranscriptRow::Notice(notice) => match (notice.placement(), notice.tone) {
                 (NoticePlacement::SessionLog, _) => return None,
                 (_, NoticeTone::Error) => Self::Error(notice.text),
+                _ if notice.scope == NoticeScope::Tree && mail_parts(&notice.text).is_some() => {
+                    Self::Mail {
+                        text: notice.text,
+                        open: false,
+                        group_open: false,
+                    }
+                }
                 (NoticePlacement::GroupItem, _) => Self::item(notice.text),
                 (NoticePlacement::NoticeRow, _) => Self::System(notice.text),
             },
@@ -844,7 +862,7 @@ impl ScrollBlock {
                     format!("{text} {}", meta.join(" · "))
                 }
             }
-            Self::System(text) | Self::Header(text) => text.clone(),
+            Self::System(text) | Self::Header(text) | Self::Mail { text, .. } => text.clone(),
             Self::Steer { text, .. } => format!("steer: {text}"),
             Self::Milestone { milestone, .. } => milestone_line(milestone),
             Self::Error(text) => format!("error: {text}"),
@@ -861,6 +879,7 @@ impl ScrollBlock {
             | Self::Item { text: t, .. }
             | Self::Steer { text: t, .. }
             | Self::Header(t)
+            | Self::Mail { text: t, .. }
             | Self::System(t)
             | Self::Error(t) => t.as_str(),
             Self::Milestone { milestone, .. } => milestone
@@ -920,6 +939,11 @@ impl ScrollBlock {
     #[must_use]
     pub fn display_mode(&self) -> Option<DisplayMode> {
         match self {
+            Self::Mail { open, .. } => Some(if *open {
+                DisplayMode::Expanded
+            } else {
+                DisplayMode::Collapsed
+            }),
             Self::Tool { mode, .. } | Self::Thinking { mode, .. } => Some(*mode),
             Self::Milestone { milestone, open } if milestone_has_detail(milestone) => {
                 Some(if *open {
@@ -941,7 +965,7 @@ impl ScrollBlock {
                     *manual = true;
                 }
             }
-            Self::Milestone { open, .. } => *open = next.shows_detail(),
+            Self::Milestone { open, .. } | Self::Mail { open, .. } => *open = next.shows_detail(),
             _ => {}
         }
     }
@@ -968,11 +992,67 @@ impl ScrollBlock {
     #[must_use]
     pub fn is_foldable(&self) -> bool {
         match self {
-            Self::Tool { .. } | Self::Thinking { .. } => true,
+            Self::Tool { .. } | Self::Thinking { .. } | Self::Mail { .. } => true,
             Self::Milestone { milestone, .. } => milestone_has_detail(milestone),
             _ => false,
         }
     }
+}
+
+/// Recognize only the hosted delivered-mail spelling, never arbitrary tree notices.
+pub(crate) fn mail_parts(text: &str) -> Option<(&str, &str, &str)> {
+    let mut parts = text.splitn(3, " · ");
+    let purpose = parts.next()?;
+    let agent = parts.next()?;
+    let body = parts.next()?;
+    if !matches!(
+        purpose,
+        "coordinate" | "finding" | "question" | "reply" | "followup" | "result"
+    ) || !agent.starts_with('#')
+        || agent.len() == 1
+        || agent.chars().any(char::is_whitespace)
+    {
+        return None;
+    }
+    Some((purpose, agent, body))
+}
+
+fn mail_lines(block: &ScrollBlock, plan: &RowPlan, width: usize) -> Vec<String> {
+    let ScrollBlock::Mail {
+        text,
+        open,
+        group_open,
+    } = block
+    else {
+        return Vec::new();
+    };
+    let mut rows = Vec::new();
+    let available = width.saturating_sub(4).max(1);
+    if let Some(summary) = &plan.mail_summary {
+        rows.push(format!(
+            "  {} {}",
+            if *group_open { "▾" } else { "▸" },
+            crate::tui::picker::clip(summary, available)
+        ));
+    }
+    if plan.group_folded {
+        return rows;
+    }
+    let first = text.lines().next().unwrap_or_default();
+    rows.push(format!(
+        "  {} {}",
+        if *open { "▾" } else { "▸" },
+        crate::tui::picker::clip(first, available)
+    ));
+    if *open {
+        let body = mail_parts(text).map_or(text.as_str(), |(_, _, body)| body);
+        rows.extend(
+            wrap_plain(body, available)
+                .into_iter()
+                .map(|line| format!("    {line}")),
+        );
+    }
+    rows
 }
 
 fn truncate_string_tail(text: &mut String, limit: usize) {
@@ -1516,7 +1596,7 @@ pub fn wants_separator(previous_drawn: Option<&ScrollBlock>, block: &ScrollBlock
         return false;
     };
     match block {
-        ScrollBlock::System(_) | ScrollBlock::Header(_) => false,
+        ScrollBlock::System(_) | ScrollBlock::Header(_) | ScrollBlock::Mail { .. } => false,
         ScrollBlock::Tool { .. } | ScrollBlock::Item { .. } | ScrollBlock::Milestone { .. } => {
             matches!(
                 previous,
@@ -1599,7 +1679,8 @@ fn block_plain_lines(
         ScrollBlock::Tool { .. }
         | ScrollBlock::Item { .. }
         | ScrollBlock::Thinking { .. }
-        | ScrollBlock::Milestone { .. } => {
+        | ScrollBlock::Milestone { .. }
+        | ScrollBlock::Mail { .. } => {
             let mut rows = render::block_lines_with(
                 block,
                 plan,
@@ -1625,6 +1706,7 @@ fn block_plain_lines(
     reason = "one flag per independent fold/caret axis"
 )]
 pub struct RowPlan {
+    pub(crate) mail_summary: Option<String>,
     pub(crate) activity_summary: Option<String>,
     pub(crate) activity_action: Option<String>,
     /// Right-aligned meta of a group summary line (exit codes, duration).
@@ -1728,6 +1810,16 @@ pub fn lead_targets(block: &ScrollBlock, plan: &RowPlan) -> Vec<RowTarget> {
         return Vec::new();
     }
     match block {
+        ScrollBlock::Mail { .. } => {
+            let mut targets = Vec::new();
+            if plan.mail_summary.is_some() {
+                targets.push(RowTarget::Group);
+            }
+            if !plan.group_folded {
+                targets.push(RowTarget::Item);
+            }
+            targets
+        }
         ScrollBlock::Tool { kind, .. } if *kind != ActivityKind::Compact => {
             let mut targets = Vec::new();
             if plan.activity_summary.is_some() {
@@ -2920,6 +3012,7 @@ mod render {
             ScrollBlock::Discarded { text, .. } => {
                 estimate_wrapped_rows(text, body_width).saturating_add(1)
             }
+            ScrollBlock::Mail { .. } => super::mail_lines(block, plan, content_width).len(),
             ScrollBlock::System(text) => {
                 if system_row_is_hidden(text) {
                     0
@@ -4412,6 +4505,10 @@ mod render {
                 }
                 logical
             }
+            ScrollBlock::Mail { .. } => super::mail_lines(block, plan, content_width)
+                .into_iter()
+                .map(|line| Line::from(Span::styled(line, theme.system)))
+                .collect(),
             ScrollBlock::System(text) => {
                 // Hide pure-noise lines that used to pollute the session log.
                 if system_row_is_hidden(text) {
@@ -4540,6 +4637,37 @@ mod render {
             return Vec::new();
         }
         match block {
+            ScrollBlock::Mail {
+                text,
+                open,
+                group_open,
+            } => {
+                let row = |label: String, copy: String, open: bool| LeadRow {
+                    rail: "  ",
+                    glyph: (if open { "▾" } else { "▸" }, theme.system),
+                    label: vec![Span::styled(label, theme.system)],
+                    problems: None,
+                    meta: Vec::new(),
+                    label_floor: MIN_SUBJECT_CELLS,
+                    kept_meta: 0,
+                    caret: "",
+                    copy,
+                    thinking: false,
+                };
+                let mut rows = Vec::new();
+                if let Some(summary) = &plan.mail_summary {
+                    rows.push(row(summary.clone(), summary.clone(), *group_open));
+                }
+                if !plan.group_folded {
+                    rows.push(row(
+                        text.lines().next().unwrap_or_default().to_owned(),
+                        text.clone(),
+                        *open,
+                    ));
+                }
+                rows
+            }
+
             ScrollBlock::Tool {
                 kind,
                 name,

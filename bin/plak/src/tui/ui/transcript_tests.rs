@@ -3579,3 +3579,120 @@ fn a_restored_running_tip_shows_its_elapsed_like_live() {
         "live tips paint elapsed; a restored (/reload) tip with the host's started_at_ms shows none:\n{screen}"
     );
 }
+
+#[test]
+fn delivered_child_mail_is_compact_grouped_and_expandable() {
+    use crate::tui::blocks::{RowTarget, plan_rows};
+    for width in [40, 120] {
+        let mut app = App::new(launch_basic(), true);
+        pin_clock(&mut app);
+        let rows: Vec<_> = [("coordinate", "c9"), ("result", "c11"), ("question", "c16")]
+            .into_iter()
+            .map(|(purpose, agent)| TranscriptRow::info(NoticeScope::Tree,
+                format!("{purpose} · #{agent} · A long first line with enough detail to clip on narrow terminals\nFull body second line for {agent}")))
+            .collect();
+        app.apply_host_event(restore_snapshot(1, rows.clone()));
+        let head = app
+            .pane
+            .blocks
+            .iter()
+            .position(|block| matches!(block, ScrollBlock::Mail { .. }))
+            .unwrap();
+        activity_frame(&mut app, "dark", width, "mail-collapsed");
+        let plans = plan_rows(&app.pane.blocks, app.pane_prefs());
+        assert!(plans[head + 1].hidden);
+        assert_eq!(
+            app.row_targets(head, plans.get(head)),
+            vec![RowTarget::Group]
+        );
+        app.toggle_tool_expand_at(head);
+        activity_frame(&mut app, "dark", width, "mail-rows");
+        app.toggle_row(head + 1, RowTarget::Item);
+        activity_frame(&mut app, "dark", width, "mail-detail");
+        // Same notices re-sent by a snapshot preserve local folds, by occurrence.
+        app.apply_host_event(restore_snapshot(2, rows));
+        assert!(matches!(
+            app.pane.blocks[head],
+            ScrollBlock::Mail {
+                group_open: true,
+                ..
+            }
+        ));
+        assert!(matches!(
+            app.pane.blocks[head + 1],
+            ScrollBlock::Mail { open: true, .. }
+        ));
+        app.toggle_all_blocks();
+        assert!(matches!(
+            app.pane.blocks[head],
+            ScrollBlock::Mail {
+                group_open: false,
+                open: false,
+                ..
+            }
+        ));
+    }
+}
+
+#[test]
+fn only_delivered_mail_tree_notices_are_folded() {
+    for row in [
+        TranscriptRow::info(NoticeScope::Host, "coordinate · #c9 · body"),
+        TranscriptRow::info(NoticeScope::Tree, "tree restored paused"),
+        TranscriptRow::info(NoticeScope::Tree, "unknown · #c9 · body"),
+        TranscriptRow::error(NoticeScope::Tree, "result · #c9 · failure"),
+    ] {
+        assert!(!matches!(
+            ScrollBlock::from_row(row),
+            Some(ScrollBlock::Mail { .. })
+        ));
+    }
+    let block = ScrollBlock::from_row(TranscriptRow::info(
+        NoticeScope::Tree,
+        "finding · #c9 · first
+second",
+    ))
+    .unwrap();
+    assert!(block.is_foldable());
+    assert!(block.body().contains("second"));
+}
+
+#[test]
+fn mail_groups_stop_at_other_rows_and_repeated_notices_keep_independent_folds() {
+    let mail = TranscriptRow::info(NoticeScope::Tree, "coordinate · #c9 · same body");
+    let rows = vec![
+        mail.clone(),
+        mail.clone(),
+        TranscriptRow::assistant("separator"),
+        mail,
+    ];
+    let mut app = App::new(launch_basic(), true);
+    app.apply_host_event(restore_snapshot(1, rows.clone()));
+    let head = app
+        .pane
+        .blocks
+        .iter()
+        .position(|block| matches!(block, ScrollBlock::Mail { .. }))
+        .unwrap();
+    let plans = crate::tui::blocks::plan_rows(&app.pane.blocks, app.pane_prefs());
+    assert_eq!(
+        plans[head].mail_summary.as_deref(),
+        Some("2 messages · #c9")
+    );
+    assert!(plans[head + 3].mail_summary.is_none());
+    assert!(!plans[head + 3].hidden);
+    app.toggle_tool_expand_at(head + 3);
+    app.apply_host_event(restore_snapshot(2, rows));
+    assert!(matches!(
+        app.pane.blocks[head],
+        ScrollBlock::Mail { open: false, .. }
+    ));
+    assert!(matches!(
+        app.pane.blocks[head + 1],
+        ScrollBlock::Mail { open: false, .. }
+    ));
+    assert!(matches!(
+        app.pane.blocks[head + 3],
+        ScrollBlock::Mail { open: true, .. }
+    ));
+}
