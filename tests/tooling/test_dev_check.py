@@ -62,6 +62,8 @@ class DevCheckWorkerTests(unittest.TestCase):
                         CARGO_TARGET_DIR=str(self.root / 'custom target'),
                         CARGO_BUILD_TARGET='host-triple')
         self.env.pop('PLAK_MONTY_WORKER', None)
+        # The offline musl container exports this; the package group must decide it itself.
+        self.env.pop('CARGO_NET_OFFLINE', None)
         # Keep gate scratch inside the fixture instead of the shared per-checkout root.
         self.env['PLAK_TEST_TMPDIR'] = str(self.root / 'test-tmp')
         # The gate must create the isolated product home itself. An ambient

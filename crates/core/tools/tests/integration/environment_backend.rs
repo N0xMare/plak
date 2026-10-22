@@ -3326,7 +3326,9 @@ async fn cargo_package_in_a_discovery_ceiling_copy_lists_its_own_source() -> Res
     let result = environment
         .execute_literal_process(
             LiteralProcessRequest::new(
-                "cargo",
+                // The toolchain's own cargo: a rustup proxy needs a default
+                // toolchain the filtered child environment may not carry.
+                env!("CARGO"),
                 [
                     "package",
                     "--list",
