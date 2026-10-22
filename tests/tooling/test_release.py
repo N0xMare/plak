@@ -1,4 +1,7 @@
-"""Release tarballs, the release build script and install.sh, without Rust or the network.
+"""Release tarballs, the release build script and install.sh.
+
+The suite does not compile Rust. One test reads the locked offline `cargo tree`
+closure of the release build; nothing here uses the network.
 
 install.sh runs under /bin/sh against a local HTTP server laid out like GitHub
 Releases, with `uname` and `gh` stubbed so the selected triple and the
@@ -28,6 +31,7 @@ import release_tarball  # noqa: E402
 
 VERSION = "0.0.2"
 LINUX = "x86_64-unknown-linux-musl"
+DARWIN = "aarch64-apple-darwin"
 EXECUTABLES = ("plak", "plakous-js-host", "monty")
 
 
@@ -50,7 +54,10 @@ def write_executables(directory: pathlib.Path, tag: str = "one") -> None:
 
 
 def fake_metadata(base: pathlib.Path) -> dict:
-    """plak -> (vendored protocol, registry `left`); `left` -> `deep`; dev-only `testonly`."""
+    """plak -> (vendored protocol, registry `left`); `left` -> `deep`.
+
+    `testonly` is a dev edge and `buildonly` is a build edge; neither is linked.
+    """
     def package(name: str, directory: pathlib.Path, source: str | None, license_: str,
                 files: dict[str, str]) -> dict:
         directory.mkdir(parents=True, exist_ok=True)
@@ -72,6 +79,7 @@ def fake_metadata(base: pathlib.Path) -> dict:
                 {"LICENSE-MIT": "mit", "LICENSE-APACHE": "apache", "src.rs": ""}),
         package("deep", base / "registry/deep", registry, "BSD-3-Clause", {"COPYING": "bsd"}),
         package("testonly", base / "registry/testonly", registry, "MIT", {"LICENSE": "x"}),
+        package("buildonly", base / "registry/buildonly", registry, "MIT", {"LICENSE": "x"}),
     ]
     normal = [{"kind": None, "target": None}]
 
@@ -80,10 +88,11 @@ def fake_metadata(base: pathlib.Path) -> dict:
 
     nodes = [
         node("plak-id", ("vendored-protocol-id", normal), ("left-id", normal),
-             ("testonly-id", [{"kind": "dev", "target": None}])),
+             ("testonly-id", [{"kind": "dev", "target": None}]),
+             ("buildonly-id", [{"kind": "build", "target": None}])),
         node("plakous-js-runtime-id"), node("plakous-py-worker-id", ("left-id", normal)),
         node("vendored-protocol-id"), node("left-id", ("deep-id", normal)),
-        node("deep-id"), node("testonly-id"),
+        node("deep-id"), node("testonly-id"), node("buildonly-id"),
     ]
     members = ["plak-id", "plakous-js-runtime-id", "plakous-py-worker-id", "vendored-protocol-id"]
     return {"packages": packages, "resolve": {"nodes": nodes}, "workspace_members": members,
@@ -198,6 +207,111 @@ class ReleaseTarballTests(unittest.TestCase):
             release_tarball.pack(VERSION, LINUX, artifacts, self.base / "no", 0, metadata,
                                  static=True)
         self.assertFalse((self.base / "no").exists())
+
+    def test_tree_lines_keep_name_and_version_and_drop_suffixes(self) -> None:
+        text = "\n".join([
+            "plak v0.0.2 (/tmp/plak)",
+            "serde v1.0.229",
+            "serde v1.0.229 (*)",
+            "clap_derive v4.6.7 (proc-macro)",
+            "toml v1.1.8+spec-1.1.0",
+            "left v1.0.0 (/tmp/left) (*)",
+            "",
+        ])
+        self.assertEqual(release_tarball.parse_tree_packages(text), {
+            ("plak", "0.0.2"), ("serde", "1.0.229"), ("clap_derive", "4.6.7"),
+            ("toml", "1.1.8+spec-1.1.0"), ("left", "1.0.0"),
+        })
+        with self.assertRaisesRegex(release_tarball.ReleaseError, "unparsed"):
+            release_tarball.parse_tree_package("not a package")
+
+    def test_exact_closure_drops_unified_edges_and_keeps_vendored(self) -> None:
+        metadata = fake_metadata(self.base / "meta")
+        registry = "registry+https://github.com/rust-lang/crates.io-index"
+        for name in ("jj-lib", "gix"):
+            directory = self.base / "meta" / "registry" / name
+            directory.mkdir(parents=True)
+            (directory / "Cargo.toml").write_text("")
+            (directory / "LICENSE").write_text(name)
+            metadata["packages"].append({
+                "id": f"{name}-id", "name": name, "version": "1.0.0", "source": registry,
+                "license": "Apache-2.0", "repository": f"https://example.invalid/{name}",
+                "manifest_path": str(directory / "Cargo.toml"),
+            })
+            metadata["resolve"]["nodes"].append({"id": f"{name}-id", "deps": []})
+            for node in metadata["resolve"]["nodes"]:
+                if node["id"] == "plak-id":
+                    node["deps"].append({"pkg": f"{name}-id", "dep_kinds": [{"kind": None, "target": None}]})
+        unified = [package["name"] for package in release_tarball.third_party(metadata)]
+        self.assertEqual(unified, ["deep", "gix", "jj-lib", "left", "vendored-protocol"])
+        linked = {
+            ("plak", "1.0.0"), ("plakous-js-runtime", "1.0.0"), ("plakous-py-worker", "1.0.0"),
+            ("vendored-protocol", "1.0.0"), ("left", "1.0.0"), ("deep", "1.0.0"),
+        }
+        exact = [package["name"] for package in release_tarball.third_party(metadata, linked)]
+        self.assertEqual(exact, ["deep", "left", "vendored-protocol"])
+        metadata["packages"].append(dict(metadata["packages"][-1], id="gix-other"))
+        with self.assertRaisesRegex(release_tarball.ReleaseError, "ambiguous package gix"):
+            release_tarball.third_party(metadata, linked | {("gix", "1.0.0")})
+        with self.assertRaisesRegex(release_tarball.ReleaseError, "not in metadata"):
+            release_tarball.third_party(metadata, linked | {("missing", "9.9.9")})
+
+    def test_release_tree_commands_match_the_artifacts_build(self) -> None:
+        commands = [
+            release_tarball.release_tree_command(DARWIN, packages)
+            for packages in release_tarball.RELEASE_RESOLUTIONS
+        ]
+        self.assertEqual(commands, [
+            ["cargo", "tree", "--locked", "--offline", "-e", "normal", "--target", DARWIN,
+             "--prefix", "none", "--charset", "ascii", "-f", "{p}", "-p", "plak"],
+            ["cargo", "tree", "--locked", "--offline", "-e", "normal", "--target", DARWIN,
+             "--prefix", "none", "--charset", "ascii", "-f", "{p}",
+             "-p", "plakous-js-runtime", "-p", "plakous-py-worker"],
+        ])
+        for command in commands:
+            self.assertNotIn("--features", command)
+            self.assertNotIn("--all-features", command)
+            self.assertNotIn("--no-default-features", command)
+
+
+def _jj_or_gix(name: str) -> bool:
+    return name == "jj" or name.startswith("jj-") or name == "gix" or name.startswith("gix-")
+
+
+class ReleaseClosureTests(unittest.TestCase):
+    """The git-only release closure matches `cargo tree` and omits jj and gix."""
+
+    def test_both_targets_match_cargo_tree_without_jj_or_gix(self) -> None:
+        for triple in (DARWIN, LINUX):
+            with self.subTest(triple=triple):
+                metadata = release_tarball.load_metadata(triple, None)
+                linked = release_tarball.release_closure(triple)
+                listed = release_tarball.third_party(metadata, linked)
+                names = [package["name"] for package in listed]
+                self.assertEqual(names, sorted(names))
+                forbidden = [name for name in names if _jj_or_gix(name)]
+                self.assertEqual(forbidden, [])
+                unified = release_tarball.third_party(metadata)
+                unified_names = {package["name"] for package in unified}
+                self.assertIn("jj-lib", unified_names)
+                self.assertIn("gix", unified_names)
+                self.assertLess(
+                    {(package["name"], package["version"]) for package in listed},
+                    {(package["name"], package["version"]) for package in unified},
+                )
+                members = set(metadata["workspace_members"])
+                vendor = pathlib.Path(metadata["workspace_root"]) / "vendor"
+                by_key = {(package["name"], package["version"]): package
+                          for package in metadata["packages"]}
+                expected = set()
+                for key in linked:
+                    package = by_key[key]
+                    directory = pathlib.Path(package["manifest_path"]).parent
+                    ours = package["id"] in members and vendor not in directory.parents
+                    if not ours:
+                        expected.add(key)
+                self.assertEqual({(package["name"], package["version"]) for package in listed}, expected)
+                self.assertIn("monty-typeshed", names)
 
 
 class InstallScriptTests(unittest.TestCase):
@@ -373,7 +487,25 @@ class PackageReleaseTests(unittest.TestCase):
         self.stubs.mkdir()
         self.log = self.base / "calls.log"
         self.metadata = self.base / "metadata.json"
-        self.metadata.write_text(json.dumps(fake_metadata(self.base / "meta")))
+        # Workspace unification adds jj-lib as a normal edge. The cargo tree
+        # stub below is the git-only closure and does not report it.
+        metadata = fake_metadata(self.base / "meta")
+        directory = self.base / "meta" / "registry" / "jj-lib"
+        directory.mkdir(parents=True)
+        (directory / "Cargo.toml").write_text("")
+        (directory / "LICENSE").write_text("jj")
+        metadata["packages"].append({
+            "id": "jj-lib-id", "name": "jj-lib", "version": "1.0.0",
+            "source": "registry+https://github.com/rust-lang/crates.io-index",
+            "license": "Apache-2.0", "repository": "https://example.invalid/jj-lib",
+            "manifest_path": str(directory / "Cargo.toml"),
+        })
+        metadata["resolve"]["nodes"].append({"id": "jj-lib-id", "deps": []})
+        for node in metadata["resolve"]["nodes"]:
+            if node["id"] == "plak-id":
+                node["deps"].append(
+                    {"pkg": "jj-lib-id", "dep_kinds": [{"kind": None, "target": None}]})
+        self.metadata.write_text(json.dumps(metadata))
         self.stub("uname", 'case "$1" in -s) echo "${FAKE_OS:-Linux}" ;; '
                            '-m) echo "${FAKE_ARCH:-x86_64}" ;; esac')
         self.stub("rustup", "echo x86_64-unknown-linux-musl")
@@ -391,6 +523,9 @@ case "$1" in
   metadata)
     case "$*" in *--no-deps*) echo '{{"packages":[{{"name":"plak","version":"{VERSION}"}}]}}' ;;
       *) cat {self.metadata} ;; esac ;;
+  tree)
+    printf '%s\\n' 'plak v1.0.0' 'plakous-js-runtime v1.0.0' 'plakous-py-worker v1.0.0' \\
+      'vendored-protocol v1.0.0' 'left v1.0.0' 'deep v1.0.0' ;;
   build) out="$CARGO_TARGET_DIR/$CARGO_BUILD_TARGET/release"; mkdir -p "$out"; {writer};;
 esac""")
         self.env = {key: value for key, value in os.environ.items()
@@ -431,8 +566,14 @@ esac""")
                 result = self.run_script(FAKE_TAG=f"v{VERSION}", FAKE_OS=os_name, FAKE_ARCH=arch)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 dist = self.base / "target/release-dist"
-                self.assertEqual(result.stdout.strip(),
-                                 str(dist / f"plak-{VERSION}-{triple}.tar.gz"))
+                tarball = dist / f"plak-{VERSION}-{triple}.tar.gz"
+                self.assertEqual(result.stdout.strip(), str(tarball))
+                with tarfile.open(tarball) as archive:
+                    third_party = archive.extractfile(
+                        f"plak-{VERSION}-{triple}/THIRD-PARTY").read().decode()
+                listed = [line.split()[0] for line in third_party.splitlines()[3:]]
+                self.assertEqual(listed, ["deep", "left", "vendored-protocol"])
+                self.assertNotIn("jj-lib", third_party)
                 builds = [line for line in self.log.read_text().splitlines()
                           if line.startswith("cargo build")]
                 self.assertEqual(len(builds), 2)
