@@ -1921,6 +1921,63 @@ async fn an_in_band_401_is_post_acceptance_and_never_redispatched() -> TestResul
     Ok(())
 }
 
+/// The field shape: an accepted stream of keep-alives, then one chunk with no
+/// choices whose error object names HTTP 504 and the upstream that timed out.
+///
+/// It is the provider's timeout, read like that status before acceptance:
+/// typed `Timeout` with its status on the error context, and the operator
+/// text names the provider's error rather than a stream validation failure.
+/// No retry rule replays an in-band deadline, so the one inference stands.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_in_band_504_is_the_providers_timeout_with_its_status() -> TestResult {
+    let stream = format!(
+        ": OPENROUTER PROCESSING\n\n: OPENROUTER PROCESSING\n\ndata: {{\"id\":\"gen-inband\",\"object\":\"chat.completion.chunk\",\"created\":1787623695,\"model\":\"{MODEL}\",\"provider\":\"Upstream\",\"choices\":[],\"error\":{{\"code\":504,\"message\":\"error code: 504\",\"metadata\":{{\"provider_name\":\"Upstream\"}}}}}}\n\n"
+    );
+    let mut replies = discovery_replies();
+    replies.push(("text/event-stream", stream, "x-request-id: req-inband\r\n"));
+    let (client, origin, peer) = loopback(b"openrouter-in-band-504-v1", replies).await?;
+    let chat = discovered_chat_model(client, origin).await?;
+    let workspace_dir = tempfile::tempdir()?;
+    let workspace = Arc::new(WorkspacePolicy::host(workspace_dir.path(), ".")?);
+    let agent = AgentBuilder::new(chat, ToolRegistryBuilder::default().freeze(), workspace)
+        .request_policy(
+            AgentRequestPolicy::default()
+                .with_generation_limits(GenerationLimits::new(NonZeroU32::new(64), Vec::new())?),
+        )
+        .identity_sources(
+            Arc::new(review_clock()),
+            Arc::new(SequenceIdGenerator::new(
+                (100_u128..=400).map(Uuid::from_u128),
+            )?),
+        )
+        .build()?;
+
+    let result = agent.prompt("hello").await?.result().await?;
+    let error = result
+        .error()
+        .ok_or("failed turn error")?
+        .model_error()
+        .ok_or("model error")?;
+    assert_eq!(error.kind(), ModelErrorKind::Timeout);
+    assert_eq!(
+        error
+            .context()
+            .and_then(plakous_model::ModelErrorContext::http_status)
+            .map(plakous_model::ModelHttpStatus::get),
+        Some(504)
+    );
+    assert_eq!(
+        error.message(),
+        "OpenRouter Chat operation failed: OpenRouter returned an in-band error after \
+         accepting the request: HTTP 504 (timeout) from Upstream [1 requests; last: timeout]"
+    );
+
+    agent.shutdown().await?;
+    let requests = timeout(Duration::from_secs(5), peer).await???;
+    assert_eq!(requests.len(), 3, "two discovery calls and one inference");
+    Ok(())
+}
+
 /// A gateway that refuses before the stream reads the same way.
 ///
 /// `520` through `527` are the statuses an edge invents for an upstream it

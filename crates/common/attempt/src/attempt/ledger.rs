@@ -448,11 +448,13 @@ impl PhysicalRequestLedger {
         Ok(())
     }
 
-    /// Records the last closed failure and the owning kernel's retry decision.
+    /// Records the last closed failure, the refusal the provider named for
+    /// it, and the owning kernel's retry decision.
     pub fn record_failure(
         &self,
         point: super::retry::FailurePoint,
         phase: Option<&'static str>,
+        refusal: Option<super::terminal::ProviderRefusal>,
         proven_unsent: bool,
         decline: Option<&'static str>,
     ) {
@@ -462,6 +464,7 @@ impl PhysicalRequestLedger {
         }
         state.summary.last_point = Some(point);
         state.summary.last_phase = phase.and_then(super::summary::AttemptPhase::from_label);
+        state.summary.last_refusal = refusal;
         state.summary.proven_unsent = proven_unsent;
         state.summary.decline = decline.and_then(super::summary::AttemptRetryDecline::from_label);
     }

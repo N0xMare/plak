@@ -29,7 +29,7 @@ use plakous_model::{
     ContextEvidenceClass, CountObservation, CredentialSelectionId, Digest, DigestDomain,
     EffectiveProviderConfiguration, FactProvenance, FactSource, FamilyPolicyEnvelope,
     FeatureSupport, LanguageModel, ModelAdapterProfileId, ModelError, ModelErrorContext,
-    ModelErrorKind, ModelErrorPhase, ModelEvent, ModelFamilyId, ModelId,
+    ModelErrorKind, ModelErrorPhase, ModelEvent, ModelFamilyId, ModelHttpStatus, ModelId,
     ModelImplementationIdentity, ModelPreparationContext, ModelPreparationError,
     ModelPreparationErrorKind, ModelRetryRisk, ModelRetryability, NamespaceId, PreparedCacheUse,
     PreparedCallRecord, PreparedModelCall, PreparedModelProjection, PreparedOutputLimit,
@@ -1306,9 +1306,16 @@ impl ChatHttpHooks for OpenRouterChatHooks {
     }
 
     fn classify_stream_error(&self, error: ChatStreamError) -> ChatAttemptProtocolError {
-        let protocol = ChatAttemptProtocolError::new(format!(
-            "OpenRouter Chat stream validation failed: {error}"
-        ));
+        // A well-formed error object is OpenRouter's own report, not a stream
+        // that broke the grammar, and the operator text says which it was.
+        let protocol = ChatAttemptProtocolError::new(match error.in_band_detail() {
+            Some(detail) => {
+                format!(
+                    "OpenRouter returned an in-band error after accepting the request: {detail}"
+                )
+            }
+            None => format!("OpenRouter Chat stream validation failed: {error}"),
+        });
         // OpenRouter commits HTTP 200 at acceptance and reports an upstream
         // failure inside the stream, carrying the status it would have sent had
         // it failed earlier. That is the provider naming its own refusal, and
@@ -1441,6 +1448,7 @@ fn chat_observation_error(
         descriptor,
         kind,
         facts,
+        error.http_status(),
         format!("OpenRouter Chat protocol failed: {error}"),
     )
 }
@@ -1465,11 +1473,13 @@ pub(crate) fn inferred_failure_kind(
 
 /// Builds a gateway operation error whose retryability states the risk its
 /// facts leave behind, so no caller mistakes a post-acceptance failure for a
-/// replayable one.
+/// replayable one. The HTTP status the provider named, before the stream or
+/// inside it, rides on the typed context.
 pub(crate) fn operation_error(
     descriptor: &ResolvedModelDescriptor,
     kind: ModelErrorKind,
     facts: Option<TerminalFacts>,
+    http_status: Option<u16>,
     message: String,
 ) -> ModelError {
     let retryability = match (kind, facts.map(TerminalFacts::failure_risk)) {
@@ -1489,6 +1499,12 @@ pub(crate) fn operation_error(
         descriptor.requested_model().clone(),
         ModelErrorPhase::Terminal,
         retryability,
+    )
+    .map(
+        |context| match http_status.and_then(|status| ModelHttpStatus::new(status).ok()) {
+            Some(status) => context.with_http_status(status),
+            None => context,
+        },
     )
     .and_then(|context| ModelError::contextual(kind, message.clone(), context))
     .unwrap_or_else(|_| ModelError::new(kind, message))
@@ -1604,6 +1620,7 @@ fn chat_model_error(descriptor: &ResolvedModelDescriptor, error: &ChatAttemptErr
         descriptor,
         kind,
         facts,
+        error.http_status(),
         format!("OpenRouter Chat operation failed: {error}"),
     )
     .with_attempt_summary(facts.map_or_else(String::new, |facts| facts.summary().to_string()));

@@ -547,39 +547,42 @@ class LiveOracleTests(unittest.TestCase):
                 self.assertEqual(live.run_cli(env, base, [], base / "run.log")[0], code)
 
     def test_a_providers_in_band_5xx_or_429_is_provider_on_every_surface(self):
-        text = ("agent turn failed: OpenRouter Chat operation failed: OpenRouter Chat stream "
-                "validation failed: Chat provider returned an in-band error: error code: 504 "
-                "[1 requests; last: unclassified]")
+        text = ("agent turn failed: OpenRouter Chat operation failed: OpenRouter returned an "
+                "in-band error after accepting the request: HTTP 504 (timeout) from Upstream "
+                "[1 requests; last: timeout] · HTTP 504")
         self.assertEqual(live.in_band_provider_status(text), 504)
         self.assertIsNone(live.stream_validation_outcome(text, None))
-        turn = live.Turn(phase="failed", model_error_kind="Timeout", errors=[text])
-        with self.assertRaises(live.ScenarioFailure) as raised:
-            live.classify_incomplete(turn, "coding turn", segments=[])
-        self.assertEqual(raised.exception.outcome, live.PROVIDER)
+        for kind, status in (("Timeout", 504), (None, None)):
+            turn = live.Turn(phase="failed", model_error_kind=kind, http_status=status,
+                             errors=[text])
+            with self.assertRaises(live.ScenarioFailure) as raised:
+                live.classify_incomplete(turn, "coding turn", segments=[])
+            self.assertEqual(raised.exception.outcome, live.PROVIDER, kind)
         with self.assertRaises(live.ScenarioFailure) as raised:
             live.classify_cli_failure(5, f"plak: {text}\n", "cli_task", segments=[])
         self.assertEqual(raised.exception.outcome, live.PROVIDER)
         self.assertTrue(live.provider_child_text(text))
-        self.assertEqual(live.in_band_provider_status(
-            "Chat provider returned an in-band error: code=429"), 429)
-        for other in ("Chat provider returned an in-band error: code=400",
-                      "Chat provider returned an in-band error: Provider returned error",
-                      "Chat provider returned an in-band error: unclassified",
-                      "Chat stream validation failed: Chat chunk omitted model"):
+        prefix = "OpenRouter returned an in-band error after accepting the request: "
+        for status in (429, 502, 520, 521, 522, 523, 524):
+            self.assertEqual(live.in_band_provider_status(
+                f"{prefix}HTTP {status} (unavailable): Provider returned error"), status)
+        for other in (prefix + "HTTP 400: bad request",
+                      prefix + "HTTP 401",
+                      prefix + "Provider returned error",
+                      prefix + "Provider returned error (from Upstream)",
+                      prefix + "unclassified",
+                      "OpenRouter Chat stream validation failed: Chat chunk omitted model"):
             self.assertIsNone(live.in_band_provider_status(other), other)
-        other = live.Turn(phase="failed", errors=[
-            "OpenRouter Chat stream validation failed: Chat provider returned an in-band "
-            "error: code=400"])
+        other = live.Turn(phase="failed", model_error_kind="Protocol", errors=[prefix + "HTTP 400"])
         with self.assertRaises(live.ScenarioFailure) as raised:
             live.classify_incomplete(other, "coding turn", segments=[])
         self.assertEqual(raised.exception.outcome, live.HARNESS)
         self.assertEqual(live.provider_reason_from(None, 504, ""), "504")
 
     def test_a_typed_in_band_provider_error_without_a_rendered_status_is_provider(self):
-        # OpenRouter's usual object, {"code": 502, "message": "Provider returned error"},
-        # renders only the message; the product still types the kind.
-        text = ("agent turn failed: OpenRouter Chat stream validation failed: Chat provider "
-                "returned an in-band error: Provider returned error [1 requests; last: unavailable]")
+        # Text cut before its status still carries the typed kind.
+        text = ("agent turn failed: OpenRouter Chat operation failed: OpenRouter returned an "
+                "in-band error after accepting the request: Provider returned error")
         for kind in ("Unavailable", "RateLimited", "Timeout"):
             turn = live.Turn(phase="failed", model_error_kind=kind, errors=[text])
             with self.assertRaises(live.ScenarioFailure) as raised:
@@ -591,12 +594,15 @@ class LiveOracleTests(unittest.TestCase):
         self.assertEqual(raised.exception.outcome, live.HARNESS)
 
     def test_the_in_band_status_stays_inside_its_own_diagnostic(self):
-        prefix = "Chat provider returned an in-band error: "
+        prefix = "OpenRouter returned an in-band error after accepting the request: "
         self.assertIsNone(live.in_band_provider_status(
-            prefix + "Provider returned error [1 requests; last: x] compact failed: error code: 502"))
-        self.assertIsNone(live.in_band_provider_status(prefix + "code=502.5"))
-        self.assertEqual(live.in_band_provider_status(prefix + "code=503; type=server_error"), 503)
-        text = prefix + "error code: 429"
+            prefix + "Provider returned error [1 requests; last: x] compact failed: HTTP 502"))
+        self.assertIsNone(live.in_band_provider_status(prefix + "HTTP 5025"))
+        self.assertIsNone(live.in_band_provider_status(
+            "Chat provider returned an in-band error: error code: 504"))
+        self.assertEqual(live.in_band_provider_status(
+            prefix + "HTTP 503 (unavailable): type=server_error"), 503)
+        text = prefix + "HTTP 429 (rate limited)"
         self.assertFalse(live._absorbed_injection("RateLimited", None, "429", text))
         self.assertTrue(live._absorbed_injection("RateLimited", 429, "429", "provider rate limited"))
 

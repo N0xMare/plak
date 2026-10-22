@@ -7916,7 +7916,14 @@ classification, telemetry labels and dispatch authority are unchanged.
 
 Each terminal kernel model failure appends one canonical attempt-accounting
 suffix: physical request count, last classified point/phase, proof that nothing
-was sent, and the closed reason retry was declined, when known. The common
+was sent, and the closed reason retry was declined, when known. When the last
+failure is a refusal the provider named — an HTTP status before the stream
+(`429`, `5xx`, `408`) or the same status or an overload or rate limit inside
+it — the last classification is that refusal's class instead of its
+point/phase: `rate limited`, `unavailable` or `timeout`, the classes the
+terminal is typed as (`RateLimited`, `Unavailable`, `Timeout`). Every kernel
+derives it from the typed retry cause, and the Chat kernel also records it for
+an in-band refusal no retry rule replays. The common
 attempt ledger holds these transient facts beside acceptance authority; the
 summary grants no replay authority. It is rendered into the existing sanitized
 ModelError message, not a new persisted field or export encoding. Zero-dispatch
@@ -8326,6 +8333,27 @@ which is the shape observed in the field. Anything that does not match that
 anchored spelling leaves the status unnamed, and the failure reads as the
 protocol break it was. This does not add
 inference retries or authorize replay of paid compaction or unknown effects.
+An in-band status is typed exactly like that status before the stream: the
+terminal kind is its named refusal (`Timeout` for `408`/`504`, `Unavailable`
+for other `5xx` including the `52x` edge statuses, `RateLimited` for `429`),
+the status rides on the error context's `http_status`, and the attempt summary
+names the same class. Retry is unchanged: the in-stream overload and rate
+limit rows above replay; an in-band deadline (`408`, `504`) is not one of
+them and ends the attempt.
+
+A well-formed in-band error object is the provider's own report, not a stream
+that violated the grammar, and its diagnostic says so: `OpenRouter returned an
+in-band error after accepting the request: HTTP 504 (timeout) from <upstream>`.
+A named status leads with its class (no class for exhausted quota or a status
+that names no refusal); the upstream is the error's
+`metadata.provider_name`, else the chunk's `provider`, bounded to 64
+characters; the provider's message follows unless it only restates the status
+(`error code: 504`), and without a message its `type` label. With no status the
+provider's message is the whole account. The text is bounded and redacted like
+every provider diagnostic and never carries the upstream's raw body. `stream
+validation failed` names only a stream that broke the Chat grammar.
+`ChatStreamError::in_band_detail` carries that account, without the
+sentence's framing, for exactly the provider-error class.
 Optional Plak application attribution sends the truthful project URL and title
 plus `X-OpenRouter-Categories: cli-agent` on all three OpenRouter inference
 wires, following the [documented terminal coding assistant category](https://openrouter.ai/docs/app-attribution).

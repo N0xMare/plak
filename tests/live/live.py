@@ -260,15 +260,14 @@ PROVIDER_ERROR_KINDS = frozenset({
 PROVIDER_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504, 529})
 # A Chat gateway reports an upstream failure inside the stream it already
 # committed to; the product types it as a provider error and renders
-# "Chat provider returned an in-band error: <detail>" with the status the
-# gateway named (`error code: 504`, `code=502`). A 429 or 5xx there is the
-# provider's outage, not a protocol violation.
-_IN_BAND_STATUS = re.compile(r"returned an in-band error:[^|\[\]]*?\bcode\s*[=:]\s*(\d{3})(?![\d.])",
+# "<provider> returned an in-band error after accepting the request: HTTP 504
+# (timeout) from <upstream>" with the status the gateway named leading the
+# account. A 429 or 5xx there is the provider's outage, not a protocol violation.
+_IN_BAND_STATUS = re.compile(r"returned an in-band error after accepting the request: HTTP (\d{3})\b",
                              re.IGNORECASE)
-IN_BAND_ERROR_MARKER = "returned an in-band error:"
-# Kinds the product types an in-band provider error as when its status is not
-# in the rendered text (a gateway error object with both `code` and `message`
-# renders only the message).
+IN_BAND_ERROR_MARKER = "returned an in-band error after accepting the request:"
+# Kinds the product types an in-band provider error as; the typed kind scores
+# it even where the rendered text was cut before its status.
 IN_BAND_PROVIDER_KINDS = frozenset({"RateLimited", "Unavailable", "Timeout"})
 
 

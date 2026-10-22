@@ -3,6 +3,7 @@
 use std::fmt;
 
 use super::retry::FailurePoint;
+use super::terminal::ProviderRefusal;
 
 /// Closed content-free transport phase.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -100,6 +101,9 @@ pub struct AttemptSummary {
     pub proven_unsent: bool,
     /// Closed retry-decline label supplied by the owning kernel.
     pub decline: Option<AttemptRetryDecline>,
+    /// The refusal the provider named for the last failure, before the stream
+    /// or inside it.
+    pub last_refusal: Option<ProviderRefusal>,
 }
 
 impl fmt::Display for AttemptSummary {
@@ -111,16 +115,19 @@ impl fmt::Display for AttemptSummary {
         if self.ride_out_physical > 0 {
             write!(formatter, "; {} unreachable", self.ride_out_physical)?;
         }
-        let last = match self.last_phase {
-            Some(AttemptPhase::Resolution) => "DNS lookup failed",
-            Some(AttemptPhase::Connect) => "could not connect",
-            Some(AttemptPhase::Tls) => "TLS handshake failed",
-            Some(AttemptPhase::RequestWrite) => "while sending",
-            Some(AttemptPhase::RequestWriteOrResponseHead | AttemptPhase::ResponseHead) => {
+        // A refusal the provider named says more than where the exchange
+        // stopped: it is the class the terminal failure is typed as.
+        let last = match (self.last_refusal, self.last_phase) {
+            (Some(refusal), _) => refusal.label(),
+            (None, Some(AttemptPhase::Resolution)) => "DNS lookup failed",
+            (None, Some(AttemptPhase::Connect)) => "could not connect",
+            (None, Some(AttemptPhase::Tls)) => "TLS handshake failed",
+            (None, Some(AttemptPhase::RequestWrite)) => "while sending",
+            (None, Some(AttemptPhase::RequestWriteOrResponseHead | AttemptPhase::ResponseHead)) => {
                 "after send"
             }
-            Some(AttemptPhase::ResponseBody) => "response stream interrupted",
-            _ => match self.last_point {
+            (None, Some(AttemptPhase::ResponseBody)) => "response stream interrupted",
+            (None, _) => match self.last_point {
                 Some(FailurePoint::Unreachable) => "provider unreachable",
                 Some(FailurePoint::Refused) => "request refused",
                 Some(FailurePoint::RecordRejectedInTransit) => "TLS record rejected",
@@ -159,5 +166,24 @@ mod tests {
             summary.to_string(),
             " [4 requests; last: DNS lookup failed, nothing sent; retry declined: deadline]"
         );
+    }
+
+    /// A refusal the provider named is the class, wherever it arrived.
+    #[test]
+    fn a_named_refusal_is_the_last_class() {
+        for (refusal, label) in [
+            (ProviderRefusal::RateLimit, "rate limited"),
+            (ProviderRefusal::Overloaded, "unavailable"),
+            (ProviderRefusal::Deadline, "timeout"),
+        ] {
+            let summary = AttemptSummary {
+                physical: 1,
+                last_point: Some(FailurePoint::MidStream),
+                last_phase: Some(AttemptPhase::ResponseBody),
+                last_refusal: Some(refusal),
+                ..AttemptSummary::default()
+            };
+            assert_eq!(summary.to_string(), format!(" [1 requests; last: {label}]"));
+        }
     }
 }

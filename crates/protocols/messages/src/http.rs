@@ -10,7 +10,8 @@ use tokio::time::Instant;
 
 use plakous_attempt::{ExchangeBreak, FailurePoint, Jitter, PhysicalRequestOutcome, RetryPolicy};
 use plakous_exchange::{
-    RetryDeclineInput, cancellable, read_bounded_body, retry_decline, retry_phase, time_until,
+    RetryDeclineInput, cancellable, read_bounded_body, retry_cause_refusal, retry_decline,
+    retry_phase, time_until,
 };
 use plakous_http::{
     CancellationToken as HttpCancellationToken, Client, ExchangeControl, Failure as HttpFailure,
@@ -768,6 +769,7 @@ async fn retry_step<H: MessagesHttpHooks>(
     attempt.record_failure(
         failure.point,
         phase.map(plakous_model::ModelRetryPhase::as_str),
+        retry_cause_refusal(failure.cause),
         unsent,
         reason.map(Decline::as_str),
     );

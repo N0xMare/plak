@@ -568,12 +568,13 @@ impl MessagesAttempt {
         &self,
         point: plakous_attempt::FailurePoint,
         phase: Option<&'static str>,
+        refusal: Option<MessagesProviderRefusal>,
         proven_unsent: bool,
         decline: Option<&'static str>,
     ) {
         self.core
             .observations_ref()
-            .record_failure(point, phase, proven_unsent, decline);
+            .record_failure(point, phase, refusal, proven_unsent, decline);
     }
     /// Returns current conservative facts.
     #[must_use]

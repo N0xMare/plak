@@ -577,12 +577,13 @@ impl ChatAttempt {
         &self,
         point: plakous_attempt::FailurePoint,
         phase: Option<&'static str>,
+        refusal: Option<ProviderRefusal>,
         proven_unsent: bool,
         decline: Option<&'static str>,
     ) {
         self.core
             .observations_ref()
-            .record_failure(point, phase, proven_unsent, decline);
+            .record_failure(point, phase, refusal, proven_unsent, decline);
     }
     /// Returns cancellation/deadline/attempt context.
     #[must_use]

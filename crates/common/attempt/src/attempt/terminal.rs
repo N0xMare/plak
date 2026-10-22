@@ -56,6 +56,19 @@ impl ProviderRefusal {
             _ => None,
         }
     }
+
+    /// The closed class this refusal names in operator text.
+    ///
+    /// These are the classes a terminal failure is typed as (`RateLimited`,
+    /// `Unavailable`, `Timeout`), so a diagnostic and its typed kind agree.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::RateLimit => "rate limited",
+            Self::Overloaded => "unavailable",
+            Self::Deadline => "timeout",
+        }
+    }
 }
 
 /// How an exchange broke when the provider named no refusal.
@@ -135,6 +148,7 @@ impl TerminalFacts {
                 last_phase: None,
                 proven_unsent: false,
                 decline: None,
+                last_refusal: None,
             },
             physical_attempts: snapshot.physical_attempts,
             provider_acceptance: snapshot.provider_acceptance,
@@ -160,6 +174,7 @@ impl TerminalFacts {
                 last_phase: None,
                 proven_unsent: false,
                 decline: None,
+                last_refusal: None,
             },
             physical_attempts: 0,
             provider_acceptance: ProviderAcceptance::NotAccepted,

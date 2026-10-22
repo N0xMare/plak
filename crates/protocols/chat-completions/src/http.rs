@@ -12,7 +12,8 @@ use plakous_attempt::{
     ExchangeBreak, FailurePoint, Jitter, PhysicalRequestOutcome, RetryPolicy, retry_after_seconds,
 };
 use plakous_exchange::{
-    RetryDeclineInput, cancellable, read_bounded_body, retry_decline, retry_phase, time_until,
+    RetryDeclineInput, cancellable, read_bounded_body, retry_cause_refusal, retry_decline,
+    retry_phase, time_until,
 };
 use plakous_http::{
     CancellationToken as HttpCancellationToken, Client, ExchangeControl, Failure as HttpFailure,
@@ -619,6 +620,7 @@ async fn wait_to_retry(
     attempt.record_failure(
         failure.point,
         phase.map(plakous_model::ModelRetryPhase::as_str),
+        retry_cause_refusal(failure.cause),
         unsent,
         reason.map(Decline::as_str),
     );
@@ -814,6 +816,17 @@ async fn stream_body<H: ChatHttpHooks>(
                                 error,
                                 fault,
                             });
+                        }
+                        // A refusal no retry rule replays still names the
+                        // class the terminal is typed as.
+                        if let Some(refusal) = error.refusal() {
+                            attempt.record_failure(
+                                FailurePoint::MidStream,
+                                Some(plakous_model::ModelRetryPhase::ResponseBody.as_str()),
+                                Some(refusal),
+                                false,
+                                None,
+                            );
                         }
                         return Err(StreamBreak::Closing(error));
                     }

@@ -264,6 +264,7 @@ pub(super) async fn wait_to_retry(
     attempt.core.observations_ref().record_failure(
         failure.point,
         failure.phase.map(plakous_model::ModelRetryPhase::as_str),
+        plakous_exchange::retry_cause_refusal(failure.cause),
         unsent,
         reason.map(Decline::as_str),
     );

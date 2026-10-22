@@ -955,6 +955,7 @@ fn messages_model_error(
         descriptor,
         kind,
         facts,
+        error.http_status().map(plakous_model::ModelHttpStatus::get),
         format!("OpenRouter Messages operation failed: {error}"),
     )
     .with_attempt_summary(facts.map_or_else(String::new, |facts| facts.summary().to_string()));

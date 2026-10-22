@@ -76,6 +76,7 @@ pub struct ChatStreamError {
     message: String,
     http_status: Option<u16>,
     usage_limit: bool,
+    in_band_detail: Option<String>,
 }
 impl ChatStreamError {
     /// Returns the closed class.
@@ -101,6 +102,18 @@ impl ChatStreamError {
     pub const fn http_status(&self) -> Option<u16> {
         self.http_status
     }
+
+    /// Returns the provider's own account of an in-band error, without the
+    /// framing of the sentence it sits in.
+    ///
+    /// `HTTP 504 (timeout) from <upstream>: <message>` when the provider named
+    /// a status, and its message (and the upstream it named) otherwise; bounded
+    /// and credential-redacted like the diagnostic. Present exactly for
+    /// [`ChatStreamErrorKind::ProviderError`], so a caller can say who failed
+    /// without calling a well-formed provider error a protocol violation.
+    pub fn in_band_detail(&self) -> Option<&str> {
+        self.in_band_detail.as_deref()
+    }
 }
 impl fmt::Display for ChatStreamError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -114,6 +127,7 @@ fn err(kind: ChatStreamErrorKind, message: impl Into<String>) -> ChatStreamError
         message: message.into(),
         http_status: None,
         usage_limit: false,
+        in_band_detail: None,
     }
 }
 
@@ -171,6 +185,94 @@ fn edge_error_code_status(message: &str) -> Option<u16> {
 }
 
 const IN_BAND_ERROR_DETAIL_CHARS: usize = 240;
+const IN_BAND_UPSTREAM_CHARS: usize = 64;
+
+/// Composes what a well-formed in-band error object said.
+///
+/// A named status leads, as `HTTP 504 (timeout)`, with the class that status
+/// is typed as before acceptance, so both read alike; exhausted quota names no
+/// refusal class. The upstream the gateway named follows, then the provider's
+/// message unless it only restates the status (`error code: 504`). Without a
+/// status the provider's message is the whole account.
+fn in_band_error_summary(
+    error: &serde_json::Value,
+    status: Option<u16>,
+    usage_limit: bool,
+    chunk_provider: Option<&serde_json::Value>,
+) -> String {
+    let upstream = in_band_upstream(error, chunk_provider);
+    let Some(status) = status else {
+        let detail = in_band_error_detail(error);
+        return match upstream {
+            Some(upstream) => format!("{detail} (from {upstream})"),
+            None => detail,
+        };
+    };
+    let mut summary = format!("HTTP {status}");
+    if let Some(refusal) = plakous_attempt::ProviderRefusal::from_http_status(status)
+        && !usage_limit
+    {
+        summary = format!("{summary} ({})", refusal.label());
+    }
+    if let Some(upstream) = upstream {
+        summary = format!("{summary} from {upstream}");
+    }
+    match in_band_status_detail(error, status) {
+        Some(detail) => format!("{summary}: {detail}"),
+        None => summary,
+    }
+}
+
+/// What an in-band error with a known status adds to it: its message, or
+/// without one its `type` label. `None` when it only restates the status.
+fn in_band_status_detail(error: &serde_json::Value, status: u16) -> Option<String> {
+    let raw = match error {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Object(object) => {
+            let field = |key| {
+                object
+                    .get(key)
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|text| !text.is_empty())
+            };
+            match (field("message"), field("type")) {
+                (Some(message), _) => message.to_owned(),
+                (None, Some(label)) => format!("type={label}"),
+                (None, None) => return None,
+            }
+        }
+        _ => return None,
+    };
+    let detail = bounded_in_band_text(&raw, IN_BAND_ERROR_DETAIL_CHARS);
+    let restated =
+        detail.is_empty() || detail.eq_ignore_ascii_case(&format!("error code: {status}"));
+    (!restated).then_some(detail)
+}
+
+/// The upstream a gateway named for its in-band error: its error metadata
+/// first, then the chunk's own `provider`. Bounded; never the raw upstream body.
+fn in_band_upstream(
+    error: &serde_json::Value,
+    chunk_provider: Option<&serde_json::Value>,
+) -> Option<String> {
+    let name = error
+        .pointer("/metadata/provider_name")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| chunk_provider.and_then(serde_json::Value::as_str))?;
+    let name = bounded_in_band_text(name, IN_BAND_UPSTREAM_CHARS);
+    (!name.is_empty()).then_some(name)
+}
+
+/// Provider text without control characters, bounded and trimmed.
+fn bounded_in_band_text(raw: &str, limit: usize) -> String {
+    let sanitized: String = raw
+        .chars()
+        .filter(|ch| *ch == ' ' || !ch.is_control())
+        .take(limit)
+        .collect();
+    sanitized.trim().to_owned()
+}
 
 fn in_band_error_detail(error: &serde_json::Value) -> String {
     let raw = match error {
@@ -180,16 +282,11 @@ fn in_band_error_detail(error: &serde_json::Value) -> String {
         serde_json::Value::Bool(value) => value.to_string(),
         serde_json::Value::Null | serde_json::Value::Array(_) => String::new(),
     };
-    let sanitized: String = raw
-        .chars()
-        .filter(|ch| *ch == ' ' || !ch.is_control())
-        .take(IN_BAND_ERROR_DETAIL_CHARS)
-        .collect();
-    let trimmed = sanitized.trim();
-    if trimmed.is_empty() {
+    let detail = bounded_in_band_text(&raw, IN_BAND_ERROR_DETAIL_CHARS);
+    if detail.is_empty() {
         "unclassified".to_owned()
     } else {
-        trimmed.to_owned()
+        detail
     }
 }
 
@@ -623,16 +720,23 @@ impl ChatStreamProjector {
         if let Some(error) = chunk.error.as_ref() {
             let status = in_band_error_status(error);
             let usage_limit = plakous_attempt::value_reports_usage_limit(error);
-            return self.fail_with_status(
-                ChatStreamErrorKind::ProviderError,
-                SafeDiagnostic::new(format!(
-                    "Chat provider returned an in-band error: {}",
-                    in_band_error_detail(error)
-                ))
-                .to_string(),
+            let detail = SafeDiagnostic::new(in_band_error_summary(
+                error,
                 status,
                 usage_limit,
-            );
+                chunk.extra.get("provider"),
+            ))
+            .to_string();
+            self.failed = true;
+            return Err(ChatStreamError {
+                kind: ChatStreamErrorKind::ProviderError,
+                message: format!(
+                    "Chat provider returned an in-band error after accepting the request: {detail}"
+                ),
+                http_status: status,
+                usage_limit,
+                in_band_detail: Some(detail),
+            });
         }
         if chunk.object.as_deref() != Some("chat.completion.chunk") {
             return self.fail(
@@ -1362,22 +1466,6 @@ impl ChatStreamProjector {
     ) -> Result<T, ChatStreamError> {
         self.failed = true;
         Err(err(kind, message))
-    }
-
-    fn fail_with_status<T>(
-        &mut self,
-        kind: ChatStreamErrorKind,
-        message: impl Into<String>,
-        http_status: Option<u16>,
-        usage_limit: bool,
-    ) -> Result<T, ChatStreamError> {
-        self.failed = true;
-        Err(ChatStreamError {
-            kind,
-            message: message.into(),
-            http_status,
-            usage_limit,
-        })
     }
 }
 
@@ -2836,6 +2924,148 @@ mod tests {
         }
     }
 
+    /// A well-formed in-band error object is the provider's own error, read
+    /// like the same status before acceptance: `HTTP <status> (<class>)`, the
+    /// upstream the gateway named, then whatever the message adds.
+    #[test]
+    fn an_in_band_error_reads_as_the_status_class_and_upstream_it_named() {
+        let mut cases = vec![
+            // The live shape: the edge's own spelling, a numeric code and the
+            // upstream in the gateway's error metadata.
+            (
+                json!({"code": 504, "message": "error code: 504", "metadata": {"provider_name": "Upstream"}}),
+                Some(504),
+                "HTTP 504 (timeout) from Upstream",
+            ),
+            (json!({"code": 504}), Some(504), "HTTP 504 (timeout)"),
+            (
+                json!({"code": "504", "message": "upstream timed out"}),
+                Some(504),
+                "HTTP 504 (timeout): upstream timed out",
+            ),
+            (
+                json!({"code": 504, "type": "timeout"}),
+                Some(504),
+                "HTTP 504 (timeout): type=timeout",
+            ),
+            (json!({"code": 502}), Some(502), "HTTP 502 (unavailable)"),
+            (
+                json!({"code": "502", "message": "Provider returned error"}),
+                Some(502),
+                "HTTP 502 (unavailable): Provider returned error",
+            ),
+            (json!({"code": 429}), Some(429), "HTTP 429 (rate limited)"),
+            (
+                json!({"code": "429", "message": "Rate limit exceeded"}),
+                Some(429),
+                "HTTP 429 (rate limited): Rate limit exceeded",
+            ),
+            (
+                json!({"message": "error code: 429"}),
+                Some(429),
+                "HTTP 429 (rate limited)",
+            ),
+            // Exhausted quota is not a rate limit, whatever its status says.
+            (
+                json!({"code": 429, "type": "insufficient_quota"}),
+                Some(429),
+                "HTTP 429: type=insufficient_quota",
+            ),
+            // A status that names no refusal keeps no class.
+            (json!({"code": 401}), Some(401), "HTTP 401"),
+            // A message alone names no status; it stays the whole account.
+            (
+                json!({"message": "Provider returned error"}),
+                None,
+                "Provider returned error",
+            ),
+            (
+                json!({"message": "Provider returned error", "metadata": {"provider_name": "Upstream"}}),
+                None,
+                "Provider returned error (from Upstream)",
+            ),
+        ];
+        for status in 520_u16..=524 {
+            cases.push((
+                json!({"message": format!("error code: {status}")}),
+                Some(status),
+                "",
+            ));
+            cases.push((json!(format!("error code: {status}")), Some(status), ""));
+            cases.push((
+                json!({"code": status, "message": "origin unreachable"}),
+                Some(status),
+                "",
+            ));
+        }
+        for (payload, status, expected) in cases {
+            let error = projector()
+                .push(&data(&json!({ "error": payload })))
+                .expect_err("in-band error");
+            assert_eq!(
+                error.kind(),
+                ChatStreamErrorKind::ProviderError,
+                "{payload}"
+            );
+            assert_eq!(error.http_status(), status, "{payload}");
+            let expected = match (expected, status) {
+                ("", Some(status)) if payload.get("code").is_some() => {
+                    format!("HTTP {status} (unavailable): origin unreachable")
+                }
+                ("", Some(status)) => format!("HTTP {status} (unavailable)"),
+                (expected, _) => expected.to_owned(),
+            };
+            assert_eq!(error.in_band_detail(), Some(expected.as_str()), "{payload}");
+            assert_eq!(
+                error.message(),
+                format!(
+                    "Chat provider returned an in-band error after accepting the request: {expected}"
+                ),
+            );
+        }
+        // Grammar violations are not provider errors and carry no account.
+        let violation = projector()
+            .push(b"data: {\"object\":\"chat.completion.chunk\"}\n\n")
+            .expect_err("missing id");
+        assert_eq!(violation.kind(), ChatStreamErrorKind::InvalidResponse);
+        assert_eq!(violation.in_band_detail(), None);
+    }
+
+    /// The field shape behind this rule: an accepted OpenRouter stream of
+    /// keep-alives, then one chunk with no choices that carries the upstream's
+    /// timeout and names it at the chunk level too.
+    #[test]
+    fn an_openrouter_in_band_timeout_after_keepalives_names_its_upstream() {
+        let mut openrouter = projector_with_binding(
+            binding(ChatStreamLimits::default())
+                .with_extensions(ChatStreamExtensions::OpenRouterV1),
+        );
+        let keepalives = openrouter
+            .push(b": OPENROUTER PROCESSING\n\n: OPENROUTER PROCESSING\n\n")
+            .expect("keep-alives");
+        assert!(
+            matches!(keepalives.as_slice(), []),
+            "keep-alives project nothing"
+        );
+        let error = openrouter
+            .push(&data(&json!({
+                "id": "gen-1",
+                "object": "chat.completion.chunk",
+                "created": 1_700_000_000_u64,
+                "model": "model-literal",
+                "provider": "Upstream",
+                "choices": [],
+                "error": {"code": 504, "message": "error code: 504"}
+            })))
+            .expect_err("in-band timeout");
+        assert_eq!(error.kind(), ChatStreamErrorKind::ProviderError);
+        assert_eq!(error.http_status(), Some(504));
+        assert_eq!(
+            error.in_band_detail(),
+            Some("HTTP 504 (timeout) from Upstream")
+        );
+    }
+
     #[test]
     fn rejects_usage_mismatch_unsupported_finish_and_provider_error() {
         const SECRET_SENTINEL: &str = "SECRET_SENTINEL_DO_NOT_RETAIN";
@@ -2872,8 +3102,9 @@ mod tests {
         assert_eq!(error.kind(), ChatStreamErrorKind::ProviderError);
         assert_eq!(
             error.message(),
-            "Chat provider returned an in-band error: code=failure"
+            "Chat provider returned an in-band error after accepting the request: code=failure"
         );
+        assert_eq!(error.in_band_detail(), Some("code=failure"));
 
         let nested = projector()
             .push(&data(&json!({
@@ -2882,7 +3113,8 @@ mod tests {
             .expect_err("provider message");
         assert_eq!(
             nested.message(),
-            "Chat provider returned an in-band error: Provider returned error"
+            "Chat provider returned an in-band error after accepting the request: \
+             HTTP 502 (unavailable): Provider returned error"
         );
 
         let empty = projector()
@@ -2890,7 +3122,7 @@ mod tests {
             .expect_err("empty provider error");
         assert_eq!(
             empty.message(),
-            "Chat provider returned an in-band error: unclassified"
+            "Chat provider returned an in-band error after accepting the request: unclassified"
         );
 
         let redacted = projector()

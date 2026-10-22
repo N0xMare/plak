@@ -20,14 +20,16 @@ use std::future::Future;
 use std::time::Duration;
 
 use futures_util::future::{Either, select};
-use plakous_attempt::{FailurePoint, LongStreamReplayBudget, ReplaySafety, TerminalFacts};
+use plakous_attempt::{
+    FailurePoint, LongStreamReplayBudget, ProviderRefusal, ReplaySafety, TerminalFacts,
+};
 use plakous_http::{
     CancellationToken as HttpCancellationToken, ErrorKind, Failure, Phase, ResponseBody,
     TransmissionFact,
 };
 use plakous_model::{
     CancellationToken, ModelNetworkFailure, ModelNetworkTransmission, ModelRetryCause,
-    ModelRetryDeclineReason, ModelRetryPhase, Timestamp,
+    ModelRetryDeclineReason, ModelRetryPhase, ModelTransportFault, Timestamp,
 };
 
 /// Maps a transport phase to its neutral retry phase; `None` for phases the
@@ -150,6 +152,25 @@ async fn close_body(body: ResponseBody) -> Result<(), Failure> {
     }
 }
 
+/// The refusal a failed generation's provider named, for the attempt summary.
+///
+/// A status before the stream and the same refusal inside it name one class,
+/// so every kernel records the same one. A failure the client inferred names
+/// none.
+#[must_use]
+pub const fn retry_cause_refusal(cause: ModelRetryCause) -> Option<ProviderRefusal> {
+    match cause {
+        ModelRetryCause::HttpStatus { status } => ProviderRefusal::from_http_status(status),
+        ModelRetryCause::StreamInterrupted {
+            fault: ModelTransportFault::Overloaded,
+        } => Some(ProviderRefusal::Overloaded),
+        ModelRetryCause::StreamInterrupted {
+            fault: ModelTransportFault::RateLimited,
+        } => Some(ProviderRefusal::RateLimit),
+        _ => None,
+    }
+}
+
 /// Everything the turn-retry decline ladder reads for one failed generation.
 #[derive(Clone, Copy, Debug)]
 pub struct RetryDeclineInput {
@@ -249,6 +270,53 @@ mod tests {
             facts: TerminalFacts::preacceptance_test(),
             elapsed: Duration::from_secs(1),
             delay: Some(Duration::from_secs(1)),
+        }
+    }
+
+    #[test]
+    fn a_provider_named_refusal_is_one_class_before_and_inside_the_stream() {
+        use ModelRetryCause as Cause;
+        for (cause, expected) in [
+            (
+                Cause::HttpStatus { status: 429 },
+                Some(ProviderRefusal::RateLimit),
+            ),
+            (
+                Cause::HttpStatus { status: 503 },
+                Some(ProviderRefusal::Overloaded),
+            ),
+            (
+                Cause::HttpStatus { status: 504 },
+                Some(ProviderRefusal::Deadline),
+            ),
+            (Cause::HttpStatus { status: 400 }, None),
+            (
+                Cause::StreamInterrupted {
+                    fault: ModelTransportFault::Overloaded,
+                },
+                Some(ProviderRefusal::Overloaded),
+            ),
+            (
+                Cause::StreamInterrupted {
+                    fault: ModelTransportFault::RateLimited,
+                },
+                Some(ProviderRefusal::RateLimit),
+            ),
+            (
+                Cause::StreamInterrupted {
+                    fault: ModelTransportFault::Timeout,
+                },
+                None,
+            ),
+            (
+                Cause::TransportAfterSend {
+                    fault: ModelTransportFault::Timeout,
+                },
+                None,
+            ),
+            (Cause::Connect, None),
+        ] {
+            assert_eq!(retry_cause_refusal(cause), expected, "{cause:?}");
         }
     }
 
