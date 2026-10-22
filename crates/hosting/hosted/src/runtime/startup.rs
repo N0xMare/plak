@@ -1359,9 +1359,7 @@ mod tests {
             home: session_home.clone(),
             store: Arc::clone(&store) as Arc<dyn SessionRecordStore>,
             session,
-            target: HostTargetAuthority::Registered {
-                provider: NativeProvider::Codex,
-            },
+            target: test_kit::registered_authority(NativeProvider::Codex),
             model_id: "gpt-existing".into(),
             effort: Some(ReasoningEffort::High),
             effort_explicit: true,

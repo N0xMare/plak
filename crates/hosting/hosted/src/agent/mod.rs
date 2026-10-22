@@ -110,7 +110,6 @@ use build::{
     spawn_child_composition, spawn_parent_tree_id, spawn_roster_composition,
     spawn_roster_processing_tier,
 };
-/// Offline injection of a child's runtime binding; see the module's own docs.
 use children::{
     ProductChildSessionBinder, ProductLiveCanceller, ProductMailDeliverer,
     format_session_reopen_error, incompatible_session_message, reattach_inflight_children,

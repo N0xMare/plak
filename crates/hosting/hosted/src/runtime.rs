@@ -139,7 +139,7 @@ mod resume;
 pub mod shell;
 mod source_release;
 mod startup;
-pub use factory::{ProductionRuntimeFactory, RuntimeFactory, RuntimeFuture};
+pub use factory::{ProductionRuntimeFactory, RuntimeFactory, RuntimeFuture, TurnObserver};
 #[cfg(any(test, feature = "test-support"))]
 pub use test_kit::ScriptedRuntimeFactory;
 mod surface;
@@ -352,8 +352,20 @@ pub enum HostTargetAuthority {
     },
 
     /// A route whose factory owns runtime authority rather than a native subscription.
-    Registered { provider: NativeProvider },
+    Registered {
+        provider: NativeProvider,
+        token: RegisteredRuntimeAuthority,
+    },
 }
+
+/// Authority for a repository-only scripted route. Only the cfg'd test kit creates one.
+///
+/// ```compile_fail,E0423
+/// use plakous_hosted::runtime::RegisteredRuntimeAuthority;
+/// let _ = RegisteredRuntimeAuthority(());
+/// ```
+#[derive(Clone)]
+pub struct RegisteredRuntimeAuthority(());
 
 impl HostTargetAuthority {
     const fn native_provider(&self) -> Option<NativeProvider> {
@@ -361,7 +373,7 @@ impl HostTargetAuthority {
             Self::Native { provider, .. } => Some(*provider),
             Self::OpenRouter { .. } | Self::Platform { .. } => None,
 
-            Self::Registered { provider } => Some(*provider),
+            Self::Registered { provider, .. } => Some(*provider),
         }
     }
 
@@ -633,8 +645,8 @@ pub enum HostBoundary {
 #[cfg(any(test, feature = "test-support"))]
 pub const COMPLETION_WINS_QUIT_PROMPT: &str = "complete while quit is accepted";
 
-/// Builds one child's binding with the real binder's scoped construction roots.
-pub type ChildRuntimeFactory = dyn Fn(&str, &str, &crate::agent::ProductStateRoots) -> Result<SessionRuntimeBinding, String>
+/// Repository-only callback for a child's scoped binding; the test kit registers it.
+pub type ScriptedChildBinding = dyn Fn(&str, &str, &crate::agent::ProductStateRoots) -> Result<SessionRuntimeBinding, String>
     + Send
     + Sync
     + 'static;

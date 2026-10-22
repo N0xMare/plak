@@ -1352,9 +1352,7 @@ mod tests {
             topology_enabled: true,
             product_home: home_dir.clone(),
             session,
-            target: HostTargetAuthority::Registered {
-                provider: NativeProvider::Codex,
-            },
+            target: test_kit::registered_authority(NativeProvider::Codex),
             model_id: "gpt-existing".into(),
             effort: Some(ReasoningEffort::High),
             effort_explicit: true,

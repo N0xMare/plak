@@ -79,7 +79,7 @@ pub(crate) struct Fixture {
     store: Arc<SwitchableStore>,
     vcs: Arc<crate::occupancy_vcs::fake::FakeVcs>,
     failure_kind: ModelErrorKind,
-    _binding: crate::runtime::test_kit::ChildRuntimeGuard,
+    binding: crate::runtime::test_kit::SwitchableChildRuntime,
 }
 
 #[tokio::test]
@@ -807,10 +807,9 @@ async fn panicking_child_create_frees_startup_owner_and_triggers_recovery() {
         })
         .unwrap();
     let id = start.spawned.agent_id.clone();
-    let panic_binding = crate::runtime::test_kit::install_child_runtime(
-        fixture.parent.state_roots(),
-        Arc::new(|_, _, _| panic!("injected create panic payload must not be persisted")),
-    );
+    let panic_binding = fixture.binding.install(Arc::new(|_, _, _| {
+        panic!("injected create panic payload must not be persisted")
+    }));
     let recovered = Arc::new(tokio::sync::Notify::new());
     let notified = recovered.clone();
     fixture
@@ -1090,17 +1089,16 @@ impl Fixture {
             BoundaryController::quiet_from_evidence_path(CrashBoundary::None, &evidence).unwrap();
         let state_roots =
             ProductStateRoots::with_doubles(root.path().join("plak"), root.path().join("state"));
-        let binding = crate::runtime::test_kit::install_child_runtime(
-            &state_roots,
-            Arc::new(move |_, _, _| {
+        let binding =
+            crate::runtime::test_kit::SwitchableChildRuntime::new(Arc::new(move |_, _, _| {
                 projected_terminal_failure_runtime_binding(
                     &workspace,
                     controller.clone(),
                     failure_kind,
                 )
                 .map_err(|error| error.to_string())
-            }),
-        );
+            }));
+        let state_roots = binding.with_roots(state_roots);
         let vcs = Arc::new(crate::occupancy_vcs::fake::FakeVcs::new());
         let tree = ProductAgentTree::bootstrap_root_for_test_with(
             vcs.clone(),
@@ -1152,7 +1150,7 @@ impl Fixture {
             store,
             vcs,
             failure_kind,
-            _binding: binding,
+            binding,
         }
     }
 
@@ -2391,18 +2389,13 @@ fn install_construction_refused_binding(
 ) -> crate::runtime::test_kit::ChildRuntimeGuard {
     let workspace = fixture.root.path().to_path_buf();
     let evidence = fixture.evidence.clone();
-    crate::runtime::test_kit::install_child_runtime(
-        fixture.parent.state_roots(),
-        Arc::new(move |_, _, _| {
-            let controller =
-                BoundaryController::quiet_from_evidence_path(CrashBoundary::None, &evidence)
-                    .map_err(|error| error.to_string())?;
-            plakous_offline_crash_harness::construction_refused_runtime_binding(
-                &workspace, controller,
-            )
+    fixture.binding.install(Arc::new(move |_, _, _| {
+        let controller =
+            BoundaryController::quiet_from_evidence_path(CrashBoundary::None, &evidence)
+                .map_err(|error| error.to_string())?;
+        plakous_offline_crash_harness::construction_refused_runtime_binding(&workspace, controller)
             .map_err(|error| error.to_string())
-        }),
-    )
+    }))
 }
 
 /// A spawn whose create construction refused created nothing, so the spawn
@@ -2540,20 +2533,17 @@ async fn followup_to_a_never_created_child_is_refused_and_the_node_stays_closabl
     drop(refused);
     let workspace = fixture.root.path().to_path_buf();
     let evidence = fixture.evidence.clone();
-    let _working = crate::runtime::test_kit::install_child_runtime(
-        fixture.parent.state_roots(),
-        Arc::new(move |_, _, _| {
-            let controller =
-                BoundaryController::quiet_from_evidence_path(CrashBoundary::None, &evidence)
-                    .map_err(|error| error.to_string())?;
-            projected_terminal_failure_runtime_binding(
-                &workspace,
-                controller,
-                ModelErrorKind::OutcomeUnknown,
-            )
-            .map_err(|error| error.to_string())
-        }),
-    );
+    let _working = fixture.binding.install(Arc::new(move |_, _, _| {
+        let controller =
+            BoundaryController::quiet_from_evidence_path(CrashBoundary::None, &evidence)
+                .map_err(|error| error.to_string())?;
+        projected_terminal_failure_runtime_binding(
+            &workspace,
+            controller,
+            ModelErrorKind::OutcomeUnknown,
+        )
+        .map_err(|error| error.to_string())
+    }));
 
     let (sent, receipt) = fixture
         .invoke(
@@ -2782,22 +2772,19 @@ async fn publication_cut_reconstructs_child_before_binding_and_new_children_use_
         BoundaryController::quiet_from_evidence_path(CrashBoundary::None, &fixture.evidence)
             .unwrap();
     let script = Arc::new(serde_json::from_value::<ScriptPlan>(json!({"version": 1})).unwrap());
-    let _binding = crate::runtime::test_kit::install_child_runtime(
-        fixture.parent.state_roots(),
-        Arc::new(move |_, _, roots| {
-            let path = roots.sidecars().javascript_host()?;
-            seen.lock().unwrap().push(path.clone());
-            scripted_code_mode_runtime_binding(
-                &workspace,
-                controller.clone(),
-                Arc::clone(&script),
-                Arc::new(AtomicU64::new(0)),
-                &path,
-                None,
-            )
-            .map_err(|error| error.to_string())
-        }),
-    );
+    let _binding = fixture.binding.install(Arc::new(move |_, _, roots| {
+        let path = roots.sidecars().javascript_host()?;
+        seen.lock().unwrap().push(path.clone());
+        scripted_code_mode_runtime_binding(
+            &workspace,
+            controller.clone(),
+            Arc::clone(&script),
+            Arc::new(AtomicU64::new(0)),
+            &path,
+            None,
+        )
+        .map_err(|error| error.to_string())
+    }));
     let SpawnParent::Api(spec) = &mut fixture.parent else {
         panic!("API fixture")
     };

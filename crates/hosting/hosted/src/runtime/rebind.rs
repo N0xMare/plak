@@ -10,7 +10,7 @@ use plakous::sessions::{
 use plakous::subscriptions::NativeProvider;
 
 use crate::agent::{
-    AttachedCodingSession, ProductAgentSpec, coding_session_target_binding, open_coding_session,
+    AttachedCodingSession, ProductAgentSpec, coding_session_target_binding,
     selected_coding_provider_configuration_with_processing_tier,
 };
 use crate::binding::TargetSelection;
@@ -125,9 +125,13 @@ pub(super) fn native_rebind_runtime<P: plakous_host_protocol::ProtocolExtension>
         RebindRoute::Native { spec, .. } => spec.as_deref(),
         RebindRoute::Api(_) => None,
     };
-    config
-        .runtime_factory
-        .rebind_runtime(config, spec, attach, stderr_buf)
+    config.runtime_factory.rebind_runtime(
+        config,
+        spec,
+        attach,
+        matches!(route, RebindRoute::Native { .. }),
+        stderr_buf,
+    )
 }
 
 /// Drops the lease a profile fork's runtime build took on the tree it
@@ -166,7 +170,7 @@ pub(super) fn resolve_rebind_target<P: plakous_host_protocol::ProtocolExtension>
     if let Some((provider, binding)) = config.runtime_factory.target_binding() {
         let (parsed_effort, explicit) = effort_from_config(effort);
         if effort.is_some() && !explicit {
-            return Err(CliFailure::new("injected rebind effort is invalid"));
+            return Err(CliFailure::new("rebind target effort is invalid"));
         }
         return Ok(ResolvedRebindTarget {
             route: RebindRoute::Native {
@@ -557,34 +561,19 @@ pub(super) fn complete_rebind<P: plakous_host_protocol::ProtocolExtension>(
         }
     };
     stderr_buf.clear();
-    let replacement_result = match &target.route {
-        RebindRoute::Native {
-            spec: Some(spec), ..
-        } => {
-            let target_open = open_coding_session((**spec).clone(), resume_locator, stderr_buf);
-            match executor.block_on(target_open) {
-                Ok(result) => result.map_err(|error| error.failure),
-                Err(_) => Err(CliFailure::new("application execution failed")),
-            }
-        }
-        route => {
-            // An API target opens from its own published record; an injected
-            // native target from the host's.
-            let record = match route {
-                RebindRoute::Api(_) => &target_record,
-                RebindRoute::Native { .. } => &config.session,
-            };
-            match executor.block_on(open_session_for_host(
-                config,
-                record,
-                resume_locator,
-                stderr_buf,
-                RuntimeRole::Rebind,
-            )) {
-                Ok(result) => result.map_err(|error| error.failure),
-                Err(_) => Err(CliFailure::new("application execution failed")),
-            }
-        }
+    let spec = match &target.route {
+        RebindRoute::Native { spec, .. } => spec.as_deref(),
+        RebindRoute::Api(_) => None,
+    };
+    let replacement_result = match executor.block_on(config.runtime_factory.open_rebind_target(
+        config,
+        &target_record,
+        spec,
+        resume_locator,
+        stderr_buf,
+    )) {
+        Ok(result) => result.map_err(|error| error.failure),
+        Err(_) => Err(CliFailure::new("application execution failed")),
     };
     let replacement = match replacement_result {
         Ok(replacement) => replacement,
@@ -646,8 +635,11 @@ pub(super) fn complete_rebind<P: plakous_host_protocol::ProtocolExtension>(
             },
         },
 
-        (RebindRoute::Native { provider, .. }, HostTargetAuthority::Registered { .. }) => {
-            HostTargetAuthority::Registered { provider }
+        (RebindRoute::Native { provider, .. }, HostTargetAuthority::Registered { token, .. }) => {
+            HostTargetAuthority::Registered {
+                provider,
+                token: token.clone(),
+            }
         }
     };
     config.model_id = target_model;

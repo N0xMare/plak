@@ -130,8 +130,7 @@ pub enum TelemetryHealth {
 
 #[derive(Clone)]
 pub struct ProductStateRoots {
-    pub(crate) child_runtime:
-        Arc<Mutex<Arc<dyn super::children::runtime_factory::ChildRuntimeFactory>>>,
+    child_runtime: Arc<dyn super::children::runtime_factory::ChildRuntimeFactory>,
     job_registry: Arc<crate::jobs::JobRegistry>,
     job_config: plakous::tools::JobConfig,
     exchange_observer: Option<Arc<dyn plakous::exchange_observation::ExchangeObserver>>,
@@ -182,17 +181,14 @@ impl ProductStateRoots {
         mut self,
         factory: Arc<dyn super::children::runtime_factory::ChildRuntimeFactory>,
     ) -> Self {
-        self.child_runtime = Arc::new(Mutex::new(factory));
+        self.child_runtime = factory;
         self
     }
 
     pub(crate) fn child_runtime_factory(
         &self,
     ) -> Arc<dyn super::children::runtime_factory::ChildRuntimeFactory> {
-        self.child_runtime
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+        self.child_runtime.clone()
     }
 
     pub fn new(
@@ -212,9 +208,9 @@ impl ProductStateRoots {
         }
         let subscriptions = state_home.join("plak/subscriptions");
         Ok(Self {
-            child_runtime: Arc::new(Mutex::new(Arc::new(
+            child_runtime: Arc::new(
                 super::children::runtime_factory::ProductionChildRuntimeFactory,
-            ))),
+            ),
             job_registry: Arc::default(),
             job_config: plakous::tools::JobConfig::default(),
             exchange_observer: None,
@@ -475,9 +471,9 @@ impl ProductStateRoots {
     #[must_use]
     pub fn with_doubles(product: PathBuf, state_home: PathBuf) -> Self {
         Self {
-            child_runtime: Arc::new(Mutex::new(Arc::new(
+            child_runtime: Arc::new(
                 super::children::runtime_factory::ProductionChildRuntimeFactory,
-            ))),
+            ),
             job_registry: Arc::default(),
             job_config: plakous::tools::JobConfig::default(),
             exchange_observer: None,

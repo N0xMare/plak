@@ -53,7 +53,7 @@ impl PlakousApplication {
             return self.run_hosted(
                 config,
                 session,
-                product_host::HostTargetAuthority::Registered { provider },
+                plakous_hosted::runtime::test_kit::registered_authority(provider),
                 prompt,
                 print_session_id,
                 false,
@@ -296,9 +296,7 @@ impl PlakousApplication {
             return self.run_hosted(
                 config,
                 session,
-                product_host::HostTargetAuthority::Registered {
-                    provider: NativeProvider::Codex,
-                },
+                plakous_hosted::runtime::test_kit::registered_authority(NativeProvider::Codex),
                 prompt,
                 print_session_id,
                 resume_tree,

@@ -350,6 +350,27 @@ class PublicCompileGateTests(unittest.TestCase):
             compile_gate.has_authority_diagnostic(self.diagnostic(binary), binary)
         )
 
+    def test_hosted_construction_pins_require_the_exact_seal_or_private_constructor_error(self) -> None:
+        for binary, code, line in (
+            ("hosted_runtime_factory", "E0277", 11),
+            ("hosted_registered_authority", "E0423", 4),
+        ):
+            with self.subTest(binary=binary):
+                self.assertEqual(compile_gate.AUTHORITY_NEGATIVE_ERROR_CODES[binary], code)
+                self.assertEqual(compile_gate.AUTHORITY_NEGATIVE_ERROR_LINES[binary], line)
+                self.assertTrue(compile_gate.has_authority_diagnostic(self.diagnostic(binary), binary))
+                self.assertFalse(compile_gate.has_authority_diagnostic(
+                    self.diagnostic(binary, code="E0432"), binary,
+                ))
+                self.assertFalse(compile_gate.has_authority_diagnostic(
+                    self.diagnostic(binary, line=line + 1), binary,
+                ))
+                unrelated = json.loads(self.diagnostic(binary))
+                unrelated["message"]["message"] = "an unrelated error with the same code"
+                self.assertFalse(compile_gate.has_authority_diagnostic(
+                    json.dumps(unrelated), binary,
+                ))
+
     def test_xai_public_credentials_cannot_invoke_private_execution_methods(self) -> None:
         for binary in ("xai_platform_authority", "xai_platform_grant", "xai_platform_bearer"):
             with self.subTest(binary=binary):

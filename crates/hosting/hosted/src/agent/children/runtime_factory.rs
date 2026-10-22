@@ -31,7 +31,7 @@ pub(crate) type ChildRuntimeFuture<'a> =
 mod tests {
     use super::*;
     use crate::agent::{ProductStateRoots, api_topology_parent};
-    use crate::runtime::test_kit::install_child_runtime;
+    use crate::runtime::test_kit::SwitchableChildRuntime;
     use std::sync::Arc;
 
     fn parent(roots: ProductStateRoots, path: &std::path::Path) -> SpawnParent {
@@ -78,24 +78,15 @@ mod tests {
             home.path().join("first"),
             home.path().join("state-first"),
         );
-        let first = shared
-            .clone()
-            .with_child_runtime_factory(Arc::new(ProductionChildRuntimeFactory));
-        let second = shared
-            .clone()
-            .with_child_runtime_factory(Arc::new(ProductionChildRuntimeFactory));
-        let first_home = first.paths()[0].clone();
-        let _one = install_child_runtime(
-            &first,
-            Arc::new(move |id, path, roots| {
-                assert_eq!(roots.paths()[0], first_home);
-                Err(format!("first:{id}:{path}"))
-            }),
-        );
-        let _two = install_child_runtime(
-            &second,
-            Arc::new(|id, path, _| Err(format!("second:{id}:{path}"))),
-        );
+        let first_home = shared.paths()[0].clone();
+        let first_binding = SwitchableChildRuntime::new(Arc::new(move |id, path, roots| {
+            assert_eq!(roots.paths()[0], first_home);
+            Err(format!("first:{id}:{path}"))
+        }));
+        let second_binding =
+            SwitchableChildRuntime::new(Arc::new(|id, path, _| Err(format!("second:{id}:{path}"))));
+        let first = first_binding.with_roots(shared.clone());
+        let second = second_binding.with_roots(shared);
         let first_parent = parent(first.clone(), home.path());
         let second_parent = parent(second, home.path());
         for opening in [false, true] {
@@ -105,11 +96,15 @@ mod tests {
             assert_eq!(two, "second:a2:/work/a2");
         }
         {
-            let _replacement =
-                install_child_runtime(&first, Arc::new(|_, _, _| Err("replacement".into())));
+            let _replacement = first_binding.install(Arc::new(|_, _, _| Err("replacement".into())));
             assert_eq!(bind(&first_parent, false).await, "replacement");
             assert_eq!(bind(&second_parent, false).await, "second:a2:/work/a2");
         }
+        let older = first_binding.install(Arc::new(|_, _, _| Err("older".into())));
+        let newer = first_binding.install(Arc::new(|_, _, _| Err("newer".into())));
+        drop(older);
+        assert_eq!(bind(&first_parent, false).await, "newer");
+        drop(newer);
         assert_eq!(bind(&first_parent, false).await, "first:a2:/work/a2");
     }
 }

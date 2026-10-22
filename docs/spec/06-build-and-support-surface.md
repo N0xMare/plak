@@ -253,6 +253,12 @@ integrates with a platform. Other choices belong in runtime configuration.
 Feature selection must not change persisted or wire vocabularies. The release
 profile remains speed-focused; feature work does not change its optimization.
 
+The hosted `RuntimeFactory` is a sealed host-level construction port, not an
+embedder extension point despite the published-internal crate's nameability.
+Only production construction is available without `test-support`; the cfg'd
+test kit supplies the scripted implementation and the private registered-route
+authority token. Native and API rebind target opens use that same sealed port.
+
 The workspace checker enforces configuration placement through
 `[workspace.metadata.plakous.cfg.<package>]`. `feature-sites` defaults to
 `src/lib.rs` and `src/registry.rs`; these allow gated static-entry references

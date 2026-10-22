@@ -666,7 +666,7 @@ pub struct ScriptedRuntimeFactory {
     /// A child's binding, given the real binder's scoped construction roots.
     /// `None` retains the real child route rather than borrowing another host's
     /// scripted registration.
-    pub child_runtime: Option<Arc<ChildRuntimeFactory>>,
+    pub child_runtime: Option<Arc<ScriptedChildBinding>>,
     /// Topology attachment choices observed by scripted rebind builds.
     pub rebind_builds: Mutex<Vec<crate::topology_runtime::TopologyHubAttach>>,
 }
@@ -735,8 +735,8 @@ pub fn run_scripted_host<P: plakous_host_protocol::ProtocolExtension>(
 }
 
 use super::{
-    ChildRuntimeFactory, HostBoundary, HostConfig, HostEvent, HostWorkflow, RuntimeFactory,
-    RuntimeFuture, RuntimeRole, UserAction,
+    HostBoundary, HostConfig, HostEvent, HostWorkflow, RuntimeFactory, RuntimeFuture, RuntimeRole,
+    ScriptedChildBinding, UserAction,
 };
 use crate::{
     CliFailure, CliResult,
@@ -820,6 +820,8 @@ impl ScriptedRuntimeFactory {
         .await
     }
 }
+impl super::factory::sealed::Sealed for ScriptedRuntimeFactory {}
+
 impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for ScriptedRuntimeFactory {
     fn clear(
         &self,
@@ -856,17 +858,20 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Scripted
     fn api_runtime<'a>(
         &'a self,
         config: &'a HostConfig<P>,
-        _record: &'a SessionRecord,
-        _opening_durable_session: bool,
+        record: &'a SessionRecord,
+        opening_durable_session: bool,
         topology_attach: crate::topology_runtime::TopologyHubAttach,
-        _tree_id: Option<&'a str>,
-        _attached_tree: &'a mut Option<String>,
+        tree_id: Option<&'a str>,
+        attached_tree: &'a mut Option<String>,
     ) -> RuntimeFuture<'a, CliResult<SessionRuntimeBinding>> {
-        self.rebind_builds
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(topology_attach);
-        Box::pin(async move { self.binding(config, RuntimeRole::Rebind) })
+        super::ProductionRuntimeFactory.api_runtime(
+            config,
+            record,
+            opening_durable_session,
+            topology_attach,
+            tree_id,
+            attached_tree,
+        )
     }
     fn runtime(
         &self,
@@ -918,6 +923,20 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Scripted
     ) -> RuntimeFuture<'a, Result<AttachedCodingSession, CodingSessionOpenFailure>> {
         Box::pin(self.open_binding(config, head, role))
     }
+    fn open_rebind_target<'a>(
+        &'a self,
+        config: &'a HostConfig<P>,
+        record: &'a SessionRecord,
+        spec: Option<&'a ProductAgentSpec>,
+        locator: SessionLocator,
+        stderr: &'a mut Vec<u8>,
+    ) -> RuntimeFuture<'a, Result<AttachedCodingSession, CodingSessionOpenFailure>> {
+        if spec.is_some() {
+            return super::ProductionRuntimeFactory
+                .open_rebind_target(config, record, spec, locator, stderr);
+        }
+        Box::pin(self.open_binding(config, locator, RuntimeRole::Rebind))
+    }
     fn fork_runtime(
         &self,
         _: &plakous::application::ApplicationExecutor,
@@ -929,14 +948,26 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Scripted
     fn rebind_runtime(
         &self,
         config: &HostConfig<P>,
-        _: Option<&ProductAgentSpec>,
+        spec: Option<&ProductAgentSpec>,
         attach: crate::topology_runtime::TopologyHubAttach,
-        _: &mut Vec<u8>,
+        native_target: bool,
+        stderr: &mut Vec<u8>,
     ) -> (CliResult<SessionRuntimeBinding>, Option<String>) {
-        self.rebind_builds
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(attach);
+        if spec.is_some() {
+            return super::ProductionRuntimeFactory.rebind_runtime(
+                config,
+                spec,
+                attach,
+                native_target,
+                stderr,
+            );
+        }
+        if native_target {
+            self.rebind_builds
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(attach);
+        }
         (self.binding(config, RuntimeRole::Rebind), None)
     }
     fn input_window(
@@ -956,18 +987,24 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Scripted
     fn observe(&self, workflow: HostWorkflow, boundary: HostBoundary) {
         (self.observe)(workflow, boundary);
     }
-    fn observe_turn_boundary(&self, prompt: &str, boundary: HostBoundary) {
-        if prompt == super::COMPLETION_WINS_QUIT_PROMPT {
-            (self.observe)(HostWorkflow::SendNow, boundary);
-        }
+    fn turn_observer(&self, prompt: &str) -> Option<Box<dyn super::TurnObserver>> {
+        (prompt == super::COMPLETION_WINS_QUIT_PROMPT).then(|| {
+            Box::new(ScriptedTurnObserver(Arc::clone(&self.observe)))
+                as Box<dyn super::TurnObserver>
+        })
     }
     fn configure(&self, config: &mut HostConfig<P>) {
-        if let Some(factory) = &self.child_runtime {
-            config.state_roots = config
-                .state_roots
-                .clone()
-                .with_child_runtime_factory(Arc::new(ScriptedChildRuntimeFactory(factory.clone())));
-        }
+        let factory: Arc<dyn crate::agent::children::runtime_factory::ChildRuntimeFactory> =
+            match &self.child_runtime {
+                Some(binding) => Arc::new(ScriptedChildRuntimeFactory(binding.clone())),
+                None => {
+                    Arc::new(crate::agent::children::runtime_factory::ProductionChildRuntimeFactory)
+                }
+            };
+        config.state_roots = config
+            .state_roots
+            .clone()
+            .with_child_runtime_factory(factory);
     }
     fn attached(&self, config: &HostConfig<P>, opened: &mut AttachedCodingSession) {
         opened.claim_registered_topology_owner(&super::rebind::durable_tree_id(
@@ -977,7 +1014,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> RuntimeFactory<P> for Scripted
     }
 }
 
-struct ScriptedChildRuntimeFactory(Arc<ChildRuntimeFactory>);
+struct ScriptedChildRuntimeFactory(Arc<ScriptedChildBinding>);
 impl crate::agent::children::runtime_factory::ChildRuntimeFactory for ScriptedChildRuntimeFactory {
     fn bind<'a>(
         &'a self,
@@ -988,32 +1025,195 @@ impl crate::agent::children::runtime_factory::ChildRuntimeFactory for ScriptedCh
         )
     }
 }
-/// A fixture-local route registration. Dropping it restores only these roots.
+
+struct ScriptedTurnObserver(Arc<dyn Fn(HostWorkflow, HostBoundary) + Send + Sync>);
+impl super::TurnObserver for ScriptedTurnObserver {
+    fn observe(&self, boundary: HostBoundary) {
+        (self.0)(HostWorkflow::SendNow, boundary);
+    }
+}
+
+/// Constructs repository-only authority; no constructor exists in production builds.
+pub fn registered_authority(
+    provider: plakous::subscriptions::NativeProvider,
+) -> super::HostTargetAuthority {
+    super::HostTargetAuthority::Registered {
+        provider,
+        token: super::RegisteredRuntimeAuthority(()),
+    }
+}
+
+/// A fixture-owned switchable route. Roots hold only an immutable factory Arc.
+#[derive(Clone)]
+pub struct SwitchableChildRuntime {
+    state: Arc<Mutex<ChildBindings>>,
+}
+struct ChildBindings {
+    base: Arc<ScriptedChildBinding>,
+    next_id: u64,
+    overrides: Vec<(u64, Arc<ScriptedChildBinding>)>,
+}
+impl SwitchableChildRuntime {
+    #[must_use]
+    pub fn new(binding: Arc<ScriptedChildBinding>) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(ChildBindings {
+                base: binding,
+                next_id: 0,
+                overrides: Vec::new(),
+            })),
+        }
+    }
+    #[must_use]
+    pub fn with_roots(
+        &self,
+        roots: crate::agent::ProductStateRoots,
+    ) -> crate::agent::ProductStateRoots {
+        roots.with_child_runtime_factory(Arc::new(self.clone()))
+    }
+    #[must_use]
+    pub fn install(&self, binding: Arc<ScriptedChildBinding>) -> ChildRuntimeGuard {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let id = state.next_id;
+        state.next_id += 1;
+        state.overrides.push((id, binding));
+        ChildRuntimeGuard {
+            state: self.state.clone(),
+            id,
+        }
+    }
+}
+impl crate::agent::children::runtime_factory::ChildRuntimeFactory for SwitchableChildRuntime {
+    fn bind<'a>(
+        &'a self,
+        request: crate::agent::children::runtime_factory::ChildRuntimeRequest<'a>,
+    ) -> crate::agent::children::runtime_factory::ChildRuntimeFuture<'a> {
+        let binding = {
+            let state = self
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            state
+                .overrides
+                .last()
+                .map_or_else(|| state.base.clone(), |(_, binding)| binding.clone())
+        };
+        Box::pin(
+            async move { binding(request.agent_id, request.path, request.parent.state_roots()) },
+        )
+    }
+}
+/// Removes its own override, not a stale snapshot of another registration.
 pub struct ChildRuntimeGuard {
-    slot: Arc<Mutex<Arc<dyn crate::agent::children::runtime_factory::ChildRuntimeFactory>>>,
-    previous: Arc<dyn crate::agent::children::runtime_factory::ChildRuntimeFactory>,
+    state: Arc<Mutex<ChildBindings>>,
+    id: u64,
 }
 impl Drop for ChildRuntimeGuard {
     fn drop(&mut self) {
-        *self
-            .slot
+        self.state
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = self.previous.clone();
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .overrides
+            .retain(|(id, _)| *id != self.id);
     }
 }
-pub fn install_child_runtime(
-    roots: &crate::agent::ProductStateRoots,
-    factory: Arc<ChildRuntimeFactory>,
-) -> ChildRuntimeGuard {
-    let previous = std::mem::replace(
-        &mut *roots
-            .child_runtime
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner),
-        Arc::new(ScriptedChildRuntimeFactory(factory)),
-    );
-    ChildRuntimeGuard {
-        slot: roots.child_runtime.clone(),
-        previous,
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "deterministic factory-boundary fixture")]
+mod factory_boundary_tests {
+    use super::*;
+    #[test]
+    fn absent_child_and_turn_observers_do_not_inherit_another_registration() {
+        let home = tempfile::tempdir().unwrap();
+        let (mut config, scripted) =
+            super::super::test_support::fresh_injected_attached_host(home.path());
+        let inherited = SwitchableChildRuntime::new(Arc::new(|_, _, _| Err("inherited".into())));
+        let roots = inherited.with_roots(config.state_roots.clone());
+        config.state_roots = roots.clone();
+        let factory: &dyn RuntimeFactory<TestExtension> = &*scripted;
+        factory.configure(&mut config);
+        assert!(!Arc::ptr_eq(
+            &roots.child_runtime_factory(),
+            &config.state_roots.child_runtime_factory()
+        ));
+        assert!(Arc::ptr_eq(
+            &roots.child_runtime_factory(),
+            &roots.clone().child_runtime_factory()
+        ));
+        assert!(factory.turn_observer("ordinary prompt").is_none());
+        assert!(
+            factory
+                .turn_observer(super::super::COMPLETION_WINS_QUIT_PROMPT)
+                .is_some()
+        );
+        let production: &dyn RuntimeFactory<TestExtension> =
+            &super::super::ProductionRuntimeFactory;
+        assert!(
+            production
+                .turn_observer(super::super::COMPLETION_WINS_QUIT_PROMPT)
+                .is_none()
+        );
+    }
+    #[test]
+    fn scripted_profile_api_builds_do_not_replace_the_real_binder_or_record_native_builds() {
+        use crate::binding::{
+            OpenRouterRoutingSelection, ProtocolSelection, TargetSelection, WireBinding,
+        };
+        use crate::topology_runtime::TopologyHubAttach;
+        let home = tempfile::tempdir().unwrap();
+        let (config, scripted) =
+            super::super::test_support::fresh_injected_attached_host(home.path());
+        let factory: &dyn RuntimeFactory<TestExtension> = &*scripted;
+        let mut record = config.session.clone();
+        record.target_selection = TargetSelection::OpenRouter {
+            wire: WireBinding::resolve(ProtocolSelection::Auto),
+            routing: OpenRouterRoutingSelection::GatewayManaged,
+        };
+        record.model = Some("offline/no-credential".into());
+        let executor = plakous::application::ApplicationExecutor::new().unwrap();
+        let result = executor
+            .block_on(factory.api_runtime(
+                &config,
+                &record,
+                false,
+                TopologyHubAttach::LookupOnly,
+                None,
+                &mut None,
+            ))
+            .unwrap();
+        assert!(
+            result.is_err(),
+            "the real binder must refuse absent credentials"
+        );
+        assert!(scripted.rebind_builds.lock().unwrap().is_empty());
+        assert!(
+            factory
+                .rebind_runtime(
+                    &config,
+                    None,
+                    TopologyHubAttach::LookupOnly,
+                    false,
+                    &mut Vec::new()
+                )
+                .0
+                .is_ok()
+        );
+        assert!(scripted.rebind_builds.lock().unwrap().is_empty());
+        assert!(
+            factory
+                .rebind_runtime(
+                    &config,
+                    None,
+                    TopologyHubAttach::LookupOnly,
+                    true,
+                    &mut Vec::new()
+                )
+                .0
+                .is_ok()
+        );
+        assert_eq!(scripted.rebind_builds.lock().unwrap().len(), 1);
     }
 }

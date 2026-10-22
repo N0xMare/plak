@@ -901,9 +901,7 @@ impl OfflineSelection {
             store: state_roots.session_records(),
             state_roots: state_roots.clone(),
             session,
-            target: product_host::HostTargetAuthority::Registered {
-                provider: NativeProvider::Codex,
-            },
+            target: plakous_hosted::runtime::test_kit::registered_authority(NativeProvider::Codex),
             model_id: SELECTOR.to_owned(),
             effort: Some(effort),
             effort_explicit,

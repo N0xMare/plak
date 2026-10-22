@@ -21,7 +21,7 @@ use super::{
     settle_late_cancel, settle_live_thinking, surface, terminal_turn_outcome,
     turn_finalization_ready, turn_lifecycle, unresolved_turn_lifecycle,
 };
-use super::{HostBoundary, HostWorkflow, RuntimeFactory, observe_boundary};
+use super::{HostBoundary, HostWorkflow, RuntimeFactory, TurnObserver, observe_boundary};
 
 pub(super) struct TurnHost<'a, P: plakous_host_protocol::ProtocolExtension> {
     pub(super) job_agent: &'a Agent,
@@ -84,6 +84,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnHost<'_, P> {
 }
 
 struct TurnDrive<'a, P: plakous_host_protocol::ProtocolExtension> {
+    turn_observer: Option<Box<dyn TurnObserver>>,
     host: TurnHost<'a, P>,
     control: TurnControl,
     assistant: String,
@@ -132,9 +133,14 @@ mod finish;
 mod queue_projection;
 
 impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
-    fn new(control: TurnControl, host: TurnHost<'a, P>) -> Self {
+    fn new(
+        control: TurnControl,
+        host: TurnHost<'a, P>,
+        turn_observer: Option<Box<dyn TurnObserver>>,
+    ) -> Self {
         let live_occupancy = LiveOccupancy::from_projection(&host.context_projection);
         Self {
+            turn_observer,
             host,
             control,
             assistant: String::new(),
@@ -168,11 +174,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
         }
     }
 
-    async fn run(
-        mut self,
-        mut turn: plakous::agent::Turn,
-        prompt: String,
-    ) -> Result<DrivenTurn, DriveTurnError> {
+    async fn run(mut self, mut turn: plakous::agent::Turn) -> Result<DrivenTurn, DriveTurnError> {
         let mut event_stream = turn
             .take_events()
             .map_err(|e| format!("events unavailable: {e}"))?;
@@ -211,7 +213,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
                 &mut self.interrupted_status_pending,
             )
             .await;
-            if self.poll_actions(&prompt).await {
+            if self.poll_actions().await {
                 continue;
             }
 
@@ -231,7 +233,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> TurnDrive<'a, P> {
                 biased;
                 res = &mut result_fut, if self.turn_result.is_none() => {
                     self.turn_result = Some(res);
-                    self.host.runtime_factory.observe_turn_boundary(&prompt, HostBoundary::RuntimeReturned);
+                    if let Some(observer) = &self.turn_observer { observer.observe(HostBoundary::RuntimeReturned); }
                 }
                 () = tokio::time::sleep(
                     self.quit_join_deadline

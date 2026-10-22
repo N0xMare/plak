@@ -432,6 +432,20 @@ session header against the logical session UUID in the request body and keeps
 the per-dispatch client request UUID distinct. These checks establish wire and
 provenance behavior; they do not establish the cause of a live provider refusal.
 
+### Hosted construction ports
+
+Hosted construction tests register a scripted `RuntimeFactory` through the
+same port as production host builders. Lifecycle boundary observations are
+port calls, not feature-conditioned host control flow. Admission selects a
+per-turn observer without retaining the prompt in the drive; production selects
+none. Child binding fixtures
+register against their own construction roots: cloning those roots preserves
+the immutable registration and an unrelated host cannot observe it. Mid-test
+changes belong to a test-kit switchable factory; dropping an override removes
+only that override, including when guards are dropped out of order. Existing lifecycle
+and crash-cut observations retain their ordering and durability authority;
+scripted construction does not replace the real admission or publication path.
+
 ### The Harbor bakeoff plane
 
 `eval/` is a separate, opt-in and paid Harbor bakeoff plane that runs
@@ -475,13 +489,6 @@ The generated `rebuild_from_empty_equals_every_paging_and_replay` law covers
 arbitrary page partitions in either build. Wall-clock performance claims still
 require the release procedure, not a debug gate.
 
-Hosted construction tests register a scripted `RuntimeFactory` through the
-same port as production route builders. Lifecycle boundary observations are
-port calls, not feature-conditioned host control flow. Child binding fixtures
-register against their own construction roots: cloning those roots preserves
-the registration and an unrelated host cannot observe it. Existing lifecycle
-and crash-cut observations retain their ordering and durability authority;
-scripted construction does not replace the real admission or publication path.
 
 ## 1. Gate layers
 
@@ -886,7 +893,7 @@ workspace precisely so they resolve as genuine downstream crates. These
 fixtures are the inventory: a direct-package symbol outside them is nameable,
 not supported.
 
-Negative pins compile 26 single-import binaries under
+Negative pins compile 28 external binaries under
 `tests/fixtures/authority-negative` and require each one to fail with the exact
 expected error code, message, and line. One locked, offline `cargo check
 --keep-going --message-format=json` selects every requested negative binary;
@@ -900,7 +907,12 @@ store, the durable session runtime and driver endpoint, opaque invocation and
 turn-result construction, credential byte exposure, family transports, Standard
 integration authority, family-artifact sealing, the raw Anthropic transport,
 the OpenRouter model lane, xAI Platform authority, and the local composition
-session. A twenty-seventh documentation pin runs the curated `plakous-agent` and
+session. The hosted construction pins provide every required factory method
+but must fail the sealed `RuntimeFactory` bound with E0277, and must fail direct
+`RegisteredRuntimeAuthority(())` construction with E0423. Their dependency
+probe first proves the hosted types remain nameable without test support;
+unrelated dependency, import, or type errors cannot satisfy the negative pins.
+A separate documentation pin runs the curated `plakous-agent` and
 `plakous` doctests, which include compile-fail assertions for withdrawn
 prototypes.
 
@@ -910,8 +922,9 @@ feature sets never merge. All inventory and source-content assertions remain.
 `--positive-only` and `--negative-only` select a half; repeatable `--only`
 fragments select pins before batching. `--archive-dir PATH` retains one complete
 log per pin and the negative batch log for an evidence archive. Direct nameability of
-an implementation crate is never itself a support failure; only a supported
-root exporting withheld authority is.
+an implementation crate is never itself a support failure. The hosted pins
+enforce its explicitly closed construction boundary, not a naming ban or a
+support pledge for the published-internal crate.
 
 ### 1.2 What is not gated, and why
 
@@ -1452,13 +1465,14 @@ inspection and root admission are separate facts.
 
 `test-hooks` is not in `default`, is never enabled in a release build, and
 carries exactly three edges: the harness that holds the model,
-`plakous-hosted/test-support`, the injection point that admits it, and
+`plakous-hosted/test-support`, the scripted factory registration, and
 `plakous-recursive-subagents-store/commit-trace`, tracing the already-present
 tree-store dependency. The direct tree feature avoids a harness-to-tree normal
 edge cycling through the subagents crate's harness dev-dependency. All are
 pinned — `check_workspace.py` refuses any other contents for the feature, and
-`check_features.py` requires the forwarding edge, without which the injection is
-compiled out and the binding would be inert. The default and release binaries
+`check_features.py` requires the forwarding edge, without which the scripted
+factory registration is unavailable. The sealed production construction port
+remains available without test support. The default and release binaries
 contain none of the selector's strings. The harness also carries
 `plakous-http/fault-injection` (§2.8) unconditionally, so `test-hooks` is the
 one product edge to transport fault injection as well.

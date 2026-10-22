@@ -23,8 +23,8 @@ use plakous_offline_crash_harness::{
 
 use crate::home::paths::PlakPaths;
 use plakous_hosted::runtime::{
-    COMPLETION_WINS_QUIT_PROMPT, HostBoundary, HostConfig, HostTargetAuthority, HostWorkflow,
-    ReadyPathTiming, RuntimeRole, ScriptedRuntimeFactory, run_scripted_host, spawn_host_worker,
+    COMPLETION_WINS_QUIT_PROMPT, HostBoundary, HostConfig, HostWorkflow, ReadyPathTiming,
+    RuntimeRole, ScriptedRuntimeFactory, run_scripted_host, spawn_host_worker,
 };
 use plakous_hosted::sessions::TranscriptRow;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -93,9 +93,7 @@ pub(crate) fn product_injected_attached_host(
         topology_enabled: SessionPolicy::load(&paths).unwrap().topology_enabled,
         product_home: paths.home().to_path_buf(),
         session,
-        target: HostTargetAuthority::Registered {
-            provider: NativeProvider::Codex,
-        },
+        target: plakous_hosted::runtime::test_kit::registered_authority(NativeProvider::Codex),
         model_id: "offline-loopback-v1".into(),
         effort: Some(ReasoningEffort::Medium),
         effort_explicit: true,
@@ -153,7 +151,7 @@ fn product_overflow_attached_host(
         }
         .into(),
     );
-    config.target = HostTargetAuthority::Registered { provider };
+    config.target = plakous_hosted::runtime::test_kit::registered_authority(provider);
     config.compaction_enabled = true;
     config.runtime_factory = injection.clone();
     (config, injection, paths)
@@ -858,9 +856,7 @@ fn clear_publishes_fresh_product_and_runtime_authority_before_dispatch() {
             paths.clone(),
         )),
         session,
-        target: HostTargetAuthority::Registered {
-            provider: NativeProvider::Codex,
-        },
+        target: plakous_hosted::runtime::test_kit::registered_authority(NativeProvider::Codex),
         model_id: "offline-loopback-v1".into(),
         effort: Some(ReasoningEffort::Medium),
         effort_explicit: true,

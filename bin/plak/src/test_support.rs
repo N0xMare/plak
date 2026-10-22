@@ -165,9 +165,7 @@ pub fn run_actual_host(
                 .topology_enabled,
             product_home: paths.home().to_path_buf(),
             session,
-            target: product_host::HostTargetAuthority::Registered {
-                provider: NativeProvider::Codex,
-            },
+            target: plakous_hosted::runtime::test_kit::registered_authority(NativeProvider::Codex),
             model_id: "offline-loopback-v1".into(),
             effort: Some(ReasoningEffort::Medium),
             effort_explicit: true,

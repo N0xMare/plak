@@ -30,7 +30,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
         let _ = self.host.events.notice(row);
     }
 
-    pub(super) async fn poll_actions(&mut self, prompt: &str) -> bool {
+    pub(super) async fn poll_actions(&mut self) -> bool {
         crate::call_detail::note_attached(&self.host.session.id);
         self.host
             .last_tree_revision
@@ -124,9 +124,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                     }
                     self.quit_after_terminal = true;
                     self.quit_join_deadline = Some(Instant::now() + QUIT_RESULT_JOIN);
-                    self.host
-                        .runtime_factory
-                        .observe_turn_boundary(prompt, HostBoundary::ProductPublished);
+                    if let Some(observer) = &self.turn_observer {
+                        observer.observe(HostBoundary::ProductPublished);
+                    }
                 }
                 Ok(action @ (UserAction::FollowUp(_) | UserAction::Prompt(_))) => {
                     let draft = match &action {

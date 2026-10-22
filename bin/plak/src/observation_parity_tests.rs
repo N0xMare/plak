@@ -59,7 +59,7 @@ use crate::home::paths::PlakPaths;
 use crate::store::sessions::SessionRecord;
 use crate::surface_protocol::{HostEvent, UserAction};
 use plakous_hosted::runtime::{
-    HostConfig, HostTargetAuthority, ReadyPathTiming, ScriptedRuntimeFactory, spawn_host_worker,
+    HostConfig, ReadyPathTiming, ScriptedRuntimeFactory, spawn_host_worker,
 };
 
 /// How long one scripted step may take before the oracle calls it a hang.
@@ -965,9 +965,7 @@ impl Fixture {
                 .topology_enabled,
             product_home: paths.home().to_path_buf(),
             session,
-            target: HostTargetAuthority::Registered {
-                provider: NativeProvider::Codex,
-            },
+            target: plakous_hosted::runtime::test_kit::registered_authority(NativeProvider::Codex),
             model_id: "offline-loopback-v1".into(),
             effort: Some(ReasoningEffort::Medium),
             effort_explicit: true,

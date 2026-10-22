@@ -131,12 +131,14 @@ Route-owned doctor checks include OAuth credential rows and the OpenRouter
 catalog row; home, storage and runtime-wide checks remain common checks.
 Catalog refresh iterates the registered native routes, preserving their
 presentation order and excluding the attached route. Runtime construction is
-selected through the hosted `RuntimeFactory` route-binder port: startup
+selected through the sealed host-level `RuntimeFactory` construction port,
+separate from the per-route identity registry: startup
 create/exact-open, carried-history preflight, clear, fork, compaction and rebind
-all use the same port in production and offline tests. Production registers
+all use the same port in production and offline tests, including native and
+API rebind target opens. Production registers
 the real builders; the test kit registers scripted bindings and lifecycle
 observations. The host never selects construction by a test feature. A child's
-binder follows the parent's scoped construction roots, including reopen
+binder is an immutable registration on the parent's scoped construction roots, including reopen
 artifact selection; registrations are not process-global. Construction does
 not fall back to another route, change durable operations or introduce a
 second runtime. Lifecycle observations remain non-authoritative.

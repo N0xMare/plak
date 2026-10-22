@@ -200,9 +200,7 @@ impl TuiAttacher for OfflineAttacher {
                 paths.clone(),
             )),
             session,
-            target: crate::product_host::HostTargetAuthority::Registered {
-                provider: NativeProvider::Codex,
-            },
+            target: plakous_hosted::runtime::test_kit::registered_authority(NativeProvider::Codex),
             model_id,
             effort: Some(effort),
             effort_explicit,
@@ -1666,9 +1664,7 @@ fn host_config(
             paths.clone(),
         )),
         session,
-        target: crate::product_host::HostTargetAuthority::Registered {
-            provider: NativeProvider::Codex,
-        },
+        target: plakous_hosted::runtime::test_kit::registered_authority(NativeProvider::Codex),
         model_id: "offline-loopback-v1".to_owned(),
         effort: Some(ReasoningEffort::Medium),
         effort_explicit: true,

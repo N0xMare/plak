@@ -32,6 +32,14 @@ that mode or its subscription credential as an OpenAI Platform fallback.
 | Child copy → parent checkout | one sealed candidate, adopted explicitly | three-way, no commit, never destroys the only copy |
 | Consumer → Plakous | typed facade calls only | product read models never authorize runtime mutation |
 
+The hosted `RuntimeFactory` construction port is sealed, not an embedder
+extension point. Only the production factory and the cfg'd scripted test kit
+implement it. Registered scripted authority requires a private token that only
+the test kit constructs. A published-internal consumer cannot replace exact-URL
+subscription authentication or rebind revalidation by supplying its own
+factory or forging registered authority. Enabling `test-support` is an explicit
+repository-only test seam, not a supported credential bypass in product builds.
+
 Protected assets are credentials, prompts and responses, reasoning and
 family-native continuation material, tool requests and outcomes, approvals,
 canonical checkpoints, account and route bindings, workspace content, capacity

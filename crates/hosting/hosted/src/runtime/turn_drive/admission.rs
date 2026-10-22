@@ -494,6 +494,8 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
         session,
         admitted_turn_lifecycle(turn.control().turn_id()),
     );
+    let turn_observer = runtime_factory.turn_observer(&prompt);
+    drop(prompt);
     let driven = Box::pin(
         TurnDrive::new(
             turn.control(),
@@ -529,8 +531,9 @@ pub(in crate::runtime) async fn drive_one_turn<P: plakous_host_protocol::Protoco
                 job_events,
                 runtime_factory,
             },
+            turn_observer,
         )
-        .run(turn, prompt),
+        .run(turn),
     )
     .await;
     if let Err(error) = super::super::projection::project_tree(
