@@ -427,6 +427,31 @@ class LiveOracleTests(unittest.TestCase):
         self.assertEqual(raised.exception.outcome, live.HARNESS)
         self.assertEqual(live.provider_reason_from(None, 504, ""), "504")
 
+    def test_a_typed_in_band_provider_error_without_a_rendered_status_is_provider(self):
+        # OpenRouter's usual object, {"code": 502, "message": "Provider returned error"},
+        # renders only the message; the product still types the kind.
+        text = ("agent turn failed: OpenRouter Chat stream validation failed: Chat provider "
+                "returned an in-band error: Provider returned error [1 requests; last: unavailable]")
+        for kind in ("Unavailable", "RateLimited", "Timeout"):
+            turn = live.Turn(phase="failed", model_error_kind=kind, errors=[text])
+            with self.assertRaises(live.ScenarioFailure) as raised:
+                live.classify_incomplete(turn, "coding turn", injected_fault="529", segments=[])
+            self.assertEqual(raised.exception.outcome, live.PROVIDER, kind)
+        untyped = live.Turn(phase="failed", errors=[text])
+        with self.assertRaises(live.ScenarioFailure) as raised:
+            live.classify_incomplete(untyped, "coding turn", segments=[])
+        self.assertEqual(raised.exception.outcome, live.HARNESS)
+
+    def test_the_in_band_status_stays_inside_its_own_diagnostic(self):
+        prefix = "Chat provider returned an in-band error: "
+        self.assertIsNone(live.in_band_provider_status(
+            prefix + "Provider returned error [1 requests; last: x] compact failed: error code: 502"))
+        self.assertIsNone(live.in_band_provider_status(prefix + "code=502.5"))
+        self.assertEqual(live.in_band_provider_status(prefix + "code=503; type=server_error"), 503)
+        text = prefix + "error code: 429"
+        self.assertFalse(live._absorbed_injection("RateLimited", None, "429", text))
+        self.assertTrue(live._absorbed_injection("RateLimited", 429, "429", "provider rate limited"))
+
     def test_output_limit_failure_is_model_on_every_surface(self):
         typed = live.Turn(phase="failed", model_error_kind="OutputLimit",
                           errors=["agent turn failed: model request failed"])

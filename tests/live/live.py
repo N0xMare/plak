@@ -246,8 +246,13 @@ PROVIDER_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504, 529})
 # "Chat provider returned an in-band error: <detail>" with the status the
 # gateway named (`error code: 504`, `code=502`). A 429 or 5xx there is the
 # provider's outage, not a protocol violation.
-_IN_BAND_STATUS = re.compile(r"returned an in-band error:[^|\]]*?\bcode\s*[=:]\s*(\d{3})\b",
+_IN_BAND_STATUS = re.compile(r"returned an in-band error:[^|\[\]]*?\bcode\s*[=:]\s*(\d{3})(?![\d.])",
                              re.IGNORECASE)
+IN_BAND_ERROR_MARKER = "returned an in-band error:"
+# Kinds the product types an in-band provider error as when its status is not
+# in the rendered text (a gateway error object with both `code` and `message`
+# renders only the message).
+IN_BAND_PROVIDER_KINDS = frozenset({"RateLimited", "Unavailable", "Timeout"})
 
 
 def in_band_provider_status(text: str) -> int | None:
@@ -764,9 +769,14 @@ def with_failure_messages(records: list[dict]) -> list[dict]:
     return out
 
 
-def _absorbed_injection(kind: str | None, http_status: int | None, fault: str | None) -> bool:
+def _absorbed_injection(kind: str | None, http_status: int | None, fault: str | None,
+                        text: str | None = None) -> bool:
     """The failure is the injected fault the product was required to absorb."""
     if fault not in ABSORBED_FAULTS:
+        return False
+    if text is not None and IN_BAND_ERROR_MARKER in text.lower():
+        # Injected status faults answer before acceptance; an in-band error is
+        # always the real provider.
         return False
     if fault == "429":
         return http_status == 429 or kind in ("RateLimited", "QuotaExceeded", "QuotaExhausted")
@@ -798,6 +808,9 @@ def classify_incomplete(turn: Turn, what: str, *, injected_fault: str | None = N
     if output_limit_failure(turn.model_error_kind, text):
         raise ScenarioFailure(MODEL, f"{what}: {OUTPUT_LIMIT_MISS}")
     status = f"{turn.phase} {turn.model_error_kind or ''} {turn.http_status or ''}".strip()
+    if IN_BAND_ERROR_MARKER in text.lower() and turn.model_error_kind in IN_BAND_PROVIDER_KINDS:
+        raise ScenarioFailure(PROVIDER, f"{what}: provider in-band error "
+                                        f"({turn.model_error_kind})")
     validation = stream_validation_outcome(f"{text} {turn.model_error_kind or ''}", segments)
     if validation == MODEL:
         raise ScenarioFailure(MODEL, f"{what}: model emitted invalid tool arguments")
@@ -808,10 +821,10 @@ def classify_incomplete(turn: Turn, what: str, *, injected_fault: str | None = N
         raise ScenarioFailure(HARNESS, f"{what}: kernel stream validation failed without "
                                        f"a captured protocol violation")
     reason = provider_reason_from(turn.model_error_kind, turn.http_status, text)
-    if reason and _absorbed_injection(turn.model_error_kind, turn.http_status, injected_fault) \
+    if reason and _absorbed_injection(turn.model_error_kind, turn.http_status, injected_fault, text) \
             and _real_errors_followed_the_injection(turn):
         raise ScenarioFailure(PROVIDER, f"{what}: {reason} after the injected fault was retried")
-    if reason and not _absorbed_injection(turn.model_error_kind, turn.http_status, injected_fault):
+    if reason and not _absorbed_injection(turn.model_error_kind, turn.http_status, injected_fault, text):
         raise ScenarioFailure(PROVIDER, f"{what}: {reason}")
     if turn.phase == "refused" and turn.refusals:
         raise ScenarioFailure(PROVIDER, f"{what}: provider refused the request "
