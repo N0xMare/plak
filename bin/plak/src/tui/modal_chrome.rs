@@ -5,8 +5,8 @@
 //! centered modal. The chrome owns the rounded border, the title on the
 //! border, the clickable `[×]` close glyph, the wrapping tab bar, the wrapping
 //! centered footer, the scrim, and the scroll state every tab shares. A tab
-//! body receives a rect and never draws its own border. Menu may cap that
-//! column at 120 and center it; the border and close glyph stay full width.
+//! body receives a rect and never draws its own border. Menu uses a wide
+//! list/detail split when the usable inner column can fit both panes.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -497,10 +497,14 @@ impl DescriptionPanel {
 
     /// Wrapped body rows plus the value row, capped at [`DESCRIPTION_MAX_ROWS`].
     fn lines(&self, width: u16) -> Vec<(String, bool)> {
+        self.lines_with_budget(width, DESCRIPTION_MAX_ROWS)
+    }
+
+    fn lines_with_budget(&self, width: u16, rows: u16) -> Vec<(String, bool)> {
         let budget = if self.value.is_some() {
-            DESCRIPTION_MAX_ROWS.saturating_sub(DESCRIPTION_VALUE_ROWS)
+            rows.saturating_sub(DESCRIPTION_VALUE_ROWS)
         } else {
-            DESCRIPTION_MAX_ROWS
+            rows
         };
         let mut lines: Vec<(String, bool)> =
             crate::tui::picker::wrap(&self.body, Self::text_width(width))
@@ -524,6 +528,32 @@ impl DescriptionPanel {
             .clamp(DESCRIPTION_MIN_ROWS, DESCRIPTION_MAX_ROWS);
         rows.saturating_add(2)
     }
+}
+
+/// A 140-column terminal leaves 136 usable columns after frame and padding.
+pub(crate) const WIDE_MENU_COLUMNS: u16 = 136;
+
+/// Keep common list labels and values together (60%, capped at 120), with a
+/// two-column gutter and a readable detail column (at most 76 columns).
+pub(crate) fn split_wide_detail(body: Rect) -> Option<(Rect, Rect)> {
+    if body.width < WIDE_MENU_COLUMNS {
+        return None;
+    }
+    let list_width = body.width.min(200) * 3 / 5;
+    let list = Rect {
+        width: list_width,
+        ..body
+    };
+    let detail = Rect {
+        x: body.x.saturating_add(list_width).saturating_add(2),
+        width: body
+            .width
+            .saturating_sub(list_width)
+            .saturating_sub(2)
+            .min(76),
+        ..body
+    };
+    Some((list, detail))
 }
 
 /// Split a modal body into the rows area and the panel that floats under it.
@@ -574,7 +604,11 @@ pub(crate) fn render_description(
     if inner.width == 0 || inner.height == 0 {
         return;
     }
-    for (offset, (line, is_value)) in panel.lines(rect.width).into_iter().enumerate() {
+    for (offset, (line, is_value)) in panel
+        .lines_with_budget(rect.width, inner.height)
+        .into_iter()
+        .enumerate()
+    {
         let Ok(offset) = u16::try_from(offset) else {
             break;
         };
@@ -891,6 +925,19 @@ mod tests {
             width,
             height,
         }
+    }
+
+    #[test]
+    fn wide_detail_breakpoint_and_readable_columns() {
+        assert!(super::split_wide_detail(area(135, 30)).is_none());
+        let (list, detail) = super::split_wide_detail(area(136, 30)).unwrap();
+        assert_eq!(list.width, 81);
+        assert_eq!(detail.width, 53);
+        assert_eq!(detail.x, list.right() + 2);
+        let (list, detail) = super::split_wide_detail(area(216, 30)).unwrap();
+        assert_eq!(list.width, 120);
+        assert_eq!(detail.width, 76);
+        assert_eq!(detail.height, list.height);
     }
 
     #[test]

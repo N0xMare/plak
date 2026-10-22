@@ -8,7 +8,7 @@ use super::{
 use crate::tui::providers::ProviderRowPresentation as _;
 use unicode_width::UnicodeWidthStr;
 
-/// Widest Menu column. The border and close glyph stay the whole terminal.
+/// Narrow Menu column before the list/detail breakpoint.
 const MENU_BODY_MAX_COLUMNS: u16 = 120;
 
 impl App {
@@ -115,7 +115,8 @@ impl App {
             hints: &hints,
             close_hover: self.control_close_hover,
             sizing: ModalSizing::full_page(),
-            content_max: Some(MENU_BODY_MAX_COLUMNS),
+            content_max: (area.width.saturating_sub(4) < modal_chrome::WIDE_MENU_COLUMNS)
+                .then_some(MENU_BODY_MAX_COLUMNS),
         };
         let Some(layout) = modal_chrome::render(frame, area, &theme, &chrome) else {
             // Below the refuse-to-draw floor: the shared too-small line, and
@@ -133,19 +134,38 @@ impl App {
             .collect();
         self.settings_hits.clear();
         self.session_row_hits.clear();
-        // Above 120 columns the chrome centered the title, tabs, footer and
-        // body in one column. At or below that, `body` is the full inner
-        // rect (spec 02 §5.5). The border and close glyph stay full width.
         let body = layout.body;
         if body.height == 0 || body.width == 0 {
             return;
         }
-        // §5.5: the focused row's description floats in its own rectangle at the
-        // foot of the body, above the footer hints. The list above it never
-        // reflows when the pointer moves, because the row itself only
-        // highlights.
-        let panel = self.control_description(active);
-        let (body, floating) = modal_chrome::split_description(body, panel.as_ref());
+        let mut panel = self.control_description(active);
+        if body.width >= modal_chrome::WIDE_MENU_COLUMNS
+            && active == ControlTab::Settings
+            && let Some(menu) = &self.settings_menu
+            && let Some(meta) = SettingsMenu::meta(menu.selected)
+            && let Some(panel) = &mut panel
+        {
+            let choices = meta.choices();
+            if !choices.is_empty() {
+                panel.body.push_str(" Options: ");
+                panel.body.push_str(
+                    &choices
+                        .iter()
+                        .map(|choice| choice.label)
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
+                panel.body.push('.');
+            }
+        }
+        let (body, floating) = if panel.is_some() {
+            modal_chrome::split_wide_detail(body).map_or_else(
+                || modal_chrome::split_description(body, panel.as_ref()),
+                |(list, detail)| (list, Some(detail)),
+            )
+        } else {
+            (body, None)
+        };
         match active {
             ControlTab::Settings => self.draw_control_settings(frame, body),
             ControlTab::Models => self.draw_control_models(frame, body),

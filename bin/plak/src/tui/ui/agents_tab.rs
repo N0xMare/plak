@@ -255,11 +255,16 @@ impl App {
             .as_ref()
             .map(|view| view.diagnostics.clone())
             .unwrap_or_default();
+        let (body, wide_detail) = super::modal_chrome::split_wide_detail(body)
+            .map_or((body, None), |(list, detail)| (list, Some(detail)));
         let panel_rows = row.as_ref().map_or(0, detail_line_count);
         let panel_height = u16::try_from(panel_rows)
             .unwrap_or(u16::MAX)
             .saturating_add(2);
-        let reserve = if row.is_some() && body.height > panel_height.saturating_add(4) {
+        let reserve = if wide_detail.is_none()
+            && row.is_some()
+            && body.height > panel_height.saturating_add(4)
+        {
             panel_height
         } else {
             0
@@ -365,6 +370,10 @@ impl App {
                 .wrap(Wrap { trim: false }),
             list,
         );
+        if let (Some(detail), Some(row)) = (wide_detail, row.as_ref()) {
+            self.draw_profile_detail(frame, detail, row, true);
+            return;
+        }
         let Some(row) = row.filter(|_| reserve > 0) else {
             return;
         };
@@ -374,10 +383,10 @@ impl App {
             width: body.width,
             height: reserve,
         };
-        self.draw_profile_detail(frame, panel, &row);
+        self.draw_profile_detail(frame, panel, &row, false);
     }
 
-    fn draw_profile_detail(&self, frame: &mut Frame<'_>, area: Rect, row: &ProfileRow) {
+    fn draw_profile_detail(&self, frame: &mut Frame<'_>, area: Rect, row: &ProfileRow, wide: bool) {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -387,7 +396,11 @@ impl App {
             .style(Style::default().bg(self.theme.menu_bg));
         let inner = block.inner(area);
         frame.render_widget(block, area);
-        let width = usize::from(inner.width);
+        let width = if wide {
+            usize::MAX
+        } else {
+            usize::from(inner.width)
+        };
         let mut lines = vec![Line::from(Span::styled(
             clip_line(&role_text("Root agent", &row.root), width),
             self.theme.slash_item,
@@ -414,7 +427,9 @@ impl App {
             self.theme.slash_item_help,
         )));
         frame.render_widget(
-            Paragraph::new(lines).style(Style::default().bg(self.theme.menu_bg)),
+            Paragraph::new(lines)
+                .style(Style::default().bg(self.theme.menu_bg))
+                .wrap(Wrap { trim: false }),
             inner,
         );
     }

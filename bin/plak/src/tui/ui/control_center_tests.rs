@@ -1446,7 +1446,7 @@ fn theme_value_gap(width: u16, height: u16) -> usize {
     row[label..value].chars().count()
 }
 
-/// A 200-column Menu keeps the full-page frame and a body no wider than the
+/// A wide Menu keeps the full-page frame and a list no wider than the
 /// 120-column sheet, so a value stays next to its label.
 #[test]
 fn menu_body_stays_next_to_its_labels_at_200_columns() {
@@ -1467,10 +1467,7 @@ fn menu_body_stays_next_to_its_labels_at_200_columns() {
         .iter()
         .find_map(|row| row.find("Settings").map(|byte| row[..byte].chars().count()))
         .expect("tab row");
-    assert!(
-        (30..55).contains(&tab),
-        "the tab row centers with the 120-column body: {tab}"
-    );
+    assert!(tab < 15, "the wide tab row spans the frame: {tab}");
     let close = rows[0]
         .find('\u{00d7}')
         .map(|byte| rows[0][..byte].chars().count())
@@ -1486,8 +1483,8 @@ fn menu_body_stays_next_to_its_labels_at_200_columns() {
         .map(|(_, rect)| rect.x)
         .expect("settings hit");
     assert!(
-        (30..55).contains(&usize::from(settings_hit)),
-        "the tab hit follows the centered label: {settings_hit}"
+        settings_hit < 15,
+        "the tab hit follows the full-width label: {settings_hit}"
     );
 
     let mut narrow = App::new(launch_basic(), true);
@@ -1509,8 +1506,8 @@ fn menu_body_stays_next_to_its_labels_at_200_columns() {
         })
         .expect("keybinds body");
     assert!(
-        (20..80).contains(&heading),
-        "keybinds body is not a centered 120-column column: {heading}"
+        heading < 15,
+        "keybinds sheet starts at the full-width body edge: {heading}"
     );
 }
 
@@ -1538,4 +1535,38 @@ fn ctrl_x_first_opens_menu_on_the_session_tab() {
     let mut app = App::new(launch_basic(), true);
     app.handle_key(key_ctrl(KeyCode::Char('x')));
     assert_eq!(app.control_tab, Some(super::ControlTab::Session));
+}
+
+#[test]
+fn wide_menu_details_do_not_steal_list_mouse_hits() {
+    for width in [140, 220] {
+        let mut app = usage_fixture();
+        app.pending_open_settings = true;
+        app.apply_host_event(HostEvent::Extension(SurfaceObservation::SettingsSnapshot(
+            SettingsSnapshot::default(),
+        )));
+        app.activate_control_tab(super::ControlTab::Settings);
+        let _ = menu_rows(&mut app, width, 40);
+        let first = app.settings_hits.first().expect("settings hit").rect;
+        assert!(first.width <= 120);
+        assert!(first.right() < width - 20);
+        assert_eq!(app.control_close_hit.unwrap().right(), width - 1);
+        let (_, tab) = app.control_tab_hits.first().copied().unwrap();
+        assert!(tab.x < 15);
+        let selected = app.settings_menu.as_ref().unwrap().selected;
+        app.handle_mouse(left_click(first.right() + 3, first.y));
+        assert_eq!(app.settings_menu.as_ref().unwrap().selected, selected);
+        let usage = app
+            .control_tab_hits
+            .iter()
+            .find(|(tab, _)| *tab == super::ControlTab::Usage)
+            .unwrap()
+            .1;
+        app.handle_mouse(left_click(usage.x, usage.y));
+        assert_eq!(app.control_tab, Some(super::ControlTab::Usage));
+        let _ = menu_rows(&mut app, width, 40);
+        let close = app.control_close_hit.unwrap();
+        app.handle_mouse(left_click(close.x, close.y));
+        assert_eq!(app.control_tab, None);
+    }
 }

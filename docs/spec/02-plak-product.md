@@ -4062,7 +4062,24 @@ Transcript child-mail folding uses the shared expandable-row controls (§5.4),
 independently of the Menu's `group tool calls` preference.
 
 One full-page frame, seven tabs, one row renderer: **Settings · Agents · Providers ·
-Usage · Context · Session · Keybinds**. Menu and Activity (§5.7) share that frame: the whole terminal at every size, the same title row, tab row, footer and close glyph; only the body differs. On a terminal wider than 120 columns the border and close button still span the page, and the title, the tab row, the tab divider and the footer content center with the body, which is at most 120 columns. Hit rectangles follow that column. At 120 columns and narrower nothing moves. Activity is not capped. Nothing of the main view is drawn or hit-tested beneath either. Divergent hand-drawn chrome per pane is
+Usage · Context · Session · Keybinds**. Menu and Activity (§5.7) share that
+frame: the whole terminal at every size, the same title row, tab row, footer and
+close glyph; only the body differs. At 136 usable inner columns (140 terminal
+columns with the full-page frame
+and padding), Menu switches to a wide layout: title, tabs, divider and footer
+span the frame. Settings and Providers put the focused row's description and
+current/default value and enum options in a right-hand detail pane; Agents puts its existing
+profile detail there. The list takes 60% of the usable width, capped at 120
+columns, followed by a two-column gutter. The detail pane uses the remaining
+width, capped at 76 columns so prose stays readable, and wraps to its height
+instead of the narrow floating panel's three-row budget. These dimensions keep
+common list labels and values together at the breakpoint. Usage and Context
+data tables use the whole width; Session and Keybinds, which have no separate
+focused-row description, also retain their whole body. Hit rectangles follow
+the actual list, tabs and close glyph; detail prose is not a list hit target.
+Below the breakpoint the existing centered, at-most-120-column layout and
+bottom description panels are unchanged. Activity remains uncapped. Nothing
+of the main view is drawn or hit-tested beneath either. Divergent hand-drawn chrome per pane is
 a defect.
 
 `Ctrl+X` without a composer selection reopens the last-used tab; with a
@@ -4089,7 +4106,8 @@ command submission path, not by opening the panel.
 
 Rows are one line. Focus and hover are a highlight and nothing else, so moving
 the pointer never reflows the list; the focused row's description appears in a
-floating panel at the foot of the body, with a `now x · default y` footnote
+floating panel at the foot of the narrow body (in the right detail pane when
+wide), with a `now x · default y` footnote
 where the row holds a value. **A click focuses, a double-click activates**:
 a click only focuses a row, and a second click on the same row within the
 500 ms multi-click interval activates it exactly as Enter does — the operator

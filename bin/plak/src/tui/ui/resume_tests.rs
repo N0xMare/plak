@@ -779,8 +779,7 @@ fn every_control_center_tab_matches_reviewable_goldens_at_both_sizes() {
         (super::ControlTab::Session, "session"),
         (super::ControlTab::Keybinds, "keybinds"),
     ] {
-        let mut sizes = vec![(80u16, 24u16), (120, 40)];
-        // Wide terminals keep the full-page frame and center a 120-column body.
+        let mut sizes = vec![(80u16, 24u16), (100, 40), (120, 40), (140, 40), (220, 40)];
         if matches!(slug, "settings" | "keybinds") {
             sizes.push((200, 50));
         }
