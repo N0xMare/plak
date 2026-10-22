@@ -782,6 +782,15 @@ class LongSessionOracleTests(unittest.TestCase):
         self.assertIn("all in one parallel batch, each with limit 20", grok)
         self.assertIn("do not skip or merge rounds", grok)
 
+    def test_pi_paging_prompts_spell_out_the_read_arguments(self):
+        example = '{"path": "bulk.txt", "offset": 33, "limit": 32}'
+        self.assertIn(example, long_session.growth_prompt(992, "pi", 32))
+        self.assertIn('{"path": "bulk.txt", "offset": 34, "limit": 33}',
+                      long_session.child_paging("pi", 32))
+        for pack in ("grok", "claude", "codex"):
+            self.assertNotIn("Pass path, offset and limit", long_session.growth_prompt(40, pack))
+            self.assertNotIn("Pass path, offset and limit", long_session.child_paging(pack, 20))
+
     @patch.dict(os.environ, {"PLAK_LIVE_INPUT_CEILING": "967232", "PLAK_LIVE_GROWTH_PAGES": ""})
     def test_pi_plans_pass_a_1m_admitted_ceiling_in_about_thirty_reads(self):
         """DeepSeek's measured 1.44 bytes per token, not 1.06, sizes every pi plan.
@@ -997,6 +1006,11 @@ class LongSessionOracleTests(unittest.TestCase):
             {"kind": "tool", "name": "read_file", "subject": "c3"},
         ]
         self.assertEqual(long_session.child_ordinals(events), ["c1", "c2"])
+        # A check word echoed in a wait receipt is not a child ordinal.
+        echoed = [{"kind": "tool", "name": "wait_agent", "state": "succeeded",
+                   "subject": "c1 · up to 30s",
+                   "detail": "pages/2.txt contains check-c40954 (both words); c2:done"}]
+        self.assertEqual(long_session.child_ordinals(echoed), ["c1", "c2"])
         show = (
             "Session x\n\nTopology children (durable snapshot)\n"
             "  Child          c1 node=Completed attempt=Completed\n"

@@ -22,6 +22,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -488,10 +489,25 @@ def _page_bulk(pack: str, line_count: int, limit: int, reads: int | None = None)
     return (
         f"Read bulk.txt from the first line through eof using only the {tool} tool, "
         f"not the shell. Each call must use limit {limit} and the next offset from "
-        f"the previous result, starting at offset 1. Make one call per response and "
+        f"the previous result, starting at offset 1.{_pi_read_arguments(pack, 1, limit)} "
+        f"Make one call per response and "
         f"wait for its result before the next call. The file is {line_count} lines; "
         "do not stop early."
     )
+
+
+def _pi_read_arguments(pack: str, offset: int, limit: int) -> str:
+    """On pi, spell out the read arguments.
+
+    On OpenRouter Messages DeepSeek sent `{"path": "bulk.txt"}` alone on every
+    paging call, so each returned the first page again, then reported that its
+    offset and limit were ignored. Chat sent them. Other packs are unchanged.
+    """
+    if pack != "pi":
+        return ""
+    return (f" Pass path, offset and limit on every call, for example "
+            f'{{"path": "bulk.txt", "offset": {offset}, "limit": {limit}}}, then '
+            f'{{"path": "bulk.txt", "offset": {offset + limit}, "limit": {limit}}}.')
 
 
 def growth_prompt(line_count: int, pack: str = "grok", call_lines: int | None = None) -> str:
@@ -673,7 +689,7 @@ def child_paging(pack: str, call_lines: int) -> str:
             f"bulk.txt is a sequence of pages of {size} lines each; page 1 starts at line 1. "
             f"Page through it using only the {_read_tool(pack)} tool. Read one page per call "
             f"with limit {size}, one call per response, and wait for its result before the "
-            "next call."
+            f"next call.{_pi_read_arguments(pack, 1, size)}"
         )
         nxt = "where the next page starts"
     return (
@@ -1107,18 +1123,7 @@ def is_child_ordinal(value: object) -> bool:
     return number <= 4_294_967_295 and str(number) == ordinal
 
 
-def _ascii_words(text: str) -> list[str]:
-    words: list[str] = []
-    buf: list[str] = []
-    for char in text:
-        if char.isascii() and char.isalnum():
-            buf.append(char)
-        elif buf:
-            words.append("".join(buf))
-            buf = []
-    if buf:
-        words.append("".join(buf))
-    return words
+_CHILD_TOKEN = re.compile(r"(?<![A-Za-z0-9_-])c[0-9]+(?![A-Za-z0-9_-])")
 
 
 def child_ordinals(events: list[dict]) -> list[str]:
@@ -1155,8 +1160,10 @@ def child_ordinals(events: list[dict]) -> list[str]:
         for key in ("subject", "detail"):
             text = event.get(key)
             if isinstance(text, str):
-                for word in _ascii_words(text):
-                    add(word)
+                # Whole `cN` tokens only: a check word such as
+                # `check-c40954` echoed in a wait receipt is not a child.
+                for match in _CHILD_TOKEN.finditer(text):
+                    add(match.group(0))
     return found
 
 
