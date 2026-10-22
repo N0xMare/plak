@@ -2791,13 +2791,15 @@ The Codex OAuth reference client is `0.162.1`; the authenticated catalog request
 sends `client_version=0.162.1`. Its catalog contract is the `rust-v0.162.1`
 source revision's `models.json`, which is unchanged from `rust-v0.160.0` in
 every field Plak pins (tool mode, reasoning levels, windows, truncation,
-Responses Lite, parallel calls, service tiers). The 2026-10-21 re-review against
-stable `rust-v0.163.0` (revision
+Responses Lite, parallel calls, service tiers). The 2026-10-22
+release-candidate re-review against stable `rust-v0.163.0` (revision
 `83086188ae0614bd882818ff1aa23f3194962012`) found no change to pinned facts;
 `rust-v0.164.0-alpha.9` was spot-checked. The reviewed `models.json` SHA-256 is
 `943ca7fe1d19ed019054158303f0dbbd80b3bef43b3aa425a71aa7cb3fb52c2b`.
 OAuth client, scopes, endpoints, callback and originator/header contract are
-unchanged; Plak retains its pinned reference version and truthful identity. The reference client also sends
+unchanged; the release-candidate review changes only the review window.
+Plak retains its pinned reference version and truthful identity. The reference
+client also sends
 `x-codex-beta-features: remote_compaction_v2` on ordinary turns; Plak sends that
 header only on a remote-compaction request, because it claims a capability
 only that request uses. Ordinary and remote-compaction requests send
@@ -2806,7 +2808,7 @@ dispatch. The backend keys prompt caching on this header, not the body field.
 A missing, non-string, or header-invalid key is refused. This Plak-owned affinity
 does not borrow client identity: `originator=plak` and the truthful Plak user
 agent remain unchanged. Its compiled compatibility
-profile was reviewed on 2026-10-21 and expires at 2026-11-20T23:59:59Z; an
+profile was reviewed on 2026-10-22 and expires at 2026-11-21T23:59:59Z; an
 acceptance recorded before the review date is not current, so the operator
 accepts the notice again without a new login (§7.2).
 The hidden, non-default `test-clock` feature alone exposes the Codex manager
@@ -3011,10 +3013,10 @@ domain-separated SHA-256 of the key, for keying a cache: not a credential, but
 a candidate key can be checked against it, so it stays in owner-only files.
 
 The OpenAI Platform manifest and xAI Platform binding were re-reviewed on
-2026-10-21 against their official model, Responses, tool-calling, reasoning and
-storage documentation. Neither review changed pinned facts. Their existing
-90-day windows end at
-2027-01-19T00:00:00Z; construction and runtime revalidation still refuse stale
+2026-10-22 against their official model, Responses, tool-calling, reasoning and
+storage documentation. The release-candidate re-review found no change to
+pinned facts on either surface. Their existing 90-day windows end at
+2027-01-20T00:00:00Z; construction and runtime revalidation still refuse stale
 facts without fallback. Each surface derives its expiry from one review-date
 constant, as do the Codex and OpenRouter Chat pins. Re-dating changes no
 profile, request, or persisted encoding.
@@ -3271,8 +3273,8 @@ final usage chunk that repeats `finish_reason`, `reasoning` and
 `reasoning_details`, tool calls, and the pre-commit JSON and mid-stream
 `error` shapes were last reviewed against the public
 [OpenRouter docs](https://openrouter.ai/docs/api_reference/streaming) on
-2026-10-21, with no change to pinned facts. The pin expires at
-2026-11-20T00:00:00Z. The expiry is enforced
+2026-10-22, with no change to pinned facts. The pin expires at
+2026-11-21T00:00:00Z. The expiry is enforced
 at runtime exactly like a compiled subscription profile's: target construction
 and every runtime-authority revalidation at or after it refuse the route with
 "OpenRouter Chat compatibility profile is not currently admissible"

@@ -588,10 +588,10 @@ date (shown in the message and by `plak status`) or was withdrawn. Logging in
 again cannot renew it; build a newer plak. A re-reviewed build requires the
 current notice to be accepted again; that alone does not discard an existing
 Codex login or require a fresh OAuth login. This build's Codex review is valid
-through 2026-11-20T23:59:59Z.
+through 2026-11-21T23:59:59Z.
 
 The built-in OpenRouter Chat dialect is pinned the same way: from its expiry
-(2026-11-20T00:00:00Z for this build) OpenRouter sessions refuse with `OpenRouter Chat
+(2026-11-21T00:00:00Z for this build) OpenRouter sessions refuse with `OpenRouter Chat
 compatibility profile is not currently admissible`. Build a newer plak.
 
 `plak doctor` and both forms of `plak status` warn 14 days before any compiled

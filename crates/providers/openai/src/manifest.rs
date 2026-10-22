@@ -15,7 +15,7 @@ pub(crate) const OPENAI_GPT_56_PLATFORM_PROFILE_ID: &str = "openai.platform.gpt-
 /// Reviewed GPT-6 Sol/Luna Responses profile.
 pub(crate) const OPENAI_GPT_6_PLATFORM_PROFILE_ID: &str = "openai.platform.gpt-6.2026-09-22.r1";
 /// UTC second at which the official model documentation was reviewed.
-pub(crate) const OPENAI_PLATFORM_MODEL_MANIFEST_REVIEWED_AT_UNIX_SECONDS: u64 = 1_792_540_800;
+pub(crate) const OPENAI_PLATFORM_MODEL_MANIFEST_REVIEWED_AT_UNIX_SECONDS: u64 = 1_792_627_200;
 /// Fixed end of the 90-day compatibility window for this review.
 pub const OPENAI_PLATFORM_MODEL_MANIFEST_EXPIRES_AT_UNIX_SECONDS: u64 =
     OPENAI_PLATFORM_MODEL_MANIFEST_REVIEWED_AT_UNIX_SECONDS + 90 * 86_400;
@@ -25,7 +25,7 @@ const GPT_6_FAMILY_ID: &str = "gpt-6";
 /// Reviewed maximum output tokens for every Platform row.
 pub(crate) const OPENAI_PLATFORM_MAX_OUTPUT_TOKENS: u32 = 128_000;
 
-// Sources reviewed 2026-10-21:
+// Sources reviewed 2026-10-22:
 // - https://developers.openai.com/api/docs/models
 // - https://developers.openai.com/api/docs/guides/latest-model
 // - the exact /api/docs/models/gpt-5.6-{sol,terra,luna} and

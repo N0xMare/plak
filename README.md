@@ -37,7 +37,7 @@ route. Use at your own risk.
 
 A supported route is not a promise that every model, effort level, or usage scenario works reliably. Testing has observed model refusals, incorrect tool outputs, and provider streaming failures although in many cases its been reliable for me in exhaustive testing. The [live status page](tests/live/STATUS.md) records the current live qualification state.
 
-Built-in compatibility pins carry review expiry dates: the Codex subscription profile is valid through 2026-11-20T23:59:59Z and the OpenRouter Chat dialect until 2026-11-20T00:00:00Z; the OpenAI and xAI Platform API reviews expire 2027-01-19 (UTC). `plak doctor` and `plak status` warn within 14 days of any compiled review expiry; publication dry runs and uploads require more than 21 days remaining. After its date a build refuses that route until a newer build renews the review; see [troubleshooting](docs/user-guide/troubleshooting.md) ("native compatibility profile compiled into this build is inactive").
+Built-in compatibility pins carry review expiry dates: the Codex subscription profile is valid through 2026-11-21T23:59:59Z and the OpenRouter Chat dialect until 2026-11-21T00:00:00Z; the OpenAI and xAI Platform API reviews expire 2027-01-20 (UTC). `plak doctor` and `plak status` warn within 14 days of any compiled review expiry; publication dry runs and uploads require more than 21 days remaining. After its date a build refuses that route until a newer build renews the review; see [troubleshooting](docs/user-guide/troubleshooting.md) ("native compatibility profile compiled into this build is inactive").
 
 ## Using Plak
 

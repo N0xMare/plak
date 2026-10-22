@@ -60,10 +60,10 @@ one cross-build carrier (a build imports its own and the previous version).
 
 ### Pins
 
-- Current review expiries (UTC): Codex subscription profile,
-  2026-11-20 23:59:59; OpenRouter Chat dialect, 2026-11-20 00:00:00;
-  xAI and OpenAI API profiles, 2027-01-19 00:00:00. These will be re-dated
-  at the release candidate; renewal does not require re-login.
+- No-change release-candidate review dated 2026-10-22. Review expiries (UTC):
+  Codex subscription profile, 2026-11-21T23:59:59Z; OpenRouter Chat dialect,
+  2026-11-21T00:00:00Z; xAI and OpenAI API profiles, 2027-01-20T00:00:00Z.
+  Accept the current Codex notice again; renewal does not require re-login.
 
 ### Known limitations
 

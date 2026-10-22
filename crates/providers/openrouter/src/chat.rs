@@ -67,7 +67,7 @@ const OPENROUTER_CHAT_AUTH_PROFILE: &str = "openrouter.platform-api-key";
 const OPENROUTER_CHAT_AUTH_REVISION: &str = "openrouter-platform-api-key-v1";
 const OPENROUTER_CHAT_AUTHORITY_CLASS: &str = "platform-api-key";
 const OPENROUTER_CHAT_CREDENTIAL_SELECTION: &str = "openrouter-product-key-generation";
-pub(crate) const OPENROUTER_CHAT_REVIEWED_AT: u64 = 1_792_540_800;
+pub(crate) const OPENROUTER_CHAT_REVIEWED_AT: u64 = 1_792_627_200;
 pub(crate) const OPENROUTER_CHAT_REVIEW_EXPIRES_AT: u64 = OPENROUTER_CHAT_REVIEWED_AT + 30 * 86_400;
 
 /// Provider-owned exact reasoning-detail replay selection.
