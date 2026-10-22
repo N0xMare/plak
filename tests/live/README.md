@@ -227,11 +227,18 @@ cannot run away and is not stopped before a handful of read pages. There is
 no key that lowers a context window or a compaction trigger. Growth is pack-aware. Codex and the OpenAI API are native Code Mode and have
 no `read_file`: those routes print `bulk.txt` with `exec_command`, at most
 20 lines per call. Other packs use their read tool (`read_file`, `Read`, or
-`read`) with the same 20-line limit on a sequential growth turn. `bulk.txt` is
+`read`) with the same 20-line limit on a sequential growth turn, except that a
+pi `read` takes 32 lines once those are at most an eighth of the window (from
+384,000 tokens): 34 would fill its 50 KiB cap. `bulk.txt` is
 random base64 lines, except on the Claude pack: Anthropic's classifier refused a
 growth turn over base64 pages (`category=reasoning_extraction`), so Claude and
 Anthropic API routes read random five-digit groups at 40 lines per call, which
-count_tokens prices like 20 base64 lines (about 29k tokens). The product
+count_tokens prices like 20 base64 lines (about 29k tokens). Sizing converts
+bulk bytes to tokens at the pack's measured bytes per token: 1.06 for base64
+and 2.0 for digits (count_tokens), 4.0 for digits on Codex, and 1.44 for the
+pi pack's base64, measured on `deepseek/deepseek-v4.1-flash-1017` from
+provider-counted input; a denser tokenizer on another OpenRouter route only
+reaches the trigger sooner. The product
 caps the text one model round observes at `clamp(window * 4 * 8 / 100, 32 KiB,
 256 KiB)` bytes (spec 01 observation policy), so one parallel batch cannot fill
 a large window. The overflow turn therefore reads in rounds: each round is one
@@ -240,16 +247,20 @@ the rounds cover the compaction trigger at the pack's measured bytes per token
 plus two more (for example 7 rounds of 2 x 20 lines on grok-4.7, 12 of 2 x 65
 on the 1M Claude rows). Each read also stays within its own tool's per-call
 cap: pi `read` returns at most 50 KiB and one Codex `exec_command` result at
-most 40,000 bytes, so a batch takes as many reads as that needs (at least two):
-7 rounds of 4 x 32 lines at a 967,232-token DeepSeek ceiling, where 65-line
-reads would be cut at 34 lines. `bulk.txt` holds at least the planned lines.
-Codex refused every batched wording, so on Codex the
+most 40,000 bytes, so a batch takes as many reads as that needs (at least two).
+`bulk.txt` holds at least the planned lines. Codex refused every batched
+wording, so on Codex the
 same total is 36 sequential 21-line reads, one `exec_command` per Code Mode
-exec (a multi-slice exec passes the round cap and is clipped). The child of
+exec (a multi-slice exec passes the round cap and is clipped). DeepSeek on
+Messages issued one read per response whatever the batch wording, so a pi
+round is a single read of at most 32 lines, phrased as sequential reads one
+per response: 29 reads at a 967,232-token DeepSeek ceiling, the last two past
+the trigger on an almost full window. The child of
 `child_compaction` reads its own `bulk.txt`: pages whose count passes its
 trigger at the pack's bytes per token, each a header line naming a random
 check word and the next page (or saying it is the last), then one read's worth
-of bulk lines. The page count is not in the prompt. The child writes each
+of bulk lines (31 pages of 32 on pi at the 967,232 DeepSeek ceiling, where
+35 pages of 20 lines priced at 1.06 never reached it). The page count is not in the prompt. The child writes each
 page's check word into `pages/<k>.txt`, so every read is a deliverable the
 oracle counts. A Codex child page is two halves of 26 base64 lines read by one
 exec through `page.py`, one half returned with `notify` and one with `text`:
@@ -273,6 +284,12 @@ sizes it with `pages_for_window`: ceil(window / 65,536) pages, at least 2 for
 windows up to two pages and at least 6 otherwise, capped at 28. Per-call read
 sizes also follow the admitted window, so a fold leaves room below the trigger. `PLAK_LIVE_GROWTH_PAGES`
 (1..=28) overrides that. 28 pages are 7 MiB, under the 8 MiB capture cap.
+On the pi pack, unless that dial is set, the growth `bulk.txt` instead holds
+the reads that pass the trigger at 1.44 bytes per token plus four more, read
+to eof: 31 reads of 32 lines (992 lines) at a 967,232-token ceiling, where 15
+pages read 20 lines at a time were 131 calls and DeepSeek stopped after about
+20. The page count still sets the turn timeouts and the reported
+`growth_pages`.
 The pre-compaction fact is a neutral code word (`ZEBRA-` and six digits) that lives only in `codeword.txt`; prompts call it a code word and ask for it from memory, because "token" wording drew Codex refusals ("I can't write the previously disclosed token into another file"). A pass does not accept
 the model's own claim that it compacted or remembered. Reports name
 `route_report` (class, account, effort, protocol, `composition_requested`, which
@@ -283,7 +300,7 @@ the shared home and the scenario private home.
 | Scenario | Surface | Passes when |
 | --- | --- | --- |
 | `in_turn_compaction` | `plak agent` | one turn pages `bulk.txt` until the session log shows `compact.started` reason `scheduled` and `compact.finished` outcome `committed` inside that turn's admitted..terminal bracket; prepared input shrinks when both figures are present; `recalled.txt` matches `codeword.txt`; the fact files are not read again after that commit; a follow-up writes `followup.txt` with the same code word |
-| `overflow` | `plak agent` | rounds of parallel read batches, each under the round cap, then the log shows a remedy: an in-turn `scheduled` compact, a `context.placeholders` shrink inside that turn, or a `failed` / `ContextLimit` turn followed by `compact.started` reason `capacity` and a committed finish; `acknowledged.txt` is unchanged, and a later turn writes `continuation.txt` containing `CONTINUED` |
+| `overflow` | `plak agent` | rounds of parallel read batches, each under the round cap (sequential reads, one per response, on Codex and pi), then the log shows a remedy: an in-turn `scheduled` compact, a `context.placeholders` shrink inside that turn, or a `failed` / `ContextLimit` turn followed by `compact.started` reason `capacity` and a committed finish; `acknowledged.txt` is unchanged, and a later turn writes `continuation.txt` containing `CONTINUED` |
 | `kill_reopen` | `plak agent` | SIGKILL after the marker process is observed running, or after 15s if it never appears (the marker is an argv token, not a shell comment); reopen emits JSONL `recovered` and the session log has `turn.abandoned` with `cause=process_lost` and `claim=running_tool`, `nothing_started` or `tool_round_completed` (spec 02 §2.4: Code Mode can abandon as `nothing_started` when exec was shown before the cell was durably prepared; a kill after a finalized tool round and before the next model request abandons as `tool_round_completed`; process restart does not log `session.recovered`); the follow-up writes `after_reopen.txt` containing `REOPENED` |
 | `child_compaction` | `plak agent` | after the root quits, `plak session log <root>.cN --json` contains a committed compaction segment and the adopted checkout has `acknowledged.txt` and `recalled.txt` matching `codeword.txt` and every `pages/<k>.txt` holding page k's check word. `cN` comes from the root JSONL `tree` frames or spawn/wait receipts, otherwise from `plak session show <root>`. The segment projects as `kind` `compaction` with text beginning `compacted ` (the summary is not display text; an empty assistant item is not the segment; the harness `compact` row is not on this log). `pending` only when that show/log channel fails. A child tool failure on a `tool` event (a root call the model retried successfully, such as an adopt refused as `target_changed` and then made with the current target, does not count), a topology node, or a wait receipt (`agents[].blocked` with `account`, `quota`, `resets_at`) is that failure. `blocked.quota` of `rate_limited` or a quota exhaustion, or provider-unavailable fault text, is `provider` (spec 05 §3.2); any other child failure is `harness`. The projection has no prepared-input row, so a missing segment is `model`, as is a missing or wrong page check word |
 

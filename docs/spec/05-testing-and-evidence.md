@@ -2500,7 +2500,14 @@ in `tests/live/` (whose README lists every scenario and its oracle):
   trigger, so the last batches land on an almost full window. Each read also
   stays within its own tool's per-call cap (pi `read` returns at most 50 KiB,
   one Codex `exec_command` result at most 40,000 bytes), so a batch on such a
-  pack takes more, shorter reads, and `bulk.txt` holds every planned line. The overflow
+  pack takes more, shorter reads, and `bulk.txt` holds every planned line. On
+  the Codex and pi packs the plan is phrased as sequential reads, one call per
+  response, each under both caps, because their models did not reliably issue
+  one batch per round; a pi round is then a single read, so the sequential
+  reads still pass the trigger and the last of them land on an almost full
+  window. Sizing converts bulk bytes to tokens at the pack's measured bytes per
+  token, and a pi growth `bulk.txt` holds only the reads that pass the trigger
+  plus a few more. The overflow
   remedy is whichever the session log shows: an in-turn
   `scheduled` compact, a `context.placeholders` shrink, or a failed
   `ContextLimit` turn followed by a `capacity` compact. `just smoke <route>

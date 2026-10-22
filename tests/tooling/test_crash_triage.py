@@ -141,7 +141,7 @@ class CrashTriageTests(unittest.TestCase):
             on_event({"kind": "tool", "state": "running", "subject": marker})
             raise live.ScenarioFailure(live.HARNESS, "plak agent exited during a turn")
         agent.prompt.side_effect = killed
-        with patch.object(driver, "repo", return_value=(repo, 0)), \
+        with patch.object(driver, "repo", return_value=repo), \
              patch.object(driver, "home", return_value=home), \
              patch.object(driver, "agent", side_effect=[agent, live.ScenarioFailure(
                  live.HARNESS, "plak agent did not become ready: {'kind': 'bye'}")]), \

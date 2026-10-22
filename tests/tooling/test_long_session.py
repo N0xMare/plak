@@ -687,7 +687,8 @@ class LongSessionOracleTests(unittest.TestCase):
             calls = len(batches[0])
             batch_bytes = calls * lines * long_session.LINE_BYTES
             self.assertLessEqual(batch_bytes, long_session.round_cap_bytes(window), name)
-            self.assertGreaterEqual(calls, long_session.OVERFLOW_BATCH_CALLS, name)
+            # A pi round is one sequential read; every other pack batches.
+            self.assertEqual(calls == 1, pack == "pi", name)
             self.assertTrue(all(len(batch) == calls for batch in batches), name)
             offsets = [offset for batch in batches for offset in batch]
             self.assertEqual(offsets, sorted(set(offsets)), name)
@@ -762,16 +763,136 @@ class LongSessionOracleTests(unittest.TestCase):
             child_read = (long_session.CODEX_CHILD_HALF_LINES if pack == "codex"
                           else long_session.child_page_lines(pack, call_lines) + 1)
             self.assertLessEqual(child_read, long_session.read_call_lines(pack), label)
-        # The measured DeepSeek ceiling: four 32-line reads per round, not two
-        # 65-line reads the 50 KiB cap would cut at 34 lines.
+        # The measured DeepSeek ceiling: one 32-line read per round, so a model
+        # that reads once per response still passes the trigger.
         lines, batches = long_session.overflow_plan(
             967_232, "pi", None, "deepseek/deepseek-v4.1-flash-1017")
-        self.assertEqual((lines, len(batches[0]), len(batches)), (32, 4, 7))
+        self.assertEqual((lines, len(batches[0]), len(batches)), (32, 1, 29))
         prompt = long_session.overflow_prompt(lines, batches, "pi")
-        self.assertIn("in 7 rounds using only the read tool", prompt)
-        self.assertIn("Round 1: offsets 1, 33, 65, 97.", prompt)
-        self.assertIn("each with limit 32", prompt)
-        self.assertIn("do not skip or merge rounds", prompt)
+        self.assertTrue(prompt.startswith(long_session.OVERFLOW_PURPOSE))
+        self.assertIn("using only the read tool, in exactly 29 sequential calls of 32 lines each",
+                      prompt)
+        self.assertIn("at line offsets 1, 33, 65, and so on up to 897.", prompt)
+        self.assertIn("Make one call per response", prompt)
+        self.assertNotIn("parallel batch", prompt)
+        self.assertTrue(prompt.endswith("reply with exactly: done. Do not open codeword.txt."))
+        grok = long_session.overflow_prompt(20, [[1, 21], [41, 61]], "grok")
+        self.assertTrue(grok.startswith(long_session.OVERFLOW_PURPOSE))
+        self.assertIn("in 2 rounds using only the read_file tool", grok)
+        self.assertIn("all in one parallel batch, each with limit 20", grok)
+        self.assertIn("do not skip or merge rounds", grok)
+
+    @patch.dict(os.environ, {"PLAK_LIVE_INPUT_CEILING": "967232", "PLAK_LIVE_GROWTH_PAGES": ""})
+    def test_pi_plans_pass_a_1m_admitted_ceiling_in_about_thirty_reads(self):
+        """DeepSeek's measured 1.44 bytes per token, not 1.06, sizes every pi plan.
+
+        Growth, child and overflow each plan at most 32 reads, every read is
+        whole under the 50 KiB `read` cap with the bytes a line really has,
+        and the reads before the margin already pass the harness bar.
+        """
+        self.assertEqual(long_session.bulk_bytes_per_token("pi"), 1.44)
+        self.assertEqual(long_session.bulk_bytes_per_token("grok"), 1.06)
+        real_line = len(long_session.bulk_line("pi")) + 1
+        self.assertEqual(real_line, 1_469)
+        call_cap = long_session.read_call_bytes("pi")
+        self.assertEqual(call_cap, 51_200)
+        capture_cap = long_session.MAX_GROWTH_PAGES * long_session.READ_PAGE_BYTES
+        for name in ("deepseek", "deepseek-messages"):
+            route = live.ROUTES[name]
+            model = route.model
+            window = long_session.catalog_window(model)
+            self.assertEqual(window, 967_232)
+            bar = long_session.harness_bar(window, model)
+            self.assertEqual(bar, long_session.compaction_trigger(window, model))
+            per_token = long_session.PI_BASE64_BYTES_PER_TOKEN
+
+            call_lines = long_session.growth_call_lines("pi", window)
+            self.assertEqual(call_lines, long_session.PI_CALL_LINES)
+            self.assertLessEqual(call_lines * real_line, call_cap)
+            read_tokens = call_lines * real_line / per_token
+            lines = long_session.growth_lines(route)
+            self.assertEqual(lines % call_lines, 0)
+            reads = lines // call_lines
+            self.assertEqual((lines, reads), (992, 31), name)
+            self.assertLessEqual(lines * real_line, capture_cap)
+            self.assertGreater((reads - long_session.GROWTH_EXTRA_READS + 1) * read_tokens, bar)
+            self.assertIn(f"limit {call_lines}", long_session.growth_prompt(lines, "pi", call_lines))
+
+            pages = long_session.child_pages(window, "pi", call_lines, model)
+            self.assertEqual(pages, 31, name)
+            header = long_session.page_header(pages - 1, pages, "check-abcdef", call_lines + 1)
+            self.assertLessEqual(len(header) + 1 + call_lines * real_line, call_cap)
+            self.assertGreater((pages - long_session.GROWTH_EXTRA_READS + 1) * read_tokens, bar)
+            self.assertIn(f"limit {call_lines + 1}", long_session.child_prompt("pi", call_lines))
+
+            line_count = max(long_session.default_pages(route),
+                             long_session.overflow_bulk_pages(window, "pi", model)
+                             ) * long_session.lines_per_page()
+            over_lines, batches = long_session.overflow_plan(window, "pi", line_count, model)
+            over_reads = sum(len(batch) for batch in batches)
+            self.assertEqual((over_lines, over_reads), (32, 29), name)
+            self.assertLessEqual(over_lines * real_line, call_cap)
+            self.assertLessEqual(line_count * real_line, capture_cap)
+            self.assertGreater(
+                (over_reads - long_session.OVERFLOW_EXTRA_ROUNDS + 1)
+                * over_lines * real_line / per_token, bar)
+            # Every planned read fits the turn's timeout at a minute or more each.
+            self.assertGreaterEqual(long_session.growth_timeout(long_session.default_pages(route)),
+                                    60 * reads)
+            self.assertGreaterEqual(long_session.child_timeout(long_session.default_pages(route)),
+                                    60 * 2 * pages)
+            self.assertGreaterEqual(
+                long_session.overflow_timeout(len(batches), long_session.default_pages(route)),
+                60 * over_reads)
+
+    def test_pi_growth_dial_still_sizes_pages_and_small_windows_keep_small_reads(self):
+        route = live.ROUTES["deepseek"]
+        with patch.dict(os.environ, {"PLAK_LIVE_INPUT_CEILING": "967232",
+                                     "PLAK_LIVE_GROWTH_PAGES": "3"}):
+            self.assertEqual(long_session.growth_lines(route), 3 * long_session.lines_per_page())
+        with patch.dict(os.environ, {"PLAK_LIVE_GROWTH_PAGES": ""}):
+            os.environ.pop("PLAK_LIVE_INPUT_CEILING", None)
+            self.assertIsNone(long_session.catalog_window(route.model))
+            self.assertEqual(long_session.growth_lines(route), 6 * long_session.lines_per_page())
+        # One pi read stays at most an eighth of the window: 32 lines from 384k.
+        self.assertEqual(long_session.growth_call_lines("pi", 383_999), long_session.GROWTH_CALL_LINES)
+        self.assertEqual(long_session.growth_call_lines("pi", 384_000), long_session.PI_CALL_LINES)
+        with patch.dict(os.environ, {"PLAK_LIVE_INPUT_CEILING": "65536",
+                                     "PLAK_LIVE_GROWTH_PAGES": ""}):
+            window = long_session.catalog_window(route.model)
+            call_lines = long_session.growth_call_lines("pi", window)
+            self.assertEqual(call_lines, 5)
+            self.assertEqual(long_session.growth_lines(route), 65)
+            self.assertEqual(long_session.child_pages(window, "pi", call_lines, route.model), 13)
+            lines, batches = long_session.overflow_plan(window, "pi", None, route.model)
+            self.assertEqual((lines, len(batches[0]), len(batches)), (16, 1, 5))
+            self.assertLessEqual(lines * long_session.LINE_BYTES,
+                                 long_session.round_cap_bytes(window) * long_session.OVERFLOW_CAP_SHARE)
+
+    def test_grok_claude_and_codex_plans_are_unchanged(self):
+        """Pinned: growth lines per read and bulk lines, child pages, overflow plan."""
+        expected = {
+            "grok": (20, 1_044, 13, (20, 2, 7)),
+            "grok-46": (20, 1_392, 19, (40, 2, 6)),
+            "claude-sonnet55-low": (40, 2_784, 34, (65, 2, 12)),
+            "codex": (20, 1_044, 6, (21, 2, 18)),
+            "codex-sol": (20, 1_392, 10, (20, 4, 17)),
+        }
+        with patch.dict(os.environ, {"PLAK_LIVE_GROWTH_PAGES": ""}):
+            for name, (call_lines, lines, pages, plan) in expected.items():
+                route = live.ROUTES[name]
+                pack = long_session.pack_of(route)
+                window = long_session.catalog_window(route.model)
+                self.assertEqual(long_session.growth_call_lines(pack, window), call_lines, name)
+                self.assertEqual(long_session.growth_lines(route), lines, name)
+                self.assertEqual(
+                    long_session.child_pages(window, pack, call_lines, route.model), pages, name)
+                over_lines, batches = long_session.overflow_plan(window, pack, None, route.model)
+                self.assertEqual((over_lines, len(batches[0]), len(batches)), plan, name)
+        prompt = long_session.overflow_prompt(21, [[1, 22]] * 18, "codex")
+        self.assertTrue(prompt.startswith(long_session.CODEX_BULK_NOTE))
+        self.assertNotIn(long_session.OVERFLOW_PURPOSE, prompt)
+        self.assertTrue(prompt.endswith("After the last call, reply with exactly: done"))
 
     def test_child_pages_carry_the_check_words_the_oracle_counts(self):
         with tempfile.TemporaryDirectory() as directory:

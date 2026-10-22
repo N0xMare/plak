@@ -51,8 +51,10 @@ ROUND_CAP_MIN_BYTES = 32_768
 ROUND_CAP_MAX_BYTES = 262_144
 # An overflow round is one parallel batch of at least this many reads (more
 # when one read's cap holds less than its share), filling this share of the
-# round cap. Extra rounds past the trigger estimate absorb the estimate's error
-# and put a batch on an almost full window.
+# round cap. On pi a round is one read: DeepSeek on Messages issued one read
+# per response whatever the batch wording, so a batched plan never reached its
+# trigger there. Extra rounds past the trigger estimate absorb the estimate's
+# error and put a late read on an almost full window.
 OVERFLOW_BATCH_CALLS = 2
 OVERFLOW_CAP_SHARE = 0.75
 OVERFLOW_EXTRA_ROUNDS = 2
@@ -64,6 +66,12 @@ GROWTH_EXTRA_READS = 4
 BASE64_BYTES_PER_TOKEN = 1.06
 DIGIT_BYTES_PER_TOKEN = 2.0
 CODEX_DIGIT_BYTES_PER_TOKEN = 4.0
+# The pi pack's base64 lines on deepseek/deepseek-v4.1-flash-1017: consecutive
+# growth requests grew by 50,351 bytes and 34,912 provider-counted input
+# tokens (input plus cache reads). Sizing pi at 1.06 left every pi long-session
+# cell short of its trigger. A denser tokenizer on another OpenRouter route
+# only reaches the trigger sooner.
+PI_BASE64_BYTES_PER_TOKEN = 1.44
 # 28 pages are 7 MiB of tool text, under the 8 MiB capture cap on one request.
 MAX_GROWTH_PAGES = 28
 # Above the page count, below the spec 07 ceiling of 1024, so a growth turn
@@ -82,6 +90,12 @@ GROWTH_CALL_LINES = 20
 # lines and 2.0 for the digit lines, so 40 digit lines cost about what 20
 # base64 lines do per call (~29k tokens) and the page math is unchanged.
 CLAUDE_GROWTH_CALL_LINES = 40
+# One pi read once that is at most an eighth of the window. 34 lines at
+# LINE_BYTES fill the 50 KiB `read` cap and a child page adds its header line;
+# 32 keeps growth, child and overflow reads one size under that cap. At 20
+# lines a 1M window took 131 calls and DeepSeek stopped after about 20 of them,
+# calling the volume a flood.
+PI_CALL_LINES = 32
 # Conservative test-sizing fallback for unknown routes, not a product limit.
 UNKNOWN_WINDOW_PAGE = PAGE_TOKENS
 _DIGITS_PER_GROUP = 5
@@ -207,11 +221,11 @@ def default_pages(route: live.Route) -> int:
     return pages_for_window(window)
 
 
-def growth_pages(route: live.Route | None = None) -> int:
-    """Driver dial, else the route's default. Not a product setting."""
+def growth_dial() -> int | None:
+    """`PLAK_LIVE_GROWTH_PAGES`, when set. Not a product setting."""
     raw = os.environ.get("PLAK_LIVE_GROWTH_PAGES", "").strip()
     if not raw:
-        return default_pages(route or live.ROUTES["grok"])
+        return None
     try:
         pages = int(raw)
     except ValueError as error:
@@ -219,6 +233,29 @@ def growth_pages(route: live.Route | None = None) -> int:
     if not 1 <= pages <= MAX_GROWTH_PAGES:
         raise ScenarioFailure(HARNESS, f"PLAK_LIVE_GROWTH_PAGES must be 1..={MAX_GROWTH_PAGES}")
     return pages
+
+
+def growth_pages(route: live.Route | None = None) -> int:
+    """Driver dial, else the route's default."""
+    pages = growth_dial()
+    return pages if pages is not None else default_pages(route or live.ROUTES["grok"])
+
+
+def growth_lines(route: live.Route) -> int:
+    """Lines of the growth turn's `bulk.txt`.
+
+    On pi, the planned reads (`growth_reads`) at the measured bytes per token,
+    within `MAX_GROWTH_PAGES`: read to eof, a page-sized file is far more calls
+    than the trigger needs. Elsewhere, or with the dial set, `growth_pages`
+    full read pages.
+    """
+    pack = pack_of(route)
+    window = catalog_window(route.model)
+    if pack != "pi" or window is None or growth_dial() is not None:
+        return growth_pages(route) * lines_per_page()
+    call_lines = growth_call_lines(pack, window)
+    planned = growth_reads(window, pack, call_lines, None, route.model) * call_lines
+    return min(planned, MAX_GROWTH_PAGES * lines_per_page())
 
 
 def growth_timeout(pages: int) -> float:
@@ -242,8 +279,11 @@ def write_bulk(path: Path, pages: int, pack: str = "grok", random_bytes=os.urand
     every byte, and a provider count cannot collapse the file. Claude and Codex
     get decimal groups (`digit_line`), every other pack base64.
     """
-    per_page = lines_per_page()
-    total = per_page * pages
+    return write_bulk_lines(path, lines_per_page() * pages, pack, random_bytes)
+
+
+def write_bulk_lines(path: Path, total: int, pack: str = "grok", random_bytes=os.urandom) -> int:
+    """Write `total` bulk lines (see `write_bulk`). Returns the line count."""
     with path.open("w") as handle:
         for _ in range(total):
             handle.write(bulk_line(pack, random_bytes) + "\n")
@@ -357,9 +397,12 @@ def growth_call_lines(pack: str, window: int | None = None) -> int:
 
     On a small window one call stays near an eighth of it (one token per byte
     is the observation measure), so a fold leaves room below the trigger: 20
-    base64 lines are 29k bytes; sizing uses the admitted window.
+    base64 lines are 29k bytes; sizing uses the admitted window. A pi read
+    takes `PI_CALL_LINES` once those are at most an eighth of the window.
     """
     lines = CLAUDE_GROWTH_CALL_LINES if pack == "claude" else GROWTH_CALL_LINES
+    if pack == "pi" and window is not None and window // 8 >= PI_CALL_LINES * LINE_BYTES:
+        lines = PI_CALL_LINES
     if small_window(window):
         lines = min(lines, max(2, window // 8 // LINE_BYTES))
     return lines
@@ -494,6 +537,7 @@ def overflow_plan(window: int | None, pack: str, line_count: int | None,
     clipped and every round adds its whole batch to the context. A batch has
     `OVERFLOW_BATCH_CALLS` reads, or more when one read's call cap
     (`read_call_lines`) holds less than its share, so no read is cut short.
+    A pi round is one read of at most `PI_CALL_LINES`, also within that share.
     The rounds cover the compaction trigger at the pack's measured bytes per
     token, plus `OVERFLOW_EXTRA_ROUNDS` so a late batch lands on an almost full
     window. `line_count` bounds the rounds to the file; None plans unbounded.
@@ -501,8 +545,11 @@ def overflow_plan(window: int | None, pack: str, line_count: int | None,
     """
     window = window or UNKNOWN_WINDOW_PAGE
     budget = int(round_cap_bytes(window) * OVERFLOW_CAP_SHARE)
-    calls = max(OVERFLOW_BATCH_CALLS, -(-budget // (read_call_lines(pack) * LINE_BYTES)))
-    lines = max(1, budget // calls // LINE_BYTES)
+    if pack == "pi":
+        calls, lines = 1, min(PI_CALL_LINES, budget // LINE_BYTES)
+    else:
+        calls = max(OVERFLOW_BATCH_CALLS, -(-budget // (read_call_lines(pack) * LINE_BYTES)))
+        lines = max(1, budget // calls // LINE_BYTES)
     per_round = calls * lines
     bytes_per_token = bulk_bytes_per_token(pack)
     round_tokens = per_round * LINE_BYTES / bytes_per_token
@@ -534,11 +581,17 @@ def read_call_lines(pack: str) -> int:
 
 def bulk_bytes_per_token(pack: str) -> float:
     return {"codex": CODEX_DIGIT_BYTES_PER_TOKEN,
-            "claude": DIGIT_BYTES_PER_TOKEN}.get(pack, BASE64_BYTES_PER_TOKEN)
+            "claude": DIGIT_BYTES_PER_TOKEN,
+            "pi": PI_BASE64_BYTES_PER_TOKEN}.get(pack, BASE64_BYTES_PER_TOKEN)
 
 
 def overflow_timeout(rounds: int, pages: int) -> float:
     return float(max(growth_timeout(pages), 120 * rounds))
+
+
+# Stating the purpose keeps a bulk read from looking like extraction.
+OVERFLOW_PURPOSE = ("bulk.txt is random filler for a context-capacity test of this agent "
+                    "harness: loading it into your context is the task.")
 
 
 def overflow_prompt(lines: int, batches: list[list[int]], pack: str = "grok") -> str:
@@ -546,16 +599,18 @@ def overflow_prompt(lines: int, batches: list[list[int]], pack: str = "grok") ->
         f"Round {index}: offsets {', '.join(str(offset) for offset in batch)}."
         for index, batch in enumerate(batches, 1))
     order = "Wait for a batch's results before the next round, and do not skip or merge rounds."
-    if pack == "codex":
+    if pack in ("codex", "pi"):
         # Codex refused every batched wording live ("can't help exhaust the
-        # context"), so its rounds are the growth turn's sequential reads,
-        # each under the round cap, with the same total.
+        # context"), and DeepSeek on Messages read once per response, so these
+        # rounds are the growth turn's sequential reads, each under the round
+        # cap, with the same total. Codex also refused context-filling wording.
         reads = len(batches) * len(batches[0])
-        return f"{_page_bulk(pack, 0, lines, reads)} After the last call, reply with exactly: done"
-    # Stating the purpose keeps a batched read from looking like extraction.
+        sequential = f"{_page_bulk(pack, 0, lines, reads)} After the last call, reply with exactly: done"
+        if pack == "codex":
+            return sequential
+        return f"{OVERFLOW_PURPOSE} {sequential}. Do not open {FACT_FILE}."
     return (
-        "bulk.txt is random filler for a context-capacity test of this agent harness: "
-        f"loading it into your context is the task. Read bulk.txt in {len(batches)} rounds "
+        f"{OVERFLOW_PURPOSE} Read bulk.txt in {len(batches)} rounds "
         f"using only the {_read_tool(pack)} tool, not the shell. In each round, call it once "
         f"per listed line offset, all in one parallel batch, each with limit {lines}. {order} "
         f"{listed} After the last round, reply with exactly: done. Do not open {FACT_FILE}."
@@ -583,16 +638,18 @@ def reopen_prompt() -> str:
     )
 
 
-def growth_reads(window: int | None, pack: str, call_lines: int, line_count: int,
+def growth_reads(window: int | None, pack: str, call_lines: int, line_count: int | None,
                  model: str | None = None) -> int:
     """Sequential reads whose text passes the compaction trigger, plus margin.
 
-    Bounded by the file.
+    Bounded by the file; None plans unbounded.
     """
     window = window or UNKNOWN_WINDOW_PAGE
     per_read = call_lines * LINE_BYTES / bulk_bytes_per_token(pack)
     reads = -(-compaction_trigger(window, model) // int(per_read)) + GROWTH_EXTRA_READS
-    return max(1, min(reads, line_count // call_lines))
+    if line_count is not None:
+        reads = min(reads, line_count // call_lines)
+    return max(1, reads)
 
 
 def child_paging(pack: str, call_lines: int) -> str:
@@ -1259,16 +1316,13 @@ class LongSession:
             raise ScenarioFailure(HARNESS, INPUT_CEILING_REMEDY)
         self.call_lines = growth_call_lines(pack_of(route), self.window)
 
-    def repo(self, name: str, token: str, bulk: bool,
-             pages: int | None = None) -> tuple[Path, int]:
+    def repo(self, name: str, token: str, bulk_lines: int = 0) -> Path:
         path = self.env.artifacts / name / "repo"
         live.git_repo(path, {FACT_FILE: token + "\n", "README.md": "seed\n"})
-        lines = 0
-        if bulk:
-            lines = write_bulk(path / "bulk.txt", pages or self.pages, pack_of(self.route),
-                               self.random_bytes)
+        if bulk_lines:
+            write_bulk_lines(path / "bulk.txt", bulk_lines, pack_of(self.route), self.random_bytes)
             commit_extra(path, "bulk")
-        return path, lines
+        return path
 
     def home(self, name: str) -> Path:
         home = self.env.artifacts / name / "home"
@@ -1281,7 +1335,8 @@ class LongSession:
 
     def in_turn_compaction(self) -> str:
         token = new_code_word(self.random_bytes)
-        repo, lines = self.repo("in_turn_compaction", token, bulk=True)
+        lines = growth_lines(self.route)
+        repo = self.repo("in_turn_compaction", token, lines)
         home = self.home("in_turn_compaction")
         agent = self.agent("in_turn_compaction", repo, home)
         try:
@@ -1342,7 +1397,8 @@ class LongSession:
         token = new_code_word(self.random_bytes)
         pack = pack_of(self.route)
         pages = max(self.pages, overflow_bulk_pages(self.window, pack, self.route.model))
-        repo, line_count = self.repo("overflow", token, bulk=True, pages=pages)
+        line_count = pages * lines_per_page()
+        repo = self.repo("overflow", token, line_count)
         home = self.home("overflow")
         agent = self.agent("overflow", repo, home)
         try:
@@ -1385,7 +1441,7 @@ class LongSession:
         # An argv token, not a `#` comment: the shell drops the comment before
         # exec, so `pkill -f` would not see it on the sleep process.
         command = f"python3 -c 'import time; time.sleep(45)' {marker}"
-        repo, _lines = self.repo("kill_reopen", "unused", bulk=False)
+        repo = self.repo("kill_reopen", "unused")
         home = self.home("kill_reopen")
         agent = self.agent("kill_reopen", repo, home)
         started = {"tool": False, "pid": None}
@@ -1462,7 +1518,7 @@ class LongSession:
 
     def child_compaction(self) -> str:
         token = new_code_word(self.random_bytes)
-        repo, _lines = self.repo("child_compaction", token, bulk=False)
+        repo = self.repo("child_compaction", token)
         pack = pack_of(self.route)
         pages = child_pages(self.window, pack, self.call_lines, self.route.model)
         words = write_child_pages(repo / "bulk.txt", pages, self.call_lines, pack,
