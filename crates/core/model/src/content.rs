@@ -1835,6 +1835,30 @@ pub struct CompactionReplayBinding {
 }
 
 impl CompactionReplayBinding {
+    /// The producing protocol, for portable neutral encodings.
+    #[must_use]
+    pub const fn protocol(&self) -> &ProtocolId {
+        &self.protocol
+    }
+
+    /// The producing model family, when one was declared.
+    #[must_use]
+    pub const fn model_family(&self) -> Option<&ModelFamilyId> {
+        self.model_family.as_ref()
+    }
+
+    /// The exact producing model.
+    #[must_use]
+    pub const fn model(&self) -> &ModelId {
+        &self.model
+    }
+
+    /// The producing account binding.
+    #[must_use]
+    pub const fn account(&self) -> Digest {
+        self.account
+    }
+
     /// Records the admitted producing dialect, family, requested model and account.
     #[must_use]
     pub const fn new(

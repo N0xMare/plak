@@ -133,6 +133,7 @@ struct Driver {
     /// `ToolExchange` cannot hold. Fence (b) adds it to the parts estimate;
     /// it resets when a round sets a new anchor or a compaction commits.
     nested_committed_observation_tokens: u64,
+    seed_compaction_pending: bool,
     /// Derives the note a committed compaction leaves behind.
     post_compaction_note: Option<crate::runtime::PostCompactionNote>,
     /// The host's shared bound on concurrent model requests, if any.

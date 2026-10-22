@@ -27,7 +27,7 @@ pub(in crate::runtime) use compaction_inspection::checkpoint_can_abandon_compact
 pub(in crate::runtime) mod composition_recovery;
 pub(in crate::runtime) mod effect_recovery;
 mod retention;
-mod session;
+pub(super) mod session;
 pub(in crate::runtime) mod turn_recovery;
 pub(in crate::runtime) mod workflow_closure;
 

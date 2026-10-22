@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::num::NonZeroU32;
+
 #[cfg(test)]
 use std::path::Path;
 use std::path::PathBuf;
@@ -795,6 +796,39 @@ fn key_usage_failure(error: &plakous::openrouter::OpenRouterKeyUsageError, label
         "run `plak key set openrouter` to replace it"
     };
     format!("OpenRouter rejected the API key from {label} ({status}); {remedy}")
+}
+
+pub(crate) fn carry_input_window<P: plakous_host_protocol::ProtocolExtension>(
+    config: &crate::runtime::HostConfig<P>,
+) -> CliResult<plakous::sessions::SessionInputWindow> {
+    let credentials = config.state_roots.openrouter_credentials();
+    credentials.preflight()?;
+    let client = OpenRouterChatClient::connect_with_retention(
+        credentials.source()?,
+        OpenRouterRetentionPolicy::gateway_default(),
+    )
+    .and_then(OpenRouterChatClient::with_plak_attribution)
+    .map_err(|e| CliFailure::new(e.to_string()))?;
+    let executor = plakous::application::ApplicationExecutor::new()
+        .map_err(|e| CliFailure::new(e.to_string()))?;
+    let evidence = executor
+        .block_on(client.discover_exact(&config.model_id))
+        .map_err(|e| CliFailure::new(e.to_string()))?
+        .map_err(|e| CliFailure::new(e.to_string()))?;
+    let wire = config
+        .session
+        .target_selection
+        .api_target()
+        .ok_or_else(|| CliFailure::new("missing API target"))?
+        .protocol();
+    let reasoning = config.effort.is_some();
+    let output = openrouter_output_bound(&evidence, wire, reasoning)?;
+    let admitted = openrouter_maximum_projected_input(&evidence, wire, reasoning, output)?;
+    Ok(plakous::sessions::SessionInputWindow {
+        route: format!("openrouter/{wire:?}"),
+        total_window: Some(evidence.context_length()),
+        admitted_input: Some(admitted),
+    })
 }
 
 #[cfg(test)]

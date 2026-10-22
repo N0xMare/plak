@@ -157,6 +157,8 @@ mod turn_drive;
 use turn_drive::{TurnHost, drive_one_turn};
 mod usage;
 
+#[cfg(any(test, feature = "test-support"))]
+pub use self::{startup::run_injected_host, topology_state::install_successor_epoch_headless};
 pub use binding_document::{
     RootBindingDocument, RootBindingDraft, RootBindingEdit, RootBindingSaveError,
 };
@@ -178,18 +180,14 @@ pub(crate) use resources::sample_children_rusage_cumulative;
 pub use resources::sample_process_resources;
 pub use source_release::SourceReleases;
 pub use startup::HostWorker;
-pub use startup::create_seeded_session;
-#[cfg(any(test, feature = "test-support"))]
-pub use startup::run_injected_host;
 pub use startup::spawn_deferred_tui_host;
 pub use startup::spawn_deferred_tui_host_with_clear_publication;
 pub use startup::spawn_host_worker;
+pub use startup::{create_seeded_session, create_seeded_session_with_preflight};
 pub use surface::{
     ProfileForkOutcome, Surface, SurfaceEffect, SurfaceFacts, SurfaceHandler, SurfaceMcp,
     SurfacePhase, SurfaceProfileFork, SurfaceRefusal, SurfaceSaved, SurfaceSession,
 };
-#[cfg(any(test, feature = "test-support"))]
-pub use topology_state::install_successor_epoch_headless;
 pub use topology_state::{HostRows, TopologyRows, TreeRows};
 pub use topology_state::{
     durable_tree_id as durable_topology_tree_id, epoch_rebind_refusal, install_successor_epoch,
@@ -464,6 +462,58 @@ pub struct HostConfig<P: plakous_host_protocol::ProtocolExtension = plakous_host
     /// (`SourceReleases::default()`). Switch-back joins that source's release;
     /// host exit joins every outstanding release under one bounded deadline.
     pub source_releases: SourceReleases,
+}
+
+/// Resolves a destination runtime's advisory input window without creating a
+/// session or dispatching inference. Route construction may refresh auth/catalogs.
+///
+/// # Errors
+/// Returns the ordinary target/tool/configuration construction refusal.
+pub fn carry_input_window<P: plakous_host_protocol::ProtocolExtension>(
+    config: &HostConfig<P>,
+) -> CliResult<plakous::sessions::SessionInputWindow> {
+    use plakous::sessions::SessionInputWindow;
+    #[cfg(any(test, feature = "test-support"))]
+    if let Some(runtime) = startup::injected_runtime(config, TestRuntimeRole::Primary) {
+        return Ok(runtime?.input_window());
+    }
+    if let HostTargetAuthority::Native { resolved, .. } = &config.target {
+        let configured = resolved.configured_model();
+        let descriptor = configured.configuration().effective().descriptor();
+        let rule = descriptor.context_contract().map(|c| c.capacity().rule());
+        let output = configured
+            .configuration()
+            .effective()
+            .behavior()
+            .output_bound
+            .bound()
+            .map(|v| u64::from(v.get()));
+        let (total_window, admitted_input) = rule.map_or((None, None), |rule| match rule {
+            plakous::model::CapacityRule::ProviderReservedInput {
+                reported_context_window,
+                maximum_projected_input,
+                ..
+            } => (reported_context_window, Some(maximum_projected_input)),
+            plakous::model::CapacityRule::SharedWindow { total }
+            | plakous::model::CapacityRule::SharedWindowWithOutputCap { total, .. } => (
+                Some(total.lower_bound()),
+                output.map(|n| total.lower_bound().saturating_sub(n)),
+            ),
+            plakous::model::CapacityRule::Separate { input, .. } => {
+                (None, Some(input.lower_bound()))
+            }
+            _ => (None, None),
+        });
+        return Ok(SessionInputWindow {
+            route: descriptor.route().as_str().to_owned(),
+            total_window,
+            admitted_input,
+        });
+    }
+    if let HostTargetAuthority::Platform { provider, .. } = &config.target {
+        return crate::platform::carry_input_window(*provider, config);
+    }
+    crate::openrouter::carry_input_window(config)
 }
 
 impl<P: plakous_host_protocol::ProtocolExtension> HostConfig<P> {

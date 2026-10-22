@@ -2030,8 +2030,8 @@ session, or damaged store with the ordinary typed errors.
 It also refuses a job row without durable terminal evidence as
 `AgentSessionsErrorKind::UnsettledProcesses`. The remedy is to resume the
 session and send a prompt to deliver its process notices before exporting.
-Lease-release metadata is not evidence that a process stopped. The portable
-history and export-document encodings are unchanged.
+Lease-release metadata is not evidence that a process stopped. The portable history API is unchanged; the product export encoding is
+owned by chapter 02 §2.5.1.
 
 `PortableSessionHistory` is plain data: the segments, oldest first, and the
 account reference (lowercase hex of the admitted account binding) and model
@@ -2039,6 +2039,28 @@ the provider replay material is bound to. `PortableSessionHistory::new`
 reassembles one a consumer carried in its own format, and
 `retains_replay_for(&SessionRuntimeBinding)` says whether a seed keeps the
 replay material.
+
+For consumers encoding histories neutrally, the facade also names
+`ImageDetailHint`, `ToolResultUpdateBlock`, `SummarizedTurns`, and
+`CompactionReplayBinding`. The latter exposes read-only `protocol`,
+`model_family`, `model`, and `account` accessors: a portable encoder need not
+serialize its runtime representation. Product format stability belongs to the
+consumer, not the canonical runtime serde encoding.
+
+`SessionRuntimeBinding::input_window()` returns a named `SessionInputWindow`
+with `route`, optional `total_window` and optional `admitted_input` after shared
+output reservation. Unknown capacity is not an import failure. The values are
+advisory, not measurement or admission authority. Hosted capacity probes stop
+at provider configuration before tool-plan/MCP construction; import preflight
+reuses its actual runtime binding.
+
+`PortableSessionHistory::without_replay` removes self-declared provider replay
+from external documents regardless of account/model equality.
+`with_replay_validation` requests offline destination-dialect validation before
+creation of same-binding seeds, with no store/session creation or dispatch on
+refusal. Product handoff authentication is a separate host concern, not a
+property of a declared replay binding. Seed-only occupancy scheduling applies
+to nonempty root genesis checkpoints, never fork/rebind/clear successors.
 
 `CreateSessionRequest::with_history(history)` makes `AgentSessions::create`
 build the new session's genesis checkpoint from that history instead of an
@@ -2049,7 +2071,9 @@ binding has the same account and model; otherwise the seed applies its own
 strip rule, separate from a rebind's request projection (which would still
 refuse a native compaction item bound to another account): opaque replay reasoning is removed, visible reasoning
 keeps its text without replay, an opaque block with a semantic summary becomes
-text, other opaque blocks are removed, and a native compaction block is replaced
+text, other opaque blocks are removed (also inside tool results; an otherwise
+empty result retains a content-free omission marker so its exchange stays
+complete), and a native compaction block is replaced
 by a plain compaction block whose summary is a content-free marker that earlier
 context could not be carried (the native summary is ciphertext, not portable
 prose) and which keeps that block's `summarized_turns` record. The segment
@@ -6827,9 +6851,11 @@ an automatic fold. A provider overflow then ends the turn with typed capacity
 failure and the Compact remedy; no overflow fold is dispatched.
 Admission authority is restored only for a matching stable
 binding. A failed or abandoned compaction preserves it; a committed compaction,
-fork or rebind successor clears it. Text carry/export documents
-contain no anchor, so import is unanchored. The export document is version 7;
-this build imports versions 7 and 6 (chapter 02 §2.5.1).
+fork or rebind successor clears it. Conversation carry/export documents
+contain no anchor, so import is unanchored. A seeded history with no provider
+operation yet may use the destination's unanchored occupancy measure solely
+to schedule its first preflight fold; this is not paid admission authority.
+The export document is version 8; this build imports versions 8 and 7 (chapter 02 §2.5.1).
 
 A paid fold's **own input must admit under a conservative bound** before
 physical dispatch; it seals the current-binding anchor and uses the same
@@ -7126,9 +7152,9 @@ it, so the position survives compaction, reopen and fork unchanged. A
 compaction segment without the record leaves
 the position unknown and the indices are omitted, as native omits an unknown
 position. The record is an optional field of the canonical compaction block
-encoding; the session export document carries no canonical history, so it is
-unchanged, and an imported session starts its count anew with its seeded
-restart checkpoint as its first prompt (spec 02 §2.5.1). Carrying a history to
+encoding; export v8 carries the turn record in its independent neutral
+compaction fields, so conversation carry preserves the position (spec 02
+§2.5.1). The v7 importer can only seed its old restart checkpoint. Carrying a history to
 another binding turns a native compaction block into a plain compaction block
 that keeps its record and places that segment at position zero, ahead of the
 retained prefix (§5.10); `(prompts, turns)` is unchanged. Withheld-prompt note

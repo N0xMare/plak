@@ -430,6 +430,14 @@ Host and product job construction use the facade's root `JobConfig`; product
 job observations use root `JobStatus`, `JobStopReason`, and `JobView`; product
 compaction telemetry uses `agent::CompactionRefusalReason`. These are enrolled in
 the checker's approved-symbol inventory, without exposing private runtime authority.
+
+The product's `carry/history.rs` alone may name the public model content
+constructors and canonical-history validator needed to decode the neutral
+export document (chapter 02 §2.5.1). Its closed tag-mapping macro and the
+installed-build carry-capacity process probe are enrolled source-specifically;
+this grants no mutable runtime/store authority or general source-generation
+exception to the CLI. The facade inventory also pins the compaction replay
+binding accessors and advisory `SessionRuntimeBinding::input_window`.
 Hosted usage also names the facade's existing `openrouter::OpenRouterKeyUsageError`
 to distinguish HTTP 401 and 403 and attach product-supplied safe key-source labels
 and remedies; the error is enrolled in the same inventory.

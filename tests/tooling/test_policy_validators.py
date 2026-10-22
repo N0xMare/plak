@@ -1577,6 +1577,7 @@ fn paths() {
                 "src/carry.rs": """
 fn carry(executable: &str, snapshot: &str) {
     let _ = std::process::Command::new(&executable);
+    let _ = std::process::Command::new(&target.executable);
     let _ = std::process::Command::new(executable);
     let _ = std::process::Command::new(snapshot);
 }
@@ -1697,6 +1698,19 @@ fn fixtures() {
                 self.assertEqual(workspace_policy.validate_cli_security_sources("plakous-hosted", {path: source}), [])
                 self.assertTrue(workspace_policy.validate_cli_security_sources("plakous-hosted", {"src/x.rs": source}))
                 self.assertTrue(workspace_policy.validate_cli_security_sources("plak", {path: source}))
+
+    def test_neutral_carry_codec_is_source_specific(self) -> None:
+        codec = """
+macro_rules! tags { () => { stringify!(Actor); } }
+use plakous::model::{CanonicalHistory, CompactionReplayBinding, ToolResultUpdateBlock};
+fn decode() { tags!(); }
+"""
+        fixture = self.cli_security_fixture()
+        fixture["plak"]["src/carry/history.rs"] = codec
+        self.assertEqual(self.validate_fixture(fixture), [])
+        errors = workspace_policy.validate_cli_security_sources("plak", {"src/other.rs": codec})
+        self.assertTrue(any("unapproved plakous facade symbols" in error for error in errors), errors)
+        self.assertTrue(any("source-generation macros" in error for error in errors), errors)
 
     def test_plakous_symbol_allowlist_is_per_package(self) -> None:
         errors = workspace_policy.validate_cli_security_sources(

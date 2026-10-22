@@ -861,7 +861,9 @@ Before leaving a resumable session, `/reload` asks the destination build for
 its state key, importable export versions, and a strict configuration verdict
 in the session workspace. An unreadable configuration or incompatible carry
 version keeps the source session open with the cause and a repair instruction.
-The verdict applies whenever the destination answers the probe, for exact
+After this verdict, a cross-key reload produces a transient private export and
+asks `version --carry-probe <file>` for the destination capacity, before any
+teardown. The verdict applies whenever the destination answers the probe, for exact
 resume as well as carry. Builds without the probe retain the
 `version --state-key` fallback; unverified resume proceeds without a verdict.
 A timed-out probe does not trigger another probe, and the TUI's answer is
@@ -883,158 +885,177 @@ carry file is removed on every failure. Export publication is atomic and
 refuses an existing destination. A directory sync failure after publication
 is a warning, not an export refusal.
 
-**The export document is the one cross-build carrier. A build MUST import
-export documents of its own version and of the immediately previous version.
-Any change to the document, including the embedded canonical-history and
-binding encodings, bumps the version; the previous version's importer is kept
-for one bump only. Older builds need not import newer documents.** No build
-opens another build's state directory for resume or import authority. The
-document embeds no canonical conversation items: its checkpoint and archive are
-text, so canonical-history encodings such as tool execution owners change the
-runtime format epoch, not the export version, and a test pins that an exported
-document carries no owner encoding.
+The export document is the sole cross-build carrier. A build imports its own
+version and the immediately previous version; any document change bumps the
+version, and the previous reader survives for exactly one bump. This build
+writes **version 8** and imports **8 and 7**, never older documents. Runtime
+canonical format epochs are not export versions: v8 carries a Plak-owned neutral
+conversation encoding, not canonical segment bytes, digests, checkpoints, or
+runtime serde representations.
 
-`plak session export <id> [--out <path>]` writes one JSON document,
-`"format": "plak-session-export", "version": 7`, and prints its path. Without
-`--out` it goes to `~/.plak/carry/<id>.<uuid>.json`; the `carry/` directory is
-created 0700 and refused if it is not a private directory. The file is created
-exclusively at mode 0600 and never overwrites an existing path. The document
-carries source session/build provenance (the producer binary id when the
-exporting process can identify it by hash or a matching install manifest,
-otherwise an explicit unavailable marker),
-workspace, title, binding, a
-deterministic restart checkpoint bounded to 32 KiB each for user intent and
-reference text (64 KiB total), a readable inert archive
-bounded to 64 MiB of actor labels and UTF-8 text,
-the typed transcript rows (§5.4) and the composer projection, queued prompt texts, an inert ledger
-of unresolved source workflows, source child/candidate/workspace reference
-facts, and the non-live source-sub-agent count. Independently bounded sections
-reserve space for producer provenance, the first and recent user goals, recent
-assistant results or decisions, the paused-queue count, and the inert work
-ledger, so an asymmetric huge first goal cannot erase later sections. Each of
-the eight recent goals and eight latest results has its own bounded excerpt;
-latest results receive 24 KiB and the work ledger only 4 KiB. The ledger lists
-only live/interrupted/recovery-required children, still-adoptable candidates,
-in-flight workspaces, and retained active/adopted copies with changes, including
-copies of closed children (or whose changes
-cannot be inspected). Settled rows are replaced by a count, not repeated as
-unresolved work. It is the optional typed integer
-`source_resolved_count`, outside `pending_work`; exports never encode it as
-a pseudo obligation, and import refuses that pseudo-entry kind. Queued
-prompt contents remain only in the paused product queue and never enter the
-model checkpoint. The checkpoint explicitly warns when state is missing and
-never claims to be a summary or restoration. Producing it makes no inference
-request. The checkpoint stores user intent and imported reference text separately.
-User goals/requests seed user-voice RecentIntent; assistant results/decisions,
-paused-queue warning and the work ledger seed a separate Conversation text note
-as Actor::Assistant with Provenance::Imported, never user authority. User intent
-comes first on every route, including Anthropic Messages. Version 7 carries
-the transcript as typed rows (§5.4); import refuses a transcript past the product
-transcript bounds (10 000 rows or 16 MiB of encoded rows) while reading it,
-and writes the rows once, as the new session's imported-transcript intent at
-anchor 0, lane 1 (§2.6), under the same row rules live rows take (§5.4), so a
-header row is dropped, a truncation marker survives only as the first row, and
-tool, process and thinking rows are re-bounded. The seeded session's `Created`
-record derives no rows, so a rebuild keeps the imported rows exactly (including
-a leading truncation marker) and derives everything after them from the new feed.
-The first product commit stores these keyed imported-row intents atomically with
-the new session; it writes no transcript view rows. Import then runs the ordinary
-projector against the seeded session's feed. The carried queue remains paused
-`queue_items`, not already-submitted commands; queued items' attached images
-are not carried (the export document stays version 7), so a carried item
-arrives text-only. The source workflow ledger
-remains inert reference text, not executable workflow requests. A version 7 tool row
-carries `exposed_name`, the name the model called, beside `name`, the
-canonical name its activity kind derives from; the field is omitted when the
-two are equal (chapter 01 §8.2). Version 6 is the only previous importer: it
-differs only in tool rows without `exposed_name`, which import with the exposed
-name equal to the canonical `name`, so its documents read unchanged and their
-rows render as they did; a version 6 tool row that carries `exposed_name` is
-refused as invalid. Unknown fields, another `format`, other
-versions, or checkpoint halves/archive payloads exceeding their ceilings
-are refused with a typed validation error before state admission or seed creation.
-Export truncates its checkpoint and retains the newest archive text within its
-independent ceiling.
+`plak session export <id> [--out <path>]` writes one JSON document with
+`"format": "plak-session-export", "version": 8` and prints its path. The
+exclusive 0600 file never overwrites an existing path. Without `--out`, it is
+`~/.plak/carry/<id>.<uuid>.json` in a private 0700 directory. Source session,
+state key and producer build provenance (verified binary id, or explicitly
+unavailable), workspace, title and selected binding accompany the history.
 
-Not restored, by design: canonical history, usage and the last provider input-token
-floor, telemetry, the event log, agent-tree topology and every sub-agent, the
-turn, tool-call and compaction counters, workflow requests and command
-submissions, and every feed-derived view (the new session has its own feed).
-The Claude OAuth turn position (spec 01 §10.6) therefore
-restarts in the imported session, whose seeded restart checkpoint counts as its
-first prompt. Old children, workspaces, candidates and source state
-remain untouched. Workflow facts in the document are reference-only. The new
-session starts these executable structures empty, and its queue is paused.
+`history` contains `replay_account` (source account reference), `replay_model`
+(model identifier string), and ordered `groups`. Each group contains its
+semantic `kind` and ordered `messages`. Group kinds are `conversation`,
+`recent_intent`, `steering`, `tool_exchange`, `reasoning_replay`, and
+`compaction`. Messages contain `id` (UUID), `actor` (`developer`, `system`,
+`user`, `assistant`, `tool`, `harness`), `origin` (`user_input`, `model_output`,
+`tool_execution`, `instruction`, `imported`), optional bounded
+`presentation_subject` (4096 bytes), and ordered `blocks`.
 
-Export reads without opening a runtime. It first applies the projector up to
-the feed tail (a product write that needs no lease), then refuses with the cause
-named (`session <id> cannot be exported: <cause>`) when the session has no
-runtime yet, a command submission or workflow request has no feed fact yet
-(`open the session once to settle it`), a sub-agent is live or sealing (`let it
-finish or close it first`), the tree cannot be read, or the canonical head is
-Working (a turn running or parked). Completed, Failed, Closed, RecoveryRequired and Interrupted
-sub-agents are inert source facts: they are counted but neither restored nor
-resumed. Their candidate and workspace rows remain in the old state and are
-named in the inert ledger only when genuinely unresolved. Nothing but projector catch-up is written on refusal.
+Blocks have an explicit `kind` and neutral fields:
 
-`plak session import <path>` creates a **new** session id, seeds its new
-runtime with only the bounded checkpoint, and links it to the old id and state
-key. The link is stored in the record's lineage fields under the operation
-prefix `plak:carry-forward:`, and lineage walks (tree inspection, durable tree
-identity) stop at it, so the new session starts a new tree. It prints
-`session <new> linked from <old> (<old key>)` plus the truthful missing-state
-warning (and non-live source-sub-agent count, if any) and the resume line. The session
-is promptable from that checkpoint; carried queue items are restored paused
-and never silently run. `plak session list` appends `[carried forward from <old> (<old key>)]`
-to the title, `plak session show` prints a `Lineage` line, and the TUI shows
-the same line as its opening note when it resumes the session. Opening notes
-remain after the rows restored at open and before later turns when the host
-republishes its presentation; republication never duplicates the note.
-When the bounded restore window evicts earlier rows, the note follows its
-last identifiable pre-open row and the remaining pre-open rows after it. If
-that anchor disappears, or an anonymous pre-open prefix cannot be proved
-unchanged, the launch-only note is dropped permanently, never placed between
-later turns. The document is
-left in place. A session is carried once: importing a document whose source
-session and key already have a carried session in that workspace is refused,
-naming that session. `plak session reference <file> [--search <text>]
-[--tail <n>]` independently reads at most 64 KiB of matching/recent archive
-entries. A non-empty search is an ASCII-case-insensitive literal match and shows a
-UTF-8-safe bounded excerpt around each selected hit; the output budget is
-allocated newest-first in the destination-safe representation, so an older
-giant entry or control-character expansion cannot displace a newer selected
-entry or truncate the selected hit, then displayed in chronological order. An empty search has the
-same recent-entry behavior as no search. It opens no archive-supplied path,
-performs no inference, and labels the output untrusted historical data rather
-than instructions. A pipe receives
-the faithful UTF-8 archive projection; an interactive terminal receives the
-same multiline text with controls and bidirectional format characters made
-inert. The 64 KiB bound applies after that terminal-safe projection. The
-provenance note printed by import follows the same pipe-versus-terminal safety
-policy. Import also
-retains the archive only after the new seed commits, at
-`~/.plak/references/<new-session-id>.json` in a 0700 directory as a 0600 file, so the command accepts the new session id after a
-reload has spent and removed its transient carry file. If retaining the archive
-fails after the seed commits, import still succeeds and explicitly warns that
-the named session was created without its retained reference. Session ids are parsed
-canonically before path construction; document content never selects a path.
-Session deletion removes a retained reference only if the target is a regular
-file owned by the user; missing targets, a non-directory parent and target links
-do not block deletion, and the parent's privacy mode is not required. Reference
-inspection or removal failures never block session deletion; an unremoved
-orphan can be reclaimed later by `state prune-legacy --prune-orphaned-references`.
+- `text`: `text`, optional `phase` (`commentary` or `final`).
+- `image`: MIME `mime`, `source`, optional `detail` (`auto`, `low`, `high`,
+  `original`); `document` and `audio`: MIME and source. Byte sources carry
+  base64 strings; URI sources must parse as HTTPS with a host (all other
+  schemes are refused); data-URL sources retain their original string. No blob-store dependency or import-time network fetch exists.
+- `call`: call UUID `id`, exposed `name`, `canonical_name`, execution `owner`,
+  `state`, `correlation`, and exact raw `arguments`. `result`: UUID, owner,
+  `outcome`, ordered `parts`, correlation. Result parts are only text, image,
+  document, audio, or opaque. `update`: UUID, owner, text, phase, correlation.
+- `reasoning`: visibility (`visible`, `summary`, `omitted`, `redacted`,
+  `opaque_replay`), optional text and optional replay; `refusal`: text.
+- `citation`: target message UUID and block index, source/annotation ids,
+  optional URI/title and optional start/end range with explicit offset unit.
+- `compaction`: summary, optional `[prompts, turns]`, native replay string
+  and producing binding. `opaque`: scoped replay and fallback (`omit`,
+  `compatible_replay`, or `summary` with text).
 
-Versions 3 and 2 never import reasoning, replay envelopes, tool exchanges,
-native compaction items, or any other archived item. The archive retains only
-readable text, including tool-result bodies and updates needed for selective
-recovery searches, and is never model context. A native compaction summary is
-never archive or checkpoint prose: exports replace it with a content-free marker
-that opaque native compaction was omitted. Version 3 records the count of older
-entries omitted to fit the archive ceiling; `session reference` reports that
-count. A partially kept entry is marked truncated. Version 2 archives have no
-source omitted-entry count; import retains their newest entries within 64 MiB,
-records omitted older entries and marks a partially retained oldest entry, just
-like export. There is no full-history import exception.
+Owners distinguish local, MCP server and provider namespace. Correlation keeps
+remote-call/container ids and direct, provider-programmatic or local-programmatic
+caller lineage, including its operation/generation/cell/sequence/child/depth.
+Scoped replay contains protocol, optional family, explicit protocol/family/model
+scope, optional exact model, namespace, version, classification and the opaque
+JSON payload as a string. Its digest is reconstructed, never imported authority.
+Native binding records protocol, family, model and the SHA-256 ModelBinding
+account bytes and digest version. These fields do not serialize runtime enums.
+
+Export reads `AgentSessions::export_history_sqlite`; import rebuilds through
+public content constructors, `HistorySegment::new`, `CanonicalHistory::new`,
+and `PortableSessionHistory::new`, then seeds the existing
+`CreateSessionRequest::with_history` path (chapter 01 §5.10). Original
+model-visible contents, roles, grouping, tool correlations, image bytes and
+summarized turn counts survive. Presentation subjects survive unchanged for read-only host presentation;
+typed transcript rows still carry independently.
+The document's replay account/model are declared, not authenticated. Ordinary
+`session import <file>` strips all provider-opaque replay by default, including
+reasoning envelopes, native compaction ciphertext and opaque result parts; only
+portable visible text and declared semantic fallback remain. Binding equality
+alone does not authorize external replay. `/reload` alone may keep replay: the
+source creates a separate private, one-use receipt under its own `carry/` home,
+pinning the exact exported bytes. `--import-resume` consumes and checks this
+local receipt; an unreceipted/modified file takes the default stripping path.
+The receipt is not part of the export or a cross-machine carrier. Even then,
+`retains_replay_for` must prove the identical account/model and every retained
+replay segment must pass the destination route's offline dialect decoding before
+seed creation. Malformed/incompatible replay refuses with a typed error before
+persisting a successor. Historical tools, children and workflows never execute.
+
+A document is bounded to 256 MiB before parsing, its encoded neutral history
+to 128 MiB and 100,000 messages/groups. Runtime constructors enforce per-content
+bounds (including the 16 MiB media-source bound and the existing
+3,932,160-byte user-image bound), UUID validity and complete
+canonical-history invariants. Groups and messages are bounded while parsing
+with a shared 100,000-message budget; each message has at most 4096 blocks
+and each tool result at most 1024 parts. Raw history size is checked once
+before content decoding. Unknown fields/tags, another format/version,
+invalid contents and oversized payloads refuse before seed creation. History is
+never excerpted or silently truncated to fit export. Export makes no inference
+request.
+
+Destination usage, continuation and prompt caches start empty. At first prompt
+preflight the destination route measures its new history. Scheduled compaction
+runs for an over-window seed and, without requiring an old usage anchor, for
+an unmeasured seed at or above its compaction trigger. The existing single-paid-
+dispatch ladder and offline placeholder/replay-omission rung apply. A source or
+protected tail that cannot admit even through that ladder returns the ordinary
+typed capacity refusal; import does not discard arbitrary user/assistant text
+to force a smaller route to fit. Reload reports `N messages, ~T tokens; the
+first request rebuilds the prompt cache`; the token count is an estimate, not
+billing or admission authority.
+
+Before carrying, `session import` resolves the destination route and warns on
+stderr when the estimated history exceeds its admitted input ceiling. The
+warning names the route, admitted input window and reported total window, and
+says the first prompt will refuse unless history compacts. `/reload` performs
+the same destination inspection through hidden `version --carry-probe <file>`
+while the old session remains attached, using a transient private export that
+is removed after inspection. The background probe can resolve credentials,
+catalogs and provider configuration, but stops before the tool plan and never
+starts MCP servers, creates a runtime session or dispatches inference. Import
+reuses the actual seed binding for its advisory warning. An unavailable capacity
+contract is reported as `destination window unknown`, skips the comparison, and
+does not block import or the probe. A failed inspection keeps the old TUI open. An oversized estimate
+opens the existing confirmation pop-up with message/token counts, the cache
+rebuild note and capacity warning; `Carry anyway` proceeds and `Cancel` leaves
+the old session open. A root prompt/turn or binding change while inspection is
+pending invalidates the estimate and requires `/reload` again. Below-window
+carry keeps the normal handoff without an extra confirmation.
+
+Typed transcript rows remain independently bounded to 10,000 rows/16 MiB and
+use the live normalization, redaction and re-bounding rules (§5.4). Import
+stores their keyed imported-transcript intents atomically with the product
+record at anchor 0, lane 1 (§2.6); it writes no view rows. The new runtime's
+seeded `Created` record derives no transcript rows. Ordinary projection and
+rebuild retain the imported rows and derive later rows from the new feed.
+Composer history and queued prompt texts carry; queue items remain paused,
+never already-submitted commands. Queued image attachments do not carry.
+
+Children, candidates, workspaces and workflow ledger are reference-only facts
+in the document, not executable journals or live topology. Only genuinely
+unresolved rows belong in `pending_work`; settled rows are the optional typed
+`source_resolved_count`, never a pseudo obligation of that name (which import
+refuses). Closed children's dirty/adopted workspaces remain unresolved reference
+facts when appropriate. Live process ownership, store/feed/event state, usage,
+telemetry, provider continuation and model/tool-owned runtime state do not carry.
+Earlier compaction has already replaced superseded history; carry cannot recover
+what that compaction removed. Old stores, source children and workspaces remain
+untouched.
+
+Export first catches the product projector up to the feed tail without opening
+a runtime or taking its lease. It then refuses with the cause named when the
+session has no runtime, an unresolved command/workflow submission lacks a fact,
+a child is live or sealing, tree inspection fails, the head is Working, the
+record is stale, or a background process lacks durable terminal evidence.
+Nothing beyond projector catch-up is written on refusal. Finished, Closed,
+RecoveryRequired and Interrupted children are inert source facts, not resumed
+children. Process notices must be delivered by resuming and prompting the source
+before it can export; lease release alone is not terminal evidence.
+
+`plak session import <path>` creates a new id, seeds its new runtime, links it
+to the source id/key and prints the provenance, carry summary and resume line.
+Lineage uses `plak:carry-forward:` and stops tree walks at the boundary. The new
+session starts a new tree. Importing the same source session/key into the same
+workspace twice refuses and names its existing successor. `session list`,
+`session show` and the TUI opening note name the link. Opening notes follow the
+same pre-open transcript anchoring rules as ordinary resume notes: no duplicates
+on republication, and permanent removal when the anchor is no longer provable.
+The export file remains in place for ordinary import.
+
+**Version 7 reader:** v7 contains no full conversation. Its bounded checkpoint
+(32 KiB user intent plus 32 KiB imported assistant reference) alone seeds history;
+its inert archive (64 MiB actor/text) never enters model context. Typed rows still
+carry exposed tool names. This reader cannot invent missing conversation or
+opaque replay. Only this previous reader retains the checkpoint/archive path;
+new v8 documents have neither field. `session reference` retains bounded,
+terminal-safe search/tail inspection for v7 archives (64 KiB projected output,
+newest-first budget, chronological display, literal ASCII-insensitive search,
+UTF-8-safe hit-centered excerpts). Empty search means recent entries. Pipes
+receive faithful UTF-8; terminals neutralize controls and bidi formatting. v8
+reports that it carries conversation rather than a separate archive.
+A v7 archive is retained only after seed commitment at
+`~/.plak/references/<new-id>.json` (0600 in 0700); failure warns without undoing
+the committed successor. Canonical UUIDs, not document-supplied paths, select
+retained files. Deletion best-effort removes only an owned regular target;
+links, missing targets, parent-mode or inspection errors do not block deletion.
+Orphans can be pruned explicitly with `state prune-legacy --prune-orphaned-references`.
 
 `/reload` (§5.1) resolves the installed build and asks its state key with the
 hidden `plak version --state-key` while the session is still attached, before
@@ -1859,6 +1880,11 @@ current branch heads on a behind-retention read), never authorized by a stop
 marker or a product delivery receipt. An unrelated product command id cannot
 prevent inspection of that head.
 
+`plak version --carry-probe <file>` is a hidden machine form: it validates a
+v8/v7 export and reports the destination route, optional total/admitted input
+windows, estimated history tokens and message count. It performs no inference
+or session creation and emits no startup event.
+
 ### 3.2 Help
 
 Help is static product text, one page per command group, printed to stdout with
@@ -2067,7 +2093,7 @@ with only `binary` (the same 12-hex build id as `plak version`), `state_key`
 and `command` (the normalized top-level verb), skipped if the build id is unavailable;
 only plain `version` obtains the id synchronously. Other commands use an already
 computed id or emit from the background identity reader without delaying startup.
-The hidden `version --state-key`, `--reload-probe`, `--export-version` and
+The hidden `version --state-key`, `--reload-probe`, `--carry-probe <file>`, `--export-version` and
 `--write-binary-manifest <dir>` machine probes emit no startup event and do not
 prepare a cached binary id. The install-only manifest probe hashes and stats
 the same running image and creates `<dir>/binary-id` with mode 0444, containing

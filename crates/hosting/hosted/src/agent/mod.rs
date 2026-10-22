@@ -95,13 +95,13 @@ pub use build::{
     selected_coding_provider_configuration_with_processing_tier, topology_tree_is_restored_paused,
 };
 pub(crate) use build::{
-    SessionToolFence, api_session_runtime_binding, build_api_coding_session,
-    coding_session_runtime_binding_with_attach, coding_tool_registry_with_extensions,
-    direct_extension_tool, enroll_product_instructions, invoke_topology_tool_on_hub,
-    node_coding_presentation, occupancy_session_fence, open_api_coding_session_with_fence,
-    product_javascript_candidate_attachment, product_prompt_variant, product_python_attachment,
-    projection_target, session_tool_policy, stamped_workspace_policy, subagent_catalog_profile_id,
-    vocabulary_for_presentation,
+    SeededHistory, SessionToolFence, api_session_runtime_binding, build_api_coding_session_seed,
+    build_coding_session_seed, coding_session_runtime_binding_with_attach,
+    coding_tool_registry_with_extensions, direct_extension_tool, enroll_product_instructions,
+    invoke_topology_tool_on_hub, node_coding_presentation, occupancy_session_fence,
+    open_api_coding_session_with_fence, product_javascript_candidate_attachment,
+    product_prompt_variant, product_python_attachment, projection_target, session_tool_policy,
+    stamped_workspace_policy, subagent_catalog_profile_id, vocabulary_for_presentation,
 };
 #[cfg(any(test, feature = "test-support"))]
 pub use build::{build_or_open_injected_session, injected_root_tool_registrations};

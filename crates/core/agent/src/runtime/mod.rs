@@ -55,6 +55,7 @@ pub use config::AgentConfig;
 
 mod checkpoint;
 mod durable;
+pub(crate) use durable::session::validate_seed_replay;
 mod family_artifact;
 pub(crate) mod feed_views;
 

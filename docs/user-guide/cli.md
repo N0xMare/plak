@@ -602,22 +602,29 @@ or close it first; interrupted, recovery-required and finished sub-agents are
 retained only as inert source facts), a queued prompt's
 delivery is unresolved. `import` creates a new session from the document,
 prints `session <new> linked from <old> (<old key>, <producer>)`, and the new
-session continues from a bounded, deterministic restart checkpoint. It does
-not import the whole conversation or restore tools, topology, children, or
-runtime state. Queued prompts are preserved but paused, and unresolved work is
-reference-only. The document's readable archive is untrusted historical data;
-use `session reference <path> [--search <text>] [--tail N]` for bounded
-selective retrieval without putting it in model context. A document whose session was
-already carried into this workspace is refused, naming the carried session to
-resume instead. Reasoning replay and provider-native items are never restored
-by an export. This build writes version 7 and imports versions 7 and 6. User goals
-remain user voice; assistant results and the work ledger are a separate imported
-reference note, not user instructions. Export keeps newest archive entries, drops oldest first,
-and reference output reports the omitted-entry count. Usage, the event log,
-telemetry, sub-agent trees and model-owned tool state are not restored. If saving the retained
-reference fails after creation, import succeeds with a warning naming the session
-created without its reference. `session list` and `session show` name the link. A build imports documents of its own version and
-of the version just before it.
+session continues from the full conversation, including tool exchanges and inline
+image bytes. It does not restore live tools, processes, topology, children,
+usage or prompt caches. Queued prompts stay paused; workflow facts stay
+reference-only. The first request rebuilds the prompt cache. File import strips provider replay regardless of the document's declared
+binding. Only a locally produced `/reload` handoff may retain replay, on the
+identical account/model and after offline destination decoding.
+Before creating the successor, import warns if the estimated history exceeds
+the destination route's admitted input window, naming that route/window and
+warning that the first prompt will refuse unless history compacts.
+A smaller destination route schedules compaction at the first prompt when
+needed; if its protected history or summary input still cannot fit, it returns
+the normal context-limit refusal rather than silently truncating conversation.
+An unknown destination window is reported but does not block carry.
+This build writes version 8 and imports versions 8 and 7. Version 7 has only its
+old bounded checkpoint, not a complete conversation; its archive remains
+available through `session reference <path-or-session> [--search <text>]
+[--tail N]` as untrusted reference data. New exports have no separate archive. Keep exports private: they contain full
+conversation/tool contents, not a redacted transcript.
+Documents larger than 256 MiB, histories larger than 128 MiB/100,000 messages,
+and malformed content are refused, not truncated. A document already imported
+into this workspace is refused, naming its existing successor.
+`session list` and `session show` name the lineage link. A build imports its
+own document version and the immediately previous one.
 
 `delete` removes a session and its retained `~/.plak/references/<id>.json` archive,
 plus all of its retained history, together with the

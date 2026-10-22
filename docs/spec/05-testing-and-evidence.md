@@ -121,13 +121,24 @@ isolation, running-only transition refusals without side effects, and host-wide
 stops across registered slices. A durable fast-exit
 fixture checks attributed process stop, a history-unchanged terminal checkpoint,
 and lease release in that order. Portable export refuses missing job-terminal
-evidence without changing its document version. These tests are deterministic
+evidence before producing a document. These tests are deterministic
 and use local pipes, never provider inference or persisted PIDs.
 Dedicated carry fixtures pin fork/rebind branch seeding and crash/recovery
 release, including abandonment of a Working provider turn, with terminal rows
 and the number counter preserved. A release receipt alone still yields an
 unknown process outcome. Reload admission reads a process-local host count and
 refuses without closing the terminal.
+Export-v8 fixtures round-trip neutral content (including inline image bytes,
+opaque replay, native compaction bindings and turn counts), retain only the v7
+reader, and reject malformed or oversized input. Explicit account/protocol
+loopback bindings pin same-binding equality and cross-provider replay stripping.
+The scripted `history_report` output reports the text actually present in a
+model request, proving a >64 KiB, multi-turn conversation reaches the next
+request after a simulated state-key move. Seed fixtures distinguish unanchored
+above-trigger input that still fits from genuinely over-window input, and
+exercise first-prompt compaction. Offline capacity probes create no session;
+CLI and real-PTY tests pin pre-carry window warnings and cancellation while the
+old terminal remains attached. No live credential or inference is involved.
 Terminal-mode regressions cover hosted-owner shutdown, direct attachment
 release, and retirement of an interrupted child with a running job, then reopen
 with a fresh registry to prove terminal evidence was committed before release.
@@ -1835,11 +1846,11 @@ requires the reopen alone to converge before the harness checks idempotence.
 - An alias regression drives pi's `edit` and `write` through one turn and
   checks the committed `exposed_name` on both calls, exact replay of each name
   on every kernel, both history rows' labels and activity kinds, and a
-  version 6 export importing with the exposed name equal to `name`. A row
-  round-trip test pins `ToolItem.exposed_name` (present when it differs from
-  `name`, omitted when equal) through the product row codec and the version 7
-  export, and a version 6 import test refuses a version 6 tool row that carries
-  it.
+  version 7 previous-document import preserving its exposed name. The remaining
+  v7 fixture and `previous_document_preserves_every_transcript_row_type` pin
+  typed rows; `rejected_exports_do_not_create_state_or_reference_files` pins
+  refusal of v6. The v8 neutral round-trip includes presentation subjects,
+  base64 media, bounded parsing and closed unknown-field refusals.
 
 The opt-in live-fact pilots cover `non_stop_finish_length`,
 `empty_length_retry`, `non_stop_finish_refusal`, `steer_accepted_mid_turn`,

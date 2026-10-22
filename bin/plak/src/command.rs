@@ -124,6 +124,9 @@ pub(crate) enum Command {
         directory: PathBuf,
     },
     ReloadProbe,
+    CarryProbe {
+        path: PathBuf,
+    },
     ExportVersion,
     StatePruneLegacy {
         yes: bool,
@@ -277,7 +280,9 @@ impl Command {
             | Self::StateKey
             | Self::ReloadProbe
             | Self::ExportVersion
-            | Self::WriteBinaryManifest { .. } => "version",
+            | Self::WriteBinaryManifest { .. } 
+            | Self::CarryProbe { .. }
+            | Self::ExportVersion => "version",
             Self::Tui { .. } => "tui",
             Self::Resume { .. } | Self::ImportResume { .. } => "resume",
             Self::Fork { .. } => "fork",

@@ -507,7 +507,10 @@ pub(super) fn run_app(
             // Asked while the session is still attached: once the handoff
             // starts there is nothing left to show a slow answer on.
             let workspace = std::path::PathBuf::from(&app.workspace);
-            app.start_reload_probe(move || crate::carry::reload_target(&workspace));
+            let session_id = app.session_id.clone();
+            app.start_reload_probe(move || {
+                crate::carry::reload_target_for_session(&workspace, session_id.as_deref())
+            });
         }
         if let Some(super::reload::ReloadOutcome::HandOff(target)) = app.poll_reload_probe() {
             request_terminal_handoff(&mut app, actions, TuiHandoff::Reload { target });

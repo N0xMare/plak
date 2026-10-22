@@ -2199,6 +2199,27 @@ fn a_reload_onto_the_same_state_key_resumes_exactly() {
     assert_eq!(fixture.session_ids(), [session]);
 }
 
+fn install_carry_target(fixture: &Fixture, fake_bin: &Path, admitted: u64) -> (PathBuf, PathBuf) {
+    let args = fixture.root.join("reload-args");
+    let copy = fixture.root.join("carried.json");
+    let probe = json!({"state_key":"r0.e0.p0.t0","export_versions":[7,8],"config_error":null});
+    let capacity = json!({"route":"test.route","total_window":1_000_000,"admitted_input":admitted,"estimated_tokens":100,"messages":3});
+    write_script_file(
+        &fake_bin.join("plak"),
+        &format!(
+            "#!/bin/sh\nif [ \"$1 $2\" = 'version --reload-probe' ]; then printf '%s' '{}'; exit 0; fi\n\
+         if [ \"$1 $2\" = 'version --carry-probe' ]; then printf '%s' '{}'; exit 0; fi\n\
+         if [ \"$1 $2\" = 'version --state-key' ]; then echo r0.e0.p0.t0; exit 0; fi\n\
+         printf '%s\\n' \"$@\" > '{}'\n[ \"$1\" = --import-resume ] && cp \"$2\" '{}'\nexit 0\n",
+            probe,
+            capacity,
+            args.display(),
+            copy.display()
+        ),
+    );
+    (args, copy)
+}
+
 /// `/reload` onto an installed build that reports another state key exports
 /// the session it is leaving (after a turn, from the record the host last
 /// committed) and starts that build with `--import-resume <file>`.
@@ -2212,20 +2233,7 @@ fn a_reload_onto_another_state_key_hands_the_new_build_an_export() {
     terminal.send(b"carry this conversation\r");
     terminal.wait_screen("the answer before reload");
 
-    let args = fixture.root.join("reload-args");
-    let copy = fixture.root.join("carried.json");
-    write_script_file(
-        &fake_bin.join("plak"),
-        &format!(
-            "#!/bin/sh\n\
-             if [ \"$1 $2\" = 'version --state-key' ]; then echo r0.e0.p0.t0; exit 0; fi\n\
-             printf '%s\\n' \"$@\" > '{}'\n\
-             [ \"$1\" = --import-resume ] && cp \"$2\" '{}'\n\
-             exit 0\n",
-            args.display(),
-            copy.display()
-        ),
-    );
+    let (args, copy) = install_carry_target(&fixture, &fake_bin, 900_000);
     // The turn may still be settling; a refused reload leaves the TUI up.
     let deadline = Instant::now() + WAIT;
     while terminal.is_alive() {
@@ -2263,7 +2271,7 @@ fn a_reload_onto_another_state_key_hands_the_new_build_an_export() {
         document["source"]["session_id"],
         fixture.session_ids()[0].as_str()
     );
-    let checkpoint = document["checkpoint"].to_string();
+    let checkpoint = document["history"].to_string();
     assert!(
         checkpoint.contains("carry this conversation"),
         "{checkpoint}"
@@ -2272,15 +2280,42 @@ fn a_reload_onto_another_state_key_hands_the_new_build_an_export() {
         checkpoint.contains("the answer before reload"),
         "{checkpoint}"
     );
-    assert!(
-        document["archive"]
-            .to_string()
-            .contains("the answer before reload")
-    );
+    assert!(document.get("archive").is_none());
 }
 
-/// The new build's half of a reload: `--import-resume` opens the carried
-/// session with its note and spends the file.
+#[test]
+fn reload_warns_about_a_smaller_destination_before_closing_the_old_session() {
+    let fixture = Fixture::new(&tool_then_answer("answer before capacity warning"));
+    let fake_bin = fixture.root.join("fake-bin");
+    std::fs::create_dir_all(&fake_bin).unwrap();
+    let mut terminal = Terminal::spawn(&fixture, Launch::OnPath(&fake_bin));
+    terminal.wait_ready();
+    terminal.send(b"carry this goal\r");
+    terminal.wait_screen("answer before capacity warning");
+    terminal.wait_absent("Esc stop");
+    let (args, copy) = install_carry_target(&fixture, &fake_bin, 10);
+    terminal.send(b"/reload\r");
+    terminal.wait_screen("Carry to a smaller route?");
+    assert!(terminal.is_alive());
+    assert!(!args.exists() && !copy.exists());
+    let screen = terminal.screen();
+    assert!(screen.contains("test.route"), "{screen}");
+    assert!(screen.contains("refuse"), "{screen}");
+    terminal.send(b"\x1b");
+    terminal.wait_absent("Carry to a smaller route?");
+    terminal.send(b"/reload\r");
+    terminal.wait_screen("Carry to a smaller route?");
+    terminal.send(b"\r");
+    let deadline = Instant::now() + WAIT;
+    while terminal.is_alive() {
+        assert!(Instant::now() < deadline, "reload did not hand off");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(terminal.finish().success());
+    assert!(args.exists() && copy.exists());
+}
+
+/// The new build imports the conversation and spends its transient file.
 #[test]
 fn import_resume_opens_the_carried_session_and_deletes_the_file() {
     let fixture = Fixture::new(&tool_then_answer("an answer worth carrying"));

@@ -12,7 +12,7 @@
 use plakous_model::{
     CanonicalHistory, CompactionBlock, ContentBlock, ConversationItem, HistorySegment,
     HistorySegmentKind, ModelId, OpaqueFallback, ReasoningBlock, ReasoningVisibility, TextBlock,
-    hex_lower,
+    ToolResultBlock, ToolResultPart, hex_lower,
 };
 
 use super::{AgentSessionsError, AgentSessionsErrorKind, SessionRuntimeBinding};
@@ -25,6 +25,7 @@ pub struct PortableSessionHistory {
     segments: Vec<HistorySegment>,
     replay_account: String,
     replay_model: ModelId,
+    pub(super) validate_replay: bool,
 }
 
 impl PortableSessionHistory {
@@ -43,7 +44,27 @@ impl PortableSessionHistory {
             segments,
             replay_account,
             replay_model,
+            validate_replay: false,
         }
+    }
+
+    /// Removes all provider replay from an externally supplied document.
+    /// The declared binding of a document is not authenticated authority.
+    ///
+    /// # Errors
+    /// Returns invalid content when a portable fallback cannot be reconstructed.
+    pub fn without_replay(mut self) -> Result<Self, AgentSessionsError> {
+        self.segments = carried_segments_without_replay(&self.segments)?;
+        self.replay_account.clear();
+        Ok(self)
+    }
+
+    /// Requires the destination's offline dialect decoder to accept retained
+    /// replay before creating the seed. Use only for a locally attested handoff.
+    #[must_use]
+    pub fn with_replay_validation(mut self) -> Self {
+        self.validate_replay = true;
+        self
     }
 
     /// The committed segments, oldest first.
@@ -202,6 +223,14 @@ fn block_without_replay(block: &ContentBlock) -> Result<Option<ContentBlock>, Ag
                 }
             }
         }
+        ContentBlock::ToolResult(result)
+            if result
+                .parts()
+                .iter()
+                .any(|part| matches!(part, ToolResultPart::Opaque(_))) =>
+        {
+            tool_result_without_replay(result)
+        }
         ContentBlock::Opaque(opaque) => match opaque.fallback() {
             OpaqueFallback::SemanticSummary(summary) => {
                 TextBlock::new(summary.clone(), None).map(ContentBlock::Text)
@@ -224,6 +253,40 @@ fn block_without_replay(block: &ContentBlock) -> Result<Option<ContentBlock>, Ag
         block => return Ok(Some(block.clone())),
     };
     stripped.map(Some).map_err(|error| invalid_history(&error))
+}
+
+fn tool_result_without_replay(
+    result: &ToolResultBlock,
+) -> Result<ContentBlock, plakous_model::ContentError> {
+    let mut parts = result
+        .parts()
+        .iter()
+        .map(|part| match part {
+            ToolResultPart::Opaque(opaque) => match opaque.fallback() {
+                OpaqueFallback::SemanticSummary(summary) => TextBlock::new(summary.clone(), None)
+                    .map(ToolResultPart::Text)
+                    .map(Some),
+                _ => Ok(None),
+            },
+            part => Ok(Some(part.clone())),
+        })
+        .filter_map(Result::transpose)
+        .collect::<Result<Vec<_>, _>>()?;
+    // Keep the terminal result so the carried exchange remains complete.
+    if parts.is_empty() {
+        parts.push(ToolResultPart::Text(TextBlock::new(
+            "[provider replay omitted at carry boundary]",
+            None,
+        )?));
+    }
+    ToolResultBlock::new(
+        result.call_id(),
+        result.owner().clone(),
+        result.kind(),
+        parts,
+        result.correlation().clone(),
+    )
+    .map(ContentBlock::ToolResult)
 }
 
 #[cfg(test)]
@@ -504,5 +567,91 @@ mod tests {
             }
         }
         Ok((prompts, turns))
+    }
+    #[test]
+    fn opaque_tool_result_parts_strip_without_breaking_the_exchange()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use plakous_model::{
+            CallId, DataClassification, OpaqueBlock, OpaqueFallback, ProtocolId, ReplayEnvelope,
+            ReplayKindId, ReplayScope, ToolCallBlock, ToolCallState, ToolCorrelation,
+            ToolExecutionOwner, ToolName, ToolResultBlock, ToolResultKind, ToolResultPart,
+        };
+        for fallback in [
+            OpaqueFallback::Omit,
+            OpaqueFallback::CompatibleReplay,
+            OpaqueFallback::SemanticSummary("portable result".to_owned()),
+        ] {
+            let envelope = ReplayEnvelope::new(
+                ProtocolId::new("source.protocol")?,
+                None,
+                ReplayScope::Protocol,
+                ReplayKindId::new("opaque.result")?,
+                1,
+                DataClassification::Sensitive,
+                serde_json::value::RawValue::from_string("\"sanitized-secret-replay\"".to_owned())?,
+            )?;
+            let id = CallId::try_from(uuid::Uuid::from_u128(1))?;
+            let call = ConversationItem::new(
+                EntryId::try_from(uuid::Uuid::from_u128(2))?,
+                Actor::Assistant,
+                vec![ContentBlock::ToolCall(ToolCallBlock::new(
+                    id,
+                    ToolName::new("read")?,
+                    ToolExecutionOwner::Local,
+                    ToolCallState::Requested,
+                    ToolCorrelation::default(),
+                    "{}",
+                )?)],
+                Provenance::ModelOutput,
+            )?;
+            let result = ConversationItem::new(
+                EntryId::try_from(uuid::Uuid::from_u128(3))?,
+                Actor::Tool,
+                vec![ContentBlock::ToolResult(ToolResultBlock::new(
+                    id,
+                    ToolExecutionOwner::Local,
+                    ToolResultKind::Success,
+                    vec![ToolResultPart::Opaque(OpaqueBlock::new(
+                        envelope,
+                        fallback.clone(),
+                    )?)],
+                    ToolCorrelation::default(),
+                )?)],
+                Provenance::ToolExecution,
+            )?;
+            let segments = vec![HistorySegment::new(
+                HistorySegmentKind::ToolExchange,
+                vec![call, result],
+            )?];
+            let history = PortableSessionHistory::new(
+                segments.clone(),
+                "00ff".to_owned(),
+                ModelId::new("source.model")?,
+            );
+            assert_eq!(
+                history.clone().into_canonical(true)?.segments().to_vec(),
+                segments
+            );
+            let stripped = history.into_canonical(false)?;
+            let ContentBlock::ToolResult(result) =
+                &stripped.segments().get(0).ok_or("missing segment")?.items()[1].blocks()[0]
+            else {
+                return Err("missing result".into());
+            };
+            assert_eq!(result.parts().len(), 1);
+            let ToolResultPart::Text(text) = &result.parts()[0] else {
+                return Err("opaque result survived".into());
+            };
+            assert_eq!(
+                text.text(),
+                if matches!(fallback, OpaqueFallback::SemanticSummary(_)) {
+                    "portable result"
+                } else {
+                    "[provider replay omitted at carry boundary]"
+                }
+            );
+            assert!(!serde_json::to_string(&stripped)?.contains("sanitized-secret-replay"));
+        }
+        Ok(())
     }
 }

@@ -8,6 +8,12 @@ use std::path::Path;
 
 pub(crate) fn surface_is_nameable() {
     let _ = std::any::type_name::<AgentSessions>();
+    let _ = |binding: &plakous::sessions::SessionRuntimeBinding| -> plakous::sessions::SessionInputWindow {
+        binding.input_window()
+    };
+    let _ = |history: plakous::sessions::PortableSessionHistory| {
+        history.without_replay().map(|history| history.with_replay_validation())
+    };
     let _ = SessionBackend::memory().and_then(AgentSessions::new);
     let _ = |path: &Path, locator: SessionLocator| {
         AgentSessions::inspect_recovery_sqlite(path, locator)

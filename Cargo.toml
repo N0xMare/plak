@@ -273,6 +273,7 @@ plak = [
     "tracing-subscriber",
     "unicode-segmentation",
     "unicode-width",
+    "url",
     "uuid",
     "zeroize",
 ]

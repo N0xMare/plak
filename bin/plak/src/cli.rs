@@ -416,6 +416,8 @@ enum TopCommand {
         state_key: bool,
         #[arg(long, hide = true, conflicts_with_all = ["state_key", "reload_probe", "export_version"])]
         write_binary_manifest: Option<std::path::PathBuf>,
+        #[arg(long, hide = true, conflicts_with_all = ["state_key", "reload_probe", "export_version", "write_binary_manifest"])]
+        carry_probe: Option<std::path::PathBuf>,
         #[arg(long, action = ArgAction::SetTrue, hide = true, conflicts_with_all = ["state_key", "export_version"])]
         reload_probe: bool,
         #[arg(long, action = ArgAction::SetTrue, hide = true, conflicts_with = "state_key")]
@@ -688,6 +690,9 @@ impl TopCommand {
                 write_binary_manifest: Some(directory),
                 ..
             } => Ok(Command::WriteBinaryManifest { directory }),
+                carry_probe: Some(path),
+                ..
+            } => Ok(Command::CarryProbe { path }),
             Self::Version {
                 reload_probe: true, ..
             } => Ok(Command::ReloadProbe),

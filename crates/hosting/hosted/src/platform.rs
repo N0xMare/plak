@@ -406,3 +406,38 @@ fn platform_behavior(
 
 #[cfg(test)]
 pub(crate) mod tests;
+
+pub(crate) fn carry_input_window<P: plakous_host_protocol::ProtocolExtension>(
+    provider: PlatformProvider,
+    config: &crate::runtime::HostConfig<P>,
+) -> CliResult<plakous::sessions::SessionInputWindow> {
+    let admission = config.state_roots.platform_admission();
+    let executor = plakous::application::ApplicationExecutor::new()
+        .map_err(|e| CliFailure::new(e.to_string()))?;
+    let catalog = executor
+        .block_on(listing::api_model_catalog_observed(
+            provider,
+            config.state_roots.platform_credentials(),
+            Some(&config.product_home),
+            admission.lists,
+            catalog::unix_now(),
+            config.state_roots.exchange_observer(),
+        ))
+        .map_err(|e| CliFailure::new(e.to_string()))?;
+    let row = catalog
+        .admit(&config.model_id, config.effort)
+        .map_err(|e| CliFailure::new(e.to_string()))?;
+    let window = row.window(admission.window);
+    let (total_window, admitted_input) = match provider {
+        PlatformProvider::Anthropic => (None, window),
+        PlatformProvider::OpenAi | PlatformProvider::Xai => (
+            Some(window),
+            window.saturating_sub(u64::from(row.output_bound())),
+        ),
+    };
+    Ok(plakous::sessions::SessionInputWindow {
+        route: provider.account().to_owned(),
+        total_window,
+        admitted_input: Some(admitted_input),
+    })
+}

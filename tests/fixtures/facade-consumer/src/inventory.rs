@@ -343,8 +343,9 @@ pub(crate) fn exact_supported_root_inventory_is_importable() {
         ViewError, ViewRequest, WeakAgent, compile_explicit_profile,
     };
     use plakous::model::{
-        CompiledToolProjectionV2, HostedTool, LanguageModel, ModelDiagnostic, ModelEvent,
-        PortableToolSchemaV2, SystemIdGenerator, ToolCallerDisposition, ToolCallerLineage,
+        CompactionReplayBinding, CompiledToolProjectionV2, HostedTool, ImageDetailHint,
+        LanguageModel, ModelDiagnostic, ModelEvent, PortableToolSchemaV2, SummarizedTurns,
+        SystemIdGenerator, ToolCallerDisposition, ToolCallerLineage, ToolResultUpdateBlock,
     };
     use plakous::profiles::{claude, grok, neutral_coding};
     use plakous::tools::{
@@ -358,6 +359,18 @@ pub(crate) fn exact_supported_root_inventory_is_importable() {
     hold(&std::any::type_name::<Agent>());
     hold(&std::any::type_name::<AgentBuilder>());
     hold(&std::any::type_name::<SystemIdGenerator>());
+    hold(&std::any::type_name::<ImageDetailHint>());
+    hold(&std::any::type_name::<SummarizedTurns>());
+    hold(&std::any::type_name::<ToolResultUpdateBlock>());
+    fn replay_binding_fields(binding: &CompactionReplayBinding) {
+        let _ = (
+            binding.protocol(),
+            binding.model_family(),
+            binding.model(),
+            binding.account(),
+        );
+    }
+    hold(&replay_binding_fields);
     fn with_clock(
         builder: AgentBuilder,
         clock: std::sync::Arc<dyn plakous::model::Clock>,

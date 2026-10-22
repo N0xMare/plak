@@ -4,6 +4,7 @@ use std::env;
 
 use plakous_hosted::sessions::{NoticePlacement, NoticeTone, TranscriptRow};
 use std::io;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use super::host_config::{attached_target_accepts_effort, build_host_config};
@@ -1195,17 +1196,67 @@ pub(crate) fn import_session(
 ) -> CliResult<(product_sessions::SessionRecord, String)> {
     let document =
         crate::carry::read_document(path).map_err(|error| CliFailure::new(error.to_string()))?;
+    import_document(services, document, false)
+}
+
+pub(crate) struct PreparedImport {
+    carried: crate::carry::CarriedImport,
+    estimated_tokens: u64,
+    messages: usize,
+}
+impl PreparedImport {
+    pub(crate) fn new(
+        document: crate::carry::CarryDocument,
+        local_handoff: bool,
+    ) -> CliResult<Self> {
+        let estimated_tokens = document.estimated_tokens();
+        let messages = document.message_count();
+        let carried = document
+            .into_import_with_replay(local_handoff)
+            .map_err(|e| CliFailure::new(e.to_string()))?;
+        Ok(Self {
+            carried,
+            estimated_tokens,
+            messages,
+        })
+    }
+}
+pub(crate) fn import_document(
+    services: &crate::shell::services::Services,
+    document: crate::carry::CarryDocument,
+    local_handoff: bool,
+) -> CliResult<(product_sessions::SessionRecord, String)> {
+    import_prepared(services, PreparedImport::new(document, local_handoff)?)
+}
+pub(crate) fn import_prepared(
+    services: &crate::shell::services::Services,
+    prepared: PreparedImport,
+) -> CliResult<(product_sessions::SessionRecord, String)> {
+    let PreparedImport {
+        carried,
+        estimated_tokens,
+        messages,
+    } = prepared;
+    let crate::carry::CarriedImport {
+        record,
+        history,
+        mut note,
+        archive,
+    } = carried;
     let paths = crate::home::paths::PlakPaths::for_workspace(
         services.paths()?.home().to_path_buf(),
-        document.workspace_root(),
+        &record.workspace_root,
     );
     product_config::SessionPolicy::load(&paths).map_err(CliFailure::new)?;
-    let (source_id, source_key) = document.source();
+    let (source_id, source_key) = record
+        .carried_forward_from()
+        .ok_or_else(|| CliFailure::new("missing carry lineage"))?;
+    let (source_id, source_key) = (source_id.to_owned(), source_key.to_owned());
     if let Some(existing) = crate::carry::already_carried(
         services.session_records()?.as_ref(),
-        document.workspace_root(),
-        source_id,
-        source_key,
+        &record.workspace_root,
+        &source_id,
+        &source_key,
     )
     .map_err(CliFailure::new)?
     {
@@ -1214,18 +1265,29 @@ pub(crate) fn import_session(
             existing.id, existing.id
         )));
     }
-    let crate::carry::CarriedImport {
-        record,
-        history,
-        mut note,
-        archive,
-    } = document
-        .into_import()
-        .map_err(|error| CliFailure::new(error.to_string()))?;
     record.validate_for_store().map_err(CliFailure::new)?;
     let mut config = attached_host_config(services, record)?;
     config.seed_history = Some(history);
-    let (record, notes) = product_host::create_seeded_session(config)?;
+    let (record, notes) =
+        product_host::create_seeded_session_with_preflight(config, move |window| {
+            let capacity = carry_capacity_from_window(window, estimated_tokens, messages);
+            let message = capacity.warning().unwrap_or_else(|| {
+                if capacity.admitted_input.is_none() {
+                    "destination window unknown; carry will be checked at first prompt".to_owned()
+                } else {
+                    String::new()
+                }
+            });
+            if !message.is_empty() {
+                writeln!(
+                    io::stderr(),
+                    "warning: {}",
+                    crate::cli_output::safe_terminal_block(&message)
+                )
+                .map_err(|_| CliFailure::new("stderr failed"))?;
+            }
+            Ok(())
+        })?;
     let projected = (|| -> CliResult<()> {
         let executor = plakous::application::ApplicationExecutor::new()
             .map_err(|_| CliFailure::new("application executor failed"))?;
@@ -1279,6 +1341,38 @@ pub(crate) fn run_attached_action(
 
 /// A host config for `record` under its own exact binding, as a one-shot
 /// command attaches it.
+fn carry_capacity_from_window(
+    window: plakous::sessions::SessionInputWindow,
+    estimated_tokens: u64,
+    messages: usize,
+) -> crate::carry::CarryCapacityProbe {
+    crate::carry::CarryCapacityProbe {
+        route: window.route,
+        total_window: window.total_window,
+        admitted_input: window.admitted_input,
+        estimated_tokens,
+        messages,
+    }
+}
+pub(crate) fn probe_carry_capacity(
+    services: &crate::shell::services::Services,
+    path: &Path,
+) -> CliResult<crate::carry::CarryCapacityProbe> {
+    let document = crate::carry::read_document(path).map_err(|e| CliFailure::new(e.to_string()))?;
+    probe_prepared_capacity(services, PreparedImport::new(document, false)?)
+}
+pub(crate) fn probe_prepared_capacity(
+    services: &crate::shell::services::Services,
+    prepared: PreparedImport,
+) -> CliResult<crate::carry::CarryCapacityProbe> {
+    let config = attached_host_config(services, prepared.carried.record)?;
+    Ok(carry_capacity_from_window(
+        product_host::carry_input_window(&config)?,
+        prepared.estimated_tokens,
+        prepared.messages,
+    ))
+}
+
 fn attached_host_config(
     services: &crate::shell::services::Services,
     record: product_sessions::SessionRecord,

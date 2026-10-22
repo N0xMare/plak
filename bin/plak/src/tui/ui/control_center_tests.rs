@@ -1294,6 +1294,26 @@ fn the_reload_probe_runs_off_the_ui_thread_and_hands_off_when_it_answers() {
 }
 
 #[test]
+fn a_completed_prompt_during_reload_probe_invalidates_its_capacity_estimate() {
+    let mut app = App::new(launch_basic(), true);
+    let (release, gate) = mpsc::channel::<()>();
+    app.start_reload_probe(move || {
+        let _ = gate.recv();
+        None
+    });
+    app.last_prompt_at = Some(std::time::Instant::now());
+    release.send(()).unwrap();
+    assert!(matches!(
+        settle_reload_probe(&mut app),
+        super::reload::ReloadOutcome::Refused
+    ));
+    assert!(blocks_contain(
+        &app,
+        "conversation changed during the capacity check"
+    ));
+}
+
+#[test]
 fn a_turn_started_while_the_reload_probe_ran_refuses_the_handoff() {
     let mut app = App::new(launch_basic(), true);
     let (release, gate) = mpsc::channel::<()>();

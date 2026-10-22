@@ -521,6 +521,8 @@ pub(crate) struct App {
     pending_reload: bool,
     /// The running installed-build probe; the loop hands off when it answers.
     reload_probe: Option<std::sync::mpsc::Receiver<Option<crate::carry::ReloadTarget>>>,
+    reload_confirmed_target: Option<crate::carry::ReloadTarget>,
+    reload_source: Option<reload::ReloadSource>,
     background_processes: usize,
     processes: std::sync::Arc<Vec<plakous_host_protocol::views::ProcessView>>,
     activity_tab: Option<processes::ActivityTab>,
@@ -884,6 +886,8 @@ impl App {
             next_build_check: Instant::now(),
             pending_reload: false,
             reload_probe: None,
+            reload_confirmed_target: None,
+            reload_source: None,
             background_processes: 0,
             processes: std::sync::Arc::new(Vec::new()),
             activity_tab: None,

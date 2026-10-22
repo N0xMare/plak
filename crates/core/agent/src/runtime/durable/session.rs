@@ -23,6 +23,94 @@ use crate::{
 };
 use plakous_model::CanonicalHistory;
 use std::sync::Arc;
+// Lower retained replay with fresh destination authority before any store write.
+// Prepared calls are dropped, never dispatched; no carried tool becomes work.
+pub(crate) async fn validate_seed_replay(
+    builder: &AgentBuilder,
+    segments: &[plakous_model::HistorySegment],
+) -> Result<(), AgentError> {
+    use plakous_model::{
+        ContentBlock, ConversationView, ModelPreparationContext, ModelRequest, RequestMetadata,
+        ToolResultPart, ValidationMode, WorkingProjection,
+    };
+    let admission = sealed_runtime_admission(builder).await?;
+    let identities = DurableGenesisIdentities::new("validate-carry-replay")?;
+    let checkpoint = prepare_durable_genesis(
+        builder,
+        identities,
+        admission,
+        crate::RuntimeDurability::Required,
+        CanonicalHistory::default(),
+    )?;
+    for segment in segments {
+        let has_replay = segment
+            .items()
+            .iter()
+            .flat_map(plakous_model::ConversationItem::blocks)
+            .any(|b| match b {
+                ContentBlock::Reasoning(r) => r.replay().is_some(),
+                ContentBlock::Opaque(_) => true,
+                ContentBlock::Compaction(c) => c.native_item().is_some(),
+                ContentBlock::ToolResult(r) => r
+                    .parts()
+                    .iter()
+                    .any(|p| matches!(p, ToolResultPart::Opaque(_))),
+                _ => false,
+            });
+        if !has_replay {
+            continue;
+        }
+        let metadata = RequestMetadata::for_turn(
+            identities.run_id,
+            plakous_model::TurnId::try_from(
+                builder
+                    .ids
+                    .next_uuid(builder.clock.now())
+                    .map_err(|e| AgentError::from_identity(&e))?,
+            )
+            .map_err(|e| AgentError::from_identity(&e))?,
+            plakous_model::AttemptId::try_from(
+                builder
+                    .ids
+                    .next_uuid(builder.clock.now())
+                    .map_err(|e| AgentError::from_identity(&e))?,
+            )
+            .map_err(|e| AgentError::from_identity(&e))?,
+            builder.clock.now(),
+        );
+        let request = ModelRequest::from_parts(
+            checkpoint.manifest().canonical().stable_prefix().clone(),
+            ConversationView::from_shared(
+                CanonicalHistory::new(vec![segment.clone()])
+                    .map_err(|e| AgentError::new(AgentErrorKind::InvalidInput, e.to_string()))?,
+                WorkingProjection::default(),
+            ),
+            metadata,
+        )
+        .map_err(|e| AgentError::new(AgentErrorKind::InvalidInput, e.to_string()))?;
+        let plan = builder
+            .provider_configuration
+            .effective()
+            .descriptor()
+            .validate_request(request, ValidationMode::Strict)
+            .map_err(|e| AgentError::new(AgentErrorKind::InvalidInput, e.to_string()))?;
+        let prepared = Arc::clone(&builder.model).prepare_call(
+            plan,
+            ModelPreparationContext::new(
+                builder.initial_model_authority.clone(),
+                builder.clock.now(),
+            ),
+        );
+        prepared.map_err(|e| {
+            AgentError::new(
+                AgentErrorKind::InvalidInput,
+                format!("carried replay refused by destination dialect: {e}"),
+            )
+        })?;
+    }
+    Ok(())
+}
+
 impl DurableSessionRuntime {
     /// Pure deterministic create address derivation for facade composition.
     ///

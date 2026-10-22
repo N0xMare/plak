@@ -444,6 +444,8 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[SourceKey, list[tuple[str, tuple[tuple[
     ],
 }
 EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
+    # Export-v8's closed neutral tag mappings, never runtime code generation.
+    ("plak", "src/carry/history.rs"): ("macro_rules",),
     # Compile-time repository location restricts the private capture root.
     ("plak", "src/commands/exchange_capture.rs"): ("env",),
     # Spec 02 §3.2: the help pages are one-level static text, so they are static
@@ -472,10 +474,12 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[SourceKey, list[tuple[str, tuple[tuple[s
         ("std::process::Command", (("string", "/bin/sh"),)),
     ],
     # Carry-forward asks the installed `plak` for its reload verdict (the
-    # destination probe, then the bare state-key fallback) and has a kept
+    # destination/config and carry-capacity probes, then the bare state-key
+    # fallback) and has a kept
     # maintainer snapshot export a session its own state holds.
     ("plak", "src/carry.rs"): [
         ("std::process::Command", (("punct", "&"), ("identifier", "executable"))),
+        ("std::process::Command", (("punct", "&"), ("identifier", "target"), ("punct", "."), ("identifier", "executable"))),
         ("std::process::Command", (("identifier", "executable"),)),
         ("std::process::Command", (("identifier", "snapshot"),)),
     ],
@@ -537,6 +541,7 @@ ALLOWED_CLI_MACROS_BY_SOURCE: dict[SourceKey, set[str]] = {
     ("plak", "src/commands/exchange_capture.rs"): {"env", "warn"},
     # A published export whose directory sync failed is kept and logged.
     ("plak", "src/carry.rs"): {"warn"},
+    ("plak", "src/carry/history.rs"): {"tags", "stringify"},
     # A TUI attach refused over an unusable stored login logs the CLI's
     # remedy text, which names no secret.
     ("plak", "src/commands/host_config.rs"): {"warn"},
@@ -1035,6 +1040,7 @@ _SHARED_PLAKOUS_SYMBOLS = {
         "SessionLocator",
         "SessionOperationId",
         "SessionRuntimeBinding",
+        "SessionInputWindow",
         "isolated_tool_scheduler",
         "SessionContextStatus",
         "SessionContextStatusKind",
@@ -1226,6 +1232,45 @@ ALLOWED_PLAKOUS_SYMBOLS_BY_PACKAGE: dict[str, dict[str, set[str]]] = {
     "plakous-recursive-subagents-store": _SHARED_PLAKOUS_SYMBOLS,
 }
 ALLOWED_PLAKOUS_SYMBOLS_BY_SOURCE: dict[SourceKey, dict[str, set[str]]] = {
+    # Plak owns the export document, not a second runtime. This one codec
+    # reconstructs validated public content data, never mutable authority.
+    ("plak", "src/carry/history.rs"): {
+        "agent": {"MAX_USER_IMAGE_BYTES"},
+        "model": {
+            "AudioBlock",
+            "CanonicalHistory",
+            "CitationBlock",
+            "CitationRange",
+            "CitationSource",
+            "CitationTarget",
+            "CitationUnit",
+            "CompactionBlock",
+            "CompactionReplayBinding",
+            "DataClassification",
+            "DocumentBlock",
+            "ImageBlock",
+            "ImageDetailHint",
+            "McpServerId",
+            "MediaSource",
+            "ModelFamilyId",
+            "NamespaceId",
+            "OpaqueBlock",
+            "OpaqueFallback",
+            "ReasoningBlock",
+            "RefusalBlock",
+            "ReplayEnvelope",
+            "ReplayKindId",
+            "ReplayScope",
+            "SummarizedTurns",
+            "TextPhase",
+            "ToolCallBlock",
+            "ToolCallState",
+            "ToolCorrelation",
+            "ToolExecutionOwner",
+            "ToolResultBlock",
+            "ToolResultUpdateBlock",
+        },
+    },
     # Prompt images: the library's admission bounds and its one sniffer,
     # checked before a draft is queued and to render chips.
     ("plakous-hosted", "src/attachments.rs"): {

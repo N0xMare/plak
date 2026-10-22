@@ -186,7 +186,32 @@ pub struct SessionRuntimeBinding {
     builder: AgentBuilder,
 }
 
+/// Advisory destination capacity, never request admission.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionInputWindow {
+    /// Exact destination route.
+    pub route: String,
+    /// Reported total window, if known.
+    pub total_window: Option<u64>,
+    /// Input ceiling after the configured output reservation, if known.
+    pub admitted_input: Option<u64>,
+}
+
 impl SessionRuntimeBinding {
+    /// The configured route's total window (when reported) and input ceiling,
+    /// after this builder's shared-window output reservation. This advisory
+    /// snapshot is not request admission or a token measurement.
+    #[must_use]
+    pub fn input_window(&self) -> SessionInputWindow {
+        let capacity =
+            plakous_agent::internal::facade_support::agent_builder_input_window(&self.builder);
+        SessionInputWindow {
+            route: self.target_binding().route().as_str().to_owned(),
+            total_window: capacity.and_then(|c| c.0),
+            admitted_input: capacity.map(|c| c.1),
+        }
+    }
+
     /// Shares a host process registry across runtime opens and same-branch refreshes.
     #[must_use]
     pub fn with_job_host(mut self, host: Arc<dyn plakous_tools::JobHost>) -> Self {
@@ -670,6 +695,14 @@ impl AgentSessions {
         let history = match history {
             Some(history) => {
                 let retain_replay = history.retains_replay_for(&runtime);
+                if retain_replay && history.validate_replay {
+                    plakous_agent::internal::facade_support::validate_seed_replay(
+                        &runtime.builder,
+                        history.segments(),
+                    )
+                    .await
+                    .map_err(|e| runtime_error(&e))?;
+                }
                 history.into_canonical(retain_replay)?
             }
             None => plakous_model::CanonicalHistory::default(),

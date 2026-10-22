@@ -21,6 +21,12 @@ use plakous_model::{
     SelectedProviderConfigurationId,
 };
 
+/// Advisory configured window and reserved input ceiling; no request admission.
+#[must_use]
+pub fn agent_builder_input_window(builder: &AgentBuilder) -> Option<(Option<u64>, u64)> {
+    builder.session_input_window()
+}
+
 /// Projects reconstruction-safe target identity from an exact runtime builder.
 #[must_use]
 pub fn agent_builder_target_authority(
@@ -456,4 +462,15 @@ pub fn agent_builder_reachability_probe(
     builder: &AgentBuilder,
 ) -> Option<plakous_model::ReachabilityProbe> {
     builder.reachability_probe()
+}
+
+/// Offline destination-dialect validation before a trusted seed is persisted.
+///
+/// # Errors
+/// Returns a typed construction or replay-decoding refusal; never dispatches.
+pub async fn validate_seed_replay(
+    builder: &AgentBuilder,
+    segments: &[plakous_model::HistorySegment],
+) -> Result<(), AgentError> {
+    crate::runtime::validate_seed_replay(builder, segments).await
 }

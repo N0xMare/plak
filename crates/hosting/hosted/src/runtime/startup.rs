@@ -17,8 +17,8 @@ use plakous::subscriptions::{NativeProvider, ResolvedProvider};
 use crate::agent::build_or_open_injected_session;
 use crate::agent::{
     AttachedCodingSession, ProductAgentSpec, SessionToolFence, api_session_runtime_binding,
-    api_topology_parent, build_api_coding_session, build_coding_session,
-    coding_session_runtime_binding, open_api_coding_session_with_fence, open_coding_session,
+    api_topology_parent, coding_session_runtime_binding, open_api_coding_session_with_fence,
+    open_coding_session,
 };
 use crate::binding::TargetSelection;
 use crate::sessions::SessionRecord;
@@ -373,31 +373,40 @@ pub fn spawn_deferred_tui_host_with_clear_publication<
 /// failure. A failed save leaves the released runtime unreferenced. Returns
 /// the saved record and the startup notes the host wrote while building it.
 pub fn create_seeded_session<P: plakous_host_protocol::ProtocolExtension>(
-    mut config: HostConfig<P>,
+    config: HostConfig<P>,
 ) -> CliResult<(SessionRecord, String)> {
-    if config.seed_history.is_none() {
+    create_seeded_session_with_preflight(config, |_| Ok(()))
+}
+
+/// Creates a seed after a host-owned advisory capacity callback, reusing the
+/// exact runtime binding that will be created. No inference is dispatched.
+///
+/// # Errors
+/// Returns construction, callback, create, release or persistence failures.
+pub fn create_seeded_session_with_preflight<P: plakous_host_protocol::ProtocolExtension>(
+    mut config: HostConfig<P>,
+    preflight: impl FnOnce(plakous::sessions::SessionInputWindow) -> CliResult<()> + Send + 'static,
+) -> CliResult<(SessionRecord, String)> {
+    if config.session.plakous_locator.is_some() {
         return Err(CliFailure::new(
-            "no carried history to seed the session with",
+            "a carried history seeds only a session that has no runtime yet",
         ));
     }
-    let executor = ApplicationExecutor::new()
-        .map_err(|error| CliFailure::new(format!("application executor failed: {error}")))?;
+    let history = config
+        .seed_history
+        .take()
+        .ok_or_else(|| CliFailure::new("no carried history to seed the session with"))?;
+    let seed = crate::agent::SeededHistory::with_preflight(history, preflight);
+    let executor = ApplicationExecutor::new().map_err(|e| CliFailure::new(e.to_string()))?;
     let mut stderr_buf = Vec::new();
     let opened = executor
-        .block_on(build_session_from_config(&mut config, &mut stderr_buf))
-        .map_err(|_| CliFailure::new("application execution failed"))?;
-    let notes = String::from_utf8_lossy(&stderr_buf).into_owned();
-    let opened = opened.map_err(|failure| {
-        if notes.trim().is_empty() {
-            failure
-        } else {
-            CliFailure::new(format!("{}\n{}", notes.trim_end(), failure.message()))
-        }
-    })?;
+        .block_on(create_session(&mut config, Some(seed), &mut stderr_buf))
+        .map_err(|e| CliFailure::new(e.to_string()))??;
     let locator = executor
         .block_on(opened.release())
-        .map_err(|_| CliFailure::new("application execution failed"))?
-        .map_err(|error| CliFailure::new(format!("imported session release failed: {error}")))?;
+        .map_err(|e| CliFailure::new(e.to_string()))?
+        .map_err(|e| CliFailure::new(e.to_string()))?;
+    let notes = String::from_utf8_lossy(&stderr_buf).into_owned();
     config
         .session
         .bind_plakous_locator(locator)
@@ -422,7 +431,12 @@ pub(super) async fn build_session_from_config<P: plakous_host_protocol::Protocol
         ));
     }
     if config.session.plakous_locator.is_none() {
-        return create_session(config, seed, stderr_buf).await;
+        return create_session(
+            config,
+            seed.map(crate::agent::SeededHistory::new),
+            stderr_buf,
+        )
+        .await;
     }
     // Spec 02 §4.2: step 0 names the head, step 1 opens exactly it. A stale
     // refusal means another owner committed in between: step 0 runs once
@@ -521,26 +535,31 @@ async fn open_head<P: plakous_host_protocol::ProtocolExtension>(
 
 async fn create_session<P: plakous_host_protocol::ProtocolExtension>(
     config: &mut HostConfig<P>,
-    seed: Option<plakous::sessions::PortableSessionHistory>,
+    seed: Option<crate::agent::SeededHistory>,
     stderr_buf: &mut Vec<u8>,
 ) -> CliResult<AttachedCodingSession> {
     freeze_root_tools(config)?;
     #[cfg(any(test, feature = "test-support"))]
     if let Some(runtime) = injected_runtime(config, injected_role(config)) {
+        let mut seed = seed;
         let operation = SessionOperationId::new(config.session.create_operation_id.clone())
             .map_err(|_| CliFailure::new("injected host operation identity is invalid"))?;
+        let runtime = runtime?;
+        if let Some(seed) = seed.as_mut() {
+            seed.inspect(&runtime)?;
+        }
         return build_or_open_injected_session(
             config.state_roots.runtime_sessions()?,
             None,
-            seed,
+            seed.map(|s| s.history),
             operation,
-            runtime?,
+            runtime,
         )
         .await
         .map_err(|error| error.failure);
     }
     if config.target.is_api() {
-        return Box::pin(build_api_coding_session(
+        return Box::pin(crate::agent::build_api_coding_session_seed(
             api_parent_from_config(config, &config.session)?,
             &config.session.create_operation_id,
             seed,
@@ -551,7 +570,7 @@ async fn create_session<P: plakous_host_protocol::ProtocolExtension>(
     }
     refresh_native_target(config).await?;
     let spec = native_spec(config)?;
-    Box::pin(build_coding_session(
+    Box::pin(crate::agent::build_coding_session_seed(
         spec,
         &config.session.create_operation_id,
         seed,

@@ -1374,7 +1374,7 @@ fn reload_installed_plak(
             command.arg("--resume").arg(&record.id);
         }
         carry::ReloadPlan::Carry => {
-            let path = match carry::carry_out(paths, record) {
+            let (path, summary) = match carry::carry_out(paths, record) {
                 Ok(path) => path,
                 Err(reason) => {
                     return Ok(format!(
@@ -1382,6 +1382,8 @@ fn reload_installed_plak(
                     ));
                 }
             };
+            let _ = writeln!(io::stdout(), "carrying {summary}");
+            let _ = io::stdout().flush();
             command.arg("--import-resume").arg(&path);
             carry_file = Some(path);
         }

@@ -1240,6 +1240,23 @@ fn scripted_response(
     let entry_identity = call_identity.saturating_add(1);
     let mut blocks = match &step.output {
         ScriptOutput::Empty => Vec::new(),
+        ScriptOutput::HistoryReport => {
+            let text = plan
+                .request()
+                .input()
+                .items()
+                .iter()
+                .flat_map(ConversationItem::blocks)
+                .filter_map(|block| match block {
+                    ContentBlock::Text(text) => Some(text.text()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            vec![ContentBlock::Text(
+                TextBlock::new(text, Some(TextPhase::Final)).map_err(invalid_model_fixture)?,
+            )]
+        }
         ScriptOutput::ImageReport => {
             let images = plan
                 .request()
@@ -1730,12 +1747,24 @@ fn script_descriptor(
     account: &[u8],
     script: &ScriptPlan,
 ) -> HarnessResult<ResolvedModelDescriptor> {
-    descriptor_over_protocol(
+    let descriptor = descriptor_over_protocol(
         account,
         script.maximum_projected_input,
         LOOPBACK_PROTOCOL,
         script.image_input,
-    )
+    )?;
+    if script.omit_context_contract {
+        return Ok(ResolvedModelDescriptor::new_custom(
+            descriptor.protocol().clone(),
+            descriptor.route().clone(),
+            descriptor.requested_model().clone(),
+            None,
+            descriptor.model_family().cloned(),
+            ModelAdapterProfileId::new("offline-loopback-adapter-v1")?,
+            descriptor.capabilities().clone(),
+        ));
+    }
+    Ok(descriptor)
 }
 
 /// The loopback protocol family every ordinary scripted binding speaks.
@@ -3132,13 +3161,52 @@ pub fn text_blocks_runtime_binding(
     text_scenario_runtime_binding(workspace, controller, LoopbackScenario::TextBlocks(texts))
 }
 
+/// Builds a text-only fixture over an explicit account and protocol, for
+/// cross-provider history tests without credentials or inference.
+///
+/// # Errors
+/// Returns invalid target or workspace construction inputs.
+pub fn text_runtime_binding_for_target(
+    workspace: &Path,
+    controller: BoundaryController,
+    account: &[u8],
+    protocol: &str,
+) -> HarnessResult<SessionRuntimeBinding> {
+    text_scenario_runtime_binding_for_target(
+        workspace,
+        controller,
+        LoopbackScenario::Text {
+            prefix: "carry",
+            terminal: "carry",
+            finish: FinishReason::Stop,
+        },
+        account,
+        protocol,
+    )
+}
+
 fn text_scenario_runtime_binding(
     workspace: &Path,
     controller: BoundaryController,
     scenario: LoopbackScenario,
 ) -> HarnessResult<SessionRuntimeBinding> {
-    let account = b"offline-loopback-account";
-    let descriptor = descriptor(account)?;
+    text_scenario_runtime_binding_for_target(
+        workspace,
+        controller,
+        scenario,
+        b"offline-loopback-account",
+        LOOPBACK_PROTOCOL,
+    )
+}
+
+fn text_scenario_runtime_binding_for_target(
+    workspace: &Path,
+    controller: BoundaryController,
+    scenario: LoopbackScenario,
+    account: &[u8],
+    protocol: &str,
+) -> HarnessResult<SessionRuntimeBinding> {
+    let descriptor = descriptor_over_protocol(account, 10_000_000, protocol, false)?;
     let mut model = LoopbackModel::with_descriptor(controller, account, true, descriptor.clone())?;
     model.scenario = scenario;
     let configured = configured_model_with_tools(

@@ -273,7 +273,9 @@ fn log_command_start(command: &Command) {
         Command::StateKey
         | Command::ReloadProbe
         | Command::ExportVersion
-        | Command::WriteBinaryManifest { .. } => {}
+        | Command::WriteBinaryManifest { .. } 
+        | Command::CarryProbe { .. }
+        | Command::ExportVersion => {}
         Command::Version => log_start(build_identity::binary_id(), command.diagnostic_verb()),
         _ => {
             if let Some(binary) = build_identity::ready_binary_id() {
@@ -296,9 +298,15 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         return Ok(ProcessOutcome::Success);
     }
 
-    if let Command::SessionImport { path } = &command {
-        carry::read_document(path).map_err(|error| CliFailure::new(error.to_string()))?;
-    }
+    let prepared_import =
+        if let Command::SessionImport { path } | Command::CarryProbe { path } = &command {
+            Some(commands::session::PreparedImport::new(
+                carry::read_document(path).map_err(|e| CliFailure::new(e.to_string()))?,
+                false,
+            )?)
+        } else {
+            None
+        };
 
     // A face that runs a turn arms the terminating-signal watcher here, the
     // first moment the face is known. Everything below it — the composition
@@ -412,6 +420,28 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         command => command,
     };
 
+    if let Some(prepared) = prepared_import {
+        if command_needs_product_state(&command) {
+            home::state::ensure_usable_state(services.paths()?, &mut io::stderr().lock())
+                .map_err(CliFailure::new)?;
+        }
+        if matches!(&command, Command::CarryProbe { .. }) {
+            let capacity = commands::session::probe_prepared_capacity(&services, prepared)?;
+            serde_json::to_writer(io::stdout(), &capacity)
+                .map_err(|_| CliFailure::new("stdout failed"))?;
+            writeln!(io::stdout()).map_err(|_| CliFailure::new("stdout failed"))?;
+        } else {
+            let (record, note) = commands::session::import_prepared(&services, prepared)?;
+            writeln!(
+                io::stdout(),
+                "{}\nresume with: plak --resume {}",
+                cli_output::terminal_block(&note, cli_output::TerminalMode::of_stdout(), None),
+                record.id
+            )
+            .map_err(|_| CliFailure::new("stdout failed"))?;
+        }
+        return Ok(ProcessOutcome::Success);
+    }
     let mut stdin = io::stdin().lock();
     let mut stdout = io::stdout().lock();
     let mut stderr = io::stderr().lock();
@@ -432,6 +462,13 @@ fn run(arguments: impl IntoIterator<Item = OsString>) -> CliResult<ProcessOutcom
         Command::Version => {
             writeln!(stdout, "plak {}", build_identity::version_label())
                 .map_err(|_| CliFailure::new("stdout failed"))?;
+            Ok(ProcessOutcome::Success)
+        }
+        Command::CarryProbe { path } => {
+            let capacity = commands::session::probe_carry_capacity(&services, &path)?;
+            serde_json::to_writer(&mut stdout, &capacity)
+                .map_err(|_| CliFailure::new("stdout failed"))?;
+            writeln!(stdout).map_err(|_| CliFailure::new("stdout failed"))?;
             Ok(ProcessOutcome::Success)
         }
         Command::ReloadProbe => {
@@ -1434,6 +1471,7 @@ fn execute_command(
         | Command::StateKey
         | Command::WriteBinaryManifest { .. }
         | Command::ReloadProbe
+        | Command::CarryProbe { .. }
         | Command::ExportVersion
         | Command::ImportResume { .. }
         | Command::Doctor

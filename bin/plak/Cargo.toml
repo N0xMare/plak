@@ -46,6 +46,7 @@ pulldown-cmark = { version = "0.13", default-features = false }
 arboard = { version = "3.6.1", default-features = false, features = ["image-data"] }
 syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "regex-fancy"] }
 base64 = { workspace = true }
+url.workspace = true
 tracing = { workspace = true }
 unicode-segmentation = "1.13.3"
 serde = { workspace = true, features = ["derive"] }

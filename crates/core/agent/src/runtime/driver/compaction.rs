@@ -485,9 +485,16 @@ impl Driver {
         // same anchored occupancy trigger. A host fence that already folded left
         // the successor unanchored, and one that failed after dispatch is not
         // repeated before another model round.
+        // A seeded genesis has no provider usage anchor yet. Measure it on
+        // the destination route instead of sending an above-trigger first turn.
+        let unmeasured_seed = std::mem::take(&mut self.seed_compaction_pending);
+        let occupied = self.anchored_occupied_tokens(&status).or_else(|| {
+            unmeasured_seed
+                .then(|| status.unanchored_occupancy_tokens())
+                .flatten()
+        });
         let occupancy = matches!(status.kind(), ContextStatusKind::Fits { .. })
-            && self
-                .anchored_occupied_tokens(&status)
+            && occupied
                 .zip(status.compaction_trigger_tokens())
                 .is_some_and(|(occupied, trigger)| occupied >= trigger)
             && !self.paid_fold_failed_since_last_round();

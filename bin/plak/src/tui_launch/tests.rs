@@ -13,6 +13,8 @@ fn reload_handoff_reuses_the_tui_probe_verdict_without_reprobing() {
     let mut record = product_sessions::SessionRecord::new(root.path().to_path_buf());
     let key = home::state::state_key();
     let target = carry::ReloadTarget {
+        capacity: None,
+        capacity_error: None,
         executable: root.path().join("absent-plak"),
         state_key: Some(key.clone()),
         probe: Some(carry::ReloadProbe {

@@ -6302,7 +6302,7 @@ fn export_session(fixture: &Fixture, session: &str, name: &str) -> (String, Valu
     let document: Value =
         serde_json::from_slice(&std::fs::read(&path).expect("export document")).expect("json");
     assert_eq!(document["format"], "plak-session-export");
-    assert_eq!(document["version"], 7);
+    assert_eq!(document["version"], 8);
     assert!(document["source_resolved_count"].is_u64());
     assert!(
         document["pending_work"]
@@ -6330,6 +6330,10 @@ fn export_session(fixture: &Fixture, session: &str, name: &str) -> (String, Valu
 #[test]
 fn an_exported_session_imports_as_a_linked_session_that_carries_on() {
     let fixture = Fixture::new(&two_tool_round_trips("first answer"));
+    let long_prompt = format!(
+        "first prompt: {} end-of-long-goal",
+        "carry every conversation byte. ".repeat(1600)
+    );
     let first = run_cli(
         &fixture,
         &[
@@ -6342,18 +6346,37 @@ fn an_exported_session_imports_as_a_linked_session_that_carries_on() {
             "medium",
             "--print-session-id",
             "--",
-            "first prompt",
+            &long_prompt,
         ],
     );
     assert!(first.status.success(), "{}", first.stderr);
     let old = first.session_id();
+    let next_source_goal = format!(
+        "second long source goal: {}end-of-second-goal",
+        "another conversation byte. ".repeat(1600)
+    );
+    fixture.write_script(
+        &json!({"version":1,"steps":[{"output":{"text":"second answer before carry"}}]}),
+    );
+    let second = run_cli(
+        &fixture,
+        &["run", "--session", &old, "--", &next_source_goal],
+    );
+    assert!(second.status.success(), "{}", second.stderr);
 
-    let (path_text, document) = export_session(&fixture, &old, "carried.json");
-    let carried = document["checkpoint"].to_string();
-    assert!(carried.contains("first prompt"), "{carried}");
+    let (path_text, mut document) = export_session(&fixture, &old, "carried.json");
+    assert!(document.get("checkpoint").is_none());
+    assert!(document.get("archive").is_none());
+    let carried = document["history"].to_string();
+    assert!(carried.len() > 64 * 1024);
     assert!(carried.contains("first answer"), "{carried}");
-    let archive = document["archive"].to_string();
-    assert!(archive.contains("first answer"), "{archive}");
+    assert!(carried.contains("end-of-long-goal"));
+    assert!(carried.contains(&next_source_goal));
+    document["source"]["state_key"] = json!("r1.e1.p1.t1");
+    write_private(
+        Path::new(&path_text),
+        &serde_json::to_string(&document).unwrap(),
+    );
 
     let imported = run_cli(&fixture, &["session", "import", &path_text]);
     assert!(imported.status.success(), "{}", imported.stderr);
@@ -6389,51 +6412,159 @@ fn an_exported_session_imports_as_a_linked_session_that_carries_on() {
 
     fixture.write_script(&json!({
         "version": 1,
-        "steps": [{"output": {"text": "carried answer"}}]
+        "steps": [{"output": "history_report"}]
     }));
     let carried_on = run_cli(&fixture, &["run", "--session", &new, "--", "next prompt"]);
     assert!(carried_on.status.success(), "{}", carried_on.stderr);
     assert!(
-        carried_on.stdout.contains("carried answer"),
+        carried_on.stdout.contains("first answer")
+            && carried_on.stdout.contains("end-of-long-goal"),
         "{}",
         carried_on.stdout
     );
 
-    // The new session carries only the checkpoint plus the new turn. Its old
-    // archive remains selectable without entering model context.
+    // The next actual provider request saw the complete carried text, not excerpts.
+    assert!(carried_on.stdout.contains(&long_prompt));
+    assert!(carried_on.stdout.contains(&next_source_goal));
     let (_, grown) = export_session(&fixture, &new, "again.json");
-    let checkpoint = grown["checkpoint"].to_string();
-    assert!(checkpoint.contains("next prompt"), "{checkpoint}");
-    assert!(checkpoint.contains("carried answer"), "{checkpoint}");
-
-    let referenced = run_cli(
-        &fixture,
-        &[
-            "session",
-            "reference",
-            &path_text,
-            "--search",
-            "first answer",
-        ],
-    );
-    assert!(referenced.status.success(), "{}", referenced.stderr);
-    assert!(referenced.stdout.contains("untrusted historical data"));
-    assert!(referenced.stdout.contains("first answer"));
-    assert!(!referenced.stdout.contains("first prompt"));
-    let retained = run_cli(
-        &fixture,
-        &["session", "reference", &new, "--search", "first answer"],
-    );
-    assert!(retained.status.success(), "{}", retained.stderr);
-    assert!(retained.stdout.contains("first answer"));
+    let history = grown["history"].to_string();
+    assert!(history.contains("next prompt"));
     let reference_path = fixture
         .home()
         .join("references")
         .join(format!("{new}.json"));
-    assert!(reference_path.exists());
-    let deleted = run_cli(&fixture, &["session", "delete", &new, "--yes"]);
-    assert!(deleted.status.success(), "{}", deleted.stderr);
     assert!(!reference_path.exists());
+}
+
+#[test]
+fn import_warns_before_seeding_history_over_the_destination_route_input_window() {
+    let fixture = Fixture::new(&json!({"version":1,"steps":[{"output":{"text":"old answer"}}]}));
+    let source = run_cli(
+        &fixture,
+        &[
+            "run",
+            "--account",
+            "codex",
+            "--model",
+            "offline-loopback-v1",
+            "--print-session-id",
+            "--",
+            &"goal ".repeat(1000),
+        ],
+    );
+    assert!(source.status.success(), "{}", source.stderr);
+    let (path, _) = export_session(&fixture, &source.session_id(), "small-route.json");
+    fixture.write_script(
+        &json!({"version":1,"maximum_projected_input":100,"scheduled_compaction":true,"steps":[]}),
+    );
+    let before = retained_runtime_sessions(&fixture);
+    let probe = run_cli(&fixture, &["version", "--carry-probe", &path]);
+    assert!(probe.status.success(), "{}", probe.stderr);
+    let capacity: Value = serde_json::from_str(&probe.stdout).unwrap();
+    assert_eq!(capacity["admitted_input"], 100);
+    assert_eq!(
+        retained_runtime_sessions(&fixture),
+        before,
+        "a capacity probe must not seed a session"
+    );
+    let imported = run_cli(&fixture, &["session", "import", &path]);
+    assert!(imported.status.success(), "{}", imported.stderr);
+    assert!(
+        imported
+            .stderr
+            .contains("destination route offline.loopback input window 100 tokens"),
+        "{}",
+        imported.stderr
+    );
+    assert!(
+        imported
+            .stderr
+            .contains("first prompt will refuse unless the history compacts"),
+        "{}",
+        imported.stderr
+    );
+}
+
+#[test]
+fn unknown_destination_window_does_not_block_import_or_capacity_probe() {
+    let fixture = Fixture::new(&json!({"version":1,"steps":[{"output":{"text":"source"}}]}));
+    let source = run_cli(
+        &fixture,
+        &[
+            "run",
+            "--account",
+            "codex",
+            "--model",
+            "offline-loopback-v1",
+            "--print-session-id",
+            "--",
+            "goal",
+        ],
+    );
+    assert!(source.status.success(), "{}", source.stderr);
+    let (path, _) = export_session(&fixture, &source.session_id(), "unknown-window.json");
+    fixture.write_script(&json!({"version":1,"omit_context_contract":true,"steps":[]}));
+    let probe = run_cli(&fixture, &["version", "--carry-probe", &path]);
+    assert!(probe.status.success(), "{}", probe.stderr);
+    let capacity: Value = serde_json::from_str(&probe.stdout).unwrap();
+    assert!(capacity["admitted_input"].is_null());
+    let imported = run_cli(&fixture, &["session", "import", &path]);
+    assert!(imported.status.success(), "{}", imported.stderr);
+    assert!(
+        imported.stderr.contains("destination window unknown"),
+        "{}",
+        imported.stderr
+    );
+}
+
+#[test]
+fn file_import_strips_self_declared_provider_replay_before_seed_creation() {
+    let fixture = Fixture::new(&json!({"version":1,"steps":[{"output":{"text":"source"}}]}));
+    let source = run_cli(
+        &fixture,
+        &[
+            "run",
+            "--account",
+            "codex",
+            "--model",
+            "offline-loopback-v1",
+            "--print-session-id",
+            "--",
+            "goal",
+        ],
+    );
+    assert!(source.status.success(), "{}", source.stderr);
+    let (path, mut document) =
+        export_session(&fixture, &source.session_id(), "untrusted-replay.json");
+    let group = json!({"kind":"reasoning_replay","messages":[{"id":"00000000-0000-0000-0000-000000009999","actor":"assistant","origin":"model_output","presentation_subject":null,"blocks":[{"kind":"reasoning","visibility":"opaque_replay","text":null,"replay":{"protocol":"offline.loopback.responses","family":null,"scope":"protocol","model":null,"namespace":"invented.replay","version":1,"classification":"sensitive","payload":"{\"malformed_provider_replay\":true}"}}]}]});
+    document["history"]["groups"]
+        .as_array_mut()
+        .unwrap()
+        .push(group);
+    write_private(Path::new(&path), &serde_json::to_string(&document).unwrap());
+    let imported = run_cli(&fixture, &["session", "import", &path]);
+    assert!(imported.status.success(), "{}", imported.stderr);
+    let new = imported
+        .stdout
+        .lines()
+        .find_map(|l| l.strip_prefix("resume with: plak --resume "))
+        .unwrap();
+    let (_, exported) = export_session(&fixture, new, "stripped.json");
+    assert!(
+        !exported["history"]
+            .to_string()
+            .contains("malformed_provider_replay")
+    );
+}
+
+fn v7_reference_document(mut document: Value) -> Value {
+    let previous: Value =
+        serde_json::from_str(include_str!("../fixtures/session-export-v7.json")).unwrap();
+    document.as_object_mut().unwrap().remove("history");
+    document["version"] = json!(7);
+    document["checkpoint"] = previous["checkpoint"].clone();
+    document["archive"] = previous["archive"].clone();
+    document
 }
 
 /// The production CLI must return the literal match rather than the prefix of
@@ -6462,6 +6593,7 @@ fn session_reference_search_returns_a_late_match_under_the_output_cap() {
     assert!(first.status.success(), "{}", first.stderr);
     let (path_text, mut document) =
         export_session(&fixture, &first.session_id(), "late-search.json");
+    document = v7_reference_document(document);
     let matching_text = format!("{}literal late needle", "界".repeat(80_000));
     document["archive"]["entries"] = json!([{"actor": "assistant", "text": matching_text}]);
     write_private(
@@ -6516,6 +6648,7 @@ fn session_reference_pty_preserves_the_newest_hit_after_control_projection() {
     assert!(first.status.success(), "{}", first.stderr);
     let (path_text, mut document) =
         export_session(&fixture, &first.session_id(), "projected-search.json");
+    document = v7_reference_document(document);
     let controls = "\u{1b}".repeat(80_000);
     document["archive"]["entries"] = json!([
         {
@@ -7065,6 +7198,7 @@ fn carry_output_is_faithful_to_pipes_and_inert_on_a_terminal() {
     );
     assert!(first.status.success(), "{}", first.stderr);
     let (path_text, mut document) = export_session(&fixture, &first.session_id(), "hostile.json");
+    document = v7_reference_document(document);
     let hostile = "normal 日本\n\u{1b}[31mred\u{1b}[0m\n\u{1b}]52;c;cGF5bG9hZA==\u{7}\n\u{9b}2J bidi \u{202e}end";
     document["archive"]["entries"] = json!([{"actor": "tool", "text": hostile}]);
     document["source"]["producer"] = json!({"status": "verified", "binary_id": hostile});
@@ -7233,7 +7367,7 @@ fn nested_workspace_import_refuses_broken_trusted_parent_before_successor() {
     let nested = fixture.workspace().join("nested");
     std::fs::create_dir_all(&nested).unwrap();
     let mut document: Value =
-        serde_json::from_str(include_str!("../fixtures/session-export-v6.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/session-export-v7.json")).unwrap();
     document["workspace_root"] = json!(nested);
     let path = fixture.root.join("nested-import.json");
     write_private(&path, &serde_json::to_string(&document).unwrap());
@@ -7281,7 +7415,7 @@ fn home_workspace_import_does_not_treat_product_home_as_overlay() {
     let home = fixture.root.join(".plak");
     std::fs::rename(fixture.home(), &home).unwrap();
     let mut document: Value =
-        serde_json::from_str(include_str!("../fixtures/session-export-v6.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/session-export-v7.json")).unwrap();
     document["workspace_root"] = json!(fixture.root);
     let path = fixture.root.join("home-import.json");
     write_private(&path, &serde_json::to_string(&document).unwrap());
@@ -7421,12 +7555,12 @@ fn reload_probe_reports_strict_effective_config_without_creating_sessions() {
     let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
     let version = run_cli(&fixture, &["version", "--export-version"]);
     assert!(version.status.success(), "{}", version.stderr);
-    assert_eq!(version.stdout.trim(), "7");
+    assert_eq!(version.stdout.trim(), "8");
     let valid = run_cli(&fixture, &["version", "--reload-probe"]);
     assert!(valid.status.success(), "{}", valid.stderr);
     let verdict: Value = serde_json::from_str(&valid.stdout).unwrap();
     assert_eq!(verdict["config_error"], Value::Null);
-    assert_eq!(verdict["export_versions"], json!([6, 7]));
+    assert_eq!(verdict["export_versions"], json!([7, 8]));
 
     let project = fixture.workspace().join(".plak");
     std::fs::create_dir_all(&project).unwrap();
@@ -7485,7 +7619,7 @@ fn doctor_checks_trusted_project_config_and_template_files() {
 #[test]
 fn a_refused_import_seed_does_not_publish_a_retained_reference() {
     let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
-    let document: Value = serde_json::from_str(include_str!("../fixtures/session-export-v6.json"))
+    let document: Value = serde_json::from_str(include_str!("../fixtures/session-export-v7.json"))
         .expect("sanitized previous export");
     let paths = plak::home::paths::PlakPaths::explicit(fixture.home());
     std::fs::create_dir_all(paths.runtime_database()).expect("block the seed's runtime store open");
@@ -7503,7 +7637,7 @@ fn a_refused_import_seed_does_not_publish_a_retained_reference() {
 fn retained_reference_failure_warns_without_failing_a_committed_import() {
     let fixture = Fixture::new(&json!({"version": 1, "steps": []}));
     let mut document: Value =
-        serde_json::from_str(include_str!("../fixtures/session-export-v6.json"))
+        serde_json::from_str(include_str!("../fixtures/session-export-v7.json"))
             .expect("sanitized previous export");
     document["workspace_root"] = json!(fixture.workspace());
     let path = fixture.root.join("import-without-reference.json");

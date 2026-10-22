@@ -975,6 +975,24 @@ authorize runtime mutation except through typed facade calls. Resume
 reconstructs an exact checkpoint; current defaults, rendered transcripts,
 digests alone, and provider wire logs cannot repair missing state.
 
+An explicit cross-build conversation import is construction, not recovery
+repair (chapter 02 §2.5.1). Export v8 carries full canonical content in a
+Plak-owned neutral encoding, including original message roles; it is sensitive
+conversation data, not a sanitized transcript. Import validates its bounds and
+content, then admits a new seeded session through the facade. No prior lease,
+terminal receipt, command, workflow, child or tool-call record becomes authority
+in the new session, and historical tool calls are never executed by import.
+Replay bindings in an export are self-declared, not authenticated. File import
+strips provider replay by default (including nested opaque tool-result parts).
+Only `/reload` with this machine's private one-use exact-bytes handoff receipt
+may retain replay on an identical account/model binding. Each retained replay
+segment is passed through the destination dialect decoder offline before seed
+creation; malformed payloads fail with a typed refusal, not an unusable saved
+session. A receipt cannot authorize tool execution or a foreign binding. Export files remain
+0600 in private directories, and neutral-history debug output never includes
+message contents or opaque replay. A user must trust a document's conversation
+contents before importing it; typed validation is not prompt-injection filtering.
+
 Product commands and attached workers share a serialized record service;
 product file paths are not a second record-access port. Tree-only topology
 queries receive `TreeRows`; ancestry lookup additionally requires the injected

@@ -149,6 +149,39 @@ impl AgentBuilder {
         self.model.reachability_probe()
     }
 
+    pub(crate) fn session_input_window(&self) -> Option<(Option<u64>, u64)> {
+        use plakous_model::CapacityRule;
+        let rule = self
+            .provider_configuration
+            .effective()
+            .descriptor()
+            .context_contract()?
+            .capacity()
+            .rule();
+        match rule {
+            CapacityRule::ProviderReservedInput {
+                reported_context_window,
+                maximum_projected_input,
+                ..
+            } => Some((reported_context_window, maximum_projected_input)),
+            CapacityRule::SharedWindow { total }
+            | CapacityRule::SharedWindowWithOutputCap { total, .. } => {
+                let reserved = u64::from(
+                    self.request_policy
+                        .generation_limits()
+                        .max_output_tokens()?
+                        .get(),
+                );
+                Some((
+                    Some(total.lower_bound()),
+                    total.lower_bound().saturating_sub(reserved),
+                ))
+            }
+            CapacityRule::Separate { input, .. } => Some((None, input.lower_bound())),
+            _ => None,
+        }
+    }
+
     pub(crate) fn session_target_authority(
         &self,
     ) -> (

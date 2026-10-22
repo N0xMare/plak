@@ -208,8 +208,21 @@ while:
 
 A refusal never closes the TUI. When the installed build cannot read this
 build's state, `/reload` carries the session forward into a linked session
-built from a bounded checkpoint; the old archive stays available only by
-explicit reference.
+with the full conversation and typed transcript. The handoff reports
+`N messages, ~T tokens; the first request rebuilds the prompt cache`.
+Before closing the old session, `/reload` checks the destination route.
+If the estimated conversation exceeds its admitted input window, a confirmation
+shows the route/window and warns that the first prompt will refuse unless the
+history compacts. Choose `Carry anyway` to proceed or `Cancel` to stay here.
+An unknown destination window skips the warning; admission still runs at the
+first prompt. The probe never starts MCP servers. A failed capacity check leaves this TUI open. A prompt or binding change while
+the check runs requires `/reload` again.
+Only this machine's private `/reload` handoff can retain provider replay on an
+identical binding, and the destination validates it before creating the session.
+Importing an ordinary export file strips replay.
+The destination may compact an over-window conversation at first prompt.
+Children and live processes do not carry; queued prompts stay paused. Old
+version 7 documents still resume from their bounded checkpoint only.
 
 ## Slash commands
 

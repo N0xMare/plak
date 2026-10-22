@@ -2492,6 +2492,35 @@ pub fn selected_coding_provider_configuration_with_processing_tier(
     .map_err(|_| CliFailure::new("native provider behavior is invalid"))
 }
 
+pub(crate) struct SeededHistory {
+    pub(crate) history: PortableSessionHistory,
+    preflight:
+        Option<Box<dyn FnOnce(plakous::sessions::SessionInputWindow) -> CliResult<()> + Send>>,
+}
+impl SeededHistory {
+    pub(crate) fn new(history: PortableSessionHistory) -> Self {
+        Self {
+            history,
+            preflight: None,
+        }
+    }
+    pub(crate) fn with_preflight(
+        history: PortableSessionHistory,
+        preflight: impl FnOnce(plakous::sessions::SessionInputWindow) -> CliResult<()> + Send + 'static,
+    ) -> Self {
+        Self {
+            history,
+            preflight: Some(Box::new(preflight)),
+        }
+    }
+    pub(crate) fn inspect(&mut self, runtime: &SessionRuntimeBinding) -> CliResult<()> {
+        if let Some(preflight) = self.preflight.take() {
+            preflight(runtime.input_window())?;
+        }
+        Ok(())
+    }
+}
+
 /// Builds and returns the attached public Plakous session authority.
 ///
 /// Product code that persists or later reopens a conversation must retain this
@@ -2500,6 +2529,21 @@ pub async fn build_coding_session(
     spec: ProductAgentSpec,
     create_operation_id: &str,
     seed: Option<PortableSessionHistory>,
+    stderr: &mut dyn Write,
+) -> CliResult<AttachedCodingSession> {
+    build_coding_session_seed(
+        spec,
+        create_operation_id,
+        seed.map(SeededHistory::new),
+        stderr,
+    )
+    .await
+}
+
+pub(crate) async fn build_coding_session_seed(
+    spec: ProductAgentSpec,
+    create_operation_id: &str,
+    seed: Option<SeededHistory>,
     stderr: &mut dyn Write,
 ) -> CliResult<AttachedCodingSession> {
     let operation_id = SessionOperationId::new(create_operation_id)
@@ -2559,7 +2603,7 @@ pub async fn build_runtime_session(
 pub(super) async fn build_or_open_coding_session(
     mut spec: ProductAgentSpec,
     locator: Option<SessionLocator>,
-    seed: Option<PortableSessionHistory>,
+    seed: Option<SeededHistory>,
     operation_id: SessionOperationId,
     stderr: &mut dyn Write,
 ) -> Result<AttachedCodingSession, CodingSessionOpenFailure> {
@@ -2862,6 +2906,23 @@ pub(crate) async fn build_api_coding_session(
     topology_attach: crate::topology_runtime::TopologyHubAttach,
     cached_evidence: Option<plakous::openrouter::OpenRouterChatModelEvidence>,
 ) -> CliResult<AttachedCodingSession> {
+    build_api_coding_session_seed(
+        parent,
+        create_operation_id,
+        seed.map(SeededHistory::new),
+        topology_attach,
+        cached_evidence,
+    )
+    .await
+}
+
+pub(crate) async fn build_api_coding_session_seed(
+    parent: ApiTopologyParent,
+    create_operation_id: &str,
+    seed: Option<SeededHistory>,
+    topology_attach: crate::topology_runtime::TopologyHubAttach,
+    cached_evidence: Option<plakous::openrouter::OpenRouterChatModelEvidence>,
+) -> CliResult<AttachedCodingSession> {
     let operation_id = SessionOperationId::new(create_operation_id)
         .map_err(|_| CliFailure::new("plak create operation identity is invalid"))?;
     Box::pin(build_or_open_api_coding_session(
@@ -2931,7 +2992,7 @@ pub(crate) async fn open_api_coding_session_with_fence(
 pub(super) async fn build_or_open_api_coding_session(
     parent: ApiTopologyParent,
     locator: Option<SessionLocator>,
-    seed: Option<PortableSessionHistory>,
+    seed: Option<SeededHistory>,
     operation_id: SessionOperationId,
     topology_attach: crate::topology_runtime::TopologyHubAttach,
     cached_evidence: Option<plakous::openrouter::OpenRouterChatModelEvidence>,
@@ -3061,13 +3122,16 @@ pub(super) async fn build_or_open_runtime_session(
     sessions: Arc<AgentSessions>,
     runtime: SessionRuntimeBinding,
     locator: Option<SessionLocator>,
-    seed: Option<PortableSessionHistory>,
+    mut seed: Option<SeededHistory>,
     operation_id: SessionOperationId,
     topology_owner: Option<String>,
     // Set only by a reopen whose route has moved its output budget; carried to
     // the attached session so it is reported once, at open.
     output_bound_rederived: Option<crate::openrouter::OutputBoundRederived>,
 ) -> Result<AttachedCodingSession, CodingSessionOpenFailure> {
+    if let Some(seed) = seed.as_mut() {
+        seed.inspect(&runtime)?;
+    }
     let reachability_probe = plakous::sessions::internal::reachability_probe(&runtime);
     if let Some(locator) = locator {
         if seed.is_some() {
@@ -3149,11 +3213,11 @@ pub(super) async fn build_or_open_runtime_session(
 fn create_request(
     operation_id: SessionOperationId,
     runtime: SessionRuntimeBinding,
-    seed: Option<PortableSessionHistory>,
+    seed: Option<SeededHistory>,
 ) -> CreateSessionRequest {
     let request = CreateSessionRequest::new(operation_id, runtime);
     match seed {
-        Some(history) => request.with_history(history),
+        Some(history) => request.with_history(history.history),
         None => request,
     }
 }
@@ -3233,7 +3297,11 @@ pub async fn build_or_open_injected_session(
         };
     }
     match sessions
-        .create(create_request(operation_id, runtime, seed))
+        .create(create_request(
+            operation_id,
+            runtime,
+            seed.map(SeededHistory::new),
+        ))
         .await
         .map_err(|error| {
             CliFailure::new(format!(

@@ -31,6 +31,7 @@ const MAX_TEXT_WIDTH: usize = 72;
 enum ConfirmButton {
     Send(UserAction),
     ResetSetting(&'static str),
+    Reload(crate::carry::ReloadTarget),
 }
 
 /// An open confirmation: what it says, the exact intents its buttons send,
@@ -57,6 +58,7 @@ impl DestructiveConfirm {
     pub(super) fn kind(&self) -> &'static str {
         match self.actions.first().map(|(_, button)| button) {
             Some(ConfirmButton::ResetSetting(_)) => "settings-reset",
+            Some(ConfirmButton::Reload(_)) => "reload-carry",
             Some(ConfirmButton::Send(UserAction::Interrupt)) => "turn-stop",
             Some(ConfirmButton::Send(UserAction::InterruptTopologyNode { .. })) => "interrupt",
             Some(ConfirmButton::Send(UserAction::CloseTopologyNode { .. })) => "close",
@@ -407,6 +409,18 @@ impl App {
         );
     }
 
+    pub(super) fn open_reload_confirm(
+        &mut self,
+        target: crate::carry::ReloadTarget,
+        lines: Vec<String>,
+    ) {
+        self.show_confirm(
+            "Carry to a smaller route?".to_owned(),
+            lines,
+            vec![("[ Carry anyway ]", ConfirmButton::Reload(target))],
+        );
+    }
+
     fn show_confirm(
         &mut self,
         title: String,
@@ -508,6 +522,9 @@ impl App {
             .iter()
             .map(|(_, button)| match button {
                 ConfirmButton::ResetSetting(_) => true,
+                ConfirmButton::Reload(_) => {
+                    self.reload_refusal().is_none() && !self.reload_source_changed()
+                }
                 ConfirmButton::Send(action) => {
                     if matches!(
                         action,
@@ -549,6 +566,10 @@ impl App {
         self.mark_dirty();
         let (_, button) = confirm.actions.into_iter().nth(index.checked_sub(1)?)?;
         let action = match button {
+            ConfirmButton::Reload(target) => {
+                self.reload_confirmed_target = Some(target);
+                return None;
+            }
             ConfirmButton::ResetSetting(key) => return self.commit_settings_reset(key),
             ConfirmButton::Send(action) => action,
         };

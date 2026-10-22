@@ -60,6 +60,9 @@ pub struct ScriptPlan {
     /// The admitted projected-input ceiling of the scripted descriptor.
     #[serde(default = "default_maximum_projected_input")]
     pub maximum_projected_input: u64,
+    /// No capacity contract, to qualify unknown-window carry.
+    #[serde(default)]
+    pub omit_context_contract: bool,
     /// Arm the between-rounds compaction fence.
     #[serde(default)]
     pub scheduled_compaction: bool,
@@ -320,6 +323,8 @@ pub enum ScriptOutput {
     /// item carries (`image/png 1234 bytes`), so a test sees what reached the
     /// model.
     ImageReport,
+    /// Reports the text actually present in the next model request.
+    HistoryReport,
 }
 
 /// One scripted tool call.
