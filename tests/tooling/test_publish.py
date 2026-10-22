@@ -294,7 +294,7 @@ class PublishScriptTests(unittest.TestCase):
         src = cargo_home / "registry" / "src"
         stale = [src / "-overlay" / f"{name}-0.0.2" for name in ORDER]
         stale.append(src / "index.crates.io-x" / "plakous-mid-0.0.2")
-        kept = [src / "-overlay" / "serde-1.0.0", src / "-overlay" / "plakous-mid-0.0.2"]
+        kept = [src / "-overlay" / "serde-1.0.0", src / "-overlay" / "plakous-mid-0.0.3"]
         for directory in (*stale, *kept):
             directory.mkdir(parents=True)
             (directory / ".cargo-ok").write_text("ok")
