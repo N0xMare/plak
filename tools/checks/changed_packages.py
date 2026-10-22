@@ -20,6 +20,9 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import vcs_listing  # noqa: E402
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE = "--workspace"
 
@@ -52,29 +55,8 @@ def package_dirs(root: Path = REPO_ROOT) -> dict[str, str]:
     return dirs
 
 
-def changed_paths(root: Path = REPO_ROOT, base: str = "HEAD") -> list[str]:
-    """Diff plus untracked files and ignored proptest regression seeds."""
-    revision = subprocess.run(
-        ["git", "rev-parse", "--verify", "--end-of-options", f"{base}^{{commit}}"],
-        cwd=root, check=True, capture_output=True, text=True
-    ).stdout.strip()
-    tracked = subprocess.run(
-        ["git", "diff", "--name-only", "--no-renames", "-z", revision, "--"],
-        cwd=root, check=True, capture_output=True, text=True
-    ).stdout.rstrip("\0").split("\0")
-    untracked = subprocess.run(
-        ["git", "ls-files", "--others", "--exclude-standard", "-z"],
-        cwd=root,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.rstrip("\0").split("\0")
-    ignored = subprocess.run(
-        ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "-z"],
-        cwd=root, check=True, capture_output=True, text=True,
-    ).stdout.rstrip("\0").split("\0")
-    regressions = {path for path in ignored if "proptest-regressions" in PurePosixPath(path).parts[:-1]}
-    return sorted((set(tracked) | set(untracked) | regressions) - {""})
+def changed_paths(root: Path = REPO_ROOT, base: str | None = None) -> list[str]:
+    return vcs_listing.changed_paths(root, base)
 
 
 def touched_packages(paths: list[str], dirs: dict[str, str]) -> list[str]:

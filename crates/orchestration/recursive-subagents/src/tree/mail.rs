@@ -649,6 +649,11 @@ impl ProductAgentTree {
             "attempt_id": attempt_id.as_str(),
             "status": label,
         });
+        if self.seal_history_notice(agent_id, &attempt_id) {
+            envelope["notice"] = serde_json::Value::String(
+                "history left plak_base(); the candidate is the whole tree".to_owned(),
+            );
+        }
         if let Some(candidate) = candidate {
             envelope["candidate"] = serde_json::Value::String(candidate.to_string());
         }

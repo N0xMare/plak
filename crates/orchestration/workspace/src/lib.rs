@@ -50,3 +50,13 @@ mod native_jj;
 #[cfg(not(feature = "jj-lib"))]
 #[path = "native_jj_disabled.rs"]
 mod native_jj;
+
+/// jj-lib writer version used by this build (also reported without the jj feature).
+pub const JJ_LIB_VERSION: &str = "0.46.0";
+/// Tested external CLI minor range, inclusive, for major zero.
+pub const JJ_CLI_SUPPORTED: std::ops::RangeInclusive<u32> = 44..=46;
+
+/// The built native writer version, or None when JJ was not compiled in.
+pub fn built_jj_library_version() -> Option<&'static str> {
+    native_jj::BUILT_LIBRARY_VERSION
+}

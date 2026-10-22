@@ -53,7 +53,7 @@ fn failure(error: &Error) -> VcsError {
 fn settings() -> Result<UserSettings> {
     let mut config = StackedConfig::with_defaults();
     config.add_layer(ConfigLayer::parse(ConfigSource::CommandArg, "user.name='plak'\nuser.email='plak@local'\noperation.hostname='local'\noperation.username='plak'\nsigning.behavior='drop'\n")?);
-    Ok(UserSettings::from_config(config)?)
+    Ok(UserSettings::from_config_and_home_dir(config, None)?)
 }
 
 fn load(path: &Path) -> Result<Workspace> {
@@ -112,6 +112,7 @@ impl Matcher for SnapshotPaths {
 fn description(commit: &Commit) -> VcsSnapshot {
     let content = tree_content(&commit.tree());
     VcsSnapshot {
+        history_left_base: false,
         commit: commit.id().hex(),
         content,
         change_id: Some(commit.change_id().reverse_hex()),
@@ -138,7 +139,7 @@ async fn publish_checked(
 ) -> Result<Arc<ReadonlyRepo>> {
     let base = tx.base_repo().op_id().clone();
     let heads = tx.base_repo().op_heads_store().clone();
-    if heads.name() != jj_lib::simple_op_heads_store::SimpleOpHeadsStore::name() {
+    if heads.name() != jj_lib::simple_op_heads_store::SimpleOpHeadsStore::NAME {
         return Err("only the locking standard JJ operation-head store is supported".into());
     }
     let prepared = tx.write(description).await?;
@@ -292,6 +293,7 @@ pub(super) fn mint(
             std::fs::create_dir_all(parent)?;
         }
         super::occupancy_vcs::append_exclude_lines(&excludes).map_err(|e| e.to_string())?;
+        let supplied_base = base.is_some();
         let base = match base {
             Some(base) => {
                 repo.store()
@@ -323,6 +325,13 @@ pub(super) fn mint(
         }
         let old = current(&repo, &ws).await?;
         let mut tx = repo.start_transaction();
+        let base = if supplied_base {
+            base
+        } else {
+            tx.repo_mut().new_commit(base.parent_ids().to_vec(), base.tree())
+                .set_description(format!("plak base {id}"))
+                .write().await?
+        };
         let child = tx
             .repo_mut()
             .new_commit(vec![base.id().clone()], base.tree())
@@ -333,12 +342,13 @@ pub(super) fn mint(
         let repo = publish_checked(tx, "plak mint workspace").await?;
         let checkout=ws.check_out(repo.op_id().clone(), Some(&old.tree()), &child).await?;
         if checkout.skipped_files != 0 { return Err(recovery("workspace checkout skipped files; retained workspace needs recovery")); }
-        crate::git_redirect_fence::install_jj(&dest)?;
+        pin_base(launch, id, Some(&base.id().hex())).map_err(|error| recovery(error.detail))?;
+        crate::git_redirect_fence::install_jj(&dest, &base.id().hex())?;
         crate::git_redirect_fence::install(&dest)?;
         Ok::<_, Error>(MintedCopy {
             path: dest,
             branch: Some(name),
-            base: description(&child),
+            base: description(&base),
         })
     })
     .map_err(|error| {
@@ -472,16 +482,88 @@ pub(super) fn diverged(path: &Path, base: &str) -> std::result::Result<bool, Vcs
     .map_err(|error| failure(&error))
 }
 
+pub(super) const BUILT_LIBRARY_VERSION: Option<&str> = Some(super::JJ_LIB_VERSION);
+
+pub(super) fn validate_copy_base(path: &Path, base: &str) -> std::result::Result<(), VcsError> {
+    pollster::block_on(async {
+        let ws = load(path)?;
+        let repo = ws.repo_loader().load_at_head().await?;
+        let id = path
+            .file_name()
+            .and_then(std::ffi::OsStr::to_str)
+            .ok_or("invalid copy path")?;
+        let base = CommitId::try_from_hex(base).ok_or("invalid base")?;
+        if pinned_base(&repo, id).as_ref() != Some(&base) {
+            return Err(recovery(
+                "jj copy minted by an older build; discard or close it and respawn",
+            ));
+        }
+        Ok::<_, Error>(())
+    })
+    .map_err(|error| failure(&error))
+}
+
+pub(super) fn history_left_base(
+    path: &Path,
+    base: &str,
+    sealed: &str,
+) -> std::result::Result<bool, VcsError> {
+    pollster::block_on(async {
+        let ws = load(path)?;
+        let repo = ws.repo_loader().load_at_head().await?;
+        let base = CommitId::try_from_hex(base).ok_or("invalid base")?;
+        let sealed = CommitId::try_from_hex(sealed).ok_or("invalid sealed commit")?;
+        Ok::<_, Error>(!repo.index().is_ancestor(&base, &sealed).await?)
+    })
+    .map_err(|error| failure(&error))
+}
+
+fn base_reference(id: &str) -> String {
+    let prefix = id.split_once('-').map_or(id, |(namespace, _)| namespace);
+    let namespace = if prefix.len() == 64 && prefix.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        prefix.to_owned()
+    } else {
+        super::occupancy_vcs::digest_text(id)
+    };
+    format!("refs/plak/{}/bases/{id}", &namespace[..16])
+}
+
+fn pinned_base(repo: &ReadonlyRepo, id: &str) -> Option<CommitId> {
+    let backend = repo
+        .store()
+        .backend()
+        .downcast_ref::<jj_lib::git_backend::GitBackend>()?;
+    let git = backend.git_repo();
+    let reference = git.try_find_reference(base_reference(id).as_str()).ok()??;
+    CommitId::try_from_hex(reference.target().try_id()?.to_string())
+}
+
 pub(super) fn forget(launch: &Path, id: &str) -> std::result::Result<(), VcsError> {
     pollster::block_on(async {
         let ws = load(launch)?;
         let repo = ws.repo_loader().load_at_head().await?;
+        let base = pinned_base(&repo, id);
         let mut tx = repo.start_transaction();
         tx.repo_mut()
             .remove_workspace(&WorkspaceNameBuf::from(format!("plak-{id}")))
             .await?;
         tx.repo_mut().rebase_descendants().await?;
+        if let Some(base) = base {
+            let expression = jj_lib::revset::ResolvedRevsetExpression::commits(vec![base.clone()]);
+            let descendants = expression
+                .descendants()
+                .minus(&expression)
+                .evaluate(tx.repo())?;
+            if descendants.stream().next().await.is_none() {
+                let base = repo.store().get_commit_async(&base).await?;
+                if base.description().starts_with("plak base ") {
+                    tx.repo_mut().record_abandoned_commit(&base);
+                    tx.repo_mut().rebase_descendants().await?;
+                }
+            }
+        }
         publish_checked(tx, "plak forget workspace").await?;
+        pin_base(launch, id, None).map_err(|error| recovery(error.detail))?;
         Ok::<_, Error>(())
     })
     .map_err(|error| failure(&error))
@@ -526,20 +608,33 @@ pub(super) fn dirty(path: &Path) -> bool {
     .unwrap_or(true)
 }
 
-async fn revset_count(repo: &ReadonlyRepo, left: &CommitId, right: &CommitId) -> Result<u64> {
+async fn revset_count(
+    repo: &ReadonlyRepo,
+    left: &CommitId,
+    right: &[CommitId],
+    excluded_tree: Option<&MergedTree>,
+) -> Result<u64> {
     let left = jj_lib::revset::ResolvedRevsetExpression::commits(vec![left.clone()]).ancestors();
-    let right = jj_lib::revset::ResolvedRevsetExpression::commits(vec![right.clone()]).ancestors();
+    let right = jj_lib::revset::ResolvedRevsetExpression::commits(right.to_vec()).ancestors();
     let selected = left.minus(&right).evaluate(repo)?;
     let mut stream = selected.stream();
     let mut count = 0u64;
     while let Some(id) = stream.next().await {
-        id?;
-        count = count.saturating_add(1);
+        let id = id?;
+        let commit = repo.store().get_commit_async(&id).await?;
+        if !commit.is_empty(repo).await?
+            && excluded_tree.is_none_or(|tree| {
+                tree.tree_ids_and_labels() != commit.tree().tree_ids_and_labels()
+            })
+        {
+            count = count.saturating_add(1);
+        }
     }
     Ok(count)
 }
-pub(super) fn ahead_behind(child: &Path, parent: &Path) -> Option<(u64, u64)> {
+pub(super) fn ahead_behind(child: &Path, parent: &Path, base: Option<&str>) -> Option<(u64, u64)> {
     pollster::block_on(async {
+        let base = CommitId::try_from_hex(base?)?;
         let child = load(child).ok()?;
         let parent = load(parent).ok()?;
         if child.repo_path() != parent.repo_path() {
@@ -549,8 +644,21 @@ pub(super) fn ahead_behind(child: &Path, parent: &Path) -> Option<(u64, u64)> {
         let child = current(&repo, &child).await.ok()?;
         let parent = current(&repo, &parent).await.ok()?;
         Some((
-            revset_count(&repo, child.id(), parent.id()).await.ok()?,
-            revset_count(&repo, parent.id(), child.id()).await.ok()?,
+            revset_count(&repo, child.id(), std::slice::from_ref(&base), None)
+                .await
+                .ok()?,
+            revset_count(
+                &repo,
+                parent.id(),
+                repo.store()
+                    .get_commit_async(&base)
+                    .await
+                    .ok()?
+                    .parent_ids(),
+                Some(&repo.store().get_commit_async(&base).await.ok()?.tree()),
+            )
+            .await
+            .ok()?,
         ))
     })
 }
@@ -559,6 +667,35 @@ pub(super) fn pin(
     path: &Path,
     namespace: &str,
     id: &str,
+    commit: Option<&str>,
+) -> std::result::Result<(), VcsError> {
+    pin_reference(
+        path,
+        namespace,
+        &super::occupancy_vcs::candidate_ref(namespace, id),
+        id.starts_with("failed-"),
+        false,
+        commit,
+    )
+}
+
+fn pin_base(path: &Path, id: &str, commit: Option<&str>) -> std::result::Result<(), VcsError> {
+    let reference = base_reference(id);
+    let prefix = id.split_once('-').map_or(id, |(namespace, _)| namespace);
+    let namespace = if prefix.len() == 64 && prefix.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        prefix.to_owned()
+    } else {
+        super::occupancy_vcs::digest_text(id)
+    };
+    pin_reference(path, &namespace, &reference, false, true, commit)
+}
+
+fn pin_reference(
+    path: &Path,
+    namespace: &str,
+    reference: &str,
+    create_only: bool,
+    overwrite: bool,
     commit: Option<&str>,
 ) -> std::result::Result<(), VcsError> {
     use gix::refs::transaction::{Change, LogChange, PreviousValue, RefEdit, RefLog};
@@ -579,7 +716,6 @@ pub(super) fn pin(
         } else {
             None
         };
-        let reference = super::occupancy_vcs::candidate_ref(namespace, id);
         let change = if let Some(commit) = commit {
             let target = gix::refs::Target::Object(gix::ObjectId::from_hex(commit.as_bytes())?);
             Change::Update {
@@ -588,18 +724,20 @@ pub(super) fn pin(
                     force_create_reflog: false,
                     message: "plak candidate pin".into(),
                 },
-                expected: if id.starts_with("failed-") {
+                expected: if create_only {
                     // MustNotExist accepts an identical existing target in gix;
                     // matching the impossible null target is strictly create-only.
                     PreviousValue::ExistingMustMatch(gix::refs::Target::Object(
                         gix::ObjectId::null(git.object_hash()),
                     ))
+                } else if overwrite {
+                    PreviousValue::Any
                 } else {
                     PreviousValue::ExistingMustMatch(target.clone())
                 },
                 new: target,
             }
-        } else if let Some(existing) = git.try_find_reference(reference.as_str())? {
+        } else if let Some(existing) = git.try_find_reference(reference)? {
             Change::Delete {
                 expected: PreviousValue::MustExistAndMatch(existing.target().into()),
                 log: RefLog::AndReference,
@@ -614,7 +752,7 @@ pub(super) fn pin(
         };
         git.edit_references_as(
             [RefEdit {
-                name: reference.as_str().try_into()?,
+                name: reference.try_into()?,
                 deref: false,
                 change,
             }],
@@ -636,6 +774,217 @@ mod tests {
     use crate::vcs_fixtures::{jj_available, jj_in, jj_repo};
     use jj_lib::object_id::ObjectId;
     use jj_lib::repo::Repo;
+    #[test]
+    fn jj_counts_exclude_empty_commits_and_the_copied_mint_tree() {
+        if !jj_available() {
+            return;
+        }
+        let root = jj_repo();
+        let clean = mint(root.path(), "clean-count", root.path(), None).unwrap();
+        assert_eq!(
+            super::ahead_behind(&clean.path, root.path(), Some(&clean.base.commit)),
+            Some((0, 0))
+        );
+        std::fs::write(root.path().join("dirty.txt"), "at mint").unwrap();
+        let child = mint(root.path(), "dirty-count", root.path(), None).unwrap();
+        assert_eq!(
+            super::ahead_behind(&child.path, root.path(), Some(&child.base.commit)),
+            Some((0, 0))
+        );
+        std::fs::write(root.path().join("dirty.txt"), "after mint").unwrap();
+        snapshot(root.path()).unwrap();
+        assert_eq!(
+            super::ahead_behind(&child.path, root.path(), Some(&child.base.commit)),
+            Some((0, 1))
+        );
+        for n in 1..=3 {
+            std::fs::write(child.path.join(format!("child-{n}.txt")), "child").unwrap();
+            jj_in(&child.path, &["commit", "-m", "child work"]);
+            assert_eq!(
+                super::ahead_behind(&child.path, root.path(), Some(&child.base.commit)),
+                Some((n, 1))
+            );
+        }
+    }
+
+    #[test]
+    fn upgraded_jj_copy_requires_a_matching_base_pin_and_a_recorded_row() {
+        let root = native_repo();
+        let child = mint(root.path(), "base-validation", root.path(), None).unwrap();
+        assert!(super::validate_copy_base(&child.path, &child.base.commit).is_ok());
+        let head = snapshot(&child.path).unwrap();
+        assert!(
+            super::validate_copy_base(&child.path, &head.commit)
+                .unwrap_err()
+                .detail
+                .contains("jj copy minted by an older build")
+        );
+        let missing = crate::git_redirect_fence::install_for_copy(&child.path, None).unwrap_err();
+        assert!(missing.contains("no recorded tree row"));
+        assert!(
+            super::validate_copy_base(&child.path, &snapshot(root.path()).unwrap().commit).is_err()
+        );
+        super::pin_base(&child.path, "base-validation", None).unwrap();
+        assert!(
+            super::validate_copy_base(&child.path, &child.base.commit)
+                .unwrap_err()
+                .detail
+                .contains("jj copy minted by an older build")
+        );
+    }
+
+    #[test]
+    fn stale_base_pin_is_replaced_and_unused_frozen_base_is_abandoned() {
+        let root = native_repo();
+        let stale = snapshot(root.path()).unwrap();
+        super::pin_base(root.path(), "reused-pin", Some(&stale.commit)).unwrap();
+        let child = mint(root.path(), "reused-pin", root.path(), None).unwrap();
+        assert_ne!(child.base.commit, stale.commit);
+        super::forget(root.path(), "reused-pin").unwrap();
+        pollster::block_on(async {
+            let ws = super::load(root.path()).unwrap();
+            let repo = ws.repo_loader().load_at_head().await.unwrap();
+            assert!(super::pinned_base(&repo, "reused-pin").is_none());
+            assert!(
+                !repo.view().heads().contains(
+                    &jj_lib::backend::CommitId::try_from_hex(&child.base.commit).unwrap()
+                )
+            );
+        });
+    }
+
+    #[test]
+    fn git_discovery_ceiling_is_honored_by_environment_aware_gix() {
+        if std::env::var_os("PLAK_TEST_GIX_CEILING_PROBE").is_some() {
+            assert!(
+                gix::ThreadSafeRepository::discover_with_environment_overrides_opts(
+                    ".",
+                    gix::discover::upwards::Options::default(),
+                    gix::sec::trust::Mapping::default(),
+                )
+                .is_err()
+            );
+            return;
+        }
+        let launch = crate::vcs_fixtures::git_repo();
+        let copy = launch.path().join("copies/child");
+        std::fs::create_dir_all(copy.join("sub")).unwrap();
+        assert!(gix::discover(&copy).is_ok());
+        assert!(
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "native_jj::tests::git_discovery_ceiling_is_honored_by_environment_aware_gix"
+                ])
+                .current_dir(copy.join("sub"))
+                .env_clear()
+                .env("GIT_CEILING_DIRECTORIES", copy.parent().unwrap())
+                .env("PLAK_TEST_GIX_CEILING_PROBE", "1")
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+
+    #[test]
+    fn running_forks_survive_parent_edit_and_snapshot() {
+        let repo = native_repo();
+        let first = mint(repo.path(), "first", repo.path(), None).unwrap();
+        let second = mint(repo.path(), "second", repo.path(), None).unwrap();
+        std::fs::write(first.path.join("SEED.txt"), "first work").unwrap();
+        std::fs::write(second.path.join("new.txt"), "second work").unwrap();
+        std::fs::write(repo.path().join("SEED.txt"), "parent work").unwrap();
+        snapshot(repo.path()).unwrap();
+        for child in [&first, &second] {
+            assert_ne!(snapshot(&child.path).unwrap().content, child.base.content);
+            assert_eq!(
+                super::resolve(repo.path(), &child.base.commit).as_deref(),
+                Some(child.base.commit.as_str())
+            );
+        }
+        assert_eq!(
+            std::fs::read_to_string(first.path.join("SEED.txt")).unwrap(),
+            "first work"
+        );
+        assert_eq!(
+            std::fs::read_to_string(second.path.join("new.txt")).unwrap(),
+            "second work"
+        );
+    }
+
+    #[test]
+    fn owner_describe_commit_and_new_do_not_stale_forks() {
+        if !jj_available() {
+            return;
+        }
+        let repo = jj_repo();
+        let child = mint(repo.path(), "owner-commands", repo.path(), None).unwrap();
+        std::fs::write(child.path.join("new.txt"), "child work").unwrap();
+        for args in [
+            vec!["describe", "-m", "owner"],
+            vec!["commit", "-m", "owner"],
+            vec!["new"],
+        ] {
+            jj_in(repo.path(), &args);
+            snapshot(&child.path).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(child.path.join("new.txt")).unwrap(),
+                "child work"
+            );
+        }
+    }
+
+    #[test]
+    fn mint_base_is_a_sibling_of_parent_working_copy() {
+        let root = native_repo();
+        let child = mint(root.path(), "sibling-base", root.path(), None).unwrap();
+        pollster::block_on(async {
+            let ws = super::load(root.path()).unwrap();
+            let repo = ws.repo_loader().load_at_head().await.unwrap();
+            let parent = super::current(&repo, &ws).await.unwrap();
+            let base = repo
+                .store()
+                .get_commit_async(
+                    &jj_lib::backend::CommitId::try_from_hex(&child.base.commit).unwrap(),
+                )
+                .await
+                .unwrap();
+            let child_ws = super::load(&child.path).unwrap();
+            let head = super::current(&repo, &child_ws).await.unwrap();
+            assert_eq!(base.parent_ids(), parent.parent_ids());
+            assert_ne!(base.id(), parent.id());
+            assert_eq!(base.tree().tree_ids(), parent.tree().tree_ids());
+            assert_eq!(head.parent_ids(), &[base.id().clone()]);
+            let git = repo
+                .store()
+                .backend()
+                .downcast_ref::<jj_lib::git_backend::GitBackend>()
+                .unwrap()
+                .git_repo();
+            let namespace = crate::occupancy_vcs::digest_text("sibling-base");
+            let reference = format!("refs/plak/{}/bases/sibling-base", &namespace[..16]);
+            assert!(git.try_find_reference(&reference).unwrap().is_some());
+        });
+        super::forget(root.path(), "sibling-base").unwrap();
+        pollster::block_on(async {
+            let ws = super::load(root.path()).unwrap();
+            let repo = ws.repo_loader().load_at_head().await.unwrap();
+            let git = repo
+                .store()
+                .backend()
+                .downcast_ref::<jj_lib::git_backend::GitBackend>()
+                .unwrap()
+                .git_repo();
+            let namespace = crate::occupancy_vcs::digest_text("sibling-base");
+            assert!(
+                git.try_find_reference(
+                    format!("refs/plak/{}/bases/sibling-base", &namespace[..16]).as_str()
+                )
+                .unwrap()
+                .is_none()
+            );
+        });
+    }
     #[test]
     fn native_adoption_preserves_child_and_supports_followup() {
         if !jj_available() {
@@ -714,7 +1063,7 @@ mod tests {
         );
     }
     #[test]
-    fn stale_tree_refusal_survives_reopen_without_touching_child_files() {
+    fn ancestor_rewrite_still_refuses_and_preserves_files() {
         if !jj_available() {
             return;
         }
@@ -722,7 +1071,8 @@ mod tests {
         let child = mint(repo.path(), "stale", repo.path(), None).unwrap();
         std::fs::write(child.path.join("SEED.txt"), "child dirty").unwrap();
         std::fs::write(child.path.join("untracked.txt"), "child untracked").unwrap();
-        std::fs::write(repo.path().join("SEED.txt"), "parent rewrite").unwrap();
+        jj_in(repo.path(), &["edit", &child.base.commit]);
+        std::fs::write(repo.path().join("SEED.txt"), "ancestor tree rewrite").unwrap();
         jj_in(repo.path(), &["status"]);
         for _ in 0..2 {
             let error = snapshot(&child.path).unwrap_err();

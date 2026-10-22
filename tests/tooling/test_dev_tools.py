@@ -17,6 +17,7 @@ class DevToolsTests(unittest.TestCase):
         self.root = Path(self.temporary.name).resolve()
         (self.root / "scripts").mkdir()
         shutil.copyfile(ROOT / "scripts/dev-tools.sh", self.root / "scripts/dev-tools.sh")
+        shutil.copyfile(ROOT / "scripts/dev-tools-prefix.sh", self.root / "scripts/dev-tools-prefix.sh")
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.log = self.root / "calls.jsonl"
@@ -120,6 +121,7 @@ elif args[:1] == ['install']:
             ["install", "--locked", "--root", prefix, "--version", "0.9.100", "cargo-nextest"],
             ["install", "--locked", "--root", prefix, "--version", "0.19.0", "cargo-deny"],
             ["tools/checks/check_public_compile.py", "--fetch"],
+            ["scripts/jj-tools.py", "install", prefix],
         ])
         self.assertTrue(all(call["env_names"] == ["CARGO_TARGET_DIR"] for call in calls[:2]))
         self.assertEqual(calls[-1]["env_names"], [])
@@ -159,6 +161,20 @@ if sys.argv[1:] == ['nextest', '--version']:
         result = self.run_script("check")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.calls(), [])
+
+    def test_copy_prefix_requires_local_bin_and_uses_launch_build_cache(self):
+        for layout in ('worktrees', 'workspaces'):
+            copy = self.root / '.plak' / layout / 'copy'
+            (copy / '.dev-tools').mkdir(parents=True)
+            helper = ROOT / 'scripts/dev-tools-prefix.sh'
+            def prefix():
+                return subprocess.check_output(['bash', '-c', 'source "$1"; plak_dev_tools_prefix "$2"', 'prefix', str(helper), str(copy)], text=True).strip()
+            self.assertEqual(prefix(), str(self.root / '.dev-tools'))
+            (copy / '.dev-tools/bin').mkdir()
+            self.assertEqual(prefix(), str(copy / '.dev-tools'))
+        source = (ROOT / 'scripts/dev-tools.sh').read_text()
+        self.assertIn('CARGO_TARGET_DIR="$prefix/build"', source)
+        self.assertNotIn('CARGO_TARGET_DIR="$root/.dev-tools/build"', source)
 
     def test_invalid_mode_is_rejected(self):
         result = self.run_script("invalid")

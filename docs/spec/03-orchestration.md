@@ -493,6 +493,11 @@ to name and simply has not sealed. Inherit (the default) with any input is
 
 ### 4.2 `list_agents`
 
+JJ ahead counts non-empty commits in `base..@`. Behind counts non-empty
+commits in `base-..parent@`, excluding commits whose tree equals the recorded
+F tree: copied mint state is not new parent work. Fresh forks, even over a
+dirty parent, report `(0, 0)`; a subsequent parent edit contributes one behind.
+
 Arguments, optional booleans: `include_self`, `include_completed`, `include_read`.
 
 Receipt: `{ revision, agents: [...], inbox: [...] }`. Each `inbox[]` row
@@ -1429,8 +1434,20 @@ external JJ snapshots as well.
 
 **Mint.** The library creates `<launch>/.plak/workspaces/<copy_id>` with name
 `plak-<copy_id>`, using the same tree-scoped identity as Git, and a new empty
-working-copy commit over the exact candidate or snapshotted parent. The
-recorded base is that child's initial commit.
+working-copy commit over an immutable mint base. With no candidate input, the
+parent is snapshotted and a frozen base F is written with the parent's tree
+and parent IDs, described `plak base <copy_id>`: F is a sibling of the parent's
+working-copy commit, not its descendant. With candidate input, that exact
+candidate is F. The child's empty working-copy commit has F as its parent,
+and the recorded base is F. F and the child are published together by
+`plak mint workspace`; F is pinned at `refs/plak/<namespace>/bases/<copy_id>`.
+For JJ occupancy, ahead counts non-empty commits in `base..@`; behind counts
+`base-..parent@` excluding empty commits and commits whose tree equals F
+(the copied mint state is not new parent work). The frozen base and empty working-copy commit add no noise to
+a fresh fork's `(0, 0)` count. The recorded row base is the authority.
+Parent edits, snapshots, `describe`, `commit` and `new` do not rebase running
+forks or stale their copies. Ancestor rewrites can still stale a copy and
+must refuse sealing without changing its modified or untracked files.
 In-process mints serialize per launch repository; library locking coordinates
 working-copy mutations with external JJ callers. An incomplete mint retains
 its directory and reports recovery with its path instead of silently deleting
@@ -1438,7 +1455,11 @@ possibly published state.
 
 **Discard.** The host removes the workspace registration through the library
 before deleting its directory. If registration removal fails, the directory
-is retained. Cleanup returns an explicit acknowledgement or typed failure;
+is retained. Its base pin is removed after successful workspace forgetting;
+candidate pins are independent. A Plak-created frozen base is also abandoned
+when no visible descendant remains; input candidates are never abandoned by
+this cleanup. Reused copy IDs replace a stale base pin atomically on mint.
+Cleanup returns an explicit acknowledgement or typed failure;
 `discarded` must not be inferred from scheduling a cleanup. Candidate unpin
 also returns a result, so an unpin failure cannot be reported as an empty
 successful seal. Candidate refs remain independently pinned.
@@ -1496,7 +1517,7 @@ working-copy diff.
 
 ### 6.5 A failed seal is a fault
 
-Snapshotting runs a subprocess and can fail: a stale jj copy, a full disk, a
+Snapshotting uses the native JJ library or a Git subprocess and can fail: a stale jj copy, a full disk, a
 refused `update-ref`, a `git` killed at its ceiling. The seal path propagates that error rather than swallowing
 it. The node is left `recovery_required` with a fault reason naming the seal
 failure, and **no** `result` claiming "nothing diverged" is pushed.
@@ -2232,7 +2253,7 @@ walking `PATH` while skipping any `.plak/bin` entry, with fixed fallbacks. The
 shim is published by writing a temporary sibling and renaming it, so a
 concurrent fork holding the write descriptor cannot make the child's exec fail.
 
-The git shim refuses, with exit 128:
+A worktree copy's git shim refuses, with exit 128:
 
 - `core.worktree` set through `GIT_CONFIG_PARAMETERS`, `-c`, or `--config-env`;
 - `git init` and `git init-db`;
@@ -2242,17 +2263,76 @@ The git shim refuses, with exit 128:
   `GIT_WORK_TREE` — outside the copy;
 - a `--git-dir` or `GIT_DIR` that is not this copy's git directory.
 
-The jj shim refuses, with exit 1: `jj init`, `jj git init`, `jj git clone`,
-`jj workspace add|forget|rename`, a `-R`/`--repository` outside the copy, and a
-cwd outside the copy.
+A JJ copy has no Git directory: its Git shim admits only `git --version`,
+`git version` and `git help`; everything else exits 128 and directs the child
+to JJ instead of discovering the launch checkout. Hosted construction also
+requests the neutral core discovery ceiling (chapter 01) for JJ copies.
+
+The JJ shim consumes value-taking global options before locating the command,
+including `--color`, `--config`, repository and operation options and their
+`=` forms. Every clustered or glued single-dash token is refused (including
+`-GR`, `-nR` and `-mRelease`); pass short options and their values separately.
+This fail-closed rule prevents repository redirection hidden in a cluster,
+including valueless short flags before `R`. The other value-taking globals
+(`--at-op`/`--at-operation`, `--config`, `--config-file`, `--color`) have no
+short aliases and their long separate/equals forms are checked explicitly.
+It admits only built-in top-level command names and the pinned
+default aliases `b`, `ci`, `desc`, `op`, `st`; configured aliases and configured
+default commands fail closed. The default aliases cannot be redefined through
+user config. `init`, `undo`, `redo`, `gerrit`, `-R`/`--repository`, cwd outside
+the copy, `--ignore-immutable`, `--config-file`, and `--config` naming aliases,
+`immutable_heads` or `snapshot` are refused with exit 1.
+
+Repository-wide command groups are allowlists; any unlisted subcommand is
+refused, including future additions:
+
+- `workspace`: `list`, `root` only (in particular, never `remove`).
+- `tag` and `bookmark|b`: `list|l` only (never `track`/`untrack`).
+- `operation|op`: `log`, `show`, `diff` only.
+- `config`: `get|g`, `list|l`, `path|p` only.
+- `git`: `root` only.
+- `util`: `completion`, `config-schema`, `markdown-help`, `install-man-pages`,
+  `exec`, `snapshot` only.
+
+`file track` accepts only explicit existing non-secret paths matching
+`^[A-Za-z0-9._/@+,-]+$`, with no leading `-`. Tokens after `--` are checked as
+paths even when they start with `-`. Quotes, `&`, whitespace and other fileset
+syntax are refused rather than interpreted. It accepts only non-secret files; secret-policy
+basenames, directories, omitted arguments and fileset expressions are refused
+because a broad fileset could start tracking a secret. The `.env.example`
+exception remains. Under `--at-op`/`--at-operation`, only `log`, `show`, `diff`,
+`status|st`, `evolog`, `interdiff`, `file list|show|annotate|search`, and
+`operation|op log|show|diff` are admitted.
+
+Every admitted invocation injects `plak_base()` naming the recorded mint base,
+`immutable_heads() = (all() ~ plak_base()+::) | (working_copies() ~ @)`, and
+`snapshot.auto-track` excluding every secret-policy path (case-insensitive,
+including the `.env.example` exception). Thus only the copy's own descendants
+of its base are mutable and every other workspace's ancestry is immutable.
+The shim is regenerated from the recorded base at hosted construction; no
+user config is written. Other user settings still apply. At hosted
+construction the copy's `refs/plak/<namespace>/bases/<copy_id>` pin must match
+the recorded row base. A missing or mismatched pin refuses with `jj copy
+minted by an older build; discard or close it and respawn`. An admitted copy
+may have moved its `@` off that base through `new`/`rebase`; follow-up and
+reload still regenerate its shim. Sealing records `history_left_base` in the
+canonical `seal_outcome` payload and result-mail replay emits `history left
+plak_base(); the candidate is the whole tree` when true. The transient snapshot
+observation uses the sealed commit and recorded base under the unlocked seal
+phase, never a later working-copy observation. This is folded into unreleased
+tree schema 8; epoch e28 prevents older-shape state being opened. A JJ copy
+with no owning tree row refuses with `jj copy has no recorded tree row; launch
+from its owning session, or discard or close it and respawn`.
 
 Repo creation inside a copy is refused because a child re-initialising its copy
 turns it into a standalone repo the launch checkout cannot see, and its seal
 then faults.
 
 **What the shim cannot enforce.** It is basename-only. An absolute
-`/usr/bin/git`, a `PATH=/usr/bin git`, a `git worktree add` invoked outside the
-copy, and a hostile overwrite of the shim itself are all residual. Isolation
+`/usr/bin/git` or `PATH=/usr/bin git` with an explicit repository path or
+deliberately cleared discovery ceiling, raw `gix::discover` in a custom
+binary (only environment-aware gix discovery honors the ceiling), a
+`git worktree add` outside the copy, and a hostile overwrite of the shim itself are all residual. Isolation
 remains host-level; the shim is a guard rail, not a boundary.
 
 ## 13. `on_mint`
@@ -2787,7 +2867,7 @@ tree asked for, what it derived from its sessions' change feeds (chapter 01
 | Session retirement settled | view | the child's `LeaseReleased` record after its last terminal |
 | Seal state, candidates, workspaces and their `sealing`, `adopting` and `discarding` statuses, `on_mint` | external-effect record | the tree's own VCS and copy operations, recovered by §14.1 and §14.2, never from a feed |
 | Seal reservation | external-effect record | `agent_operations` of kind `seal_effect`, keyed by agent and attempt; captures `reserved_at` and `resume_status` before dispatch, including a seal with no divergent candidate |
-| Seal outcome | intent, joined into views | anchored `agent_operations` of kind `seal_outcome`, with attempt, completion stamp, failure and candidate id; the fold derives settled status and `seal_failed` at that position and fences result mail once |
+| Seal outcome | intent, joined into views | anchored `agent_operations` of kind `seal_outcome`, with attempt, completion stamp, failure, candidate id and `history_left_base` flag; the fold derives settled status and `seal_failed` at that position and fences result mail once |
 | Orphaned VCS operation and its settlement | intent, joined into views | anchored `agent_operations` of kinds `vcs_fault` and `vcs_fault_settled`, per affected agent and attempt; reopen records seal, adopt and removal ambiguity, and acknowledged workspace completion records settlement |
 | Spawn refusal, adoption acceptance and failed workspace removal | intent, joined into views | anchored `agent_operations` of kinds `spawn_refused`, `attempt_adopted` for the producer's attempt, and `workspace_cleanup` per occupant; captured failure, diagnostic and spawn end stamp derive agent-local consequences |
 | Feed cursors (`agent_feed_cursors`), node fold order | view metadata | cursor per runtime session and last applied intent order at the agent cursor; NULL node order restarts the fold |

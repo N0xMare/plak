@@ -581,6 +581,7 @@ impl ProductAgentTree {
             ));
         }
         Ok(Some(VcsSnapshot {
+            history_left_base: false,
             commit: candidate.commit.clone(),
             content: candidate.content.clone(),
             change_id: candidate.change_id.clone(),

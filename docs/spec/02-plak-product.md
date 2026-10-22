@@ -193,9 +193,9 @@ launch directory — the cwd of the process, resolved once.
   secrets/mcp-oauth/<id>/     MCP server OAuth logins, one private record each (§2.3)
   cache/api-models/<account>-<fingerprint>.json  API model lists, 6 h TTL (§2.3), disposable
   state/
-    r25.e27.p33.t8/             this build's state (§2.5)
+    r25.e28.p33.t8/             this build's state (§2.5)
       sessions/<id>.events.jsonl  append-only agent-readable event log
-      runtime.sqlite3             Plakous semantic runtime and change feed, schema 25, epoch 27
+      runtime.sqlite3             Plakous semantic runtime and change feed, schema 25, epoch 28
       product.sqlite3             Plak intents and feed-derived views, schema 33
       subagents.sqlite3           the agent tree, schema 8
       deleted-artifacts/<uuid>.json  retained physical ownership, never authority
@@ -665,7 +665,7 @@ recovery authority.
 Plak does not migrate state. Each build keeps its state in
 `~/.plak/state/<key>/`, where the key names every persisted format the build
 reads: `r<runtime schema>.e<runtime format epoch>.p<product schema>.t<tree
-schema>`, for example `r25.e27.p33.t8`. The key is derived from the stores'
+schema>`, for example `r25.e28.p33.t8`. The key is derived from the stores'
 own version constants, never hand-bumped, so a format change cannot forget to
 move it. A build therefore never finds another build's files in its own
 directory, and a whole-store incompatibility never blocks startup.
@@ -6055,6 +6055,18 @@ the result `missing` and the remedy that state is created by the first stateful
 command (for the config file, `plak config init`). Doctor reads the configured
 locations (`PLAK_HOME`, `XDG_STATE_HOME`) without creating them.
 
+One check runs a bounded local subprocess: `jj --version`, discovered on PATH
+with `.plak/bin` skipped. It gets a cleared environment with only PATH, null
+stdin, no pager, bounded output, its own process group, and a five-second
+ceiling; the whole group is retired and the child reaped. `jj_cli` is never an
+error: detail says `library not built` when the JJ feature is disabled;
+absent is `OK missing` (native operations need no CLI), supported CLI
+minors 0.44-0.46 are `OK available`, older/newer are `WARNING untested` with an
+upgrade/pin-or-update remedy, and failed/timeout/unparseable probes are
+`WARNING unavailable`. Detail names library 0.46.0, the supported range, and,
+inside a JJ repository, colocated/secondary/non-colocated repository kind.
+The analyzer consumes this captured probe; other checks spawn no processes.
+
 The product and subagents database rows run read-only `PRAGMA integrity_check(1)`
 and `PRAGMA foreign_key_check`. A failed check is `ERROR corrupt`, with a remedy
 to restore a trusted backup or move the database aside to start fresh. Ordinary
@@ -6063,7 +6075,7 @@ scans. Doctor uses a bounded busy timeout; only SQLite corruption and
 not-a-database errors are `corrupt`, while other query failures are
 `unavailable`. Runtime writer admission still validates its accounting counters.
 
-Twenty-one checks are always emitted, in a fixed order, grouped as product,
+Twenty-two checks are always emitted, in a fixed order, grouped as product,
 storage, config, environment, terminal, composition, provider, and OAuth:
 version; the home; the config file; the product and runtime databases; the
 runtime store's retained usage (`runtime_store`: per aggregate bound used/limit
@@ -6081,7 +6093,7 @@ telemetry databases; the secrets and sessions directories; kept carry files
 (`carry_files`: a warning listing each session export left in `carry/` by a
 failed carry, with the remedy to import it with `plak session import <file>`
 or delete it); the working
-directory; stdin and stdout being terminals; the composition host; the
+directory; the external `jj_cli`; stdin and stdout being terminals; the composition host; the
 OpenRouter catalog; the root template; the spawnable templates
 (`spawn_templates`: a warning naming each template the working set reaches,
 directly or through `spawns`, whose account or model is not ready, with the

@@ -18,6 +18,9 @@ pub(crate) fn options(workspace: &Path) -> CliResult<HostProcessOptions> {
     }
     let required = (known_copy || shim_present).then_some(relative);
     HostProcessOptions::new(required)
+        .map(|options| {
+            options.with_discovery_ceiling(crate::git_redirect_fence::is_minted_jj_copy(workspace))
+        })
         .map_err(|_| CliFailure::new("host process prefix policy is invalid"))
 }
 
@@ -58,7 +61,7 @@ mod tests {
         use std::str::FromStr;
 
         let directory = tempfile::tempdir().expect("workspace");
-        for relative in ["ordinary", ".plak/worktrees/copy"] {
+        for relative in ["ordinary", ".plak/worktrees/copy", ".plak/workspaces/copy"] {
             let workspace = directory.path().join(relative);
             let prefix = workspace.join(".plak/bin");
             std::fs::create_dir_all(&prefix).expect("prefix");

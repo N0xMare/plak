@@ -4,6 +4,8 @@
 //! host owners can supply statuses where opening the owned resource would
 //! create, migrate, publish, or extract state.
 
+pub mod jj_cli;
+
 use std::fs;
 use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
@@ -19,6 +21,7 @@ use serde::Deserialize;
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum CheckKind {
     Version,
+    JjCli,
     Home,
     Config,
     ProductDatabase,
@@ -45,6 +48,7 @@ impl CheckKind {
     pub const fn key(self) -> &'static str {
         match self {
             Self::Version => "version",
+            Self::JjCli => "jj_cli",
             Self::Home => "home",
             Self::Config => "config",
             Self::ProductDatabase => "product_db",
@@ -244,6 +248,7 @@ impl TerminalFacts {
 /// Inputs whose owners must decide availability without giving doctor mutation authority.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DoctorInputs {
+    pub jj_cli: DoctorCheck,
     pub version: String,
     pub paths: DoctorPaths,
     pub config: ConfigStatus,
@@ -921,6 +926,7 @@ pub fn diagnose(input: DoctorInputs) -> DoctorReport {
     ));
     checks.push(carry_files_check(&input.paths.home.join("carry")));
     checks.push(cwd_check(input.working_directory));
+    checks.push(input.jj_cli);
     checks.push(terminal_check(
         CheckKind::StdinTerminal,
         input.terminals.stdin,

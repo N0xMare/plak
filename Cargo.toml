@@ -418,10 +418,10 @@ lto = false
 
 [workspace.metadata.plakous.cfg.plak]
 feature-sites = ["src/lib.rs", "src/capabilities.rs"]
-env-sites = ["src/environment.rs", "src/home/paths.rs", "src/home/secrets.rs"]
+env-sites = ["src/environment.rs", "src/home/paths.rs", "src/home/secrets.rs", "src/commands/doctor.rs"]
 feature-ceiling = 131
 test-seam-ceiling = 75
-env-ceiling = 32
+env-ceiling = 30
 reason = "Capability registry entry sites; existing placement debt must fall as composition-root ports and module boundaries replace inline configuration."
 
 [workspace.metadata.plakous.cfg.plakous]
@@ -501,7 +501,7 @@ env-sites = ["src/environment/backend.rs", "src/environment/backend/process.rs"]
 reason = "Reviewed child-process/VCS environment construction reads; passed-in environment remains a later refactor."
 
 [workspace.metadata.plakous.cfg.plakous-workspace]
-env-sites = ["src/git_redirect_fence.rs", "src/occupancy_vcs.rs", "src/workspace.rs"]
+env-sites = ["src/git_redirect_fence.rs", "src/occupancy_vcs.rs", "src/workspace.rs", "src/vcs_fixtures.rs"]
 feature-ceiling = 5
 test-seam-ceiling = 2
 reason = "Reviewed child-process/VCS environment construction reads; passed-in environment remains a later refactor."

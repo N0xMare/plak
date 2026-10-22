@@ -38,7 +38,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import vcs_listing  # noqa: E402
 
 from plakous_policy import (  # noqa: E402
     ABOVE_FACADE_LAYERS,
@@ -60,15 +63,10 @@ def cache_path(root: Path = ROOT) -> Path:
     return root / (os.environ.get("CARGO_TARGET_DIR") or "target") / "feature-closure-cache.json"
 
 
-def cache_digest(root: Path = ROOT) -> str | None:
+def cache_digest(root: Path = ROOT) -> str:
     """Hash Cargo's inputs, including the tracked manifest inventory."""
     version = subprocess.check_output(["cargo", "--version"], cwd=root, text=True)
-    try:
-        tracked = subprocess.check_output(
-            ["git", "ls-files", "-z"], cwd=root, text=True, stderr=subprocess.DEVNULL,
-        )
-    except subprocess.CalledProcessError:
-        return None
+    tracked = "\0".join(vcs_listing.listed_files(root))
     paths = {Path(name) for name in tracked.split("\0") if name and Path(name).name == "Cargo.toml"}
     paths.update(Path(name) for name in tracked.split("\0")
                  if Path(name).parent.name == ".cargo" and Path(name).name.startswith("config"))
@@ -869,11 +867,8 @@ def main() -> int:
         print("feature closure cache: bypass (--build or --no-cache)")
     else:
         digest = cache_digest()
-        if digest is None:
-            print("feature closure cache: bypass (git ls-files failed; not a git checkout)", flush=True)
-        else:
-            CARGO_OUTPUTS = CargoOutputCache(cache_path(), digest)
-            print(f"feature closure cache: {'hit' if CARGO_OUTPUTS.hit else 'miss'}", flush=True)
+        CARGO_OUTPUTS = CargoOutputCache(cache_path(), digest)
+        print(f"feature closure cache: {'hit' if CARGO_OUTPUTS.hit else 'miss'}", flush=True)
 
     workspace = cached_workspace(ROOT)
     manifests = {name: package.manifest for name, package in workspace.packages.items()}

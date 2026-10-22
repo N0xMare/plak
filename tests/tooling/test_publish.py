@@ -102,7 +102,7 @@ class PublishScriptTests(unittest.TestCase):
         self.log = base / "cargo.jsonl"
         for relative in ("scripts/publish.sh", "tools/release/publish_plan.py",
                          "tools/release/publish_shape.py", "tools/release/review_expiry.py",
-                         "tools/release/prefetch_packages.py"):
+                         "tools/release/prefetch_packages.py", "tools/checks/vcs_listing.py"):
             (self.repo / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, self.repo / relative)
         # Freeze only this copied fixture's invocation, never the maintainer CLI.

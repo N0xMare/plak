@@ -23,6 +23,7 @@ struct SealEffectRequest {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct SealOutcome {
+    history_left_base: bool,
     attempt_id: Option<AttemptId>,
     completed_at_ms: u64,
     failure: Option<SealFailure>,
@@ -203,6 +204,7 @@ impl ProductAgentTree {
                     completed_at_ms,
                     Some(&error),
                     None,
+                    false,
                 );
                 return None;
             }
@@ -212,6 +214,9 @@ impl ProductAgentTree {
         // candidate, and therefore nothing pinning its workspace against
         // `discard_workspace`. `SealTicket::seal` already
         // applies this; a hand-built snapshot is filtered here.
+        let history_left_base = sealed
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.history_left_base);
         let sealed = sealed.filter(|snapshot| diverged_from_base(snapshot, &base_content));
         if let Some(snapshot) = sealed {
             let producing_attempt_id = attempt_id
@@ -244,8 +249,23 @@ impl ProductAgentTree {
             completed_at_ms,
             None,
             recorded.clone(),
+            history_left_base,
         );
         recorded
+    }
+
+    pub(super) fn seal_history_notice(&self, agent_id: &str, attempt_id: &AttemptId) -> bool {
+        self.operations.values().any(|operation| {
+            operation.tool_name == SEAL_OUTCOME_KIND
+                && operation.caller_agent_id == agent_id
+                && serde_json::from_str::<SealOutcome>(&operation.canonical_request).is_ok_and(
+                    |outcome| {
+                        outcome.attempt_id.as_ref() == Some(attempt_id)
+                            && outcome.history_left_base
+                            && outcome.failure.is_none()
+                    },
+                )
+        })
     }
 
     fn record_seal_outcome(
@@ -255,6 +275,7 @@ impl ProductAgentTree {
         completed_at_ms: u64,
         failure: Option<&TopologyError>,
         candidate_id: Option<CandidateId>,
+        history_left_base: bool,
     ) {
         let effect_id = seal_effect_id(agent_id, attempt_id);
         let Some(effect) = self.operations.get(&effect_id) else {
@@ -265,6 +286,7 @@ impl ProductAgentTree {
             return;
         };
         let outcome = SealOutcome {
+            history_left_base,
             attempt_id: attempt_id.cloned(),
             completed_at_ms,
             failure: failure.map(|error| SealFailure {
@@ -656,6 +678,7 @@ impl ProductAgentTree {
                 &self.launch_checkout,
                 copy_id,
                 &VcsSnapshot {
+                    history_left_base: false,
                     commit: candidate.commit.clone(),
                     content: candidate.content.clone(),
                     change_id: candidate.change_id.clone(),
@@ -859,8 +882,133 @@ pub fn merge_conflict_message(paths: &[String], child_path: &Path) -> String {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "unit tests")]
 mod tests {
+    use super::SEAL_OUTCOME_KIND;
     use crate::tree::test_support::*;
     use crate::tree::vcs_fixtures::*;
+
+    #[test]
+    fn jj_off_base_followup_seals_and_replays_the_whole_tree_notice() {
+        if !jj_available() {
+            return;
+        }
+        let repo = jj_repo();
+        let root_parent =
+            Command::new(std::env::var_os("PLAK_TEST_JJ").unwrap_or_else(|| "jj".into()))
+                .args(["log", "-r", "@-", "--no-graph", "-T", "commit_id"])
+                .env("JJ_CONFIG", "/dev/null")
+                .current_dir(repo.path())
+                .output()
+                .unwrap();
+        assert!(root_parent.status.success());
+        let root_parent = String::from_utf8(root_parent.stdout).unwrap();
+        let mut tree = tree_at(repo.path().to_path_buf(), WriterMode::SingleLease);
+        let child = tree.spawn_agent("root", &mint_req(), None).unwrap();
+        let path = tree.node(&child.agent_id).unwrap().path.clone();
+        let base = tree
+            .workspaces
+            .get(&child.workspace.id)
+            .unwrap()
+            .base_commit
+            .clone()
+            .unwrap();
+        let shim = path.join(".plak/bin/jj");
+        let output = Command::new(&shim)
+            .args(["new", root_parent.trim()])
+            .env("JJ_CONFIG", "/dev/null")
+            .current_dir(&path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            plakous_workspace::git_redirect_fence::install_for_copy(&path, Some(&base)).is_ok()
+        );
+        std::fs::write(path.join("off-base.txt"), "whole tree").unwrap();
+        tree.submit_result(
+            &child.agent_id,
+            &SubmitResultRequest {
+                turn_token: 1,
+                output_json: r#"{"ok":true}"#.into(),
+            },
+            None,
+        )
+        .unwrap();
+        tree.record_turn_completed(&child.agent_id).unwrap();
+        tree.settle_for_test();
+        let notice = "history left plak_base(); the candidate is the whole tree";
+        let result = tree
+            .messages
+            .values()
+            .find(|mail| mail.purpose == MessagePurpose::Result)
+            .unwrap();
+        assert!(result.body.contains(notice), "{}", result.body);
+        let outcome = tree
+            .operations
+            .values()
+            .find(|operation| operation.tool_name == SEAL_OUTCOME_KIND)
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&outcome.canonical_request).unwrap()["history_left_base"],
+            true
+        );
+        let persisted = tree.to_persisted();
+        let mut replay = ProductAgentTree::reopen(persisted);
+        assert!(
+            replay
+                .messages
+                .values()
+                .any(|mail| mail.purpose == MessagePurpose::Result && mail.body.contains(notice))
+        );
+        let prior = replay.messages.len();
+        replay.enqueue_result_mail(&child.agent_id);
+        assert_eq!(replay.messages.len(), prior);
+        replay
+            .messages
+            .retain(|_, mail| mail.purpose != MessagePurpose::Result);
+        let attempt = replay
+            .current_attempt(&child.agent_id)
+            .unwrap()
+            .attempt_id
+            .clone();
+        replay
+            .operations
+            .remove(&format!("plak:result:{}:{attempt}", child.agent_id));
+        replay.enqueue_result_mail(&child.agent_id);
+        assert!(
+            replay
+                .messages
+                .values()
+                .any(|mail| mail.purpose == MessagePurpose::Result && mail.body.contains(notice))
+        );
+        tree.send_agent_message(
+            "root",
+            &SendAgentMessageRequest {
+                agent_id: child.agent_id.clone(),
+                message: "follow up".into(),
+                purpose: Some(MessagePurpose::Followup),
+                priority: None,
+                in_reply_to: None,
+                output_schema_json: None,
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            tree.node(&child.agent_id).unwrap().status,
+            NodeStatus::Running
+        );
+        tree.settle_for_test();
+        assert!(
+            plakous_workspace::git_redirect_fence::install_for_copy(&path, Some(&base)).is_ok()
+        );
+        assert_eq!(
+            std::fs::read_to_string(path.join("off-base.txt")).unwrap(),
+            "whole tree"
+        );
+    }
 
     #[test]
     fn failed_empty_candidate_unpin_is_recovery_and_cannot_discard_retained_pin() {

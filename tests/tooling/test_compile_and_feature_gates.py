@@ -78,7 +78,8 @@ class FeatureClosureCacheTests(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("original")
             inventory = "Cargo.toml\0crates/example/Cargo.toml\0nested/.cargo/config.toml\0"
-            with mock.patch.object(feature_gate.subprocess, "check_output", side_effect=lambda command, **_: "cargo 1" if command[0] == "cargo" else inventory):
+            with mock.patch.object(feature_gate.subprocess, "check_output", return_value="cargo 1"), \
+                 mock.patch.object(feature_gate.vcs_listing, "listed_files", side_effect=lambda _: list(filter(None, inventory.split("\0")))):
                 baseline = feature_gate.cache_digest(root)
                 for name in paths:
                     with self.subTest(input=name):
@@ -96,7 +97,7 @@ class FeatureClosureCacheTests(unittest.TestCase):
                 (root / ".cargo/config.extra").unlink()
                 inventory += "new/Cargo.toml\0"
                 self.assertNotEqual(feature_gate.cache_digest(root), baseline)
-            with mock.patch.object(feature_gate.subprocess, "check_output", side_effect=["cargo 2", "Cargo.toml\0crates/example/Cargo.toml\0nested/.cargo/config.toml\0"]):
+            with mock.patch.object(feature_gate.subprocess, "check_output", return_value="cargo 2"):
                 self.assertNotEqual(feature_gate.cache_digest(root), baseline)
 
     def test_cache_path_respects_target_dir(self):
@@ -109,37 +110,12 @@ class FeatureClosureCacheTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CARGO_TARGET_DIR": ""}):
             self.assertEqual(feature_gate.cache_path(), ROOT / "target/feature-closure-cache.json")
 
-    def test_digest_unavailable_when_git_inventory_fails(self):
+    def test_digest_refuses_failed_repository_inventory(self):
         failed = subprocess.CalledProcessError(128, ["git", "ls-files", "-z"])
-        with mock.patch.object(feature_gate.subprocess, "check_output",
-                               side_effect=["cargo 1", failed]):
-            self.assertIsNone(feature_gate.cache_digest(ROOT))
-
-    def test_missing_git_inventory_bypasses_cache_and_queries_cargo_directly(self):
-        command = ["cargo", "metadata"]
-
-        def workspace(root):
-            for _ in range(2):
-                self.assertEqual(feature_gate.cargo_output(command, root), "direct")
-            return mock.Mock(packages={})
-
-        with mock.patch.object(feature_gate.sys, "argv", ["check_features.py"]), \
-             mock.patch.object(feature_gate, "cache_digest", return_value=None), \
-             mock.patch.object(feature_gate, "CargoOutputCache") as cache, \
-             mock.patch.object(feature_gate, "run_cargo_output", return_value="direct") as run, \
-             mock.patch.object(feature_gate, "cached_workspace", side_effect=workspace), \
-             mock.patch.object(feature_gate, "digest_packages", return_value=set()), \
-             mock.patch.object(feature_gate, "validate_feature_contracts", return_value=[]), \
-             mock.patch.object(feature_gate, "validate_excluded_closures", return_value=[]), \
-             mock.patch.object(feature_gate, "validate_test_only_dependency_features", return_value=[]), \
-             mock.patch.object(feature_gate, "check_facade_profiles", return_value=[]), \
-             mock.patch.object(feature_gate.sys, "stdout", new_callable=io.StringIO) as output:
-            self.assertEqual(feature_gate.main(), 0)
-            cache.assert_not_called()
-            self.assertEqual(run.call_count, 2)
-            self.assertIn("bypass", output.getvalue())
-            self.assertIn("git ls-files failed", output.getvalue())
-            self.assertIsNone(feature_gate.CARGO_OUTPUTS)
+        with mock.patch.object(feature_gate.subprocess, "check_output", return_value="cargo 1"), \
+             mock.patch.object(feature_gate.vcs_listing, "listed_files", side_effect=failed):
+            with self.assertRaises(subprocess.CalledProcessError):
+                feature_gate.cache_digest(ROOT)
 
     def test_build_and_no_cache_bypass_cache(self):
         for flag in ("--build", "--no-cache"):

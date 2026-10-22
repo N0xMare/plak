@@ -460,7 +460,10 @@ pub(crate) fn stamped_workspace_policy(
 
 pub(super) fn install_occupancy_fence(copy: &Path) -> CliResult<()> {
     if crate::git_redirect_fence::is_minted_occupancy_copy(copy)
-        && let Err(error) = crate::git_redirect_fence::install_for_copy(copy)
+        && let Err(error) = crate::git_redirect_fence::install_for_copy(
+            copy,
+            crate::topology_runtime::workspace_base_for_root(copy).as_deref(),
+        )
     {
         return Err(CliFailure::new(format!(
             "occupancy fence could not be installed: {error}"
@@ -2777,7 +2780,6 @@ async fn api_session_runtime_binding_with_owner(
     cached_evidence: Option<plakous::openrouter::OpenRouterChatModelEvidence>,
     acquired_owner: &mut Option<String>,
 ) -> CliResult<PreparedApiRuntime> {
-    install_occupancy_fence(&parent.cwd)?;
     let tool_plan = bind_node_tool_plan(
         &parent.tool_selection,
         Some(crate::tool_plan::ToolRoute::api(parent.target)),
@@ -2794,6 +2796,7 @@ async fn api_session_runtime_binding_with_owner(
         acquired_owner,
     )?
     .with_plan(&tool_plan)?;
+    install_occupancy_fence(&parent.cwd)?;
     match parent.target {
         crate::binding::ApiTarget::OpenRouter { wire } => {
             let prepared = Box::pin(crate::openrouter::construct_openrouter_runtime_with_fence(
@@ -3427,7 +3430,6 @@ pub(super) fn coding_session_runtime_binding_for(
         session_id = plan_state_authority.as_str(),
     )
     .entered();
-    install_occupancy_fence(&cwd)?;
     let model = resolved.model();
 
     let resolved_tool_mode = resolved.native_tool_mode();
@@ -3519,6 +3521,7 @@ pub(super) fn coding_session_runtime_binding_for(
         attached_tree,
     )?
     .with_plan(&tool_plan)?;
+    install_occupancy_fence(&cwd)?;
     product_extensions.connect_retrieval(resolved.retrieval_port())?;
     product_extensions.connect_image_gen(resolved.image_gen_port())?;
     let frozen_tools = coding_tool_registry_with_extensions(

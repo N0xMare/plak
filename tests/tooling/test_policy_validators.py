@@ -1531,6 +1531,7 @@ use std::process::ExitCode;
 """,
                 "src/commands/doctor.rs": """
 fn doctor() {
+    let _ = std::env::var_os("PATH");
     let _ = std::env::var_os("XDG_RUNTIME_DIR");
 }
 """,
@@ -1602,6 +1603,7 @@ fn mint() {}
                 "src/git_redirect_fence.rs": """
 fn discover_real_git() {
     let _ = std::env::var_os("PATH");
+    let _ = std::env::var_os("PLAK_TEST_JJ");
     let _ = std::env::var_os("PATH");
 }
 """,
@@ -1624,6 +1626,8 @@ fn vcs() {
                 "src/vcs_fixtures.rs": """
 use std::process::Command;
 fn fixtures() {
+    let _ = std::env::var_os("PLAK_TEST_JJ");
+    let _ = Command::new(executable);
     let _ = Command::new("git");
     let _ = Command::new("git");
     let _ = Command::new("git");
@@ -1632,12 +1636,6 @@ fn fixtures() {
     let _ = Command::new("git");
     let _ = Command::new("git");
     let _ = Command::new("git");
-    let _ = Command::new("jj");
-    let _ = Command::new("jj");
-    let _ = Command::new("jj");
-    let _ = Command::new("jj");
-    let _ = Command::new("jj");
-    let _ = Command::new("jj");
     let _ = Command::new("git");
     let _ = Command::new("git");
     let _ = Command::new("git");

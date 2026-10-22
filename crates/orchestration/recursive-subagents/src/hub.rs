@@ -1231,6 +1231,29 @@ pub fn generation_stamp_for_workspace_root(root: &Path) -> Option<Arc<AtomicU64>
     None
 }
 
+/// Recorded mint base for a copy owned by an attached tree.
+pub fn workspace_base_for_root(root: &Path) -> Option<String> {
+    let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    for runtime in process_hub().runtimes() {
+        let Ok(tree) = runtime.tree.lock() else {
+            continue;
+        };
+        if let Some(base) = tree
+            .workspaces()
+            .values()
+            .filter(|row| {
+                let path = std::fs::canonicalize(&row.path).unwrap_or_else(|_| row.path.clone());
+                root == path || root.starts_with(path)
+            })
+            .max_by_key(|row| row.path.components().count())
+            .and_then(|row| row.base_commit.clone())
+        {
+            return Some(base);
+        }
+    }
+    None
+}
+
 /// Inserts a working copy over an in-memory store, or returns the occupant
 /// if this tree is already attached. Test attach only: production roots
 /// attach through [`resolve_topology_runtime`] with the product's store.

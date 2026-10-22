@@ -66,7 +66,8 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 [profile.offline]
 default-filter = '''
 not (
-  test(lookup_progress_does_not_wait_for_cli_stderr_lock)
+  test(jj_cli_doctor_kills_hanging_process_group_at_five_seconds)
+  | test(lookup_progress_does_not_wait_for_cli_stderr_lock)
   | test(a_stuck_worker_request_is_killed_and_reported_as_session_loss)
   | test(product_terminal_e2e_tests::)
   | test(real_composition_quit_releases_nested_process)
@@ -156,7 +157,8 @@ not (
 test-threads = 1
 slow-timeout = { period = "240s", terminate-after = 2 }
 default-filter = '''
-  test(lookup_progress_does_not_wait_for_cli_stderr_lock)
+  test(jj_cli_doctor_kills_hanging_process_group_at_five_seconds)
+  | test(lookup_progress_does_not_wait_for_cli_stderr_lock)
   | test(a_stuck_worker_request_is_killed_and_reported_as_session_loss)
   | test(product_terminal_e2e_tests::)
   | test(real_composition_quit_releases_nested_process)

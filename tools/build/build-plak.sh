@@ -27,9 +27,7 @@ if [[ -z "$artifacts_only" ]]; then
 # This command also updates the installed symlinks. A build from a
 # linked worktree must never silently repoint those daily-use commands away from
 # the primary checkout.
-git_dir="$(git rev-parse --absolute-git-dir)"
-git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
-if [[ "$git_dir" != "$git_common_dir" ]]; then
+if [[ ! -d "$repo_root/.git" ]]; then
   echo "build-plak: refusing to build and relink installed binaries from a linked worktree" >&2
   exit 2
 fi

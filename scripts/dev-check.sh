@@ -37,7 +37,8 @@ for group in "${requested[@]}"; do
   if [[ "$known" != true ]]; then echo "unknown step group: $group" >&2; exit 2; fi
 done
 
-export PATH="$root/.dev-tools/bin:$PATH"
+source "$root/scripts/dev-tools-prefix.sh"
+export PATH="$(plak_dev_tools_prefix "$root")/bin:$PATH"
 bash scripts/dev-tools.sh check
 
 # Linux budget tests need RAM-backed fsync under parallel gate load; macOS
@@ -216,7 +217,7 @@ run_group() {
       python3 tools/checks/run_tooling_tests.py -v ;;
     package)
       # Publication packages a git tree; the musl container mounts an export.
-      if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      if [[ "$(python3 tools/checks/vcs_listing.py kind)" == export ]]; then
         echo "skip package: not a git work tree (the dry run stages tracked files)"
         return 0
       fi
@@ -229,9 +230,8 @@ run_group() {
 # A passing full tier on a clean tree records that tree as publication
 # evidence (scripts/publish.sh refuses a tree without it).
 evidence_tree=''
-if [[ "$tier" == full ]] && git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
-    && [[ -z "$(git status --porcelain --untracked-files=normal)" ]]; then
-  evidence_tree="$(git rev-parse 'HEAD^{tree}')"
+if [[ "$tier" == full ]]; then
+  evidence_tree="$(python3 tools/checks/vcs_listing.py evidence-tree)"
 fi
 
 failed_groups=""
@@ -274,7 +274,7 @@ if [[ "$gate_status" -ne 0 ]]; then
   exit "$gate_status"
 fi
 if [[ -n "$evidence_tree" ]]; then
-  if [[ -z "$(git status --porcelain --untracked-files=normal)" && "$(git rev-parse 'HEAD^{tree}')" == "$evidence_tree" ]]; then
+  if [[ "$(python3 tools/checks/vcs_listing.py evidence-tree)" == "$evidence_tree" ]]; then
     mkdir -p "$target_dir/gate-evidence"
     printf '%s\n' "$evidence_tree" >"$target_dir/gate-evidence/full"
     echo "== evidence: full gate passed on tree $evidence_tree =="
@@ -282,6 +282,6 @@ if [[ -n "$evidence_tree" ]]; then
     echo "== no evidence: the tree changed during the run ==" >&2
   fi
 elif [[ "$tier" == full ]]; then
-  echo "== no evidence: not a clean git tree when the run started =="
+  echo "== no evidence: evidence requires a clean git tree or unconflicted colocated jj root with a .git directory =="
 fi
 echo "== ok: $tier gate passed =="

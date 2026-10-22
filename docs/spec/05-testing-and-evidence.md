@@ -547,10 +547,15 @@ stop internally on a failed command; later groups still run. The final summary
 names all failed groups, exits with the first failed group's status, and never
 reports success when any group failed.
 
-`--fast` maps tracked working-tree changes against HEAD plus untracked,
+`--fast` maps tracked working-tree changes against HEAD on Git plus untracked,
 non-ignored files (and ignored `**/proptest-regressions/**` seeds) to their
 longest-prefix package owner with `tools/checks/changed_packages.py`. Named
-packages replace the diff. A root Cargo input (manifest, lockfile, toolchain,
+packages replace the diff. At a JJ root, shared root-checked listings use
+`builtin_immutable_heads()..@`; inside a Plak copy they diff `plak_base()` to
+`@`. `PLAK_FAST_BASE` overrides either default. Listings never silently inspect
+an ancestor repository or fall back to an empty set. A source export uses a
+walk excluding `.git`, `.jj` and `target`; changed-package discovery requires a
+repository or explicit packages. A root Cargo input (manifest, lockfile, toolchain,
 lint, format or nextest config, `.cargo/`) selects every package. Its parallel
 lane passes `-E 'rdeps(=<pkg>) | ...'`, which nextest intersects with the
 profile's own filter; an empty selection passes, and no touched package runs

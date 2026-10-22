@@ -132,31 +132,20 @@ class BuildPlakTests(unittest.TestCase):
         block = source.split("# BEGIN LINKED WORKTREE GUARD", 1)[1].split(
             "# END LINKED WORKTREE GUARD", 1
         )[0]
-        for git_dir, common_dir, success in (
-            ("/repo/.git", "/repo/.git", True),
-            ("/repo/.git/worktrees/tools", "/repo/.git", False),
-        ):
-            result = subprocess.run(
-                [
-                    "bash",
-                    "-c",
-                    "set -euo pipefail; "
-                    "mock_git_dir=$1; mock_common_dir=$2; "
-                    "git() { if [[ \"${*: -1}\" == --absolute-git-dir ]]; then "
-                    "printf '%s\\n' \"$mock_git_dir\"; else "
-                    "printf '%s\\n' \"$mock_common_dir\"; fi; }; "
-                    + block,
-                    "guard",
-                    git_dir,
-                    common_dir,
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(result.returncode == 0, success, result.stderr)
-            if not success:
-                self.assertIn("linked worktree", result.stderr)
+        for layout in ("primary", "linked", "jj-secondary"):
+            with tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                if layout == "primary":
+                    (root / ".git").mkdir()
+                elif layout == "linked":
+                    (root / ".git").write_text("gitdir: /unused\n")
+                else:
+                    (root / ".jj").mkdir()
+                result = subprocess.run(["bash", "-c", "set -euo pipefail; repo_root=$1; " + block,
+                                         "guard", str(root)], capture_output=True, text=True)
+                self.assertEqual(result.returncode == 0, layout == "primary", result.stderr)
+                if layout != "primary":
+                    self.assertIn("linked worktree", result.stderr)
 
     def test_product_build_keeps_monty_features_out_of_parent(self) -> None:
         import tomllib
@@ -563,7 +552,8 @@ class BuildPlakTests(unittest.TestCase):
             fake = base / "fake-bin"
             fake.mkdir()
             (fake / "python3").symlink_to(sys.executable)
-            # A primary checkout: the git dir is the common dir.
+            # Only a primary checkout can relink installed binaries.
+            (repo / ".git").mkdir()
             (fake / "git").write_text(f"#!/bin/sh\necho {repo / '.git'}\n")
             (fake / "git").chmod(0o755)
             # Fake cargo: record the invocation and write the named executables

@@ -6,7 +6,8 @@
 //! This module installs a basename `git` shim under `{copy}/.plak/bin/git` so
 //! the process PATH hits occupancy identity before `/usr/bin/git`.
 //!
-//! Isolation remains Host: absolute `/usr/bin/git`, `PATH=/usr/bin git`,
+//! Isolation remains Host: explicit repository access through absolute Git or
+//! a deliberately cleared discovery ceiling,
 //! `git worktree add` outside the copy, and a hostile shim overwrite are
 //! residual, not a VM. Login shells (`/bin/sh -l`) re-export the fence PATH
 //! after profile scripts run.
@@ -84,6 +85,15 @@ pub fn is_minted_occupancy_copy(path: &Path) -> bool {
     })
 }
 
+/// True for a minted JJ-copy layout, even if its `.jj` machinery disappeared.
+#[must_use]
+pub fn is_minted_jj_copy(path: &Path) -> bool {
+    path.ancestors().any(|ancestor| {
+        ancestor.file_name() == Some(OsStr::new("workspaces"))
+            && ancestor.parent().and_then(Path::file_name) == Some(OsStr::new(".plak"))
+    })
+}
+
 /// Writes `{copy}/.plak/bin/git` so process PATH can intercept basename `git`.
 pub(crate) fn install(copy: &Path) -> Result<PathBuf, String> {
     let copy = canonicalize_or_normalize(copy);
@@ -129,14 +139,12 @@ fn write_executable(path: &Path, body: &str) -> std::io::Result<()> {
 ///
 /// Jj copies also install the git-redirect shim when `git` is on PATH so
 /// colocated `jj git init` checkouts cannot basename-`git` into the parent.
-pub fn install_for_copy(copy: &Path) -> Result<PathBuf, String> {
-    let uses_jj = copy.ancestors().any(|ancestor| {
-        ancestor.file_name() == Some(OsStr::new("workspaces"))
-            && ancestor.parent().and_then(Path::file_name) == Some(OsStr::new(".plak"))
-    });
-    if uses_jj {
-        let shim = install_jj(copy)?;
-        let _ = install(copy);
+pub fn install_for_copy(copy: &Path, base: Option<&str>) -> Result<PathBuf, String> {
+    if is_minted_jj_copy(copy) {
+        let base = base.ok_or("jj copy has no recorded tree row; launch from its owning session, or discard or close it and respawn")?;
+        super::occupancy_vcs::validate_jj_copy_base(copy, base).map_err(|error| error.detail)?;
+        let shim = install_jj(copy, base)?;
+        install(copy)?;
         Ok(shim)
     } else {
         install(copy)
@@ -144,33 +152,39 @@ pub fn install_for_copy(copy: &Path) -> Result<PathBuf, String> {
 }
 
 /// Writes `{copy}/.plak/bin/jj` so process PATH can intercept basename `jj`.
-pub(crate) fn install_jj(copy: &Path) -> Result<PathBuf, String> {
+pub(crate) fn install_jj(copy: &Path, base: &str) -> Result<PathBuf, String> {
+    if !matches!(base.len(), 40 | 64) || !base.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("jj copy base is not an exact commit identity".into());
+    }
     let copy = canonicalize_or_normalize(copy);
     let bin = copy.join(FENCE_BIN);
     std::fs::create_dir_all(&bin).map_err(|error| format!("jj fence bin: {error}"))?;
     let shim = bin.join(JJ_SHIM_NAME);
-    let script = jj_fence_body(&copy);
+    let script = jj_fence_body(&copy, base);
     write_executable(&shim, &script).map_err(|error| format!("jj fence shim: {error}"))?;
     Ok(shim)
 }
 
 fn git_fence_body(copy: &Path) -> String {
+    if is_minted_jj_copy(copy) {
+        return jj_copy_git_shim(discover_real_git().ok().as_deref());
+    }
     discover_real_git().ok().as_deref().map_or_else(
         || "#!/bin/sh\nprintf 'Git CLI is not installed; native workspace operations remain available\\n' >&2\nexit 127\n".to_owned(),
         |real_git| shim_script(copy, real_git),
     )
 }
 
-fn jj_fence_body(copy: &Path) -> String {
+fn jj_fence_body(copy: &Path, base: &str) -> String {
     discover_real_jj().ok().as_deref().map_or_else(
         || "#!/bin/sh\nprintf 'JJ CLI is not installed; native workspace operations remain available\\n' >&2\nexit 127\n".to_owned(),
-        |real_jj| jj_shim_script(copy, real_jj),
+        |real_jj| jj_shim_script(copy, real_jj, base),
     )
 }
 
 /// An ignored directory is exempt only if every leaf is an exact minted fence.
 /// Never follow links or exempt user content merely because it is under .plak.
-pub(crate) fn ignored_path_is_managed(copy: &Path, relative: &Path) -> bool {
+pub(crate) fn ignored_path_is_managed(copy: &Path, relative: &Path, base: Option<&str>) -> bool {
     let bin = Path::new(FENCE_BIN);
     let Some(root) = bin.parent() else {
         return false;
@@ -185,7 +199,7 @@ pub(crate) fn ignored_path_is_managed(copy: &Path, relative: &Path) -> bool {
         return std::fs::read_dir(copy.join(relative)).is_ok_and(|entries| {
             entries.into_iter().all(|entry| {
                 entry.is_ok_and(|entry| {
-                    ignored_path_is_managed(copy, &relative.join(entry.file_name()))
+                    ignored_path_is_managed(copy, &relative.join(entry.file_name()), base)
                 })
             })
         });
@@ -196,7 +210,10 @@ pub(crate) fn ignored_path_is_managed(copy: &Path, relative: &Path) -> bool {
     let expected = if relative == bin.join(GIT_SHIM_NAME) {
         git_fence_body(&canonical)
     } else if relative == bin.join(JJ_SHIM_NAME) {
-        jj_fence_body(&canonical)
+        let Some(base) = base else {
+            return false;
+        };
+        jj_fence_body(&canonical, base)
     } else {
         return false;
     };
@@ -437,6 +454,10 @@ fn sh_single_quote(value: &str) -> String {
 }
 
 fn discover_real_jj() -> Result<PathBuf, String> {
+    #[cfg(test)]
+    if let Some(path) = std::env::var_os("PLAK_TEST_JJ") {
+        return Ok(PathBuf::from(path));
+    }
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {
             if dir.ends_with(".plak/bin") {
@@ -457,102 +478,153 @@ fn discover_real_jj() -> Result<PathBuf, String> {
     Err("real jj executable was not found".into())
 }
 
-fn jj_shim_script(allowed: &Path, real_jj: &Path) -> String {
+fn jj_copy_git_shim(real_git: Option<&Path>) -> String {
+    format!(
+        r#"#!/bin/sh
+REAL_GIT={real_git}
+case "$1" in
+  --version|version|help)
+    [ -n "$REAL_GIT" ] || exit 127
+    exec "$REAL_GIT" "$@" ;;
+esac
+echo "plak: git refused: this copy is a jj workspace with no git directory; git would act on the launch checkout. Use jj (jj st, jj diff, jj log, jj commit). The candidate is sealed from this copy's files." >&2
+exit 128
+"#,
+        real_git = sh_single_quote(
+            &real_git
+                .map(|path| path.display().to_string())
+                .unwrap_or_default()
+        )
+    )
+}
+
+fn jj_shim_script(allowed: &Path, real_jj: &Path, base: &str) -> String {
     format!(
         r#"#!/bin/sh
 # Plak occupancy jj-op fence. Basename jj only.
-# Refuse repository escape and host-owned workspace mutations, then exec real jj.
 ALLOWED={allowed}
 REAL_JJ={real_jj}
-repo=""
-skip=0
-prev=""
+refuse() {{
+  echo "plak: jj-op refused: $* affects the whole repository, not this copy; report to the parent instead" >&2
+  exit 1
+}}
+check_config() {{
+  case "$1" in
+    *aliases*|*immutable_heads*|*snapshot*|*\\*) refuse "protected configuration" ;;
+  esac
+}}
+check_track() {{
+  # Fileset expressions and directories could include secret files indirectly.
+  case "$1" in ''|-*|*[!A-Za-z0-9._/@+,-]*) refuse "file track requires a simple explicit non-secret path" ;; esac
+  name=`printf '%s' "${{1##*/}}" | tr '[:upper:]' '[:lower:]'`
+  case "$name" in
+    .env.example) ;;
+    .env|.env.*|.netrc|.npmrc|credentials.json|id_rsa|id_ed25519|*.pem|*.key|*.p12|*.pfx) refuse "secret file track" ;;
+  esac
+  [ -f "$1" ] || refuse "file track requires explicit non-secret files"
+  track_count=$((track_count + 1))
+}}
 sub1=""
 sub2=""
+prev=""
+at_op=0
+track_count=0
+global_read=0
+arg_index=0
+command_index=0
+paths_only=0
 for arg in "$@"; do
-  if [ "$skip" -eq 1 ]; then
+  arg_index=$((arg_index + 1))
+  if [ "$paths_only" -eq 1 ] && [ "$sub1" = file ] && [ "$sub2" = track ]; then
+    check_track "$arg"
+    continue
+  fi
+  if [ -n "$prev" ]; then
     case "$prev" in
-      -R|--repository) repo=$arg ;;
+      --config) check_config "$arg" ;;
     esac
-    skip=0
     prev=""
     continue
   fi
+  # Only -R is a value-taking short global; refuse all clusters/glued values.
+  case "$arg" in --*) ;; -??*) refuse "clustered or glued short options; pass values separately" ;; esac
   case "$arg" in
-    --) break ;;
-    -R|--repository)
-      prev=$arg
-      skip=1
-      ;;
-    --repository=*)
-      repo=${{arg#--repository=}}
-      ;;
-    -*)
-      ;;
+    -R|--repository|-R?*|--repository=*) refuse "repository escapes occupancy copy" ;;
+    --ignore-immutable|--ignore-immutable=*) refuse "--ignore-immutable" ;;
+    --config-file|--config-file=*) refuse "--config-file" ;;
+    --config) prev=$arg ;;
+    --config=*) check_config "${{arg#*=}}" ;;
+    --at-op|--at-operation) at_op=1; prev=$arg ;;
+    --at-op=*|--at-operation=*) at_op=1 ;;
+    --color) prev=$arg ;;
+    --color=*) ;;
+    --help|-h|--version|-V) global_read=1 ;;
+    --) paths_only=1 ;;
+    -*) if [ "$sub1" = file ] && [ "$sub2" = track ]; then check_track "$arg"; fi ;;
     *)
-      if [ -z "$sub1" ]; then
-        sub1=$arg
-      elif [ -z "$sub2" ]; then
-        sub2=$arg
+      if [ -z "$sub1" ]; then sub1=$arg; command_index=$arg_index
+      elif [ -z "$sub2" ]; then sub2=$arg
+      elif [ "$sub1" = file ] && [ "$sub2" = track ]; then check_track "$arg"
       fi
       ;;
   esac
 done
 case "$sub1" in
-  init)
-    echo "plak: jj-op refused: this occupancy copy is already a workspace of the launch repo; 'jj init' would make it a standalone repo the launch checkout cannot see" >&2
-    exit 1
-    ;;
-  git)
-    case "$sub2" in
-      init|clone)
-        echo "plak: jj-op refused: this occupancy copy is already a workspace of the launch repo; 'jj git $sub2' would make it a standalone repo the launch checkout cannot see" >&2
-        exit 1
-        ;;
-    esac
-    ;;
-  workspace)
-    case "$sub2" in
-      add|forget|rename)
-        echo "plak: jj-op refused: workspace mutation escapes host mint" >&2
-        exit 1
-        ;;
-    esac
-    ;;
+  init) refuse "this occupancy copy is already a workspace of the launch repo" ;;
+  undo|redo|gerrit) refuse "$sub1" ;;
+  operation|op) case "$sub2" in log|show|diff) ;; *) refuse "$sub1 $sub2" ;; esac ;;
+  util) case "$sub2" in completion|config-schema|markdown-help|install-man-pages|exec|snapshot) ;; *) refuse "util $sub2" ;; esac ;;
+  git) case "$sub2" in root) ;; *) refuse "this occupancy copy is already a workspace of the launch repo; jj git $sub2" ;; esac ;;
+  bookmark|b) case "$sub2" in list|l) ;; *) refuse "bookmark mutation" ;; esac ;;
+  tag) case "$sub2" in list|l) ;; *) refuse "tag mutation" ;; esac ;;
+  workspace) case "$sub2" in list|root) ;; *) refuse "workspace mutation escapes host mint" ;; esac ;;
+  config) case "$sub2" in get|g|list|l|path|p) ;; *) refuse "config mutation" ;; esac ;;
+  file) if [ "$sub2" = track ] && [ "$track_count" -eq 0 ]; then refuse "file track requires explicit non-secret files"; fi ;;
+  abandon|absorb|arrange|bisect|commit|ci|converge|describe|desc|diff|diffedit|duplicate|edit|evolog|fix|help|interdiff|log|metaedit|new|next|parallelize|prev|rebase|resolve|restore|revert|root|run|show|sign|simplify-parents|sparse|split|squash|status|st|unsign|version) ;;
+  "") [ "$global_read" -eq 1 ] || refuse "missing command or configured default alias" ;;
+  *) refuse "unknown command or configured alias" ;;
 esac
-if [ -n "$repo" ]; then
-  case "$repo" in
-    "$ALLOWED"|"$ALLOWED"/*) ;;
-    /*)
-      echo "plak: jj-op refused: repository escapes occupancy copy" >&2
-      exit 1
-      ;;
-    *)
-      cwd=`pwd -P 2>/dev/null || pwd`
-      target=$cwd/$repo
-      target=`(cd "$target" 2>/dev/null && pwd -P) || echo "$target"`
-      case "$target" in
-        "$ALLOWED"|"$ALLOWED"/*) ;;
-        *)
-          echo "plak: jj-op refused: repository escapes occupancy copy" >&2
-          exit 1
-          ;;
-      esac
-      ;;
+if [ "$at_op" -eq 1 ]; then
+  case "$sub1" in
+    log|show|diff|status|st|evolog|interdiff) ;;
+    file) case "$sub2" in list|show|annotate|search) ;; *) refuse "--at-op file mutation" ;; esac ;;
+    operation|op) case "$sub2" in log|show|diff) ;; *) refuse "--at-op operation mutation" ;; esac ;;
+    *) refuse "--at-op with mutating command" ;;
   esac
 fi
+
 cwd=`pwd -P 2>/dev/null || pwd`
 case "$cwd" in
   "$ALLOWED"|"$ALLOWED"/*) ;;
-  *)
-    echo "plak: jj-op refused: working directory escapes occupancy copy" >&2
-    exit 1
-    ;;
+  *) refuse "working directory escapes occupancy copy" ;;
 esac
-exec "$REAL_JJ" "$@"
+# Expand admitted default aliases ourselves: jj ignores CLI alias overrides.
+expanded=""
+case "$sub1" in b) expanded=bookmark ;; ci) expanded=commit ;; desc) expanded=describe ;; op) expanded=operation ;; st) expanded=status ;; esac
+if [ -n "$expanded" ]; then
+  count=$#
+  index=0
+  while [ "$index" -lt "$count" ]; do
+    arg=$1
+    shift
+    index=$((index + 1))
+    if [ "$index" -eq "$command_index" ]; then set -- "$@" "$expanded"
+    else set -- "$@" "$arg"
+    fi
+  done
+fi
+exec "$REAL_JJ" --config {base_config} --config {immutable_config} --config {snapshot_config} "$@"
 "#,
         allowed = sh_single_quote(&allowed.display().to_string()),
         real_jj = sh_single_quote(&real_jj.display().to_string()),
+        base_config = sh_single_quote(&format!("revset-aliases.\"plak_base()\"=\"{base}\"")),
+        immutable_config = sh_single_quote(
+            "revset-aliases.\"immutable_heads()\"=\"(all() ~ plak_base()+::) | (working_copies() ~ @)\""
+        ),
+        snapshot_config = sh_single_quote(&format!(
+            "snapshot.auto-track=\"all() ~ ({})\"",
+            super::occupancy_vcs::secret_fileset()
+        )),
     )
 }
 
@@ -793,6 +865,404 @@ mod tests {
         dest
     }
 
+    #[test]
+    fn jj_copy_git_shim_refuses_status_and_never_touches_launch() {
+        if !jj_available() {
+            return;
+        }
+        let launch = jj_repo();
+        let child = mint_jj_child(launch.path(), "git-fence");
+        let shim = install(&child).unwrap();
+        std::fs::write(launch.path().join("SEED.txt"), "dirty launch").unwrap();
+        // Keep a real launch index to detect accidental Git side effects.
+        assert!(
+            Command::new("git")
+                .args(["init", "-q"])
+                .current_dir(launch.path())
+                .status()
+                .unwrap()
+                .success()
+        );
+        let index = launch.path().join(".git/index");
+        let before = std::fs::read(&index).ok();
+        std::fs::create_dir(child.join("sub")).unwrap();
+        for cwd in [&child, &child.join("sub")] {
+            for args in [
+                vec!["status"],
+                vec!["stash"],
+                vec!["checkout", "."],
+                vec!["--git-dir=../../../.git", "status"],
+            ] {
+                let out = Command::new(&shim)
+                    .args(&args)
+                    .current_dir(cwd)
+                    .output()
+                    .unwrap();
+                assert_eq!(out.status.code(), Some(128), "{args:?}");
+                assert!(String::from_utf8_lossy(&out.stderr).contains("Use jj"));
+            }
+        }
+        for args in [vec!["--version"], vec!["version"], vec!["help"]] {
+            assert!(
+                Command::new(&shim)
+                    .args(args)
+                    .current_dir(&child)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        assert_eq!(
+            std::fs::read_to_string(launch.path().join("SEED.txt")).unwrap(),
+            "dirty launch"
+        );
+        assert_eq!(std::fs::read(&index).ok(), before);
+        assert!(super::ignored_path_is_managed(
+            &child,
+            Path::new(".plak/bin/git"),
+            None,
+        ));
+    }
+
+    #[test]
+    fn jj_shim_refuses_repository_wide_operations() {
+        if !jj_available() {
+            return;
+        }
+        let parent = jj_repo();
+        let child = mint_jj_child(parent.path(), "refusals");
+        let sibling = mint_jj_child(parent.path(), "cluster-sibling");
+        std::fs::write(sibling.join("keep.txt"), "sibling work").unwrap();
+        let sibling_head = jj(
+            &sibling,
+            &["log", "-r", "@", "--no-graph", "-T", "commit_id"],
+        )
+        .stdout;
+        let launch_head = jj(
+            parent.path(),
+            &["log", "-r", "@", "--no-graph", "-T", "commit_id"],
+        )
+        .stdout;
+        let base = String::from_utf8(
+            jj(
+                &child,
+                &["log", "-r", "@-", "--no-graph", "-T", "commit_id"],
+            )
+            .stdout,
+        )
+        .unwrap();
+        let shim = install_jj(&child, base.trim()).unwrap();
+        let before = jj(
+            parent.path(),
+            &["op", "log", "--no-graph", "-n", "1", "-T", "id"],
+        )
+        .stdout;
+        let glued = format!("-sR{}", sibling.display());
+        let glued_log = format!("-GR{}", parent.path().display());
+        let cases = [
+            vec!["log", "-GR", parent.path().to_str().unwrap()],
+            vec!["log", &glued_log],
+            vec!["diff", &glued],
+            vec!["prev", "-nR", sibling.to_str().unwrap()],
+            vec!["next", "-nR", parent.path().to_str().unwrap()],
+            vec!["--color", "never", "--at-op", "@", "undo"],
+            vec!["log", "--config-file=ignored"],
+            vec!["workspace", "remove", "plak-sibling"],
+            vec!["tag", "track", "x@origin"],
+            vec!["tag", "untrack", "x@origin"],
+            vec!["dangerous-alias"],
+            vec!["util", "backend"],
+            vec!["--at-op", "@", "file", "track", ".env"],
+            vec!["--at-op", "@", "file", "untrack", "file.txt"],
+            vec!["--at-op", "@", "op", "integrate"],
+            vec!["file", "track", ".env"],
+            vec!["file", "track", "sub/ID_RSA"],
+            vec!["file", "track", "root-glob:**"],
+            vec!["file", "track"],
+            vec!["undo"],
+            vec!["redo"],
+            vec!["--color", "never", "undo"],
+            vec!["--color=never", "redo"],
+            vec!["op", "restore", "@-"],
+            vec!["operation", "revert", "@-"],
+            vec!["op", "abandon", "@-"],
+            vec!["op", "integrate"],
+            vec!["util", "gc"],
+            vec!["git", "push"],
+            vec!["git", "fetch"],
+            vec!["git", "import"],
+            vec!["git", "export"],
+            vec!["git", "remote", "list"],
+            vec!["bookmark", "set", "main"],
+            vec!["b", "s", "main"],
+            vec!["bookmark", "delete", "main"],
+            vec!["tag", "set", "test"],
+            vec!["tag", "s", "test"],
+            vec!["tag", "delete", "test"],
+            vec!["tag", "d", "test"],
+            vec!["workspace", "add", "elsewhere"],
+            vec!["workspace", "forget"],
+            vec!["workspace", "rename", "other"],
+            vec!["workspace", "update-stale"],
+            vec!["config", "set", "user.name", "other"],
+            vec!["config", "s"],
+            vec!["config", "unset"],
+            vec!["config", "u"],
+            vec!["config", "edit"],
+            vec!["config", "e"],
+            vec!["config", "gc"],
+            vec!["gerrit"],
+            vec!["--ignore-immutable", "describe"],
+            vec!["--config-file", "config.toml", "status"],
+            vec!["--config-file=config.toml", "status"],
+            vec!["--config", "revset-aliases.x='all()'", "status"],
+            vec!["--config=revset-aliases.x='all()'", "status"],
+            vec!["--config", "snapshot.auto-track='all()'", "status"],
+            vec!["--at-op", "@-", "describe"],
+            vec!["--at-operation=@-", "commit"],
+            vec!["-R", ".", "status"],
+            vec!["--repository=.", "status"],
+        ];
+        for args in cases {
+            let out = Command::new(&shim)
+                .args(&args)
+                .env("JJ_CONFIG", "/dev/null")
+                .current_dir(&child)
+                .output()
+                .unwrap();
+            assert_eq!(
+                out.status.code(),
+                Some(1),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert!(String::from_utf8_lossy(&out.stderr).contains("jj-op refused"));
+        }
+        assert_eq!(
+            jj(
+                parent.path(),
+                &["op", "log", "--no-graph", "-n", "1", "-T", "id"]
+            )
+            .stdout,
+            before
+        );
+        assert_eq!(
+            std::fs::read_to_string(sibling.join("keep.txt")).unwrap(),
+            "sibling work"
+        );
+        assert_eq!(
+            jj(
+                &sibling,
+                &["log", "-r", "@", "--no-graph", "-T", "commit_id"]
+            )
+            .stdout,
+            sibling_head
+        );
+        assert_eq!(
+            jj(
+                parent.path(),
+                &["log", "-r", "@", "--no-graph", "-T", "commit_id"]
+            )
+            .stdout,
+            launch_head
+        );
+        assert!(super::ignored_path_is_managed(
+            &child,
+            Path::new(".plak/bin/jj"),
+            Some(base.trim())
+        ));
+        assert!(!super::ignored_path_is_managed(
+            &child,
+            Path::new(".plak/bin/jj"),
+            Some("wrong-base")
+        ));
+    }
+
+    #[cfg(feature = "jj-lib")]
+    #[test]
+    fn jj_shim_immutability_and_secret_auto_track() {
+        if !jj_available() {
+            return;
+        }
+        let launch = crate::vcs_fixtures::jj_repo();
+        let child =
+            crate::native_jj::mint(launch.path(), "protected", launch.path(), None).unwrap();
+        let sibling =
+            crate::native_jj::mint(launch.path(), "sibling", launch.path(), None).unwrap();
+        let shim = child.path.join(".plak/bin/jj");
+        let before = jj(
+            launch.path(),
+            &["op", "log", "--no-graph", "-n", "1", "-T", "id"],
+        )
+        .stdout;
+        for args in [
+            vec!["workspace", "remove", sibling.branch.as_deref().unwrap()],
+            vec!["tag", "track", "x@origin"],
+        ] {
+            let denied = Command::new(&shim)
+                .args(args)
+                .env("JJ_CONFIG", "/dev/null")
+                .current_dir(&child.path)
+                .output()
+                .unwrap();
+            assert_eq!(denied.status.code(), Some(1));
+            assert!(String::from_utf8_lossy(&denied.stderr).contains("jj-op refused"));
+        }
+        assert!(sibling.path.join("SEED.txt").is_file());
+        assert_eq!(
+            jj(
+                launch.path(),
+                &["op", "log", "--no-graph", "-n", "1", "-T", "id"]
+            )
+            .stdout,
+            before
+        );
+        let config = launch.path().join("aliases.toml");
+        std::fs::write(&config, "[aliases]\ndangerous-alias=['undo']\nb=['undo']\n").unwrap();
+        let denied = Command::new(&shim)
+            .arg("dangerous-alias")
+            .env("JJ_CONFIG", &config)
+            .current_dir(&child.path)
+            .output()
+            .unwrap();
+        assert_eq!(denied.status.code(), Some(1));
+        let safe = Command::new(&shim)
+            .args(["b", "list"])
+            .env("JJ_CONFIG", &config)
+            .current_dir(&child.path)
+            .output()
+            .unwrap();
+        assert!(
+            safe.status.success(),
+            "{}",
+            String::from_utf8_lossy(&safe.stderr)
+        );
+        std::fs::remove_file(config).unwrap();
+        let root = String::from_utf8(
+            jj(
+                launch.path(),
+                &["log", "-r", "@", "--no-graph", "-T", "commit_id"],
+            )
+            .stdout,
+        )
+        .unwrap();
+        let sibling_head = String::from_utf8(
+            jj(
+                &sibling.path,
+                &["log", "-r", "@", "--no-graph", "-T", "commit_id"],
+            )
+            .stdout,
+        )
+        .unwrap();
+        for revision in [root.trim(), sibling_head.trim(), child.base.commit.as_str()] {
+            for command in ["edit", "abandon", "describe"] {
+                let mut args = vec![command, "-r", revision];
+                if command == "describe" {
+                    args.extend(["-m", "forbidden"]);
+                }
+                let out = Command::new(&shim)
+                    .args(&args)
+                    .env("JJ_CONFIG", "/dev/null")
+                    .current_dir(&child.path)
+                    .output()
+                    .unwrap();
+                assert!(!out.status.success(), "{args:?}");
+                assert!(
+                    String::from_utf8_lossy(&out.stderr).contains("immutable"),
+                    "{}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+            }
+        }
+        std::fs::create_dir(child.path.join("sub")).unwrap();
+        for name in [
+            ".env",
+            ".ENV.production",
+            "id_rsa",
+            "x.pem",
+            "-id.pem",
+            "sub/X.KEY",
+            ".env.example",
+            "ordinary.txt",
+        ] {
+            std::fs::write(child.path.join(name), "fixture").unwrap();
+        }
+        for args in [
+            vec!["file", "track", ".env"],
+            vec!["file", "track", "\".env\""],
+            vec!["file", "track", "ordinary.txt&.env"],
+            vec!["file", "track", "ordinary.txt", "--", "-id.pem"],
+            vec!["file", "track", "all()"],
+            vec!["--at-op", "@", "file", "track", "ordinary.txt"],
+        ] {
+            let denied = Command::new(&shim)
+                .args(args)
+                .env("JJ_CONFIG", "/dev/null")
+                .current_dir(&child.path)
+                .output()
+                .unwrap();
+            assert_eq!(denied.status.code(), Some(1));
+        }
+        let tracked = Command::new(&shim)
+            .args(["file", "track", "ordinary.txt", ".env.example"])
+            .env("JJ_CONFIG", "/dev/null")
+            .current_dir(&child.path)
+            .output()
+            .unwrap();
+        assert!(
+            tracked.status.success(),
+            "{}",
+            String::from_utf8_lossy(&tracked.stderr)
+        );
+        for args in [
+            vec!["st"],
+            vec!["log"],
+            vec!["diff", "--from", "plak_base()"],
+            vec!["op", "log"],
+            vec!["bookmark", "list"],
+            vec!["b", "l"],
+            vec!["git", "root"],
+            vec!["describe", "-m", "own"],
+            vec!["commit", "-m", "own"],
+            vec!["new"],
+        ] {
+            let out = Command::new(&shim)
+                .args(&args)
+                .env("JJ_CONFIG", "/dev/null")
+                .current_dir(child.path.join("sub"))
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        let output = Command::new(&shim)
+            .args(["file", "list"])
+            .env("JJ_CONFIG", "/dev/null")
+            .current_dir(&child.path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let listed = String::from_utf8(output.stdout).unwrap();
+        for name in [
+            ".env",
+            ".ENV.production",
+            "id_rsa",
+            "x.pem",
+            "-id.pem",
+            "sub/X.KEY",
+        ] {
+            assert!(!listed.lines().any(|line| line == name), "{listed}");
+        }
+        assert!(listed.contains(".env.example"));
+        crate::native_jj::snapshot(&child.path).unwrap();
+    }
     #[test]
     fn cwd_inside_copy_is_admitted() {
         let parent = git_repo();
@@ -1140,7 +1610,7 @@ mod tests {
     }
 
     fn jj_available() -> bool {
-        Command::new("jj")
+        Command::new(std::env::var_os("PLAK_TEST_JJ").unwrap_or_else(|| "jj".into()))
             .arg("--version")
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -1150,7 +1620,7 @@ mod tests {
     }
 
     fn jj(root: &Path, args: &[&str]) -> std::process::Output {
-        Command::new("jj")
+        Command::new(std::env::var_os("PLAK_TEST_JJ").unwrap_or_else(|| "jj".into()))
             .args(["--no-pager"])
             .args([
                 "--config",
@@ -1197,7 +1667,15 @@ mod tests {
         }
         let parent = jj_repo();
         let child = mint_jj_child(parent.path(), "c1");
-        let shim = install_jj(&child).unwrap();
+        let base = String::from_utf8(
+            jj(
+                &child,
+                &["log", "-r", "@-", "--no-graph", "-T", "commit_id"],
+            )
+            .stdout,
+        )
+        .unwrap();
+        let shim = install_jj(&child, base.trim()).unwrap();
         for args in [
             vec!["init"],
             vec!["git", "init"],
@@ -1231,7 +1709,15 @@ mod tests {
         }
         let parent = jj_repo();
         let child = mint_jj_child(parent.path(), "c1");
-        let shim = install_jj(&child).unwrap();
+        let base = String::from_utf8(
+            jj(
+                &child,
+                &["log", "-r", "@-", "--no-graph", "-T", "commit_id"],
+            )
+            .stdout,
+        )
+        .unwrap();
+        let shim = install_jj(&child, base.trim()).unwrap();
         for args in [
             vec!["workspace", "add", "sub"],
             vec!["workspace", "forget", "c1"],
@@ -1268,7 +1754,15 @@ mod tests {
         }
         let parent = jj_repo();
         let child = mint_jj_child(parent.path(), "c1");
-        let shim = install_jj(&child).unwrap();
+        let base = String::from_utf8(
+            jj(
+                &child,
+                &["log", "-r", "@-", "--no-graph", "-T", "commit_id"],
+            )
+            .stdout,
+        )
+        .unwrap();
+        let shim = install_jj(&child, base.trim()).unwrap();
         for args in [
             vec!["status"],
             vec!["workspace", "root"],

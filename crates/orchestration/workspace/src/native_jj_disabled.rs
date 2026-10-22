@@ -38,7 +38,7 @@ pub(super) fn over(_: &Path, _: &str, _: &VcsSnapshot) -> bool {
 pub(super) fn dirty(_: &Path) -> bool {
     true
 }
-pub(super) fn ahead_behind(_: &Path, _: &Path) -> Option<(u64, u64)> {
+pub(super) fn ahead_behind(_: &Path, _: &Path, _: Option<&str>) -> Option<(u64, u64)> {
     None
 }
 #[cfg(test)]
@@ -47,5 +47,14 @@ pub(super) fn resolve(_: &Path, _: &str) -> Option<String> {
 }
 
 pub(super) fn pin(_: &Path, _: &str, _: &str, _: Option<&str>) -> Result<(), VcsError> {
+    Err(unavailable())
+}
+
+pub(super) fn validate_copy_base(_: &Path, _: &str) -> Result<(), VcsError> {
+    Err(unavailable())
+}
+pub(super) const BUILT_LIBRARY_VERSION: Option<&str> = None;
+
+pub(super) fn history_left_base(_: &Path, _: &str, _: &str) -> Result<bool, VcsError> {
     Err(unavailable())
 }

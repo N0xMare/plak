@@ -1115,12 +1115,25 @@ The hidden `test-clock` feature is excluded from supported feature closures
 and inventory, and checked absent from default, maintainer and release builds;
 only dev-dependencies or repository `test-hooks` enable it.
 
+On a colocated JJ root, `just full` records the Git tree of snapshotted `@`
+at start and end, refuses conflicted `@`, and requires equal trees. `@` need
+not be empty. Evidence is recorded only where `.git` is a directory, never
+in linked Git or secondary JJ workspaces; their package dry run still uses
+the shared VCS listing. Copies reuse the launch's `.dev-tools` when they have
+none of their own. Install/relink builds likewise require a `.git` directory.
 The evidence file is written only by a passing `just full` that began and
-ended on the same clean tree (chapter 05 §1), so an upload always follows a
-full gate on exactly the bytes it packages. Publishing is a maintainer act;
+ended on the same clean Git tree or unconflicted colocated JJ tree (chapter 05 §1),
+so an upload always follows a full gate on exactly the bytes it packages. Publishing is a maintainer act;
 no gate or workflow uploads. The maintainer runs `just full` and then
 `just publish --execute` on a gated host, from the tagged tree whose release
 tarballs §6.6 builds.
+
+For colocated JJ: test `@` with `just full`, then `jj commit` or `jj new` so
+`@` is empty before `just publish` (which still checks clean Git status and
+`HEAD^{tree}`). Tag `@-` with `jj tag set vX.Y.Z -r @-` or Git, set the main
+bookmark to `@-`, push it with JJ and push tags with Git. Never push
+`refs/plak/*` (in particular, never `git push --mirror`). Release automation
+continues to clone plain Git.
 
 ### 6.6 Release artifacts and the installer
 
@@ -1200,17 +1213,23 @@ interoperability, or maintenance benefit over a small local implementation. Each
 material choice records its maintenance, correctness, MSRV, license, security,
 and feature-cost reasoning. Default features are reviewed rather than accepted.
 
-Native JJ uses crates.io `jj-lib =0.45.1` (Apache-2.0, upstream MSRV 1.89),
+Native JJ uses crates.io `jj-lib =0.46.0` (Apache-2.0, upstream MSRV 1.97.1),
 with default features disabled and only `git` enabled; Watchman is excluded.
-Its Git backend uses `gix =0.87.1` in process; a matching direct dependency
+Its Git backend uses `gix =0.88.0` in process; a matching direct dependency
 with defaults disabled accesses immutable candidate refs in that existing Git
 backend, without importing Git types into the workspace port. `pollster =1.0.1` drives the library's
 async local operations without a nested Tokio runtime or detached worker.
 The workspace's own unsafe ban is unchanged; as with other dependencies it
 is not a blanket claim that transitive upstream crates contain no unsafe.
 Repository types remain private to `plakous-workspace`. Compatibility with
-installed external JJ 0.39 through 0.45 executables is covered by real
-repository tests;
+installed external JJ 0.44 through 0.46 executables is covered by real
+repository tests. The supported CLI range is the library minor and its two
+previous minors; a newer CLI is unsupported until the library is bumped.
+Each bump updates `JJ_LIB_VERSION`, `JJ_CLI_SUPPORTED`, the user guide and
+reruns JJ tests against the lowest and highest supported binaries. The opt-in
+`just jj-compat` lane (not a gate tier) tests all three pinned minors;
+`just dev-tools install` installs checksummed release archives under
+`.dev-tools/jj/<version>/jj`. Fixtures honor `PLAK_TEST_JJ`;
 this is not a promise of compatibility with arbitrary custom backends or
 future repository formats.
 

@@ -399,9 +399,23 @@ in process and do not require the `jj` executable. See
   and untracked files. It does not reset the copy to make it usable.
 - Do not run `jj git init` inside a Plak-minted copy: that creates a separate
   repository instead of a workspace of the launch repository.
-- Native operations are tested alongside external JJ CLIs in the 0.39-0.45 range. Human JJ
+- Native operations are tested alongside external JJ CLIs in the 0.44-0.46 range (library 0.46.0). Human JJ
   commands remain usable; immutable candidate pins do not create JJ bookmarks
   or tags that change normal rewrite rules.
+
+For JJ users, the recommended repository configuration is:
+
+```toml
+[revset-aliases]
+"immutable_heads()" = "builtin_immutable_heads() | (working_copies() ~ @)"
+```
+
+Plak never writes this owner setting. It protects running forks' ancestry from
+owner rewrites. Ordinary parent edits, `jj describe`, `jj commit` and `jj new`
+do not stale a running fork. In child copies, use `jj st`, `jj diff`, `jj log`
+and `jj commit`, not Git; repository-wide operations and protected configuration
+changes are refused. Inspect `plak doctor`'s `jj_cli` row for CLI version skew.
+Close or discard dormant JJ copies explicitly; JJ reclamation is not yet available.
 
 ## `plak agent`: driving Plak as JSONL
 

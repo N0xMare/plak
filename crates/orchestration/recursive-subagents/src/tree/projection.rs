@@ -28,7 +28,7 @@ pub struct NodeOccupancy {
 /// its arguments — the same shape the seal, adopt, and mint tickets use.
 #[derive(Clone, Debug, Default)]
 pub struct OccupancyProbe {
-    rows: Vec<(String, PathBuf, Option<PathBuf>)>,
+    rows: Vec<(String, PathBuf, Option<PathBuf>, Option<String>)>,
 }
 
 impl OccupancyProbe {
@@ -38,10 +38,10 @@ impl OccupancyProbe {
         Occupancy(
             self.rows
                 .into_iter()
-                .map(|(agent_id, path, parent_path)| {
+                .map(|(agent_id, path, parent_path, base)| {
                     let dirty = vcs.dirty(&path);
-                    let ahead_behind =
-                        parent_path.and_then(|parent| vcs.ahead_behind(&path, &parent));
+                    let ahead_behind = parent_path
+                        .and_then(|parent| vcs.ahead_behind(&path, &parent, base.as_deref()));
                     (
                         agent_id,
                         NodeOccupancy {
@@ -107,7 +107,14 @@ impl ProductAgentTree {
                 .as_ref()
                 .and_then(|parent| self.nodes.get(parent))
                 .map(|parent| parent.path.clone());
-            probe.rows.push((id, node.path.clone(), parent));
+            probe.rows.push((
+                id,
+                node.path.clone(),
+                parent,
+                self.workspaces
+                    .get(&node.workspace_id)
+                    .and_then(|row| row.base_commit.clone()),
+            ));
         }
         Ok(probe)
     }
@@ -549,6 +556,23 @@ mod tests {
         let mut tree = tree_at(repo.path().to_path_buf(), WriterMode::SingleLease);
         let spawned = tree.spawn_agent("root", &mint_req(), None).unwrap();
         let path = tree.node(&spawned.agent_id).unwrap().path.clone();
+        let fresh = tree
+            .list_agents(
+                "root",
+                &ListAgentsRequest {
+                    include_read: None,
+                    include_self: Some(false),
+                    include_completed: Some(false),
+                },
+            )
+            .unwrap();
+        let row = fresh
+            .agents
+            .iter()
+            .find(|row| row["agent_id"] == spawned.agent_id)
+            .unwrap();
+        assert_eq!(row["ahead"], 0);
+        assert_eq!(row["behind"], 0);
         std::fs::write(path.join("AHEAD.txt"), "ahead\n").unwrap();
         jj_commit(&path, &["AHEAD.txt"], "child ahead");
         let listed = tree
@@ -596,7 +620,7 @@ mod tests {
         request.inputs = Some(vec![candidate.to_string()]);
         let first = tree.spawn_agent("root", &request, None).unwrap();
         let before = tree.nodes().len();
-        assert_ne!(
+        assert_eq!(
             tree.workspace(&first.workspace.id)
                 .unwrap()
                 .base_commit

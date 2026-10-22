@@ -58,6 +58,7 @@ struct Reclamation {
 impl Reclamation {
     fn snapshot(&self) -> Result<VcsSnapshot, TopologyError> {
         Ok(VcsSnapshot {
+            history_left_base: false,
             commit: self.commit.clone().ok_or_else(reclamation_corrupt)?,
             content: self.content.clone().ok_or_else(reclamation_corrupt)?,
             change_id: self.change_id.clone(),

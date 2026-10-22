@@ -577,9 +577,8 @@ pub struct WorkspaceRecord {
     /// The tree hash at that base, so divergence is asked by content.
     pub base_content: Option<String>,
     /// The jj change the copy was minted on (`None` on git and on `inherit`).
-    /// Divergence and adoption are both asked against this change, never
-    /// against `base_commit`: jj rewrites commit ids under a copy whenever
-    /// anything snapshots elsewhere in the repo.
+    /// Presentation and lineage only; the exact frozen `base_commit` is the
+    /// merge and divergence authority. Parent snapshots cannot rewrite it.
     pub base_change_id: Option<String>,
     /// Bumped every time the copy is re-minted at the same id, so a live
     /// handle from an earlier generation is recognisable as stale.
@@ -883,7 +882,9 @@ impl SealTicket {
     /// phase. An unpin refusal is a recoverable seal failure, never an empty
     /// candidate success.
     pub fn seal(&self, vcs: &dyn VcsOps) -> Result<Option<VcsSnapshot>, VcsError> {
-        let sealed = vcs.seal(&self.path, &self.namespace, self.candidate_id.as_str())?;
+        let mut sealed = vcs.seal(&self.path, &self.namespace, self.candidate_id.as_str())?;
+        sealed.history_left_base =
+            vcs.history_left_base(&self.path, &self.base_commit, &sealed.commit)?;
         if !diverged_from_base(&sealed, &self.base_content) {
             vcs.unpin(&self.path, &self.namespace, self.candidate_id.as_str())?;
             return Ok(None);
@@ -922,6 +923,7 @@ impl AdoptTicket {
             &self.candidate.base_commit,
             self.candidate.base_change_id.as_deref(),
             &VcsSnapshot {
+                history_left_base: false,
                 commit: self.candidate.commit.clone(),
                 content: self.candidate.content.clone(),
                 change_id: self.candidate.change_id.clone(),

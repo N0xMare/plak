@@ -25,6 +25,9 @@ except ImportError:  # pragma: no cover - Python has no resource module on Windo
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools/checks"))
+import vcs_listing  # noqa: E402
+
 SCHEMA = "plakous.perf-build.v9"
 FIXTURE = {"name": "isolated-build-closure-matrix", "revision": 9}
 SUPPORTED_PUBLIC_BUILD_PROFILES = {
@@ -555,6 +558,16 @@ def cargo_package_and_inputs(
 
 def git_identity() -> dict[str, object]:
     """Return the commit plus current non-ignored source-content identity."""
+    if vcs_listing.kind(ROOT) == "jj":
+        commit = vcs_listing.jj(ROOT, "log", "-r", "@", "--no-graph", "-T", "commit_id").strip()
+        status = vcs_listing.jj(ROOT, "diff", "--summary").encode()
+        return {
+            "commit": commit,
+            "dirty": bool(status),
+            "status_sha256": sha256_bytes(status),
+            "tracked_patch_sha256": sha256_bytes(vcs_listing.jj(ROOT, "diff", "--git").encode()),
+            "non_ignored_worktree_content_closure": worktree_content_closure(),
+        }
     git = executable("git")
     commit = checked_stdout([git, "rev-parse", "--verify", "HEAD"]).decode().strip()
     status = checked_stdout(
@@ -567,15 +580,13 @@ def git_identity() -> dict[str, object]:
         "tracked_patch_sha256": checked_stdout_sha256(
             [git, "diff", "--binary", "HEAD"]
         ),
-        "non_ignored_worktree_content_closure": worktree_content_closure(git),
+        "non_ignored_worktree_content_closure": worktree_content_closure(),
     }
 
 
-def worktree_content_closure(git: str) -> dict[str, object]:
+def worktree_content_closure() -> dict[str, object]:
     """Hash current tracked and non-ignored untracked source bytes."""
-    listing = checked_stdout(
-        [git, "ls-files", "-z", "--cached", "--others", "--exclude-standard"]
-    )
+    listing = "\0".join(vcs_listing.listed_files(ROOT)).encode()
     framed = bytearray()
     file_count = 0
     content_bytes = 0
@@ -600,7 +611,7 @@ def worktree_content_closure(git: str) -> dict[str, object]:
         "file_count": file_count,
         "content_bytes": content_bytes,
         "missing_tracked_files": missing_tracked_files,
-        "rule": "ordered git ls-files cached plus non-ignored untracked paths, framed with each current file content or a missing marker",
+        "rule": "ordered VCS-listed tracked plus non-ignored untracked paths, framed with each current file content or a missing marker",
     }
 
 

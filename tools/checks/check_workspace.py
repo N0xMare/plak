@@ -34,9 +34,12 @@ import tomllib
 from collections.abc import Iterable
 from functools import lru_cache
 from pathlib import Path
+
 from typing import Any, NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import vcs_listing  # noqa: E402
 
 from plakous_policy import (  # noqa: E402
     ABOVE_FACADE_LAYERS,
@@ -360,6 +363,7 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[SourceKey, list[tuple[str, tuple[tuple[
         ("var_os", (("string", "OTEL_EXPORTER_OTLP_ENDPOINT"),)),
     ],
     ("plak", "src/commands/doctor.rs"): [
+        ("var_os", (("string", "PATH"),)),
         ("var_os", (("string", "XDG_RUNTIME_DIR"),)),
     ],
     ("plak", "src/presentation.rs"): [
@@ -438,8 +442,12 @@ EXPECTED_PRODUCT_ENVIRONMENT_CALLS: dict[SourceKey, list[tuple[str, tuple[tuple[
     ("plakous-workspace", "src/workspace.rs"): [
         ("var_os", (("string", "HOME"),)),
     ],
+    ("plakous-workspace", "src/vcs_fixtures.rs"): [
+        ("var_os", (("string", "PLAK_TEST_JJ"),)),
+    ],
     ("plakous-workspace", "src/git_redirect_fence.rs"): [
         ("var_os", (("string", "PATH"),)),
+        ("var_os", (("string", "PLAK_TEST_JJ"),)),
         ("var_os", (("string", "PATH"),)),
     ],
 }
@@ -461,6 +469,10 @@ EXPECTED_PRODUCT_GENERATED_MACROS: dict[SourceKey, tuple[str, ...]] = {
     ("plak", "src/capabilities/grok.rs"): ("include_str",) * 4,
 }
 EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[SourceKey, list[tuple[str, tuple[tuple[str, str], ...]]]] = {
+    # Doctor's one cleared-env, five-second, own-group local version probe.
+    ("plak", "src/product_doctor/jj_cli.rs"): [
+        ("Command", (("identifier", "executable"),)),
+    ],
     ("plak", "src/terminal_application.rs"): [
         ("std::process::Command", (("string", "open"),)),
         ("std::process::Command", (("string", "xdg-open"),)),
@@ -489,6 +501,7 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[SourceKey, list[tuple[str, tuple[tuple[s
     # Behind `test-support`: real-repository fixtures for the crates whose
     # tests drive a copy. Pinned like every other invocation in this package.
     ("plakous-workspace", "src/vcs_fixtures.rs"): [
+        ("Command", (("identifier", "executable"),)),
         ("Command", (("string", "git"),)),
         ("Command", (("string", "git"),)),
         ("Command", (("string", "git"),)),
@@ -497,12 +510,6 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[SourceKey, list[tuple[str, tuple[tuple[s
         ("Command", (("string", "git"),)),
         ("Command", (("string", "git"),)),
         ("Command", (("string", "git"),)),
-        ("Command", (("string", "jj"),)),
-        ("Command", (("string", "jj"),)),
-        ("Command", (("string", "jj"),)),
-        ("Command", (("string", "jj"),)),
-        ("Command", (("string", "jj"),)),
-        ("Command", (("string", "jj"),)),
         ("Command", (("string", "git"),)),
         ("Command", (("string", "git"),)),
         ("Command", (("string", "git"),)),
@@ -514,6 +521,7 @@ EXPECTED_PRODUCT_PROCESS_COMMANDS: dict[SourceKey, list[tuple[str, tuple[tuple[s
     ],
 }
 EXPECTED_PRODUCT_PROCESS_IMPORTS: dict[SourceKey, set[str]] = {
+    ("plak", "src/product_doctor/jj_cli.rs"): {"Command", "Stdio"},
     ("plak", "src/main.rs"): {"ExitCode"},
     ("plak", "src/lib.rs"): {"ExitCode"},
     ("plak", "src/oauth_ui.rs"): {"Command", "Stdio"},
@@ -3355,20 +3363,13 @@ def newest_tracked_source_mtime(root: Path) -> float | None:
     """Return the newest mtime among tracked Rust sources and Cargo metadata.
 
     `Cargo.lock` is matched by the same listing, so a dependency change dates
-    the tree just as a source edit does. Returns `None` when `git` cannot be
-    asked, in which case staleness is simply not decided.
+    the tree just as a source edit does. Returns `None` only when there is no
+    extant source input; repository listing failures propagate.
     """
-    result = subprocess.run(
-        ["git", "ls-files", "-z", "--", "*.rs", "*Cargo.toml", "Cargo.lock"],
-        cwd=root,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        return None
+    listed = [path for path in vcs_listing.listed_files(root)
+              if path.endswith((".rs", "Cargo.toml")) or path == "Cargo.lock"]
     newest: float | None = None
-    for relative in result.stdout.split("\0"):
+    for relative in listed:
         if not relative:
             continue
         try:
@@ -3618,23 +3619,7 @@ def hygiene_candidate_files(root: Path) -> list[str]:
     Outside a git checkout (the musl container's source export holds exactly
     that set) every regular file except build output is scanned.
     """
-    try:
-        listing = subprocess.run(
-            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-            cwd=root,
-            capture_output=True,
-            check=False,
-        )
-    except OSError:
-        listing = None
-    if listing is not None and listing.returncode == 0:
-        return sorted({name.decode() for name in listing.stdout.split(b"\0") if name})
-    files: list[str] = []
-    for directory, directories, names in os.walk(root):
-        directories[:] = [name for name in directories if name not in {".git", "target"}]
-        for name in names:
-            files.append((Path(directory) / name).relative_to(root).as_posix())
-    return sorted(files)
+    return vcs_listing.listed_files(root)
 
 
 def validate_tracked_hygiene(
@@ -3749,19 +3734,8 @@ def package_rust_files(root: Path, package: Package, nested: set[str]) -> dict[s
     the tracked and nonignored untracked files) every `*.rs` file under the
     package directory except build output counts as tracked.
     """
-    if (root / ".git").exists():
-        listed = subprocess.run(
-            ["git", "ls-files", "-z", "--", f"{package.directory}/*.rs"],
-            cwd=root, capture_output=True, check=True,
-        ).stdout.decode().split("\0")
-    else:
-        listed = []
-        for directory, directories, names in os.walk(root / package.directory):
-            directories[:] = sorted(name for name in directories if name not in {".git", "target"})
-            listed.extend(
-                (Path(directory) / name).relative_to(root).as_posix()
-                for name in sorted(names) if name.endswith(".rs")
-            )
+    listed = [path for path in vcs_listing.listed_files(root)
+              if path.startswith(f"{package.directory}/") and path.endswith(".rs")]
     files: dict[str, str] = {}
     for path in filter(None, listed):
         if any(path.startswith(f"{other}/") for other in nested):

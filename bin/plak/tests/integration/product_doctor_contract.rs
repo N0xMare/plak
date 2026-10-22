@@ -49,6 +49,7 @@ fn input(temp: &TempDir) -> DoctorInputs {
     private_directory(&paths.state_dir());
     private_directory(&paths.sessions_dir());
     DoctorInputs {
+        jj_cli: product_doctor::jj_cli::probe(None, temp.path()),
         version: "0.1.0-test".to_owned(),
         paths: DoctorPaths::under(home),
         config: ConfigStatus::Parsed,
@@ -667,4 +668,104 @@ fn doctor_reports_non_database_bytes_as_corrupt_and_lock_contention_as_unavailab
         product_doctor::inspect_state_database(&path, 1),
         DatabaseStatus::Available
     );
+}
+
+#[test]
+fn jj_cli_doctor_versions_and_missing_are_nonblocking() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let temp = tempfile::tempdir().unwrap();
+    assert_eq!(
+        product_doctor::jj_cli::probe(None, temp.path()).result,
+        "missing"
+    );
+    for (text, result, severity) in [
+        ("jj 0.44.0", "available", Severity::Ok),
+        ("jj 0.45.0", "available", Severity::Ok),
+        ("jj 0.46.0", "available", Severity::Ok),
+        ("jj 0.43.0", "untested", Severity::Warning),
+        ("jj 0.47.0", "untested", Severity::Warning),
+        ("not a version", "unavailable", Severity::Warning),
+    ] {
+        let binary = temp.path().join("jj");
+        fs::write(&binary, format!("#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 99\n[ -z \"${{HOME+x}}\" ] || exit 98\nprintf '%s\\n' '{text}'\n")).unwrap();
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+        let row = product_doctor::jj_cli::probe(Some(temp.path().as_os_str()), temp.path());
+        assert_eq!(row.kind, CheckKind::JjCli);
+        if plakous_hosted::built_jj_library_version().is_none() {
+            assert!(row.detail.contains("library not built"));
+        }
+        assert_eq!(row.result, result, "{text}: {}", row.detail);
+        assert_eq!(row.severity, severity);
+    }
+    let shim = temp.path().join(".plak/bin");
+    fs::create_dir_all(&shim).unwrap();
+    fs::copy(temp.path().join("jj"), shim.join("jj")).unwrap();
+    assert_eq!(
+        product_doctor::jj_cli::probe(Some(shim.as_os_str()), temp.path()).result,
+        "missing"
+    );
+}
+
+#[test]
+fn jj_cli_doctor_kills_hanging_process_group_at_five_seconds() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let temp = tempfile::tempdir().unwrap();
+    let binary = temp.path().join("jj");
+    fs::write(
+        &binary,
+        "#!/bin/sh\n/bin/sleep 60 &\necho $! >descendant\nwait\n",
+    )
+    .unwrap();
+    fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+    let started = std::time::Instant::now();
+    let row = product_doctor::jj_cli::probe(Some(temp.path().as_os_str()), temp.path());
+    assert_eq!(row.severity, Severity::Warning);
+    assert_eq!(row.result, "unavailable");
+    assert!(started.elapsed() >= std::time::Duration::from_secs(5));
+    assert!(started.elapsed() < std::time::Duration::from_secs(8));
+    #[cfg(target_os = "linux")]
+    assert_jj_descendant_retired(temp.path());
+}
+
+#[test]
+fn jj_cli_doctor_bounds_output_wait_after_leader_exit() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let temp = tempfile::tempdir().unwrap();
+    let binary = temp.path().join("jj");
+    fs::write(
+        &binary,
+        "#!/bin/sh\nprintf 'jj 0.46.0\\n'\n/bin/sleep 60 &\necho $! >descendant\nexit 0\n",
+    )
+    .unwrap();
+    fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+    let started = std::time::Instant::now();
+    let row = product_doctor::jj_cli::probe(Some(temp.path().as_os_str()), temp.path());
+    assert_eq!(row.severity, Severity::Ok);
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    #[cfg(target_os = "linux")]
+    assert_jj_descendant_retired(temp.path());
+}
+
+#[cfg(target_os = "linux")]
+fn assert_jj_descendant_retired(path: &std::path::Path) {
+    let pid = fs::read_to_string(path.join("descendant")).unwrap();
+    let stat_path = format!("/proc/{}/stat", pid.trim());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    loop {
+        let Ok(stat) = fs::read_to_string(&stat_path) else {
+            return;
+        };
+        if matches!(
+            stat.split_once(") ").unwrap().1.chars().next(),
+            Some('Z' | 'X')
+        ) {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "jj descendant survived: {stat}"
+        );
+        // SIGKILL delivery and the zombie transition are asynchronous.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
 }

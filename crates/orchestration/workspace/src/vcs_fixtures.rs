@@ -8,6 +8,11 @@ use std::path::Path;
 pub use std::process::Command;
 use tempfile::tempdir;
 
+fn jj_command() -> Command {
+    let executable = std::env::var_os("PLAK_TEST_JJ").unwrap_or_else(|| "jj".into());
+    Command::new(executable)
+}
+
 /// A seeded git repository on `main` with one commit and a local identity.
 pub fn git_repo() -> tempfile::TempDir {
     let root = tempdir().unwrap();
@@ -87,7 +92,7 @@ pub fn git_commit(cwd: &Path, paths: &[&str], message: &str) {
 
 /// Whether a usable `jj` is on this machine; VCS-backed jj tests skip without one.
 pub fn jj_available() -> bool {
-    Command::new("jj")
+    jj_command()
         .arg("--version")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -101,7 +106,7 @@ pub fn jj_available() -> bool {
 /// Runs `jj` in `path` and asserts it succeeded.
 pub fn jj_in(path: &Path, args: &[&str]) {
     assert!(
-        Command::new("jj")
+        jj_command()
             .args(["--no-pager"])
             .args([
                 "--config",
@@ -122,7 +127,7 @@ pub fn jj_in(path: &Path, args: &[&str]) {
 pub fn jj_repo() -> tempfile::TempDir {
     let root = tempdir().unwrap();
     assert!(
-        Command::new("jj")
+        jj_command()
             .args(["--no-pager", "git", "init"])
             .args([
                 "--config",
@@ -139,7 +144,7 @@ pub fn jj_repo() -> tempfile::TempDir {
     );
     std::fs::write(root.path().join("SEED.txt"), "seed\n").unwrap();
     assert!(
-        Command::new("jj")
+        jj_command()
             .args(["--no-pager", "commit", "-m", "seed"])
             .args([
                 "--config",
@@ -161,7 +166,7 @@ pub fn jj_repo() -> tempfile::TempDir {
 pub fn jj_commit(cwd: &Path, paths: &[&str], message: &str) {
     for path in paths {
         assert!(
-            Command::new("jj")
+            jj_command()
                 .args(["--no-pager", "file", "track", path])
                 .args([
                     "--config",
@@ -177,7 +182,7 @@ pub fn jj_commit(cwd: &Path, paths: &[&str], message: &str) {
         );
     }
     assert!(
-        Command::new("jj")
+        jj_command()
             .args(["--no-pager", "commit", "-m", message])
             .args([
                 "--config",

@@ -71,7 +71,7 @@ pub fn check_reclaimable(path: &Path, sealed: Option<&super::VcsSnapshot>) -> Re
             ));
         }
         if relative.starts_with("target")
-            || crate::git_redirect_fence::ignored_path_is_managed(path, relative)
+            || crate::git_redirect_fence::ignored_path_is_managed(path, relative, None)
         {
             continue;
         }
@@ -294,7 +294,7 @@ pub fn inspect(
             {
                 if let Some(ignored) = entry.strip_prefix(b"!! ") {
                     let relative = Path::new(std::ffi::OsStr::from_bytes(ignored));
-                    if !crate::git_redirect_fence::ignored_path_is_managed(path, relative) {
+                    if !crate::git_redirect_fence::ignored_path_is_managed(path, relative, None) {
                         return Err(VcsError::mint_unavailable(format!(
                             "ignored files; worktree retained: {} ({})",
                             path.display(),

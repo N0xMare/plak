@@ -36,6 +36,8 @@ const GIT_CLI_ENABLED: bool = false;
 /// the native merged tree IDs and conflict labels with explicit framing.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct VcsSnapshot {
+    /// Seal observation: the recorded mint base is no longer an ancestor.
+    pub history_left_base: bool,
     /// The commit the snapshot is pinned to.
     pub commit: String,
     /// What the snapshot's content hashes to: a git tree id, or a digest of
@@ -220,8 +222,17 @@ pub trait VcsOps: Send + Sync {
         mode: WorkspaceMode,
         base: Option<&VcsSnapshot>,
     ) -> Result<MintedCopy, VcsError>;
-    /// Seals what the copy changed as `candidate_id`, pinned by a ref so the
-    /// commit survives until it is adopted or discarded.
+    /// Whether the sealed JJ history has left its recorded mint base.
+    fn history_left_base(
+        &self,
+        _path: &Path,
+        _base: &str,
+        _sealed: &str,
+    ) -> Result<bool, VcsError> {
+        Ok(false)
+    }
+
+    /// Seals what the copy changed as `candidate_id`, pinned until adoption or discard.
     fn seal(
         &self,
         child_path: &Path,
@@ -255,7 +266,7 @@ pub trait VcsOps: Send + Sync {
     /// Whether the copy has uncommitted changes.
     fn dirty(&self, path: &Path) -> bool;
     /// How far `child` has moved from `parent`, when both are readable.
-    fn ahead_behind(&self, child: &Path, parent: &Path) -> Option<(u64, u64)>;
+    fn ahead_behind(&self, child: &Path, parent: &Path, base: Option<&str>) -> Option<(u64, u64)>;
     /// The copy's branch or revision, for presentation only.
     fn label(&self, path: &Path) -> Option<String>;
     /// jj only: whether `path`'s chain carries anything beyond its base.
@@ -292,6 +303,13 @@ impl VcsOps for SystemVcs {
         base: Option<&VcsSnapshot>,
     ) -> Result<MintedCopy, VcsError> {
         mint_worktree_from(launch, copy_id, parent_cwd, mode, base)
+    }
+
+    fn history_left_base(&self, path: &Path, base: &str, sealed: &str) -> Result<bool, VcsError> {
+        match detect_vcs(path)? {
+            SessionVcs::Jj => crate::native_jj::history_left_base(path, base, sealed),
+            SessionVcs::Git => Ok(false),
+        }
     }
 
     fn seal(
@@ -348,8 +366,8 @@ impl VcsOps for SystemVcs {
         copy_is_dirty(path)
     }
 
-    fn ahead_behind(&self, child: &Path, parent: &Path) -> Option<(u64, u64)> {
-        ahead_behind(child, parent)
+    fn ahead_behind(&self, child: &Path, parent: &Path, base: Option<&str>) -> Option<(u64, u64)> {
+        ahead_behind(child, parent, base)
     }
 
     fn label(&self, path: &Path) -> Option<String> {
@@ -848,9 +866,9 @@ pub(crate) fn copy_is_dirty(path: &Path) -> bool {
 }
 
 /// `(ahead, behind)` of `child` relative to `parent`. Omit from list JSON when `None`.
-pub(crate) fn ahead_behind(child: &Path, parent: &Path) -> Option<(u64, u64)> {
+pub(crate) fn ahead_behind(child: &Path, parent: &Path, base: Option<&str>) -> Option<(u64, u64)> {
     match detect_vcs(parent).or_else(|_| detect_vcs(child)) {
-        Ok(SessionVcs::Jj) => jj_ahead_behind(child, parent),
+        Ok(SessionVcs::Jj) => jj_ahead_behind(child, parent, base),
         Ok(SessionVcs::Git) => git_ahead_behind(child, parent),
         Err(_) => None,
     }
@@ -1149,6 +1167,7 @@ fn git_snapshot_indexed(
         return Err(mint_error("git commit-tree produced no commit"));
     }
     Ok(VcsSnapshot {
+        history_left_base: false,
         commit,
         content,
         change_id: None,
@@ -1559,8 +1578,8 @@ fn git_ahead_behind(child: &Path, parent: &Path) -> Option<(u64, u64)> {
     parse_left_right_counts(&String::from_utf8_lossy(&counted.stdout))
 }
 
-fn jj_ahead_behind(child: &Path, parent: &Path) -> Option<(u64, u64)> {
-    crate::native_jj::ahead_behind(child, parent)
+fn jj_ahead_behind(child: &Path, parent: &Path, base: Option<&str>) -> Option<(u64, u64)> {
+    crate::native_jj::ahead_behind(child, parent, base)
 }
 
 fn parse_left_right_counts(text: &str) -> Option<(u64, u64)> {
@@ -1570,21 +1589,45 @@ fn parse_left_right_counts(text: &str) -> Option<(u64, u64)> {
     Some((ahead, behind))
 }
 
+const SECRET_NAMES: &[&str] = &[
+    ".netrc",
+    ".npmrc",
+    "credentials.json",
+    "id_rsa",
+    "id_ed25519",
+];
+const SECRET_EXTENSIONS: &[&str] = &["pem", "key", "p12", "pfx"];
+
+pub(super) fn secret_fileset() -> String {
+    let mut patterns = vec![
+        "root-glob-i:'**/.env'".to_owned(),
+        "(root-glob-i:'**/.env.*' ~ root-glob-i:'**/.env.example')".to_owned(),
+    ];
+    patterns.extend(
+        SECRET_NAMES
+            .iter()
+            .map(|name| format!("root-glob-i:'**/{name}'")),
+    );
+    patterns.extend(
+        SECRET_EXTENSIONS
+            .iter()
+            .map(|ext| format!("root-glob-i:'**/*.{ext}'")),
+    );
+    patterns.join(" | ")
+}
+
 pub(super) fn is_secret_git_path(path: &str) -> bool {
     let file = Path::new(path)
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(path);
     let lower = file.to_ascii_lowercase();
-    if lower == ".env" || (lower.starts_with(".env.") && lower != ".env.example") {
-        return true;
-    }
-    matches!(
-        lower.as_str(),
-        ".netrc" | ".npmrc" | "credentials.json" | "id_rsa" | "id_ed25519"
-    ) || lower
-        .rsplit_once('.')
-        .is_some_and(|(_, ext)| matches!(ext, "pem" | "key" | "p12" | "pfx"))
+    lower == ".env"
+        || (lower.starts_with(".env.") && lower != ".env.example")
+        || SECRET_NAMES.contains(&lower.as_str())
+        || lower
+            .rsplit_once('.')
+            .is_some_and(|(_, ext)| SECRET_EXTENSIONS.contains(&ext))
 }
 
 /// Keeps a snapshot commit from pinning a secret the tool policy already
@@ -1903,6 +1946,7 @@ pub mod fake {
         #[must_use]
         pub fn base_for(agent_id: &str) -> VcsSnapshot {
             VcsSnapshot {
+                history_left_base: false,
                 commit: format!("base-{agent_id}"),
                 content: format!("content-base-{agent_id}"),
                 change_id: None,
@@ -1947,6 +1991,7 @@ pub mod fake {
                 return answer;
             }
             Ok(VcsSnapshot {
+                history_left_base: false,
                 commit: format!("sealed-{candidate_id}"),
                 content: format!("content-{candidate_id}"),
                 change_id: None,
@@ -2038,7 +2083,12 @@ pub mod fake {
             false
         }
 
-        fn ahead_behind(&self, child: &Path, _parent: &Path) -> Option<(u64, u64)> {
+        fn ahead_behind(
+            &self,
+            child: &Path,
+            _parent: &Path,
+            _base: Option<&str>,
+        ) -> Option<(u64, u64)> {
             self.record(FakeOp::AheadBehind, child);
             None
         }
@@ -2071,6 +2121,11 @@ pub mod fake {
             false
         }
     }
+}
+
+/// Refuses a JJ copy whose recorded mint base is no longer its strict ancestor.
+pub fn validate_jj_copy_base(path: &Path, base: &str) -> Result<(), VcsError> {
+    crate::native_jj::validate_copy_base(path, base)
 }
 
 #[cfg(test)]
@@ -2118,7 +2173,7 @@ mod tests {
         if !cfg!(feature = "jj-lib") {
             return false;
         }
-        Command::new("jj")
+        Command::new(std::env::var_os("PLAK_TEST_JJ").unwrap_or_else(|| "jj".into()))
             .arg("--version")
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -2138,7 +2193,7 @@ mod tests {
                 std::fs::write(root.path().join("SEED.txt"), "seed\n").unwrap();
             }
             assert!(
-                Command::new("jj")
+                Command::new(std::env::var_os("PLAK_TEST_JJ").unwrap_or_else(|| "jj".into()))
                     .args(["--no-pager"])
                     .args([
                         "--config",
@@ -2325,7 +2380,7 @@ mod tests {
         let base = copy.base.clone();
         std::fs::rename(copy.path.join(".jj"), copy.path.join(".jj.bak")).unwrap();
         assert!(
-            Command::new("jj")
+            Command::new(std::env::var_os("PLAK_TEST_JJ").unwrap_or_else(|| "jj".into()))
                 .args(["--no-pager", "git", "init"])
                 .args([
                     "--config",
@@ -2651,6 +2706,7 @@ mod tests {
     #[test]
     fn snapshot_token_matches_commit_content_or_pair() {
         let snap = VcsSnapshot {
+            history_left_base: false,
             commit: "c".into(),
             content: "t".into(),
             change_id: None,

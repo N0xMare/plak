@@ -154,6 +154,10 @@ pub(crate) fn run_doctor(
     };
     let report = product_doctor::diagnose(product_doctor::DoctorInputs {
         version: plakous::VERSION.to_owned(),
+        jj_cli: product_doctor::jj_cli::probe(
+            env::var_os("PATH").as_deref(),
+            &env::current_dir().unwrap_or_default(),
+        ),
         paths: doctor_paths,
         config,
         product_database,

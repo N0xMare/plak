@@ -348,3 +348,7 @@ crash-sweep *ARGS:
 mcp-oauth-e2e *ARGS:
     cargo build --release --locked -p plak --features plak/test-hooks
     python3 tests/live/mcp_oauth/run.py {{ARGS}}
+
+# Opt-in external jj writer compatibility; not part of a gate tier.
+jj-compat:
+    bash -c 'source scripts/dev-tools-prefix.sh; python3 scripts/jj-tools.py compat "$(plak_dev_tools_prefix "$PWD")"'

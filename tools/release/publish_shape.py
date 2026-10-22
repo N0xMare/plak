@@ -23,6 +23,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools/checks"))
+import vcs_listing  # noqa: E402
 PLAK_MANIFEST = Path("bin/plak/Cargo.toml")
 HARNESS = "plakous-offline-crash-harness"
 
@@ -61,11 +63,7 @@ def published_plak_manifest(text: str) -> str:
 
 
 def tracked_files(root: Path) -> list[str]:
-    listed = subprocess.run(
-        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-        cwd=root, capture_output=True, check=True,
-    ).stdout.decode()
-    return [path for path in listed.split("\0") if path and (root / path).is_file()]
+    return [path for path in vcs_listing.listed_files(root) if (root / path).is_file()]
 
 
 def stage(root: Path, destination: Path) -> None:

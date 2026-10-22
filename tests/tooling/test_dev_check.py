@@ -49,7 +49,10 @@ class DevCheckWorkerTests(unittest.TestCase):
         (self.root / "scripts").mkdir()
         shutil.copyfile(ROOT / "scripts/dev-check.sh", self.root / "scripts/dev-check.sh")
         shutil.copyfile(ROOT / "scripts/dev-tools.sh", self.root / "scripts/dev-tools.sh")
+        shutil.copyfile(ROOT / "scripts/dev-tools-prefix.sh", self.root / "scripts/dev-tools-prefix.sh")
         shutil.copyfile(ROOT / "scripts/test-tmpdir.sh", self.root / "scripts/test-tmpdir.sh")
+        (self.root / "tools/checks").mkdir(parents=True)
+        shutil.copyfile(ROOT / "tools/checks/vcs_listing.py", self.root / "tools/checks/vcs_listing.py")
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.log = self.root / "calls.jsonl"
@@ -99,7 +102,7 @@ if args[0] == 'test':
                          target=dict(name='monty', kind=['bin']), profile=dict(test=False))))
 ''')
         self.executable('python3', r'''import json, os, sys
-if sys.argv[1] == '-':
+if sys.argv[1] == '-' or sys.argv[1].endswith('vcs_listing.py'):
     os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
 with open(os.environ['GATE_CALLS'], 'a') as log:
     log.write(json.dumps(dict(python=sys.argv[1:])) + '\n')
@@ -527,7 +530,7 @@ raise SystemExit(int(os.environ.get('GATE_PUBLISH_FAILURE', '0')))
         (self.root / 'untracked').write_text('x')
         result, _, _ = self.run_gate('--full')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('no evidence: not a clean git tree', result.stdout)
+        self.assertIn('no evidence: evidence requires a clean git tree', result.stdout)
         self.assertFalse(self.evidence.exists())
         (self.root / 'untracked').unlink()
         result, _, _ = self.run_gate('--full')
