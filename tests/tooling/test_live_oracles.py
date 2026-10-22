@@ -53,6 +53,21 @@ class LiveOracleTests(unittest.TestCase):
         self.assertEqual(result.phase, "refused")
         self.assertEqual(result.errors, ["prompt exceeds the maximum supported size"])
 
+    def test_a_rejected_tool_call_counts_as_an_attempt(self):
+        """A host rejection must not read as the model skipping the tool."""
+        agent = live.Agent.__new__(live.Agent)
+        agent.events = queue.Queue()
+        for event in ({"kind": "tool", "id": "1", "state": "rejected:OccupancyFence"},
+                      {"kind": "tool", "id": "1", "state": "running"},
+                      {"kind": "tool", "id": "1", "state": "done"},
+                      {"kind": "tool", "id": "1", "state": "failed"},
+                      {"kind": "turn_lifecycle", "id": "1", "phase": "completed"},
+                      {"kind": "busy", "busy": False}):
+            agent.events.put(event)
+        with patch.object(agent, "send", return_value="1"):
+            turn = agent.prompt("read fold.txt", timeout=1)
+        self.assertEqual(turn.tools, 2)
+
     def test_explore_oracle_checks_answer_not_only_green_repository(self):
         explore = soak.tasks(1)[0]
         with patch.object(live, "unittest_passes", return_value=True):
@@ -600,6 +615,15 @@ class LiveOracleTests(unittest.TestCase):
                      "before the response was complete\n")
         with self.assertRaises(live.ScenarioFailure) as raised:
             live.classify_cli_failure(5, responses, "cli_task")
+        self.assertEqual(raised.exception.outcome, live.MODEL)
+        # Only the final stderr line is the turn's failure: an earlier line
+        # quoting the diagnostic (a recovered retry, a log) does not decide it.
+        with self.assertRaises(live.ScenarioFailure) as raised:
+            live.classify_cli_failure(
+                5, rendered + "plak: agent turn failed: session store is closed\n\n", "cli_task")
+        self.assertEqual(raised.exception.outcome, live.HARNESS)
+        with self.assertRaises(live.ScenarioFailure) as raised:
+            live.classify_cli_failure(5, "plak: retrying\n" + rendered + "\n", "cli_task")
         self.assertEqual(raised.exception.outcome, live.MODEL)
         # Another failure that merely mentions an output bound stays harness.
         with self.assertRaises(live.ScenarioFailure) as raised:

@@ -2497,15 +2497,16 @@ in `tests/live/` (whose README lists every scenario and its oracle):
   observation policy), so one parallel batch cannot fill a large window. The
   overflow turn reads in rounds instead: each round is one parallel batch of
   reads under that cap, and the rounds together pass the route's compaction
-  trigger, so the last batches land on an almost full window. Each read also
+  trigger, so the read that passes the trigger lands on an almost full
+  window. Each read also
   stays within its own tool's per-call cap (pi `read` returns at most 50 KiB,
   one Codex `exec_command` result at most 40,000 bytes), so a batch on such a
   pack takes more, shorter reads, and `bulk.txt` holds every planned line. On
   the Codex and pi packs the plan is phrased as sequential reads, one call per
   response, each under both caps, because their models did not reliably issue
   one batch per round; a pi round is then a single read, so the sequential
-  reads still pass the trigger and the last of them land on an almost full
-  window. Sizing converts bulk bytes to tokens at the pack's measured bytes per
+  reads still pass the trigger and the read that passes it lands on an almost
+  full window. Sizing converts bulk bytes to tokens at the pack's measured bytes per
   token, and a pi growth `bulk.txt` holds only the reads that pass the trigger
   plus a few more. The overflow
   remedy is whichever the session log shows: an in-turn
@@ -2645,7 +2646,8 @@ spent its output bound without an answer. JSONL lifecycle frames carry the
 kind; `plak run` stderr, the TUI's `turn.failed` session-log row and child
 failure text carry only its rendered diagnostic (`response reached its output
 bound before completion`, or the Responses provider's `stopped at the output
-bound before` message), which identifies it there. Like any first `model` it
+bound before` message), which identifies it there; on `plak run` only the
+final non-empty stderr line, the turn's own failure, is read for it. Like any first `model` it
 gets the single MODEL rerun (§3.4).
 A `plak run` launched by a driver has stdin closed, so a subscription
 compatibility notice that still needs acceptance fails at once (exit 3); that

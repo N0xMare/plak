@@ -440,6 +440,10 @@ class JobEvidenceTests(unittest.TestCase):
             path.write_text(json.dumps(only_notice))
             self.assertFalse(jobs.notice_on_steer([segment], "p1"))
 
+    def test_wake_prompt_is_the_products(self):
+        source = (ROOT / "crates/hosting/hosted/src/runtime/host_loop/wake.rs").read_text()
+        self.assertIn(f'const WAKE_PROMPT: &str = "{jobs.WAKE_PROMPT}";', source)
+
     def test_notice_passes_at_the_steer_or_at_a_notice_yield_of_the_same_turn(self):
         """Both orderings R1 allows: steer first (one commit) or notice first."""
         notice = '<process_notice id="p1" status="exited">\ncommand: python3 short.py tok\n'
@@ -476,6 +480,10 @@ class JobEvidenceTests(unittest.TestCase):
             self.assertFalse(jobs.notice_in_turn([segment], "p1", shared.stat().st_mtime - 1))
             self.assertFalse(jobs.notice_in_turn([segment], "p1", None))
             self.assertFalse(jobs.notice_in_turn([segment], "p2", terminal))
+            # A fast idle wake's request, persisted before the terminal was
+            # observed, is still the wake turn's, not this turn's.
+            shared.write_text(request("Run both commands.", notice, jobs.WAKE_PROMPT))
+            self.assertFalse(jobs.notice_in_turn([segment], "p1", terminal))
             # A response body naming the notice is not a request of the turn.
             shared.write_text(request("Run both commands."))
             (segment / "exchange-0002.body").write_text(notice)

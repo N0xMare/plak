@@ -1006,13 +1006,21 @@ def notice_on_steer(segments: list[Path], job_id: str | None) -> bool:
     return False
 
 
+# The product's idle wake prompt (`WAKE_PROMPT` in the hosted runtime's
+# `host_loop/wake.rs`); a request carrying it belongs to a wake turn.
+WAKE_PROMPT = ("Background processes finished or sub-agent results arrived while you were "
+               "idle; continue the current task, or reply briefly if nothing remains.")
+
+
 def notice_in_turn(segments: list[Path], job_id: str | None, terminal_wall: float | None) -> bool:
     """Some request persisted before the turn's terminal carries the notice.
 
     The capture writes each `.request` before dispatch, so its mtime orders it
     against the terminal the driver observed; a later wake turn's requests
-    are after it. A notice committed at a Notice yield counts here whether or
-    not the later steer request replays it.
+    are after it. A request carrying the idle wake prompt is a wake turn's
+    even when a fast wake persisted it before that terminal was observed. A
+    notice committed at a Notice yield counts here whether or not the later
+    steer request replays it.
     """
     if not job_id or terminal_wall is None:
         return False
@@ -1024,7 +1032,9 @@ def notice_in_turn(segments: list[Path], job_id: str | None, terminal_wall: floa
             persisted = path.stat().st_mtime
         except OSError:
             continue
-        if persisted <= terminal_wall and any(needle in text for text in capture_texts(path)):
+        texts = capture_texts(path)
+        if (persisted <= terminal_wall and any(needle in text for text in texts)
+                and not any(WAKE_PROMPT in text for text in texts)):
             return True
     return False
 

@@ -741,10 +741,15 @@ _COMPATIBILITY_NOTICE = re.compile(
     r"(?:is not accepted|needs an answer|could not be read)")
 
 
+def last_line(text: str) -> str:
+    """The last non-empty line: `plak run`'s final status on stderr."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return lines[-1] if lines else ""
+
+
 def truncated_answer(code: int, stderr: str) -> bool:
     """`plak run` printed a committed answer cut at its output limit."""
-    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
-    return code == 5 and bool(lines) and lines[-1] == TRUNCATED_ANSWER_LINE
+    return code == 5 and last_line(stderr) == TRUNCATED_ANSWER_LINE
 
 
 def output_limit_failure(kind: str | None, text: str) -> bool:
@@ -875,7 +880,8 @@ def classify_cli_failure(code: int, stderr: str, what: str, *,
     """`plak run` exit. Exit 5 is the agent class; the text decides provider.
 
     An unaccepted compatibility notice (exit 3) is `harness` naming the
-    remedy, and a typed OutputLimit diagnostic is `model` as on every surface.
+    remedy, and a typed OutputLimit diagnostic is `model` as on every surface
+    when it is the final stderr line, the turn's own failure.
     """
     lookup = lookup_failure(stderr, lookup_faults)
     if lookup:
@@ -892,7 +898,7 @@ def classify_cli_failure(code: int, stderr: str, what: str, *,
     if validation == HARNESS:
         raise ScenarioFailure(HARNESS, f"{what}: kernel stream validation failed without "
                                        f"a captured protocol violation")
-    if output_limit_failure(None, stderr):
+    if output_limit_failure(None, last_line(stderr)):
         raise ScenarioFailure(MODEL, f"{what}: {OUTPUT_LIMIT_MISS}")
     if provider_reason_from(None, None, stderr):
         raise ScenarioFailure(PROVIDER, f"{what}: {detail}")
@@ -1407,6 +1413,8 @@ class Turn:
     model_error_kind: str | None = None
     http_status: int | None = None
     text: str = ""
+    # Tool calls the model made: each starts `running` or, refused before it
+    # ran (by the host or for its arguments), arrives as `rejected:<reason>`.
     tools: int = 0
     errors: list[str] = dataclasses.field(default_factory=list)
     # Typed `model_refusal` fields (`refusal_summary`), never the provider's prose.
@@ -1590,7 +1598,8 @@ class Agent:
                 raise ScenarioFailure(HARNESS, "plak agent exited during a turn")
             if kind == "assistant":
                 turn.text += event.get("text", "")
-            elif kind == "tool" and event.get("state") == "running":
+            elif kind == "tool" and (event.get("state") == "running"
+                                     or str(event.get("state", "")).startswith("rejected")):
                 turn.tools += 1
             elif kind == "error":
                 turn.errors.append(event.get("message", ""))
