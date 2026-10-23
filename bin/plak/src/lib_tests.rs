@@ -3976,8 +3976,53 @@ fn product_gate_allows_inference() {
 }
 
 #[test]
-fn usage_refresh_offers_every_connected_vertical_and_refreshes_only_when_needed() {
-    use commands::usage::{can_refresh_usage, refresh_usage_credential, usage_refresh_accounts};
+fn usage_refresh_is_offered_only_when_a_refresh_is_needed() {
+    use commands::usage::{refresh_usage_credential, usage_refresh_accounts};
+    for (credential, expired, offered) in [
+        (CredentialState::Ready, false, &[][..]),
+        (
+            CredentialState::Ready,
+            true,
+            &["codex", "grok", "claude"][..],
+        ),
+        (
+            CredentialState::RefreshRequired,
+            false,
+            &["codex", "grok", "claude"][..],
+        ),
+        (CredentialState::Quarantined, false, &["grok"][..]),
+        (CredentialState::Refreshing, true, &[][..]),
+        (CredentialState::SignedOut, true, &[][..]),
+        (CredentialState::LoginRequired, true, &[][..]),
+        (CredentialState::Revoked, true, &[][..]),
+        (CredentialState::ProfileChanged, true, &[][..]),
+        (CredentialState::WrittenByNewerBuild, true, &[][..]),
+    ] {
+        let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
+        backend.credential = credential;
+        backend.access_token_expired = expired;
+        assert_eq!(
+            usage_refresh_accounts(&mut backend),
+            offered,
+            "{credential:?} expired={expired}"
+        );
+        // The offered set is decided offline: only a Ready posture checks
+        // the stored expiry, and nothing reads usage to decide.
+        assert!(
+            !backend
+                .calls
+                .iter()
+                .any(|call| matches!(call, Call::Usage(_)))
+        );
+        assert_eq!(
+            backend
+                .calls
+                .iter()
+                .any(|call| matches!(call, Call::Expiry(_))),
+            credential == CredentialState::Ready
+        );
+    }
+
     for provider in [
         NativeProvider::Codex,
         NativeProvider::Claude,
@@ -3994,7 +4039,10 @@ fn usage_refresh_offers_every_connected_vertical_and_refreshes_only_when_needed(
             CredentialState::Refreshing,
             CredentialState::Quarantined,
         ] {
-            let offered = matches!(
+            // A button may outlive its snapshot: activation revalidates the
+            // posture, refreshes only what still needs it and otherwise lets
+            // the caller re-read.
+            let admitted = matches!(
                 credential,
                 CredentialState::Ready
                     | CredentialState::RefreshRequired
@@ -4003,21 +4051,13 @@ fn usage_refresh_offers_every_connected_vertical_and_refreshes_only_when_needed(
                 && credential == CredentialState::Quarantined);
             let refreshes = credential == CredentialState::RefreshRequired
                 || (provider == NativeProvider::Xai && credential == CredentialState::Quarantined);
-            let status = CliStatus {
-                compatibility: CompatibilityState::Current,
-                credential,
-            };
-            assert_eq!(can_refresh_usage(provider, status), offered);
             let mut backend = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
             backend.credential = credential;
             assert_eq!(
                 refresh_usage_credential(&mut backend, provider).is_ok(),
-                offered,
+                admitted,
                 "{provider:?} {credential:?}"
             );
-            // The decision is local: only a Ready posture checks the stored
-            // expiry, and no offered state reads usage before the re-read. A
-            // valid Ready token is only re-read, never refreshed.
             assert_eq!(
                 backend.calls.contains(&Call::RefreshNow(provider)),
                 refreshes

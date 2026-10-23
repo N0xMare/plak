@@ -1676,9 +1676,10 @@ fn usage_refresh_buttons_match_goldens_and_their_scrolled_mouse_hits() {
 }
 
 #[test]
-fn usage_refresh_is_offered_beside_every_connected_subscription_vertical() {
+fn usage_refresh_highlights_only_under_the_pointer_or_after_up_down() {
     let mut app = usage_fixture();
     app.activate_control_tab(super::ControlTab::Usage);
+    // Every subscription vertical whose credential needs a refresh offers it.
     app.apply_host_event(HostEvent::Extension(
         SurfaceObservation::UsageRefreshAccounts(vec![
             "codex".into(),
@@ -1686,30 +1687,89 @@ fn usage_refresh_is_offered_beside_every_connected_subscription_vertical() {
             "claude".into(),
         ]),
     ));
+    let mut terminal = Terminal::new(TestBackend::new(100, 80)).unwrap();
+    let mut draw = |app: &mut App| {
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let selected = app.theme.slash_selected.bg.unwrap_or_default();
+        app.usage_refresh_hits
+            .iter()
+            .filter(|(_, rect)| buffer[(rect.x, rect.y)].bg == selected)
+            .map(|(account, _)| account.clone())
+            .collect::<Vec<_>>()
+    };
+    // Nothing is highlighted when Usage opens, and Enter activates no
+    // invisible focus.
+    assert_eq!(draw(&mut app), [] as [String; 0]);
     let rows = menu_rows(&mut app, 100, 80);
     for label in ["Codex [refresh]", "SuperGrok [refresh]", "Claude [refresh]"] {
         assert!(rows.iter().any(|row| row.contains(label)), "{label}");
     }
     assert!(!rows.iter().any(|row| row.contains("OpenRouter [")));
-    for account in ["codex", "grok", "claude"] {
-        assert!(
-            app.usage_refresh_hits
-                .iter()
-                .any(|(offered, _)| offered == account),
-            "{account}"
-        );
-    }
+    assert!(app.handle_key(key(KeyCode::Enter)).is_none());
+
+    // Hover highlights the label under the pointer without moving focus.
+    let _ = draw(&mut app);
+    let claude = app
+        .usage_refresh_hits
+        .iter()
+        .find(|(account, _)| account == "claude")
+        .unwrap()
+        .1;
+    assert!(
+        app.handle_mouse(left_mouse(MouseEventKind::Moved, claude.x + 2, claude.y))
+            .is_none()
+    );
+    assert_eq!(draw(&mut app), ["claude"]);
+    assert_eq!(app.usage_refresh.focus, 0);
+    assert!(!app.usage_refresh.focus_shown);
+    app.handle_mouse(left_mouse(MouseEventKind::Moved, 0, 0));
+    assert_eq!(draw(&mut app), [] as [String; 0]);
+
+    // The first Up/Down shows the focus where it is; the next one moves it.
+    app.handle_key(key(KeyCode::Down));
+    assert_eq!(draw(&mut app), ["codex"]);
+    app.handle_key(key(KeyCode::Down));
+    assert_eq!(draw(&mut app), ["grok"]);
     assert_eq!(
         app.handle_key(key(KeyCode::Enter)),
+        Some(UserAction::Extension(
+            SurfaceIntent::RefreshUsageCredential {
+                account: "grok".into()
+            }
+        ))
+    );
+    let rows = menu_rows(&mut app, 100, 80);
+    assert!(
+        rows.iter()
+            .any(|row| row.contains("SuperGrok [refreshing…]"))
+    );
+    assert!(app.start_usage_refresh("codex".into()).is_none());
+    app.apply_host_event(HostEvent::Extension(
+        SurfaceObservation::UsageCredentialRefreshed {
+            account: "grok".into(),
+            error: None,
+        },
+    ));
+
+    // Reopening Usage hides the keyboard focus again; a click still
+    // activates directly.
+    app.activate_control_tab(super::ControlTab::Usage);
+    assert_eq!(draw(&mut app), [] as [String; 0]);
+    let codex = app
+        .usage_refresh_hits
+        .iter()
+        .find(|(account, _)| account == "codex")
+        .unwrap()
+        .1;
+    assert_eq!(
+        app.handle_mouse(left_click(codex.x, codex.y)),
         Some(UserAction::Extension(
             SurfaceIntent::RefreshUsageCredential {
                 account: "codex".into()
             }
         ))
     );
-    let rows = menu_rows(&mut app, 100, 80);
-    assert!(rows.iter().any(|row| row.contains("Codex [refreshing…]")));
-    assert!(app.start_usage_refresh("grok".into()).is_none());
 }
 
 #[test]
@@ -1725,6 +1785,8 @@ fn usage_refresh_is_keyboard_reachable_and_completion_does_not_reopen_menu() {
     app.apply_host_event(HostEvent::Extension(
         SurfaceObservation::UsageRefreshAccounts(vec!["grok".into(), "claude".into()]),
     ));
+    assert!(app.handle_key(key(KeyCode::Enter)).is_none());
+    app.handle_key(key(KeyCode::Down));
     app.handle_key(key(KeyCode::Down));
     assert_eq!(
         app.handle_key(key(KeyCode::Enter)),

@@ -27,7 +27,7 @@ p6 Rgb(255, 112, 112)/Rgb(20, 22, 27)
 09 symbols │··································································································│
 09 colors  0-0:p0, 1-98:p3, 99-99:p0
 10 symbols │·SuperGrok·[refresh]··············································································│
-10 colors  0-0:p0, 1-1:p3, 2-10:p1, 11-11:p3, 12-20:p4, 21-98:p3, 99-99:p0
+10 colors  0-0:p0, 1-1:p3, 2-10:p1, 11-11:p3, 12-20:p5, 21-98:p3, 99-99:p0
 11 symbols │·credential·is·quarantined·after·an·ambiguous·refresh;·the·next·turn·retries·it,·or·run·`plak·····│
 11 colors  0-0:p0, 1-1:p3, 2-94:p5, 95-98:p3, 99-99:p0
 12 symbols │·refresh·grok`;·run·`plak·login·grok`·if·that·fails···············································│

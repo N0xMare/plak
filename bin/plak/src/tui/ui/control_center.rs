@@ -156,6 +156,11 @@ impl App {
                 && !self.usage_refresh.accounts.is_empty() =>
             {
                 match code {
+                    // The first Up/Down only shows the focus on the current
+                    // action; nothing is highlighted when Usage opens.
+                    KeyCode::Up | KeyCode::Down if !self.usage_refresh.focus_shown => {
+                        self.usage_refresh.focus_shown = true;
+                    }
                     KeyCode::Up => {
                         self.usage_refresh.focus = self.usage_refresh.focus.saturating_sub(1);
                     }
@@ -166,6 +171,8 @@ impl App {
                             .saturating_add(1)
                             .min(self.usage_refresh.accounts.len() - 1);
                     }
+                    // Enter activates only a focus the operator can see.
+                    KeyCode::Enter if !self.usage_refresh.focus_shown => return None,
                     KeyCode::Enter => {
                         let account = self
                             .usage_refresh
@@ -273,6 +280,9 @@ impl App {
                 Some(UserAction::RefreshReadiness)
             }
             ControlTab::Usage | ControlTab::Context => {
+                self.usage_refresh.focus = 0;
+                self.usage_refresh.focus_shown = false;
+                self.usage_refresh.hover = None;
                 self.usage_refresh.reveal = true;
                 self.pending_open_usage = true;
                 Some(UserAction::Extension(SurfaceIntent::OpenUsage))
@@ -400,6 +410,21 @@ impl App {
                 .copied()
             {
                 self.hover_profile(index);
+            }
+            return None;
+        }
+        // Hover highlights a Usage `[refresh]` without moving focus.
+        if matches!(mouse.kind, MouseEventKind::Moved)
+            && self.control_tab == Some(ControlTab::Usage)
+        {
+            let hover = self
+                .usage_refresh_hits
+                .iter()
+                .find(|(_, rect)| rect.contains(point))
+                .map(|(account, _)| account.clone());
+            if self.usage_refresh.hover != hover {
+                self.usage_refresh.hover = hover;
+                self.mark_dirty();
             }
             return None;
         }
@@ -544,6 +569,10 @@ impl App {
         if tab == ControlTab::Models {
             self.move_profile_cursor(isize::from(delta));
             return None;
+        }
+        // The wheel moves the labels out from under the pointer.
+        if tab == ControlTab::Usage {
+            self.usage_refresh.hover = None;
         }
         if self.control_scroll[tab.index()].scroll_by(isize::from(delta)) {
             self.mark_dirty();

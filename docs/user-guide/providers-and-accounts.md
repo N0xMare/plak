@@ -22,10 +22,12 @@ vertical it names the account, its status, and the command that connects it.
 A usage read never refreshes an expired token. An expired Codex, Grok or Claude
 access token shows that the credential needs a token refresh: the next turn
 refreshes it, or run `plak refresh <account>`. In the TUI, the Usage tab offers
-`[refresh]` beside every connected subscription account (Up/Down and Enter, or
-click it): it re-reads that account's usage and, when the token has expired,
-first runs the same refresh as `plak refresh <account>`. Accounts that need
-`plak login` get no action. If the provider rejects a token that is
+`[refresh]` beside a Codex, SuperGrok or Claude account only when its token
+needs a refresh (or a SuperGrok refresh outcome is quarantined): click it, or
+use Up/Down and Enter. It runs the same refresh as `plak refresh <account>`
+and re-reads that account's usage. The label highlights under the pointer or
+once Up/Down has focused it. Accounts with a valid token, or that need
+`plak login`, get no action. If the provider rejects a token that is
 still fresh, the usage read forces one refresh and reads again; if that
 refresh fails, the provider line shows why. An ended usage window means stale provider
 data, not an expired local token.

@@ -74,13 +74,11 @@ pub fn usage_vertical_for_account(account: &str) -> Option<UsageVertical> {
     }
 }
 
-/// Every connected subscription credential under a current profile offers an
-/// explicit Usage refresh; states whose remedy is `plak login` (or another
-/// build) do not. SuperGrok's quarantine is reclaimable by its next refresh.
-pub(crate) fn can_refresh_usage(
-    provider: NativeProvider,
-    status: crate::presentation::CliStatus,
-) -> bool {
+/// Whether a Usage refresh may run for this posture: a connected
+/// subscription credential under a current profile. States whose remedy is
+/// `plak login` (or another build) never refresh from Usage. SuperGrok's
+/// quarantine is reclaimable by its next refresh.
+fn can_refresh_usage(provider: NativeProvider, status: crate::presentation::CliStatus) -> bool {
     status.compatibility == CompatibilityState::Current
         && match status.credential {
             CredentialState::Ready
@@ -91,7 +89,8 @@ pub(crate) fn can_refresh_usage(
         }
 }
 
-/// The subscription accounts whose Usage vertical offers `[refresh]`.
+/// The subscription accounts whose Usage vertical offers `[refresh]`: only
+/// those whose credential needs one, decided offline.
 pub(crate) fn usage_refresh_accounts(backend: &mut impl AccountOps) -> Vec<String> {
     [
         NativeProvider::Codex,
@@ -100,18 +99,19 @@ pub(crate) fn usage_refresh_accounts(backend: &mut impl AccountOps) -> Vec<Strin
     ]
     .into_iter()
     .filter(|provider| {
-        backend
-            .offline_status(*provider)
-            .is_ok_and(|status| can_refresh_usage(*provider, status))
+        backend.offline_status(*provider).is_ok_and(|status| {
+            can_refresh_usage(*provider, status)
+                && usage_needs_refresh(backend, *provider, status.credential).unwrap_or(false)
+        })
     })
     .map(|provider| super::support::cli_provider_name(provider).to_owned())
     .collect()
 }
 
-/// Whether the credential must be refreshed before Usage re-reads it, decided
-/// from local state only. The offline posture stays `Ready` for an expired but
-/// refreshable access token, so a `Ready` posture also checks the stored
-/// expiry. A `Refreshing` credential is renewed by its claim holder.
+/// Whether the credential needs a refresh, decided from local state only.
+/// The offline posture stays `Ready` for an expired but refreshable access
+/// token, so a `Ready` posture also checks the stored expiry. A `Refreshing`
+/// credential is renewed by its claim holder.
 fn usage_needs_refresh(
     backend: &mut impl AccountOps,
     provider: NativeProvider,
@@ -125,9 +125,10 @@ fn usage_needs_refresh(
     }
 }
 
-/// The Usage action re-reads every offered account; when the credential needs
-/// a refresh it first runs the same forced, claimed refresh as `plak refresh`.
-/// Revalidate the offline posture because a button may outlive its snapshot.
+/// The Usage action runs the same forced, claimed refresh as `plak refresh`
+/// when the credential still needs one; the caller then re-reads Usage.
+/// Revalidate the offline posture because a button may outlive its snapshot:
+/// a credential renewed meanwhile is only re-read.
 pub(crate) fn refresh_usage_credential(
     backend: &mut impl AccountOps,
     provider: NativeProvider,

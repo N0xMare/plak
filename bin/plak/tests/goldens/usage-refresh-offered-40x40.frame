@@ -30,7 +30,7 @@ p5 Rgb(150, 156, 168)/Rgb(20, 22, 27)
 11 symbols │······································│
 11 colors  0-0:p0, 1-38:p3, 39-39:p0
 12 symbols │·SuperGrok·[refresh]··················│
-12 colors  0-0:p0, 1-1:p3, 2-10:p1, 11-11:p3, 12-20:p4, 21-38:p3, 39-39:p0
+12 colors  0-0:p0, 1-1:p3, 2-10:p1, 11-11:p3, 12-20:p5, 21-38:p3, 39-39:p0
 13 symbols │·credential·is·quarantined·after·an···│
 13 colors  0-0:p0, 1-1:p3, 2-36:p5, 37-38:p3, 39-39:p0
 14 symbols │·ambiguous·refresh;·the·next·turn·····│

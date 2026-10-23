@@ -691,6 +691,11 @@ pub(crate) struct RefreshActions {
     pub active: Option<String>,
     pub error: Option<(String, String)>,
     pub focus: usize,
+    /// Whether Up/Down has been used since Usage opened; the keyboard focus
+    /// is painted only then.
+    pub focus_shown: bool,
+    /// The action under the pointer. Hover highlights it without moving focus.
+    pub hover: Option<String>,
     pub pending_read: bool,
     pub reveal: bool,
 }
@@ -787,10 +792,12 @@ pub(crate) fn limits_layout(
                         "[refresh]"
                     },
                     if refresh.active.is_none()
-                        && refresh
-                            .accounts
-                            .get(refresh.focus)
-                            .is_some_and(|id| id == account)
+                        && (refresh.hover.as_deref() == Some(account)
+                            || (refresh.focus_shown
+                                && refresh
+                                    .accounts
+                                    .get(refresh.focus)
+                                    .is_some_and(|id| id == account)))
                     {
                         theme.slash_selected
                     } else {

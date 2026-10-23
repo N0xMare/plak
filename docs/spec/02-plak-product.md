@@ -4142,9 +4142,11 @@ These are in-process host observations, not new JSONL v1 lines.
 
 ### 5.5 The Menu
 
-Usage's explicit `[refresh]` action (§7.2) re-reads any connected subscription
-vertical and first refreshes an expired subscription credential or SuperGrok's
-reclaimable quarantine; login stays CLI-only.
+Usage's explicit `[refresh]` action (§7.2) appears only on a subscription
+vertical whose credential needs a refresh (an expired access token, a
+`RefreshRequired` posture, or SuperGrok's reclaimable quarantine), refreshes it
+and re-reads Usage; login stays CLI-only. The label is muted until the pointer
+hovers it or Up/Down has focused it.
 
 No Menu read blocks the host's action loop. A subscription posture read takes
 the provider's compatibility lock and may wait behind any other holder
@@ -5976,33 +5978,38 @@ reclaims an ambiguous outcome: there the line names the next turn or
 `plak refresh grok` first and `plak login grok` only as the fallback.
 
 **Explicit TUI refresh.** Usage offers `[refresh]` beside the provider name of
-every connected subscription vertical (Codex, SuperGrok, Claude) whose offline
-credential posture is `Ready`, `RefreshRequired` or `Refreshing`, or SuperGrok's
-reclaimable `Quarantined`, under a current accepted compatibility profile. The
-offline posture stays `Ready` for an expired but refreshable access token, so
-the action is not gated on it. States whose remedy is `plak login` (signed out,
-revoked, login-required, profile-changed and non-reclaimable quarantine) or
-another build (written by a newer build) offer no action, and there is no
-`[login]` action.
+a subscription vertical (Codex, SuperGrok or Claude) only when its credential
+needs a refresh, under a current accepted compatibility profile: its offline
+posture is `RefreshRequired`; or it is `Ready` and the facade's offline
+`access_token_expired` check finds the stored access token expired (the offline
+posture stays `Ready` for such a token, and the vertical reads "credential
+needs a token refresh"); or it is SuperGrok's reclaimable `Quarantined`. The
+decision reads local state only, never a provider usage read. A `Ready`
+credential with a valid token, a `Refreshing` one, and states whose remedy is
+`plak login` (signed out, revoked, login-required, profile-changed, and a Codex
+or Claude quarantine) or another build (written by a newer build) offer no
+action, and there is no `[login]` action.
 The offered set is read off the host's action loop (§5.5), after the host's own
 usage read for the same open or re-read has settled: that read holds the
 compatibility lock across its exchange and only try-locks it, so a posture read
 from the same process while it runs would report it `Busy`. A set read for an
 older open or re-read is discarded, and until the newest arrives the previous
 set stays offered.
-Up/Down focuses the offered actions, Enter activates the focused action, and
-clicking its `[refresh]` label activates it directly. Page keys and the wheel
-still scroll the whole Usage page; tab and close hits remain independent.
-The action revalidates the offline posture, then decides from local state
-alone, never by a provider usage read, whether the credential needs a refresh:
-a `RefreshRequired` posture or SuperGrok's quarantine does, and a `Ready`
-posture does when the facade's offline `access_token_expired` check finds the
-stored access token expired; a `Refreshing` credential is left to its claim
-holder. A credential that needs one first gets the same
+The labels render muted. Hovering a label highlights it without moving the
+keyboard focus. Opening Usage shows no keyboard focus: the first Up or Down
+shows the focus on the current action, later presses move it, and Enter
+activates the focused action only once it is shown. Clicking a `[refresh]`
+label activates it directly. Page keys and the wheel still scroll the whole
+Usage page, and the wheel clears the hover; tab and close hits remain
+independent.
+The action revalidates the offline posture with the same local check, since a
+button may outlive its snapshot. A credential that still needs a refresh first
+gets the same
 in-process facade `refresh_now` operation as `plak refresh <account>`, with the
-same single-flight claim, rotation and quarantine rules. A ready credential
-with a valid token is not refreshed, only re-read. The action never logs in or
-accepts a profile.
+same single-flight claim, rotation and quarantine rules. A credential renewed
+meanwhile (`Ready` with a valid token, or `Refreshing` under another claim) is
+not refreshed, only re-read; a posture that now needs `plak login` is refused
+with an inline reason. The action never logs in or accepts a profile.
 One explicit refresh runs per attached product surface; its button reads
 `[refreshing…]` and other refresh actions are disabled until it settles.
 Completion re-reads the host-owned Usage projection, bypassing held freshness;

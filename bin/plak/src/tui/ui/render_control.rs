@@ -392,7 +392,11 @@ impl App {
     pub(super) fn draw_control_usage(&mut self, frame: &mut Frame<'_>, body: Rect) {
         let layout = self.usage_tab_layout(body.width);
         self.usage_refresh_hits.clear();
-        let focused = self.usage_refresh.accounts.get(self.usage_refresh.focus);
+        let focused = self
+            .usage_refresh
+            .accounts
+            .get(self.usage_refresh.focus)
+            .filter(|_| self.usage_refresh.focus_shown);
         if std::mem::take(&mut self.usage_refresh.reveal)
             && let Some(hit) = layout
                 .refresh_hits
@@ -420,6 +424,15 @@ impl App {
                     ),
                 ));
             }
+        }
+        // A label scrolled away or disabled is no longer under the pointer.
+        if let Some(hovered) = &self.usage_refresh.hover
+            && !self
+                .usage_refresh_hits
+                .iter()
+                .any(|(account, _)| account == hovered)
+        {
+            self.usage_refresh.hover = None;
         }
     }
 

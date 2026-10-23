@@ -24,14 +24,15 @@ one cross-build carrier (a build imports its own and the previous version).
   resources (`resources = true`, `plak mcp add --resources`, a `read_resource`
   tool); and prompts (`plak mcp prompts`).
 - TUI: delivered child mail renders as compact expandable groups; Menu uses a
-  list and detail pane at 140+ columns; Usage offers `[refresh]` beside every
-  connected Codex, SuperGrok and Claude account, which re-reads its usage and
-  first refreshes an expired token (as `plak refresh` does); Usage and
-  Providers read credential state off the host loop, so a prompt sent while
-  another process holds a subscription lock is accepted at once; streaming code
-  fences highlight incrementally; long inline code and URLs wrap. A
-  scrolled-up transcript stays anchored while output arrives, and a send-now
-  steer shows its row immediately.
+  list and detail pane at 140+ columns; Usage offers `[refresh]` beside a
+  Codex, SuperGrok or Claude account whose token needs a refresh, which
+  refreshes it (as `plak refresh` does) and re-reads its usage; the label
+  highlights only under the pointer or after Up/Down; Usage and Providers read
+  credential state off the host loop, so a prompt sent while another process
+  holds a subscription lock is accepted at once; streaming code fences
+  highlight incrementally; long inline code and URLs wrap. A scrolled-up
+  transcript stays anchored while output arrives, and a send-now steer shows
+  its row immediately.
 - `plak doctor` and `plak status` warn when a compiled provider review expires
   within 14 days or has expired, naming the surface and UTC date.
 - Startup: store integrity scans moved to `plak doctor`; the binary identity
