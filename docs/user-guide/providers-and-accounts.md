@@ -19,9 +19,13 @@ API sessions. The ambiguous bare spelling `xai` is refused.
 Login and key entry are CLI-only. The TUI's Providers tab is read-only: per
 vertical it names the account, its status, and the command that connects it.
 
-Usage never refreshes an expired token. An expired Codex, Grok or Claude access
-token shows that the credential needs a token refresh: the next turn refreshes
-it, or run `plak refresh <account>`. If the provider rejects a token that is
+A usage read never refreshes an expired token. An expired Codex, Grok or Claude
+access token shows that the credential needs a token refresh: the next turn
+refreshes it, or run `plak refresh <account>`. In the TUI, the Usage tab offers
+`[refresh]` beside every connected subscription account (Up/Down and Enter, or
+click it): it re-reads that account's usage and, when the token has expired,
+first runs the same refresh as `plak refresh <account>`. Accounts that need
+`plak login` get no action. If the provider rejects a token that is
 still fresh, the usage read forces one refresh and reads again; if that
 refresh fails, the provider line shows why. An ended usage window means stale provider
 data, not an expired local token.

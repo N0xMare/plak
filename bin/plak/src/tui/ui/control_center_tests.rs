@@ -1676,6 +1676,43 @@ fn usage_refresh_buttons_match_goldens_and_their_scrolled_mouse_hits() {
 }
 
 #[test]
+fn usage_refresh_is_offered_beside_every_connected_subscription_vertical() {
+    let mut app = usage_fixture();
+    app.activate_control_tab(super::ControlTab::Usage);
+    app.apply_host_event(HostEvent::Extension(
+        SurfaceObservation::UsageRefreshAccounts(vec![
+            "codex".into(),
+            "grok".into(),
+            "claude".into(),
+        ]),
+    ));
+    let rows = menu_rows(&mut app, 100, 80);
+    for label in ["Codex [refresh]", "SuperGrok [refresh]", "Claude [refresh]"] {
+        assert!(rows.iter().any(|row| row.contains(label)), "{label}");
+    }
+    assert!(!rows.iter().any(|row| row.contains("OpenRouter [")));
+    for account in ["codex", "grok", "claude"] {
+        assert!(
+            app.usage_refresh_hits
+                .iter()
+                .any(|(offered, _)| offered == account),
+            "{account}"
+        );
+    }
+    assert_eq!(
+        app.handle_key(key(KeyCode::Enter)),
+        Some(UserAction::Extension(
+            SurfaceIntent::RefreshUsageCredential {
+                account: "codex".into()
+            }
+        ))
+    );
+    let rows = menu_rows(&mut app, 100, 80);
+    assert!(rows.iter().any(|row| row.contains("Codex [refreshing…]")));
+    assert!(app.start_usage_refresh("grok".into()).is_none());
+}
+
+#[test]
 fn usage_refresh_is_keyboard_reachable_and_completion_does_not_reopen_menu() {
     let mut app = usage_fixture();
     app.activate_control_tab(super::ControlTab::Usage);

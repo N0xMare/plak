@@ -724,6 +724,7 @@ fn status_long_state_path_names_the_account_command() {
 enum Call {
     Status(NativeProvider),
     Usage(NativeProvider),
+    Expiry(NativeProvider),
     Acknowledge(NativeProvider, String),
     Login(NativeProvider, NativeLoginMode),
     Refresh(NativeProvider),
@@ -754,6 +755,7 @@ struct FakeBackend {
     openrouter_key_usage: Option<product_usage::VerticalObservation>,
     revoke_refused: bool,
     refresh_failure: Option<&'static str>,
+    access_token_expired: bool,
 }
 
 impl FakeBackend {
@@ -775,6 +777,7 @@ impl FakeBackend {
             openrouter_key_usage: None,
             revoke_refused: false,
             refresh_failure: None,
+            access_token_expired: false,
         }
     }
 }
@@ -818,6 +821,11 @@ impl AccountOps for FakeBackend {
                 .unwrap_or_else(|_| unreachable!("epoch is valid")),
             reason: plakous::model::SubscriptionUsageUnavailable::Unqualified,
         })
+    }
+
+    fn access_token_expired(&mut self, provider: NativeProvider) -> CliResult<bool> {
+        self.calls.push(Call::Expiry(provider));
+        Ok(self.access_token_expired)
     }
 
     fn openrouter_key_usage(&mut self) -> CliResult<product_usage::VerticalObservation> {
@@ -2933,6 +2941,7 @@ fn compatibility_prompt_precedes_representative_network_actions() {
             | Call::Revoke(provider) => *provider,
             Call::Status(_)
             | Call::Usage(_)
+            | Call::Expiry(_)
             | Call::Acknowledge(_, _)
             | Call::LogoutLocal(_)
             | Call::ReplaceNewerBuild(_)
@@ -3967,8 +3976,8 @@ fn product_gate_allows_inference() {
 }
 
 #[test]
-fn usage_refresh_revalidates_fake_credentials_and_uses_the_claimed_cli_operation() {
-    use commands::usage::{can_refresh_usage, refresh_usage_credential};
+fn usage_refresh_offers_every_connected_vertical_and_refreshes_only_when_needed() {
+    use commands::usage::{can_refresh_usage, refresh_usage_credential, usage_refresh_accounts};
     for provider in [
         NativeProvider::Codex,
         NativeProvider::Claude,
@@ -3979,10 +3988,20 @@ fn usage_refresh_revalidates_fake_credentials_and_uses_the_claimed_cli_operation
             CredentialState::SignedOut,
             CredentialState::LoginRequired,
             CredentialState::Revoked,
+            CredentialState::ProfileChanged,
+            CredentialState::WrittenByNewerBuild,
             CredentialState::RefreshRequired,
+            CredentialState::Refreshing,
             CredentialState::Quarantined,
         ] {
-            let offered = credential == CredentialState::RefreshRequired
+            let offered = matches!(
+                credential,
+                CredentialState::Ready
+                    | CredentialState::RefreshRequired
+                    | CredentialState::Refreshing
+            ) || (provider == NativeProvider::Xai
+                && credential == CredentialState::Quarantined);
+            let refreshes = credential == CredentialState::RefreshRequired
                 || (provider == NativeProvider::Xai && credential == CredentialState::Quarantined);
             let status = CliStatus {
                 compatibility: CompatibilityState::Current,
@@ -3993,9 +4012,21 @@ fn usage_refresh_revalidates_fake_credentials_and_uses_the_claimed_cli_operation
             backend.credential = credential;
             assert_eq!(
                 refresh_usage_credential(&mut backend, provider).is_ok(),
-                offered
+                offered,
+                "{provider:?} {credential:?}"
             );
-            assert_eq!(backend.calls.contains(&Call::RefreshNow(provider)), offered);
+            // The decision is local: only a Ready posture checks the stored
+            // expiry, and no offered state reads usage before the re-read. A
+            // valid Ready token is only re-read, never refreshed.
+            assert_eq!(
+                backend.calls.contains(&Call::RefreshNow(provider)),
+                refreshes
+            );
+            assert_eq!(
+                backend.calls.contains(&Call::Expiry(provider)),
+                credential == CredentialState::Ready
+            );
+            assert!(!backend.calls.contains(&Call::Usage(provider)));
             assert!(
                 !backend
                     .calls
@@ -4004,6 +4035,53 @@ fn usage_refresh_revalidates_fake_credentials_and_uses_the_claimed_cli_operation
             );
         }
     }
+
+    // The common SuperGrok case: the offline posture stays Ready while the
+    // stored access token expired. The action is offered and runs the claimed
+    // refresh after the local expiry check, with no usage read first.
+    for provider in [
+        NativeProvider::Xai,
+        NativeProvider::Codex,
+        NativeProvider::Claude,
+    ] {
+        let mut expired = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
+        expired.credential = CredentialState::Ready;
+        expired.access_token_expired = true;
+        assert_eq!(
+            usage_refresh_accounts(&mut expired),
+            ["codex", "grok", "claude"]
+        );
+        expired.calls.clear();
+        refresh_usage_credential(&mut expired, provider).unwrap();
+        assert_eq!(
+            expired.calls,
+            vec![
+                Call::Status(provider),
+                Call::Expiry(provider),
+                Call::RefreshNow(provider)
+            ]
+        );
+
+        let mut valid = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
+        valid.credential = CredentialState::Ready;
+        refresh_usage_credential(&mut valid, provider).unwrap();
+        assert_eq!(
+            valid.calls,
+            vec![Call::Status(provider), Call::Expiry(provider)]
+        );
+    }
+
+    let mut signed_out = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
+    assert_eq!(usage_refresh_accounts(&mut signed_out), [] as [String; 0]);
+    let refusal = refresh_usage_credential(&mut signed_out, NativeProvider::Xai).unwrap_err();
+    assert!(
+        refusal
+            .message()
+            .contains("can no longer be refreshed from Usage"),
+        "{}",
+        refusal.message()
+    );
+
     let mut failure = FakeBackend::new(CompatibilityState::Current, CredentialState::Ready);
     failure.credential = CredentialState::RefreshRequired;
     failure.refresh_failure = Some("scripted credential refresh failed");
@@ -4020,12 +4098,22 @@ fn usage_refresh_revalidates_fake_credentials_and_uses_the_claimed_cli_operation
             Call::RefreshNow(NativeProvider::Claude)
         ]
     );
+    let mut unready = FakeBackend::new(CompatibilityState::Current, CredentialState::Quarantined);
+    unready.credential = CredentialState::Quarantined;
+    assert!(
+        refresh_usage_credential(&mut unready, NativeProvider::Xai)
+            .unwrap_err()
+            .message()
+            .contains("did not produce a ready credential")
+    );
     let mut inactive = FakeBackend::new(CompatibilityState::Required, CredentialState::Ready);
-    inactive.credential = CredentialState::RefreshRequired;
+    inactive.credential = CredentialState::Ready;
+    assert_eq!(usage_refresh_accounts(&mut inactive), [] as [String; 0]);
     assert!(refresh_usage_credential(&mut inactive, NativeProvider::Claude).is_err());
     assert!(
         !inactive
             .calls
-            .contains(&Call::RefreshNow(NativeProvider::Claude))
+            .iter()
+            .any(|call| matches!(call, Call::RefreshNow(_) | Call::Usage(_) | Call::Expiry(_)))
     );
 }

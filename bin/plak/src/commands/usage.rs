@@ -74,27 +74,72 @@ pub fn usage_vertical_for_account(account: &str) -> Option<UsageVertical> {
     }
 }
 
-/// Only recoverable credential states offer an explicit Usage refresh.
+/// Every connected subscription credential under a current profile offers an
+/// explicit Usage refresh; states whose remedy is `plak login` (or another
+/// build) do not. SuperGrok's quarantine is reclaimable by its next refresh.
 pub(crate) fn can_refresh_usage(
     provider: NativeProvider,
     status: crate::presentation::CliStatus,
 ) -> bool {
     status.compatibility == CompatibilityState::Current
-        && (status.credential == CredentialState::RefreshRequired
-            || (provider == NativeProvider::Xai
-                && status.credential == CredentialState::Quarantined))
+        && match status.credential {
+            CredentialState::Ready
+            | CredentialState::RefreshRequired
+            | CredentialState::Refreshing => true,
+            CredentialState::Quarantined => provider == NativeProvider::Xai,
+            _ => false,
+        }
 }
 
-/// The Usage action uses the same forced, claimed refresh as `plak refresh`.
+/// The subscription accounts whose Usage vertical offers `[refresh]`.
+pub(crate) fn usage_refresh_accounts(backend: &mut impl AccountOps) -> Vec<String> {
+    [
+        NativeProvider::Codex,
+        NativeProvider::Xai,
+        NativeProvider::Claude,
+    ]
+    .into_iter()
+    .filter(|provider| {
+        backend
+            .offline_status(*provider)
+            .is_ok_and(|status| can_refresh_usage(*provider, status))
+    })
+    .map(|provider| super::support::cli_provider_name(provider).to_owned())
+    .collect()
+}
+
+/// Whether the credential must be refreshed before Usage re-reads it, decided
+/// from local state only. The offline posture stays `Ready` for an expired but
+/// refreshable access token, so a `Ready` posture also checks the stored
+/// expiry. A `Refreshing` credential is renewed by its claim holder.
+fn usage_needs_refresh(
+    backend: &mut impl AccountOps,
+    provider: NativeProvider,
+    credential: CredentialState,
+) -> CliResult<bool> {
+    match credential {
+        CredentialState::RefreshRequired => Ok(true),
+        CredentialState::Quarantined => Ok(provider == NativeProvider::Xai),
+        CredentialState::Ready => backend.access_token_expired(provider),
+        _ => Ok(false),
+    }
+}
+
+/// The Usage action re-reads every offered account; when the credential needs
+/// a refresh it first runs the same forced, claimed refresh as `plak refresh`.
 /// Revalidate the offline posture because a button may outlive its snapshot.
 pub(crate) fn refresh_usage_credential(
     backend: &mut impl AccountOps,
     provider: NativeProvider,
 ) -> CliResult<()> {
-    if !can_refresh_usage(provider, backend.offline_status(provider)?) {
+    let status = backend.offline_status(provider)?;
+    if !can_refresh_usage(provider, status) {
         return Err(plakous_hosted::error::CliFailure::new(
-            "credential no longer needs a Usage refresh; reopen Usage",
+            "credential can no longer be refreshed from Usage; reopen Usage",
         ));
+    }
+    if !usage_needs_refresh(backend, provider, status.credential)? {
+        return Ok(());
     }
     let (state, _) = backend.refresh_now(provider)?;
     if state != CredentialState::Ready {

@@ -2107,31 +2107,58 @@ impl NativeSubscriptions {
     ) -> Result<ForcedRefresh, NativeSubscriptionError> {
         let lock = self.acquire_compatibility_lock(provider).await?;
         let status = self.refresh_locked(provider, true).await?;
-        let access_expires_at = match provider {
-            NativeProvider::Codex => self
-                .codex_online()
-                .await?
-                .manager
-                .access_expires_at()
-                .map_err(map_codex_error)?,
-            NativeProvider::Claude => self
-                .claude_online()
-                .await?
-                .manager
-                .access_expires_at()
-                .map_err(map_claude_error)?,
-            NativeProvider::Xai => self
-                .xai_online()
-                .await?
-                .manager
-                .access_expires_at()
-                .map_err(map_xai_error)?,
-        };
+        let access_expires_at = self.access_expires_at_locked(provider).await?;
         lock.verify()?;
         Ok(ForcedRefresh {
             status,
             access_expires_at,
         })
+    }
+
+    /// Reports whether the stored access token of a `Ready` credential has
+    /// expired, from local state only: no provider network I/O and no claim.
+    /// The offline status stays `Ready` for such a token because the next
+    /// refresh renews it.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed for a missing, non-`Ready`, or unreadable record.
+    pub async fn access_token_expired(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<bool, NativeSubscriptionError> {
+        let lock = self.acquire_compatibility_lock(provider).await?;
+        let access_expires_at = self.access_expires_at_locked(provider).await?;
+        lock.verify()?;
+        Ok(access_expires_at <= self.state.now()?)
+    }
+
+    /// Stored access-token expiry under the held compatibility lock; opening
+    /// the provider manager performs no network I/O.
+    async fn access_expires_at_locked(
+        &self,
+        provider: NativeProvider,
+    ) -> Result<u64, NativeSubscriptionError> {
+        match provider {
+            NativeProvider::Codex => self
+                .codex_online()
+                .await?
+                .manager
+                .access_expires_at()
+                .map_err(map_codex_error),
+            NativeProvider::Claude => self
+                .claude_online()
+                .await?
+                .manager
+                .access_expires_at()
+                .map_err(map_claude_error),
+            NativeProvider::Xai => self
+                .xai_online()
+                .await?
+                .manager
+                .access_expires_at()
+                .map_err(map_xai_error),
+        }
     }
 
     /// Runs one refresh under the held compatibility lock; `force` claims a

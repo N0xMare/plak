@@ -808,6 +808,12 @@ async fn newer_build_state_is_refused_untouched_until_a_confirmed_replacement()
                 "{label}"
             );
             untouched()?;
+            assert_eq!(
+                subscriptions.access_token_expired(provider).await,
+                Err(NativeSubscriptionError::CredentialWrittenByNewerBuild),
+                "{label}"
+            );
+            untouched()?;
             assert!(
                 matches!(
                     subscriptions.subscription_usage(provider).await,

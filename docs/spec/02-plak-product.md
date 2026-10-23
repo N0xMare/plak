@@ -4142,8 +4142,9 @@ These are in-process host observations, not new JSONL v1 lines.
 
 ### 5.5 The Menu
 
-Usage's explicit `[refresh]` action (§7.2) may refresh an expired subscription
-credential or SuperGrok's reclaimable quarantine; login stays CLI-only.
+Usage's explicit `[refresh]` action (§7.2) re-reads any connected subscription
+vertical and first refreshes an expired subscription credential or SuperGrok's
+reclaimable quarantine; login stays CLI-only.
 
 Transcript child-mail folding uses the shared expandable-row controls (§5.4),
 independently of the Menu's `group tool calls` preference.
@@ -5958,17 +5959,28 @@ Unsafe local storage remains a local-state refusal. A settled quarantine names
 reclaims an ambiguous outcome: there the line names the next turn or
 `plak refresh grok` first and `plak login grok` only as the fallback.
 
-**Explicit TUI refresh.** Usage offers `[refresh]` beside a provider name only
-when its current offline credential posture is `RefreshRequired`, or when
-SuperGrok has a reclaimable quarantine, under a current accepted compatibility
-profile. Ready, signed-out, revoked, login-required and non-reclaimable
-quarantine states offer no refresh action, and there is no `[login]` action.
+**Explicit TUI refresh.** Usage offers `[refresh]` beside the provider name of
+every connected subscription vertical (Codex, SuperGrok, Claude) whose offline
+credential posture is `Ready`, `RefreshRequired` or `Refreshing`, or SuperGrok's
+reclaimable `Quarantined`, under a current accepted compatibility profile. The
+offline posture stays `Ready` for an expired but refreshable access token, so
+the action is not gated on it. States whose remedy is `plak login` (signed out,
+revoked, login-required, profile-changed and non-reclaimable quarantine) or
+another build (written by a newer build) offer no action, and there is no
+`[login]` action.
 Up/Down focuses the offered actions, Enter activates the focused action, and
 clicking its `[refresh]` label activates it directly. Page keys and the wheel
 still scroll the whole Usage page; tab and close hits remain independent.
-The action revalidates the posture and invokes the same in-process facade
-`refresh_now` operation as `plak refresh <account>`, with the same single-flight
-claim, rotation and quarantine rules. It never logs in or accepts a profile.
+The action revalidates the offline posture, then decides from local state
+alone, never by a provider usage read, whether the credential needs a refresh:
+a `RefreshRequired` posture or SuperGrok's quarantine does, and a `Ready`
+posture does when the facade's offline `access_token_expired` check finds the
+stored access token expired; a `Refreshing` credential is left to its claim
+holder. A credential that needs one first gets the same
+in-process facade `refresh_now` operation as `plak refresh <account>`, with the
+same single-flight claim, rotation and quarantine rules. A ready credential
+with a valid token is not refreshed, only re-read. The action never logs in or
+accepts a profile.
 One explicit refresh runs per attached product surface; its button reads
 `[refreshing…]` and other refresh actions are disabled until it settles.
 Completion re-reads the host-owned Usage projection, bypassing held freshness;

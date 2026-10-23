@@ -246,6 +246,10 @@ pub trait AccountOps {
 
     fn subscription_usage(&mut self, provider: NativeProvider) -> CliResult<SubscriptionUsageRead>;
 
+    /// Whether a `Ready` credential's stored access token has expired, read
+    /// locally without provider network I/O.
+    fn access_token_expired(&mut self, provider: NativeProvider) -> CliResult<bool>;
+
     /// Reads the OpenRouter inference key's own allowance on demand.
     fn openrouter_key_usage(&mut self) -> CliResult<product_usage::VerticalObservation>;
 
@@ -548,6 +552,13 @@ impl AccountOps for PlakousApplication {
         self.executor
             .block_on(self.subscriptions.subscription_usage(provider))
             .map_err(application_execution_failure)
+    }
+
+    fn access_token_expired(&mut self, provider: NativeProvider) -> CliResult<bool> {
+        self.executor
+            .block_on(self.subscriptions.access_token_expired(provider))
+            .map_err(application_execution_failure)?
+            .map_err(|error| self.subscription_failure(error, Some(provider)))
     }
 
     fn openrouter_key_usage(&mut self) -> CliResult<product_usage::VerticalObservation> {

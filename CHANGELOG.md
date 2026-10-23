@@ -24,10 +24,12 @@ one cross-build carrier (a build imports its own and the previous version).
   resources (`resources = true`, `plak mcp add --resources`, a `read_resource`
   tool); and prompts (`plak mcp prompts`).
 - TUI: delivered child mail renders as compact expandable groups; Menu uses a
-  list and detail pane at 140+ columns; Usage offers `[refresh]` for
-  credentials that need it; streaming code fences highlight incrementally;
-  long inline code and URLs wrap. A scrolled-up transcript stays anchored
-  while output arrives, and a send-now steer shows its row immediately.
+  list and detail pane at 140+ columns; Usage offers `[refresh]` beside every
+  connected Codex, SuperGrok and Claude account, which re-reads its usage and
+  first refreshes an expired token (as `plak refresh` does); streaming code
+  fences highlight incrementally; long inline code and URLs wrap. A
+  scrolled-up transcript stays anchored while output arrives, and a send-now
+  steer shows its row immediately.
 - `plak doctor` and `plak status` warn when a compiled provider review expires
   within 14 days or has expired, naming the surface and UTC date.
 - Startup: store integrity scans moved to `plak doctor`; the binary identity
@@ -64,6 +66,8 @@ one cross-build carrier (a build imports its own and the previous version).
   provider, and OpenRouter failures carry the provider's HTTP status, including
   an in-band one, on the model error and the JSONL `turn_lifecycle`.
 - OpenRouter derives its input capacity from the catalog.
+- `NativeSubscriptions::access_token_expired` reports, from local state only,
+  whether a `Ready` subscription credential's stored access token has expired.
 - Long Responses sessions keep working past 4096 history items or 3 MiB of
   replay: per-response limits no longer apply to accumulated history.
   Provider replay is bound to the account that produced it, so changing

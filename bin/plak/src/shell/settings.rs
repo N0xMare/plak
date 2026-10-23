@@ -811,24 +811,9 @@ impl ProductSurface {
     }
 
     fn send_usage_refresh_accounts(&self, events: &Sender<PlakExtension>) {
-        use crate::commands::application::AccountOps as _;
         let accounts = self
             .accounts_backend()
-            .map(|mut backend| {
-                [
-                    plakous::subscriptions::NativeProvider::Codex,
-                    plakous::subscriptions::NativeProvider::Xai,
-                    plakous::subscriptions::NativeProvider::Claude,
-                ]
-                .into_iter()
-                .filter(|provider| {
-                    backend.offline_status(*provider).is_ok_and(|status| {
-                        crate::commands::usage::can_refresh_usage(*provider, status)
-                    })
-                })
-                .map(|provider| crate::commands::support::cli_provider_name(provider).to_owned())
-                .collect()
-            })
+            .map(|mut backend| crate::commands::usage::usage_refresh_accounts(&mut backend))
             .unwrap_or_default();
         let _ = events.send(HostEvent::Extension(
             SurfaceObservation::UsageRefreshAccounts(accounts),

@@ -3862,7 +3862,11 @@ resulting state (`RefreshRequired`, `Quarantined`, `LoginRequired`, ...), or
 `Unauthorized` when the credential stays `Ready`; the refresh failure itself is
 in telemetry. Model dispatch keeps its one-refresh-then-fail rule. The
 operator's `refresh_now` forces one grant regardless of expiry and reports the
-new access-token expiry; it never reports success without a grant. A usage read that finds a durable `Unknown`
+new access-token expiry; it never reports success without a grant.
+`access_token_expired` reports whether a `Ready` credential's stored access
+token has expired, from local state only (no provider network I/O, no claim);
+the offline status stays `Ready` for such a token, and the call fails closed
+like the offline status for a missing, non-`Ready` or unreadable record. A usage read that finds a durable `Unknown`
 record while a refresh claim still owns the execution lock, in this or another
 process, or whose record changes under the probe, reports retryable `Busy`
 rather than quarantine; the probe neither waits nor writes.
