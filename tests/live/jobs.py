@@ -286,21 +286,28 @@ def settle_child_task(route: live.Route, command: str) -> str:
         "this submit_result.\n"
         f"3. After that refusal, {stop_hint(route)}\n"
         "4. Call submit_result again with a schema-valid result.\n"
-        "Do not run the command yourself. After you spawn the worker, end your turn "
-        "without waiting for it.\n"
+        "Do not run the command yourself. After you spawn the worker, you may wait for "
+        "it with wait_agent until it reports, then reply with the single word done.\n"
     )
 
 
 def close_child_task(route: live.Route, command: str) -> str:
-    """Root prompt for the close half of `child_settle`. The driver closes."""
+    """Root prompt for the close half of `child_settle`. The driver closes.
+
+    Plak's own JSONL-root agreement tells the root to wait for every child it
+    started before it ends its turn, so the root may park in `wait_agent`:
+    the driver closes the worker while that wait runs, and the wait then
+    returns the closed worker.
+    """
     return (
         "Spawn exactly one worker. Its entire task is to run exactly:\n"
         f"{command}\n"
         f"{immediate_hint(route)}\n"
         "When that call returns while the command is still running, stop. "
         "Do not submit_result, do not stop the process, and do not wait for it.\n"
-        "Do not run the command yourself. After you spawn the worker, reply with "
-        "the single word done.\n"
+        "Do not run the command yourself. After you spawn the worker, you may wait for "
+        "it with wait_agent; the operator closes it while the command runs. When it has "
+        "reported or been closed, reply with the single word done.\n"
     )
 
 
@@ -686,19 +693,33 @@ def judge_child(*, started: bool, owner: str | None, first_code: str | None,
 
 
 def judge_close(*, started: bool, finished_early: bool, stop_reason: str | None,
-                still_running: bool, detail: str = "") -> str:
+                still_running: bool, detail: str = "", promoted: bool = True,
+                sent: bool = True, target_problem: str | None = None) -> str:
     """`close_agent` stops the child's live job with `attempt ended`.
 
     Interrupt does not. Spec 01 §8.5: retiring an interrupted child whose
     attempt remains live is not a job-ending release. Spec 03 §5.2: close
     stops that attempt's jobs with `attempt ended` before sealing.
+
+    A command that finished before close is the model's only when the worker
+    ignored its instructions and the job was never promoted. When the driver
+    never sent `close_node` while the promoted job ran, its own timing is
+    at fault; a close sent in time that did not stop the job is the product's.
     """
     if live.provider_reason_from(None, None, detail):
         raise ScenarioFailure(PROVIDER, f"child failure: {' '.join(detail.split())[:160]}")
+    if target_problem is not None:
+        raise ScenarioFailure(MODEL, target_problem)
     if not started:
         raise ScenarioFailure(MODEL, "the child did not start the command")
+    if finished_early and not promoted:
+        raise ScenarioFailure(MODEL, "the child ran the command in the foreground instead of "
+                                     "leaving a promoted job for close")
+    if finished_early and not sent:
+        raise ScenarioFailure(HARNESS, "the driver did not close the child while its job ran")
     if finished_early:
-        raise ScenarioFailure(MODEL, "the command finished before close")
+        raise ScenarioFailure(HARNESS, "close was sent while the job ran, but the job finished "
+                                       "instead of stopping at attempt end")
     if stop_reason == "model":
         raise ScenarioFailure(MODEL, "the model stopped the job instead of leaving it for close")
     if stop_reason != "attempt_ended" or still_running:
@@ -777,12 +798,59 @@ def job_id_for(events: list[dict], token: str) -> str | None:
     return None
 
 
-def terminal_for(events: list[dict], job_id: str | None) -> dict | None:
+def owner_for(events: list[dict], token: str) -> str | None:
+    """The owner of the job whose command names `token`. Job ids repeat across agents."""
+    for event in events:
+        if event.get("kind") == "job_started" and token in str(event.get("command", "")):
+            return event.get("owner")
+    return None
+
+
+def terminal_for(events: list[dict], job_id: str | None, owner: str | None = None) -> dict | None:
     found = None
     for event in events:
-        if job_id and event.get("kind") == "job_terminal" and event.get("job_id") == job_id:
+        if job_id and event.get("kind") == "job_terminal" and event.get("job_id") == job_id \
+                and (owner is None or event.get("owner") == owner):
             found = event
     return found
+
+
+def close_target(events: list[dict], root: str, before: set[str],
+                 token: str) -> tuple[str | None, str | None]:
+    """The worker to close for the job naming `token`, or why there is none to close.
+
+    A job's `owner` is not a tree `agent_id` (the tree names children `cN`),
+    so the worker is mapped through the tree: the one child the root spawned
+    since `before`, whose spawn prompt names the command. More than one new
+    worker is the root not following its prompt, as is a lone worker whose
+    prompt does not carry the command; the driver does not guess.
+    """
+    fresh = [item for item in spawned_children(events, root) if item not in before]
+    if len(fresh) > 1:
+        return None, "the root spawned more than one worker"
+    if not fresh:
+        return None, None
+    prompt = node_prompt(events, fresh[0])
+    if prompt is not None and token not in prompt:
+        return None, "the spawned worker's prompt does not carry the command"
+    return fresh[0], None
+
+
+def node_prompt(events: list[dict], agent_id: str) -> str | None:
+    """The spawn prompt the newest tree snapshot records for `agent_id`."""
+    prompt = None
+    for event in events:
+        if event.get("kind") != "tree":
+            continue
+        for node in event.get("nodes") or []:
+            if node.get("agent_id") == agent_id and isinstance(node.get("prompt"), str):
+                prompt = node["prompt"]
+    return prompt
+
+
+def promoted_for(events: list[dict], job_id: str | None, owner: str | None) -> bool:
+    return any(event.get("kind") == "job_promoted" and event.get("job_id") == job_id
+               and (owner is None or event.get("owner") == owner) for event in events)
 
 
 def screen_after(data: bytes, mark: int) -> str:
@@ -2088,33 +2156,52 @@ class Jobs:
             if marker_path.is_file():
                 marker_path.unlink()
             before = set(spawned_children(events, root))
+            closing: dict = {"child": None, "problem": None}
+
+            def close_while_busy(_turn, _event) -> None:
+                # The root may park in wait_agent past the hold (its JSONL
+                # agreement asks it to wait for its children), so close the
+                # worker as soon as its job is promoted and running. close_node
+                # is accepted while the root turn is busy. A start that is
+                # still foreground is not closed: close would cancel it.
+                if closing["child"] is not None or closing["problem"] is not None:
+                    return
+                seen = [event for _, event in agent.observed]
+                target, problem = close_target(seen, root, before, close_token)
+                if problem is not None:
+                    closing["problem"] = problem
+                    return
+                job_id = job_id_for(seen, close_token)
+                if target and promoted_for(seen, job_id, owner_for(seen, close_token)) \
+                        and matching(command_lines(), close_token) \
+                        and not marker(repo, "job-finished"):
+                    closing["child"] = target
+                    agent.send("close_node", agent_id=target)
+
             follow = run_turn(
                 agent, close_child_task(self.route, hold_command(40, close_token)),
-                180, None, lambda: False,
+                180, close_while_busy, lambda: False,
             )
             classify_turn(follow, "close")
-            close_id = None
-            close_child = None
             deadline = time.monotonic() + CHILD_WAIT_S
-            while time.monotonic() < deadline and close_child is None:
+            # A root that ended its turn first: close after the turn.
+            while time.monotonic() < deadline and closing["child"] is None \
+                    and closing["problem"] is None and not marker(repo, "job-finished"):
                 drain(agent, 0.5)
-                events = [event for _, event in agent.observed]
-                fresh = [item for item in spawned_children(events, root) if item not in before]
-                if fresh and job_id_for(events, close_token) and matching(command_lines(), close_token) \
-                        and not marker(repo, "job-finished"):
-                    close_child = fresh[-1]
-                    close_id = job_id_for(events, close_token)
-            if close_child is not None:
-                agent.send("close_node", agent_id=close_child)
+                close_while_busy(None, None)
+            close_id = job_id_for([event for _, event in agent.observed], close_token)
+            close_owner = owner_for([event for _, event in agent.observed], close_token)
+            if closing["child"] is not None:
                 deadline = time.monotonic() + 30
                 while time.monotonic() < deadline:
                     drain(agent, 0.5)
-                    closed = terminal_for([event for _, event in agent.observed], close_id)
+                    closed = terminal_for([event for _, event in agent.observed], close_id, close_owner)
                     if closed is not None and not matching(command_lines(), close_token):
                         break
             events = [event for _, event in agent.observed]
             close_id = close_id or job_id_for(events, close_token)
-            closed = terminal_for(events, close_id)
+            close_owner = close_owner or owner_for(events, close_token)
+            closed = terminal_for(events, close_id, close_owner)
             ended = judge_close(
                 started=close_id is not None,
                 finished_early=marker(repo, "job-finished") and (
@@ -2123,6 +2210,9 @@ class Jobs:
                 stop_reason=None if closed is None else closed.get("stop_reason"),
                 still_running=bool(matching(command_lines(), close_token)),
                 detail="" if closed is None else str(closed.get("output") or ""),
+                promoted=promoted_for(events, close_id, close_owner),
+                sent=closing["child"] is not None,
+                target_problem=closing["problem"],
             )
             return f"{lived}; {ended}"
         finally:

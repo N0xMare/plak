@@ -272,9 +272,20 @@ class JobOracleTests(unittest.TestCase):
         failure(self, lambda: jobs.judge_close(
             started=True, finished_early=False, stop_reason="model", still_running=False,
         ), live.MODEL)
+        # A command that finished before close: model only for a job the
+        # worker never left promoted; the driver's own timing and a close that
+        # did not stop the job are harness.
         failure(self, lambda: jobs.judge_close(
             started=True, finished_early=True, stop_reason=None, still_running=False,
+            promoted=False,
         ), live.MODEL)
+        failure(self, lambda: jobs.judge_close(
+            started=True, finished_early=True, stop_reason=None, still_running=False,
+            sent=False,
+        ), live.HARNESS)
+        failure(self, lambda: jobs.judge_close(
+            started=True, finished_early=True, stop_reason=None, still_running=False,
+        ), live.HARNESS)
         failure(self, lambda: jobs.judge_close(
             started=False, finished_early=False, stop_reason=None, still_running=False,
         ), live.MODEL)
@@ -629,6 +640,10 @@ class JobEvidenceTests(unittest.TestCase):
         self.assertIn("write_stdin", jobs.stop_hint(live.ROUTES["codex"]))
         closed = jobs.close_child_task(live.ROUTES["grok"], "python3 hold.py 40 tok")
         self.assertIn("Do not submit_result", closed)
+        # Neither half asks a root to disobey its wait-for-children agreement.
+        for prompt in (task, closed):
+            self.assertIn("you may wait for it with wait_agent", prompt)
+            self.assertNotIn("without waiting for it", prompt)
 
     def test_cursor_split_hud_is_one_composer_row(self):
         agent = " · \u280b 1 agent".encode()
@@ -811,3 +826,145 @@ class JobEvidenceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ChildSettleCloseReplayTests(unittest.TestCase):
+    """The close half of `child_settle`, replayed from the recorded root shapes."""
+
+    CLOSE = "plakjobclose"
+
+    def play(self, during_turn, after_turn):
+        """`during_turn` events arrive inside the root turn, `after_turn` after it.
+
+        The job stops at attempt end once close_node is sent and runs to its end
+        otherwise; `finish` in a list marks the hold ending on its own there.
+        """
+        import collections
+        from unittest.mock import Mock, patch
+
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            driver = jobs.Jobs(live.ROUTES["codex-sol"], Mock(fixture_seed=1, capture_segments=[]))
+            driver.prepare = Mock(return_value=(repo, repo / "home"))
+            agent = Mock(session_id="root", observed=collections.deque())
+            sent = []
+            state = {"stopped": False, "finished": False}
+
+            def send(kind, **fields):
+                sent.append((kind, fields))
+                if kind == "close_node" and not state["finished"]:
+                    state["stopped"] = True
+                    agent.observed.append((0.0, {"kind": "job_terminal", "job_id": "p1",
+                                                 "owner": "o2", "status": "stopped",
+                                                 "stop_reason": "attempt_ended", "output": ""}))
+                return "1"
+
+            agent.send.side_effect = send
+            driver.open_agent = Mock(return_value=agent)
+            pending_after = list(after_turn)
+            calls = {"n": 0}
+
+            def feed(event):
+                if event == "finish":
+                    if not state["stopped"]:
+                        state["finished"] = True
+                        (repo / "job-finished").write_text("1\n")
+                        agent.observed.append((0.0, {"kind": "job_terminal", "job_id": "p1",
+                                                     "owner": "o2", "status": "exited",
+                                                     "output": ""}))
+                    return
+                agent.observed.append((0.0, event))
+
+            def run_turn(_agent, _text, _timeout, tick, _accept_eof):
+                calls["n"] += 1
+                if calls["n"] == 2:
+                    for event in during_turn:
+                        feed(event)
+                        if tick:
+                            tick(None, event)
+                return live.Turn(phase="completed")
+
+            def drain(_agent, _seconds):
+                if pending_after:
+                    feed(pending_after.pop(0))
+
+            def matching(_lines, token):
+                running = not state["stopped"] and not state["finished"] and any(
+                    event.get("kind") == "job_started" and token in event.get("command", "")
+                    for _, event in agent.observed)
+                return ["hold"] if running else []
+
+            with patch.object(jobs, "run_turn", run_turn), patch.object(jobs, "drain", drain), \
+                    patch.object(jobs, "matching", side_effect=matching), \
+                    patch.object(jobs, "command_lines", return_value=[]), \
+                    patch.object(jobs, "classify_turn"), patch.object(jobs, "require_script"), \
+                    patch.object(jobs, "judge_child", return_value="lived"), \
+                    patch.object(jobs, "submit_outcomes", return_value=["live_work", "ok"]), \
+                    patch.object(jobs, "child_has_settled", return_value=True), \
+                    patch.object(jobs, "close_agent"), patch.object(jobs, "stop_token"), \
+                    patch.object(jobs, "CHILD_WAIT_S", 0.5), \
+                    patch.object(driver, "fresh_token", side_effect=["plakjobchild", self.CLOSE]):
+                try:
+                    return driver.child_settle(), sent
+                except live.ScenarioFailure as caught:
+                    return caught, sent
+
+    TREE = {"kind": "tree", "nodes": [
+        {"agent_id": "root", "depth": 0},
+        {"agent_id": "c2", "depth": 1, "prompt": "run exactly: python3 hold.py 40 plakjobclose"}]}
+    TWO = {"kind": "tree", "nodes": [
+        {"agent_id": "root", "depth": 0},
+        {"agent_id": "c2", "depth": 1, "prompt": "run exactly: python3 hold.py 40 plakjobclose"},
+        {"agent_id": "c3", "depth": 1, "prompt": "run exactly: python3 hold.py 40 plakjobclose"}]}
+    STARTED = {"kind": "job_started", "job_id": "p1", "owner": "o2",
+               "command": "python3 hold.py 40 plakjobclose"}
+    PROMOTED = {"kind": "job_promoted", "job_id": "p1", "owner": "o2"}
+    WAIT = {"kind": "tool", "name": "wait_agent", "state": "running", "call_id": "w"}
+
+    def test_a_root_parked_in_wait_agent_has_its_worker_closed_during_the_turn(self):
+        # The recorded gpt-6.1-sol shape: the root waits on the worker past the
+        # 40 s hold; the driver closes it while that wait runs.
+        result, sent = self.play([self.TREE, self.STARTED, self.PROMOTED, self.WAIT, "finish"], [])
+        self.assertEqual(result, "lived; close stopped the child job at attempt end")
+        self.assertEqual(sent, [("close_node", {"agent_id": "c2"})])
+
+    def test_a_root_that_says_done_first_has_its_worker_closed_after_the_turn(self):
+        # The recorded gpt-6-luna shape: the root replies done right after the
+        # spawn; the job events arrive after its turn ends.
+        result, sent = self.play([self.TREE], [self.STARTED, self.PROMOTED])
+        self.assertEqual(result, "lived; close stopped the child job at attempt end")
+        self.assertEqual(sent, [("close_node", {"agent_id": "c2"})])
+
+    def test_a_job_that_finished_before_the_driver_could_close_is_not_the_model(self):
+        # The job ends before the driver ever sees the worker in a tree.
+        result, sent = self.play([self.STARTED, self.PROMOTED, "finish"], [self.TREE])
+        self.assertEqual(sent, [])
+        self.assertEqual((result.outcome, str(result)), (
+            live.HARNESS, "the driver did not close the child while its job ran"))
+
+    def test_a_start_that_was_never_promoted_is_not_closed_and_is_the_model(self):
+        # A foreground start: close would cancel it, so the driver waits for
+        # promotion that never comes; the job then finishes on its own.
+        result, sent = self.play([self.TREE, self.STARTED, "finish"], [])
+        self.assertEqual(sent, [])
+        self.assertEqual((result.outcome, str(result)), (
+            live.MODEL, "the child ran the command in the foreground instead of leaving a "
+                        "promoted job for close"))
+
+    def test_the_close_goes_to_the_worker_the_tree_maps_to_the_job(self):
+        result, sent = self.play([self.STARTED, self.TREE, self.PROMOTED, "finish"], [])
+        self.assertEqual(sent, [("close_node", {"agent_id": "c2"})])
+        self.assertEqual(result, "lived; close stopped the child job at attempt end")
+        # Job owners are runtime ids, not tree agent ids: the tree maps them.
+        self.assertEqual(jobs.close_target([self.TREE, self.STARTED], "root", set(),
+                                           self.CLOSE), ("c2", None))
+
+    def test_more_than_one_new_worker_is_the_model_and_nobody_is_closed(self):
+        result, sent = self.play([self.TWO, self.STARTED, self.PROMOTED, "finish"], [])
+        self.assertEqual(sent, [])
+        self.assertEqual((result.outcome, str(result)),
+                         (live.MODEL, "the root spawned more than one worker"))
+        other = {"kind": "tree", "nodes": [{"agent_id": "c2", "depth": 1, "prompt": "run ls"}]}
+        self.assertEqual(jobs.close_target([other], "root", set(), self.CLOSE),
+                         (None, "the spawned worker's prompt does not carry the command"))
+
