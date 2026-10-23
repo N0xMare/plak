@@ -88,6 +88,10 @@ _HUD_PAINT = re.compile(
 STOP_TITLE = "Stop all processes?"
 WARNING = "Plak stopped unexpectedly while this command was running."
 STEER_TEXT = "Reply with the single word steered."
+# Nested Code Mode calls that wait on a promoted process; a start is not one.
+NESTED_WAITS = frozenset({"process_session_write", "process_session_poll", "process_session_wait"})
+# The steer_await fixture's hold, in seconds.
+AWAIT_HOLD_S = 25
 
 HOLD_PY = (
     "import pathlib\n"
@@ -318,23 +322,101 @@ def exchange_settled(segment: Path) -> bool:
     return terminal and "incomplete=false" in lines
 
 
+def promotion_prompt(route: live.Route, command: str) -> str:
+    """The `promotion_budget` prompt: one command that carries no wait hint.
+
+    Told not to pass a yield, Codex still passed `yield_time_ms` 1000, so the
+    Code Mode prompt names the one argument the call may carry.
+    """
+    if code_mode(route):
+        how = ("Call exec_command with only the cmd argument: do not pass yield_time_ms "
+               "or any other argument.")
+    else:
+        how = "Do not pass a timeout, yield, block_until, or background flag."
+    return (
+        "Run exactly this shell command and no other tool:\n"
+        f"{command}\n"
+        f"{how}\n"
+        "When the tool returns, reply with the single word promoted."
+    )
+
+
 def judge_nested_steer(*, promoted: bool, steered: bool, acked: bool,
                        finished: bool, still_running: bool) -> str:
-    """Hint promotion, then a steer at the outer-cell boundary. Not preemption."""
+    """Hint promotion, then a steer after the cell. Not preemption.
+
+    `acked` is a `steer_ack` that reported `applied`; a steer that was only
+    `queued` and never applied is `harness`. `finished` and `still_running`
+    are the job's state when it was applied, not at turn end.
+    """
     if not promoted:
         raise ScenarioFailure(MODEL, "nested command was not promoted by its hint")
-    if finished and not still_running:
-        raise ScenarioFailure(MODEL, "command finished before the outer-cell steer")
     if not steered or not acked:
         raise ScenarioFailure(HARNESS, "steer was not applied at the outer-cell boundary")
+    if finished and not still_running:
+        raise ScenarioFailure(MODEL, "command finished before the steer was applied")
     if not still_running or finished:
         raise ScenarioFailure(HARNESS, "outer-cell steer stopped the nested job")
-    return "hint promoted the nested command; steer landed at the outer-cell boundary"
+    return "hint promoted the nested command; steer applied with the job still running"
+
+
+def judge_nested_await(*, promoted: bool, steered: bool, applied: bool,
+                       latency: float | None, running: bool, finished: bool,
+                       cell_wait: bool, yielded_first: bool = False,
+                       hold_left: float | None = None) -> str:
+    """A steer sent while a nested wait is in flight inside the outer cell.
+
+    The forwarded Notice yields the nested wait, the outer cell yields after
+    that settles and the steer is applied there with the job still running
+    (spec 01 §8.5). `steered` means a nested wait (`process_session_write`,
+    `_poll` or `_wait`) was in flight when the steer was sent; `latency` is
+    send to `steer_ack` `applied`, held to the direct scenarios' bar;
+    `running` and `finished` are the job's state when it was applied. A job
+    already finished then is the model's late nested wait when that wait
+    returned while the job still ran (`yielded_first`): the product yielded it
+    and the job ended on its own before the outer cell did. A steer sent with
+    less than the latency bar of the hold left (`hold_left`) is late too: the
+    job could end inside the bar however the product behaved. When the wait
+    returned only once the job had finished, the product never yielded it on
+    the steer. A `wait` on the cell first seen after the steer was applied is
+    the model not following it.
+    """
+    if not promoted:
+        raise ScenarioFailure(MODEL, "nested command was not promoted by its hint")
+    if not steered:
+        raise ScenarioFailure(MODEL, "no nested wait was in flight inside the cell while the job ran")
+    if not applied or latency is None:
+        raise ScenarioFailure(HARNESS, "steer was not applied at the outer-cell boundary")
+    if latency > STEER_LIMIT_S:
+        raise ScenarioFailure(HARNESS, f"steer was applied {latency:.1f} s after it was sent, "
+                                       f"past {STEER_LIMIT_S:.0f} s")
+    if finished and yielded_first:
+        raise ScenarioFailure(MODEL, f"job finished within {latency:.1f} s of the steer, after the "
+                                     "nested wait yielded: the nested wait began too late")
+    if finished and hold_left is not None and hold_left < STEER_LIMIT_S:
+        raise ScenarioFailure(MODEL, f"the steer went out with {hold_left:.1f} s of the hold left, "
+                                     f"under the {STEER_LIMIT_S:.0f} s bar: the nested wait began "
+                                     "too late")
+    if finished:
+        raise ScenarioFailure(HARNESS, "the nested wait returned only when the job finished: it "
+                                       "was not yielded on the steer")
+    if not running:
+        raise ScenarioFailure(HARNESS, "outer-cell steer stopped the nested job")
+    if cell_wait:
+        raise ScenarioFailure(MODEL, "model waited on the cell after the steer was applied "
+                                     "instead of following the steer")
+    return (f"nested wait yielded on the steer; applied at the outer-cell boundary in "
+            f"{latency:.1f} s; job still running")
 
 
 def judge_nested_ctrl_b(*, promoted: bool, sent: bool, finished: bool,
                         still_running: bool) -> str:
-    """Ctrl+B at the outer cell does not preempt or kill a hint-promoted job."""
+    """Ctrl+B at the outer cell does not preempt or kill a hint-promoted job.
+
+    `promoted` is session or telemetry evidence that the hint promoted the
+    nested start; without it the model did not pass the hint, as in the other
+    Code Mode judges.
+    """
     if not promoted:
         raise ScenarioFailure(MODEL, "nested command was not promoted by its hint")
     if not sent:
@@ -1457,7 +1539,9 @@ def run_turn(agent: live.Agent, text: str, timeout: float, tick, accept_eof) -> 
     while True:
         remaining = timeout - (time.monotonic() - started)
         if remaining <= 0:
-            raise ScenarioFailure(HARNESS, f"no turn terminal within {timeout:.0f}s")
+            raise live.timeout_failure(getattr(agent, "env", None), getattr(agent, "capture_dir", None),
+                                       f"no turn terminal within {timeout:.0f}s",
+                                       getattr(agent, "lookup_faults", None), timeout=timeout)
         try:
             event = agent.events.get(timeout=min(0.25, remaining))
         except queue.Empty:
@@ -1558,12 +1642,8 @@ class Jobs:
                 state["at"] = time.monotonic()
                 state["finished"] = marker(repo, "job-finished")
 
-            turn = run_turn(agent, (
-                "Run exactly this shell command and no other tool:\n"
-                f"{hold_command(8, token)}\n"
-                "Do not pass a timeout, yield, block_until, or background flag.\n"
-                "When the tool returns, reply with the single word promoted."
-            ), 180, tick, lambda: False)
+            turn = run_turn(agent, promotion_prompt(self.route, hold_command(8, token)),
+                            180, tick, lambda: False)
             classify_turn(turn, "promotion")
             require_script(repo, "hold.py", HOLD_PY)
             events = [event for _, event in agent.observed]
@@ -1603,6 +1683,14 @@ class Jobs:
                         events = [item for _, item in agent.observed]
                         if job_id_for(events, token) == event.get("job_id"):
                             state["promoted"] = True
+                    # The job's state is the one the steer found when it was
+                    # applied, not the one at turn end.
+                    if event is not None and event.get("kind") == "steer_ack" \
+                            and event.get("state") == "applied" and state["at"] is not None \
+                            and not state["snap"]:
+                        state["running"] = bool(matching(command_lines(), token))
+                        state["finished"] = marker(repo, "job-finished")
+                        state["snap"] = True
                     if state["at"] is None and state["promoted"] and matching(command_lines(), token) \
                             and not marker(repo, "job-finished"):
                         state["at"] = time.monotonic()
@@ -1642,9 +1730,9 @@ class Jobs:
             acked = any(event.get("kind") == "steer_ack" for event in events)
             if nested:
                 return judge_nested_steer(
-                    promoted=state["promoted"], steered=state["at"] is not None, acked=acked,
-                    finished=marker(repo, "job-finished"),
-                    still_running=bool(matching(command_lines(), token)),
+                    promoted=state["promoted"], steered=state["at"] is not None,
+                    acked=state["snap"], finished=state["finished"],
+                    still_running=state["running"],
                 )
             latency = latency_until(
                 agent.observed, state["at"],
@@ -1664,21 +1752,59 @@ class Jobs:
         repo, home = self.prepare("steer_await", FOREGROUND_BUDGET)
         agent = None
         state = {"at": None, "promoted": False, "before": [], "await": None,
-                 "running": False, "finished": False}
+                 "running": False, "finished": False, "snap": False, "cells": set(),
+                 "in_flight": set(), "waits": set(), "cell_wait": False, "latency": None,
+                 "steered_waits": set(), "yielded_first": None, "hold_left": None}
         try:
             agent = self.open_agent("steer_await", repo, home)
 
-            def tick(_turn, event) -> None:
-                if nested and state["at"] is None and state["promoted"] \
+            def nested_tick(event) -> None:
+                # The steer goes out only while a nested wait is in flight
+                # inside the outer cell; the job state is the one the steer
+                # found when it was applied at the outer-cell boundary.
+                if event is not None and event.get("kind") == "tool":
+                    call, parent, name = event.get("call_id"), event.get("parent_call_id"), event.get("name")
+                    if name == "exec" and not parent:
+                        state["cells"].add(call)
+                    elif parent in state["cells"] and name in NESTED_WAITS:
+                        if event.get("state") == "running":
+                            state["in_flight"].add(call)
+                        else:
+                            state["in_flight"].discard(call)
+                            # The wait the steer found: did it return while the job still ran?
+                            if call in state["steered_waits"] and state["yielded_first"] is None:
+                                state["yielded_first"] = not marker(repo, "job-finished")
+                    elif name == "wait" and call not in state["waits"]:
+                        state["waits"].add(call)
+                        state["cell_wait"] = state["cell_wait"] or state["snap"]
+                if event is not None and event.get("kind") == "job_promoted":
+                    events = [item for _, item in agent.observed]
+                    if job_id_for(events, token) == event.get("job_id"):
+                        state["promoted"] = True
+                if event is not None and event.get("kind") == "steer_ack" \
+                        and event.get("state") == "applied" and state["at"] is not None \
+                        and not state["snap"]:
+                    state["latency"] = time.monotonic() - state["at"]
+                    state["running"] = bool(matching(command_lines(), token))
+                    state["finished"] = marker(repo, "job-finished")
+                    state["snap"] = True
+                if state["at"] is None and state["promoted"] and state["in_flight"] \
                         and matching(command_lines(), token) and not marker(repo, "job-finished"):
                     state["at"] = time.monotonic()
-                    state["running"] = True
+                    state["steered_waits"] = set(state["in_flight"])
+                    began = started_wall(repo)
+                    if began is not None:
+                        state["hold_left"] = AWAIT_HOLD_S - (time.time() - began)
                     agent.send("prompt", text=STEER_TEXT, steer=True)
+
+            def tick(_turn, event) -> None:
+                if nested:
+                    nested_tick(event)
                     return
                 if event is None:
                     return
                 if state["at"] is not None:
-                    if not state.get("snap") and event.get("kind") == "tool" \
+                    if not state["snap"] and event.get("kind") == "tool" \
                             and event.get("call_id") == state["await"] and event.get("state") != "running":
                         state["running"] = bool(matching(command_lines(), token))
                         state["finished"] = marker(repo, "job-finished")
@@ -1709,17 +1835,19 @@ class Jobs:
             if nested:
                 prompt = (
                     "Inside one code cell, run exactly this shell command and no other tool:\n"
-                    f"{hold_command(25, token)}\n"
+                    f"{hold_command(AWAIT_HOLD_S, token)}\n"
                     f"{immediate_hint(self.route)}\n"
-                    "When that call returns while the command is still running, stay inside "
-                    "the cell. Do not stop the job. The outer cell must not yield on a steer "
-                    "until that nested call has settled."
+                    "When that call returns while the command is still running, wait for it "
+                    "inside the same cell with one write_stdin call with empty chars and "
+                    "yield_time_ms of at least 60000 on its session id. Do not stop the job. "
+                    "If a new instruction arrives, follow it immediately without waiting on "
+                    "the cell."
                 )
             else:
                 prompt = (
                     "Run exactly this shell command first, with no timeout, yield, "
                     "block_until, or background flag:\n"
-                    f"{hold_command(25, token)}\n"
+                    f"{hold_command(AWAIT_HOLD_S, token)}\n"
                     "When that tool returns while the command is still running, wait on "
                     "that job with your wait or poll tool and a timeout of at least 60 seconds. "
                     "Do not stop the job, do not read its output file, and do not start any other tool."
@@ -1730,10 +1858,11 @@ class Jobs:
             events = [event for _, event in agent.observed]
             acked = any(event.get("kind") == "steer_ack" for event in events)
             if nested:
-                return judge_nested_steer(
-                    promoted=state["promoted"], steered=state["at"] is not None, acked=acked,
-                    finished=marker(repo, "job-finished"),
-                    still_running=bool(matching(command_lines(), token)),
+                return judge_nested_await(
+                    promoted=state["promoted"], steered=state["at"] is not None,
+                    applied=state["snap"], latency=state["latency"], running=state["running"],
+                    finished=state["finished"], cell_wait=state["cell_wait"],
+                    yielded_first=bool(state["yielded_first"]), hold_left=state["hold_left"],
                 )
             await_id = state["await"]
             latency = latency_until(
@@ -2048,11 +2177,12 @@ class Jobs:
                 # The outer cell is not required to preempt the nested call.
                 # Give the key a moment, then judge that the job survived it.
                 tui.pump(1)
+                finished = marker(repo, "job-finished")
+                still_running = bool(matching(command_lines(), token))
                 require_script(repo, "hold.py", HOLD_PY)
                 return judge_nested_ctrl_b(
-                    promoted=True, sent=sent["at"] is not None,
-                    finished=marker(repo, "job-finished"),
-                    still_running=bool(matching(command_lines(), token)),
+                    promoted=self.nested_promoted(tui, home, token), sent=sent["at"] is not None,
+                    finished=finished, still_running=still_running,
                 )
             returned = tui.wait_until(
                 lambda: tool_completed_count(home, session) > 0, STEER_LIMIT_S,
@@ -2067,6 +2197,15 @@ class Jobs:
             if tui is not None:
                 tui.quit()
             stop_token(token)
+
+    @staticmethod
+    def nested_promoted(tui: live.Tui, home: Path, token: str) -> bool:
+        """The hint promoted the nested start: the session log shows that start
+        returned (`command_promoted`), waited on briefly while the log flushes,
+        or a flushed telemetry `promoted` row corroborates it."""
+        if tui.wait_until(lambda: command_promoted(all_session_records(home), token) is True, 5):
+            return True
+        return promotion_of(read_telemetry(home)[0]) is not None
 
     def stop_jobs(self) -> str:
         token = self.fresh_token("plakjobstop")
@@ -2088,7 +2227,8 @@ class Jobs:
             if not tui.wait_until(lambda: len(terminals(home, session)) > before, 180):
                 if terminals(home, session):
                     classify_tui_turn(home, session, len(terminals(home, session)) - 1, "stop", lookup_faults=tui.lookup_faults)
-                raise ScenarioFailure(HARNESS, "root turn did not finish")
+                raise live.timeout_failure(self.env, tui.capture_dir, "root turn did not finish",
+                                          tui.lookup_faults, timeout=180)
             classify_tui_turn(home, session, before, "stop", lookup_faults=tui.lookup_faults)
             require_script(repo, "hold.py", HOLD_PY)
             if marker(repo, "job-finished"):
@@ -2160,7 +2300,8 @@ class Jobs:
             if not tui.wait_until(root_finished, 180):
                 if terminals(home, session):
                     classify_tui_turn(home, session, len(terminals(home, session)) - 1, "wake", lookup_faults=tui.lookup_faults)
-                raise ScenarioFailure(HARNESS, "root turn did not finish")
+                raise live.timeout_failure(self.env, tui.capture_dir, "root turn did not finish",
+                                          tui.lookup_faults, timeout=180)
             classify_tui_turn(home, session, 0, "wake", lookup_faults=tui.lookup_faults)
             require_script(repo, "hold.py", HOLD_PY)
             painted = mark["n"] or 0
@@ -2215,7 +2356,8 @@ class Jobs:
             if not tui.wait_until(root_finished, 180):
                 if terminals(home, session):
                     classify_tui_turn(home, session, len(terminals(home, session)) - 1, "badge", lookup_faults=tui.lookup_faults)
-                raise ScenarioFailure(HARNESS, "root turn did not finish")
+                raise live.timeout_failure(self.env, tui.capture_dir, "root turn did not finish",
+                                          tui.lookup_faults, timeout=180)
             classify_tui_turn(home, session, 0, "badge", lookup_faults=tui.lookup_faults)
             require_script(repo, "hold.py", HOLD_PY)
             painted = mark["n"] or 0
@@ -2291,6 +2433,7 @@ def main(argv: list[str]) -> int:
     stamp = time.strftime("%Y%m%d-%H%M%S")
     artifacts = args.artifacts or live.ROOT / "target" / "live" / f"jobs-{route.name}-{stamp}"
     env = live.Env(args.binary.resolve(), artifacts / "home", artifacts)
+    env.route = route
     env.fixture_seed = args.fixture_seed
     if not env.binary.is_file():
         print(f"jobs: plak binary not found: {env.binary}", file=sys.stderr)
@@ -2313,6 +2456,7 @@ def main(argv: list[str]) -> int:
             outcome, detail = HARNESS, f"driver error: {error!r}"
             (artifacts / name / "traceback.txt").write_text(traceback.format_exc())
         segments = env.capture_segments[segment_start:]
+        outcome, detail = live.score_runaway(outcome, detail, segments)
         pending = live.provider_pending(env, segments, outcome)
         complete = _capture_complete(segments, pending)
         evidence[name] = {

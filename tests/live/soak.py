@@ -379,6 +379,7 @@ def main(argv: list[str]) -> int:
     artifacts = args.artifacts or live.ROOT / "target" / "live" / f"soak-{route.name}-{time.strftime('%Y%m%d-%H%M%S')}"
     artifacts.mkdir(parents=True)
     env = live.Env(args.binary.resolve(), artifacts / "home", artifacts)
+    env.route = route
     binary_start = live.binary_sha256(env.binary)
     live.write_home(env.home, route)
     repo = prepare_repo(live.ROOT / "target/live/cache/more-itertools", artifacts / "repo")

@@ -22,16 +22,22 @@ class CatalogTests(unittest.TestCase):
             self.assertIn(route.route_class, live.ROUTE_CLASSES, route.name)
             self.assertTrue(route.host and route.path.startswith("/"), route.name)
 
-    def test_only_messages_long_session_is_an_informational_lane(self):
+    def test_only_the_deepseek_long_sessions_are_informational_lanes(self):
         lanes = {name: route.informational_lanes for name, route in live.ROUTES.items()
                  if route.informational_lanes}
-        self.assertEqual(lanes, {"deepseek-messages": frozenset({"long-session"})})
-        messages = live.ROUTES["deepseek-messages"]
-        self.assertEqual(messages.route_class, live.FULL)
-        self.assertEqual(messages.lane_class("long-session"), live.INFORMATIONAL)
-        for lane in ("smoke", "jobs", "crash-jobs", "soak"):
-            self.assertEqual(messages.lane_class(lane), live.FULL, lane)
-        self.assertEqual(live.ROUTES["deepseek"].lane_class("long-session"), live.FULL)
+        self.assertEqual(lanes, {"deepseek": frozenset({"long-session"}),
+                                 "deepseek-messages": frozenset({"long-session"})})
+        for name in ("deepseek", "deepseek-messages"):
+            route = live.ROUTES[name]
+            self.assertEqual(route.route_class, live.FULL)
+            self.assertEqual(route.lane_class("long-session"), live.INFORMATIONAL)
+            for lane in ("smoke", "jobs", "crash-jobs", "soak"):
+                self.assertEqual(route.lane_class(lane), live.FULL, lane)
+        # No OpenRouter row has a blocking long-session lane.
+        for route in live.ROUTES.values():
+            if route.account == "openrouter" and route.planned:
+                self.assertNotEqual(route.lane_class("long-session"), live.FULL, route.name)
+        self.assertEqual(live.ROUTES["grok"].lane_class("long-session"), live.FULL)
 
     def test_xai_api_home_copies_the_shared_key_file(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -181,23 +187,37 @@ class EstimateTests(unittest.TestCase):
         for c in crashes:
             self.assertEqual(estimate.lane_charge(c).input_tokens,
                              (estimate.JOBS_INPUT * 2 + 5) // 11)
-        optional = estimate.planned_cells(soak_row="grok", tui_rows=("codex", "deepseek"))
+        optional = estimate.planned_cells(soak_row="grok", tui_rows=("codex-sol", "deepseek"))
         self.assertEqual([c.route_name for c in optional if c.lane == "tui-soak"],
-                         ["codex", "deepseek"])
+                         ["codex-sol", "deepseek"])
         self.assertEqual(estimate.lane_charge(next(c for c in optional if c.lane == "tui-soak")).input_tokens,
                          estimate.TUI_INPUT // 4)
-        for rows in (("nope",), ("grok", "grok"), ("api-openai",)):
+        for rows in (("nope",), ("grok", "grok"), ("api-openai",), ("codex",)):
             with self.assertRaises(estimate.EstimateError):
                 estimate.planned_cells(soak_row="grok", tui_rows=rows)
 
-    def test_messages_long_session_cell_is_priced_as_informational(self):
+    def test_codex_sol_is_the_full_codex_row(self):
+        full = sorted(name for name, route in live.ROUTES.items()
+                      if route.route_class == live.FULL and route.planned)
+        self.assertEqual(full, ["claude-sonnet55-low", "codex-sol", "deepseek",
+                                "deepseek-messages", "grok"])
+        for name in ("codex", "codex-luna-medium", "codex-astra"):
+            self.assertEqual(live.ROUTES[name].route_class, live.LIGHT, name)
+        cells = {(c.platform, c.lane, c.route_name) for c in estimate.planned_cells(soak_row="grok")}
+        self.assertIn(("linux", "smoke", "codex-sol"), cells)
+        self.assertIn(("mac", "long-session", "codex-sol"), cells)
+        self.assertNotIn(("linux", "smoke", "codex"), cells)
+        self.assertNotIn(("mac", "long-session", "codex"), cells)
+
+    def test_deepseek_long_session_cells_are_priced_as_informational(self):
         cells = {(c.platform, c.lane, c.route_name): c.route_class
                  for c in estimate.planned_cells(soak_row="grok")}
-        self.assertEqual(cells[("mac", "long-session", "deepseek-messages")], live.INFORMATIONAL)
-        for lane in ("smoke", "jobs", "crash-jobs"):
-            self.assertEqual(cells[("mac", lane, "deepseek-messages")], live.FULL, lane)
-        self.assertEqual(cells[("linux", "smoke", "deepseek-messages")], live.FULL)
-        self.assertEqual(cells[("mac", "long-session", "deepseek")], live.FULL)
+        for name in ("deepseek", "deepseek-messages"):
+            self.assertEqual(cells[("mac", "long-session", name)], live.INFORMATIONAL)
+            for lane in ("smoke", "jobs", "crash-jobs"):
+                self.assertEqual(cells[("mac", lane, name)], live.FULL, lane)
+            self.assertEqual(cells[("linux", "smoke", name)], live.FULL)
+        self.assertEqual(cells[("mac", "long-session", "grok")], live.FULL)
         self.assertEqual(estimate.planned_cells(soak_row="deepseek-messages")[0].platform, "mac")
 
     def test_long_session_scales_the_measured_deepseek_cell(self):
@@ -219,7 +239,9 @@ class EstimateTests(unittest.TestCase):
                          int((Decimal(750_415) * Decimal("0.22")).to_integral_value()))
         self.assertEqual(charge("deepseek-messages").input_tokens, charge("deepseek").input_tokens)
         self.assertEqual(charge("grok").input_tokens, scaled(750_415, "grok-4.7"))
-        self.assertEqual(charge("codex").input_tokens, scaled(750_415, "gpt-6-luna"))
+        self.assertEqual(charge("codex-sol").input_tokens, scaled(750_415, "gpt-6.1-sol"))
+        self.assertEqual(estimate.input_window("gpt-6.1-sol"), 500_000)
+        self.assertEqual(estimate.input_window("gpt-6-luna"), 272_000)
         self.assertEqual(charge("claude-sonnet55-low").input_tokens,
                          scaled(750_415, "claude-sonnet-5-5"))
         self.assertLess(charge("grok").input_tokens, charge("deepseek").input_tokens)

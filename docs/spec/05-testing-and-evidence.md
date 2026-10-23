@@ -2543,7 +2543,16 @@ in `tests/live/` (whose README lists every scenario and its oracle):
   log` itself, not a missing segment. Chapter 07
   has no key that lowers a context window or compaction trigger; the scenarios
   pin `[compaction] enabled` and `[turn] max_model_rounds` on a private home
-  and size `bulk.txt` to the route's window. An OpenRouter route's window is
+  and size `bulk.txt` to the route's window. The pinned round cap is the
+  scenario's planned rounds (each planned read, two per check-word page, or a
+  child's pages at two each) plus 32, at least 128 and at most chapter 07's
+  1024, and the report records it per scenario as `round_cap`. The oracle
+  runs first. A `model` miss by a turn that ended on the operation-budget
+  wrap-up (the session log's `turn.operation_budget_exhausted`, or the
+  wrap-up note in a child's captured requests) is `harness`, driver sizing,
+  only when the plan with its headroom does not fit under the pinned cap;
+  otherwise the model spent the cap and the miss stays `model`. An
+  OpenRouter route's window is
   the session's admitted input ceiling, which the operator supplies as
   `PLAK_LIVE_INPUT_CEILING` (§3.4); without a valid value the driver starts no
   process and reports a `pre_attempt_error`. The long-session report records
@@ -2670,31 +2679,110 @@ compatibility notice that still needs acceptance fails at once (exit 3); that
 is `harness`, and the reason names the remedy, `plak models <account>`.
 An injected fault the scenario required the product to absorb stays
 `harness` when the turn fails with that same fault; a different provider
-refusal during that scenario is still `provider`.
-A driver's `plak run`, or an awaited `plak agent` turn, that outlives its
-scenario budget is `harness` (a product hang) unless the timed-out process's
-capture segment ends on an exchange still pending at the provider: its
-highest-numbered exchange, ordered by integer exchange number, carries the
-pre-dispatch record `status=None`, `terminal=pending`, `incomplete=true`,
-which the product rewrites only at that exchange's terminal, and that
-exchange shows a provider that never finished answering: its `.body` carries
-no protocol terminal event (Chat `data: [DONE]`, Responses
-`response.completed`, `response.done` or `response.failed`, Messages
-`message_stop`), and either the body received bytes within the 60 s before the
-kill (the provider was still streaming or sending keep-alives) or the body is
-empty and the request was dispatched at least 120 s before the kill (no first
-byte). File modification times are read against the kill time. That timeout
-is `provider` (`provider did not respond within the scenario budget`). A
-missing capture, a last exchange that reached a terminal, a pending exchange
-whose provider had finished or fell silent mid-body (a product hang after the
-answer), a request still young when the process was killed (a product request
-loop), or a scenario that injects faults (which the product must absorb) keeps
-the timeout `harness`. Capture
-completeness then excuses exactly that one pending exchange in that segment,
+refusal during that scenario is still `provider`. An injected fault that was
+never observed is `harness`, with one exception: an `after-events=<n>` stream
+fault that never fired because the provider ended the targeted exchange first.
+The targeted exchange is the lowest-numbered request in the faulted process's
+segment that carries a conversation (`messages` or `input`; model lookups are
+bodiless GETs). It qualifies when it ended (`Complete`, `ProtocolComplete`,
+`ClosedEarly`, or a network-shaped transport failure as below) before its
+Nth event, counted as the fault counts them (§2.8: comment-only blocks such as
+keep-alives are not events), in a provider failure, and the turn failed as a
+provider error (an in-band provider kind `RateLimited`, `Unavailable` or
+`Timeout`, or a provider HTTP status), which a transport kind is not. The
+injected cut lands exactly at the Nth event, so it never qualifies. That
+outcome is `provider`.
+
+A provider failure in a capture is one of: an HTTP status of 408, 429 or a
+5xx; a well-formed in-band error as the body's last counted event other than
+Chat's `data: [DONE]` (Chat: an `error` object with an integer `code` of 408,
+429 or a 5xx; Messages: `{"type":"error","error":{"type":T}}` with T
+`rate_limit_error`, `api_error` or `overloaded_error`; Responses:
+`response.failed` whose `response.error.code`, or an `error` event whose
+`code`, is `rate_limit_exceeded`, `server_error` or `server_is_overloaded`); or
+a network-shaped transport failure in `ResponseHead` or `ResponseBody`: `Io`,
+`Tls`, `DeadlineExceeded`, or `Protocol` with an HTTP/2 reset reason.
+`Internal`, `LimitExceeded`, `InvalidResponse`, a cancellation and any other
+`Protocol` failure are not provider failures: they earn no credited wait and
+no resend allowance.
+
+A driver's `plak run`, an awaited `plak agent` turn (the jobs driver's
+included), or a TUI root turn (smoke's or the jobs driver's) that outlives its
+scenario budget is `harness` (a product hang) unless the timed-out process's capture segment proves the
+provider used that budget. The driver accounts the window from the kill back
+over the budget using file modification times. Each exchange spans dispatch
+(its `.request`) to its terminal record (its `.info`); a pending exchange,
+whose highest-numbered record still carries the pre-dispatch `status=None`,
+`terminal=pending`, `incomplete=true`, runs to the kill. Spans of in-process
+children that share the segment are united. Provider time is the pending
+exchange, exchanges that ended in a provider failure, and the part of each
+successful exchange its own work does not explain: its duration less a fixed
+5 s first-token and prefill allowance and less its reported output tokens
+(reasoning included: Chat `usage.completion_tokens`, Messages
+`usage.output_tokens`, Responses `response.usage.output_tokens`) at 15 tokens
+per second, counted from its dispatch, and none of it when the response
+reports no usage. The rest of the exchange time is token-explained, so a loop
+of healthy rounds is mostly explained by its own work and does not by itself
+reach the provider share below; only rounds slower than that allowance and
+rate contribute. After a provider failure, the gap
+until the next request of the same work (a lookup's next lookup, or a request
+whose conversation extends the failed one) is a credited wait of at most 30 s
+plus 5 s of slack: the capture records no response headers, so Retry-After
+advice (chapter 01 §13.1 honors up to 60 s) is not visible, and chapter 02's
+transient continuation waits 30 s by default. The rest of the window is local.
+
+The timeout is `provider` (`provider did not respond within the scenario
+budget`, with the provider, token-explained, credited and local seconds and
+the state the kill found) only when all of these hold: the scenario injected no
+faults; the segment passes capture integrity apart from that one pending
+exchange; every exchange that ended inside the window has a protocol terminal
+(`Complete`, `ProtocolComplete`, or `ClosedEarly` after a terminal event) or a
+provider failure; the kill lands inside a credited wait, or on a pending
+exchange that is not stale; local time is at most 15 s; provider time and
+credited waits are at least half the window; at most six model lookups ran in
+the window; and there is no request loop. A pending exchange is stale, and the
+product's to end, when its `.body` carries a protocol terminal event (Chat
+`data: [DONE]`, Responses `response.completed`, `response.done` or
+`response.failed`, Messages `message_stop`); when a lookup has waited more than
+its 60 s cap plus 5 s; when a non-empty body received no byte (keep-alive
+comments and pings included; by its `.body` mtime) in the 60 s before the
+kill; or when an empty
+body has waited, from its `.request` mtime, more than the route's dispatch
+deadline plus 5 s (120 s for the OpenAI Platform, xAI API and Anthropic API
+routes and when the driver does not name the route, 300 s otherwise). A
+request loop is an in-window request whose conversation (its `messages` or
+`input` items) equals or is a prefix of an earlier request's, except an
+identical resend after that earlier exchange's provider failure, dispatched at
+least 0.4 s after it ended (the shortest backoff without advice), at most
+three times for one request (four physical requests per logical attempt;
+a transient continuation grows the conversation and is not a resend). A shorter conversation that is not such
+a prefix, such as a compaction, is not a loop, and interleaved agents keep
+distinct conversations. Anything else keeps the timeout `harness`. Capture
+completeness then excuses exactly the one pending exchange in that segment,
 and only on a scenario scored `provider` this way: the scenario evidence lists
 the segment under `provider_pending`, and every other exchange in it and every
 other segment must still be complete, so the cell is not relabeled `harness`
-solely because the killed process left that exchange pending.
+solely because the killed process left that exchange pending. A report whose
+capture is incomplete names the scenarios, segments and exchanges at fault.
+
+The `test-hooks` capture is required and stops at its 8 MiB response cap; a
+response that outgrows it aborts its exchange in the body
+(`Failed(ResponseBody, Internal)`). An exchange whose capture stopped exactly
+there (HTTP 200, `recorded_bytes` 8,388,608 and equal to the body,
+`incomplete=true`, failed `Internal` in `ResponseBody`) while every complete
+SSE event of its body is JSON stream preamble or model output for one output
+item (a Responses item's deltas, a Messages content block's, or one Chat
+choice's text or one tool call's arguments) is a runaway model output, not an
+evidence gap: capture integrity accepts it on every driver. In smoke,
+long-session and jobs a `harness` or `model` scenario failure scores `model`
+(`model output ran past the 8 MiB capture bound (runaway output in <item
+kind>)`) only when the runaway explains it: the failure is a turn that ended
+on the aborted stream (reported as a transport failure of the response
+stream), and the runaway exchange is in the scenario's last process segment
+and is the last exchange there that received a response byte. Any other
+failure in the same scenario keeps its class.
+The headless and TUI soaks keep their own task outcome. Every other incomplete
+capture stays `harness`.
 
 TUI `turn.lifecycle` terminals carry only the turn id and phase. Smoke and the
 jobs driver use that turn's last `model_retries` telemetry row to recognize an
@@ -2770,25 +2858,47 @@ feature-scenario roster rows `api-anthropic-low` and `or-gemma4-free`.
 with protocol `messages`. `or-ling` and `or-qwen38` are paid model ids at
 informational depth.
 
-- `full`: `codex`, `grok`, `claude-sonnet55-low`, `deepseek`,
-  `deepseek-messages` (its long-session lane is informational, below).
-- `light`: `codex-luna-medium`, `codex-sol`, `codex-astra`, `grok-46`,
+- `full`: `codex-sol`, `grok`, `claude-sonnet55-low`, `deepseek`,
+  `deepseek-messages` (both DeepSeek rows' long-session lanes are
+  informational, below).
+- `light`: `codex`, `codex-luna-medium`, `codex-astra`, `grok-46`,
   `claude-sonnet55-medium`, `claude-haiku55-low`, `claude-haiku55-medium`,
   `claude-opus-low`, `claude-opus-medium`, `claude-fable`, `or-mimo`,
   `or-glm`, `or-qwen37`, `api-openai`, `api-openai-medium`, `api-anthropic`,
   `api-xai`.
 - `informational`: `or-nemotron-free`, `or-laguna-free`, `or-lfm-free`,
-  `or-ling`, `or-qwen38`; also the `deepseek-messages` long-session lane.
+  `or-ling`, `or-qwen38`; also the `deepseek` and `deepseek-messages`
+  long-session lanes.
+
+`codex-sol` (`gpt-6.1-sol` at low) is the full Codex row. `gpt-6-luna` at low
+and at medium ended long growth turns early ("I can't finish paging ...
+within this turn", after 37 to 41 of 52 pages) and skipped a page after the
+child's compaction in every long-session cell of a qualification cycle, with
+Plak's requests verified against this chapter; `gpt-6.1-sol` paged all 69
+growth pages through compaction under the derived round cap and passed
+in-turn compaction, the child (10 of 10 pages) and kill-reopen. Its overflow
+attempt in that diagnostic was a model runaway (one tool call's input
+repeated until the 8 MiB capture bound), which the runaway rule in §3.2
+scores `model`. `codex`,
+`codex-luna-medium` and `codex-astra` stay `light`.
 
 A route may mark single lanes informational (`informational_lanes` in
 `ROUTES`). Such a lane still runs at its row's depth and is scored like an
-informational row; the row's other lanes keep its class. `deepseek-messages`
-marks long-session: deep into long tool loops, DeepSeek over OpenRouter
-Messages sends `read` calls with only a path, even given an argument example,
-while the same model and upstream on Chat pages correctly with the same tool
-schema. That is a provider translation or model limitation, not product
-behavior. Its smoke and jobs stay blocking and cover the Messages dialect, and
-`deepseek` keeps the blocking long-session.
+informational row; the row's other lanes keep its class. `deepseek` and
+`deepseek-messages` mark long-session, so no OpenRouter row has a blocking
+long-session lane. The model's own compaction summary loses the earlier
+turn's fact: replaying Plak's captured summary request through OpenRouter, on
+Chat and on Messages, the summary dropped that fact once one or two large tool
+results followed it, at about 34k to 70k tokens as well as at about 826k (none
+of 18 kept it from 100k to 826k; three of three kept it with no bulk; with
+tool definitions present it kept the fact at about 38k and lost it at about
+71k). Plak's summary input was complete and byte-equal to the request before
+the fold, and Grok and Claude pass the same lane. Deep into long tool loops,
+DeepSeek over OpenRouter Messages also sends `read` calls with only a path,
+even given an argument example, while the same model and upstream on Chat
+pages correctly with the same tool schema. Both are model or provider
+translation limits, not product behavior. Smoke, jobs and the headless soak
+stay blocking on both rows and cover the Chat and Messages dialects.
 
 `api-openai` is OpenAI `gpt-6-luna` at low. `api-openai-medium` is the same
 model at medium. `api-anthropic` is Anthropic `claude-haiku-5-5` at medium.
@@ -2813,9 +2923,9 @@ On Apple Silicon, §3.2 names the oracles:
 
 On Apple Silicon the full cell of a `full` row, with `<route>` that row's
 name, is these commands; the soak line belongs only to the least-used row.
-On `deepseek-messages` the long-session line is informational: it runs and is
-recorded, a `model` or `provider` outcome does not block, and a `harness`
-outcome does. The cell driver records the scored class as `lane_class` in its
+On `deepseek` and `deepseek-messages` the long-session line is informational:
+it runs and is recorded, a `model` or `provider` outcome does not block, and a
+`harness` outcome does. The cell driver records the scored class as `lane_class` in its
 binding.
 
 ```text
@@ -2917,7 +3027,7 @@ The PROVIDER and MODEL rules share that reserve, not successive attempts.
 Best-effort rows are the informational rows and the OpenRouter light rows
 `or-mimo`, `or-glm` and `or-qwen37`; an informational lane is best-effort
 too. On those three light rows the only waiver is the second `provider`
-outcome. `deepseek`, `deepseek-messages` outside its long-session lane, every
+outcome. `deepseek` and `deepseek-messages` outside their long-session lanes, every
 subscription row, and `api-openai`, `api-openai-medium`, `api-anthropic` and
 `api-xai` are not best-effort.
 

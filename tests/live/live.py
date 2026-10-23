@@ -152,13 +152,14 @@ ROUTES = {
         "claude-fable", "claude", "claude-fable-5-1", "low", None, _CLAUDE, LIGHT),
     "grok": _route("grok", "grok", "grok-4.7", "low", None, _GROK, FULL),
     "grok-46": _route("grok-46", "grok", "grok-4.6", "low", None, _GROK, LIGHT),
+    # Long-session is informational on both DeepSeek rows: given Plak's
+    # complete summary request, the model's summary drops the earlier turn's
+    # fact once large tool results follow it, on Chat and on Messages. On
+    # Messages it also sends reads with only a path deep into long tool loops.
+    # Smoke, jobs and soak stay blocking.
     "deepseek": _route(
         "deepseek", "openrouter", "deepseek/deepseek-v4.1-flash-1017", None, None,
-        _OR_CHAT, FULL),
-    # Deep into long tool loops this model on OpenRouter Messages sends reads
-    # with only a path, even given an argument example, while Chat pages
-    # correctly with the same schema: a provider translation or model limit.
-    # Smoke and jobs still cover the Messages dialect at full depth.
+        _OR_CHAT, FULL, informational_lanes=frozenset({"long-session"})),
     "deepseek-messages": _route(
         "deepseek-messages", "openrouter", "deepseek/deepseek-v4.1-flash-1017", None,
         "messages", _OR_MESSAGES, FULL, informational_lanes=frozenset({"long-session"})),
@@ -183,10 +184,13 @@ ROUTES = {
         _OR_CHAT, INFORMATIONAL),
     "or-qwen38": _route(
         "or-qwen38", "openrouter", "qwen/qwen3.8-27b", None, None, _OR_CHAT, INFORMATIONAL),
-    "codex": _route("codex", "codex", "gpt-6-luna", "low", None, _CODEX, FULL),
+    # gpt-6.1-sol is the full Codex row: gpt-6-luna at low and medium ended
+    # long growth turns early and skipped a page after a child's compaction in
+    # every long-session cell, while sol paged through compaction and passed.
+    "codex": _route("codex", "codex", "gpt-6-luna", "low", None, _CODEX, LIGHT),
     "codex-luna-medium": _route(
         "codex-luna-medium", "codex", "gpt-6-luna", "medium", None, _CODEX, LIGHT),
-    "codex-sol": _route("codex-sol", "codex", "gpt-6.1-sol", "low", None, _CODEX, LIGHT),
+    "codex-sol": _route("codex-sol", "codex", "gpt-6.1-sol", "low", None, _CODEX, FULL),
     "codex-astra": _route("codex-astra", "codex", "gpt-6-astra", "low", None, _CODEX, LIGHT),
     # Direct API rows for the pre-release bar (spec 05 §3.4). Light, not
     # best-effort. Linux musl smokes these four plus the full rows.
@@ -764,6 +768,20 @@ def last_line(text: str) -> str:
     return lines[-1] if lines else ""
 
 
+def failure_lines(stderr: str) -> str:
+    """The final stderr line, after the nearest earlier error or failure line.
+
+    The final line is the run's status; the error line before it, when there
+    is one, usually names the cause.
+    """
+    lines = [" ".join(line.split()) for line in stderr.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    cause = next((line for line in reversed(lines[:-1])
+                  if "error" in line.lower() or "failed" in line.lower()), None)
+    return (f"{cause} | {lines[-1]}" if cause else lines[-1])[:300]
+
+
 def truncated_answer(code: int, stderr: str) -> bool:
     """`plak run` printed a committed answer cut at its output limit."""
     return code == 5 and last_line(stderr) == TRUNCATED_ANSWER_LINE
@@ -906,7 +924,7 @@ def classify_cli_failure(code: int, stderr: str, what: str, *,
     notice = compatibility_notice_refusal(stderr)
     if notice:
         raise ScenarioFailure(HARNESS, f"{what} exited {code}: {notice}")
-    detail = " ".join(stderr.split())[:200]
+    detail = failure_lines(stderr)
     validation = stream_validation_outcome(stderr, segments)
     if validation == MODEL:
         raise ScenarioFailure(MODEL, f"{what}: model emitted invalid tool arguments")
@@ -1006,55 +1024,443 @@ def pending_exchange(segment: Path) -> int | None:
 # the provider is not what the process was still waiting on.
 _TERMINAL_EVENT_MARKERS = (b"data: [DONE]", b"response.completed", b"response.done",
                            b"response.failed", b"message_stop")
-# A provider still answering wrote within this window before the kill.
-PENDING_RECENT_BYTES_S = 60
-# A provider that never sent a first byte was waited on at least this long.
-PENDING_NO_FIRST_BYTE_S = 120
+# A wait the provider mandated after a failure. The capture records no response
+# headers, so Retry-After advice (chapter 01 §13.1 honors up to 60 s) is not
+# visible; the credit is chapter 02's 30 s transient continuation, the longest
+# wait the product takes without advice, plus slack for scheduling.
+PROVIDER_WAIT_CAP_S = 30.0
+PROVIDER_WAIT_SLACK_S = 5.0
+# The shortest retry wait without advice: half of the 1 s equal-jitter base
+# (chapter 01 §13.1), less a little clock slack.
+MIN_RETRY_BACKOFF_S = 0.4
+# Identical resends of one request after provider failures: four physical
+# requests per logical attempt (chapter 01 §13.1) are the original and three
+# resends. A transient continuation grows the conversation, so it is not one.
+MAX_IDENTICAL_RESENDS = 3
+# Budget a timed-out process may spend outside provider exchanges and credited
+# waits: startup, tools and the work between requests.
+LOCAL_ALLOWANCE_S = 15.0
+# What a successful exchange's own work explains: a fixed first-token and
+# prefill allowance, plus its reported output tokens (reasoning included) at
+# this rate. Only the duration beyond both is the provider's, so a loop of
+# healthy rounds is mostly explained and does not by itself reach the
+# provider share a timeout needs.
+EXPLAINED_PREFILL_S = 5.0
+EXPLAINED_TOKENS_PER_S = 15.0
+# Bodiless model lookups in one window: two at startup and the bounded retry.
+MAX_WINDOW_LOOKUPS = 6
+# Staleness of the exchange pending at the kill: a provider still answering
+# wrote a byte (keep-alives included) within `PENDING_RECENT_BYTES_S`; an
+# empty body past the route's dispatch deadline, or a lookup past its 60 s cap
+# (chapter 01 §6.2), means the product, not the provider, kept it from ending.
+PENDING_RECENT_BYTES_S = 60.0
+LOOKUP_CAP_S = 60.0
+STALE_SLACK_S = 5.0
+# Route dispatch deadlines: 120 s for the OpenAI Platform, xAI API and
+# Anthropic API library defaults, 300 s for subscription routes and OpenRouter.
+API_LIBRARY_ACCOUNTS = frozenset({"openai", "anthropic", "xai-api"})
 
 
-def provider_never_finished(segment: Path, exchange: int, killed_at: float) -> bool:
-    """Whether pending `exchange` shows a provider that never finished answering.
+def dispatch_deadline_s(route: "Route | None") -> float:
+    """The route's dispatch deadline; the stricter 120 s when the route is unknown."""
+    if route is None or route.account in API_LIBRARY_ACCOUNTS:
+        return 120.0
+    return 300.0
 
-    Its body carries no protocol terminal event, and either bytes arrived
-    within `PENDING_RECENT_BYTES_S` before the kill (still streaming or
-    sending keep-alives) or no byte arrived and the request was dispatched at
-    least `PENDING_NO_FIRST_BYTE_S` before it. Anything else is the product:
-    a hang after the provider finished, or a request loop mid-request.
+
+def provider_wait_status(status: int) -> bool:
+    """An HTTP status after which the provider may mandate a wait."""
+    return status in (408, 429) or 500 <= status <= 599
+
+
+def sse_events(body: bytes) -> list[bytes]:
+    """The SSE events in `body`, counted as the `after-events` stream cut counts them.
+
+    A blank line ends a block; a block of only `:` comment lines, such as a
+    keep-alive, dispatches no event (spec 05 §2.8). `\r` is ignored, and a
+    final block no blank line ended is not an event yet.
     """
-    name = f"exchange-{exchange:04}"
+    events, block, has_field = [], [], False
+    for line in body.replace(b"\r", b"").split(b"\n")[:-1]:
+        if line:
+            block.append(line)
+            has_field = has_field or not line.startswith(b":")
+            continue
+        if has_field:
+            events.append(b"\n".join(block))
+        block, has_field = [], False
+    return events
+
+
+def _event_data(event: bytes) -> object:
+    data = [line[5:].removeprefix(b" ") for line in event.split(b"\n") if line.startswith(b"data:")]
     try:
-        body_path = segment / f"{name}.body"
+        return json.loads(b"\n".join(data)) if data else None
+    except ValueError:
+        return None
+
+
+# In-band provider errors by wire: Messages `error` event types and Responses
+# error codes, with the HTTP status they stand for.
+_MESSAGES_ERROR_TYPES = {"rate_limit_error": 429, "api_error": 500, "overloaded_error": 529}
+_RESPONSES_ERROR_CODES = {"rate_limit_exceeded": 429, "server_error": 500,
+                          "server_is_overloaded": 503}
+
+
+def event_error_status(event: bytes) -> int | None:
+    """The status a well-formed in-band provider error event stands for, or None.
+
+    Chat (OpenRouter): an object whose `error` object has an integer `code`
+    of 408, 429 or a 5xx. Messages: `{"type":"error","error":{"type":T}}`
+    with T `rate_limit_error`, `api_error` or `overloaded_error`. Responses:
+    `response.failed` whose `response.error.code`, or an `error` event whose
+    `code` or `error.code`, is `rate_limit_exceeded`, `server_error` or
+    `server_is_overloaded`.
+    """
+    value = _event_data(event)
+    if not isinstance(value, dict):
+        return None
+    error = value.get("error")
+    code = error.get("code") if isinstance(error, dict) else None
+    if type(code) is int:
+        return code if provider_wait_status(code) else None
+    if value.get("type") == "error" and isinstance(error, dict):
+        status = _MESSAGES_ERROR_TYPES.get(error.get("type"))
+        if status is not None:
+            return status
+    if value.get("type") == "response.failed":
+        response = value.get("response")
+        failed = response.get("error") if isinstance(response, dict) else None
+        code = failed.get("code") if isinstance(failed, dict) else None
+    elif value.get("type") == "error":
+        code = value.get("code", code)
+    return _RESPONSES_ERROR_CODES.get(code) if isinstance(code, str) else None
+
+
+def last_event(body: bytes) -> bytes | None:
+    """The body's last counted SSE event other than Chat's `data: [DONE]`."""
+    events = [event for event in sse_events(body) if event.strip() != b"data: [DONE]"]
+    return events[-1] if events else None
+
+
+_TRANSPORT_FAILURE = re.compile(r"Failed\(Failure \{ phase: (ResponseHead|ResponseBody), "
+                                r"transmission: \w+, kind: (\w+)(?:\(\w+\))?, "
+                                r".*http2_reason: (None|Some\([0-9]+\))")
+
+
+def network_failure(terminal: str) -> str | None:
+    """A network-shaped transport failure while the provider owed the response.
+
+    `Io`, `Tls` or `DeadlineExceeded` in the response head or body, or
+    `Protocol` with an HTTP/2 reset reason. `Internal`, `LimitExceeded`,
+    `InvalidResponse`, a cancellation and any other `Protocol` failure are
+    the product's or undetermined, not the provider's.
+    """
+    match = _TRANSPORT_FAILURE.match(terminal)
+    if match is None:
+        return None
+    phase, kind, reset = match.groups()
+    if kind in ("Io", "Tls", "DeadlineExceeded") or (kind == "Protocol" and reset != "None"):
+        return f"a transport failure ({kind}) in {phase}"
+    return None
+
+
+def exchange_failure(fields: dict[str, str], body: bytes) -> str | None:
+    """How a terminal exchange ended in a provider-side failure, or None.
+
+    An HTTP status of 408, 429 or a 5xx; a well-formed in-band error as its
+    last event (`event_error_status`); or a network-shaped transport failure
+    while the provider owed the response (`network_failure`).
+    """
+    status = re.fullmatch(r"Some\(([0-9]{3})\)", fields["status"])
+    if status and provider_wait_status(int(status[1])):
+        return f"HTTP {status[1]}"
+    event = last_event(body)
+    in_band = event_error_status(event) if event is not None else None
+    if in_band is not None:
+        return f"HTTP {in_band}"
+    return network_failure(fields["terminal"])
+
+
+def output_tokens(body: bytes) -> int | None:
+    """The response's reported output tokens, reasoning included, or None.
+
+    Chat `usage.completion_tokens`, Messages `usage.output_tokens` (the
+    `message_delta` total), Responses `response.usage.output_tokens`; the
+    largest reported value wins. A body that is one JSON object (a
+    non-streamed answer) is read the same way.
+    """
+    values = [_event_data(event) for event in sse_events(body)]
+    if not values:
+        try:
+            values = [json.loads(body)]
+        except ValueError:
+            return None
+    found = []
+    for value in values:
+        if not isinstance(value, dict):
+            continue
+        for holder in (value, value.get("response"), value.get("message")):
+            usage = holder.get("usage") if isinstance(holder, dict) else None
+            if not isinstance(usage, dict):
+                continue
+            for key in ("completion_tokens", "output_tokens"):
+                if type(usage.get(key)) is int:
+                    found.append(usage[key])
+    return max(found) if found else None
+
+
+@dataclasses.dataclass
+class _Exchange:
+    number: int
+    dispatched: float
+    # The terminal record's time; None while the exchange is still pending.
+    ended: float | None
+    # The body's last write: the last byte the product pulled.
+    last_byte: float
+    body_bytes: int
+    request_bytes: int
+    # The request's conversation items, canonical; None for a bodiless lookup
+    # or a request that carries no conversation.
+    items: tuple[str, ...] | None
+    settled: bool
+    failure: str | None
+    finished: bool
+    # Reported output tokens of a terminal response, or None without usage.
+    tokens: int | None = None
+
+    @property
+    def lookup(self) -> bool:
+        return self.request_bytes == 0
+
+    @property
+    def conversation(self) -> bool:
+        return self.items is not None
+
+
+def request_items(request: Path) -> tuple[str, ...] | None:
+    """A request's conversation (`messages`, or Responses `input`), item by item."""
+    raw = request.read_bytes()
+    try:
+        value = json.loads(raw) if raw else None
+    except ValueError:
+        return None
+    items = value.get("messages", value.get("input")) if isinstance(value, dict) else None
+    if not isinstance(items, list):
+        return None
+    return tuple(json.dumps(item, sort_keys=True) for item in items)
+
+
+def _extends(longer: tuple[str, ...], prefix: tuple[str, ...]) -> bool:
+    return len(prefix) <= len(longer) and longer[:len(prefix)] == prefix
+
+
+def _segment_exchanges(segment: Path, pending: int | None) -> list[_Exchange] | None:
+    """Every exchange in an integrity-checked segment, in exchange-number order."""
+    exchanges = []
+    for info in segment.glob("exchange-*.info"):
+        number = int(info.stem.removeprefix("exchange-"))
+        request, body_path = info.with_suffix(".request"), info.with_suffix(".body")
         body = body_path.read_bytes()
-        if any(marker in body for marker in _TERMINAL_EVENT_MARKERS):
-            return False
-        if body:
-            return killed_at - body_path.stat().st_mtime <= PENDING_RECENT_BYTES_S
-        dispatched = (segment / f"{name}.request").stat().st_mtime
-        return killed_at - dispatched >= PENDING_NO_FIRST_BYTE_S
-    except OSError:
-        return False
+        finished = any(marker in body for marker in _TERMINAL_EVENT_MARKERS)
+        common = dict(number=number, dispatched=request.stat().st_mtime,
+                      last_byte=body_path.stat().st_mtime, body_bytes=len(body),
+                      request_bytes=request.stat().st_size,
+                      items=request_items(request), finished=finished)
+        if number == pending:
+            exchanges.append(_Exchange(ended=None, settled=False, failure=None, **common))
+            continue
+        fields = terminal_fields(info, body_path)
+        if fields is None:
+            return None
+        failure = exchange_failure(fields, body)
+        settled = (fields["terminal"] in ("Complete", "ProtocolComplete")
+                   or (fields["terminal"] == "ClosedEarly" and finished) or failure is not None)
+        exchanges.append(_Exchange(ended=info.stat().st_mtime, settled=settled, failure=failure,
+                                   tokens=output_tokens(body), **common))
+    return sorted(exchanges, key=lambda exchange: exchange.number)
+
+
+def _resumes(later: _Exchange, failed: _Exchange) -> bool:
+    """`later` is the next request of the work `failed` was doing."""
+    if failed.lookup:
+        return later.lookup
+    if failed.conversation:
+        return later.conversation and _extends(later.items, failed.items)
+    return not later.lookup
+
+
+def _measure(spans: list[tuple[float, float]], low: float, high: float) -> float:
+    """The length of the union of `spans` inside [low, high]."""
+    total, reach = 0.0, low
+    for start, end in sorted(spans):
+        start, end = max(start, reach), min(end, high)
+        if end > start:
+            total, reach = total + end - start, end
+    return total
+
+
+def _stale_pending(last: _Exchange, killed_at: float, deadline: float) -> str | None:
+    """Why the exchange pending at the kill was the product's to end, or None."""
+    if last.finished:
+        return f"exchange {last.number} pending after the provider finished"
+    if last.lookup:
+        waited = killed_at - last.dispatched
+        if waited > LOOKUP_CAP_S + STALE_SLACK_S:
+            return (f"lookup exchange {last.number} pending {waited:.0f}s, past its "
+                    f"{LOOKUP_CAP_S:.0f}s cap")
+        return None
+    if last.body_bytes:
+        silent = killed_at - last.last_byte
+        if silent > PENDING_RECENT_BYTES_S:
+            return (f"exchange {last.number} received no byte in the {silent:.0f}s before "
+                    f"the kill, more than {PENDING_RECENT_BYTES_S:.0f}s")
+        return None
+    waited = killed_at - last.dispatched
+    if waited > deadline + STALE_SLACK_S:
+        return (f"exchange {last.number} had no first byte for {waited:.0f}s, past the "
+                f"{deadline:.0f}s dispatch deadline")
+    return None
+
+
+def _request_loop(exchanges: list[_Exchange], start: float) -> str | None:
+    """A resend no provider failure explains, inside the window.
+
+    A request whose conversation repeats, or rolls back to, an earlier
+    request's conversation is a loop, unless it is an identical resend after
+    that earlier exchange's provider failure, at least the minimal backoff
+    later, and within `MAX_IDENTICAL_RESENDS`. A shorter conversation that is
+    not such a prefix (a compaction) is not a loop. Interleaved agents keep
+    distinct conversations.
+    """
+    for index, exchange in enumerate(exchanges):
+        if not exchange.conversation or exchange.dispatched < start:
+            continue
+        identical = 0
+        for before in exchanges[:index]:
+            if not before.conversation or not _extends(before.items, exchange.items):
+                continue
+            if before.items != exchange.items or before.failure is None:
+                return (f"exchange {exchange.number} resent exchange {before.number}'s "
+                        f"conversation without a provider failure to retry")
+            if before.ended is not None and exchange.dispatched - before.ended < MIN_RETRY_BACKOFF_S:
+                return f"exchange {exchange.number} retried exchange {before.number} without backoff"
+            identical += 1
+        if identical > MAX_IDENTICAL_RESENDS:
+            return f"exchange {exchange.number} resent one request {identical} times"
+    return None
+
+
+def budget_attribution(segment: Path, killed_at: float, timeout: float,
+                       deadline: float = 120.0) -> tuple[bool, str]:
+    """Whether a timed-out process's capture proves the provider used its budget.
+
+    Over the window [killed_at - timeout, killed_at] every exchange spans its
+    dispatch (`.request` mtime) to its terminal record (`.info` mtime), a
+    pending one to the kill; spans of in-process children sharing the segment
+    are united. Provider time is the pending exchange, exchanges that ended
+    in a provider failure (`exchange_failure`), and for each successful
+    exchange its duration less `EXPLAINED_PREFILL_S` and what its own
+    reported output explains at `EXPLAINED_TOKENS_PER_S` (nothing without
+    usage), counted from its dispatch. After a provider failure, the gap until that work's next
+    request (or the kill) is a credited wait of at most `PROVIDER_WAIT_CAP_S`
+    plus slack. The rest of the exchange time is token-explained, and the
+    rest of the window is local.
+
+    The provider used the budget when every exchange that ended in the window
+    is settled; the kill lands on a pending exchange that is not stale
+    (`_stale_pending`, `deadline` being the route's dispatch deadline) or
+    inside a credited wait; local time is within `LOCAL_ALLOWANCE_S`;
+    provider time and credited waits are at least half the window; at most
+    `MAX_WINDOW_LOOKUPS` lookups ran; and there is no request loop
+    (`_request_loop`). Returns that verdict and the account.
+    """
+    pending = pending_exchange(segment)
+    if not capture_integrity([segment], [segment]):
+        return False, "capture incomplete"
+    exchanges = _segment_exchanges(segment, pending)
+    if not exchanges:
+        return False, "capture incomplete" if exchanges is None else "no captured exchange"
+    start = killed_at - timeout
+    cap = PROVIDER_WAIT_CAP_S + PROVIDER_WAIT_SLACK_S
+    spans, caused, waits = [], [], []
+    for exchange in exchanges:
+        span = (exchange.dispatched, killed_at if exchange.ended is None else exchange.ended)
+        spans.append(span)
+        if exchange.ended is None or exchange.failure is not None:
+            caused.append(span)
+        elif exchange.tokens is not None:
+            unexplained = (span[1] - span[0] - EXPLAINED_PREFILL_S
+                           - exchange.tokens / EXPLAINED_TOKENS_PER_S)
+            if unexplained > 0:
+                caused.append((span[0], span[0] + unexplained))
+        if exchange.failure is None:
+            continue
+        resumed = min((later.dispatched for later in exchanges if later.number > exchange.number
+                       and _resumes(later, exchange)), default=killed_at)
+        waits.append((exchange.ended, min(resumed, exchange.ended + cap)))
+    provider = _measure(caused, start, killed_at)
+    credited = _measure(caused + waits, start, killed_at) - provider
+    covered = _measure(spans + waits, start, killed_at)
+    explained = covered - provider - credited
+    local = max(0.0, timeout - covered)
+    account = (f"provider {provider:.1f}s, token-explained {explained:.1f}s, credited wait "
+               f"{credited:.1f}s, local {local:.1f}s")
+    last = exchanges[-1]
+    if last.ended is None:
+        stale = _stale_pending(last, killed_at, deadline)
+        if stale:
+            return False, f"{account}; {stale}"
+        state = f"exchange {last.number} pending"
+    elif last.failure is not None and killed_at - last.ended <= cap:
+        state = (f"killed {killed_at - last.ended:.1f}s into the wait after "
+                 f"{last.failure} on exchange {last.number}")
+    else:
+        return False, f"{account}; killed {killed_at - last.ended:.1f}s after exchange {last.number} ended"
+    unsettled = next((exchange for exchange in exchanges if exchange.ended is not None
+                      and exchange.ended >= start and not exchange.settled), None)
+    if unsettled is not None:
+        return False, (f"{account}; exchange {unsettled.number} ended without a protocol "
+                       f"terminal or provider failure")
+    if local > LOCAL_ALLOWANCE_S:
+        return False, f"{account}; local time exceeds {LOCAL_ALLOWANCE_S:.0f}s; {state}"
+    if provider + credited < timeout / 2:
+        return False, (f"{account}; the exchanges' own output, not the provider, used the "
+                       f"budget; {state}")
+    lookups = sum(1 for exchange in exchanges if exchange.lookup and exchange.dispatched >= start)
+    if lookups > MAX_WINDOW_LOOKUPS:
+        return False, f"{account}; {lookups} model lookups in the window; {state}"
+    loop = _request_loop(exchanges, start)
+    if loop:
+        return False, f"{account}; {loop}"
+    return True, f"{account}; {state}"
 
 
 def timeout_failure(env: Env | None, segment: Path | None, what: str,
-                    faults: str | None = None, killed_at: float | None = None) -> ScenarioFailure:
-    """Score a process that outlived the scenario budget.
+                    faults: str | None = None, *, timeout: float,
+                    killed_at: float | None = None) -> ScenarioFailure:
+    """Score a process that outlived its `timeout` budget, killed at `killed_at` (default now).
 
-    `provider` when its last exchange is still pending at a provider that
-    never finished answering (`provider_never_finished`, judged at
-    `killed_at`, default now); the segment is then recorded on `env` so that
-    one pending exchange does not by itself make the capture incomplete. A
-    product hang, a missing capture, or a scenario with injected faults, which
-    the product must absorb, stays `harness`.
+    `provider` when `budget_attribution` shows the provider used the budget,
+    judged against the dispatch deadline of `env.route`; the segment is then
+    recorded on `env` so that the one exchange the kill left pending does not
+    by itself make the capture incomplete. A product hang, a stalled consumer,
+    a request loop, a missing capture, or a scenario with injected faults,
+    which the product must absorb, stays `harness`.
     """
-    exchange = None if faults or segment is None else pending_exchange(segment)
-    if exchange is not None and not provider_never_finished(
-            segment, exchange, time.time() if killed_at is None else killed_at):
-        exchange = None
-    if exchange is None:
+    if faults or segment is None:
         return ScenarioFailure(HARNESS, what)
+    try:
+        provider, account = budget_attribution(
+            segment, time.time() if killed_at is None else killed_at, timeout,
+            dispatch_deadline_s(getattr(env, "route", None)))
+    except (OSError, UnicodeError, ValueError):
+        provider, account = False, "capture unreadable"
+    if not provider:
+        return ScenarioFailure(HARNESS, f"{what} ({account})")
     if env is not None:
         env.provider_pending.add(segment)
-    return ScenarioFailure(PROVIDER, f"{what}: {PROVIDER_PENDING} (exchange {exchange} pending)")
+    return ScenarioFailure(PROVIDER, f"{what}: {PROVIDER_PENDING} ({account})")
 
 
 def provider_pending(env: Env, segments: list[Path], outcome: str) -> list[Path]:
@@ -1063,61 +1469,218 @@ def provider_pending(env: Env, segments: list[Path], outcome: str) -> list[Path]
             if segment in env.provider_pending] if outcome == PROVIDER else []
 
 
-def capture_integrity(segments: list[Path], pending: Collection[Path] = ()) -> bool:
-    """Reject incomplete, unpaired, or potentially exhausted process captures.
+def terminal_fields(info: Path, body: Path) -> dict[str, str] | None:
+    """A terminal exchange record's fields, or None when it is not one.
 
-    A segment in `pending` (a process scored `provider` because it timed out
+    The product rewrites the pre-dispatch record at the exchange's terminal
+    with exactly these fields; `recorded_bytes` must equal the body's size.
+    """
+    fields = {}
+    for line in info.read_text().splitlines():
+        key, value = line.split("=", 1)
+        if key in fields:
+            return None
+        fields[key] = value
+    if (fields.keys() != {"process_id", "exchange", "status", "connection", "terminal",
+                          "recorded_bytes", "incomplete"}
+            or not re.fullmatch(r"[1-9][0-9]*", fields["process_id"])
+            or not re.fullmatch(r"[1-9][0-9]*", fields["exchange"])
+            or info.stem != f"exchange-{int(fields['exchange']):04}"
+            or not re.fullmatch(r"None|Some\([0-9]{3}\)", fields["status"])
+            or not re.fullmatch(r"None|Some\((?:Fresh|Reused|ReplacedStale)\)",
+                                fields["connection"])
+            or not re.fullmatch(
+                r"Complete|ProtocolComplete|ClosedEarly|Abandoned|Failed\(Failure \{ "
+                r"phase: \w+, transmission: \w+, kind: \w+(?:\(\w+\))?, "
+                r'cause: (?:None|Some\("[a-z_0-9]+"\)), http2_reason: (?:None|Some\([0-9]+\)), '
+                r"os_error: (?:None|Some\(-?[0-9]+\)), "
+                r'tls: (?:None|Some\("[a-z_0-9]+"\)), tls_alert: (?:None|Some\([0-9]+\)), '
+                r'alpn: (?:None|Some\("(?:h2|http/1\.1)"\)), http2_io: (?:true|false), '
+                r"connection: (?:None|Some\((?:Fresh|Reused|ReplacedStale)\)), "
+                r"idle_age: (?:None|Some\([0-9.]+(?:ns|µs|ms|s)\)) \}\)",
+                fields["terminal"])
+            or fields["incomplete"] != "false"
+            or not re.fullmatch(r"[0-9]+", fields["recorded_bytes"])
+            or int(fields["recorded_bytes"]) != body.stat().st_size):
+        return None
+    return fields
+
+
+# The `test-hooks` capture's response cap (`MAX_RESPONSE_BYTES`). The capture is
+# required, so a response that outgrows it aborts the exchange in its body.
+CAPTURE_RESPONSE_CAP_BYTES = 8 * 1024 * 1024
+_RUNAWAY_TERMINAL = re.compile(r"Failed\(Failure \{ phase: ResponseBody, transmission: \w+, "
+                               r"kind: Internal, ")
+
+
+def _output_item(value: dict) -> tuple[str, str, bool] | None:
+    """The (item, kind, is a delta) of one streamed model-output event, or None.
+
+    Responses: an `output_item.added` names its item and kind, and a
+    `*.delta` names its `item_id`. Messages: `content_block_start` and
+    `content_block_delta` by block index. Chat: a choice's text or one tool
+    call's argument delta.
+    """
+    kind = value.get("type")
+    if kind == "response.output_item.added" and isinstance(value.get("item"), dict):
+        item = value["item"]
+        return (str(item.get("id")),
+                " ".join(str(part) for part in (item.get("type"), item.get("name")) if part), False)
+    if isinstance(kind, str) and kind.startswith("response.") and kind.endswith(".delta"):
+        return str(value.get("item_id")), "", True
+    if kind == "content_block_start" and isinstance(value.get("content_block"), dict):
+        block = value["content_block"]
+        return (f"block {value.get('index')}",
+                " ".join(str(part) for part in (block.get("type"), block.get("name")) if part), False)
+    if kind == "content_block_delta":
+        return f"block {value.get('index')}", "", True
+    choices = value.get("choices")
+    if isinstance(choices, list) and len(choices) == 1 and isinstance(choices[0], dict):
+        delta = choices[0].get("delta")
+        if isinstance(delta, dict):
+            calls = delta.get("tool_calls")
+            if isinstance(calls, list) and len(calls) == 1 and isinstance(calls[0], dict):
+                function = calls[0].get("function") or {}
+                name = function.get("name")
+                return f"tool call {calls[0].get('index')}", f"tool call {name}" if name else "", True
+            if isinstance(delta.get("content"), str):
+                return "text", "assistant text", True
+    return None
+
+
+# Stream lifecycle events that carry no output of their own.
+_STREAM_PREAMBLE = frozenset({"response.created", "response.in_progress", "message_start", "ping",
+                              "response.content_part.added"})
+
+
+def runaway_output(info: Path, body: Path) -> str | None:
+    """The output item a model ran past the capture's response cap with, or None.
+
+    Exactly this shape: an HTTP 200 exchange whose capture stopped at
+    `CAPTURE_RESPONSE_CAP_BYTES` (`recorded_bytes` equal to it and to the
+    body, `incomplete=true`) and failed `Internal` in `ResponseBody`, whose
+    every complete SSE event is JSON stream preamble or model output for one
+    output item. The final event the cap cut short is not read.
+    """
+    fields = dict(line.split("=", 1) for line in info.read_text().splitlines() if "=" in line)
+    if (fields.get("status") != "Some(200)" or fields.get("incomplete") != "true"
+            or fields.get("recorded_bytes") != str(CAPTURE_RESPONSE_CAP_BYTES)
+            or body.stat().st_size != CAPTURE_RESPONSE_CAP_BYTES
+            or not _RUNAWAY_TERMINAL.match(fields.get("terminal", ""))):
+        return None
+    items: set[str] = set()
+    kind = ""
+    deltas = 0
+    for event in sse_events(body.read_bytes()):
+        value = _event_data(event)
+        if not isinstance(value, dict):
+            return None
+        if value.get("type") in _STREAM_PREAMBLE:
+            continue
+        output = _output_item(value)
+        if output is None:
+            return None
+        items.add(output[0])
+        kind = kind or output[1]
+        deltas += output[2]
+    if len(items) != 1 or not deltas:
+        return None
+    return kind or "one output item"
+
+
+def _runaways(segments: list[Path]) -> list[tuple[Path, Path, str]]:
+    """(segment, info, item kind) for every capture a runaway output stopped at the cap."""
+    found = []
+    for segment in segments:
+        for info in sorted(segment.glob("exchange-*.info")) if segment.is_dir() else ():
+            try:
+                kind = runaway_output(info, info.with_suffix(".body"))
+            except (OSError, UnicodeError, ValueError):
+                kind = None
+            if kind is not None:
+                found.append((segment, info, kind))
+    return found
+
+
+def _runaway_reason(segment: Path, info: Path, kind: str) -> str:
+    return (f"model output ran past the {CAPTURE_RESPONSE_CAP_BYTES >> 20} MiB capture bound "
+            f"(runaway output in {kind}) at {segment.name} {info.stem}")
+
+
+def runaway_outputs(segments: list[Path]) -> list[str]:
+    """`model` reasons for every capture a runaway output stopped at the cap."""
+    return [_runaway_reason(*found) for found in _runaways(segments)]
+
+
+# How a turn the capture cap aborted fails: the product reports the
+# interrupted response stream as a transport failure.
+_STREAM_ABORT = re.compile(r"\bTransport\b|stream interrupted|transport failed", re.IGNORECASE)
+
+
+def _last_answered(segment: Path, info: Path) -> bool:
+    """No later exchange in the segment received a response byte."""
+    number = int(info.stem.removeprefix("exchange-"))
+    return not any(int(body.stem.removeprefix("exchange-")) > number and body.stat().st_size
+                   for body in segment.glob("exchange-*.body"))
+
+
+def score_runaway(outcome: str, detail: str, segments: list[Path]) -> tuple[str, str]:
+    """A failure a runaway model output explains is `model`; any other keeps its class.
+
+    The runaway explains a `harness` or `model` failure when that failure is
+    a turn that ended on the aborted stream (its text reports a transport
+    failure of the response stream), the runaway exchange is in the
+    scenario's last process segment (the one whose turn failed), and it is
+    the last exchange there that received a response byte.
+    """
+    runaways = _runaways(segments)
+    if not runaways or outcome not in (HARNESS, MODEL) or not _STREAM_ABORT.search(detail):
+        return outcome, detail
+    explained = [found for found in runaways
+                 if found[0] == segments[-1] and _last_answered(found[0], found[1])]
+    if not explained:
+        return outcome, detail
+    return MODEL, "; ".join(_runaway_reason(*found) for found in explained)
+
+
+def capture_problems(segments: list[Path], pending: Collection[Path] = ()) -> list[str]:
+    """Why these process captures are incomplete, unpaired or possibly exhausted.
+
+    Each problem names its segment and, where there is one, its exchange. A
+    segment in `pending` (a process scored `provider` because it timed out
     on a pending exchange) may end with that one pending exchange.
     """
-    try:
-        for segment in segments:
+    problems = []
+    for segment in segments:
+        try:
             if not segment.is_dir():
-                return False
-            if any((segment / marker).exists() for marker in ("incomplete.log", "retention.info")):
-                return False
+                problems.append(f"{segment.name} missing")
+                continue
+            markers = [marker for marker in ("incomplete.log", "retention.info")
+                       if (segment / marker).exists()]
+            problems += [f"{segment.name} has {marker}" for marker in markers]
             files = {kind: {path.stem: path for path in segment.glob(f"*.{kind}")}
                      for kind in ("request", "body", "info")}
-            if (files["request"].keys() != files["info"].keys()
-                    or files["body"].keys() != files["info"].keys()):
-                return False
-            exchange = pending_exchange(segment) if segment in pending else None
-            excused = None if exchange is None else f"exchange-{exchange:04}"
-            for name, path in files["info"].items():
-                if not all(files[kind][name].is_file() for kind in files):
-                    return False
-                if name == excused:
-                    continue
-                fields = {}
-                for line in path.read_text().splitlines():
-                    key, value = line.split("=", 1)
-                    if key in fields:
-                        return False
-                    fields[key] = value
-                if (fields.keys() != {"process_id", "exchange", "status", "connection", "terminal",
-                                      "recorded_bytes", "incomplete"}
-                        or not re.fullmatch(r"[1-9][0-9]*", fields["process_id"])
-                        or not re.fullmatch(r"[1-9][0-9]*", fields["exchange"])
-                        or name != f"exchange-{int(fields['exchange']):04}"
-                        or not re.fullmatch(r"None|Some\([0-9]{3}\)", fields["status"])
-                        or not re.fullmatch(r"None|Some\((?:Fresh|Reused|ReplacedStale)\)",
-                                            fields["connection"])
-                        or not re.fullmatch(
-                            r"Complete|ProtocolComplete|ClosedEarly|Abandoned|Failed\(Failure \{ "
-                            r"phase: \w+, transmission: \w+, kind: \w+(?:\(\w+\))?, "
-                            r'cause: (?:None|Some\("[a-z_0-9]+"\)), http2_reason: (?:None|Some\([0-9]+\)), '
-                            r"os_error: (?:None|Some\(-?[0-9]+\)), "
-                            r'tls: (?:None|Some\("[a-z_0-9]+"\)), tls_alert: (?:None|Some\([0-9]+\)), '
-                            r'alpn: (?:None|Some\("(?:h2|http/1\.1)"\)), http2_io: (?:true|false), '
-                            r"connection: (?:None|Some\((?:Fresh|Reused|ReplacedStale)\)), "
-                            r"idle_age: (?:None|Some\([0-9.]+(?:ns|µs|ms|s)\)) \}\)",
-                            fields["terminal"])
-                        or fields["incomplete"] != "false"
-                        or not re.fullmatch(r"[0-9]+", fields["recorded_bytes"])
-                        or int(fields["recorded_bytes"]) != files["body"][name].stat().st_size):
-                    return False
-    except (OSError, UnicodeError, ValueError):
-        return False
-    return True
+            names = set().union(*(found.keys() for found in files.values()))
+            exchange = pending_exchange(segment)
+            open_name = None if exchange is None else f"exchange-{exchange:04}"
+            for name in sorted(names):
+                if not all(name in found and found[name].is_file() for found in files.values()):
+                    problems.append(f"{segment.name} {name} unpaired")
+                elif name == open_name:
+                    if segment not in pending:
+                        problems.append(f"{segment.name} {name} pending")
+                elif terminal_fields(files["info"][name], files["body"][name]) is None \
+                        and runaway_output(files["info"][name], files["body"][name]) is None:
+                    problems.append(f"{segment.name} {name} not terminal")
+        except (OSError, UnicodeError, ValueError):
+            problems.append(f"{segment.name} unreadable")
+    return problems
+
+
+def capture_integrity(segments: list[Path], pending: Collection[Path] = ()) -> bool:
+    """Reject incomplete, unpaired, or potentially exhausted process captures."""
+    return not capture_problems(segments, pending)
 
 
 def write_home(home: Path, route: Route, source_home: Path | None = None) -> None:
@@ -1370,6 +1933,9 @@ class Env:
 
     def __init__(self, binary: Path, home: Path, artifacts: Path):
         self.binary, self.home, self.artifacts = binary, home, artifacts
+        # The route under test, when the driver names it; timeout scoring reads
+        # its dispatch deadline.
+        self.route: Route | None = None
         self.lookup_faults: str | None = None
         self.fixture_seed: int | None = None
         self._capture_root: Path | None = None
@@ -1448,9 +2014,10 @@ def run_cli(env: Env, repo: Path, args: list[str], log: Path,
                                 env=child, stdin=subprocess.DEVNULL, capture_output=True,
                                 text=True, timeout=timeout)
     except subprocess.TimeoutExpired as error:
+        killed_at = time.time()
         log.write_text(f"timeout after {timeout}s\n{error.stdout or ''}{error.stderr or ''}")
         raise timeout_failure(env, segment, f"plak run did not finish in {timeout:.0f}s",
-                              faults) from None
+                              faults, timeout=timeout, killed_at=killed_at) from None
     code, note = result.returncode, ""
     if truncated_answer(code, result.stderr):
         code, note = 0, " (answer committed at its output limit; scored as completed)"
@@ -1644,7 +2211,7 @@ class Agent:
                                       e.get("kind") in ("error", "busy", "eof"), timeout)
             except EventTimeout as error:
                 raise timeout_failure(getattr(self, "env", None), getattr(self, "capture_dir", None),
-                                      f"turn: {error}", turn.lookup_faults) from None
+                                      f"turn: {error}", turn.lookup_faults, timeout=timeout) from None
             kind = event.get("kind")
             if on_event:
                 on_event(event)

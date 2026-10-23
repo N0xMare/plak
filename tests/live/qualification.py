@@ -24,6 +24,22 @@ LANES = {"smoke": "smoke", "jobs": "jobs", "long-session": "long_session",
          "soak": "soak", "tui-soak": "tui_soak"}
 
 
+def incomplete_captures(report: dict) -> str:
+    """The scenarios, segments and exchanges whose raw capture is incomplete."""
+    named = []
+    for scenario, item in report.get("evidence", {}).items():
+        if not isinstance(item, dict) or item.get("capture_complete"):
+            continue
+        segments = [Path(segment) for segment in item.get("segments") or []]
+        pending = {Path(segment) for segment in item.get("provider_pending") or []}
+        problems = live.capture_problems(segments, pending) if segments else ["no capture segment"]
+        problems += [f"{segment.name} has no exchange" for segment in segments
+                     if segment.is_dir() and not any(segment.glob("*.info"))]
+        if problems:
+            named.append(f"{scenario}: {', '.join(problems)}")
+    return "; ".join(named)
+
+
 def score_report(code: int, report: dict) -> tuple[str, str]:
     """Evidence/build failures outrank scored model and provider outcomes."""
     if report.get("pre_attempt_error"):
@@ -32,7 +48,8 @@ def score_report(code: int, report: dict) -> tuple[str, str]:
         return live.HARNESS, "driver error: " + report["driver_error"]
     summary = report.get("summary", report)
     if not summary.get("capture_complete"):
-        return live.HARNESS, "raw exchange evidence missing or incomplete"
+        named = incomplete_captures(report)
+        return live.HARNESS, "raw exchange evidence missing or incomplete" + (f": {named}" if named else "")
     if not summary.get("binary_sha256_start") or not summary.get("binary_sha256_end"):
         return live.HARNESS, "binary identity missing"
     if summary.get("rebuild") == "changed":
@@ -47,7 +64,8 @@ def score_report(code: int, report: dict) -> tuple[str, str]:
         records = [*records, failure]
     evidence = report.get("evidence", {})
     if any(not item.get("capture_complete") for item in evidence.values()):
-        return live.HARNESS, "scenario capture missing or incomplete"
+        named = incomplete_captures(report)
+        return live.HARNESS, "scenario capture missing or incomplete" + (f": {named}" if named else "")
     if summary.get("evidence_gaps") or summary.get("diagnostics_available") is False:
         return live.HARNESS, "diagnostic evidence missing"
     if (summary.get("clean_quit") is False

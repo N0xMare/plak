@@ -257,9 +257,12 @@ def input_window(model: str) -> int:
     """Catalog input window used to pick the long-session growth band.
 
     Claude is 1,000,000. `grok-4.7` is 256,000 and `grok-4.6` is 500,000
-    (spec 01). Codex and OpenAI API rows are 272,000.
+    (spec 01). Codex and OpenAI API rows are 272,000, except `gpt-6.1-sol`,
+    whose Codex catalog row reports 500,000.
     `deepseek/deepseek-v4.1-flash-1017` is 1,048,576 in the OpenRouter catalog.
     """
+    if model == "gpt-6.1-sol":
+        return 500_000
     if model == "grok-4.7":
         return 256_000
     if model == "grok-4.6":

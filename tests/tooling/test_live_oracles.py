@@ -313,49 +313,303 @@ class LiveOracleTests(unittest.TestCase):
             f"process_id=123\nexchange={number}\nstatus=None\nterminal=pending\n"
             "recorded_bytes=0\nincomplete=true\n")
 
-    def test_a_pending_timeout_excuses_only_a_provider_that_never_finished(self):
+    # The observed OpenRouter free-route timeline, from the window start: two
+    # model lookups, inference exchanges, one in-band 504 and the transient
+    # continuation's 30 s wait, and a fresh request pending at the kill.
+    OBSERVED = (("gap", 0.2), ("lookup", 0.43), ("gap", 0.02), ("lookup", 0.18), ("gap", 0.11),
+                ("ok", 41.67, 178), ("gap", 0.04), ("ok", 40.01, 259), ("gap", 0.04),
+                ("ok", 70.81, 633), ("gap", 0.05), ("ok", 42.32, 262), ("gap", 0.05),
+                ("504", 24.45), ("gap", 30.06), ("ok", 40.62, 224), ("gap", 0.12), ("pending",))
+    IN_BAND_504 = (b": OPENROUTER PROCESSING\n\n" * 33
+                   + b'data: {"choices":[],"error":{"code":504,"message":"error code: 504",'
+                     b'"metadata":{"error_type":"timeout"}}}\n\n')
+    KEEP_ALIVE = b": OPENROUTER PROCESSING\n\n"
+    # Output tokens a successful fixture exchange reports: 3 s at 15 tokens/s.
+    TOKENS = 45
+
+    def write_timeline(self, segment, steps, kill, timeout=300.0):
+        """Exchanges laid out from the window start; returns the number of the last.
+
+        Each inference request carries one conversation that grows by an item
+        per exchange; `resend` repeats the previous conversation, `rollback`
+        drops its last item and `compact` replaces it with a new, shorter one.
+        A pending step takes an optional body and how long before the kill it
+        was last written.
+        """
+        clock, number, items = kill - timeout, 0, [{"role": "user", "content": "task"}]
+        for step in steps:
+            kind = step[0]
+            if kind == "gap":
+                clock += step[1]
+                continue
+            number += 1
+            name = f"exchange-{number:04}"
+            request, body, info = (segment / f"{name}.{suffix}" for suffix in ("request", "body", "info"))
+            if kind == "lookup":
+                request.write_bytes(b"")
+            else:
+                if kind == "rollback":
+                    items = items[:-1]
+                elif kind == "compact":
+                    items = [{"role": "user", "content": "summary"}]
+                elif not kind.startswith("resend"):
+                    items = [*items, {"role": "assistant", "content": f"round {number}"}]
+                request.write_text(json.dumps({"messages": items}))
+            if kind.endswith("pending"):
+                payload = step[1] if len(step) > 1 else b""
+                body.write_bytes(payload)
+                info.write_text(f"process_id=123\nexchange={number}\nstatus=None\n"
+                                "terminal=pending\nrecorded_bytes=0\nincomplete=true\n")
+                for path in (request, info):
+                    os.utime(path, (clock, clock))
+                written = kill - step[2] if len(step) > 2 else clock
+                os.utime(body, (written, written))
+                return number
+            tokens = step[2] if len(step) > 2 else self.TOKENS
+            usage = b"" if tokens is None else (
+                b'data: {"choices":[],"usage":{"completion_tokens":%d}}\n\n' % tokens)
+            answered = (b'data: {"choices":[{"index":0,"delta":{"content":"x"}}]}\n\n'
+                        + usage + b"data: [DONE]\n\n")
+            payload, status, terminal = {
+                "lookup": (b'{"data":[]}', "Some(200)", "Complete"),
+                "504": (self.IN_BAND_504, "Some(200)", "ClosedEarly"),
+                "429": (b'{"error":{"code":429}}', "Some(429)", "Complete"),
+                "abandoned": (b"data: {}\n\n", "Some(200)", "Abandoned"),
+            }.get(kind.removeprefix("resend-"), (answered, "Some(200)", "Complete"))
+            body.write_bytes(payload)
+            info.write_text(f"process_id=123\nexchange={number}\nstatus={status}\n"
+                            f"connection=Some(Reused)\nterminal={terminal}\n"
+                            f"recorded_bytes={len(payload)}\nincomplete=false\n")
+            os.utime(request, (clock, clock))
+            clock += step[1]
+            for path in (body, info):
+                os.utime(path, (clock, clock))
+        return number
+
+    def judge_timeline(self, steps, faults=None, route="or-lfm-free"):
         base = self.capture_workspace
-        for name, pending, expected in (
-                ("no first byte for 300 s", {}, live.PROVIDER),
-                ("no first byte for only 30 s", {"dispatched_ago": 30.0}, live.HARNESS),
-                ("keep-alives 10 s before the kill",
-                 {"body": b": OPENROUTER PROCESSING\n\n", "body_ago": 10.0}, live.PROVIDER),
-                ("streaming stopped 90 s before the kill",
-                 {"body": b"data: {\"choices\":[]}\n\n", "body_ago": 90.0}, live.HARNESS),
-                ("Chat answered in full", {"body": b"data: {}\n\ndata: [DONE]\n\n"}, live.HARNESS),
-                ("Responses completed",
-                 {"body": b"event: response.completed\ndata: {}\n\n"}, live.HARNESS),
-                ("Responses failed", {"body": b"event: response.failed\ndata: {}\n\n"},
-                 live.HARNESS),
-                ("Messages stopped", {"body": b"event: message_stop\ndata: {}\n\n"},
-                 live.HARNESS)):
-            with self.subTest(name):
-                env = live.Env(base / "plak", base / "home", base)
-                env.environ(source={})
-                segment = env.capture_segments[-1]
-                self.write_capture(segment)
-                self.write_pending(segment, **pending)
-                failure = live.timeout_failure(env, segment, "plak run did not finish in 300s")
-                self.assertEqual(failure.outcome, expected)
-                self.assertEqual(env.provider_pending,
-                                 {segment} if expected == live.PROVIDER else set())
-        # The kill time decides, not the time the driver scores it.
         env = live.Env(base / "plak", base / "home", base)
+        env.route = live.ROUTES[route] if route else None
         env.environ(source={})
         segment = env.capture_segments[-1]
-        self.write_capture(segment)
-        self.write_pending(segment, dispatched_ago=130.0)
-        self.assertEqual(live.timeout_failure(env, segment, "x", killed_at=time.time() - 60).outcome,
-                         live.HARNESS)
-        self.assertEqual(live.timeout_failure(env, segment, "x").outcome, live.PROVIDER)
+        kill = time.time()
+        self.write_timeline(segment, steps, kill)
+        failure = live.timeout_failure(env, segment, "plak run did not finish in 300s", faults,
+                                       timeout=300, killed_at=kill)
+        self.assertEqual(env.provider_pending, {segment} if failure.outcome == live.PROVIDER else set())
+        return failure
+
+    def test_observed_timeout_is_provider_time_plus_a_credited_wait(self):
+        failure = self.judge_timeline(self.OBSERVED)
+        self.assertEqual(failure.outcome, live.PROVIDER)
+        self.assertEqual(str(failure), (
+            "plak run did not finish in 300s: provider did not respond within the scenario "
+            "budget (provider 140.0s, token-explained 129.3s, credited wait 30.1s, local 0.6s; "
+            "exchange 9 pending)"))
+
+    def test_local_time_over_the_allowance_is_harness(self):
+        steps = list(self.OBSERVED)
+        steps[5], steps[6] = ("ok", 11.67, 178), ("gap", 30.04)
+        failure = self.judge_timeline(steps)
+        self.assertEqual(failure.outcome, live.HARNESS)
+        self.assertIn("local time exceeds 15s; exchange 9 pending", str(failure))
+
+    def test_a_pending_exchange_the_product_left_stale_is_harness(self):
+        for name, pending, route, expected, needle in (
+                ("keep-alives 10 s before the kill", ("pending", self.KEEP_ALIVE, 10.0), "deepseek",
+                 live.PROVIDER, "exchange 2 pending"),
+                ("streaming stopped 70 s before the kill",
+                 ("pending", b"data: {}\n\n", 70.0), "deepseek", live.HARNESS,
+                 "received no byte in the 70s before the kill, more than 60s"),
+                ("a keep-alive 50 s before the kill", ("pending", self.KEEP_ALIVE, 50.0),
+                 "deepseek", live.PROVIDER, "exchange 2 pending"),
+                ("no first byte for 200 s on a 300 s route", ("pending",), "deepseek",
+                 live.PROVIDER, "exchange 2 pending"),
+                ("no first byte for 200 s on a 120 s route", ("pending",), "api-openai",
+                 live.HARNESS, "had no first byte for 200s, past the 120s dispatch deadline"),
+                ("no first byte for 200 s on an unknown route", ("pending",), None,
+                 live.HARNESS, "past the 120s dispatch deadline")):
+            with self.subTest(name):
+                failure = self.judge_timeline((("ok", 100.0), pending), route=route)
+                self.assertEqual(failure.outcome, expected)
+                self.assertIn(needle, str(failure))
+
+    def test_a_lookup_pending_past_its_cap_is_harness(self):
+        base = self.capture_workspace
+        segment = base / "segment"
+        segment.mkdir()
+        kill = time.time()
+        self.write_timeline(segment, (("ok", 230.0), ("pending",)), kill)
+        (segment / "exchange-0002.request").write_bytes(b"")
+        os.utime(segment / "exchange-0002.request", (kill - 70.0, kill - 70.0))
+        provider, account = live.budget_attribution(segment, kill, 300, 300.0)
+        self.assertFalse(provider)
+        self.assertIn("lookup exchange 2 pending 70s, past its 60s cap", account)
+
+    def test_a_kill_inside_a_capped_provider_wait_is_provider(self):
+        for error, into, expected in (("504", 20.0, live.PROVIDER), ("429", 20.0, live.PROVIDER),
+                                      ("504", 34.0, live.PROVIDER), ("504", 50.0, live.HARNESS),
+                                      ("504", 90.0, live.HARNESS), ("ok", 20.0, live.HARNESS)):
+            with self.subTest(error=error, into=into):
+                steps = (("gap", 0.5), ("lookup", 0.4), ("ok", 300 - 0.9 - 30 - into),
+                         (error, 30.0), ("gap", into))
+                failure = self.judge_timeline(steps)
+                self.assertEqual(failure.outcome, expected)
+                if expected == live.PROVIDER:
+                    self.assertIn(f"killed {into:.1f}s into the wait after HTTP {error} on "
+                                  "exchange 3", str(failure))
+
+    def test_rounds_their_own_output_explains_are_not_a_provider_timeout(self):
+        # A healthy reasoning model: 25 rounds of 11 s, each reporting 150
+        # output tokens (reasoning included), then a fresh request.
+        steps = [step for _ in range(25) for step in (("ok", 11.0, 150), ("gap", 0.1))]
+        failure = self.judge_timeline((*steps[:-1], ("pending",)))
+        self.assertEqual(failure.outcome, live.HARNESS)
+        self.assertIn("the exchanges' own output, not the provider, used the budget",
+                      str(failure))
+        # Short answers do not make the rounds the provider's: the first-token
+        # allowance explains each round's wait before its output.
+        steps = [step for _ in range(25) for step in (("ok", 11.0, 50), ("gap", 0.1))]
+        self.assertEqual(self.judge_timeline((*steps[:-1], ("pending",))).outcome, live.HARNESS)
+        # Without usage nothing of a successful exchange is the provider's.
+        steps = [step for _ in range(25) for step in (("ok", 11.0, None), ("gap", 0.1))]
+        self.assertEqual(self.judge_timeline((*steps[:-1], ("pending",))).outcome, live.HARNESS)
+
+    def test_output_tokens_by_wire(self):
+        for body, tokens in (
+                (b'data: {"choices":[],"usage":{"completion_tokens":224}}\n\ndata: [DONE]\n\n', 224),
+                (b'event: message_start\ndata: {"type":"message_start","message":{"usage":'
+                 b'{"output_tokens":1}}}\n\nevent: message_delta\ndata: {"type":"message_delta",'
+                 b'"usage":{"output_tokens":812}}\n\n', 812),
+                (b'event: response.completed\ndata: {"type":"response.completed","response":'
+                 b'{"usage":{"output_tokens":95,"output_tokens_details":{"reasoning_tokens":60}}}}\n\n',
+                 95),
+                (b'{"choices":[],"usage":{"completion_tokens":7}}', 7),
+                (b"data: {}\n\ndata: [DONE]\n\n", None)):
+            with self.subTest(body=body[:40]):
+                self.assertEqual(live.output_tokens(body), tokens)
+
+    def test_a_request_loop_or_an_unfinished_exchange_is_harness(self):
+        for name, steps, expected, needle in (
+                ("an identical resend after a completed exchange",
+                 (("ok", 100.0), ("resend", 100.0), ("pending",)), live.HARNESS,
+                 "exchange 2 resent exchange 1's conversation without a provider failure"),
+                ("a rollback to an earlier conversation",
+                 (("ok", 100.0), ("ok", 100.0), ("rollback", 50.0), ("pending",)), live.HARNESS,
+                 "exchange 3 resent exchange 1's conversation"),
+                ("an identical resend right after a provider error",
+                 (("ok", 100.0), ("504", 100.0), ("gap", 30.0), ("resend", 30.0), ("pending",)),
+                 live.PROVIDER, "exchange 4 pending"),
+                ("a retry without backoff",
+                 (("ok", 100.0), ("504", 100.0), ("gap", 0.1), ("resend", 60.0), ("pending",)),
+                 live.HARNESS, "exchange 3 retried exchange 2 without backoff"),
+                ("a compaction that shrinks the conversation",
+                 (("ok", 100.0), ("ok", 100.0), ("compact", 50.0), ("pending",)), live.PROVIDER,
+                 "exchange 4 pending"),
+                ("an abandoned exchange in the window",
+                 (("ok", 100.0), ("abandoned", 100.0), ("pending",)), live.HARNESS,
+                 "exchange 2 ended without a protocol terminal or provider failure"),
+                ("pending after the provider finished",
+                 (("ok", 290.0), ("pending", b"data: {}\n\ndata: [DONE]\n\n", 1.0)), live.HARNESS,
+                 "pending after the provider finished"),
+                ("a hang after a completed exchange",
+                 (("ok", 200.0),), live.HARNESS, "killed 100.0s after exchange 1 ended")):
+            with self.subTest(name):
+                failure = self.judge_timeline(steps)
+                self.assertEqual(failure.outcome, expected)
+                self.assertIn(needle, str(failure))
+
+    def test_identical_resends_are_bounded_by_the_retry_budget(self):
+        for resends, expected in ((3, live.PROVIDER), (4, live.HARNESS)):
+            with self.subTest(resends=resends):
+                steps = [("ok", 200.0), ("504", 30.0)]
+                steps += [step for _ in range(resends - 1) for step in (("gap", 1.0), ("resend-504", 2.0))]
+                steps += [("gap", 1.0), ("resend-pending",)]
+                failure = self.judge_timeline(steps)
+                self.assertEqual(failure.outcome, expected, str(failure))
+                if expected == live.HARNESS:
+                    self.assertIn("resent one request 4 times", str(failure))
+
+    def test_too_many_lookups_in_the_window_are_harness(self):
+        steps = [step for _ in range(7) for step in (("lookup", 0.2), ("gap", 0.1))]
+        failure = self.judge_timeline((*steps, ("ok", 150.0), ("pending",)), route="deepseek")
+        self.assertEqual(failure.outcome, live.HARNESS)
+        self.assertIn("7 model lookups in the window", str(failure))
+
+    def test_injected_faults_and_missing_captures_keep_a_timeout_harness(self):
+        failure = self.judge_timeline(self.OBSERVED, faults="fault=stall,seconds=40")
+        self.assertEqual((failure.outcome, str(failure)),
+                         (live.HARNESS, "plak run did not finish in 300s"))
+        env = live.Env(self.capture_workspace / "plak", self.capture_workspace / "home",
+                       self.capture_workspace)
+        missing = live.timeout_failure(env, self.capture_workspace / "missing", "x", timeout=300)
+        self.assertEqual((missing.outcome, str(missing)), (live.HARNESS, "x (capture incomplete)"))
+        self.assertEqual(env.provider_pending, set())
+
+    def test_children_sharing_a_segment_unite_their_provider_spans(self):
+        base = self.capture_workspace
+        segment = base / "segment"
+        segment.mkdir()
+        kill = time.time()
+        self.write_timeline(segment, (("ok", 150.0), ("ok", 1.0), ("pending",)), kill)
+        # Exchange 2 becomes a child's own conversation, overlapping the parent's.
+        child = segment / "exchange-0002.request"
+        child.write_text(json.dumps({"messages": [{"role": "user", "content": "child task"}]}))
+        os.utime(child, (kill - 120.0, kill - 120.0))
+        for suffix in (".body", ".info"):
+            os.utime(segment / f"exchange-0002{suffix}", (kill - 60.0, kill - 60.0))
+        provider, account = live.budget_attribution(segment, kill, 300, 300.0)
+        self.assertTrue(provider, account)
+        self.assertIn("token-explained 8.0s, credited wait 0.0s, local 1.0s; exchange 3 pending",
+                      account)
+
+    def test_in_band_provider_errors_by_wire(self):
+        for event, status in (
+                (b'data: {"error":{"code":503}}', 503),
+                (b'data: {"error":{"code":400}}', None),
+                (b'event: error\ndata: {"type":"error","error":{"type":"overloaded_error"}}', 529),
+                (b'event: error\ndata: {"type":"error","error":{"type":"rate_limit_error"}}', 429),
+                (b'event: error\ndata: {"type":"error","error":{"type":"invalid_request_error"}}',
+                 None),
+                (b'event: response.failed\ndata: {"type":"response.failed","response":'
+                 b'{"error":{"code":"server_error"}}}', 500),
+                (b'event: error\ndata: {"type":"error","code":"rate_limit_exceeded"}', 429),
+                (b'data: {"type":"response.failed","response":{"error":{"code":"invalid_prompt"}}}',
+                 None)):
+            with self.subTest(event=event):
+                self.assertEqual(live.event_error_status(event), status)
+        fields = {"status": "Some(200)", "terminal": "Complete"}
+        self.assertEqual(live.exchange_failure(
+            fields, b'data: {"error":{"code":502}}\n\ndata: [DONE]\n\n'), "HTTP 502")
+        def terminal(kind, reset="None", phase="ResponseBody"):
+            return (f"Failed(Failure {{ phase: {phase}, transmission: MayHaveTransmitted, "
+                    f"kind: {kind}, cause: None, http2_reason: {reset}, os_error: None, tls: None, "
+                    "tls_alert: None, alpn: None, http2_io: false, connection: None, idle_age: None })")
+
+        for kind, reset, phase, label in (
+                ("Io", "None", "ResponseBody", "a transport failure (Io) in ResponseBody"),
+                ("Tls", "None", "ResponseHead", "a transport failure (Tls) in ResponseHead"),
+                ("DeadlineExceeded", "None", "ResponseBody",
+                 "a transport failure (DeadlineExceeded) in ResponseBody"),
+                ("Protocol", "Some(2)", "ResponseBody", "a transport failure (Protocol) in ResponseBody"),
+                ("Protocol", "None", "ResponseBody", None),
+                ("Internal", "None", "ResponseBody", None),
+                ("LimitExceeded(ResponseBodyBytes)", "None", "ResponseBody", None),
+                ("InvalidResponse", "None", "ResponseHead", None),
+                ("Cancelled", "None", "ResponseBody", None),
+                ("Io", "None", "Connect", None)):
+            with self.subTest(kind=kind, reset=reset, phase=phase):
+                self.assertEqual(live.exchange_failure(
+                    {"status": "Some(200)", "terminal": terminal(kind, reset, phase)}, b""), label)
+        self.assertEqual(live.exchange_failure({"status": "Some(408)", "terminal": "Complete"}, b""),
+                         "HTTP 408")
 
     def timed_out_run(self, env, *, pending: bool, faults: str | None = None):
         """`plak run` killed at its timeout, its capture as the process left it."""
         def run(*args, **kwargs):
             segment = Path(kwargs["env"]["PLAK_TEST_EXCHANGE_CAPTURE_DIR"])
-            self.write_capture(segment)
-            if pending:
-                self.write_pending(segment)
+            steps = (("ok", 100.0), ("pending",)) if pending else (("ok", 100.0),)
+            self.write_timeline(segment, steps, time.time())
             raise live.subprocess.TimeoutExpired(args[0], kwargs["timeout"])
 
         base = self.capture_workspace
@@ -403,10 +657,13 @@ class LiveOracleTests(unittest.TestCase):
     def test_run_cli_timeout_on_a_pending_exchange_is_provider(self):
         base = self.capture_workspace
         env = live.Env(base / "plak", base / "home", base)
+        env.route = live.ROUTES["grok"]
         failure = self.timed_out_run(env, pending=True)
         self.assertEqual(failure.outcome, live.PROVIDER)
-        self.assertEqual(str(failure), "plak run did not finish in 300s: provider did not "
-                                       "respond within the scenario budget (exchange 2 pending)")
+        self.assertRegex(str(failure), r"^plak run did not finish in 300s: provider did not "
+                                       r"respond within the scenario budget \(provider 292\.0s, "
+                                       r"token-explained 8\.0s, credited wait 0\.0s, local 0\.0s; "
+                                       r"exchange 2 pending\)$")
         self.assertEqual(env.provider_pending, {env.capture_segments[-1]})
         self.assertEqual(live.provider_pending(env, env.capture_segments, live.PROVIDER),
                          env.capture_segments)
@@ -416,14 +673,13 @@ class LiveOracleTests(unittest.TestCase):
         base = self.capture_workspace
         env = live.Env(base / "plak", base / "home", base)
         failure = self.timed_out_run(env, pending=False)
-        self.assertEqual((failure.outcome, str(failure)),
-                         (live.HARNESS, "plak run did not finish in 300s"))
+        self.assertEqual(failure.outcome, live.HARNESS)
+        self.assertRegex(str(failure), r"^plak run did not finish in 300s \(provider 92\.0s, .*"
+                                       r"killed 200\.0s after exchange 1 ended\)$")
         # A fault the scenario injected must be absorbed, so it never relabels a hang.
         failure = self.timed_out_run(env, pending=True, faults="fault=stall,seconds=40")
         self.assertEqual(failure.outcome, live.HARNESS)
         self.assertEqual(env.provider_pending, set())
-        missing = live.timeout_failure(env, base / "missing", "plak run did not finish in 300s")
-        self.assertEqual(missing.outcome, live.HARNESS)
 
     def test_turn_timeout_on_a_pending_exchange_is_provider(self):
         base = self.capture_workspace
@@ -431,11 +687,12 @@ class LiveOracleTests(unittest.TestCase):
                                           (True, "fault=stall", live.HARNESS)):
             with self.subTest(pending=pending, faults=faults):
                 env = live.Env(base / "plak", base / "home", base)
+                env.route = live.ROUTES["grok"]
                 env.environ(source={})
                 segment = env.capture_segments[-1]
                 self.write_capture(segment)
                 if pending:
-                    self.write_pending(segment)
+                    self.write_pending(segment, dispatched_ago=100.0)
                 agent = live.Agent.__new__(live.Agent)
                 agent.env, agent.capture_dir, agent.lookup_faults = env, segment, faults
                 agent.events = queue.Queue()

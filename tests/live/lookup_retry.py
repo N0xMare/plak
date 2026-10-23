@@ -41,6 +41,7 @@ def main() -> int:
     stamp = time.strftime("%Y%m%d-%H%M%S")
     artifacts = live.ROOT / "target/live" / f"lookup-{args.route}-{args.fault}-{stamp}"
     env = live.Env(binary, artifacts / "home", artifacts)
+    env.route = route
     live.write_home(env.home, route)
     repo = live.git_repo(artifacts / "repo", {"README.md": "Lookup retry proof.\n"})
     host, path = CATALOGS[route.account]

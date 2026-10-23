@@ -365,7 +365,7 @@ class JobEvidenceTests(unittest.TestCase):
             self.assertIn(command, task)
             self.assertNotIn("no timeout", task)
             self.assertIn("submit_result", task)
-        self.assertIn("outer-cell", jobs.judge_nested_steer(
+        self.assertIn("steer applied with the job still running", jobs.judge_nested_steer(
             promoted=True, steered=True, acked=True, finished=False, still_running=True,
         ))
         failure(self, lambda: jobs.judge_nested_steer(

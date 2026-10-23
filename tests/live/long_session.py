@@ -75,9 +75,22 @@ CODEX_DIGIT_BYTES_PER_TOKEN = 4.0
 PI_BASE64_BYTES_PER_TOKEN = 1.44
 # 28 pages are 7 MiB of tool text, under the 8 MiB capture cap on one request.
 MAX_GROWTH_PAGES = 28
-# Above the page count, below the spec 07 ceiling of 1024, so a growth turn
-# is not cut off by the default 512 and still cannot run away.
+# The pinned `[turn] max_model_rounds` never goes below this or above the spec
+# 07 ceiling of 1024. A scenario's cap is its planned rounds plus headroom
+# (`round_cap`), so a turn that follows its plan is never cut off and a
+# runaway still stops.
 ROUND_CAP = 128
+ROUND_CAP_CEILING = 1024
+# A page that carries a check word can take two rounds: its read, and the
+# write of its word when the model does not fold it into the next read. A
+# Codex growth turn on a 500k window wrote 63 of 69 pages in 128 rounds.
+ROUNDS_PER_CHECKED_PAGE = 2
+# Rounds past the planned reads: a child's plant steps, compaction, the
+# recall write, the final answer and a few repeated calls.
+ROUND_HEADROOM = 32
+# The text the product injects into the wrap-up round once a turn has spent
+# its model-operation budget; a child's turn shows it only in its requests.
+OPERATION_BUDGET_NOTE = b"has used its entire model-operation budget"
 # Sizing bytes per bulk line. A written line is 1,469 bytes with its newline;
 # the difference is the margin that keeps a planned read under its call cap.
 LINE_BYTES = 1500
@@ -651,6 +664,65 @@ def bulk_bytes_per_token(pack: str) -> float:
     return {"codex": CODEX_DIGIT_BYTES_PER_TOKEN,
             "claude": DIGIT_BYTES_PER_TOKEN,
             "pi": PI_BASE64_BYTES_PER_TOKEN}.get(pack, BASE64_BYTES_PER_TOKEN)
+
+
+def planned_rounds(route: live.Route, scenario: str) -> int:
+    """Model rounds the scenario's longest turn needs when the model follows its plan.
+
+    Growth reads `bulk.txt` to eof (Codex: one page per exec, each with a
+    check word); overflow runs one round per batch (Codex and pi: per page or
+    read); the child reads every child page and writes its check word.
+    `kill_reopen` plans a handful of rounds.
+    """
+    pack = pack_of(route)
+    window = catalog_window(route.model)
+    call_lines = growth_call_lines(pack, window)
+    if scenario == "in_turn_compaction":
+        lines = growth_lines(route)
+        if pack == "codex":
+            return lines // call_lines * ROUNDS_PER_CHECKED_PAGE
+        return -(-lines // call_lines)
+    if scenario == "overflow":
+        if pack == "codex":
+            _lines, batches = overflow_plan(window, pack, None, route.model)
+            return len(batches) * len(batches[0]) * ROUNDS_PER_CHECKED_PAGE
+        pages = max(growth_pages(route), overflow_bulk_pages(window, pack, route.model))
+        _lines, batches = overflow_plan(window, pack, pages * lines_per_page(), route.model)
+        return len(batches) * (len(batches[0]) if pack == "pi" else 1)
+    if scenario == "child_compaction":
+        return child_pages(window, pack, call_lines, route.model) * ROUNDS_PER_CHECKED_PAGE
+    return 0
+
+
+def round_cap(route: live.Route, scenario: str) -> int:
+    """The `[turn] max_model_rounds` a scenario's private home pins."""
+    return min(ROUND_CAP_CEILING, max(ROUND_CAP, planned_rounds(route, scenario) + ROUND_HEADROOM))
+
+
+def round_cap_reached(records: list[dict], segments: list[Path]) -> bool:
+    """A turn spent its model-operation budget and wrapped up.
+
+    The root's session log records `turn.operation_budget_exhausted`; a
+    child's turn is seen only in the captured requests that carry the
+    wrap-up note.
+    """
+    if any(record.get("kind") == "turn.operation_budget_exhausted" for record in records):
+        return True
+    for segment in segments:
+        for request in segment.glob("exchange-*.request") if segment.is_dir() else ():
+            try:
+                if OPERATION_BUDGET_NOTE in request.read_bytes():
+                    return True
+            except OSError:
+                continue
+    return False
+
+
+def round_cap_failure(what: str, cap: int, progress: str = "") -> ScenarioFailure:
+    """A plan cut off by the pinned round cap: the driver sized the cap too small."""
+    reached = f" after {progress}" if progress else ""
+    return ScenarioFailure(HARNESS, f"{what} ended on the operation-budget wrap-up at the pinned "
+                                    f"round cap {cap}{reached} (driver sizing)")
 
 
 def overflow_timeout(rounds: int, pages: int) -> float:
@@ -1398,6 +1470,8 @@ class LongSession:
         if "/" in route.model and self.window is None:
             raise ScenarioFailure(HARNESS, INPUT_CEILING_REMEDY)
         self.call_lines = growth_call_lines(pack_of(route), self.window)
+        # Each scenario's pinned round cap, for the report.
+        self.caps: dict[str, int] = {}
 
     def repo(self, name: str, token: str, bulk_lines: int = 0) -> Path:
         path = self.env.artifacts / name / "repo"
@@ -1416,7 +1490,8 @@ class LongSession:
     def home(self, name: str) -> Path:
         home = self.env.artifacts / name / "home"
         live.write_home(home, self.route, self.env.home)
-        live.pin_max_model_rounds(home, ROUND_CAP)
+        self.caps[name] = round_cap(self.route, name)
+        live.pin_max_model_rounds(home, self.caps[name])
         return home
 
     def agent(self, name: str, repo: Path, home: Path, args: list[str] | None = None) -> live.Agent:
@@ -1447,10 +1522,13 @@ class LongSession:
                 home, agent.session_id,
                 lambda rows: any(scheduled_in_window(rows, start, end)
                                  for start, end in bulk_windows(rows)))
-            progress = page_progress(repo, words)
-            self._require_in_turn(records, token, repo / "recalled.txt", progress)
-            if words and pages_written(repo, words) != len(words):
-                raise ScenarioFailure(MODEL, f"growth turn wrote {progress}")
+            try:
+                self._require_in_turn(records, token, repo, words)
+            except ScenarioFailure as failure:
+                raise self._sizing("in_turn_compaction", failure, records, [agent.capture_dir],
+                                   "growth turn",
+                                   f"{pages_written(repo, words)}/{len(words)} pages"
+                                   if words else "") from None
             follow = follow_prompt(pack)
             hide_token(follow, token)
             follow_turn = agent.prompt(follow, timeout=180)
@@ -1465,8 +1543,14 @@ class LongSession:
             close_agent(agent)
         return "in-turn scheduled compaction committed; fact survived; follow-up wrote followup.txt"
 
-    def _require_in_turn(self, records: list[dict], token: str, recalled: Path,
-                         progress: str = "") -> None:
+    def _require_in_turn(self, records: list[dict], token: str, repo: Path,
+                         words: list[str]) -> None:
+        """The growth turn's compaction, then its pages and recall, in that order.
+
+        An early stop names how far the growth turn got before the recall is
+        compared, so a missing `recalled.txt` is not reported as a mismatch.
+        """
+        progress = page_progress(repo, words)
         windows = bulk_windows(records)
         committed = [record for start, end in windows
                      for record in scheduled_in_window(records, start, end)]
@@ -1481,8 +1565,32 @@ class LongSession:
         for start, end in windows:
             if reread_after_commit(records, start, end):
                 raise ScenarioFailure(MODEL, "fact file was re-read after compaction")
-        if not text_equals(recalled, token):
+        written = pages_written(repo, words)
+        if not (repo / "recalled.txt").is_file():
+            pages = f" after {written}/{len(words)} pages" if words else ""
+            raise ScenarioFailure(MODEL, f"growth turn ended{pages} without writing recalled.txt")
+        if words and written != len(words):
+            raise ScenarioFailure(MODEL, f"growth turn wrote {progress}")
+        if not text_equals(repo / "recalled.txt", token):
             raise ScenarioFailure(MODEL, "recalled.txt does not match the pre-compaction code word")
+
+    def _sizing(self, scenario: str, failure: ScenarioFailure, records: list[dict],
+                segments: list[Path], what: str, progress: str) -> ScenarioFailure:
+        """Score a `model` miss that ended on the operation-budget wrap-up.
+
+        `harness` (driver sizing) only when the plan itself, run as a
+        plan-following model would run it, does not fit under the pinned cap
+        with its headroom; otherwise the model spent the cap and the miss
+        stays `model`, naming the cap and the plan.
+        """
+        if failure.outcome != MODEL or not round_cap_reached(records, segments):
+            return failure
+        cap = self.caps.get(scenario, ROUND_CAP)
+        planned = planned_rounds(self.route, scenario)
+        if planned + ROUND_HEADROOM > cap:
+            return round_cap_failure(what, cap, progress)
+        return ScenarioFailure(MODEL, f"{failure}; the turn spent the pinned round cap {cap}, "
+                                      f"and its plan needs {planned} rounds")
 
     def _reject_follow_reread(self, records: list[dict]) -> None:
         windows = lifecycle_windows(records)
@@ -1519,7 +1627,7 @@ class LongSession:
             records = poll_records(
                 home, agent.session_id, lambda rows: overflow_remedy(rows) is not None)
             progress = page_progress(repo, words)
-            remedy = self._require_overflow(turn, records, progress)
+            remedy = self._require_overflow(turn, records, progress, [agent.capture_dir])
             if progress:
                 remedy = f"{remedy}; {progress}"
             if not text_equals(repo / "acknowledged.txt", token):
@@ -1532,7 +1640,8 @@ class LongSession:
             close_agent(agent)
         return f"{remedy}; continuation wrote continuation.txt"
 
-    def _require_overflow(self, turn: live.Turn, records: list[dict], progress: str = "") -> str:
+    def _require_overflow(self, turn: live.Turn, records: list[dict], progress: str = "",
+                          segments: list[Path] = ()) -> str:
         remedy = overflow_remedy(records)
         if remedy is not None:
             return remedy
@@ -1543,8 +1652,10 @@ class LongSession:
         if reached_trigger(records, self.window, self.route.model):
             raise ScenarioFailure(
                 HARNESS, "prepared input reached the compaction trigger without a committed remedy")
-        raise ScenarioFailure(MODEL, "overflow turn did not reach the compaction trigger"
-                              + (f" ({progress})" if progress else ""))
+        raise self._sizing("overflow", ScenarioFailure(
+            MODEL, "overflow turn did not reach the compaction trigger"
+            + (f" ({progress})" if progress else "")), records, list(segments), "overflow turn",
+            progress.removeprefix("check words for "))
 
     def kill_reopen(self) -> str:
         marker = "plak-long-kill-" + self.random_bytes(4).hex()
@@ -1675,20 +1786,24 @@ class LongSession:
                     committed = True
                     break
             written = pages_written(repo, words)
-            if not committed:
-                if channel_error is not None:
-                    raise channel_error
-                # The projection has no `model.operation_usage`, so a missing
-                # segment is not evidence the trigger was reached.
-                raise ScenarioFailure(
-                    MODEL, "child history has no committed compaction segment "
-                    f"(check words for {written}/{pages} pages)")
-            if written != pages:
-                raise ScenarioFailure(MODEL, f"child wrote check words for {written}/{pages} pages")
-            if not text_equals(repo / "recalled.txt", token):
-                raise ScenarioFailure(MODEL, "child did not report the code word in recalled.txt")
-            if not text_equals(repo / "acknowledged.txt", token):
-                raise ScenarioFailure(MODEL, "child did not write acknowledged.txt before compaction")
+            if not committed and channel_error is not None:
+                raise channel_error
+            try:
+                if not committed:
+                    # The projection has no `model.operation_usage`, so a
+                    # missing segment is not evidence the trigger was reached.
+                    raise ScenarioFailure(
+                        MODEL, "child history has no committed compaction segment "
+                        f"(check words for {written}/{pages} pages)")
+                if written != pages:
+                    raise ScenarioFailure(MODEL, f"child wrote check words for {written}/{pages} pages")
+                if not text_equals(repo / "recalled.txt", token):
+                    raise ScenarioFailure(MODEL, "child did not report the code word in recalled.txt")
+                if not text_equals(repo / "acknowledged.txt", token):
+                    raise ScenarioFailure(MODEL, "child did not write acknowledged.txt before compaction")
+            except ScenarioFailure as failure:
+                raise self._sizing("child_compaction", failure, [], [agent.capture_dir],
+                                   "child turn", f"{written}/{pages} pages") from None
         finally:
             close_agent(agent)
         return (f"child compaction segment committed; {pages}/{pages} page check words; "
@@ -1768,12 +1883,14 @@ def main(argv: list[str]) -> int:
         print(refused, file=sys.stderr)
         return 2
     env = live.Env(args.binary.resolve(), artifacts / "home", artifacts)
+    env.route = route
     env.fixture_seed = args.fixture_seed
     binary_start = live.binary_sha256(env.binary)
     live.write_home(env.home, route)
     results = []
     evidence = {}
     reported_pages = None
+    round_caps: dict[str, int] = {}
     for name, surface in selected:
         (artifacts / name).mkdir(parents=True, exist_ok=True)
         started = time.monotonic()
@@ -1782,6 +1899,7 @@ def main(argv: list[str]) -> int:
         try:
             # A bad dial fails this scenario, not the report writer.
             reported_pages = growth_pages(route)
+            round_caps[name] = round_cap(route, name)
             detail, outcome = play(route, env, name), PASS
         except ScenarioFailure as failure:
             outcome, detail = failure.outcome, str(failure)
@@ -1789,6 +1907,7 @@ def main(argv: list[str]) -> int:
             outcome, detail = HARNESS, f"driver error: {error!r}"
             (artifacts / name / "traceback.txt").write_text(traceback.format_exc())
         segments = env.capture_segments[segment_start:]
+        outcome, detail = live.score_runaway(outcome, detail, segments)
         import smoke
         pending = live.provider_pending(env, segments, outcome)
         complete = smoke.capture_complete(segments, pending)
@@ -1814,7 +1933,7 @@ def main(argv: list[str]) -> int:
     (artifacts / "report.json").write_text(json.dumps(
         {**header, "binary": str(env.binary),
          "binary_sha256_start": binary_start, "binary_sha256_end": binary_end,
-         "growth_pages": reported_pages, "round_cap": ROUND_CAP, "input_ceiling": ceiling,
+         "growth_pages": reported_pages, "round_cap": round_caps, "input_ceiling": ceiling,
          "token_telemetry": live.sum_usage(
              live.TokenUsage(result.input_tokens, result.output_tokens,
                              result.cached_input_tokens, result.reasoning_tokens)

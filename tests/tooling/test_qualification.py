@@ -384,20 +384,21 @@ class QualificationReviewTests(unittest.TestCase):
                 self.assertEqual(qualification.qualifies(route, {"outcome": outcome}, "smoke"),
                                  outcome in (live.PASS, live.MODEL, live.PROVIDER))
 
-    def test_messages_long_session_is_informational_and_other_lanes_block(self):
-        messages, chat = live.ROUTES["deepseek-messages"], live.ROUTES["deepseek"]
+    def test_deepseek_long_session_is_informational_and_other_lanes_block(self):
         for outcome in (live.PASS, live.MODEL, live.PROVIDER, live.HARNESS, live.PENDING):
-            with self.subTest(outcome=outcome):
-                result = {"outcome": outcome, "attempts": [{"outcome": outcome}] * 2}
-                self.assertEqual(qualification.qualifies(messages, result, "long-session"),
-                                 outcome in (live.PASS, live.MODEL, live.PROVIDER))
-                for lane in ("smoke", "jobs", "soak"):
-                    self.assertEqual(qualification.qualifies(messages, result, lane),
-                                     outcome == live.PASS, lane)
-                self.assertEqual(qualification.qualifies(chat, result, "long-session"),
-                                 outcome == live.PASS)
+            result = {"outcome": outcome, "attempts": [{"outcome": outcome}] * 2}
+            for name in ("deepseek-messages", "deepseek"):
+                with self.subTest(outcome=outcome, route=name):
+                    route = live.ROUTES[name]
+                    self.assertEqual(qualification.qualifies(route, result, "long-session"),
+                                     outcome in (live.PASS, live.MODEL, live.PROVIDER))
+                    for lane in ("smoke", "jobs", "soak"):
+                        self.assertEqual(qualification.qualifies(route, result, lane),
+                                         outcome == live.PASS, lane)
+            self.assertEqual(qualification.qualifies(live.ROUTES["grok"], result, "long-session"),
+                             outcome == live.PASS)
 
-    def test_messages_long_session_cell_records_its_lane_class(self):
+    def test_deepseek_long_session_cell_records_its_lane_class(self):
         def execute(lane, route, used_binary, argv, seed, path):
             path.mkdir()
             return 1, {"capture_complete": True,
@@ -408,7 +409,8 @@ class QualificationReviewTests(unittest.TestCase):
                                     "detail": "reads omitted offset"}]}
 
         for route, expected_code, lane_class in (("deepseek-messages", 0, live.INFORMATIONAL),
-                                                 ("deepseek", 1, live.FULL)):
+                                                 ("deepseek", 0, live.INFORMATIONAL),
+                                                 ("grok", 1, live.FULL)):
             with self.subTest(route=route), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 binary = root / "plak"

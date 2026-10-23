@@ -143,9 +143,9 @@ small git repo:
 | `jsonl_task` | `plak agent` | the same coding task over JSONL |
 | `jsonl_resume` | `plak agent --session` | a reopened process continues the session |
 | `compaction` | `compact` command or capacity recovery | the first turn reads `fold.txt` (10,000 tokens, bytes/4, and it does not contain the code word; on Code Mode routes the prompt names one `exec_command` that prints the whole file; a first turn that replies without any tool call is `model`, since nothing is then large enough to fold; a call the host rejected (`rejected:<reason>`) was still attempted, so it is not that skip); manual compaction commits, or on a catalog window unknown or at most 65,536, a first-turn `ContextLimit` has a failed lifecycle terminal followed by a capacity start and committed compact; the latter reports `capacity recovery compaction, context carried`. Known larger windows remain harness failures. The second turn and fact question complete, and `ZEBRA-42` survives without appearing in any repository file before the question |
-| `cancel` | `interrupt` | the turn ends `cancelled` mid-tool and the next prompt completes |
+| `cancel` | `interrupt` | the turn ends `cancelled` mid-tool and the next prompt completes. When the interrupt was never sent, a failed turn is classified like any turn (a provider error is `provider`); only a completed turn that never started the command is `model` |
 | `fault_429`, `fault_529` | injected before dispatch | the turn still completes; the fault is one response, so a turn that fails after more than one HTTP retry was refused by the real provider and scores `provider` |
-| `fault_reset` | injected after 3 SSE events | a cost-only turn request replays once with its partial output discarded (a `retry` event, `stream_interrupted`, `output_discarded`), the turn completes with one effect, the session continues; a real provider HTTP error (an `http_status` retry) that ends the faulted request before the reset fires scores `provider` |
+| `fault_reset` | injected after 3 SSE events | a cost-only turn request replays once with its partial output discarded (a `retry` event, `stream_interrupted`, `output_discarded`), the turn completes with one effect, the session continues; a real provider HTTP error (an `http_status` retry) that ends the faulted request before the reset fires scores `provider`, as does an unobserved reset whose targeted exchange (the first request carrying a conversation) ended `Complete`, `ProtocolComplete`, `ClosedEarly` or in a network-shaped response transport failure (`Io`, `Tls`, `DeadlineExceeded`, or an HTTP/2 reset) before its third counted event (keep-alive comment blocks do not count) in a provider failure (HTTP 408, 429 or a 5xx; a last in-band error event on the Chat, Messages or Responses wire, spec 05 §3.2; or that transport failure) while the turn failed as any provider error (an in-band provider kind or a provider HTTP status). Any other unobserved reset is `harness` |
 | `fault_stall` | 20 s stall after 2 events | the turn completes |
 | `subagents` | `spawn_agent` × 2 | two forked children, both candidates adopted |
 | `tui` | TUI on a PTY | two turns, then a clean `Ctrl+Q` |
@@ -222,8 +222,16 @@ it is not the hour soak loop. `just smoke <route> --only <names>` and
 is what fills a `full` cell (spec 05 §3.4). `--all` and `--only` are mutually
 exclusive. The direct script refuses a bare launch. Each scenario uses a
 private home copied from the scratch home. Spec 07's only compaction key is `[compaction] enabled`
-(pinned `true`). `[turn] max_model_rounds` is pinned to 128 so a growth turn
-cannot run away and is not stopped before a handful of read pages. There is
+(pinned `true`). `[turn] max_model_rounds` is pinned per scenario to its
+planned rounds plus 32 of headroom, never below 128 or above 1024: a growth or
+overflow turn's planned reads (two rounds per Codex check-word page, the read
+and the word's write), or a child's pages at two rounds each. The report
+records each scenario's cap under `round_cap`. The oracle runs first. A
+`model` miss by a turn that ended on the operation-budget wrap-up
+(`turn.operation_budget_exhausted`, or the wrap-up note in a child's captured
+requests) is `harness`, driver sizing, only when the plan itself with its
+headroom does not fit under the pinned cap; otherwise the model spent the cap
+and the miss stays `model`, naming the cap and the plan's rounds. There is
 no key that lowers a context window or a compaction trigger. Growth is pack-aware. Codex and the OpenAI API are native Code Mode and have
 no `read_file`: those routes read a paged `bulk.txt` through `page.py` with
 `exec_command`, one 20-line page per exec (below). Other packs use their read tool (`read_file`, `Read`, or
@@ -310,7 +318,7 @@ the shared home and the scenario private home.
 
 | Scenario | Surface | Passes when |
 | --- | --- | --- |
-| `in_turn_compaction` | `plak agent` | one turn pages `bulk.txt` until the session log shows `compact.started` reason `scheduled` and `compact.finished` outcome `committed` inside that turn's admitted..terminal bracket; prepared input shrinks when both figures are present; `recalled.txt` matches the fact file (`codeword.txt`, or `release_label.txt` on Codex); the fact files are not read again after that commit; on Codex every `pages/<k>.txt` holds page k's check word; a follow-up writes `followup.txt` with the same fact |
+| `in_turn_compaction` | `plak agent` | one turn pages `bulk.txt` until the session log shows `compact.started` reason `scheduled` and `compact.finished` outcome `committed` inside that turn's admitted..terminal bracket; prepared input shrinks when both figures are present; `recalled.txt` matches the fact file (`codeword.txt`, or `release_label.txt` on Codex); the fact files are not read again after that commit; on Codex every `pages/<k>.txt` holds page k's check word; a follow-up writes `followup.txt` with the same fact. Pages and `recalled.txt` are checked before the recall is compared, so an early stop reports how far it got (`growth turn ended after 37/52 pages without writing recalled.txt`, `model`) |
 | `overflow` | `plak agent` | rounds of parallel read batches, each under the round cap (sequential reads, one per response, on pi; one check-word page per exec on Codex), then the log shows a remedy: an in-turn `scheduled` compact, a `context.placeholders` shrink inside that turn, or a `failed` / `ContextLimit` turn followed by `compact.started` reason `capacity` and a committed finish; `acknowledged.txt` is unchanged, and a later turn writes `continuation.txt` containing `CONTINUED` |
 | `kill_reopen` | `plak agent` | SIGKILL after the marker process is observed running, or after 15s if it never appears (the marker is an argv token, not a shell comment); reopen emits JSONL `recovered` and the session log has `turn.abandoned` with `cause=process_lost` and `claim=running_tool`, `nothing_started` or `tool_round_completed` (spec 02 §2.4: Code Mode can abandon as `nothing_started` when exec was shown before the cell was durably prepared; a kill after a finalized tool round and before the next model request abandons as `tool_round_completed`; process restart does not log `session.recovered`); the follow-up writes `after_reopen.txt` containing `REOPENED` |
 | `child_compaction` | `plak agent` | after the root quits, `plak session log <root>.cN --json` contains a committed compaction segment and the adopted checkout has `acknowledged.txt` and `recalled.txt` matching the fact file and every `pages/<k>.txt` holding page k's check word. `cN` comes from the root JSONL `tree` frames or spawn/wait receipts, otherwise from `plak session show <root>`. The segment projects as `kind` `compaction` with text beginning `compacted ` (the summary is not display text; an empty assistant item is not the segment; the harness `compact` row is not on this log). `pending` only when that show/log channel fails. A child tool failure on a `tool` event (a root call the model retried successfully, such as an adopt refused as `target_changed` and then made with the current target, does not count), a topology node, or a wait receipt (`agents[].blocked` with `account`, `quota`, `resets_at`) is that failure. `blocked.quota` of `rate_limited` or a quota exhaustion, or provider-unavailable fault text, is `provider` (spec 05 §3.2); any other child failure is `harness`. The projection has no prepared-input row, so a missing segment is `model`, as is a missing or wrong page check word |
@@ -368,14 +376,14 @@ when it exits; it does not stop the job at the end of the first turn.
 
 | Scenario | Surface | Passes when |
 | --- | --- | --- |
-| `promotion_budget` | `plak agent` | the fixture is promoted about 1 s after it starts, still running, with no immediate-background hint |
-| `steer_command` | `plak agent` | a steer during a 45 s foreground command returns it within 8 s and leaves the process running. On Codex and OpenAI Code Mode the command is promoted by `yield_time_ms` 0 and the steer is asserted at the outer-cell boundary, not as a direct-tool preemption |
-| `steer_await` | `plak agent` | a steer returns a wait on an already promoted job within 8 s and leaves that process running. Code Mode uses the same hint promotion and outer-cell steer |
+| `promotion_budget` | `plak agent` | the fixture is promoted about 1 s after it starts, still running, with no immediate-background hint. On Code Mode the prompt asks for `exec_command` with only the `cmd` argument and names `yield_time_ms` as not to be passed; a call that carries a hint is still `model` |
+| `steer_command` | `plak agent` | a steer during a 45 s foreground command returns it within 8 s and leaves the process running. On Codex and OpenAI Code Mode the command is promoted by `yield_time_ms` 0 and the cell ends; the steer must reach `steer_ack` `applied` (a steer only queued is `harness`), and the job is judged when it is applied, not at turn end |
+| `steer_await` | `plak agent` | a steer returns a wait on an already promoted job within 8 s and leaves that process running. Code Mode uses the same hint promotion; the prompt asks for one nested `write_stdin` wait inside the cell and to follow a new instruction at once without waiting on the cell. The driver steers only while a nested wait (`process_session_write`, `_poll` or `_wait`; a start is not one) is in flight (a cell that already completed is not an outer-cell steer; never having one in flight is `model`). `steer_ack` `applied` must follow the send within 8 s (later is `harness`), and the job is read then: still running passes; finished is `model` when the nested wait returned while the job still ran or the steer went out with under 8 s of the hold left (a late nested wait) and `harness` when it returned only once the job finished (never yielded on the steer); stopped is `harness`. A `wait` on the cell first seen after the steer was applied is `model` |
 | `notice_while_busy` | `plak agent` | a short job exits during a later command, and some request of that turn, persisted before its terminal, contains `<process_notice id="pN">`: either the request carrying the driver's steer, which the driver sends once the short job has finished, or an earlier one after the open wait yielded on the job-terminal Notice (spec 01 §8.5). An idle-wake delivery fails, and a request carrying the product's idle wake prompt is the wake turn's even when it was persisted before the terminal was observed. The check parses the request JSON and reads message text, so a serialized `\"` still counts |
 | `run_promoted` | `plak run` | the prompt requests the pack's immediate background hint and ends without polling; stderr says `waiting for p` and then `continuing` with `exited`, and the fixture finishes |
 | `crash_jobs` | `plak agent` | SIGKILL only after the root turn's exchange info is `terminal=Complete` or `ProtocolComplete` and `incomplete=false`, while the promoted job is still live; reopen reports `outcome_unknown`, and the next request contains `Plak stopped unexpectedly while this command was running.` |
 | `child_settle` | `plak agent` | the child promotes with the pack's immediate hint and calls `submit_result` while that job is live. The first submit is refused `live_work` (spec 03 §4.6). The child then stops the job (or, on Codex, waits until it exits) and submits successfully, and the job is terminal when the attempt settles. A second worker promotes another job and does not submit; the driver `close_node`s it, and that job stops with `stop_reason=attempt_ended` (interrupt would keep the job). Model only when the child ignores those instructions. A provider refusal in the job output is provider |
-| `ctrl_b` | TUI | Ctrl+B during a 45 s foreground command returns the tool within 8 s and leaves the process running. Code Mode asks for hint promotion and asserts Ctrl+B leaves that job running |
+| `ctrl_b` | TUI | Ctrl+B during a 45 s foreground command returns the tool within 8 s and leaves the process running. Code Mode asks for hint promotion, requires evidence that the hint promoted the nested start (the session log shows the start returned, or a telemetry `promoted` row; without it `model`) and asserts Ctrl+B leaves that job running |
 | `stop_jobs` | TUI | after the turn, Processes `S` shows `Stop all processes?`, the process is gone before `job-finished`, and the idle root admits another turn. A user stop is a process notice (`wake.rs` lines 156-158 keep every job that is not running); `[turn] auto_continue` defaults true |
 | `wake_while_idle` | TUI | after the root terminal, wait until the latest HUD paint shows `1 process` (a paint from before the terminal counts when nothing repainted) and `ps` still shows the fixture (bounded); the job finishing then admits a second turn that is not recorded as `user_prompt` |
 | `idle_badge` | TUI | the root's latest admitted turn has completed; the child started the hold with the pack's immediate background hint and is waiting on that job; a frame taken while that job is still live shows `1 agent` and `1 process` on the composer row. A cursor update that repaints one counter does not drop the other. A child that never promoted is model |
@@ -425,13 +433,38 @@ counts), never an earlier scenario, process or exchange;
 `provider`, the real provider refusing with no injected fault; and
 `pending`, a failure a named in-flight slice is expected to fix
 (`EXPECTED_PENDING` in `smoke.py`).
-A `plak run` or awaited `plak agent` turn that outlives its scenario budget is
-`harness` unless that process's highest-numbered captured exchange is still
-pending at the provider (`status=None`, `terminal=pending`,
-`incomplete=true`) and the scenario injected no faults: then it is `provider`,
-`provider did not respond within the scenario budget`. The report lists that
-process's segment under `provider_pending`, and that one pending exchange does
-not make the capture incomplete; every other exchange must still be complete.
+A `plak run`, an awaited `plak agent` turn (the jobs driver's included), or a
+TUI root turn (smoke's or the jobs driver's) that outlives its scenario budget is `harness` unless the
+process's capture proves the provider used the budget (spec 05 §3.2). Over the
+window from the kill back over the budget, exchanges span `.request` to
+`.info` modification time (a pending one to the kill, children sharing the
+segment united). Provider time is the pending exchange, provider failures and
+each successful exchange's duration less a 5 s first-token allowance and its
+reported output tokens at 15 tokens per second (none without usage); the rest is token-explained. After a
+provider failure (HTTP 408, 429 or 5xx, an in-band error on the Chat,
+Messages or Responses wire, or an `Io`, `Tls`, `DeadlineExceeded` or HTTP/2
+reset transport failure in the response) the gap until
+the same work's next request is a credited wait of at most 30 s plus 5 s
+slack (the capture has no headers, so Retry-After is not visible). The rest is
+local. It is `provider`, `provider did not respond within the scenario budget
+(provider Ns, token-explained Ns, credited wait Ns, local Ns; state)`, only with
+no injected faults, every exchange in the window settled, the kill inside a
+credited wait or on a pending exchange that is not stale (finished body; a
+lookup past 60 s; no byte in the last 60 s; no first byte past the route's 120 s or
+300 s dispatch deadline), local time at most 15 s, provider time and credited
+waits at least half the window, at most six lookups, and no request loop (a
+conversation repeating or rolling back an earlier one, other than up to three
+identical retries at least 0.4 s after a provider failure). The report lists
+that process's segment under `provider_pending`, and the one pending exchange
+does not make the capture incomplete; every other exchange must still be
+complete. An incomplete capture is reported with the scenario, segment and
+exchange at fault. An exchange the 8 MiB capture cap stopped while the body
+was one output item's model deltas is a runaway output: the capture counts as
+complete, and in smoke, long-session and jobs a failure it explains (a turn
+that ended on that aborted stream, the runaway being the last answered
+exchange of the scenario's last segment) is `model`,
+`model output ran past the 8 MiB capture bound (runaway output in <item
+kind>)`. Any other failure keeps its class; the soaks keep their task outcome.
 Output limits score alike on every surface (spec 05 §3.2). A tool-free answer
 committed at its output limit completed its turn: `plak run` prints it and
 exits 5 with `turn_failed:output-limit`, and the drivers judge that printed
@@ -445,7 +478,11 @@ cannot continue the durable session.
 
 ## Catalog
 
-Route class is the planned depth, not a claim that the row has passed. The
+Route class is the planned depth, not a claim that the row has passed.
+`codex-sol` is the full Codex row: `gpt-6-luna` at low and medium ended long
+growth turns early and skipped a page after the child's compaction in every
+long-session cell, while `gpt-6.1-sol` paged through compaction and passed
+in-turn compaction, the child and kill-reopen. The
 pre-release bar, the platforms and the pass rule are spec 05 §3.4. On Apple
 Silicon, `full` is the twelve smoke scenarios, the four long-session
 scenarios and the eleven jobs scenarios, with `crash_jobs` run three times.
@@ -455,10 +492,13 @@ There is no per-row two-hour TUI soak: the maintainer's TUI review replaces it.
 `informational` is that smoke, recorded: a model or provider outcome does not
 block, and a harness outcome does. A row may mark single lanes informational
 (`informational_lanes`): the lane runs at the row's depth and is scored like
-an informational row. `deepseek-messages` marks long-session, because DeepSeek
-over OpenRouter Messages drops `read` offset and limit deep into long tool
-loops while Chat pages correctly; its smoke and jobs stay blocking, and
-`deepseek` keeps the blocking long-session. Linux `x86_64-unknown-linux-musl` runs the
+an informational row. `deepseek` and `deepseek-messages` mark long-session,
+so no OpenRouter row has a blocking long-session: given Plak's complete
+summary request, DeepSeek's own compaction summary drops the earlier turn's
+fact once one or two large tool results follow it, on Chat and on Messages,
+from about 34k tokens up (Grok and Claude pass the same lane), and over
+Messages it also drops `read` offset and limit deep into long tool loops.
+Smoke, jobs and the headless soak stay blocking on both rows. Linux `x86_64-unknown-linux-musl` runs the
 twelve-scenario smoke on each `full` row and on `api-openai`,
 `api-openai-medium`, `api-anthropic` and `api-xai` only. `or-mimo`, `or-glm`
 and `or-qwen37` are best-effort light rows: a second provider outcome is
@@ -470,9 +510,9 @@ paid ids at informational depth.
 
 | Route | Account | Model | Effort | Class |
 | --- | --- | --- | --- | --- |
-| `codex` | `codex` | `gpt-6-luna` | low | full |
+| `codex` | `codex` | `gpt-6-luna` | low | light |
 | `codex-luna-medium` | `codex` | `gpt-6-luna` | medium | light |
-| `codex-sol` | `codex` | `gpt-6.1-sol` | low | light |
+| `codex-sol` | `codex` | `gpt-6.1-sol` | low | full; the full Codex row |
 | `codex-astra` | `codex` | `gpt-6-astra` | low | light |
 | `grok` | `grok` | `grok-4.7` | low | full |
 | `grok-46` | `grok` | `grok-4.6` | low | light |
@@ -483,7 +523,7 @@ paid ids at informational depth.
 | `claude-opus-low` | `claude` | `claude-opus-5-5` | low | light |
 | `claude-opus-medium` | `claude` | `claude-opus-5-5` | medium | light |
 | `claude-fable` | `claude` | `claude-fable-5-1` | low | light |
-| `deepseek` | `openrouter` | `deepseek/deepseek-v4.1-flash-1017` | | full, Chat |
+| `deepseek` | `openrouter` | `deepseek/deepseek-v4.1-flash-1017` | | full, Chat; long-session informational |
 | `deepseek-messages` | `openrouter` | `deepseek/deepseek-v4.1-flash-1017` | | full, Messages; long-session informational |
 | `or-mimo` | `openrouter` | `xiaomi/mimo-v2.6-flash` | | light |
 | `or-glm` | `openrouter` | `z-ai/glm-5.3-flash` | | light |
@@ -645,7 +685,7 @@ The warning does not drop cells and the exit status stays 0.
 ```sh
 python3 tests/live/estimate.py --rate-card rates.json --soak-row deepseek
 python3 tests/live/estimate.py --rate-card rates.json --soak-row deepseek --contingency 0.25 --openrouter-ceiling 40
-just estimate --rate-card rates.json --soak-row deepseek --tui-rows codex,grok
+just estimate --rate-card rates.json --soak-row deepseek --tui-rows codex-sol,grok
 ```
 
 Defaults are measured volumes where a trial recorded them, all overridable.
@@ -656,8 +696,8 @@ TUI soak (2 hours): 8,600,000 input, output scaled by the soak output/input
 ratio, cached share 0.9. Long-session, on each `full` row: the measured
 DeepSeek four-scenario cell, 750,415 input and 4,673 output at 22% cached,
 scaled by catalog window / 1,048,576 for every other window; the
-`deepseek-messages` long-session cell is priced and printed with class
-`informational`. Jobs (11
+`deepseek` and `deepseek-messages` long-session cells are priced and printed
+with class `informational`. Jobs (11
 scenarios) uses the smoke per-scenario share and the smoke cache share.
 Two further `crash_jobs` runs are priced on every `full` row at two elevenths
 of the jobs volume, so that scenario runs three times including the jobs cell.

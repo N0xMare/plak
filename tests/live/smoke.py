@@ -162,14 +162,70 @@ def compaction_first_prompt(pack: str) -> str:
     return f"{how} Remember the code word ZEBRA-42. Reply: ok"
 
 
-def judge_fault_reset(turn: live.Turn, hello: Path, segments: list[Path] | None) -> str:
+def after_events(plan: str) -> int | None:
+    """The `after-events=<n>` threshold of a one-rule fault plan, if it has one."""
+    for field in plan.split(","):
+        key, _, value = field.partition("=")
+        if key.strip() == "after-events" and value.strip().isdigit():
+            return int(value)
+    return None
+
+
+def provider_ended_before_cut(turn: live.Turn, segments: list[Path] | None,
+                             threshold: int | None) -> str | None:
+    """Why an `after-events` reset never fired, when the provider is the reason.
+
+    The targeted exchange is the faulted process's lowest-numbered request
+    that carries a conversation (`messages` or `input`); model lookups are
+    bodiless GETs. It must have ended (`Complete`, `ProtocolComplete`,
+    `ClosedEarly`, or a network-shaped transport failure, `live.network_failure`)
+    before its Nth counted SSE event (spec 05 §2.8) in a provider failure
+    (`live.exchange_failure`): an HTTP status of 408, 429 or a 5xx, a
+    well-formed in-band error as its last event, or that transport failure.
+    The injected cut lands exactly at the Nth event, so it is never this. The
+    turn must have failed as a provider error (an in-band provider kind or a
+    provider HTTP status), which a transport kind is not.
+    """
+    if threshold is None or not segments or len(segments) != 1 or turn.completed:
+        return None
+    if turn.model_error_kind not in live.IN_BAND_PROVIDER_KINDS \
+            and turn.http_status not in live.PROVIDER_HTTP_STATUSES:
+        return None
+    segment = segments[0]
+    try:
+        requests = sorted(segment.glob("exchange-*.request"),
+                          key=lambda path: int(path.stem.removeprefix("exchange-")))
+        target = next((path for path in requests if live.request_items(path) is not None), None)
+        if target is None:
+            return None
+        fields = live.terminal_fields(target.with_suffix(".info"), target.with_suffix(".body"))
+        body = target.with_suffix(".body").read_bytes()
+    except (OSError, UnicodeError, ValueError):
+        return None
+    if fields is None:
+        return None
+    failure = live.exchange_failure(fields, body)
+    ended = fields["terminal"] in ("Complete", "ProtocolComplete", "ClosedEarly") \
+        or live.network_failure(fields["terminal"]) is not None
+    events = live.sse_events(body)
+    if failure is None or not ended or len(events) >= threshold:
+        return None
+    return (f"the provider ended the targeted stream ({target.stem}) in {failure} after "
+            f"{len(events)} of {threshold} events, before the reset fired")
+
+
+def judge_fault_reset(turn: live.Turn, hello: Path, segments: list[Path] | None,
+                      threshold: int | None = None) -> str:
     """A reset is a safe replay, a declined unsafe replay, or a provider refusal.
 
     The injected fault has to have been observed. A replay that discarded its
     partial output and completed with one effect is the safe path. A turn that
     fails closed without replaying, and does not repeat the write, is the
     correctly declined unsafe path. A typed provider refusal, including HTTP
-    429, is provider even though a reset was also injected.
+    429, is provider even though a reset was also injected. A reset armed
+    after `threshold` events that never fired because the provider ended the
+    targeted stream first in an error (`provider_ended_before_cut`) is
+    provider too.
     """
     if not fault_was_observed(turn, segments):
         # A real provider HTTP error on the faulted request ends it before any
@@ -177,6 +233,9 @@ def judge_fault_reset(turn: live.Turn, hello: Path, segments: list[Path] | None)
         if any(retry.get("cause_kind") == "http_status" for retry in turn.retries):
             raise ScenarioFailure(PROVIDER, "a provider HTTP error consumed the faulted request "
                                             "before the reset fired")
+        ended = provider_ended_before_cut(turn, segments, threshold)
+        if ended:
+            raise ScenarioFailure(PROVIDER, ended)
         raise ScenarioFailure(HARNESS, "injected reset was not observed")
     try:
         require_completed(turn, "reset turn", segments=segments)
@@ -436,6 +495,8 @@ class Smoke:
         turn = agent.prompt("Run the shell command `sleep 60` and then tell me it finished.",
                             timeout=120, on_event=interrupt_on_tool)
         if not sent["interrupt"]:
+            agent.quit()
+            require_completed(turn, "cancel turn", segments=[agent.capture_dir])
             raise ScenarioFailure(MODEL, "the model never started the command")
         if turn.phase != "cancelled":
             raise ScenarioFailure(HARNESS, f"interrupted turn ended {turn.phase}")
@@ -463,7 +524,7 @@ class Smoke:
             if not (repo / "hello.txt").exists():
                 raise ScenarioFailure(MODEL, "turn completed without writing the file")
             return "fault absorbed, turn completed; session continued"
-        return judge_fault_reset(turn, repo / "hello.txt", [agent.capture_dir])
+        return judge_fault_reset(turn, repo / "hello.txt", [agent.capture_dir], after_events(plan))
 
     def fault_429(self) -> str:
         return self.fault("fault_429", live.fault_plan(self.route, "429", retry_after=2),
@@ -521,8 +582,11 @@ class Smoke:
 
         finished = tui.wait_until(first_turn_terminal, 300)
         if not finished or session is None:
+            failure = live.timeout_failure(
+                self.env, tui.capture_dir if session else None,
+                "first TUI turn produced no durable terminal", timeout=300)
             tui.quit()
-            raise ScenarioFailure(HARNESS, "first TUI turn produced no durable terminal")
+            raise failure
         first = durable_terminals(live.session_records(self.env.home, session))[0]
         try:
             require_durable_completed(first, "first TUI turn",
@@ -542,11 +606,13 @@ class Smoke:
             return len(durable_terminals(records)) >= 2
 
         answered = tui.wait_until(answered_on_durable_session, 180)
+        unanswered = None if answered else live.timeout_failure(
+            self.env, tui.capture_dir, "second TUI turn produced no durable terminal", timeout=180)
         code = tui.quit()
         if code != 0:
             raise ScenarioFailure(HARNESS, f"TUI exited {code} after Ctrl+Q")
-        if not answered:
-            raise ScenarioFailure(HARNESS, "second TUI turn produced no durable terminal")
+        if unanswered is not None:
+            raise unanswered
         records = live.session_records(self.env.home, session)
         require_durable_completed(durable_terminals(records)[1], "second TUI turn",
                                   segments=[tui.capture_dir], home=self.env.home)
@@ -588,6 +654,7 @@ def main(argv: list[str]) -> int:
         print(f"smoke: {mismatch}", file=sys.stderr)
         return 2
     env = live.Env(args.binary.resolve(), artifacts / "home", artifacts)
+    env.route = route
     env.fixture_seed = args.fixture_seed
     binary_start = live.binary_sha256(env.binary)
     live.write_home(env.home, route)
@@ -610,6 +677,7 @@ def main(argv: list[str]) -> int:
         if outcome not in (PASS, features.REFUSED) and name in EXPECTED_PENDING:
             outcome, detail = PENDING, f"{detail} [{EXPECTED_PENDING[name]}]"
         segments = env.capture_segments[segment_start:]
+        outcome, detail = live.score_runaway(outcome, detail, segments)
         pending = live.provider_pending(env, segments, outcome)
         complete = capture_complete(segments, pending)
         evidence[name] = {"segments": [str(segment) for segment in segments],
@@ -618,7 +686,9 @@ def main(argv: list[str]) -> int:
                           "captured_exchanges": sum(len(list(segment.glob("*.info")))
                                                     for segment in segments)}
         if outcome == PASS and not complete:
-            outcome, detail = HARNESS, "raw exchange evidence missing or incomplete"
+            problems = live.capture_problems(segments, pending) or ["no captured exchange"]
+            outcome, detail = HARNESS, ("raw exchange evidence missing or incomplete: "
+                                        + ", ".join(problems))
         usage = scenario_usage(env.home, artifacts / name / "home", usage_before)
         result = live.Result(name, surface, outcome, detail, time.monotonic() - started,
                              usage.input_tokens, usage.output_tokens,
@@ -695,9 +765,10 @@ def _reject_binding_loss(what: str, log: Path, out: str, records: list[dict]) ->
 
 
 def _stderr_excerpt(log: Path) -> str:
+    """The run's stderr, one line per product message."""
     text = log.read_text(errors="replace") if log.is_file() else ""
     stderr = text.split("--- stderr\n", 1)[-1]
-    return " ".join(stderr.split())
+    return "\n".join(" ".join(line.split()) for line in stderr.splitlines() if line.strip())
 
 
 def _raise_cli_failure(code: int, log: Path, what: str, missing_session: bool = False,
