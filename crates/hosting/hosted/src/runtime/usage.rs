@@ -858,11 +858,13 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
         let (requests, receiver) = std::sync::mpsc::sync_channel(1);
         let in_flight = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let worker_in_flight = Arc::clone(&in_flight);
+        let reads = super::surface::UsageReads::default();
         let worker_events = events.clone();
         let worker = thread::Builder::new()
             .name("plak-subscription-usage".to_owned())
             .spawn(move || {
-                while let Ok(subscriptions) = receiver.recv() {
+                // The read's guard settles it once its projection is published.
+                while let Ok((subscriptions, _read)) = receiver.recv() {
                     let (projected, limits) = project(subscriptions);
                     let _ = worker_events.send(HostEvent::SubscriptionUsage(projected));
                     if let Some(limits) = limits {
@@ -877,8 +879,15 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
             worker,
             events: events.clone(),
             in_flight,
+            reads,
             last_request: std::sync::Mutex::new(None),
         }
+    }
+
+    /// The reads this refresh has queued and not yet finished, for a surface
+    /// that must not read subscription posture while one runs.
+    pub(super) fn reads(&self) -> super::surface::UsageReads {
+        self.reads.clone()
     }
 
     pub(super) fn poll_idle(
@@ -928,7 +937,8 @@ impl<P: plakous_host_protocol::ProtocolExtension> SubscriptionUsageRefresh<P> {
         let _ = self.events.send(HostEvent::SubscriptionUsage(
             plakous_host_protocol::views::presentation::SubscriptionUsageView::Loading,
         ));
-        match requests.try_send(subscriptions) {
+        // A refused send drops its guard; a queued read absorbs this request.
+        match requests.try_send((subscriptions, self.reads.begin())) {
             Ok(()) | Err(std::sync::mpsc::TrySendError::Full(_)) => {}
             Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
                 self.in_flight
@@ -1768,6 +1778,40 @@ mod tests {
         release_tx.send(()).unwrap();
         drop(refresh);
         assert_eq!(calls.load(Ordering::Acquire), 2);
+    }
+
+    /// A surface reading subscription posture waits out the running read and
+    /// the explicit follow-up queued behind it, so it never holds a
+    /// compatibility lock the read only try-locks.
+    #[test]
+    fn usage_reads_settle_only_after_the_running_and_queued_reads() {
+        let (tx, _rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
+        let events = Sender::over(tx);
+        let (started_tx, started_rx) = std::sync::mpsc::sync_channel(2);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(2);
+        let refresh = SubscriptionUsageRefresh::new_with_projector(&events, move |_| {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            (
+                plakous_host_protocol::views::presentation::SubscriptionUsageView::Read,
+                None,
+            )
+        });
+        let reads = refresh.reads();
+        assert!(reads.wait_settled(Duration::ZERO), "nothing was requested");
+        refresh.request(None);
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        refresh.request_fresh(None);
+        refresh.request(None);
+        assert!(!reads.wait_settled(Duration::from_millis(20)));
+        release_tx.send(()).unwrap();
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(
+            !reads.wait_settled(Duration::from_millis(20)),
+            "the queued follow-up read is still running"
+        );
+        release_tx.send(()).unwrap();
+        assert!(reads.wait_settled(Duration::from_secs(5)));
     }
 
     #[test]

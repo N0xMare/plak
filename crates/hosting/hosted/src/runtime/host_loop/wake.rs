@@ -3142,16 +3142,8 @@ mod tests {
             ) {
             }
 
-            fn refresh_readiness(
-                &self,
-            ) -> Result<
-                (
-                    Vec<plakous_host_protocol::views::ProviderDef>,
-                    Vec<plakous_host_protocol::views::ProviderSection>,
-                ),
-                String,
-            > {
-                Ok((Vec::new(), Vec::new()))
+            fn readiness_read(&self) -> crate::runtime::ReadinessRead {
+                Box::new(|| Ok((Vec::new(), Vec::new())))
             }
         }
         with_host(1, |host, _, _, _| {

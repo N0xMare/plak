@@ -738,10 +738,23 @@ fn refresh_readiness_republishes_both_projections_without_touching_credentials()
         });
 
     tx.send(UserAction::RefreshReadiness).unwrap();
+    // The read runs off the action loop; the loop applies it between actions.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut observed = Vec::new();
+    while !observed
+        .iter()
+        .any(|event| matches!(event, HostEvent::ProviderSnapshot { .. }))
+    {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let event = rx
+            .recv_timeout(left)
+            .unwrap_or_else(|_| panic!("readiness never settled: {observed:?}"));
+        observed.push(event);
+    }
     drop(tx);
     join.join().unwrap().unwrap();
 
-    let observed = rx.try_iter().collect::<Vec<_>>();
+    observed.extend(rx.try_iter());
     assert!(
         observed.iter().any(|event| matches!(
             event,

@@ -4146,6 +4146,15 @@ Usage's explicit `[refresh]` action (§7.2) re-reads any connected subscription
 vertical and first refreshes an expired subscription credential or SuperGrok's
 reclaimable quarantine; login stays CLI-only.
 
+No Menu read blocks the host's action loop. A subscription posture read takes
+the provider's compatibility lock and may wait behind any other holder
+(chapter 01 §7.2), so the product surface never performs one, nor any network
+read, inline: Usage's offered `[refresh]` set, the explicit refresh and the
+Providers tab's readiness re-read each run on a thread of their own and publish
+when they settle, while the loop keeps accepting prompts and every other
+action. A readiness re-read is applied between actions, and only the newest
+one: an older re-read that settles later is discarded.
+
 Transcript child-mail folding uses the shared expandable-row controls (§5.4),
 independently of the Menu's `group tool calls` preference.
 
@@ -4335,7 +4344,9 @@ model, and effort live in the templates the profile names. Login, logout, and
 key entry stay out of the TUI.
 
 **Providers** is a read-only status view that performs no provider call of its
-own. Each vertical is one block: its name, then `account`, `status`, and `cli`.
+own. Opening it re-reads credential readiness off the action loop (above) and
+republishes the provider rows and the template projection when the read
+settles. Each vertical is one block: its name, then `account`, `status`, and `cli`.
 The account line is only what the host already knows — an OAuth vertical's
 account identity from the usage projection, or an API-key account's fingerprint
 or winning environment variable — and reads `not reported` when nothing was
@@ -5952,7 +5963,12 @@ recorded refresh failure below. A still-expired Ready token
 is never provider staleness. Shared Ready leases do not block a credential-free fence read.
 `Busy` means local writer or refresh contention: a writer's brief record
 replacement, or a refresh claim still in flight in this or another process,
-which is not reported as a quarantine. The hosted usage read retries `Busy`.
+which is not reported as a quarantine. Every provider's compatibility lock
+shares one directory guard, so a holder of any of them (another process binding
+a model, for example) makes every vertical's read `Busy`, and its line names
+that shared lock: `another Plak process or a credential refresh holds the
+subscription lock; nothing was sent, retry in a moment`. The hosted usage read
+retries `Busy`.
 `Stale` means only "provider reported a usage window that has already ended".
 Unsafe local storage remains a local-state refusal. A settled quarantine names
 `plak login <account>` as its remedy, except for Grok, whose next refresh
@@ -5968,6 +5984,12 @@ the action is not gated on it. States whose remedy is `plak login` (signed out,
 revoked, login-required, profile-changed and non-reclaimable quarantine) or
 another build (written by a newer build) offer no action, and there is no
 `[login]` action.
+The offered set is read off the host's action loop (§5.5), after the host's own
+usage read for the same open or re-read has settled: that read holds the
+compatibility lock across its exchange and only try-locks it, so a posture read
+from the same process while it runs would report it `Busy`. A set read for an
+older open or re-read is discarded, and until the newest arrives the previous
+set stays offered.
 Up/Down focuses the offered actions, Enter activates the focused action, and
 clicking its `[refresh]` label activates it directly. Page keys and the wheel
 still scroll the whole Usage page; tab and close hits remain independent.

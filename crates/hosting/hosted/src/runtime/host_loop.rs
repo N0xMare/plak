@@ -46,7 +46,6 @@ use super::reconcile::{
     commit_definite_failure_projection, commit_exceptional_terminal_projection, persist,
 };
 use super::resume::handle_resume_picker;
-use super::shell::refresh_credential_readiness;
 use super::startup::build_session_from_config;
 use super::surface;
 use super::tree::{
@@ -118,6 +117,7 @@ struct HostLoop<'a, P: plakous_host_protocol::ProtocolExtension> {
     session_ledger: SessionLedger,
     pending_usage: std::sync::Arc<std::sync::Mutex<super::projection::presentation::ProcessUsage>>,
     subscription_usage_refresh: SubscriptionUsageRefresh<P>,
+    readiness: super::shell::ReadinessRefresh,
     /// The session's projector task, spawned on the first tick.
     live: Option<super::projection::live::LiveProjector>,
     projection_finished: bool,

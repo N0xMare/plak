@@ -188,8 +188,9 @@ pub use startup::spawn_deferred_tui_host_with_clear_publication;
 pub use startup::spawn_host_worker;
 pub use startup::{create_seeded_session, create_seeded_session_with_preflight};
 pub use surface::{
-    ProfileForkOutcome, Surface, SurfaceEffect, SurfaceFacts, SurfaceHandler, SurfaceMcp,
-    SurfacePhase, SurfaceProfileFork, SurfaceRefusal, SurfaceSaved, SurfaceSession,
+    ProfileForkOutcome, ReadinessRead, Surface, SurfaceEffect, SurfaceFacts, SurfaceHandler,
+    SurfaceMcp, SurfacePhase, SurfaceProfileFork, SurfaceRefusal, SurfaceSaved, SurfaceSession,
+    UsageRead, UsageReads,
 };
 pub use topology_state::{HostRows, TopologyRows, TreeRows};
 pub use topology_state::{
@@ -695,10 +696,11 @@ struct SessionLedgerTotals {
 }
 
 struct SubscriptionUsageRefresh<P: plakous_host_protocol::ProtocolExtension> {
-    requests: Option<std::sync::mpsc::SyncSender<Option<NativeSubscriptions>>>,
+    requests: Option<std::sync::mpsc::SyncSender<(Option<NativeSubscriptions>, UsageRead)>>,
     worker: Option<thread::JoinHandle<()>>,
     events: Sender<P>,
     in_flight: Arc<AtomicBool>,
+    reads: UsageReads,
     last_request: std::sync::Mutex<Option<Instant>>,
 }
 

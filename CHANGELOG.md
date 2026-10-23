@@ -26,7 +26,9 @@ one cross-build carrier (a build imports its own and the previous version).
 - TUI: delivered child mail renders as compact expandable groups; Menu uses a
   list and detail pane at 140+ columns; Usage offers `[refresh]` beside every
   connected Codex, SuperGrok and Claude account, which re-reads its usage and
-  first refreshes an expired token (as `plak refresh` does); streaming code
+  first refreshes an expired token (as `plak refresh` does); Usage and
+  Providers read credential state off the host loop, so a prompt sent while
+  another process holds a subscription lock is accepted at once; streaming code
   fences highlight incrementally; long inline code and URLs wrap. A
   scrolled-up transcript stays anchored while output arrives, and a send-now
   steer shows its row immediately.

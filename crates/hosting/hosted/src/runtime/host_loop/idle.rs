@@ -11,9 +11,8 @@ use super::{
     emit_unavailable_context, handle_compact, handle_fork, handle_rebind, handle_resume_picker,
     move_mutable, native_compact_facet, observe_compact, query_context, queue, queue_edit_applied,
     queue_edit_refused, queue_refusal, record_emitted_tree_revision, recovery_blocked_action,
-    refresh_credential_readiness, refuse_recovery_blocked_action, reject_draft,
-    reject_stale_queue_action, remove_mutable, report_context, resume_session_switch, sessions,
-    surface,
+    refuse_recovery_blocked_action, reject_draft, reject_stale_queue_action, remove_mutable,
+    report_context, resume_session_switch, sessions, surface,
 };
 use crate::runtime::admission::{
     QueuePersistAction, report_queue_persist_failed as queue_persist_failed,
@@ -31,6 +30,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
             .retain_session(&self.config.session.id);
         self.update_background_process_count();
         self.publish_pending_continuation();
+        self.readiness.apply_settled(&mut self.config, &self.events);
         // An action the operator already sent outranks the queue. Starting
         // a queued turn first would open a turn the very next iteration has to
         // cancel, so a deferred delivery is drained before `pending_start`.
@@ -730,6 +730,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                             attached_one_shot: self.config.attached_one_shot,
                             catalog: &self.config.ready_catalog.accounts,
                             queue_len: self.config.session.pending_queue.len(),
+                            usage_reads: self.subscription_usage_refresh.reads(),
                         },
                         &self.events,
                     );
@@ -776,7 +777,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> HostLoop<'_, P> {
                     None
                 }
                 Ok(UserAction::RefreshReadiness) => {
-                    refresh_credential_readiness(&mut self.config, &self.events);
+                    self.readiness.start(&self.config);
                     None
                 }
                 Ok(UserAction::RetryAttach) => {

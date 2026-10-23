@@ -1,5 +1,8 @@
 //! Typed driver extensions. Only immutable facts and bounded observations cross this port.
 
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
+
 use super::Sender;
 use crate::binding::RootTemplateFact;
 use crate::sessions::{NoticeScope, TranscriptRow};
@@ -47,7 +50,65 @@ pub struct SurfaceFacts<'a> {
     pub queue_len: usize,
     /// Current session's presentation facts, never reconstructed from defaults.
     pub session: Option<SurfaceSession>,
+    /// The host's queued and running subscription usage reads.
+    pub usage_reads: UsageReads,
 }
+
+/// The host's queued and running subscription usage reads, as a surface waits
+/// on them.
+///
+/// A usage read holds a provider's compatibility lock across its network
+/// exchange and only try-locks it, so a posture read of the same store from
+/// this process while it runs would make the read report `Busy`. A surface
+/// that reads subscription posture for a Usage intent does so off the action
+/// loop and waits here first.
+#[derive(Clone, Debug, Default)]
+pub struct UsageReads {
+    pending: Arc<(Mutex<usize>, Condvar)>,
+}
+
+impl UsageReads {
+    /// Blocks until no usage read is queued or running, or `limit` passes;
+    /// returns whether the reads settled.
+    #[must_use]
+    pub fn wait_settled(&self, limit: Duration) -> bool {
+        let (pending, settled) = &*self.pending;
+        let Ok(guard) = pending.lock() else {
+            return false;
+        };
+        settled
+            .wait_timeout_while(guard, limit, |pending| *pending > 0)
+            .is_ok_and(|(pending, _)| *pending == 0)
+    }
+
+    /// Marks one read queued or running until the returned guard drops.
+    #[must_use]
+    pub fn begin(&self) -> UsageRead {
+        if let Ok(mut pending) = self.pending.0.lock() {
+            *pending = pending.saturating_add(1);
+        }
+        UsageRead(self.clone())
+    }
+}
+
+/// One queued or running usage read; dropping it settles the read.
+#[derive(Debug)]
+pub struct UsageRead(UsageReads);
+
+impl Drop for UsageRead {
+    fn drop(&mut self) {
+        let (pending, settled) = &*self.0.pending;
+        if let Ok(mut pending) = pending.lock() {
+            *pending = pending.saturating_sub(1);
+        }
+        settled.notify_all();
+    }
+}
+
+/// A product's credential readiness re-read: provider rows and model sections,
+/// or a redaction-safe failure. The host runs it on its own thread.
+pub type ReadinessRead =
+    Box<dyn FnOnce() -> Result<(Vec<ProviderDef>, Vec<ProviderSection>), String> + Send>;
 
 /// Frozen session facts for product-owned identity and workspace presentation.
 pub struct SurfaceSession {
@@ -264,10 +325,9 @@ pub trait SurfaceHandler<P: ProtocolExtension>: Send {
     ) -> SurfaceEffect;
     /// Publish template readiness for the closed protocol's refresh intent.
     fn publish_template_readiness(&self, catalog: &[ProviderSection], events: &Sender<P>);
-    /// Re-read credential readiness as product data.
-    /// # Errors
-    /// Returns a redaction-safe readiness failure.
-    fn refresh_readiness(&self) -> Result<(Vec<ProviderDef>, Vec<ProviderSection>), String>;
+    /// The re-read of credential readiness as product data. It may wait on
+    /// subscription locks, so the host runs it off the action loop.
+    fn readiness_read(&self) -> ReadinessRead;
 }
 
 /// Optional driver-owned extension handler.

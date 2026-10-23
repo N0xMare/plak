@@ -7,7 +7,7 @@ use super::{
     HostConfig, HostEvent, OneShot, OneShotOutcome, ScriptedRuntimeFactory, Sender, SurfaceEffect,
     SurfaceFacts, SurfaceHandler, SurfacePhase, SurfaceRefusal, UserAction,
 };
-use plakous_host_protocol::views::{ProviderDef, ProviderSection};
+use plakous_host_protocol::views::ProviderSection;
 use plakous_host_protocol::{Core, ProtocolExtension};
 use std::sync::{Arc, Mutex};
 
@@ -31,8 +31,8 @@ impl SurfaceHandler<TestExtension> for ProbeSurface {
         SurfaceEffect::default()
     }
     fn publish_template_readiness(&self, _: &[ProviderSection], _: &Sender<TestExtension>) {}
-    fn refresh_readiness(&self) -> Result<(Vec<ProviderDef>, Vec<ProviderSection>), String> {
-        Ok((Vec::new(), Vec::new()))
+    fn readiness_read(&self) -> super::ReadinessRead {
+        Box::new(|| Ok((Vec::new(), Vec::new())))
     }
 }
 

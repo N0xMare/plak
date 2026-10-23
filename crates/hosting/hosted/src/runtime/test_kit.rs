@@ -12,11 +12,11 @@
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 
-use plakous_host_protocol::views::{ProviderDef, ProviderSection};
+use plakous_host_protocol::views::ProviderSection;
 
 use crate::binding::CompositionSelection;
 
-use super::surface::{SurfaceEffect, SurfaceFacts};
+use super::surface::{ReadinessRead, SurfaceEffect, SurfaceFacts};
 use super::{
     RootBindingDocument, RootBindingDraft, RootBindingEdit, RootBindingSaveError, Sender,
     SessionHome, ShellFallbackFacts, ShellHostConfig, ShellHostRunner, Surface, SurfaceHandler,
@@ -68,9 +68,9 @@ impl<P: plakous_host_protocol::ProtocolExtension> SurfaceHandler<P> for Arc<Reco
     fn publish_template_readiness(&self, _catalog: &[ProviderSection], _events: &Sender<P>) {
         self.record("publish_template_readiness");
     }
-    fn refresh_readiness(&self) -> Result<(Vec<ProviderDef>, Vec<ProviderSection>), String> {
-        self.record("refresh_readiness");
-        Ok((Vec::new(), Vec::new()))
+    fn readiness_read(&self) -> ReadinessRead {
+        self.record("readiness_read");
+        Box::new(|| Ok((Vec::new(), Vec::new())))
     }
 }
 

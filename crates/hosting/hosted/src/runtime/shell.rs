@@ -73,8 +73,10 @@ pub fn run_shell_host_loop<P: plakous_host_protocol::ProtocolExtension>(
         held_usage.clone(),
         session_ledger.clone(),
     );
+    let mut readiness = ReadinessRefresh::new();
 
     loop {
+        readiness.apply_settled(&mut config, &events);
         let delivery = match actions.recv_timeout(IDLE_OBSERVE_POLL_INTERVAL) {
             Ok(delivery) => delivery,
             Err(RecvTimeoutError::Timeout) => continue,
@@ -320,6 +322,7 @@ pub fn run_shell_host_loop<P: plakous_host_protocol::ProtocolExtension>(
                         attached_one_shot: false,
                         catalog: &config.ready_catalog.accounts,
                         queue_len: config.session.pending_queue.len(),
+                        usage_reads: subscription_usage_refresh.reads(),
                     },
                     &events,
                 );
@@ -365,9 +368,7 @@ pub fn run_shell_host_loop<P: plakous_host_protocol::ProtocolExtension>(
                     active: true,
                 });
             }
-            UserAction::RefreshReadiness => {
-                refresh_credential_readiness(&mut config, &events);
-            }
+            UserAction::RefreshReadiness => readiness.start(&config),
             UserAction::OpenAgentTranscript { agent_id } => {
                 let _ = events.send(HostEvent::AgentTranscript(
                     plakous_host_protocol::views::AgentTranscript {
@@ -599,33 +600,96 @@ impl<P: plakous_host_protocol::ProtocolExtension> ProductAuthHost<P> for HostCon
     }
 }
 
-/// Re-read credential readiness and republish both projections (spec 02 §5.5).
-pub(super) fn refresh_credential_readiness<P: plakous_host_protocol::ProtocolExtension>(
-    host: &mut impl ProductAuthHost<P>,
-    events: &Sender<P>,
-) {
-    let refreshed = host.surface().map_or_else(
-        || Err("no product surface is attached".to_owned()),
-        SurfaceHandler::refresh_readiness,
-    );
-    match refreshed {
-        Ok((providers, model_sections)) => {
-            host.replace_ready_catalog(plakous_host_protocol::views::ReadyCatalog::new(
-                model_sections,
-            ));
-            let _ = events.send(HostEvent::ProviderSnapshot { providers });
+type ReadinessResult = Result<
+    (
+        Vec<plakous_host_protocol::views::ProviderDef>,
+        Vec<plakous_host_protocol::views::ProviderSection>,
+    ),
+    String,
+>;
+
+/// Credential readiness re-reads (spec 02 §5.5). The product's read may wait on
+/// subscription locks, so it runs on its own thread; the action loop applies
+/// only the newest settled read, between actions.
+pub(super) struct ReadinessRefresh {
+    generation: u64,
+    sender: std::sync::mpsc::Sender<(u64, ReadinessResult)>,
+    settled: std::sync::mpsc::Receiver<(u64, ReadinessResult)>,
+}
+
+impl ReadinessRefresh {
+    pub(super) fn new() -> Self {
+        let (sender, settled) = std::sync::mpsc::channel();
+        Self {
+            generation: 0,
+            sender,
+            settled,
         }
-        Err(error) => {
-            let _ = events.notice(TranscriptRow::error(
-                NoticeScope::Settings,
-                format!("provider readiness refresh failed: {error}"),
+    }
+
+    /// Starts one re-read without waiting for it.
+    pub(super) fn start<P: plakous_host_protocol::ProtocolExtension>(
+        &mut self,
+        host: &impl ProductAuthHost<P>,
+    ) {
+        self.generation = self.generation.wrapping_add(1);
+        let generation = self.generation;
+        let sender = self.sender.clone();
+        let Some(read) = host.surface().map(SurfaceHandler::readiness_read) else {
+            let _ = sender.send((generation, Err("no product surface is attached".to_owned())));
+            return;
+        };
+        let spawned = std::thread::Builder::new()
+            .name("plak-readiness-refresh".to_owned())
+            .spawn({
+                let sender = sender.clone();
+                move || {
+                    let _ = sender.send((generation, read()));
+                }
+            });
+        if spawned.is_err() {
+            let _ = sender.send((
+                generation,
+                Err("readiness refresh could not start".to_owned()),
             ));
         }
     }
-    // A credential change moves template readiness, so the Agents
-    // projection is republished from the freshly read catalog.
-    let catalog = host.ready_catalog().accounts.clone();
-    super::surface::publish_template_readiness(host.surface(), &catalog, events);
+
+    /// Republishes both projections from the newest settled re-read; an older
+    /// read that settles later is discarded.
+    pub(super) fn apply_settled<P: plakous_host_protocol::ProtocolExtension>(
+        &self,
+        host: &mut impl ProductAuthHost<P>,
+        events: &Sender<P>,
+    ) {
+        let Some(refreshed) = self
+            .settled
+            .try_iter()
+            .filter(|(generation, _)| *generation == self.generation)
+            .last()
+            .map(|(_, refreshed)| refreshed)
+        else {
+            return;
+        };
+        match refreshed {
+            Ok((providers, model_sections)) => {
+                host.replace_ready_catalog(plakous_host_protocol::views::ReadyCatalog::new(
+                    model_sections,
+                ));
+                let _ = events.send(HostEvent::ProviderSnapshot { providers });
+            }
+            Err(error) => {
+                let _ = events.notice(TranscriptRow::error(
+                    NoticeScope::Settings,
+                    format!("provider readiness refresh failed: {error}"),
+                ));
+            }
+        }
+        // A credential change moves template readiness, so the Agents
+        // projection is republished from the freshly read catalog.
+        let catalog = host.ready_catalog().accounts.clone();
+        super::surface::publish_template_readiness(host.surface(), &catalog, events);
+    }
 }
 
 /// The target selection for a profile root: Platform for an API account,
@@ -1369,15 +1433,112 @@ mod tests {
             seed_history: None,
             source_releases: SourceReleases::default(),
         };
-        let (tx, _rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
+        let (tx, rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
         let events = Sender::over(tx);
 
         // A readiness refresh re-reads external credential authority only: the
         // attached branch keeps its exact provider/model binding.
-        refresh_credential_readiness(&mut config, &events);
+        let mut readiness = ReadinessRefresh::new();
+        readiness.start(&config);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !rx
+            .try_iter()
+            .any(|event| matches!(event, HostEvent::ProviderSnapshot { .. }))
+        {
+            assert!(Instant::now() < deadline, "readiness never settled");
+            thread::sleep(Duration::from_millis(5));
+            readiness.apply_settled(&mut config, &events);
+        }
         assert_eq!(config.target.native_provider(), Some(NativeProvider::Codex));
         assert_eq!(config.session.account.as_deref(), Some("codex"));
         assert_eq!(config.session.model.as_deref(), Some("gpt-existing"));
         assert_eq!(config.model_id, "gpt-existing");
+    }
+
+    /// The product's readiness read may wait on another holder's
+    /// subscription lock: starting it never waits for it, and a slower,
+    /// older read that settles last cannot replace the newer catalog.
+    #[test]
+    fn readiness_reads_run_off_the_loop_and_only_the_newest_applies() {
+        struct GatedReadiness(std::sync::Mutex<Vec<(usize, std::sync::mpsc::Receiver<()>)>>);
+        impl SurfaceHandler<TestExtension> for GatedReadiness {
+            fn dispatch(
+                &self,
+                _: test_kit::ProbeIntent,
+                _: SurfaceFacts<'_>,
+                _: &Sender,
+            ) -> SurfaceEffect {
+                SurfaceEffect::default()
+            }
+            fn publish_template_readiness(
+                &self,
+                _: &[plakous_host_protocol::views::ProviderSection],
+                _: &Sender,
+            ) {
+            }
+            fn readiness_read(&self) -> ReadinessRead {
+                let (read, gate) = self.0.lock().unwrap().remove(0);
+                Box::new(move || {
+                    gate.recv().unwrap();
+                    Ok((
+                        Vec::new(),
+                        vec![plakous_host_protocol::views::ProviderSection {
+                            account: format!("read-{read}"),
+                            label: String::new(),
+                            ready: true,
+                            entries: Vec::new(),
+                        }],
+                    ))
+                })
+            }
+        }
+        struct Host {
+            catalog: plakous_host_protocol::views::ReadyCatalog,
+            surface: GatedReadiness,
+        }
+        impl ProductAuthHost<TestExtension> for Host {
+            fn replace_ready_catalog(
+                &mut self,
+                catalog: plakous_host_protocol::views::ReadyCatalog,
+            ) {
+                self.catalog = catalog;
+            }
+            fn ready_catalog(&self) -> &plakous_host_protocol::views::ReadyCatalog {
+                &self.catalog
+            }
+            fn surface(&self) -> Option<&dyn SurfaceHandler<TestExtension>> {
+                Some(&self.surface)
+            }
+        }
+        let (older_tx, older) = std::sync::mpsc::channel();
+        let (newer_tx, newer) = std::sync::mpsc::channel();
+        let mut host = Host {
+            catalog: plakous_host_protocol::views::ReadyCatalog::default(),
+            surface: GatedReadiness(std::sync::Mutex::new(vec![(0, older), (1, newer)])),
+        };
+        let (tx, _rx) = crate::surface_protocol::host_event_channel::<TestExtension>();
+        let events = Sender::over(tx);
+        let mut readiness = ReadinessRefresh::new();
+        // Both reads are still blocked; neither start waited for its read.
+        readiness.start(&host);
+        readiness.start(&host);
+        readiness.apply_settled(&mut host, &events);
+        assert_eq!(host.catalog.accounts, []);
+
+        let settle = |host: &mut Host, readiness: &ReadinessRefresh| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while host.catalog.accounts.is_empty() {
+                assert!(Instant::now() < deadline, "readiness never settled");
+                thread::sleep(Duration::from_millis(5));
+                readiness.apply_settled(host, &events);
+            }
+        };
+        newer_tx.send(()).unwrap();
+        settle(&mut host, &readiness);
+        assert_eq!(host.catalog.accounts[0].account, "read-1");
+        older_tx.send(()).unwrap();
+        thread::sleep(Duration::from_millis(50));
+        readiness.apply_settled(&mut host, &events);
+        assert_eq!(host.catalog.accounts[0].account, "read-1");
     }
 }

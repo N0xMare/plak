@@ -420,7 +420,8 @@ pub enum SubscriptionUsageUnavailable {
     /// A selected credential exists but its local lifecycle is not `Ready`.
     CredentialState(SubscriptionUsageCredentialState),
     /// Another Plak session, process, or in-flight credential refresh holds
-    /// this provider's lock or lease. Nothing was sent and nothing failed.
+    /// the subscription lock or this credential's lease. Nothing was sent and
+    /// nothing failed.
     Busy,
     /// Local compatibility, storage, or recovery state refused observation.
     LocalState,

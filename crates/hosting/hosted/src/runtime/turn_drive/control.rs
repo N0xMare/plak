@@ -495,6 +495,7 @@ impl<P: plakous_host_protocol::ProtocolExtension> TurnDrive<'_, P> {
                             attached_one_shot: self.host.attached_one_shot,
                             catalog: self.host.ready_catalog,
                             queue_len: self.host.session.pending_queue.len(),
+                            usage_reads: self.host.subscription_usage_refresh.reads(),
                         },
                         self.host.events,
                     );

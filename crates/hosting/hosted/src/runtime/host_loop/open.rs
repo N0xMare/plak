@@ -567,6 +567,7 @@ impl<'a, P: plakous_host_protocol::ProtocolExtension> HostLoop<'a, P> {
             session_ledger,
             pending_usage,
             subscription_usage_refresh,
+            readiness: super::super::shell::ReadinessRefresh::new(),
             live: None,
             projection_finished: false,
         };

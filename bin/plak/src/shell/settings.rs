@@ -11,7 +11,7 @@ use plakous_hosted::binding::ProtocolSelection;
 use crate::shell::host::{commit_root_template, settings_save_changes_root_binding};
 use plakous_hosted::runtime::{
     ProfileForkOutcome, Sender, SurfaceEffect, SurfaceFacts, SurfaceHandler, SurfacePhase,
-    SurfaceProfileFork, SurfaceSaved, oauth_provider_for_account,
+    SurfaceProfileFork, SurfaceSaved, UsageReads, oauth_provider_for_account,
 };
 use plakous_hosted::sessions::{NoticeScope, TranscriptRow};
 
@@ -778,8 +778,31 @@ fn send_agent_acknowledgements(paths: &PlakPaths, tree_id: &str, events: &Sender
 pub struct ProductSurface {
     paths: PlakPaths,
     chrome_generation: std::sync::Arc<std::sync::Mutex<u64>>,
+    usage_accounts_generation: std::sync::Arc<std::sync::Mutex<u64>>,
     usage_refreshing: std::sync::Arc<std::sync::Mutex<bool>>,
     state_home: Result<std::path::PathBuf, String>,
+}
+
+/// How long a Usage refresh-account read waits for the host's usage read to
+/// settle before it reads posture anyway. The read itself is bounded far
+/// below this; the limit only keeps a wedged read from parking the thread.
+const USAGE_READ_SETTLE_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Publishes a refresh-account list unless a newer Usage intent asked for one.
+fn publish_usage_refresh_accounts(
+    generation: &std::sync::Mutex<u64>,
+    expected: u64,
+    accounts: Vec<String>,
+    events: &Sender<PlakExtension>,
+) {
+    let Ok(current) = generation.lock() else {
+        return;
+    };
+    if *current == expected {
+        let _ = events.send(HostEvent::Extension(
+            SurfaceObservation::UsageRefreshAccounts(accounts),
+        ));
+    }
 }
 
 impl ProductSurface {
@@ -791,6 +814,7 @@ impl ProductSurface {
             usage_refreshing: std::sync::Arc::new(std::sync::Mutex::new(false)),
             paths,
             chrome_generation: std::sync::Arc::new(std::sync::Mutex::new(0)),
+            usage_accounts_generation: std::sync::Arc::new(std::sync::Mutex::new(0)),
         }
     }
 
@@ -800,24 +824,31 @@ impl ProductSurface {
         self
     }
 
-    fn accounts_backend(
-        &self,
-    ) -> plakous_hosted::error::CliResult<crate::commands::application::PlakousApplication> {
-        let state_home = self
-            .state_home
-            .as_ref()
-            .map_err(|error| plakous_hosted::error::CliFailure::new(error.clone()))?;
-        crate::commands::application::PlakousApplication::for_accounts(state_home.clone())
-    }
-
-    fn send_usage_refresh_accounts(&self, events: &Sender<PlakExtension>) {
-        let accounts = self
-            .accounts_backend()
-            .map(|mut backend| crate::commands::usage::usage_refresh_accounts(&mut backend))
-            .unwrap_or_default();
-        let _ = events.send(HostEvent::Extension(
-            SurfaceObservation::UsageRefreshAccounts(accounts),
-        ));
+    /// Reads the offered `[refresh]` accounts on a thread of its own: the
+    /// posture read takes each provider's compatibility lock and waits behind
+    /// any holder, so it never runs on the host's action loop. It first waits
+    /// for the host's usage read, which holds that lock across its network
+    /// exchange and only try-locks it.
+    fn send_usage_refresh_accounts(&self, reads: UsageReads, events: &Sender<PlakExtension>) {
+        let expected = {
+            let Ok(mut generation) = self.usage_accounts_generation.lock() else {
+                return;
+            };
+            *generation = generation.wrapping_add(1);
+            *generation
+        };
+        let state_home = self.state_home.clone();
+        let generation = std::sync::Arc::clone(&self.usage_accounts_generation);
+        let events = events.clone();
+        std::thread::spawn(move || {
+            let _ = reads.wait_settled(USAGE_READ_SETTLE_LIMIT);
+            let accounts = state_home
+                .map_err(plakous_hosted::error::CliFailure::new)
+                .and_then(crate::commands::application::PlakousApplication::for_accounts)
+                .map(|mut backend| crate::commands::usage::usage_refresh_accounts(&mut backend))
+                .unwrap_or_default();
+            publish_usage_refresh_accounts(&generation, expected, accounts, &events);
+        });
     }
 
     fn refresh_usage(&self, account: String, events: &Sender<PlakExtension>) {
@@ -952,9 +983,11 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
             SurfaceIntent::RefreshUsageCredential { account } => {
                 self.refresh_usage(account, events);
             }
-            SurfaceIntent::RereadUsage => self.send_usage_refresh_accounts(events),
+            SurfaceIntent::RereadUsage => {
+                self.send_usage_refresh_accounts(facts.usage_reads, events);
+            }
             SurfaceIntent::OpenUsage => {
-                self.send_usage_refresh_accounts(events);
+                self.send_usage_refresh_accounts(facts.usage_reads, events);
                 emit_settings(&self.paths, events);
                 let _ = events.send(HostEvent::Extension(SurfaceObservation::OpenUsageOverlay));
             }
@@ -1023,17 +1056,12 @@ impl SurfaceHandler<PlakExtension> for ProductSurface {
         emit_template_readiness(&self.paths, catalog, events);
     }
 
-    fn refresh_readiness(
-        &self,
-    ) -> Result<
-        (
-            Vec<plakous_host_protocol::views::ProviderDef>,
-            Vec<plakous_host_protocol::views::ProviderSection>,
-        ),
-        String,
-    > {
-        crate::presentation::tui_presentation_values(&self.paths)
-            .map_err(|error| error.message().to_owned())
+    fn readiness_read(&self) -> plakous_hosted::runtime::ReadinessRead {
+        let paths = self.paths.clone();
+        Box::new(move || {
+            crate::presentation::tui_presentation_values(&paths)
+                .map_err(|error| error.message().to_owned())
+        })
     }
 }
 
@@ -1093,6 +1121,7 @@ mod tests {
                 attached_one_shot: false,
                 catalog: &[],
                 queue_len: 0,
+                usage_reads: UsageReads::default(),
                 session: Some(session),
             },
             &events,
@@ -1314,6 +1343,7 @@ mod tests {
             attached_one_shot: false,
             catalog: &[],
             queue_len: 0,
+            usage_reads: UsageReads::default(),
             session: None,
         };
         let (events, rx) = host_event_sink();
@@ -1390,6 +1420,9 @@ mod tests {
                 };
                 assert_eq!(handler.needs_usage(&intent), intent_index == 3);
                 let (events, received) = host_event_sink();
+                // A host usage read stays running until the dispatch is observed.
+                let reads = UsageReads::default();
+                let running_read = reads.begin();
                 let effect = handler.dispatch(
                     intent.clone(),
                     SurfaceFacts {
@@ -1398,10 +1431,12 @@ mod tests {
                         attached_one_shot,
                         catalog: &[],
                         queue_len: 7,
+                        usage_reads: reads,
                     },
                     &events,
                 );
                 let observed = received.try_iter().collect::<Vec<_>>();
+                drop(running_read);
                 assert_eq!(effect.saved.is_some(), intent_index == 2);
                 match intent {
                     SurfaceIntent::OpenConfigFile if phase == SurfacePhase::Busy => assert_eq!(
@@ -1441,14 +1476,23 @@ mod tests {
                             [] as [plakous_host_protocol::SessionObservation<PlakExtension>; 0]
                         );
                     }
-                    SurfaceIntent::OpenUsage => assert!(matches!(
-                        observed.as_slice(),
-                        [
-                            HostEvent::Extension(SurfaceObservation::UsageRefreshAccounts(_)),
-                            HostEvent::Extension(SurfaceObservation::SettingsSnapshot(_)),
-                            HostEvent::Extension(SurfaceObservation::OpenUsageOverlay),
-                        ]
-                    )),
+                    // The refresh-account list is read off the dispatch and
+                    // follows it.
+                    SurfaceIntent::OpenUsage => {
+                        assert!(matches!(
+                            observed.as_slice(),
+                            [
+                                HostEvent::Extension(SurfaceObservation::SettingsSnapshot(_)),
+                                HostEvent::Extension(SurfaceObservation::OpenUsageOverlay),
+                            ]
+                        ));
+                        assert!(matches!(
+                            received
+                                .recv_timeout(std::time::Duration::from_secs(10))
+                                .unwrap(),
+                            HostEvent::Extension(SurfaceObservation::UsageRefreshAccounts(_))
+                        ));
+                    }
                     SurfaceIntent::RefreshUsageCredential { .. }
                     | SurfaceIntent::RereadUsage
                     | SurfaceIntent::ListProfiles
@@ -1462,6 +1506,157 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Creates the subscription layout under `state_home` and returns the
+    /// directory every provider's compatibility lock `flock`s.
+    fn compatibility_lock_dir(state_home: &std::path::Path) -> std::path::PathBuf {
+        use std::os::unix::fs::DirBuilderExt;
+        let dir = state_home.join("plak/subscriptions/compatibility");
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&dir)
+            .unwrap();
+        dir
+    }
+
+    /// Receives until `wanted` matches, failing after `limit`; returns every
+    /// event received on the way, the match last.
+    fn receive_until(
+        received: &crate::surface_protocol::HostEventReceiver,
+        limit: std::time::Duration,
+        wanted: impl Fn(&plakous_host_protocol::SessionObservation<PlakExtension>) -> bool,
+    ) -> Vec<plakous_host_protocol::SessionObservation<PlakExtension>> {
+        let deadline = std::time::Instant::now() + limit;
+        let mut seen = Vec::new();
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            let event = received
+                .recv_timeout(left)
+                .unwrap_or_else(|_| panic!("no matching event within {limit:?}: {seen:#?}"));
+            let done = wanted(&event);
+            seen.push(event);
+            if done {
+                return seen;
+            }
+        }
+    }
+
+    /// Usage reads each provider's posture under its compatibility lock. With
+    /// that lock held by another holder, opening Usage leaves the action loop
+    /// free: the next action is answered while the lock is still held, and the
+    /// offered `[refresh]` list arrives once the lock frees.
+    #[test]
+    fn usage_never_waits_on_a_held_compatibility_lock_on_the_action_loop() {
+        let (root, paths) = PlakPaths::isolated_test_home();
+        paths.ensure_layout().unwrap();
+        let state_home = root.path().join("account-state");
+        let holder = std::fs::File::open(compatibility_lock_dir(&state_home)).unwrap();
+        holder.lock().unwrap();
+        let surface = ProductSurface::new(paths.clone()).with_test_state_home(state_home);
+        let (tx, rx, join) = crate::shell::host::spawn_shell_host(ShellHostConfig {
+            surface: Some(Box::new(surface)),
+            binding: crate::shell::binding_document::ProductRootBindingDocument::shared(&paths),
+            subscriptions: None,
+            openrouter_credentials: crate::openrouter_product::ProductOpenRouterCredentials::shared(
+                &paths,
+            ),
+            product_home: paths.home().to_path_buf(),
+            home: paths.session_home(),
+            store: std::sync::Arc::new(crate::store::session_records::SqliteSessionStore::new(
+                paths.clone(),
+            )),
+            session: SessionRecord::new(root.path().to_path_buf()),
+            cwd: root.path().to_path_buf(),
+            reason: "missing_defaults".into(),
+            ready_catalog: plakous_host_protocol::views::ReadyCatalog::default(),
+        });
+        for intent in [
+            SurfaceIntent::OpenUsage,
+            SurfaceIntent::RereadUsage,
+            SurfaceIntent::OpenConfigFile,
+        ] {
+            tx.send(UserAction::Extension(intent)).unwrap();
+        }
+        let answered = receive_until(&rx, std::time::Duration::from_secs(5), |event| {
+            matches!(event, HostEvent::Status { detail: Some(detail), .. }
+                if detail.starts_with("config: "))
+        });
+        assert!(
+            !answered.iter().any(|event| matches!(
+                event,
+                HostEvent::Extension(SurfaceObservation::UsageRefreshAccounts(_))
+            )),
+            "no posture can be read while the lock is held: {answered:#?}"
+        );
+        holder.unlock().unwrap();
+        // The newer intent's list is the one published; no consent is
+        // recorded in this store, so nothing is offered.
+        let offered = receive_until(&rx, std::time::Duration::from_secs(10), |event| {
+            matches!(
+                event,
+                HostEvent::Extension(SurfaceObservation::UsageRefreshAccounts(_))
+            )
+        });
+        assert_eq!(
+            offered.last(),
+            Some(&HostEvent::Extension(
+                SurfaceObservation::UsageRefreshAccounts(Vec::new())
+            ))
+        );
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(
+            !rx.try_iter().any(|event| matches!(
+                event,
+                HostEvent::Extension(SurfaceObservation::UsageRefreshAccounts(_))
+            )),
+            "the superseded list is discarded"
+        );
+        drop(tx);
+        join.join().unwrap().unwrap();
+    }
+
+    /// The host's usage read holds the compatibility lock across its network
+    /// exchange and only try-locks it. The posture read for the same Usage
+    /// intent waits for that read to settle, so it never holds the lock the
+    /// read is trying to take.
+    #[test]
+    fn usage_posture_waits_for_the_host_usage_read_to_settle() {
+        let (root, paths) = PlakPaths::isolated_test_home();
+        let state_home = root.path().join("account-state");
+        let lock_dir = compatibility_lock_dir(&state_home);
+        let surface = ProductSurface::new(paths).with_test_state_home(state_home);
+        let reads = UsageReads::default();
+        let running_read = reads.begin();
+        let (events, received) = host_event_sink();
+        surface.dispatch(
+            SurfaceIntent::RereadUsage,
+            SurfaceFacts {
+                session: None,
+                phase: SurfacePhase::Idle,
+                attached_one_shot: false,
+                catalog: &[],
+                queue_len: 0,
+                usage_reads: reads,
+            },
+            &events,
+        );
+        // Act as the running read: every try-lock finds the lock free.
+        let read_lock = std::fs::File::open(&lock_dir).unwrap();
+        for _ in 0..20 {
+            read_lock.try_lock().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            read_lock.unlock().unwrap();
+        }
+        assert!(received.try_recv().is_err(), "posture was read mid-read");
+        drop(running_read);
+        assert_eq!(
+            received
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap(),
+            HostEvent::Extension(SurfaceObservation::UsageRefreshAccounts(Vec::new()))
+        );
     }
 
     #[test]
@@ -1482,6 +1677,7 @@ mod tests {
                 attached_one_shot: false,
                 catalog: &[],
                 queue_len: 3,
+                usage_reads: UsageReads::default(),
             },
             &events,
         );
@@ -1800,6 +1996,7 @@ mod tests {
                 attached_one_shot: false,
                 catalog: &catalog,
                 queue_len: 0,
+                usage_reads: UsageReads::default(),
             },
             &events,
         );
