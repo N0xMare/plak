@@ -51,6 +51,19 @@ limit before it finishes; the turn then ends as recovery-required, and
 reopening the session settles it. Splitting very long work across turns avoids
 this.
 
+## Compaction summaries depend on the model
+
+When a session compacts, the model writes the summary that replaces the earlier
+conversation (Codex compaction is written by the Codex service). A model that
+recalls poorly across large tool outputs can leave details out, and after the
+compaction it re-reads files or redoes steps. DeepSeek V4.1 Flash
+(`deepseek/deepseek-v4.1-flash-1017`) on OpenRouter does this once one or two
+large tool results follow an earlier fact, far below its 1M-token window: its
+summary keeps the first request and the latest tool call and drops the steps in
+between. Grok and Claude summaries kept those details in the same tests. When
+earlier values matter in a long session, write them to a file the later steps
+read, or use a model that keeps them.
+
 ## Plak's own git steps
 
 When Plak mints, seals or adopts a copy, it runs `git` with inherited `GIT_*`

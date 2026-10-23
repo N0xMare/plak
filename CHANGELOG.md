@@ -123,6 +123,11 @@ one cross-build carrier (a build imports its own and the previous version).
   official Anthropic client; use it at your own risk.
 - Routes with compiled review windows refuse after their expiry until a
   newer build renews them; see the current dates above.
+- Compaction summaries are written by the model. DeepSeek V4.1 Flash
+  (`deepseek/deepseek-v4.1-flash-1017`) on OpenRouter leaves out earlier
+  details once large tool outputs follow them, so after a compaction it may
+  re-read files; see
+  [known limits](docs/user-guide/known-limits-and-security-model.md).
 - API-key routes compact locally only: no provider compaction, token counting,
   user-configurable cache settings or hosted programmatic tool calling yet.
 - xAI sometimes refuses a follow-up turn on content-policy grounds in long Grok
