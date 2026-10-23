@@ -530,7 +530,6 @@ paid ids at informational depth.
 | `or-qwen37` | `openrouter` | `qwen/qwen3.7-flash` | | light |
 | `or-nemotron-free` | `openrouter` | `nvidia/nemotron-3-ultra-550b-a55b:free` | | informational |
 | `or-laguna-free` | `openrouter` | `poolside/laguna-s-2.1:free` | | informational |
-| `or-lfm-free` | `openrouter` | `liquid/lfm-2.5-2.6b:free` | | informational |
 | `or-ling` | `openrouter` | `inclusionai/ling-3.0-flash-vl` | | informational |
 | `or-qwen38` | `openrouter` | `qwen/qwen3.8-27b` | | informational |
 | `api-openai` | `openai` | `gpt-6-luna` | low | light |
@@ -541,10 +540,12 @@ paid ids at informational depth.
 `claude` and `claude-sonnet-medium` (`claude-sonnet-5` low and medium) still
 run, but they are not in this matrix. Nor are two feature-scenario roster
 rows: `api-anthropic-low` (`anthropic`, `claude-haiku-5-5`, low) and
-`or-gemma4-free` (`openrouter`, `google/gemma-4-31b-it:free`). The four direct API rows are light and
-not best-effort: `api-openai` is `gpt-6-luna` low, `api-openai-medium` is
-`gpt-6-luna` medium, `api-anthropic` is `claude-haiku-5-5` medium, and
-`api-xai` is `grok-4.7` low.
+`or-gemma4-free` (`openrouter`, `google/gemma-4-31b-it:free`). Nor is
+`or-lfm-free` (`openrouter`, `liquid/lfm-2.5-2.6b:free`): its free upstream
+streamed at about 7 tokens per second with in-band 504s on every 0.0.2 run.
+The four direct API rows are light and not best-effort: `api-openai` is
+`gpt-6-luna` low, `api-openai-medium` is `gpt-6-luna` medium, `api-anthropic`
+is `claude-haiku-5-5` medium, and `api-xai` is `grok-4.7` low.
 
 The pre-release bar runs once per release candidate, not per install. It
 binds the same clean source revision, binary/sidecar hashes and platform

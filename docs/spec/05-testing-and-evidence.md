@@ -2852,8 +2852,11 @@ a qualification.
 
 Route names are the keys of `ROUTES` in `tests/live/live.py`. Account, model,
 effort and protocol are that route's fields. Routes with `planned` false stay
-runnable and are not in the matrix: `claude`, `claude-sonnet-medium`, and the
-feature-scenario roster rows `api-anthropic-low` and `or-gemma4-free`.
+runnable and are not in the matrix: `claude`, `claude-sonnet-medium`, the
+feature-scenario roster rows `api-anthropic-low` and `or-gemma4-free`, and
+`or-lfm-free`, whose free upstream streamed at about 7 tokens per second with
+in-band 504s on every 0.0.2 run, so its smoke outlived scenario budgets without
+evidence that clears the product.
 `deepseek` is Chat, with no protocol. `deepseek-messages` is the same model
 with protocol `messages`. `or-ling` and `or-qwen38` are paid model ids at
 informational depth.
@@ -2866,9 +2869,8 @@ informational depth.
   `claude-opus-low`, `claude-opus-medium`, `claude-fable`, `or-mimo`,
   `or-glm`, `or-qwen37`, `api-openai`, `api-openai-medium`, `api-anthropic`,
   `api-xai`.
-- `informational`: `or-nemotron-free`, `or-laguna-free`, `or-lfm-free`,
-  `or-ling`, `or-qwen38`; also the `deepseek` and `deepseek-messages`
-  long-session lanes.
+- `informational`: `or-nemotron-free`, `or-laguna-free`, `or-ling`,
+  `or-qwen38`; also the `deepseek` and `deepseek-messages` long-session lanes.
 
 `codex-sol` (`gpt-6.1-sol` at low) is the full Codex row. `gpt-6-luna` at low
 and at medium ended long growth turns early ("I can't finish paging ...

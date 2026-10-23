@@ -175,9 +175,12 @@ ROUTES = {
     "or-laguna-free": _route(
         "or-laguna-free", "openrouter", "poolside/laguna-s-2.1:free", None, None,
         _OR_CHAT, INFORMATIONAL),
+    # Runnable, not planned: its free upstream streamed this 2.6B model at about
+    # 7 tokens per second with in-band 504s on every 0.0.2 run, so its smoke
+    # outlived scenario budgets without evidence that clears the product.
     "or-lfm-free": _route(
         "or-lfm-free", "openrouter", "liquid/lfm-2.5-2.6b:free", None, None,
-        _OR_CHAT, INFORMATIONAL),
+        _OR_CHAT, INFORMATIONAL, planned=False),
     # Not offered as `:free` on the probe day. Paid ids, informational depth.
     "or-ling": _route(
         "or-ling", "openrouter", "inclusionai/ling-3.0-flash-vl", None, None,
